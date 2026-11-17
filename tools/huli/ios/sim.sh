@@ -1,5 +1,6 @@
-# Builds the iOS app from ~/huli/mobile (prepare-ios.sh puts it there) for the simulator, unsigned,
-# and installs and launches it on one, for screenshots of every screen without a phone.
+# Builds the iOS app from ~/huli/mobile (prepare-ios.sh puts it there) for the simulator, signed to
+# run locally so its keychain and App Group entitlements apply, and installs and launches it on one,
+# for screenshots of every screen without a phone.
 # Usage: [SIM="iPhone 18 Pro Max"] [APPEARANCE=dark|light] bash sim.sh
 # Then: xcrun simctl io booted screenshot /tmp/shot.png
 set -e
@@ -18,7 +19,9 @@ pod install > "$OUT/pod.log" 2>&1 || { tail -30 "$OUT/pod.log"; exit 1; }
 echo "== build"
 xcodebuild -workspace Huli.xcworkspace -scheme Huli -configuration Release \
   -destination "generic/platform=iOS Simulator" -derivedDataPath "$OUT/dd" \
-  CODE_SIGNING_ALLOWED=NO build > "$OUT/build.log" 2>&1 \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER= \
+  DEVELOPMENT_TEAM=Z5C6TTY2YF CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+  build > "$OUT/build.log" 2>&1 \
   || { grep -E "error:" "$OUT/build.log" | sort -u | head -30; tail -15 "$OUT/build.log"; exit 1; }
 APP=$(ls -d "$OUT"/dd/Build/Products/Release-iphonesimulator/Huli.app)
 
