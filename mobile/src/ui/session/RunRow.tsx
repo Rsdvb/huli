@@ -42,7 +42,8 @@ export const Step = memo(function Step(props: { entry: ThreadEntry }) {
   const { entry } = props
   if (entry.kind === 'tool') return <ToolRow entry={entry} />
   if (entry.kind === 'thought') return <ThoughtRow entry={entry} />
-  if (entry.kind === 'memory') return <MemoryEntry entry={entry} sessionId={sessionId} place="thread" />
+  if (entry.kind === 'memory')
+    return <MemoryEntry entry={entry} sessionId={sessionId} place="thread" />
   return null
 })
 

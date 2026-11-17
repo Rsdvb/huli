@@ -42,9 +42,7 @@ function copiedText(content: readonly UserContent[]): string {
 
 function Ago(props: { at: number; color: string }) {
   const now = useMinute()
-  return (
-    <Text style={[styles.meta, { color: props.color }]}>{agoText(props.at, now)}</Text>
-  )
+  return <Text style={[styles.meta, { color: props.color }]}>{agoText(props.at, now)}</Text>
 }
 
 export const UserMessage = memo(function UserMessage(props: {

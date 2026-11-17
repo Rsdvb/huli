@@ -23,8 +23,7 @@ export type Chip =
 
 // A mention starts at a space, the start, or text outside ASCII such as Chinese, and ends at a
 // space or CJK punctuation.
-const MENTION =
-  /(^|\s|[^\x00-\x7f])[@＠]([^\s　-〿！-／：-＠［-｀｛-･]+)/g
+const MENTION = /(^|\s|[^\x00-\x7f])[@＠]([^\s　-〿！-／：-＠［-｀｛-･]+)/g
 const URL_TEXT = /https?:\/\/[^\s<>"'`　-〿一-鿿＀-￯]+/g
 const TRAILING = /[.,;:!?)\]}>'"。，；：！？）、]+$/
 const SENTENCE_END = /[.,;:!?>'"]/
@@ -115,7 +114,8 @@ export function mentionResolver(
   return (token) => {
     const item = attachments.find(
       (a) =>
-        a.type !== 'text' && ((a.type === 'folder' ? `${a.name}/` : a.name) === token || a.name === token),
+        a.type !== 'text' &&
+        ((a.type === 'folder' ? `${a.name}/` : a.name) === token || a.name === token),
     )
     if (item) {
       const kind = item.type === 'folder' ? 'folder' : item.type === 'image' ? 'image' : 'file'

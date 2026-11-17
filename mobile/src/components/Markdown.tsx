@@ -5,15 +5,18 @@
 // blinking caret. A sent prompt's mentions and links read as chips.
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type TextStyle,
+} from 'react-native'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { copyText } from '../ui/session/feedback'
-import {
-  knownFileRef,
-  openFile,
-  useFileRefs,
-  type FileRefsContext,
-} from '../ui/session/fileRefs'
+import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
 import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
 import { parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
@@ -439,15 +442,7 @@ function Blocks(props: {
       {props.blocks.map((block, index) => {
         const tail = index === last ? props.tail : undefined
         if (index === 0 && props.head && block.kind === 'para') {
-          return (
-            <Para
-              key={index}
-              text={block.text}
-              look={look}
-              tail={tail}
-              head={props.head}
-            />
-          )
+          return <Para key={index} text={block.text} look={look} tail={tail} head={props.head} />
         }
         switch (block.kind) {
           case 'heading': {
@@ -632,7 +627,12 @@ const styles = StyleSheet.create({
   codeCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 },
   codeBody: { paddingHorizontal: 12, paddingVertical: 10 },
   codeRow: { flexDirection: 'row' },
-  gutter: { paddingLeft: 10, paddingVertical: 10, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  gutter: {
+    paddingLeft: 10,
+    paddingVertical: 10,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
   codeText: { fontFamily: MONO, fontSize: 13, lineHeight: 20 },
   codeMore: {
     flexDirection: 'row',

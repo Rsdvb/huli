@@ -274,7 +274,8 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
   const stats = diffs.length > 0 ? diffStats(diffs) : null
   const result = entry.permissionResult
   const note =
-    props.note ?? (typeof result === 'object' && result?.by === 'routine' ? '由例程允许' : undefined)
+    props.note ??
+    (typeof result === 'object' && result?.by === 'routine' ? '由例程允许' : undefined)
   const body = hasBody(entry, label)
   const toggle = () => {
     gentle()
@@ -445,10 +446,7 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
         name="思考"
         summary={thoughtTitle(entry.markdown)}
         mark={
-          <StepMark
-            status={entry.streaming ? 'running' : 'success'}
-            duration={entry.durationMs}
-          />
+          <StepMark status={entry.streaming ? 'running' : 'success'} duration={entry.durationMs} />
         }
         open={open}
         onToggle={

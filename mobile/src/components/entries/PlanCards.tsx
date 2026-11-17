@@ -121,7 +121,11 @@ function PlanBody(props: { markdown: string; clamp?: boolean }) {
         accessibilityLabel={copied ? '已复制计划' : '复制计划'}
         style={styles.copy}
       >
-        <Icon icon={copied ? G.copied : G.copy} size={14} color={copied ? c.success : c.textTertiary} />
+        <Icon
+          icon={copied ? G.copied : G.copy}
+          size={14}
+          color={copied ? c.success : c.textTertiary}
+        />
       </Pressable>
       {props.clamp === false ? (
         body
@@ -318,7 +322,11 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
           onPress={() => answer(chosen)}
         />
       </View>
-      {away && <Text style={[styles.small, { color: c.textTertiary, marginTop: 8 }]}>连上电脑后才能回答</Text>}
+      {away && (
+        <Text style={[styles.small, { color: c.textTertiary, marginTop: 8 }]}>
+          连上电脑后才能回答
+        </Text>
+      )}
       <SendState sender={sender} />
     </View>
   )
@@ -392,7 +400,9 @@ export function PlanSettled(props: { entry: ToolEntry }) {
           <Icon icon={icon} size={15} color={approved ? c.success : c.textSecondary} />
           <Text style={[styles.settledTitle, { color: c.text }]} numberOfLines={1}>
             {title}
-            {meta ? <Text style={{ color: c.textTertiary, fontWeight: '400' }}> · {meta}</Text> : null}
+            {meta ? (
+              <Text style={{ color: c.textTertiary, fontWeight: '400' }}> · {meta}</Text>
+            ) : null}
           </Text>
           {markdown ? (
             <Text style={[styles.small, { color: c.tint, fontWeight: '600' }]}>
@@ -401,7 +411,10 @@ export function PlanSettled(props: { entry: ToolEntry }) {
           ) : null}
         </Pressable>
         {kept?.note ? (
-          <Text selectable style={[styles.quote, { color: c.textSecondary, borderLeftColor: c.borderStrong }]}>
+          <Text
+            selectable
+            style={[styles.quote, { color: c.textSecondary, borderLeftColor: c.borderStrong }]}
+          >
             {kept.note}
           </Text>
         ) : null}
@@ -433,7 +446,15 @@ function PlanRing(props: { items: PlanEntry['items']; size?: number }) {
       {props.items.map((item, i) => {
         if (count === 1) {
           return (
-            <Circle key={i} cx={8} cy={8} r={6} stroke={color(item.status)} strokeWidth={2} fill="none" />
+            <Circle
+              key={i}
+              cx={8}
+              cy={8}
+              r={6}
+              stroke={color(item.status)}
+              strokeWidth={2}
+              fill="none"
+            />
           )
         }
         const a0 = (i / count) * 2 * Math.PI - Math.PI / 2 + gap
@@ -555,7 +576,13 @@ const styles = StyleSheet.create({
   planBody: { borderRadius: 12, padding: 12, paddingRight: 34 },
   copy: { position: 'absolute', top: 10, right: 10, zIndex: 1 },
   small: { fontSize: 13, lineHeight: 18 },
-  diffLine: { fontSize: 13, lineHeight: 19, borderRadius: 4, paddingHorizontal: 4, overflow: 'hidden' },
+  diffLine: {
+    fontSize: 13,
+    lineHeight: 19,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    overflow: 'hidden',
+  },
   choices: { gap: 8 },
   choice: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   choiceText: { fontSize: 15 },
@@ -568,9 +595,21 @@ const styles = StyleSheet.create({
     minHeight: 44,
     maxHeight: 120,
   },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14, justifyContent: 'flex-end' },
+  row: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+    justifyContent: 'flex-end',
+  },
   line: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
-  lineBadge: { width: 24, height: 24, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
+  lineBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   lineText: { flex: 1, fontSize: 14, lineHeight: 19 },
   pill: {
     fontSize: 11,

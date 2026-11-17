@@ -377,13 +377,15 @@ export default function SessionScreen() {
         : app && !QUIET_PHASES.has(turn.phase)
           ? `正在使用 ${app}`
           : phaseText(turn.phase, turn.count))
+  const added =
+    usage && startUsed !== null && usage.used > startUsed ? usage.used - startUsed : null
   const working =
     running && !turn.writing ? (
       <View style={styles.working}>
         <WorkingRow
           since={session?.turnStartedAt ?? summary?.turnStartedAt ?? null}
           label={workingText}
-          tokens={usage && startUsed !== null && usage.used > startUsed ? usage.used - startUsed : null}
+          tokens={added}
           waiting={waitingYou || handBack || turn.asked !== null}
         />
       </View>
@@ -608,13 +610,14 @@ export default function SessionScreen() {
         maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 40 }}
       />
     )
+    // The rows' file references open the folder's files.
+    body = <FileRefs.Provider value={fileRefs}>{body}</FileRefs.Provider>
   }
 
   const linkDown = host.state.kind === 'reconnecting' || host.state.kind === 'stopped'
 
   return (
     <SessionRows.Provider value={context}>
-      <FileRefs.Provider value={fileRefs}>
       {pane ? null : <Stack.Screen options={{ headerShown: false }} />}
       <KeyboardAvoidingView style={[styles.root, { backgroundColor: c.bg }]} behavior="padding">
         <View style={{ flex: 1 }}>
@@ -829,7 +832,6 @@ export default function SessionScreen() {
       {actions.element}
       <SelectText text={selecting} onClose={() => setSelecting(null)} />
       {menu.render(pages)}
-      </FileRefs.Provider>
     </SessionRows.Provider>
   )
 }

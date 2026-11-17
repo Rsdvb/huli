@@ -46,9 +46,9 @@ function read(link: HostLink, child: Pick<SessionSummary, 'id' | 'status' | 'upd
   const key = keyOf(child)
   if (reads.get(child.id)?.key === key || reading.has(child.id)) return
   reading.add(child.id)
-  void (link.request('sessions.snapshot', { sessionId: child.id, from: 0 }) as Promise<
-    SessionSnapshot
-  >)
+  void (
+    link.request('sessions.snapshot', { sessionId: child.id, from: 0 }) as Promise<SessionSnapshot>
+  )
     .then((snapshot) => {
       let tools = 0
       let durationMs: number | null = null

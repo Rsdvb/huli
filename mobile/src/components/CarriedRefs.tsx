@@ -178,10 +178,7 @@ export function RefTiles(props: { refs: Tiled[]; align: 'start' | 'end' }) {
   if (props.refs.length === 0) return null
   return (
     <View
-      style={[
-        styles.tiles,
-        { justifyContent: props.align === 'end' ? 'flex-end' : 'flex-start' },
-      ]}
+      style={[styles.tiles, { justifyContent: props.align === 'end' ? 'flex-end' : 'flex-start' }]}
     >
       {props.refs.map((ref, i) => {
         switch (ref.kind) {

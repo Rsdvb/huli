@@ -85,7 +85,11 @@ function AnsweredTool(props: { entry: ToolEntry }) {
       <QuietLine
         icon={words.allowed ? G.shieldCheck : questions.length > 0 ? G.hand : G.shield}
         tone={words.allowed ? 'done' : 'other'}
-        text={questions.length > 0 && entry.question ? `${entry.question} · ${words.headline}` : words.headline}
+        text={
+          questions.length > 0 && entry.question
+            ? `${entry.question} · ${words.headline}`
+            : words.headline
+        }
         detail={words.note || null}
       />
       {questions.map((q, i) => (

@@ -241,7 +241,9 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
                     size={12}
                   />
                 ) : null}
-                {edit ? <Icon icon={G.right} size={10} color={c.textTertiary} weight="semibold" /> : null}
+                {edit ? (
+                  <Icon icon={G.right} size={10} color={c.textTertiary} weight="semibold" />
+                ) : null}
               </>
             )
             return edit ? (
@@ -657,7 +659,13 @@ const styles = StyleSheet.create({
   description: { fontSize: 14, lineHeight: 20, marginTop: 6 },
   mono: { fontFamily: MONO, fontSize: 13, lineHeight: 19 },
   permHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  avatar: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  avatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   permTitle: { fontSize: 16, lineHeight: 22 },
   sub: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
   subText: { flexShrink: 1, fontSize: 13, lineHeight: 18 },
