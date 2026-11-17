@@ -40,10 +40,12 @@
 .k-rcard {
   border-radius: 12px;
 }
+/* The state column grows with the page, by its width rather than its text, so every row's grid
+   still lines up: "Today 14:30 · in 5 h 52 min" fits where the name has room to spare. */
 .k-rrow {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px 128px 200px 28px 36px;
+  grid-template-columns: minmax(0, 1fr) 150px 128px clamp(200px, 26cqi, 260px) 28px 36px;
   align-items: center;
   gap: 12px;
   min-height: 60px;
@@ -953,7 +955,7 @@ button.k-run:focus-visible {
     margin-top: 0;
   }
   .k-rrow {
-    grid-template-columns: minmax(0, 1fr) 160px 28px 36px;
+    grid-template-columns: minmax(0, 1fr) clamp(160px, 34cqi, 260px) 28px 36px;
   }
   .k-rrow > :is(.k-rrow__schedule, .k-rrow__agent, [data-wide]) {
     display: none;
