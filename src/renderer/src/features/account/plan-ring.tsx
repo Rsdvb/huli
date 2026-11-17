@@ -29,7 +29,7 @@ import {
   useWindowHost,
 } from '@renderer/stores/window-host'
 import { closeAccountMenu } from './menu-close'
-import { currentCard, planCards, popoverCards, tightestWindow } from './model'
+import { currentCard, hasModelGroups, planCards, popoverCards, tightestWindow } from './model'
 import { PlanLimitCard } from './plan-limit-card'
 
 /**
@@ -185,6 +185,10 @@ function PlanPopover({ currentKey, close }: { currentKey: string | null; close: 
   const cards = planCards(useAccountsWithLimits(), useNow())
   const current = cards.find((card) => card.key === currentKey) ?? null
   const shown = popoverCards(cards, current)
+  // Model-group cards take a whole row; of the half-width ones, an odd last one takes the whole
+  // row too, rather than leaving half a row empty beside it with its names cut short.
+  const halves = shown.filter((card) => !hasModelGroups(card))
+  const loneKey = halves.length % 2 === 1 ? (halves[halves.length - 1]?.key ?? null) : null
   const windowHost = useWindowHost()
   const hostName = useHostName()
   const shownKey = windowHost.kind === 'all' ? '*' : (windowHost.hostId ?? '')
@@ -229,7 +233,7 @@ function PlanPopover({ currentKey, close }: { currentKey: string | null; close: 
       <div className="kettu-plan-pop__well scroll-fade-y">
         <div className="grid grid-flow-dense grid-cols-2 gap-1">
           {shown.map((card) => (
-            <PlanLimitCard key={card.key} card={card} onOpen={open} />
+            <PlanLimitCard key={card.key} card={card} onOpen={open} wide={card.key === loneKey} />
           ))}
         </div>
       </div>
