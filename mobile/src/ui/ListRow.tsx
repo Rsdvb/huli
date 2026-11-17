@@ -1,11 +1,17 @@
 // Grouped rows in the iOS Settings manner: a rounded group, rows split by inset hairlines, an
 // optional icon tile, a value or chevron at the end.
 
-import { Children, Fragment, isValidElement, type ReactNode } from 'react'
+import { Children, Fragment, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { Icon, type IconName } from './Icon'
 import { Press } from './Press'
 import { radius, space, type as typeScale, useTokens } from './tokens'
+
+/** Whether a row of a group starts with a ListRow's icon, so the line above it starts at its text. */
+function hasIcon(row: ReactElement): boolean {
+  const props = row.props as { icon?: unknown } | null
+  return row.type === ListRow && !!props?.icon
+}
 
 export function ListGroup(props: { children: ReactNode; header?: string; footer?: string }) {
   const { c } = useTokens()
@@ -23,7 +29,15 @@ export function ListGroup(props: { children: ReactNode; header?: string; footer?
       <View style={[styles.group, { backgroundColor: c.surface, borderColor: c.border }]}>
         {rows.map((row, i) => (
           <Fragment key={row.key ?? i}>
-            {i > 0 && <View style={[styles.separator, { backgroundColor: c.border }]} />}
+            {i > 0 && (
+              <View
+                style={[
+                  styles.separator,
+                  hasIcon(row) && styles.underText,
+                  { backgroundColor: c.border },
+                ]}
+              />
+            )}
             {row}
           </Fragment>
         ))}
@@ -126,7 +140,9 @@ const styles = StyleSheet.create({
   header: { marginLeft: space.lg, textTransform: 'none' },
   footer: { marginHorizontal: space.lg },
   group: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  separator: { height: StyleSheet.hairlineWidth, marginLeft: space.lg },
+  separator: { height: StyleSheet.hairlineWidth, marginLeft: space.lg, marginRight: space.lg },
+  // The row's padding, its 30 point icon and the gap after it, as Settings lines up its rules.
+  underText: { marginLeft: space.lg + 30 + space.md },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

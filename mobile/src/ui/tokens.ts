@@ -126,7 +126,7 @@ export const type = {
   caption: { fontSize: 12, lineHeight: 16, fontWeight: '500' },
   stat: { fontSize: 32, lineHeight: 38, fontWeight: '700' },
   /** The greeting and summary lines at the top of a tab. */
-  lead: { fontSize: 22, lineHeight: 31, fontWeight: '400' },
+  lead: { fontSize: 17, lineHeight: 29, fontWeight: '400' },
   /** A list row's title. */
   rowTitle: { fontSize: 17, lineHeight: 23, fontWeight: '500' },
   /** The top bar's computer pill. */

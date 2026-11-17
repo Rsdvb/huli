@@ -243,6 +243,7 @@ export function RoutineEditor(props: {
 
   return (
     <BottomSheet
+      solid
       visible={seed !== null}
       onClose={props.onClose}
       title={props.routine ? '编辑定时任务' : '新建定时任务'}

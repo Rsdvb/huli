@@ -1,0 +1,42 @@
+# Text selection in the session titled TITLE: a reply's menu, its sheet with a word selected, and a
+# code block's menu.
+appId: io.github.rsdvb.huli
+---
+- runFlow: qa-reset.yaml
+- tapOn: "会话"
+- tapOn:
+    text: ".*${TITLE}.*"
+- waitForAnimationToEnd
+- longPressOn:
+    point: ${REPLY}
+- waitForAnimationToEnd
+- takeScreenshot: t01-reply-menu
+- tapOn: "选择文本"
+- waitForAnimationToEnd
+- takeScreenshot: t02-select-sheet
+- longPressOn:
+    point: 30%,30%
+- waitForAnimationToEnd
+- takeScreenshot: t03-word-selected
+- tapOn:
+    point: 12%,15%
+- waitForAnimationToEnd
+- takeScreenshot: t04-all-selected
+- tapOn:
+    point: 92%,10%
+- waitForAnimationToEnd
+- longPressOn:
+    point: ${CODE}
+- waitForAnimationToEnd
+- takeScreenshot: t05-code-menu
+- tapOn: "选择文本"
+- waitForAnimationToEnd
+- takeScreenshot: t06-code-sheet
+- tapOn:
+    point: 92%,10%
+- waitForAnimationToEnd
+- longPressOn:
+    text: "你好"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: t07-user-menu

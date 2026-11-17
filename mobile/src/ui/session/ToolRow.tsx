@@ -14,12 +14,13 @@ import { Markdown } from '../../components/Markdown'
 import { handDiff } from '../../diff'
 import { Clamp } from './Clamp'
 import { useSessionRows } from './context'
-import { copyText } from './feedback'
+import { copyText, plainText, showMenu } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useTenth } from './now'
 import { MONO, useSessionTokens } from './palette'
 import { gentle } from './Press'
+import { selectText } from './SelectText'
 import { Counts } from './TurnChanges'
 import { toolEdits, type FileEdit } from './turns'
 import {
@@ -311,8 +312,21 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
 function Section(props: { label: string; copy?: string; children: ReactNode }) {
   const { c } = useSessionTokens()
   const [copied, setCopied] = useState(false)
+  const text = props.copy
   return (
-    <View style={{ gap: 6 }}>
+    <Pressable
+      onLongPress={
+        text
+          ? () =>
+              showMenu(undefined, [
+                { label: '复制', onPress: () => void copyText(text) },
+                { label: '选择文本', onPress: () => selectText({ text, mono: true }) },
+              ])
+          : undefined
+      }
+      delayLongPress={350}
+      style={{ gap: 6 }}
+    >
       <View style={styles.sectionHead}>
         <Text style={[styles.sectionLabel, { color: c.textTertiary }]}>{props.label}</Text>
         {props.copy !== undefined && (
@@ -336,7 +350,7 @@ function Section(props: { label: string; copy?: string; children: ReactNode }) {
         )}
       </View>
       {props.children}
-    </View>
+    </Pressable>
   )
 }
 
@@ -458,7 +472,16 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
         }
       />
       {open && has && (
-        <View style={[styles.thought, { borderLeftColor: c.borderStrong }]}>
+        <Pressable
+          onLongPress={() =>
+            showMenu(undefined, [
+              { label: '复制', onPress: () => void copyText(plainText(entry.markdown)) },
+              { label: '选择文本', onPress: () => selectText({ text: plainText(entry.markdown) }) },
+            ])
+          }
+          delayLongPress={350}
+          style={[styles.thought, { borderLeftColor: c.borderStrong }]}
+        >
           <Clamp maxHeight={180}>
             <Markdown
               markdown={entry.markdown}
@@ -467,7 +490,7 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
               color={c.textSecondary}
             />
           </Clamp>
-        </View>
+        </Pressable>
       )}
     </View>
   )

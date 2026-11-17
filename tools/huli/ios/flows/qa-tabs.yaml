@@ -1,0 +1,55 @@
+# Shoots each tab at rest and scrolled, and the tasks tab's two views.
+appId: io.github.rsdvb.huli
+---
+- runFlow: qa-reset.yaml
+- tapOn: "会话"
+- waitForAnimationToEnd
+- takeScreenshot: 01-home
+- tapOn: "Artifacts"
+- waitForAnimationToEnd
+- takeScreenshot: 02-artifacts
+- tapOn: "任务"
+- waitForAnimationToEnd
+- tapOn:
+    text: "需求"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: 03-tasks
+- tapOn:
+    text: "定时"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: 04-routines
+- swipe:
+    start: 50%, 80%
+    end: 50%, 25%
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: 04b-routines-2
+- tapOn: "用量"
+- waitForAnimationToEnd
+- takeScreenshot: 05-usage
+- swipe:
+    start: 50%, 80%
+    end: 50%, 25%
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: 06-usage-2
+- swipe:
+    start: 50%, 80%
+    end: 50%, 25%
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: 07-usage-3
+- swipe:
+    start: 50%, 80%
+    end: 50%, 25%
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: 08-usage-4
+- swipe:
+    start: 50%, 80%
+    end: 50%, 25%
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: 09-usage-5

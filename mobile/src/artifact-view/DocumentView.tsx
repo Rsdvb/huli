@@ -3,10 +3,12 @@
 // (src/renderer/src/viewers/document) shows the same text; editing stays on the computer.
 
 import { useMemo } from 'react'
-import { ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { CONTENT_ENTRIES } from '@shared/artifact-types'
 import { Markdown } from '../components/Markdown'
+import { copyText, plainText, showMenu } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
+import { selectText } from '../ui/session/SelectText'
 import { dataUrl, textOf } from './bytes'
 import type { LoadedVersion } from './content'
 import { confirmLink } from './external'
@@ -62,9 +64,19 @@ export function DocumentView(props: { version: LoadedVersion; top: number; botto
       contentInsetAdjustmentBehavior="never"
       scrollIndicatorInsets={{ top: props.top }}
     >
-      <View style={styles.article}>
+      <Pressable
+        onLongPress={() =>
+          showMenu(undefined, [
+            { label: '复制', onPress: () => void copyText(plainText(text)) },
+            { label: '选择文本', onPress: () => selectText({ text: plainText(text) }) },
+            { label: '复制为 Markdown', onPress: () => void copyText(text) },
+          ])
+        }
+        delayLongPress={400}
+        style={styles.article}
+      >
         <Markdown markdown={text} image={image} onLink={confirmLink} />
-      </View>
+      </Pressable>
     </ScrollView>
   )
 }

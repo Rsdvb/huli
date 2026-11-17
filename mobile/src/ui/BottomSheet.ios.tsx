@@ -17,6 +17,11 @@ export function BottomSheet(props: {
   children?: ReactNode
   /** Scroll the body when it is taller than this; the default suits a menu. */
   maxHeight?: number
+  /**
+   * An opaque sheet for a form: through the glass of a sheet sized to its content, the list
+   * behind showed as smudges around the fields.
+   */
+  solid?: boolean
 }) {
   const { c, scheme } = useTokens()
   const window = Dimensions.get('window')
@@ -31,7 +36,13 @@ export function BottomSheet(props: {
       >
         <Group modifiers={[presentationDragIndicator('visible'), preferredColorScheme(scheme)]}>
           <RNHostView matchContents>
-            <View style={[styles.sheet, { width: window.width }]}>
+            <View
+              style={[
+                styles.sheet,
+                { width: window.width },
+                props.solid && { backgroundColor: c.surface },
+              ]}
+            >
               {props.title || props.message ? (
                 <View style={styles.head}>
                   {props.title ? (

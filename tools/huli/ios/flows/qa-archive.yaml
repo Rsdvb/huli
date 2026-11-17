@@ -1,0 +1,19 @@
+# Archives the session titled TITLE from the list, unpinned first: holding its row, then 归档.
+appId: io.github.rsdvb.huli
+---
+- runFlow: qa-reset.yaml
+- tapOn: "会话"
+- longPressOn:
+    text: ".*${TITLE}.*"
+- waitForAnimationToEnd
+- takeScreenshot: x01-row-menu
+- tapOn:
+    text: "取消置顶"
+    optional: true
+- waitForAnimationToEnd
+- longPressOn:
+    text: ".*${TITLE}.*"
+- waitForAnimationToEnd
+- tapOn: "归档"
+- waitForAnimationToEnd
+- takeScreenshot: x02-archived
