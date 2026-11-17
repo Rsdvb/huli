@@ -1,16 +1,19 @@
 // The Live Activity the app runs itself while it is open: one session's turn at a time, the one
 // that waits for the user first, else the latest to start, with how many others run or wait. The
-// app updates it as the session list changes and ends it when the turns end. Left behind in the
-// background it goes stale, and says so, until the app comes back and sets it right; the
-// computer's own activity (activities.ts) is the one that follows the user while the app is away.
+// app updates it as the session list changes and ends it when the turns end. It starts with a push
+// token, which the computer gets (activities.ts): a computer that follows turns keeps it up to date
+// while the app is away, and the app leaves it alone meanwhile. With an older computer it goes
+// stale in the background, and says so, until the app comes back and sets it right. An activity
+// the computer started by push for a turn is taken up the same way.
 
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import type { ThreadEntry } from '@shared/thread'
+import type { TurnPhaseName } from '@shared/turn-phase'
 import { HuliLive } from '../../modules/huli-live'
 import { isMuted } from '../push/muted'
 import { needsYou, sessionTitle } from '../sessions'
-import { liveSnapshot } from './activities'
+import { computerFollows, followedActivities, liveSnapshot, setProgressSource } from './activities'
 
 /** Seconds after its last update before an activity counts as stale. */
 const STALE_S = 20 * 60
@@ -24,7 +27,33 @@ const MAX_TEXT = 120
 
 /** As HuliLiveActivity.swift's LivePhase names them. */
 type Phase =
-  'thinking' | 'command' | 'approval' | 'question' | 'waiting' | 'running' | 'done' | 'error'
+  | 'starting'
+  | 'thinking'
+  | 'writing'
+  | 'command'
+  | 'read'
+  | 'search'
+  | 'edit'
+  | 'approval'
+  | 'question'
+  | 'waiting'
+  | 'running'
+  | 'done'
+  | 'error'
+
+/** What the summary says the turn does, as the activity names it. */
+const WORK_PHASES: Record<TurnPhaseName, Phase> = {
+  thinking: 'thinking',
+  execute: 'command',
+  read: 'read',
+  search: 'search',
+  fetch: 'search',
+  edit: 'edit',
+  writing: 'writing',
+  compacting: 'running',
+  approval: 'approval',
+  working: 'running',
+}
 
 /** HuliLocalState in modules/huli-live/ios/HuliActivityAttributes.swift. */
 interface LocalState {
@@ -37,6 +66,9 @@ interface LocalState {
   endedAt?: number
   running: number
   waiting: number
+  planDone?: number
+  planTotal?: number
+  subagents?: number
 }
 
 export interface LocalInput {
@@ -160,9 +192,18 @@ async function stateOf(
   if (busyAs(s) === 'waiting') {
     ;({ phase, doing } = await requestDetail(input.link, s))
   } else if (s.status === 'starting') {
-    doing = '正在启动'
-  } else if (s.plan?.current) {
-    doing = `正在：${s.plan.current.text}`
+    phase = 'starting'
+  } else {
+    // A host too old to say what the turn does leaves it running.
+    if (s.working) phase = WORK_PHASES[s.working.phase]
+    if (s.working?.step) doing = s.working.step
+    else if (s.plan?.current) doing = `正在：${s.plan.current.text}`
+  }
+  let subagents = 0
+  for (const other of input.sessions.values()) {
+    if (other.parentId === s.id && (other.status === 'running' || other.status === 'starting')) {
+      subagents++
+    }
   }
   return {
     sessionId: s.id,
@@ -172,6 +213,8 @@ async function stateOf(
     ...(doing && !input.hidden ? { doing: clip(doing) } : {}),
     startedAt: startOf(s),
     ...counts,
+    ...(s.plan && s.plan.total > 0 ? { planDone: s.plan.done, planTotal: s.plan.total } : {}),
+    ...(subagents > 0 ? { subagents } : {}),
   }
 }
 
@@ -191,16 +234,28 @@ function finalState(previous: Tracked, session: SessionSummary | undefined): Loc
     endedAt: Date.now(),
     running: 0,
     waiting: 0,
+    subagents: 0,
   }
 }
+
+// The computer follows the activity the app keeps, by its token and the session it shows.
+setProgressSource(() => {
+  if (!tracked?.sessionId) return null
+  const id = tracked.id
+  const entry = liveSnapshot().activities.find((a) => a.id === id)
+  if (!entry?.token || (entry.state !== 'active' && entry.state !== 'stale')) return null
+  return { token: entry.token, sessionId: tracked.sessionId }
+})
 
 async function reconcile(input: LocalInput): Promise<void> {
   const live = HuliLive
   if (!live) return
   const snapshot = liveSnapshot()
-  const locals = snapshot.activities.filter(
-    (a) => a.local && (a.state === 'active' || a.state === 'stale'),
-  )
+  const locals = [
+    ...snapshot.activities.filter((a) => a.local && (a.state === 'active' || a.state === 'stale')),
+    // One the computer started by push for a turn is the app's to keep while it is open.
+    ...(await followedActivities().catch(() => [])),
+  ]
   if (!input.enabled) {
     for (const activity of locals) await live.end(activity.id, '', 0).catch(() => {})
     tracked = null
@@ -245,6 +300,9 @@ async function reconcile(input: LocalInput): Promise<void> {
         Number(b.id === trackedId) - Number(a.id === trackedId) ||
         startOf(b) - startOf(a),
     )[0]
+
+  // Away, a computer that follows turns keeps the activity; the app sets it right when it is back.
+  if (tracked && !input.foreground && computerFollows()) return
 
   if (focus) {
     const json = JSON.stringify({ local: await stateOf(focus, input, counts) })

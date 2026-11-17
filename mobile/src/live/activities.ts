@@ -1,11 +1,13 @@
 // The phone's Live Activities, as the app keeps track of them (modules/huli-live): which of the
 // computer's activities came from which computer, and the tokens that computer needs, which reach
 // it in the push target of `notifications.set` (src/shared/remote/push.ts): `start` lets it start
-// an activity by push while requests wait for the user, `update` reaches the one it started.
+// an activity by push while requests wait for the user, or a turn starts while the phone is away,
+// `update` reaches the one it started for what waits, and `progress` the one that follows a turn,
+// which the app started itself (local.ts) or the computer started by push.
 
 import { useSyncExternalStore } from 'react'
 import { importKeyPair, type KeyPair } from '@shared/remote/noise'
-import { decodeSealed, openPush, type PushTarget } from '@shared/remote/push'
+import { decodeSealed, openPush, type ProgressTarget, type PushTarget } from '@shared/remote/push'
 import { decodeRelayBytes, verifyRelaySignature } from '@shared/remote/relay'
 import {
   HuliLive,
@@ -30,11 +32,14 @@ interface Origin {
   signed: Uint8Array
   /** Whether the signature is the host's: unknown until checked against a key the host gave. */
   verified: boolean | null
+  /** One that follows a turn, and the session it started with. */
+  progress: { sessionId: string } | null
 }
 
 export interface ComputerActivity extends NativeActivity {
   host: string
   at: number
+  progress: { sessionId: string } | null
 }
 
 let snapshot: NativeSnapshot = readSnapshot()
@@ -42,10 +47,18 @@ let snapshot: NativeSnapshot = readSnapshot()
 const origins = new Map<string, Origin | null>()
 /** The computer the link is paired with, as notifications.get named it. */
 let current: { id: string; key: Uint8Array } | null = null
-/** The tokens last handed to the computer, as JSON. */
+/** The tokens last handed to the computer, as JSON, and whether it follows turns. */
 let given: string | null = null
+let givenProgress = false
+let follows = false
 let device: KeyPair | null = null
 const listeners = new Set<() => void>()
+/** The activity the app keeps for a turn (local.ts), which the computer may follow. */
+let progressSource: () => ProgressTarget | null = () => null
+
+export function setProgressSource(source: () => ProgressTarget | null): void {
+  progressSource = source
+}
 
 export function liveSnapshot(): NativeSnapshot {
   return snapshot
@@ -84,6 +97,10 @@ async function originOf(sealed: string, key: KeyPair): Promise<Origin | null> {
       signature: opened.signature,
       signed: opened.signed,
       verified: null,
+      progress:
+        content.progress === true && typeof content.sessionId === 'string'
+          ? { sessionId: content.sessionId }
+          : null,
     }
   } catch {
     return null
@@ -116,7 +133,7 @@ export function computerActivities(): { mine: ComputerActivity[]; foreign: Nativ
     const origin = origins.get(activity.id)
     if (origin === undefined) continue
     if (origin === null) foreign.push(activity)
-    else mine.push({ ...activity, host: origin.host, at: origin.at })
+    else mine.push({ ...activity, host: origin.host, at: origin.at, progress: origin.progress })
   }
   mine.sort((a, b) => b.at - a.at)
   return { mine, foreign }
@@ -144,33 +161,68 @@ export async function currentActivities(): Promise<ComputerActivity[]> {
   return current ? verifiedFor(current) : []
 }
 
-async function tokensFor(host: {
-  id: string
-  key: Uint8Array
-}): Promise<ActivityTokens | undefined> {
+/** The paired computer's activities that follow a turn, which the app keeps while it is open. */
+export async function followedActivities(): Promise<ComputerActivity[]> {
+  return (await currentActivities()).filter((activity) => activity.progress)
+}
+
+/**
+ * Whether the computer may start an activity by push for a turn begun while the phone is away:
+ * Live Activities on in Huli and in the system's Settings, on an iOS that starts them by push.
+ */
+export function liveTurnsWanted(): boolean {
+  return Boolean(HuliLive) && getPrefs().liveActivities && snapshot.enabled && !!snapshot.startToken
+}
+
+/** Whether the paired computer follows the app's turn activity while the app is away. */
+export function computerFollows(): boolean {
+  return follows && givenProgress
+}
+
+async function tokensFor(
+  host: { id: string; key: Uint8Array },
+  following: boolean,
+): Promise<ActivityTokens | undefined> {
   if (!HuliLive || !getPrefs().liveActivities || !snapshot.enabled) return undefined
-  const update = (await verifiedFor(host)).find((activity) => activity.token)?.token
+  const verified = await verifiedFor(host)
+  const update = verified.find((activity) => activity.token && !activity.progress)?.token
   const start = snapshot.startToken
-  if (!start && !update) return undefined
-  return { ...(start ? { start } : {}), ...(update ? { update } : {}) }
+  let progress: ProgressTarget | null = null
+  if (following) {
+    progress = progressSource()
+    // One the computer started by push, before the app took it up.
+    const started = verified.find((activity) => activity.token && activity.progress)
+    if (!progress && started) {
+      progress = { token: started.token!, sessionId: started.progress!.sessionId }
+    }
+  }
+  if (!start && !update && !progress) return undefined
+  return {
+    ...(start ? { start } : {}),
+    ...(update ? { update } : {}),
+    ...(progress ? { progress } : {}),
+  }
 }
 
 /**
  * The Live Activity tokens for the computer's push target, by its id and key as
- * notifications.get gives them; remembers them as given, and the computer as the paired one.
+ * notifications.get gives them, with the turn's activity for a computer that follows turns;
+ * remembers them as given, and the computer as the paired one.
  */
-export async function liveActivityTokens(host: {
-  id: string
-  key: string
-}): Promise<ActivityTokens | undefined> {
+export async function liveActivityTokens(
+  host: { id: string; key: string },
+  following: boolean,
+): Promise<ActivityTokens | undefined> {
   const key = decodeRelayBytes(host.key)
   if (!key) return undefined
   current = { id: host.id, key }
+  follows = following
   if (snapshot.activities.some((a) => !a.local && a.sealed && !origins.has(a.id))) {
     await refreshLive()
   }
-  const tokens = await tokensFor(current)
+  const tokens = await tokensFor(current, following)
   given = JSON.stringify(tokens ?? null)
+  givenProgress = Boolean(tokens?.progress)
   return tokens
 }
 
@@ -193,7 +245,8 @@ export async function tidyComputerActivities(options: {
     for (const activity of mine) await end(activity.id)
     return
   }
-  const ours = await currentActivities()
+  // A turn's activity is the app's own to keep (local.ts).
+  const ours = (await currentActivities()).filter((activity) => !activity.progress)
   for (const activity of ours.slice(1)) await end(activity.id)
   if (options.nothingWaits && ours[0]) await end(ours[0].id)
 }
@@ -201,5 +254,5 @@ export async function tidyComputerActivities(options: {
 /** Whether the computer has the tokens the phone has now; unknown before it was given any. */
 export async function tokensGiven(): Promise<boolean> {
   if (!current) return true
-  return JSON.stringify((await tokensFor(current)) ?? null) === given
+  return JSON.stringify((await tokensFor(current, follows)) ?? null) === given
 }

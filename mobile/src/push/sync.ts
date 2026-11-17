@@ -12,7 +12,7 @@ import {
   type NotificationsState,
 } from '@shared/remote/push'
 import { decodeRelayBytes, relayHostId } from '@shared/remote/relay'
-import { liveActivityTokens } from '../live/activities'
+import { liveActivityTokens, liveTurnsWanted } from '../live/activities'
 import { getPrefs } from '../prefs'
 import { loadDeviceKey } from '../store'
 import { platform } from './platform'
@@ -116,15 +116,22 @@ async function syncOnce(link: HostLink): Promise<string | null> {
     setStatus('unsupported')
     return current.host.id
   }
-  const activity = await liveActivityTokens(current.host).catch(() => undefined)
+  // A computer that says whether it has a turn's activity follows turns; an older one does not.
+  const follows = typeof current.target.progress === 'boolean'
+  const activity = await liveActivityTokens(current.host, follows).catch(() => undefined)
   if (activity) target.activity = activity
   const text = JSON.stringify(target)
   // The computer drops a Live Activity token Apple no longer takes, or one whose activity it ended.
   const activityChanged =
     Boolean(current.target.activityStart) !== Boolean(activity?.start) ||
-    Boolean(current.target.activityUpdate) !== Boolean(activity?.update)
-  if (!current.target.apns || activityChanged || sent.get(link) !== text) {
-    await link.request(NOTIFICATIONS_SET, { target })
+    Boolean(current.target.activityUpdate) !== Boolean(activity?.update) ||
+    (follows && current.target.progress !== Boolean(activity?.progress))
+  // It starts an activity for a turn begun while the phone is away only when asked to.
+  const liveProgress = follows && liveTurnsWanted()
+  const choices =
+    follows && current.choices.liveProgress !== liveProgress ? { liveProgress } : undefined
+  if (!current.target.apns || activityChanged || choices || sent.get(link) !== text) {
+    await link.request(NOTIFICATIONS_SET, { target, ...(choices ? { choices } : {}) })
     sent.set(link, text)
   }
   setStatus(current.signedIn ? 'on' : 'signed-out')
