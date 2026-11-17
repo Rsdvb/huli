@@ -1,14 +1,16 @@
 // The line under the composer: the computer with its system and whether the link is up, the
 // session's folder, which opens its changes (or, in New session, the project picker), the branch
-// it is on, how much of the plan's tightest window is used, which opens the plan's usage, and how
-// full the context is, which opens what fills it.
+// it is on, how much of the plan's tightest window is used, which opens the plan's usage, how long
+// the prompt cache has left, and how full the context is, both of which open what fills it.
 
 import type { RefObject } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import Svg, { Circle } from 'react-native-svg'
 import type { PlanLimit } from '@shared/agent-host'
+import type { CachePhase } from '@shared/prompt-cache'
 import type { LinkState } from '@shared/remote/link'
 import { G, Icon, SystemMark } from './icons'
+import { cacheLeftText } from './promptCache'
 import type { ViewHandle } from './Popover'
 import {
   backText,
@@ -104,6 +106,8 @@ export function StatusLine(props: {
   onLimitPress?: () => void
   /** The context's share used, which opens its breakdown. */
   context?: { share: number; color: string; approximate: boolean; onPress(): void } | null
+  /** The prompt cache's time left, which opens the context's breakdown with its cache. */
+  cache?: { left: number; phase: CachePhase; estimate: boolean; onPress(): void } | null
 }) {
   const { c, s } = useSessionTokens()
   const dot =
@@ -210,6 +214,43 @@ export function StatusLine(props: {
               <Text style={{ color: limitTextColor(limit, c, c.textSecondary) }}>{percent}%</Text>
             </Text>
           )}
+        </Pressable>
+      )}
+      {props.cache && (
+        <Pressable
+          onPress={props.cache.onPress}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`Prompt cache：${
+            props.cache.phase === 'expired'
+              ? props.cache.estimate
+                ? '可能已过期'
+                : '已过期'
+              : `剩余 ${cacheLeftText(props.cache.left)}`
+          }`}
+          style={({ pressed }) => [styles.limit, { opacity: pressed ? 0.55 : 1 }]}
+        >
+          <Icon
+            icon={G.timer}
+            size={13}
+            color={
+              props.cache.phase === 'expired'
+                ? c.textTertiary
+                : props.cache.phase === 'ending'
+                  ? c.warning
+                  : c.tint
+            }
+          />
+          <Text
+            style={[
+              styles.text,
+              { color: props.cache.phase === 'ending' ? c.warning : c.textSecondary },
+            ]}
+          >
+            {props.cache.phase === 'expired'
+              ? '已过期'
+              : `${props.cache.estimate ? '约 ' : ''}${cacheLeftText(props.cache.left)}`}
+          </Text>
         </Pressable>
       )}
       {props.context && (
