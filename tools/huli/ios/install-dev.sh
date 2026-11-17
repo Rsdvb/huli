@@ -5,7 +5,7 @@ set -e
 export PATH="$HOME/.huli-tools/ruby/bin:$HOME/.huli-tools/node/bin:$HOME/.huli-tools/gems/bin:$PATH"
 export GEM_HOME="$HOME/.huli-tools/gems"
 export LANG=en_US.UTF-8
-: "${DEVICE:?the iPhone's UDID}"
+: "${DEVICE:?set DEVICE to the UDID of the iPhone}"
 APP_DIR="${APP_DIR:-$HOME/huli/mobile}"
 HULI_TOOLS="${HULI_TOOLS:-$HOME/huli}"
 OUT="${OUT:-$HOME/huli/out-dev}"
