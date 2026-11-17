@@ -99,6 +99,10 @@ export default function Settings() {
     Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? APP_VERSION
   const build = Application.nativeBuildVersion
   const enabledRoutines = routines.data?.routines.filter((r) => r.enabled).length
+  const agentList = [...host.agents.values()]
+  const updates = agentList.filter((a) => a.isDefault && (a.update || a.cli?.update)).length
+  const usable = agentList.filter((a) => a.registered !== false).length
+  const agentsLine = !host.loaded ? undefined : updates > 0 ? `${updates} 个可更新` : `${usable} 个`
 
   const toggleLock = async (on: boolean) => {
     const result = await authenticate(on ? `开启${biometry}锁定` : `关闭${biometry}锁定`)
@@ -280,6 +284,73 @@ export default function Settings() {
             plainIcon
             chevron
             onPress={() => router.push('/archived')}
+          />
+        </ListGroup>
+
+        <ListGroup
+          header="电脑上的 Huli"
+          footer="这些都存在电脑上，在这里改和在电脑上改一样，对所有配对的设备都生效。"
+        >
+          <ListRow
+            title="Agent"
+            icon="sparkles"
+            plainIcon
+            value={agentsLine}
+            chevron
+            onPress={() => router.push('/settings/agents')}
+          />
+          <ListRow
+            title="插件市场"
+            icon="store"
+            plainIcon
+            chevron
+            onPress={() => router.push('/settings/market')}
+          />
+          <ListRow
+            title="MCP 服务器"
+            icon="server"
+            plainIcon
+            chevron
+            onPress={() => router.push('/settings/mcp')}
+          />
+          <ListRow
+            title="记忆"
+            icon="brain"
+            plainIcon
+            chevron
+            onPress={() => router.push('/settings/memory')}
+          />
+          <ListRow
+            title="项目"
+            icon="folder"
+            plainIcon
+            value={host.loaded ? `${host.projects.length} 个` : undefined}
+            chevron
+            onPress={() => router.push('/settings/projects')}
+          />
+        </ListGroup>
+
+        <ListGroup header="权限与数据">
+          <ListRow
+            title="Artifact 权限"
+            icon="shield"
+            plainIcon
+            chevron
+            onPress={() => router.push('/settings/artifacts')}
+          />
+          <ListRow
+            title="设备"
+            icon="phone"
+            plainIcon
+            chevron
+            onPress={() => router.push('/settings/devices')}
+          />
+          <ListRow
+            title="用量记录"
+            icon="chart"
+            plainIcon
+            chevron
+            onPress={() => router.push('/settings/usage')}
           />
         </ListGroup>
 
