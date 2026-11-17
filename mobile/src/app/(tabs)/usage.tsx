@@ -824,22 +824,35 @@ function PlanCard(props: {
       {limits.length > 0 ? (
         <View style={styles.planBody}>
           <ConcentricRings
-            size={68}
-            stroke={6}
-            gap={3}
+            size={56}
+            stroke={5}
+            gap={2.5}
             rings={limits.map((l) => ({
               progress: (l.usedPercent ?? 0) / 100,
               color: limitColor(c, l),
             }))}
           />
+          {/* Each window as the desktop's card has it: its name on the left, its share on the
+              right, so a long name such as 每周 · Fable shortens itself and never the figure. */}
           <View style={styles.planLegend}>
             {limits.map((l) => (
-              <Text key={l.window} numberOfLines={1} style={{ color: c.textSecondary }}>
-                <Text style={[typeScale.headline, styles.tabular, { color: c.text }]}>
+              <View key={l.window} style={styles.planLine}>
+                <Text
+                  style={[typeScale.caption, styles.planLineName, { color: c.textSecondary }]}
+                  numberOfLines={1}
+                >
+                  {limitLabel(l)}
+                </Text>
+                <Text
+                  style={[
+                    typeScale.subhead,
+                    styles.tabular,
+                    { color: (l.usedPercent ?? 0) >= 95 ? limitColor(c, l) : c.text },
+                  ]}
+                >
                   {l.usedPercent === null ? '—' : `${Math.round(l.usedPercent)}%`}
                 </Text>
-                <Text style={typeScale.caption}> {limitLabel(l)}</Text>
-              </Text>
+              </View>
             ))}
           </View>
         </View>
@@ -975,7 +988,9 @@ const styles = StyleSheet.create({
   planCard: { gap: space.md, minHeight: 128 },
   planHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   planBody: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  planLegend: { flex: 1, gap: 2 },
+  planLegend: { flex: 1, gap: 3 },
+  planLine: { flexDirection: 'row', alignItems: 'baseline', gap: space.xs },
+  planLineName: { flex: 1 },
   periodRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingTop: space.xxl },
   customRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   calendar: {
