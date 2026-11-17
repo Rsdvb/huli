@@ -2,7 +2,8 @@
 // the agents it is installed in, each with its switch and Uninstall, and installing it in another.
 
 import { useState } from 'react'
-import { Image, Linking, StyleSheet, Switch, Text, View } from 'react-native'
+import { Linking, StyleSheet, Switch, Text, View } from 'react-native'
+import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentId } from '@shared/agents'
 import {
@@ -178,7 +179,9 @@ export default function MarketPlugin() {
             <Image
               source={{ uri: logoUri }}
               style={styles.logo}
-              resizeMode="contain"
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              transition={120}
               accessibilityIgnoresInvertColors
             />
           ) : (

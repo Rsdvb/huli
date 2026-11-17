@@ -28,7 +28,6 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
-  Image,
   Linking,
   Platform,
   Pressable,
@@ -40,6 +39,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import { Image } from 'expo-image'
 import * as Clipboard from 'expo-clipboard'
 import * as DocumentPicker from 'expo-document-picker'
 import { File, Paths } from 'expo-file-system'
@@ -1254,7 +1254,7 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
       style={[styles.tile, { borderColor: c.border, backgroundColor: c.fill }]}
     >
       {preview ? (
-        <Image source={{ uri: preview }} style={styles.preview} resizeMode="cover" />
+        <Image source={{ uri: preview }} style={styles.preview} contentFit="cover" cachePolicy="memory" />
       ) : textThumb ? (
         <View style={styles.file}>
           <Text style={[styles.textLines, { color: c.textSecondary }]} numberOfLines={3}>
@@ -1342,7 +1342,12 @@ function TileSheet(props: {
           accessibilityRole="imagebutton"
           accessibilityLabel={`查看 ${item?.source.name ?? ''}`}
         >
-          <Image source={{ uri: image }} style={styles.sheetImage} resizeMode="contain" />
+          <Image
+            source={{ uri: image }}
+            style={styles.sheetImage}
+            contentFit="contain"
+            cachePolicy="memory"
+          />
         </Pressable>
       ) : pastedText || textThumb ? (
         <View style={[styles.sheetText, { backgroundColor: c.fill }]}>

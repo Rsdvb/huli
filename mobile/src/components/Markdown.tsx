@@ -6,7 +6,6 @@
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -15,6 +14,7 @@ import {
   View,
   type TextStyle,
 } from 'react-native'
+import { Image } from 'expo-image'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { copyText } from '../ui/session/feedback'
 import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
@@ -452,9 +452,11 @@ function Picture(props: { uri: string; alt: string }) {
       source={{ uri: props.uri }}
       accessibilityLabel={props.alt || '图片'}
       accessibilityIgnoresInvertColors
-      resizeMode="contain"
+      contentFit="contain"
+      cachePolicy="memory-disk"
+      transition={120}
       onLoad={(event) => {
-        const { width, height } = event.nativeEvent.source
+        const { width, height } = event.source
         if (width > 0 && height > 0) setRatio(width / height)
       }}
       style={{

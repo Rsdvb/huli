@@ -5,7 +5,8 @@
 // its edits, each opening to its diff.
 
 import { memo, useEffect, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { ShellBlock } from '../../components/entries/ShellBlock'
@@ -396,7 +397,8 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
               key={i}
               source={{ uri: `data:${ref.mimeType};base64,${ref.data}` }}
               style={[styles.picture, { borderColor: s.codeBorder }]}
-              resizeMode="contain"
+              contentFit="contain"
+              cachePolicy="memory"
               accessibilityIgnoresInvertColors
             />
           )

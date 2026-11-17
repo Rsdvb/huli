@@ -1,7 +1,8 @@
 // An artifact in the grid: its title, the agent that made it, its kind and age, over a preview the
 // computer captured, or a sketch of its kind while there is none.
 
-import { Image, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
+import { Image } from 'expo-image'
 import type { ArtifactSummary } from '@shared/artifacts'
 import { age, artifactKind, KIND_TEXT, useThumbnail, type ArtifactKind } from '../artifacts'
 import { useAgent, useMaybeLink, useSession } from '../host'
@@ -94,7 +95,10 @@ export function ArtifactPreview(props: { artifact: ArtifactSummary; inset?: numb
           <Image
             source={{ uri: thumbnail.uri }}
             style={StyleSheet.absoluteFill}
-            resizeMode="cover"
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={props.artifact.id}
+            transition={150}
             accessibilityIgnoresInvertColors
           />
         ) : thumbnail.state === 'loading' ? (
