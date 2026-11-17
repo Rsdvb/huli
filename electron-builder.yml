@@ -1,5 +1,7 @@
+# Huli: the app is named Kite, but keeps Huli's appId (so installs update in place, and Windows
+# keeps its taskbar pins and notifications) and its data folder (src/main/user-data.ts).
 appId: local.huli.app
-productName: Huli
+productName: Kite
 directories:
   buildResources: build
   output: dist
