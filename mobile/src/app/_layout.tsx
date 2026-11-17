@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
+import { LiveBridge } from '../live/bridge'
 import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
 import { ShareIntake } from '../share/intake'
@@ -45,6 +46,7 @@ export default function Layout() {
           </Stack>
         </ShellProvider>
         <PushBridge />
+        <LiveBridge />
         <ShareIntake />
         <LockLayer />
       </HostProvider>

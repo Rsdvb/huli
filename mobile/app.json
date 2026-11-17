@@ -54,6 +54,7 @@
       ],
       ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
       "./plugins/withNotificationService",
+      "./plugins/withWidgets",
       "./plugins/withShareExtension",
       [
         "expo-share-intent",

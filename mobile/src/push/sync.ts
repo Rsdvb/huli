@@ -12,6 +12,7 @@ import {
   type NotificationsState,
 } from '@shared/remote/push'
 import { decodeRelayBytes, relayHostId } from '@shared/remote/relay'
+import { liveActivityTokens } from '../live/activities'
 import { getPrefs } from '../prefs'
 import { loadDeviceKey } from '../store'
 import { platform } from './platform'
@@ -106,8 +107,14 @@ async function syncOnce(link: HostLink): Promise<void> {
   }
   const target = await platform.target()
   if (!target) return setStatus('unsupported')
+  const activity = await liveActivityTokens(current.host).catch(() => undefined)
+  if (activity) target.activity = activity
   const text = JSON.stringify(target)
-  if (!current.target.apns || sent.get(link) !== text) {
+  // The computer drops a Live Activity token Apple no longer takes, or one whose activity it ended.
+  const activityChanged =
+    Boolean(current.target.activityStart) !== Boolean(activity?.start) ||
+    Boolean(current.target.activityUpdate) !== Boolean(activity?.update)
+  if (!current.target.apns || activityChanged || sent.get(link) !== text) {
     await link.request(NOTIFICATIONS_SET, { target })
     sent.set(link, text)
   }
