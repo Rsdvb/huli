@@ -5709,6 +5709,15 @@ li[data-row-exit='dust'] > * {
   text-overflow: ellipsis;
   color: var(--composer-faint);
 }
+/* Narrow, the project gives its fixed 96px to the title, which it squeezed to two letters. */
+.kettu-pickup {
+  container: kettu-pickup / inline-size;
+}
+@container kettu-pickup (inline-size < 400px) {
+  .kettu-pickup__project {
+    display: none;
+  }
+}
 /* The project menu's folder marks take the line icons' 15px, so every name starts in one place. */
 .kettu-menu-mark {
   display: inline-grid;
