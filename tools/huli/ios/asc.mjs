@@ -13,10 +13,11 @@ const body = b64({ iss: ISSUER, iat: now, exp: now + 600, aud: 'appstoreconnect-
 const sig = sign('sha256', Buffer.from(`${head}.${body}`), { key, dsaEncoding: 'ieee-p1363' })
 const jwt = `${head}.${body}.${sig.toString('base64url')}`
 
-const [method, path] = process.argv.slice(2)
+const [method, path, bodyFile] = process.argv.slice(2)
 const res = await fetch(`https://api.appstoreconnect.apple.com${path}`, {
   method,
-  headers: { authorization: `Bearer ${jwt}` },
+  headers: { authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+  body: bodyFile ? readFileSync(bodyFile, 'utf8') : undefined,
 })
 const text = await res.text()
 console.log(res.status)

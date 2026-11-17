@@ -37,7 +37,6 @@ cat > "$OUT/ExportOptions.plist" <<EOF
   <key>signingStyle</key><string>manual</string>
   <key>signingCertificate</key><string>Apple Distribution</string>
   <key>provisioningProfiles</key><dict>$PROFILES</dict>
-  <key>testFlightInternalTestingOnly</key><true/>
 </dict>
 </plist>
 EOF
