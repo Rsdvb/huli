@@ -16,11 +16,13 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Stack, useLocalSearchParams } from 'expo-router'
+import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
-import { ChangesButton } from '../../components/ChangesButton'
 import { EntryView } from '../../components/EntryView'
 import { PermissionCard } from '../../components/PermissionCard'
+import { useSessionActions } from '../../components/SessionActions'
+import { SessionDock } from '../../components/SessionDock'
+import { SessionHeaderButtons } from '../../components/SessionHeaderButtons'
 import { useHost, useLink } from '../../host'
 import { folder } from '../../sessions'
 import { useThread } from '../../thread'
@@ -37,6 +39,7 @@ export default function SessionScreen() {
   const host = useHost()
   const link = useLink()
   const view = useThread(link, id, host.state)
+  const actions = useSessionActions('session', () => router.back())
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const summary = host.sessions.get(id)
@@ -100,14 +103,13 @@ export default function SessionScreen() {
             </View>
           ),
           headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-              <ChangesButton sessionId={id} theme={theme} />
-              {running ? (
-                <Pressable onPress={stop} hitSlop={8}>
-                  <Text style={{ color: theme.danger, fontSize: 16, fontWeight: '600' }}>停止</Text>
-                </Pressable>
-              ) : null}
-            </View>
+            <SessionHeaderButtons
+              sessionId={id}
+              running={running}
+              onStop={stop}
+              onMenu={summary ? () => actions.open(summary) : undefined}
+            />
+
           ),
         }}
       />
@@ -139,6 +141,8 @@ export default function SessionScreen() {
           ))}
         </ScrollView>
       )}
+      <SessionDock sessionId={id} session={session} />
+      {actions.element}
 
       <View style={[styles.composer, { borderTopColor: theme.line, paddingBottom: Math.max(insets.bottom, 8) }]}>
         <TextInput

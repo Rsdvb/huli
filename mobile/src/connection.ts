@@ -48,6 +48,40 @@ function rank(address: DirectAddress): number {
   return address.host.includes(':') ? 3 : 2
 }
 
+export type RouteKind = 'tailscale' | 'lan' | 'other'
+
+export function routeKind(address: DirectAddress): RouteKind {
+  const r = rank(address)
+  return r === 0 ? 'tailscale' : r === 1 ? 'lan' : 'other'
+}
+
+// HostLink does not say which route it is on, so each open socket notes when it last heard the
+// computer; the link's own connection is the one heard from most recently.
+const heard = new Map<Transport, { address: DirectAddress; at: number }>()
+
+function tracked(address: DirectAddress, transport: Transport): Transport {
+  const entry = { address, at: 0 }
+  heard.set(transport, entry)
+  transport.onClose(() => heard.delete(transport))
+  return {
+    ...transport,
+    onMessage: (listener) =>
+      transport.onMessage((message) => {
+        entry.at = Date.now()
+        listener(message)
+      }),
+  }
+}
+
+/** The address the computer was last heard on, among the connections still open. */
+export function currentAddress(): DirectAddress | null {
+  let best: { address: DirectAddress; at: number } | null = null
+  for (const entry of heard.values()) {
+    if (entry.at > 0 && (!best || entry.at > best.at)) best = entry
+  }
+  return best?.address ?? null
+}
+
 /** The addresses to try, Tailscale's first, without the IPv6 ones a WebSocket URL cannot name. */
 export function usableAddresses(addresses: DirectAddress[]): DirectAddress[] {
   return addresses.filter((a) => !a.host.includes('%')).sort((a, b) => rank(a) - rank(b))
@@ -65,7 +99,9 @@ function openSocket(address: DirectAddress, timeoutMs = 8000): Promise<Transport
     Object.defineProperty(socket, 'bufferedAmount', { value: 0 })
   }
   const timer = setTimeout(() => socket.close(), timeoutMs)
-  return webSocketTransport(socket).finally(() => clearTimeout(timer))
+  return webSocketTransport(socket)
+    .then((transport) => tracked(address, transport))
+    .finally(() => clearTimeout(timer))
 }
 
 /** The first address that opens; the others are closed. */
