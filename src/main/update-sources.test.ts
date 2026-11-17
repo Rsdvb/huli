@@ -35,10 +35,7 @@ function signatureFile(file: Buffer, key: KeyObject, name = NAME): Buffer {
 
 const LIST = {
   serial: 3,
-  sources: [
-    { id: 'kettu', url: 'https://download.kettu.sh' },
-    { id: 'github', url: 'https://github.com/KettuAI/Kettu/releases' },
-  ],
+  sources: [{ id: 'kettu', url: 'https://download.kettu.sh' }, { ...GITHUB_SOURCE }],
   connectTimeoutSeconds: 10,
   stallSeconds: 15,
 }
@@ -104,10 +101,13 @@ describe('update file signatures', () => {
     }
   })
 
-  it('builds in a current and a next key for releases and for the list, all different', () => {
+  // Huli signs its update files and its source list with the same pair of keys, so only a current
+  // and a next key that differ are asked of each.
+  it('builds in a current and a next key for releases and for the list, each pair different', () => {
     expect(RELEASE_KEYS).toHaveLength(2)
     expect(SOURCES_KEYS).toHaveLength(2)
-    expect(new Set([...RELEASE_KEYS, ...SOURCES_KEYS]).size).toBe(4)
+    expect(new Set(RELEASE_KEYS).size).toBe(2)
+    expect(new Set(SOURCES_KEYS).size).toBe(2)
     for (const key of [...RELEASE_KEYS, ...SOURCES_KEYS]) {
       expect(Buffer.from(key, 'base64')).toHaveLength(32)
     }
@@ -164,7 +164,7 @@ describe('the source list', () => {
     const first = read({
       ...LIST,
       sources: [
-        { id: 'gh', url: 'https://github.com/KettuAI/Kettu/releases' },
+        { id: 'gh', url: GITHUB_SOURCE.url },
         { id: 'kettu', url: 'https://download.kettu.sh' },
         { id: 'vps', url: 'https://mirror.example.com/kettu' },
       ],

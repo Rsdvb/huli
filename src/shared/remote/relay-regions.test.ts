@@ -15,7 +15,7 @@ import {
   type ListedRegion,
   type RegionList,
 } from './relay-regions'
-import { decodeRelayBytes } from './relay'
+import { decodeRelayBytes, RELAY_URL } from './relay'
 import { RelayStats, localDay, reportBody } from './relay-report'
 
 const { regions: v } = vectors
@@ -80,11 +80,7 @@ describe('the signed region list', () => {
       t1: v.key.publicKey,
     })
     expect(regionKeys(local, undefined)).toEqual(REGION_KEYS)
-    for (const main of [
-      'https://relay.kettu.sh',
-      'https://relay.kettu.sh/',
-      'https://relay.kettu.sh.',
-    ]) {
+    for (const main of [RELAY_URL, `${RELAY_URL}/`, `${RELAY_URL}.`]) {
       expect(regionKeys(main, `r1=${v.key.publicKey}`)).toEqual(REGION_KEYS)
     }
   })

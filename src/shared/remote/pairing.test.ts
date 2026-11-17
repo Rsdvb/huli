@@ -3,10 +3,12 @@ import {
   browserPairingLink,
   decodePairing,
   encodePairing,
+  HOSTED_WEB_URL,
   hostedPairingLink,
   MAX_PAIRING_ADDRESSES,
   pairingLink,
   parseBrowserPairingLink,
+  PAIRING_URL,
   parsePairingLink,
   DIRECT_PAIRING_VERSION,
   PAIRING_VERSION,
@@ -27,7 +29,7 @@ const payload: PairingPayload = {
 describe('pairing codes', () => {
   it('carry the version, key, secret and addresses in the fragment, in base64url', () => {
     const link = pairingLink(payload)
-    expect(link.startsWith('https://kettu.sh/pair#')).toBe(true)
+    expect(link.startsWith(`${PAIRING_URL}#`)).toBe(true)
     const fragment = link.slice(link.indexOf('#') + 1)
     expect(fragment).toMatch(/^[A-Za-z0-9_-]+$/)
     expect(parsePairingLink(link)).toEqual(payload)
@@ -156,7 +158,7 @@ describe('browser pairing links', () => {
       relay: { id: 'aeiscmkbkfqxdamrugy4dupb6e', urls: ['https://relay.kettu.sh'] },
     }
     const link = hostedPairingLink(relayed)!
-    expect(link.startsWith('https://app.kettu.sh/pair#')).toBe(true)
+    expect(link.startsWith(`${HOSTED_WEB_URL}/pair#`)).toBe(true)
     expect(parseBrowserPairingLink(link)).toEqual(relayed)
   })
 
