@@ -111,6 +111,7 @@ import type {
   TaskView,
 } from './workflow'
 import type { ClockRequest, UsageScope, UsageStatus, UsageSummary, UsageTotal } from './usage'
+import type { TurnWork } from './turn-phase'
 import type {
   AgentId,
   HarnessId,
@@ -627,6 +628,9 @@ export interface SessionSummary {
   plan?: PlanProgress | null
   // When its running turn started; null between turns; absent from older hosts
   turnStartedAt?: number | null
+  // What its running turn does now, as the desktop's working row says it, with the latest running
+  // tool call's title; null between turns; absent from older hosts
+  working?: TurnWork | null
 }
 
 /**

@@ -18,6 +18,7 @@ import type {
   RelayInit,
   RemoteHostStatus,
   RemoteHostToMain,
+  SessionProgress,
   TerminalHostToMain,
 } from '@shared/host-control'
 import { BROWSER_UNAVAILABLE } from '@shared/browser'
@@ -184,6 +185,8 @@ export class Hosts {
   private readonly attentionListeners = new Set<(message: Attention) => void>()
   /** What waits for the user by session, which each remote host process starts with. */
   private waiting: Record<string, string[]> = {}
+  /** The sessions at work, which each remote host process starts with too. */
+  private progress: Record<string, SessionProgress> = {}
   private readonly askers = new Map<number, (pairing: PairingState) => void>()
   private nextCode = 1
   private readonly reportRequests = new Map<number, (result: ReportBuildResult) => void>()
@@ -333,6 +336,7 @@ export class Hosts {
         relay: this.initRelay(),
         push: options.pushUrl,
         waiting: this.waiting,
+        progress: this.progress,
       }),
       shutdownMessage: { type: 'remote-host:shutdown', reason: 'stopping' },
       readyType: 'remote-host:ready',
@@ -1026,6 +1030,12 @@ export class Hosts {
         if (typeof message.sessions === 'object' && message.sessions !== null) {
           this.waiting = message.sessions
           this.remote.post({ type: 'remote-host:waiting', sessions: message.sessions })
+        }
+        break
+      case 'host:progress':
+        if (typeof message.sessions === 'object' && message.sessions !== null) {
+          this.progress = message.sessions
+          this.remote.post({ type: 'remote-host:progress', sessions: message.sessions })
         }
         break
       case 'host:seen':

@@ -23,6 +23,7 @@ import type { DirectAddress } from './remote/protocol'
 import type { ReportBuildResult, ReportRequest } from './report'
 import type { TerminalCall, TerminalCallAnswer } from './terminal-agent'
 import type { RelayStatus } from './remote/relay-host'
+import type { ProgressPhase } from './remote/push'
 import type { DirectSettings, HostSettings, SettingsFile, TerminalSettings } from './settings'
 import type { AgentId, HarnessId } from './thread'
 
@@ -268,6 +269,26 @@ export interface AttentionFront {
   devices: string[]
 }
 
+export type { ProgressPhase }
+
+/** A top-level session's turn, as the devices' Live Activities follow it. */
+export interface SessionProgress {
+  title: string | null
+  agent: string | null
+  phase: ProgressPhase
+  /** The running tool call's title, such as its command, or what waits: a question or a tool. */
+  step: string | null
+  /** Its latest plan's progress, and the step in progress. */
+  plan: { done: number; total: number; current: string | null } | null
+  /** When the turn started and, once it ended, when; in ms since the epoch. */
+  startedAt: number | null
+  endedAt: number | null
+  /** Its subagents at work. */
+  subagents: number
+  /** Requests in it that wait for the user. */
+  waiting: number
+}
+
 export type HostToMain =
   // Keep (or, with null, clear) a server's OAuth sign-in after the host connected, renewed or
   // disconnected it; main stores the text as it stores keys and pushes host:market-keys again.
@@ -305,6 +326,9 @@ export type HostToMain =
   | { type: 'host:badge'; count: number } // pending permission requests across sessions
   // What waits for the user, by session: the ids of the requests, new sites, apps and setups.
   | { type: 'host:waiting'; sessions: Record<string, string[]> }
+  // The top-level sessions at work, and those whose turn just ended, for the devices' Live
+  // Activities; sent on change, at most about once a second.
+  | { type: 'host:progress'; sessions: Record<string, SessionProgress> }
   // A window or device showed the session, or it was marked read: its turn was seen.
   | { type: 'host:seen'; sessionId: string }
   | ({ type: 'host:busy-changed' } & BusyCounts) // for the tray's state line
@@ -476,6 +500,8 @@ export type MainToRemoteHost =
       /** What waits for the user and whether they are at the computer, as last told. */
       waiting?: Record<string, string[]>
       present?: boolean
+      /** The sessions at work, as `remote-host:progress` last told them. */
+      progress?: Record<string, SessionProgress>
       /**
        * Devices of the same Kettu account find this host on the relay and ask to be added;
        * `remote-host:discoverable` says when it changes. Absent, as under the daemon, they do not.
@@ -581,6 +607,7 @@ export type MainToRemoteHost =
   // notifications.
   | { type: 'remote-host:attention'; attention: Extract<HostToMain, { type: 'host:attention' }> }
   | { type: 'remote-host:waiting'; sessions: Record<string, string[]> }
+  | { type: 'remote-host:progress'; sessions: Record<string, SessionProgress> }
   | { type: 'remote-host:seen'; sessionId: string }
   // The desktop app's user is at the computer: its screen unlocked and input in the last two
   // minutes. The daemon sends none, since it cannot tell.

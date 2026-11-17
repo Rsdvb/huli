@@ -33,6 +33,7 @@ import { PROMPT_BYTES, promptShare } from '@shared/attachments'
 import { CONTEXT_REFRESH_MS } from '@shared/context'
 import { firstLine, outlineText } from '@shared/outline'
 import { longEnough, queryWords } from '@shared/search-fold'
+import { turnWork, type TurnWork } from '@shared/turn-phase'
 import { originLabel, type BrowserOriginAnswer, type BrowserOriginDecision } from '@shared/browser'
 import type { ControlOutcome, ControlStep, ControlSurface } from '@shared/control'
 import type {
@@ -47,6 +48,8 @@ import type {
   BackgroundWork,
   BusyCounts,
   BusySession,
+  ProgressPhase,
+  SessionProgress,
 } from '@shared/host-control'
 import type { Platform } from '@shared/platform'
 import type { PortDevice } from '@shared/remote/device'
@@ -377,6 +380,8 @@ export interface SessionEvents {
   /** The session was shown or marked read, so its turn was seen. */
   seen(sessionId: string): void
   busy(counts: BusyCounts): void
+  /** The top-level sessions at work and the ones whose turn just ended, each change of them. */
+  progress?(sessions: Record<string, SessionProgress>): void
   /** A turn of a session the user started themselves ended normally. */
   completed(sessionId: string): void
 }
@@ -845,6 +850,56 @@ function planProgress({ order, byId }: ThreadState): PlanProgress | null {
   return null
 }
 
+/** The longest step title a summary carries. */
+const MAX_STEP = 200
+/** How long a change of what a turn does waits to reach the summary, so a burst sends one. */
+const WORK_MS = 500
+
+/** What the session's running turn does now; null between turns. */
+function workOf(live: Live): TurnWork | null {
+  const { status } = live.thread.session
+  if (status !== 'running' && status !== 'awaiting_permission') return null
+  const work = turnWork(live.thread)
+  return work.step === null ? work : { ...work, step: firstLine(work.step).slice(0, MAX_STEP) }
+}
+
+const workKey = (work: TurnWork | null | undefined): string =>
+  work ? `${work.phase}:${work.count}:${work.step ?? ''}` : ''
+
+/** How often at most the sessions at work reach the devices' Live Activities. */
+const PROGRESS_MS = 1000
+const MAX_PROGRESS_TEXT = 200
+
+const PROGRESS_PHASES: Record<TurnWork['phase'], ProgressPhase> = {
+  thinking: 'thinking',
+  execute: 'command',
+  read: 'read',
+  search: 'search',
+  fetch: 'search',
+  edit: 'edit',
+  writing: 'writing',
+  compacting: 'running',
+  approval: 'approval',
+  working: 'running',
+}
+
+function progressText(text: string | null | undefined): string | null {
+  const line = text ? firstLine(text).trim() : ''
+  return line ? line.slice(0, MAX_PROGRESS_TEXT) : null
+}
+
+/** What waits first in the session, as its Live Activity says it: a question, or what to allow. */
+function waitingProgress(live: Live): { phase: ProgressPhase; step: string | null } {
+  const entry = waitingEntries(live)[0]
+  if (entry?.kind !== 'tool' || !entry.permission) return { phase: 'approval', step: null }
+  const { permission } = entry
+  if (permission.plan) return { phase: 'approval', step: null }
+  const question =
+    entry.question ?? permission.questions?.[0]?.question ?? permission.elicitation?.message
+  if (question) return { phase: 'question', step: progressText(question) }
+  return { phase: 'approval', step: progressText(entry.title) }
+}
+
 /** Whether a patch can change the latest plan, which the session's summary carries. */
 function changesPlan(thread: ThreadState, patch: Patch): boolean {
   if (patch.op === 'entry.add') return patch.entry.kind === 'plan'
@@ -1102,6 +1157,13 @@ export class SessionManager {
     { naming: BranchNaming; values: { type?: string; issue?: string } }
   >()
   private readonly lastSummaries = new Map<string, string>()
+  /** What each session's summary last said its turn does, and the summary that will say it anew. */
+  private readonly workKeys = new Map<string, string>()
+  private readonly workTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** The sessions at work as last sent, and the send that waits to follow a change. */
+  private progressSent: Record<string, SessionProgress> = {}
+  private progressJson = '{}'
+  private progressTimer: ReturnType<typeof setTimeout> | null = null
   /** `/context` reports running, by session id. */
   private readonly contextRuns = new Map<string, Promise<ContextBreakdown | null>>()
   /** The side question each session is answering, stopped through its controller. */
@@ -1374,6 +1436,7 @@ export class SessionManager {
       acpSessionId: record.acpSessionId || null,
       plan: live ? planProgress(live.thread) : null,
       turnStartedAt: live?.thread.session.turnStartedAt ?? null,
+      working: live ? workOf(live) : null,
       ...(record.worktree ? { worktree: this.worktreeSummary(record.worktree) } : {}),
       ...(record.agentWorktree ? { agentWorktree: { ...record.agentWorktree } } : {}),
       ...(live?.prepared
@@ -1459,14 +1522,21 @@ export class SessionManager {
 
   /** Sends the summary to every port if it changed, after the session's pending patches. */
   private touch(sessionId: string): void {
-    if (!this.has(sessionId)) return
+    if (!this.has(sessionId)) {
+      this.workKeys.delete(sessionId)
+      return
+    }
     const summary = this.summary(sessionId)
+    const key = workKey(summary.working)
+    if (key) this.workKeys.set(sessionId, key)
+    else this.workKeys.delete(sessionId)
     const json = JSON.stringify(summary)
     if (this.lastSummaries.get(sessionId) === json) return
     const live = this.live.get(sessionId)
     if (live) this.flushPatches(live)
     this.lastSummaries.set(sessionId, json)
     this.updateBusy()
+    this.progressChanged()
     if (live?.prepared) this.deps.events.summary(summary, [live.prepared.portId])
     else this.deps.events.summary(summary)
   }
@@ -1504,6 +1574,87 @@ export class SessionManager {
     this.deps.events.busy(this.busyCounts)
   }
 
+  /** The sessions at work reach the devices' Live Activities a moment after a change. */
+  private progressChanged(): void {
+    if (this.progressTimer || !this.deps.events.progress) return
+    this.progressTimer = setTimeout(() => {
+      this.progressTimer = null
+      this.sendProgress()
+    }, PROGRESS_MS)
+    this.progressTimer.unref?.()
+  }
+
+  private sendProgress(): void {
+    const subagents = new Map<string, number>()
+    for (const live of this.live.values()) {
+      const parent = live.record.parentId
+      if (parent !== null && live.childRunning) {
+        subagents.set(parent, (subagents.get(parent) ?? 0) + 1)
+      }
+    }
+    const progress: Record<string, SessionProgress> = {}
+    for (const live of this.live.values()) {
+      const entry = this.progressOf(live, subagents.get(live.id) ?? 0)
+      if (entry) progress[live.id] = entry
+    }
+    // A turn that ended since the last is there once more, with how it ended.
+    for (const [id, before] of Object.entries(this.progressSent)) {
+      if (progress[id] || before.endedAt !== null) continue
+      const live = this.live.get(id)
+      const session = live?.thread.session
+      const failed =
+        session !== undefined &&
+        (session.status === 'failed' || (Boolean(session.error) && !live?.errorSeen))
+      progress[id] = {
+        ...before,
+        phase: failed ? 'error' : 'done',
+        step: null,
+        endedAt: this.now(),
+        subagents: 0,
+        waiting: 0,
+      }
+    }
+    const json = JSON.stringify(progress)
+    if (json === this.progressJson) return
+    this.progressJson = json
+    this.progressSent = progress
+    this.deps.events.progress?.(progress)
+  }
+
+  /** A top-level session's turn while it runs, starts or waits for the user; else null. */
+  private progressOf(live: Live, subagents: number): SessionProgress | null {
+    const { record } = live
+    if (record.parentId !== null || record.archivedAt || live.prepared) return null
+    const session = live.thread.session
+    const waiting = waitingCount(live)
+    const running = session.status === 'running' || session.status === 'awaiting_permission'
+    // A session that starts only to be read is no turn; one with its first message to send is.
+    const starting = session.status === 'starting' && live.first !== null
+    if (!running && !starting && waiting === 0) return null
+    let phase: ProgressPhase = 'starting'
+    let step: string | null = null
+    if (waiting > 0) ({ phase, step } = waitingProgress(live))
+    else if (running) {
+      const work = turnWork(live.thread)
+      phase = PROGRESS_PHASES[work.phase]
+      step = progressText(work.step)
+    }
+    const plan = planProgress(live.thread)
+    return {
+      title: progressText(record.customTitle ?? session.title ?? record.title),
+      agent: this.deps.agents.name(record.agentId) || null,
+      phase,
+      step,
+      plan: plan
+        ? { done: plan.done, total: plan.total, current: progressText(plan.current?.text) }
+        : null,
+      startedAt: session.turnStartedAt ?? null,
+      endedAt: null,
+      subagents,
+      waiting,
+    }
+  }
+
   private emit(live: Live, patches: readonly Patch[]): void {
     let plan = false
     for (const patch of patches) {
@@ -1525,6 +1676,19 @@ export class SessionManager {
     this.scheduleCheckpoint(live)
     // A replay ends with a summary of its own, which carries the plan it brought back.
     if (plan && !live.replaying) this.touch(live.id)
+    if (!live.replaying) this.watchWork(live)
+  }
+
+  /** A change of what the running turn does reaches the summary, at most every `WORK_MS`. */
+  private watchWork(live: Live): void {
+    if (this.workTimers.has(live.id)) return
+    if (workKey(workOf(live)) === (this.workKeys.get(live.id) ?? '')) return
+    const timer = setTimeout(() => {
+      this.workTimers.delete(live.id)
+      this.touch(live.id)
+    }, WORK_MS)
+    timer.unref?.()
+    this.workTimers.set(live.id, timer)
   }
 
   /** Applies one patch and queues it to send; false for one the thread could not take. */

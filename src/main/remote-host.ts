@@ -12,6 +12,7 @@ import type {
   RemoteHostStatus,
   RemoteHostStopReason,
   RemoteHostToMain,
+  SessionProgress,
 } from '@shared/host-control'
 import type { BrowserForward } from '@shared/browser'
 import type { DeviceActivity } from '@shared/remote/activity'
@@ -200,6 +201,7 @@ export class RemoteHost {
   private paired: PairedDevice[] = []
   /** What waits for the user and whether they are at the computer, for each process to start with. */
   private waiting: Record<string, string[]> = {}
+  private progress: Record<string, SessionProgress> = {}
   private present: boolean | null = null
 
   constructor(private readonly deps: RemoteHostDeps) {}
@@ -413,6 +415,12 @@ export class RemoteHost {
   setWaiting(sessions: Record<string, string[]>): void {
     this.waiting = sessions
     this.host?.post({ type: 'remote-host:waiting', sessions })
+  }
+
+  /** The sessions at work now, which the devices' Live Activities follow. */
+  setProgress(sessions: Record<string, SessionProgress>): void {
+    this.progress = sessions
+    this.host?.post({ type: 'remote-host:progress', sessions })
   }
 
   /** A session was seen, which withdraws its turn's notifications. */
@@ -763,6 +771,7 @@ export class RemoteHost {
       relay: this.initRelay(identity !== null),
       push: this.deps.pushUrl,
       waiting: this.waiting,
+      progress: this.progress,
       ...(this.present === null ? {} : { present: this.present }),
       discoverable: this.initDiscoverable(),
       ...(this.device

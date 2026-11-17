@@ -1046,6 +1046,7 @@ export class AgentHost {
           }),
         badge: (count) => options.send({ type: 'host:badge', count }),
         waiting: (sessions) => options.send({ type: 'host:waiting', sessions }),
+        progress: (sessions) => options.send({ type: 'host:progress', sessions }),
         seen: (sessionId) => options.send({ type: 'host:seen', sessionId }),
         busy: (counts) => options.send({ type: 'host:busy-changed', ...counts }),
         completed: () => void this.star.turnCompleted(),

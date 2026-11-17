@@ -435,6 +435,7 @@ async function start(): Promise<void> {
       remoteHost.attention(message)
     },
     onWaiting: (sessions) => remoteHost.setWaiting(sessions),
+    onProgress: (sessions) => remoteHost.setProgress(sessions),
     onSeen: (sessionId) => remoteHost.seen(sessionId),
     onBadge: (count) => setBadgeCount(count),
     onBusy: (counts) => tray.setBusy(counts),
