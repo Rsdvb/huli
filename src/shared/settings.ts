@@ -242,7 +242,8 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     name: null,
     direct: { enabled: true, port: null, addresses: [] },
     terminal: false,
-    relay: false,
+    // Huli Cloud's own relay, used only while Huli Cloud is on and signed in.
+    relay: true,
     discoverable: false,
   },
   computerUse: { enabled: false, allowedApps: [], pauseOnUse: true, stopShortcut: '' },
