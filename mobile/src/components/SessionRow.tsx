@@ -2,7 +2,8 @@
 // and when it last changed. Swipes and long-press come from the list that holds it.
 
 import { memo, useEffect, useState } from 'react'
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { router } from 'expo-router'
 import Reanimated, { FadeInDown } from 'react-native-reanimated'
 import Svg, { Circle } from 'react-native-svg'
 import { Bot } from 'lucide-react-native'
@@ -14,6 +15,7 @@ import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
 import { Skeleton } from '../ui/Skeleton'
 import {
+  motion,
   radius,
   size as sizes,
   space,
@@ -146,6 +148,28 @@ function SubagentBadge(props: { subagents: SubagentCount }) {
   )
 }
 
+/** A small chip naming the task a step's session works for; it opens the task. */
+function TaskChip(props: { id: string; title: string }) {
+  const { c } = useTokens()
+  return (
+    <Pressable
+      onPress={() => router.push(`/task/${props.id}`)}
+      hitSlop={6}
+      accessibilityRole="link"
+      accessibilityLabel={`需求：${props.title}，点按打开`}
+      style={({ pressed }) => [
+        styles.taskChip,
+        { backgroundColor: c.tintSoft, opacity: pressed ? motion.pressOpacity : 1 },
+      ]}
+    >
+      <Icon name="flow" size={11} color={c.tint} />
+      <Text style={[typeScale.caption, styles.shrink, { color: c.tint }]} numberOfLines={1}>
+        {props.title}
+      </Text>
+    </Pressable>
+  )
+}
+
 export const SessionRow = memo(function SessionRow(props: {
   session: SessionSummary
   /** Its sub-agents, counted by `subagentCounts`. */
@@ -155,6 +179,8 @@ export const SessionRow = memo(function SessionRow(props: {
   projectName: string | undefined
   /** A search hit's text, shown under the title. */
   snippet?: string
+  /** The task a workflow step's session works for: its title on a chip that opens it. */
+  task?: { id: string; title: string }
   /** What the time column shows; the last change by default. */
   time?: number
   start?: SwipeAction
@@ -216,13 +242,19 @@ export const SessionRow = memo(function SessionRow(props: {
           </Text>
         ) : null}
         <View style={styles.meta}>
-          <Icon name="folder" size={13} color={c.textTertiary} />
-          <Text
-            style={[typeScale.footnote, styles.place, { color: c.textTertiary }]}
-            numberOfLines={1}
-          >
-            {place}
-          </Text>
+          {props.task ? (
+            <TaskChip id={props.task.id} title={props.task.title} />
+          ) : (
+            <>
+              <Icon name="folder" size={13} color={c.textTertiary} />
+              <Text
+                style={[typeScale.footnote, styles.place, { color: c.textTertiary }]}
+                numberOfLines={1}
+              >
+                {place}
+              </Text>
+            </>
+          )}
           {stateText && (
             <Text
               style={[
@@ -325,5 +357,15 @@ const styles = StyleSheet.create({
   subagentSpin: { transform: [{ scale: 0.55 }], width: 12, height: 12, marginLeft: -1 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
   place: { flexShrink: 1, maxWidth: '55%' },
+  shrink: { flexShrink: 1 },
+  taskChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    maxWidth: '60%',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.pill,
+  },
   plan: { flexShrink: 1 },
 })
