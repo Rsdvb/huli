@@ -1,20 +1,17 @@
-// Where a notification leads: what the extension (or this app, for its own notices) left in its
-// data, and the screen that shows it. A notification opened before the paired computer is loaded,
-// as one that launched the app, waits here until the bridge says the screens are ready; the app
-// lock's cover stays over whatever it opens until the user unlocks.
+// What a notification is about: what the extension (or this app, for its own notices) left in its
+// data, and the deep link that opens it on the computer that sent it (src/links.ts switches to
+// that computer first, waits for Face ID and then navigates).
 
-import { router, type Href } from 'expo-router'
 import type { PushActions, PushQuestion } from '@shared/remote/push'
+import { openLink, type LinkTarget } from '../links'
 
 /** A notification's data, as the Notification Service Extension writes it. */
 export interface NotificationData {
-  /** The host's id. */
+  /** The sending computer's notification id (its relay host id). */
   host: string | null
   kind: string | null
   tag: string | null
   sessionId: string | null
-  /** An entry of the session to show, when the notification names one. */
-  entryId: string | null
   requestId: string | null
   actions: PushActions | null
   question: PushQuestion | null
@@ -57,43 +54,19 @@ export function notificationData(raw: unknown): NotificationData | null {
     kind,
     tag: text(data.tag),
     sessionId: text(data.sessionId),
-    entryId: text(data.entryId),
     requestId: text(data.requestId),
     actions: actionsOf(data.actions),
     question: questionOf(data.question),
   }
 }
 
-/** The screen a notification opens; null leaves the app where it is. */
-export function routeOf(data: NotificationData): Href | null {
-  if (data.sessionId) {
-    return {
-      pathname: '/session/[id]',
-      params: data.entryId ? { id: data.sessionId, entry: data.entryId } : { id: data.sessionId },
-    }
-  }
-  if (data.kind === 'routine-paused') return '/routines'
+function targetOf(data: NotificationData): LinkTarget | null {
+  if (data.sessionId) return { kind: 'session', id: data.sessionId }
+  if (data.kind === 'routine-paused') return { kind: 'tab', tab: 'routines' }
   return null
 }
 
-let pending: NotificationData | null = null
-let ready = false
-
-function flush(): void {
-  if (!ready || !pending) return
-  const route = routeOf(pending)
-  pending = null
-  if (route) router.push(route)
-}
-
-/** Opens what the notification is about, now or once the screens are ready. */
+/** Opens what the notification is about, on the computer that sent it. */
 export function openNotification(data: NotificationData): void {
-  pending = data
-  flush()
-}
-
-/** Whether the paired computer's screens are there to open a notification on. */
-export function setOpenReady(value: boolean): void {
-  ready = value
-  flush()
+  openLink({ target: targetOf(data), host: data.host })
 }

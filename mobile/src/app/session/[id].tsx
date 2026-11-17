@@ -37,6 +37,7 @@ import { ContextSheet } from '../../components/ContextSheet'
 import { ThreadRow } from '../../components/EntryView'
 import { PermissionCard } from '../../components/PermissionCard'
 import { useSessionActions } from '../../components/SessionActions'
+import { useSessionPane } from '../../components/SessionPane'
 import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
 import { call } from '../../git'
 import { useHost, useLink } from '../../host'
@@ -120,7 +121,10 @@ function activity(rows: Row[], awaiting: boolean, root: string | null): string {
 }
 
 export default function SessionScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const params = useLocalSearchParams<{ id: string }>()
+  // On iPad the same screen shows as the pane beside the session list (SessionPane.tsx).
+  const pane = useSessionPane()
+  const id = pane?.id ?? params.id
   const { c } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const headerHeight = useHeaderHeight()
@@ -129,7 +133,7 @@ export default function SessionScreen() {
   const computer = useComputer()
   const view = useThread(link, id, host.state)
   const changes = useSessionChanges(id)
-  const actions = useSessionActions('session', () => router.back())
+  const actions = useSessionActions('session', () => (pane ? pane.close() : router.back()))
   const summary = host.sessions.get(id)
   const session = view.thread?.session
   const config = useSessionConfig(id, session)
@@ -263,7 +267,9 @@ export default function SessionScreen() {
                 })
                 .then((made) => {
                   haptic.success()
-                  router.push(`/session/${(made as SessionSummary).id}`)
+                  const madeId = (made as SessionSummary).id
+                  if (pane) pane.open(madeId)
+                  else router.push(`/session/${madeId}`)
                 })
                 .catch((error: unknown) => Alert.alert('没能分叉', errorText(error)))
             },
@@ -271,7 +277,7 @@ export default function SessionScreen() {
         ],
       )
     },
-    [forkAtMessage, link, id],
+    [forkAtMessage, link, id, pane],
   )
 
   const newChild = () => {
@@ -543,7 +549,7 @@ export default function SessionScreen() {
 
   return (
     <SessionRows.Provider value={context}>
-      <Stack.Screen options={{ headerShown: false }} />
+      {pane ? null : <Stack.Screen options={{ headerShown: false }} />}
       <KeyboardAvoidingView style={[styles.root, { backgroundColor: c.bg }]} behavior="padding">
         <View style={{ flex: 1 }}>
           {body}

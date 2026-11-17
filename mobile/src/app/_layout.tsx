@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
+import { LinkBridge } from '../links'
 import { LiveBridge } from '../live/bridge'
 import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
@@ -37,15 +38,19 @@ export default function Layout() {
             <Stack.Screen name="new" options={{ headerShown: false }} />
             <Stack.Screen name="share" options={{ headerShown: false, presentation: 'modal' }} />
             <Stack.Screen name="settings/index" options={{ headerShown: false }} />
+            <Stack.Screen name="settings/computers" options={{ headerShown: false }} />
             <Stack.Screen name="settings/computer" options={{ headerShown: false }} />
             <Stack.Screen name="settings/lock" options={{ headerShown: false }} />
             <Stack.Screen name="settings/licenses" options={{ headerShown: false }} />
             <Stack.Screen name="archived" options={{ headerShown: false }} />
             <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
             <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />
+            <Stack.Screen name="search" options={{ headerShown: false, animation: 'fade' }} />
+            <Stack.Screen name="pair" options={{ headerShown: false, presentation: 'modal' }} />
           </Stack>
         </ShellProvider>
         <PushBridge />
+        <LinkBridge />
         <LiveBridge />
         <ShareIntake />
         <LockLayer />

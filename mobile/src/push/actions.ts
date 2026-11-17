@@ -1,8 +1,10 @@
 // The buttons on Huli's notifications and what pressing one does. A waiting request offers 允许 and
 // 拒绝 when the computer sent its one-time answers, a question offers its choices and 回复…, and a
 // finished turn offers 回复… and 打开. The answering buttons run without bringing the app to the
-// front, after the phone is unlocked: the app connects to the computer, sends the answer, and
-// leaves a notice of how it went, which opens the session when it failed.
+// front, after the phone is unlocked: the app connects to the computer that sent it, sends the
+// answer, and leaves a notice of how it went, which opens the session when it failed. A
+// notification from a computer other than the active one is not answered in the background; its
+// notice asks the user to open Huli, which switches to that computer.
 //
 // The categories with fixed buttons are registered here; a question's buttons are its own, so the
 // Notification Service Extension registers its category as it opens the notification, with the
@@ -10,7 +12,7 @@
 
 import * as Notifications from 'expo-notifications'
 import { getPrefs, prefsReady } from '../prefs'
-import { connectedLink } from './live-link'
+import { connectedLink, NoLink } from './live-link'
 import type { NotificationData } from './open'
 
 export const ACTION = {
@@ -131,7 +133,11 @@ function failure(error: unknown): { title: string; body: string } {
           : '这个请求已经结束了。点开看看。',
     }
   }
-  if (error instanceof Error && ['no link', 'not connected', 'stopped'].includes(error.message)) {
+  if (error instanceof NoLink) {
+    // Answering another computer would mean leaving the one in front, which only the app does.
+    if (error.reason === 'other-computer') {
+      return { title: '打开 Huli 处理', body: '这条来自另一台电脑，点开后会切换过去。' }
+    }
     return { title: '没能发送，点开处理', body: '没有连上电脑。' }
   }
   return { title: '没能发送，点开处理', body: '电脑没有收下这个回答。' }
@@ -172,7 +178,7 @@ export async function answerFromNotification(
   await prefsReady()
   const hidden = getPrefs().hidePreviews
   try {
-    const link = await connectedLink(CONNECT_MS)
+    const link = await connectedLink(data.host, CONNECT_MS)
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), REQUEST_MS)
     try {

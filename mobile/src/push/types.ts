@@ -1,5 +1,6 @@
 // What notifications need of the phone's system, behind one face so the screens never see which
-// transport a platform uses: APNs on iOS now, Android's own later.
+// transport a platform uses: APNs on iOS now, Android's own later. Presses on a notification are
+// taken by responses.ts, whatever the platform.
 
 import type { PushTarget } from '@shared/remote/push'
 
@@ -24,6 +25,8 @@ export interface PushPlatform {
   target(): Promise<PushTarget | null>
   /** The system changed the address. */
   onTargetChange(listener: () => void): () => void
+  /** Adds the host's key to those the extension keeps, beside other paired computers' keys. */
   share(keys: PushKeys): Promise<void>
-  unshare(): Promise<void>
+  /** Removes one host's key, by its id. */
+  unshare(host: string): Promise<void>
 }

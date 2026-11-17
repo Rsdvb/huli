@@ -50,6 +50,8 @@ type Step =
 export function PairScreen(props: {
   notice: string | null
   onPaired(host: SavedHost, key: KeyPair, paired: Paired): void
+  /** Pairing one more computer, from a sheet that can be closed. */
+  onCancel?: () => void
 }) {
   const { c } = useTokens()
   const insets = useSafeAreaInsets()
@@ -145,14 +147,28 @@ export function PairScreen(props: {
           contentContainerStyle={[styles.page, { paddingBottom: insets.bottom + space.xl }]}
           keyboardShouldPersistTaps="handled"
         >
+          {props.onCancel ? (
+            <Press
+              onPress={props.onCancel}
+              accessibilityRole="button"
+              hitSlop={10}
+              style={styles.cancel}
+            >
+              <Text style={[typeScale.body, { color: c.tint }]}>取消</Text>
+            </Press>
+          ) : null}
           <Image
             source={require('../../assets/icon.png')}
             style={styles.appIcon}
             accessibilityIgnoresInvertColors
           />
-          <Text style={[typeScale.hero, { color: c.text }]}>连接你的电脑</Text>
+          <Text style={[typeScale.hero, { color: c.text }]}>
+            {props.onCancel ? '添加一台电脑' : '连接你的电脑'}
+          </Text>
           <Text style={[typeScale.body, { color: c.textSecondary }]}>
-            Huli 在手机上看着、指挥电脑上的智能体。配对一次，之后打开就连上。
+            {props.onCancel
+              ? '已配对的电脑都会留着，随时在顶部的电脑标记里切换。'
+              : 'Huli 在手机上看着、指挥电脑上的智能体。配对一次，之后打开就连上。'}
           </Text>
 
           <View style={[styles.steps, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -243,6 +259,7 @@ const styles = StyleSheet.create({
   center: { textAlign: 'center' },
   page: { paddingHorizontal: space.xl + 4, paddingTop: space.xxxl, gap: space.lg },
   appIcon: { width: 72, height: 72, borderRadius: 18, marginBottom: space.sm },
+  cancel: { alignSelf: 'flex-end', minHeight: sizes.hit, justifyContent: 'center' },
   steps: {
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,

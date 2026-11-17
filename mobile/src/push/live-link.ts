@@ -1,24 +1,40 @@
-// The paired computer's link, for work that runs outside any screen: answering from a notification,
-// often while the app is in the background or was launched only for that. The bridge publishes the
-// link the host provider keeps, so an answer never opens a second connection beside it.
+// The active computer's link, for work that runs outside any screen: answering from a
+// notification, often while the app is in the background or was launched only for that. The bridge
+// publishes the link the host provider keeps, with which computer it is, so an answer goes only
+// to the computer that sent the notification and never opens a second connection beside it.
 
 import type { HostLink } from '@shared/remote/link'
+import { computerFor } from '../links'
+import type { SavedHost } from '../store'
 
-let current: HostLink | null = null
+interface Live {
+  link: HostLink
+  active: SavedHost | null
+  computers: SavedHost[]
+}
+
+let current: Live | null = null
 const waiting = new Set<() => void>()
 
-export function publishLink(link: HostLink | null): void {
-  current = link
+export function publishLink(live: Live | null): void {
+  current = live
   for (const listener of [...waiting]) listener()
 }
 
-function linkWithin(ms: number): Promise<HostLink | null> {
+/** Why there is no link to answer on: none at all, or another computer is the active one. */
+export class NoLink extends Error {
+  constructor(readonly reason: 'none' | 'other-computer' | 'not-connected') {
+    super(reason)
+  }
+}
+
+function liveWithin(ms: number): Promise<Live | null> {
   if (current) return Promise.resolve(current)
   return new Promise((resolve) => {
-    const done = (link: HostLink | null): void => {
+    const done = (live: Live | null): void => {
       clearTimeout(timer)
       waiting.delete(check)
-      resolve(link)
+      resolve(live)
     }
     const check = (): void => {
       if (current) done(current)
@@ -28,14 +44,26 @@ function linkWithin(ms: number): Promise<HostLink | null> {
   })
 }
 
+/** Whether the computer a notification names (by its notifications' id) is the active one. */
+function isActive(live: Live, host: string | null): boolean {
+  if (!host) return true
+  const wanted = computerFor(live.computers, host)
+  if (wanted) return wanted.id === live.active?.id
+  // Its notifications' id is not known yet: only a phone with this one computer can tell.
+  return live.computers.length === 1 && live.active !== null
+}
+
 /**
- * The link once it is connected, trying at once even in the background, where it does not retry
- * by itself; rejects after `ms`, or when there is no paired computer or it stopped.
+ * The link to the computer `host` names once it is connected, trying at once even in the
+ * background, where it does not retry by itself. Rejects with NoLink after `ms`, when that
+ * computer is not the active one, or when there is none.
  */
-export async function connectedLink(ms: number): Promise<HostLink> {
+export async function connectedLink(host: string | null, ms: number): Promise<HostLink> {
   const deadline = Date.now() + ms
-  const link = await linkWithin(ms)
-  if (!link) throw new Error('no link')
+  const live = await liveWithin(ms)
+  if (!live) throw new NoLink('none')
+  if (!isActive(live, host)) throw new NoLink('other-computer')
+  const { link } = live
   if (link.state.kind === 'connected') return link
   link.wake()
   return new Promise<HostLink>((resolve, reject) => {
@@ -50,13 +78,13 @@ export async function connectedLink(ms: number): Promise<HostLink> {
       else resolve(link)
     }
     const timer = setTimeout(
-      () => settle(new Error('not connected')),
+      () => settle(new NoLink('not-connected')),
       Math.max(0, deadline - Date.now()),
     )
     // onState calls back at once with the current state, before it returns its remover.
     off = link.onState((state) => {
       if (state.kind === 'connected') settle(null)
-      else if (state.kind === 'stopped') settle(new Error('stopped'))
+      else if (state.kind === 'stopped') settle(new NoLink('not-connected'))
     })
     if (settled) off()
   })
