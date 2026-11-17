@@ -99,27 +99,35 @@ function socketUrl(address: DirectAddress): string {
   return `ws://${host}:${address.port}/channel`
 }
 
-/** A transport to one address. React Native's WebSocket may not count what it has buffered. */
-function openSocket(address: DirectAddress, timeoutMs = 8000): Promise<Transport> {
+/**
+ * A transport to one address. React Native's WebSocket may not count what it has buffered. A
+ * socket of a link to a computer other than the active one is not `track`ed, so it never passes
+ * for the active link's route.
+ */
+function openSocket(address: DirectAddress, timeoutMs = 8000, track = true): Promise<Transport> {
   const socket = new WebSocket(socketUrl(address))
   if (typeof socket.bufferedAmount !== 'number') {
     Object.defineProperty(socket, 'bufferedAmount', { value: 0 })
   }
   const timer = setTimeout(() => socket.close(), timeoutMs)
   return webSocketTransport(socket)
-    .then((transport) => tracked(address, transport))
+    .then((transport) => (track ? tracked(address, transport) : transport))
     .finally(() => clearTimeout(timer))
 }
 
 /** The first address that opens; the others are closed. */
-function dialFirst(addresses: DirectAddress[], timeoutMs?: number): Promise<Transport> {
+function dialFirst(
+  addresses: DirectAddress[],
+  timeoutMs?: number,
+  track = true,
+): Promise<Transport> {
   const list = usableAddresses(addresses)
   if (list.length === 0) return Promise.reject(new Error('The computer named no address'))
   return new Promise((resolve, reject) => {
     let left = list.length
     let won = false
     for (const address of list) {
-      openSocket(address, timeoutMs).then(
+      openSocket(address, timeoutMs, track).then(
         (transport) => {
           if (won) return transport.close()
           won = true
@@ -196,22 +204,25 @@ export function triedAddresses(host: SavedHost): DirectAddress[] {
 
 /**
  * The kept link to the computer, which reconnects by itself while the app is in front. `current`
- * reads the computer as saved now, so a try takes the addresses its last welcome named.
+ * reads the computer as saved now, so a try takes the addresses its last welcome named. A link
+ * that is not the active computer's (`side`) keeps its sockets out of `currentAddress`.
  */
 export function linkTo(
   host: SavedHost,
   key: KeyPair,
   adopt?: Paired,
   current: () => SavedHost = () => host,
+  side = false,
 ): HostLink {
+  const track = !side
   const routes = (): LinkRoute[] =>
     triedAddresses(current()).map((address) => ({
       key: routeKey(address),
       relay: false,
-      dial: () => openSocket(address),
+      dial: () => openSocket(address, undefined, track),
     }))
   return new HostLink({
-    dial: () => dialFirst(current().addresses),
+    dial: () => dialFirst(current().addresses, undefined, track),
     routes,
     hostKey: fromBase64(host.hostKey),
     key,

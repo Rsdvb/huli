@@ -23,6 +23,7 @@ import { Alert } from 'react-native'
 import { router } from 'expo-router'
 import type { AgentStatus, HostEvent, Project, SessionSummary } from '@shared/agent-host'
 import type { HostLink, LinkState } from '@shared/remote/link'
+import type { SessionFolder } from '@shared/session-folders'
 import type { KeyPair } from '@shared/remote/noise'
 import type { Paired } from '@shared/remote/pair'
 import { admin } from './admin'
@@ -58,6 +59,8 @@ export interface HostData {
   sessions: Map<string, SessionSummary>
   agents: Map<string, AgentStatus>
   projects: Project[]
+  /** The user's folders of sessions on the computer; none from a computer without them. */
+  folders: SessionFolder[]
   loaded: boolean
   fromCache: boolean
   syncedAt: number | null
@@ -122,6 +125,7 @@ const store = createStore<HostData>({
   sessions: new Map(),
   agents: new Map(),
   projects: [],
+  folders: [],
   loaded: false,
   fromCache: false,
   syncedAt: null,
@@ -163,6 +167,7 @@ const activeOf = (d: HostData): SavedHost | null =>
 const selectSessions = (d: HostData) => d.sessions
 const selectAgents = (d: HostData) => d.agents
 const selectProjects = (d: HostData) => d.projects
+const selectFolders = (d: HostData) => d.folders
 const selectState = (d: HostData) => d.state
 const selectLink = (d: HostData) => d.ready?.link ?? null
 const selectConnected = (d: HostData) => d.state.kind === 'connected'
@@ -190,6 +195,11 @@ export function useAgent(id: string | null | undefined): AgentStatus | undefined
 
 export function useProjects(): Project[] {
   return useHostSelector(selectProjects)
+}
+
+/** The active computer's folders of sessions, in the user's order. */
+export function useFolders(): SessionFolder[] {
+  return useHostSelector(selectFolders)
 }
 
 export function useHostState(): LinkState {
@@ -369,6 +379,14 @@ function timeout(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** A computer's folders of sessions; none from a computer older than folders, or on a failure. */
+export function readFolders(link: HostLink): Promise<SessionFolder[]> {
+  return (link.request('folders.list', undefined) as Promise<SessionFolder[]>).then(
+    (list) => (Array.isArray(list) ? list : []),
+    () => [],
+  )
+}
+
 /** How long the link may try before the app says the computer cannot be reached. */
 export const UNREACHABLE_AFTER = 8000
 
@@ -414,6 +432,7 @@ export function HostProvider(props: { children: ReactNode }) {
       sessions: new Map(),
       agents: new Map(),
       projects: [],
+      folders: [],
       loaded: false,
       fromCache: false,
       syncedAt: null,
@@ -438,6 +457,7 @@ export function HostProvider(props: { children: ReactNode }) {
           sessions: new Map(cached.sessions.map((s) => [s.id, s])),
           agents: new Map(cached.agents.map((a) => [a.id, a])),
           projects: cached.projects,
+          folders: cached.folders ?? [],
           loaded: true,
           fromCache: true,
           syncedAt: cached.savedAt,
@@ -462,10 +482,11 @@ export function HostProvider(props: { children: ReactNode }) {
     const link = getHost().ready?.link
     if (!link) return
     const mine = generation.current
-    const [list, agentList, projectList] = await Promise.all([
+    const [list, agentList, projectList, folderList] = await Promise.all([
       link.request('sessions.list', {}) as Promise<SessionSummary[]>,
       link.request('agents.list', undefined) as Promise<AgentStatus[]>,
       link.request('projects.list', undefined) as Promise<Project[]>,
+      readFolders(link),
     ])
     if (mine !== generation.current) return
     fresh.current = true
@@ -473,6 +494,7 @@ export function HostProvider(props: { children: ReactNode }) {
       sessions: reconcile(d.sessions, list),
       agents: reconcile(d.agents, agentList),
       projects: same(d.projects, projectList) ? d.projects : projectList,
+      folders: same(d.folders, folderList) ? d.folders : folderList,
       loaded: true,
       fromCache: false,
       syncedAt: Date.now(),
@@ -620,7 +642,8 @@ export function HostProvider(props: { children: ReactNode }) {
         d.fromCache === seen.fromCache &&
         d.sessions === seen.sessions &&
         d.agents === seen.agents &&
-        d.projects === seen.projects
+        d.projects === seen.projects &&
+        d.folders === seen.folders
       )
         return
       seen = d
@@ -635,6 +658,7 @@ export function HostProvider(props: { children: ReactNode }) {
           sessions: [...d.sessions.values()],
           agents: [...d.agents.values()],
           projects: d.projects,
+          folders: d.folders,
         })
       }, 1500)
     }
@@ -706,6 +730,9 @@ export function HostProvider(props: { children: ReactNode }) {
           break
         case 'projects.changed':
           setHost((d) => (same(d.projects, event.projects) ? {} : { projects: event.projects }))
+          break
+        case 'folders.changed':
+          setHost((d) => (same(d.folders, event.folders) ? {} : { folders: event.folders }))
           break
         case 'agents.limitAlert':
           showLimitAlert(event.alert)

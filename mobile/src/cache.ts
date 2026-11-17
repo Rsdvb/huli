@@ -2,7 +2,8 @@
 // and the latest page of the sessions opened most recently, kept as JSON files in the app's cache
 // folder (out of backups; the system may clear it, which costs only a slower start).
 //
-//   <cache>/huli/<computer id>/lists.json            the lists, and when they were read
+//   <cache>/huli/<computer id>/lists.json            the lists (sessions, agents, projects,
+//                                                    folders), and when they were read
 //   <cache>/huli/<computer id>/threads.json          the cached threads' ids, latest opened first
 //   <cache>/huli/<computer id>/threads/<id>.json     one thread's newest entries
 //
@@ -11,6 +12,7 @@
 
 import { Directory, File, Paths } from 'expo-file-system'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
+import type { SessionFolder } from '@shared/session-folders'
 import type { SessionView, ThreadEntry, ThreadState } from '@shared/thread'
 
 const VERSION = 1
@@ -26,6 +28,8 @@ export interface CachedLists {
   sessions: SessionSummary[]
   agents: AgentStatus[]
   projects: Project[]
+  /** Missing in a cache written before folders. */
+  folders?: SessionFolder[]
 }
 
 export interface CachedThread {
