@@ -120,8 +120,61 @@ jobs:
             cloud/deploy/install.sh
           if-no-files-found: error
 
+  # The phone app for Android, signed with Huli's own key (kept off the repository) and installed
+  # straight from Huli's update channel. Its failure never holds the desktop release back.
+  android:
+    name: Android
+    needs: version
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - name: Set the version
+        run: |
+          node -e '
+            const fs = require("fs"); const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            app.expo.version = process.env.VERSION;
+            app.expo.android.versionCode = Number(process.env.RUN);
+            fs.writeFileSync("app.json", JSON.stringify(app, null, 2));'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RUN: ${{ github.run_number }}
+      - run: CI=1 npx expo prebuild --platform android --no-install
+      - name: Build
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=arm64-v8a
+      - name: Sign
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/huli.p12"
+          mkdir -p out
+          "$tools/zipalign" -f -p 4 android/app/build/outputs/apk/release/app-release.apk out/aligned.apk
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/huli.p12" --ks-type PKCS12 --ks-key-alias huli \
+            --ks-pass env:KEYSTORE_PASSWORD --out "out/Huli-$VERSION.apk" out/aligned.apk
+          rm -f "$RUNNER_TEMP/huli.p12" out/aligned.apk
+          "$tools/apksigner" verify --print-certs "out/Huli-$VERSION.apk" | grep -i sha-256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: huli-android
+          path: mobile/out/*.apk
+          if-no-files-found: error
+
   release:
-    needs: [version, desktop, mac, cloud]
+    needs: [version, desktop, mac, cloud, android]
     if: >-
       always() && needs.desktop.result == 'success' && needs.cloud.result == 'success' &&
       (needs.mac.result == 'success' || needs.mac.result == 'skipped')
@@ -147,7 +200,7 @@ jobs:
           mkdir release
           find artifacts -type f \( -name '*-setup.exe' -o -name '*-setup.exe.blockmap' \
             -o -name '*.AppImage' -o -name '*.dmg' -o -name 'latest*.yml' \
-            -o -name 'huli-cloud.mjs' -o -name 'install.sh' \) -exec cp {} release/ \;
+            -o -name 'huli-cloud.mjs' -o -name 'install.sh' -o -name '*.apk' \) -exec cp {} release/ \;
           node tools/workflow/sign-update-files.mjs release/latest*.yml
           (cd release && sha256sum * > SHA256SUMS.txt)
           ls -l release
@@ -170,6 +223,12 @@ jobs:
           cp release/*-setup.exe* release/*.AppImage release/*.dmg release/latest*.yml* channel/ 2>/dev/null || true
           rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" channel/ "$host:download/v$VERSION/"
           rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" release/latest*.yml "$host:latest/download/"
+          # The phone's download link stays the same from version to version.
+          for apk in release/*.apk; do
+            [ -e "$apk" ] || continue
+            rsync -t --mkpath --chmod=F644 -e "$ssh" "$apk" "$host:download/v$VERSION/"
+            rsync -t --mkpath --chmod=F644 -e "$ssh" "$apk" "$host:android/Huli.apk"
+          done
           rm -f ~/.ssh/huli_upload
       - name: Publish a pre-release
         env:
