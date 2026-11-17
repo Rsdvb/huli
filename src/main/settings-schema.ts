@@ -178,6 +178,7 @@ const SECTION_FIELDS = {
     turnEnded: isBoolean,
     error: isBoolean,
     routines: isBoolean,
+    limits: isBoolean,
     sound: isBoolean,
     badge: isBoolean,
   },

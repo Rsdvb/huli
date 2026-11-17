@@ -137,6 +137,7 @@ export type AppCommand =
   | { kind: 'toggle-sidebar' }
   | { kind: 'open-session'; sessionId: string }
   | { kind: 'open-routines' }
+  | { kind: 'open-usage' }
   | { kind: 'go-back' }
   | { kind: 'go-forward' }
   | { kind: 'show-history' }

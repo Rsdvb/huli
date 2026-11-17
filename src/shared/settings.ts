@@ -56,6 +56,7 @@ export interface SettingsFile {
     turnEnded: boolean
     error: boolean
     routines: boolean // a routine's run ended, or its routines paused at a plan limit
+    limits: boolean // a plan window crossed 90% used or ran out: a toast, and a notification away
     sound: boolean
     badge: boolean // the Dock icon on macOS, the taskbar button on Windows
   }
@@ -218,6 +219,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     turnEnded: true,
     error: true,
     routines: true,
+    limits: true,
     sound: false,
     badge: true,
   },

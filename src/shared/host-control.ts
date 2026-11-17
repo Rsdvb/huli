@@ -302,6 +302,15 @@ export type HostToMain =
       title: string
       body: string
     }
+  // A plan window of the agent's crossed 90% or ran out; it has no session and opens Usage.
+  | {
+      type: 'host:attention'
+      kind: 'plan-limit'
+      agentId: AgentId
+      window: string
+      title: string
+      body: string
+    }
   | { type: 'host:badge'; count: number } // pending permission requests across sessions
   // What waits for the user, by session: the ids of the requests, new sites, apps and setups.
   | { type: 'host:waiting'; sessions: Record<string, string[]> }

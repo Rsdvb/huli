@@ -13,6 +13,7 @@ export const ATTENTION_SETTING = {
   error: 'error',
   'routine-ended': 'routines',
   'routine-paused': 'routines',
+  'plan-limit': 'limits',
 } as const satisfies Record<HostAttention['kind'], keyof SettingsFile['notifications']>
 
 const MAX_TITLE = 120
@@ -28,7 +29,8 @@ function isId(value: unknown): value is string {
 
 /**
  * What a well-formed attention message stands for, which a newer one of the same replaces, and
- * what a click opens: its session, or the Routines page for a pause. Null for a malformed one.
+ * what a click opens: its session, the Routines page for a pause, or Usage for a plan limit. Null
+ * for a malformed one.
  */
 export function attentionTarget(
   message: HostAttention,
@@ -38,6 +40,11 @@ export function attentionTarget(
   if (message.kind === 'routine-paused') {
     return isId(message.agentId)
       ? { key: `routines:${message.agentId}`, command: { kind: 'open-routines' } }
+      : null
+  }
+  if (message.kind === 'plan-limit') {
+    return isId(message.agentId) && isId(message.window)
+      ? { key: `limits:${message.agentId}:${message.window}`, command: { kind: 'open-usage' } }
       : null
   }
   return isId(message.sessionId)
