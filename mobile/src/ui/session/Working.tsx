@@ -38,8 +38,15 @@ function usePulse(): Animated.Value {
   return value
 }
 
+// The grid at 15 points: dots of 4 with gaps of 1.5, scaled for another size.
+const gapOf = (size: number) => (size * 1.5) / 15
+const dotOf = (size: number) => {
+  const side = (size * 4) / 15
+  return { width: side, height: side, borderRadius: side / 2 }
+}
+
 /** A three by three grid of dots a wave of light runs across while the agent works. */
-function WorkingDots(props: { color: string }) {
+export function WorkingDots(props: { color: string; size?: number }) {
   const wave = useRef(new Animated.Value(0)).current
   const [still, setStill] = useState(false)
   useEffect(() => {
@@ -64,7 +71,14 @@ function WorkingDots(props: { color: string }) {
     }
   }, [wave])
   return (
-    <View style={styles.dots} accessibilityElementsHidden importantForAccessibility="no">
+    <View
+      style={[
+        styles.dots,
+        props.size ? { width: props.size, height: props.size, gap: gapOf(props.size) } : null,
+      ]}
+      accessibilityElementsHidden
+      importantForAccessibility="no"
+    >
       {Array.from({ length: 9 }, (_, i) => {
         const at = 0.05 + (((i % 3) + Math.floor(i / 3)) / 4) * 0.5
         return (
@@ -72,6 +86,7 @@ function WorkingDots(props: { color: string }) {
             key={i}
             style={[
               styles.dot,
+              props.size ? dotOf(props.size) : null,
               {
                 backgroundColor: props.color,
                 opacity: still
