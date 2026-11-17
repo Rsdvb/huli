@@ -664,6 +664,7 @@ export function HostProvider(props: { children: ReactNode }) {
             deviceName: welcome.device.name,
             platform: welcome.host.platform,
             addresses,
+            ...(welcome.relay ? { relay: welcome.relay } : {}),
             lastSeen: Date.now(),
             ...(reached ? { lastAddress: reached } : {}),
           })
