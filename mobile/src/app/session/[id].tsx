@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +17,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native'
+import { KeyboardAvoidingView, KeyboardGestureArea } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
@@ -33,7 +33,12 @@ import {
 } from '../../agentSwitch'
 import { AttachPages, useAttachPages } from '../../components/AttachMenu'
 import { useSessionChanges } from '../../components/ChangesButton'
-import { Composer, SendCancelled, type ComposerHandle } from '../../components/Composer'
+import {
+  Composer,
+  keyboardOverlap,
+  SendCancelled,
+  type ComposerHandle,
+} from '../../components/Composer'
 import { CacheNotice, SwitchStrip } from '../../components/ComposerNotes'
 import {
   agentModelsPage,
@@ -93,7 +98,11 @@ import { NATIVE_MENUS, NativeMenu } from '../../ui/session/NativeMenu'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
 import { tokensText, toneColor, usageTone } from '../../ui/session/limits'
 import { endedOnRejection, sessionPlaceholder } from '../../ui/session/placeholder'
-import { CACHE_NOTICE_MIN_TOKENS, useCacheState } from '../../ui/session/promptCache'
+import {
+  CACHE_NOTICE_MIN_TOKENS,
+  useCacheExpiry,
+  useCachePhase,
+} from '../../ui/session/promptCache'
 import { useSessionTokens } from '../../ui/session/palette'
 import {
   usePopover,
@@ -172,7 +181,6 @@ export default function SessionScreen() {
   const pendingSwitch = usePendingSwitch(id)
   const pending = pendingSwitch ? (host.agents.get(pendingSwitch.agentId) ?? null) : null
   const [attachCount, setAttachCount] = useState(0)
-  const [holds, setHolds] = useState(false)
   // The cache write the notice was closed for, so it stays closed until the next one expires.
   const [noticeClosedFor, setNoticeClosedFor] = useState<number | null>(null)
   const [counts, setCounts] = useState<{ artifacts: number | null; terminals: number | null }>({
@@ -543,24 +551,25 @@ export default function SessionScreen() {
 
   // The prompt cache: its countdown under the box, a warning on a change that rewrites it while
   // warm, and a notice when a message is begun on one that has expired.
-  const cache = useCacheState(session, agent?.account ?? null)
+  const cacheExpiry = useCacheExpiry(session, agent?.account ?? null)
+  const cachePhase = useCachePhase(cacheExpiry)
   const reread = session?.usage?.used ?? 0
+  // Shown once the box holds a message, which the composer tells its notes alone.
   const cacheNoticeShown =
-    cache !== null &&
-    cache.phase === 'expired' &&
-    holds &&
+    cacheExpiry !== null &&
+    cachePhase === 'expired' &&
     !running &&
     status !== 'starting' &&
     pendingSwitch === null &&
     reread >= CACHE_NOTICE_MIN_TOKENS &&
-    noticeClosedFor !== cache.expiry.lastRequestAt
+    noticeClosedFor !== cacheExpiry.lastRequestAt
   // Claude Code's model, effort and fast mode are part of what its cache was written for.
   const cacheNote =
     agentId !== '' &&
     harnessOf(agentId) === 'claude-code' &&
     !running &&
     pendingSwitch === null &&
-    (cache?.phase === 'warm' || cache?.phase === 'ending')
+    (cachePhase === 'warm' || cachePhase === 'ending')
       ? `在这里改动会重写约 ${tokensText(reread)} token 的 prompt cache`
       : null
 
@@ -808,11 +817,18 @@ export default function SessionScreen() {
   return (
     <SessionRows.Provider value={context}>
       {pane ? null : <Stack.Screen options={{ headerShown: false }} />}
-      <KeyboardAvoidingView style={[styles.root, { backgroundColor: c.bg }]} behavior="padding">
-        <View style={{ flex: 1 }}>
+      {/* Moved up with the keyboard on the UI thread, and laid out again once it settles, so the
+          conversation is not laid out on each frame of the keyboard's animation. */}
+      <KeyboardAvoidingView
+        style={[styles.root, { backgroundColor: c.bg }]}
+        behavior="translate-with-padding"
+        automaticOffset
+        keyboardVerticalOffset={-keyboardOverlap(insets.bottom)}
+      >
+        <KeyboardGestureArea interpolator="ios" style={{ flex: 1 }}>
           {body}
           <ToBottomButton visible={away} fresh={fresh} onPress={toBottom} />
-        </View>
+        </KeyboardGestureArea>
 
         <PlanChip plan={plan} running={ownTurn && running} />
 
@@ -880,16 +896,15 @@ export default function SessionScreen() {
                 }
               : null
           }
-          onHoldsChange={setHolds}
           onCountChange={setAttachCount}
-          top={
-            pendingSwitch || cacheNoticeShown ? (
+          top={(holds) =>
+            pendingSwitch || (cacheNoticeShown && holds) ? (
               <>
-                {cacheNoticeShown && (
+                {cacheNoticeShown && holds && (
                   <CacheNotice
-                    estimate={cache.expiry.estimate}
+                    estimate={cacheExpiry.estimate}
                     used={reread}
-                    onDismiss={() => setNoticeClosedFor(cache.expiry.lastRequestAt)}
+                    onDismiss={() => setNoticeClosedFor(cacheExpiry.lastRequestAt)}
                   />
                 )}
                 {pendingSwitch && (
@@ -993,11 +1008,9 @@ export default function SessionScreen() {
                   : null
               }
               cache={
-                cache && !running
+                cacheExpiry && !running
                   ? {
-                      left: cache.left,
-                      phase: cache.phase,
-                      estimate: cache.expiry.estimate,
+                      expiry: cacheExpiry,
                       onPress: () => {
                         haptic.tap()
                         setContextOpen(true)

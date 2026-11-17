@@ -11,6 +11,8 @@
 // box at once, giving the message back if it could not go.
 
 import {
+  memo,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -77,7 +79,6 @@ import { haptic, showMenu } from '../ui/session/feedback'
 import { openFile } from '../ui/session/fileRefs'
 import { extensionOf } from '../ui/session/format'
 import { FileMark, G, Icon } from '../ui/session/icons'
-import { useKeyboardShown } from '../ui/session/keyboard'
 import { useSessionTokens } from '../ui/session/palette'
 import { Glass, useGlassMode } from '../ui/Glass'
 import { NativeMenu } from '../ui/session/NativeMenu'
@@ -116,16 +117,17 @@ export interface ComposerProps {
   sessionId?: string
   /** What the agent's prompts take, for how each attachment goes. */
   takes?: Takes | null
-  /** Hears whether the box holds a message, as the prompt cache's notice needs. */
-  onHoldsChange?: (holds: boolean) => void
   /** Hears how many attachments the box holds, for the add menu's limit. */
   onCountChange?: (count: number) => void
   bottomInset: number
   /** A turn runs: an empty box offers to stop it. */
   running?: boolean
   onStop?: () => void
-  /** Over the card, such as the switch's strip or the prompt cache's notice. */
-  top?: ReactNode
+  /**
+   * Over the card, such as the switch's strip or the prompt cache's notice; as a function it is
+   * told whether the box holds a message, so typing never renders the screen around it.
+   */
+  top?: ReactNode | ((holds: boolean) => ReactNode)
   /** Controls after the attach button, such as the permission mode. */
   left?: ReactNode
   /** Controls before the send button, such as the model. */
@@ -155,11 +157,28 @@ export interface ComposerHandle {
   focus(): void
 }
 
+/**
+ * The room under the box: the home indicator's, which the keyboard covers once it is up. Screens
+ * move the box up by the keyboard less `keyboardOverlap`, so 8 pt stay above the keyboard without
+ * the box changing its layout as the keyboard comes and goes.
+ */
+export function composerBottom(inset: number): number {
+  return Math.max(inset, 8)
+}
+
+/** How far the box's bottom room may sit under the keyboard. */
+export function keyboardOverlap(inset: number): number {
+  return composerBottom(inset) - 8
+}
+
 /** Thrown by a send the user called off, as at a confirmation: the message comes back unsaid. */
 export class SendCancelled extends Error {}
 
 let nextKey = 1
 const newKey = () => `a${nextKey++}`
+
+/** How long after the focus the clipboard is asked for a picture: past the keyboard's rise. */
+const CLIPBOARD_DELAY = 600
 
 const LIMIT_TEXT = `一条消息最多带 ${ATTACHMENT_LIMIT} 个附件`
 
@@ -211,7 +230,6 @@ export function Composer(props: ComposerProps) {
   const { c, s } = useSessionTokens()
   const host = useHost()
   const link = useLink()
-  const keyboard = useKeyboardShown()
   const liquid = useGlassMode() === 'liquid'
   const tray = useRef<ViewHandle>(null)
   useMenuEdge(tray)
@@ -352,8 +370,7 @@ export function Composer(props: ComposerProps) {
   }, [restored, draftKey, computer, text, items, mentions])
 
   const holds = text.trim().length > 0 || items.length > 0
-  const { onHoldsChange, onCountChange } = props
-  useEffect(() => onHoldsChange?.(holds), [holds, onHoldsChange])
+  const { onCountChange } = props
   useEffect(() => onCountChange?.(items.length), [items.length, onCountChange])
 
   const held = (key: string) => mounted.current && latest.current.some((item) => item.key === key)
@@ -583,11 +600,13 @@ export function Composer(props: ComposerProps) {
         (has) => live && setClipboardImage(has),
         () => {},
       )
-    check()
+    // Asked once the keyboard is up, so nothing else runs while it comes.
+    const first = setTimeout(check, CLIPBOARD_DELAY)
     const app = AppState.addEventListener('change', (state) => state === 'active' && check())
     const clip = Clipboard.addClipboardListener(check)
     return () => {
       live = false
+      clearTimeout(first)
       app.remove()
       Clipboard.removeClipboardListener(clip)
     }
@@ -703,6 +722,13 @@ export function Composer(props: ComposerProps) {
     focus: () => input.current?.focus(),
   }))
 
+  // The add button and its system menu render again only when the screen gives a new menu, not on
+  // each keystroke or focus of the box.
+  const { attachMenu } = props
+  const attachSource = useMemo(() => attachMenu?.(attachAnchor) ?? null, [attachMenu])
+  const openRef = useRef<() => void>(() => {})
+  const pressAttach = useCallback(() => openRef.current(), [])
+
   const openMenu = () => {
     if (props.onAttach) return props.onAttach(attachAnchor)
     showMenu('添加附件', [
@@ -725,6 +751,7 @@ export function Composer(props: ComposerProps) {
     (allowEmpty || holds)
   const stoppable = !!props.running && !!props.onStop
   const addBlocked = props.addBlocked ?? null
+  openRef.current = () => (addBlocked ? Alert.alert(addBlocked) : openMenu())
 
   const send = async (now = false) => {
     if (!canSend) return
@@ -796,8 +823,8 @@ export function Composer(props: ComposerProps) {
   // With Liquid Glass the tray and its card are one slab of glass; elsewhere a card in a tray.
   const Tray = liquid ? GlassTray : View
   return (
-    <View style={[styles.outer, { paddingBottom: keyboard ? 8 : Math.max(props.bottomInset, 8) }]}>
-      {props.top}
+    <View style={[styles.outer, { paddingBottom: composerBottom(props.bottomInset) }]}>
+      {typeof props.top === 'function' ? props.top(holds) : props.top}
       <Tray
         ref={tray}
         collapsable={false}
@@ -867,7 +894,10 @@ export function Composer(props: ComposerProps) {
             onSelectionChange={(event) => {
               const end = event.nativeEvent.selection.end
               caretRef.current = end
-              setCaret(end)
+              // The caret renders the box only where a `/` or `@` list could show, so moving it
+              // or typing plain text costs no render of its own.
+              const lists = latestText.current.startsWith('/') || latestText.current.includes('@')
+              setCaret(lists ? end : null)
             }}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
@@ -883,21 +913,12 @@ export function Composer(props: ComposerProps) {
             <Spans text={text} mentions={mentions} color={c.accent} fill={s.accentSoft} />
           </TextInput>
           <View style={styles.row}>
-            <View ref={attachAnchor} collapsable={false}>
-              <NativeMenu
-                source={props.attachMenu ? props.attachMenu(attachAnchor) : null}
-                disabled={!!addBlocked}
-              >
-                <RoundButton
-                  onPress={() => (addBlocked ? Alert.alert(addBlocked) : openMenu())}
-                  disabled={!!addBlocked}
-                  accessibilityLabel="添加照片、文件或命令"
-                  {...(addBlocked ? { accessibilityHint: addBlocked } : {})}
-                >
-                  <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
-                </RoundButton>
-              </NativeMenu>
-            </View>
+            <AttachButton
+              anchor={attachAnchor}
+              source={attachSource}
+              blocked={addBlocked}
+              onPress={pressAttach}
+            />
             {props.left}
             <View style={styles.right}>{props.right}</View>
             {(!stoppable || holds || sending) && (
@@ -972,6 +993,29 @@ export function Composer(props: ComposerProps) {
     </View>
   )
 }
+
+const AttachButton = memo(function AttachButton(props: {
+  anchor: RefObject<ViewHandle | null>
+  source: MenuSource | null
+  blocked: string | null
+  onPress(): void
+}) {
+  const { c } = useSessionTokens()
+  return (
+    <View ref={props.anchor} collapsable={false}>
+      <NativeMenu source={props.source} disabled={!!props.blocked}>
+        <RoundButton
+          onPress={props.onPress}
+          disabled={!!props.blocked}
+          accessibilityLabel="添加照片、文件或命令"
+          {...(props.blocked ? { accessibilityHint: props.blocked } : {})}
+        >
+          <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
+        </RoundButton>
+      </NativeMenu>
+    </View>
+  )
+})
 
 /** The text as the field draws it: each mention a piece of its own, tinted as a chip. */
 function Spans(props: { text: string; mentions: readonly Mention[]; color: string; fill: string }) {

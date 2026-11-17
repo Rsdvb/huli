@@ -4,7 +4,8 @@
 // picker, the branch it is on, and the agent's plan usage.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router } from 'expo-router'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
@@ -12,7 +13,7 @@ import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
-import { Composer, type ComposerHandle } from '../components/Composer'
+import { Composer, keyboardOverlap, type ComposerHandle } from '../components/Composer'
 import {
   agentModelsPage,
   agentNeed,
@@ -247,173 +248,186 @@ export default function NewSession() {
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
       <GlassHeader title="新建会话" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        <ScrollView
+      {/* Clipped, so what the keyboard moves up slides under the header, not over it. */}
+      <View style={styles.clip}>
+        <KeyboardAvoidingView
           style={{ flex: 1 }}
-          contentContainerStyle={styles.content}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
+          behavior="translate-with-padding"
+          automaticOffset
+          keyboardVerticalOffset={-keyboardOverlap(insets.bottom)}
         >
-          <View style={styles.hello}>
-            <HuliIcon size={34} />
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.content}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.hello}>
+              <HuliIcon size={34} />
 
-            <Text style={[styles.greeting, { color: c.text }]}>{greeting()}</Text>
-          </View>
-          <Text style={[styles.lead, { color: c.textSecondary }]}>
-            选一个项目，或者直接说你要什么。
-          </Text>
+              <Text style={[styles.greeting, { color: c.text }]}>{greeting()}</Text>
+            </View>
+            <Text style={[styles.lead, { color: c.textSecondary }]}>
+              选一个项目，或者直接说你要什么。
+            </Text>
 
-          <Text style={[styles.section, { color: c.textSecondary }]}>
-            最近的项目
-            <Text style={{ color: c.textTertiary }}> {projects.length}</Text>
-          </Text>
-          {projectRows.map((row) => {
-            const on = row.path === projectPath
-            return (
-              <Pressable
-                key={row.key}
-                onPress={() => pickProject(row.path)}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: on }}
-                accessibilityLabel={row.path ? `${row.name}，${row.count} 个会话` : '无项目'}
-                style={({ pressed }) => [styles.project, pressed && { opacity: 0.6 }]}
-              >
-                <View style={[styles.disc, { backgroundColor: c.avatar }]}>
-                  <Icon
-                    icon={row.path === null ? G.file : G.folder}
-                    size={16}
-                    color={row.path === null ? c.textSecondary : c.tint}
-                  />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[styles.projectName, { color: c.text }]} numberOfLines={1}>
-                    {row.name}
-                  </Text>
-                  <Text style={[styles.projectMeta, { color: c.textSecondary }]} numberOfLines={1}>
-                    {row.path ? (
-                      <>
-                        {computer.name}
-                        <Text style={{ color: c.text }}>
-                          {'  '}
-                          {row.count} 个会话
-                        </Text>
-                      </>
-                    ) : (
-                      '在一个临时文件夹里工作'
-                    )}
-                  </Text>
-                </View>
-                <View style={styles.projectEnd}>
-                  {row.at !== null && (
-                    <Text style={[styles.time, { color: c.textSecondary }]}>
-                      {listTime(row.at)}
+            <Text style={[styles.section, { color: c.textSecondary }]}>
+              最近的项目
+              <Text style={{ color: c.textTertiary }}> {projects.length}</Text>
+            </Text>
+            {projectRows.map((row) => {
+              const on = row.path === projectPath
+              return (
+                <Pressable
+                  key={row.key}
+                  onPress={() => pickProject(row.path)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: on }}
+                  accessibilityLabel={row.path ? `${row.name}，${row.count} 个会话` : '无项目'}
+                  style={({ pressed }) => [styles.project, pressed && { opacity: 0.6 }]}
+                >
+                  <View style={[styles.disc, { backgroundColor: c.avatar }]}>
+                    <Icon
+                      icon={row.path === null ? G.file : G.folder}
+                      size={16}
+                      color={row.path === null ? c.textSecondary : c.tint}
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.projectName, { color: c.text }]} numberOfLines={1}>
+                      {row.name}
                     </Text>
-                  )}
-                  {on && <Icon icon={G.check} size={17} color={c.tint} weight="semibold" />}
-                </View>
-              </Pressable>
-            )
-          })}
-        </ScrollView>
+                    <Text
+                      style={[styles.projectMeta, { color: c.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {row.path ? (
+                        <>
+                          {computer.name}
+                          <Text style={{ color: c.text }}>
+                            {'  '}
+                            {row.count} 个会话
+                          </Text>
+                        </>
+                      ) : (
+                        '在一个临时文件夹里工作'
+                      )}
+                    </Text>
+                  </View>
+                  <View style={styles.projectEnd}>
+                    {row.at !== null && (
+                      <Text style={[styles.time, { color: c.textSecondary }]}>
+                        {listTime(row.at)}
+                      </Text>
+                    )}
+                    {on && <Icon icon={G.check} size={17} color={c.tint} weight="semibold" />}
+                  </View>
+                </Pressable>
+              )
+            })}
+          </ScrollView>
 
-        <Composer
-          ref={composer}
-          draft={NEW_SESSION_DRAFT}
-          agentName={agent?.name ?? null}
-          placeholder={agent ? `想让 ${agent.name} 做什么？` : '想让 Agent 做什么？'}
-          onSend={create}
-          failTitle="没能新建会话"
-          allowEmpty
-          disabled={!agentId}
-          blocked={unsendable}
-          folder={projectPath}
-          takes={
-            agent?.capabilities.prompt
-              ? {
-                  images: !!agent.capabilities.prompt.image,
-                  text: !!agent.capabilities.prompt.embeddedContext,
-                }
-              : null
-          }
-          onCountChange={setAttachCount}
-          top={
-            notices.length > 0 ? (
-              <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
-                {notices.map((text) => (
-                  <Text key={text} style={[styles.noticeText, { color: c.text }]}>
-                    {text}
-                  </Text>
-                ))}
-              </View>
-            ) : undefined
-          }
-          bottomInset={insets.bottom}
-          onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
-          attachMenu={(anchor) => ({
-            root: 'attach',
-            pages,
-            popover: {
-              pages: ['mention'],
-              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
-            },
-          })}
-          left={
-            <NativeMenu source={{ root: 'mode', pages }}>
-              <ModeButton
-                mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
-                busy={false}
-                disabled={false}
-                labelled
-                anchor={modeAnchor}
-                onPress={() =>
-                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
-                }
-              />
-            </NativeMenu>
-          }
-          right={
-            agent ? (
-              <NativeMenu source={{ root: 'model', pages }}>
-                <ModelChip
-                  agentId={agent.id}
-                  harness={agent.harnessId}
-                  model={model?.name ?? agent.name}
-                  effort={effort?.name ?? null}
+          <Composer
+            ref={composer}
+            draft={NEW_SESSION_DRAFT}
+            agentName={agent?.name ?? null}
+            placeholder={agent ? `想让 ${agent.name} 做什么？` : '想让 Agent 做什么？'}
+            onSend={create}
+            failTitle="没能新建会话"
+            allowEmpty
+            disabled={!agentId}
+            blocked={unsendable}
+            folder={projectPath}
+            takes={
+              agent?.capabilities.prompt
+                ? {
+                    images: !!agent.capabilities.prompt.image,
+                    text: !!agent.capabilities.prompt.embeddedContext,
+                  }
+                : null
+            }
+            onCountChange={setAttachCount}
+            top={
+              notices.length > 0 ? (
+                <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
+                  {notices.map((text) => (
+                    <Text key={text} style={[styles.noticeText, { color: c.text }]}>
+                      {text}
+                    </Text>
+                  ))}
+                </View>
+              ) : undefined
+            }
+            bottomInset={insets.bottom}
+            onAttach={(anchor) =>
+              menu.open('attach', anchor, { placement: 'above', align: 'start' })
+            }
+            attachMenu={(anchor) => ({
+              root: 'attach',
+              pages,
+              popover: {
+                pages: ['mention'],
+                open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+              },
+            })}
+            left={
+              <NativeMenu source={{ root: 'mode', pages }}>
+                <ModeButton
+                  mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
                   busy={false}
                   disabled={false}
-                  anchor={modelAnchor}
+                  labelled
+                  anchor={modeAnchor}
                   onPress={() =>
-                    menu.open('model', modelAnchor, {
-                      placement: 'above',
-                      align: 'end',
-                      width: 340,
-                    })
+                    menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
                   }
                 />
               </NativeMenu>
-            ) : null
-          }
-          footer={
-            <StatusLine
-              hostName={computer.name}
-              platform={computer.platform}
-              state={host.state}
-              folder={project ? project.name : '无项目'}
-              folderPicker
-              folderAnchor={folderAnchor}
-              onFolderPress={() =>
-                menu.open('projects', folderAnchor, { placement: 'above', align: 'center' })
-              }
-              branch={branch}
-              limits={limitsForModel(agent?.limits ?? [], model?.option)}
-              onLimitPress={() => {
-                haptic.tap()
-                setUsageOpen(true)
-              }}
-            />
-          }
-        />
-      </KeyboardAvoidingView>
+            }
+            right={
+              agent ? (
+                <NativeMenu source={{ root: 'model', pages }}>
+                  <ModelChip
+                    agentId={agent.id}
+                    harness={agent.harnessId}
+                    model={model?.name ?? agent.name}
+                    effort={effort?.name ?? null}
+                    busy={false}
+                    disabled={false}
+                    anchor={modelAnchor}
+                    onPress={() =>
+                      menu.open('model', modelAnchor, {
+                        placement: 'above',
+                        align: 'end',
+                        width: 340,
+                      })
+                    }
+                  />
+                </NativeMenu>
+              ) : null
+            }
+            footer={
+              <StatusLine
+                hostName={computer.name}
+                platform={computer.platform}
+                state={host.state}
+                folder={project ? project.name : '无项目'}
+                folderPicker
+                folderAnchor={folderAnchor}
+                onFolderPress={() =>
+                  menu.open('projects', folderAnchor, { placement: 'above', align: 'center' })
+                }
+                branch={branch}
+                limits={limitsForModel(agent?.limits ?? [], model?.option)}
+                onLimitPress={() => {
+                  haptic.tap()
+                  setUsageOpen(true)
+                }}
+              />
+            }
+          />
+        </KeyboardAvoidingView>
+      </View>
       <PlanUsageSheet visible={usageOpen} onClose={() => setUsageOpen(false)} agentId={agentId} />
       {menu.render(pages)}
     </View>
@@ -467,6 +481,7 @@ const styles = StyleSheet.create({
   projectMeta: { fontSize: 14, lineHeight: 19, marginTop: 1 },
   projectEnd: { alignItems: 'flex-end', gap: 4 },
   time: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  clip: { flex: 1, overflow: 'hidden' },
   notice: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, gap: 4 },
   noticeText: { fontSize: 13, lineHeight: 18 },
 })

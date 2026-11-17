@@ -1,14 +1,18 @@
 // A session's prompt cache as the composer shows it, by the desktop's rules (shared/prompt-cache.ts,
-// features/prompt-cache): when it expires, whether it is warm, in its last minutes or gone, and a
-// clock that ticks each minute, then each second in its last five, so the countdown stays true.
+// features/prompt-cache): when it expires, whether it is warm, in its last minutes or gone, and the
+// time it has left. The phase changes a few times in a cache's life, so a screen follows it; only
+// the countdown itself ticks, each minute and then each second in the last five, in the one small
+// view that shows it.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { AppState } from 'react-native'
 import type { AgentAccount } from '@shared/agent-host'
 import {
   cacheExpiry,
   cachePhase,
   endingWindow,
   knownExpiry,
+  nextPhaseIn,
   type CachePhase,
   type KnownExpiry,
 } from '@shared/prompt-cache'
@@ -18,25 +22,65 @@ import type { SessionView } from '@shared/thread'
 export const CACHE_NOTICE_MIN_TOKENS = 20_000
 
 const MINUTE = 60_000
+/** The longest delay `setTimeout` takes; a longer one fires at once. */
+const MAX_DELAY = 2 ** 31 - 1
 
-export interface CacheState {
-  expiry: KnownExpiry
-  phase: CachePhase
-  /** Milliseconds left, 0 once expired. */
-  left: number
-}
-
-export function useCacheState(
+/** When the session's cache expires, while its lifetime is known. */
+export function useCacheExpiry(
   session: SessionView | undefined,
   account: AgentAccount | null,
-): CacheState | null {
+): KnownExpiry | null {
   const expiry = session ? knownExpiry(cacheExpiry(session, account)) : null
-  const expiresAt = expiry?.expiresAt ?? null
+  const at = expiry?.expiresAt ?? null
+  const last = expiry?.lastRequestAt ?? null
+  const estimate = expiry?.estimate ?? false
+  const ttl = expiry?.ttl ?? null
+  // The same object while nothing about the cache changed, so what follows it stays still.
+  return useMemo(
+    () =>
+      at !== null && last !== null && ttl !== null
+        ? { lastRequestAt: last, ttl, expiresAt: at, estimate }
+        : null,
+    [at, last, ttl, estimate],
+  )
+}
+
+/** The cache's phase, rendering only as the last minutes start and as the cache expires. */
+export function useCachePhase(expiry: KnownExpiry | null): CachePhase | null {
+  const phaseNow = () =>
+    expiry ? cachePhase(expiry.expiresAt, endingWindow(expiry.ttl), Date.now()) : null
+  const [phase, setPhase] = useState(phaseNow)
+  useEffect(() => {
+    if (!expiry) {
+      setPhase(null)
+      return
+    }
+    const ending = endingWindow(expiry.ttl)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const check = () => {
+      clearTimeout(timer)
+      setPhase(cachePhase(expiry.expiresAt, ending, Date.now()))
+      const wait = nextPhaseIn(expiry.expiresAt, ending, Date.now())
+      if (wait !== null) timer = setTimeout(check, Math.min(wait + 50, MAX_DELAY))
+    }
+    check()
+    // Timers stand still while the phone sleeps.
+    const app = AppState.addEventListener('change', (state) => state === 'active' && check())
+    return () => {
+      clearTimeout(timer)
+      app.remove()
+    }
+  }, [expiry])
+  return phase
+}
+
+/** Milliseconds the cache has left, ticking each minute, then each second in its last five. */
+export function useCacheLeft(expiresAt: number): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (expiresAt === null) return
     let timer: ReturnType<typeof setTimeout>
     const tick = () => {
+      clearTimeout(timer)
       const at = Date.now()
       setNow(at)
       const left = expiresAt - at
@@ -45,14 +89,13 @@ export function useCacheState(
       timer = setTimeout(tick, Math.min(wait, MINUTE))
     }
     tick()
-    return () => clearTimeout(timer)
+    const app = AppState.addEventListener('change', (state) => state === 'active' && tick())
+    return () => {
+      clearTimeout(timer)
+      app.remove()
+    }
   }, [expiresAt])
-  if (!expiry) return null
-  return {
-    expiry,
-    phase: cachePhase(expiry.expiresAt, endingWindow(expiry.ttl), now),
-    left: Math.max(0, expiry.expiresAt - now),
-  }
+  return Math.max(0, expiresAt - now)
 }
 
 /** 「4:59」 in the last minutes, else 「12 分钟」. */
