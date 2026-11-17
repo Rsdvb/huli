@@ -1,5 +1,6 @@
-// One file's change: a file of a session's working tree, read from the computer and read again
-// when the folder changes, or a tool's edit handed over from the conversation.
+// One file's change: a file of a session's working tree (or as one of the branch's commits changed
+// it), read from the computer and read again when the folder changes, or a tool's edit handed over
+// from the conversation.
 
 import { useEffect, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
@@ -27,6 +28,8 @@ export default function DiffScreen() {
     id?: string
     path?: string
     oldPath?: string
+    /** A commit: the file as that commit changed it, against its first parent. */
+    ref?: string
   }>()
   const { c, s } = useSessionTokens()
   const host = useHost()
@@ -41,6 +44,7 @@ export default function DiffScreen() {
   const ready = changes.status !== null || changes.error !== null
   const connected = host.state.kind === 'connected'
   const oldPath = params.oldPath || null
+  const ref = params.ref || null
   const [shown, setShown] = useState<Shown | null>(null)
   const [attempt, setAttempt] = useState(0)
 
@@ -65,7 +69,7 @@ export default function DiffScreen() {
           projectPath: folder,
           path,
           oldPath,
-          ref: null,
+          ref,
         })
         if (!live) return
         if (file.binary) return setShown({ kind: 'note', text: '二进制文件，没法显示逐行改动。' })
@@ -79,7 +83,7 @@ export default function DiffScreen() {
     return () => {
       live = false
     }
-  }, [handed, folder, path, oldPath, connected, ready, link, updatedAt, attempt])
+  }, [handed, folder, path, oldPath, ref, connected, ready, link, updatedAt, attempt])
 
   const missing = params.key
     ? !handed && '这个改动已经不在了，请回到对话里再点开。'

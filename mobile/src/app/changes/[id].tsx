@@ -1,105 +1,54 @@
-// The files changed in the folder a session works in, its worktree's or its project's, as the
-// computer's git sees them now; a file opens to its diff.
+// The git panel of the folder a session works in, its worktree's or its project's, as the desktop's
+// branch popover and git dialogs offer it: the worktree, the branch with Pull and Push (or Publish),
+// the commits a pull brings, the pull request, the uncommitted files with Commit and Discard, and
+// the branch's commits. A file opens to its diff; the branch opens the branch picker.
 
 import { useMemo, type ReactElement } from 'react'
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
-import type { ChangeStatus, ChangedFile, GitStatus } from '@shared/git'
-import { sessionFolder, useChanges } from '../../git'
+import type { ChangedFile } from '@shared/git'
+import {
+  CommitSheet,
+  CreatePrSheet,
+  LogSheet,
+  PublishBranchSheet,
+  PublishRepoSheet,
+} from '../../components/git/GitSheets'
+import {
+  CommitsPart,
+  FileRow,
+  FolderFooter,
+  IncomingPart,
+  PillButton,
+  PrPart,
+  Separator,
+  SyncCard,
+} from '../../components/git/GitParts'
+import { useGitSteps } from '../../components/git/useGitSteps'
+import { WorktreeCard } from '../../components/git/WorktreeCard'
+import { sessionFolder, useChanges, useCurrentPr, useGitRunning, useGitTools } from '../../git'
 import { useHost, useLink } from '../../host'
-import { baseName, dirName } from '../../ui/session/format'
+import { showMenu } from '../../ui/session/feedback'
+import { baseName } from '../../ui/session/format'
+import { GI } from '../../ui/session/gitIcons'
 import { GlassHeader } from '../../ui/session/GlassHeader'
-import { FileMark, G, Icon } from '../../ui/session/icons'
+import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
+import { RoundButton } from '../../ui/session/Press'
 import { StateView } from '../../ui/session/StateView'
 import { Counts } from '../../ui/session/TurnChanges'
 
-type Tone = 'added' | 'changed' | 'moved' | 'removed'
-
-const STATUS: Record<ChangeStatus, { mark: string; label: string; tone: Tone }> = {
-  added: { mark: 'A', label: '新增', tone: 'added' },
-  untracked: { mark: 'U', label: '新文件', tone: 'added' },
-  modified: { mark: 'M', label: '修改', tone: 'changed' },
-  typechange: { mark: 'T', label: '类型改变', tone: 'changed' },
-  renamed: { mark: 'R', label: '重命名', tone: 'moved' },
-  copied: { mark: 'C', label: '复制', tone: 'moved' },
-  deleted: { mark: 'D', label: '删除', tone: 'removed' },
-  conflicted: { mark: '!', label: '冲突', tone: 'removed' },
-}
-
-function branchText(status: GitStatus): string {
-  if (status.head.branch) return status.head.branch
-  if (status.head.detached && status.head.oid) return `分离于 ${status.head.oid.slice(0, 7)}`
-  return '还没有提交'
-}
-
-function FileRow(props: { file: ChangedFile; first: boolean; last: boolean; onPress(): void }) {
-  const { c, s } = useSessionTokens()
-  const { file } = props
-  const status = STATUS[file.status]
-  const tone = {
-    added: { color: c.added, bg: c.addedBg },
-    changed: { color: c.warning, bg: s.warningSoft },
-    moved: { color: c.tint, bg: c.tintSoft },
-    removed: { color: c.removed, bg: c.removedBg },
-  }[status.tone]
-  const dir = dirName(file.path)
-  const counted = file.insertions !== null && file.deletions !== null
-  return (
-    <Pressable
-      onPress={props.onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${status.label} ${file.path}`}
-      style={({ pressed }) => [
-        styles.file,
-        {
-          backgroundColor: pressed ? c.fill : s.dockCard,
-          borderTopLeftRadius: props.first ? 16 : 0,
-          borderTopRightRadius: props.first ? 16 : 0,
-          borderBottomLeftRadius: props.last ? 16 : 0,
-          borderBottomRightRadius: props.last ? 16 : 0,
-        },
-      ]}
-    >
-      <FileMark path={file.path} size={17} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text
-          style={[
-            styles.name,
-            {
-              color: c.text,
-              textDecorationLine: file.status === 'deleted' ? 'line-through' : 'none',
-            },
-          ]}
-          numberOfLines={1}
-        >
-          {baseName(file.path)}
-        </Text>
-        {dir || file.oldPath ? (
-          <Text
-            style={[styles.dir, { color: c.textTertiary }]}
-            numberOfLines={1}
-            ellipsizeMode="head"
-          >
-            {file.oldPath ? `${file.oldPath} → ` : ''}
-            {dir}
-          </Text>
-        ) : null}
-      </View>
-      {counted && (file.insertions || file.deletions) ? (
-        <Counts insertions={file.insertions!} deletions={file.deletions!} />
-      ) : null}
-      <View style={[styles.mark, { backgroundColor: tone.bg }]}>
-        <Text style={[styles.markText, { color: tone.color }]}>{status.mark}</Text>
-      </View>
-      <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
-    </Pressable>
-  )
-}
-
 export default function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { c, s } = useSessionTokens()
+  const { c } = useSessionTokens()
   const host = useHost()
   const link = useLink()
   const summary = host.sessions.get(id)
@@ -107,6 +56,11 @@ export default function ChangesScreen() {
   const changes = useChanges(link, folder)
   const { status, files, error } = changes
   const connected = host.state.kind === 'connected'
+  const tools = useGitTools(link, connected)
+  const gh = tools?.gh.state ?? null
+  const current = useCurrentPr(link, status?.repo ? status : null)
+  const running = useGitRunning(folder)
+  const steps = useGitSteps(link, folder, status, current.pr !== null)
 
   const totals = useMemo(() => {
     let insertions = 0
@@ -123,6 +77,41 @@ export default function ChangesScreen() {
       pathname: '/diff',
       params: { id, path: file.path, ...(file.oldPath ? { oldPath: file.oldPath } : {}) },
     })
+
+  const discard = (paths: string[]) => {
+    const name = paths.length === 1 ? baseName(paths[0]!) : ''
+    Alert.alert(
+      paths.length === 1 ? `丢弃 ${name} 的更改？` : `丢弃 ${paths.length} 个文件的更改？`,
+      paths.length === 1
+        ? '文件会恢复到上次提交时的样子；如果是新文件，则会被删除。此操作无法撤销。'
+        : '文件会恢复到上次提交时的样子，新文件会被删除。此操作无法撤销。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '丢弃',
+          style: 'destructive',
+          onPress: () => void steps.run({ kind: 'discard', paths }),
+        },
+      ],
+    )
+  }
+
+  const blocked = !status || status.changes.conflicted > 0 || !!status.operation
+  const fileMenu = (file: ChangedFile) =>
+    showMenu(file.path, [
+      { label: '打开差异', onPress: () => open(file) },
+      ...(blocked || file.status === 'conflicted'
+        ? []
+        : [
+            {
+              label: '提交…',
+              onPress: () => steps.setSheet({ kind: 'commit', paths: [file.path] }),
+            },
+          ]),
+      ...(running
+        ? []
+        : [{ label: '丢弃', destructive: true, onPress: () => discard([file.path]) }]),
+    ])
 
   let body: ReactElement
   if (!summary) {
@@ -141,7 +130,16 @@ export default function ChangesScreen() {
       <StateView loading />
     )
   } else if (!status.repo) {
-    body = <StateView text="这个文件夹不是 git 仓库。" icon={G.folder} />
+    body = (
+      <View style={{ flex: 1 }}>
+        {summary.worktree ? (
+          <View style={styles.pad}>
+            <WorktreeCard sessionId={id} worktree={summary.worktree} />
+          </View>
+        ) : null}
+        <StateView text="这个文件夹不是 git 仓库。" icon={G.folder} />
+      </View>
+    )
   } else {
     body = (
       <FlatList
@@ -153,13 +151,10 @@ export default function ChangesScreen() {
             first={index === 0}
             last={index === files.length - 1}
             onPress={() => open(item)}
+            onLongPress={() => fileMenu(item)}
           />
         )}
-        ItemSeparatorComponent={() => (
-          <View style={{ backgroundColor: s.dockCard }}>
-            <View style={[styles.separator, { backgroundColor: c.border }]} />
-          </View>
-        )}
+        ItemSeparatorComponent={Separator}
         refreshControl={
           <RefreshControl
             refreshing={false}
@@ -168,24 +163,58 @@ export default function ChangesScreen() {
           />
         }
         ListHeaderComponent={
-          <View style={styles.summary}>
-            <View style={styles.branch}>
-              <Icon icon={G.branch} size={15} color={c.textSecondary} />
-              <Text style={[styles.branchText, { color: c.text }]} numberOfLines={1}>
-                {branchText(status)}
-              </Text>
+          <View style={styles.header}>
+            {summary.worktree ? <WorktreeCard sessionId={id} worktree={summary.worktree} /> : null}
+            <SyncCard
+              status={status}
+              gh={gh}
+              running={running}
+              onSwitch={() => router.push({ pathname: '/branches/[id]', params: { id } })}
+              onPull={() => void steps.run({ kind: 'pull' })}
+              onPush={() => steps.pushNow()}
+            />
+            <IncomingPart link={link} status={status} />
+            <PrPart
+              status={status}
+              pr={current.pr}
+              loading={current.loading}
+              error={current.error}
+              gh={gh}
+              onRetry={current.reload}
+              onCreate={() => steps.setSheet({ kind: 'createPr' })}
+            />
+            <View style={styles.changesHead}>
+              <Text style={[styles.changesTitle, { color: c.text }]}>更改</Text>
+              {files.length > 0 ? (
+                <>
+                  <Text style={[styles.total, { color: c.textSecondary }]}>
+                    {files.length} 个文件
+                  </Text>
+                  <Counts insertions={totals.insertions} deletions={totals.deletions} />
+                </>
+              ) : null}
+              <View style={styles.flex} />
+              {files.length > 0 ? (
+                <>
+                  <PillButton
+                    label="全部丢弃"
+                    icon={GI.discard}
+                    danger
+                    disabled={running !== null}
+                    busy={running === 'discard'}
+                    onPress={() => discard(files.map((f) => f.path))}
+                  />
+                  <PillButton
+                    label="提交…"
+                    icon={G.commit}
+                    filled
+                    disabled={blocked || running !== null}
+                    busy={running === 'commit'}
+                    onPress={() => steps.setSheet({ kind: 'commit', paths: null })}
+                  />
+                </>
+              ) : null}
             </View>
-            {files.length > 0 ? (
-              <View style={styles.totals}>
-                <Text style={[styles.total, { color: c.textSecondary }]}>
-                  {files.length} 个文件
-                </Text>
-                <Counts insertions={totals.insertions} deletions={totals.deletions} />
-                {status.stale ? (
-                  <Text style={[styles.total, { color: c.textTertiary }]}>· 可能不是最新</Text>
-                ) : null}
-              </View>
-            ) : null}
             {error ? <Text style={[styles.total, { color: c.danger }]}>{error}</Text> : null}
           </View>
         }
@@ -195,11 +224,18 @@ export default function ChangesScreen() {
             <Text style={[styles.emptyText, { color: c.textSecondary }]}>没有未提交的改动</Text>
           </View>
         }
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
+        ListFooterComponent={
+          <View style={styles.footer}>
+            <CommitsPart link={link} status={status} sessionId={id} />
+            <FolderFooter status={status} />
+          </View>
+        }
+        contentContainerStyle={styles.list}
       />
     )
   }
 
+  const canFetch = !!status?.remote && running === null && connected
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -210,30 +246,86 @@ export default function ChangesScreen() {
             ? `${baseName(summary.projectPath)}${summary.worktree ? ' · 工作树' : ''}`
             : null
         }
+        right={
+          status?.repo ? (
+            <RoundButton
+              tone="glass"
+              size={44}
+              {...(running === 'fetch' ? {} : { systemImage: GI.fetch.sf })}
+              disabled={!canFetch}
+              onPress={() => void steps.run({ kind: 'fetch' })}
+              accessibilityLabel={!status.remote ? '此仓库没有远程仓库' : '抓取'}
+            >
+              {running === 'fetch' ? (
+                <ActivityIndicator size="small" color={c.text} />
+              ) : (
+                <Icon icon={GI.fetch} size={17} color={c.text} weight="semibold" />
+              )}
+            </RoundButton>
+          ) : null
+        }
       />
       {body}
+      {status?.repo && files ? (
+        <>
+          <CommitSheet
+            visible={steps.sheet?.kind === 'commit'}
+            status={status}
+            files={files}
+            paths={steps.sheet?.kind === 'commit' ? steps.sheet.paths : null}
+            steps={steps}
+            onClose={() => steps.setSheet(null)}
+          />
+          <CreatePrSheet
+            visible={steps.sheet?.kind === 'createPr'}
+            link={link}
+            status={status}
+            steps={steps}
+            onClose={() => steps.setSheet(null)}
+            onCreated={current.set}
+          />
+          <PublishBranchSheet
+            visible={steps.sheet?.kind === 'publishBranch'}
+            link={link}
+            status={status}
+            steps={steps}
+            onClose={() => steps.setSheet(null)}
+          />
+          <PublishRepoSheet
+            visible={steps.sheet?.kind === 'publishRepo'}
+            status={status}
+            tools={tools}
+            steps={steps}
+            onClose={() => steps.setSheet(null)}
+          />
+          <LogSheet
+            visible={steps.sheet?.kind === 'log'}
+            title={steps.sheet?.kind === 'log' ? steps.sheet.title : ''}
+            log={steps.sheet?.kind === 'log' ? steps.sheet.log : ''}
+            onClose={() => steps.setSheet(null)}
+          />
+        </>
+      ) : null}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  summary: { paddingHorizontal: 4, paddingTop: 8, paddingBottom: 14, gap: 6 },
-  branch: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  branchText: { fontSize: 17, fontWeight: '600', flexShrink: 1 },
-  totals: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  total: { fontSize: 13 },
-  file: {
+  flex: { flex: 1 },
+  pad: { paddingHorizontal: 16, paddingTop: 8 },
+  list: { paddingHorizontal: 16, paddingBottom: 40 },
+  header: { paddingTop: 8, paddingBottom: 10 },
+  changesHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
-    paddingHorizontal: 14,
-    minHeight: 58,
+    gap: 8,
+    paddingHorizontal: 4,
+    paddingTop: 6,
+    flexWrap: 'wrap',
   },
-  name: { fontSize: 15, lineHeight: 20, fontWeight: '500' },
-  dir: { fontSize: 12, lineHeight: 16, marginTop: 1 },
-  mark: { width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  markText: { fontSize: 11, fontWeight: '700' },
-  separator: { height: StyleSheet.hairlineWidth, marginLeft: 46 },
-  empty: { alignItems: 'center', gap: 10, paddingTop: 64 },
+  changesTitle: { fontSize: 17, fontWeight: '600' },
+  total: { fontSize: 13 },
+  empty: { alignItems: 'center', gap: 10, paddingTop: 36, paddingBottom: 24 },
   emptyText: { fontSize: 15 },
+  footer: { paddingTop: 16 },
 })
