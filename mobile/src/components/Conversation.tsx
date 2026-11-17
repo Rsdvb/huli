@@ -15,6 +15,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native'
 import type { ThreadState } from '@shared/thread'
+import type { WritableStore } from '../select'
 import { useThreadSelector, type ThreadView } from '../thread'
 import { countRender } from '../ui/renders'
 import { haptic } from '../ui/session/feedback'
@@ -27,6 +28,8 @@ import { ThreadRow } from './EntryView'
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
+// Points a millisecond a scroll must move to count as a fling.
+const FLING = 1.2
 
 const NO_ROWS: Row[] = []
 const selectThread = (thread: ThreadState | null) => thread
@@ -45,6 +48,8 @@ export function Conversation(props: {
   /** With no older page, the sub-session's first line names the session it started from. */
   fromParent: boolean
   paddingBottom: number
+  /** Set while the conversation scrolls fast. */
+  scrolling?: WritableStore<boolean>
 }) {
   countRender('Conversation')
   const { c } = useSessionTokens()
@@ -69,11 +74,33 @@ export function Conversation(props: {
     seenNewest.current = newest
   }, [newest, away])
 
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = event.nativeEvent.contentOffset.y > AWAY
-    setAway((was) => (was === next ? was : next))
-    if (!next) setFresh(false)
-  }, [])
+  // A fling: what floats over the conversation's top steps aside until it settles.
+  const { scrolling } = props
+  const last = useRef({ y: 0, at: 0 })
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (settle.current) clearTimeout(settle.current)
+    },
+    [],
+  )
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = event.nativeEvent.contentOffset.y
+      const next = y > AWAY
+      setAway((was) => (was === next ? was : next))
+      if (!next) setFresh(false)
+      if (!scrolling) return
+      const now = Date.now()
+      const speed = Math.abs(y - last.current.y) / Math.max(1, now - last.current.at)
+      last.current = { y, at: now }
+      if (speed < FLING) return
+      scrolling.set(true)
+      if (settle.current) clearTimeout(settle.current)
+      settle.current = setTimeout(() => scrolling.set(false), 450)
+    },
+    [scrolling],
+  )
 
   const toBottom = useCallback(() => {
     haptic.tap()

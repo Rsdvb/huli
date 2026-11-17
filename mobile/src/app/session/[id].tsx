@@ -46,7 +46,8 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { Conversation } from '../../components/Conversation'
-import { PlanChip } from '../../components/entries/PlanCards'
+import { PLAN_PILL_ROOM, PlanPill, pinnedPlan, planPage } from '../../components/entries/PlanCards'
+import { createStore } from '../../select'
 import {
   cutNoticeOf,
   OutOfCreditStrip,
@@ -210,6 +211,9 @@ export default function SessionScreen() {
   const moreAnchor = useRef<ViewHandle>(null)
   const modeAnchor = useRef<ViewHandle>(null)
   const modelAnchor = useRef<ViewHandle>(null)
+  const planAnchor = useRef<ViewHandle>(null)
+  // Whether the conversation is flung, which only the plan's pill reads.
+  const scrolling = useMemo(() => createStore(false), [])
   const [contextOpen, setContextOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   // Another agent picked to take over with the next message, and the options it starts with.
@@ -269,6 +273,8 @@ export default function SessionScreen() {
     useCallback((thread: ThreadState | null) => latestPlan(thread, view.plan), [view.plan]),
     sameFields,
   )
+  const planRunning = ownTurn && running
+  const pinned = pinnedPlan(plan, planRunning)
 
   // What waits: the thread's own cards, and those on pages not read yet, oldest first.
   const waits = useThreadSelector(view, threadWaits, sameItems)
@@ -708,6 +714,8 @@ export default function SessionScreen() {
         return titlePages?.(page) ?? null
       case 'more-menu':
         return moreMenu()
+      case 'plan':
+        return planPage(pinned, planRunning)
       case 'attach':
         return attachPages.attach
       case 'mention':
@@ -767,7 +775,10 @@ export default function SessionScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.outboxOnly,
-          { paddingTop: headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) },
+          {
+            paddingTop:
+              headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0),
+          },
         ]}
         keyboardDismissMode="interactive"
       >
@@ -785,7 +796,10 @@ export default function SessionScreen() {
         working={working}
         pending={outbox}
         fromParent={summary?.origin === 'user' && !!summary.parentId}
-        paddingBottom={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0)}
+        paddingBottom={
+          headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0)
+        }
+        scrolling={scrolling}
       />
     )
     // The rows' file references open the folder's files.
@@ -808,8 +822,6 @@ export default function SessionScreen() {
         <KeyboardGestureArea interpolator="ios" style={{ flex: 1 }}>
           {body}
         </KeyboardGestureArea>
-
-        <PlanChip plan={plan} running={ownTurn && running} />
 
         {(requests.length > 0 ||
           handBack ||
@@ -1076,6 +1088,18 @@ export default function SessionScreen() {
       />
       {summary && chips ? (
         <SessionChips summary={summary} top={headerHeight} onOpenSession={openSession} />
+      ) : null}
+      {pinned && hasThread ? (
+        <PlanPill
+          items={pinned}
+          running={planRunning}
+          top={headerHeight + 6 + (chips ? CHIPS_HEIGHT : 0) + (linkDown ? 42 : 0)}
+          anchor={planAnchor}
+          scrolling={scrolling}
+          onPress={() =>
+            menu.open('plan', planAnchor, { placement: 'below', align: 'center', width: 340 })
+          }
+        />
       ) : null}
       {linkDown && hasThread && (
         <View
