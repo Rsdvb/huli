@@ -87,6 +87,19 @@ export default defineConfig([
     rules: { 'kettu/no-color-literals': 'error' },
   },
   {
+    // Huli's phone app, React Native under Expo: the hooks rules hold as in the renderer, Metro
+    // takes an image only through require(), and leaving a prop out of a rest spread is how its
+    // wrappers drop one.
+    files: ['mobile/**/*.{ts,tsx}'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-require-imports': ['error', { allow: ['\\.png$'] }],
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+    },
+  },
+  {
     // shadcn/ui components export their variant helpers next to the component.
     files: ['src/renderer/src/components/ui/**/*.tsx'],
     rules: { 'react-refresh/only-export-components': 'off' },

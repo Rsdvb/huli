@@ -4,7 +4,7 @@
 import type { ColorValue } from 'react-native'
 import type { SFSymbol } from 'expo-symbols'
 
-export function SystemButton(_props: {
+export const SystemButton: (props: {
   systemImage: SFSymbol
   size: number
   label: string
@@ -12,6 +12,4 @@ export function SystemButton(_props: {
   color?: ColorValue
   disabled?: boolean
   onPress(): void
-}) {
-  return null
-}
+}) => null = () => null

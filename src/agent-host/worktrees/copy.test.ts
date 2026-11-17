@@ -58,7 +58,8 @@ describe('checkIncludeEntry', () => {
   })
 })
 
-describe('copyLocalFiles', () => {
+// Runs git for the project and its worktree, which takes seconds on a busy Windows machine.
+describe('copyLocalFiles', { timeout: 30_000 }, () => {
   const exec = createExec(() => process.env).exec
   let dir: string
   let project: string
@@ -108,7 +109,7 @@ describe('copyLocalFiles', () => {
     await writeFile(path.join(worktree, 'existing.txt'), 'worktree')
     // A link in the worktree that would take a write outside it.
     await linkFolder(outside, path.join(worktree, 'redirect'))
-  })
+  }, 30_000)
 
   afterAll(async () => {
     await rm(dir, { recursive: true, force: true })

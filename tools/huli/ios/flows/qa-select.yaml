@@ -3,15 +3,15 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - tapOn:
-    text: ".*${TITLE}.*"
+    text: '.*${TITLE}.*'
 - waitForAnimationToEnd
 - longPressOn:
     point: ${REPLY}
 - waitForAnimationToEnd
 - takeScreenshot: t01-reply-menu
-- tapOn: "选择文本"
+- tapOn: '选择文本'
 - waitForAnimationToEnd
 - takeScreenshot: t02-select-sheet
 - longPressOn:
@@ -29,14 +29,14 @@ appId: io.github.rsdvb.huli
     point: ${CODE}
 - waitForAnimationToEnd
 - takeScreenshot: t05-code-menu
-- tapOn: "选择文本"
+- tapOn: '选择文本'
 - waitForAnimationToEnd
 - takeScreenshot: t06-code-sheet
 - tapOn:
     point: 92%,10%
 - waitForAnimationToEnd
 - longPressOn:
-    text: "你好"
+    text: '你好'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: t07-user-menu

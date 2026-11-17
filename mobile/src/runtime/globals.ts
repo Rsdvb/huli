@@ -58,7 +58,7 @@ class Utf8Decoder {
       if (this.fatal) throw new TypeError('The bytes are not valid UTF-8')
       chunk.push(0xfffd)
     }
-    for (let i = 0; i < bytes.length; ) {
+    for (let i = 0; i < bytes.length;) {
       const b0 = bytes[i]!
       let code = -1
       let need = 0
@@ -106,12 +106,14 @@ class Utf8Decoder {
   }
 }
 
-let decoderWorks = false
-try {
-  decoderWorks =
-    typeof g.TextDecoder === 'function' &&
-    new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array([0xe7, 0x8b, 0x90])) === '狐'
-} catch {
-  decoderWorks = false
+function decoderWorks(): boolean {
+  try {
+    return (
+      typeof g.TextDecoder === 'function' &&
+      new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array([0xe7, 0x8b, 0x90])) === '狐'
+    )
+  } catch {
+    return false
+  }
 }
-if (!decoderWorks) g.TextDecoder = Utf8Decoder
+if (!decoderWorks()) g.TextDecoder = Utf8Decoder

@@ -2,11 +2,11 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "Artifacts"
+- tapOn: 'Artifacts'
 - waitForAnimationToEnd
 - takeScreenshot: r01-artifacts
 - tapOn:
-    text: ".*${NAME}.*"
+    text: '.*${NAME}.*'
     index: 0
 - waitForAnimationToEnd
 - takeScreenshot: r02-viewer
@@ -15,7 +15,7 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - takeScreenshot: r03-doc-menu
 - tapOn:
-    text: "选择文本"
+    text: '选择文本'
     optional: true
 - waitForAnimationToEnd
 - longPressOn:

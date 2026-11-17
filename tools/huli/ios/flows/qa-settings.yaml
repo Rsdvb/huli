@@ -2,7 +2,7 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - tapOn:
     point: 7%,10%
 - waitForAnimationToEnd
@@ -21,16 +21,16 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: s02b-settings-3
 - scrollUntilVisible:
     element:
-      text: ".*已配对的电脑.*"
+      text: '.*已配对的电脑.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*已配对的电脑.*"
+      text: '.*已配对的电脑.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*已配对的电脑.*"
+    text: '.*已配对的电脑.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s03-computers
@@ -41,16 +41,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*与锁定.*"
+      text: '.*与锁定.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*与锁定.*"
+      text: '.*与锁定.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*与锁定.*"
+    text: '.*与锁定.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s04-lock
@@ -61,16 +61,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*Agent.*"
+      text: '.*Agent.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*Agent.*"
+      text: '.*Agent.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*Agent.*"
+    text: '.*Agent.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s05-agents
@@ -81,16 +81,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*插件市场.*"
+      text: '.*插件市场.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*插件市场.*"
+      text: '.*插件市场.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*插件市场.*"
+    text: '.*插件市场.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s07-market
@@ -101,16 +101,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*MCP 服务器.*"
+      text: '.*MCP 服务器.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*MCP 服务器.*"
+      text: '.*MCP 服务器.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*MCP 服务器.*"
+    text: '.*MCP 服务器.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s08-mcp
@@ -121,16 +121,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*记忆.*"
+      text: '.*记忆.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*记忆.*"
+      text: '.*记忆.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*记忆.*"
+    text: '.*记忆.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s09-memory
@@ -141,16 +141,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*项目.*"
+      text: '.*项目.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*项目.*"
+      text: '.*项目.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*项目.*"
+    text: '.*项目.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s10-projects
@@ -161,16 +161,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*Artifact 权限.*"
+      text: '.*Artifact 权限.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*Artifact 权限.*"
+      text: '.*Artifact 权限.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*Artifact 权限.*"
+    text: '.*Artifact 权限.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s13-artifact-perm
@@ -181,16 +181,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*设备.*"
+      text: '.*设备.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*设备.*"
+      text: '.*设备.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*设备.*"
+    text: '.*设备.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s11-devices
@@ -201,16 +201,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*用量记录.*"
+      text: '.*用量记录.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*用量记录.*"
+      text: '.*用量记录.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*用量记录.*"
+    text: '.*用量记录.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s12-usage-records
@@ -221,16 +221,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*线路.*"
+      text: '.*线路.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*线路.*"
+      text: '.*线路.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*线路.*"
+    text: '.*线路.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s14-route
@@ -241,16 +241,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*致谢.*"
+      text: '.*致谢.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*致谢.*"
+      text: '.*致谢.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*致谢.*"
+    text: '.*致谢.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s15-licenses
@@ -261,16 +261,16 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*已归档的会话.*"
+      text: '.*已归档的会话.*'
     direction: UP
     optional: true
 - scrollUntilVisible:
     element:
-      text: ".*已归档的会话.*"
+      text: '.*已归档的会话.*'
     direction: DOWN
     optional: true
 - tapOn:
-    text: ".*已归档的会话.*"
+    text: '.*已归档的会话.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: s16-archived

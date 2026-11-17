@@ -29,7 +29,10 @@ const SHOW_BY_MS = 3000
 
 function randomToken(bytes: number): string {
   const values = crypto.getRandomValues(new Uint8Array(bytes))
-  return Array.from(values, (b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[b & 63]).join('')
+  return Array.from(
+    values,
+    (b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[b & 63],
+  ).join('')
 }
 
 export interface ArtifactFrameProps {
@@ -95,10 +98,7 @@ export function ArtifactFrame(props: ArtifactFrameProps) {
     return () => clearTimeout(timer)
   }, [html, crashes])
 
-  const drive = useCallback(
-    (message: DriveMessage) => inject('drive', message),
-    [inject],
-  )
+  const drive = useCallback((message: DriveMessage) => inject('drive', message), [inject])
 
   const sendMode = useCallback(() => {
     drive({

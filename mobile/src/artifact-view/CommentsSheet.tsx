@@ -17,7 +17,12 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { COMMENT_CHARS, isAnswered, type CommentAnchor, type CommentThread } from '@shared/artifact-comments'
+import {
+  COMMENT_CHARS,
+  isAnswered,
+  type CommentAnchor,
+  type CommentThread,
+} from '@shared/artifact-comments'
 import { useHost } from '../host'
 import { LockLayer } from '../lock'
 import { errorText, sessionTitle } from '../sessions'
@@ -151,7 +156,10 @@ export function CommentsSheet(props: {
     list = props.error ? (
       <View style={styles.empty}>
         <Text style={[styles.emptyText, { color: c.danger }]}>没能读到评论：{props.error}</Text>
-        <PressScale onPress={props.onRetry} style={[styles.retry, { backgroundColor: c.fillStrong }]}>
+        <PressScale
+          onPress={props.onRetry}
+          style={[styles.retry, { backgroundColor: c.fillStrong }]}
+        >
           <Text style={{ color: c.text, fontWeight: '600' }}>重试</Text>
         </PressScale>
       </View>
@@ -241,7 +249,9 @@ export function CommentsSheet(props: {
                 disabled={!connected}
                 hitSlop={8}
               >
-                <Text style={[styles.action, { color: connected ? c.tint : c.textTertiary }]}>回复</Text>
+                <Text style={[styles.action, { color: connected ? c.tint : c.textTertiary }]}>
+                  回复
+                </Text>
               </Pressable>
               <Pressable onPress={() => resolve(thread)} disabled={!connected || busy} hitSlop={8}>
                 <Text style={[styles.action, { color: connected ? c.tint : c.textTertiary }]}>

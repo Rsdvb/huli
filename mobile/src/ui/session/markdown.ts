@@ -374,7 +374,7 @@ const RULES: Rule[] = [
     make: (m) => ({ t: 'link', href: m[1]!, c: [{ t: 'text', v: m[1]! }] }),
   },
   {
-    re: /https?:\/\/[^\s<>()（）　-〿＀-￯]+[^\s<>()（）.,;:!?'"　-〿＀-￯]/g,
+    re: /https?:\/\/[^\s<>()（）\u3000-\u303f\uff00-\uffef]+[^\s<>()（）.,;:!?'"\u3000-\u303f\uff00-\uffef]/g,
     make: (m) => ({ t: 'link', href: m[0], c: [{ t: 'text', v: m[0] }] }),
   },
   { re: /\*\*(?=\S)([\s\S]+?)\*\*/g, make: (m) => ({ t: 'strong', c: inline(m[1]!) }) },
