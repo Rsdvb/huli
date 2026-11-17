@@ -105,6 +105,11 @@ export interface NotificationChoices {
   errors: boolean
   /** A routine's run ended, or the routines paused near a plan limit. */
   routines: boolean
+  /**
+   * A plan window crossed 90% used or ran out, once per reset period. Hosts before it was added
+   * leave it out of what they answer and ignore it when it is set.
+   */
+  limits: boolean
   /** Only while the user is not at the host, when the host can tell: the desktop app can. */
   onlyAway: boolean
   /** Titles and text; without them a notification says only which host needs the user. */
@@ -118,6 +123,7 @@ export const DEFAULT_CHOICES: NotificationChoices = {
   turnEnded: true,
   errors: true,
   routines: false,
+  limits: true,
   onlyAway: true,
   details: true,
   muted: [],
@@ -186,6 +192,7 @@ const SWITCHES = [
   'turnEnded',
   'errors',
   'routines',
+  'limits',
   'onlyAway',
   'details',
 ] as const satisfies readonly (keyof NotificationChoices)[]
@@ -269,6 +276,11 @@ export type PushEvent =
   | { kind: 'turn-ended' | 'error' | 'routine-ended'; sessionId: string }
   /** An agent's routines paused near a plan limit; it opens the Routines page. */
   | { kind: 'routine-paused'; agentId: string }
+  /**
+   * A plan window of an agent crossed 90% used or ran out; it opens the agent's usage. A device
+   * from before it was added shows its title and body, or its generic text.
+   */
+  | { kind: 'plan-limit'; agentId: string; window: string }
   /** Removes the notification of the same tag, which no longer applies. */
   | { kind: 'withdraw'; sessionId?: string }
   /** A Live Activity's state: how many requests wait, and the session of the latest. */

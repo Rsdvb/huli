@@ -40,6 +40,7 @@ const KINDS: readonly string[] = [
   'error',
   'routine-ended',
   'routine-paused',
+  'plan-limit',
 ] satisfies AttentionKind[]
 
 const MAX_TEXT = 4000
@@ -78,7 +79,10 @@ function parseAnswer(value: unknown): { optionId: string; label: string } | null
  */
 export function parseAttention(value: unknown): Attention | null {
   if (typeof value !== 'object' || value === null) return null
-  const { kind, sessionId, agentId, title, body, request, front } = value as Record<string, unknown>
+  const { kind, sessionId, agentId, window, title, body, request, front } = value as Record<
+    string,
+    unknown
+  >
   if (typeof kind !== 'string' || !KINDS.includes(kind)) return null
   if (typeof title !== 'string' || typeof body !== 'string') return null
   if (title.length > MAX_TEXT || body.length > MAX_TEXT) return null
@@ -92,6 +96,10 @@ export function parseAttention(value: unknown): Attention | null {
   if (kind === 'routine-paused') {
     if (!isId(agentId)) return null
     attention.agentId = agentId
+  } else if (kind === 'plan-limit') {
+    if (!isId(agentId) || !isId(window)) return null
+    attention.agentId = agentId
+    attention.window = window
   } else {
     if (!isId(sessionId)) return null
     attention.sessionId = sessionId
