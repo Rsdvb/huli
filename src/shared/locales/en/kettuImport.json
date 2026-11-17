@@ -1,0 +1,68 @@
+{
+  "row": {
+    "group": "Moving from Kettu",
+    "name": "Import from Kettu",
+    "description": "Bring the sessions of the official Kettu app on this computer here, with their titles, projects, pins and archives. Kettu's data is only read.",
+    "keywords": "kettu import migrate move sessions projects",
+    "looking": "Looking for Kettu's sessions…",
+    "notFound": "No Kettu data on this computer.",
+    "found": "{{sessions}} · {{projects}} in Kettu",
+    "allImported": "{{sessions}} · {{projects}} in Kettu, all imported",
+    "choose": "Choose sessions…"
+  },
+  "sessions_one": "{{count}} session",
+  "sessions_other": "{{count}} sessions",
+  "projects_one": "{{count}} project",
+  "projects_other": "{{count}} projects",
+  "subagents_one": "{{count}} subagent",
+  "subagents_other": "{{count}} subagents",
+  "error": {
+    "newer": "Kettu's data is from a newer version than this app reads. Update this app and try again.",
+    "unreadable": "Kettu's sessions could not be read.",
+    "scan": "Could not look for Kettu's sessions: {{error}}"
+  },
+  "dialog": {
+    "title": "Import from Kettu",
+    "description": "Found {{sessions}} · {{projects}} in Kettu. The chosen ones come over with their titles, projects, pins and archives, and pick up where they left off.",
+    "selectAll": "Select all",
+    "readOnly": "Kettu's data is only read: its sessions stay there as they are. A session Kettu has open right now comes over as a copy; quit Kettu first to continue the same one. Subagents come back under their session when it is opened here.",
+    "import_one": "Import {{count}} session",
+    "import_other": "Import {{count}} sessions",
+    "importNone": "Import",
+    "importing": "Importing {{done}} of {{total}}…",
+    "importingTitle": "Importing {{done}} of {{total}}: {{title}}",
+    "close": "Close",
+    "noSessions": "Kettu has no sessions to import.",
+    "projectCount": "{{count}}",
+    "toggleProject": "Select every session of {{project}}"
+  },
+  "badge": {
+    "pinned": "Pinned",
+    "archived": "Archived",
+    "imported": "Imported",
+    "subagent": "Comes with its session",
+    "noAgentSession": "Never started",
+    "worktree": "In a Kettu worktree",
+    "scratch": "In Kettu's own folder",
+    "unknownAgent": "Agent not set up here",
+    "missingFolder": "Folder missing"
+  },
+  "result": {
+    "imported_one": "Imported {{count}} session.",
+    "imported_other": "Imported {{count}} sessions.",
+    "forked_one": "{{count}} was open in Kettu and came over as a copy.",
+    "forked_other": "{{count}} were open in Kettu and came over as copies.",
+    "skipped_one": "Skipped {{count}} already here or not importable.",
+    "skipped_other": "Skipped {{count}} already here or not importable.",
+    "failed_one": "{{count}} could not be imported:",
+    "failed_other": "{{count}} could not be imported:",
+    "failure": "{{title}}: {{message}}",
+    "untitled": "Untitled"
+  },
+  "offer": {
+    "text_one": "Kettu has {{count}} session. Import it?",
+    "text_other": "Kettu has {{count}} sessions. Import them?",
+    "detail": "Brings Kettu's sessions here, with their projects. Kettu's data is only read.",
+    "action": "Import"
+  }
+}

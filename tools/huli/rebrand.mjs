@@ -18,8 +18,11 @@ const WORD = /(?<!KettuAI\/)\bKettu\b(?!AI)/g
  */
 const KEEP = ['Based on Kettu', 'based on Kettu', '基于 Kettu', 'Star Kettu']
 
-/** Locale files about Kettu itself, left whole: the prompts to star its repository on GitHub. */
-const KEEP_FILES = new Set(['star.json'])
+/**
+ * Locale files about Kettu itself, left whole: the prompts to star its repository on GitHub, and
+ * the import from an official Kettu, which names that app.
+ */
+const KEEP_FILES = new Set(['star.json', 'kettuImport.json'])
 
 /**
  * Code files whose literal display text is swapped. A string has its Kettu swapped for Huli; a
