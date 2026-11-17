@@ -77,8 +77,37 @@ export interface MenuRow {
   keepOpen?: boolean
 }
 
+/** A choice of a few values, as the effort's levels: a segmented row in a native menu. */
+export interface MenuPicker {
+  label: string
+  options: { key: string; label: string }[]
+  value: string
+  onChange(value: string): void
+  disabled?: boolean
+}
+
 export type MenuEntry =
-  MenuRow | { kind: 'divider'; key: string } | { kind: 'custom'; key: string; node: ReactNode }
+  | MenuRow
+  | { kind: 'divider'; key: string }
+  | {
+      kind: 'custom'
+      key: string
+      node: ReactNode
+      /** What a native menu shows in the node's place; it is left out without one. */
+      picker?: MenuPicker
+    }
+
+/** A menu by its pages, for a control to open as the system's menu or as our popover. */
+export interface MenuSource {
+  /** The first page's id. */
+  root: string
+  pages(id: string): MenuPage | null
+  /**
+   * Opens a page a native menu cannot hold, such as one with a search field, as our popover;
+   * rows that lead there are buttons that call it.
+   */
+  popover?: { pages: readonly string[]; open(page: string): void }
+}
 
 export interface MenuPage {
   /** A page other than the first shows it beside its way back. */

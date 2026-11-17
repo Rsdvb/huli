@@ -36,6 +36,7 @@ import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../ui/session/Popover'
+import { NativeMenu } from '../ui/session/NativeMenu'
 import { StatusLine } from '../ui/session/StatusLine'
 
 export default function NewSession() {
@@ -277,30 +278,48 @@ export default function NewSession() {
           disabled={!agentId}
           bottomInset={insets.bottom}
           onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
+          attachMenu={(anchor) => ({
+            root: 'attach',
+            pages,
+            popover: {
+              pages: ['mention'],
+              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+            },
+          })}
           left={
-            <ModeButton
-              mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
-              busy={false}
-              disabled={false}
-              labelled
-              anchor={modeAnchor}
-              onPress={() => menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })}
-            />
+            <NativeMenu source={{ root: 'mode', pages }}>
+              <ModeButton
+                mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
+                busy={false}
+                disabled={false}
+                labelled
+                anchor={modeAnchor}
+                onPress={() =>
+                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
+                }
+              />
+            </NativeMenu>
           }
           right={
             agent ? (
-              <ModelChip
-                agentId={agent.id}
-                harness={agent.harnessId}
-                model={model?.name ?? agent.name}
-                effort={effort?.name ?? null}
-                busy={false}
-                disabled={false}
-                anchor={modelAnchor}
-                onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
-                }
-              />
+              <NativeMenu source={{ root: 'model', pages }}>
+                <ModelChip
+                  agentId={agent.id}
+                  harness={agent.harnessId}
+                  model={model?.name ?? agent.name}
+                  effort={effort?.name ?? null}
+                  busy={false}
+                  disabled={false}
+                  anchor={modelAnchor}
+                  onPress={() =>
+                    menu.open('model', modelAnchor, {
+                      placement: 'above',
+                      align: 'end',
+                      width: 340,
+                    })
+                  }
+                />
+              </NativeMenu>
             ) : null
           }
           footer={

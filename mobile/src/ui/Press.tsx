@@ -1,10 +1,10 @@
-// The app's pressable: a quick fade and a slight shrink under the finger, and a springy release,
-// as iOS controls do. Reduce Motion keeps the fade and drops the shrink.
+// The app's pressable: a slight shrink and fade under the finger and a springy release, as iOS
+// controls do, run on the UI thread by Reanimated. Reduce Motion keeps the fade and drops the
+// shrink.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   AccessibilityInfo,
-  Animated,
   Pressable,
   StyleSheet,
   type GestureResponderEvent,
@@ -12,6 +12,13 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import Reanimated, {
+  interpolate,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+} from 'react-native-reanimated'
+import { PRESS_IN, PRESS_OUT, spring } from './motion'
 import { motion } from './tokens'
 
 let reduceMotion = false
@@ -51,18 +58,16 @@ export function Press({
   onPressOut,
   ...rest
 }: PressProps) {
-  const pressed = useRef(new Animated.Value(0)).current
-  // Down at once; back up on a spring whose small overshoot reads as the control letting go.
-  const to = (value: number) =>
-    (value
-      ? Animated.timing(pressed, { toValue: 1, duration: 70, useNativeDriver: true })
-      : Animated.spring(pressed, {
-          toValue: 0,
-          useNativeDriver: true,
-          speed: 28,
-          bounciness: reduceMotion ? 0 : 7,
-        })
-    ).start()
+  const reduce = useReducedMotion()
+  const pressed = useSharedValue(0)
+  const shrink = scale && !reduce ? motion.pressScale : 1
+  const body = useAnimatedStyle(() => ({
+    opacity: highlight ? 1 : interpolate(pressed.value, [0, 1], [1, motion.pressOpacity], 'clamp'),
+    transform: [{ scale: interpolate(pressed.value, [0, 1], [1, shrink]) }],
+  }))
+  const wash = useAnimatedStyle(() => ({
+    opacity: interpolate(pressed.value, [0, 1], [0, 1], 'clamp'),
+  }))
 
   return (
     <Pressable
@@ -70,56 +75,23 @@ export function Press({
       disabled={disabled}
       style={containerStyle}
       onPressIn={(event: GestureResponderEvent) => {
-        to(1)
+        pressed.value = spring(1, PRESS_IN, reduce)
         onPressIn?.(event)
       }}
       onPressOut={(event: GestureResponderEvent) => {
-        to(0)
+        pressed.value = spring(0, PRESS_OUT, reduce)
         onPressOut?.(event)
       }}
     >
-      <Animated.View
-        style={[
-          style,
-          disabled
-            ? { opacity: 0.4 }
-            : {
-                opacity: highlight
-                  ? 1
-                  : pressed.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [1, motion.pressOpacity],
-                      extrapolate: 'clamp',
-                    }),
-                transform: [
-                  {
-                    scale: pressed.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [1, scale && !reduceMotion ? motion.pressScale : 1],
-                    }),
-                  },
-                ],
-              },
-        ]}
-      >
+      <Reanimated.View style={[style, disabled ? { opacity: 0.4 } : body]}>
         {highlight && !disabled ? (
-          <Animated.View
+          <Reanimated.View
             pointerEvents="none"
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                backgroundColor: highlight,
-                opacity: pressed.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, 1],
-                  extrapolate: 'clamp',
-                }),
-              },
-            ]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: highlight }, wash]}
           />
         ) : null}
         {children}
-      </Animated.View>
+      </Reanimated.View>
     </Pressable>
   )
 }

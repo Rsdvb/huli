@@ -2,7 +2,7 @@
 // delete. The list, the archive and a session's own menu each offer their part of it.
 
 import { useState, type ReactNode } from 'react'
-import { Alert } from 'react-native'
+import { ActionSheetIOS, Alert, Platform } from 'react-native'
 import type { SessionSummary } from '@shared/agent-host'
 import { useHost } from '../host'
 import { errorText, sessionTitle } from '../sessions'
@@ -132,7 +132,20 @@ export function useSessionActions(
   return {
     open: (summary) => {
       setTarget(summary)
-      setSheet(true)
+      // iOS has the system's own action sheet, glass on iOS 26; elsewhere ours.
+      if (Platform.OS !== 'ios') return setSheet(true)
+      const list = [...(extra?.(summary) ?? []), ...items(summary)]
+      const destructive = list.findIndex((item) => item.destructive)
+      haptic.tap()
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: sessionTitle(summary),
+          options: [...list.map((item) => item.label), '取消'],
+          cancelButtonIndex: list.length,
+          ...(destructive >= 0 ? { destructiveButtonIndex: destructive } : {}),
+        },
+        (index) => list[index]?.onPress(),
+      )
     },
     togglePin: (s) =>
       run('没能置顶', () =>

@@ -4,10 +4,9 @@
 // frosted blur the app used before, Android a translucent fill, and Reduce Transparency an opaque
 // surface on either.
 
-import { useEffect, useRef, useState, type ComponentRef, type ReactNode, type Ref } from 'react'
+import { useEffect, useId, useState, type ComponentRef, type ReactNode, type Ref } from 'react'
 import {
   AccessibilityInfo,
-  Animated,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,6 +17,8 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import Reanimated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated'
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { BlurView } from 'expo-blur'
 import {
   GlassContainer,
@@ -25,8 +26,10 @@ import {
   isGlassEffectAPIAvailable,
   isLiquidGlassAvailable,
 } from 'expo-glass-effect'
+import type { SFSymbol } from 'expo-symbols'
 import { haptic } from './haptics'
-import { useReduceMotion } from './Press'
+import { PRESS_IN, PRESS_OUT, spring, useReducedMotion } from './motion'
+import { SystemButton } from './SystemButton'
 import { motion, size as sizes, useTokens } from './tokens'
 
 /** Whether the system's Liquid Glass can be drawn at all, which never changes while the app runs. */
@@ -202,6 +205,29 @@ export function GlassBackdrop(props: {
 }
 
 /**
+ * The soft edge iOS 26 gives a scroll view under floating glass controls in place of a bar: the
+ * screen's color, strong under the status bar and fading out below the controls.
+ */
+export function ScrollEdge(props: { color: string; height: number }) {
+  // useId's colons do not survive in an SVG url().
+  const id = `edge${useId().replace(/\W/g, '')}`
+  return (
+    <View pointerEvents="none" style={[styles.edge, { height: props.height }]}>
+      <Svg width="100%" height="100%">
+        <Defs>
+          <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={props.color} stopOpacity={0.94} />
+            <Stop offset="0.45" stopColor={props.color} stopOpacity={0.7} />
+            <Stop offset="1" stopColor={props.color} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${id})`} />
+      </Svg>
+    </View>
+  )
+}
+
+/**
  * Neighbors that melt together as they come within `spacing` of each other, as the tab bar and its
  * round button do while one gives way to the other. A plain view without Liquid Glass.
  */
@@ -232,6 +258,13 @@ export interface GlassButtonProps extends Omit<PressableProps, 'style' | 'childr
   outerStyle?: StyleProp<ViewStyle>
   /** No tap haptic, for a button whose action has its own. */
   silent?: boolean
+  /**
+   * The icon as an SF Symbol: with Liquid Glass the button is then the system's own, which draws
+   * the symbol itself in place of the children.
+   */
+  systemImage?: SFSymbol
+  /** The symbol's color in the system's button; its label color by default. */
+  symbolColor?: ColorValue
   children?: ReactNode
   ref?: Ref<ComponentRef<typeof View>>
 }
@@ -249,6 +282,8 @@ export function GlassButton(props: GlassButtonProps) {
     style,
     outerStyle,
     silent,
+    systemImage,
+    symbolColor,
     children,
     disabled,
     onPress,
@@ -258,17 +293,30 @@ export function GlassButton(props: GlassButtonProps) {
     ...rest
   } = props
   const mode = useGlassMode()
-  const reduce = useReduceMotion()
-  const scale = useRef(new Animated.Value(1)).current
+  const reduce = useReducedMotion()
+  const scale = useSharedValue(1)
   const native = mode === 'liquid'
+  const pressStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }))
   const to = (value: number) => {
     if (native || reduce) return
-    Animated.spring(scale, {
-      toValue: value,
-      useNativeDriver: true,
-      speed: value < 1 ? 50 : 30,
-      bounciness: value < 1 ? 0 : 8,
-    }).start()
+    scale.value = spring(value, value < 1 ? PRESS_IN : PRESS_OUT, reduce)
+  }
+  // The system's own glass button where it has the icon: its glass, press and feel are iOS's.
+  if (native && systemImage && !capsule && onPress) {
+    return (
+      <SystemButton
+        systemImage={systemImage}
+        size={size}
+        label={rest.accessibilityLabel ?? ''}
+        {...(tint ? { tint } : {})}
+        {...(symbolColor ? { color: symbolColor } : {})}
+        {...(disabled ? { disabled: true } : {})}
+        onPress={() => {
+          if (!silent) haptic.tap()
+          onPress(undefined as never)
+        }}
+      />
+    )
   }
   return (
     <Pressable
@@ -291,11 +339,11 @@ export function GlassButton(props: GlassButtonProps) {
       }}
     >
       {({ pressed }) => (
-        <Animated.View
-          style={{
-            transform: [{ scale }],
-            opacity: disabled ? 0.38 : pressed && reduce && !native ? motion.pressOpacity : 1,
-          }}
+        <Reanimated.View
+          style={[
+            pressStyle,
+            { opacity: disabled ? 0.38 : pressed && reduce && !native ? motion.pressOpacity : 1 },
+          ]}
         >
           <Glass
             ref={ref}
@@ -312,7 +360,7 @@ export function GlassButton(props: GlassButtonProps) {
           >
             {children}
           </Glass>
-        </Animated.View>
+        </Reanimated.View>
       )}
     </Pressable>
   )
@@ -331,6 +379,7 @@ export function GlassCapsule(
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
+  edge: { position: 'absolute', top: 0, left: 0, right: 0 },
   capsule: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 6 },
   shadow: {
     shadowOpacity: 0.22,
