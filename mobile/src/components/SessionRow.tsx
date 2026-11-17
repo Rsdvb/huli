@@ -7,8 +7,10 @@ import { router } from 'expo-router'
 import Reanimated, { FadeInDown } from 'react-native-reanimated'
 import Svg, { Circle } from 'react-native-svg'
 import { Bot } from 'lucide-react-native'
-import type { PlanProgress, SessionSummary } from '@shared/agent-host'
+import type { PlanProgress, SessionPullRequest, SessionSummary } from '@shared/agent-host'
 import { folder, listTime, sessionState, sessionTitle, type SessionState } from '../sessions'
+import { sessionPullRequests, topPrState } from '../sessionMenu'
+import { PR_STATE_TEXT, PrMark } from '../ui/session/gitIcons'
 import { AgentAvatar, type AvatarBadge } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
@@ -170,6 +172,33 @@ function TaskChip(props: { id: string; title: string }) {
   )
 }
 
+/**
+ * A session's pull requests on its row, as the desktop's badge: the icon of the one that most
+ * needs someone, the count when there are several, and a red dot for failing checks.
+ */
+function PrBadge(props: { prs: SessionPullRequest[] }) {
+  const { c } = useTokens()
+  const { prs } = props
+  const failing = prs.some((pr) => pr.failing)
+  const states = new Set(prs.map((pr) => pr.state))
+  const only = states.size === 1 ? [...states][0] : null
+  const label = [
+    `${prs.length} 个 Pull Request`,
+    only ? (prs.length === 1 ? PR_STATE_TEXT[only] : `全部${PR_STATE_TEXT[only]}`) : null,
+    failing ? `${prs.filter((pr) => pr.failing).length} 个检查失败` : null,
+  ]
+    .filter(Boolean)
+    .join('，')
+  return (
+    <View style={styles.prs} accessibilityRole="image" accessibilityLabel={label}>
+      <PrMark state={topPrState(prs)} size={13} failing={failing} ring={c.bg} />
+      {prs.length > 1 ? (
+        <Text style={[styles.prCount, { color: c.textTertiary }]}>{prs.length}</Text>
+      ) : null}
+    </View>
+  )
+}
+
 export const SessionRow = memo(function SessionRow(props: {
   session: SessionSummary
   /** Its sub-agents, counted by `subagentCounts`. */
@@ -197,6 +226,7 @@ export const SessionRow = memo(function SessionRow(props: {
   const state = sessionState(s)
   const place = s.scratch ? '无项目' : (props.projectName ?? folder(s.projectPath))
   const plan = s.plan && s.plan.total > 0 ? s.plan : null
+  const prs = sessionPullRequests(s)
   const running = s.status === 'running' || s.status === 'starting'
   const since = running ? (s.turnStartedAt ?? null) : null
   const now = useTick(since !== null, 15_000)
@@ -232,6 +262,7 @@ export const SessionRow = memo(function SessionRow(props: {
           {props.subagents && (running || props.subagents.running) ? (
             <SubagentBadge subagents={props.subagents} />
           ) : null}
+          {prs.length > 0 ? <PrBadge prs={prs} /> : null}
           <View style={{ flex: 1 }} />
           {plan && running && !props.snippet ? <PlanRing plan={plan} /> : null}
           <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>{time}</Text>
@@ -356,6 +387,8 @@ const styles = StyleSheet.create({
   subagentText: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
   subagentSpin: { transform: [{ scale: 0.55 }], width: 12, height: 12, marginLeft: -1 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
+  prs: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 2 },
+  prCount: { fontSize: 12, fontVariant: ['tabular-nums'] },
   place: { flexShrink: 1, maxWidth: '55%' },
   shrink: { flexShrink: 1 },
   taskChip: {
