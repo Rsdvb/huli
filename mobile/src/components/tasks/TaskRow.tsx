@@ -57,6 +57,7 @@ export const TaskRow = memo(function TaskRow(props: {
   start?: SwipeAction
   end?: SwipeAction
   onPress(): void
+  /** Where the system gives no context menu (Android), the long press opens the task's menu. */
   onLongPress?(): void
 }) {
   const { c } = useTokens()
@@ -117,7 +118,8 @@ export const TaskRow = memo(function TaskRow(props: {
         .filter(Boolean)
         .join('，')}
       accessibilityHint={props.onLongPress ? '长按查看更多操作' : undefined}
-      style={styles.row}
+      // Opaque, so the row lifts as itself when its context menu opens.
+      style={[styles.row, { backgroundColor: c.bg }]}
     >
       {yours && running ? (
         <YouAvatar waiting={waiting} />
