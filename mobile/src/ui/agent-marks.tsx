@@ -3,7 +3,16 @@
 // back to the agent's initial.
 
 import { useId, type ReactNode } from 'react'
-import { Defs, G, LinearGradient, Path, Stop } from 'react-native-svg'
+import {
+  Circle,
+  ClipPath,
+  Defs,
+  G,
+  LinearGradient,
+  Path,
+  RadialGradient,
+  Stop,
+} from 'react-native-svg'
 import { brand } from './tokens'
 
 export interface MarkInk {
@@ -78,6 +87,66 @@ const COPILOT_EYES = [
 // Grok mark: ACP Registry, https://github.com/agentclientprotocol/registry (Apache-2.0).
 const GROK =
   'M0.58392448,14.9254204 L0.8326,14.66295 C2.004465,13.42985 3.1678,12.2082 2.45814,10.48105 C1.50813,8.1701 2.061355,5.4619 3.820575,3.70057 C5.6495,1.8709 8.3431,1.40957 10.59295,2.336505 C11.0907,2.52161 11.5245,2.785025 11.86295,3.02993 L9.98425,3.89849 C8.235,3.163775 6.23115,3.66355 5.0081,4.88809 C3.354105,6.5426 3.019895,9.4117 4.95835,11.2656 L-0.335,15.99995 C-0.066496,15.62975 0.2538896,15.275934 0.58392448,14.9254204 Z M14.0391,2.288155 L16.33165,2.57749377e-12 L16.20795,0.172288 C14.4658,2.574355 13.6153,3.749045 14.29795,6.6879 C14.76445,8.68415 14.261,10.90255 12.63545,12.53005 C10.5861,14.58325 7.3066,15.0403 4.6059,13.19215 L6.48885,12.3193 C8.2125,12.99705 10.0983,12.69945 11.4536,11.34255 C12.80895,9.9856 13.1133,8.00925 12.4321,6.3647 C12.30265,6.05285 11.9144,5.97455 11.64275,6.1753 L6.102,10.27035 L14.0391,2.288155 Z'
+
+// DimCode mark: ACP Registry, https://github.com/agentclientprotocol/registry (Apache-2.0).
+// Brand color: https://dimagent.cn/dimagent-favicon.svg.
+const DIMCODE =
+  'M3.12109 11.0078H1.99902V5.49316H3.12109V11.0078ZM3.7041 5.49316C4.91979 5.49316 5.31142 5.57449 5.80762 5.7373C6.50208 5.97365 6.85299 6.40958 6.86133 7.04492V9.45605C6.86125 10.207 6.37767 10.6797 5.41016 10.874C4.95546 10.9633 4.69632 11.0078 3.7041 11.0078V10.6064C4.72131 10.6064 4.95994 10.5507 5.34863 10.4404C5.91072 10.2671 6.19576 9.93907 6.2041 9.45605V7.04492C6.20402 6.4883 5.83211 6.13886 5.08789 5.99707C4.74057 5.93405 4.58897 5.89978 3.7041 5.89453V5.49316ZM9.16797 5.49316V11.0078H8.0459V5.49316H9.16797ZM14 6.79297V11.0078H12.8779V8.0791L13.8877 6.79297H14ZM14 5.49316V5.7373L11.3594 8.97852H10.7852L9.74219 6.94531V6.07812H9.86719L11.0723 8.33203L13.4258 5.49316H14Z'
+
+// Google Antigravity mark: ACP Registry, https://github.com/agentclientprotocol/registry (Apache-2.0).
+// Full-color artwork: https://antigravity.google/press.
+const ANTIGRAVITY =
+  'M14.1452 14.6818C14.9937 15.3182 16.2664 14.894 15.0997 13.7273C11.5998 10.3333 12.3421 1 7.99366 1C3.64518 1 4.3876 10.3333 0.887603 13.7273C-0.385123 15 0.993664 15.3182 1.84215 14.6818C5.13002 12.4545 4.9179 8.5303 7.99366 8.5303C11.0694 8.5303 10.8573 12.4545 14.1452 14.6818Z'
+
+// The press artwork lays blurred color fields over the arch, which the desktop draws with SVG
+// filters; react-native-svg has none that hold up on both platforms, so soft radial glows at the
+// same places stand in for them, over the artwork's blue.
+const ANTIGRAVITY_GLOWS = [
+  { tone: 'green', cx: 1, cy: 6, r: 7 },
+  { tone: 'yellow', cx: 5.5, cy: 0.5, r: 5.5 },
+  { tone: 'amber', cx: 8, cy: -1, r: 4 },
+  { tone: 'red', cx: 15, cy: 2.5, r: 6.5 },
+  { tone: 'violet', cx: 14.5, cy: 9, r: 3.5 },
+] as const
+
+function AntigravityBody() {
+  const id = useSvgId()
+  return (
+    <>
+      <Defs>
+        <ClipPath id={`${id}clip`}>
+          <Path d={ANTIGRAVITY} />
+        </ClipPath>
+        {ANTIGRAVITY_GLOWS.map((glow) => (
+          <RadialGradient
+            key={glow.tone}
+            id={`${id}${glow.tone}`}
+            cx={glow.cx}
+            cy={glow.cy}
+            r={glow.r}
+            gradientUnits="userSpaceOnUse"
+          >
+            <Stop stopColor={brand.antigravity[glow.tone]} />
+            <Stop offset=".4" stopColor={brand.antigravity[glow.tone]} />
+            <Stop offset="1" stopColor={brand.antigravity[glow.tone]} stopOpacity={0} />
+          </RadialGradient>
+        ))}
+      </Defs>
+      <G clipPath={`url(#${id}clip)`}>
+        <Path fill={brand.antigravity.blue} d={ANTIGRAVITY} />
+        {ANTIGRAVITY_GLOWS.map((glow) => (
+          <Circle
+            key={glow.tone}
+            cx={glow.cx}
+            cy={glow.cy}
+            r={glow.r}
+            fill={`url(#${id}${glow.tone})`}
+          />
+        ))}
+      </G>
+    </>
+  )
+}
 
 function CodexBody() {
   const id = useSvgId()
@@ -181,6 +250,12 @@ const MARKS: Record<string, Mark> = {
     ),
   },
   grok: { viewBox: '0 0 16 16', Body: ({ ink }) => <Path fill={ink.text} d={GROK} /> },
+  // Cropped to the wordmark, which fills only the middle band of its 16 x 16 box.
+  dimcode: {
+    viewBox: '1.5 1.75 13 13',
+    Body: () => <Path fill={brand.dimcode} d={DIMCODE} />,
+  },
+  antigravity: { viewBox: '0 0 16 16', Body: () => <AntigravityBody /> },
 }
 
 /** The harness an agent belongs to: an added agent's id is its harness's, then `~` and its own. */
@@ -210,6 +285,10 @@ export function agentColor(agentId: string, fallback: string): string {
       return brand.kimi
     case 'pi':
       return brand.piBlue
+    case 'dimcode':
+      return brand.dimcode
+    case 'antigravity':
+      return brand.antigravity.blue
     default:
       return fallback
   }

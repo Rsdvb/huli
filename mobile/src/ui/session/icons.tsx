@@ -1,8 +1,8 @@
 // The session screens' icons, each by its SF Symbol and its Lucide fallback, and the marks no icon
-// set has: an agent's burst, the computer's system and a file's type.
+// set has: an agent's mark, the computer's system and a file's type.
 
 import { Text, View } from 'react-native'
-import Svg, { Line, Rect } from 'react-native-svg'
+import Svg, { Rect } from 'react-native-svg'
 import {
   Apple,
   ArrowRightLeft,
@@ -76,7 +76,7 @@ import {
   Zap,
 } from 'lucide-react-native'
 import type { HarnessId } from '@shared/agents'
-import { markFor } from '../agent-marks'
+import { harnessOf, markFor } from '../agent-marks'
 import type { ToolKind } from '@shared/thread'
 import { extensionOf } from './format'
 import { Icon, type IconSpec } from './Icon'
@@ -166,47 +166,37 @@ export const TOOL_ICONS: Record<ToolKind, IconSpec> = {
   other: { sf: 'wrench.and.screwdriver', lucide: Wrench },
 }
 
-/** An agent's mark: a burst of rays, in its harness's color. */
-export function AgentMark(props: { harness: HarnessId | undefined; size?: number }) {
+/** An agent the phone has no mark for: its initial on a quiet tile, never another agent's mark. */
+function AgentInitial(props: { agentId: string; size: number }) {
   const { c } = useSessionTokens()
-  const size = props.size ?? 16
-  const color =
-    props.harness === 'claude-code'
-      ? c.accent
-      : props.harness === 'codex'
-        ? c.tint
-        : props.harness === 'opencode'
-          ? c.success
-          : c.textSecondary
-  const rays = 12
+  const side = props.size
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      {Array.from({ length: rays }, (_, i) => {
-        const angle = (i / rays) * Math.PI * 2 + 0.12
-        const length = i % 2 === 0 ? 10.5 : 8
-        return (
-          <Line
-            key={i}
-            x1={12 + Math.cos(angle) * 2.2}
-            y1={12 + Math.sin(angle) * 2.2}
-            x2={12 + Math.cos(angle) * length}
-            y2={12 + Math.sin(angle) * length}
-            stroke={color}
-            strokeWidth={2.3}
-            strokeLinecap="round"
-          />
-        )
-      })}
-    </Svg>
+    <View
+      style={{
+        width: side,
+        height: side,
+        borderRadius: Math.round(side * 0.28),
+        backgroundColor: c.fillStrong,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text
+        style={{ color: c.textSecondary, fontSize: Math.round(side * 0.6), fontWeight: '700' }}
+        allowFontScaling={false}
+      >
+        {harnessOf(props.agentId).trim().charAt(0).toUpperCase() || '?'}
+      </Text>
+    </View>
   )
 }
 
-/** An agent's own mark, as the shell draws it, or the burst for a harness without one here. */
+/** An agent's own mark, as the shell draws it, or its initial for a harness without one here. */
 export function AgentGlyph(props: { agentId: string; harness?: HarnessId; size?: number }) {
   const { c, scheme } = useSessionTokens()
   const size = props.size ?? 16
-  const mark = markFor(props.agentId)
-  if (!mark) return <AgentMark harness={props.harness} size={size} />
+  const mark = markFor(props.agentId) ?? (props.harness ? markFor(props.harness) : null)
+  if (!mark) return <AgentInitial agentId={props.agentId} size={size} />
   return (
     <Svg width={size} height={size} viewBox={mark.viewBox}>
       <mark.Body ink={{ scheme, text: c.text }} />
