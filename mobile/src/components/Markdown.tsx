@@ -1,23 +1,40 @@
 // Agents' replies as a phone reads them: comfortable type, headings, lists with hanging indents,
-// quotes, tables that scroll sideways, and code in cards with their language, a copy button and a
-// light tint. A reply still streaming ends in a blinking caret.
+// quotes, tables that scroll sideways with their numbers on the right, and code in cards with their
+// language or file, a copy button and a light tint, long ones folded past 20 lines. Links and
+// inline code that name a file of the session's folder open it. A reply still streaming ends in a
+// blinking caret. A sent prompt's mentions and links read as chips.
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Linking, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
+import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { copyText } from '../ui/session/feedback'
+import {
+  knownFileRef,
+  openFile,
+  useFileRefs,
+  type FileRefsContext,
+} from '../ui/session/fileRefs'
 import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
 import { parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
-import { PressScale } from '../ui/session/Press'
+import { gentle, PressScale } from '../ui/session/Press'
 
 export type MarkdownSize = 'body' | 'compact'
+
+/** How a sent prompt's mentions resolve, and what a chip opens. */
+export interface MarkdownChips {
+  resolve(token: string): MentionTarget | null
+  onOpen(chip: Chip): void
+}
 
 interface Look {
   t: SessionTokens
   color: string
   size: MarkdownSize
   body: TextStyle
+  refs: FileRefsContext | null
+  chips: MarkdownChips | null
 }
 
 const SIZES: Record<MarkdownSize, { fontSize: number; lineHeight: number; gap: number }> = {
@@ -25,8 +42,58 @@ const SIZES: Record<MarkdownSize, { fontSize: number; lineHeight: number; gap: n
   compact: { fontSize: 15, lineHeight: 22, gap: 8 },
 }
 
-function openLink(href: string) {
+/** Blocks longer than this many lines start folded, showing FOLDED_LINES of them. */
+const FOLD_OVER = 20
+const FOLDED_LINES = 7
+
+const SCHEME = /^[a-z][a-z\d+.-]*:/i
+
+/** Opens a link: a file of the session's folder on the file screen, a web address in the browser. */
+function openLink(href: string, refs: FileRefsContext | null) {
+  const local = href !== '' && !href.startsWith('#') && (!SCHEME.test(href) || /^file:/i.test(href))
+  if (local || /^[a-z]:[\\/]/i.test(href)) {
+    const ref = knownFileRef(href, refs)
+    if (ref && refs) openFile(refs.sessionId, ref.path, ref.line)
+    return
+  }
   if (/^(https?:|mailto:)/i.test(href)) void Linking.openURL(href).catch(() => {})
+}
+
+/** A chip's words: a file's name and lines, a folder with its slash, a link's host and path. */
+function chipWords(chip: Chip): string {
+  if (chip.kind === 'link') {
+    const path = chip.path.length > 28 ? `${chip.path.slice(0, 27)}…` : chip.path
+    return `${chip.host}${path}`
+  }
+  return chip.lines ? `${chip.label}:${chip.lines}` : chip.label
+}
+
+/** Text with its mentions and links as chips, when the Markdown reads a sent prompt. */
+function ChipRuns(props: { text: string; look: Look }): ReactNode {
+  const { look } = props
+  const chips = look.chips!
+  const found = findChips(props.text, chips.resolve)
+  if (found.length === 0) return props.text
+  const { c, s } = look.t
+  const out: ReactNode[] = []
+  let at = 0
+  for (const chip of found) {
+    if (chip.from > at) out.push(props.text.slice(at, chip.from))
+    out.push(
+      <Text
+        key={chip.from}
+        onPress={() => chips.onOpen(chip)}
+        accessibilityRole={chip.kind === 'link' ? 'link' : 'button'}
+        accessibilityLabel={props.text.slice(chip.from, chip.to)}
+        style={{ color: c.tint, backgroundColor: s.inlineCode, fontWeight: '500' }}
+      >
+        {` ${chip.kind === 'link' ? '' : chip.kind === 'folder' ? '▸ ' : '@'}${chipWords(chip)} `}
+      </Text>,
+    )
+    at = chip.to
+  }
+  if (at < props.text.length) out.push(props.text.slice(at))
+  return out
 }
 
 function Caret(props: { color: string }) {
@@ -44,8 +111,28 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
   return props.nodes.map((node, i) => {
     switch (node.t) {
       case 'text':
-        return node.v
-      case 'code':
+        return look.chips ? <ChipRuns key={i} text={node.v} look={look} /> : node.v
+      case 'code': {
+        // Code that names a file of the session's folder opens it, as the desktop's file links.
+        const ref = knownFileRef(node.v, look.refs)
+        if (ref && look.refs) {
+          const refs = look.refs
+          return (
+            <Text
+              key={i}
+              onPress={() => openFile(refs.sessionId, ref.path, ref.line)}
+              accessibilityRole="link"
+              style={{
+                fontFamily: MONO,
+                fontSize: look.body.fontSize! - 2.5,
+                backgroundColor: s.inlineCode,
+                color: c.tint,
+              }}
+            >
+              {` ${node.v} `}
+            </Text>
+          )
+        }
         return (
           <Text
             key={i}
@@ -59,6 +146,7 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
             {` ${node.v} `}
           </Text>
         )
+      }
       case 'strong':
         return (
           <Text key={i} style={{ fontWeight: '700' }}>
@@ -78,19 +166,24 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
           </Text>
         )
       case 'link':
+        // A bare address in a sent prompt reads as the composer's link chip.
+        if (look.chips && node.c.length === 1 && node.c[0]!.t === 'text') {
+          const text = node.c[0]!.v
+          if (text === node.href) return <ChipRuns key={i} text={text} look={look} />
+        }
         return (
           <Text
             key={i}
             style={{ color: c.tint }}
-            onPress={() => openLink(node.href)}
+            onPress={() => openLink(node.href, look.refs)}
             accessibilityRole="link"
           >
-            <Runs nodes={node.c} look={look} />
+            <Runs nodes={node.c} look={{ ...look, chips: null }} />
           </Text>
         )
       case 'image':
         return (
-          <Text key={i} style={{ color: c.tint }} onPress={() => openLink(node.href)}>
+          <Text key={i} style={{ color: c.tint }} onPress={() => openLink(node.href, look.refs)}>
             {`［图片${node.alt ? `：${node.alt}` : ''}］`}
           </Text>
         )
@@ -98,20 +191,55 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
   })
 }
 
-function Para(props: { text: string; look: Look; style?: TextStyle; tail?: ReactNode }) {
+function Para(props: {
+  text: string
+  look: Look
+  style?: TextStyle
+  tail?: ReactNode
+  head?: ReactNode
+}) {
   const nodes = useMemo(() => inline(props.text), [props.text])
   return (
     <Text style={[props.look.body, { color: props.look.color }, props.style]}>
+      {props.head}
       <Runs nodes={nodes} look={props.look} />
       {props.tail}
     </Text>
   )
 }
 
-function CodeBlock(props: { lang: string; text: string; look: Look }) {
+const QUOTED = /\b(?:title|file|filename|name)=(?:"([^"]+)"|'([^']+)'|(\S+))/
+const PATHLIKE = /^(?:[\w.~@-]+[\\/])*[\w.@-]*\.[\w-]+$|^(?:[\w.~@-]+[\\/])+[\w.@-]+$/
+
+/** The file a fence names: `title="src/a.ts"`, a path in its meta, or `ts:src/a.ts`. */
+function fenceFileName(language: string, meta: string): string | null {
+  const colon = language.indexOf(':')
+  if (colon > 0 && colon < language.length - 1) return language.slice(colon + 1)
+  if (!meta) return null
+  const quoted = QUOTED.exec(meta)
+  if (quoted) return quoted[1] ?? quoted[2] ?? quoted[3] ?? null
+  for (const word of meta.trim().split(/\s+/)) {
+    if (word.startsWith('{') || word.includes('=')) continue
+    if (PATHLIKE.test(word)) return word
+  }
+  return null
+}
+
+function CodeBlock(props: { lang: string; meta: string; text: string; look: Look }) {
   const { c, s } = props.look.t
   const [copied, setCopied] = useState(false)
-  const tokens = useMemo(() => highlight(props.text, props.lang), [props.text, props.lang])
+  const [folded, setFolded] = useState(true)
+  const colon = props.lang.indexOf(':')
+  const language = colon > 0 ? props.lang.slice(0, colon) : props.lang
+  const file = fenceFileName(props.lang, props.meta)
+  const start = /\bstartLine=(\d+)/.exec(props.meta)
+  const firstLine = start ? Number(start[1]) : null
+  const lines = useMemo(() => props.text.replace(/\n$/, '').split('\n'), [props.text])
+  const foldable = lines.length > FOLD_OVER
+  const shown =
+    foldable && folded ? lines.slice(0, FOLDED_LINES).join('\n') : props.text.replace(/\n$/, '')
+  const shownCount = foldable && folded ? FOLDED_LINES : lines.length
+  const tokens = useMemo(() => highlight(shown, language), [shown, language])
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), 1600)
@@ -120,11 +248,24 @@ function CodeBlock(props: { lang: string; text: string; look: Look }) {
   const copy = () => {
     void copyText(props.text).then(() => setCopied(true))
   }
+  const refs = props.look.refs
+  const fileRef = file ? knownFileRef(file, refs) : null
   return (
     <View style={[styles.code, { backgroundColor: s.code, borderColor: s.codeBorder }]}>
       <View style={[styles.codeHead, { borderBottomColor: s.codeBorder }]}>
-        <Text style={[styles.codeLang, { color: c.textSecondary }]} numberOfLines={1}>
-          {props.lang || '代码'}
+        <Text
+          style={[
+            styles.codeLang,
+            { color: fileRef ? c.tint : c.textSecondary, flexShrink: 1 },
+            file ? { textTransform: 'none' } : null,
+          ]}
+          numberOfLines={1}
+          ellipsizeMode="head"
+          {...(fileRef && refs
+            ? { onPress: () => openFile(refs.sessionId, fileRef.path, firstLine ?? fileRef.line) }
+            : {})}
+        >
+          {file ?? (language || '代码')}
         </Text>
         <PressScale
           onPress={copy}
@@ -143,33 +284,81 @@ function CodeBlock(props: { lang: string; text: string; look: Look }) {
           </Text>
         </PressScale>
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.codeBody}
-      >
-        <Text style={[styles.codeText, { color: c.text }]}>
-          {tokens
-            ? tokens.map((token, i) =>
-                token.kind === 'plain' ? (
-                  token.text
-                ) : (
-                  <Text
-                    key={i}
-                    style={{
-                      color: s.syntax[token.kind],
-                      fontStyle: token.kind === 'comment' ? 'italic' : 'normal',
-                    }}
-                  >
-                    {token.text}
-                  </Text>
-                ),
-              )
-            : props.text}
-        </Text>
-      </ScrollView>
+      <View style={styles.codeRow}>
+        {firstLine !== null && (
+          <Text style={[styles.codeText, styles.gutter, { color: c.textTertiary }]}>
+            {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
+          </Text>
+        )}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[styles.codeBody, firstLine !== null && { paddingLeft: 8 }]}
+        >
+          <Text style={[styles.codeText, { color: c.text }]}>
+            {tokens
+              ? tokens.map((token, i) =>
+                  token.kind === 'plain' ? (
+                    token.text
+                  ) : (
+                    <Text
+                      key={i}
+                      style={{
+                        color: s.syntax[token.kind],
+                        fontStyle: token.kind === 'comment' ? 'italic' : 'normal',
+                      }}
+                    >
+                      {token.text}
+                    </Text>
+                  ),
+                )
+              : shown}
+          </Text>
+        </ScrollView>
+      </View>
+      {foldable && (
+        <Pressable
+          onPress={() => {
+            gentle()
+            setFolded((v) => !v)
+          }}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: !folded }}
+          style={({ pressed }) => [
+            styles.codeMore,
+            { borderTopColor: s.codeBorder, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Icon
+            icon={G.down}
+            size={11}
+            color={c.tint}
+            style={folded ? undefined : { transform: [{ rotate: '180deg' }] }}
+          />
+          <Text style={[styles.codeMoreText, { color: c.tint }]}>
+            {folded ? `再显示 ${lines.length - FOLDED_LINES} 行` : '收起'}
+          </Text>
+        </Pressable>
+      )}
     </View>
   )
+}
+
+// A count, an amount or a measure: an optional sign or currency, digits with separators, a
+// fraction, and a short unit such as %, ms, KB or x.
+const NUMBER = /^[+\-−±~≈]?\s?[$€£¥]?\d[\d,_  ]*(?:\.\d+)?\s?(?:%|[a-zA-Zµ]{1,3}|×)?$/
+
+/** The columns whose body cells are all numbers, empty ones aside, that the Markdown leaves unaligned. */
+function numericColumns(block: Extract<Block, { kind: 'table' }>): Set<number> {
+  const numeric = new Set<number>()
+  for (let column = 0; column < block.head.length; column++) {
+    if (block.align[column]) continue
+    const values = block.rows
+      .map((row) => (row[column] ?? '').replace(/[*`_~]/g, '').trim())
+      .filter((value) => value !== '')
+    if (values.length > 0 && values.every((value) => NUMBER.test(value))) numeric.add(column)
+  }
+  return numeric
 }
 
 /** A rough width for a column, from its longest cell; wide characters count twice. */
@@ -190,9 +379,11 @@ function Table(props: { block: Extract<Block, { kind: 'table' }>; look: Look }) 
     () => block.head.map((h, col) => columnWidth([h, ...block.rows.map((r) => r[col] ?? '')])),
     [block],
   )
+  const numeric = useMemo(() => numericColumns(block), [block])
   const cellStyle = (col: number): TextStyle => ({
     width: widths[col],
-    textAlign: block.align[col] ?? 'left',
+    textAlign: block.align[col] ?? (numeric.has(col) ? 'right' : 'left'),
+    fontVariant: numeric.has(col) ? ['tabular-nums'] : [],
     fontSize: 14,
     lineHeight: 20,
     paddingHorizontal: 10,
@@ -231,7 +422,14 @@ function Table(props: { block: Extract<Block, { kind: 'table' }>; look: Look }) 
 
 const BULLETS = ['•', '◦', '▪']
 
-function Blocks(props: { blocks: Block[]; look: Look; depth: number; tail?: ReactNode }) {
+function Blocks(props: {
+  blocks: Block[]
+  look: Look
+  depth: number
+  tail?: ReactNode
+  /** What leads the first paragraph, such as a sent prompt's command. */
+  head?: ReactNode
+}) {
   const { look, depth } = props
   const { c } = look.t
   const gap = SIZES[look.size].gap
@@ -240,6 +438,17 @@ function Blocks(props: { blocks: Block[]; look: Look; depth: number; tail?: Reac
     <View style={{ gap }}>
       {props.blocks.map((block, index) => {
         const tail = index === last ? props.tail : undefined
+        if (index === 0 && props.head && block.kind === 'para') {
+          return (
+            <Para
+              key={index}
+              text={block.text}
+              look={look}
+              tail={tail}
+              head={props.head}
+            />
+          )
+        }
         switch (block.kind) {
           case 'heading': {
             const big = look.size === 'body'
@@ -273,7 +482,7 @@ function Blocks(props: { blocks: Block[]; look: Look; depth: number; tail?: Reac
           case 'code':
             return (
               <View key={index} style={{ gap: 4 }}>
-                <CodeBlock lang={block.lang} text={block.text} look={look} />
+                <CodeBlock lang={block.lang} meta={block.meta} text={block.text} look={look} />
                 {tail ? <Text style={look.body}>{tail}</Text> : null}
               </View>
             )
@@ -367,8 +576,13 @@ export const Markdown = memo(function Markdown(props: {
   streaming?: boolean
   size?: MarkdownSize
   color?: string
+  /** A sent prompt's mentions and links, read as chips. */
+  chips?: MarkdownChips
+  /** What leads the text, such as a sent prompt's command. */
+  head?: ReactNode
 }) {
   const t = useSessionTokens()
+  const refs = useFileRefs()
   const size = props.size ?? 'body'
   const color = props.color ?? t.c.text
   const parsed = useMemo(() => parseBlocks(props.markdown), [props.markdown])
@@ -378,14 +592,29 @@ export const Markdown = memo(function Markdown(props: {
       color,
       size,
       body: { fontSize: SIZES[size].fontSize, lineHeight: SIZES[size].lineHeight, color },
+      refs,
+      chips: props.chips ?? null,
     }),
-    [t.c, t.s, color, size],
+    [t.c, t.s, color, size, refs, props.chips],
   )
   const tail = props.streaming ? <Caret color={t.c.accent} /> : undefined
   if (parsed.length === 0) {
-    return tail ? <Text style={look.body}>{tail}</Text> : null
+    return tail || props.head ? (
+      <Text style={look.body}>
+        {props.head}
+        {tail}
+      </Text>
+    ) : null
   }
-  return <Blocks blocks={parsed} look={look} depth={0} tail={tail} />
+  if (props.head && parsed[0]!.kind !== 'para') {
+    return (
+      <View style={{ gap: SIZES[size].gap }}>
+        <Text style={look.body}>{props.head}</Text>
+        <Blocks blocks={parsed} look={look} depth={0} tail={tail} />
+      </View>
+    )
+  }
+  return <Blocks blocks={parsed} look={look} depth={0} tail={tail} head={props.head} />
 })
 
 const styles = StyleSheet.create({
@@ -402,7 +631,18 @@ const styles = StyleSheet.create({
   codeLang: { fontSize: 12, fontWeight: '500', textTransform: 'lowercase' },
   codeCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 },
   codeBody: { paddingHorizontal: 12, paddingVertical: 10 },
+  codeRow: { flexDirection: 'row' },
+  gutter: { paddingLeft: 10, paddingVertical: 10, textAlign: 'right', fontVariant: ['tabular-nums'] },
   codeText: { fontFamily: MONO, fontSize: 13, lineHeight: 20 },
+  codeMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    height: 34,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  codeMoreText: { fontSize: 12.5, fontWeight: '600' },
   quote: { borderLeftWidth: 3, paddingLeft: 12, borderRadius: 1 },
   item: { flexDirection: 'row' },
   table: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, overflow: 'hidden' },
