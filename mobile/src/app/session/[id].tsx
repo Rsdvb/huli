@@ -297,30 +297,42 @@ export default function SessionScreen() {
   )
   const childrenRunning = children.filter((s) => live(s.status)).length
 
-  // What the ⋯ menu counts is read as it opens.
+  // What the ⋯ menu counts is read as it opens, and again as the session changes. A system menu
+  // is built before it opens, so there it is read all along: once the session's changes pause
+  // rather than on each of them, which while it streams would be many a second.
   const moreOpen = NATIVE_MENUS || menu.openId === 'more-menu'
+  const countsRead = useRef(false)
+  const projectPath = summary?.projectPath ?? null
   useEffect(() => {
-    if (!moreOpen || !connected) return
+    if (!moreOpen || !connected) {
+      countsRead.current = false
+      return
+    }
     let alive = true
-    call(link, 'artifacts.list', {}).then(
-      (all) =>
-        alive &&
-        setCounts((was) => ({
-          ...was,
-          artifacts: all.filter((a) => a.sessionId === id && a.deletedAt === null).length,
-        })),
-      () => {},
-    )
-    if (terminalAllowed && summary) {
-      sessionTerminals(link, summary.projectPath, id).then(
-        (found) => alive && setCounts((was) => ({ ...was, terminals: found.length })),
+    const read = () => {
+      countsRead.current = true
+      call(link, 'artifacts.list', {}).then(
+        (all) =>
+          alive &&
+          setCounts((was) => ({
+            ...was,
+            artifacts: all.filter((a) => a.sessionId === id && a.deletedAt === null).length,
+          })),
         () => {},
       )
+      if (terminalAllowed && projectPath !== null) {
+        sessionTerminals(link, projectPath, id).then(
+          (found) => alive && setCounts((was) => ({ ...was, terminals: found.length })),
+          () => {},
+        )
+      }
     }
+    const timer = setTimeout(read, countsRead.current ? 1000 : 0)
     return () => {
       alive = false
+      clearTimeout(timer)
     }
-  }, [moreOpen, connected, link, id, terminalAllowed, summary])
+  }, [moreOpen, connected, link, id, terminalAllowed, projectPath, summary])
 
   const stop = () => {
     void link.request('sessions.cancel', { sessionId: id }).catch((error: { message?: string }) => {
