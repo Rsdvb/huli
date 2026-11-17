@@ -109,8 +109,10 @@ private enum Inbox {
       let container = manager.containerURL(forSecurityApplicationGroupIdentifier: groupId)
     else { return done(nil) }
     let root = container.appendingPathComponent("share", isDirectory: true)
-    dropOld(in: root)
-    let id = UUID().uuidString.lowercased()
+    let now = Int(Date().timeIntervalSince1970 * 1000)
+    dropOld(in: root, now: now)
+    // Named by when it was made, so clearing old ones reads no file dates.
+    let id = "\(now)-\(UUID().uuidString.lowercased())"
     let folder = root.appendingPathComponent(id, isDirectory: true)
     do {
       try manager.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -133,11 +135,7 @@ private enum Inbox {
     }
     waiting.notify(queue: .global()) {
       let kept = entries.compactMap { $0 }
-      let manifest: [String: Any] = [
-        "v": 1,
-        "at": Int(Date().timeIntervalSince1970 * 1000),
-        "items": kept,
-      ]
+      let manifest: [String: Any] = ["v": 1, "at": now, "items": kept]
       guard !kept.isEmpty,
         let data = try? JSONSerialization.data(withJSONObject: manifest),
         (try? data.write(to: folder.appendingPathComponent("manifest.json"), options: .atomic))
@@ -151,17 +149,16 @@ private enum Inbox {
   }
 
   /// Items the app never took within a day go, so the container does not fill up.
-  private static func dropOld(in root: URL) {
+  private static func dropOld(in root: URL, now: Int) {
     let manager = FileManager.default
-    let key = URLResourceKey.contentModificationDateKey
     guard
       let folders = try? manager.contentsOfDirectory(
-        at: root, includingPropertiesForKeys: [key], options: [])
+        at: root, includingPropertiesForKeys: nil, options: [])
     else { return }
-    let limit = Date().addingTimeInterval(-24 * 60 * 60)
+    let limit = now - 24 * 60 * 60 * 1000
     for folder in folders {
-      let date = (try? folder.resourceValues(forKeys: [key]))?.contentModificationDate
-      if let date, date < limit { try? manager.removeItem(at: folder) }
+      let made = folder.lastPathComponent.split(separator: "-").first.flatMap { Int($0) }
+      if let made, made < limit { try? manager.removeItem(at: folder) }
     }
   }
 }
@@ -260,8 +257,9 @@ private enum Item {
       "name": name,
       "mimeType": own?.preferredMIMEType ?? "application/octet-stream",
     ]
-    let attributes = try? FileManager.default.attributesOfItem(atPath: file.path)
-    if let size = (attributes?[.size] as? NSNumber)?.intValue { entry["size"] = size }
+    if let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+      entry["size"] = size
+    }
     return entry
   }
 
