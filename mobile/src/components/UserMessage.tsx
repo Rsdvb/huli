@@ -17,6 +17,7 @@ import { G, Icon } from '../ui/session/icons'
 import { useMinute } from '../ui/session/now'
 import { useSessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
+import { selectText } from '../ui/session/SelectText'
 import { agoText } from '../ui/session/work'
 import { RefTiles } from './CarriedRefs'
 import { Markdown, type MarkdownChips } from './Markdown'
@@ -54,7 +55,7 @@ export const UserMessage = memo(function UserMessage(props: {
 }) {
   const { content } = props
   const { c, s } = useSessionTokens()
-  const { selectText, sessionId, commands, command } = useSessionRows()
+  const { sessionId, commands, command } = useSessionRows()
   const refs = useFileRefs()
   const text = textOf(content)
   const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
@@ -150,7 +151,7 @@ export const UserMessage = memo(function UserMessage(props: {
   const menu = () =>
     showMenu(undefined, [
       { label: '复制', onPress: () => void copyText(copiedText(content)) },
-      { label: '选择文本', onPress: () => selectText(text) },
+      { label: '选择文本', onPress: () => selectText({ text }) },
     ])
 
   return (

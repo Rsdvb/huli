@@ -110,9 +110,9 @@ import { useSessionTokens } from '../../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../../ui/session/Popover'
 import { RoundButton } from '../../ui/session/Press'
 import { Icon } from '../../ui/session/Icon'
-import { SelectText } from '../../ui/session/SelectText'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
+import { SubagentBar } from '../../components/SubagentBar'
 import { foldsIntoRun, latestPlan } from '../../ui/session/turns'
 import { askedText, forgetTools, phaseText, turnPhase, writingId } from '../../ui/session/work'
 import { WorkingRow } from '../../ui/session/Working'
@@ -199,7 +199,6 @@ export default function SessionScreen() {
   const moreAnchor = useRef<ViewHandle>(null)
   const modeAnchor = useRef<ViewHandle>(null)
   const modelAnchor = useRef<ViewHandle>(null)
-  const [selecting, setSelecting] = useState<string | null>(null)
   const [contextOpen, setContextOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   // Another agent picked to take over with the next message, and the options it starts with.
@@ -392,7 +391,6 @@ export default function SessionScreen() {
       root: changes.folder,
       fork: canFork ? fork : null,
       forkAtMessage,
-      selectText: setSelecting,
       retryNotice,
       cutNotice,
       config: session?.config ?? [],
@@ -813,8 +811,31 @@ export default function SessionScreen() {
           </ScrollView>
         )}
 
+        {summary?.origin === 'subagent' && (
+          <SubagentBar
+            summary={summary}
+            session={session}
+            agentName={agent?.name ?? 'Agent'}
+            bottomInset={insets.bottom}
+            context={
+              share !== null
+                ? {
+                    share,
+                    color: toneColor(usageTone({ usedPercent: share * 100, state: 'ok' }), c),
+                    approximate: !!session?.context?.error,
+                    onPress: () => {
+                      haptic.tap()
+                      setContextOpen(true)
+                    },
+                  }
+                : null
+            }
+            onOpenParent={openSession}
+          />
+        )}
         <Composer
           key={id}
+          hidden={summary?.origin === 'subagent'}
           ref={composer}
           draft={id}
           agentName={shownName}
@@ -985,10 +1006,13 @@ export default function SessionScreen() {
           : {})}
         right={
           <View ref={moreAnchor} collapsable={false}>
-            <NativeMenu source={{ root: 'more-menu', pages }} disabled={!summary}>
+            {/* Our popover, not the system's menu: a system menu cannot hold each row's count on
+                its right, as 文件 1 and 改动 没有改动 read in Kettu. */}
+            <NativeMenu source={{ root: 'more-menu', pages }} disabled>
               <RoundButton
                 tone="glass"
                 size={44}
+                systemImage={G.more.sf}
                 onPress={() =>
                   menu.open('more-menu', moreAnchor, {
                     placement: 'below',
@@ -1043,7 +1067,6 @@ export default function SessionScreen() {
         usage={usage}
       />
       {actions.element}
-      <SelectText text={selecting} onClose={() => setSelecting(null)} />
       {menu.render(pages)}
     </SessionRows.Provider>
   )

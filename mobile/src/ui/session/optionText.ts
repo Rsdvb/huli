@@ -34,6 +34,7 @@ const NAMES: Record<string, string> = {
   xhigh: '超高',
   'x high': '超高',
   'extra high': '超高',
+  extra: '超高',
   max: '最高',
 }
 
@@ -50,6 +51,8 @@ const DESCRIPTIONS: Record<string, string> = {
   'any file or network, without approval': '访问所有文件和网络，无需授权',
   '1.5x speed, increased usage': '1.5 倍速度，用量更多',
   'ask before edits and commands': '改动和命令先问',
+  // Antigravity's default mode.
+  'ask before edits and commands, per your permission settings': '改动和命令先问，按你的权限设置',
   'approve file edits in the workspace without asking': '工作区里的文件改动不问',
   'approve edits and safe commands; ask before irreversible actions':
     '改动和安全的命令不问，不可撤回的操作先问',

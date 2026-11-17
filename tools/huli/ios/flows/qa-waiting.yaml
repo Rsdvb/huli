@@ -1,0 +1,23 @@
+# The session titled TITLE while it waits for the user: its card, then the more and title menus.
+appId: io.github.rsdvb.huli
+---
+- runFlow: qa-reset.yaml
+- tapOn: "会话"
+- tapOn:
+    text: ".*${TITLE}.*"
+- waitForAnimationToEnd
+- takeScreenshot: w01-waiting
+- tapOn:
+    point: 92%,10%
+- waitForAnimationToEnd
+- takeScreenshot: w02-more-popover
+- tapOn:
+    point: 20%,60%
+- waitForAnimationToEnd
+- tapOn:
+    point: 50%,10%
+- waitForAnimationToEnd
+- takeScreenshot: w03-title-menu
+- tapOn:
+    point: 20%,60%
+- waitForAnimationToEnd

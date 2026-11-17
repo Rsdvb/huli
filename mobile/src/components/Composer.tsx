@@ -102,6 +102,8 @@ export interface ComposerProps {
   /** Whether a message without text or attachments may go, as a new session's may. */
   allowEmpty?: boolean
   disabled?: boolean
+  /** Not shown, as for a sub-agent's session, which only its agent writes to. */
+  hidden?: boolean
   /** Why nothing can go now, said over the text; Send stays off while it holds. */
   blocked?: string | null
   /** Why nothing can be added now, as while the agent starts. */
@@ -824,6 +826,7 @@ export function Composer(props: ComposerProps) {
 
   // With Liquid Glass the tray and its card are one slab of glass; elsewhere a card in a tray.
   const Tray = liquid ? GlassTray : View
+  if (props.hidden) return null
   return (
     <View style={[styles.outer, { paddingBottom: composerBottom(props.bottomInset) }]}>
       {typeof props.top === 'function' ? props.top(holds) : props.top}

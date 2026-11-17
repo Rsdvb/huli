@@ -379,25 +379,29 @@ export function StackedBarChart(props: {
       </Pressable>
       {props.ticks && slot > 0 && (
         <View style={styles.labels} pointerEvents="none">
-          {Object.entries(props.ticks).map(([index, label]) => (
-            <Text
-              key={index}
-              numberOfLines={1}
-              style={[
-                typeScale.caption,
-                styles.label,
-                {
-                  color: c.textTertiary,
-                  left: Math.min(
-                    width - TICK_WIDTH,
-                    Math.max(0, (Number(index) + 0.5) * slot - TICK_WIDTH / 2),
-                  ),
-                },
-              ]}
-            >
-              {label}
-            </Text>
-          ))}
+          {Object.entries(props.ticks).map(([index, label]) => {
+            // Centered under its bar, or held to the chart's edge, flush with it, where it would
+            // overflow: a label pushed in whole would sit under the wrong bar.
+            const at = (Number(index) + 0.5) * slot - TICK_WIDTH / 2
+            const edge = at < 0 ? 'left' : at > width - TICK_WIDTH ? 'right' : 'center'
+            return (
+              <Text
+                key={index}
+                numberOfLines={1}
+                style={[
+                  typeScale.caption,
+                  styles.label,
+                  {
+                    color: c.textTertiary,
+                    left: Math.min(width - TICK_WIDTH, Math.max(0, at)),
+                    textAlign: edge,
+                  },
+                ]}
+              >
+                {label}
+              </Text>
+            )
+          })}
         </View>
       )}
       {tip && held !== null && (

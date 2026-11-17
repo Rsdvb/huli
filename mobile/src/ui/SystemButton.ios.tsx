@@ -14,8 +14,9 @@ import {
 } from '@expo/ui/swift-ui/modifiers'
 import type { SFSymbol } from 'expo-symbols'
 
-// The glass style's own padding around its label, which the label's frame leaves room for.
-const PADDING = 12
+// The glass style's own padding around its label, which the label's frame leaves room for. As
+// measured on iOS 27: at 12, a 44 point button drew 33 points across, smaller than its neighbors.
+const PADDING = 7
 
 export function SystemButton(props: {
   systemImage: SFSymbol

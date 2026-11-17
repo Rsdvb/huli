@@ -17,13 +17,14 @@ import {
 import { Image } from 'expo-image'
 import { cacheFor } from '../ui/memory'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
-import { copyText } from '../ui/session/feedback'
+import { copyText, showMenu } from '../ui/session/feedback'
 import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
 import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
 import { keepBlocks, parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
 import { gentle, PressScale } from '../ui/session/Press'
+import { selectText } from '../ui/session/SelectText'
 
 export type MarkdownSize = 'body' | 'compact'
 
@@ -145,11 +146,13 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
         return (
           <Text
             key={i}
+            // In Huli's orange on its soft tint, as Kettu sets inline code: plain text on gray read
+            // as a block of stripes in a list of names.
             style={{
               fontFamily: MONO,
               fontSize: look.body.fontSize! - 2.5,
-              backgroundColor: s.inlineCode,
-              color: look.color,
+              backgroundColor: s.accentSoft,
+              color: c.accent,
             }}
           >
             {` ${node.v} `}
@@ -297,7 +300,19 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
           </Text>
         </PressScale>
       </View>
-      <View style={styles.codeRow}>
+      <Pressable
+        onLongPress={() =>
+          showMenu(undefined, [
+            { label: '复制代码', onPress: copy },
+            {
+              label: '选择文本',
+              onPress: () => selectText({ text: props.text.replace(/\n$/, ''), mono: true }),
+            },
+          ])
+        }
+        delayLongPress={350}
+        style={styles.codeRow}
+      >
         {firstLine !== null && (
           <Text style={[styles.codeText, styles.gutter, { color: c.textTertiary }]}>
             {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
@@ -328,7 +343,7 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
               : shown}
           </Text>
         </ScrollView>
-      </View>
+      </Pressable>
       {foldable && (
         <Pressable
           onPress={() => {

@@ -12,8 +12,6 @@ export interface SessionRowsContext {
   fork: ((entryId: string | null) => void) | null
   /** Whether a fork can stop at a reply rather than take the whole session. */
   forkAtMessage: boolean
-  /** Shows text the user can select, as the message menu offers. */
-  selectText(text: string): void
   /** The notice of a failed latest turn that Retry sends again, while the session is free. */
   retryNotice?: string | null
   /** The notice of a latest turn the agent's exit cut short, which Resume continues. */
@@ -31,7 +29,6 @@ export const SessionRows = createContext<SessionRowsContext>({
   root: null,
   fork: null,
   forkAtMessage: false,
-  selectText: () => {},
   retryNotice: null,
   cutNotice: null,
 })

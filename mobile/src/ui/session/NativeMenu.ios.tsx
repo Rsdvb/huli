@@ -129,13 +129,9 @@ function Entry(props: { entry: MenuEntry; source: MenuSource; depth: number }) {
         ))}
       </Picker>
     )
-    if (!picker.hint) return control
-    return (
-      <>
-        {control}
-        <Text>{picker.hint}</Text>
-      </>
-    )
+    // A palette picker is a section of its own, headed by its label; a hint after it would land
+    // above it, so the menu leaves the hint to the control's accessibility hint.
+    return control
   }
   return <Row row={entry} source={props.source} depth={props.depth} />
 }
@@ -147,7 +143,14 @@ function groupsOf(entries: MenuEntry[]): { key: string; title?: string; entries:
   ]
   for (const entry of entries) {
     if (entry.kind === 'divider') {
-      groups.push({ key: entry.key, ...(entry.title ? { title: entry.title } : {}), entries: [] })
+      // A picker heads its own section with its label, so a title saying the same goes.
+      const next = entries[entries.indexOf(entry) + 1]
+      const named = next?.kind === 'custom' && next.picker?.label === entry.title
+      groups.push({
+        key: entry.key,
+        ...(entry.title && !named ? { title: entry.title } : {}),
+        entries: [],
+      })
     } else {
       groups[groups.length - 1]!.entries.push(entry)
     }

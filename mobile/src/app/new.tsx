@@ -41,7 +41,7 @@ import { folder, greeting, listTime, sessionTitle } from '../sessions'
 import { HuliIcon } from '../ui/HuliMark'
 import { useComputer } from '../ui/session/computer'
 import { haptic } from '../ui/session/feedback'
-import { GlassHeader } from '../ui/session/GlassHeader'
+import { GlassHeader, useHeaderHeight } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../ui/session/Popover'
@@ -54,6 +54,7 @@ export default function NewSession() {
   const link = useLink()
   const computer = useComputer()
   const insets = useSafeAreaInsets()
+  const headerHeight = useHeaderHeight()
   const menu = usePopover()
   const composer = useRef<ComposerHandle>(null)
   const modeAnchor = useRef<ViewHandle>(null)
@@ -265,11 +266,13 @@ export default function NewSession() {
       />
       {/* Clipped, so what the keyboard moves up slides under the header, not over it. */}
       <View style={styles.clip}>
+        {/* The header's height said outright: measured on its own (automaticOffset), the view
+            under a header that takes its own room read as starting at the top on iOS 27, and the
+            keyboard covered the composer's buttons. */}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior="translate-with-padding"
-          automaticOffset
-          keyboardVerticalOffset={-keyboardOverlap(insets.bottom)}
+          keyboardVerticalOffset={headerHeight - keyboardOverlap(insets.bottom)}
         >
           <ScrollView
             style={{ flex: 1 }}

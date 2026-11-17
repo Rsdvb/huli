@@ -148,7 +148,7 @@ export function StatusLine(props: {
           <SystemMark platform={props.platform} color={c.textSecondary} size={14} />
           <View style={[styles.dot, { backgroundColor: dot, borderColor: c.bg }]} />
         </View>
-        <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+        <Text style={[styles.text, styles.shrink, { color: c.textSecondary }]} numberOfLines={1}>
           {props.hostName}
         </Text>
       </View>
@@ -188,7 +188,10 @@ export function StatusLine(props: {
               style={({ pressed }) => [styles.folder, { opacity: pressed ? 0.55 : 1 }]}
             >
               <Icon icon={G.folder} size={14} color={c.tint} />
-              <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+              <Text
+                style={[styles.text, styles.shrink, styles.folderName, { color: c.textSecondary }]}
+                numberOfLines={1}
+              >
                 {props.folder}
               </Text>
               {props.folderPicker ? (
@@ -335,6 +338,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   text: { fontSize: 13, lineHeight: 17, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  // A name cut short inside its row, so it never runs under the / after it.
+  shrink: { flexShrink: 1 },
+  // Shrinking with the computer's longer name, a short folder name would be cut to nothing.
+  folderName: { minWidth: 24 },
   folderBox: { flexShrink: 1 },
   folder: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
   badge: { borderRadius: 999, paddingHorizontal: 6, minWidth: 18, alignItems: 'center' },

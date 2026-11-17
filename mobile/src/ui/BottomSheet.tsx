@@ -28,6 +28,8 @@ export function BottomSheet(props: {
   children?: ReactNode
   /** Scroll the body when it is taller than this; the default suits a menu. */
   maxHeight?: number
+  /** Opaque on iOS, for a form; Android's sheet is opaque already. */
+  solid?: boolean
 }) {
   const { c } = useTokens()
   const insets = useSafeAreaInsets()
