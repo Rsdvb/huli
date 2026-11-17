@@ -151,7 +151,9 @@ jobs:
           APP_DIR: ${{ github.workspace }}/mobile
           HULI_TOOLS: ${{ github.workspace }}/tools/huli/ios
           OUT: ${{ runner.temp }}/ios
+      # Beta review often refuses a fresh build with "try again later"; the upload itself stands.
       - name: Put it on TestFlight's public link
+        continue-on-error: true
         run: node ../tools/huli/ios/publish-testflight.mjs "$RUN" "Huli $VERSION 自动构建，包含电脑端和官方 Kettu 的最新改动。"
         env:
           VERSION: ${{ needs.version.outputs.version }}
