@@ -5,39 +5,26 @@ import { useMemo, type ReactElement } from 'react'
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { ChangeStatus, ChangedFile, GitStatus } from '@shared/git'
-import { Loading, Message } from '../../components/Placeholder'
 import { sessionFolder, useChanges } from '../../git'
 import { useHost, useLink } from '../../host'
-import { folder as baseName } from '../../sessions'
-import { useTheme, type Theme } from '../../theme'
+import { baseName, dirName } from '../../ui/session/format'
+import { GlassHeader } from '../../ui/session/GlassHeader'
+import { FileMark, G, Icon } from '../../ui/session/icons'
+import { useSessionTokens } from '../../ui/session/palette'
+import { StateView } from '../../ui/session/StateView'
+import { Counts } from '../../ui/session/TurnChanges'
 
-const STATUS: Record<
-  ChangeStatus,
-  { mark: string; label: string; tone: 'ok' | 'warn' | 'danger' | 'muted' }
-> = {
-  added: { mark: 'A', label: '新增', tone: 'ok' },
-  untracked: { mark: 'U', label: '新文件', tone: 'ok' },
-  modified: { mark: 'M', label: '修改', tone: 'warn' },
-  typechange: { mark: 'T', label: '类型改变', tone: 'warn' },
-  renamed: { mark: 'R', label: '重命名', tone: 'muted' },
-  copied: { mark: 'C', label: '复制', tone: 'muted' },
-  deleted: { mark: 'D', label: '删除', tone: 'danger' },
-  conflicted: { mark: '!', label: '冲突', tone: 'danger' },
-}
+type Tone = 'added' | 'changed' | 'moved' | 'removed'
 
-function toneColor(tone: (typeof STATUS)[ChangeStatus]['tone'], theme: Theme): string {
-  return tone === 'ok'
-    ? theme.ok
-    : tone === 'warn'
-      ? theme.warn
-      : tone === 'danger'
-        ? theme.danger
-        : theme.muted
-}
-
-function dirName(path: string): string {
-  const cut = path.lastIndexOf('/')
-  return cut > 0 ? path.slice(0, cut) : ''
+const STATUS: Record<ChangeStatus, { mark: string; label: string; tone: Tone }> = {
+  added: { mark: 'A', label: '新增', tone: 'added' },
+  untracked: { mark: 'U', label: '新文件', tone: 'added' },
+  modified: { mark: 'M', label: '修改', tone: 'changed' },
+  typechange: { mark: 'T', label: '类型改变', tone: 'changed' },
+  renamed: { mark: 'R', label: '重命名', tone: 'moved' },
+  copied: { mark: 'C', label: '复制', tone: 'moved' },
+  deleted: { mark: 'D', label: '删除', tone: 'removed' },
+  conflicted: { mark: '!', label: '冲突', tone: 'removed' },
 }
 
 function branchText(status: GitStatus): string {
@@ -46,36 +33,51 @@ function branchText(status: GitStatus): string {
   return '还没有提交'
 }
 
-function FileRow(props: { file: ChangedFile; theme: Theme; onPress(): void }) {
-  const { file, theme, onPress } = props
+function FileRow(props: { file: ChangedFile; first: boolean; last: boolean; onPress(): void }) {
+  const { c, s } = useSessionTokens()
+  const { file } = props
   const status = STATUS[file.status]
-  const color = toneColor(status.tone, theme)
+  const tone = {
+    added: { color: c.added, bg: c.addedBg },
+    changed: { color: c.warning, bg: s.warningSoft },
+    moved: { color: c.tint, bg: c.tintSoft },
+    removed: { color: c.removed, bg: c.removedBg },
+  }[status.tone]
   const dir = dirName(file.path)
   const counted = file.insertions !== null && file.deletions !== null
   return (
     <Pressable
-      onPress={onPress}
+      onPress={props.onPress}
       accessibilityRole="button"
       accessibilityLabel={`${status.label} ${file.path}`}
-      style={({ pressed }) => [styles.file, { backgroundColor: pressed ? theme.line : theme.card }]}
+      style={({ pressed }) => [
+        styles.file,
+        {
+          backgroundColor: pressed ? c.fill : s.dockCard,
+          borderTopLeftRadius: props.first ? 16 : 0,
+          borderTopRightRadius: props.first ? 16 : 0,
+          borderBottomLeftRadius: props.last ? 16 : 0,
+          borderBottomRightRadius: props.last ? 16 : 0,
+        },
+      ]}
     >
-      <View style={[styles.mark, { borderColor: color }]}>
-        <Text style={{ color, fontSize: 11, fontWeight: '700' }}>{status.mark}</Text>
-      </View>
+      <FileMark path={file.path} size={17} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text
-          style={{
-            color: theme.text,
-            fontSize: 15,
-            textDecorationLine: file.status === 'deleted' ? 'line-through' : 'none',
-          }}
+          style={[
+            styles.name,
+            {
+              color: c.text,
+              textDecorationLine: file.status === 'deleted' ? 'line-through' : 'none',
+            },
+          ]}
           numberOfLines={1}
         >
           {baseName(file.path)}
         </Text>
         {dir || file.oldPath ? (
           <Text
-            style={{ color: theme.muted, fontSize: 12, marginTop: 2 }}
+            style={[styles.dir, { color: c.textTertiary }]}
             numberOfLines={1}
             ellipsizeMode="head"
           >
@@ -84,22 +86,20 @@ function FileRow(props: { file: ChangedFile; theme: Theme; onPress(): void }) {
           </Text>
         ) : null}
       </View>
-      {counted ? (
-        <Text style={{ fontSize: 13, fontVariant: ['tabular-nums'] }}>
-          {file.insertions ? <Text style={{ color: theme.ok }}>+{file.insertions} </Text> : null}
-          {file.deletions ? <Text style={{ color: theme.danger }}>−{file.deletions}</Text> : null}
-        </Text>
-      ) : (
-        <Text style={{ color: theme.muted, fontSize: 12 }}>{status.label}</Text>
-      )}
-      <Text style={{ color: theme.muted, fontSize: 18, marginLeft: 2 }}>›</Text>
+      {counted && (file.insertions || file.deletions) ? (
+        <Counts insertions={file.insertions!} deletions={file.deletions!} />
+      ) : null}
+      <View style={[styles.mark, { backgroundColor: tone.bg }]}>
+        <Text style={[styles.markText, { color: tone.color }]}>{status.mark}</Text>
+      </View>
+      <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
     </Pressable>
   )
 }
 
 export default function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const theme = useTheme()
+  const { c, s } = useSessionTokens()
   const host = useHost()
   const link = useLink()
   const summary = host.sessions.get(id)
@@ -128,76 +128,88 @@ export default function ChangesScreen() {
   if (!summary) {
     body =
       connected && host.sessions.size > 0 ? (
-        <Message text="找不到这个会话。" theme={theme} />
+        <StateView text="找不到这个会话。" />
       ) : (
-        <Loading theme={theme} />
+        <StateView loading />
       )
   } else if (summary.scratch) {
-    body = <Message text="这个会话没有项目，没有可看的改动。" theme={theme} />
+    body = <StateView text="这个会话没有项目，没有可看的改动。" />
   } else if (!status || !files) {
     body = error ? (
-      <Message text={error} theme={theme} color={theme.danger} retry={changes.reload} />
+      <StateView text={error} tone="danger" retry={changes.reload} />
     ) : (
-      <Loading theme={theme} />
+      <StateView loading />
     )
   } else if (!status.repo) {
-    body = <Message text="这个文件夹不是 git 仓库。" theme={theme} />
+    body = <StateView text="这个文件夹不是 git 仓库。" icon={G.folder} />
   } else {
     body = (
       <FlatList
         data={files}
         keyExtractor={(file) => file.path}
-        renderItem={({ item }) => <FileRow file={item} theme={theme} onPress={() => open(item)} />}
+        renderItem={({ item, index }) => (
+          <FileRow
+            file={item}
+            first={index === 0}
+            last={index === files.length - 1}
+            onPress={() => open(item)}
+          />
+        )}
         ItemSeparatorComponent={() => (
-          <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: theme.line }} />
+          <View style={{ backgroundColor: s.dockCard }}>
+            <View style={[styles.separator, { backgroundColor: c.border }]} />
+          </View>
         )}
         refreshControl={
-          <RefreshControl refreshing={false} onRefresh={changes.reload} tintColor={theme.accent} />
+          <RefreshControl
+            refreshing={false}
+            onRefresh={changes.reload}
+            tintColor={c.textSecondary}
+          />
         }
         ListHeaderComponent={
           <View style={styles.summary}>
-            <Text style={{ color: theme.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-              ⎇ {branchText(status)}
-            </Text>
-            <Text style={{ color: theme.muted, fontSize: 13, marginTop: 4 }}>
-              {files.length > 0 ? `${files.length} 个文件 · ` : ''}
-              {files.length > 0 ? (
-                <>
-                  <Text style={{ color: theme.ok }}>+{totals.insertions}</Text>{' '}
-                  <Text style={{ color: theme.danger }}>−{totals.deletions}</Text>
-                </>
-              ) : (
-                '没有未提交的改动'
-              )}
-              {status.stale ? ' · 可能不是最新' : ''}
-            </Text>
-            {error ? (
-              <Text style={{ color: theme.danger, fontSize: 12, marginTop: 4 }}>{error}</Text>
+            <View style={styles.branch}>
+              <Icon icon={G.branch} size={15} color={c.textSecondary} />
+              <Text style={[styles.branchText, { color: c.text }]} numberOfLines={1}>
+                {branchText(status)}
+              </Text>
+            </View>
+            {files.length > 0 ? (
+              <View style={styles.totals}>
+                <Text style={[styles.total, { color: c.textSecondary }]}>
+                  {files.length} 个文件
+                </Text>
+                <Counts insertions={totals.insertions} deletions={totals.deletions} />
+                {status.stale ? (
+                  <Text style={[styles.total, { color: c.textTertiary }]}>· 可能不是最新</Text>
+                ) : null}
+              </View>
             ) : null}
+            {error ? <Text style={[styles.total, { color: c.danger }]}>{error}</Text> : null}
           </View>
         }
-        ListEmptyComponent={<Text style={[styles.empty, { color: theme.muted }]}>没有改动</Text>}
-        contentContainerStyle={{ paddingBottom: 24 }}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Icon icon={G.done} size={28} color={c.success} />
+            <Text style={[styles.emptyText, { color: c.textSecondary }]}>没有未提交的改动</Text>
+          </View>
+        }
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
       />
     )
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <Stack.Screen
-        options={{
-          headerTitle: () => (
-            <View style={{ alignItems: 'center', maxWidth: 240 }}>
-              <Text style={{ color: theme.text, fontWeight: '600', fontSize: 16 }}>改动</Text>
-              {summary && !summary.scratch ? (
-                <Text style={{ color: theme.muted, fontSize: 11 }} numberOfLines={1}>
-                  {baseName(summary.projectPath)}
-                  {summary.worktree ? ' · 工作树' : ''}
-                </Text>
-              ) : null}
-            </View>
-          ),
-        }}
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <GlassHeader
+        title="改动"
+        subtitle={
+          summary && !summary.scratch
+            ? `${baseName(summary.projectPath)}${summary.worktree ? ' · 工作树' : ''}`
+            : null
+        }
       />
       {body}
     </View>
@@ -205,21 +217,23 @@ export default function ChangesScreen() {
 }
 
 const styles = StyleSheet.create({
-  summary: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
+  summary: { paddingHorizontal: 4, paddingTop: 8, paddingBottom: 14, gap: 6 },
+  branch: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  branchText: { fontSize: 17, fontWeight: '600', flexShrink: 1 },
+  totals: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  total: { fontSize: 13 },
   file: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: 11,
+    paddingHorizontal: 14,
+    minHeight: 58,
   },
-  mark: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  empty: { textAlign: 'center', fontSize: 15, paddingTop: 48 },
+  name: { fontSize: 15, lineHeight: 20, fontWeight: '500' },
+  dir: { fontSize: 12, lineHeight: 16, marginTop: 1 },
+  mark: { width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  markText: { fontSize: 11, fontWeight: '700' },
+  separator: { height: StyleSheet.hairlineWidth, marginLeft: 46 },
+  empty: { alignItems: 'center', gap: 10, paddingTop: 64 },
+  emptyText: { fontSize: 15 },
 })

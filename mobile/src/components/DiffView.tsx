@@ -4,7 +4,6 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import {
   FlatList,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,9 +13,9 @@ import {
   type ListRenderItem,
 } from 'react-native'
 import type { Diff, DiffRow } from '../diff'
-import type { Theme } from '../theme'
+import { MONO, useSessionTokens } from '../ui/session/palette'
 
-export const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' })
+export { MONO }
 
 const FONT = 12
 const ROW = 20
@@ -30,6 +29,7 @@ interface Colors {
   addBg: string
   delBg: string
   hunkBg: string
+  hunk: string
   add: string
   del: string
   text: string
@@ -41,7 +41,7 @@ const Row = memo(function Row(props: { row: DiffRow; colors: Colors; gutter: num
   if (row.kind === 'hunk') {
     return (
       <View style={[styles.row, { backgroundColor: colors.hunkBg }]}>
-        <Text style={[styles.text, { color: colors.muted, paddingLeft: PAD }]} numberOfLines={1}>
+        <Text style={[styles.text, { color: colors.hunk, paddingLeft: PAD }]} numberOfLines={1}>
           {row.text}
         </Text>
       </View>
@@ -66,22 +66,24 @@ const Row = memo(function Row(props: { row: DiffRow; colors: Colors; gutter: num
   )
 })
 
-export function DiffView(props: { diff: Diff; theme: Theme }) {
-  const { diff, theme } = props
+export function DiffView(props: { diff: Diff }) {
+  const { diff } = props
+  const { c } = useSessionTokens()
   const window = useWindowDimensions()
   const [advance, setAdvance] = useState(GUESS)
   const [limit, setLimit] = useState(PAGE)
   const colors = useMemo<Colors>(
     () => ({
-      addBg: `${theme.ok}24`,
-      delBg: `${theme.danger}24`,
-      hunkBg: theme.line,
-      add: theme.ok,
-      del: theme.danger,
-      text: theme.text,
-      muted: theme.muted,
+      addBg: c.addedBg,
+      delBg: c.removedBg,
+      hunkBg: c.tintSoft,
+      hunk: c.tint,
+      add: c.added,
+      del: c.removed,
+      text: c.text,
+      muted: c.textTertiary,
     }),
-    [theme],
+    [c],
   )
   const rows = useMemo(() => diff.rows.slice(0, limit), [diff.rows, limit])
   const gutter = Math.ceil(String(Math.max(diff.lastLine, 9)).length * advance) + PAD
@@ -121,10 +123,10 @@ export function DiffView(props: { diff: Diff; theme: Theme }) {
                   onPress={() => setLimit((n) => n + PAGE)}
                   style={({ pressed }) => [
                     styles.more,
-                    { borderColor: theme.line, opacity: pressed ? 0.6 : 1 },
+                    { backgroundColor: c.fillStrong, opacity: pressed ? 0.6 : 1 },
                   ]}
                 >
-                  <Text style={{ color: theme.accent, fontSize: 14 }}>
+                  <Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>
                     显示更多（还有 {left} 行）
                   </Text>
                 </Pressable>
@@ -147,9 +149,8 @@ const styles = StyleSheet.create({
   ruler: { position: 'absolute', opacity: 0, left: 0, top: 0 },
   more: {
     alignSelf: 'flex-start',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
   },
 })

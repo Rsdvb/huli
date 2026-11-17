@@ -2,13 +2,22 @@
 // MCP server's form or page is left to the computer.
 
 import { useState } from 'react'
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native'
 import type { HostLink } from '@shared/remote/link'
 import type { PermissionOption, QuestionAnswer, ToolEntry } from '@shared/thread'
-import type { Theme } from '../theme'
+import { haptic } from '../ui/session/feedback'
+import { G, Icon, TOOL_ICONS } from '../ui/session/icons'
+import { MONO, useSessionTokens } from '../ui/session/palette'
+import { PressScale } from '../ui/session/Press'
 import { Markdown } from './Markdown'
-
-const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' })
 
 function plain(name: string): string {
   return name.replace(/`/g, '')
@@ -20,8 +29,9 @@ function failure(error: unknown): string {
   return e.message ?? '没能发送回答。'
 }
 
-export function PermissionCard(props: { entry: ToolEntry; sessionId: string; link: HostLink; theme: Theme }) {
-  const { entry, theme, link, sessionId } = props
+export function PermissionCard(props: { entry: ToolEntry; sessionId: string; link: HostLink }) {
+  const { entry, link, sessionId } = props
+  const { c, s } = useSessionTokens()
   const permission = entry.permission!
   const [sending, setSending] = useState(false)
   const [noteFor, setNoteFor] = useState<PermissionOption | null>(null)
@@ -33,7 +43,12 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
   const respond = async (params: Record<string, unknown>) => {
     setSending(true)
     try {
-      await link.request('permissions.respond', { sessionId, requestId: permission.requestId, ...params })
+      await link.request('permissions.respond', {
+        sessionId,
+        requestId: permission.requestId,
+        ...params,
+      })
+      haptic.success()
     } catch (error) {
       Alert.alert('没有发出去', failure(error))
     } finally {
@@ -53,113 +68,179 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
     ? '批准这个计划？'
     : questions.length > 0
       ? (entry.question ?? '智能体在问你')
-      : entry.question ?? entry.title
+      : (entry.question ?? entry.title)
+  const icon = permission.plan ? G.plan : questions.length > 0 ? G.hand : TOOL_ICONS[entry.toolKind]
+  const shell = entry.toolKind === 'execute'
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.warn }]}>
-      <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
-      {entry.description && <Text style={{ color: theme.muted, fontSize: 14, marginTop: 4 }}>{entry.description}</Text>}
+    <View
+      style={[
+        styles.card,
+        { backgroundColor: s.dockCard, borderColor: c.borderStrong, shadowColor: c.shadow },
+      ]}
+    >
+      <View style={styles.head}>
+        <View style={[styles.badge, { backgroundColor: s.warningSoft }]}>
+          <Icon icon={icon} size={15} color={c.warning} />
+        </View>
+        <Text style={[styles.title, { color: c.text }]}>{title}</Text>
+      </View>
+      {entry.description ? (
+        <Text style={[styles.description, { color: c.textSecondary }]}>{entry.description}</Text>
+      ) : null}
       {entry.rawInput && !permission.plan && questions.length === 0 && (
-        <ScrollView style={[styles.input, { backgroundColor: theme.line }]} nestedScrollEnabled>
-          <Text selectable style={{ fontFamily: MONO, fontSize: 13, color: theme.text }}>
-            {entry.rawInput}
+        <ScrollView
+          style={[styles.input, { backgroundColor: s.code, borderColor: s.codeBorder }]}
+          nestedScrollEnabled
+        >
+          <Text selectable style={[styles.mono, { color: c.text }]}>
+            {shell ? `$ ${entry.rawInput}` : entry.rawInput}
           </Text>
         </ScrollView>
       )}
       {permission.plan && (
-        <ScrollView style={[styles.plan, { borderColor: theme.line }]} nestedScrollEnabled>
-          <Markdown markdown={permission.plan.markdown} theme={theme} />
+        <ScrollView
+          style={[styles.plan, { backgroundColor: c.fill, borderColor: c.border }]}
+          contentContainerStyle={{ padding: 12 }}
+          nestedScrollEnabled
+        >
+          <Markdown markdown={permission.plan.markdown} size="compact" />
         </ScrollView>
       )}
 
       {permission.elicitation ? (
-        <Text style={{ color: theme.muted, marginTop: 10, fontSize: 14 }}>
-          这是 {permission.elicitation.server} 的{permission.elicitation.kind === 'form' ? '表单' : '网页'}请求，请在电脑上处理。
+        <Text style={[styles.description, { color: c.textSecondary, marginTop: 10 }]}>
+          这是 {permission.elicitation.server} 的
+          {permission.elicitation.kind === 'form' ? '表单' : '网页'}请求，请在电脑上处理。
         </Text>
       ) : questions.length > 0 ? (
-        <View style={{ marginTop: 8, gap: 14 }}>
+        <View style={{ marginTop: 10, gap: 16 }}>
           {questions.map((q, qi) => (
-            <View key={qi}>
-              {q.header ? <Text style={{ color: theme.muted, fontSize: 12, marginBottom: 2 }}>{q.header}</Text> : null}
-              <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600' }}>{q.question}</Text>
-              <View style={{ marginTop: 6, gap: 6 }}>
-                {q.options.map((option, oi) => {
-                  const on = choices[qi]!.includes(oi)
-                  return (
-                    <Pressable
-                      key={oi}
-                      onPress={() =>
-                        setChoices((all) =>
-                          all.map((picked, i) =>
-                            i !== qi ? picked : q.multiSelect ? (on ? picked.filter((x) => x !== oi) : [...picked, oi]) : [oi],
-                          ),
-                        )
-                      }
-                      style={[
-                        styles.choice,
-                        { borderColor: on ? theme.accent : theme.line, backgroundColor: on ? theme.bg : 'transparent' },
-                      ]}
-                    >
-                      <Text style={{ color: theme.text, fontSize: 15 }}>
-                        {q.multiSelect ? (on ? '☑ ' : '☐ ') : on ? '◉ ' : '○ '}
-                        {option.label}
-                      </Text>
-                      {option.description ? (
-                        <Text style={{ color: theme.muted, fontSize: 13, marginTop: 2 }}>{option.description}</Text>
-                      ) : null}
-                    </Pressable>
-                  )
-                })}
-                {q.allowsText && (
-                  <TextInput
-                    value={texts[qi]}
-                    onChangeText={(text) => setTexts((all) => all.map((t, i) => (i === qi ? text : t)))}
-                    placeholder="自己写一个回答"
-                    placeholderTextColor={theme.muted}
-                    secureTextEntry={q.secret}
-                    style={[styles.text, { color: theme.text, borderColor: theme.line }]}
-                  />
-                )}
+            <View key={qi} style={{ gap: 8 }}>
+              <View>
+                {q.header ? (
+                  <Text style={[styles.header, { color: c.textTertiary }]}>{q.header}</Text>
+                ) : null}
+                <Text style={[styles.question, { color: c.text }]}>{q.question}</Text>
               </View>
+              {q.options.map((option, oi) => {
+                const on = choices[qi]!.includes(oi)
+                return (
+                  <PressScale
+                    key={oi}
+                    scale={0.98}
+                    onPress={() => {
+                      haptic.pick()
+                      setChoices((all) =>
+                        all.map((picked, i) =>
+                          i !== qi
+                            ? picked
+                            : q.multiSelect
+                              ? on
+                                ? picked.filter((x) => x !== oi)
+                                : [...picked, oi]
+                              : [oi],
+                        ),
+                      )
+                    }}
+                    accessibilityRole={q.multiSelect ? 'checkbox' : 'radio'}
+                    accessibilityState={{ checked: on }}
+                    style={[
+                      styles.choice,
+                      {
+                        borderColor: on ? c.accent : c.border,
+                        backgroundColor: on ? s.accentSoft : c.fill,
+                      },
+                    ]}
+                  >
+                    <View style={{ height: 21, justifyContent: 'center' }}>
+                      <Icon
+                        icon={on ? G.done : G.todo}
+                        size={18}
+                        color={on ? c.accent : c.textTertiary}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.optionLabel, { color: c.text }]}>{option.label}</Text>
+                      {option.description ? (
+                        <Text style={[styles.optionDetail, { color: c.textSecondary }]}>
+                          {option.description}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </PressScale>
+                )
+              })}
+              {q.allowsText && (
+                <TextInput
+                  value={texts[qi]}
+                  onChangeText={(text) =>
+                    setTexts((all) => all.map((t, i) => (i === qi ? text : t)))
+                  }
+                  placeholder="自己写一个回答"
+                  placeholderTextColor={c.textTertiary}
+                  selectionColor={c.accent}
+                  secureTextEntry={q.secret}
+                  style={[
+                    styles.text,
+                    { color: c.text, borderColor: c.border, backgroundColor: c.fill },
+                  ]}
+                />
+              )}
             </View>
           ))}
           <View style={styles.row}>
             <Button
-              theme={theme}
               label="提交回答"
-              primary
+              tone="primary"
               disabled={sending}
               onPress={() => {
                 const answers: QuestionAnswer[] = questions.flatMap((_, qi) => {
                   const text = texts[qi]!.trim()
                   const picked = choices[qi]!
-                  return picked.length || text ? [{ question: qi, choices: picked, ...(text ? { text } : {}) }] : []
+                  return picked.length || text
+                    ? [{ question: qi, choices: picked, ...(text ? { text } : {}) }]
+                    : []
                 })
                 void respond({ answers })
               }}
             />
-            <Button theme={theme} label="都跳过" disabled={sending} onPress={() => void respond({ answers: [] })} />
+            <Button
+              label="都跳过"
+              disabled={sending}
+              onPress={() => void respond({ answers: [] })}
+            />
           </View>
         </View>
       ) : noteFor ? (
-        <View style={{ marginTop: 10 }}>
-          <Text style={{ color: theme.text, fontSize: 14 }}>{plain(noteFor.name)}：写下要改什么</Text>
+        <View style={{ marginTop: 10, gap: 4 }}>
+          <Text style={[styles.description, { color: c.text }]}>
+            {plain(noteFor.name)}：写下要改什么
+          </Text>
           <TextInput
             value={note}
             onChangeText={setNote}
             multiline
             autoFocus
-            style={[styles.text, { color: theme.text, borderColor: theme.line, minHeight: 70 }]}
+            selectionColor={c.accent}
+            style={[
+              styles.text,
+              { color: c.text, borderColor: c.border, backgroundColor: c.fill, minHeight: 80 },
+            ]}
           />
           <View style={styles.row}>
             <Button
-              theme={theme}
               label="发送"
-              primary
+              tone="primary"
               disabled={sending}
-              onPress={() => void respond({ optionId: noteFor.id, ...(note.trim() ? { note: note.trim() } : {}) })}
+              onPress={() =>
+                void respond({
+                  optionId: noteFor.id,
+                  ...(note.trim() ? { note: note.trim() } : {}),
+                })
+              }
             />
-            <Button theme={theme} label="取消" disabled={sending} onPress={() => setNoteFor(null)} />
+            <Button label="取消" disabled={sending} onPress={() => setNoteFor(null)} />
           </View>
         </View>
       ) : (
@@ -167,62 +248,98 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
           {permission.options.map((option) => (
             <Button
               key={option.id}
-              theme={theme}
               label={plain(option.name)}
-              primary={option.kind.startsWith('allow') && (option.preferred || option.kind === 'allow_once')}
-              danger={option.kind.startsWith('reject')}
+              tone={
+                option.kind.startsWith('reject')
+                  ? 'danger'
+                  : option.kind.startsWith('allow') &&
+                      (option.preferred || option.kind === 'allow_once')
+                    ? 'primary'
+                    : 'plain'
+              }
               disabled={sending}
               onPress={() => choose(option)}
             />
           ))}
         </View>
       )}
-      {sending && <ActivityIndicator style={{ marginTop: 8 }} color={theme.accent} />}
+      {sending && <ActivityIndicator style={{ marginTop: 10 }} color={c.textSecondary} />}
     </View>
   )
 }
 
 function Button(props: {
-  theme: Theme
   label: string
-  primary?: boolean
-  danger?: boolean
+  tone?: 'primary' | 'danger' | 'plain'
   disabled?: boolean
   onPress(): void
 }) {
-  const { theme } = props
+  const { c, s } = useSessionTokens()
+  const tone = props.tone ?? 'plain'
   return (
-    <Pressable
+    <PressScale
+      scale={0.96}
       disabled={props.disabled}
       onPress={props.onPress}
-      style={({ pressed }) => [
+      accessibilityRole="button"
+      style={[
         styles.button,
-        props.primary
-          ? { backgroundColor: theme.accent, borderColor: theme.accent }
-          : { borderColor: props.danger ? theme.danger : theme.line },
-        { opacity: props.disabled ? 0.5 : pressed ? 0.75 : 1 },
+        {
+          backgroundColor:
+            tone === 'primary' ? c.accent : tone === 'danger' ? s.dangerSoft : c.fillStrong,
+          opacity: props.disabled ? 0.5 : 1,
+        },
       ]}
     >
       <Text
-        style={{
-          color: props.primary ? theme.accentText : props.danger ? theme.danger : theme.text,
-          fontSize: 15,
-          fontWeight: '600',
-        }}
+        style={[
+          styles.buttonText,
+          { color: tone === 'primary' ? c.onAccent : tone === 'danger' ? c.danger : c.text },
+        ]}
       >
         {props.label}
       </Text>
-    </Pressable>
+    </PressScale>
   )
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1.5, borderRadius: 14, padding: 14 },
-  title: { fontSize: 16, fontWeight: '700' },
-  input: { maxHeight: 140, borderRadius: 8, padding: 10, marginTop: 10 },
-  plan: { maxHeight: 260, borderWidth: 1, borderRadius: 8, padding: 10, marginTop: 10 },
-  row: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  button: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9 },
-  choice: { borderWidth: 1, borderRadius: 10, padding: 10 },
-  text: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginTop: 6, fontSize: 15 },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 22,
+    padding: 16,
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  badge: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  title: { flex: 1, fontSize: 16, lineHeight: 22, fontWeight: '600' },
+  description: { fontSize: 14, lineHeight: 20, marginTop: 6 },
+  input: {
+    maxHeight: 150,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 12,
+    marginTop: 12,
+  },
+  mono: { fontFamily: MONO, fontSize: 13, lineHeight: 19 },
+  plan: { maxHeight: 280, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, marginTop: 12 },
+  header: { fontSize: 12, fontWeight: '600', marginBottom: 2, textTransform: 'uppercase' },
+  question: { fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  choice: { flexDirection: 'row', gap: 10, borderWidth: 1, borderRadius: 14, padding: 12 },
+  optionLabel: { fontSize: 15, lineHeight: 21 },
+  optionDetail: { fontSize: 13, lineHeight: 18, marginTop: 2 },
+  row: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  button: { borderRadius: 999, paddingHorizontal: 18, height: 40, justifyContent: 'center' },
+  buttonText: { fontSize: 15, fontWeight: '600' },
+  text: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 4,
+    fontSize: 15,
+  },
 })

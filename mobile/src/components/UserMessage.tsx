@@ -1,17 +1,21 @@
-// The user's message in a session: its text, and its pictures as thumbnails. A sent attachment
-// carries its thumbnail and an inline image its bytes, so those show at once; a picture the host
-// keeps only in its thread store is read with `sessions.blob` when it is tapped, as is the full
-// size of any of them, since a phone should not download every picture it scrolls past.
+// The user's message in a session: a soft bubble on the right with its text, and its pictures as
+// thumbnails above it. A sent attachment carries its thumbnail and an inline image its bytes, so
+// those show at once; a picture the host keeps only in its thread store is read with
+// `sessions.blob` when it is tapped, as is the full size of any of them, since a phone should not
+// download every picture it scrolls past. Holding the bubble offers to copy or select its text.
 
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useLocalSearchParams } from 'expo-router'
 import { File, Paths } from 'expo-file-system'
 import type { AttachmentBytes } from '@shared/agent-host'
-import type { UserContent } from '@shared/thread'
+import type { FromDevice, FromSession, UserContent } from '@shared/thread'
 import { useLink } from '../host'
-import type { Theme } from '../theme'
+import { useSessionRows } from '../ui/session/context'
+import { copyText, showMenu } from '../ui/session/feedback'
+import { G, Icon } from '../ui/session/icons'
+import { useSessionTokens } from '../ui/session/palette'
+import { PressScale } from '../ui/session/Press'
 
 /** A picture of the message: what shows in the bubble, and where its full size comes from. */
 interface Picture {
@@ -90,37 +94,81 @@ async function stored(
   return file.uri
 }
 
-export function UserMessage(props: { content: UserContent[]; theme: Theme }) {
-  const { content, theme } = props
+export function UserMessage(props: {
+  content: UserContent[]
+  steered?: boolean
+  device?: FromDevice
+  from?: FromSession
+}) {
+  const { content } = props
+  const { c, s } = useSessionTokens()
+  const { selectText } = useSessionRows()
   const [open, setOpen] = useState<Picture | null>(null)
   const text = content
     .map(label)
     .filter((line): line is string => line !== null)
     .join('\n')
   const pictures = content.map(picture).filter((each): each is Picture => each !== null)
+  const note = props.from
+    ? `来自「${props.from.title}」`
+    : props.steered
+      ? '插话'
+      : props.device
+        ? `从 ${props.device.name} 发送`
+        : null
+
+  const menu = () =>
+    showMenu(undefined, [
+      { label: '复制', onPress: () => void copyText(text) },
+      { label: '选择文本', onPress: () => selectText(text) },
+    ])
+
   return (
-    <View style={{ gap: 6 }}>
+    <View style={styles.root}>
       {pictures.length > 0 && (
         <View style={styles.pictures}>
           {pictures.map((each, index) => (
-            <Pressable key={index} onPress={() => setOpen(each)} accessibilityLabel="查看图片">
+            <PressScale
+              key={index}
+              scale={0.97}
+              onPress={() => setOpen(each)}
+              accessibilityLabel="查看图片"
+            >
               {each.thumb ? (
-                <Image source={{ uri: each.thumb }} style={styles.thumb} resizeMode="cover" />
+                <Image
+                  source={{ uri: each.thumb }}
+                  style={[styles.thumb, { borderColor: c.border }]}
+                  resizeMode="cover"
+                />
               ) : (
-                <View style={[styles.thumb, styles.placeholder, { backgroundColor: theme.card }]}>
-                  <Text style={{ color: theme.muted, fontSize: 12 }}>图片</Text>
-                  <Text style={{ color: theme.muted, fontSize: 10, marginTop: 2 }}>点按查看</Text>
+                <View
+                  style={[
+                    styles.thumb,
+                    styles.placeholder,
+                    { backgroundColor: s.bubble, borderColor: c.border },
+                  ]}
+                >
+                  <Icon icon={G.photos} size={20} color={c.textSecondary} />
+                  <Text style={{ color: c.textSecondary, fontSize: 11, marginTop: 4 }}>
+                    点按查看
+                  </Text>
                 </View>
               )}
-            </Pressable>
+            </PressScale>
           ))}
         </View>
       )}
       {text ? (
-        <Text selectable style={{ color: theme.accentText, fontSize: 15, lineHeight: 21 }}>
-          {text}
-        </Text>
+        <PressScale
+          scale={0.98}
+          onLongPress={text ? menu : undefined}
+          delayLongPress={350}
+          style={[styles.bubble, { backgroundColor: s.bubble }]}
+        >
+          <Text style={[styles.text, { color: c.text }]}>{text}</Text>
+        </PressScale>
       ) : null}
+      {note && <Text style={[styles.note, { color: c.textTertiary }]}>{note}</Text>}
       {open && <Viewer picture={open} onClose={() => setOpen(null)} />}
     </View>
   )
@@ -128,7 +176,8 @@ export function UserMessage(props: { content: UserContent[]; theme: Theme }) {
 
 function Viewer(props: { picture: Picture; onClose(): void }) {
   const { picture, onClose } = props
-  const { id: sessionId } = useLocalSearchParams<{ id: string }>()
+  const { sessionId } = useSessionRows()
+  const { s } = useSessionTokens()
   const link = useLink()
   const insets = useSafeAreaInsets()
   const full = picture.full
@@ -152,6 +201,7 @@ function Viewer(props: { picture: Picture; onClose(): void }) {
   }, [full, link, sessionId])
 
   const shown = uri ?? picture.thumb
+  const light = s.onScrim
   return (
     <Modal
       visible
@@ -159,24 +209,49 @@ function Viewer(props: { picture: Picture; onClose(): void }) {
       onRequestClose={onClose}
       supportedOrientations={['portrait']}
     >
-      <Pressable style={styles.viewer} onPress={onClose} accessibilityLabel="关闭图片">
+      <Pressable
+        style={[styles.viewer, { backgroundColor: s.scrim }]}
+        onPress={onClose}
+        accessibilityLabel="关闭图片"
+      >
         {shown && <Image source={{ uri: shown }} style={styles.full} resizeMode="contain" />}
-        {!uri && !error && <ActivityIndicator style={StyleSheet.absoluteFill} color="#FFFFFF" />}
-        {error && <Text style={[styles.error, { bottom: insets.bottom + 24 }]}>{error}</Text>}
-        <Text style={[styles.close, { top: insets.top + 12 }]}>关闭</Text>
+        {!uri && !error && <ActivityIndicator style={StyleSheet.absoluteFill} color={light} />}
+        {error && (
+          <Text style={[styles.error, { bottom: insets.bottom + 24, color: light }]}>{error}</Text>
+        )}
+        <View style={[styles.close, { top: insets.top + 10, backgroundColor: s.scrimFill }]}>
+          <Icon icon={G.close} size={18} color={light} weight="semibold" />
+        </View>
       </Pressable>
     </Modal>
   )
 }
 
-const THUMB = 96
+const THUMB = 112
 
 const styles = StyleSheet.create({
-  pictures: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  thumb: { width: THUMB, height: THUMB, borderRadius: 10 },
+  root: { alignItems: 'flex-end', gap: 6, paddingLeft: 48 },
+  pictures: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' },
+  thumb: { width: THUMB, height: THUMB, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth },
   placeholder: { alignItems: 'center', justifyContent: 'center' },
-  viewer: { flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' },
+  bubble: {
+    borderRadius: 20,
+    borderBottomRightRadius: 6,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  text: { fontSize: 16, lineHeight: 23 },
+  note: { fontSize: 12, lineHeight: 16, marginRight: 4 },
+  viewer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   full: { width: '100%', height: '100%' },
-  close: { position: 'absolute', right: 20, color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  error: { position: 'absolute', left: 24, right: 24, color: '#FFFFFF', textAlign: 'center' },
+  close: {
+    position: 'absolute',
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  error: { position: 'absolute', left: 24, right: 24, textAlign: 'center' },
 })
