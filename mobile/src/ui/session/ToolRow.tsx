@@ -14,7 +14,7 @@ import { gentle } from './Press'
 import { Counts } from './TurnChanges'
 import { toolEdits, type FileEdit } from './turns'
 
-const VERBS: Record<ToolEntry['toolKind'], string> = {
+export const VERBS: Record<ToolEntry['toolKind'], string> = {
   read: '读取',
   edit: '编辑',
   delete: '删除',
@@ -29,7 +29,7 @@ const VERBS: Record<ToolEntry['toolKind'], string> = {
 
 const OUTPUT_CHARS = 4000
 
-function answerText(entry: ToolEntry): string | null {
+export function answerText(entry: ToolEntry): string | null {
   const result = entry.permissionResult
   if (!result) return null
   if (result === 'cancelled') return '请求已取消'
@@ -41,7 +41,7 @@ function answerText(entry: ToolEntry): string | null {
 }
 
 /** What the line names: the command for a shell call, else the agent's title for the call. */
-function target(entry: ToolEntry, root: string | null): string {
+export function target(entry: ToolEntry, root: string | null): string {
   if (entry.toolKind === 'execute' && entry.rawInput) return entry.rawInput.split('\n')[0]!
   const location = entry.locations[0]?.path
   if (
@@ -54,7 +54,7 @@ function target(entry: ToolEntry, root: string | null): string {
   return entry.title
 }
 
-function EditLine(props: { edit: FileEdit; root: string | null }) {
+export function EditLine(props: { edit: FileEdit; root: string | null }) {
   const { c } = useSessionTokens()
   const { edit } = props
   return (
@@ -88,7 +88,7 @@ function EditLine(props: { edit: FileEdit; root: string | null }) {
 
 export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry }) {
   const { c, s } = useSessionTokens()
-  const { root } = useSessionRows()
+  const { root, sessionId } = useSessionRows()
   const { entry } = props
   const [open, setOpen] = useState(false)
   const waiting = !!entry.permission && !entry.permissionResult
@@ -193,6 +193,18 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry }) {
             !entry.description && (
               <Text style={[styles.description, { color: c.textTertiary }]}>没有输出</Text>
             )}
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/tool', params: { sessionId, entryId: entry.id } })
+            }
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="全屏查看这次调用"
+            style={({ pressed }) => [styles.full, { opacity: pressed ? 0.55 : 1 }]}
+          >
+            <Text style={[styles.fullText, { color: c.tint }]}>全屏查看</Text>
+            <Icon icon={G.right} size={10} color={c.tint} weight="semibold" />
+          </Pressable>
         </View>
       )}
     </View>
@@ -227,4 +239,12 @@ const styles = StyleSheet.create({
     minHeight: 36,
   },
   editPath: { flex: 1, fontSize: 13 },
+  full: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    paddingVertical: 2,
+  },
+  fullText: { fontSize: 13, fontWeight: '500' },
 })

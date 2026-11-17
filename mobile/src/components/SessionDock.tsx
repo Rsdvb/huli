@@ -1,21 +1,27 @@
 // What sits around a session's composer: the messages queued behind the running turn, each to take
 // back, steer in or send now; and the session's permission mode, model and effort as the agent
-// reports them, each to change from the composer's own row.
+// reports them, each a button of the composer's own row that opens its menu.
 
-import { useState, type ReactNode } from 'react'
+import { useState, type RefObject } from 'react'
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ConfigOption, QueuedPrompt, SessionView } from '@shared/thread'
-import { isFullAccessMode, type HarnessId } from '@shared/agents'
+import type { HarnessId } from '@shared/agents'
 import { useHost } from '../host'
 import { errorText } from '../sessions'
 import { haptic } from '../ui/session/feedback'
-import { AgentMark, G, Icon } from '../ui/session/icons'
+import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
+import type { ViewHandle } from '../ui/session/Popover'
 import { PressScale, RoundButton } from '../ui/session/Press'
-import { Sheet, type SheetItem } from './Sheet'
-
-type Choice = NonNullable<ConfigOption['choices']>[number]
-type Picked = 'model' | 'mode' | 'thought_level'
+import {
+  MODE_ICON,
+  modeLook,
+  modelName,
+  optionOf,
+  shownChoice,
+  type ConfigControl,
+  type ModeLook,
+} from './ConfigMenus'
 
 function promptText(item: QueuedPrompt): string {
   return item.content
@@ -29,17 +35,6 @@ function attachmentCount(item: QueuedPrompt): number {
   return item.content.filter((c) => c.type === 'ref' && c.ref.kind !== 'link').length
 }
 
-/** The choice that stands for the value: an alias shows as the choice it names. */
-function shownChoice(option: ConfigOption): Choice | undefined {
-  const choices = option.choices ?? []
-  const own = choices.find((c) => c.value === option.value)
-  return (own?.shownAs ? choices.find((c) => c.value === own.shownAs) : undefined) ?? own
-}
-
-function selectOf(config: ConfigOption[], category: Picked): ConfigOption | undefined {
-  return config.find((o) => o.category === category && o.type === 'select' && !!o.choices?.length)
-}
-
 export interface ConfigSlot {
   option: ConfigOption
   name: string
@@ -48,17 +43,30 @@ export interface ConfigSlot {
 }
 
 export interface SessionConfig {
-  mode: (ConfigSlot & { full: boolean }) | null
+  control: ConfigControl
+  mode: (ConfigSlot & { look: ModeLook }) | null
   model: ConfigSlot | null
   effort: ConfigSlot | null
   harness: HarnessId | undefined
   /** The option being changed. */
   setting: string | null
   connected: boolean
-  openMode(): void
-  openModel(): void
-  /** The pickers; put it anywhere in the screen. */
-  element: ReactNode
+}
+
+/** A select option's slot in the composer's row, by what it shows. */
+export function slotOf(
+  config: readonly ConfigOption[],
+  category: 'mode' | 'model' | 'thought_level',
+  running: boolean,
+): ConfigSlot | null {
+  const option = optionOf(config, category)
+  if (!option) return null
+  const name = shownChoice(option)?.name ?? String(option.value)
+  return {
+    option,
+    name: category === 'model' ? modelName(name) : name,
+    locked: !!option.idleOnly && running,
+  }
 }
 
 export function useSessionConfig(
@@ -66,26 +74,14 @@ export function useSessionConfig(
   session: SessionView | undefined,
 ): SessionConfig {
   const { link, agents, state } = useHost()
-  const [picking, setPicking] = useState<'mode' | 'model' | null>(null)
   const [setting, setSetting] = useState<string | null>(null)
   const connected = state.kind === 'connected'
   const running = session?.status === 'running' || session?.status === 'awaiting_permission'
-  const slot = (category: Picked): ConfigSlot | null => {
-    const option = session ? selectOf(session.config, category) : undefined
-    if (!option) return null
-    return {
-      option,
-      name: shownChoice(option)?.name ?? String(option.value),
-      locked: !!option.idleOnly && running,
-    }
-  }
-  const mode = slot('mode')
-  const model = slot('model')
-  const effort = slot('thought_level')
+  const config = session?.config ?? []
+  const mode = slotOf(config, 'mode', running)
 
-  const setOption = (option: ConfigOption, value: string) => {
+  const set = (option: ConfigOption, value: string | boolean) => {
     if (value === option.value || !link) return
-    haptic.pick()
     setSetting(option.id)
     link
       .request('sessions.setConfigOption', { sessionId, optionId: option.id, value })
@@ -93,131 +89,127 @@ export function useSessionConfig(
       .finally(() => setSetting(null))
   }
 
-  const itemsOf = (slotted: ConfigSlot, heading: string | null): SheetItem[] => {
-    const { option } = slotted
-    const shown = shownChoice(option)?.value
-    const listed = (option.choices ?? []).filter((c) => !c.shownAs)
-    const ordered = [...listed.filter((c) => !c.older), ...listed.filter((c) => c.older)]
-    return ordered.map((c, index) => ({
-      key: `${option.id}:${c.value}`,
-      label: c.name,
-      ...(c.description ? { detail: c.description } : {}),
-      checked: c.value === shown,
-      disabled: slotted.locked,
-      destructive: option.category === 'mode' && isFullAccessMode(c.value),
-      ...(index === 0 && heading
-        ? { section: slotted.locked ? `${heading}（这一轮结束后才能改）` : heading }
-        : c.older && !ordered[index - 1]?.older
-          ? { section: '更早的版本' }
-          : {}),
-      onPress: () => setOption(option, c.value),
-    }))
-  }
-
-  const open = (which: 'mode' | 'model') => {
-    const target = which === 'mode' ? mode : (model ?? effort)
-    if (!target) return
-    if (which === 'mode' && target.locked) {
-      Alert.alert('权限模式要等这一轮结束才能改')
-      return
-    }
-    haptic.pick()
-    setPicking(which)
-  }
-
-  const sheetItems: SheetItem[] =
-    picking === 'mode' && mode
-      ? itemsOf(mode, null)
-      : picking === 'model'
-        ? [
-            ...(model ? itemsOf(model, effort ? '模型' : null) : []),
-            ...(effort ? itemsOf(effort, '思考强度') : []),
-          ]
-        : []
-
-  const element = (
-    <Sheet
-      visible={picking !== null && sheetItems.length > 0}
-      title={picking === 'mode' ? '权限模式' : model ? '模型' : '思考强度'}
-      {...(picking === 'mode' && mode?.option.description
-        ? { message: mode.option.description }
-        : {})}
-      items={sheetItems}
-      onClose={() => setPicking(null)}
-    />
-  )
-
   return {
-    mode: mode ? { ...mode, full: isFullAccessMode(String(mode.option.value)) } : null,
-    model,
-    effort,
+    control: { config, running, set },
+    mode: mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null,
+    model: slotOf(config, 'model', running),
+    effort: slotOf(config, 'thought_level', running),
     harness: session ? agents.get(session.agentId)?.harnessId : undefined,
     setting,
     connected,
-    openMode: () => open('mode'),
-    openModel: () => open('model'),
-    element,
   }
 }
 
-/** The permission mode as a round button: a shield, or a warning for a mode with full access. */
-export function ModeButton(props: { config: SessionConfig }) {
-  const { c } = useSessionTokens()
-  const { mode, setting, connected } = props.config
+/**
+ * The permission mode as a round button with its icon, or as a pill with its name too, as New
+ * session shows it; a mode with full access in red.
+ */
+export function ModeButton(props: {
+  mode: (ConfigSlot & { look: ModeLook }) | null
+  busy: boolean
+  disabled: boolean
+  onPress(): void
+  anchor: RefObject<ViewHandle | null>
+  labelled?: boolean
+}) {
+  const { c, s } = useSessionTokens()
+  const { mode } = props
   if (!mode) return null
+  const full = mode.look === 'full'
+  const color = full ? c.danger : c.textSecondary
+  const icon = props.busy ? (
+    <ActivityIndicator size="small" color={c.textSecondary} />
+  ) : (
+    <Icon icon={MODE_ICON[mode.look]} size={18} color={color} />
+  )
   return (
-    <RoundButton
-      tone={mode.full ? 'warning' : 'fill'}
-      onPress={props.config.openMode}
-      disabled={!connected || setting !== null}
-      accessibilityLabel={`权限模式：${mode.name}`}
-      style={mode.locked ? { opacity: 0.5 } : null}
-    >
-      {setting === mode.option.id ? (
-        <ActivityIndicator size="small" color={c.textSecondary} />
+    <View ref={props.anchor} collapsable={false}>
+      {props.labelled ? (
+        <PressScale
+          scale={0.96}
+          onPress={props.onPress}
+          disabled={props.disabled}
+          accessibilityRole="button"
+          accessibilityLabel={`权限模式：${mode.name}`}
+          style={[
+            styles.modePill,
+            {
+              backgroundColor: full ? s.dangerSoft : c.fill,
+              opacity: props.disabled ? 0.38 : mode.locked ? 0.5 : 1,
+            },
+          ]}
+        >
+          {icon}
+          <Text style={[styles.modeText, { color: full ? c.danger : c.text }]} numberOfLines={1}>
+            {mode.name}
+          </Text>
+        </PressScale>
       ) : (
-        <Icon
-          icon={mode.full ? G.warning : G.shieldCheck}
-          size={18}
-          color={mode.full ? c.warning : c.textSecondary}
-        />
+        <RoundButton
+          tone={full ? 'warning' : 'fill'}
+          onPress={props.onPress}
+          disabled={props.disabled}
+          accessibilityLabel={`权限模式：${mode.name}`}
+          style={[
+            full ? { backgroundColor: s.dangerSoft } : null,
+            mode.locked ? { opacity: 0.5 } : null,
+          ]}
+        >
+          {icon}
+        </RoundButton>
       )}
-    </RoundButton>
+    </View>
   )
 }
 
-/** The model chip: the agent's mark, its model and effort, opening the pickers. */
-export function ModelChip(props: { config: SessionConfig }) {
+/** The model chip: the agent's mark, its model and effort, opening the model menu. */
+export function ModelChip(props: {
+  agentId: string
+  harness: HarnessId | undefined
+  model: string | null
+  effort: string | null
+  /** The agent a switch hands the session to with the next message, named in place of the model. */
+  pending?: string | null
+  busy: boolean
+  disabled: boolean
+  onPress(): void
+  anchor: RefObject<ViewHandle | null>
+}) {
   const { c } = useSessionTokens()
-  const { model, effort, setting, connected, harness } = props.config
-  if (!model && !effort) return null
-  const busy = setting !== null && (setting === model?.option.id || setting === effort?.option.id)
+  const label = props.pending ?? props.model ?? ''
   return (
-    <PressScale
-      scale={0.96}
-      onPress={props.config.openModel}
-      disabled={!connected || setting !== null}
-      accessibilityRole="button"
-      accessibilityLabel={`模型：${model?.name ?? ''}${effort ? `，思考强度：${effort.name}` : ''}`}
-      outerStyle={styles.chipOuter}
-      style={[styles.chip, { opacity: connected ? 1 : 0.5 }]}
-    >
-      <AgentMark harness={harness} size={17} />
-      <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
-        {model?.name ?? ''}
-        {effort ? (
-          <Text style={{ color: c.textSecondary, fontWeight: '400' }}>
-            {model ? ' ' : ''}
-            {effort.name}
-          </Text>
-        ) : null}
-      </Text>
-      {busy ? (
-        <ActivityIndicator size="small" color={c.textSecondary} />
-      ) : (
-        <Icon icon={G.upDown} size={11} color={c.textTertiary} weight="semibold" />
-      )}
-    </PressScale>
+    <View ref={props.anchor} collapsable={false} style={styles.chipOuter}>
+      <PressScale
+        scale={0.96}
+        onPress={props.onPress}
+        disabled={props.disabled}
+        accessibilityRole="button"
+        accessibilityLabel={
+          props.pending
+            ? `下一条消息交给 ${props.pending}`
+            : `模型：${props.model ?? ''}${props.effort ? `，思考强度：${props.effort}` : ''}`
+        }
+        style={[styles.chip, { opacity: props.disabled ? 0.5 : 1 }]}
+      >
+        <AgentGlyph agentId={props.agentId} harness={props.harness} size={17} />
+        <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
+          {label}
+          {props.pending ? (
+            <Text style={{ color: c.textSecondary, fontWeight: '400' }}> · 下条消息起</Text>
+          ) : props.effort ? (
+            <Text style={{ color: c.textSecondary, fontWeight: '400' }}>
+              {label ? ' ' : ''}
+              {props.effort}
+            </Text>
+          ) : null}
+        </Text>
+        {props.busy ? (
+          <ActivityIndicator size="small" color={c.textSecondary} />
+        ) : (
+          <Icon icon={G.upDown} size={11} color={c.textTertiary} weight="semibold" />
+        )}
+      </PressScale>
+    </View>
   )
 }
 
@@ -340,6 +332,16 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   chipOuter: { flexShrink: 1, minWidth: 0 },
+  modePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    height: 40,
+    borderRadius: 20,
+    paddingHorizontal: 13,
+    maxWidth: 200,
+  },
+  modeText: { fontSize: 15, fontWeight: '500', flexShrink: 1 },
   chipText: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   queue: { gap: 8 },
   queueHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },

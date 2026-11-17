@@ -68,6 +68,11 @@ private enum Notice {
     if let sessionId = content["sessionId"] as? String {
       data["sessionId"] = sessionId
       result.threadIdentifier = "\(host):\(sessionId)"
+      // A session the user muted on this phone arrives in the list without a sound or a banner.
+      if MutedSessions.load().contains(sessionId) {
+        result.sound = nil
+        if #available(iOS 15.0, *) { result.interruptionLevel = .passive }
+      }
     }
     var userInfo = original.userInfo
     userInfo["body"] = data
@@ -129,6 +134,25 @@ private struct SharedKeys: Decodable {
       keys.v == 1
     else { return nil }
     return keys
+  }
+}
+
+/// The sessions the user muted on this phone, which the app keeps beside the keys.
+private enum MutedSessions {
+  static func load() -> Set<String> {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: "huli.push:no-auth",
+      kSecAttrAccount as String: Data("huli.push.muted".utf8),
+      kSecMatchLimit as String: kSecMatchLimitOne,
+      kSecReturnData as String: true,
+    ]
+    var item: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+      let data = item as? Data,
+      let ids = try? JSONDecoder().decode([String].self, from: data)
+    else { return [] }
+    return Set(ids)
   }
 }
 

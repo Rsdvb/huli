@@ -18,6 +18,10 @@ export interface SessionActions {
   togglePin(summary: SessionSummary): void
   archive(summary: SessionSummary): void
   restore(summary: SessionSummary): void
+  rename(summary: SessionSummary): void
+  toggleUnread(summary: SessionSummary): void
+  /** Asks first, then deletes. */
+  remove(summary: SessionSummary): void
   /** Renders the sheet and the rename dialog; put it anywhere in the screen. */
   element: ReactNode
 }
@@ -138,6 +142,18 @@ export function useSessionActions(
       run('没能归档', () => link!.request('sessions.archive', { sessionId: s.id }), onGone),
     restore: (s) =>
       run('没能恢复', () => link!.request('sessions.unarchive', { sessionId: s.id }), onGone),
+    rename: (s) => {
+      setTarget(s)
+      setRenaming(true)
+    },
+    toggleUnread: (s) =>
+      run('没能标记', () =>
+        link!.request('sessions.markUnread', { sessionId: s.id, unread: s.attention !== 'unread' }),
+      ),
+    remove: (s) =>
+      items(s)
+        .find((item) => item.key === 'delete')
+        ?.onPress(),
     element,
   }
 }

@@ -27,6 +27,16 @@ export interface SessionPalette {
   veil: string
   onScrim: string
   scrimFill: string
+  /** A popover menu: its fill under the blur, its fill without one, and the chosen row's. */
+  menu: string
+  menuSolid: string
+  menuActive: string
+  /** The context bar's small fixed costs, after the four colored kinds, and the buffer. */
+  contextGrays: readonly [string, string, string]
+  contextBuffer: string
+  /** The round stop button: a light disc in the dark, a dark one in the light. */
+  stop: string
+  onStop: string
   /** Code tints: a cheap highlighter's few classes. */
   syntax: Record<'keyword' | 'string' | 'comment' | 'number' | 'type', string>
   /** File type marks, by language. */
@@ -51,6 +61,13 @@ const dark: SessionPalette = {
   scrim: '#000000',
   onScrim: '#FFFFFF',
   scrimFill: 'rgba(255,255,255,0.16)',
+  menu: 'rgba(36,37,42,0.62)',
+  menuSolid: '#24252A',
+  menuActive: 'rgba(255,255,255,0.09)',
+  contextGrays: ['#9A9AA1', '#7C7C84', '#62626A'],
+  contextBuffer: 'rgba(255,255,255,0.22)',
+  stop: '#F2F2F5',
+  onStop: '#050506',
   syntax: {
     keyword: '#FF7AB2',
     string: '#FF8170',
@@ -87,6 +104,13 @@ const light: SessionPalette = {
   scrim: '#000000',
   onScrim: '#FFFFFF',
   scrimFill: 'rgba(255,255,255,0.16)',
+  menu: 'rgba(250,250,252,0.72)',
+  menuSolid: '#FAFAFC',
+  menuActive: 'rgba(0,0,0,0.06)',
+  contextGrays: ['#8E8E96', '#A8A8AF', '#C2C2C8'],
+  contextBuffer: 'rgba(0,0,0,0.18)',
+  stop: '#16161A',
+  onStop: '#FFFFFF',
   syntax: {
     keyword: '#AD3DA4',
     string: '#D12F1B',

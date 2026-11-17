@@ -5,7 +5,19 @@
 // download every picture it scrolls past. Holding the bubble offers to copy or select its text.
 
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import {
+  ActivityIndicator,
+  Image,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { File, Paths } from 'expo-file-system'
 import type { AttachmentBytes } from '@shared/agent-host'
@@ -127,37 +139,51 @@ export function UserMessage(props: {
   return (
     <View style={styles.root}>
       {pictures.length > 0 && (
-        <View style={styles.pictures}>
-          {pictures.map((each, index) => (
-            <PressScale
-              key={index}
-              scale={0.97}
-              onPress={() => setOpen(each)}
-              accessibilityLabel="查看图片"
-            >
-              {each.thumb ? (
-                <Image
-                  source={{ uri: each.thumb }}
-                  style={[styles.thumb, { borderColor: c.border }]}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View
-                  style={[
-                    styles.thumb,
-                    styles.placeholder,
-                    { backgroundColor: s.bubble, borderColor: c.border },
-                  ]}
-                >
-                  <Icon icon={G.photos} size={20} color={c.textSecondary} />
-                  <Text style={{ color: c.textSecondary, fontSize: 11, marginTop: 4 }}>
-                    点按查看
-                  </Text>
-                </View>
-              )}
-            </PressScale>
-          ))}
-        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.strip}
+          contentContainerStyle={styles.pictures}
+        >
+          {pictures.map((each, index) => {
+            const side = pictures.length > 1 ? THUMB_SMALL : THUMB
+            return (
+              <PressScale
+                key={index}
+                scale={0.97}
+                onPress={() => setOpen(each)}
+                accessibilityRole="imagebutton"
+                accessibilityLabel={pictures.length > 1 ? `查看第 ${index + 1} 张图片` : '查看图片'}
+              >
+                {each.thumb ? (
+                  <Image
+                    source={{ uri: each.thumb }}
+                    style={[styles.thumb, { width: side, height: side, borderColor: c.border }]}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.thumb,
+                      styles.placeholder,
+                      {
+                        width: side,
+                        height: side,
+                        backgroundColor: s.bubble,
+                        borderColor: c.border,
+                      },
+                    ]}
+                  >
+                    <Icon icon={G.photos} size={20} color={c.textSecondary} />
+                    <Text style={{ color: c.textSecondary, fontSize: 11, marginTop: 4 }}>
+                      点按查看
+                    </Text>
+                  </View>
+                )}
+              </PressScale>
+            )
+          })}
+        </ScrollView>
       )}
       {text ? (
         <PressScale
@@ -203,6 +229,23 @@ function Viewer(props: { picture: Picture; onClose(): void }) {
 
   const shown = uri ?? picture.thumb
   const light = s.onScrim
+  const window = useWindowDimensions()
+  const share = async () => {
+    if (!uri) return
+    try {
+      await Share.share({ url: await shareable(uri) })
+    } catch (failed) {
+      console.warn('Could not share a picture', failed)
+    }
+  }
+  const image = shown ? (
+    <Image
+      source={{ uri: shown }}
+      style={{ width: window.width, height: window.height }}
+      resizeMode="contain"
+      accessibilityIgnoresInvertColors
+    />
+  ) : null
   return (
     <Modal
       visible
@@ -210,31 +253,80 @@ function Viewer(props: { picture: Picture; onClose(): void }) {
       onRequestClose={onClose}
       supportedOrientations={['portrait']}
     >
-      <Pressable
-        style={[styles.viewer, { backgroundColor: s.scrim }]}
-        onPress={onClose}
-        accessibilityLabel="关闭图片"
-      >
-        {shown && <Image source={{ uri: shown }} style={styles.full} resizeMode="contain" />}
-        {!uri && !error && <ActivityIndicator style={StyleSheet.absoluteFill} color={light} />}
+      <View style={[styles.viewer, { backgroundColor: s.scrim }]}>
+        {Platform.OS === 'ios' ? (
+          // Pinching zooms in a scroll view on iOS; Android's has no zoom, so it shows the fit.
+          <ScrollView
+            maximumZoomScale={5}
+            minimumZoomScale={1}
+            centerContent
+            bouncesZoom
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ flexGrow: 1 }}
+          >
+            <Pressable onPress={onClose} accessibilityLabel="关闭图片">
+              {image}
+            </Pressable>
+          </ScrollView>
+        ) : (
+          <Pressable onPress={onClose} accessibilityLabel="关闭图片">
+            {image}
+          </Pressable>
+        )}
+        {!uri && !error && (
+          <ActivityIndicator style={StyleSheet.absoluteFill} color={light} pointerEvents="none" />
+        )}
         {error && (
           <Text style={[styles.error, { bottom: insets.bottom + 24, color: light }]}>{error}</Text>
         )}
-        <View style={[styles.close, { top: insets.top + 10, backgroundColor: s.scrimFill }]}>
+        <Pressable
+          onPress={onClose}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="关闭"
+          style={[styles.close, { top: insets.top + 10, right: 16, backgroundColor: s.scrimFill }]}
+        >
           <Icon icon={G.close} size={18} color={light} weight="semibold" />
-        </View>
-      </Pressable>
+        </Pressable>
+        {Platform.OS === 'ios' && uri && (
+          <Pressable
+            onPress={() => void share()}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="分享图片"
+            style={[styles.close, { top: insets.top + 10, left: 16, backgroundColor: s.scrimFill }]}
+          >
+            <Icon icon={G.share} size={17} color={light} weight="semibold" />
+          </Pressable>
+        )}
+      </View>
       <LockLayer />
     </Modal>
   )
 }
 
+/** A file to share: a picture held as a data URL is written to the cache first. */
+async function shareable(uri: string): Promise<string> {
+  const match = /^data:([^;]+);base64,(.*)$/.exec(uri)
+  if (!match) return uri
+  const file = new File(Paths.cache, `huli-share.${EXTENSIONS[match[1]!] ?? 'png'}`)
+  const binary = atob(match[2]!)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  file.create({ overwrite: true })
+  await file.write(bytes)
+  return file.uri
+}
+
 const THUMB = 112
+const THUMB_SMALL = 76
 
 const styles = StyleSheet.create({
   root: { alignItems: 'flex-end', gap: 6, paddingLeft: 48 },
-  pictures: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' },
-  thumb: { width: THUMB, height: THUMB, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth },
+  strip: { flexGrow: 0, alignSelf: 'stretch', marginLeft: -48 },
+  pictures: { flexDirection: 'row', gap: 8, flexGrow: 1, justifyContent: 'flex-end' },
+  thumb: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth },
   placeholder: { alignItems: 'center', justifyContent: 'center' },
   bubble: {
     borderRadius: 20,
@@ -245,10 +337,8 @@ const styles = StyleSheet.create({
   text: { fontSize: 16, lineHeight: 23 },
   note: { fontSize: 12, lineHeight: 16, marginRight: 4 },
   viewer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  full: { width: '100%', height: '100%' },
   close: {
     position: 'absolute',
-    right: 16,
     width: 36,
     height: 36,
     borderRadius: 18,

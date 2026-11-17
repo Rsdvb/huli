@@ -18,13 +18,34 @@ import type { Attachment, UserContent } from '@shared/thread'
 
 export { ATTACHMENT_LIMIT }
 
-/** Something picked: a photo to re-encode, or a file sent as it is. */
+/**
+ * Something picked: a photo to re-encode, or a file sent as it is; or a file of the project an `@`
+ * mention named, which the host reads itself (`uri` is its path relative to the project then).
+ */
 export interface PickedSource {
-  kind: 'image' | 'file'
+  kind: 'image' | 'file' | 'project'
   uri: string
   name: string
   mimeType: string | null
   size: number | null
+  /** For a mention: the project its path is relative to. */
+  projectPath?: string
+}
+
+/** Has the host attach a file of the project by its path, as the desktop's `@` mention does. */
+export async function attachProjectFile(
+  link: HostLink,
+  projectPath: string,
+  path: string,
+): Promise<Attachment> {
+  try {
+    return (await link.request('attachments.add', {
+      source: { projectPath, path },
+      thumb: null,
+    })) as Attachment
+  } catch (error) {
+    throw new Error(uploadError(error))
+  }
 }
 
 export interface PendingAttachment {
