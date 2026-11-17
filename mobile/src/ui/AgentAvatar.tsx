@@ -45,6 +45,25 @@ export function AgentAvatar(props: {
   )
 }
 
+/** An agent's mark on its own, at text size, as a card's byline shows it. */
+export function AgentGlyph(props: { agentId: string; name?: string; size?: number }) {
+  const { c, scheme } = useTokens()
+  const side = props.size ?? 14
+  const mark = markFor(props.agentId)
+  if (mark) {
+    return (
+      <Svg width={side} height={side} viewBox={mark.viewBox}>
+        <mark.Body ink={{ scheme, text: c.text }} />
+      </Svg>
+    )
+  }
+  return (
+    <Text style={{ color: c.textSecondary, fontSize: side * 0.9, fontWeight: '700' }}>
+      {(props.name ?? props.agentId).trim().charAt(0).toUpperCase() || '?'}
+    </Text>
+  )
+}
+
 function Badge(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
   const { c } = useTokens()
   const reduce = useReduceMotion()

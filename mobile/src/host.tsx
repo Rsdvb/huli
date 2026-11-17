@@ -39,6 +39,8 @@ export interface HostContextValue {
   paired(host: SavedHost, key: KeyPair, paired: Paired): Promise<void>
   forget(notice: string | null): Promise<void>
   refresh(): Promise<void>
+  /** The computer took a new name for this phone; kept until its next welcome says so too. */
+  renamedDevice(name: string): void
 }
 
 const HostContext = createContext<HostContextValue | null>(null)
@@ -65,6 +67,7 @@ export function HostProvider(props: { children: ReactNode }) {
   const [agents, setAgents] = useState<Map<string, AgentStatus>>(new Map())
   const [projects, setProjects] = useState<Project[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [, setRenames] = useState(0)
   const hostRef = useRef<SavedHost | null>(null)
   const linkRef = useRef<HostLink | null>(null)
   linkRef.current = ready?.link ?? null
@@ -191,6 +194,12 @@ export function HostProvider(props: { children: ReactNode }) {
     },
     forget,
     refresh,
+    renamedDevice: (name) => {
+      if (!hostRef.current) return
+      hostRef.current = { ...hostRef.current, deviceName: name }
+      void saveHost(hostRef.current)
+      setRenames((n) => n + 1)
+    },
   }
   return <HostContext.Provider value={value}>{props.children}</HostContext.Provider>
 }

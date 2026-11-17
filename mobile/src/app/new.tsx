@@ -5,7 +5,6 @@
 
 import { useMemo, useRef, useState } from 'react'
 import {
-  Image,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -35,6 +34,7 @@ import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
 import { useHost, useLink } from '../host'
 import { greeting, listTime } from '../sessions'
+import { HuliIcon } from '../ui/HuliMark'
 import { useComputer } from '../ui/session/computer'
 import { haptic } from '../ui/session/feedback'
 import { GlassHeader } from '../ui/session/GlassHeader'
@@ -205,11 +205,8 @@ export default function NewSession() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.hello}>
-            <Image
-              source={require('../../assets/icon.png')}
-              style={styles.fox}
-              accessibilityIgnoresInvertColors
-            />
+            <HuliIcon size={34} />
+
             <Text style={[styles.greeting, { color: c.text }]}>{greeting()}</Text>
           </View>
           <Text style={[styles.lead, { color: c.textSecondary }]}>
@@ -330,7 +327,6 @@ export default function NewSession() {
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 22, paddingTop: 12, paddingBottom: 24 },
   hello: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  fox: { width: 34, height: 34, borderRadius: 9 },
   greeting: { fontSize: 24, lineHeight: 30, fontWeight: '700' },
   lead: { fontSize: 16, lineHeight: 22, marginTop: 8 },
   section: { fontSize: 15, fontWeight: '500', marginTop: 30, marginBottom: 6 },

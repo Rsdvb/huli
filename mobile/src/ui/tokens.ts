@@ -2,6 +2,7 @@
 // scale. Screens and components take every color and size from here, never a literal.
 
 import { useColorScheme } from 'react-native'
+import { usePrefs } from '../prefs'
 
 export interface Palette {
   /** The screen behind everything, and the glow at its top. */
@@ -167,6 +168,16 @@ export const brand = {
   qwen: '#082DFF',
   kimi: '#1783FF',
   huli: '#E2611F',
+  /** The app icon's fox: its orange ground, light to dark, and the face's tones. */
+  fox: {
+    groundLight: '#FDB46F',
+    groundDark: '#DD4C1C',
+    face: '#FFFFFF',
+    faceShade: '#FFE6D5',
+    cheek: '#FFC49C',
+    ear: '#4A2B22',
+    nose: '#3B201A',
+  },
 } as const
 
 export interface Tokens {
@@ -175,6 +186,8 @@ export interface Tokens {
 }
 
 export function useTokens(): Tokens {
-  const scheme = useColorScheme() === 'light' ? 'light' : 'dark'
+  const system = useColorScheme()
+  const { theme } = usePrefs()
+  const scheme = theme === 'system' ? (system === 'light' ? 'light' : 'dark') : theme
   return { scheme, c: scheme === 'dark' ? dark : light }
 }

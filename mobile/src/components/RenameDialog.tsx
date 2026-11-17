@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { LockLayer } from '../lock'
 import { haptic } from '../ui/haptics'
 import { Press } from '../ui/Press'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
@@ -22,6 +23,11 @@ export function RenameDialog(props: {
   title: string
   onClose(): void
   onSave(title: string | null): Promise<void>
+  /** For another name than a session's: its heading and placeholder, and no way back. */
+  heading?: string
+  placeholder?: string
+  noReset?: boolean
+  maxLength?: number
 }) {
   const { c } = useTokens()
   const [text, setText] = useState(props.title)
@@ -56,13 +62,15 @@ export function RenameDialog(props: {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={[styles.card, { backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
-          <Text style={[typeScale.headline, { color: c.text }]}>重命名会话</Text>
+          <Text style={[typeScale.headline, { color: c.text }]}>
+            {props.heading ?? '重命名会话'}
+          </Text>
           <TextInput
             value={text}
             onChangeText={setText}
             autoFocus
-            maxLength={MAX_TITLE}
-            placeholder="会话标题"
+            maxLength={props.maxLength ?? MAX_TITLE}
+            placeholder={props.placeholder ?? '会话标题'}
             placeholderTextColor={c.textTertiary}
             returnKeyType="done"
             onSubmitEditing={() => void save(text.trim() || null)}
@@ -71,9 +79,11 @@ export function RenameDialog(props: {
             style={[typeScale.body, styles.input, { color: c.text, backgroundColor: c.fill }]}
           />
           {error && <Text style={[typeScale.footnote, { color: c.danger }]}>{error}</Text>}
-          <Press onPress={() => void save(null)} disabled={saving} hitSlop={6} scale={false}>
-            <Text style={[typeScale.subhead, { color: c.tint }]}>用智能体起的标题</Text>
-          </Press>
+          {props.noReset ? null : (
+            <Press onPress={() => void save(null)} disabled={saving} hitSlop={6} scale={false}>
+              <Text style={[typeScale.subhead, { color: c.tint }]}>用智能体起的标题</Text>
+            </Press>
+          )}
           <View style={styles.buttons}>
             <Press
               onPress={props.onClose}
@@ -99,6 +109,7 @@ export function RenameDialog(props: {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <LockLayer />
     </Modal>
   )
 }

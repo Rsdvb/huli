@@ -18,6 +18,8 @@ export interface PushKeys {
   device: Uint8Array
   /** The host's id and its Ed25519 public key in base64url, which signs what it sends. */
   host: { id: string; key: string }
+  /** Show only what kind of thing happened, never the session's title or text. */
+  quiet: boolean
 }
 
 export interface PushPlatform {

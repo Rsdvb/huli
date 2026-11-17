@@ -23,6 +23,7 @@ import { File, Paths } from 'expo-file-system'
 import type { AttachmentBytes } from '@shared/agent-host'
 import type { FromDevice, FromSession, UserContent } from '@shared/thread'
 import { useLink } from '../host'
+import { LockLayer } from '../lock'
 import { useSessionRows } from '../ui/session/context'
 import { copyText, showMenu } from '../ui/session/feedback'
 import { G, Icon } from '../ui/session/icons'
@@ -300,6 +301,7 @@ function Viewer(props: { picture: Picture; onClose(): void }) {
           </Pressable>
         )}
       </View>
+      <LockLayer />
     </Modal>
   )
 }

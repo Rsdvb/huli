@@ -14,6 +14,8 @@ export function NavBar(props: {
   /** Close for a modal, back for a pushed screen. */
   kind?: 'back' | 'close'
   right?: ReactNode
+  /** Show the title at rest too, for a screen without a large title. */
+  titleAlways?: boolean
 }) {
   const { c } = useTokens()
   const close = props.kind === 'close'
@@ -29,7 +31,10 @@ export function NavBar(props: {
       <View style={styles.titleWrap} pointerEvents="none">
         <Animated.Text
           numberOfLines={1}
-          style={[typeScale.headline, { color: c.text, opacity: props.header.progress }]}
+          style={[
+            typeScale.headline,
+            { color: c.text, opacity: props.titleAlways ? 1 : props.header.progress },
+          ]}
         >
           {props.title}
         </Animated.Text>

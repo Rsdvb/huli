@@ -1,47 +1,75 @@
-// Artifacts: what the agents made on the computer, newest first; one opens the session behind it.
+// Artifacts: what the agents made on the computer, as a grid of previews. A line says how many and
+// of which kinds; chips pick a kind; sort and filter sheets, and search, narrow the grid. A card
+// opens its sheet (preview, session, versions); Recently deleted sits at the end.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Animated, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import {
+  Animated,
+  FlatList,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
 import type { ArtifactSummary } from '@shared/artifacts'
-import {
-  FilterNote,
-  inFilter,
-  TopBar,
-  useScrollTopOnTabPress,
-  useShell,
-} from '../../components/shell'
+import { artifactKind, KIND_ICON, KIND_TEXT, KINDS, type ArtifactKind } from '../../artifacts'
+import { ArtifactCard } from '../../components/ArtifactCard'
+import { ArtifactSheet, confirmDelete } from '../../components/ArtifactSheet'
+import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
+import { Sheet, type SheetItem } from '../../components/Sheet'
 import { useHost } from '../../host'
-import { errorText, folder, listTime } from '../../sessions'
+import { errorText } from '../../sessions'
 import { EmptyState } from '../../ui/EmptyState'
-import { Icon, type IconName } from '../../ui/Icon'
-import { LargeTitle } from '../../ui/LargeTitle'
+import { useMinimizingTabBar } from '../../ui/GlassTabBar'
+import { haptic } from '../../ui/haptics'
+import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
-import { SectionHeader } from '../../ui/SectionHeader'
-import { SkeletonRows } from '../../ui/Skeleton'
+import { Skeleton } from '../../ui/Skeleton'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 
-function kindOf(a: ArtifactSummary): { icon: IconName; text: string } {
-  if (a.type === 'slides') return { icon: 'slides', text: '幻灯片' }
-  if (a.canvas || a.pages > 1) return { icon: 'canvas', text: `画布 · ${a.pages} 页` }
-  if (a.type === 'document') return { icon: 'doc', text: '文档' }
-  return { icon: 'doc', text: '页面' }
+type Sort = 'updated' | 'created' | 'name'
+
+const SORT_TEXT: Record<Sort, string> = {
+  updated: '最近更新',
+  created: '最近创建',
+  name: '名称',
 }
+
+interface Row {
+  key: string
+  cells: ArtifactSummary[]
+}
+
+const collator = new Intl.Collator('zh-CN', { numeric: true })
 
 export default function Artifacts() {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
-  const header = useCollapsingHeader()
+  const minimize = useMinimizingTabBar()
+  const header = useCollapsingHeader({ onScroll: minimize })
   const insets = useSafeAreaInsets()
-  const list = useRef<FlatList<ArtifactSummary>>(null)
+  const list = useRef<FlatList<Row>>(null)
   const [items, setItems] = useState<ArtifactSummary[] | null>(null)
+  const [deleted, setDeleted] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [kind, setKind] = useState<ArtifactKind | null>(null)
+  const [sort, setSort] = useState<Sort>('updated')
+  const [agentId, setAgentId] = useState<string | null>(null)
+  const [editingOnly, setEditingOnly] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [query, setQuery] = useState('')
+  const [sheet, setSheet] = useState<'sort' | 'filter' | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [menu, setMenu] = useState<ArtifactSummary | null>(null)
   const connected = host.state.kind === 'connected'
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
@@ -51,7 +79,12 @@ export default function Artifacts() {
   const load = useCallback(async () => {
     if (!host.link) return
     try {
-      setItems((await host.link.request('artifacts.list', {})) as ArtifactSummary[])
+      const [live, gone] = await Promise.all([
+        host.link.request('artifacts.list', {}) as Promise<ArtifactSummary[]>,
+        host.link.request('artifacts.list', { deleted: true }) as Promise<ArtifactSummary[]>,
+      ])
+      setItems(live)
+      setDeleted(gone.length)
       setError(null)
     } catch (failure) {
       setError(errorText(failure))
@@ -70,40 +103,227 @@ export default function Artifacts() {
     })
   }, [host.link, load])
 
-  const projectNames = useMemo(
-    () => new Map(host.projects.map((p) => [p.path, p.name])),
-    [host.projects],
+  const agentOf = useCallback(
+    (a: ArtifactSummary) => host.sessions.get(a.sessionId)?.agentId ?? null,
+    [host.sessions],
   )
-  const visible = useMemo(
+
+  const inProject = useMemo(
     () =>
       (items ?? [])
         .filter((a) => a.deletedAt === null)
-        .filter((a) => inFilter(shell.filter, { scratch: a.scratch, path: a.project }))
-        .sort((a, b) => b.updatedAt - a.updatedAt),
+        .filter((a) => inFilter(shell.filter, { scratch: a.scratch, path: a.project })),
     [items, shell.filter],
   )
+  const kinds = useMemo(
+    () => KINDS.filter((k) => inProject.some((a) => artifactKind(a) === k)),
+    [inProject],
+  )
+  const agents = useMemo(() => {
+    const ids = new Set<string>()
+    for (const a of inProject) {
+      const id = agentOf(a)
+      if (id) ids.add(id)
+    }
+    return [...ids]
+  }, [inProject, agentOf])
+
+  const words = searching ? query.trim().toLowerCase() : ''
+  const shown = useMemo(() => {
+    const kept = inProject.filter(
+      (a) =>
+        (!kind || artifactKind(a) === kind) &&
+        (!agentId || agentOf(a) === agentId) &&
+        (!editingOnly || a.editing.length > 0) &&
+        (!words || a.title.toLowerCase().includes(words)),
+    )
+    return kept.sort((a, b) =>
+      sort === 'name'
+        ? collator.compare(a.title, b.title) || b.updatedAt - a.updatedAt
+        : sort === 'created'
+          ? b.createdAt - a.createdAt
+          : b.updatedAt - a.updatedAt,
+    )
+  }, [inProject, kind, agentId, editingOnly, words, sort, agentOf])
+
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = []
+    for (let i = 0; i < shown.length; i += 2) {
+      const cells = shown.slice(i, i + 2)
+      out.push({ key: cells.map((a) => a.id).join('|'), cells })
+    }
+    return out
+  }, [shown])
+
+  // A kind that is gone from the list no longer holds its chip.
+  useEffect(() => {
+    if (kind && items && !kinds.includes(kind)) setKind(null)
+  }, [kind, kinds, items])
+
+  const narrowed = kind !== null || agentId !== null || editingOnly || words !== ''
+  const clearFilters = () => {
+    setKind(null)
+    setAgentId(null)
+    setEditingOnly(false)
+    setQuery('')
+  }
+  const open = items?.find((a) => a.id === openId) ?? null
+
+  const summary = (
+    <View style={styles.summary} accessibilityRole="header">
+      {items && inProject.length === 0 ? (
+        <Text style={[typeScale.lead, { color: c.textSecondary }]}>
+          你的 Agent 还没做过 Artifact。
+        </Text>
+      ) : (
+        <View
+          style={styles.sentence}
+          accessible
+          accessibilityLabel={`你的 Agent 做了 ${inProject.length} 个 Artifact`}
+        >
+          <Text style={[typeScale.lead, { color: c.textSecondary }]}>你的 Agent 做了</Text>
+          {kinds.length > 0 ? (
+            <View style={[styles.kindIcons, { backgroundColor: c.fill, borderColor: c.border }]}>
+              {kinds.slice(0, 3).map((k) => (
+                <Icon key={k} name={KIND_ICON[k]} size={15} color={c.textSecondary} />
+              ))}
+            </View>
+          ) : null}
+          <Text style={[typeScale.lead, styles.count, { color: c.text }]}>
+            {items ? inProject.length : '…'} 个 Artifact。
+          </Text>
+        </View>
+      )}
+    </View>
+  )
+
+  const chip = (label: string, on: boolean, onPress: () => void, key: string) => (
+    <Press
+      key={key}
+      onPress={() => {
+        if (on) return
+        haptic.select()
+        onPress()
+      }}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: on }}
+      style={[
+        styles.chip,
+        { backgroundColor: on ? c.fillStrong : 'transparent', borderColor: c.borderStrong },
+      ]}
+    >
+      <Text
+        style={[typeScale.callout, { color: on ? c.text : c.textSecondary, fontWeight: '500' }]}
+      >
+        {label}
+      </Text>
+    </Press>
+  )
+
+  const controls = (
+    <View style={styles.controls}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chips}
+        style={styles.flex}
+        accessibilityRole="tablist"
+      >
+        {chip('全部', kind === null, () => setKind(null), 'all')}
+        {kinds.map((k) => chip(KIND_TEXT[k], kind === k, () => setKind(k), k))}
+      </ScrollView>
+      <Press
+        onPress={() => setSheet('sort')}
+        accessibilityRole="button"
+        accessibilityLabel={`排序：${SORT_TEXT[sort]}`}
+        style={[styles.square, { borderColor: c.borderStrong }]}
+      >
+        <Icon name="sort" size={18} color={sort !== 'updated' ? c.tint : c.text} />
+      </Press>
+      <Press
+        onPress={() => setSheet('filter')}
+        accessibilityRole="button"
+        accessibilityLabel={agentId || editingOnly ? '筛选（已开启）' : '筛选'}
+        style={[
+          styles.square,
+          {
+            borderColor: c.borderStrong,
+            backgroundColor: agentId || editingOnly ? c.tintSoft : 'transparent',
+          },
+        ]}
+      >
+        <Icon name="sliders" size={18} color={agentId || editingOnly ? c.tint : c.text} />
+      </Press>
+    </View>
+  )
+
+  const searchBar = searching ? (
+    <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
+      <Icon name="search" size={17} color={c.textSecondary} />
+      <TextInput
+        autoFocus
+        value={query}
+        onChangeText={setQuery}
+        placeholder="搜索 Artifact 标题"
+        placeholderTextColor={c.textTertiary}
+        returnKeyType="search"
+        autoCorrect={false}
+        autoCapitalize="none"
+        clearButtonMode="while-editing"
+        style={[typeScale.body, styles.searchInput, { color: c.text }]}
+      />
+    </View>
+  ) : null
 
   const empty = () => {
     if (!connected && !items) {
-      return <EmptyState icon="box" title="连上电脑后才能看 Artifacts" />
+      return (
+        <EmptyState
+          icon="box"
+          title="连上电脑后才能看 Artifact"
+          message="Huli 正在连接你的电脑。"
+          action={{ label: '立即重连', onPress: () => host.link?.wake() }}
+        />
+      )
     }
     if (error && !items) {
       return (
         <EmptyState
           tone="error"
           icon="warning"
-          title="没能读到 Artifacts"
+          title="没能读到 Artifact"
           message={error}
           action={{ label: '重试', onPress: () => void load() }}
         />
       )
     }
-    if (!items) return <SkeletonRows count={6} />
+    if (!items) {
+      return (
+        <View style={styles.skeletonGrid} accessibilityLabel="正在加载">
+          {[0, 1, 2, 3].map((i) => (
+            <View key={i} style={[styles.skeletonCell, { borderColor: c.border }]}>
+              <Skeleton width="70%" height={16} />
+              <Skeleton width="45%" height={12} />
+              <Skeleton height={90} radius={radius.sm} />
+            </View>
+          ))}
+        </View>
+      )
+    }
+    if (narrowed && inProject.length > 0) {
+      return (
+        <EmptyState
+          icon="search"
+          title="没有符合条件的 Artifact"
+          action={{ label: '清除筛选', onPress: clearFilters }}
+        />
+      )
+    }
     if (shell.filter.kind !== 'all') {
       return (
         <EmptyState
           icon="folder"
-          title="这个项目里还没有 Artifacts"
+          title="这个项目里还没有 Artifact"
           action={{ label: '查看全部项目', onPress: () => shell.setFilter({ kind: 'all' }) }}
         />
       )
@@ -111,79 +331,118 @@ export default function Artifacts() {
     return (
       <EmptyState
         icon="box"
-        title="还没有 Artifacts"
-        message="让智能体做一份报告、一页原型或一套幻灯片，它们会出现在这里。"
+        title="还没有 Artifact"
+        message="让 Agent 做一份报告、一页原型或一套幻灯片，它们会出现在这里。"
+        action={connected ? { label: '新会话', onPress: () => router.push('/new') } : undefined}
       />
     )
   }
 
-  const renderItem = ({ item }: { item: ArtifactSummary }) => {
-    const kind = kindOf(item)
-    const session = host.sessions.get(item.sessionId)
-    const editing = item.editing.length > 0
-    const place = item.scratch ? '无项目' : (projectNames.get(item.project) ?? folder(item.project))
-    const content = (
-      <>
-        <View style={[styles.tile, { backgroundColor: c.fill }]}>
-          <Icon name={kind.icon} size={20} color={c.textSecondary} />
-          {editing && (
-            <View style={[styles.liveDot, { backgroundColor: c.success, borderColor: c.bg }]} />
-          )}
-        </View>
-        <View style={styles.body}>
-          <View style={styles.titleLine}>
-            <Text style={[typeScale.rowTitle, styles.flex, { color: c.text }]} numberOfLines={1}>
-              {item.title}
-            </Text>
-            <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>
-              {listTime(item.updatedAt)}
-            </Text>
-          </View>
-          <View style={styles.meta}>
-            <Icon name="folder" size={13} color={c.textTertiary} />
-            <Text
-              style={[typeScale.footnote, styles.place, { color: c.textTertiary }]}
-              numberOfLines={1}
-            >
-              {place}
-            </Text>
-            <Text
-              style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}
-              numberOfLines={1}
-            >
-              {kind.text} · v{item.version}
-            </Text>
-            {editing && (
-              <Text style={[typeScale.footnote, { color: c.success, fontWeight: '500' }]}>
-                正在编辑
-              </Text>
-            )}
-          </View>
-        </View>
-      </>
-    )
-    if (!session) return <View style={styles.row}>{content}</View>
-    return (
+  const footer =
+    deleted !== null ? (
       <Press
-        onPress={() => router.push(`/session/${session.id}`)}
+        onPress={() => router.push('/artifacts-deleted')}
         scale={false}
         accessibilityRole="button"
-        accessibilityHint="打开做它的会话"
-        style={styles.row}
+        accessibilityLabel={`最近删除，${deleted} 个`}
+        style={styles.deleted}
       >
-        {content}
+        <View style={[styles.trash, { backgroundColor: c.fill }]}>
+          <Icon name="trash" size={18} color={c.textSecondary} />
+        </View>
+        <Text style={[typeScale.rowTitle, styles.flex, { color: c.text }]}>最近删除</Text>
+        <Text style={[typeScale.callout, styles.count, { color: c.textTertiary }]}>{deleted}</Text>
+        <Icon name="chevronRight" size={13} color={c.textTertiary} weight="semibold" />
       </Press>
-    )
-  }
+    ) : null
+
+  const menuItems: SheetItem[] = menu
+    ? [
+        { key: 'open', label: '详情与版本', onPress: () => setOpenId(menu.id) },
+        ...(host.sessions.has(menu.sessionId)
+          ? [
+              {
+                key: 'session',
+                label: '打开会话',
+                onPress: () => router.push(`/session/${menu.sessionId}`),
+              },
+            ]
+          : []),
+        {
+          key: 'delete',
+          label: '删除',
+          destructive: true,
+          disabled: !connected,
+          onPress: () => host.link && confirmDelete((m, p) => host.link!.request(m, p), menu),
+        },
+      ]
+    : []
+
+  const sortItems: SheetItem[] = (Object.keys(SORT_TEXT) as Sort[]).map((key) => ({
+    key,
+    label: SORT_TEXT[key],
+    checked: sort === key,
+    onPress: () => {
+      haptic.select()
+      setSort(key)
+    },
+  }))
+
+  const filterItems: SheetItem[] = [
+    {
+      key: 'agents',
+      section: 'Agent',
+      label: '全部 Agent',
+      checked: agentId === null,
+      onPress: () => setAgentId(null),
+    },
+    ...agents.map((id) => ({
+      key: id,
+      label: host.agents.get(id)?.name ?? id,
+      checked: agentId === id,
+      onPress: () => {
+        haptic.select()
+        setAgentId(id)
+      },
+    })),
+    {
+      key: 'editing',
+      section: '状态',
+      label: '只看正在编辑的',
+      detail: 'Agent 此刻正在改它',
+      checked: editingOnly,
+      onPress: () => {
+        haptic.select()
+        setEditingOnly((on) => !on)
+      },
+    },
+  ]
 
   return (
     <Screen>
       <Animated.FlatList
         ref={list}
-        data={items ? visible : []}
-        keyExtractor={(a) => a.id}
-        renderItem={renderItem}
+        data={items ? rows : []}
+        keyExtractor={(row) => row.key}
+        renderItem={({ item }) => (
+          <View style={styles.row}>
+            {item.cells.map((a) => (
+              <ArtifactCard
+                key={a.id}
+                artifact={a}
+                onPress={() => setOpenId(a.id)}
+                onLongPress={() => {
+                  haptic.tap()
+                  setMenu(a)
+                }}
+              />
+            ))}
+            {item.cells.length === 1 ? <View style={styles.flex} /> : null}
+          </View>
+        )}
         {...header.scrollProps}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         contentContainerStyle={{
           paddingTop: header.contentTop,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
@@ -195,54 +454,131 @@ export default function Artifacts() {
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
+              host.link?.wake()
               void load().finally(() => setRefreshing(false))
             }}
           />
         }
         ListHeaderComponent={
-          <View style={styles.pad}>
-            <LargeTitle title="Artifacts" subtitle="智能体做出的页面、文档、画布和幻灯片。" />
-            <FilterNote what="Artifacts" />
-            {visible.length > 0 && <SectionHeader title="最近" count={visible.length} />}
+          <View style={styles.top}>
+            {summary}
+            {searchBar}
+            {items && inProject.length > 0 ? controls : null}
           </View>
         }
         ListEmptyComponent={<View style={styles.pad}>{empty()}</View>}
+        ListFooterComponent={footer ?? undefined}
       />
-      <TopBar header={header} />
+      <TopBar
+        header={header}
+        compact
+        search={{
+          active: searching,
+          onPress: () => {
+            haptic.tap()
+            if (searching) setQuery('')
+            setSearching(!searching)
+          },
+        }}
+      />
+      <ArtifactSheet artifact={open} onClose={() => setOpenId(null)} />
+      <Sheet
+        visible={menu !== null}
+        title={menu?.title}
+        items={menuItems}
+        onClose={() => setMenu(null)}
+      />
+      <Sheet
+        visible={sheet === 'sort'}
+        title="排序"
+        items={sortItems}
+        onClose={() => setSheet(null)}
+      />
+      <Sheet
+        visible={sheet === 'filter'}
+        title="筛选"
+        items={filterItems}
+        onClose={() => setSheet(null)}
+      />
     </Screen>
   )
 }
 
 const styles = StyleSheet.create({
-  pad: { paddingHorizontal: space.xl },
   flex: { flex: 1 },
-  tabular: { fontVariant: ['tabular-nums'] },
-  row: {
+  pad: { paddingHorizontal: space.xl },
+  top: {
+    paddingHorizontal: space.xl,
+    paddingTop: space.sm,
+    gap: space.lg,
+    paddingBottom: space.lg,
+  },
+  summary: { paddingTop: space.md },
+  kindIcons: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.md + 2,
-    paddingHorizontal: space.xl,
-    paddingVertical: space.md,
+    gap: space.xs + 2,
+    paddingHorizontal: space.sm + 2,
+    height: 30,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  tile: {
-    width: 40,
-    height: 40,
+  sentence: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm },
+  controls: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  chips: { gap: space.sm, paddingRight: space.xs },
+  chip: {
+    height: 38,
+    paddingHorizontal: space.lg,
     borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  liveDot: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: 11,
-    height: 11,
-    borderRadius: 6,
-    borderWidth: 2,
+  square: {
+    width: 42,
+    height: 38,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  body: { flex: 1, gap: 3 },
-  titleLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  time: { fontVariant: ['tabular-nums'], fontWeight: '400' },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
-  place: { flexShrink: 1, maxWidth: '45%' },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    height: 44,
+  },
+  searchInput: { flex: 1, paddingVertical: 0 },
+  row: {
+    flexDirection: 'row',
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.md,
+  },
+  skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md, paddingTop: space.md },
+  skeletonCell: {
+    width: '47%',
+    gap: space.sm,
+    padding: space.md,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  deleted: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.lg,
+    marginTop: space.sm,
+  },
+  trash: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  count: { fontVariant: ['tabular-nums'] },
 })

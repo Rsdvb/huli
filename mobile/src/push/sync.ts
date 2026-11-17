@@ -12,6 +12,7 @@ import {
   type NotificationsState,
 } from '@shared/remote/push'
 import { decodeRelayBytes, relayHostId } from '@shared/remote/relay'
+import { getPrefs } from '../prefs'
 import { loadDeviceKey } from '../store'
 import { platform } from './platform'
 
@@ -93,7 +94,10 @@ async function syncOnce(link: HostLink): Promise<void> {
   }
   const device = await loadDeviceKey()
   // Without the keys the extension still shows each notification, with a generic text.
-  if (device) await platform.share({ device, host: current.host }).catch(() => {})
+  if (device) {
+    const quiet = getPrefs().hidePreviews
+    await platform.share({ device, host: current.host, quiet }).catch(() => {})
+  }
 
   if ((await platform.permission(true)) !== 'granted') {
     if (current.target.apns) await link.request(NOTIFICATIONS_SET, { target: null })

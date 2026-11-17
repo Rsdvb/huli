@@ -218,8 +218,17 @@ function HostSheet(props: { visible: boolean; onClose(): void }) {
   )
 }
 
-/** The top bar of every tab: account, project filter, the computer, search. */
-export function TopBar(props: { header: CollapsingHeader; filter?: boolean }) {
+/**
+ * The top bar of every tab: account, project filter, the computer, search. The home tab names the
+ * computer in a pill; the others (`compact`) name the project filter and mark the computer only.
+ */
+export function TopBar(props: {
+  header: CollapsingHeader
+  filter?: boolean
+  compact?: boolean
+  /** The tab's own search; without it, search opens the home tab's. */
+  search?: { active: boolean; onPress(): void }
+}) {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
@@ -227,16 +236,65 @@ export function TopBar(props: { header: CollapsingHeader; filter?: boolean }) {
   const platform =
     (host.state.kind === 'connected' ? host.state.welcome.host.platform : undefined) ??
     host.host?.platform
+  const avatar = (
+    <Press
+      onPress={() => router.push('/settings')}
+      accessibilityRole="button"
+      accessibilityLabel="账户与设置"
+      style={[styles.avatar, { backgroundColor: c.avatar, borderColor: c.borderStrong }]}
+    >
+      <Icon name="person" size={22} color={c.textSecondary} />
+    </Press>
+  )
+  if (props.compact) {
+    return (
+      <FloatingHeader header={props.header}>
+        {avatar}
+        <Pill
+          tone="glass"
+          size="lg"
+          onPress={shell.openProjects}
+          accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
+          leading={
+            <Icon
+              name="layers"
+              size={20}
+              color={shell.filterName ? c.tint : c.text}
+              weight="medium"
+            />
+          }
+          label={shell.filterName ?? '全部'}
+        />
+        <Press
+          onPress={shell.openHost}
+          accessibilityRole="button"
+          accessibilityLabel={`${host.host?.name ?? '电脑'}，${status.text}`}
+          hitSlop={10}
+          style={styles.mark}
+        >
+          <OsIcon platform={platform} size={18} color={c.textSecondary} />
+          <View
+            style={[
+              styles.statusDot,
+              styles.markDot,
+              { backgroundColor: toneColor(c, status.tone), borderColor: c.bg },
+            ]}
+          />
+        </Press>
+        <View style={styles.spacer} />
+        {props.search ? (
+          <IconButton
+            icon={props.search.active ? 'close' : 'search'}
+            label={props.search.active ? '结束搜索' : '搜索'}
+            onPress={props.search.onPress}
+          />
+        ) : null}
+      </FloatingHeader>
+    )
+  }
   return (
     <FloatingHeader header={props.header}>
-      <Press
-        onPress={() => router.push('/settings')}
-        accessibilityRole="button"
-        accessibilityLabel="账户与设置"
-        style={[styles.avatar, { backgroundColor: c.avatar, borderColor: c.borderStrong }]}
-      >
-        <Icon name="person" size={22} color={c.textSecondary} />
-      </Press>
+      {avatar}
       {props.filter !== false && (
         <IconButton
           icon="layers"
@@ -340,6 +398,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   spacer: { flex: 1 },
+  mark: { padding: space.xs },
+  markDot: { top: 0, right: 0 },
   hostHead: { alignItems: 'center', gap: space.sm, paddingBottom: space.sm },
   hostIcon: {
     width: 64,

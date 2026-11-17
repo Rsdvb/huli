@@ -13,7 +13,10 @@ export function ListGroup(props: { children: ReactNode; header?: string; footer?
   return (
     <View style={styles.groupWrap}>
       {props.header ? (
-        <Text style={[typeScale.footnote, styles.header, { color: c.textSecondary }]}>
+        <Text
+          style={[typeScale.headline, styles.header, { color: c.textSecondary }]}
+          accessibilityRole="header"
+        >
           {props.header}
         </Text>
       ) : null}
@@ -44,6 +47,10 @@ export function ListRow(props: {
   leading?: ReactNode
   trailing?: ReactNode
   chevron?: boolean
+  /** Opens outside the app: an arrow out instead of the chevron. */
+  external?: boolean
+  /** The icon bare and tinted, as Settings rows draw it, instead of on a tile. */
+  plainIcon?: boolean
   destructive?: boolean
   /** The title in the tint color, for a row that is an action. */
   action?: boolean
@@ -56,7 +63,12 @@ export function ListRow(props: {
   const body = (
     <View style={styles.row}>
       {props.leading}
-      {props.icon && (
+      {props.icon && props.plainIcon ? (
+        <View style={styles.glyph}>
+          <Icon name={props.icon} size={22} color={props.iconTint ?? c.tint} />
+        </View>
+      ) : null}
+      {props.icon && !props.plainIcon && (
         <View style={[styles.tile, { backgroundColor: props.iconTint ?? c.fillStrong }]}>
           <Icon
             name={props.icon}
@@ -87,6 +99,9 @@ export function ListRow(props: {
       {props.trailing}
       {props.chevron && (
         <Icon name="chevronRight" size={14} color={c.textTertiary} weight="semibold" />
+      )}
+      {props.external && (
+        <Icon name="external" size={14} color={c.textTertiary} weight="semibold" />
       )}
     </View>
   )
@@ -126,6 +141,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  glyph: { width: 30, alignItems: 'center', justifyContent: 'center' },
   text: { flex: 1, gap: 2 },
   value: { flexShrink: 1, maxWidth: '55%', textAlign: 'right' },
 })

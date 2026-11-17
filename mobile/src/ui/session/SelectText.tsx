@@ -3,6 +3,7 @@
 
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { LockLayer } from '../../lock'
 import { copyText } from './feedback'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
@@ -40,6 +41,7 @@ export function SelectText(props: { text: string | null; onClose(): void }) {
           </Text>
         </ScrollView>
       </View>
+      <LockLayer />
     </Modal>
   )
 }

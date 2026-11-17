@@ -5,7 +5,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Animated,
   Dimensions,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +15,7 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { LockLayer } from '../lock'
 import { useReduceMotion } from './Press'
 import { motion, radius, space, type as typeScale, useTokens } from './tokens'
 
@@ -31,6 +34,21 @@ export function BottomSheet(props: {
   const [mounted, setMounted] = useState(props.visible)
   const shown = useRef(new Animated.Value(0)).current
   const travel = Dimensions.get('window').height * 0.6
+  const [keyboard, setKeyboard] = useState(0)
+
+  // A sheet with a text field rides above the keyboard rather than under it; Android's window
+  // already resizes for it.
+  useEffect(() => {
+    if (!mounted || Platform.OS !== 'ios') return
+    const show = Keyboard.addListener('keyboardWillShow', (e) =>
+      setKeyboard(e.endCoordinates.height),
+    )
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboard(0))
+    return () => {
+      show.remove()
+      hide.remove()
+    }
+  }, [mounted])
 
   useEffect(() => {
     if (props.visible) {
@@ -78,7 +96,8 @@ export function BottomSheet(props: {
             {
               backgroundColor: c.surfaceRaised,
               borderColor: c.border,
-              paddingBottom: Math.max(insets.bottom, space.lg),
+              paddingBottom: keyboard > 0 ? space.md : Math.max(insets.bottom, space.lg),
+              marginBottom: keyboard,
               opacity: reduce ? shown : 1,
               transform: [
                 {
@@ -106,14 +125,22 @@ export function BottomSheet(props: {
             </View>
           ) : null}
           <ScrollView
-            style={{ maxHeight: props.maxHeight ?? Dimensions.get('window').height * 0.7 }}
+            style={{
+              maxHeight: Math.min(
+                props.maxHeight ?? Dimensions.get('window').height * 0.7,
+                Dimensions.get('window').height - keyboard - insets.top - 120,
+              ),
+            }}
             contentContainerStyle={styles.body}
             bounces={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
           >
             {props.children}
           </ScrollView>
         </Animated.View>
       </View>
+      <LockLayer />
     </Modal>
   )
 }
