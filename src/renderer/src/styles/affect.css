@@ -2451,6 +2451,22 @@ li[data-row-exit='dust'] > * {
 .kp-bar-tools .kp-tool {
   position: relative;
 }
+/* The pane buttons lay out as the bar's own; a bar too narrow for them beside the title (a narrow
+   window, or a session beside its side panel) folds them into one menu. */
+.kp-bar-panes {
+  display: contents;
+}
+.kp-bar-tools .kp-bar-panes-menu {
+  display: none;
+}
+@container top-bar (inline-size < 520px) {
+  .kp-bar-panes {
+    display: none;
+  }
+  .kp-bar-tools .kp-bar-panes-menu {
+    display: grid;
+  }
+}
 .kp-bar-tools .kp-tool[aria-pressed='true'] {
   background: var(--bg-selected);
 }
