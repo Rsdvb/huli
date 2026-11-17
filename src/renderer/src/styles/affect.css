@@ -312,6 +312,13 @@
 .kettu-frame.kettu-band > .ui-as-resizer {
   top: calc(var(--title-bar) + var(--frame-gap));
 }
+/* A narrow window's drawer runs up to the window's top, under the band: it keeps the band's
+   height clear, or the corner controls drawn over it cover the search field. */
+@container ui-as (max-width: 900px) {
+  .kettu-frame.kettu-band.ui-as-app > .ui-as-side {
+    padding-top: var(--title-bar);
+  }
+}
 /* The account row's Settings button marks what needs you there with a fox dot. */
 .ui-as-user-action {
   position: relative;
