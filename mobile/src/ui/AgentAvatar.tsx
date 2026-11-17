@@ -64,7 +64,70 @@ export function AgentGlyph(props: { agentId: string; name?: string; size?: numbe
   )
 }
 
+/** A running session's mark: a small bubble whose three dots pulse in turn, as a typing one does. */
+function Typing(props: { side: number }) {
+  const { c } = useTokens()
+  const reduce = useReduceMotion()
+  const phase = useRef(new Animated.Value(0)).current
+  const height = Math.max(11, Math.round(props.side * 0.4))
+  const width = Math.round(height * 1.9)
+  const dot = Math.max(2.5, height * 0.22)
+
+  useEffect(() => {
+    if (reduce) return
+    const loop = Animated.loop(
+      Animated.timing(phase, { toValue: 3, duration: 1200, useNativeDriver: true }),
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [reduce, phase])
+
+  return (
+    <View
+      style={[
+        styles.typing,
+        {
+          width,
+          height,
+          borderRadius: height / 2,
+          right: -Math.round(width * 0.35),
+          bottom: -Math.round(height * 0.25),
+          backgroundColor: c.surfaceRaised,
+          borderColor: c.bg,
+          gap: dot * 0.8,
+        },
+      ]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      {[0, 1, 2].map((i) => (
+        <Animated.View
+          key={i}
+          style={{
+            width: dot,
+            height: dot,
+            borderRadius: dot / 2,
+            backgroundColor: c.danger,
+            opacity: reduce
+              ? 0.8
+              : phase.interpolate({
+                  inputRange: [0, i, i + 0.5, i + 1, 3],
+                  outputRange: [0.35, 0.35, 1, 0.35, 0.35],
+                  extrapolate: 'clamp',
+                }),
+          }}
+        />
+      ))}
+    </View>
+  )
+}
+
 function Badge(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
+  if (props.kind === 'live') return <Typing side={props.side} />
+  return <Dot kind={props.kind} side={props.side} />
+}
+
+function Dot(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
   const { c } = useTokens()
   const reduce = useReduceMotion()
   const halo = useRef(new Animated.Value(0)).current
@@ -123,4 +186,11 @@ function Badge(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
 const styles = StyleSheet.create({
   disc: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   badge: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  typing: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
 })

@@ -77,48 +77,53 @@ export function limitTextColor(
   return tone === 'critical' ? c.danger : tone === 'high' ? c.warning : quiet
 }
 
+// As the desktop's zh-CN catalog names them (planWindowInText in host.json).
 const WINDOW_NAMES: Record<string, string> = {
   five_hour: '5 小时',
-  seven_day: '7 天',
-  seven_day_opus: '7 天 · Opus',
-  seven_day_sonnet: '7 天 · Sonnet',
-  monthly: '本月',
-  annual: '本年',
+  seven_day: '每周',
+  seven_day_opus: 'Opus 每周',
+  seven_day_sonnet: 'Sonnet 每周',
+  monthly: '每月',
+  annual: '每年',
   overage: '额外用量',
   rolling: '5 小时',
-  weekly: '7 天',
+  weekly: '每周',
 }
 
-const UNITS: Record<string, string> = { minute: '分钟', hour: '小时', day: '天' }
+/** An agent's own English label in Chinese where its shape is known: 「Fable 每周」「5 小时」. */
+function labelName(label: string): string {
+  const text = label.trim()
+  const weekly = /^weekly(?: · (.+))?$/i.exec(text)
+  if (weekly) return weekly[1] ? `${weekly[1]} 每周` : '每周'
+  const span = /^(\d+)-(minute|hour|day)(?: · (.+))?$/i.exec(text)
+  if (span) {
+    const unit = { minute: '分钟', hour: '小时', day: '天' }[span[2]!.toLowerCase()]
+    return `${span[3] ? `${span[3]} ` : ''}${span[1]} ${unit}`
+  }
+  if (/^monthly$/i.test(text)) return '每月'
+  if (/^(annual|yearly)$/i.test(text)) return '每年'
+  return text
+}
 
-/** The model a per-model window counts, from its label: 「Weekly · Fable」 gives Fable. */
+/** A window's name: 「每周」「Fable 每周」, or the agent's own label for one the phone does not know. */
+export function windowName(limit: PlanLimit): string {
+  return (
+    WINDOW_NAMES[limit.window] ??
+    (limit.models?.length ? limit.models.join('、') : labelName(limit.label))
+  )
+}
+
+/** The model a per-model window counts: 「Weekly · Fable」 gives Fable. */
 function modelOf(limit: PlanLimit): string | null {
   if (limit.window === 'seven_day_opus') return 'Opus'
   if (limit.window === 'seven_day_sonnet') return 'Sonnet'
-  const named = /^(?:Weekly|5-hour) · (.+)$/.exec(limit.label)
+  const named = /^(?:Weekly|\d+-(?:minute|hour|day)) · (.+)$/i.exec(limit.label.trim())
   return named?.[1] ?? (limit.models?.length ? limit.models.join('、') : null)
 }
 
-/** A window's name: 「5 小时」「7 天」「7 天 · Fable」, or the agent's own for one unknown here. */
-export function windowName(limit: PlanLimit): string {
-  const known = WINDOW_NAMES[limit.window]
-  if (known) return known
-  const model = modelOf(limit)
-  if (/^Weekly · /.test(limit.label) || limit.window.startsWith('seven_day_')) {
-    return model ? `7 天 · ${model}` : '7 天'
-  }
-  if (/^5-hour · /.test(limit.label) || limit.window.startsWith('five_hour_')) {
-    return model ? `5 小时 · ${model}` : '5 小时'
-  }
-  const counted = /(?:^|_)(\d+)_(minute|hour|day)$/.exec(limit.window)
-  if (counted) return `${counted[1]} ${UNITS[counted[2]!]}`
-  return limit.label
-}
-
-/** A window's name where room is short, as the status line and the rings: 「7 天」「Fable」. */
+/** A window's name where room is short, as the status line and the rings: 「每周」「Fable」. */
 export function windowShort(limit: PlanLimit): string {
-  const model = WINDOW_NAMES[limit.window] ? null : modelOf(limit)
-  return model ?? windowName(limit).replace(/^7 天 · /, '')
+  return modelOf(limit) ?? windowName(limit)
 }
 
 /** The plan's name with its tier: 「Claude Max 5x」. */

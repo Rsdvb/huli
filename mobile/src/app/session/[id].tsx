@@ -36,7 +36,19 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { ThreadRow } from '../../components/EntryView'
-import { PermissionCard } from '../../components/PermissionCard'
+import {
+  cutNoticeOf,
+  OutOfCreditStrip,
+  outOfCreditOf,
+  retryNoticeOf,
+} from '../../components/entries/TurnEnd'
+import {
+  HandBackCard,
+  WaitingCard,
+  WaitingChildren,
+  waitingBelow,
+  waitsForUser,
+} from '../../components/entries/Waiting'
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { useSessionActions } from '../../components/SessionActions'
 import { useSessionPane } from '../../components/SessionPane'
@@ -52,6 +64,7 @@ import { SessionRows, type SessionRowsContext } from '../../ui/session/context'
 import { haptic } from '../../ui/session/feedback'
 import { baseName, relativePath } from '../../ui/session/format'
 import { G } from '../../ui/session/icons'
+import { GlassCapsule } from '../../ui/Glass'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
 import { toneColor, usageTone } from '../../ui/session/limits'
 import { useSessionTokens } from '../../ui/session/palette'
@@ -68,10 +81,6 @@ import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
 import { threadRows, type Row } from '../../ui/session/turns'
 import { ToBottomButton, WorkingRow } from '../../ui/session/Working'
-
-function waiting(entry: ThreadEntry): entry is ToolEntry {
-  return entry.kind === 'tool' && entry.permission !== null && entry.permissionResult === null
-}
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
@@ -167,14 +176,21 @@ export default function SessionScreen() {
 
   const rows = useMemo(() => (view.thread ? threadRows(view.thread).reverse() : []), [view.thread])
 
-  // What waits: the thread's own cards, and those on pages not read yet.
+  // What waits: the thread's own cards, and those on pages not read yet, oldest first.
   const requests = useMemo(() => {
-    const seen = new Map<string, ToolEntry>()
-    for (const entry of view.requests) if (waiting(entry)) seen.set(entry.id, entry)
-    for (const row of rows)
-      if (row.type === 'entry' && waiting(row.entry)) seen.set(row.entry.id, row.entry)
+    const seen = new Map<string, ThreadEntry>()
+    for (const entry of view.requests) if (waitsForUser(entry)) seen.set(entry.id, entry)
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i]!
+      if (row.type === 'entry' && waitsForUser(row.entry)) seen.set(row.entry.id, row.entry)
+    }
     return [...seen.values()]
   }, [view.requests, rows])
+  const credit = useMemo(() => outOfCreditOf(view.thread), [view.thread])
+  const retryNotice = useMemo(() => retryNoticeOf(view.thread), [view.thread])
+  const cutNotice = useMemo(() => cutNoticeOf(view.thread), [view.thread])
+  const childWaiting = waitingBelow(id, host.sessions).length > 0
+  const handBack = session?.computer?.control === 'you'
 
   // The files of the folder the session's tools read or edited, newest first.
   const touched = useMemo(() => {
@@ -304,8 +320,11 @@ export default function SessionScreen() {
       fork: canFork ? fork : null,
       forkAtMessage,
       selectText: setSelecting,
+      retryNotice,
+      cutNotice,
+      config: session?.config ?? [],
     }),
-    [id, changes.folder, canFork, fork, forkAtMessage],
+    [id, changes.folder, canFork, fork, forkAtMessage, retryNotice, cutNotice, session?.config],
   )
 
   const title = session?.title ?? summary?.title ?? '会话'
@@ -327,7 +346,11 @@ export default function SessionScreen() {
     <View style={styles.working}>
       <WorkingRow
         since={session?.turnStartedAt ?? summary?.turnStartedAt ?? null}
-        label={activity(rows, status === 'awaiting_permission', changes.folder)}
+        label={activity(
+          rows,
+          status === 'awaiting_permission' || requests.length > 0 || handBack,
+          changes.folder,
+        )}
         tokens={usage && startUsed !== null ? usage.used - startUsed : null}
       />
     </View>
@@ -563,15 +586,38 @@ export default function SessionScreen() {
           <ToBottomButton visible={away} fresh={fresh} onPress={toBottom} />
         </View>
 
-        {(requests.length > 0 || (session?.queue.length ?? 0) > 0) && (
+        {(requests.length > 0 ||
+          handBack ||
+          credit !== null ||
+          childWaiting ||
+          (session?.queue.length ?? 0) > 0) && (
           <ScrollView
             style={styles.waiting}
             contentContainerStyle={styles.waitingContent}
             keyboardShouldPersistTaps="handled"
           >
+            <HandBackCard sessionId={id} session={session} />
             {requests.map((entry) => (
-              <PermissionCard key={entry.id} entry={entry} sessionId={id} link={link} />
+              <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
             ))}
+            {credit && (
+              <OutOfCreditStrip
+                sessionId={id}
+                notice={credit}
+                config={session?.config ?? []}
+                onSwitchModel={
+                  connected
+                    ? () =>
+                        menu.open('model', modelAnchor, {
+                          placement: 'above',
+                          align: 'end',
+                          width: 300,
+                        })
+                    : null
+                }
+              />
+            )}
+            <WaitingChildren sessionId={id} />
             <QueueStack sessionId={id} session={session} />
           </ScrollView>
         )}
@@ -616,7 +662,7 @@ export default function SessionScreen() {
                 disabled={!connected}
                 anchor={modelAnchor}
                 onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 300 })
+                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
                 }
               />
             ) : null
@@ -689,7 +735,7 @@ export default function SessionScreen() {
           style={[styles.banner, { top: headerHeight + 8 }]}
           accessibilityLiveRegion="polite"
         >
-          <View style={[styles.bannerPill, { backgroundColor: c.glass, borderColor: c.border }]}>
+          <GlassCapsule height={34} elevated style={styles.bannerPill}>
             {host.state.kind === 'reconnecting' ? (
               <ActivityIndicator size="small" color={c.textSecondary} />
             ) : (
@@ -698,7 +744,7 @@ export default function SessionScreen() {
             <Text style={[styles.bannerText, { color: c.textSecondary }]}>
               {host.state.kind === 'reconnecting' ? '和电脑的连接断了，正在重连…' : '已和电脑断开'}
             </Text>
-          </View>
+          </GlassCapsule>
         </View>
       )}
       <ContextSheet
@@ -732,14 +778,6 @@ const styles = StyleSheet.create({
   waiting: { maxHeight: '55%', flexGrow: 0 },
   waitingContent: { paddingHorizontal: 10, paddingTop: 8, gap: 10 },
   banner: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
-  bannerPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
-    height: 34,
-  },
+  bannerPill: { gap: 8 },
   bannerText: { fontSize: 13, fontWeight: '500' },
 })

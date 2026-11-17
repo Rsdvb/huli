@@ -11,6 +11,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import { GlassButton, useGlassMode } from '../Glass'
 import { useSessionTokens } from './palette'
 
 let reduceMotion = false
@@ -42,15 +43,16 @@ export interface PressScaleProps extends Omit<PressableProps, 'style' | 'childre
 }
 
 export function PressScale(props: PressScaleProps) {
-  const { style, outerStyle, scale = 0.94, children, onPressIn, onPressOut, ...rest } = props
+  const { style, outerStyle, scale = 0.96, children, onPressIn, onPressOut, ...rest } = props
   const value = useRef(new Animated.Value(1)).current
+  // In quickly and all the way, out a touch slower with a small overshoot, as iOS controls settle.
   const to = (target: number) => {
     if (reduceMotion) return
     Animated.spring(value, {
       toValue: target,
       useNativeDriver: true,
-      speed: 40,
-      bounciness: target === 1 ? 6 : 0,
+      speed: target === 1 ? 28 : 60,
+      bounciness: target === 1 ? 8 : 0,
     }).start()
   }
   return (
@@ -81,7 +83,10 @@ export function PressScale(props: PressScaleProps) {
   )
 }
 
-/** A round icon button on a soft fill, as the header and the composer use. */
+/**
+ * A round icon button on a soft fill, as the header and the composer use. Glass is Liquid Glass
+ * where the system has it; accent is glass tinted with Huli's orange there, a solid disc elsewhere.
+ */
 export function RoundButton(
   props: Omit<PressScaleProps, 'children'> & {
     size?: number
@@ -90,15 +95,24 @@ export function RoundButton(
   },
 ) {
   const { c, s } = useSessionTokens()
+  const mode = useGlassMode()
   const { size = 40, tone = 'fill', style, disabled, ...rest } = props
-  const background =
-    tone === 'accent'
-      ? c.accent
-      : tone === 'warning'
-        ? s.warningSoft
-        : tone === 'glass'
-          ? c.glass
-          : c.fill
+  if (tone === 'glass' || (tone === 'accent' && mode === 'liquid')) {
+    const { scale: _scale, outerStyle, ...pressable } = rest
+    return (
+      <GlassButton
+        {...pressable}
+        silent
+        size={size}
+        disabled={disabled}
+        elevated={tone === 'glass'}
+        {...(tone === 'accent' ? { tint: c.accent } : {})}
+        {...(outerStyle ? { outerStyle } : {})}
+        style={style}
+      />
+    )
+  }
+  const background = tone === 'accent' ? c.accent : tone === 'warning' ? s.warningSoft : c.fill
   return (
     <PressScale
       hitSlop={6}
@@ -115,7 +129,6 @@ export function RoundButton(
           backgroundColor: background,
           opacity: disabled ? 0.38 : 1,
         },
-        tone === 'glass' ? { borderWidth: 0.5, borderColor: c.borderStrong } : null,
         style,
       ]}
     />

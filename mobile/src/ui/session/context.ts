@@ -2,6 +2,7 @@
 // shown under, and whether a reply can be forked from.
 
 import { createContext, useContext } from 'react'
+import type { ConfigOption } from '@shared/thread'
 
 export interface SessionRowsContext {
   sessionId: string
@@ -13,6 +14,12 @@ export interface SessionRowsContext {
   forkAtMessage: boolean
   /** Shows text the user can select, as the message menu offers. */
   selectText(text: string): void
+  /** The notice of a failed latest turn that Retry sends again, while the session is free. */
+  retryNotice?: string | null
+  /** The notice of a latest turn the agent's exit cut short, which Resume continues. */
+  cutNotice?: string | null
+  /** The session's options, which a task started from its suggestion carries on with. */
+  config?: readonly ConfigOption[]
 }
 
 export const SessionRows = createContext<SessionRowsContext>({
@@ -21,6 +28,8 @@ export const SessionRows = createContext<SessionRowsContext>({
   fork: null,
   forkAtMessage: false,
   selectText: () => {},
+  retryNotice: null,
+  cutNotice: null,
 })
 
 export function useSessionRows(): SessionRowsContext {
