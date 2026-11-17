@@ -40,7 +40,7 @@ const DEV = process.env.SIGNING === 'development'
 const KIND = DEV ? 'development' : 'distribution'
 const CERT_TYPE = DEV ? 'DEVELOPMENT' : 'DISTRIBUTION'
 const IDENTITY = DEV ? 'Apple Development' : 'Apple Distribution'
-const p12 = `/ios-${KIND}.p12`
+const p12 = `${KEYS}/ios-${KIND}.p12`
 const certs = (await api('GET', `/v1/certificates?filter[certificateType]=${CERT_TYPE}&limit=50`)).data
 let cert = null
 if (existsSync(p12)) {
@@ -73,16 +73,19 @@ try {
   // Already imported.
 }
 sh('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', kpass, keychain])
-const identity = sh('security', ['find-identity', '-v', '-p', 'codesigning', keychain])
-  .split('\n')
-  .find((l) => l.includes(IDENTITY) && (!DEV || l.includes('Huli')))
-if (!identity) throw new Error(`no ${IDENTITY} identity in the keychain`)
-const sha1 = identity.trim().split(/\s+/)[1]
+// Apple names the certificate itself, so another of the same kind can sit beside it in the
+// keychain: the one this script made is picked by its fingerprint, and signing names it so.
+const sha1 = sh('openssl', ['x509', '-in', `${KEYS}/ios-${KIND}.pem`, '-noout', '-fingerprint', '-sha1'])
+  .split('=')[1]
+  .replace(/[:\s]/g, '')
+  .toUpperCase()
+const listed = sh('security', ['find-identity', '-v', '-p', 'codesigning', keychain])
+if (!listed.toUpperCase().includes(sha1)) throw new Error(`no ${IDENTITY} identity ${sha1} in the keychain`)
 
 // 2. A fresh App Store profile per bundle id, installed where Xcode looks.
 const dir = `${HOME}/Library/MobileDevice/Provisioning Profiles`
 mkdirSync(dir, { recursive: true })
-const out = { identity: sha1, signing: IDENTITY, profiles: {} }
+const out = { identity: sha1, signing: sha1, profiles: {} }
 // A development profile lists the devices it installs on: every enabled iPhone the team has.
 const devices = DEV
   ? (await api('GET', '/v1/devices?filter[platform]=IOS&filter[status]=ENABLED&limit=100')).data
