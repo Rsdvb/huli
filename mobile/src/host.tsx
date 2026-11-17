@@ -17,7 +17,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from 'react'
 import { Alert, AppState } from 'react-native'
@@ -30,6 +29,7 @@ import { admin } from './admin'
 import { clearComputer, dropThread, readLists, writeLists } from './cache'
 import { deviceKey, linkTo } from './connection'
 import { dropDrafts } from './drafts'
+import { createStore, sameFields, sameItems, useSelector } from './select'
 import { stopPush } from './push/sync'
 import {
   computerName,
@@ -108,7 +108,7 @@ const EMPTY: SavedComputers = { active: null, hosts: [] }
 
 // ---- The store ----
 
-let data: HostData = {
+const store = createStore<HostData>({
   phase: 'loading',
   notice: null,
   computers: EMPTY,
@@ -121,31 +121,22 @@ let data: HostData = {
   fromCache: false,
   syncedAt: null,
   unreachable: false,
-}
-const listeners = new Set<() => void>()
+})
+const subscribe = store.subscribe
 
 /** The store as it is now, for code outside React or inside callbacks. */
 export function getHost(): HostData {
-  return data
+  return store.get()
 }
 
 function setHost(change: Partial<HostData> | ((was: HostData) => Partial<HostData>)): void {
-  const patch = typeof change === 'function' ? change(data) : change
-  let changed = false
-  for (const key in patch) {
-    if (patch[key as keyof HostData] !== data[key as keyof HostData]) {
-      changed = true
-      break
+  store.set((data) => {
+    const patch = typeof change === 'function' ? change(data) : change
+    for (const key in patch) {
+      if (patch[key as keyof HostData] !== data[key as keyof HostData]) return { ...data, ...patch }
     }
-  }
-  if (!changed) return
-  data = { ...data, ...patch }
-  for (const listener of listeners) listener()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+    return data
+  })
 }
 
 /**
@@ -156,30 +147,10 @@ export function useHostSelector<T>(
   select: (d: HostData) => T,
   equal: (a: T, b: T) => boolean = Object.is,
 ): T {
-  const memo = useRef<{ data: HostData; select: (d: HostData) => T; value: T } | null>(null)
-  const read = () => {
-    const was = memo.current
-    if (was && was.data === data && was.select === select) return was.value
-    const next = select(data)
-    const value = was && equal(was.value, next) ? was.value : next
-    memo.current = { data, select, value }
-    return value
-  }
-  return useSyncExternalStore(subscribe, read, read)
+  return useSelector(store, select, equal)
 }
 
-/** Arrays equal item by item, by reference. */
-export function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
-  return a.length === b.length && a.every((item, i) => item === b[i])
-}
-
-/** Objects equal field by field, by reference: for a selector that picks several fields. */
-export function sameFields<T extends object>(a: T, b: T): boolean {
-  for (const key in a) if (a[key] !== b[key]) return false
-  for (const key in b) if (!(key in a)) return false
-  return true
-}
-
+export { sameFields, sameItems }
 const activeOf = (d: HostData): SavedHost | null =>
   d.computers.hosts.find((h) => h.id === d.computers.active) ?? null
 
