@@ -1,117 +1,48 @@
-// Routines: the prompts the computer sends on a schedule, with when each runs next and how its last
-// run went. A routine opens its recent runs; a run opens its session.
+// 定时任务: what routines are, a way to make one, the user's routines (each with its switch, when it
+// last ran and runs next), and ready-made examples to start from. A routine opens its page.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ComponentRef } from 'react'
 import {
-  ActivityIndicator,
+  Alert,
   Animated,
-  FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
+  Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
-import type { HostEvent, RoutineList } from '@shared/agent-host'
-import type { RoutineView, RunPage, RunStatus, RunView, Schedule } from '@shared/routines'
-import {
-  FilterNote,
-  inFilter,
-  TopBar,
-  useScrollTopOnTabPress,
-  useShell,
-} from '../../components/shell'
+import type { RoutineView } from '@shared/routines'
+import { DEFAULT_SCHEDULE, DEFAULT_SCOPE } from '@shared/routines'
+import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
+import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { useHost } from '../../host'
-import { duration, errorText, folder, listTime } from '../../sessions'
+import {
+  confirmDeleteRoutine,
+  routineExamples,
+  RUN_TEXT,
+  runLook,
+  scheduleText,
+  scopeText,
+  STATE_TEXT,
+  useRoutineList,
+  whenText,
+} from '../../routines'
+import { errorText, folder } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
-import { BottomSheet } from '../../ui/BottomSheet'
 import { EmptyState } from '../../ui/EmptyState'
-import { Icon, type IconName } from '../../ui/Icon'
-import { LargeTitle } from '../../ui/LargeTitle'
-import { Pill } from '../../ui/Pill'
+import { haptic } from '../../ui/haptics'
+import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
-import { SkeletonRows } from '../../ui/Skeleton'
-import {
-  radius,
-  space,
-  TAB_BAR_CLEARANCE,
-  type as typeScale,
-  useTokens,
-  type Palette,
-} from '../../ui/tokens'
-
-const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
-
-function scheduleText(schedule: Schedule): string {
-  switch (schedule.kind) {
-    case 'once': {
-      const [date, time] = schedule.at.split('T')
-      const [, month, day] = (date ?? '').split('-')
-      return `一次 · ${Number(month)}月${Number(day)}日 ${time ?? ''}`
-    }
-    case 'every':
-      return schedule.minutes % 60 === 0
-        ? `每 ${schedule.minutes / 60} 小时`
-        : `每 ${schedule.minutes} 分钟`
-    case 'weekly': {
-      const days = [...schedule.days].sort()
-      const key = days.join('')
-      const when =
-        days.length === 7
-          ? '每天'
-          : key === '12345'
-            ? '工作日'
-            : key === '06'
-              ? '周末'
-              : `每周${days.map((d) => DAY_NAMES[d]).join('、')}`
-      return `${when} ${schedule.time}`
-    }
-    case 'cron':
-      return `Cron · ${schedule.expression}`
-  }
-}
-
-const RUN_TEXT: Record<RunStatus, string> = {
-  queued: '排队中',
-  starting: '正在开始',
-  running: '运行中',
-  waiting: '等你处理',
-  succeeded: '成功',
-  failed: '失败',
-  timed_out: '超时',
-  cancelled: '已取消',
-  interrupted: '已中断',
-  skipped: '已跳过',
-}
-
-function runLook(c: Palette, status: RunStatus): { icon: IconName; color: string } {
-  switch (status) {
-    case 'succeeded':
-      return { icon: 'succeeded', color: c.success }
-    case 'failed':
-    case 'timed_out':
-      return { icon: 'failed', color: c.danger }
-    case 'waiting':
-      return { icon: 'warning', color: c.warning }
-    case 'queued':
-    case 'starting':
-    case 'running':
-      return { icon: 'timer', color: c.tint }
-    default:
-      return { icon: 'skipped', color: c.textTertiary }
-  }
-}
-
-const STATE_TEXT: Record<RoutineView['state'], string> = {
-  on: '已开启',
-  off: '已关闭',
-  done: '已完成',
-  paused: '已暂停',
-}
+import { Skeleton } from '../../ui/Skeleton'
+import { SwipeRow } from '../../ui/SwipeRow'
+import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 
 export default function Routines() {
   const { c } = useTokens()
@@ -119,66 +50,36 @@ export default function Routines() {
   const shell = useShell()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
-  const list = useRef<FlatList<RoutineView>>(null)
-  const [data, setData] = useState<RoutineList | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
+  const { data, error, load } = useRoutineList()
   const [refreshing, setRefreshing] = useState(false)
-  const [open, setOpen] = useState<string | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [query, setQuery] = useState('')
+  const [seed, setSeed] = useState<EditorSeed | null>(null)
   const connected = host.state.kind === 'connected'
   useScrollTopOnTabPress(
-    (offset) => list.current?.scrollToOffset({ offset, animated: true }),
+    (offset) => scroll.current?.scrollTo({ y: offset, animated: true }),
     header,
   )
-
-  const load = useCallback(async () => {
-    if (!host.link) return
-    try {
-      setData((await host.link.request('routines.list', undefined)) as RoutineList)
-      setError(null)
-    } catch (failure) {
-      setError(errorText(failure))
-    }
-  }, [host.link])
-
-  useEffect(() => {
-    if (connected) void load()
-  }, [connected, load])
-
-  useEffect(() => {
-    if (!host.link) return
-    return host.link.onHostEvent((raw: unknown) => {
-      const event = raw as HostEvent
-      if (event.type === 'routine.changed') {
-        setData((current) => {
-          if (!current) return current
-          const known = current.routines.some((r) => r.id === event.routine.id)
-          return {
-            ...current,
-            routines: known
-              ? current.routines.map((r) => (r.id === event.routine.id ? event.routine : r))
-              : [...current.routines, event.routine],
-          }
-        })
-      }
-      if (event.type === 'routine.removed') {
-        setData((current) =>
-          current
-            ? { ...current, routines: current.routines.filter((r) => r.id !== event.routineId) }
-            : current,
-        )
-      }
-    })
-  }, [host.link])
 
   const projectNames = useMemo(
     () => new Map(host.projects.map((p) => [p.path, p.name])),
     [host.projects],
   )
+  const words = searching ? query.trim().toLowerCase() : ''
+  const inProject = useMemo(
+    () =>
+      (data?.routines ?? []).filter((r) =>
+        inFilter(shell.filter, { scratch: r.projectPath === null, path: r.projectPath ?? '' }),
+      ),
+    [data, shell.filter],
+  )
   const visible = useMemo(() => {
     const rank = { on: 0, paused: 1, off: 2, done: 3 }
-    return (data?.routines ?? [])
-      .filter((r) =>
-        inFilter(shell.filter, { scratch: r.projectPath === null, path: r.projectPath ?? '' }),
+    return inProject
+      .filter(
+        (r) =>
+          !words || r.name.toLowerCase().includes(words) || r.prompt.toLowerCase().includes(words),
       )
       .sort(
         (a, b) =>
@@ -186,10 +87,175 @@ export default function Routines() {
           (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity) ||
           a.name.localeCompare(b.name),
       )
-  }, [data, shell.filter])
+  }, [inProject, words])
 
-  const empty = () => {
-    if (!connected && !data) return <EmptyState icon="history" title="连上电脑后才能看定时任务" />
+  // A new routine starts in the project the tabs are filtered to.
+  const filterProject =
+    shell.filter.kind === 'project'
+      ? shell.filter.path
+      : shell.filter.kind === 'scratch'
+        ? null
+        : undefined
+
+  const startNew = (from?: Partial<EditorSeed>) => {
+    haptic.tap()
+    setSeed({
+      name: '',
+      prompt: '',
+      schedule: DEFAULT_SCHEDULE,
+      scope: DEFAULT_SCOPE,
+      ...(filterProject !== undefined ? { projectPath: filterProject } : {}),
+      ...from,
+    })
+  }
+
+  const toggle = (r: RoutineView, enabled: boolean) => {
+    if (!host.link) return
+    haptic.select()
+    host.link
+      .request('routines.update', { routineId: r.id, changes: { enabled } })
+      .catch((failure: unknown) =>
+        Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure)),
+      )
+  }
+
+  const place = (r: RoutineView) =>
+    r.projectPath === null ? '无项目' : (projectNames.get(r.projectPath) ?? folder(r.projectPath))
+
+  const routineRow = (r: RoutineView, index: number) => {
+    const run = r.activeRun ?? r.lastRun
+    const look = run ? runLook(c, run.status) : null
+    const quiet = r.state === 'off' || r.state === 'done'
+    const agent = host.agents.get(r.agentId)
+    return (
+      <View key={r.id}>
+        {index > 0 && <View style={[styles.line, { backgroundColor: c.border }]} />}
+        <SwipeRow
+          start={
+            connected && r.state !== 'done'
+              ? {
+                  label: r.enabled ? '关闭' : '开启',
+                  icon: r.enabled ? 'pause' : 'play',
+                  color: r.enabled ? c.warning : c.success,
+                  onPress: () => toggle(r, !r.enabled),
+                }
+              : undefined
+          }
+          end={
+            connected
+              ? {
+                  label: '删除',
+                  icon: 'trash',
+                  color: c.danger,
+                  onPress: () =>
+                    host.link && confirmDeleteRoutine((m, p) => host.link!.request(m, p), r),
+                }
+              : undefined
+          }
+        >
+          <Press
+            onPress={() => router.push(`/routine/${r.id}`)}
+            scale={false}
+            accessibilityRole="button"
+            accessibilityLabel={`${r.name}，${scheduleText(r.trigger.schedule)}，${STATE_TEXT[r.state]}`}
+            accessibilityHint="查看运行记录和设置"
+            style={[styles.routine, { backgroundColor: c.surface }]}
+          >
+            <View style={{ opacity: quiet ? 0.5 : 1 }}>
+              <AgentAvatar
+                agentId={r.agentId}
+                name={agent?.name}
+                size={36}
+                badge={r.activeRun ? 'live' : r.unseen.failed > 0 ? 'error' : null}
+              />
+            </View>
+            <View style={styles.body}>
+              <Text
+                style={[typeScale.rowTitle, { color: quiet ? c.textSecondary : c.text }]}
+                numberOfLines={1}
+              >
+                {r.name}
+              </Text>
+              <Text
+                style={[typeScale.footnote, styles.tabular, { color: c.textSecondary }]}
+                numberOfLines={1}
+              >
+                {scheduleText(r.trigger.schedule)} · {place(r)}
+              </Text>
+              <View style={styles.meta}>
+                {run && look ? (
+                  <>
+                    <Icon name={look.icon} size={13} color={look.color} />
+                    <Text
+                      style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}
+                      numberOfLines={1}
+                    >
+                      {RUN_TEXT[run.status]}
+                      {r.activeRun
+                        ? ''
+                        : ` · ${whenText(run.endedAt ?? run.startedAt ?? r.updatedAt)}`}
+                    </Text>
+                  </>
+                ) : r.state === 'on' && r.nextRunAt !== null ? (
+                  <Text
+                    style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}
+                    numberOfLines={1}
+                  >
+                    下次 {whenText(r.nextRunAt)}
+                  </Text>
+                ) : (
+                  <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
+                    {r.state === 'on' ? '还没有运行过' : STATE_TEXT[r.state]}
+                  </Text>
+                )}
+              </View>
+            </View>
+            <Switch
+              value={r.enabled}
+              disabled={!connected || r.state === 'done'}
+              onValueChange={(on) => toggle(r, on)}
+              trackColor={{ true: c.success }}
+              accessibilityLabel={r.enabled ? `关闭 ${r.name}` : `开启 ${r.name}`}
+            />
+          </Press>
+        </SwipeRow>
+      </View>
+    )
+  }
+
+  const intro = (
+    <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <View style={styles.introText}>
+        <Text style={[typeScale.headline, { color: c.text }]}>定时任务按计划运行一条提示词</Text>
+        <Text style={[typeScale.callout, { color: c.textSecondary }]}>
+          每次运行都会在电脑上开一个会话，只在你给的权限内干活，做完告诉你。
+        </Text>
+      </View>
+      <View style={[styles.line, { backgroundColor: c.border }]} />
+      <Press
+        onPress={() => startNew()}
+        disabled={!connected}
+        scale={false}
+        accessibilityRole="button"
+        style={styles.newRow}
+      >
+        <Icon name="plus" size={22} color={c.tint} />
+        <Text style={[typeScale.body, { color: c.tint }]}>新建定时任务</Text>
+      </Press>
+    </View>
+  )
+
+  const mine = () => {
+    if (!connected && !data) {
+      return (
+        <EmptyState
+          icon="history"
+          title="连上电脑后才能看定时任务"
+          message="Huli 正在连接你的电脑。"
+          action={{ label: '立即重连', onPress: () => host.link?.wake() }}
+        />
+      )
+    }
     if (error && !data) {
       return (
         <EmptyState
@@ -201,8 +267,42 @@ export default function Routines() {
         />
       )
     }
-    if (!data) return <SkeletonRows count={5} />
-    if (shell.filter.kind !== 'all') {
+    if (!data) {
+      return (
+        <View
+          style={[
+            styles.card,
+            styles.skeleton,
+            { backgroundColor: c.surface, borderColor: c.border },
+          ]}
+          accessibilityLabel="正在加载"
+        >
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={styles.skeletonRow}>
+              <Skeleton width={36} height={36} radius={18} />
+              <View style={styles.body}>
+                <Skeleton width="60%" height={15} />
+                <Skeleton width="40%" height={12} />
+              </View>
+            </View>
+          ))}
+        </View>
+      )
+    }
+    if (visible.length > 0) {
+      return (
+        <>
+          <SectionHeader title="你的定时任务" count={visible.length} />
+          <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+            {visible.map(routineRow)}
+          </View>
+        </>
+      )
+    }
+    if (words) {
+      return <EmptyState icon="search" title={`没有定时任务包含「${query.trim()}」`} />
+    }
+    if (shell.filter.kind !== 'all' && data.routines.length > 0) {
       return (
         <EmptyState
           icon="folder"
@@ -211,106 +311,23 @@ export default function Routines() {
         />
       )
     }
-    return (
-      <EmptyState
-        icon="calendarClock"
-        title="还没有定时任务"
-        message="在电脑上的 Huli 里新建一个，它会按时把提示词发给智能体。"
-      />
-    )
+    return null
   }
 
-  const renderItem = ({ item }: { item: RoutineView }) => {
-    const place =
-      item.projectPath === null
-        ? '无项目'
-        : (projectNames.get(item.projectPath) ?? folder(item.projectPath))
-    const run = item.activeRun ?? item.lastRun
-    const look = run ? runLook(c, run.status) : null
-    const quiet = item.state === 'off' || item.state === 'done'
-    return (
-      <Press
-        onPress={() => setOpen(item.id)}
-        scale={false}
-        accessibilityRole="button"
-        accessibilityHint="查看最近的运行"
-        style={styles.row}
-      >
-        <View style={{ opacity: quiet ? 0.5 : 1 }}>
-          <AgentAvatar
-            agentId={item.agentId}
-            name={host.agents.get(item.agentId)?.name}
-            badge={item.activeRun ? 'live' : item.state === 'paused' ? 'waiting' : null}
-          />
-        </View>
-        <View style={styles.body}>
-          <View style={styles.titleLine}>
-            <Text
-              style={[typeScale.rowTitle, styles.flex, { color: quiet ? c.textSecondary : c.text }]}
-              numberOfLines={1}
-            >
-              {item.name}
-            </Text>
-            {item.state !== 'on' && (
-              <Pill size="sm" label={STATE_TEXT[item.state]} color={c.textSecondary} />
-            )}
-          </View>
-          <View style={styles.meta}>
-            <Icon name="repeat" size={13} color={c.textTertiary} />
-            <Text
-              style={[typeScale.footnote, styles.tabular, { color: c.textSecondary }]}
-              numberOfLines={1}
-            >
-              {scheduleText(item.trigger.schedule)}
-            </Text>
-            <Text
-              style={[typeScale.footnote, styles.flex, { color: c.textTertiary }]}
-              numberOfLines={1}
-            >
-              · {place}
-            </Text>
-          </View>
-          <View style={styles.meta}>
-            {run && look ? (
-              <>
-                <Icon name={look.icon} size={13} color={look.color} />
-                <Text style={[typeScale.footnote, { color: look.color }]}>
-                  {RUN_TEXT[run.status]}
-                </Text>
-                <Text style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}>
-                  {listTime(run.endedAt ?? run.startedAt ?? run.scheduledFor ?? item.updatedAt)}
-                </Text>
-              </>
-            ) : (
-              <Text style={[typeScale.footnote, { color: c.textTertiary }]}>还没有运行过</Text>
-            )}
-            {item.nextRunAt !== null && (
-              <Text
-                style={[typeScale.footnote, styles.next, { color: c.textTertiary }]}
-                numberOfLines={1}
-              >
-                下次 {listTime(item.nextRunAt)}
-              </Text>
-            )}
-          </View>
-        </View>
-      </Press>
-    )
-  }
-
-  const shown = data?.routines.find((r) => r.id === open) ?? null
+  const examples = routineExamples()
 
   return (
     <Screen>
-      <Animated.FlatList
-        ref={list}
-        data={data ? visible : []}
-        keyExtractor={(r) => r.id}
-        renderItem={renderItem}
+      <Animated.ScrollView
+        ref={scroll}
         {...header.scrollProps}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         contentContainerStyle={{
-          paddingTop: header.contentTop,
+          paddingTop: header.contentTop + space.md,
+          paddingHorizontal: space.lg,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
+          gap: space.md,
         }}
         refreshControl={
           <RefreshControl
@@ -319,154 +336,153 @@ export default function Routines() {
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
+              host.link?.wake()
               void load().finally(() => setRefreshing(false))
             }}
           />
         }
-        ListHeaderComponent={
-          <View style={styles.pad}>
-            <LargeTitle title="定时任务" subtitle="电脑按时发给智能体的提示词。" />
-            <FilterNote what="定时任务" />
-            {data?.problem && (
-              <View style={[styles.problem, { backgroundColor: c.removedBg }]}>
-                <Icon name="warning" size={16} color={c.danger} />
-                <Text style={[typeScale.footnote, styles.flex, { color: c.text }]}>
-                  定时任务文件读不了：{data.problem.reason}
-                </Text>
-              </View>
-            )}
-            {visible.length > 0 && <SectionHeader title="全部" count={visible.length} />}
-          </View>
-        }
-        ListEmptyComponent={<View style={styles.pad}>{empty()}</View>}
-      />
-      <TopBar header={header} />
-      <BottomSheet
-        visible={shown !== null}
-        onClose={() => setOpen(null)}
-        title={shown?.name}
-        message={shown ? scheduleText(shown.trigger.schedule) : undefined}
       >
-        {shown && <Runs routine={shown} onOpen={() => setOpen(null)} />}
-      </BottomSheet>
+        {searching ? (
+          <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
+            <Icon name="search" size={17} color={c.textSecondary} />
+            <TextInput
+              autoFocus
+              value={query}
+              onChangeText={setQuery}
+              placeholder="搜索名称或提示词"
+              placeholderTextColor={c.textTertiary}
+              returnKeyType="search"
+              autoCorrect={false}
+              autoCapitalize="none"
+              clearButtonMode="while-editing"
+              style={[typeScale.body, styles.searchInput, { color: c.text }]}
+            />
+          </View>
+        ) : (
+          intro
+        )}
+        {data?.problem ? (
+          <View style={[styles.problem, { backgroundColor: c.removedBg }]}>
+            <Icon name="warning" size={16} color={c.danger} />
+            <Text style={[typeScale.footnote, styles.body, { color: c.text }]}>
+              定时任务文件读不了：{data.problem.reason}
+              {data.problem.backup ? `。原文件已另存为 ${data.problem.backup}。` : ''}
+            </Text>
+          </View>
+        ) : null}
+        {mine()}
+        {!searching ? (
+          <>
+            <SectionHeader title="示例" />
+            <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+              {examples.map((e, i) => (
+                <View key={e.id}>
+                  {i > 0 && <View style={[styles.line, { backgroundColor: c.border }]} />}
+                  <Press
+                    onPress={() =>
+                      startNew({
+                        name: e.name,
+                        prompt: e.prompt,
+                        schedule: e.schedule,
+                        scope: e.scope,
+                      })
+                    }
+                    disabled={!connected}
+                    scale={false}
+                    accessibilityRole="button"
+                    accessibilityLabel={`使用示例：${e.name}，${scheduleText(e.schedule)}，${scopeText(e.scope)}`}
+                    style={styles.example}
+                  >
+                    <View style={styles.body}>
+                      <Text style={[typeScale.rowTitle, { color: c.tint }]}>{e.name}</Text>
+                      <Text
+                        style={[typeScale.footnote, styles.tabular, { color: c.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {scheduleText(e.schedule)} · {scopeText(e.scope)}
+                      </Text>
+                    </View>
+                    <Text style={[typeScale.body, { color: c.tint, fontWeight: '500' }]}>使用</Text>
+                  </Press>
+                </View>
+              ))}
+            </View>
+            <Text style={[typeScale.footnote, styles.footnote, { color: c.textTertiary }]}>
+              定时任务在电脑上的 Huli 开着时按电脑的时间运行。Agent 接近套餐限额时，它会先暂停。
+            </Text>
+          </>
+        ) : null}
+      </Animated.ScrollView>
+      <TopBar
+        header={header}
+        compact
+        search={{
+          active: searching,
+          onPress: () => {
+            haptic.tap()
+            if (searching) setQuery('')
+            setSearching(!searching)
+          },
+        }}
+      />
+      <RoutineEditor
+        seed={seed}
+        onClose={() => setSeed(null)}
+        onSaved={(r) => router.push(`/routine/${r.id}`)}
+      />
     </Screen>
   )
 }
 
-function Runs(props: { routine: RoutineView; onOpen(): void }) {
-  const { c } = useTokens()
-  const { link } = useHost()
-  const [page, setPage] = useState<RunPage | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!link) return
-    let live = true
-    link.request('routines.runs', { routineId: props.routine.id }).then(
-      (answer) => live && setPage(answer as RunPage),
-      (failure: unknown) => live && setError(errorText(failure)),
-    )
-    return () => {
-      live = false
-    }
-  }, [link, props.routine.id])
-
-  if (error)
-    return <EmptyState tone="error" icon="warning" title="没能读到运行记录" message={error} />
-  if (!page) return <ActivityIndicator color={c.textSecondary} style={styles.loading} />
-  if (page.runs.length === 0) return <EmptyState icon="history" title="还没有运行过" />
-
-  return (
-    <View style={[styles.runs, { backgroundColor: c.fill }]}>
-      {page.runs.slice(0, 20).map((run: RunView, i) => {
-        const look = runLook(c, run.status)
-        const when = run.startedAt ?? run.scheduledFor ?? run.endedAt
-        const sessionId = run.sessionId
-        const line = (
-          <View style={styles.run}>
-            <Icon name={look.icon} size={18} color={look.color} />
-            <View style={styles.flex}>
-              <Text style={[typeScale.callout, { color: c.text }]}>
-                {RUN_TEXT[run.status]}
-                {run.trigger === 'manual' ? ' · 手动' : run.trigger === 'catch-up' ? ' · 补跑' : ''}
-              </Text>
-              {run.error ? (
-                <Text style={[typeScale.footnote, { color: c.danger }]} numberOfLines={2}>
-                  {run.error.message}
-                </Text>
-              ) : null}
-            </View>
-            <View style={styles.runRight}>
-              <Text style={[typeScale.footnote, styles.tabular, { color: c.textSecondary }]}>
-                {when ? listTime(when) : '—'}
-              </Text>
-              {run.workingMs > 0 && (
-                <Text style={[typeScale.caption, styles.tabular, { color: c.textTertiary }]}>
-                  {duration(run.workingMs)}
-                </Text>
-              )}
-            </View>
-            {sessionId && (
-              <Icon name="chevronRight" size={12} color={c.textTertiary} weight="semibold" />
-            )}
-          </View>
-        )
-        return (
-          <View key={run.id}>
-            {i > 0 && <View style={[styles.line, { backgroundColor: c.border }]} />}
-            {sessionId ? (
-              <Press
-                scale={false}
-                accessibilityRole="button"
-                onPress={() => {
-                  props.onOpen()
-                  router.push(`/session/${sessionId}`)
-                }}
-              >
-                {line}
-              </Press>
-            ) : (
-              line
-            )}
-          </View>
-        )
-      })}
-    </View>
-  )
-}
-
 const styles = StyleSheet.create({
-  pad: { paddingHorizontal: space.xl },
-  flex: { flex: 1 },
+  body: { flex: 1, gap: 3 },
   tabular: { fontVariant: ['tabular-nums'] },
-  row: {
+  card: {
+    borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  introText: { padding: space.xl, paddingBottom: space.lg, gap: space.xs },
+  newRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.md + 2,
+    gap: space.md,
     paddingHorizontal: space.xl,
-    paddingVertical: space.md,
+    paddingVertical: space.lg,
   },
-  body: { flex: 1, gap: 3 },
-  titleLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  line: { height: StyleSheet.hairlineWidth, marginLeft: space.xl },
+  routine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md + 2,
+  },
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
-  next: { marginLeft: 'auto', fontVariant: ['tabular-nums'] },
+  example: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md + 2,
+  },
   problem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
     padding: space.md,
     borderRadius: radius.md,
-    marginTop: space.md,
   },
-  loading: { marginVertical: space.xxl },
-  runs: { borderRadius: radius.lg, overflow: 'hidden' },
-  run: {
+  searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.md,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
+    gap: space.sm,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    height: 44,
   },
-  runRight: { alignItems: 'flex-end', gap: 2 },
-  line: { height: StyleSheet.hairlineWidth, marginLeft: space.lg },
+  searchInput: { flex: 1, paddingVertical: 0 },
+  skeleton: { padding: space.lg, gap: space.lg },
+  skeletonRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  footnote: { marginHorizontal: space.sm },
 })
