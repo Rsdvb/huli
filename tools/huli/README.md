@@ -21,6 +21,7 @@ Code (kept small so upstream merges stay clean):
 | `src/main/index.ts`, `src/main/computer-use.ts` | app user model id `local.huli.app` |
 | `package.json` | productName `Huli` (data folder `%APPDATA%\Huli`), version 0.1.0 |
 | `electron-builder.yml` | appId `local.huli.app`, productName `Huli`, `publish` is Huli's update channel (generic) |
+| `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts` | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub |
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json` | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved |
 
 Generated before a build (not hand edits):

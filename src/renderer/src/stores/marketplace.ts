@@ -21,6 +21,9 @@ import type { AgentId } from '@shared/thread'
 import { errorMessage, host, type HostRequest } from '@renderer/lib/host'
 
 /** How long the directory's Community and the installed items' standings are shown before a visit reads them again. */
+/** Huli: Kettu's community marketplace lives on Kettu's own service, which Huli does not use. */
+export const COMMUNITY_MARKETPLACE = false
+
 const COMMUNITY_MS = 5 * 60_000
 
 /** What a part of the Kettu Marketplace's directory is read for: a kind, a search, or both. */
@@ -341,6 +344,7 @@ export function createMarketplaceStore(
       set((s) => ({ logos: { ...s.logos, [pluginId]: logo } }))
     },
     async loadCommunity(scope, refresh = false) {
+      if (!COMMUNITY_MARKETPLACE) return
       const key = communityScopeKey(scope)
       const id = (communityReads.get(key) ?? 0) + 1
       communityReads.set(key, id)
@@ -397,6 +401,7 @@ export function createMarketplaceStore(
       }
     },
     ensureCommunity(scope) {
+      if (!COMMUNITY_MARKETPLACE) return
       const known = get().communityPages[communityScopeKey(scope)]
       if (known?.loading) return
       if (known && !known.error && Date.now() - known.at < COMMUNITY_MS) return

@@ -287,6 +287,11 @@ export function byInstalls(a: CatalogPlugin, b: CatalogPlugin): number {
 }
 
 /** Whether a plugin comes from Anthropic itself, in Claude Code's official marketplace. */
+/** Huli: plugins of Anthropic's community marketplace, which the Community section lists apart. */
+export function isCommunityPlugin(plugin: CatalogPlugin): boolean {
+  return plugin.harness === 'claude-code' && plugin.marketplace === 'claude-community'
+}
+
 export function fromAnthropic(plugin: CatalogPlugin): boolean {
   return (
     plugin.harness === 'claude-code' && plugin.official && /anthropic/i.test(plugin.publisher ?? '')

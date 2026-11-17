@@ -3,7 +3,7 @@
 // Arguments go as an argv array, never through a shell, and nothing confirms a command a
 // marketplace declares: a plugin that needs one fails with Claude Code's own message.
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { AgentId } from '@shared/thread'
@@ -16,6 +16,7 @@ import type {
 } from '@shared/marketplace'
 import { displayTitle } from '@shared/marketplace'
 import { KETTU_PLUGINS } from '@shared/market-community'
+import { KETTU_HOME_FOLDER } from '@shared/storage'
 import {
   programFailure,
   runProgram,
@@ -29,6 +30,9 @@ export const OFFICIAL_MARKETPLACE = 'claude-plugins-official'
 const SKILLS_DIR = 'skills-dir'
 const PLUGIN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$/
 const OFFICIAL_SOURCE = 'anthropics/claude-plugins-official'
+// Huli: Anthropic's community marketplace stands in for Kettu's own, added once to each agent.
+export const COMMUNITY_MARKETPLACE = 'claude-community'
+const COMMUNITY_SOURCE = 'anthropics/claude-plugins-community'
 const FEATURED = 12
 const LIST_MS = 60_000
 const CHANGE_MS = 180_000
@@ -226,7 +230,8 @@ export function claudeCatalog(
   )
   const featured = new Set(
     plugins
-      .filter((plugin) => plugin.installs !== null)
+      // Huli: the community's plugins have a section of their own, so Featured stays curated.
+      .filter((plugin) => plugin.installs !== null && plugin.marketplace !== COMMUNITY_MARKETPLACE)
       .sort((a, b) => b.installs! - a.installs!)
       .slice(0, FEATURED)
       .map((plugin) => plugin.id),
@@ -398,6 +403,7 @@ export async function listPlugins(cli: ClaudeCli): Promise<ClaudePluginList> {
     await change(cli, ['marketplace', 'add', OFFICIAL_SOURCE])
     marketplaces = await listMarketplaces(cli)
   }
+  if (await addCommunityOnce(cli, marketplaces)) marketplaces = await listMarketplaces(cli)
   const list = parsePluginList(
     await claude(cli, ['list', '--available', '--json'], { timeoutMs: LIST_MS }),
   )
@@ -424,6 +430,33 @@ export async function listPlugins(cli: ClaudeCli): Promise<ClaudePluginList> {
       official: marketplace.name === OFFICIAL_MARKETPLACE,
     })),
   }
+}
+
+/**
+ * Adds Anthropic's community marketplace to the agent the first time Huli lists its plugins; a
+ * marker in Huli's home folder keeps it from coming back once the user removes it.
+ */
+async function addCommunityOnce(
+  cli: ClaudeCli,
+  marketplaces: readonly { name: string }[],
+): Promise<boolean> {
+  const marker = path.join(os.homedir(), KETTU_HOME_FOLDER, `community-marketplace-${cli.agentId}`)
+  if (marketplaces.some((marketplace) => marketplace.name === COMMUNITY_MARKETPLACE)) return false
+  if (
+    await stat(marker).then(
+      () => true,
+      () => false,
+    )
+  )
+    return false
+  try {
+    await change(cli, ['marketplace', 'add', COMMUNITY_SOURCE])
+  } catch {
+    return false
+  }
+  await mkdir(path.dirname(marker), { recursive: true })
+  await writeFile(marker, `added ${COMMUNITY_SOURCE}\n`)
+  return true
 }
 
 /** The plugins installed in the agent's configuration, without what the marketplaces offer. */

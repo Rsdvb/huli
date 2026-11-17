@@ -42,6 +42,7 @@ import { isMac, isWeb } from '@renderer/lib/platform'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { useAccountStore } from '@renderer/stores/account'
 import {
+  COMMUNITY_MARKETPLACE,
   SEARCH_MAX,
   SEARCH_MIN,
   communityScopeKey,
@@ -65,6 +66,7 @@ import {
   catalogServers,
   fromAnthropic,
   fromCatalog,
+  isCommunityPlugin,
   itemKey,
   matchesQuery,
   pluginMatches,
@@ -283,6 +285,16 @@ function communitySections(
   t: TFunction<'marketplace'>,
   kind: PublishKind | null,
 ): Section[] {
+  // Huli: the community is Anthropic's community plugins and the community's skills on GitHub.
+  if (!COMMUNITY_MARKETPLACE) {
+    if (kind !== null && kind !== 'plugin') return []
+    const plugins = (src.plugins?.catalog ?? []).filter(isCommunityPlugin).sort(byInstalls)
+    const skills =
+      kind === null ? (src.skills?.catalog ?? []).filter((s) => s.trust === 'community') : []
+    const entries = [...plugins.map(pluginEntry), ...skills.map(skillEntry)]
+    if (entries.length === 0) return []
+    return [{ id: 'community', title: t('sections.community'), entries, pending: 0 }]
+  }
   const scope: CommunityScope = kind ? { kind } : {}
   const pages = src.communityPages[communityScopeKey(scope)]
   if (!pages || (pages.at === 0 && pages.loading)) {
@@ -331,6 +343,11 @@ function workflowCommunity(
   const added = src.workflows.filter(
     (entry) => workflowGroup(entry) === 'community' && workflowMatches(entry, query, locale),
   )
+  if (!COMMUNITY_MARKETPLACE) {
+    return added.length > 0
+      ? { id: 'community', title, entries: added.map(workflowEntry), pending: 0 }
+      : null
+  }
   const listings = new Set(
     added.flatMap((entry) => (entry.origin?.kind === 'community' ? [entry.origin.listingId] : [])),
   )
@@ -478,7 +495,7 @@ function pluginSections(src: Sources, t: TFunction<'marketplace'>): Section[] {
         ]
       : communitySections(src, t, 'plugin')
   }
-  const plugins = [...src.plugins.catalog].sort(byInstalls)
+  const plugins = [...src.plugins.catalog].filter((p) => !isCommunityPlugin(p)).sort(byInstalls)
   const groups = new Map<string, CatalogPlugin[]>()
   for (const plugin of plugins) {
     const category = plugin.category?.trim().toLocaleLowerCase() ?? ''
@@ -621,7 +638,11 @@ function foundSections(
   }
   const scope = communityScope(tab, query)
   const found = src.communityPages[communityScopeKey(scope)]
-  if (src.communityPages[communityScopeKey({})]?.signedIn !== false && found?.signedIn !== false) {
+  if (
+    COMMUNITY_MARKETPLACE &&
+    src.communityPages[communityScopeKey({})]?.signedIn !== false &&
+    found?.signedIn !== false
+  ) {
     const first = !found || (found.at === 0 && found.loading)
     sections.push({
       id: 'found-community',
@@ -644,7 +665,7 @@ export function Directory({ tab }: { tab: MarketplaceTab }) {
   const windowHost = useWindowHost()
   const hostName = useHostName()
   const showsPublished = useShowsPublished()
-  const tabs = showsPublished ? SIGNED_IN_TABS : TABS
+  const tabs = showsPublished && COMMUNITY_MARKETPLACE ? SIGNED_IN_TABS : TABS
   const published = tab === 'published'
   const labels: Record<MarketplaceTab, string> = {
     all: t('page.tabs.all'),
@@ -680,7 +701,7 @@ export function Directory({ tab }: { tab: MarketplaceTab }) {
   }, [registry, useMarketplaceStore])
 
   // The Kettu Marketplace is read by the service a page at a time, each kind and search on its own.
-  const lists = tab !== 'installed' && tab !== 'published'
+  const lists = COMMUNITY_MARKETPLACE && tab !== 'installed' && tab !== 'published'
   const communityKey = lists ? communityScopeKey(communityScope(tab, filter)) : null
   useEffect(() => {
     const store = useMarketplaceStore.getState()
@@ -693,7 +714,7 @@ export function Directory({ tab }: { tab: MarketplaceTab }) {
   // Signing in or out of this computer's account changes what the Community shows.
   const accountState = useAccountStore((s) => s.status?.state ?? null)
   useEffect(() => {
-    if (scope.hostId !== null || accountState === null) return
+    if (!COMMUNITY_MARKETPLACE || scope.hostId !== null || accountState === null) return
     const store = useMarketplaceStore.getState()
     const all = store.communityPages[communityScopeKey({})]
     if (all && all.signedIn !== (accountState === 'signed-in')) {
