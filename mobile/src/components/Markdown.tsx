@@ -146,11 +146,13 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
         return (
           <Text
             key={i}
+            // In Huli's orange on its soft tint, as Kettu sets inline code: plain text on gray read
+            // as a block of stripes in a list of names.
             style={{
               fontFamily: MONO,
               fontSize: look.body.fontSize! - 2.5,
-              backgroundColor: s.inlineCode,
-              color: look.color,
+              backgroundColor: s.accentSoft,
+              color: c.accent,
             }}
           >
             {` ${node.v} `}
