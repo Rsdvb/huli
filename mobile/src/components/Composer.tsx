@@ -75,6 +75,7 @@ import { readDraft, useDraftsReady, writeDraft, type SavedAttachment } from '../
 import { matchFiles, useProjectFiles } from '../files'
 import { useComputerId, useHostState, useLink } from '../host'
 import { BottomSheet } from '../ui/BottomSheet'
+import { countRender } from '../ui/renders'
 import { haptic, showMenu } from '../ui/session/feedback'
 import { openFile } from '../ui/session/fileRefs'
 import { extensionOf } from '../ui/session/format'
@@ -226,6 +227,7 @@ function slashMatches(commands: readonly SlashCommand[], query: string): SlashCo
 }
 
 export function Composer(props: ComposerProps) {
+  countRender('Composer')
   const { placeholder, onSend, failTitle, allowEmpty = false, disabled = false } = props
   const { c, s } = useSessionTokens()
   const hostState = useHostState()

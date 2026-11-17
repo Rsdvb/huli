@@ -16,6 +16,7 @@ import {
 } from 'react-native'
 import type { ThreadState } from '@shared/thread'
 import { useThreadSelector, type ThreadView } from '../thread'
+import { countRender } from '../ui/renders'
 import { haptic } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 import { rowBuilder, type Row } from '../ui/session/turns'
@@ -43,6 +44,7 @@ export function Conversation(props: {
   fromParent: boolean
   paddingBottom: number
 }) {
+  countRender('Conversation')
   const { c } = useSessionTokens()
   const { view, sessionId: id, running } = props
   const thread = useThreadSelector(view, selectThread)

@@ -98,6 +98,7 @@ import { errorText, folder } from '../../sessions'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
 import { useThread, useThreadSelector } from '../../thread'
 import { useComputer } from '../../ui/session/computer'
+import { countRender } from '../../ui/renders'
 import { SessionRows, type SessionRowsContext } from '../../ui/session/context'
 import { haptic } from '../../ui/session/feedback'
 import { FileRefs } from '../../ui/session/fileRefs'
@@ -169,6 +170,7 @@ const live = (status: string | undefined) =>
 const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval'])
 
 export default function SessionScreen() {
+  countRender('SessionScreen')
   const params = useLocalSearchParams<{ id: string }>()
   // On iPad the same screen shows as the pane beside the session list (SessionPane.tsx).
   const pane = useSessionPane()

@@ -47,6 +47,7 @@ import { LIST_COLUMN, useWide } from '../../ui/layout'
 import { Press } from '../../ui/Press'
 import { AnimatedFlashList, type FlashListRef } from '../../ui/AnimatedList'
 import { Screen } from '../../ui/Screen'
+import { countRender } from '../../ui/renders'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { computerName } from '../../store'
@@ -175,6 +176,7 @@ function sameHomeRow(a: HomeRowProps, b: HomeRowProps): boolean {
 
 /** A session's row in the list: redraws only when what it shows changed. */
 const HomeRow = memo(function HomeRow(props: HomeRowProps) {
+  countRender('HomeRow')
   const { c } = useTokens()
   const s = props.session
   const { actions } = props
@@ -218,6 +220,7 @@ const itemType = (item: Item) => item.kind
 const itemKey = (item: Item) => item.key
 
 function SessionList(props: { selected: string | null; onOpen(id: string): void }) {
+  countRender('SessionList')
   const { c } = useTokens()
   const sessions = useSessions()
   const projects = useProjects()
