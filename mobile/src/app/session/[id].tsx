@@ -21,7 +21,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
-import type { ThreadEntry, ToolEntry, UserContent } from '@shared/thread'
+import type { ThreadEntry, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
 import { AttachPages, useAttachPages } from '../../components/AttachMenu'
 import { useSessionChanges } from '../../components/ChangesButton'
@@ -35,6 +35,8 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { ThreadRow } from '../../components/EntryView'
+import { SubSessionStart } from '../../components/entries/NoteEntries'
+import { PlanChip } from '../../components/entries/PlanCards'
 import {
   cutNoticeOf,
   OutOfCreditStrip,
@@ -51,6 +53,7 @@ import {
 import { useSessionActions } from '../../components/SessionActions'
 import { useSessionPane } from '../../components/SessionPane'
 import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
+import { useProjectFiles } from '../../files'
 import { call } from '../../git'
 import { useHost, useLink } from '../../host'
 import { setMuted, useMuted } from '../../push/muted'
@@ -60,7 +63,8 @@ import { useThread } from '../../thread'
 import { useComputer } from '../../ui/session/computer'
 import { SessionRows, type SessionRowsContext } from '../../ui/session/context'
 import { haptic } from '../../ui/session/feedback'
-import { baseName, relativePath } from '../../ui/session/format'
+import { FileRefs } from '../../ui/session/fileRefs'
+import { relativePath } from '../../ui/session/format'
 import { G } from '../../ui/session/icons'
 import { GlassCapsule } from '../../ui/Glass'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
@@ -77,7 +81,15 @@ import { Icon } from '../../ui/session/Icon'
 import { SelectText } from '../../ui/session/SelectText'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
-import { threadRows, type Row } from '../../ui/session/turns'
+import { latestPlan, threadRows, type Row } from '../../ui/session/turns'
+import {
+  askedText,
+  forgetTools,
+  observeTools,
+  phaseText,
+  turnPhase,
+  writingId,
+} from '../../ui/session/work'
 import { ToBottomButton, WorkingRow } from '../../ui/session/Working'
 
 // How far up the conversation may be scrolled before the way back to its end shows.
@@ -88,46 +100,8 @@ const renderRow: ListRenderItem<Row> = ({ item }) => <ThreadRow row={item} />
 const live = (status: string | undefined) =>
   status === 'running' || status === 'awaiting_permission' || status === 'starting'
 
-/** What the running turn does now, from its newest entries: 「正在运行 2 个命令」. */
-function activity(rows: Row[], awaiting: boolean, root: string | null): string {
-  if (awaiting) return '等你回答'
-  let commands = 0
-  let tool: ToolEntry | null = null
-  let replied = false
-  const first = rows[0]
-  if (first?.type === 'entry') {
-    if (first.entry.kind === 'thought' && first.entry.streaming) return '正在思考'
-    if (first.entry.kind === 'agent' && first.entry.streaming) return '正在回复'
-  }
-  for (const row of rows) {
-    if (row.type !== 'entry') break
-    const entry = row.entry
-    if (entry.kind === 'user' && !entry.steered) break
-    if (entry.kind === 'agent') replied = true
-    if (entry.kind === 'tool' && (entry.status === 'pending' || entry.status === 'in_progress')) {
-      if (entry.toolKind === 'execute') commands++
-      else tool ??= entry
-    }
-  }
-  if (commands > 0) return `正在运行 ${commands} 个命令`
-  if (tool) {
-    const path = tool.locations[0]?.path
-    const where = path ? baseName(relativePath(path, root)) : null
-    switch (tool.toolKind) {
-      case 'edit':
-        return where ? `正在编辑 ${where}` : '正在编辑'
-      case 'read':
-        return where ? `正在读取 ${where}` : '正在读取'
-      case 'search':
-        return '正在搜索'
-      case 'fetch':
-        return '正在获取网页'
-      default:
-        return `正在使用 ${tool.title}`
-    }
-  }
-  return replied ? '正在工作' : '正在思考'
-}
+// Phases in which the agent thinks or writes rather than works in the app it uses.
+const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval'])
 
 export default function SessionScreen() {
   const params = useLocalSearchParams<{ id: string }>()
@@ -171,7 +145,27 @@ export default function SessionScreen() {
   const terminalAllowed = useTerminalAllowed(link, host.state)
   const agentOptions = useAgentOptions(link, menu.openId === 'model')
 
-  const rows = useMemo(() => (view.thread ? threadRows(view.thread).reverse() : []), [view.thread])
+  const rows = useMemo(() => {
+    if (!view.thread) return []
+    observeTools(id, view.thread)
+    return threadRows(view.thread, running).reverse()
+  }, [view.thread, id, running])
+  useEffect(() => () => forgetTools(id), [id])
+
+  // The folder's files, for the references in replies and prompts that open them.
+  const projectFiles = useProjectFiles(link, changes.folder, connected)
+  const known = useMemo(
+    () => (projectFiles.list ? new Set(projectFiles.list.paths) : null),
+    [projectFiles.list],
+  )
+  const fileRefs = useMemo(
+    () => ({ sessionId: id, root: changes.folder, known }),
+    [id, changes.folder, known],
+  )
+  const { plan, ownTurn } = useMemo(
+    () => latestPlan(view.thread, view.plan),
+    [view.thread, view.plan],
+  )
 
   // What waits: the thread's own cards, and those on pages not read yet, oldest first.
   const requests = useMemo(() => {
@@ -310,6 +304,14 @@ export default function SessionScreen() {
       .catch((error: unknown) => Alert.alert('没能新建子会话', errorText(error)))
   }
 
+  const commandNames = useMemo(
+    () => (session?.commands ?? []).map((command) => command.name),
+    [session?.commands],
+  )
+  const putCommand = useCallback(
+    (name: string) => composer.current?.command(name, commandNames),
+    [commandNames],
+  )
   const context = useMemo<SessionRowsContext>(
     () => ({
       sessionId: id,
@@ -320,8 +322,21 @@ export default function SessionScreen() {
       retryNotice,
       cutNotice,
       config: session?.config ?? [],
+      commands: commandNames,
+      command: putCommand,
     }),
-    [id, changes.folder, canFork, fork, forkAtMessage, retryNotice, cutNotice, session?.config],
+    [
+      id,
+      changes.folder,
+      canFork,
+      fork,
+      forkAtMessage,
+      retryNotice,
+      cutNotice,
+      session?.config,
+      commandNames,
+      putCommand,
+    ],
   )
 
   const title = session?.title ?? summary?.title ?? '会话'
@@ -336,22 +351,38 @@ export default function SessionScreen() {
     await link.request('sessions.queue', { sessionId: id, content })
   }
 
-  // The turn runs: a line says what it does now, for how long, and what it has added.
+  // The turn runs: a line says for how long, what it has added and what it does now, with the
+  // attention dot while it waits for the user. While the agent writes its reply, the reply's
+  // caret carries the turn, so the line steps aside.
   const usage = session?.usage ?? null
   const startUsed = session?.turnStartUsed ?? null
-  const working = running ? (
-    <View style={styles.working}>
-      <WorkingRow
-        since={session?.turnStartedAt ?? summary?.turnStartedAt ?? null}
-        label={activity(
-          rows,
-          status === 'awaiting_permission' || requests.length > 0 || handBack,
-          changes.folder,
-        )}
-        tokens={usage && startUsed !== null ? usage.used - startUsed : null}
-      />
-    </View>
-  ) : undefined
+  const turn = useMemo(() => {
+    const thread = view.thread
+    const phase = turnPhase(thread)
+    return { ...phase, asked: askedText(thread), writing: writingId(thread) !== null }
+  }, [view.thread])
+  const app = session?.computer?.app ?? null
+  const waitingYou = turn.phase === 'approval' || requests.length > 0
+  const workingText =
+    turn.asked ??
+    (handBack
+      ? `等你交还 ${app ?? '电脑'}`
+      : waitingYou && turn.phase !== 'approval'
+        ? phaseText('approval', 1)
+        : app && !QUIET_PHASES.has(turn.phase)
+          ? `正在使用 ${app}`
+          : phaseText(turn.phase, turn.count))
+  const working =
+    running && !turn.writing ? (
+      <View style={styles.working}>
+        <WorkingRow
+          since={session?.turnStartedAt ?? summary?.turnStartedAt ?? null}
+          label={workingText}
+          tokens={usage && startUsed !== null && usage.used > startUsed ? usage.used - startUsed : null}
+          waiting={waitingYou || handBack || turn.asked !== null}
+        />
+      </View>
+    ) : undefined
 
   // How full the context is, for the status line's ring.
   const breakdown = session?.context?.breakdown ?? null
@@ -553,6 +584,8 @@ export default function SessionScreen() {
             <View style={styles.older}>
               <ActivityIndicator size="small" color={c.textTertiary} />
             </View>
+          ) : !view.hasOlder && summary?.origin === 'user' && summary.parentId ? (
+            <SubSessionStart sessionId={id} />
           ) : (
             <View style={{ height: 4 }} />
           )
@@ -572,12 +605,15 @@ export default function SessionScreen() {
 
   return (
     <SessionRows.Provider value={context}>
+      <FileRefs.Provider value={fileRefs}>
       {pane ? null : <Stack.Screen options={{ headerShown: false }} />}
       <KeyboardAvoidingView style={[styles.root, { backgroundColor: c.bg }]} behavior="padding">
         <View style={{ flex: 1 }}>
           {body}
           <ToBottomButton visible={away} fresh={fresh} onPress={toBottom} />
         </View>
+
+        <PlanChip plan={plan} running={ownTurn && running} />
 
         {(requests.length > 0 ||
           handBack ||
@@ -749,6 +785,7 @@ export default function SessionScreen() {
       {actions.element}
       <SelectText text={selecting} onClose={() => setSelecting(null)} />
       {menu.render(pages)}
+      </FileRefs.Provider>
     </SessionRows.Provider>
   )
 }
