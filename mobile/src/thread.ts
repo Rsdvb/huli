@@ -11,6 +11,7 @@ import {
   threadFromSnapshot,
   type OlderPage,
   type PatchBatch,
+  type PlanEntry,
   type SessionSnapshot,
   type ThreadEntry,
   type ThreadState,
@@ -29,6 +30,8 @@ export interface ThreadView {
   /** What waits for the user, which may lie on a page not read yet. */
   requests: ThreadEntry[]
   reloadRequests(): void
+  /** The latest plan when it lies on a page not read yet, for the plan above the composer. */
+  plan: PlanEntry | null
 }
 
 /** How often at most a watched thread is written to the cache while it changes. */
@@ -42,6 +45,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const [older, setOlder] = useState<number | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [requests, setRequests] = useState<ThreadEntry[]>([])
+  const [plan, setPlan] = useState<PlanEntry | null>(null)
   const seq = useRef(-1)
   const pending = useRef<PatchBatch[] | null>(null)
   const generation = useRef(0)
@@ -108,6 +112,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       setThread(next)
       setCached(false)
       setOlder(snapshot.older)
+      setPlan(snapshot.plan ?? null)
       setError(null)
       void link.request('sessions.show', { sessionIds: [sessionId] }).catch(() => {})
       reloadRequests()
@@ -175,5 +180,6 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     loadOlder,
     requests,
     reloadRequests,
+    plan,
   }
 }
