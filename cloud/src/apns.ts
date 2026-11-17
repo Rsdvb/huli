@@ -22,9 +22,7 @@ export interface ApnsMessage {
   payload: unknown
 }
 
-export type ApnsResult =
-  | { ok: true }
-  | { ok: false; status: number; reason: string; gone: boolean }
+export type ApnsResult = { ok: true } | { ok: false; status: number; reason: string; gone: boolean }
 
 /** What sends a message to Apple; tests give their own. */
 export type ApnsSender = (message: ApnsMessage) => Promise<ApnsResult>

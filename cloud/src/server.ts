@@ -81,7 +81,13 @@ export function makeServer(
           return await push.handle(request, response)
         case 'POST /api/v1/relay/token':
         case 'POST /api/v1/reports':
-          return sendError(response, secure, 404, 'not_available', 'Huli Cloud does not offer this.')
+          return sendError(
+            response,
+            secure,
+            404,
+            'not_available',
+            'Huli Cloud does not offer this.',
+          )
         default:
           return sendError(response, secure, 404, 'not_found', 'Not found.')
       }
@@ -90,7 +96,8 @@ export function makeServer(
         return sendError(response, secure, 413, 'too_big', 'The request is too large.')
       }
       log(`huli-cloud: ${route} failed: ${(error as Error).stack ?? String(error)}`)
-      if (!response.headersSent) sendError(response, secure, 500, 'server_error', 'Something went wrong.')
+      if (!response.headersSent)
+        sendError(response, secure, 500, 'server_error', 'Something went wrong.')
       else response.destroy()
     }
   })

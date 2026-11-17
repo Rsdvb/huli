@@ -239,7 +239,12 @@ export class Auth {
     this.sweep()
     const q = url.searchParams
     if (q.get('done') === '1') {
-      return sendHtml(response, this.secure, 200, messagePage('已登录', '可以关掉这个页面，回到 Huli 了。'))
+      return sendHtml(
+        response,
+        this.secure,
+        200,
+        messagePage('已登录', '可以关掉这个页面，回到 Huli 了。'),
+      )
     }
     if (q.get('cancelled') === '1') {
       return sendHtml(response, this.secure, 200, messagePage('已取消', '这次登录已取消。'))
@@ -256,7 +261,12 @@ export class Auth {
       !state ||
       state.length > 512
     ) {
-      return sendHtml(response, this.secure, 400, messagePage('无法登录', '这个登录请求不完整或不被接受。'))
+      return sendHtml(
+        response,
+        this.secure,
+        400,
+        messagePage('无法登录', '这个登录请求不完整或不被接受。'),
+      )
     }
     const params: AuthorizeParams = {
       clientId,
@@ -292,7 +302,12 @@ export class Auth {
     const ticketId = form.get('ticket') ?? ''
     const ticket = this.tickets.get(ticketId)
     if (!ticket) {
-      return sendHtml(response, this.secure, 400, messagePage('登录已过期', '回到 Huli 重新点登录。'))
+      return sendHtml(
+        response,
+        this.secure,
+        400,
+        messagePage('登录已过期', '回到 Huli 重新点登录。'),
+      )
     }
     const { params } = ticket
     if (form.get('action') === 'deny') {
@@ -383,7 +398,8 @@ export class Auth {
     if (grant === 'refresh_token') {
       const result = this.store.refresh(clientId, form.get('refresh_token') ?? '')
       if (!result.ok) {
-        if (result.reason === 'reused') this.log('huli-cloud: an old refresh token came back; signed that client out')
+        if (result.reason === 'reused')
+          this.log('huli-cloud: an old refresh token came back; signed that client out')
         return fail(400, 'invalid_grant', 'The refresh token is not valid.')
       }
       return sendJson(response, this.secure, 200, result.tokens)
@@ -428,13 +444,13 @@ export class Auth {
       return sendError(response, this.secure, 429, 'slow_down', 'Too many sign-ins started.')
     }
     const deviceCode = randomToken()
-    let userCode = ''
+    let userCode: string
     do {
-      userCode = ''
+      let letters = ''
       for (let i = 0; i < 8; i++) {
-        userCode += USER_CODE_ALPHABET[randomInt(USER_CODE_ALPHABET.length)]
+        letters += USER_CODE_ALPHABET[randomInt(USER_CODE_ALPHABET.length)]
       }
-      userCode = `${userCode.slice(0, 4)}-${userCode.slice(4)}`
+      userCode = `${letters.slice(0, 4)}-${letters.slice(4)}`
     } while (this.userCodes.has(userCode))
     const key = sha256Hex(deviceCode)
     this.devices.set(key, {
@@ -473,7 +489,11 @@ export class Auth {
         response,
         this.secure,
         200,
-        loginPage({ action: '/web/login', fields: { next: `/device?code=${code}` }, purpose: '登录后确认设备' }),
+        loginPage({
+          action: '/web/login',
+          fields: { next: `/device?code=${code}` },
+          purpose: '登录后确认设备',
+        }),
       )
     }
     const key = this.userCodes.get(code)
@@ -482,7 +502,11 @@ export class Auth {
       response,
       this.secure,
       200,
-      devicePage({ csrf: session.csrf, code, client: device ? describeClient(device.info) : undefined }),
+      devicePage({
+        csrf: session.csrf,
+        code,
+        client: device ? describeClient(device.info) : undefined,
+      }),
     )
   }
 
@@ -506,7 +530,8 @@ export class Auth {
       )
     }
     device.status = form.get('action') === 'allow' ? 'approved' : 'denied'
-    if (device.status === 'approved') this.log(`huli-cloud: approved ${describeClient(device.info)}`)
+    if (device.status === 'approved')
+      this.log(`huli-cloud: approved ${describeClient(device.info)}`)
     sendHtml(
       response,
       this.secure,
@@ -521,14 +546,20 @@ export class Auth {
   // ---- Web login for /device and /account ---------------------------------------------------
 
   private safeNext(next: string | null): string {
-    return next && /^\/(device|account\/)/.test(next) && !next.startsWith('//') ? next : '/account/devices/'
+    return next && /^\/(device|account\/)/.test(next) && !next.startsWith('//')
+      ? next
+      : '/account/devices/'
   }
 
   /** POST /web/login */
   async webLogin(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const form = await readForm(request)
     const next = this.safeNext(form.get('next'))
-    const failure = await this.verifyLogin(request, form.get('password') ?? '', form.get('code') ?? '')
+    const failure = await this.verifyLogin(
+      request,
+      form.get('password') ?? '',
+      form.get('code') ?? '',
+    )
     if (failure) {
       return sendHtml(
         response,
@@ -548,7 +579,11 @@ export class Auth {
         response,
         this.secure,
         200,
-        loginPage({ action: '/web/login', fields: { next: '/account/devices/' }, purpose: '登录后管理设备' }),
+        loginPage({
+          action: '/web/login',
+          fields: { next: '/account/devices/' },
+          purpose: '登录后管理设备',
+        }),
       )
     }
     sendHtml(
