@@ -18,6 +18,7 @@ import { router } from 'expo-router'
 import type { ConversationHit, SearchIndexing, SessionSummary } from '@shared/agent-host'
 import type { LinkState } from '@shared/remote/link'
 import { useSessionActions } from '../components/SessionActions'
+import { UpdateBanner } from '../components/UpdateBanner'
 import { useHost } from '../host'
 import { PairScreen } from '../screens/PairScreen'
 import {
@@ -359,6 +360,7 @@ export default function Home() {
           <Text style={{ color: theme.muted, fontSize: 14 }}>{banner}</Text>
         </View>
       )}
+      <UpdateBanner />
 
       {search ? (
         <FlatList
