@@ -84,7 +84,12 @@ function CardFace({ card }: { card: PlanCard }) {
         <AgentMark agent={card.agentId} hostId={card.hostId} size={14} />
         <span className="min-w-0 truncate text-small font-medium text-primary">{card.name}</span>
         {card.tier && (
-          <span className="ml-auto shrink-0 text-badge leading-3.75 font-medium text-tertiary">
+          // At most half the line, so a long plan such as "Business Enterprise" never pushes the
+          // name out or runs past the card.
+          <span
+            className="ml-auto max-w-1/2 min-w-0 shrink-0 truncate text-badge leading-3.75 font-medium text-tertiary"
+            title={card.tier}
+          >
             {card.tier}
           </span>
         )}

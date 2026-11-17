@@ -599,6 +599,11 @@ li[data-row-exit='dust'] > * {
 .kettu-plan-ring__button[aria-expanded='true'] {
   background: var(--bg-selected);
 }
+/* Wider than the account menu's 260px, which left two cards side by side too narrow for a name
+   beside its plan ("Claude …") or a window beside its figure ("5 …"); never past the window. */
+.kettu-plan-ring .ui-as-user-pop {
+  min-width: min(320px, calc(100vw - 24px));
+}
 .kettu-plan-pop {
   padding: 4px;
   border-radius: 12px;
