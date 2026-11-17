@@ -7,7 +7,9 @@
 //   huli://search?q=<text>        search, the text filled in and searched (q may be left out)
 //   huli://artifacts              the Artifacts tab
 //   huli://artifact/<artifactId>  an artifact, full screen (`version=<n>` for an older one)
-//   huli://routines               the 定时任务 tab
+//   huli://tasks                  the 任务 tab, its tasks (需求)
+//   huli://task/<taskId>          a task
+//   huli://routines               the 任务 tab, its routines (定时)
 //   huli://usage                  the 用量 tab
 //
 // Any of them may add `host=<id>` (`huli://session/abc?host=1a2b3c4d5e6f`) to show that computer
@@ -24,12 +26,15 @@ import { router, useRootNavigationState } from 'expo-router'
 import { ARTIFACT_ID } from '@shared/artifacts'
 import { useHost } from './host'
 import { useLockState } from './lock'
+import { setTasksTabView } from './tasks'
 import type { SavedHost } from './store'
 
 export type TabName = 'index' | 'artifacts' | 'routines' | 'usage'
 
 export type LinkTarget =
   | { kind: 'session'; id: string }
+  | { kind: 'task'; id: string }
+  | { kind: 'tasks' }
   | { kind: 'artifact'; id: string; version: number | null }
   | { kind: 'new' }
   | { kind: 'search'; q: string }
@@ -86,6 +91,8 @@ export function parseLink(url: string): AppLink | null {
   const [head = '', id, ...more] = path.split('/')
   let target: LinkTarget | null = null
   if (head === 'session' && id && more.length === 0) target = { kind: 'session', id: decode(id) }
+  else if (head === 'task' && id && more.length === 0) target = { kind: 'task', id: decode(id) }
+  else if (path === 'tasks') target = { kind: 'tasks' }
   else if (head === 'artifact' && id && more.length === 0 && ARTIFACT_ID.test(decode(id))) {
     const version = params.get('version') ?? ''
     target = {
@@ -111,6 +118,10 @@ export function linkTo(target: LinkTarget, host?: string | null): string {
   switch (target.kind) {
     case 'session':
       return `huli://session/${encodeURIComponent(target.id)}${suffix([])}`
+    case 'task':
+      return `huli://task/${encodeURIComponent(target.id)}${suffix([])}`
+    case 'tasks':
+      return `huli://tasks${suffix([])}`
     case 'artifact':
       return `huli://artifact/${encodeURIComponent(target.id)}${suffix([
         ['version', target.version === null ? '' : String(target.version)],
@@ -148,10 +159,20 @@ function navigate(target: LinkTarget): void {
     case 'session':
       router.push({ pathname: '/session/[id]', params: { id: target.id } })
       return
+    case 'task':
+      router.push({ pathname: '/task/[id]', params: { id: target.id } })
+      return
+    case 'tasks':
+      setTasksTabView('tasks')
+      if (router.canDismiss()) router.dismissAll()
+      router.navigate('/routines')
+      return
     case 'artifact':
       router.push({
         pathname: '/artifact/[id]',
-        params: target.version ? { id: target.id, version: String(target.version) } : { id: target.id },
+        params: target.version
+          ? { id: target.id, version: String(target.version) }
+          : { id: target.id },
       })
       return
     case 'new':
@@ -161,6 +182,7 @@ function navigate(target: LinkTarget): void {
       router.push({ pathname: '/search', params: target.q ? { q: target.q } : {} })
       return
     case 'tab':
+      if (target.tab === 'routines') setTasksTabView('routines')
       if (router.canDismiss()) router.dismissAll()
       router.navigate(target.tab === 'index' ? '/' : `/${target.tab}`)
   }
