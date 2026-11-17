@@ -1,9 +1,11 @@
 // One entry of a session's thread, as compact as a phone wants: the conversation in full, tools as
 // a line that opens to their input and output, and the host's own records as a short note.
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { router } from 'expo-router'
 import type { ThreadEntry, ToolEntry, UserContent } from '@shared/thread'
+import { diffTexts, handDiff, type ToolDiff } from '../diff'
 import { duration } from '../sessions'
 import type { Theme } from '../theme'
 import { Markdown } from './Markdown'
@@ -71,6 +73,33 @@ function answerText(entry: ToolEntry): string | null {
   return `${verb}${result.name ? `：${result.name}` : ''}${where}`
 }
 
+function DiffChip(props: { part: ToolDiff; theme: Theme }) {
+  const { part, theme } = props
+  const stats = useMemo(() => diffTexts(part.oldText, part.newText), [part])
+  const open = () =>
+    router.push({
+      pathname: '/diff',
+      params: { key: handDiff({ path: part.path, oldText: part.oldText, newText: part.newText, diff: stats }) },
+    })
+  return (
+    <Pressable
+      onPress={open}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.diff, { borderColor: theme.line, opacity: pressed ? 0.6 : 1 }]}
+    >
+      <Text style={{ flex: 1, color: theme.text, fontSize: 12 }} numberOfLines={1} ellipsizeMode="head">
+        {part.oldText === null ? '新建 ' : '改动 '}
+        {part.path}
+      </Text>
+      <Text style={{ fontSize: 12, fontVariant: ['tabular-nums'] }}>
+        <Text style={{ color: theme.ok }}>+{stats.insertions}</Text>{' '}
+        <Text style={{ color: theme.danger }}>−{stats.deletions}</Text>
+      </Text>
+      <Text style={{ color: theme.muted, fontSize: 14 }}>›</Text>
+    </Pressable>
+  )
+}
+
 function Tool(props: { entry: ToolEntry; theme: Theme }) {
   const { entry, theme } = props
   const [open, setOpen] = useState(false)
@@ -97,9 +126,7 @@ function Tool(props: { entry: ToolEntry; theme: Theme }) {
               {part.markdown.length > 4000 ? `${part.markdown.slice(0, 4000)}\n…` : part.markdown}
             </Text>
           ) : part.type === 'diff' ? (
-            <Text key={i} style={{ color: theme.muted, fontSize: 12, marginTop: 6 }}>
-              改动 {part.path}
-            </Text>
+            <DiffChip key={i} part={part} theme={theme} />
           ) : null,
         )}
     </Pressable>
@@ -192,6 +219,7 @@ const styles = StyleSheet.create({
   note: { paddingVertical: 2 },
   tool: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   output: { fontFamily: MONO, fontSize: 12, borderRadius: 6, padding: 8, marginTop: 6 },
+  diff: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginTop: 6 },
   plan: { borderWidth: 1, borderRadius: 10, padding: 10 },
   notice: { borderLeftWidth: 3, paddingLeft: 10, paddingVertical: 4 },
   divider: { textAlign: 'center', fontSize: 12, paddingVertical: 4 },

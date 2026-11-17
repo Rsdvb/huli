@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
+import { ChangesButton } from '../../components/ChangesButton'
 import { EntryView } from '../../components/EntryView'
 import { PermissionCard } from '../../components/PermissionCard'
 import { useHost, useLink } from '../../host'
@@ -98,12 +99,16 @@ export default function SessionScreen() {
               </Text>
             </View>
           ),
-          headerRight: () =>
-            running ? (
-              <Pressable onPress={stop} hitSlop={8}>
-                <Text style={{ color: theme.danger, fontSize: 16, fontWeight: '600' }}>停止</Text>
-              </Pressable>
-            ) : null,
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <ChangesButton sessionId={id} theme={theme} />
+              {running ? (
+                <Pressable onPress={stop} hitSlop={8}>
+                  <Text style={{ color: theme.danger, fontSize: 16, fontWeight: '600' }}>停止</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ),
         }}
       />
 
