@@ -4,7 +4,7 @@
 // while it waits. Tapped, it opens to its command and output, its result or the file it read, and
 // its edits, each opening to its diff.
 
-import { memo, useEffect, useState, type ReactNode } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
@@ -17,6 +17,7 @@ import { useSessionRows } from './context'
 import { copyText } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
+import { useTenth } from './now'
 import { MONO, useSessionTokens } from './palette'
 import { gentle } from './Press'
 import { Counts } from './TurnChanges'
@@ -142,11 +143,7 @@ export function stepStatus(entry: ToolEntry): StepStatus {
 
 /** How long since `since`, ticking while shown, with tenths below a minute. */
 export function LiveTime(props: { since: number; color: string; prefix?: string }) {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 100)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useTenth()
   return (
     <Text style={[styles.time, { color: props.color }]}>
       {props.prefix ?? ''}
