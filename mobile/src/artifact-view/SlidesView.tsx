@@ -3,14 +3,7 @@
 // scaled to the screen, in the deck's own colors whatever the app's mode, and pinched to zoom.
 
 import { memo, useMemo, useRef, useState } from 'react'
-import {
-  FlatList,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-  type TextStyle,
-} from 'react-native'
+import { FlatList, StyleSheet, Text, View, useWindowDimensions, type TextStyle } from 'react-native'
 import { Image } from 'expo-image'
 import { CONTENT_ENTRIES } from '@shared/artifact-types'
 import { useSessionTokens } from '../ui/session/palette'
@@ -111,7 +104,14 @@ function Bullets(props: { bullets: unknown; look: Look; sub?: boolean }) {
         const under = typeof bullet === 'object' && bullet !== null ? bullet.bullets : undefined
         return (
           <View key={i} style={{ flexDirection: 'row' }}>
-            <Text style={{ color: p.accent, fontSize: size, lineHeight: size * 1.35, width: size * 1.1 }}>
+            <Text
+              style={{
+                color: p.accent,
+                fontSize: size,
+                lineHeight: size * 1.35,
+                width: size * 1.1,
+              }}
+            >
               {props.sub ? '◦' : '•'}
             </Text>
             <View style={{ flex: 1 }}>
@@ -148,7 +148,11 @@ function ColumnView(props: { column: Column | undefined; look: Look }) {
   return (
     <View style={{ flex: 1, gap: 14 * k }}>
       <T value={column.heading} look={props.look} style={{ fontSize: 36 * k, fontWeight: '700' }} />
-      <T value={column.text} look={props.look} style={{ fontSize: 32 * k, lineHeight: 32 * k * 1.3 }} />
+      <T
+        value={column.text}
+        look={props.look}
+        style={{ fontSize: 32 * k, lineHeight: 32 * k * 1.3 }}
+      />
       {column.bullets ? <Bullets bullets={column.bullets} look={props.look} /> : null}
     </View>
   )
@@ -372,7 +376,10 @@ export function SlidesView(props: {
     if (!deck) return null
     const made = new Map<string, string>()
     const size = slideSize(deck.aspect)
-    const available = Math.min(window.width - 24, ((window.height - props.top - props.bottom - 64) * size.width) / size.height)
+    const available = Math.min(
+      window.width - 24,
+      ((window.height - props.top - props.bottom - 64) * size.width) / size.height,
+    )
     return {
       k: available / size.width,
       p: PALETTES[deck.theme === 'dark' ? 'dark' : 'light'],

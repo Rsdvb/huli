@@ -4,8 +4,8 @@ appId: io.github.rsdvb.huli
 - launchApp:
     stopApp: true
     arguments:
-      huliNoAsk: "YES"
+      huliNoAsk: 'YES'
 - tapOn:
-    text: "允许"
+    text: '允许'
     optional: true
 - waitForAnimationToEnd

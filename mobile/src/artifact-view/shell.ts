@@ -11,8 +11,7 @@ import { WEB_ARTIFACT_FRAME_SANDBOX } from '@shared/artifacts'
 export type FrameLayout = { kind: 'fluid' } | { kind: 'fixed'; width: number; height: number }
 
 function json(value: unknown): string {
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003c')
+  return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
 // Downloads mean nothing in the phone's web view, so the frame gets the web client's sandbox less

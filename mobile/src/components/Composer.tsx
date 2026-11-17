@@ -317,11 +317,13 @@ export function Composer(props: ComposerProps) {
 
   useEffect(() => {
     mounted.current = true
+    // The same map for the composer's life.
+    const going = uploads.current
     return () => {
       mounted.current = false
       // An upload under way would only be forgotten once it got there.
-      for (const controller of uploads.current.values()) controller.abort()
-      uploads.current.clear()
+      for (const controller of going.values()) controller.abort()
+      going.clear()
       // A draft keeps what the computer holds for it; without one, the computer forgets it.
       for (const item of latest.current) {
         if (carried.current.has(item.key)) continue

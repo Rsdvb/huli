@@ -19,13 +19,13 @@ HULI_TRUST_PROXY=1 \
 node huli-cloud.mjs serve
 ```
 
-| 变量 | 说明 |
-|---|---|
-| `HULI_ORIGIN` | 对外地址，主机签推送请求时用它，必须和 Huli 桌面端里的 `PUSH_URL` 一致 |
-| `HULI_DATA_DIR` | 数据目录，`state.json` 权限 600 |
-| `HULI_HOST` / `HULI_PORT` | 监听地址，默认 `127.0.0.1:3010` |
-| `HULI_TRUST_PROXY` | `1` 时从 nginx 的 `X-Real-IP` 取客户端地址（只信任来自本机的连接） |
-| `APNS_KEY_FILE` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | 苹果推送密钥；不设时推送一律拒绝 |
+| 变量                                                            | 说明                                                                   |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `HULI_ORIGIN`                                                   | 对外地址，主机签推送请求时用它，必须和 Huli 桌面端里的 `PUSH_URL` 一致 |
+| `HULI_DATA_DIR`                                                 | 数据目录，`state.json` 权限 600                                        |
+| `HULI_HOST` / `HULI_PORT`                                       | 监听地址，默认 `127.0.0.1:3010`                                        |
+| `HULI_TRUST_PROXY`                                              | `1` 时从 nginx 的 `X-Real-IP` 取客户端地址（只信任来自本机的连接）     |
+| `APNS_KEY_FILE` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | 苹果推送密钥；不设时推送一律拒绝                                       |
 
 ## 账号管理（在服务器上运行，密码自己输入）
 
@@ -36,15 +36,15 @@ sudo -u huli env HULI_DATA_DIR=/var/lib/huli-cloud node /opt/huli-cloud/huli-clo
 
 ## 接口
 
-| 路径 | 作用 |
-|---|---|
-| `GET/POST /signin/app/` | 浏览器登录（PKCE + 本机回调） |
-| `POST /api/oauth/token` | 授权码、刷新（轮换，重放旧令牌整组作废）、设备码 |
-| `POST /api/oauth/device`、`GET/POST /device` | 设备码登录 |
-| `POST /api/oauth/revoke` | 退出登录 |
-| `GET /api/v1/me` | 账号信息 |
-| `GET /account/devices/` | 已登录设备，可踢出 |
-| `POST /v1/push` | 推送网关 |
-| `GET /healthz` | 健康检查 |
+| 路径                                         | 作用                                             |
+| -------------------------------------------- | ------------------------------------------------ |
+| `GET/POST /signin/app/`                      | 浏览器登录（PKCE + 本机回调）                    |
+| `POST /api/oauth/token`                      | 授权码、刷新（轮换，重放旧令牌整组作废）、设备码 |
+| `POST /api/oauth/device`、`GET/POST /device` | 设备码登录                                       |
+| `POST /api/oauth/revoke`                     | 退出登录                                         |
+| `GET /api/v1/me`                             | 账号信息                                         |
+| `GET /account/devices/`                      | 已登录设备，可踢出                               |
+| `POST /v1/push`                              | 推送网关                                         |
+| `GET /healthz`                               | 健康检查                                         |
 
 日志里 `huli-cloud: login failed from <IP>` 给 fail2ban 用。

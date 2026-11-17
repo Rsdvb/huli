@@ -374,7 +374,7 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
 
 // A count, an amount or a measure: an optional sign or currency, digits with separators, a
 // fraction, and a short unit such as %, ms, KB or x.
-const NUMBER = /^[+\-−±~≈]?\s?[$€£¥]?\d[\d,_  ]*(?:\.\d+)?\s?(?:%|[a-zA-Zµ]{1,3}|×)?$/
+const NUMBER = /^[+\-−±~≈]?\s?[$€£¥]?\d[\d,_\u2009 ]*(?:\.\d+)?\s?(?:%|[a-zA-Zµ]{1,3}|×)?$/
 
 /** The columns whose body cells are all numbers, empty ones aside, that the Markdown leaves unaligned. */
 function numericColumns(block: Extract<Block, { kind: 'table' }>): Set<number> {

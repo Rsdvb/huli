@@ -84,8 +84,7 @@ function styleText(css: string): string {
 
 /** JSON for inside a script element. */
 function json(value: unknown): string {
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003c')
+  return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
 const MODULE_SPECIFIER =
@@ -203,7 +202,12 @@ function inline(html: string, path: string, builder: PageBuilder): string {
   const deferred: string[] = []
   const replaceAttribute = (tag: StartTag, name: string, value: string): void => {
     const found = tag.attributes.find((a) => a.name === name)
-    if (found) edits.push({ start: found.start, end: found.end, text: `${name}="${escapeAttribute(value)}"` })
+    if (found)
+      edits.push({
+        start: found.start,
+        end: found.end,
+        text: `${name}="${escapeAttribute(value)}"`,
+      })
   }
   const dropAttribute = (tag: StartTag, name: string): void => {
     const found = tag.attributes.find((a) => a.name === name)
@@ -270,7 +274,11 @@ function inline(html: string, path: string, builder: PageBuilder): string {
         if (!end) return
         const css = html.slice(tag.end, end.index)
         if (/url\(|@import/i.test(css)) {
-          edits.push({ start: tag.end, end: end.index, text: styleText(builder.cssText(css, path, 0)) })
+          edits.push({
+            start: tag.end,
+            end: end.index,
+            text: styleText(builder.cssText(css, path, 0)),
+          })
         }
         return
       }
@@ -310,13 +318,21 @@ function inline(html: string, path: string, builder: PageBuilder): string {
 function takeImportMap(html: string): { html: string; map: Record<string, unknown> | null } {
   let found: { start: number; end: number; text: string } | null = null
   eachStartTag(html, (tag) => {
-    if (tag.name !== 'script' || (attribute(tag, 'type') ?? '').trim().toLowerCase() !== 'importmap') {
+    if (
+      tag.name !== 'script' ||
+      (attribute(tag, 'type') ?? '').trim().toLowerCase() !== 'importmap'
+    ) {
       return
     }
     const close = /<\/script\s*>/gi
     close.lastIndex = tag.end
     const end = close.exec(html)
-    if (end) found = { start: tag.start, end: end.index + end[0].length, text: html.slice(tag.end, end.index) }
+    if (end)
+      found = {
+        start: tag.start,
+        end: end.index + end[0].length,
+        text: html.slice(tag.end, end.index),
+      }
     return false
   })
   const cut = found as { start: number; end: number; text: string } | null
@@ -389,7 +405,8 @@ export function buildPage(
   const files: Record<string, [string, string]> = {}
   let partial = false
   for (const f of version.files.values()) {
-    if (embedBinary || isTextType(f.type)) files[f.path] = [artifactFileType(f.path), toBase64(f.bytes)]
+    if (embedBinary || isTextType(f.type))
+      files[f.path] = [artifactFileType(f.path), toBase64(f.bytes)]
     else partial = true
   }
 

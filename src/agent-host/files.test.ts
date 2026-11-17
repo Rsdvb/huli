@@ -163,7 +163,8 @@ describe('FilesService file operations', () => {
   )
 })
 
-describe('FilesService empty folders', () => {
+// Runs git, which takes seconds to start on a busy Windows machine.
+describe('FilesService empty folders', { timeout: 30_000 }, () => {
   it('lists the empty folders of a folder outside git', async () => {
     const { root, files } = await setup()
     await mkdir(path.join(root, 'a/empty'), { recursive: true })

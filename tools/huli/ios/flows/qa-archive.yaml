@@ -2,18 +2,18 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - longPressOn:
-    text: ".*${TITLE}.*"
+    text: '.*${TITLE}.*'
 - waitForAnimationToEnd
 - takeScreenshot: x01-row-menu
 - tapOn:
-    text: "取消置顶"
+    text: '取消置顶'
     optional: true
 - waitForAnimationToEnd
 - longPressOn:
-    text: ".*${TITLE}.*"
+    text: '.*${TITLE}.*'
 - waitForAnimationToEnd
-- tapOn: "归档"
+- tapOn: '归档'
 - waitForAnimationToEnd
 - takeScreenshot: x02-archived
