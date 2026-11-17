@@ -12,6 +12,7 @@ import {
   IMAGE_SIDE,
   PROMPT_BYTES,
   THUMB_SIDE,
+  embedsText,
   promptShare,
 } from '@shared/attachments'
 import type { Attachment, UserContent } from '@shared/thread'
@@ -23,13 +24,16 @@ export { ATTACHMENT_LIMIT }
  * mention named, which the host reads itself (`uri` is its path relative to the project then).
  */
 export interface PickedSource {
-  kind: 'image' | 'file' | 'project'
+  kind: 'image' | 'file' | 'project' | 'text'
+  /** The file's URI; for a pasted text, nothing. */
   uri: string
   name: string
   mimeType: string | null
   size: number | null
   /** For a mention: the project its path is relative to. */
   projectPath?: string
+  /** A long paste's text. */
+  text?: string
 }
 
 /** Has the host attach a file of the project by its path, as the desktop's `@` mention does. */
@@ -58,6 +62,8 @@ export interface PendingAttachment {
   size: number | null
   attachment: Attachment | null
   error: string | null
+  /** A draft's attachment the computer no longer holds. */
+  gone?: boolean
 }
 
 const JPEG_QUALITY = 0.8
@@ -158,6 +164,15 @@ async function preparePhoto(source: PickedSource): Promise<Prepared> {
   }
 }
 
+async function prepareText(source: PickedSource): Promise<Prepared> {
+  return {
+    bytes: new TextEncoder().encode(source.text ?? ''),
+    mimeType: 'text/plain',
+    name: source.name,
+    thumb: null,
+  }
+}
+
 async function prepareFile(source: PickedSource): Promise<Prepared> {
   const file = new File(source.uri)
   const refused = tooLarge(source.name, file.size ?? source.size)
@@ -174,7 +189,12 @@ async function prepareFile(source: PickedSource): Promise<Prepared> {
 export async function prepare(source: PickedSource): Promise<Prepared> {
   let prepared: Prepared
   try {
-    prepared = source.kind === 'image' ? await preparePhoto(source) : await prepareFile(source)
+    prepared =
+      source.kind === 'image'
+        ? await preparePhoto(source)
+        : source.kind === 'text'
+          ? await prepareText(source)
+          : await prepareFile(source)
   } catch (error) {
     if (error instanceof Refused) throw error
     console.warn(`Could not read ${source.name}`, error)
@@ -222,6 +242,39 @@ export function sendBlock(items: readonly PendingAttachment[], text: string): st
     return `附件加起来太大了，一条消息最多约 ${formatBytes(PROMPT_BYTES)}，请移除一些。`
   }
   return null
+}
+
+/** What the agent's prompts take, as its capabilities say; unknown until it has started. */
+export interface Takes {
+  images: boolean
+  text: boolean
+}
+
+/** How an attachment goes to the agent, as the desktop's tile says it. */
+export function sentNote(item: PendingAttachment, takes: Takes | null, agent: string): string {
+  if (item.status === 'failed') {
+    return item.gone ? '为这份草稿保存的副本已不在，请移除后重新添加。' : (item.error ?? '无法读取')
+  }
+  if (item.status !== 'ready') return '正在添加…'
+  const kind = item.attachment?.type ?? (item.source.kind === 'image' ? 'image' : 'file')
+  if (kind === 'text') return takes?.text === false ? '作为文本接在消息之后发送' : '连同内容发送'
+  if (kind === 'image') {
+    return takes?.images === false
+      ? `${agent} 不接受图片，会收到文件链接，可用它自己的工具打开。`
+      : '以图片发送'
+  }
+  if (item.attachment && embedsText(item.attachment) && takes?.text !== false) return '连同内容发送'
+  return `以链接发送，${agent} 会用它自己的工具读取。`
+}
+
+/** The next free number of a pasted kind's names: 「粘贴的文本 2」「图片 3」. */
+export function nextNumber(items: readonly PendingAttachment[], prefix: string): number {
+  let most = 0
+  for (const item of items) {
+    const match = new RegExp(`^${prefix} (\\d+)`).exec(item.source.name)
+    if (match) most = Math.max(most, Number(match[1]))
+  }
+  return most + 1
 }
 
 /** The message's content: the text, then the attachments in the order they were added. */
