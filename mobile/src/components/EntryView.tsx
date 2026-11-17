@@ -257,7 +257,18 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
         />
       )
     case 'artifact':
-      return <Note icon={G.artifact} text="Artifact" detail={entry.title} />
+      return (
+        <Note
+          icon={G.artifact}
+          text="Artifact"
+          detail={entry.title}
+          onPress={
+            entry.action === 'delete'
+              ? undefined
+              : () => router.push({ pathname: '/artifact/[id]', params: { id: entry.artifactId } })
+          }
+        />
+      )
     default:
       return null
   }

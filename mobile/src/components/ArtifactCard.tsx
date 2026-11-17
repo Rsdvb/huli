@@ -130,7 +130,7 @@ export function ArtifactCard(props: {
       delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={`${a.title}，${KIND_TEXT[kind]}，${age(a.updatedAt)}${editing ? '，正在编辑' : ''}`}
-      accessibilityHint="打开详情；长按显示更多操作"
+      accessibilityHint="打开；长按显示更多操作"
       containerStyle={styles.cell}
       style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}
     >

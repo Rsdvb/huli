@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { ArtifactSummary } from '@shared/artifacts'
 import type { ConversationHit, SearchIndexing, SessionSummary } from '@shared/agent-host'
-import { artifactKind, KIND_ICON, KIND_TEXT } from '../artifacts'
+import { artifactKind, KIND_ICON, KIND_TEXT, openArtifact } from '../artifacts'
 import { ArtifactSheet } from '../components/ArtifactSheet'
 import { useShell } from '../components/shell'
 import { useHost } from '../host'
@@ -508,6 +508,10 @@ export default function Search() {
             onPress={() => {
               haptic.tap()
               rememberSearch(query)
+              openArtifact(a.id)
+            }}
+            onLongPress={() => {
+              haptic.tap()
               setOpen(a)
             }}
             scale={false}

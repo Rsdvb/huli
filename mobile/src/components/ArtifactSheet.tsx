@@ -1,11 +1,11 @@
-// An artifact's sheet: its preview, the session that made it, its versions (an older one can be
-// brought back as the newest), and deleting it into Recently deleted.
+// An artifact's sheet: its preview, which opens it, the session that made it, its versions (an
+// older one can be brought back as the newest), and deleting it into Recently deleted.
 
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { ArtifactSummary, VersionSummary } from '@shared/artifacts'
-import { artifactKind, KIND_TEXT } from '../artifacts'
+import { artifactKind, KIND_TEXT, openArtifact } from '../artifacts'
 import { useHost } from '../host'
 import { whenText } from '../routines'
 import { errorText, folder, sessionTitle } from '../sessions'
@@ -77,6 +77,11 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
     : (host.projects.find((p) => p.path === item.project)?.name ?? folder(item.project))
   const connected = host.state.kind === 'connected'
 
+  const open = (version?: number) => {
+    props.onClose()
+    openArtifact(item.id, version)
+  }
+
   const author = (v: VersionSummary) =>
     v.author === null ? '你' : sessionTitle(host.sessions.get(v.author))
 
@@ -111,27 +116,36 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
       message={`${KIND_TEXT[kind]} · ${projectName} · v${item.version}`}
       maxHeight={640}
     >
-      <ArtifactPreview artifact={item} inset={space.xs} />
+      <Pressable
+        onPress={() => open()}
+        accessibilityRole="button"
+        accessibilityLabel={`打开「${item.title || '未命名'}」`}
+        style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+      >
+        <ArtifactPreview artifact={item} inset={space.xs} />
+      </Pressable>
       <View style={styles.actions}>
+        <Pill
+          tone="accent"
+          size="lg"
+          label="打开"
+          leading={<Icon name="external" size={18} color={c.onAccent} />}
+          onPress={() => open()}
+        />
         {session ? (
           <Pill
-            tone="accent"
             size="lg"
             label="打开会话"
-            leading={<Icon name="message" size={18} color={c.onAccent} />}
+            leading={<Icon name="message" size={18} color={c.text} />}
             onPress={() => {
               props.onClose()
               router.push(`/session/${session.id}`)
             }}
           />
-        ) : (
-          <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-            做它的会话已经不在了。
-          </Text>
-        )}
+        ) : null}
       </View>
       <Text style={[typeScale.footnote, styles.hint, { color: c.textTertiary }]}>
-        在电脑上的 Huli 里可以打开、编辑和分享它。
+        {session ? '在电脑上的 Huli 里可以编辑它。' : '做它的会话已经不在了。'}
       </Text>
 
       <ListGroup header="版本">
@@ -181,7 +195,12 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
 }
 
 const styles = StyleSheet.create({
-  actions: { flexDirection: 'row', justifyContent: 'center', paddingTop: space.xs },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: space.sm,
+    paddingTop: space.xs,
+  },
   hint: { textAlign: 'center' },
   loading: { paddingVertical: space.lg },
 })
