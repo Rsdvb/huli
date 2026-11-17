@@ -3,7 +3,7 @@
 // And the button that brings a scrolled-up conversation back to its newest message.
 
 import { useEffect, useRef, useState } from 'react'
-import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from 'react-native'
+import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'react-native'
 import { G, Icon } from './icons'
 import { compactCount, durationText } from './work'
 import { GlassButton } from '../Glass'
@@ -90,9 +90,9 @@ function WorkingDots(props: { color: string }) {
 }
 
 /**
- * The running turn's status, as the desktop's: 「13 秒 · 4.1万 token · 正在运行 1 条命令」, the
- * clock ticking each second, with the attention dot in place of the running dots while it waits
- * for the user.
+ * The running turn's status, as the desktop's: 「13 秒 · 正在读取 index.tsx · 4.1万 token」, the
+ * clock ticking each second and only what it does giving way on a narrow screen, with the
+ * attention dot in place of the running dots while it waits for the user.
  */
 export function WorkingRow(props: {
   since: number | null
@@ -119,11 +119,8 @@ export function WorkingRow(props: {
     return () => clearTimeout(timer)
   }, [props.since])
   const elapsed = props.since !== null ? Math.max(0, now - props.since) : null
-  const parts = [
-    elapsed !== null ? durationText(elapsed - (elapsed % 1000)) : null,
-    props.tokens !== null && props.tokens > 0 ? `${compactCount(props.tokens)} token` : null,
-    props.label,
-  ].filter(Boolean)
+  const tone = { color: c.textSecondary }
+  const dot = <Text style={[styles.fixed, { color: c.textTertiary }]}>{'  ·  '}</Text>
   return (
     <View
       style={styles.row}
@@ -141,12 +138,24 @@ export function WorkingRow(props: {
       ) : (
         <WorkingDots color={c.accent} />
       )}
-      <Animated.Text
-        style={[styles.label, { color: c.textSecondary, opacity: props.waiting ? 1 : pulse }]}
-        numberOfLines={1}
-      >
-        {parts.join(' · ')}
-      </Animated.Text>
+      {/* Time · what it does · tokens, as the desktop orders them: only the middle one gives way. */}
+      <Animated.View style={[styles.line, { opacity: props.waiting ? 1 : pulse }]}>
+        {elapsed !== null && (
+          <>
+            <Text style={[styles.fixed, tone]}>{durationText(elapsed - (elapsed % 1000))}</Text>
+            {dot}
+          </>
+        )}
+        <Text style={[styles.label, tone]} numberOfLines={1}>
+          {props.label}
+        </Text>
+        {props.tokens !== null && props.tokens > 0 && (
+          <>
+            {dot}
+            <Text style={[styles.fixed, tone]}>{compactCount(props.tokens)} token</Text>
+          </>
+        )}
+      </Animated.View>
     </View>
   )
 }
@@ -197,7 +206,9 @@ export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPres
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 32 },
-  label: { flex: 1, fontSize: 15, lineHeight: 20, fontVariant: ['tabular-nums'] },
+  line: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
+  label: { flexShrink: 1, fontSize: 15, lineHeight: 20 },
+  fixed: { flexShrink: 0, fontSize: 15, lineHeight: 20, fontVariant: ['tabular-nums'] },
   dots: { width: 15, height: 15, flexDirection: 'row', flexWrap: 'wrap', gap: 1.5 },
   dot: { width: 4, height: 4, borderRadius: 2 },
   attention: { width: 15, height: 15, alignItems: 'center', justifyContent: 'center' },

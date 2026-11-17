@@ -118,7 +118,14 @@ import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
 import { SubagentBar } from '../../components/SubagentBar'
 import { foldsIntoRun, latestPlan } from '../../ui/session/turns'
-import { askedText, forgetTools, phaseText, turnPhase, writingId } from '../../ui/session/work'
+import {
+  askedText,
+  doingText,
+  forgetTools,
+  phaseText,
+  turnDoing,
+  writingId,
+} from '../../ui/session/work'
 import { WorkingRow } from '../../ui/session/Working'
 
 const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
@@ -127,7 +134,7 @@ const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache }
 const selectSession = (thread: ThreadState | null) => thread?.session
 const selectHasThread = (thread: ThreadState | null) => thread !== null
 const selectTurn = (thread: ThreadState | null) => ({
-  ...turnPhase(thread),
+  ...turnDoing(thread),
   asked: askedText(thread),
   writing: writingId(thread) !== null,
 })
@@ -519,7 +526,7 @@ export default function SessionScreen() {
         ? phaseText('approval', 1)
         : app && !QUIET_PHASES.has(turn.phase)
           ? `正在使用 ${app}`
-          : phaseText(turn.phase, turn.count))
+          : doingText(turn))
   const added =
     usage && startUsed !== null && usage.used > startUsed ? usage.used - startUsed : null
   const working =
