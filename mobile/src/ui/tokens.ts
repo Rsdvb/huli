@@ -129,6 +129,8 @@ export const type = {
   lead: { fontSize: 22, lineHeight: 31, fontWeight: '400' },
   /** A list row's title. */
   rowTitle: { fontSize: 17, lineHeight: 23, fontWeight: '500' },
+  /** The top bar's computer pill. */
+  bar: { fontSize: 16, lineHeight: 21, fontWeight: '500' },
   section: { fontSize: 17, lineHeight: 23, fontWeight: '500' },
 } as const
 
@@ -145,6 +147,12 @@ export const size = {
   iconButton: 48,
   avatar: 40,
   avatarSmall: 28,
+  /** A session row's agent avatar. */
+  rowAvatar: 30,
+  /** The top bar: the account avatar, the computer pill's height, the round search button. */
+  barAvatar: 34,
+  barPill: 34,
+  barButton: 44,
   tabBar: 64,
   tabItem: 56,
   icon: 22,

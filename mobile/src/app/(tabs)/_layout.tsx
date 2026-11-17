@@ -5,12 +5,12 @@
 import { useWindowDimensions, View } from 'react-native'
 import { router } from 'expo-router'
 import { Tabs } from 'expo-router/js-tabs'
+import { SessionRowSkeleton } from '../../components/SessionRow'
 import { useHost } from '../../host'
 import { PairScreen } from '../../screens/PairScreen'
 import { GlassTabBar, type TabItem } from '../../ui/GlassTabBar'
 import { LIST_COLUMN, READABLE_WIDTH, SPLIT_MIN_WIDTH } from '../../ui/layout'
 import { Screen } from '../../ui/Screen'
-import { SkeletonRows } from '../../ui/Skeleton'
 import { space, useTokens } from '../../ui/tokens'
 
 const TABS: Record<string, TabItem> = {
@@ -29,8 +29,8 @@ export default function TabsLayout() {
   if (host.phase === 'loading') {
     return (
       <Screen edges={['top']}>
-        <View style={{ paddingHorizontal: space.xl, paddingTop: space.xxxl * 2 }}>
-          <SkeletonRows count={5} />
+        <View style={{ paddingTop: space.xxxl * 2 }}>
+          <SessionRowSkeleton count={6} />
         </View>
       </Screen>
     )

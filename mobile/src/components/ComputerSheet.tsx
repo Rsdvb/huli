@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { currentAddress, probe, routeKind } from '../connection'
 import { useHost } from '../host'
-import { linkStatus, ROUTE_NAMES } from '../linkInfo'
+import { linkStatusOf, platformOf, ROUTE_NAMES, type LinkTone } from '../linkInfo'
 import { ago } from '../sessions'
 import { computerName, type SavedHost } from '../store'
 import { BottomSheet } from '../ui/BottomSheet'
@@ -50,7 +50,7 @@ export function useReach(watching: boolean): Map<string, Reach> {
 
 export interface ComputerLine {
   text: string
-  tone: 'ok' | 'busy' | 'down' | 'quiet'
+  tone: LinkTone
 }
 
 /** What a computer's row says about it: the link for the active one, a check for the others. */
@@ -58,7 +58,7 @@ export function useComputerLine(reach: Map<string, Reach>): (h: SavedHost) => Co
   const host = useHost()
   return (h) => {
     if (h.id === host.host?.id) {
-      const status = linkStatus(host.state)
+      const status = linkStatusOf(host.state, host.unreachable)
       const address = host.state.kind === 'connected' ? currentAddress() : null
       const route = address ? ` · ${ROUTE_NAMES[routeKind(address)]}` : ''
       return { text: `正在使用 · ${status.text}${route}`, tone: status.tone }
@@ -66,12 +66,12 @@ export function useComputerLine(reach: Map<string, Reach>): (h: SavedHost) => Co
     const seen = h.lastSeen ? `上次在线 ${ago(h.lastSeen)}` : '还没连上过'
     const state = reach.get(h.id)
     if (state === 'online') return { text: `可以连接 · ${seen}`, tone: 'ok' }
-    if (state === 'offline') return { text: `现在连不上 · ${seen}`, tone: 'quiet' }
+    if (state === 'offline') return { text: `现在连不上 · ${seen}`, tone: 'off' }
     return { text: `正在检查… · ${seen}`, tone: 'busy' }
   }
 }
 
-export function lineColor(c: Palette, tone: ComputerLine['tone']): string {
+export function lineColor(c: Palette, tone: LinkTone): string {
   return tone === 'ok'
     ? c.success
     : tone === 'busy'
@@ -194,7 +194,7 @@ export function ComputerRow(props: {
       style={styles.row}
     >
       <View style={[styles.icon, { backgroundColor: props.active ? c.tintSoft : c.fill }]}>
-        <OsIcon platform={h.platform} size={22} color={props.active ? c.tint : c.text} />
+        <OsIcon platform={platformOf(h)} size={22} color={props.active ? c.tint : c.text} />
       </View>
       <View style={styles.text}>
         <Text style={[typeScale.rowTitle, { color: c.text }]} numberOfLines={1}>
@@ -268,7 +268,7 @@ export function ComputerSheet(props: { visible: boolean; onClose(): void }) {
               action
               onPress={() => {
                 haptic.tap()
-                host.link?.wake()
+                host.retry()
               }}
             />
           ) : null}

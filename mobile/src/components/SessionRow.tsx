@@ -9,7 +9,15 @@ import { AgentAvatar, type AvatarBadge } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
-import { radius, space, type as typeScale, useTokens, type Palette } from '../ui/tokens'
+import { Skeleton } from '../ui/Skeleton'
+import {
+  radius,
+  size as sizes,
+  space,
+  type as typeScale,
+  useTokens,
+  type Palette,
+} from '../ui/tokens'
 
 const BADGES: Record<SessionState, AvatarBadge> = {
   waiting: 'waiting',
@@ -64,6 +72,7 @@ export const SessionRow = memo(function SessionRow(props: {
       style={[styles.row, props.selected && [styles.selected, { backgroundColor: c.fillStrong }]]}
     >
       <AgentAvatar
+        size={sizes.rowAvatar}
         agentId={s.agentId}
         name={props.agentName}
         badge={state ? BADGES[state.kind] : null}
@@ -121,7 +130,36 @@ export const SessionRow = memo(function SessionRow(props: {
   )
 })
 
+const TITLE_WIDTHS = ['68%', '54%', '76%', '46%', '62%', '50%', '72%'] as const
+
+/** Rows the shape and size of SessionRow's, while the list loads. */
+export function SessionRowSkeleton(props: { count?: number }) {
+  return (
+    <View accessibilityLabel="正在加载">
+      {Array.from({ length: props.count ?? 7 }, (_, i) => (
+        <View key={i} style={styles.row}>
+          <Skeleton width={sizes.rowAvatar} height={sizes.rowAvatar} radius={sizes.rowAvatar / 2} />
+          <View style={styles.body}>
+            <View style={[styles.titleLine, styles.skeletonLine]}>
+              <View style={styles.title}>
+                <Skeleton width={TITLE_WIDTHS[i % TITLE_WIDTHS.length]} height={15} />
+              </View>
+              <Skeleton width={52} height={12} />
+            </View>
+            <View style={[styles.meta, styles.skeletonMeta]}>
+              <Skeleton width={13} height={11} radius={2} />
+              <Skeleton width="22%" height={11} />
+            </View>
+          </View>
+        </View>
+      ))}
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
+  skeletonLine: { height: typeScale.rowTitle.lineHeight },
+  skeletonMeta: { height: typeScale.footnote.lineHeight },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

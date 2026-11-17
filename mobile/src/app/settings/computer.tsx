@@ -14,7 +14,7 @@ import {
 } from '../../components/ComputerSheet'
 import { currentAddress, routeKind, usableAddresses } from '../../connection'
 import { useHost } from '../../host'
-import { hostPort, osName, ROUTE_NAMES } from '../../linkInfo'
+import { hostPort, osName, platformOf, ROUTE_NAMES } from '../../linkInfo'
 import { ago } from '../../sessions'
 import { computerName } from '../../store'
 import { EmptyState } from '../../ui/EmptyState'
@@ -65,7 +65,7 @@ export default function Computer() {
   }
 
   const status = line(computer)
-  const platform = welcome?.host.platform ?? computer.platform
+  const platform = platformOf(computer, welcome?.host.platform)
   const addresses = usableAddresses(computer.addresses)
   const current = connected && address ? hostPort(address) : null
   const busy = actions.busy.has(computer.id)
@@ -159,7 +159,7 @@ export default function Computer() {
               action
               onPress={() => {
                 haptic.tap()
-                host.link?.wake()
+                host.retry()
               }}
             />
           ) : null}

@@ -14,7 +14,7 @@ import { Platform, StyleSheet, View } from 'react-native'
 import { router, useNavigation } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { useHost } from '../host'
-import { linkStatus, type LinkTone } from '../linkInfo'
+import { linkStatusOf, platformOf, type LinkTone } from '../linkInfo'
 import type { SearchScope } from '../search'
 import { folder } from '../sessions'
 import { computerName } from '../store'
@@ -56,8 +56,15 @@ export function useShell(): ShellValue {
   return value
 }
 
+/** The link's dot: green connected, orange connecting, grey unreachable, red stopped. */
 export function toneColor(c: Palette, tone: LinkTone): string {
-  return tone === 'ok' ? c.success : tone === 'busy' ? c.warning : c.danger
+  return tone === 'ok'
+    ? c.success
+    : tone === 'busy'
+      ? c.warning
+      : tone === 'off'
+        ? c.textTertiary
+        : c.danger
 }
 
 export function ShellProvider(props: { children: ReactNode }) {
@@ -172,11 +179,12 @@ export function TopBar(props: {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
-  const status = linkStatus(host.state)
+  const status = linkStatusOf(host.state, host.unreachable)
   const name = computerName(host.host)
-  const platform =
-    (host.state.kind === 'connected' ? host.state.welcome.host.platform : undefined) ??
-    host.host?.platform
+  const platform = platformOf(
+    host.host,
+    host.state.kind === 'connected' ? host.state.welcome.host.platform : undefined,
+  )
   const several = host.computers.length > 1
   const openSearch = () => {
     haptic.tap()
@@ -192,8 +200,38 @@ export function TopBar(props: {
       accessibilityLabel="账户与设置"
       style={[styles.avatar, { backgroundColor: c.avatar, borderColor: c.borderStrong }]}
     >
-      <Icon name="person" size={22} color={c.textSecondary} />
+      <Icon name="person" size={17} color={c.textSecondary} />
     </Press>
+  )
+  // The OS mark with the link's dot at its top right, as the reference app draws it.
+  const mark = (color?: string) => (
+    <View style={styles.markBox}>
+      <OsIcon platform={platform} size={16} {...(color ? { color } : {})} />
+      <View
+        style={[
+          styles.statusDot,
+          { backgroundColor: toneColor(c, status.tone), borderColor: c.bg },
+        ]}
+      />
+    </View>
+  )
+  const hostLabel = `${name}，${status.text}${several ? '，点按切换电脑' : ''}`
+  const search = props.search ? (
+    <IconButton
+      icon={props.search.active ? 'close' : 'search'}
+      label={props.search.active ? '结束搜索' : '搜索'}
+      size={sizes.barButton}
+      iconSize={19}
+      onPress={props.search.onPress}
+    />
+  ) : (
+    <IconButton
+      icon="search"
+      label="搜索"
+      size={sizes.barButton}
+      iconSize={19}
+      onPress={openSearch}
+    />
   )
   if (props.compact) {
     return (
@@ -201,13 +239,13 @@ export function TopBar(props: {
         {avatar}
         <Pill
           tone="glass"
-          size="lg"
+          size="bar"
           onPress={shell.openProjects}
           accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
           leading={
             <Icon
               name="layers"
-              size={20}
+              size={16}
               color={shell.filterName ? c.tint : c.text}
               weight="medium"
             />
@@ -217,29 +255,14 @@ export function TopBar(props: {
         <Press
           onPress={shell.openHost}
           accessibilityRole="button"
-          accessibilityLabel={`${name}，${status.text}${several ? '，点按切换电脑' : ''}`}
+          accessibilityLabel={hostLabel}
           hitSlop={10}
           style={styles.mark}
         >
-          <OsIcon platform={platform} size={18} color={c.textSecondary} />
-          <View
-            style={[
-              styles.statusDot,
-              styles.markDot,
-              { backgroundColor: toneColor(c, status.tone), borderColor: c.bg },
-            ]}
-          />
+          {mark(c.textSecondary)}
         </Press>
         <View style={styles.spacer} />
-        {props.search ? (
-          <IconButton
-            icon={props.search.active ? 'close' : 'search'}
-            label={props.search.active ? '结束搜索' : '搜索'}
-            onPress={props.search.onPress}
-          />
-        ) : (
-          <IconButton icon="search" label="搜索" onPress={openSearch} />
-        )}
+        {search}
       </FloatingHeader>
     )
   }
@@ -250,8 +273,8 @@ export function TopBar(props: {
         <IconButton
           icon="layers"
           tone="plain"
-          size={40}
-          iconSize={22}
+          size={28}
+          iconSize={19}
           label={shell.filterName ? `项目：${shell.filterName}` : '按项目查看'}
           color={shell.filterName ? c.tint : c.textSecondary}
           onPress={shell.openProjects}
@@ -259,29 +282,19 @@ export function TopBar(props: {
       )}
       <Pill
         tone="glass"
-        size="lg"
+        size="bar"
         onPress={shell.openHost}
-        accessibilityLabel={`${name}，${status.text}${several ? '，点按切换电脑' : ''}`}
-        leading={
-          <View>
-            <OsIcon platform={platform} size={18} />
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: toneColor(c, status.tone), borderColor: c.bg },
-              ]}
-            />
-          </View>
-        }
+        accessibilityLabel={hostLabel}
+        leading={mark()}
         trailing={
           several ? (
-            <Icon name="upDown" size={13} color={c.textSecondary} weight="semibold" />
+            <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
           ) : undefined
         }
         label={name}
       />
       <View style={styles.spacer} />
-      <IconButton icon="search" label="搜索" onPress={openSearch} />
+      {search}
     </FloatingHeader>
   )
 }
@@ -330,24 +343,24 @@ export function sessionFilterItem(s: SessionSummary) {
 
 const styles = StyleSheet.create({
   avatar: {
-    width: sizes.iconButton,
-    height: sizes.iconButton,
-    borderRadius: sizes.iconButton / 2,
+    width: sizes.barAvatar,
+    height: sizes.barAvatar,
+    borderRadius: sizes.barAvatar / 2,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  markBox: { width: 16, height: 16 },
   statusDot: {
     position: 'absolute',
-    top: -4,
+    top: -3,
     right: -4,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     borderWidth: 1.5,
   },
   spacer: { flex: 1 },
   mark: { padding: space.xs },
-  markDot: { top: 0, right: 0 },
   filterNote: { flexDirection: 'row', marginTop: space.md },
 })

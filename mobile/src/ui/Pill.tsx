@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react'
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
 import { Press } from './Press'
-import { FONT_SCALE, radius, space, type as typeScale, useTokens } from './tokens'
+import { FONT_SCALE, radius, size as sizes, space, type as typeScale, useTokens } from './tokens'
 
 export type PillTone = 'glass' | 'fill' | 'tint' | 'accent' | 'outline'
 
@@ -13,7 +13,8 @@ export function Pill(props: {
   leading?: ReactNode
   trailing?: ReactNode
   tone?: PillTone
-  size?: 'sm' | 'md' | 'lg'
+  /** `bar` is the top bar's: 34pt tall, hugging a 16pt label. */
+  size?: 'sm' | 'md' | 'lg' | 'bar'
   /** The label's color, for status tags; text tokens otherwise. */
   color?: string
   onPress?: () => void
@@ -36,7 +37,13 @@ export function Pill(props: {
     <View
       style={[
         styles.pill,
-        size === 'sm' ? styles.sm : size === 'lg' ? styles.lg : styles.md,
+        size === 'sm'
+          ? styles.sm
+          : size === 'lg'
+            ? styles.lg
+            : size === 'bar'
+              ? styles.bar
+              : styles.md,
         {
           backgroundColor: background,
           borderColor: tone === 'glass' || tone === 'outline' ? c.borderStrong : 'transparent',
@@ -54,7 +61,9 @@ export function Pill(props: {
               ? typeScale.caption
               : size === 'lg'
                 ? typeScale.headline
-                : typeScale.subhead,
+                : size === 'bar'
+                  ? typeScale.bar
+                  : typeScale.subhead,
             { color: ink, flexShrink: 1 },
             size === 'lg' && { fontWeight: '500' },
           ]}
@@ -91,4 +100,5 @@ const styles = StyleSheet.create({
   sm: { gap: space.xs, paddingHorizontal: space.sm, minHeight: 24 },
   md: { gap: space.sm - 2, paddingHorizontal: space.md, minHeight: 32 },
   lg: { gap: space.sm + 2, paddingHorizontal: space.lg + 2, minHeight: 48 },
+  bar: { gap: space.sm, paddingHorizontal: 14, minHeight: sizes.barPill, alignSelf: 'center' },
 })
