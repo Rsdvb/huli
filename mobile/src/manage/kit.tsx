@@ -498,6 +498,7 @@ export function SwitchRow(props: {
   onChange(on: boolean): void
   disabled?: boolean
   busy?: boolean
+  leading?: ReactNode
 }) {
   const { c } = useTokens()
   return (
@@ -505,6 +506,7 @@ export function SwitchRow(props: {
       title={props.title}
       subtitle={props.subtitle}
       icon={props.icon}
+      leading={props.leading}
       plainIcon
       trailing={
         props.busy ? (
