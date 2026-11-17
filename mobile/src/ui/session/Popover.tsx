@@ -34,7 +34,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
-import { Glass, useGlassMode } from '../Glass'
+import { useGlassMode } from '../Glass'
 import { haptic } from './feedback'
 import { G, Icon, type IconSpec } from './icons'
 import { useSessionTokens } from './palette'
@@ -151,8 +151,14 @@ export interface Popover {
 function measure(ref: RefObject<ViewHandle | null>): Promise<Rect | null> {
   return new Promise((resolve) => {
     const view = ref.current
-    if (!view) return resolve(null)
-    view.measureInWindow((x, y, width, height) => resolve({ x, y, width, height }))
+    // A Liquid Glass surface's ref (the composer's tray) has no measureInWindow: calling it threw,
+    // and every popover on the screen, as New session's project picker, never opened.
+    if (!view || typeof view.measureInWindow !== 'function') return resolve(null)
+    try {
+      view.measureInWindow((x, y, width, height) => resolve({ x, y, width, height }))
+    } catch {
+      resolve(null)
+    }
   })
 }
 
@@ -296,6 +302,9 @@ function PopoverView(props: {
   const insets = useSafeAreaInsets()
   const reduce = useReduceMotion()
   const glassMode = useGlassMode()
+  // Liquid Glass under the menu's fade drew nothing, leaving its rows over the screen bare, so the
+  // menu is frosted there as where the system has no Liquid Glass.
+  const material = glassMode === 'liquid' ? 'blur' : glassMode
   // Which way the pages move: a page a row leads to comes in from the right, the way back from
   // the left, as a navigation stack's do.
   const depth = useRef(stack.length)
@@ -487,36 +496,28 @@ function PopoverView(props: {
             },
           ]}
         >
-          {glassMode === 'liquid' ? (
-            <Glass radius={MENU_RADIUS} style={styles.panel}>
-              {content}
-            </Glass>
-          ) : (
-            <View
-              style={[
-                styles.panel,
-                styles.clip,
-                {
-                  borderColor: c.borderStrong,
-                  backgroundColor: glassMode === 'blur' ? 'transparent' : s.menuSolid,
-                },
-              ]}
-            >
-              {glassMode === 'blur' && (
-                <>
-                  <BlurView
-                    style={StyleSheet.absoluteFill}
-                    intensity={70}
-                    tint={
-                      scheme === 'dark' ? 'systemThickMaterialDark' : 'systemThickMaterialLight'
-                    }
-                  />
-                  <View style={[StyleSheet.absoluteFill, { backgroundColor: s.menu }]} />
-                </>
-              )}
-              {content}
-            </View>
-          )}
+          <View
+            style={[
+              styles.panel,
+              styles.clip,
+              {
+                borderColor: c.borderStrong,
+                backgroundColor: material === 'blur' ? 'transparent' : s.menuSolid,
+              },
+            ]}
+          >
+            {material === 'blur' && (
+              <>
+                <BlurView
+                  style={StyleSheet.absoluteFill}
+                  intensity={70}
+                  tint={scheme === 'dark' ? 'systemThickMaterialDark' : 'systemThickMaterialLight'}
+                />
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: s.menu }]} />
+              </>
+            )}
+            {content}
+          </View>
         </Animated.View>
       )}
     </View>
