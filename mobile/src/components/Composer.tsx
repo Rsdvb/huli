@@ -26,6 +26,8 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
@@ -49,7 +51,8 @@ import { extensionOf } from '../ui/session/format'
 import { FileMark, G, Icon } from '../ui/session/icons'
 import { useKeyboardShown } from '../ui/session/keyboard'
 import { useSessionTokens } from '../ui/session/palette'
-import type { ViewHandle } from '../ui/session/Popover'
+import { Glass, useGlassMode } from '../ui/Glass'
+import { useMenuEdge, type ViewHandle } from '../ui/session/Popover'
 import { PressScale, RoundButton } from '../ui/session/Press'
 
 export interface ComposerProps {
@@ -103,6 +106,9 @@ export function Composer(props: ComposerProps) {
   const host = useHost()
   const link = useLink()
   const keyboard = useKeyboardShown()
+  const liquid = useGlassMode() === 'liquid'
+  const tray = useRef<ViewHandle>(null)
+  useMenuEdge(tray)
   const [text, setText] = useState('')
   const [items, setItems] = useState<PendingAttachment[]>([])
   const [sending, setSending] = useState(false)
@@ -359,10 +365,21 @@ export function Composer(props: ComposerProps) {
       ? `正在处理附件，还剩 ${busy.length} 个…`
       : block
 
+  // With Liquid Glass the tray and its card are one slab of glass; elsewhere a card in a tray.
+  const Tray = liquid ? GlassTray : View
   return (
     <View style={[styles.outer, { paddingBottom: keyboard ? 8 : Math.max(props.bottomInset, 8) }]}>
-      <View style={[styles.tray, { backgroundColor: s.dock, borderColor: c.border }]}>
-        <View style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.border }]}>
+      <Tray
+        ref={tray}
+        collapsable={false}
+        style={[styles.tray, !liquid && { backgroundColor: s.dock, borderColor: c.border }]}
+      >
+        <View
+          style={[
+            styles.card,
+            liquid ? styles.glassCard : { backgroundColor: s.dockCard, borderColor: c.border },
+          ]}
+        >
           {items.length > 0 && (
             <ScrollView
               horizontal
@@ -453,9 +470,18 @@ export function Composer(props: ComposerProps) {
           </View>
         </View>
         {props.footer}
-      </View>
+      </Tray>
     </View>
   )
+}
+
+function GlassTray(props: {
+  ref?: Ref<ViewHandle>
+  style?: StyleProp<ViewStyle>
+  collapsable?: false
+  children?: ReactNode
+}) {
+  return <Glass {...props} radius={TRAY_RADIUS} />
 }
 
 function Tile(props: { item: PendingAttachment; onPress(): void; onRemove(): void }) {
@@ -518,16 +544,23 @@ function Tile(props: { item: PendingAttachment; onPress(): void; onRemove(): voi
 }
 
 const TILE = 68
+const TRAY_RADIUS = 30
 
 const styles = StyleSheet.create({
   outer: { paddingHorizontal: 10, paddingTop: 6 },
-  tray: { borderRadius: 30, borderWidth: StyleSheet.hairlineWidth, padding: 4, paddingBottom: 6 },
+  tray: {
+    borderRadius: TRAY_RADIUS,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 4,
+    paddingBottom: 6,
+  },
   card: {
     borderRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
     paddingTop: 6,
     paddingBottom: 8,
   },
+  glassCard: { borderColor: 'transparent', backgroundColor: 'transparent' },
   tiles: { gap: 10, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 },
   status: { fontSize: 12, lineHeight: 16, paddingHorizontal: 18, paddingTop: 6 },
   input: {
