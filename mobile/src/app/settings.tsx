@@ -1,29 +1,45 @@
-// Settings: the paired computer, how the phone reaches it, unpairing, and the app's version.
+// Settings: who this phone is on the computer, how it reaches it, notifications, unpairing, and
+// the app's version.
 
 import { useEffect, useState } from 'react'
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Alert, Animated, StyleSheet, Text, View } from 'react-native'
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Constants from 'expo-constants'
-import { Stack, router } from 'expo-router'
+import { router } from 'expo-router'
 import type { DirectAddress } from '@shared/remote/protocol'
-import { UpdateRows } from '../components/UpdateRows'
+import { toneColor } from '../components/shell'
+import { useUpdateRows } from '../components/UpdateRows'
 import { APP_VERSION, currentAddress, routeKind } from '../connection'
 import { useHost } from '../host'
+import { hostPort, linkStatus, osName, ROUTE_NAMES } from '../linkInfo'
 import { pushStatusText, usePushStatus } from '../push/sync'
-import { useTheme } from '../theme'
+import { haptic } from '../ui/haptics'
+import { Icon } from '../ui/Icon'
+import { LargeTitle } from '../ui/LargeTitle'
+import { ListGroup, ListRow } from '../ui/ListRow'
+import { NavBar } from '../ui/NavBar'
+import { OsIcon } from '../ui/OsIcon'
+import { Screen } from '../ui/Screen'
+import { useCollapsingHeader } from '../ui/ScrollHeader'
+import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 import { UPDATES_SUPPORTED } from '../update'
 
-const ROUTE_NAMES = { tailscale: 'Tailscale', lan: '局域网', other: '直连' } as const
-
-function hostPort(address: DirectAddress): string {
-  return address.host.includes(':')
-    ? `[${address.host}]:${address.port}`
-    : `${address.host}:${address.port}`
+// A sheet measures its own safe area: under the root's, its top would leave a status bar's gap.
+export default function Settings() {
+  return (
+    <SafeAreaProvider>
+      <SettingsPage />
+    </SafeAreaProvider>
+  )
 }
 
-export default function Settings() {
-  const theme = useTheme()
+function SettingsPage() {
+  const { c } = useTokens()
   const host = useHost()
+  const header = useCollapsingHeader()
+  const insets = useSafeAreaInsets()
   const pushText = pushStatusText(usePushStatus())
+  const updateRows = useUpdateRows()
   const [address, setAddress] = useState<DirectAddress | null>(() => currentAddress())
   const connected = host.state.kind === 'connected'
 
@@ -36,17 +52,14 @@ export default function Settings() {
 
   const welcome = host.state.kind === 'connected' ? host.state.welcome : null
   const saved = host.host
+  const status = linkStatus(host.state)
+  const platform = welcome?.host.platform ?? saved?.platform
+  const archived = [...host.sessions.values()].filter(
+    (s) => s.parentId === null && s.archivedAt !== null,
+  ).length
 
-  const status =
-    host.state.kind === 'connected'
-      ? '已连接'
-      : host.state.kind === 'connecting'
-        ? '正在连接…'
-        : host.state.kind === 'reconnecting'
-          ? '正在重连…'
-          : '已断开'
-
-  const unpair = () =>
+  const unpair = () => {
+    haptic.warning()
     Alert.alert(
       '解除配对？',
       '这台手机会忘掉这台电脑，之后要重新扫码配对。电脑那边可以在设置 › 远程访问里移除这台手机。',
@@ -62,98 +75,135 @@ export default function Settings() {
         },
       ],
     )
-
-  const row = (label: string, value: string, last = false) => (
-    <View
-      style={[
-        styles.row,
-        !last && { borderBottomColor: theme.line, borderBottomWidth: StyleSheet.hairlineWidth },
-      ]}
-    >
-      <Text style={{ color: theme.text, fontSize: 15 }}>{label}</Text>
-      <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
-        {value}
-      </Text>
-    </View>
-  )
+  }
 
   const version = Constants.expoConfig?.version ?? APP_VERSION
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: theme.bg }}
-      contentContainerStyle={{ padding: 16, gap: 8 }}
-    >
-      <Stack.Screen options={{ title: '设置' }} />
-
-      <Text style={[styles.heading, { color: theme.muted }]}>电脑</Text>
-      <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.line }]}>
-        {row('名称', saved?.name ?? '—')}
-        {welcome && row('Huli 版本', welcome.host.version)}
-        {row('这台手机在电脑上叫', saved?.deviceName ?? '—', true)}
-      </View>
-
-      <Text style={[styles.heading, { color: theme.muted }]}>连接</Text>
-      <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.line }]}>
-        {row('状态', status)}
-        {row(
-          '线路',
-          connected && address ? `${ROUTE_NAMES[routeKind(address)]} · ${hostPort(address)}` : '—',
-          true,
-        )}
-      </View>
-      <Text style={[styles.hint, { color: theme.muted }]}>
-        手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个。
-      </Text>
-
-      {pushText && (
-        <>
-          <Text style={[styles.heading, { color: theme.muted }]}>通知</Text>
-          <View
-            style={[
-              styles.group,
-              styles.note,
-              { backgroundColor: theme.card, borderColor: theme.line },
-            ]}
-          >
-            <Text style={{ color: theme.text, fontSize: 15, lineHeight: 21 }}>{pushText}</Text>
-          </View>
-        </>
-      )}
-
-      <Pressable
-        onPress={unpair}
-        style={({ pressed }) => [
-          styles.group,
-          styles.danger,
-          { backgroundColor: theme.card, borderColor: theme.line, opacity: pressed ? 0.7 : 1 },
-        ]}
+    <Screen>
+      <Animated.ScrollView
+        {...header.scrollProps}
+        contentContainerStyle={{
+          paddingTop: header.contentTop,
+          paddingHorizontal: space.lg,
+          paddingBottom: insets.bottom + space.xxxl,
+          gap: space.xxl,
+        }}
       >
-        <Text style={{ color: theme.danger, fontSize: 16, fontWeight: '600' }}>解除配对</Text>
-      </Pressable>
+        <View style={styles.titlePad}>
+          <LargeTitle title="设置" />
+        </View>
 
-      <Text style={[styles.heading, { color: theme.muted }]}>关于</Text>
-      <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.line }]}>
-        {row('App 版本', version, !UPDATES_SUPPORTED)}
-        {UPDATES_SUPPORTED && <UpdateRows />}
-      </View>
-    </ScrollView>
+        <View style={[styles.hero, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={[styles.heroIcon, { backgroundColor: c.fill }]}>
+            <OsIcon platform={platform} size={26} />
+          </View>
+          <View style={styles.flex}>
+            <Text style={[typeScale.headline, { color: c.text }]} numberOfLines={1}>
+              {saved?.name ?? '电脑'}
+            </Text>
+            <View style={styles.statusLine}>
+              <View style={[styles.dot, { backgroundColor: toneColor(c, status.tone) }]} />
+              <Text style={[typeScale.footnote, { color: c.textSecondary }]} numberOfLines={1}>
+                {status.text}
+                {welcome ? ` · Huli ${welcome.host.version}` : ''}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <ListGroup header="电脑">
+          <ListRow title="系统" value={osName(platform)} icon="desktop" />
+          <ListRow title="这台手机在电脑上叫" value={saved?.deviceName ?? '—'} icon="phone" />
+        </ListGroup>
+
+        <ListGroup header="连接" footer="手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个。">
+          <ListRow
+            title="线路"
+            icon="wifi"
+            value={
+              connected && address
+                ? `${ROUTE_NAMES[routeKind(address)]} · ${hostPort(address)}`
+                : '—'
+            }
+          />
+          {!connected ? (
+            <ListRow
+              title="立即重连"
+              icon="refresh"
+              iconTint={c.tint}
+              action
+              onPress={() => {
+                haptic.tap()
+                host.link?.wake()
+              }}
+            />
+          ) : null}
+        </ListGroup>
+
+        {pushText ? (
+          <ListGroup header="通知">
+            <ListRow title={pushText} icon="bell" />
+          </ListGroup>
+        ) : null}
+
+        <ListGroup header="会话">
+          <ListRow
+            title="已归档的会话"
+            icon="archive"
+            value={archived > 0 ? String(archived) : undefined}
+            chevron
+            onPress={() => {
+              // A card pushed under a modal would open behind it, so the modal leaves first.
+              router.dismiss()
+              router.push('/archived')
+            }}
+          />
+        </ListGroup>
+
+        <ListGroup header="关于">
+          <ListRow title="App 版本" value={version} icon="info" />
+          {UPDATES_SUPPORTED ? updateRows : null}
+        </ListGroup>
+
+        <ListGroup>
+          <ListRow title="解除配对" destructive onPress={unpair} />
+        </ListGroup>
+
+        <View style={styles.footer}>
+          <Icon name="sparkles" size={14} color={c.textTertiary} />
+          <Text style={[typeScale.caption, { color: c.textTertiary }]}>Huli {version}</Text>
+        </View>
+      </Animated.ScrollView>
+      <NavBar header={header} title="设置" kind="close" />
+    </Screen>
   )
 }
 
 const styles = StyleSheet.create({
-  heading: { fontSize: 13, marginTop: 12, marginLeft: 4 },
-  group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, overflow: 'hidden' },
-  row: {
+  flex: { flex: 1 },
+  titlePad: { paddingHorizontal: space.xs },
+  hero: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
+    gap: space.md + 2,
+    padding: space.lg,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  value: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
-  hint: { fontSize: 12, marginLeft: 4, lineHeight: 17 },
-  danger: { alignItems: 'center', paddingVertical: 14, marginTop: 16 },
-  note: { paddingHorizontal: 16, paddingVertical: 13 },
+  heroIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.md + 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm - 2, marginTop: 2 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs + 2,
+  },
 })

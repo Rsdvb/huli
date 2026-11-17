@@ -1,9 +1,11 @@
 // A list of actions or choices that rises from the bottom, the same on iOS and Android.
 
 import type { ReactNode } from 'react'
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useTheme } from '../theme'
+import { Platform, StyleSheet, Text, View } from 'react-native'
+import { BottomSheet } from '../ui/BottomSheet'
+import { Icon } from '../ui/Icon'
+import { Press } from '../ui/Press'
+import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
 export interface SheetItem {
   key: string
@@ -25,102 +27,100 @@ export function Sheet(props: {
   onClose(): void
   footer?: ReactNode
 }) {
-  const theme = useTheme()
-  const insets = useSafeAreaInsets()
+  const { c } = useTokens()
+
+  // Items between section headings share one rounded group.
+  const groups: { section?: string; items: SheetItem[] }[] = []
+  for (const item of props.items) {
+    if (groups.length === 0 || item.section) groups.push({ section: item.section, items: [] })
+    groups[groups.length - 1]!.items.push(item)
+  }
+
   return (
-    <Modal visible={props.visible} transparent animationType="fade" onRequestClose={props.onClose}>
-      <Pressable style={styles.backdrop} onPress={props.onClose} accessibilityLabel="关闭">
-        <Pressable
-          style={[
-            styles.card,
-            { backgroundColor: theme.card, paddingBottom: Math.max(insets.bottom, 12) },
-          ]}
-          onPress={() => {}}
-        >
-          {props.title || props.message ? (
-            <View style={[styles.head, { borderBottomColor: theme.line }]}>
-              {props.title ? (
-                <Text style={[styles.title, { color: theme.text }]} numberOfLines={2}>
-                  {props.title}
-                </Text>
-              ) : null}
-              {props.message ? (
-                <Text style={{ color: theme.muted, fontSize: 13, marginTop: 4 }}>
-                  {props.message}
-                </Text>
-              ) : null}
-            </View>
+    <BottomSheet
+      visible={props.visible}
+      onClose={props.onClose}
+      title={props.title}
+      message={props.message}
+    >
+      {groups.map((group, g) => (
+        <View key={g} style={styles.groupWrap}>
+          {group.section ? (
+            <Text style={[typeScale.footnote, styles.section, { color: c.textSecondary }]}>
+              {group.section}
+            </Text>
           ) : null}
-          <ScrollView style={{ maxHeight: 460 }} bounces={false}>
-            {props.items.map((item) => (
+          <View style={[styles.group, { backgroundColor: c.fill }]}>
+            {group.items.map((item, i) => (
               <View key={item.key}>
-                {item.section ? (
-                  <Text style={[styles.section, { color: theme.muted }]}>{item.section}</Text>
-                ) : null}
-                <Pressable
+                {i > 0 && <View style={[styles.line, { backgroundColor: c.border }]} />}
+                <Press
                   disabled={item.disabled}
+                  scale={false}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: item.checked }}
                   onPress={() => {
                     props.onClose()
                     // iOS will not present an alert or another modal while this one is leaving.
                     setTimeout(item.onPress, Platform.OS === 'ios' ? 400 : 0)
                   }}
-                  style={({ pressed }) => [
-                    styles.item,
-                    { backgroundColor: pressed ? theme.line : 'transparent' },
-                    item.disabled && { opacity: 0.4 },
-                  ]}
+                  style={styles.item}
                 >
-                  <View style={{ flex: 1 }}>
+                  <View style={styles.text}>
                     <Text
-                      style={{
-                        color: item.destructive ? theme.danger : theme.text,
-                        fontSize: 16,
-                        fontWeight: item.checked ? '600' : '400',
-                      }}
+                      style={[
+                        typeScale.body,
+                        {
+                          color: item.destructive ? c.danger : c.text,
+                          fontWeight: item.checked ? '600' : '400',
+                        },
+                      ]}
                     >
                       {item.label}
                     </Text>
                     {item.detail ? (
-                      <Text style={{ color: theme.muted, fontSize: 12, marginTop: 2 }}>
+                      <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
                         {item.detail}
                       </Text>
                     ) : null}
                   </View>
-                  {item.checked && (
-                    <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '700' }}>✓</Text>
-                  )}
-                </Pressable>
+                  {item.checked && <Icon name="check" size={18} color={c.tint} weight="semibold" />}
+                </Press>
               </View>
             ))}
-          </ScrollView>
-          {props.footer}
-          <Pressable
-            onPress={props.onClose}
-            style={({ pressed }) => [
-              styles.cancel,
-              { borderTopColor: theme.line, opacity: pressed ? 0.6 : 1 },
-            ]}
-          >
-            <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '600' }}>取消</Text>
-          </Pressable>
-        </Pressable>
-      </Pressable>
-    </Modal>
+          </View>
+        </View>
+      ))}
+      {props.footer}
+      <Press
+        onPress={props.onClose}
+        scale={false}
+        style={[styles.cancel, { backgroundColor: c.fill }]}
+      >
+        <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>取消</Text>
+      </Press>
+    </BottomSheet>
   )
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' },
-  card: { borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: 'hidden' },
-  head: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1 },
-  title: { fontSize: 15, fontWeight: '600' },
-  section: { fontSize: 12, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
+  groupWrap: { gap: space.sm },
+  section: { marginLeft: space.lg, marginTop: space.xs },
+  group: { borderRadius: radius.lg, overflow: 'hidden' },
+  line: { height: StyleSheet.hairlineWidth, marginLeft: space.lg },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 13,
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    minHeight: 52,
+    paddingVertical: space.md,
   },
-  cancel: { alignItems: 'center', paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth },
+  text: { flex: 1, gap: 2 },
+  cancel: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.lg,
+    minHeight: 52,
+  },
 })

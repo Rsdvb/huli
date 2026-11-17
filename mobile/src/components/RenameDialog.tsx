@@ -6,13 +6,14 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native'
-import { useTheme } from '../theme'
+import { haptic } from '../ui/haptics'
+import { Press } from '../ui/Press'
+import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
 const MAX_TITLE = 200
 
@@ -22,7 +23,7 @@ export function RenameDialog(props: {
   onClose(): void
   onSave(title: string | null): Promise<void>
 }) {
-  const theme = useTheme()
+  const { c } = useTokens()
   const [text, setText] = useState(props.title)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,8 +40,10 @@ export function RenameDialog(props: {
     setError(null)
     try {
       await props.onSave(title)
+      haptic.success()
       props.onClose()
     } catch (failure) {
+      haptic.warning()
       setError((failure as { message?: string }).message || '没能改名，请稍后再试。')
       setSaving(false)
     }
@@ -49,46 +52,50 @@ export function RenameDialog(props: {
   return (
     <Modal visible={props.visible} transparent animationType="fade" onRequestClose={props.onClose}>
       <KeyboardAvoidingView
-        style={styles.backdrop}
+        style={[styles.backdrop, { backgroundColor: c.scrim }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={[styles.card, { backgroundColor: theme.card }]}>
-          <Text style={[styles.heading, { color: theme.text }]}>重命名会话</Text>
+        <View style={[styles.card, { backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
+          <Text style={[typeScale.headline, { color: c.text }]}>重命名会话</Text>
           <TextInput
             value={text}
             onChangeText={setText}
             autoFocus
             maxLength={MAX_TITLE}
             placeholder="会话标题"
-            placeholderTextColor={theme.muted}
+            placeholderTextColor={c.textTertiary}
             returnKeyType="done"
             onSubmitEditing={() => void save(text.trim() || null)}
             selectTextOnFocus
-            style={[
-              styles.input,
-              { color: theme.text, borderColor: theme.line, backgroundColor: theme.bg },
-            ]}
+            clearButtonMode="while-editing"
+            style={[typeScale.body, styles.input, { color: c.text, backgroundColor: c.fill }]}
           />
-          {error && <Text style={{ color: theme.danger, fontSize: 13 }}>{error}</Text>}
-          <Pressable onPress={() => void save(null)} disabled={saving} hitSlop={6}>
-            <Text style={{ color: theme.accent, fontSize: 14 }}>用智能体起的标题</Text>
-          </Pressable>
+          {error && <Text style={[typeScale.footnote, { color: c.danger }]}>{error}</Text>}
+          <Press onPress={() => void save(null)} disabled={saving} hitSlop={6} scale={false}>
+            <Text style={[typeScale.subhead, { color: c.tint }]}>用智能体起的标题</Text>
+          </Press>
           <View style={styles.buttons}>
-            <Pressable onPress={props.onClose} style={styles.button} hitSlop={6}>
-              <Text style={{ color: theme.muted, fontSize: 16 }}>取消</Text>
-            </Pressable>
-            <Pressable
+            <Press
+              onPress={props.onClose}
+              accessibilityRole="button"
+              containerStyle={styles.flex}
+              style={[styles.button, { backgroundColor: c.fill }]}
+            >
+              <Text style={[typeScale.body, { color: c.text }]}>取消</Text>
+            </Press>
+            <Press
               onPress={() => void save(text.trim() || null)}
               disabled={saving}
-              style={styles.button}
-              hitSlop={6}
+              accessibilityRole="button"
+              containerStyle={styles.flex}
+              style={[styles.button, { backgroundColor: c.accent }]}
             >
               {saving ? (
-                <ActivityIndicator color={theme.accent} />
+                <ActivityIndicator color={c.onAccent} />
               ) : (
-                <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '600' }}>保存</Text>
+                <Text style={[typeScale.body, { color: c.onAccent, fontWeight: '600' }]}>保存</Text>
               )}
-            </Pressable>
+            </Press>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -97,21 +104,20 @@ export function RenameDialog(props: {
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
+  flex: { flex: 1 },
+  backdrop: { flex: 1, justifyContent: 'center', padding: space.xxl },
+  card: {
+    borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: space.xl,
+    gap: space.md,
+  },
+  input: { borderRadius: radius.md, paddingHorizontal: space.md + 2, height: 48 },
+  buttons: { flexDirection: 'row', gap: space.sm + 2, marginTop: space.xs },
+  button: {
+    height: 46,
+    borderRadius: radius.pill,
+    alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-    backgroundColor: 'rgba(0,0,0,0.35)',
   },
-  card: { borderRadius: 16, padding: 20, gap: 12 },
-  heading: { fontSize: 17, fontWeight: '600' },
-  input: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-  },
-  buttons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
-  button: { minWidth: 64, alignItems: 'center', paddingVertical: 8 },
 })

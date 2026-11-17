@@ -17,6 +17,8 @@ export interface SavedHost {
   /** This phone's name there. */
   deviceName: string
   addresses: DirectAddress[]
+  /** The computer's OS as Node.js names it ('win32', 'darwin', 'linux'), once a welcome said. */
+  platform?: string
 }
 
 export function toBase64(bytes: Uint8Array): string {

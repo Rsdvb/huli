@@ -6,6 +6,7 @@ import { Alert } from 'react-native'
 import type { SessionSummary } from '@shared/agent-host'
 import { useHost } from '../host'
 import { errorText, sessionTitle } from '../sessions'
+import { haptic } from '../ui/haptics'
 import { RenameDialog } from './RenameDialog'
 import { Sheet, type SheetItem } from './Sheet'
 
@@ -13,6 +14,10 @@ export type ActionsPlace = 'list' | 'archive' | 'session'
 
 export interface SessionActions {
   open(summary: SessionSummary): void
+  /** The swipe actions: each at once, with a haptic for how it went. */
+  togglePin(summary: SessionSummary): void
+  archive(summary: SessionSummary): void
+  restore(summary: SessionSummary): void
   /** Renders the sheet and the rename dialog; put it anywhere in the screen. */
   element: ReactNode
 }
@@ -31,7 +36,16 @@ export function useSessionActions(
 
   const run = (failed: string, request: () => Promise<unknown>, after?: () => void) => {
     if (!link) return
-    request().then(after, (error: unknown) => Alert.alert(failed, errorText(error)))
+    request().then(
+      () => {
+        haptic.success()
+        after?.()
+      },
+      (error: unknown) => {
+        haptic.warning()
+        Alert.alert(failed, errorText(error))
+      },
+    )
   }
 
   const items = (s: SessionSummary): SheetItem[] => {
@@ -116,6 +130,14 @@ export function useSessionActions(
       setTarget(summary)
       setSheet(true)
     },
+    togglePin: (s) =>
+      run('没能置顶', () =>
+        link!.request('sessions.pin', { sessionId: s.id, pinned: s.pinnedAt === null }),
+      ),
+    archive: (s) =>
+      run('没能归档', () => link!.request('sessions.archive', { sessionId: s.id }), onGone),
+    restore: (s) =>
+      run('没能恢复', () => link!.request('sessions.unarchive', { sessionId: s.id }), onGone),
     element,
   }
 }
