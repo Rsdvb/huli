@@ -101,12 +101,8 @@ export function SubagentBar(props: {
             accessibilityLabel={parent ? `返回 ${parent.title || '父会话'}` : undefined}
             style={({ pressed }) => [styles.parent, { opacity: pressed ? 0.55 : 1 }]}
           >
-            <Icon
-              icon={G.child}
-              size={13}
-              color={c.textTertiary}
-              style={{ transform: [{ scaleX: -1 }] }}
-            />
+            <Icon icon={G.child} size={13} color={c.textTertiary} />
+
             <Text style={[styles.text, { color: c.textTertiary }]} numberOfLines={1}>
               为{' '}
               <Text style={{ color: c.textSecondary, fontWeight: '600' }}>
