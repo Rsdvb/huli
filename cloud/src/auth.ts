@@ -4,14 +4,13 @@
 
 import { randomInt } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { clientInfo, DAEMON_CLIENT, DESKTOP_CLIENT, WEB_CLIENT } from '@shared/account-api'
 import {
-  clientInfo,
-  DAEMON_CLIENT,
-  DESKTOP_CLIENT,
-  WEB_CLIENT,
-  type ClientInfo,
-} from '@shared/account-api'
-import { MOBILE_CLIENT, MOBILE_REDIRECT, WEB_CALLBACK_PATH } from '@shared/huli-cloud'
+  MOBILE_CLIENT,
+  MOBILE_REDIRECT,
+  WEB_CALLBACK_PATH,
+  type HuliClientInfo,
+} from '@shared/huli-cloud'
 import {
   bearer,
   clientAddress,
@@ -70,21 +69,21 @@ interface AuthorizeParams {
   redirectUri: string
   challenge: string
   state: string
-  info: ClientInfo | null
+  info: HuliClientInfo | null
 }
 
 interface Code {
   clientId: string
   redirectUri: string
   challenge: string
-  info: ClientInfo | null
+  info: HuliClientInfo | null
   expiresAt: number
 }
 
 interface DeviceGrant {
   userCode: string
   clientId: string
-  info: ClientInfo | null
+  info: HuliClientInfo | null
   expiresAt: number
   interval: number
   lastPoll: number
@@ -102,6 +101,8 @@ export interface AuthOptions {
   trustProxy: boolean
   /** The hosted web client's origin; without one `kettu-web` cannot sign in. */
   webOrigin?: string | null
+  /** Whether one of the account's computers is on the relay now, for the account page. */
+  online?: (id: string) => boolean
   now?: () => number
   log?: (line: string) => void
 }
@@ -138,26 +139,29 @@ export function loopbackRedirect(uri: string): string | null {
   return parsed.href
 }
 
-function parseClientInfo(text: string | null): ClientInfo | null {
+function parseClientInfo(text: string | null): HuliClientInfo | null {
   if (!text || text.length > 2000) return null
   try {
-    const value = JSON.parse(text) as Partial<ClientInfo>
+    const value = JSON.parse(text) as Partial<HuliClientInfo>
     if (
-      (value.kind !== 'desktop' && value.kind !== 'daemon' && value.kind !== 'web') ||
+      !['desktop', 'daemon', 'web', 'mobile'].includes(value.kind ?? '') ||
       typeof value.name !== 'string' ||
       typeof value.os !== 'string' ||
       typeof value.arch !== 'string'
     ) {
       return null
     }
-    return clientInfo({
-      kind: value.kind,
+    // The phone's kind is Huli's own; the rest of its description is cut as Kettu's are.
+    const { kind } = value as HuliClientInfo
+    const info = clientInfo({
+      kind: kind === 'mobile' ? 'web' : kind,
       name: value.name,
       os: value.os,
       arch: value.arch,
       version: typeof value.version === 'string' ? value.version : null,
       ...(typeof value.user === 'string' ? { user: value.user } : {}),
     })
+    return { ...info, kind }
   } catch {
     return null
   }
@@ -637,6 +641,9 @@ export class Auth {
       devicesPage({
         csrf: session.csrf,
         families: this.store.families(),
+        computers: this.store
+          .computers()
+          .map((c) => ({ ...c, online: this.options.online?.(c.id) ?? false })),
         email: this.store.account?.email ?? '',
       }),
     )
