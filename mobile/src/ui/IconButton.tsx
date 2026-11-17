@@ -3,7 +3,7 @@
 
 import { StyleSheet, View } from 'react-native'
 import { GlassButton } from './Glass'
-import { Icon, type IconName } from './Icon'
+import { Icon, sfSymbol, type IconName } from './Icon'
 import { Press } from './Press'
 import { size as sizes, useTokens } from './tokens'
 
@@ -35,6 +35,8 @@ export function IconButton(props: {
         silent
         elevated={false}
         size={side}
+        systemImage={sfSymbol(props.icon)}
+        {...(props.color ? { symbolColor: props.color } : {})}
         onPress={props.onPress}
         disabled={props.disabled}
         accessibilityLabel={props.label}

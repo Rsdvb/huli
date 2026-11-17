@@ -141,6 +141,11 @@ const ICONS = {
 
 export type IconName = keyof typeof ICONS
 
+/** An icon's SF Symbol, for the system's own controls. */
+export function sfSymbol(name: IconName): SFSymbol {
+  return ICONS[name][0]
+}
+
 export function Icon(props: {
   name: IconName
   size?: number

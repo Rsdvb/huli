@@ -201,6 +201,8 @@ export function TopBar(props: {
       elevated={false}
       size={sizes.barAvatar}
       tint={c.textTertiary}
+      systemImage="person.fill"
+      symbolColor={c.onAccent}
       onPress={() => router.push('/settings')}
       accessibilityLabel="账户与设置"
     >

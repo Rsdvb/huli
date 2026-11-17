@@ -108,6 +108,7 @@ export function GlassHeader(props: {
         <RoundButton
           tone="glass"
           size={44}
+          systemImage={props.modal || pane ? G.close.sf : G.back.sf}
           onPress={props.modal ? () => router.back() : (pane?.close ?? goBack)}
           accessibilityLabel={props.modal || pane ? '关闭' : '返回'}
         >

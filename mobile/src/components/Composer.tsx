@@ -449,6 +449,7 @@ export function Composer(props: ComposerProps) {
             {(!stoppable || !empty || sending) && (
               <RoundButton
                 tone="accent"
+                {...(sending ? {} : { systemImage: props.running ? G.queue.sf : G.send.sf })}
                 onPress={() => void send()}
                 disabled={!canSend}
                 accessibilityLabel={props.running ? '加入队列' : '发送'}
@@ -475,9 +476,10 @@ export function Composer(props: ComposerProps) {
                   props.onStop!()
                 }}
                 accessibilityLabel="停止这一轮"
-                style={{ backgroundColor: s.stop }}
+                tone="glass"
+                systemImage={G.stop.sf}
               >
-                <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
+                <Icon icon={G.stop} size={13} color={c.text} weight="bold" />
               </RoundButton>
             )}
           </View>
