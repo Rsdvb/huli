@@ -288,6 +288,10 @@ export default function SessionScreen() {
   const retryNotice = useThreadSelector(view, retryNoticeOf)
   const cutNotice = useThreadSelector(view, cutNoticeOf)
   const childWaiting = useWaitingBelow(id).length > 0
+  // A question of the agent's waits: the working line and the composer say it waits for an answer.
+  const asking = requests.some(
+    (entry) => entry.kind === 'tool' && !!entry.permission?.questions?.length,
+  )
   const handBack = session?.computer?.control === 'you'
   // A worktree that is not ready says so above the composer, as the desktop's does.
   const worktreeWaits = !!summary?.worktree && summary.worktree.state !== 'ready'
@@ -528,11 +532,13 @@ export default function SessionScreen() {
     turn.asked ??
     (handBack
       ? `等你交还 ${app ?? '电脑'}`
-      : waitingYou && turn.phase !== 'approval'
-        ? phaseText('approval', 1)
-        : app && !QUIET_PHASES.has(turn.phase)
-          ? `正在使用 ${app}`
-          : doingText(turn))
+      : asking
+        ? '等待你的回答'
+        : waitingYou && turn.phase !== 'approval'
+          ? phaseText('approval', 1)
+          : app && !QUIET_PHASES.has(turn.phase)
+            ? `正在使用 ${app}`
+            : doingText(turn))
   const added =
     usage && startUsed !== null && usage.used > startUsed ? usage.used - startUsed : null
   const working =
@@ -621,6 +627,7 @@ export default function SessionScreen() {
     starting,
     pickAgent: mustSwitch && !pendingSwitch,
     awaiting,
+    asking,
     running,
     steering,
     reached,
