@@ -34,6 +34,15 @@ export interface Palette {
   removed: string
   removedBg: string
   shadow: string
+  /** Behind sheets and dialogs. */
+  scrim: string
+  /** A round avatar's disc, and the track under a ring or a bar. */
+  avatar: string
+  track: string
+  /** Placeholder blocks while something loads. */
+  skeleton: string
+  /** Categorical series for charts, in a fixed order; color follows the entity, never its rank. */
+  series: readonly string[]
 }
 
 const dark: Palette = {
@@ -61,6 +70,11 @@ const dark: Palette = {
   removed: '#FF7A6E',
   removedBg: 'rgba(255,107,94,0.12)',
   shadow: '#000000',
+  scrim: 'rgba(0,0,0,0.55)',
+  avatar: '#26272C',
+  track: 'rgba(91,147,245,0.16)',
+  skeleton: 'rgba(255,255,255,0.06)',
+  series: ['#3987E5', '#D95926', '#199E70', '#C98500', '#D55181', '#0CA30C', '#9085E9', '#E66767'],
 }
 
 const light: Palette = {
@@ -88,6 +102,11 @@ const light: Palette = {
   removed: '#C9372A',
   removedBg: 'rgba(217,58,43,0.09)',
   shadow: '#000000',
+  scrim: 'rgba(0,0,0,0.3)',
+  avatar: '#E8E8ED',
+  track: 'rgba(47,111,228,0.12)',
+  skeleton: 'rgba(0,0,0,0.06)',
+  series: ['#2A78D6', '#EB6834', '#1BAF7A', '#EDA100', '#E87BA4', '#008300', '#6250D6', '#E34948'],
 }
 
 export const radius = { xs: 6, sm: 10, md: 14, lg: 20, xl: 28, pill: 999 } as const
@@ -105,6 +124,49 @@ export const type = {
   footnote: { fontSize: 13, lineHeight: 18, fontWeight: '400' },
   caption: { fontSize: 12, lineHeight: 16, fontWeight: '500' },
   stat: { fontSize: 32, lineHeight: 38, fontWeight: '700' },
+  /** The greeting and summary lines at the top of a tab. */
+  lead: { fontSize: 22, lineHeight: 31, fontWeight: '400' },
+  /** A list row's title. */
+  rowTitle: { fontSize: 17, lineHeight: 23, fontWeight: '500' },
+  section: { fontSize: 17, lineHeight: 23, fontWeight: '500' },
+} as const
+
+/** Fixed sizes of the shell: hit targets, the top bar and the floating tab bar. */
+export const size = {
+  hit: 44,
+  iconButton: 48,
+  avatar: 40,
+  avatarSmall: 28,
+  tabBar: 64,
+  tabItem: 56,
+  icon: 22,
+  iconSmall: 16,
+  gutter: 20,
+} as const
+
+/** The room above the bottom inset a scrolling tab leaves so the tab bar never covers its end. */
+export const TAB_BAR_CLEARANCE = size.tabBar + space.xxxl
+
+export const motion = { pressOpacity: 0.65, pressScale: 0.96, fast: 160, normal: 260 } as const
+
+/**
+ * Each agent harness's own colors, the only brand colors in the app. Kept apart from the scheme
+ * palettes since a mark looks the same on either; the few that flip carry both.
+ */
+export const brand = {
+  claude: '#D97757',
+  codex: ['#B1A7FF', '#7A9DFF', '#3941FF'],
+  opencodeFrame: { light: '#17181C', dark: '#FFFFFF' },
+  opencodeFill: { light: '#E6E5E6', dark: '#5A5858' },
+  piCoral: '#F09082',
+  piBlue: '#4D9ABF',
+  piYellow: '#F1BE58',
+  gemini: ['#217BFE', '#078EFB', '#AC87EB', '#EE4D5D'],
+  geminiTile: '#1E1E2E',
+  deepseek: '#4D6BFE',
+  qwen: '#082DFF',
+  kimi: '#1783FF',
+  huli: '#E2611F',
 } as const
 
 export interface Tokens {
