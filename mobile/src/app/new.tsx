@@ -1,10 +1,12 @@
 // A new session: a greeting, the recent projects to choose one from (or none), and the same
 // composer as a session's, whose mode and model menus set what the session starts with and whose
 // model menu switches the agent; the status line names the computer, the project, which opens a
-// picker, the branch it is on, and the agent's plan usage.
+// picker, the branch it is on, and the agent's plan usage. Opened with `parent`, it starts a
+// sub-session of that session, in its project.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
@@ -12,23 +14,30 @@ import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
-import { Composer, type ComposerHandle } from '../components/Composer'
+import { Composer, keyboardOverlap, type ComposerHandle } from '../components/Composer'
 import {
+  agentModelsPage,
+  agentNeed,
   agentsPage,
+  canStart,
   modeLook,
   modePage,
   modelPage,
   moreModelsPage,
+  optionPage,
   startConfig,
+  startNotices,
   startValues,
   usableAgents,
+  type AgentMenuProps,
   type ConfigControl,
 } from '../components/ConfigMenus'
+import { NEW_SESSION_DRAFT } from '../drafts'
 import { PlanUsageSheet } from '../components/PlanUsageSheet'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
 import { useHost, useLink } from '../host'
-import { folder, greeting, listTime } from '../sessions'
+import { folder, greeting, listTime, sessionTitle } from '../sessions'
 import { HuliIcon } from '../ui/HuliMark'
 import { useComputer } from '../ui/session/computer'
 import { haptic } from '../ui/session/feedback'
@@ -40,7 +49,7 @@ import { NativeMenu } from '../ui/session/NativeMenu'
 import { StatusLine } from '../ui/session/StatusLine'
 
 export default function NewSession() {
-  const { c } = useSessionTokens()
+  const { c, s } = useSessionTokens()
   const host = useHost()
   const link = useLink()
   const computer = useComputer()
@@ -51,7 +60,6 @@ export default function NewSession() {
   const modelAnchor = useRef<ViewHandle>(null)
   const folderAnchor = useRef<ViewHandle>(null)
   const options = useAgentOptions(link, host.state.kind === 'connected')
-  const { text } = useLocalSearchParams<{ text?: string }>()
 
   const agents = useMemo(() => usableAgents(host.agents), [host.agents])
   const projects = useMemo(
@@ -60,13 +68,31 @@ export default function NewSession() {
   )
 
   const [chosenAgent, setChosenAgent] = useState<string | null>(null)
-  const agentId = chosenAgent ?? agents.find((a) => a.isDefault)?.id ?? agents[0]?.id ?? null
+  // 新建子会话 opens this screen under its parent, in the parent's project and with its agent.
+  const parentId = useLocalSearchParams<{ parent?: string }>().parent
+  const parent = parentId ? host.sessions.get(parentId) : undefined
+  const startable = agents.filter(canStart)
+  const agentId =
+    chosenAgent ??
+    (parent && host.agents.has(parent.agentId) ? parent.agentId : null) ??
+    startable.find((a) => a.isDefault)?.id ??
+    startable[0]?.id ??
+    agents.find((a) => a.isDefault)?.id ??
+    agents[0]?.id ??
+    null
   const agent = agentId ? host.agents.get(agentId) : undefined
   const [chosenProject, setChosenProject] = useState<string | null | undefined>(undefined)
-  const projectPath = chosenProject === undefined ? (projects[0]?.path ?? null) : chosenProject
+  const projectPath = parent
+    ? parent.scratch
+      ? null
+      : parent.projectPath
+    : chosenProject === undefined
+      ? (projects[0]?.path ?? null)
+      : chosenProject
   const project = projects.find((p) => p.path === projectPath)
   const [picks, setPicks] = useState<Record<string, string | boolean>>({})
   const [usageOpen, setUsageOpen] = useState(false)
+  const [attachCount, setAttachCount] = useState(0)
   const connected = host.state.kind === 'connected'
 
   // The chosen agent's plan, for the status line's ring; only one already running is asked, so
@@ -89,10 +115,33 @@ export default function NewSession() {
   const model = slotOf(config, 'model', false)
   const effort = slotOf(config, 'thought_level', false)
 
-  const chooseAgent = (next: AgentStatus) => {
+  // An agent and one of its models are chosen together.
+  const chooseAgent = (next: AgentStatus, modelValue: string | null) => {
     setChosenAgent(next.id)
-    setPicks({})
+    const nextEntry = options.options?.find((o) => o.agentId === next.id)
+    const modelId = nextEntry?.config.find((o) => o.category === 'model')?.id
+    setPicks(modelId && modelValue !== null ? { [modelId]: modelValue } : {})
   }
+
+  // Why Send does nothing now, said over the box rather than left to guess.
+  const need = agent ? agentNeed(agent) : null
+  const unsendable =
+    agents.length === 0
+      ? host.loaded
+        ? '没有可用的 Agent，先添加或启用一个再开始。'
+        : null
+      : !agent
+        ? '先选择 Agent'
+        : need === 'sign-in'
+          ? `在 ${computer.name} 上登录 ${agent.name} 后才能使用。`
+          : need === 'update'
+            ? `在 ${computer.name} 上更新 ${agent.name} 后才能用。`
+            : need === 'installing'
+              ? `正在安装 ${agent.name}…`
+              : need === 'failed'
+                ? (agent.detail ?? `${agent.name} 启动失败。`)
+                : null
+  const notices = entry && agent ? startNotices(entry, picks, agent.name) : []
 
   const create = async (prompt: UserContent[]) => {
     if (!agentId) return
@@ -100,6 +149,7 @@ export default function NewSession() {
     const summary = (await link.request('sessions.create', {
       agentId,
       projectPath,
+      ...(parent ? { parentId: parent.id } : {}),
       ...(Object.keys(values).length > 0 ? { options: values } : {}),
       ...(prompt.length > 0 ? { prompt } : {}),
     })) as SessionSummary
@@ -113,7 +163,21 @@ export default function NewSession() {
     composer,
     commands: [],
     touched: [],
+    count: attachCount,
   })
+
+  const agentMenu: AgentMenuProps = {
+    agents,
+    current: agentId,
+    currentModel: (model?.option.value as string | undefined) ?? null,
+    options: options.options,
+    error: options.error,
+    onRetry: options.reload,
+    onChoose: chooseAgent,
+    footer: '新会话会用这个 Agent 开始',
+    title: '选择 Agent',
+    c,
+  }
 
   const projectRows = [
     ...projects.map((p) => ({
@@ -152,24 +216,16 @@ export default function NewSession() {
               menu.close()
               setUsageOpen(true)
             },
-          }) ?? { entries: [], loading: !entry, empty: '这个 Agent 没有可选的模型' }
+          }) ?? {
+            entries: [],
+            loading: !entry && !options.error,
+            empty: agent ? `${agent.name} 启动后，这里会列出它的模型。` : '没有可用的模型',
+          }
         )
       case 'more':
         return moreModelsPage(control, agentId ?? '')
       case 'agents':
-        return {
-          ...agentsPage({
-            agents,
-            current: agentId,
-            options: options.options,
-            error: options.error,
-            onRetry: options.reload,
-            onChoose: chooseAgent,
-            footer: '新会话会用这个 Agent 开始',
-            c,
-          }),
-          title: '选择 Agent',
-        }
+        return agentsPage(agentMenu)
       case 'projects':
         return {
           entries: projectRows.map((row) => ({
@@ -182,6 +238,9 @@ export default function NewSession() {
           })),
         }
       default:
+        if (page.startsWith('option:')) return optionPage(control, page.slice('option:'.length))
+        if (page.startsWith('agent:'))
+          return agentModelsPage(agentMenu, page.slice('agent:'.length))
         return null
     }
   }
@@ -200,151 +259,197 @@ export default function NewSession() {
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <GlassHeader title="新建会话" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        <ScrollView
+      <GlassHeader
+        title={parent ? '新建子会话' : '新建会话'}
+        subtitle={parent ? sessionTitle(parent) : null}
+      />
+      {/* Clipped, so what the keyboard moves up slides under the header, not over it. */}
+      <View style={styles.clip}>
+        <KeyboardAvoidingView
           style={{ flex: 1 }}
-          contentContainerStyle={styles.content}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
+          behavior="translate-with-padding"
+          automaticOffset
+          keyboardVerticalOffset={-keyboardOverlap(insets.bottom)}
         >
-          <View style={styles.hello}>
-            <HuliIcon size={34} />
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.content}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.hello}>
+              <HuliIcon size={34} />
 
-            <Text style={[styles.greeting, { color: c.text }]}>{greeting()}</Text>
-          </View>
-          <Text style={[styles.lead, { color: c.textSecondary }]}>
-            选一个项目，或者直接说你要什么。
-          </Text>
+              <Text style={[styles.greeting, { color: c.text }]}>{greeting()}</Text>
+            </View>
+            <Text style={[styles.lead, { color: c.textSecondary }]}>
+              选一个项目，或者直接说你要什么。
+            </Text>
 
-          <Text style={[styles.section, { color: c.textSecondary }]}>
-            最近的项目
-            <Text style={{ color: c.textTertiary }}> {projects.length}</Text>
-          </Text>
-          {projectRows.map((row) => {
-            const on = row.path === projectPath
-            return (
-              <Pressable
-                key={row.key}
-                onPress={() => pickProject(row.path)}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: on }}
-                accessibilityLabel={row.path ? `${row.name}，${row.count} 个会话` : '无项目'}
-                style={({ pressed }) => [styles.project, pressed && { opacity: 0.6 }]}
-              >
-                <View style={[styles.disc, { backgroundColor: c.avatar }]}>
-                  <Icon
-                    icon={row.path === null ? G.file : G.folder}
-                    size={16}
-                    color={row.path === null ? c.textSecondary : c.tint}
-                  />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[styles.projectName, { color: c.text }]} numberOfLines={1}>
-                    {row.name}
-                  </Text>
-                  <Text style={[styles.projectMeta, { color: c.textSecondary }]} numberOfLines={1}>
-                    {row.path ? (
-                      <>
-                        {computer.name}
-                        <Text style={{ color: c.text }}>
-                          {'  '}
-                          {row.count} 个会话
-                        </Text>
-                      </>
-                    ) : (
-                      '在一个临时文件夹里工作'
-                    )}
-                  </Text>
-                </View>
-                <View style={styles.projectEnd}>
-                  {row.at !== null && (
-                    <Text style={[styles.time, { color: c.textSecondary }]}>
-                      {listTime(row.at)}
+            <Text style={[styles.section, { color: c.textSecondary }]}>
+              {parent ? '子会话在父会话的项目中工作' : '最近的项目'}
+              {parent ? null : <Text style={{ color: c.textTertiary }}> {projects.length}</Text>}
+            </Text>
+            {(parent ? [] : projectRows).map((row) => {
+              const on = row.path === projectPath
+              return (
+                <Pressable
+                  key={row.key}
+                  onPress={() => pickProject(row.path)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: on }}
+                  accessibilityLabel={row.path ? `${row.name}，${row.count} 个会话` : '无项目'}
+                  style={({ pressed }) => [styles.project, pressed && { opacity: 0.6 }]}
+                >
+                  <View style={[styles.disc, { backgroundColor: c.avatar }]}>
+                    <Icon
+                      icon={row.path === null ? G.file : G.folder}
+                      size={16}
+                      color={row.path === null ? c.textSecondary : c.tint}
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.projectName, { color: c.text }]} numberOfLines={1}>
+                      {row.name}
                     </Text>
-                  )}
-                  {on && <Icon icon={G.check} size={17} color={c.tint} weight="semibold" />}
-                </View>
-              </Pressable>
-            )
-          })}
-        </ScrollView>
+                    <Text
+                      style={[styles.projectMeta, { color: c.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {row.path ? (
+                        <>
+                          {computer.name}
+                          <Text style={{ color: c.text }}>
+                            {'  '}
+                            {row.count} 个会话
+                          </Text>
+                        </>
+                      ) : (
+                        '在一个临时文件夹里工作'
+                      )}
+                    </Text>
+                  </View>
+                  <View style={styles.projectEnd}>
+                    {row.at !== null && (
+                      <Text style={[styles.time, { color: c.textSecondary }]}>
+                        {listTime(row.at)}
+                      </Text>
+                    )}
+                    {on && <Icon icon={G.check} size={17} color={c.tint} weight="semibold" />}
+                  </View>
+                </Pressable>
+              )
+            })}
+          </ScrollView>
 
-        <Composer
-          ref={composer}
-          placeholder="想让 Agent 做什么？"
-          initialText={text}
-          onSend={create}
-          failTitle="没能新建会话"
-          allowEmpty
-          disabled={!agentId}
-          bottomInset={insets.bottom}
-          onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
-          attachMenu={(anchor) => ({
-            root: 'attach',
-            pages,
-            popover: {
-              pages: ['mention'],
-              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
-            },
-          })}
-          left={
-            <NativeMenu source={{ root: 'mode', pages }}>
-              <ModeButton
-                mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
-                busy={false}
-                disabled={false}
-                labelled
-                anchor={modeAnchor}
-                onPress={() =>
-                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
-                }
-              />
-            </NativeMenu>
-          }
-          right={
-            agent ? (
-              <NativeMenu source={{ root: 'model', pages }}>
-                <ModelChip
-                  agentId={agent.id}
-                  harness={agent.harnessId}
-                  model={model?.name ?? agent.name}
-                  effort={effort?.name ?? null}
+          <Composer
+            ref={composer}
+            draft={parent ? `new:${parent.id}` : NEW_SESSION_DRAFT}
+            agentName={agent?.name ?? null}
+            placeholder={agent ? `想让 ${agent.name} 做什么？` : '想让 Agent 做什么？'}
+            onSend={create}
+            failTitle="没能新建会话"
+            allowEmpty
+            disabled={!agentId}
+            blocked={unsendable}
+            folder={projectPath}
+            takes={
+              agent?.capabilities.prompt
+                ? {
+                    images: !!agent.capabilities.prompt.image,
+                    text: !!agent.capabilities.prompt.embeddedContext,
+                  }
+                : null
+            }
+            onCountChange={setAttachCount}
+            top={
+              notices.length > 0 ? (
+                <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
+                  {notices.map((text) => (
+                    <Text key={text} style={[styles.noticeText, { color: c.text }]}>
+                      {text}
+                    </Text>
+                  ))}
+                </View>
+              ) : undefined
+            }
+            bottomInset={insets.bottom}
+            onAttach={(anchor) =>
+              menu.open('attach', anchor, { placement: 'above', align: 'start' })
+            }
+            attachMenu={(anchor) => ({
+              root: 'attach',
+              pages,
+              popover: {
+                pages: ['mention'],
+                open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+              },
+            })}
+            left={
+              <NativeMenu source={{ root: 'mode', pages }}>
+                <ModeButton
+                  mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
                   busy={false}
                   disabled={false}
-                  anchor={modelAnchor}
+                  labelled
+                  anchor={modeAnchor}
                   onPress={() =>
-                    menu.open('model', modelAnchor, {
-                      placement: 'above',
-                      align: 'end',
-                      width: 340,
-                    })
+                    menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
                   }
                 />
               </NativeMenu>
-            ) : null
-          }
-          footer={
-            <StatusLine
-              hostName={computer.name}
-              platform={computer.platform}
-              state={host.state}
-              folder={project ? project.name : '无项目'}
-              folderPicker
-              folderAnchor={folderAnchor}
-              onFolderPress={() =>
-                menu.open('projects', folderAnchor, { placement: 'above', align: 'center' })
-              }
-              branch={branch}
-              limits={limitsForModel(agent?.limits ?? [], model?.option)}
-              onLimitPress={() => {
-                haptic.tap()
-                setUsageOpen(true)
-              }}
-            />
-          }
-        />
-      </KeyboardAvoidingView>
+            }
+            right={
+              agent ? (
+                <NativeMenu source={{ root: 'model', pages }}>
+                  <ModelChip
+                    agentId={agent.id}
+                    harness={agent.harnessId}
+                    model={model?.name ?? agent.name}
+                    effort={effort?.name ?? null}
+                    busy={false}
+                    disabled={false}
+                    anchor={modelAnchor}
+                    onPress={() =>
+                      menu.open('model', modelAnchor, {
+                        placement: 'above',
+                        align: 'end',
+                        width: 340,
+                      })
+                    }
+                  />
+                </NativeMenu>
+              ) : null
+            }
+            footer={
+              <StatusLine
+                hostName={computer.name}
+                platform={computer.platform}
+                state={host.state}
+                folder={project ? project.name : projectPath ? folder(projectPath) : '无项目'}
+                path={projectPath}
+                folderPicker={!parent}
+                folderAnchor={folderAnchor}
+                {...(parent
+                  ? {}
+                  : {
+                      onFolderPress: () =>
+                        menu.open('projects', folderAnchor, {
+                          placement: 'above',
+                          align: 'center',
+                        }),
+                    })}
+                branch={branch}
+                limits={limitsForModel(agent?.limits ?? [], model?.option)}
+                onLimitPress={() => {
+                  haptic.tap()
+                  setUsageOpen(true)
+                }}
+              />
+            }
+          />
+        </KeyboardAvoidingView>
+      </View>
       <PlanUsageSheet visible={usageOpen} onClose={() => setUsageOpen(false)} agentId={agentId} />
       {menu.render(pages)}
     </View>
@@ -398,4 +503,7 @@ const styles = StyleSheet.create({
   projectMeta: { fontSize: 14, lineHeight: 19, marginTop: 1 },
   projectEnd: { alignItems: 'flex-end', gap: 4 },
   time: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  clip: { flex: 1, overflow: 'hidden' },
+  notice: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, gap: 4 },
+  noticeText: { fontSize: 13, lineHeight: 18 },
 })

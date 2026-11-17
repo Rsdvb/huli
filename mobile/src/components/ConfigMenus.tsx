@@ -1,7 +1,9 @@
 // The composer's menus of a session's options, as the desktop's control row has them
 // (features/session/composer): the permission modes with their icons, and the model menu with its
-// models, More models, the effort as one track, the agent's switches, Switch agent and the plan's
-// usage under them. A session and New session build them alike from the options they hold.
+// models and their descriptions, More models, the effort as one track, the agent's switches, every
+// other option it reports under Options, Switch agent, where an agent and its model are picked
+// together, and the plan's usage under them. A session and New session build them alike from the
+// options they hold.
 
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import type { AgentOptions, AgentStatus } from '@shared/agent-host'
@@ -61,20 +63,41 @@ function splitModels(choices: Choice[]): { current: Choice[]; older: Choice[] } 
 const isDefaultChoice = (c: { value: string; name: string }): boolean =>
   /^default$/i.test(c.value) || /^default\b/i.test(c.name)
 
+// The providers' documented default effort, for an agent whose Default choice names none, as the
+// desktop's levels.ts has them (platform.claude.com/docs/en/build-with-claude/effort).
+const PROVIDER_DEFAULT_EFFORT: [pattern: RegExp, level: string][] = [
+  [/claude-(opus|haiku)-5-5/, 'medium'],
+  [/claude-/, 'high'],
+]
+
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /**
  * The effort's levels without the choice that leaves it to the agent, and the level shown as
- * chosen: that choice shows as the level its name says, else the middle one.
+ * chosen: that choice shows as the level its name says, else the level the model runs at as its
+ * provider documents it, else the middle one.
  */
-function levelsOf(effort: SelectOption): { levels: Choice[]; shown: string | undefined } {
+export function levelsOf(
+  effort: SelectOption,
+  model?: string,
+): { levels: Choice[]; shown: string | undefined } {
   const levels = effort.choices.filter((c) => !isDefaultChoice(c))
   const value = String(effort.value)
   if (levels.some((l) => l.value === value)) return { levels, shown: value }
   const fallback = effort.choices.find(isDefaultChoice)
   const said = `${fallback?.name ?? ''} ${fallback?.description ?? ''}`.toLowerCase()
-  const named = [...levels]
-    .sort((a, b) => b.name.length - a.name.length)
-    .find((l) => said.includes(l.name.toLowerCase()))
-  return { levels, shown: (named ?? levels[Math.floor((levels.length - 1) / 2)])?.value }
+  const named = fallback
+    ? [...levels]
+        .sort((a, b) => b.name.length - a.name.length)
+        .find((l) => new RegExp(`\\b${escapeRegExp(l.name.toLowerCase())}\\b`).test(said))
+    : undefined
+  const id = model?.toLowerCase() ?? ''
+  const documented = PROVIDER_DEFAULT_EFFORT.find(([pattern]) => pattern.test(id))?.[1]
+  const provider = levels.find((l) => l.value === documented)
+  return {
+    levels,
+    shown: (named ?? provider ?? levels[Math.floor((levels.length - 1) / 2)])?.value,
+  }
 }
 
 export type ModeLook = 'asks' | 'edits' | 'plan' | 'auto' | 'full'
@@ -111,7 +134,7 @@ export interface ConfigControl {
   set(option: ConfigOption, value: string | boolean): void
 }
 
-const BETWEEN_TURNS = '这一轮结束后才能改'
+const BETWEEN_TURNS = '仅在两轮对话之间可更改'
 
 export function modePage(control: ConfigControl): MenuPage | null {
   const mode = optionOf(control.config, 'mode')
@@ -164,14 +187,38 @@ export interface ModelMenuContext {
   switchAgent: { disabled: boolean; hint?: string } | null
   /** The plan's line at the end opens the plan's usage. */
   onUsage?: () => void
+  /** What a change of model, effort or fast mode costs while the prompt cache is warm. */
+  cacheNote?: string | null
 }
+
+/** The select options the composer has no control of its own for, which the menu lists as Options. */
+export function otherOptions(config: readonly ConfigOption[]): SelectOption[] {
+  const mode = optionOf(config, 'mode')
+  const model = optionOf(config, 'model')
+  const effort = optionOf(config, 'thought_level')
+  return config.filter(
+    (o): o is SelectOption => isSelect(o) && o !== mode && o !== model && o !== effort,
+  )
+}
+
+/** The model the effort's default stands for: its id where the agent names one. */
+function modelKey(config: readonly ConfigOption[]): string | undefined {
+  const model = optionOf(config, 'model')
+  if (!model) return undefined
+  return shownChoice(model)?.modelId ?? String(model.value)
+}
+
+const EFFORT_HINT = '强度越高，思考越久，消耗的套餐额度也越多'
 
 /** The model menu's first page; null when the agent reports no model, effort or switch. */
 export function modelPage(control: ConfigControl, context: ModelMenuContext): MenuPage | null {
   const model = optionOf(control.config, 'model')
   const effort = optionOf(control.config, 'thought_level')
   const switches = control.config.filter((o) => o.type === 'boolean')
-  if (!model && !effort && switches.length === 0 && !context.switchAgent) return null
+  const others = otherOptions(control.config)
+  if (!model && !effort && switches.length === 0 && others.length === 0 && !context.switchAgent) {
+    return null
+  }
   const entries: MenuEntry[] = []
   const lead = <AgentGlyph agentId={context.agentId} harness={context.agent?.harnessId} size={18} />
 
@@ -185,6 +232,11 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
         key: `model:${choice.value}`,
         label: optionName(modelName(choice.name)),
         lead,
+        ...(locked
+          ? { subtitle: BETWEEN_TURNS }
+          : choice.description
+            ? { subtitle: optionDescription(choice.description) }
+            : {}),
         checked: choice.value === current?.value,
         disabled: locked,
         onPress: () => control.set(model, choice.value),
@@ -203,36 +255,43 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
 
   if (effort) {
     const locked = !!effort.idleOnly && control.running
-    const { levels, shown } = levelsOf(effort)
+    const { levels, shown } = levelsOf(effort, modelKey(control.config))
     if (levels.length > 0) {
-      if (entries.length > 0) entries.push({ kind: 'divider', key: 'effort-rule' })
+      const hint = locked ? BETWEEN_TURNS : EFFORT_HINT
+      entries.push({ kind: 'divider', key: 'effort-rule', title: '思考强度' })
       entries.push({
         kind: 'custom',
         key: 'effort',
         picker: {
-          label: optionName(effort.name),
+          label: '思考强度',
           options: levels.map((l) => ({ key: l.value, label: optionName(l.name) })),
           value: shown ?? '',
           onChange: (value) => control.set(effort, value),
           disabled: locked,
+          hint,
         },
         node: (
           <View
             style={[styles.effort, locked && { opacity: 0.4 }]}
             pointerEvents={locked ? 'none' : 'auto'}
-            accessibilityLabel={effort.name}
+            accessibilityLabel="思考强度"
+            accessibilityHint={hint}
           >
             <SegmentedControl
               segments={levels.map((l) => ({ key: l.value, label: optionName(l.name) }))}
               value={shown ?? ''}
               onChange={(value) => control.set(effort, value)}
             />
+            <Text style={[styles.hint, { color: context.c.textTertiary }]}>{hint}</Text>
           </View>
         ),
       })
     }
   }
 
+  if (switches.length > 0 && entries.length > 0) {
+    entries.push({ kind: 'divider', key: 'switch-rule' })
+  }
   for (const option of switches) {
     const locked = !!option.idleOnly && control.running
     const hint = switchHint(option, locked)
@@ -247,10 +306,32 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     })
   }
 
+  // Every other option the agent reports, each a page of its choices, as the desktop's row has them.
+  if (others.length > 0) {
+    entries.push({ kind: 'divider', key: 'options-rule', title: '选项' })
+    for (const option of others) {
+      const locked = !!option.idleOnly && control.running
+      const choice = shownChoice(option)
+      entries.push({
+        key: `option:${option.id}`,
+        label: optionName(option.name),
+        icon: G.sliders,
+        ...(locked
+          ? { subtitle: BETWEEN_TURNS }
+          : choice
+            ? { detail: optionName(modelName(choice.name)) }
+            : {}),
+        disabled: locked,
+        page: `option:${option.id}`,
+      })
+    }
+  }
+
   if (context.switchAgent) {
+    entries.push({ kind: 'divider', key: 'agents-rule' })
     entries.push({
       key: 'agents',
-      label: '切换 Agent…',
+      label: '换 Agent…',
       icon: G.swap,
       ...(context.switchAgent.hint ? { subtitle: context.switchAgent.hint } : {}),
       disabled: context.switchAgent.disabled,
@@ -271,9 +352,12 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
   ]
     .filter(Boolean)
     .join(' · ')
-  if (!footer) return { entries }
+  const note = context.cacheNote ? { footer: context.cacheNote } : {}
+  if (!footer) return { entries, ...note }
   const onUsage = context.onUsage
-  if (!onUsage) return { entries, footer }
+  if (!onUsage) {
+    return { entries, footer: [footer, context.cacheNote].filter(Boolean).join('\n') }
+  }
   // The plan's line opens its usage, so it is a row of its own rather than the page's footer.
   const { c } = context
   entries.push({ kind: 'divider', key: 'usage-rule' })
@@ -305,7 +389,29 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
       </Pressable>
     ),
   })
-  return { entries }
+  return { entries, ...note }
+}
+
+/** The choices of one of the Options, from the model menu. */
+export function optionPage(control: ConfigControl, id: string): MenuPage | null {
+  const option = otherOptions(control.config).find((o) => o.id === id)
+  if (!option) return null
+  const locked = !!option.idleOnly && control.running
+  const current = shownChoice(option)?.value
+  return {
+    title: optionName(option.name),
+    entries: option.choices
+      .filter((choice) => !choice.shownAs)
+      .map((choice) => ({
+        key: choice.value,
+        label: optionName(modelName(choice.name)),
+        ...(choice.description ? { subtitle: optionDescription(choice.description) } : {}),
+        checked: choice.value === current,
+        disabled: locked,
+        onPress: () => control.set(option, choice.value),
+      })),
+    ...(locked ? { footer: `${optionName(option.name)}${BETWEEN_TURNS}` } : {}),
+  }
 }
 
 export function moreModelsPage(control: ConfigControl, agentId: string): MenuPage {
@@ -318,7 +424,7 @@ export function moreModelsPage(control: ConfigControl, agentId: string): MenuPag
     entries: older.map((choice) => ({
       key: choice.value,
       label: optionName(modelName(choice.name)),
-      ...(choice.description ? { subtitle: choice.description } : {}),
+      ...(choice.description ? { subtitle: optionDescription(choice.description) } : {}),
       lead: <AgentGlyph agentId={agentId} size={18} />,
       checked: choice.value === current,
       disabled: locked,
@@ -374,6 +480,35 @@ export function startConfig(
   })
 }
 
+/**
+ * Why a new session starts with another value than the one it would have kept, in the desktop's
+ * words (newSession.startNotice): a model or option remembered from earlier sessions that the
+ * agent no longer offers.
+ */
+export function startNotices(
+  entry: AgentOptions,
+  picks: Record<string, string | boolean>,
+  agent: string,
+): string[] {
+  const started = new Map(startConfig(entry, picks).map((o) => [o.id, o]))
+  return entry.config.flatMap((option) => {
+    if (!REMEMBERED.has(option.category) || picks[option.id] !== undefined) return []
+    const wanted = entry.remembered[option.id]
+    if (wanted === undefined || isConfigValue(option, wanted)) return []
+    const now = started.get(option.id)
+    const nameOf = (value: string | boolean | undefined) => {
+      const choice = now?.choices?.find((c) => c.value === value)
+      return choice ? optionName(modelName(choice.name)) : String(value ?? '')
+    }
+    const actual = nameOf(now?.value)
+    return option.category === 'model'
+      ? [`${agent} 已不再提供 ${String(wanted)}，将使用 ${actual} 启动。`]
+      : [
+          `${agent} 已不再提供 ${optionName(option.name)} ${String(wanted)}，将使用 ${actual} 启动。`,
+        ]
+  })
+}
+
 /** What `sessions.create` takes: the start values that differ from the agent's own. */
 export function startValues(
   entry: AgentOptions,
@@ -389,7 +524,31 @@ export function startValues(
   return values
 }
 
-/** The agents that could run a session: added, installed, not hidden or turned off. */
+/**
+ * What an agent needs before it can start, as the desktop's agent menu says it
+ * (new-session/start-options.ts): its own program updated, its install to finish, a failed start
+ * looked at, or a sign-in, none of which the phone can do.
+ */
+export type AgentNeed = 'update' | 'installing' | 'failed' | 'sign-in' | null
+
+export function agentNeed(agent: AgentStatus): AgentNeed {
+  if (agent.cli?.installed?.problem?.kind === 'too-old') return 'update'
+  if (agent.state === 'installing') return 'installing'
+  if (agent.state === 'failed') return 'failed'
+  return agent.signIn === 'required' ? 'sign-in' : null
+}
+
+export const NEED_TEXT: Record<NonNullable<AgentNeed>, string> = {
+  update: '需要更新',
+  installing: '正在安装…',
+  failed: '出错',
+  'sign-in': '需要登录',
+}
+
+/**
+ * The agents a menu lists: added, not hidden or turned off, installed, or found but too old, which
+ * shows as needing an update.
+ */
 export function usableAgents(agents: Map<string, AgentStatus>): AgentStatus[] {
   return [...agents.values()].filter(
     (a) =>
@@ -397,46 +556,69 @@ export function usableAgents(agents: Map<string, AgentStatus>): AgentStatus[] {
       !a.hidden &&
       !a.disabled &&
       !a.uninstalled &&
-      !['not-installed', 'node-missing', 'node-outdated'].includes(a.state),
+      (!['not-installed', 'node-missing', 'node-outdated'].includes(a.state) ||
+        agentNeed(a) === 'update'),
   )
 }
 
-/** An agent's default model by name, from the options its last new session reported. */
-function defaultModel(options: AgentOptions | undefined): string | null {
+/** Whether a session can start with the agent now. */
+export function canStart(agent: AgentStatus): boolean {
+  return agentNeed(agent) === null
+}
+
+/** The model an agent's next session starts with, from the options its last one reported. */
+function defaultChoice(options: AgentOptions | undefined): Choice | null {
   if (!options) return null
   const model = optionOf(options.config, 'model')
   if (!model) return null
   const value = options.remembered[model.id] ?? model.value
-  const choice = model.choices.find((c) => c.value === value) ?? shownChoice(model)
-  return choice ? optionName(modelName(choice.name)) : null
+  return model.choices.find((c) => c.value === value) ?? shownChoice(model) ?? null
 }
 
-export function agentsPage(props: {
+export interface AgentMenuProps {
   agents: AgentStatus[]
   current: string | null
+  /** The chosen agent's model, checked among its models. */
+  currentModel?: string | null
   options: AgentOptions[] | null
   error: string | null
   onRetry(): void
-  onChoose(agent: AgentStatus): void
+  /** An agent and one of its models together, or with null its default model. */
+  onChoose(agent: AgentStatus, model: string | null): void
   footer: string
+  title: string
   c: Palette
-}): MenuPage {
+}
+
+/**
+ * The agents to choose, each leading to its models so an agent and a model are picked at once;
+ * one that cannot start says why. `agent:<id>` is an agent's page of models.
+ */
+export function agentsPage(props: AgentMenuProps): MenuPage {
   const { c } = props
   return {
-    title: '切换 Agent',
+    title: props.title,
     loading: props.options === null && !props.error,
-    entries: props.agents.map((agent) => {
-      const model = defaultModel(props.options?.find((o) => o.agentId === agent.id))
+    entries: props.agents.map((agent): MenuEntry => {
+      const need = agentNeed(agent)
+      const entry = props.options?.find((o) => o.agentId === agent.id)
+      const model = defaultChoice(entry)
+      const models = entry ? (optionOf(entry.config, 'model')?.choices.length ?? 0) : 0
       const limit = tightestLimit(agent.limits)
       const left =
         limit?.usedPercent != null ? Math.max(0, 100 - Math.round(limit.usedPercent)) : null
+      const subtitle = need
+        ? NEED_TEXT[need]
+        : model
+          ? optionName(modelName(model.name))
+          : undefined
       return {
         key: agent.id,
         label: agent.name,
         lead: <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={20} />,
-        ...(model ? { subtitle: model } : {}),
+        ...(subtitle ? { subtitle } : {}),
         below:
-          left !== null && limit ? (
+          !need && left !== null && limit ? (
             <View style={styles.left}>
               <UsageRing
                 percent={limit.usedPercent ?? 0}
@@ -447,9 +629,11 @@ export function agentsPage(props: {
               <Text style={[styles.leftText, { color: c.textSecondary }]}>剩余 {left}%</Text>
             </View>
           ) : undefined,
-        checked: agent.id === props.current,
-        disabled: agent.signIn === 'required',
-        onPress: () => props.onChoose(agent),
+        ...(need === null && models > 1
+          ? { page: `agent:${agent.id}` }
+          : { checked: agent.id === props.current }),
+        disabled: need !== null,
+        onPress: () => props.onChoose(agent, null),
       }
     }),
     error: props.error,
@@ -459,8 +643,38 @@ export function agentsPage(props: {
   }
 }
 
+/** One agent's models, the current first and the older after them, to pick with the agent. */
+export function agentModelsPage(props: AgentMenuProps, agentId: string): MenuPage | null {
+  const agent = props.agents.find((a) => a.id === agentId)
+  const entry = props.options?.find((o) => o.agentId === agentId)
+  const model = entry ? optionOf(entry.config, 'model') : undefined
+  if (!agent || !model) return null
+  const chosen =
+    agentId === props.current ? (props.currentModel ?? defaultChoice(entry)?.value) : null
+  const { current, older } = splitModels(model.choices)
+  const lead = <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={18} />
+  const row = (choice: Choice): MenuEntry => ({
+    key: choice.value,
+    label: optionName(modelName(choice.name)),
+    lead,
+    ...(choice.description ? { subtitle: optionDescription(choice.description) } : {}),
+    checked: choice.value === chosen,
+    onPress: () => props.onChoose(agent, choice.value),
+  })
+  return {
+    title: agent.name,
+    entries: [
+      ...current.map(row),
+      ...(older.length > 0
+        ? [{ kind: 'divider' as const, key: 'older', title: '更多模型' }, ...older.map(row)]
+        : []),
+    ],
+  }
+}
+
 const styles = StyleSheet.create({
-  effort: { paddingHorizontal: 4, paddingVertical: 4 },
+  effort: { paddingHorizontal: 4, paddingVertical: 4, gap: 6 },
+  hint: { fontSize: 12, lineHeight: 16, paddingHorizontal: 8 },
   left: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
   leftText: { fontSize: 13, fontVariant: ['tabular-nums'] },
   usage: {

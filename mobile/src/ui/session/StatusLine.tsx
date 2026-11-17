@@ -1,14 +1,19 @@
 // The line under the composer: the computer with its system and whether the link is up, the
-// session's folder, which opens its changes (or, in New session, the project picker), the branch
-// it is on, how much of the plan's tightest window is used, which opens the plan's usage, and how
-// full the context is, which opens what fills it.
+// session's folder, which opens its changes (or, in New session, the project picker) and shows its
+// whole path on a long press, the branch it is on with the worktree's mark, how much of the plan's
+// tightest window is used, which opens the plan's usage, how long the prompt cache has left, and how
+// full the context is, both of which open what fills it.
 
 import type { RefObject } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Svg, { Circle } from 'react-native-svg'
 import type { PlanLimit } from '@shared/agent-host'
+import { cachePhase, endingWindow, type KnownExpiry } from '@shared/prompt-cache'
 import type { LinkState } from '@shared/remote/link'
+import { showNotice } from '../NoticeBar'
+import { copyText } from './feedback'
 import { G, Icon, SystemMark } from './icons'
+import { cacheLeftText, useCacheLeft } from './promptCache'
 import type { ViewHandle } from './Popover'
 import {
   backText,
@@ -99,13 +104,20 @@ export function StatusLine(props: {
   folderAnchor?: RefObject<ViewHandle | null>
   /** The branch the folder is on; `loading` while it is read, null outside a repository. */
   branch?: string | null | 'loading'
+  /** The session works in a worktree of its own: the branch carries its mark. */
+  worktree?: boolean
+  /** The folder's whole path, which a long press on the folder shows and copies. */
+  path?: string | null
   limits?: PlanLimit[]
   /** The plan ring opens the plan's usage. */
   onLimitPress?: () => void
   /** The context's share used, which opens its breakdown. */
   context?: { share: number; color: string; approximate: boolean; onPress(): void } | null
+  /** The prompt cache's time left, which opens the context's breakdown with its cache. */
+  cache?: { expiry: KnownExpiry; onPress(): void } | null
 }) {
   const { c, s } = useSessionTokens()
+  const path = props.path ?? null
   const dot =
     props.state.kind === 'connected'
       ? c.success
@@ -139,7 +151,24 @@ export function StatusLine(props: {
           <View ref={props.folderAnchor} collapsable={false} style={styles.folderBox}>
             <Pressable
               onPress={props.onFolderPress}
-              disabled={!props.onFolderPress}
+              {...(path
+                ? {
+                    onLongPress: () =>
+                      Alert.alert(props.folder ?? '项目', path, [
+                        {
+                          text: '复制路径',
+                          onPress: () =>
+                            void copyText(path).then(() =>
+                              showNotice({ text: '已复制', tone: 'success' }),
+                            ),
+                        },
+                        { text: '好', style: 'cancel' },
+                      ]),
+                    delayLongPress: 400,
+                    accessibilityHint: '长按查看完整路径',
+                  }
+                : {})}
+              disabled={!props.onFolderPress && !path}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={
@@ -170,9 +199,19 @@ export function StatusLine(props: {
       {props.branch !== undefined && props.branch !== null && (
         <View
           style={styles.branch}
-          accessibilityLabel={`分支：${props.branch === 'loading' ? '正在读取' : props.branch}`}
+          accessibilityLabel={
+            props.branch === 'loading'
+              ? '分支：正在读取'
+              : props.worktree
+                ? `在分支 ${props.branch} 的 worktree 里工作`
+                : `分支：${props.branch}`
+          }
         >
-          <Icon icon={G.fork} size={13} color={c.textTertiary} />
+          <Icon
+            icon={props.worktree ? G.fork : G.branch}
+            size={13}
+            color={props.worktree ? c.tint : c.textTertiary}
+          />
           {props.branch === 'loading' ? (
             <Text style={[styles.text, { color: c.textTertiary }]}>正在读取…</Text>
           ) : (
@@ -180,6 +219,11 @@ export function StatusLine(props: {
               {props.branch}
             </Text>
           )}
+          {props.worktree && props.branch !== 'loading' ? (
+            <View style={[styles.mark, { backgroundColor: c.tintSoft }]}>
+              <Text style={[styles.markText, { color: c.tint }]}>工作树</Text>
+            </View>
+          ) : null}
         </View>
       )}
       {limit && (
@@ -212,6 +256,7 @@ export function StatusLine(props: {
           )}
         </Pressable>
       )}
+      {props.cache && <CacheChip expiry={props.cache.expiry} onPress={props.cache.onPress} />}
       {props.context && (
         <Pressable
           onPress={props.context.onPress}
@@ -228,6 +273,35 @@ export function StatusLine(props: {
         </Pressable>
       )}
     </View>
+  )
+}
+
+/** The prompt cache's countdown; it ticks alone, so the screen around it does not. */
+function CacheChip(props: { expiry: KnownExpiry; onPress(): void }) {
+  const { c } = useSessionTokens()
+  const { expiry } = props
+  const left = useCacheLeft(expiry.expiresAt)
+  const phase = cachePhase(expiry.expiresAt, endingWindow(expiry.ttl), expiry.expiresAt - left)
+  const time = `${expiry.estimate ? '约 ' : ''}${cacheLeftText(left)}`
+  return (
+    <Pressable
+      onPress={props.onPress}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={`Prompt cache：${
+        phase === 'expired' ? (expiry.estimate ? '可能已过期' : '已过期') : `剩余 ${time}`
+      }`}
+      style={({ pressed }) => [styles.limit, { opacity: pressed ? 0.55 : 1 }]}
+    >
+      <Icon
+        icon={G.timer}
+        size={13}
+        color={phase === 'expired' ? c.textTertiary : phase === 'ending' ? c.warning : c.tint}
+      />
+      <Text style={[styles.text, { color: phase === 'ending' ? c.warning : c.textSecondary }]}>
+        {phase === 'expired' ? '已过期' : time}
+      </Text>
+    </Pressable>
   )
 }
 
@@ -259,5 +333,7 @@ const styles = StyleSheet.create({
   limit: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   out: { borderRadius: 999, paddingLeft: 4, paddingRight: 8, paddingVertical: 2, flexShrink: 1 },
   outText: { fontWeight: '600', flexShrink: 1 },
-  branch: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, maxWidth: 150 },
+  branch: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, maxWidth: 190 },
+  mark: { borderRadius: 999, paddingHorizontal: 5 },
+  markText: { fontSize: 10, lineHeight: 15, fontWeight: '600' },
 })

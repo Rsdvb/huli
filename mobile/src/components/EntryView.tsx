@@ -205,7 +205,7 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
       const waiting = !!entry.permission && !entry.permissionResult
       if (waiting && entry.permission?.plan) return <PlanWaitingLine entry={entry} />
       if (waiting && (entry.permission?.questions?.length || entry.question !== undefined)) {
-        return <WaitingLine icon={G.hand} text={entry.question ?? '智能体在问你'} />
+        return <WaitingLine icon={G.hand} text={entry.question ?? 'Agent 在问你'} />
       }
       if (waiting) return <ToolRow entry={entry} />
       if (workflowCardOf(entry)) return <WorkflowToolCard entry={entry} />

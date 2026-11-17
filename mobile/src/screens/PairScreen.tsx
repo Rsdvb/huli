@@ -186,7 +186,7 @@ export function PairScreen(props: {
           <Text style={[typeScale.body, { color: c.textSecondary }]}>
             {props.onCancel
               ? '已配对的电脑都会留着，随时在顶部的电脑标记里切换。'
-              : 'Huli 在手机上看着、指挥电脑上的智能体。配对一次，之后打开就连上。'}
+              : 'Huli 在手机上看着、指挥电脑上的 Agent。配对一次，之后打开就连上。'}
           </Text>
 
           <View style={[styles.steps, { backgroundColor: c.surface, borderColor: c.border }]}>

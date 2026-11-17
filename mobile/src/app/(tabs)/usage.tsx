@@ -128,10 +128,10 @@ const WINDOW_SPANS: Record<string, string> = {
 
 const REASONS: Record<LimitsReason, string> = {
   'vendor-disallows': '服务商不提供套餐额度的读取。',
-  'harness-does-not-offer': '这个智能体不报告套餐额度。',
+  'harness-does-not-offer': '这个 Agent 不报告套餐额度。',
   'administrator-managed': '额度由管理员管理。',
   'model-provider-managed': '额度由模型服务商管理。',
-  'not-yet-supported': '暂不支持读取这个智能体的额度。',
+  'not-yet-supported': '暂不支持读取这个 Agent 的额度。',
   'console-managed': '用 API 密钥登录，用量请到服务商控制台查看。',
 }
 
@@ -811,7 +811,8 @@ function PlanCard(props: {
     >
       <View style={styles.planHead}>
         <AgentAvatar agentId={agent.id} name={agent.name} size={24} />
-        <Text style={[typeScale.headline, styles.flex, { color: c.text }]} numberOfLines={1}>
+        {/* Two lines, so a long name such as Google Antigravity reads whole on a half-width card. */}
+        <Text style={[typeScale.subhead, styles.flex, { color: c.text }]} numberOfLines={2}>
           {agent.account?.label ?? agent.name}
         </Text>
         {props.refreshing ? (

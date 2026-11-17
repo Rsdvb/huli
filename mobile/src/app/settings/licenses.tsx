@@ -66,8 +66,8 @@ export default function Licenses() {
         <ListGroup header="开源库">{LIBRARIES.map(creditRow)}</ListGroup>
 
         <ListGroup
-          header="智能体标志"
-          footer="各家智能体的标志归各自所有者，按上面列出的条款使用。"
+          header="Agent 标志"
+          footer="各家 Agent 的标志归各自所有者，按上面列出的条款使用。"
         >
           {MARKS.map(creditRow)}
         </ListGroup>

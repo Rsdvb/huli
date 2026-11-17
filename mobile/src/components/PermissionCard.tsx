@@ -420,7 +420,7 @@ function ToolPermissionCard(props: { entry: ToolEntry; sessionId: string; link: 
     void respond({ optionId: option.id })
   }
 
-  const title = entry.question ?? '智能体在问你'
+  const title = entry.question ?? 'Agent 在问你'
   const icon = G.hand
 
   return (

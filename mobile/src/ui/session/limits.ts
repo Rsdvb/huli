@@ -187,7 +187,7 @@ function clock(at: number): string {
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 /** When it comes: today's clock time, the weekday within six days, else the date. */
-function whenText(at: number, now: number): string {
+export function whenText(at: number, now: number): string {
   const days = daysBetween(now, at)
   if (days === 0) return clock(at)
   if (days === 1) return `明天 ${clock(at)}`

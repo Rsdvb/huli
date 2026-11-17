@@ -1,0 +1,17 @@
+# Answers the system's first prompts, then shoots each tab.
+appId: io.github.rsdvb.huli
+---
+- tapOn:
+    text: "允许"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: home
+- tapOn: "Artifacts"
+- waitForAnimationToEnd
+- takeScreenshot: artifacts
+- tapOn: "任务"
+- waitForAnimationToEnd
+- takeScreenshot: tasks
+- tapOn: "用量"
+- waitForAnimationToEnd
+- takeScreenshot: usage
