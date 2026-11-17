@@ -2745,6 +2745,9 @@ li[data-row-exit='dust'] > * {
   .kettu-settings .kettu-settings__scope > .ui-as-side__label {
     display: none;
   }
+  .kettu-settings .kettu-settings__search {
+    margin-right: 38px;
+  }
 }
 
 /* The page */
@@ -2772,6 +2775,19 @@ li[data-row-exit='dust'] > * {
 @container ui-as-main (max-width: 600px) {
   .kettu-settings .kettu-settings__body {
     padding: 36px 16px 40px;
+  }
+}
+/* With the list above the page, Close sits beside the search: floating over the page, it covered
+   the cards' corners. */
+@media (max-width: 700px) {
+  .kettu-settings .kettu-settings__page {
+    position: static;
+  }
+  .kettu-settings .kettu-settings__close {
+    position: absolute;
+    top: 14px;
+    right: 12px;
+    margin: 0;
   }
 }
 
