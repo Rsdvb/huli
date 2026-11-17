@@ -5,23 +5,21 @@ import { useEffect, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { DiffView } from '../components/DiffView'
-import { Loading, Message } from '../components/Placeholder'
 import { diffTexts, handedDiff, type Diff } from '../diff'
 import { call, errorText, sessionFolder, useChanges } from '../git'
 import { useHost, useLink } from '../host'
-import { folder as baseName } from '../sessions'
-import { useTheme } from '../theme'
+import { baseName, dirName, relativePath } from '../ui/session/format'
+import { GlassHeader } from '../ui/session/GlassHeader'
+import { G, Icon } from '../ui/session/icons'
+import { useSessionTokens } from '../ui/session/palette'
+import { StateView } from '../ui/session/StateView'
+import { Counts } from '../ui/session/TurnChanges'
 
 type Shown =
   { kind: 'diff'; diff: Diff } | { kind: 'note'; text: string } | { kind: 'error'; text: string }
 
 // Lets the screen draw its spinner before a large diff takes the JS thread.
 const nextFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-
-function dirName(path: string): string {
-  const cut = path.replace(/\\/g, '/').lastIndexOf('/')
-  return cut > 0 ? path.slice(0, cut) : ''
-}
 
 export default function DiffScreen() {
   const params = useLocalSearchParams<{
@@ -30,7 +28,7 @@ export default function DiffScreen() {
     path?: string
     oldPath?: string
   }>()
-  const theme = useTheme()
+  const { c, s } = useSessionTokens()
   const host = useHost()
   const link = useLink()
   const handed = params.key ? handedDiff(params.key) : null
@@ -95,61 +93,43 @@ export default function DiffScreen() {
   const diff = shown?.kind === 'diff' ? shown.diff : null
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <Stack.Screen
-        options={{
-          headerTitle: () => (
-            <View style={{ alignItems: 'center', maxWidth: 240 }}>
-              <Text
-                style={{ color: theme.text, fontWeight: '600', fontSize: 16 }}
-                numberOfLines={1}
-              >
-                {baseName(path) || '改动'}
-              </Text>
-              {dirName(path) ? (
-                <Text
-                  style={{ color: theme.muted, fontSize: 11 }}
-                  numberOfLines={1}
-                  ellipsizeMode="head"
-                >
-                  {dirName(path)}
-                </Text>
-              ) : null}
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <GlassHeader
+        title={baseName(path) || '改动'}
+        subtitle={dirName(path) ? relativePath(dirName(path), folder) : null}
+        subtitlePath
+        right={
+          diff ? (
+            <View style={[styles.counts, { backgroundColor: c.fill }]}>
+              <Counts insertions={diff.insertions} deletions={diff.deletions} size={12} />
             </View>
-          ),
-          headerRight: () =>
-            diff ? (
-              <Text style={{ fontSize: 13, fontVariant: ['tabular-nums'] }}>
-                <Text style={{ color: theme.ok }}>+{diff.insertions}</Text>
-                <Text style={{ color: theme.muted }}> </Text>
-                <Text style={{ color: theme.danger }}>−{diff.deletions}</Text>
-              </Text>
-            ) : null,
-        }}
+          ) : null
+        }
       />
       {missing ? (
-        <Message text={missing} theme={theme} />
+        <StateView text={missing} />
       ) : !shown ? (
-        <Loading theme={theme} />
+        <StateView loading />
       ) : shown.kind === 'error' ? (
-        <Message
-          text={shown.text}
-          theme={theme}
-          color={theme.danger}
-          retry={() => setAttempt((n) => n + 1)}
-        />
+        <StateView text={shown.text} tone="danger" retry={() => setAttempt((n) => n + 1)} />
       ) : shown.kind === 'note' ? (
-        <Message text={shown.text} theme={theme} />
+        <StateView text={shown.text} />
       ) : shown.diff.rows.length === 0 ? (
-        <Message text="没有改动" theme={theme} />
+        <StateView text="没有改动" />
       ) : (
         <>
           {shown.diff.rough && (
-            <Text style={[styles.banner, { color: theme.muted, borderBottomColor: theme.line }]}>
-              有些地方改动太多，没有逐行对齐，按先删后增显示。
-            </Text>
+            <View style={[styles.banner, { backgroundColor: s.warningSoft }]}>
+              <Icon icon={G.info} size={13} color={c.warning} />
+              <Text style={[styles.bannerText, { color: c.textSecondary }]}>
+                有些地方改动太多，没有逐行对齐，按先删后增显示。
+              </Text>
+            </View>
           )}
-          <DiffView diff={shown.diff} theme={theme} />
+          <View style={[styles.sheet, { borderTopColor: c.border }]}>
+            <DiffView diff={shown.diff} />
+          </View>
         </>
       )}
     </View>
@@ -157,10 +137,17 @@ export default function DiffScreen() {
 }
 
 const styles = StyleSheet.create({
+  counts: { borderRadius: 999, paddingHorizontal: 10, height: 30, justifyContent: 'center' },
   banner: {
-    fontSize: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  bannerText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  sheet: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
 })
