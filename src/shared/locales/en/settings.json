@@ -1056,7 +1056,8 @@
   "about": {
     "version": {
       "description": "A desktop workbench for Claude Code, Codex, opencode and Pi.",
-      "line": "Version {{version}} · {{system}}"
+      "line": "Version {{version}} · {{system}}",
+      "basedOn": "A personal build based on Kettu, under the AGPL-3.0."
     },
     "updates": {
       "name": "Updates",
