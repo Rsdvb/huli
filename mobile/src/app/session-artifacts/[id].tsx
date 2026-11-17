@@ -1,10 +1,11 @@
 // The artifacts a session made or last changed, newest first: what each is and when it last
-// changed. They open on the computer, which runs them.
+// changed. Each opens full screen on the phone.
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { ArtifactSummary } from '@shared/artifacts'
+import { openArtifact } from '../../artifacts'
 import { formatBytes } from '../../attachments'
 import { call, errorText } from '../../git'
 import { useHost, useLink } from '../../host'
@@ -12,6 +13,7 @@ import { listTime, sessionTitle } from '../../sessions'
 import { GlassHeader } from '../../ui/session/GlassHeader'
 import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
+import { PressScale } from '../../ui/session/Press'
 import { StateView } from '../../ui/session/StateView'
 
 function kindText(artifact: ArtifactSummary): string {
@@ -57,10 +59,13 @@ export default function SessionArtifacts() {
         }
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32, gap: 10 }}
         renderItem={({ item }) => (
-          <View
-            style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.border }]}
-            accessible
+          <PressScale
+            onPress={() => openArtifact(item.id)}
+            scale={0.98}
+            accessibilityRole="button"
             accessibilityLabel={`${item.title}，${kindText(item)}，第 ${item.version} 版`}
+            accessibilityHint="打开"
+            style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.border }]}
           >
             <View style={[styles.icon, { backgroundColor: c.fill }]}>
               <Icon icon={G.artifacts} size={18} color={c.textSecondary} />
@@ -76,12 +81,11 @@ export default function SessionArtifacts() {
               </Text>
             </View>
             <Text style={[styles.time, { color: c.textTertiary }]}>{listTime(item.updatedAt)}</Text>
-          </View>
+            <Icon icon={G.right} size={11} color={c.textTertiary} weight="semibold" />
+          </PressScale>
         )}
         ListFooterComponent={
-          <Text style={[styles.note, { color: c.textTertiary }]}>
-            在电脑上的 Huli 里打开查看和编辑。
-          </Text>
+          <Text style={[styles.note, { color: c.textTertiary }]}>编辑要在电脑上的 Huli 里。</Text>
         }
       />
     )

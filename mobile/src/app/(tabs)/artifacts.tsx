@@ -1,6 +1,7 @@
 // Artifacts: what the agents made on the computer, as a grid of previews. A line says how many and
 // of which kinds; chips pick a kind; sort and filter sheets, and search, narrow the grid. A card
-// opens its sheet (preview, session, versions); Recently deleted sits at the end.
+// opens the artifact, and its long press a menu with its sheet (preview, session, versions);
+// Recently deleted sits at the end.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -16,7 +17,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
 import type { ArtifactSummary } from '@shared/artifacts'
-import { artifactKind, KIND_ICON, KIND_TEXT, KINDS, type ArtifactKind } from '../../artifacts'
+import {
+  artifactKind,
+  KIND_ICON,
+  KIND_TEXT,
+  KINDS,
+  openArtifact,
+  type ArtifactKind,
+} from '../../artifacts'
 import { ArtifactCard } from '../../components/ArtifactCard'
 import { ArtifactSheet, confirmDelete } from '../../components/ArtifactSheet'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
@@ -340,6 +348,7 @@ export default function Artifacts() {
 
   const menuItems: SheetItem[] = menu
     ? [
+        { key: 'view', label: '打开', onPress: () => openArtifact(menu.id) },
         { key: 'open', label: '详情与版本', onPress: () => setOpenId(menu.id) },
         ...(host.sessions.has(menu.sessionId)
           ? [
@@ -412,7 +421,7 @@ export default function Artifacts() {
               <ArtifactCard
                 key={a.id}
                 artifact={a}
-                onPress={() => setOpenId(a.id)}
+                onPress={() => openArtifact(a.id)}
                 onLongPress={() => {
                   haptic.tap()
                   setMenu(a)

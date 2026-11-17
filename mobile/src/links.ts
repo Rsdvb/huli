@@ -6,6 +6,7 @@
 //   huli://new                    a new session
 //   huli://search?q=<text>        search, the text filled in and searched (q may be left out)
 //   huli://artifacts              the Artifacts tab
+//   huli://artifact/<artifactId>  an artifact, full screen (`version=<n>` for an older one)
 //   huli://routines               the 定时任务 tab
 //   huli://usage                  the 用量 tab
 //
@@ -20,6 +21,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react'
 import { router, useRootNavigationState } from 'expo-router'
+import { ARTIFACT_ID } from '@shared/artifacts'
 import { useHost } from './host'
 import { useLockState } from './lock'
 import type { SavedHost } from './store'
@@ -28,6 +30,7 @@ export type TabName = 'index' | 'artifacts' | 'routines' | 'usage'
 
 export type LinkTarget =
   | { kind: 'session'; id: string }
+  | { kind: 'artifact'; id: string; version: number | null }
   | { kind: 'new' }
   | { kind: 'search'; q: string }
   | { kind: 'tab'; tab: TabName }
@@ -83,7 +86,14 @@ export function parseLink(url: string): AppLink | null {
   const [head = '', id, ...more] = path.split('/')
   let target: LinkTarget | null = null
   if (head === 'session' && id && more.length === 0) target = { kind: 'session', id: decode(id) }
-  else if (path === 'new') target = { kind: 'new' }
+  else if (head === 'artifact' && id && more.length === 0 && ARTIFACT_ID.test(decode(id))) {
+    const version = params.get('version') ?? ''
+    target = {
+      kind: 'artifact',
+      id: decode(id),
+      version: /^[1-9][0-9]{0,8}$/.test(version) ? Number(version) : null,
+    }
+  } else if (path === 'new') target = { kind: 'new' }
   else if (path === 'search') target = { kind: 'search', q: params.get('q') ?? '' }
   else if (path in TABS) target = { kind: 'tab', tab: TABS[path]! }
   return target ? { target, host } : null
@@ -101,6 +111,10 @@ export function linkTo(target: LinkTarget, host?: string | null): string {
   switch (target.kind) {
     case 'session':
       return `huli://session/${encodeURIComponent(target.id)}${suffix([])}`
+    case 'artifact':
+      return `huli://artifact/${encodeURIComponent(target.id)}${suffix([
+        ['version', target.version === null ? '' : String(target.version)],
+      ])}`
     case 'new':
       return `huli://new${suffix([])}`
     case 'search':
@@ -133,6 +147,12 @@ function navigate(target: LinkTarget): void {
   switch (target.kind) {
     case 'session':
       router.push({ pathname: '/session/[id]', params: { id: target.id } })
+      return
+    case 'artifact':
+      router.push({
+        pathname: '/artifact/[id]',
+        params: target.version ? { id: target.id, version: String(target.version) } : { id: target.id },
+      })
       return
     case 'new':
       router.push('/new')

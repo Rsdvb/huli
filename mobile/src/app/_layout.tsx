@@ -44,6 +44,7 @@ export default function Layout() {
             <Stack.Screen name="settings/licenses" options={{ headerShown: false }} />
             <Stack.Screen name="archived" options={{ headerShown: false }} />
             <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
+            <Stack.Screen name="artifact/[id]" options={{ headerShown: false }} />
             <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />
             <Stack.Screen name="search" options={{ headerShown: false, animation: 'fade' }} />
             <Stack.Screen name="pair" options={{ headerShown: false, presentation: 'modal' }} />

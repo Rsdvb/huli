@@ -5,6 +5,7 @@
 import { memo, useState } from 'react'
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry } from '@shared/thread'
+import { openArtifact } from '../artifacts'
 import { useSessionRows } from '../ui/session/context'
 import { copyText, plainText, showMenu } from '../ui/session/feedback'
 import { spanText } from '../ui/session/format'
@@ -279,7 +280,18 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
         />
       )
     case 'artifact':
-      return <Note icon={G.artifact} text="Artifact" detail={entry.title} />
+      return (
+        <Note
+          icon={G.artifact}
+          text="Artifact"
+          detail={entry.title}
+          onPress={
+            entry.action === 'delete'
+              ? undefined
+              : () => openArtifact(entry.artifactId)
+          }
+        />
+      )
     default:
       return null
   }

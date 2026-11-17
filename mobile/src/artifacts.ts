@@ -3,6 +3,7 @@
 // app captures (`artifacts.thumbnail`) and the phone asks for a few at a time as cards appear.
 
 import { useEffect, useSyncExternalStore } from 'react'
+import { router } from 'expo-router'
 import type { ArtifactSummary, ThumbnailPage } from '@shared/artifacts'
 import { THUMBNAIL_PAGES } from '@shared/artifacts'
 import { CANVAS_FILE, parseCanvasDoc } from '@shared/canvas-doc'
@@ -26,6 +27,14 @@ export const KIND_ICON: Record<ArtifactKind, IconName> = {
   slides: 'slides',
   web: 'globe',
   canvas: 'canvas',
+}
+
+/** Opens the artifact full screen, at its latest version or `version`. */
+export function openArtifact(id: string, version?: number | null): void {
+  router.push({
+    pathname: '/artifact/[id]',
+    params: version ? { id, version: String(version) } : { id },
+  })
 }
 
 export function artifactKind(a: Pick<ArtifactSummary, 'type' | 'pages' | 'canvas'>): ArtifactKind {

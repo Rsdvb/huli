@@ -8,6 +8,8 @@ const { getDefaultConfig } = require('expo/metro-config')
 const projectRoot = __dirname
 const shared = path.resolve(projectRoot, '../src/shared')
 const appEntry = path.join(projectRoot, 'index.ts')
+// The artifact page runtime, which Vite builds for the desktop; here, the committed build of it.
+const pageRuntime = path.join(projectRoot, 'src/artifact-view/page-runtime.generated.ts')
 
 const config = getDefaultConfig(projectRoot)
 
@@ -18,6 +20,7 @@ config.resolver.blockList = [/src[\\/]shared[\\/]node_modules[\\/].*/]
 const upstream = config.resolver.resolveRequest
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const resolve = upstream ?? context.resolveRequest
+  if (moduleName === 'virtual:kettu-page-runtime') return resolve(context, pageRuntime, platform)
   if (moduleName.startsWith('@shared/')) {
     const target = path.join(shared, moduleName.slice('@shared/'.length))
     return resolve(context, target, platform)
