@@ -31,6 +31,8 @@ export interface SessionPalette {
   menu: string
   menuSolid: string
   menuActive: string
+  /** The light dimming behind an open popover menu. */
+  menuScrim: string
   /** The context bar's small fixed costs, after the four colored kinds, and the buffer. */
   contextGrays: readonly [string, string, string]
   contextBuffer: string
@@ -64,6 +66,7 @@ const dark: SessionPalette = {
   menu: 'rgba(36,37,42,0.62)',
   menuSolid: '#24252A',
   menuActive: 'rgba(255,255,255,0.09)',
+  menuScrim: 'rgba(0,0,0,0.32)',
   contextGrays: ['#9A9AA1', '#7C7C84', '#62626A'],
   contextBuffer: 'rgba(255,255,255,0.22)',
   stop: '#F2F2F5',
@@ -107,6 +110,7 @@ const light: SessionPalette = {
   menu: 'rgba(250,250,252,0.72)',
   menuSolid: '#FAFAFC',
   menuActive: 'rgba(0,0,0,0.06)',
+  menuScrim: 'rgba(0,0,0,0.12)',
   contextGrays: ['#8E8E96', '#A8A8AF', '#C2C2C8'],
   contextBuffer: 'rgba(0,0,0,0.18)',
   stop: '#16161A',

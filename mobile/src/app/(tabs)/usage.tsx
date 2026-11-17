@@ -3,7 +3,7 @@
 // year's activity, the filters, the trend, the breakdown by model or project, the facts and the
 // token composition, as the computer counts them.
 
-import { useMemo, useRef, useState, type ComponentRef } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, LimitsReason, PlanLimit } from '@shared/agent-host'
 import type { UsageScope } from '@shared/usage'
 import { TopBar, useScrollTopOnTabPress } from '../../components/shell'
@@ -25,7 +26,6 @@ import { BottomSheet } from '../../ui/BottomSheet'
 import { Card } from '../../ui/Card'
 import { BarChart, ConcentricRings, Donut, Ring } from '../../ui/charts'
 import { EmptyState } from '../../ui/EmptyState'
-import { useMinimizingTabBar } from '../../ui/GlassTabBar'
 import { haptic } from '../../ui/haptics'
 import { useContentWidth } from '../../ui/layout'
 import { Icon } from '../../ui/Icon'
@@ -165,8 +165,7 @@ function limitColor(c: Palette, limit: PlanLimit): string {
 export default function Usage() {
   const { c } = useTokens()
   const { link, agents, state, host } = useHost()
-  const minimize = useMinimizingTabBar()
-  const header = useCollapsingHeader({ onScroll: minimize })
+  const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
   const [choice, setChoice] = useState<RangeChoice>({ kind: '1' })
@@ -181,6 +180,15 @@ export default function Usage() {
   const [detail, setDetail] = useState<string | null>(null)
   const [hour, setHour] = useState<number | null>(null)
   const connected = state.kind === 'connected'
+
+  // A session's plan usage leads here filtered to its agent; `at` tells one visit from the next.
+  const params = useLocalSearchParams<{ agent?: string; at?: string }>()
+  useEffect(() => {
+    if (!params.agent) return
+    setHour(null)
+    setAgent(params.agent)
+    scroll.current?.scrollTo({ y: 0, animated: false })
+  }, [params.agent, params.at])
   const usage = useUsage(link, connected, choice, wanted)
   const { read } = usage
   const hostName = host?.name ?? '电脑'

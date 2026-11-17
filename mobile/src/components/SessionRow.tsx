@@ -1,9 +1,12 @@
 // One session in a list: its agent's avatar, its title, the project it is in and how it is doing,
 // and when it last changed. Swipes and long-press come from the list that holds it.
 
-import { memo } from 'react'
-import { StyleSheet, Text, View } from 'react-native'
-import type { SessionSummary } from '@shared/agent-host'
+import { memo, useEffect, useState } from 'react'
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import Reanimated, { FadeInDown } from 'react-native-reanimated'
+import Svg, { Circle } from 'react-native-svg'
+import { Bot } from 'lucide-react-native'
+import type { PlanProgress, SessionSummary } from '@shared/agent-host'
 import { folder, listTime, sessionState, sessionTitle, type SessionState } from '../sessions'
 import { AgentAvatar, type AvatarBadge } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
@@ -37,8 +40,116 @@ function stateColor(c: Palette, kind: SessionState): string {
   }[kind]
 }
 
+/** A session's sub-agents as its row counts them: those running, else all of them. */
+export interface SubagentCount {
+  count: number
+  running: boolean
+}
+
+/** The sub-agents of each session, as the desktop's row badge counts them. */
+export function subagentCounts(sessions: Iterable<SessionSummary>): Map<string, SubagentCount> {
+  const tally = new Map<string, { all: number; running: number }>()
+  for (const s of sessions) {
+    if (s.parentId === null || s.origin !== 'subagent') continue
+    const t = tally.get(s.parentId) ?? { all: 0, running: 0 }
+    t.all += 1
+    if (s.status === 'running' || s.status === 'awaiting_permission' || s.status === 'starting')
+      t.running += 1
+    tally.set(s.parentId, t)
+  }
+  const out = new Map<string, SubagentCount>()
+  // Finished sub-agents show only while the parent itself still runs, as a count without a spinner.
+  for (const [id, t] of tally) {
+    if (t.running > 0) out.set(id, { count: t.running, running: true })
+    else out.set(id, { count: t.all, running: false })
+  }
+  return out
+}
+
+/** How long a running turn has gone, as the row's time column shows it. */
+export function elapsedText(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} 分钟`
+  const h = Math.floor(m / 60)
+  return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`
+}
+
+/** Re-renders every `everyMs` while `on`, for a clock that counts up. */
+function useTick(on: boolean, everyMs: number): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!on) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), everyMs)
+    return () => clearInterval(id)
+  }, [on, everyMs])
+  return now
+}
+
+/** The plan's progress as a small ring and done/total, as the desktop's row shows it. */
+function PlanRing(props: { plan: PlanProgress }) {
+  const { c } = useTokens()
+  const side = 15
+  const stroke = 2
+  const r = (side - stroke) / 2
+  const length = 2 * Math.PI * r
+  const share = Math.min(1, props.plan.done / props.plan.total)
+  return (
+    <View
+      style={styles.planRing}
+      accessibilityLabel={`计划完成 ${props.plan.done}/${props.plan.total}`}
+    >
+      <Svg width={side} height={side} style={{ transform: [{ rotate: '-90deg' }] }}>
+        <Circle
+          cx={side / 2}
+          cy={side / 2}
+          r={r}
+          stroke={c.fillStrong}
+          strokeWidth={stroke}
+          fill="none"
+        />
+        <Circle
+          cx={side / 2}
+          cy={side / 2}
+          r={r}
+          stroke={c.success}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${length * share} ${length}`}
+          fill="none"
+        />
+      </Svg>
+      <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>
+        {props.plan.done}/{props.plan.total}
+      </Text>
+    </View>
+  )
+}
+
+/** The sub-agents' count on a row: a bot, the number, and a spinner while any runs. */
+function SubagentBadge(props: { subagents: SubagentCount }) {
+  const { c } = useTokens()
+  const { count, running } = props.subagents
+  return (
+    <View
+      style={[styles.subagents, { backgroundColor: c.fill, borderColor: c.border }]}
+      accessibilityLabel={running ? `${count} 个子 Agent 在运行` : `${count} 个子 Agent`}
+    >
+      <Bot size={11} color={c.tint} strokeWidth={2.2} />
+      <Text style={[styles.subagentText, { color: c.tint }]}>{count}</Text>
+      {running && (
+        <ActivityIndicator size="small" color={c.textTertiary} style={styles.subagentSpin} />
+      )}
+    </View>
+  )
+}
+
 export const SessionRow = memo(function SessionRow(props: {
   session: SessionSummary
+  /** Its sub-agents, counted by `subagentCounts`. */
+  subagents?: SubagentCount
   agentName: string | undefined
   /** The project's name as the computer names it, if known. */
   projectName: string | undefined
@@ -50,6 +161,8 @@ export const SessionRow = memo(function SessionRow(props: {
   end?: SwipeAction
   /** The session open beside the list (iPad). */
   selected?: boolean
+  /** New to the list: it fades and slides in, on the UI thread. */
+  appear?: boolean
   onPress(): void
   onLongPress(): void
 }) {
@@ -58,6 +171,13 @@ export const SessionRow = memo(function SessionRow(props: {
   const state = sessionState(s)
   const place = s.scratch ? '无项目' : (props.projectName ?? folder(s.projectPath))
   const plan = s.plan && s.plan.total > 0 ? s.plan : null
+  const running = s.status === 'running' || s.status === 'starting'
+  const since = running ? (s.turnStartedAt ?? null) : null
+  const now = useTick(since !== null, 15_000)
+  // A running row says how long its turn has gone; the rest say when they last changed.
+  const time = since !== null ? elapsedText(now - since) : listTime(props.time ?? s.updatedAt)
+  // The avatar's badge already says it runs; the meta line keeps only what asks for the user.
+  const stateText = state && state.kind !== 'live' ? state : null
 
   const row = (
     <Press
@@ -83,9 +203,12 @@ export const SessionRow = memo(function SessionRow(props: {
           <Text style={[typeScale.rowTitle, styles.title, { color: c.text }]} numberOfLines={1}>
             {sessionTitle(s)}
           </Text>
-          <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>
-            {listTime(props.time ?? s.updatedAt)}
-          </Text>
+          {props.subagents && (running || props.subagents.running) ? (
+            <SubagentBadge subagents={props.subagents} />
+          ) : null}
+          <View style={{ flex: 1 }} />
+          {plan && running && !props.snippet ? <PlanRing plan={plan} /> : null}
+          <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>{time}</Text>
         </View>
         {props.snippet ? (
           <Text style={[typeScale.footnote, { color: c.textSecondary }]} numberOfLines={2}>
@@ -100,21 +223,23 @@ export const SessionRow = memo(function SessionRow(props: {
           >
             {place}
           </Text>
-          {state && (
+          {stateText && (
             <Text
-              style={[typeScale.footnote, { color: stateColor(c, state.kind), fontWeight: '500' }]}
+              style={[
+                typeScale.footnote,
+                { color: stateColor(c, stateText.kind), fontWeight: '500' },
+              ]}
               numberOfLines={1}
             >
-              {state.text}
+              {stateText.text}
             </Text>
           )}
-          {plan && !props.snippet && (
+          {plan && running && plan.current && !props.snippet && (
             <Text
               style={[typeScale.footnote, styles.plan, { color: c.textTertiary }]}
               numberOfLines={1}
             >
-              计划 {plan.done}/{plan.total}
-              {plan.current ? ` · ${plan.current.text}` : ''}
+              {plan.current.text}
             </Text>
           )}
         </View>
@@ -122,13 +247,26 @@ export const SessionRow = memo(function SessionRow(props: {
     </Press>
   )
 
-  if (!props.start && !props.end) return row
-  return (
-    <SwipeRow start={props.start} end={props.end}>
-      {row}
-    </SwipeRow>
-  )
+  const body =
+    !props.start && !props.end ? (
+      row
+    ) : (
+      <SwipeRow start={props.start} end={props.end}>
+        {row}
+      </SwipeRow>
+    )
+  // Only a row that is new to the list comes in; one the list mounts again as it scrolls doesn't.
+  if (!props.appear) return body
+  return <Reanimated.View entering={ROW_ENTERING}>{body}</Reanimated.View>
 })
+
+const ROW_ENTERING = FadeInDown.springify()
+  .dampingRatio(0.84)
+  .duration(400)
+  .withInitialValues({
+    opacity: 0,
+    transform: [{ translateY: -8 }],
+  })
 
 const TITLE_WIDTHS = ['68%', '54%', '76%', '46%', '62%', '50%', '72%'] as const
 
@@ -170,8 +308,21 @@ const styles = StyleSheet.create({
   selected: { marginHorizontal: space.sm, paddingHorizontal: space.md, borderRadius: radius.md },
   body: { flex: 1, gap: 3 },
   titleLine: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
-  title: { flex: 1 },
+  title: { flexShrink: 1 },
   time: { fontVariant: ['tabular-nums'], fontWeight: '400' },
+  planRing: { flexDirection: 'row', alignItems: 'center', gap: 5, marginRight: space.xs },
+  subagents: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    height: 20,
+    paddingLeft: 6,
+    paddingRight: 6,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  subagentText: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  subagentSpin: { transform: [{ scale: 0.55 }], width: 12, height: 12, marginLeft: -1 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
   place: { flexShrink: 1, maxWidth: '55%' },
   plan: { flexShrink: 1 },

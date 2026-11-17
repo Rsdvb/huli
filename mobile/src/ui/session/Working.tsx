@@ -5,8 +5,8 @@ import { useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from 'react-native'
 import { spanText } from './format'
 import { G, Icon } from './icons'
+import { GlassButton } from '../Glass'
 import { useSessionTokens } from './palette'
-import { PressScale } from './Press'
 
 function usePulse(): Animated.Value {
   const value = useRef(new Animated.Value(0.7)).current
@@ -144,20 +144,22 @@ export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPres
         },
       ]}
     >
-      <PressScale
-        onPress={props.onPress}
-        accessibilityRole="button"
-        accessibilityLabel="回到最新"
-        style={[
-          styles.toBottomButton,
-          { backgroundColor: c.glass, borderColor: c.borderStrong, shadowColor: c.shadow },
-        ]}
-      >
-        <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+      <View>
+        <GlassButton
+          size={40}
+          systemImage={G.toBottom.sf}
+          onPress={props.onPress}
+          accessibilityLabel="回到最新"
+        >
+          <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+        </GlassButton>
         {props.fresh && (
-          <View style={[styles.fresh, { backgroundColor: c.accent, borderColor: c.bg }]} />
+          <View
+            pointerEvents="none"
+            style={[styles.fresh, { backgroundColor: c.accent, borderColor: c.bg }]}
+          />
         )}
-      </PressScale>
+      </View>
     </Animated.View>
   )
 }
@@ -168,18 +170,6 @@ const styles = StyleSheet.create({
   dots: { width: 15, height: 15, flexDirection: 'row', flexWrap: 'wrap', gap: 1.5 },
   dot: { width: 4, height: 4, borderRadius: 2 },
   toBottom: { position: 'absolute', alignSelf: 'center', bottom: 12 },
-  toBottomButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 0.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
-  },
   fresh: {
     position: 'absolute',
     top: 1,

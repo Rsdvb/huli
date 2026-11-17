@@ -208,9 +208,9 @@ const withExtensionTarget = (config) =>
     for (const configuration of buildSettingsOf(project, target.pbxNativeTarget)) {
       const fromApp = appSettings.find((c) => c.name === configuration.name)?.buildSettings ?? {}
       Object.assign(configuration.buildSettings, {
-        // Opening the app from a share extension goes through UIApplication's open(_:), which
-        // the extension-only API set leaves out; Apple offers share extensions no other way.
-        APPLICATION_EXTENSION_API_ONLY: 'NO',
+        // Xcode refuses an extension without it; ShareViewController reaches UIApplication's
+        // open(_:) through the runtime instead.
+        APPLICATION_EXTENSION_API_ONLY: 'YES',
         CLANG_ENABLE_MODULES: 'YES',
         CODE_SIGN_ENTITLEMENTS: quote(`${TARGET}/${ENTITLEMENTS}`),
         CODE_SIGN_STYLE: 'Automatic',

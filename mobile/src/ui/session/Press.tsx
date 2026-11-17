@@ -1,16 +1,23 @@
 // Press feedback for the session screens: a control that settles a little smaller while held, a
 // round icon button, and the gentle layout change a disclosure opens with. All honor Reduce Motion.
 
-import { useRef, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import {
   AccessibilityInfo,
-  Animated,
   LayoutAnimation,
   Pressable,
   type PressableProps,
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import Reanimated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+} from 'react-native-reanimated'
+import type { SFSymbol } from 'expo-symbols'
+import { GlassButton, useGlassMode } from '../Glass'
+import { PRESS_IN, PRESS_OUT, spring } from '../motion'
 import { useSessionTokens } from './palette'
 
 let reduceMotion = false
@@ -42,16 +49,14 @@ export interface PressScaleProps extends Omit<PressableProps, 'style' | 'childre
 }
 
 export function PressScale(props: PressScaleProps) {
-  const { style, outerStyle, scale = 0.94, children, onPressIn, onPressOut, ...rest } = props
-  const value = useRef(new Animated.Value(1)).current
+  const { style, outerStyle, scale = 0.96, children, onPressIn, onPressOut, ...rest } = props
+  const reduce = useReducedMotion()
+  const value = useSharedValue(1)
+  const scaled = useAnimatedStyle(() => ({ transform: [{ scale: value.value }] }))
+  // In quickly and all the way, out a touch slower with a small overshoot, as iOS controls settle.
   const to = (target: number) => {
-    if (reduceMotion) return
-    Animated.spring(value, {
-      toValue: target,
-      useNativeDriver: true,
-      speed: 40,
-      bounciness: target === 1 ? 6 : 0,
-    }).start()
+    if (reduce) return
+    value.value = spring(target, target === 1 ? PRESS_OUT : PRESS_IN, reduce)
   }
   return (
     <Pressable
@@ -67,38 +72,48 @@ export function PressScale(props: PressScaleProps) {
       }}
     >
       {({ pressed }) => (
-        <Animated.View
-          style={[
-            style,
-            { transform: [{ scale: value }] },
-            pressed && reduceMotion ? { opacity: 0.6 } : null,
-          ]}
-        >
+        <Reanimated.View style={[style, scaled, pressed && reduce ? { opacity: 0.6 } : null]}>
           {children}
-        </Animated.View>
+        </Reanimated.View>
       )}
     </Pressable>
   )
 }
 
-/** A round icon button on a soft fill, as the header and the composer use. */
+/**
+ * A round icon button on a soft fill, as the header and the composer use. Glass is Liquid Glass
+ * where the system has it; accent is glass tinted with Huli's orange there, a solid disc elsewhere.
+ */
 export function RoundButton(
   props: Omit<PressScaleProps, 'children'> & {
     size?: number
     tone?: 'fill' | 'glass' | 'accent' | 'warning'
+    /** The icon as an SF Symbol, for the system's own glass button where there is one. */
+    systemImage?: SFSymbol
     children: ReactNode
   },
 ) {
   const { c, s } = useSessionTokens()
-  const { size = 40, tone = 'fill', style, disabled, ...rest } = props
-  const background =
-    tone === 'accent'
-      ? c.accent
-      : tone === 'warning'
-        ? s.warningSoft
-        : tone === 'glass'
-          ? c.glass
-          : c.fill
+  const mode = useGlassMode()
+  const { size = 40, tone = 'fill', style, disabled, systemImage, ...rest } = props
+  if (tone === 'glass' || (tone === 'accent' && mode === 'liquid')) {
+    const { scale: _scale, outerStyle, ...pressable } = rest
+    return (
+      <GlassButton
+        {...pressable}
+        silent
+        size={size}
+        {...(systemImage ? { systemImage } : {})}
+        {...(tone === 'accent' ? { symbolColor: c.onAccent } : {})}
+        disabled={disabled}
+        elevated={tone === 'glass'}
+        {...(tone === 'accent' ? { tint: c.accent } : {})}
+        {...(outerStyle ? { outerStyle } : {})}
+        style={style}
+      />
+    )
+  }
+  const background = tone === 'accent' ? c.accent : tone === 'warning' ? s.warningSoft : c.fill
   return (
     <PressScale
       hitSlop={6}
@@ -115,7 +130,6 @@ export function RoundButton(
           backgroundColor: background,
           opacity: disabled ? 0.38 : 1,
         },
-        tone === 'glass' ? { borderWidth: 0.5, borderColor: c.borderStrong } : null,
         style,
       ]}
     />

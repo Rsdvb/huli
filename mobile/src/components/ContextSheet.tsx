@@ -1,9 +1,10 @@
 // What fills a session's context, from the status line's ring: how full it is, a bar of its parts
 // and their rows by the desktop's grouping (features/session/composer/context-bar.ts), the prompt
-// cache's time left, and the plan's windows on the computer.
+// cache's time left, and the plan's windows on the computer, whose line opens the plan's usage.
 
 import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
+import Svg, { ClipPath, Defs, G as SvgGroup, Path, Pattern, Rect } from 'react-native-svg'
 import type { AgentStatus, ContextList } from '@shared/agent-host'
 import type { ContextBreakdown } from '@shared/context'
 import { expiryOf, knownExpiry, modelOption } from '@shared/prompt-cache'
@@ -11,10 +12,15 @@ import type { HostLink } from '@shared/remote/link'
 import type { SessionView } from '@shared/thread'
 import { errorText } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
+import { Skeleton } from '../ui/Skeleton'
+import { haptic } from '../ui/session/feedback'
 import { clockTime } from '../ui/session/format'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import {
-  limitColor,
+  isExhausted,
+  leftText,
+  limitTextColor,
+  moneyText,
   planName,
   resetText,
   tokensText,
@@ -27,6 +33,7 @@ import { gentle } from '../ui/session/Press'
 import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
 import { modelName, optionOf, shownChoice } from './ConfigMenus'
+import { LimitChip, PlanUsageSheet, leadLimits, useTicking } from './PlanUsageSheet'
 
 type Category = ContextBreakdown['categories'][number]
 type Part = { kind: 'source'; color: number } | { kind: 'buffer' } | { kind: 'free' }
@@ -109,7 +116,8 @@ export function ContextSheet(props: {
   const { session, agent, link, sessionId } = props
   const [read, setRead] = useState<Read>({ kind: 'idle' })
   const [open, setOpen] = useState<string | null>(null)
-  const [now, setNow] = useState(Date.now())
+  const [usageOpen, setUsageOpen] = useState(false)
+  const now = useTicking(props.visible)
   const running = session?.status === 'running' || session?.status === 'awaiting_permission'
   const reports = !!agent?.capabilities.context
   const canRead = reports && (!running || !!agent?.capabilities.liveContext)
@@ -123,14 +131,15 @@ export function ContextSheet(props: {
   }, [link, sessionId])
 
   useEffect(() => {
-    if (!props.visible || !props.connected) return
-    setNow(Date.now())
+    if (!props.visible) {
+      setUsageOpen(false)
+      return
+    }
+    if (!props.connected) return
     if (canRead) load()
-    if (agent) {
+    if (agent?.capabilities.reports) {
       void link.request('agents.refreshLimits', { agentId: agent.id }).catch(() => {})
     }
-    const timer = setInterval(() => setNow(Date.now()), 15_000)
-    return () => clearInterval(timer)
     // Read once each time the sheet opens; later snapshots come with the host's pushes.
   }, [props.visible, props.connected])
 
@@ -177,11 +186,19 @@ export function ContextSheet(props: {
   const limits = agent?.limits ?? []
   const plan = planName(agent?.account ?? null)
   const subscribed = agent?.account ? agent.account.kind === 'account' : limits.length > 0
+  const lead = leadLimits(limits, now)
+  const rest = limits.filter((limit) => !lead.includes(limit))
+  const openUsage = () => {
+    haptic.tap()
+    setUsageOpen(true)
+  }
 
   return (
     <BottomSheet visible={props.visible} onClose={props.onClose}>
       <View style={styles.head}>
-        <Text style={[styles.title, { color: c.text }]}>上下文</Text>
+        <Text style={[styles.title, { color: c.text }]} accessibilityRole="header">
+          上下文
+        </Text>
         <Text style={[styles.meta, { color: c.textSecondary }]} numberOfLines={1}>
           {[modelLabel, size > 0 ? `${tokensText(size)} 窗口` : null].filter(Boolean).join(' · ')}
         </Text>
@@ -202,27 +219,16 @@ export function ContextSheet(props: {
       )}
 
       {size > 0 && (
-        <View style={[styles.bar, { backgroundColor: c.fillStrong }]}>
-          {(
-            rows ?? [
-              { name: 'used', tokens: used, share: null, part: { kind: 'source', color: 0 } },
-            ]
-          )
-            .filter((row) => row.tokens > 0 && row.part.kind !== 'free')
-            .map((row, index) => (
-              <View
-                key={`${index}-${row.name}`}
-                style={{
-                  flex: row.tokens,
-                  backgroundColor: rows
-                    ? partColor(row.part, c, s.contextGrays, s.contextBuffer)
-                    : c.textTertiary,
-                  marginRight: 1,
-                }}
-              />
-            ))}
-          <View style={{ flex: Math.max(0, size - (rows ? sumUsed(rows) : used)) }} />
-        </View>
+        <ContextBar
+          size={size}
+          parts={(rows ?? [{ name: 'used', tokens: used, share: null, part: { kind: 'free' } }])
+            .filter((row) => row.tokens > 0 && (!rows || row.part.kind !== 'free'))
+            .map((row) => ({
+              tokens: row.tokens,
+              color: rows ? partColor(row.part, c, s.contextGrays, s.contextBuffer) : tone,
+              hatched: row.part.kind === 'buffer',
+            }))}
+        />
       )}
 
       {rows ? (
@@ -241,15 +247,18 @@ export function ContextSheet(props: {
                   accessibilityLabel={`${rowName(row.name)}，${tokensText(row.tokens)} tokens，${Math.round(rowShare)}%`}
                   style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
                 >
-                  <View
-                    style={[
-                      styles.swatch,
-                      {
-                        backgroundColor: partColor(row.part, c, s.contextGrays, s.contextBuffer),
-                      },
-                      row.part.kind === 'free' && { opacity: 0.6 },
-                    ]}
-                  />
+                  {row.part.kind === 'buffer' ? (
+                    <HatchSwatch color={s.contextGrays[0]} />
+                  ) : (
+                    <View
+                      style={[
+                        styles.swatch,
+                        {
+                          backgroundColor: partColor(row.part, c, s.contextGrays, s.contextBuffer),
+                        },
+                      ]}
+                    />
+                  )}
                   <Text
                     style={[
                       styles.rowName,
@@ -265,7 +274,14 @@ export function ContextSheet(props: {
                     </View>
                   )}
                   <View style={{ flex: 1 }} />
-                  <Text style={[styles.value, { color: c.text }]}>{tokensText(row.tokens)}</Text>
+                  <Text
+                    style={[
+                      styles.value,
+                      { color: row.part.kind === 'free' ? c.textSecondary : c.text },
+                    ]}
+                  >
+                    {tokensText(row.tokens)}
+                  </Text>
                   <Text style={[styles.share, { color: c.textSecondary }]}>
                     {Math.round(rowShare)}%
                   </Text>
@@ -292,9 +308,13 @@ export function ContextSheet(props: {
           ))}
         </View>
       ) : read.kind === 'loading' && size > 0 ? (
-        <View style={styles.state}>
-          <ActivityIndicator size="small" color={c.textSecondary} />
-          <Text style={[styles.note, { color: c.textSecondary }]}>正在读取构成…</Text>
+        <View style={styles.loading} accessibilityLabel="正在读取上下文构成">
+          {(['80%', '60%', '66%'] as const).map((width) => (
+            <View key={width} style={styles.row}>
+              <Skeleton width={SWATCH} height={SWATCH} radius={3} />
+              <Skeleton width={width} height={12} />
+            </View>
+          ))}
         </View>
       ) : read.kind === 'error' ? (
         <View style={styles.state}>
@@ -309,48 +329,71 @@ export function ContextSheet(props: {
 
       {expiry && <CacheBlock expiry={expiry} used={used} now={now} />}
 
-      {subscribed && agent && (
+      {(subscribed && agent) || usage?.tokens || usage?.cost ? (
         <View style={styles.plan}>
-          <Text style={[styles.section, { color: c.textSecondary }]}>
-            {props.hostName} 上的套餐用量
-          </Text>
-          <View style={styles.planHead}>
-            <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={20} />
-            <Text style={[styles.planName, { color: c.text }]} numberOfLines={1}>
-              {plan ?? agent.name}
-            </Text>
-          </View>
-          {limits.length === 0 ? (
-            <Text style={[styles.note, { color: c.textSecondary }]}>
-              {agent.limitsError ? `没能读到用量：${agent.limitsError}` : '还没有读到用量。'}
-            </Text>
-          ) : (
-            limits.map((limit) => (
-              <View key={limit.window} style={styles.limitRow}>
-                <UsageRing
-                  percent={limit.usedPercent ?? 0}
-                  color={limitColor(limit, c)}
-                  track={c.fillStrong}
-                  size={15}
-                />
-                <Text style={[styles.limitName, { color: c.textSecondary }]} numberOfLines={1}>
-                  {windowName(limit)}
+          {subscribed && agent && (
+            <>
+              <Text style={[styles.section, { color: c.textSecondary }]}>
+                {props.hostName} 上的套餐用量
+              </Text>
+              <Pressable
+                onPress={openUsage}
+                accessibilityRole="button"
+                accessibilityLabel={[
+                  plan ?? agent.name,
+                  ...lead.map((l) =>
+                    isExhausted(l, now)
+                      ? `${windowName(l)}已用完`
+                      : `${windowName(l)}已用 ${Math.round(l.usedPercent ?? 0)}%`,
+                  ),
+                  '查看套餐用量',
+                ].join('，')}
+                style={({ pressed }) => [styles.planHead, { opacity: pressed ? 0.55 : 1 }]}
+              >
+                <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={20} />
+                <Text style={[styles.planName, { color: c.text }]} numberOfLines={1}>
+                  {plan ?? agent.name}
                 </Text>
-                <Text style={[styles.limitValue, { color: c.text }]} numberOfLines={1}>
-                  {limit.usedPercent === null ? '—' : `${Math.round(limit.usedPercent)}%`}
-                  {limit.resetsAt ? ` · ${resetText(limit.resetsAt, now)}` : ''}
+                <View style={{ flex: 1 }} />
+                {lead.map((limit) => (
+                  <LimitChip key={limit.window} limit={limit} now={now} />
+                ))}
+                <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
+              </Pressable>
+              {limits.length === 0 ? (
+                <Text style={[styles.note, { color: c.textSecondary }]}>
+                  {agent.limitsError
+                    ? `没能读到套餐用量：${agent.limitsError}`
+                    : '还没有读到套餐用量。'}
                 </Text>
-              </View>
-            ))
+              ) : (
+                rest.map((limit) => (
+                  <View key={limit.window} style={styles.limitRow}>
+                    <Text style={[styles.limitName, { color: c.textSecondary }]} numberOfLines={1}>
+                      {windowName(limit)}
+                    </Text>
+                    <Text style={[styles.limitValue, { color: c.text }]} numberOfLines={1}>
+                      <Text style={{ color: limitTextColor(limit, c, c.text) }}>
+                        {isExhausted(limit, now)
+                          ? '已用完'
+                          : limit.usedPercent === null
+                            ? '—'
+                            : `${Math.round(limit.usedPercent)}%`}
+                      </Text>
+                      {limit.resetsAt ? ` · ${resetText(limit.resetsAt, now)}` : ''}
+                    </Text>
+                  </View>
+                ))
+              )}
+            </>
           )}
           {usage?.tokens || usage?.cost ? (
             <View style={styles.limitRow}>
-              <View style={{ width: 15 }} />
               <Text style={[styles.limitName, { color: c.textSecondary }]}>本会话</Text>
               <Text style={[styles.limitValue, { color: c.text }]}>
                 {[
                   usage.tokens ? `${tokensText(usage.tokens.total)} token` : null,
-                  usage.cost ? `≈ ${usage.cost.amount.toFixed(2)} ${usage.cost.currency}` : null,
+                  usage.cost ? `≈ ${moneyText(usage.cost.amount, usage.cost.currency)}` : null,
                 ]
                   .filter(Boolean)
                   .join(' · ')}
@@ -358,14 +401,96 @@ export function ContextSheet(props: {
             </View>
           ) : null}
         </View>
-      )}
+      ) : null}
+
+      <PlanUsageSheet
+        visible={usageOpen}
+        onClose={() => setUsageOpen(false)}
+        agentId={agent?.id ?? null}
+        usage={usage}
+        onLeave={props.onClose}
+      />
     </BottomSheet>
   )
 }
 
-function sumUsed(rows: ContextRow[]): number {
-  return rows.reduce((sum, row) => (row.part.kind === 'free' ? sum : sum + row.tokens), 0)
+const BAR = 8
+const BAR_GAP = 1.5
+// A part this small still shows as a sliver, as the desktop's bar keeps every source in sight.
+const SLIVER = 2
+
+/** The context as one bar: each part in its color, the buffer hatched, then what is free. */
+function ContextBar(props: {
+  size: number
+  parts: { tokens: number; color: string; hatched: boolean }[]
+}) {
+  const { c, s } = useSessionTokens()
+  const [width, setWidth] = useState(0)
+  let x = 0
+  const rects = props.parts.map((part, index) => {
+    const w = Math.max(SLIVER, (part.tokens / props.size) * width - BAR_GAP)
+    const rect = { x, w, part, index }
+    x += w + BAR_GAP
+    return rect
+  })
+  return (
+    <View
+      style={styles.bar}
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      {width > 0 && (
+        <Svg width={width} height={BAR}>
+          <Defs>
+            <ClipPath id="bar">
+              <Rect x={0} y={0} width={width} height={BAR} rx={BAR / 2} />
+            </ClipPath>
+            <Pattern
+              id="hatch"
+              patternUnits="userSpaceOnUse"
+              width={4}
+              height={4}
+              patternTransform="rotate(45)"
+            >
+              <Rect x={0} y={0} width={1.6} height={4} fill={s.contextGrays[0]} />
+            </Pattern>
+          </Defs>
+          <SvgGroup clipPath="url(#bar)">
+            <Rect x={0} y={0} width={width} height={BAR} fill={c.fillStrong} />
+            {rects.map(({ x: left, w, part, index }) => (
+              <Rect
+                key={index}
+                x={left}
+                y={0}
+                width={w}
+                height={BAR}
+                fill={part.hatched ? 'url(#hatch)' : part.color}
+              />
+            ))}
+          </SvgGroup>
+        </Svg>
+      )}
+    </View>
+  )
 }
+
+/** The buffer's swatch: two strokes, as the desktop's hatched key. */
+function HatchSwatch(props: { color: string }) {
+  return (
+    <Svg width={SWATCH} height={SWATCH} viewBox="0 0 10 10">
+      <Path
+        d="M1 7.5 L5 2.5 M5 9 L9 4"
+        stroke={props.color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </Svg>
+  )
+}
+
+const SWATCH = 10
 
 function ListItems(props: { list: ContextList }) {
   const { c } = useSessionTokens()
@@ -392,13 +517,12 @@ function CacheBlock(props: {
   const { c } = useSessionTokens()
   const { expiry, now } = props
   const left = Math.max(0, expiry.expiresAt - now)
-  const minutes = Math.ceil(left / 60_000)
-  const leftText =
+  const state =
     left <= 0
       ? expiry.estimate
         ? '大概已经过期'
         : '已过期'
-      : `${expiry.estimate ? '大约' : ''}剩余 ${minutes >= 60 ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟` : `${minutes} 分钟`}`
+      : `${expiry.estimate ? '大约' : ''}剩余 ${leftText(left)}`
   const color = left <= 0 ? c.textTertiary : left <= 60_000 ? c.warning : c.tint
   return (
     <View style={styles.cache}>
@@ -408,12 +532,12 @@ function CacheBlock(props: {
           percent={(left / expiry.ttl) * 100}
           color={color}
           track={c.fillStrong}
-          size={30}
-          stroke={3.5}
+          size={24}
+          stroke={3}
         />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[styles.cacheLine, { color: c.text }]}>
-            {leftText} · 上次请求 {clockTime(expiry.lastRequestAt)}
+            {state} · 上次请求 {clockTime(expiry.lastRequestAt)}
           </Text>
           <Text style={[styles.note, { color: c.textSecondary }]}>
             {left > 0 ? '之后' : ''}下一条消息会按全价重新读取全部 {tokensText(props.used)}。
@@ -426,25 +550,20 @@ function CacheBlock(props: {
 
 const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'baseline', gap: 12, paddingHorizontal: 4 },
-  title: { fontSize: 20, fontWeight: '700' },
-  meta: { flex: 1, textAlign: 'right', fontSize: 14 },
+  title: { fontSize: 19, lineHeight: 25, fontWeight: '600' },
+  meta: { flex: 1, textAlign: 'right', fontSize: 15 },
   big: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: 4 },
-  percent: { fontSize: 40, lineHeight: 46, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  percent: { fontSize: 38, lineHeight: 44, fontWeight: '700', fontVariant: ['tabular-nums'] },
   used: { fontSize: 17, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  bar: {
-    flexDirection: 'row',
-    height: 10,
-    borderRadius: 5,
-    overflow: 'hidden',
-    marginHorizontal: 4,
-  },
+  bar: { height: BAR, marginHorizontal: 4 },
   rows: { paddingHorizontal: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 36 },
-  swatch: { width: 11, height: 11, borderRadius: 3 },
-  rowName: { fontSize: 16, flexShrink: 1 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 26 },
+  swatch: { width: SWATCH, height: SWATCH, borderRadius: 2.5 },
+  rowName: { fontSize: 15, flexShrink: 1 },
   value: { fontSize: 15, fontVariant: ['tabular-nums'], minWidth: 56, textAlign: 'right' },
   share: { fontSize: 15, fontVariant: ['tabular-nums'], minWidth: 44, textAlign: 'right' },
-  items: { paddingLeft: 19, paddingBottom: 6, gap: 4 },
+  loading: { paddingHorizontal: 4 },
+  items: { paddingLeft: 18, paddingBottom: 6, gap: 4 },
   item: { flexDirection: 'row', gap: 10 },
   itemName: { flex: 1, fontSize: 13 },
   itemValue: { fontSize: 13, fontVariant: ['tabular-nums'] },
@@ -455,10 +574,22 @@ const styles = StyleSheet.create({
   cache: { gap: 8, marginTop: 6 },
   cacheRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 4 },
   cacheLine: { fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  plan: { gap: 6, marginTop: 6, paddingBottom: 8 },
-  planHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
-  planName: { fontSize: 16, fontWeight: '600', flexShrink: 1 },
-  limitRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
+  plan: { gap: 4, marginTop: 6, paddingBottom: 8 },
+  planHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+    minHeight: 36,
+  },
+  planName: { fontSize: 16, fontWeight: '500', flexShrink: 1 },
+  limitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+    minHeight: 26,
+  },
   limitName: { fontSize: 15, flex: 1 },
-  limitValue: { fontSize: 15, fontVariant: ['tabular-nums'] },
+  limitValue: { fontSize: 15, fontWeight: '500', fontVariant: ['tabular-nums'] },
 })

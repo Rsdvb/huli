@@ -1,13 +1,14 @@
 // A new session: a greeting, the recent projects to choose one from (or none), and the same
 // composer as a session's, whose mode and model menus set what the session starts with and whose
 // model menu switches the agent; the status line names the computer, the project, which opens a
-// picker, and the branch it is on.
+// picker, the branch it is on, and the agent's plan usage.
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router } from 'expo-router'
-import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
+import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
@@ -23,10 +24,11 @@ import {
   usableAgents,
   type ConfigControl,
 } from '../components/ConfigMenus'
+import { PlanUsageSheet } from '../components/PlanUsageSheet'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
 import { useHost, useLink } from '../host'
-import { greeting, listTime } from '../sessions'
+import { folder, greeting, listTime } from '../sessions'
 import { HuliIcon } from '../ui/HuliMark'
 import { useComputer } from '../ui/session/computer'
 import { haptic } from '../ui/session/feedback'
@@ -34,6 +36,7 @@ import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../ui/session/Popover'
+import { NativeMenu } from '../ui/session/NativeMenu'
 import { StatusLine } from '../ui/session/StatusLine'
 
 export default function NewSession() {
@@ -51,17 +54,9 @@ export default function NewSession() {
 
   const agents = useMemo(() => usableAgents(host.agents), [host.agents])
   const projects = useMemo(
-    () => host.projects.filter((p) => !p.missing).sort((a, b) => b.lastOpenedAt - a.lastOpenedAt),
-    [host.projects],
+    () => recentProjects(host.projects, host.sessions),
+    [host.projects, host.sessions],
   )
-  const counts = useMemo(() => {
-    const byProject = new Map<string, number>()
-    for (const s of host.sessions.values()) {
-      if (s.scratch || s.parentId !== null || s.archivedAt !== null) continue
-      byProject.set(s.projectPath, (byProject.get(s.projectPath) ?? 0) + 1)
-    }
-    return byProject
-  }, [host.sessions])
 
   const [chosenAgent, setChosenAgent] = useState<string | null>(null)
   const agentId = chosenAgent ?? agents.find((a) => a.isDefault)?.id ?? agents[0]?.id ?? null
@@ -70,6 +65,16 @@ export default function NewSession() {
   const projectPath = chosenProject === undefined ? (projects[0]?.path ?? null) : chosenProject
   const project = projects.find((p) => p.path === projectPath)
   const [picks, setPicks] = useState<Record<string, string | boolean>>({})
+  const [usageOpen, setUsageOpen] = useState(false)
+  const connected = host.state.kind === 'connected'
+
+  // The chosen agent's plan, for the status line's ring; only one already running is asked, so
+  // that none starts just for the read.
+  const readsLimits = !!agent && agent.state === 'ready' && agent.capabilities.reports
+  useEffect(() => {
+    if (!connected || !readsLimits || !agentId) return
+    void link.request('agents.refreshLimits', { agentId }).catch(() => {})
+  }, [connected, readsLimits, agentId, link])
   const changes = useChanges(link, projectPath)
 
   const entry = options.options?.find((o) => o.agentId === agentId)
@@ -114,9 +119,10 @@ export default function NewSession() {
       key: p.path,
       name: p.name,
       path: p.path as string | null,
-      at: p.lastOpenedAt,
+      at: p.at as number | null,
+      count: p.count,
     })),
-    { key: '__none', name: '无项目', path: null, at: null as number | null },
+    { key: '__none', name: '无项目', path: null, at: null, count: 0 },
   ]
 
   const pickProject = (path: string | null) => {
@@ -141,6 +147,10 @@ export default function NewSession() {
             agent,
             c,
             switchAgent: agents.length > 1 ? { disabled: false } : null,
+            onUsage: () => {
+              menu.close()
+              setUsageOpen(true)
+            },
           }) ?? { entries: [], loading: !entry, empty: '这个 Agent 没有可选的模型' }
         )
       case 'more':
@@ -165,7 +175,7 @@ export default function NewSession() {
             key: row.key,
             label: row.name,
             icon: row.path === null ? G.file : G.folder,
-            ...(row.path ? { subtitle: `${counts.get(row.path) ?? 0} 个会话` } : {}),
+            ...(row.path ? { subtitle: `${row.count} 个会话` } : {}),
             checked: row.path === projectPath,
             onPress: () => pickProject(row.path),
           })),
@@ -218,9 +228,7 @@ export default function NewSession() {
                 onPress={() => pickProject(row.path)}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: on }}
-                accessibilityLabel={
-                  row.path ? `${row.name}，${counts.get(row.path) ?? 0} 个会话` : '无项目'
-                }
+                accessibilityLabel={row.path ? `${row.name}，${row.count} 个会话` : '无项目'}
                 style={({ pressed }) => [styles.project, pressed && { opacity: 0.6 }]}
               >
                 <View style={[styles.disc, { backgroundColor: c.avatar }]}>
@@ -240,7 +248,7 @@ export default function NewSession() {
                         {computer.name}
                         <Text style={{ color: c.text }}>
                           {'  '}
-                          {counts.get(row.path) ?? 0} 个会话
+                          {row.count} 个会话
                         </Text>
                       </>
                     ) : (
@@ -270,30 +278,48 @@ export default function NewSession() {
           disabled={!agentId}
           bottomInset={insets.bottom}
           onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
+          attachMenu={(anchor) => ({
+            root: 'attach',
+            pages,
+            popover: {
+              pages: ['mention'],
+              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+            },
+          })}
           left={
-            <ModeButton
-              mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
-              busy={false}
-              disabled={false}
-              labelled
-              anchor={modeAnchor}
-              onPress={() => menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })}
-            />
+            <NativeMenu source={{ root: 'mode', pages }}>
+              <ModeButton
+                mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
+                busy={false}
+                disabled={false}
+                labelled
+                anchor={modeAnchor}
+                onPress={() =>
+                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
+                }
+              />
+            </NativeMenu>
           }
           right={
             agent ? (
-              <ModelChip
-                agentId={agent.id}
-                harness={agent.harnessId}
-                model={model?.name ?? agent.name}
-                effort={effort?.name ?? null}
-                busy={false}
-                disabled={false}
-                anchor={modelAnchor}
-                onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 300 })
-                }
-              />
+              <NativeMenu source={{ root: 'model', pages }}>
+                <ModelChip
+                  agentId={agent.id}
+                  harness={agent.harnessId}
+                  model={model?.name ?? agent.name}
+                  effort={effort?.name ?? null}
+                  busy={false}
+                  disabled={false}
+                  anchor={modelAnchor}
+                  onPress={() =>
+                    menu.open('model', modelAnchor, {
+                      placement: 'above',
+                      align: 'end',
+                      width: 340,
+                    })
+                  }
+                />
+              </NativeMenu>
             ) : null
           }
           footer={
@@ -308,13 +334,54 @@ export default function NewSession() {
                 menu.open('projects', folderAnchor, { placement: 'above', align: 'center' })
               }
               branch={branch}
+              limits={limitsForModel(agent?.limits ?? [], model?.option)}
+              onLimitPress={() => {
+                haptic.tap()
+                setUsageOpen(true)
+              }}
             />
           }
         />
       </KeyboardAvoidingView>
+      <PlanUsageSheet visible={usageOpen} onClose={() => setUsageOpen(false)} agentId={agentId} />
       {menu.render(pages)}
     </View>
   )
+}
+
+interface RecentProject {
+  path: string
+  name: string
+  at: number
+  count: number
+}
+
+// The host's project list alone can miss folders its sessions are in (the home tab lists by
+// session), so the sessions' folders are merged in and named as the host names them when it does.
+function recentProjects(known: Project[], sessions: Map<string, SessionSummary>): RecentProject[] {
+  const byPath = new Map(known.map((p) => [p.path, p]))
+  const rows = new Map<string, RecentProject>()
+  for (const p of known) {
+    if (!p.missing) rows.set(p.path, { path: p.path, name: p.name, at: p.lastOpenedAt, count: 0 })
+  }
+  for (const s of sessions.values()) {
+    if (s.scratch || s.parentId !== null || s.archivedAt !== null) continue
+    const project = byPath.get(s.projectPath)
+    if (project?.missing) continue
+    const row = rows.get(s.projectPath)
+    if (row) {
+      row.at = Math.max(row.at, s.updatedAt)
+      row.count++
+    } else {
+      rows.set(s.projectPath, {
+        path: s.projectPath,
+        name: project?.name ?? folder(s.projectPath),
+        at: s.updatedAt,
+        count: 1,
+      })
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.at - a.at)
 }
 
 const styles = StyleSheet.create({

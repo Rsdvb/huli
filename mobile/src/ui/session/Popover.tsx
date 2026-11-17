@@ -16,12 +16,14 @@ import {
   type RefObject,
 } from 'react'
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Animated,
   BackHandler,
   Dimensions,
   Easing,
   Keyboard,
+  LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
@@ -32,6 +34,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
+import { Glass, useGlassMode } from '../Glass'
 import { haptic } from './feedback'
 import { G, Icon, type IconSpec } from './icons'
 import { useSessionTokens } from './palette'
@@ -60,6 +63,8 @@ export interface MenuRow {
   detail?: string
   /** Drawn at the row's end before any check or chevron, such as a usage ring. */
   trail?: ReactNode
+  /** Drawn on a line of its own under the label and subtitle, such as what is left of a limit. */
+  below?: ReactNode
   checked?: boolean
   destructive?: boolean
   disabled?: boolean
@@ -72,8 +77,37 @@ export interface MenuRow {
   keepOpen?: boolean
 }
 
+/** A choice of a few values, as the effort's levels: a segmented row in a native menu. */
+export interface MenuPicker {
+  label: string
+  options: { key: string; label: string }[]
+  value: string
+  onChange(value: string): void
+  disabled?: boolean
+}
+
 export type MenuEntry =
-  MenuRow | { kind: 'divider'; key: string } | { kind: 'custom'; key: string; node: ReactNode }
+  | MenuRow
+  | { kind: 'divider'; key: string }
+  | {
+      kind: 'custom'
+      key: string
+      node: ReactNode
+      /** What a native menu shows in the node's place; it is left out without one. */
+      picker?: MenuPicker
+    }
+
+/** A menu by its pages, for a control to open as the system's menu or as our popover. */
+export interface MenuSource {
+  /** The first page's id. */
+  root: string
+  pages(id: string): MenuPage | null
+  /**
+   * Opens a page a native menu cannot hold, such as one with a search field, as our popover;
+   * rows that lead there are buttons that call it.
+   */
+  popover?: { pages: readonly string[]; open(page: string): void }
+}
 
 export interface MenuPage {
   /** A page other than the first shows it beside its way back. */
@@ -119,6 +153,39 @@ function measure(ref: RefObject<ViewHandle | null>): Promise<Rect | null> {
   })
 }
 
+// Surfaces a menu must not cover, as the composer: a control inside one hangs its menu from the
+// surface's edge rather than its own, so the surface's outline never shows through the menu.
+const edges = new Set<RefObject<ViewHandle | null>>()
+
+/** Keeps menus opened from controls inside this view clear of it. */
+export function useMenuEdge(ref: RefObject<ViewHandle | null>): void {
+  useEffect(() => {
+    edges.add(ref)
+    return () => {
+      edges.delete(ref)
+    }
+  }, [ref])
+}
+
+const inside = (inner: Rect, outer: Rect) =>
+  inner.x >= outer.x - 1 &&
+  inner.y >= outer.y - 1 &&
+  inner.x + inner.width <= outer.x + outer.width + 1 &&
+  inner.y + inner.height <= outer.y + outer.height + 1
+
+/** The anchor, stretched vertically to the edges of a surface it sits in. */
+async function anchorRect(ref: RefObject<ViewHandle | null>): Promise<Rect | null> {
+  const rect = await measure(ref)
+  if (!rect) return null
+  for (const edge of edges) {
+    const outer = await measure(edge)
+    if (outer && outer.width > 0 && inside(rect, outer)) {
+      return { x: rect.x, width: rect.width, y: outer.y, height: outer.height }
+    }
+  }
+  return rect
+}
+
 export function usePopover(): Popover {
   const [state, setState] = useState<OpenState | null>(null)
   const [stack, setStack] = useState<string[]>([])
@@ -128,7 +195,7 @@ export function usePopover(): Popover {
   const open = useCallback(
     (id: string, anchor: RefObject<ViewHandle | null>, options: PopoverOptions = {}) => {
       anchorRef.current = anchor
-      void measure(anchor).then((rect) => {
+      void anchorRect(anchor).then((rect) => {
         if (!rect) return
         haptic.tap()
         setClosing(false)
@@ -148,7 +215,7 @@ export function usePopover(): Popover {
       if (!anchor) return
       // After the layout settles under the keyboard's new height.
       setTimeout(() => {
-        void measure(anchor).then((rect) => {
+        void anchorRect(anchor).then((rect) => {
           if (rect) setState((current) => (current ? { ...current, anchor: rect } : current))
         })
       }, 60)
@@ -179,8 +246,14 @@ export function usePopover(): Popover {
           stack={stack}
           closing={closing}
           build={build}
-          onPush={(page) => setStack((list) => [...list, page])}
-          onBack={() => setStack((list) => list.slice(0, -1))}
+          onPush={(page) => {
+            resize()
+            setStack((list) => [...list, page])
+          }}
+          onBack={() => {
+            resize()
+            setStack((list) => list.slice(0, -1))
+          }}
           onClose={close}
           onGone={gone}
         />
@@ -188,8 +261,22 @@ export function usePopover(): Popover {
   }
 }
 
+/** The menu grows or shrinks to the next page's height rather than jumping to it. */
+function resize(): void {
+  if (reduceMotion) return
+  LayoutAnimation.configureNext({
+    duration: 220,
+    update: { type: 'spring', springDamping: 0.86 },
+  })
+}
+
+let reduceMotion = false
+void AccessibilityInfo.isReduceMotionEnabled().then((on) => (reduceMotion = on))
+AccessibilityInfo.addEventListener('reduceMotionChanged', (on) => (reduceMotion = on))
+
 const MARGIN = 10
 const GAP = 8
+const MENU_RADIUS = 24
 
 function PopoverView(props: {
   state: OpenState
@@ -205,6 +292,15 @@ function PopoverView(props: {
   const { c, s, scheme } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const reduce = useReduceMotion()
+  const glassMode = useGlassMode()
+  // Which way the pages move: a page a row leads to comes in from the right, the way back from
+  // the left, as a navigation stack's do.
+  const depth = useRef(stack.length)
+  const direction = useRef(1)
+  if (stack.length !== depth.current) {
+    direction.current = stack.length > depth.current ? 1 : -1
+    depth.current = stack.length
+  }
   const root = useRef<ViewHandle>(null)
   const [origin, setOrigin] = useState<{ x: number; y: number; width: number; height: number }>()
   const shown = useRef(new Animated.Value(0)).current
@@ -295,9 +391,57 @@ function PopoverView(props: {
     placement === 'above'
       ? { bottom: frame.height - anchor.y + GAP }
       : { top: anchor.y + anchor.height + GAP }
-  const glass = Platform.OS === 'ios'
-
   const nested = stack.length > 1
+  const maxHeight = Math.max(160, room)
+  // The menu grows from the point of it nearest its control, so it springs out of the control.
+  const originX =
+    align === 'end'
+      ? '100%'
+      : align === 'center'
+        ? '50%'
+        : Math.max(0, Math.min(width, anchor.x + anchor.width / 2 - left))
+  const originY = placement === 'above' ? '100%' : '0%'
+
+  const content = page && (
+    <Animated.View
+      style={{
+        opacity: pageIn,
+        transform: [
+          {
+            translateX: pageIn.interpolate({
+              inputRange: [0, 1],
+              outputRange: [direction.current * 28, 0],
+            }),
+          },
+        ],
+      }}
+    >
+      {nested && (
+        <Pressable
+          onPress={() => {
+            haptic.pick()
+            props.onBack()
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`返回${page.title ? `，${page.title}` : ''}`}
+          style={({ pressed }) => [styles.back, pressed && { backgroundColor: s.menuActive }]}
+        >
+          <Icon icon={G.back} size={15} color={c.textSecondary} weight="semibold" />
+          <Text style={[styles.backTitle, { color: c.text }]} numberOfLines={1}>
+            {page.title ?? ''}
+          </Text>
+        </Pressable>
+      )}
+      <ScrollView
+        bounces={false}
+        keyboardShouldPersistTaps="handled"
+        style={{ maxHeight: maxHeight - (nested ? 48 : 0) }}
+        contentContainerStyle={styles.list}
+      >
+        <PageBody page={page} onPush={props.onPush} onClose={onClose} />
+      </ScrollView>
+    </Animated.View>
+  )
 
   return (
     <View
@@ -307,6 +451,10 @@ function PopoverView(props: {
         root.current?.measureInWindow((x, y, w, h) => setOrigin({ x, y, width: w, height: h }))
       }
     >
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { backgroundColor: s.menuScrim, opacity: shown }]}
+      />
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={onClose}
@@ -322,70 +470,50 @@ function PopoverView(props: {
             {
               left,
               width,
-              maxHeight: Math.max(160, room),
-              borderColor: c.borderStrong,
+              maxHeight,
               shadowColor: c.shadow,
-              backgroundColor: glass ? 'transparent' : s.menuSolid,
               opacity: shown,
-              transformOrigin: `${align === 'end' ? '100%' : align === 'center' ? '50%' : '0%'} ${placement === 'above' ? '100%' : '0%'}`,
+              transformOrigin: [originX, originY, 0],
               transform: [
                 {
                   scale: reduce
                     ? 1
-                    : shown.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1] }),
+                    : shown.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }),
                 },
               ],
             },
           ]}
         >
-          {glass && (
-            <>
-              <BlurView
-                style={StyleSheet.absoluteFill}
-                intensity={70}
-                tint={scheme === 'dark' ? 'systemThickMaterialDark' : 'systemThickMaterialLight'}
-              />
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: s.menu }]} />
-            </>
-          )}
-          <Animated.View
-            style={{
-              opacity: pageIn,
-              transform: [
+          {glassMode === 'liquid' ? (
+            <Glass radius={MENU_RADIUS} style={styles.panel}>
+              {content}
+            </Glass>
+          ) : (
+            <View
+              style={[
+                styles.panel,
+                styles.clip,
                 {
-                  translateX: pageIn.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [nested ? 18 : -18, 0],
-                  }),
+                  borderColor: c.borderStrong,
+                  backgroundColor: glassMode === 'blur' ? 'transparent' : s.menuSolid,
                 },
-              ],
-            }}
-          >
-            {nested && (
-              <Pressable
-                onPress={() => {
-                  haptic.pick()
-                  props.onBack()
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`返回${page.title ? `，${page.title}` : ''}`}
-                style={({ pressed }) => [styles.back, pressed && { backgroundColor: s.menuActive }]}
-              >
-                <Icon icon={G.back} size={15} color={c.textSecondary} weight="semibold" />
-                <Text style={[styles.backTitle, { color: c.text }]} numberOfLines={1}>
-                  {page.title ?? ''}
-                </Text>
-              </Pressable>
-            )}
-            <ScrollView
-              bounces={false}
-              keyboardShouldPersistTaps="handled"
-              style={{ maxHeight: Math.max(160, room) - (nested ? 48 : 0) }}
-              contentContainerStyle={styles.list}
+              ]}
             >
-              <PageBody page={page} onPush={props.onPush} onClose={onClose} />
-            </ScrollView>
-          </Animated.View>
+              {glassMode === 'blur' && (
+                <>
+                  <BlurView
+                    style={StyleSheet.absoluteFill}
+                    intensity={70}
+                    tint={
+                      scheme === 'dark' ? 'systemThickMaterialDark' : 'systemThickMaterialLight'
+                    }
+                  />
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: s.menu }]} />
+                </>
+              )}
+              {content}
+            </View>
+          )}
         </Animated.View>
       )}
     </View>
@@ -440,6 +568,35 @@ function PageBody(props: { page: MenuPage; onPush(page: string): void; onClose()
   )
 }
 
+/** A row's checkmark, which pops in as the row becomes the chosen one. */
+function Check(props: { color: string }) {
+  const reduce = useReduceMotion()
+  const shown = useRef(new Animated.Value(reduce ? 1 : 0)).current
+  useEffect(() => {
+    if (reduce) return
+    Animated.spring(shown, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 22,
+      bounciness: 10,
+    }).start()
+  }, [reduce, shown])
+  return (
+    <Animated.View
+      style={{
+        opacity: shown.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 1],
+          extrapolate: 'clamp',
+        }),
+        transform: [{ scale: shown.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }],
+      }}
+    >
+      <Icon icon={G.check} size={16} color={props.color} weight="semibold" />
+    </Animated.View>
+  )
+}
+
 function Row(props: { row: MenuRow; onPush(page: string): void; onClose(): void }) {
   const { c, s } = useSessionTokens()
   const { row } = props
@@ -479,7 +636,7 @@ function Row(props: { row: MenuRow; onPush(page: string): void; onClose(): void 
         </View>
       ) : null}
       <View style={styles.text}>
-        <Text style={[styles.label, { color }]} numberOfLines={1}>
+        <Text style={[styles.label, { color }]} numberOfLines={2}>
           {row.label}
         </Text>
         {row.subtitle ? (
@@ -487,6 +644,7 @@ function Row(props: { row: MenuRow; onPush(page: string): void; onClose(): void 
             {row.subtitle}
           </Text>
         ) : null}
+        {row.below}
       </View>
       {row.detail ? (
         <Text style={[styles.detail, { color: c.textSecondary }]} numberOfLines={1}>
@@ -495,31 +653,34 @@ function Row(props: { row: MenuRow; onPush(page: string): void; onClose(): void 
       ) : null}
       {row.trail}
       {row.toggle !== undefined ? (
+        // The system's own switch: a scale or an off color of ours breaks iOS 26's glass knob.
         <Switch
           value={row.toggle}
           onValueChange={() => press()}
           disabled={row.disabled}
-          trackColor={{ true: c.success, false: c.fillStrong }}
-          style={Platform.OS === 'ios' ? { transform: [{ scale: 0.82 }] } : null}
+          trackColor={
+            Platform.OS === 'ios' ? { true: c.accent } : { true: c.accent, false: c.fillStrong }
+          }
         />
       ) : null}
-      {row.checked ? <Icon icon={G.check} size={16} color={c.tint} weight="semibold" /> : null}
+      {row.checked ? <Check color={c.tint} /> : null}
       {row.page ? <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" /> : null}
     </Pressable>
   )
 }
 
 const styles = StyleSheet.create({
+  // The shadow is on a view of its own, since the panel's clip would cut it off.
   menu: {
     position: 'absolute',
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-    shadowOpacity: 0.28,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 10 },
+    borderRadius: MENU_RADIUS,
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 12 },
     elevation: 12,
   },
+  panel: { borderRadius: MENU_RADIUS, borderCurve: 'continuous' },
+  clip: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   list: { padding: 6 },
   back: {
     flexDirection: 'row',

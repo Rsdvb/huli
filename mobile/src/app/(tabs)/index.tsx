@@ -9,7 +9,7 @@ import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { useSessionActions } from '../../components/SessionActions'
 import { SessionPaneProvider } from '../../components/SessionPane'
-import { SessionRow, SessionRowSkeleton } from '../../components/SessionRow'
+import { SessionRow, SessionRowSkeleton, subagentCounts } from '../../components/SessionRow'
 import {
   FilterNote,
   inFilter,
@@ -22,7 +22,7 @@ import { SyncNote } from '../../components/SyncNote'
 import { UpdateBanner } from '../../components/UpdateBanner'
 import { useHost } from '../../host'
 import { linkProblem } from '../../linkInfo'
-import { greeting, listOrder, needsYou } from '../../sessions'
+import { greeting, listOrder, needsYou, withChildWaits } from '../../sessions'
 import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
 import { LIST_COLUMN, useWide } from '../../ui/layout'
@@ -33,8 +33,31 @@ import { SectionHeader } from '../../ui/SectionHeader'
 import { computerName } from '../../store'
 import { haptic } from '../../ui/haptics'
 import { Pill } from '../../ui/Pill'
+import { AgentAvatar } from '../../ui/AgentAvatar'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 import SessionScreen from '../session/[id]'
+
+function isRunning(s: SessionSummary): boolean {
+  return s.status === 'running' || s.status === 'starting'
+}
+
+/** The agents of some sessions as small overlapping avatars, inside a line of the greeting. */
+function Inline(props: { agents: SessionSummary[] }) {
+  const { c } = useTokens()
+  const ids = [...new Set(props.agents.map((s) => s.agentId))].slice(0, 3)
+  return (
+    <View style={styles.inline}>
+      {ids.map((id, i) => (
+        <View
+          key={id}
+          style={[styles.inlineAvatar, { marginLeft: i === 0 ? 0 : -8, borderColor: c.bg }]}
+        >
+          <AgentAvatar agentId={id} size={24} />
+        </View>
+      ))}
+    </View>
+  )
+}
 
 type Item =
   | { kind: 'section'; key: string; title: string; count: number; waiting?: boolean }
@@ -96,8 +119,12 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     header,
   )
 
+  // A sub-session's or sub-agent's wait counts on the session the list shows, as on the desktop.
   const listed = useMemo(
-    () => [...host.sessions.values()].filter((s) => s.parentId === null && s.archivedAt === null),
+    () =>
+      [...withChildWaits(host.sessions).values()].filter(
+        (s) => s.parentId === null && s.archivedAt === null,
+      ),
     [host.sessions],
   )
   const archivedCount = useMemo(
@@ -118,11 +145,14 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
 
   const connected = host.state.kind === 'connected'
   const waiting = listed.filter(needsYou).length
+  const runningNow = listed.filter((s) => !needsYou(s) && isRunning(s))
+  const subagents = useMemo(() => subagentCounts(host.sessions.values()), [host.sessions])
   const problem = linkProblem(host.state)
 
   const items = useMemo<Item[]>(() => {
     const needing = visible.filter(needsYou)
-    const rest = visible.filter((s) => !needsYou(s))
+    const running = visible.filter((s) => !needsYou(s) && isRunning(s))
+    const rest = visible.filter((s) => !needsYou(s) && !isRunning(s))
     const out: Item[] = []
     if (needing.length > 0) {
       out.push({
@@ -133,6 +163,10 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         waiting: true,
       })
       for (const s of needing) out.push({ kind: 'session', key: s.id, session: s })
+    }
+    if (running.length > 0) {
+      out.push({ kind: 'section', key: '__running', title: '正在运行', count: running.length })
+      for (const s of running) out.push({ kind: 'session', key: s.id, session: s })
     }
     if (rest.length > 0) {
       out.push({ kind: 'section', key: '__recent', title: '最近', count: rest.length })
@@ -147,17 +181,44 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       ? host.unreachable && host.state.kind !== 'stopped'
         ? `连不上「${computerName(host.host)}」。`
         : problem
-      : waiting > 0
-        ? `${waiting} 个会话在等你。`
-        : '这里没有需要你处理的。'
+      : null
+  // Connected, it says what waits and what runs, each with its agents' avatars, as Kettu's does.
+  const counts =
+    summary === null ? (
+      <Text style={[typeScale.lead, { color: c.textSecondary }]}>
+        {waiting === 0 && runningNow.length === 0 ? (
+          '这里没有需要你处理的。'
+        ) : (
+          <>
+            你有
+            {waiting > 0 ? (
+              <>
+                {' '}
+                <Inline agents={listed.filter(needsYou)} />
+                <Text style={{ color: c.text }}> {waiting} 个在等你</Text>
+              </>
+            ) : null}
+            {waiting > 0 && runningNow.length > 0 ? '，' : null}
+            {runningNow.length > 0 ? (
+              <>
+                {' '}
+                <Inline agents={runningNow} />
+                <Text style={{ color: c.text }}> {runningNow.length} 个运行中</Text>
+              </>
+            ) : null}
+            。
+          </>
+        )}
+      </Text>
+    ) : (
+      <Text style={[typeScale.lead, { color: c.textSecondary }]}>{summary}</Text>
+    )
 
   const top = (
     <View style={styles.top}>
       <View style={styles.greeting} accessibilityRole="header">
         <Text style={[typeScale.lead, { color: c.textSecondary }]}>{greeting()}。</Text>
-        <Text style={[typeScale.lead, { color: waiting > 0 ? c.text : c.textSecondary }]}>
-          {summary}
-        </Text>
+        {counts}
         {host.loaded ? <SyncNote /> : null}
       </View>
       <UpdateBanner />
@@ -206,6 +267,25 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       </Press>
     ) : null
 
+  // Sessions new to the list since it first showed come in with an animation; rows the list only
+  // mounts again as it scrolls do not.
+  const seen = useRef<Set<string> | null>(null)
+  const fresh = useRef(new Set<string>())
+  const ids = items.flatMap((item) => (item.kind === 'section' ? [] : [item.session.id]))
+  if (seen.current === null) {
+    if (ids.length > 0) seen.current = new Set(ids)
+  } else {
+    for (const sid of ids) {
+      if (!seen.current.has(sid)) {
+        seen.current.add(sid)
+        fresh.current.add(sid)
+      }
+    }
+  }
+  useEffect(() => {
+    fresh.current.clear()
+  })
+
   const renderItem = ({ item }: { item: Item }) => {
     if (item.kind === 'section') {
       return (
@@ -222,9 +302,11 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     return (
       <SessionRow
         session={s}
+        subagents={subagents.get(s.id)}
         agentName={host.agents.get(s.agentId)?.name}
         projectName={projectNames.get(s.projectPath)}
         selected={props.selected === s.id}
+        appear={fresh.current.has(s.id)}
         onPress={() => props.onOpen(s.id)}
         onLongPress={() => actions.open(s)}
         start={
@@ -339,6 +421,8 @@ function Unreachable() {
 }
 
 const styles = StyleSheet.create({
+  inline: { flexDirection: 'row', alignItems: 'center', transform: [{ translateY: 5 }] },
+  inlineAvatar: { borderWidth: 2, borderRadius: 14 },
   card: {
     marginTop: space.lg,
     padding: space.lg,

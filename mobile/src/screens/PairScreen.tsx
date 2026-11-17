@@ -1,13 +1,14 @@
 // Pairing: scan the code the computer shows in Settings › Remote access, or paste its link; the
 // owner then allows the phone on the computer.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Settings,
   StyleSheet,
   Text,
   TextInput,
@@ -19,8 +20,9 @@ import type { KeyPair } from '@shared/remote/noise'
 import type { Paired, PairFailure } from '@shared/remote/pair'
 import type { PairingPayload } from '@shared/remote/pairing'
 import { pairWith, parseScanned } from '../connection'
+import { offerPairing, onPairing, takePairing } from '../pairLink'
 import type { SavedHost } from '../store'
-import { Glass } from '../ui/GlassTabBar'
+import { GlassBackdrop } from '../ui/Glass'
 import { haptic } from '../ui/haptics'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
@@ -89,6 +91,22 @@ export function PairScreen(props: {
     }
   }
 
+  // A huli://pair link starts pairing at once, whether it opened the app or came while it showed.
+  const runRef = useRef(run)
+  runRef.current = run
+  useEffect(() => {
+    // `-huliPair <link>` among the launch arguments (simctl launch, Xcode) pairs too: iOS asks
+    // before it opens a huli:// link, and a simulator has no camera.
+    const launched = Platform.OS === 'ios' ? Settings.get('huliPair') : null
+    if (typeof launched === 'string' && launched) offerPairing(launched)
+    const waiting = takePairing()
+    if (waiting) void runRef.current(parseScanned(waiting))
+    return onPairing(() => {
+      const text = takePairing()
+      if (text) void runRef.current(parseScanned(text))
+    })
+  }, [])
+
   const scan = async () => {
     const granted = permission?.granted || (await requestPermission()).granted
     if (!granted) {
@@ -129,7 +147,7 @@ export function PairScreen(props: {
             accessibilityRole="button"
             style={styles.scanCancel}
           >
-            <Glass round={radius.pill} />
+            <GlassBackdrop shape="capsule" borderless={false} />
             <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>取消</Text>
           </Press>
         </View>

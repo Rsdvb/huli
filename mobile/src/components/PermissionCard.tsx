@@ -1,18 +1,12 @@
-// What waits for the user's answer: a tool to allow, an ask's questions, a plan to approve. An
-// MCP server's form or page is left to the computer.
+// What waits for the user's answer: a tool to allow, an ask's questions, a plan to approve, and an
+// MCP server's form or page, which ElicitationCard asks.
 
 import { useState } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { HostLink } from '@shared/remote/link'
-import type { PermissionOption, QuestionAnswer, ToolEntry } from '@shared/thread'
+import type { PendingQuestion, PermissionOption, QuestionAnswer, ToolEntry } from '@shared/thread'
+import { ElicitationCard } from './entries/ElicitationCard'
+import { SendState, useSender } from './entries/kit'
 import { haptic } from '../ui/session/feedback'
 import { G, Icon, TOOL_ICONS } from '../ui/session/icons'
 import { MONO, useSessionTokens } from '../ui/session/palette'
@@ -23,38 +17,41 @@ function plain(name: string): string {
   return name.replace(/`/g, '')
 }
 
-function failure(error: unknown): string {
-  const e = error as { code?: string; message?: string }
-  if (e.code === 'not_found') return '这个请求已经在别处回答过了，或者已经结束。'
-  return e.message ?? '没能发送回答。'
+export function PermissionCard(props: { entry: ToolEntry; sessionId: string; link: HostLink }) {
+  if (props.entry.permission?.elicitation) {
+    return <ElicitationCard entry={props.entry} sessionId={props.sessionId} />
+  }
+  return <ToolPermissionCard {...props} />
 }
 
-export function PermissionCard(props: { entry: ToolEntry; sessionId: string; link: HostLink }) {
+/** How an ask's question is answered, as the desktop's card hints it. */
+function hintOf(q: PendingQuestion): string {
+  if (q.secret) return '输入时隐藏，也不留在对话里'
+  if (q.options.length === 0) return '写下你的回答'
+  if (q.multiSelect) return q.allowsText ? '选择所有适用的，或写下你自己的回答' : '选择所有适用的'
+  return q.allowsText ? '选一项，或写下你自己的回答' : '选一项'
+}
+
+function ToolPermissionCard(props: { entry: ToolEntry; sessionId: string; link: HostLink }) {
   const { entry, link, sessionId } = props
   const { c, s } = useSessionTokens()
   const permission = entry.permission!
-  const [sending, setSending] = useState(false)
+  const sender = useSender(entry.id)
+  const sending = sender.busy !== null
   const [noteFor, setNoteFor] = useState<PermissionOption | null>(null)
   const [note, setNote] = useState('')
   const questions = permission.questions ?? []
   const [choices, setChoices] = useState<number[][]>(questions.map(() => []))
   const [texts, setTexts] = useState<string[]>(questions.map(() => ''))
 
-  const respond = async (params: Record<string, unknown>) => {
-    setSending(true)
-    try {
-      await link.request('permissions.respond', {
+  const respond = (params: Record<string, unknown>) =>
+    sender.send('respond', () =>
+      link.request('permissions.respond', {
         sessionId,
         requestId: permission.requestId,
         ...params,
-      })
-      haptic.success()
-    } catch (error) {
-      Alert.alert('没有发出去', failure(error))
-    } finally {
-      setSending(false)
-    }
-  }
+      }),
+    )
 
   const choose = (option: PermissionOption) => {
     if (option.note) {
@@ -108,12 +105,7 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
         </ScrollView>
       )}
 
-      {permission.elicitation ? (
-        <Text style={[styles.description, { color: c.textSecondary, marginTop: 10 }]}>
-          这是 {permission.elicitation.server} 的
-          {permission.elicitation.kind === 'form' ? '表单' : '网页'}请求，请在电脑上处理。
-        </Text>
-      ) : questions.length > 0 ? (
+      {questions.length > 0 ? (
         <View style={{ marginTop: 10, gap: 16 }}>
           {questions.map((q, qi) => (
             <View key={qi} style={{ gap: 8 }}>
@@ -122,6 +114,7 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
                   <Text style={[styles.header, { color: c.textTertiary }]}>{q.header}</Text>
                 ) : null}
                 <Text style={[styles.question, { color: c.text }]}>{q.question}</Text>
+                <Text style={[styles.optionDetail, { color: c.textTertiary }]}>{hintOf(q)}</Text>
               </View>
               {q.options.map((option, oi) => {
                 const on = choices[qi]!.includes(oi)
@@ -131,6 +124,8 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
                     scale={0.98}
                     onPress={() => {
                       haptic.pick()
+                      // One choice or the user's own words: picking one clears what they wrote.
+                      if (!q.multiSelect) setTexts((all) => all.map((t, i) => (i === qi ? '' : t)))
                       setChoices((all) =>
                         all.map((picked, i) =>
                           i !== qi
@@ -171,13 +166,18 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
                   </PressScale>
                 )
               })}
-              {q.allowsText && (
+              {(q.allowsText || q.options.length === 0) && (
                 <TextInput
                   value={texts[qi]}
-                  onChangeText={(text) =>
+                  onChangeText={(text) => {
                     setTexts((all) => all.map((t, i) => (i === qi ? text : t)))
-                  }
-                  placeholder="自己写一个回答"
+                    if (!q.multiSelect && text.trim()) {
+                      setChoices((all) => all.map((picked, i) => (i === qi ? [] : picked)))
+                    }
+                  }}
+                  placeholder={q.options.length === 0 ? '写下你的回答' : '写下你自己的回答'}
+                  autoCapitalize={q.secret ? 'none' : 'sentences'}
+                  autoCorrect={!q.secret}
                   placeholderTextColor={c.textTertiary}
                   selectionColor={c.accent}
                   secureTextEntry={q.secret}
@@ -264,6 +264,7 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
         </View>
       )}
       {sending && <ActivityIndicator style={{ marginTop: 10 }} color={c.textSecondary} />}
+      <SendState sender={sender} />
     </View>
   )
 }

@@ -87,12 +87,21 @@ final class ShareViewController: UIViewController {
   }
 
   /// Opens the app through the application the responder chain reaches: a share extension's
-  /// extensionContext.open(_:) opens nothing.
+  /// extensionContext.open(_:) opens nothing. UIApplication's open(_:options:) is unavailable
+  /// to extensions at compile time, so it is looked up and called through the runtime.
   private func openApp(_ url: URL, done: @escaping (Bool) -> Void) {
+    typealias Open = @convention(c) (
+      AnyObject, Selector, NSURL, NSDictionary, (@convention(block) (Bool) -> Void)?
+    ) -> Void
+    let selector = NSSelectorFromString("openURL:options:completionHandler:")
     var responder: UIResponder? = self
     while let current = responder {
-      if let application = current as? UIApplication {
-        application.open(url, options: [:], completionHandler: done)
+      if current is UIApplication,
+        let method = class_getInstanceMethod(type(of: current), selector)
+      {
+        let open = unsafeBitCast(method_getImplementation(method), to: Open.self)
+        let finished: @convention(block) (Bool) -> Void = { opened in done(opened) }
+        open(current, selector, url as NSURL, NSDictionary(), finished)
         return
       }
       responder = current.next

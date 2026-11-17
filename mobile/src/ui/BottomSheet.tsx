@@ -1,5 +1,6 @@
 // A sheet that rises from the bottom over a dimmed screen, with a grabber and a title. It stays
-// mounted through its exit so it slides away instead of vanishing.
+// mounted through its exit so it slides away instead of vanishing. Android's: iOS presents the
+// system's own sheet (BottomSheet.ios.tsx).
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
