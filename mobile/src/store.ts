@@ -3,6 +3,7 @@
 
 import * as SecureStore from 'expo-secure-store'
 import type { DirectAddress } from '@shared/remote/protocol'
+import type { HostRelay } from '@shared/remote/relay'
 
 const OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
@@ -31,6 +32,8 @@ export interface SavedHost {
   lastAddress?: DirectAddress
   /** The id its notifications carry (its relay host id), once it said. */
   pushId?: string
+  /** Its id on Huli Cloud's relay and the relays it signs in to, once a code or a welcome said. */
+  relay?: HostRelay
 }
 
 export interface SavedComputers {

@@ -70,7 +70,8 @@ function HostPlanLimits({ used }: { used: Readonly<Record<string, readonly Agent
   const [open, setOpen] = useState(false)
   useEffect(() => {
     for (const [key, ways] of toRead) {
-      readLimitsThrough(ways).then(
+      // The user opened the page: a read they asked for.
+      readLimitsThrough(ways, true).then(
         () =>
           setReads((was) => {
             const next = { ...was }

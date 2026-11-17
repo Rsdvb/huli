@@ -180,11 +180,22 @@ export class Store {
 
   /** The family an access token belongs to, while it is live. */
   checkAccess(accessToken: string): Family | null {
+    return this.accessEntry(accessToken)?.family ?? null
+  }
+
+  /** The family of a live access token and when the token lapses. */
+  accessEntry(accessToken: string): { family: Family; expiresAt: number } | null {
     const hash = sha256Hex(accessToken)
     const now = this.now()
     const token = this.state.access.find((t) => t.hash === hash && t.expiresAt > now)
     if (!token) return null
-    return this.state.families.find((f) => f.id === token.family) ?? null
+    const family = this.state.families.find((f) => f.id === token.family)
+    return family ? { family, expiresAt: token.expiresAt } : null
+  }
+
+  /** Whether a signed-in client is still signed in. */
+  hasFamily(id: string): boolean {
+    return this.state.families.some((f) => f.id === id && f.refreshExpiresAt > this.now())
   }
 
   /** Revokes the family a refresh or access token belongs to; nothing for an unknown token. */

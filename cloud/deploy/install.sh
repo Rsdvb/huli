@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Installs or upgrades Huli Cloud on oracle-relay (Ubuntu 24.04, arm64). Run as root, with the
-# bundle at /tmp/huli-cloud.mjs. Safe to run again: it replaces the program and the unit, and keeps
-# the data, the environment file, the certificate and the account.
+# Installs or upgrades Huli Cloud on oracle-relay (Ubuntu 24.04, arm64): the account service, the
+# push gateway, the relay and the hosted web client. Run as root, as `install.sh [folder]`, with
+# the folder (/tmp by default) holding huli-cloud.mjs and, when they are to be installed too,
+# regions.signed.json (the signed relay region list) and huli-web.tar.gz with
+# huli-web.tar.gz.sha256 (the hosted web client). tools/huli/deploy-cloud.ps1 uploads them and runs
+# this. Safe to run again: it replaces the program, the unit, the region list and the web client,
+# keeping the program and the web client before as .prev, and keeps the data, the environment file
+# (adding only settings it lacks), the certificates and the account.
 set -euo pipefail
 
 DOMAIN=huli.132-145-200-0.sslip.io
+APP_DOMAIN=app.huli.132-145-200-0.sslip.io
+FROM="${1:-/tmp}"
 
 # 1. User and folders.
 id huli >/dev/null 2>&1 ||
@@ -25,10 +32,17 @@ if [ ! -x /opt/huli-cloud/node/bin/node ]; then
 fi
 /opt/huli-cloud/node/bin/node --version
 
-# 3. The program.
-install -o root -g root -m 644 /tmp/huli-cloud.mjs /opt/huli-cloud/huli-cloud.mjs
+# 3. The program, the one before kept as huli-cloud.mjs.prev, and the signed region list.
+if [ -f /opt/huli-cloud/huli-cloud.mjs ] &&
+  ! cmp -s "$FROM/huli-cloud.mjs" /opt/huli-cloud/huli-cloud.mjs; then
+  cp -p /opt/huli-cloud/huli-cloud.mjs /opt/huli-cloud/huli-cloud.mjs.prev
+fi
+install -o root -g root -m 644 "$FROM/huli-cloud.mjs" /opt/huli-cloud/huli-cloud.mjs
+if [ -f "$FROM/regions.signed.json" ]; then
+  install -o root -g root -m 644 "$FROM/regions.signed.json" /opt/huli-cloud/regions.signed.json
+fi
 
-# 4. Settings, readable by root and huli only; never overwritten.
+# 4. Settings, readable by root and huli only; never overwritten, only given what they lack.
 if [ ! -f /etc/huli-cloud.env ]; then
   cat >/etc/huli-cloud.env <<EOF
 HULI_ORIGIN=https://$DOMAIN
@@ -40,11 +54,32 @@ EOF
   chown root:huli /etc/huli-cloud.env
   chmod 640 /etc/huli-cloud.env
 fi
+grep -q '^HULI_WEB_ORIGIN=' /etc/huli-cloud.env ||
+  echo "HULI_WEB_ORIGIN=https://$APP_DOMAIN" >>/etc/huli-cloud.env
+if [ -f /opt/huli-cloud/regions.signed.json ]; then
+  grep -q '^HULI_REGIONS_FILE=' /etc/huli-cloud.env ||
+    echo 'HULI_REGIONS_FILE=/opt/huli-cloud/regions.signed.json' >>/etc/huli-cloud.env
+fi
+
+# 4b. The hosted web client, checked against its SHA-256; the one before kept as huli-app.prev.
+if [ -f "$FROM/huli-web.tar.gz" ]; then
+  (cd "$FROM" && sha256sum -c huli-web.tar.gz.sha256)
+  rm -rf /var/www/huli-app.new
+  install -d -o root -g root -m 755 /var/www/huli-app.new
+  tar -xzf "$FROM/huli-web.tar.gz" -C /var/www/huli-app.new --no-same-owner --no-same-permissions
+  test -f /var/www/huli-app.new/index.html
+  chmod -R u=rwX,go=rX /var/www/huli-app.new
+  if [ -d /var/www/huli-app ]; then
+    rm -rf /var/www/huli-app.prev
+    mv /var/www/huli-app /var/www/huli-app.prev
+  fi
+  mv /var/www/huli-app.new /var/www/huli-app
+fi
 
 # 5. The service, sandboxed: it may write only its data folder.
 cat >/etc/systemd/system/huli-cloud.service <<'EOF'
 [Unit]
-Description=Huli Cloud (account service and push gateway)
+Description=Huli Cloud (account service, push gateway and relay)
 After=network-online.target
 Wants=network-online.target
 
@@ -55,6 +90,7 @@ EnvironmentFile=/etc/huli-cloud.env
 ExecStart=/opt/huli-cloud/node/bin/node /opt/huli-cloud/huli-cloud.mjs serve
 Restart=on-failure
 RestartSec=3
+LimitNOFILE=4096
 UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -87,9 +123,16 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 curl -fsS http://127.0.0.1:3010/healthz && echo ' <- huli-cloud'
+curl -fsS http://127.0.0.1:3010/v1 && echo ' <- relay'
 
-# 6. Certificate through the shared ACME webroot that port 80 already serves.
+# 6. Certificates through the shared ACME webroot that port 80 already serves: the service's, and
+# the hosted web client's on a name of its own, so its pages share no origin with the sign-in's.
 certbot certonly --webroot -w /var/www/acme -d "$DOMAIN" --non-interactive --keep-until-expiring
+app_site=''
+if [ -d /var/www/huli-app ]; then
+  certbot certonly --webroot -w /var/www/acme -d "$APP_DOMAIN" --non-interactive --keep-until-expiring
+  app_site=1
+fi
 
 # 7. Huli's update files, served under a random path kept in /etc/huli-updates.path, uploaded by
 # the build through the huli-upload user, who may only write into the folder (rrsync).
@@ -144,20 +187,25 @@ cat >/var/www/huli-static/privacy.html <<'EOF'
 <p>Huli 不收集、不出售、不分享任何个人信息，不含广告和第三方统计。</p>
 <h2>数据去向</h2>
 <ul>
-<li>手机和电脑之间的内容经端到端加密，直接在两者之间传输（局域网或 Tailscale），不经过任何服务器。</li>
+<li>手机、浏览器和电脑之间的内容经端到端加密，在两者之间直接传输（局域网或 Tailscale）；不在同一网络时经开发者自己的中转服务器（Huli Cloud）转发，中转只传递加密后的数据，看不到内容。</li>
 <li>登录和推送由开发者自己的服务器（Huli Cloud）处理：只保存账号、已登录设备和推送所需的设备标识；推送内容在电脑上加密，只有手机能解开，服务器和 Apple 都看不到。</li>
 <li>拍照、相册和文件只在你主动选择后发送到你自己的电脑。</li>
 </ul>
 <h2>联系</h2>
 <p>a2768811@icloud.com</p>
 <h1 lang="en" style="margin-top:48px">Privacy Policy (English)</h1>
-<p lang="en">Huli collects no personal data and has no ads or analytics. What the phone and the computer exchange is end-to-end encrypted and travels between them directly. The developer's own server handles sign-in and push only, storing the account, signed-in devices and push tokens; push contents are encrypted for the phone alone. Photos and files are sent only when you choose them, to your own computer.</p>
+<p lang="en">Huli collects no personal data and has no ads or analytics. What the phone and the computer exchange is end-to-end encrypted and travels between them directly, or, when they are on different networks, through the developer's own relay, which passes on only encrypted data it cannot read. The developer's own server handles sign-in, the relay and push only, storing the account, signed-in devices and push tokens; push contents are encrypted for the phone alone. Photos and files are sent only when you choose them, to your own computer.</p>
 </body></html>
 EOF
 chmod 644 /var/www/huli-static/privacy.html
 
-# 8. nginx site.
+# 8. nginx sites. The relay's WebSockets (/v1/hosts/...) are upgraded to the service, which pings
+# every socket every 30 s, so two minutes without a frame either way means the peer is gone.
 cat >/etc/nginx/sites-available/huli-cloud <<EOF
+map \$http_upgrade \$huli_connection_upgrade {
+    default upgrade;
+    ''      close;
+}
 server {
     listen 443 ssl;
     server_name $DOMAIN;
@@ -171,6 +219,19 @@ server {
         default_type text/html;
         alias /var/www/huli-static/privacy.html;
     }
+    location /v1/hosts/ {
+        proxy_pass http://127.0.0.1:3010;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$huli_connection_upgrade;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
     location / {
         proxy_pass http://127.0.0.1:3010;
         proxy_set_header Host \$host;
@@ -180,6 +241,53 @@ server {
     }
 }
 EOF
+
+# 8b. The hosted web client: static files under the policy the remote host gives its own web
+# client, with connections allowed to the service and its relay alone. A path that is no file is
+# the page itself, as /pair and /signin/callback are; the hashed assets are kept for a year.
+cat >/etc/nginx/snippets/huli-app-headers.conf <<EOF
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://$DOMAIN wss://$DOMAIN; frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+add_header X-Content-Type-Options nosniff always;
+add_header Referrer-Policy no-referrer always;
+add_header Cross-Origin-Opener-Policy same-origin always;
+add_header Cross-Origin-Resource-Policy same-origin always;
+add_header X-Frame-Options DENY always;
+add_header Strict-Transport-Security "max-age=31536000" always;
+EOF
+if [ -n "$app_site" ]; then
+  cat >/etc/nginx/sites-available/huli-app <<EOF
+server {
+    listen 443 ssl;
+    server_name $APP_DOMAIN;
+    server_tokens off;
+    ssl_certificate /etc/letsencrypt/live/$APP_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$APP_DOMAIN/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    access_log /var/log/nginx/huli-app.log;
+    root /var/www/huli-app;
+    location /assets/media-worker- {
+        limit_except GET { deny all; }
+        include snippets/huli-app-headers.conf;
+        add_header Service-Worker-Allowed / always;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files \$uri =404;
+    }
+    location /assets/ {
+        limit_except GET { deny all; }
+        include snippets/huli-app-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files \$uri =404;
+    }
+    location / {
+        limit_except GET { deny all; }
+        include snippets/huli-app-headers.conf;
+        add_header Cache-Control no-cache always;
+        try_files \$uri /index.html;
+    }
+}
+EOF
+  ln -sfn /etc/nginx/sites-available/huli-app /etc/nginx/sites-enabled/huli-app
+fi
 ln -sfn /etc/nginx/sites-available/huli-cloud /etc/nginx/sites-enabled/huli-cloud
 nginx -t
 systemctl reload nginx
@@ -204,3 +312,8 @@ fail2ban-client reload >/dev/null
 fail2ban-client status huli-cloud | head -3
 
 curl -fsS "https://$DOMAIN/healthz" && echo " <- https://$DOMAIN"
+curl -fsS "https://$DOMAIN/v1" && echo " <- https://$DOMAIN/v1"
+curl -fsS -o /dev/null -w '%{http_code}' "https://$DOMAIN/v1/regions" && echo " <- /v1/regions"
+if [ -n "$app_site" ]; then
+  curl -fsS -o /dev/null -w '%{http_code}' "https://$APP_DOMAIN/" && echo " <- https://$APP_DOMAIN"
+fi
