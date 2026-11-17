@@ -111,12 +111,25 @@ if [ -s /etc/huli-updates.path ]; then
   cat >/etc/cron.d/huli-updates-prune <<'EOF'
 17 4 * * * root ls -1dt /var/www/huli-updates/download/v* 2>/dev/null | tail -n +6 | xargs -r rm -rf
 EOF
+  # A phone's browser needs the APK's own type to offer installing it.
   updates_location="
     location ^~ /u/$segment/ {
         alias /var/www/huli-updates/;
+        types {
+            application/vnd.android.package-archive apk;
+            application/json json;
+        }
         add_header Cache-Control no-cache;
     }"
 fi
+
+# 7b. A snapshot of the service's state every night, kept two weeks, readable by the server's admin
+# user so a copy can be pulled off the server. The state is one small file written atomically.
+BACKUP_GROUP="${HULI_BACKUP_GROUP:-ubuntu}"
+install -d -o root -g "$BACKUP_GROUP" -m 750 /var/backups/huli-cloud
+cat >/etc/cron.d/huli-cloud-backup <<EOF
+41 3 * * * root f=/var/backups/huli-cloud/state-\$(date -u +\\%Y\\%m\\%d).json; install -m 640 -g $BACKUP_GROUP /var/lib/huli-cloud/state.json "\$f" && ln -sfn "\$f" /var/backups/huli-cloud/latest.json && find /var/backups/huli-cloud -name 'state-*.json' -mtime +14 -delete
+EOF
 
 # 8. nginx site.
 cat >/etc/nginx/sites-available/huli-cloud <<EOF

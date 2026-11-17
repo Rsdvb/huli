@@ -214,6 +214,8 @@ jobs:
           KEY: ${{ secrets.HULI_UPLOAD_KEY }}
           KNOWN_HOSTS: ${{ secrets.HULI_UPLOAD_KNOWN_HOSTS }}
           VERSION: ${{ needs.version.outputs.version }}
+          RUN: ${{ github.run_number }}
+          CHANNEL: ${{ vars.HULI_CHANNEL_URL }}
         run: |
           install -d -m 700 ~/.ssh
           (umask 077 && printf '%s\n' "$KEY" > ~/.ssh/huli_upload)
@@ -225,10 +227,15 @@ jobs:
           rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" channel/ "$host:download/v$VERSION/"
           rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" release/latest*.yml "$host:latest/download/"
           # The phone's download link stays the same from version to version.
+          # latest.json goes last, so the app never hears of an APK that is not there yet.
           for apk in release/*.apk; do
             [ -e "$apk" ] || continue
             rsync -t --mkpath --chmod=F644 -e "$ssh" "$apk" "$host:download/v$VERSION/"
             rsync -t --mkpath --chmod=F644 -e "$ssh" "$apk" "$host:android/Huli.apk"
+            printf '{"version":"%s","versionCode":%s,"url":"%s/android/Huli.apk","size":%s,"sha256":"%s"}\n' \
+              "$VERSION" "$RUN" "$CHANNEL" "$(stat -c %s "$apk")" "$(sha256sum "$apk" | cut -d' ' -f1)" \
+              > latest-android.json
+            rsync -t --mkpath --chmod=F644 -e "$ssh" latest-android.json "$host:android/latest.json"
           done
           rm -f ~/.ssh/huli_upload
       - name: Publish a pre-release
