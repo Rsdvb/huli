@@ -1,6 +1,6 @@
 // The floating tab bar: a glass capsule of icon tabs with a highlight that slides to the chosen one,
-// and the round new-session button beside it. On iOS the glass is a real blur; Android gets the
-// translucent fill, since its blur needs a target view around the whole screen.
+// and the round new-session button beside it, in one glass group so they melt into each other as
+// the bar minimizes. Liquid Glass on iOS 26 and later; see Glass.tsx for the fallbacks.
 //
 // A tab may let it minimize while its content scrolls down, as iOS does: the capsule gives way to
 // one round button for the current tab, and comes back on a scroll up, at the top, or on a tap.
@@ -8,19 +8,18 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Animated,
-  Platform,
   Pressable,
   StyleSheet,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native'
-import { BlurView } from 'expo-blur'
 import { useFocusEffect } from 'expo-router'
 import type { BottomTabBarProps } from 'expo-router/js-tabs'
+import { GlassBackdrop, GlassButton, GlassGroup, Glass as GlassSurface } from './Glass'
 import { haptic } from './haptics'
 import { Icon, type IconName } from './Icon'
-import { Press, useReduceMotion } from './Press'
+import { useReduceMotion } from './Press'
 import { motion, radius, size as sizes, space, useTokens } from './tokens'
 
 export interface TabItem {
@@ -88,22 +87,41 @@ export function useMinimizingTabBar(): (event: NativeSyntheticEvent<NativeScroll
   }, [])
 }
 
-/** The capsule's own glass: a blur on iOS, a translucent fill elsewhere. */
+/** Glass filling its parent, as a backdrop; a round of `radius.pill` or more makes a capsule. */
 export function Glass(props: { round: number }) {
-  const { c, scheme } = useTokens()
-  if (Platform.OS !== 'ios') {
-    return (
-      <View
-        style={[StyleSheet.absoluteFill, { backgroundColor: c.glass, borderRadius: props.round }]}
-      />
-    )
-  }
+  return props.round >= radius.pill ? (
+    <GlassBackdrop shape="capsule" borderless={false} />
+  ) : (
+    <GlassBackdrop radius={props.round} borderless={false} />
+  )
+}
+
+/** A tab's icon, which gives a little bounce as its tab is chosen. */
+function TabIcon(props: { name: IconName; focused: boolean; reduce: boolean }) {
+  const { c } = useTokens()
+  const bounce = useRef(new Animated.Value(1)).current
+  const was = useRef(props.focused)
+  useEffect(() => {
+    const chosen = props.focused && !was.current
+    was.current = props.focused
+    if (!chosen || props.reduce) return
+    bounce.setValue(0.82)
+    Animated.spring(bounce, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 16,
+      bounciness: 14,
+    }).start()
+  }, [props.focused, props.reduce, bounce])
   return (
-    <BlurView
-      tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-      intensity={90}
-      style={[StyleSheet.absoluteFill, { borderRadius: props.round, overflow: 'hidden' }]}
-    />
+    <Animated.View style={{ transform: [{ scale: bounce }] }}>
+      <Icon
+        name={props.name}
+        size={24}
+        color={props.focused ? c.tint : c.text}
+        weight={props.focused ? 'semibold' : 'regular'}
+      />
+    </Animated.View>
   )
 }
 
@@ -169,6 +187,7 @@ export function GlassTabBar(
   // Reduce Motion keeps the crossfade and drops the change of size.
   const scale = (from: number, to: number) => (reduce ? 1 : fade(from, to))
 
+  // The group holds only the row of glass, so the room around it lets touches through to the list.
   return (
     <View
       pointerEvents="box-none"
@@ -178,103 +197,83 @@ export function GlassTabBar(
         props.frame && { left: props.frame.left, right: undefined, width: props.frame.width },
       ]}
     >
-      <Animated.View
-        pointerEvents={small ? 'none' : 'auto'}
-        accessibilityElementsHidden={small}
-        importantForAccessibility={small ? 'no-hide-descendants' : 'auto'}
-        style={[styles.barWrap, { opacity: fade(1, 0), transform: [{ scale: scale(1, 0.4) }] }]}
-      >
-        <View
-          style={[styles.bar, { borderColor: c.borderStrong, shadowColor: c.shadow }]}
-          onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-          accessibilityRole="tablist"
-        >
-          <Glass round={sizes.tabBar / 2} />
-          {slot > 0 && (
-            <Animated.View
-              style={[
-                styles.highlight,
-                { width: slot, backgroundColor: c.fillStrong, transform: [{ translateX: x }] },
-              ]}
-            />
-          )}
-          {routes.map((route) => {
-            const item = props.items[route.name]!
-            const focused = route.key === focusedKey
-            const { options } = descriptors[route.key]!
-            return (
-              <Pressable
-                key={route.key}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: focused }}
-                accessibilityLabel={options.tabBarAccessibilityLabel ?? item.label}
-                onPress={() => {
-                  const event = emitter.emit({
-                    type: 'tabPress',
-                    target: route.key,
-                    canPreventDefault: true,
-                  })
-                  if (!focused && !event.defaultPrevented) {
-                    haptic.tap()
-                    navigateToTab(route.key)
-                  }
-                }}
-                onLongPress={() => emitter.emit({ type: 'tabLongPress', target: route.key })}
-                style={styles.tab}
-              >
-                <Icon
-                  name={item.icon}
-                  size={24}
-                  color={focused ? c.tint : c.text}
-                  weight={focused ? 'semibold' : 'regular'}
-                />
-              </Pressable>
-            )
-          })}
-        </View>
-      </Animated.View>
-      {focusedItem && (
+      <GlassGroup spacing={space.sm} style={styles.row}>
         <Animated.View
-          pointerEvents={small ? 'auto' : 'none'}
-          accessibilityElementsHidden={!small}
-          importantForAccessibility={small ? 'auto' : 'no-hide-descendants'}
-          style={[
-            styles.mini,
-            {
-              left: space.lg,
-              bottom,
-              opacity: fade(0, 1),
-              transform: [{ scale: scale(0.6, 1) }],
-            },
-          ]}
+          pointerEvents={small ? 'none' : 'auto'}
+          accessibilityElementsHidden={small}
+          importantForAccessibility={small ? 'no-hide-descendants' : 'auto'}
+          style={[styles.barWrap, { opacity: fade(1, 0), transform: [{ scale: scale(1, 0.4) }] }]}
         >
-          <Press
-            onPress={() => {
-              haptic.tap()
-              setMinimized(false)
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={`${focusedItem.label}，显示标签栏`}
-            style={[styles.round, { borderColor: c.borderStrong, shadowColor: c.shadow }]}
+          <GlassSurface
+            shape="capsule"
+            elevated
+            style={styles.bar}
+            onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+            accessibilityRole="tablist"
           >
-            <Glass round={sizes.tabBar / 2} />
-            <Icon name={focusedItem.icon} size={24} color={c.tint} weight="semibold" />
-          </Press>
+            {slot > 0 && (
+              <Animated.View
+                style={[
+                  styles.highlight,
+                  { width: slot, backgroundColor: c.fillStrong, transform: [{ translateX: x }] },
+                ]}
+              />
+            )}
+            {routes.map((route) => {
+              const item = props.items[route.name]!
+              const focused = route.key === focusedKey
+              const { options } = descriptors[route.key]!
+              return (
+                <Pressable
+                  key={route.key}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: focused }}
+                  accessibilityLabel={options.tabBarAccessibilityLabel ?? item.label}
+                  onPress={() => {
+                    const event = emitter.emit({
+                      type: 'tabPress',
+                      target: route.key,
+                      canPreventDefault: true,
+                    })
+                    if (!focused && !event.defaultPrevented) {
+                      haptic.tap()
+                      navigateToTab(route.key)
+                    }
+                  }}
+                  onLongPress={() => emitter.emit({ type: 'tabLongPress', target: route.key })}
+                  style={({ pressed }) => [styles.tab, pressed && { opacity: motion.pressOpacity }]}
+                >
+                  <TabIcon name={item.icon} focused={focused} reduce={reduce} />
+                </Pressable>
+              )
+            })}
+          </GlassSurface>
         </Animated.View>
-      )}
-      <Press
-        onPress={() => {
-          haptic.tap()
-          props.onPlus()
-        }}
-        disabled={props.plusDisabled}
-        accessibilityRole="button"
-        accessibilityLabel="新会话"
-        style={[styles.round, { borderColor: c.borderStrong, shadowColor: c.shadow }]}
-      >
-        <Glass round={sizes.tabBar / 2} />
-        <Icon name="plus" size={26} weight="medium" />
-      </Press>
+        {focusedItem && (
+          <Animated.View
+            pointerEvents={small ? 'auto' : 'none'}
+            accessibilityElementsHidden={!small}
+            importantForAccessibility={small ? 'auto' : 'no-hide-descendants'}
+            style={[styles.mini, { opacity: fade(0, 1), transform: [{ scale: scale(0.6, 1) }] }]}
+          >
+            <GlassButton
+              size={sizes.tabBar}
+              onPress={() => setMinimized(false)}
+              accessibilityLabel={`${focusedItem.label}，显示标签栏`}
+            >
+              <Icon name={focusedItem.icon} size={24} color={c.tint} weight="semibold" />
+            </GlassButton>
+          </Animated.View>
+        )}
+        <GlassButton
+          size={sizes.tabBar}
+          onPress={props.onPlus}
+          disabled={props.plusDisabled}
+          accessibilityLabel="新会话"
+        >
+          <Icon name="plus" size={26} weight="medium" />
+        </GlassButton>
+      </GlassGroup>
     </View>
   )
 }
@@ -285,21 +284,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
     paddingHorizontal: space.lg,
   },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   barWrap: { flex: 1, transformOrigin: 'left center' },
   bar: {
     height: sizes.tabBar,
     flexDirection: 'row',
-    borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
     padding: INSET,
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
   },
   highlight: {
     position: 'absolute',
@@ -309,16 +301,5 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   tab: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  mini: { position: 'absolute', transformOrigin: 'left center' },
-  round: {
-    width: sizes.tabBar,
-    height: sizes.tabBar,
-    borderRadius: sizes.tabBar / 2,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-  },
+  mini: { position: 'absolute', left: 0, top: 0, transformOrigin: 'left center' },
 })

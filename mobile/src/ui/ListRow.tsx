@@ -112,6 +112,7 @@ export function ListRow(props: {
       onLongPress={props.onLongPress}
       disabled={props.disabled}
       scale={false}
+      highlight={c.fill}
       accessibilityRole="button"
       accessibilityLabel={props.title}
     >

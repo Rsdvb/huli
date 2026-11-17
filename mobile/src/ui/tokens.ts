@@ -182,6 +182,15 @@ export const brand = {
   deepseek: '#4D6BFE',
   qwen: '#082DFF',
   kimi: '#1783FF',
+  dimcode: '#70C70E',
+  antigravity: {
+    blue: '#3186FF',
+    green: '#00B95C',
+    yellow: '#FFE432',
+    amber: '#FBBC04',
+    red: '#FC413D',
+    violet: '#749BFF',
+  },
   huli: '#E2611F',
   /** The app icon's fox: its orange ground, light to dark, and the face's tones. */
   fox: {

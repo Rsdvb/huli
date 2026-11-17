@@ -50,6 +50,7 @@ import { SessionRows, type SessionRowsContext } from '../../ui/session/context'
 import { haptic } from '../../ui/session/feedback'
 import { baseName, relativePath } from '../../ui/session/format'
 import { G } from '../../ui/session/icons'
+import { GlassCapsule } from '../../ui/Glass'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
 import { toneColor, usageTone } from '../../ui/session/limits'
 import { useSessionTokens } from '../../ui/session/palette'
@@ -609,7 +610,7 @@ export default function SessionScreen() {
                 disabled={!connected}
                 anchor={modelAnchor}
                 onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 300 })
+                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
                 }
               />
             ) : null
@@ -678,7 +679,7 @@ export default function SessionScreen() {
           style={[styles.banner, { top: headerHeight + 8 }]}
           accessibilityLiveRegion="polite"
         >
-          <View style={[styles.bannerPill, { backgroundColor: c.glass, borderColor: c.border }]}>
+          <GlassCapsule height={34} elevated style={styles.bannerPill}>
             {host.state.kind === 'reconnecting' ? (
               <ActivityIndicator size="small" color={c.textSecondary} />
             ) : (
@@ -687,7 +688,7 @@ export default function SessionScreen() {
             <Text style={[styles.bannerText, { color: c.textSecondary }]}>
               {host.state.kind === 'reconnecting' ? '和电脑的连接断了，正在重连…' : '已和电脑断开'}
             </Text>
-          </View>
+          </GlassCapsule>
         </View>
       )}
       <ContextSheet
@@ -715,14 +716,6 @@ const styles = StyleSheet.create({
   waiting: { maxHeight: '55%', flexGrow: 0 },
   waitingContent: { paddingHorizontal: 10, paddingTop: 8, gap: 10 },
   banner: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
-  bannerPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
-    height: 34,
-  },
+  bannerPill: { gap: 8 },
   bannerText: { fontSize: 13, fontWeight: '500' },
 })
