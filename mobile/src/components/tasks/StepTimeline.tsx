@@ -15,7 +15,7 @@ import {
   type TaskView,
   type WorkflowStep,
 } from '@shared/workflow'
-import { useHost } from '../../host'
+import { useAgents } from '../../host'
 import { spanText, stepTitle, stepWord, useTick, WORD_TEXT } from '../../tasks'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { Icon } from '../../ui/Icon'
@@ -138,7 +138,7 @@ function Parallel(props: {
 function StepNode(props: { view: TaskView; step: WorkflowStep; front: boolean; last: boolean }) {
   const { view, step } = props
   const { c } = useTokens()
-  const host = useHost()
+  const agents = useAgents()
   const summary: TaskStepSummary | undefined = view.steps.find((s) => s.id === step.id)
   const state = summary?.state ?? 'not_reached'
   const word = summary ? stepWord(summary, view) : null
@@ -157,7 +157,7 @@ function StepNode(props: { view: TaskView; step: WorkflowStep; front: boolean; l
   const waiting = view.waiting.find((w) => w.stepId === step.id)
 
   const who =
-    step.by === 'you' ? '你' : agentId ? (host.agents.get(agentId)?.name ?? agentId) : 'Auto'
+    step.by === 'you' ? '你' : agentId ? (agents.get(agentId)?.name ?? agentId) : 'Auto'
   const whyWho = pin && !latest ? '已固定' : null
 
   return (
@@ -226,7 +226,7 @@ function StepNode(props: { view: TaskView; step: WorkflowStep; front: boolean; l
           {step.by === 'you' ? (
             <YouAvatar size={18} />
           ) : agentId ? (
-            <AgentAvatar agentId={agentId} name={host.agents.get(agentId)?.name} size={18} />
+            <AgentAvatar agentId={agentId} name={agents.get(agentId)?.name} size={18} />
           ) : null}
           <Text
             style={[typeScale.footnote, styles.shrink, { color: c.textSecondary }]}

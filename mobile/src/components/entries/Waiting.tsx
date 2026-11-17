@@ -3,12 +3,13 @@
 // desktop shows as cards in the thread but does not count, the user's own hold on an app the agent
 // waits for, and the sub-sessions that wait.
 
+import { useCallback } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import type { SessionView, ThreadEntry } from '@shared/thread'
-import { useHost, useLink } from '../../host'
+import { sameItems, useHostSelector, useLink, type HostData } from '../../host'
 import { needsYou, sessionTitle } from '../../sessions'
 import { call } from '../../git'
 import { G, Icon } from '../../ui/session/icons'
@@ -138,11 +139,18 @@ export function waitingBelow(id: string, sessions: Map<string, SessionSummary>):
   return found
 }
 
+/** waitingBelow from the store; changes only when the list it gives does. */
+export function useWaitingBelow(id: string): SessionSummary[] {
+  return useHostSelector(
+    useCallback((d: HostData) => waitingBelow(id, d.sessions), [id]),
+    sameItems,
+  )
+}
+
 /** Sub-sessions that wait for the user: a row each that opens it, where its card is. */
 export function WaitingChildren(props: { sessionId: string }) {
   const { c, s } = useSessionTokens()
-  const { sessions } = useHost()
-  const waiting = waitingBelow(props.sessionId, sessions)
+  const waiting = useWaitingBelow(props.sessionId)
   if (waiting.length === 0) return null
   return (
     <View style={{ gap: 8 }}>

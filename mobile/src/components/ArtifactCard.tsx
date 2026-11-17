@@ -4,7 +4,7 @@
 import { Image, StyleSheet, Text, View } from 'react-native'
 import type { ArtifactSummary } from '@shared/artifacts'
 import { age, artifactKind, KIND_TEXT, useThumbnail, type ArtifactKind } from '../artifacts'
-import { useHost } from '../host'
+import { useAgent, useMaybeLink, useSession } from '../host'
 import { AgentGlyph } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
@@ -79,7 +79,7 @@ export function KindSketch(props: { kind: ArtifactKind }) {
 /** The preview inside its frame: the picture, a placeholder while it comes, or the sketch. */
 export function ArtifactPreview(props: { artifact: ArtifactSummary; inset?: number }) {
   const { c } = useTokens()
-  const { link } = useHost()
+  const link = useMaybeLink()
   const thumbnail = useThumbnail(link, props.artifact)
   const kind = artifactKind(props.artifact)
   return (
@@ -117,11 +117,10 @@ export function ArtifactCard(props: {
   onLongPress(): void
 }) {
   const { c } = useTokens()
-  const host = useHost()
   const a = props.artifact
   const kind = artifactKind(a)
-  const session = host.sessions.get(a.sessionId)
-  const agent = session ? host.agents.get(session.agentId) : undefined
+  const session = useSession(a.sessionId)
+  const agent = useAgent(session?.agentId)
   const editing = a.editing.length > 0
   return (
     <Press

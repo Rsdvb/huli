@@ -3,7 +3,7 @@
 // Nothing while the computer is connected and has answered.
 
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
-import { useHost } from '../host'
+import { sameFields, useHostActions, useHostSelector, type HostData } from '../host'
 import { linkProblem } from '../linkInfo'
 import { clockOf, listTime } from '../sessions'
 import { haptic } from '../ui/haptics'
@@ -17,9 +17,17 @@ function when(ms: number): string {
   return day === clock ? clock : `${day} ${clock}`
 }
 
+const pick = (d: HostData) => ({
+  state: d.state,
+  fromCache: d.fromCache,
+  unreachable: d.unreachable,
+  syncedAt: d.syncedAt,
+})
+
 export function SyncNote() {
   const { c } = useTokens()
-  const host = useHost()
+  const host = useHostSelector(pick, sameFields)
+  const { retry } = useHostActions()
   const connected = host.state.kind === 'connected'
   if (connected && !host.fromCache) return null
   const away = !connected && host.unreachable
@@ -47,7 +55,7 @@ export function SyncNote() {
         <Press
           onPress={() => {
             haptic.tap()
-            host.retry()
+            retry()
           }}
           hitSlop={10}
           accessibilityRole="button"

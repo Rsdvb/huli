@@ -70,7 +70,7 @@ import {
   HandBackCard,
   WaitingCard,
   WaitingChildren,
-  waitingBelow,
+  useWaitingBelow,
   waitsForUser,
 } from '../../components/entries/Waiting'
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
@@ -88,7 +88,16 @@ import {
 } from '../../components/SessionDock'
 import { useProjectFiles } from '../../files'
 import { call } from '../../git'
-import { useHost, useLink } from '../../host'
+import {
+  sameFields,
+  sameItems,
+  useAgents,
+  useHostSelector,
+  useHostState,
+  useLink,
+  useSession,
+  type HostData,
+} from '../../host'
 import { setMuted, useMuted } from '../../push/muted'
 import { errorText, folder } from '../../sessions'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
@@ -130,6 +139,8 @@ import { ToBottomButton, WorkingRow } from '../../ui/session/Working'
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
 
+const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
+
 const renderRow: ListRenderItem<Row> = ({ item }) => <ThreadRow row={item} />
 
 const live = (status: string | undefined) =>
@@ -146,24 +157,26 @@ export default function SessionScreen() {
   const { c } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const headerHeight = useHeaderHeight()
-  const host = useHost()
+  const hostState = useHostState()
+  const lists = useHostSelector(pickLists, sameFields)
+  const agents = useAgents()
   const link = useLink()
   const computer = useComputer()
-  const view = useThread(link, id, host.state)
+  const view = useThread(link, id, hostState)
   const changes = useSessionChanges(id)
   const actions = useSessionActions('session', () => (pane ? pane.close() : router.back()))
-  const summary = host.sessions.get(id)
+  const summary = useSession(id)
   const session = view.thread?.session
   const config = useSessionConfig(id, session)
   const status = session?.status ?? summary?.status
   const running = status === 'running' || status === 'awaiting_permission'
   const agentId = session?.agentId ?? summary?.agentId ?? ''
-  const agent = host.agents.get(agentId)
-  const connected = host.state.kind === 'connected'
+  const agent = agents.get(agentId)
+  const connected = hostState.kind === 'connected'
   // The session's agent is gone from the computer: a message goes only once another is picked.
   const mustSwitch =
-    host.loaded &&
-    !host.fromCache &&
+    lists.loaded &&
+    !lists.fromCache &&
     agentId !== '' &&
     (!agent || !!agent.uninstalled || !!agent.disabled || agent.registered === false)
   const menu = usePopover()
@@ -180,7 +193,7 @@ export default function SessionScreen() {
   const [usageOpen, setUsageOpen] = useState(false)
   // Another agent picked to take over with the next message, and the options it starts with.
   const pendingSwitch = usePendingSwitch(id)
-  const pending = pendingSwitch ? (host.agents.get(pendingSwitch.agentId) ?? null) : null
+  const pending = pendingSwitch ? (agents.get(pendingSwitch.agentId) ?? null) : null
   const [attachCount, setAttachCount] = useState(0)
   // The cache write the notice was closed for, so it stays closed until the next one expires.
   const [noticeClosedFor, setNoticeClosedFor] = useState<number | null>(null)
@@ -189,7 +202,7 @@ export default function SessionScreen() {
     terminals: null,
   })
   const muted = useMuted(id)
-  const terminalAllowed = useTerminalAllowed(link, host.state)
+  const terminalAllowed = useTerminalAllowed(link, hostState)
   // A system menu says nothing as it opens, so what it shows is read beforehand there.
   const agentOptions = useAgentOptions(
     link,
@@ -253,11 +266,12 @@ export default function SessionScreen() {
   const credit = useMemo(() => outOfCreditOf(view.thread), [view.thread])
   const retryNotice = useMemo(() => retryNoticeOf(view.thread), [view.thread])
   const cutNotice = useMemo(() => cutNoticeOf(view.thread), [view.thread])
-  const childWaiting = waitingBelow(id, host.sessions).length > 0
+  const childWaiting = useWaitingBelow(id).length > 0
   const handBack = session?.computer?.control === 'you'
   // A worktree that is not ready says so above the composer, as the desktop's does.
   const worktreeWaits = !!summary?.worktree && summary.worktree.state !== 'ready'
-  const chips = hasChips(summary, host.sessions)
+  const parentKnown = !!useSession(summary?.parentId)
+  const chips = hasChips(summary, parentKnown)
 
   // The files of the folder the session's tools read or edited, newest first.
   const touched = useMemo(() => {
@@ -275,9 +289,9 @@ export default function SessionScreen() {
     return [...seen]
   }, [rows, changes.folder])
 
-  const children = useMemo(
-    () => [...host.sessions.values()].filter((s) => s.parentId === id),
-    [host.sessions, id],
+  const children = useHostSelector(
+    useCallback((d: HostData) => [...d.sessions.values()].filter((s) => s.parentId === id), [id]),
+    sameItems,
   )
   const childrenRunning = children.filter((s) => live(s.status)).length
 
@@ -528,7 +542,7 @@ export default function SessionScreen() {
     count: attachCount,
   })
 
-  const others = usableAgents(host.agents)
+  const others = usableAgents(agents)
   const switchable = others.length > 1 || (others.length === 1 && others[0]!.id !== agentId)
   const agentMenu: AgentMenuProps = {
     agents: others,
@@ -773,7 +787,7 @@ export default function SessionScreen() {
     body = <FileRefs.Provider value={fileRefs}>{body}</FileRefs.Provider>
   }
 
-  const linkDown = host.state.kind === 'reconnecting' || host.state.kind === 'stopped'
+  const linkDown = hostState.kind === 'reconnecting' || hostState.kind === 'stopped'
 
   return (
     <SessionRows.Provider value={context}>
@@ -950,7 +964,7 @@ export default function SessionScreen() {
             <StatusLine
               hostName={computer.name}
               platform={computer.platform}
-              state={host.state}
+              state={hostState}
               folder={project}
               path={changes.folder}
               changed={changes.count}
@@ -1039,13 +1053,13 @@ export default function SessionScreen() {
           accessibilityLiveRegion="polite"
         >
           <GlassCapsule height={34} elevated style={styles.bannerPill}>
-            {host.state.kind === 'reconnecting' ? (
+            {hostState.kind === 'reconnecting' ? (
               <ActivityIndicator size="small" color={c.textSecondary} />
             ) : (
               <Icon icon={G.wifiOff} size={14} color={c.danger} />
             )}
             <Text style={[styles.bannerText, { color: c.textSecondary }]}>
-              {host.state.kind === 'reconnecting' ? '和电脑的连接断了，正在重连…' : '已和电脑断开'}
+              {hostState.kind === 'reconnecting' ? '和电脑的连接断了，正在重连…' : '已和电脑断开'}
             </Text>
           </GlassCapsule>
         </View>

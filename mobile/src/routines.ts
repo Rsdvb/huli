@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Alert } from 'react-native'
 import type { HostEvent, RoutineList } from '@shared/agent-host'
 import type { PermissionScope, RoutineView, RunStatus, Schedule } from '@shared/routines'
-import { useHost } from './host'
+import { useHostState, useMaybeLink } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
 import type { IconName } from './ui/Icon'
@@ -218,28 +218,29 @@ export interface RoutinesData {
 
 /** The computer's routines, read once connected and kept current by its events. */
 export function useRoutineList(): RoutinesData {
-  const host = useHost()
+  const link = useMaybeLink()
+  const state = useHostState()
   const [data, setData] = useState<RoutineList | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const connected = host.state.kind === 'connected'
+  const connected = state.kind === 'connected'
 
   const load = useCallback(async () => {
-    if (!host.link) return
+    if (!link) return
     try {
-      setData((await host.link.request('routines.list', undefined)) as RoutineList)
+      setData((await link.request('routines.list', undefined)) as RoutineList)
       setError(null)
     } catch (failure) {
       setError(errorText(failure))
     }
-  }, [host.link])
+  }, [link])
 
   useEffect(() => {
     if (connected) void load()
   }, [connected, load])
 
   useEffect(() => {
-    if (!host.link) return
-    return host.link.onHostEvent((raw: unknown) => {
+    if (!link) return
+    return link.onHostEvent((raw: unknown) => {
       const event = raw as HostEvent
       if (event.type === 'routine.changed') {
         setData((current) => {
@@ -261,7 +262,7 @@ export function useRoutineList(): RoutinesData {
         )
       }
     })
-  }, [host.link])
+  }, [link])
 
   return { data, error, load }
 }

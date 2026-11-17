@@ -7,7 +7,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import { HuliLive } from '../../modules/huli-live'
-import { useHost } from '../host'
+import {
+  useActiveHost,
+  useAgents,
+  useConnected,
+  useHostActions,
+  useHostSelector,
+  useListsLoaded,
+  useMaybeLink,
+  useSessions,
+  type HostData,
+} from '../host'
 import { usePrefs } from '../prefs'
 import { syncPush } from '../push/sync'
 import { needsYou } from '../sessions'
@@ -24,14 +34,22 @@ import { writeWidget } from './widget'
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
+const pickPhase = (d: HostData) => d.phase
+
 export function LiveBridge() {
-  const { link, state, phase, sessions, agents, host, loaded, refresh } = useHost()
+  const link = useMaybeLink()
+  const phase = useHostSelector(pickPhase)
+  const sessions = useSessions()
+  const agents = useAgents()
+  const host = useActiveHost()
+  const loaded = useListsLoaded()
+  const { refresh } = useHostActions()
   const prefs = usePrefs()
   const [foreground, setForeground] = useState(AppState.currentState === 'active')
   const [changes, setChanges] = useState(0)
   /** When the session list was last read in this stay in front; null while it may be old. */
   const freshAt = useRef<number | null>(null)
-  const connected = state.kind === 'connected'
+  const connected = useConnected()
   const enabled = LIVE_SUPPORTED && prefs.liveActivities && liveSnapshot().enabled
   const hostName = host?.name ?? null
 

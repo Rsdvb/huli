@@ -16,7 +16,7 @@ import type { ThreadEntry } from '@shared/thread'
 import { originLabel } from '@shared/browser'
 import { admin } from '../../admin'
 import { call } from '../../git'
-import { useHost, useLink } from '../../host'
+import { getHost, useAgent, useLink, useSession } from '../../host'
 import { useComputer } from '../../ui/session/computer'
 import { G } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
@@ -37,9 +37,9 @@ type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 export type Place = 'dock' | 'thread'
 
 export function useAgentName(sessionId: string): string {
-  const { sessions, agents } = useHost()
-  const summary = sessions.get(sessionId)
-  return (summary && agents.get(summary.agentId)?.name) || 'Agent'
+  const summary = useSession(sessionId)
+  const agent = useAgent(summary?.agentId)
+  return agent?.name || 'Agent'
 }
 
 /** "Claude 想要打开网站", as the desktop's card title words it. */
@@ -520,7 +520,6 @@ export function ProblemReportEntry(props: {
 }) {
   const { entry, sessionId } = props
   const link = useLink()
-  const { sessions } = useHost()
   const agent = useAgentName(sessionId)
   const outcome = entry.outcome
   const answer = (o: NonNullable<Of<'problem_report'>['outcome']>) =>
@@ -536,7 +535,7 @@ export function ProblemReportEntry(props: {
         extras: [],
         context: {
           sessionId,
-          agentId: sessions.get(sessionId)?.agentId ?? null,
+          agentId: getHost().sessions.get(sessionId)?.agentId ?? null,
           error: entry.error,
         },
       },

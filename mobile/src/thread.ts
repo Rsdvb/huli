@@ -17,7 +17,7 @@ import {
   type ThreadState,
 } from '@shared/thread'
 import { readThread, writeThread } from './cache'
-import { useHost } from './host'
+import { useComputerId } from './host'
 
 export interface ThreadView {
   thread: ThreadState | null
@@ -38,7 +38,7 @@ export interface ThreadView {
 const SAVE_EVERY = 5000
 
 export function useThread(link: HostLink, sessionId: string, state: LinkState): ThreadView {
-  const computer = useHost().host?.id ?? null
+  const computer = useComputerId()
   const [thread, setThread] = useState<ThreadState | null>(null)
   const [cached, setCached] = useState(false)
   const [error, setError] = useState<string | null>(null)

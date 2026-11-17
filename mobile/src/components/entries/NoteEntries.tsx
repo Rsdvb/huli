@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { harnessOf, type ThreadEntry } from '@shared/thread'
-import { useHost, useLink } from '../../host'
+import { useAgent, useConnected, useLink, useSession } from '../../host'
 import { sessionTitle } from '../../sessions'
 import { gentle } from '../../ui/session/Press'
 import { spanText } from '../../ui/session/format'
@@ -29,9 +29,9 @@ const HARNESS_NAMES: Record<string, string> = {
 export function TakeoverEntry(props: { entry: Of<'takeover'> }) {
   const { entry } = props
   const { c } = useSessionTokens()
-  const { agents } = useHost()
+  const agent = useAgent(entry.agentId)
   const [open, setOpen] = useState(false)
-  const name = agents.get(entry.agentId)?.name ?? HARNESS_NAMES[harnessOf(entry.agentId)] ?? 'Agent'
+  const name = agent?.name ?? HARNESS_NAMES[harnessOf(entry.agentId)] ?? 'Agent'
   const text = entry.turns > 0 ? `由 ${name} 接手 · 带上前面 ${entry.turns} 轮` : `由 ${name} 接手`
   return (
     <View>
@@ -89,8 +89,7 @@ export function ControlNoteEntry(props: { entry: Of<'control_note'>; sessionId: 
 export function SessionMessageEntry(props: { entry: Of<'session_message'> }) {
   const { entry } = props
   const { c } = useSessionTokens()
-  const { sessions } = useHost()
-  const sender = entry.senderId ? sessions.get(entry.senderId) : undefined
+  const sender = useSession(entry.senderId)
   const text = entry.content
     .map((part) =>
       part.type === 'text'
@@ -135,10 +134,8 @@ export function SessionMessageEntry(props: { entry: Of<'session_message'> }) {
  */
 export function SubSessionStart(props: { sessionId: string }) {
   const { c } = useSessionTokens()
-  const { sessions } = useHost()
-  const summary = sessions.get(props.sessionId)
-  const parent =
-    summary?.origin === 'user' && summary.parentId ? sessions.get(summary.parentId) : undefined
+  const summary = useSession(props.sessionId)
+  const parent = useSession(summary?.origin === 'user' ? summary.parentId : null)
   if (!parent) return null
   return (
     <View style={[styles.started, { backgroundColor: c.fill }]}>
@@ -175,13 +172,13 @@ function Elapsed(props: { since: number; color: string }) {
 export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'> }) {
   const { entry } = props
   const { c, s } = useSessionTokens()
-  const { sessions, state } = useHost()
+  const connected = useConnected()
   const link = useLink()
-  const child = sessions.get(entry.sessionId)
+  const child = useSession(entry.sessionId)
   const digest = useSubagentDigest(
     link,
     entry.kind === 'subagent' ? child : undefined,
-    state.kind === 'connected',
+    connected,
   )
   const waiting =
     !!child &&

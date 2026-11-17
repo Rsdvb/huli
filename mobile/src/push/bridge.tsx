@@ -6,14 +6,27 @@
 
 import { useEffect } from 'react'
 import { AppState } from 'react-native'
-import { useHost } from '../host'
+import {
+  useActiveHost,
+  useHostActions,
+  useHostSelector,
+  useHostState,
+  useMaybeLink,
+  type HostData,
+} from '../host'
 import { publishLink } from './live-link'
 import { platform } from './platform'
 import './responses'
 import { resetPushStatus, syncPush } from './sync'
 
+const pickComputers = (d: HostData) => d.computers.hosts
+
 export function PushBridge() {
-  const { link, state, notePushId, host, computers } = useHost()
+  const link = useMaybeLink()
+  const state = useHostState()
+  const host = useActiveHost()
+  const computers = useHostSelector(pickComputers)
+  const { notePushId } = useHostActions()
 
   useEffect(() => {
     resetPushStatus()

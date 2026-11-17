@@ -18,7 +18,7 @@ import { useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, LimitsReason, PlanLimit } from '@shared/agent-host'
 import type { UsageScope } from '@shared/usage'
 import { TopBar, useScrollTopOnTabPress } from '../../components/shell'
-import { useHost } from '../../host'
+import { useActiveHost, useAgents, useHostState, useMaybeLink } from '../../host'
 import { clockOf, errorText } from '../../sessions'
 import { agentColor } from '../../ui/agent-marks'
 import { AgentAvatar } from '../../ui/AgentAvatar'
@@ -164,7 +164,10 @@ function limitColor(c: Palette, limit: PlanLimit): string {
 
 export default function Usage() {
   const { c } = useTokens()
-  const { link, agents, state, host } = useHost()
+  const link = useMaybeLink()
+  const agents = useAgents()
+  const state = useHostState()
+  const host = useActiveHost()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
