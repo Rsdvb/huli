@@ -46,7 +46,9 @@
           "microphonePermission": false
         }
       ],
-      "expo-router"
+      "expo-router",
+      ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
+      "./plugins/withNotificationService"
     ]
   }
 }

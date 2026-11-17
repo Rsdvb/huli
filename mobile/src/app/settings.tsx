@@ -7,6 +7,7 @@ import { Stack, router } from 'expo-router'
 import type { DirectAddress } from '@shared/remote/protocol'
 import { APP_VERSION, currentAddress, routeKind } from '../connection'
 import { useHost } from '../host'
+import { pushStatusText, usePushStatus } from '../push/sync'
 import { useTheme } from '../theme'
 
 const ROUTE_NAMES = { tailscale: 'Tailscale', lan: '局域网', other: '直连' } as const
@@ -20,6 +21,7 @@ function hostPort(address: DirectAddress): string {
 export default function Settings() {
   const theme = useTheme()
   const host = useHost()
+  const pushText = pushStatusText(usePushStatus())
   const [address, setAddress] = useState<DirectAddress | null>(() => currentAddress())
   const connected = host.state.kind === 'connected'
 
@@ -102,6 +104,21 @@ export default function Settings() {
         手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个。
       </Text>
 
+      {pushText && (
+        <>
+          <Text style={[styles.heading, { color: theme.muted }]}>通知</Text>
+          <View
+            style={[
+              styles.group,
+              styles.note,
+              { backgroundColor: theme.card, borderColor: theme.line },
+            ]}
+          >
+            <Text style={{ color: theme.text, fontSize: 15, lineHeight: 21 }}>{pushText}</Text>
+          </View>
+        </>
+      )}
+
       <Pressable
         onPress={unpair}
         style={({ pressed }) => [
@@ -135,4 +152,5 @@ const styles = StyleSheet.create({
   value: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
   hint: { fontSize: 12, marginLeft: 4, lineHeight: 17 },
   danger: { alignItems: 'center', paddingVertical: 14, marginTop: 16 },
+  note: { paddingHorizontal: 16, paddingVertical: 13 },
 })

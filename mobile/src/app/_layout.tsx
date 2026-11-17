@@ -2,6 +2,7 @@ import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { HostProvider } from '../host'
+import { PushBridge } from '../push/bridge'
 import { useTheme } from '../theme'
 
 export default function Layout() {
@@ -24,6 +25,7 @@ export default function Layout() {
           <Stack.Screen name="session/[id]" options={{ title: '' }} />
           <Stack.Screen name="new" options={{ title: '新会话', presentation: 'modal' }} />
         </Stack>
+        <PushBridge />
       </HostProvider>
     </SafeAreaProvider>
   )
