@@ -8,6 +8,7 @@ import {
   MAX_PUSH_BODY_TEXT,
   MAX_PUSH_TITLE,
   MAX_SEALED,
+  PROGRESS_FORMAT,
   PUSH_PATH,
   encodeSealed,
   pushRequestHeaders,
@@ -39,7 +40,7 @@ const RETRY: PushRetry = { firstMs: 1000, maxMs: 60_000, attempts: 6 }
 const REQUEST_TIMEOUT_MS = 15_000
 
 /** Which of a device's tokens a push went to, which Apple may say is gone. */
-export type PushTokenKind = 'device' | 'activity-start' | 'activity-update'
+export type PushTokenKind = 'device' | 'activity-start' | 'activity-update' | 'activity-progress'
 
 export interface PushSenderOptions {
   /** The gateway's origin. */
@@ -119,7 +120,7 @@ export class PushSender {
       return
     }
     this.signedOutLogged = false
-    const key = job.type === 'activity' ? 'activity' : `tag:${job.subject}`
+    const key = job.type === 'activity' || job.type === 'progress' ? job.type : `tag:${job.subject}`
     const queue = this.queues.get(job.deviceId) ?? []
     for (const entry of queue) if (entry.key === key) entry.cancelled = true
     queue.push({ job, key, token, cancelled: false })
@@ -278,6 +279,49 @@ export class PushSender {
         const attributes = await seal({ ...base, kind: 'activity' })
         return attributes ? { type: 'liveactivity', event: 'start', sealed, attributes } : null
       }
+      case 'progress': {
+        const { title, step, plan, ...rest } = job.state
+        const quiet: PushContent = {
+          ...base,
+          kind: 'progress',
+          format: PROGRESS_FORMAT,
+          ...rest,
+          ...(plan ? { plan: { done: plan.done, total: plan.total } } : {}),
+        }
+        const full: PushContent = {
+          ...quiet,
+          ...(title ? { title: clip(title, MAX_PUSH_TITLE) } : {}),
+          ...(step ? { step: clip(step, MAX_PUSH_BODY_TEXT) } : {}),
+          ...(plan?.current
+            ? { plan: { ...plan, current: clip(plan.current, MAX_PUSH_TITLE) } }
+            : {}),
+        }
+        // Texts too long once sealed go, as with details off.
+        const sealed = (await seal(full)) ?? (await seal(quiet))
+        if (!sealed) return null
+        const { staleS, lingerS } = job
+        if (job.action === 'end') {
+          return { type: 'liveactivity', event: 'end', sealed, dismiss: lingerS }
+        }
+        if (job.action === 'update') {
+          return {
+            type: 'liveactivity',
+            event: 'update',
+            sealed,
+            stale: staleS,
+            ...(job.low ? { low: true as const } : {}),
+          }
+        }
+        const attributes = await seal({
+          ...base,
+          kind: 'activity',
+          progress: true,
+          sessionId: job.state.sessionId,
+        })
+        return attributes
+          ? { type: 'liveactivity', event: 'start', sealed, attributes, stale: staleS }
+          : null
+      }
     }
   }
 }
@@ -293,10 +337,17 @@ function tokenOf(push: DevicePush, job: PushJob): Entry['token'] | null {
   const target = push.target
   if (!target) return null
   const { environment } = target.apns
-  if (job.type !== 'activity') return { kind: 'device', token: target.apns.token, environment }
-  const token = job.action === 'start' ? target.activity?.start : target.activity?.update
+  if (job.type === 'alert' || job.type === 'background') {
+    return { kind: 'device', token: target.apns.token, environment }
+  }
+  if (job.action === 'start') {
+    const token = target.activity?.start
+    return token ? { kind: 'activity-start', token, environment } : null
+  }
+  const token = job.type === 'activity' ? target.activity?.update : target.activity?.progress?.token
   if (!token) return null
-  return { kind: job.action === 'start' ? 'activity-start' : 'activity-update', token, environment }
+  const kind = job.type === 'activity' ? 'activity-update' : 'activity-progress'
+  return { kind, token, environment }
 }
 
 async function refusalOf(response: Response): Promise<PushRefusal | null> {

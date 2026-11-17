@@ -154,6 +154,72 @@ describe('sending a push', () => {
     expect(content).toMatchObject({ kind: 'permission', requestId: 'r1' })
   })
 
+  it("seals a turn's activity state to its own token, timed as the notifier asks", async () => {
+    const FOLLOW = 'd4'.repeat(32)
+    const START = 'c3'.repeat(32)
+    const target = {
+      apns: { token: DEVICE_TOKEN, environment: 'sandbox' as const },
+      activity: { start: START, progress: { token: FOLLOW, sessionId: 's1' } },
+    }
+    const progress = (
+      action: 'start' | 'update' | 'end',
+      low: boolean,
+    ): Extract<PushJob, { type: 'progress' }> => ({
+      deviceId: 'phone',
+      subject: 'progress',
+      type: 'progress',
+      action,
+      low,
+      staleS: 1800,
+      lingerS: 900,
+      state: {
+        title: 'Fix the login form',
+        sessionId: 's1',
+        phase: 'command',
+        agent: 'Claude Code',
+        step: 'pnpm test',
+        plan: { done: 1, total: 3, current: 'Write the test' },
+        startedAt: 1000,
+        subagents: 2,
+        running: 1,
+        waiting: 0,
+      },
+    })
+    const t = await setup([200, 200, 200], { target })
+    t.sender.send(progress('update', true))
+    await expect.poll(() => t.requests.length).toBe(1)
+    t.sender.send(progress('end', false))
+    await expect.poll(() => t.requests.length).toBe(2)
+    t.sender.send(progress('start', false))
+    await t.finished
+    const [update, end, start] = t.requests.map((request) => parsePushRequest(request.body)!)
+    expect(update).toMatchObject({
+      token: FOLLOW,
+      push: { type: 'liveactivity', event: 'update', stale: 1800, low: true },
+    })
+    expect(end).toMatchObject({ token: FOLLOW, push: { event: 'end', dismiss: 900 } })
+    expect(end!.push).not.toHaveProperty('low')
+    expect(start).toMatchObject({ token: START, push: { event: 'start', stale: 1800 } })
+    expect(await opened(t, t.requests[0]!.body)).toMatchObject({
+      v: 1,
+      kind: 'progress',
+      format: 1,
+      title: 'Fix the login form',
+      sessionId: 's1',
+      phase: 'command',
+      step: 'pnpm test',
+      plan: { done: 1, total: 3, current: 'Write the test' },
+      subagents: 2,
+    })
+    const envelope = decodeSealed((start!.push as { attributes: string }).attributes)!
+    const attributes = (await openPush(envelope, t.device))!
+    expect(JSON.parse(new TextDecoder().decode(attributes.body))).toMatchObject({
+      kind: 'activity',
+      progress: true,
+      sessionId: 's1',
+    })
+  })
+
   it('tries again after the gateway or the network fails, and logs nothing of the push', async () => {
     const t = await setup([502, new TypeError('fetch failed'), 200])
     t.sender.send(job)

@@ -9,6 +9,7 @@ import type {
   MainToRemoteHost,
   RemoteHostStatus,
   RemoteHostToMain,
+  SessionProgress,
 } from '@shared/host-control'
 import { isBrowserForward } from '@shared/browser'
 import { writeLog } from '@shared/log/process-log'
@@ -35,7 +36,7 @@ import { DiscoveryRequests } from './discovery'
 import { DirectListener } from './direct'
 import { HostStore, uniqueAddresses } from './hosts'
 import { LoopbackListener } from './loopback'
-import { DeviceNotifications, parseAttention, parseWaiting } from './notifications'
+import { DeviceNotifications, parseAttention, parseProgress, parseWaiting } from './notifications'
 import { PairingCodes } from './pairing'
 import { jsonOf, openRelaySocket, relayRequest } from './relay-net'
 import { RemoteRegions } from './relay-regions'
@@ -150,6 +151,7 @@ export function startRemoteHost(
   // a server starting later begins with.
   let pushUrl = PUSH_URL
   let waiting: Record<string, string[]> = {}
+  let progress: Record<string, SessionProgress> = {}
   let present: boolean | null = null
   // Whether devices of the account find this host on the relay, while it is signed in to it.
   let discoverable = false
@@ -259,10 +261,12 @@ export function startRemoteHost(
             hostName: () => server.options.host.name,
             token: () => relayToken,
             showing: (deviceId, sessionId) => server.showing(deviceId, sessionId),
+            inFront: (deviceId) => server.inFront(deviceId),
             log,
           })
         : null
     notifications?.setWaiting(waiting)
+    notifications?.setProgress(progress)
     if (present !== null) notifications?.setPresent(present)
     const relay = new RelaySwitch(() => {
       if (!relayKey || !relayId || !relayUrl) return null
@@ -379,6 +383,7 @@ export function startRemoteHost(
     terminal = message.terminal === true
     if (typeof message.push === 'string') pushUrl = message.push
     waiting = parseWaiting(message.waiting) ?? {}
+    progress = parseProgress(message.progress) ?? {}
     if (typeof message.present === 'boolean') present = message.present
     discoverable = message.discoverable === true
     if (message.relay && typeof message.relay.url === 'string') {
@@ -667,6 +672,16 @@ export function startRemoteHost(
         if (!sessions) break
         waiting = sessions
         withServing(({ notifications }) => notifications?.setWaiting(sessions))
+        break
+      }
+      case 'remote-host:progress': {
+        const sessions = parseProgress(message.sessions)
+        if (!sessions) {
+          log('warn', 'Ignored a progress message that is not one')
+          break
+        }
+        progress = sessions
+        withServing(({ notifications }) => notifications?.setProgress(sessions))
         break
       }
       case 'remote-host:seen':

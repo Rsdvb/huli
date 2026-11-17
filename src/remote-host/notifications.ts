@@ -2,6 +2,7 @@
 // the device file, what the agent host reports through the host's parent, and the notifier and the
 // sender between them. Only a host with its Ed25519 key has them, since every push is signed.
 
+import type { SessionProgress } from '@shared/host-control'
 import { addLogSecret } from '@shared/log/process-log'
 import {
   DEFAULT_CHOICES,
@@ -9,13 +10,20 @@ import {
   type DevicePush,
   type NotificationsState,
   type NotificationsUpdate,
+  type ProgressPhase,
   type PushActions,
   type PushQuestion,
 } from '@shared/remote/push'
 import type { RelayKey } from '@shared/remote/relay'
 import type { LogFn } from '../agent-host/storage'
 import type { DeviceStore } from './devices'
-import { Notifier, type Attention, type AttentionKind, type NotifierDevice } from './notifier'
+import {
+  Notifier,
+  type Attention,
+  type AttentionKind,
+  type NotifierDevice,
+  type ProgressTiming,
+} from './notifier'
 import { PushSender, type PushSenderOptions, type PushTokenKind } from './push-sender'
 
 export interface DeviceNotificationsOptions {
@@ -28,10 +36,14 @@ export interface DeviceNotificationsOptions {
   token(): string | null
   /** Whether the device shows the session in front now. */
   showing(deviceId: string, sessionId: string): boolean
+  /** Whether the device is connected in the foreground, where it keeps its own Live Activity. */
+  inFront?(deviceId: string): boolean
   log: LogFn
   fetch?: typeof fetch
   mergeMs?: number
   retry?: PushSenderOptions['retry']
+  progressTiming?: Partial<ProgressTiming>
+  now?: () => number
 }
 
 const KINDS: readonly string[] = [
@@ -131,6 +143,78 @@ export function parseWaiting(value: unknown): Record<string, string[]> | null {
   return waiting
 }
 
+const PHASES: readonly string[] = [
+  'starting',
+  'thinking',
+  'writing',
+  'command',
+  'read',
+  'search',
+  'edit',
+  'running',
+  'approval',
+  'question',
+  'done',
+  'error',
+] satisfies ProgressPhase[]
+
+const MAX_PROGRESS_SESSIONS = 1000
+
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+const isTime = (value: unknown): value is number | null => value === null || isCount(value)
+
+const isText = (value: unknown): value is string | null =>
+  value === null || (typeof value === 'string' && value.length <= MAX_TEXT)
+
+function parseSessionProgress(value: unknown): SessionProgress | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { title, agent, phase, step, plan, startedAt, endedAt, subagents, waiting } =
+    value as Record<string, unknown>
+  if (typeof phase !== 'string' || !PHASES.includes(phase)) return null
+  if (!isText(title) || !isText(agent) || !isText(step)) return null
+  if (!isTime(startedAt) || !isTime(endedAt) || !isCount(subagents) || !isCount(waiting)) {
+    return null
+  }
+  let parsedPlan: SessionProgress['plan'] = null
+  if (plan !== null) {
+    if (typeof plan !== 'object') return null
+    const { done, total, current } = plan as Record<string, unknown>
+    if (!isCount(done) || !isCount(total) || done > total || !isText(current)) return null
+    parsedPlan = { done, total, current }
+  }
+  return {
+    title,
+    agent,
+    phase: phase as ProgressPhase,
+    step,
+    plan: parsedPlan,
+    startedAt,
+    endedAt,
+    subagents,
+    waiting,
+  }
+}
+
+/**
+ * The sessions at work as the parent passes them on from the agent host; null when they are not
+ * that, as for any message across processes.
+ */
+export function parseProgress(value: unknown): Record<string, SessionProgress> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const entries = Object.entries(value)
+  if (entries.length > MAX_PROGRESS_SESSIONS) return null
+  // No prototype, so a session id is only ever a key.
+  const sessions = Object.create(null) as Record<string, SessionProgress>
+  for (const [sessionId, entry] of entries) {
+    const parsed = isId(sessionId) ? parseSessionProgress(entry) : null
+    if (!parsed) return null
+    sessions[sessionId] = parsed
+  }
+  return sessions
+}
+
 export class DeviceNotifications {
   private readonly notifier: Notifier
   private readonly sender: PushSender
@@ -162,14 +246,17 @@ export class DeviceNotifications {
           return push ? [{ id: device.id, push }] : []
         }),
       showing: options.showing,
+      ...(options.inFront ? { inFront: options.inFront } : {}),
       send: (job) => {
         this.sender.send(job)
         // An ended activity's token is spent; the next activity brings its own.
-        if (job.type === 'activity' && job.action === 'end') {
-          void this.dropActivityToken(job.deviceId)
+        if ((job.type === 'activity' || job.type === 'progress') && job.action === 'end') {
+          void this.dropActivityToken(job.deviceId, job.type === 'progress' ? 'progress' : 'update')
         }
       },
       ...(options.mergeMs === undefined ? {} : { mergeMs: options.mergeMs }),
+      ...(options.progressTiming ? { progressTiming: options.progressTiming } : {}),
+      ...(options.now ? { now: options.now } : {}),
     })
   }
 
@@ -183,6 +270,7 @@ export class DeviceNotifications {
         apns: Boolean(target),
         activityStart: Boolean(target?.activity?.start),
         activityUpdate: Boolean(target?.activity?.update),
+        progress: Boolean(target?.activity?.progress),
       },
       signedIn: this.options.token() !== null,
       host: { id: this.options.hostId, key: this.publicKey },
@@ -194,7 +282,13 @@ export class DeviceNotifications {
     const { devices } = this.options
     const before = devices.push(deviceId)
     const target = update.target === undefined ? (before?.target ?? null) : update.target
-    for (const token of [target?.apns.token, target?.activity?.start, target?.activity?.update]) {
+    const { activity } = target ?? {}
+    for (const token of [
+      target?.apns.token,
+      activity?.start,
+      activity?.update,
+      activity?.progress?.token,
+    ]) {
       if (token) addLogSecret(token)
     }
     const next: DevicePush = {
@@ -212,6 +306,15 @@ export class DeviceNotifications {
 
   setWaiting(sessions: Record<string, string[]>): void {
     this.notifier.setWaiting(sessions)
+  }
+
+  setProgress(sessions: Record<string, SessionProgress>): void {
+    this.notifier.setProgress(sessions)
+  }
+
+  /** The device came to the front or left it. */
+  frontChanged(deviceId: string): void {
+    this.notifier.frontChanged(deviceId)
   }
 
   seen(sessionId: string): void {
@@ -237,6 +340,7 @@ export class DeviceNotifications {
     const push = devices.push(deviceId)
     if (!push?.target) return
     // A dead device token ends every push to it; a dead activity token only that activity's.
+    if (token === 'activity-progress') this.notifier.progressGone(deviceId)
     const target =
       token === 'device'
         ? null
@@ -244,20 +348,24 @@ export class DeviceNotifications {
             ...push.target,
             activity: {
               ...push.target.activity,
-              ...(token === 'activity-start' ? { start: undefined } : { update: undefined }),
+              ...(token === 'activity-start'
+                ? { start: undefined }
+                : token === 'activity-update'
+                  ? { update: undefined }
+                  : { progress: undefined }),
             },
           })
     await devices.setPush(deviceId, { ...push, target })
     this.notifier.deviceChanged()
   }
 
-  private async dropActivityToken(deviceId: string): Promise<void> {
+  private async dropActivityToken(deviceId: string, which: 'update' | 'progress'): Promise<void> {
     const { devices } = this.options
     const push = devices.push(deviceId)
-    if (!push?.target?.activity?.update) return
+    if (!push?.target?.activity?.[which]) return
     const target = withoutEmptyActivity({
       ...push.target,
-      activity: { ...push.target.activity, update: undefined },
+      activity: { ...push.target.activity, [which]: undefined },
     })
     await devices.setPush(deviceId, { ...push, target })
   }
@@ -267,10 +375,15 @@ export class DeviceNotifications {
 function withoutEmptyActivity(target: NonNullable<DevicePush['target']>): DevicePush['target'] {
   const start = target.activity?.start
   const update = target.activity?.update
+  const progress = target.activity?.progress
   const { apns } = target
-  if (!start && !update) return { apns }
+  if (!start && !update && !progress) return { apns }
   return {
     apns,
-    activity: { ...(start ? { start } : {}), ...(update ? { update } : {}) },
+    activity: {
+      ...(start ? { start } : {}),
+      ...(update ? { update } : {}),
+      ...(progress ? { progress } : {}),
+    },
   }
 }

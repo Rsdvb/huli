@@ -284,6 +284,14 @@ export class RemoteServer {
     return false
   }
 
+  /** Whether the device is connected and in the foreground, where it keeps its Live Activity. */
+  inFront(deviceId: string): boolean {
+    for (const session of this.sessions) {
+      if (session.device.id === deviceId && session.inFront) return true
+    }
+    return false
+  }
+
   /** The ids of the devices connected to a session now. */
   online(): string[] {
     const ids = new Set<string>()
@@ -1110,7 +1118,17 @@ class DeviceSession {
 
   /** Whether the device shows the session in front: connected, in the foreground and showing it. */
   showing(sessionId: string): boolean {
-    return this.connected && this.paceMs < BACKGROUND_PACE_MS && this.shown.has(sessionId)
+    return this.inFront && this.shown.has(sessionId)
+  }
+
+  /** Whether the device is connected and in the foreground. */
+  get inFront(): boolean {
+    return this.connected && this.paceMs < BACKGROUND_PACE_MS
+  }
+
+  /** The device came to the front or left it: the host's part in its Live Activity follows. */
+  private frontChanged(before: boolean): void {
+    if (this.inFront !== before) this.server.options.notifications?.()?.frontChanged(this.device.id)
   }
 
   /** Whether the session goes on, connected or waiting for its device. */
@@ -1248,6 +1266,7 @@ class DeviceSession {
     if (this.state !== 'open') return
     if (!this.resumable) return this.end()
     this.state = 'away'
+    this.frontChanged(this.paceMs < BACKGROUND_PACE_MS)
     // Their bytes on the way are lost; the device sends them again in uploads of their own.
     this.uploads.dropUnfinished()
     this.forwards.dropConnections()
@@ -1281,7 +1300,9 @@ class DeviceSession {
   /** Ends the session at once: its device's next hello finds no session to resume. */
   end(): void {
     if (this.state === 'closed') return
+    const before = this.inFront
     this.state = 'closed'
+    this.frontChanged(before)
     if (this.awayTimer) clearTimeout(this.awayTimer)
     this.awayTimer = null
     if (this.regionsTimer) clearTimeout(this.regionsTimer)
@@ -1391,9 +1412,12 @@ class DeviceSession {
     switch (type) {
       case 'ack':
         return this.outbox.ack(received)
-      case 'pace':
+      case 'pace': {
+        const before = this.inFront
         if (typeof ms === 'number' && Number.isFinite(ms)) this.paceMs = ms
+        this.frontChanged(before)
         return this.outbox.pace(ms)
+      }
       case 'relay.prefer':
         if (this.regionsOffered) this.server.options.regions?.preferred(this.device.id, value)
         return
