@@ -1083,10 +1083,9 @@ export function Composer(props: ComposerProps) {
                   props.onStop!()
                 }}
                 accessibilityLabel="停止这一轮"
-                tone="glass"
-                systemImage={G.stop.sf}
+                style={{ backgroundColor: s.stop }}
               >
-                <Icon icon={G.stop} size={13} color={c.text} weight="bold" />
+                <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
               </RoundButton>
             )}
           </View>
@@ -1425,9 +1424,9 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
         onPress={props.onRemove}
         hitSlop={8}
         accessibilityLabel={`移除 ${item.source.name}`}
-        style={[styles.remove, { backgroundColor: c.text, borderColor: s.dockCard }]}
+        style={[styles.remove, { backgroundColor: s.scrim, borderColor: c.borderStrong }]}
       >
-        <Icon icon={G.close} size={9} color={c.bg} weight="black" strokeWidth={3.2} />
+        <Icon icon={G.close} size={10} color={s.onScrim} weight="bold" strokeWidth={2.8} />
       </Pressable>
     </PressScale>
   )
@@ -1528,7 +1527,7 @@ function SheetButton(props: {
   )
 }
 
-const TILE = 68
+const TILE = 64
 const TRAY_RADIUS = 30
 
 const styles = StyleSheet.create({
@@ -1546,7 +1545,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   glassCard: { borderColor: 'transparent', backgroundColor: 'transparent' },
-  tiles: { gap: 10, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 },
+  tiles: { gap: 12, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 2 },
   status: { fontSize: 12, lineHeight: 16, paddingHorizontal: 18, paddingTop: 6 },
   input: {
     minHeight: 48,
@@ -1600,11 +1599,11 @@ const styles = StyleSheet.create({
   tile: {
     width: TILE,
     height: TILE,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     marginTop: 6,
   },
-  preview: { width: TILE, height: TILE, borderRadius: 14 },
+  preview: { width: TILE, height: TILE, borderRadius: 12 },
   file: { flex: 1, padding: 7, justifyContent: 'space-between' },
   fileExt: { fontSize: 10, fontWeight: '700' },
   fileName: { fontSize: 10 },
@@ -1615,7 +1614,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    borderRadius: 14,
+    borderRadius: 12,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1623,12 +1622,12 @@ const styles = StyleSheet.create({
   coverText: { fontSize: 10, marginTop: 3, fontWeight: '500' },
   remove: {
     position: 'absolute',
-    top: -6,
-    right: -6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
+    top: -8,
+    right: -8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
