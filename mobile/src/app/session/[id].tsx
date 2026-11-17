@@ -22,17 +22,31 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
-import type { ThreadEntry, UserContent } from '@shared/thread'
+import { harnessOf, type ThreadEntry, type UserContent } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
+import {
+  backgroundWork,
+  readPendingSwitch,
+  setPendingSwitch,
+  updatePendingSwitch,
+  usePendingSwitch,
+} from '../../agentSwitch'
 import { AttachPages, useAttachPages } from '../../components/AttachMenu'
 import { useSessionChanges } from '../../components/ChangesButton'
-import { Composer, type ComposerHandle } from '../../components/Composer'
+import { Composer, SendCancelled, type ComposerHandle } from '../../components/Composer'
+import { CacheNotice, SwitchStrip } from '../../components/ComposerNotes'
 import {
+  agentModelsPage,
   agentsPage,
+  modeLook,
   modePage,
   modelPage,
   moreModelsPage,
+  optionPage,
+  startConfig,
   usableAgents,
+  type AgentMenuProps,
+  type ConfigControl,
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { ThreadRow } from '../../components/EntryView'
@@ -54,7 +68,13 @@ import {
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { useSessionActions } from '../../components/SessionActions'
 import { useSessionPane } from '../../components/SessionPane'
-import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
+import {
+  ModeButton,
+  ModelChip,
+  QueueStack,
+  slotOf,
+  useSessionConfig,
+} from '../../components/SessionDock'
 import { useProjectFiles } from '../../files'
 import { call } from '../../git'
 import { useHost, useLink } from '../../host'
@@ -71,7 +91,9 @@ import { G } from '../../ui/session/icons'
 import { GlassCapsule } from '../../ui/Glass'
 import { NATIVE_MENUS, NativeMenu } from '../../ui/session/NativeMenu'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
-import { toneColor, usageTone } from '../../ui/session/limits'
+import { tokensText, toneColor, usageTone } from '../../ui/session/limits'
+import { endedOnRejection, sessionPlaceholder } from '../../ui/session/placeholder'
+import { CACHE_NOTICE_MIN_TOKENS, useCacheState } from '../../ui/session/promptCache'
 import { useSessionTokens } from '../../ui/session/palette'
 import {
   usePopover,
@@ -128,6 +150,12 @@ export default function SessionScreen() {
   const agentId = session?.agentId ?? summary?.agentId ?? ''
   const agent = host.agents.get(agentId)
   const connected = host.state.kind === 'connected'
+  // The session's agent is gone from the computer: a message goes only once another is picked.
+  const mustSwitch =
+    host.loaded &&
+    !host.fromCache &&
+    agentId !== '' &&
+    (!agent || !!agent.uninstalled || !!agent.disabled || agent.registered === false)
   const menu = usePopover()
   const composer = useRef<ComposerHandle>(null)
   const titleAnchor = useRef<ViewHandle>(null)
@@ -140,7 +168,13 @@ export default function SessionScreen() {
   const [selecting, setSelecting] = useState<string | null>(null)
   const [contextOpen, setContextOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
-  const [pending, setPending] = useState<AgentStatus | null>(null)
+  // Another agent picked to take over with the next message, and the options it starts with.
+  const pendingSwitch = usePendingSwitch(id)
+  const pending = pendingSwitch ? (host.agents.get(pendingSwitch.agentId) ?? null) : null
+  const [attachCount, setAttachCount] = useState(0)
+  const [holds, setHolds] = useState(false)
+  // The cache write the notice was closed for, so it stays closed until the next one expires.
+  const [noticeClosedFor, setNoticeClosedFor] = useState<number | null>(null)
   const [counts, setCounts] = useState<{ artifacts: number | null; terminals: number | null }>({
     artifacts: null,
     terminals: null,
@@ -148,7 +182,32 @@ export default function SessionScreen() {
   const muted = useMuted(id)
   const terminalAllowed = useTerminalAllowed(link, host.state)
   // A system menu says nothing as it opens, so what it shows is read beforehand there.
-  const agentOptions = useAgentOptions(link, NATIVE_MENUS || menu.openId === 'model')
+  const agentOptions = useAgentOptions(
+    link,
+    NATIVE_MENUS || menu.openId === 'model' || pendingSwitch !== null,
+  )
+  const pendingEntry = pendingSwitch
+    ? agentOptions.options?.find((o) => o.agentId === pendingSwitch.agentId)
+    : undefined
+  // While a switch waits, the menus set the options the new agent starts with.
+  const pendingConfig = pendingSwitch
+    ? pendingEntry
+      ? startConfig(pendingEntry, pendingSwitch.values)
+      : []
+    : null
+  const control: ConfigControl = pendingConfig
+    ? {
+        config: pendingConfig,
+        running: false,
+        set: (option, value) => {
+          const now = readPendingSwitch(id)
+          if (now) updatePendingSwitch(id, { values: { ...now.values, [option.id]: value } })
+        },
+      }
+    : config.control
+  const shownMode = pendingConfig ? slotOf(pendingConfig, 'mode', false) : config.mode
+  const shownModel = pendingConfig ? slotOf(pendingConfig, 'model', false) : config.model
+  const shownEffort = pendingConfig ? slotOf(pendingConfig, 'thought_level', false) : config.effort
 
   const rows = useMemo(() => {
     if (!view.thread) return []
@@ -347,13 +406,71 @@ export default function SessionScreen() {
   const title = session?.title ?? summary?.title ?? '会话'
   const project = summary ? (summary.scratch ? '无项目' : folder(summary.projectPath)) : null
 
+  /** Asks before a switch stops background work the session's own agent runs. */
+  const confirmSwitch = async (to: string): Promise<boolean> => {
+    const work = await backgroundWork(link, id)
+    if (work.length === 0) return true
+    return new Promise((resolve) =>
+      Alert.alert(
+        `停止后台工作并换成 ${to}？`,
+        `这些在 ${agent?.name ?? '当前 Agent'} 里运行，换 Agent 时会停止：\n${work.join('\n')}`,
+        [
+          { text: '取消', style: 'cancel', onPress: () => resolve(false) },
+          { text: '停止并切换', style: 'destructive', onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      ),
+    )
+  }
+
+  // A message that hands the session to another agent goes as that agent's first turn; any other
+  // goes through the host's queue, which sends at once when the session is free.
   const send = async (content: UserContent[]) => {
-    if (pending) {
-      await call(link, 'sessions.switchAgent', { sessionId: id, agentId: pending.id, content })
-      setPending(null)
+    if (pendingSwitch) {
+      if (!(await confirmSwitch(pending?.name ?? 'Agent'))) throw new SendCancelled()
+      // Read again: the switch may have changed while the user was asked.
+      const now = readPendingSwitch(id)
+      if (!now) throw new SendCancelled()
+      await call(link, 'sessions.switchAgent', {
+        sessionId: id,
+        agentId: now.agentId,
+        content,
+        ...(Object.keys(now.values).length > 0 ? { options: now.values } : {}),
+        ...(now.summarize ? { summarize: true } : {}),
+      })
+      setPendingSwitch(id, null)
       return
     }
     await link.request('sessions.queue', { sessionId: id, content })
+  }
+
+  // Into the running turn now: queued, then steered in, or the turn stopped and it sent next.
+  const sendNow = async (content: UserContent[]) => {
+    const { itemId } = (await link.request('sessions.queue', { sessionId: id, content })) as {
+      itemId: string | null
+    }
+    if (!itemId) return
+    // Once queued, a failed send-now leaves the message in the queue, not lost.
+    link
+      .request('sessions.sendNow', { sessionId: id, itemId })
+      .catch((error: unknown) => Alert.alert('没能立即发送', errorText(error)))
+  }
+
+  // Picking the session's own agent undoes a switch; another's model makes it the pending one.
+  const chooseAgent = (chosen: AgentStatus, model: string | null) => {
+    if (chosen.id === agentId && !mustSwitch) {
+      setPendingSwitch(id, null)
+      const own = config.model?.option
+      if (own && model !== null && model !== own.value) config.control.set(own, model)
+      return
+    }
+    const entry = agentOptions.options?.find((o) => o.agentId === chosen.id)
+    const modelId = entry?.config.find((o) => o.category === 'model')?.id
+    setPendingSwitch(id, {
+      agentId: chosen.id,
+      values: modelId && model !== null ? { [modelId]: model } : {},
+      summarize: pendingSwitch?.summarize ?? false,
+    })
   }
 
   // The turn runs: a line says for how long, what it has added and what it does now, with the
@@ -404,10 +521,74 @@ export default function SessionScreen() {
     composer,
     commands: session?.commands ?? [],
     touched,
+    count: attachCount,
   })
 
   const others = usableAgents(host.agents)
   const switchable = others.length > 1 || (others.length === 1 && others[0]!.id !== agentId)
+  const agentMenu: AgentMenuProps = {
+    agents: others,
+    current: pendingSwitch?.agentId ?? agentId,
+    currentModel: pendingConfig
+      ? (shownModel?.option.value as string | undefined)
+      : (config.model?.option.value as string | undefined),
+    options: agentOptions.options,
+    error: agentOptions.error,
+    onRetry: agentOptions.reload,
+    onChoose: chooseAgent,
+    footer: '从你的下一条消息起接手',
+    title: '换 Agent',
+    c,
+  }
+
+  // The prompt cache: its countdown under the box, a warning on a change that rewrites it while
+  // warm, and a notice when a message is begun on one that has expired.
+  const cache = useCacheState(session, agent?.account ?? null)
+  const reread = session?.usage?.used ?? 0
+  const cacheNoticeShown =
+    cache !== null &&
+    cache.phase === 'expired' &&
+    holds &&
+    !running &&
+    status !== 'starting' &&
+    pendingSwitch === null &&
+    reread >= CACHE_NOTICE_MIN_TOKENS &&
+    noticeClosedFor !== cache.expiry.lastRequestAt
+  // Claude Code's model, effort and fast mode are part of what its cache was written for.
+  const cacheNote =
+    agentId !== '' &&
+    harnessOf(agentId) === 'claude-code' &&
+    !running &&
+    pendingSwitch === null &&
+    (cache?.phase === 'warm' || cache?.phase === 'ending')
+      ? `在这里改动会重写约 ${tokensText(reread)} token 的 prompt cache`
+      : null
+
+  const starting = status === 'starting'
+  const awaiting = status === 'awaiting_permission'
+  const steering = !!agent?.capabilities.steering
+  const reached = useMemo(
+    () =>
+      limitsForModel(agent?.limits ?? [], config.model?.option).find(
+        (l) => l.state === 'reached',
+      ) ?? null,
+    [agent?.limits, config.model?.option],
+  )
+  const rejected = useMemo(() => endedOnRejection(view.thread), [view.thread])
+  const shownName = pending?.name ?? agent?.name ?? 'Agent'
+  const placeholder = sessionPlaceholder({
+    agent: shownName,
+    starting,
+    pickAgent: mustSwitch && !pendingSwitch,
+    awaiting,
+    running,
+    steering,
+    reached,
+    rejected,
+  })
+  // Why Send does nothing now, for the line over the text.
+  const unsendable =
+    mustSwitch && !pendingSwitch ? '先选择 Agent' : starting ? `等 ${shownName} 启动后再发送` : null
 
   const titleMenu = (): MenuPage | null => {
     if (!summary) return null
@@ -538,36 +719,44 @@ export default function SessionScreen() {
       case 'slash':
         return attachPages.slash
       case 'mode':
-        return modePage(config.control)
-      case 'model':
-        return modelPage(config.control, {
+        return modePage(control)
+      case 'model': {
+        // An agent picked to take over, or one that must be picked, shows its own menu.
+        if (pendingSwitch || mustSwitch) {
+          const own = pendingConfig
+            ? modelPage(control, {
+                agentId: pendingSwitch?.agentId ?? agentId,
+                agent: pending ?? undefined,
+                c,
+                switchAgent: { disabled: false },
+              })
+            : null
+          return own ?? agentsPage(agentMenu)
+        }
+        return modelPage(control, {
           agentId,
           agent,
           c,
           switchAgent: switchable
-            ? running
-              ? { disabled: true, hint: '这一轮结束后才能换' }
-              : { disabled: false }
+            ? status === 'ready' || status === 'closed'
+              ? { disabled: false }
+              : { disabled: true, hint: '在两轮之间才能换' }
             : null,
           onUsage: () => {
             menu.close()
             setUsageOpen(true)
           },
+          cacheNote,
         })
+      }
       case 'more':
-        return moreModelsPage(config.control, agentId)
+        return moreModelsPage(control, pendingSwitch?.agentId ?? agentId)
       case 'agents':
-        return agentsPage({
-          agents: others,
-          current: pending?.id ?? agentId,
-          options: agentOptions.options,
-          error: agentOptions.error,
-          onRetry: agentOptions.reload,
-          onChoose: (chosen) => setPending(chosen.id === agentId ? null : chosen),
-          footer: '从你的下一条消息起接手',
-          c,
-        })
+        return agentsPage(agentMenu)
       default:
+        if (page.startsWith('option:')) return optionPage(control, page.slice('option:'.length))
+        if (page.startsWith('agent:'))
+          return agentModelsPage(agentMenu, page.slice('agent:'.length))
         return null
     }
   }
@@ -659,21 +848,62 @@ export default function SessionScreen() {
               />
             )}
             <WaitingChildren sessionId={id} />
-            <QueueStack sessionId={id} session={session} />
+            <QueueStack
+              sessionId={id}
+              session={session}
+              onEdit={(content) => composer.current?.restore(content)}
+            />
           </ScrollView>
         )}
 
         <Composer
+          key={id}
           ref={composer}
-          placeholder={
-            pending
-              ? `交给 ${pending.name}，写下第一条消息`
-              : running
-                ? '加入队列，或者先停止'
-                : '回复'
-          }
+          draft={id}
+          agentName={shownName}
+          placeholder={placeholder}
           onSend={send}
-          failTitle={pending ? '没能换 Agent' : '没有发出去'}
+          onSendNow={sendNow}
+          steering={steering}
+          failTitle={pendingSwitch ? '没能换 Agent' : '没有发出去'}
+          blocked={unsendable}
+          addBlocked={starting ? `等 ${shownName} 启动后再添加` : null}
+          commands={session?.commands ?? []}
+          folder={changes.folder}
+          usedFiles={touched}
+          sessionId={id}
+          takes={
+            (pending ?? agent)?.capabilities.prompt
+              ? {
+                  images: !!(pending ?? agent)!.capabilities.prompt!.image,
+                  text: !!(pending ?? agent)!.capabilities.prompt!.embeddedContext,
+                }
+              : null
+          }
+          onHoldsChange={setHolds}
+          onCountChange={setAttachCount}
+          top={
+            pendingSwitch || cacheNoticeShown ? (
+              <>
+                {cacheNoticeShown && (
+                  <CacheNotice
+                    estimate={cache.expiry.estimate}
+                    used={reread}
+                    onDismiss={() => setNoticeClosedFor(cache.expiry.lastRequestAt)}
+                  />
+                )}
+                {pendingSwitch && (
+                  <SwitchStrip
+                    agentName={shownName}
+                    config={pendingConfig ?? []}
+                    summarize={pendingSwitch.summarize}
+                    onSummarize={(on) => updatePendingSwitch(id, { summarize: on })}
+                    onUndo={() => setPendingSwitch(id, null)}
+                  />
+                )}
+              </>
+            ) : undefined
+          }
           bottomInset={insets.bottom}
           running={running}
           onStop={stop}
@@ -689,9 +919,13 @@ export default function SessionScreen() {
           left={
             <NativeMenu source={{ root: 'mode', pages }} disabled={!connected}>
               <ModeButton
-                mode={config.mode}
+                mode={
+                  shownMode
+                    ? { ...shownMode, look: modeLook(String(shownMode.option.value)) }
+                    : null
+                }
                 busy={config.setting !== null && config.setting === config.mode?.option.id}
-                disabled={!connected || config.setting !== null}
+                disabled={!connected || config.setting !== null || starting}
                 anchor={modeAnchor}
                 onPress={() =>
                   menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
@@ -700,15 +934,21 @@ export default function SessionScreen() {
             </NativeMenu>
           }
           right={
-            config.model || config.effort || switchable ? (
+            !starting && (shownModel || shownEffort || switchable || mustSwitch) ? (
               <NativeMenu source={{ root: 'model', pages }} disabled={!connected}>
                 <ModelChip
                   agentId={pending?.id ?? agentId}
                   harness={pending?.harnessId ?? config.harness}
-                  model={config.model?.name ?? (config.model ? null : (agent?.name ?? null))}
-                  effort={config.effort?.name ?? null}
-                  pending={pending?.name ?? null}
+                  model={
+                    shownModel?.name ??
+                    (shownModel
+                      ? null
+                      : (pending?.name ?? (mustSwitch ? '选择 Agent' : (agent?.name ?? null))))
+                  }
+                  effort={shownEffort?.name ?? null}
+                  pending={pending && !shownModel ? pending.name : null}
                   busy={
+                    !pendingSwitch &&
                     config.setting !== null &&
                     (config.setting === config.model?.option.id ||
                       config.setting === config.effort?.option.id)
@@ -745,6 +985,19 @@ export default function SessionScreen() {
                       share,
                       color: toneColor(usageTone({ usedPercent: share * 100, state: 'ok' }), c),
                       approximate: !!session?.context?.error,
+                      onPress: () => {
+                        haptic.tap()
+                        setContextOpen(true)
+                      },
+                    }
+                  : null
+              }
+              cache={
+                cache && !running
+                  ? {
+                      left: cache.left,
+                      phase: cache.phase,
+                      estimate: cache.expiry.estimate,
                       onPress: () => {
                         haptic.tap()
                         setContextOpen(true)

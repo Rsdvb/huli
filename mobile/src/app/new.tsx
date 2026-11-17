@@ -14,16 +14,23 @@ import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
 import { Composer, type ComposerHandle } from '../components/Composer'
 import {
+  agentModelsPage,
+  agentNeed,
   agentsPage,
+  canStart,
   modeLook,
   modePage,
   modelPage,
   moreModelsPage,
+  optionPage,
   startConfig,
+  startNotices,
   startValues,
   usableAgents,
+  type AgentMenuProps,
   type ConfigControl,
 } from '../components/ConfigMenus'
+import { NEW_SESSION_DRAFT } from '../drafts'
 import { PlanUsageSheet } from '../components/PlanUsageSheet'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
@@ -40,7 +47,7 @@ import { NativeMenu } from '../ui/session/NativeMenu'
 import { StatusLine } from '../ui/session/StatusLine'
 
 export default function NewSession() {
-  const { c } = useSessionTokens()
+  const { c, s } = useSessionTokens()
   const host = useHost()
   const link = useLink()
   const computer = useComputer()
@@ -59,13 +66,21 @@ export default function NewSession() {
   )
 
   const [chosenAgent, setChosenAgent] = useState<string | null>(null)
-  const agentId = chosenAgent ?? agents.find((a) => a.isDefault)?.id ?? agents[0]?.id ?? null
+  const startable = agents.filter(canStart)
+  const agentId =
+    chosenAgent ??
+    startable.find((a) => a.isDefault)?.id ??
+    startable[0]?.id ??
+    agents.find((a) => a.isDefault)?.id ??
+    agents[0]?.id ??
+    null
   const agent = agentId ? host.agents.get(agentId) : undefined
   const [chosenProject, setChosenProject] = useState<string | null | undefined>(undefined)
   const projectPath = chosenProject === undefined ? (projects[0]?.path ?? null) : chosenProject
   const project = projects.find((p) => p.path === projectPath)
   const [picks, setPicks] = useState<Record<string, string | boolean>>({})
   const [usageOpen, setUsageOpen] = useState(false)
+  const [attachCount, setAttachCount] = useState(0)
   const connected = host.state.kind === 'connected'
 
   // The chosen agent's plan, for the status line's ring; only one already running is asked, so
@@ -88,10 +103,33 @@ export default function NewSession() {
   const model = slotOf(config, 'model', false)
   const effort = slotOf(config, 'thought_level', false)
 
-  const chooseAgent = (next: AgentStatus) => {
+  // An agent and one of its models are chosen together.
+  const chooseAgent = (next: AgentStatus, modelValue: string | null) => {
     setChosenAgent(next.id)
-    setPicks({})
+    const nextEntry = options.options?.find((o) => o.agentId === next.id)
+    const modelId = nextEntry?.config.find((o) => o.category === 'model')?.id
+    setPicks(modelId && modelValue !== null ? { [modelId]: modelValue } : {})
   }
+
+  // Why Send does nothing now, said over the box rather than left to guess.
+  const need = agent ? agentNeed(agent) : null
+  const unsendable =
+    agents.length === 0
+      ? host.loaded
+        ? '没有可用的 Agent，先添加或启用一个再开始。'
+        : null
+      : !agent
+        ? '先选择 Agent'
+        : need === 'sign-in'
+          ? `在 ${computer.name} 上登录 ${agent.name} 后才能使用。`
+          : need === 'update'
+            ? `在 ${computer.name} 上更新 ${agent.name} 后才能用。`
+            : need === 'installing'
+              ? `正在安装 ${agent.name}…`
+              : need === 'failed'
+                ? (agent.detail ?? `${agent.name} 启动失败。`)
+                : null
+  const notices = entry && agent ? startNotices(entry, picks, agent.name) : []
 
   const create = async (prompt: UserContent[]) => {
     if (!agentId) return
@@ -112,7 +150,21 @@ export default function NewSession() {
     composer,
     commands: [],
     touched: [],
+    count: attachCount,
   })
+
+  const agentMenu: AgentMenuProps = {
+    agents,
+    current: agentId,
+    currentModel: (model?.option.value as string | undefined) ?? null,
+    options: options.options,
+    error: options.error,
+    onRetry: options.reload,
+    onChoose: chooseAgent,
+    footer: '新会话会用这个 Agent 开始',
+    title: '选择 Agent',
+    c,
+  }
 
   const projectRows = [
     ...projects.map((p) => ({
@@ -151,24 +203,16 @@ export default function NewSession() {
               menu.close()
               setUsageOpen(true)
             },
-          }) ?? { entries: [], loading: !entry, empty: '这个 Agent 没有可选的模型' }
+          }) ?? {
+            entries: [],
+            loading: !entry && !options.error,
+            empty: agent ? `${agent.name} 启动后，这里会列出它的模型。` : '没有可用的模型',
+          }
         )
       case 'more':
         return moreModelsPage(control, agentId ?? '')
       case 'agents':
-        return {
-          ...agentsPage({
-            agents,
-            current: agentId,
-            options: options.options,
-            error: options.error,
-            onRetry: options.reload,
-            onChoose: chooseAgent,
-            footer: '新会话会用这个 Agent 开始',
-            c,
-          }),
-          title: '选择 Agent',
-        }
+        return agentsPage(agentMenu)
       case 'projects':
         return {
           entries: projectRows.map((row) => ({
@@ -181,6 +225,9 @@ export default function NewSession() {
           })),
         }
       default:
+        if (page.startsWith('option:')) return optionPage(control, page.slice('option:'.length))
+        if (page.startsWith('agent:'))
+          return agentModelsPage(agentMenu, page.slice('agent:'.length))
         return null
     }
   }
@@ -271,11 +318,35 @@ export default function NewSession() {
 
         <Composer
           ref={composer}
-          placeholder="想让 Agent 做什么？"
+          draft={NEW_SESSION_DRAFT}
+          agentName={agent?.name ?? null}
+          placeholder={agent ? `想让 ${agent.name} 做什么？` : '想让 Agent 做什么？'}
           onSend={create}
           failTitle="没能新建会话"
           allowEmpty
           disabled={!agentId}
+          blocked={unsendable}
+          folder={projectPath}
+          takes={
+            agent?.capabilities.prompt
+              ? {
+                  images: !!agent.capabilities.prompt.image,
+                  text: !!agent.capabilities.prompt.embeddedContext,
+                }
+              : null
+          }
+          onCountChange={setAttachCount}
+          top={
+            notices.length > 0 ? (
+              <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
+                {notices.map((text) => (
+                  <Text key={text} style={[styles.noticeText, { color: c.text }]}>
+                    {text}
+                  </Text>
+                ))}
+              </View>
+            ) : undefined
+          }
           bottomInset={insets.bottom}
           onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
           attachMenu={(anchor) => ({
@@ -396,4 +467,6 @@ const styles = StyleSheet.create({
   projectMeta: { fontSize: 14, lineHeight: 19, marginTop: 1 },
   projectEnd: { alignItems: 'flex-end', gap: 4 },
   time: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  notice: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, gap: 4 },
+  noticeText: { fontSize: 13, lineHeight: 18 },
 })
