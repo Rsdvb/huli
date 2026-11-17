@@ -2,27 +2,27 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - tapOn:
-    text: ".*${TITLE}.*"
+    text: '.*${TITLE}.*'
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element:
-      text: ".*${CHILD}.*"
+      text: '.*${CHILD}.*'
     direction: UP
 - tapOn:
-    text: ".*${CHILD}.*"
+    text: '.*${CHILD}.*'
 - waitForAnimationToEnd
 - takeScreenshot: a01-subagent
 - tapOn:
-    text: "文件、改动、Artifacts、终端和子会话"
+    text: '文件、改动、Artifacts、终端和子会话'
 - waitForAnimationToEnd
 - takeScreenshot: a02-subagent-more
 - tapOn:
     point: 50%,50%
 - waitForAnimationToEnd
 - tapOn:
-    text: "返回 .*"
+    text: '返回 .*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: a03-parent

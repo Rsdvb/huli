@@ -42,7 +42,8 @@ function page(title: string, body: string): string {
 
 export function describeClient(info: ClientInfo | null): string {
   if (!info) return '未知设备'
-  const kind = { desktop: 'Huli 桌面端', daemon: 'Huli 命令行', web: '网页版' }[info.kind] ?? info.kind
+  const kind =
+    { desktop: 'Huli 桌面端', daemon: 'Huli 命令行', web: '网页版' }[info.kind] ?? info.kind
   return `${kind} · ${info.name}（${info.os} ${info.arch}${info.version ? ` · ${info.version}` : ''}）`
 }
 

@@ -30,7 +30,13 @@ import { makeServer, type ServerParts } from '../src/server'
 
 const ORIGIN = 'http://127.0.0.1'
 const PASSWORD = 'correct horse battery staple'
-const INFO: ClientInfo = { kind: 'desktop', name: 'Test PC', os: 'win32', arch: 'x64', version: '0.1.0' }
+const INFO: ClientInfo = {
+  kind: 'desktop',
+  name: 'Test PC',
+  os: 'win32',
+  arch: 'x64',
+  version: '0.1.0',
+}
 
 let clock = Date.UTC(2026, 10, 17, 12, 0, 0)
 const now = () => clock
@@ -147,7 +153,12 @@ describe('browser sign-in', () => {
   it('signs a desktop client in and answers /me', async () => {
     const { access } = await signIn()
     const me = await api.me(access)
-    expect(me.account).toEqual({ id: 'acct-1', email: 'me@example.com', name: 'Me', avatarUrl: null })
+    expect(me.account).toEqual({
+      id: 'acct-1',
+      email: 'me@example.com',
+      name: 'Me',
+      avatarUrl: null,
+    })
     expect(me.subscription).toBe('active')
   })
 
@@ -163,7 +174,9 @@ describe('browser sign-in', () => {
     })
     const issued = new URL(answer.headers.get('location')!).searchParams.get('code')!
     expect(
-      await failure(api.exchangeCode({ code: issued, redirectUri: REDIRECT, verifier: randomToken(48) })),
+      await failure(
+        api.exchangeCode({ code: issued, redirectUri: REDIRECT, verifier: randomToken(48) }),
+      ),
     ).toBe('invalid_grant')
     // The failed try spent it.
     expect(await failure(api.exchangeCode({ code: issued, redirectUri: REDIRECT, verifier }))).toBe(
@@ -276,9 +289,15 @@ describe('device codes', () => {
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('authorization_pending')
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('slow_down')
 
-    const page = await (await fetch(new URL(`/device?code=${device.userCode}`, base), { headers: { cookie } })).text()
+    const page = await (
+      await fetch(new URL(`/device?code=${device.userCode}`, base), { headers: { cookie } })
+    ).text()
     const csrf = /name="csrf" value="([^"]+)"/.exec(page)![1]!
-    const approved = await post('/device', { csrf, user_code: device.userCode, action: 'allow' }, cookie)
+    const approved = await post(
+      '/device',
+      { csrf, user_code: device.userCode, action: 'allow' },
+      cookie,
+    )
     expect(approved.status).toBe(200)
 
     clock += 60_000
@@ -361,7 +380,10 @@ describe('push gateway', () => {
     expect(message.headers['apns-push-type']).toBe('alert')
     expect(message.headers['apns-collapse-id']).toBe('tag-1')
     expect(message.headers['apns-topic']).toBe('com.example.huli')
-    expect(message.payload).toMatchObject({ aps: { 'mutable-content': 1 }, sealed: vectors.sealed[0]!.envelope })
+    expect(message.payload).toMatchObject({
+      aps: { 'mutable-content': 1 },
+      sealed: vectors.sealed[0]!.envelope,
+    })
     expect((await push(access, body)).status).toBe(401)
   })
 
@@ -395,7 +417,9 @@ describe('push gateway', () => {
         push: { type: 'liveactivity', sealed, ...fields },
       })
     const at = Math.floor(clock / 1000)
-    expect((await push(access, activity({ event: 'update', stale: 1800, low: true }))).status).toBe(200)
+    expect((await push(access, activity({ event: 'update', stale: 1800, low: true }))).status).toBe(
+      200,
+    )
     expect(sent.at(-1)!.headers['apns-priority']).toBe('5')
     expect(sent.at(-1)!.payload).toEqual({
       aps: { timestamp: at, event: 'update', 'content-state': { sealed }, 'stale-date': at + 1800 },
@@ -403,9 +427,13 @@ describe('push gateway', () => {
     expect((await push(access, activity({ event: 'update' }))).status).toBe(200)
     expect(sent.at(-1)!.headers['apns-priority']).toBe('10')
     expect(sent.at(-1)!.payload).not.toHaveProperty('aps.stale-date')
-    expect((await push(access, activity({ event: 'end', dismiss: 900, low: true }))).status).toBe(200)
+    expect((await push(access, activity({ event: 'end', dismiss: 900, low: true }))).status).toBe(
+      200,
+    )
     expect(sent.at(-1)!.headers['apns-priority']).toBe('10')
-    expect(sent.at(-1)!.payload).toMatchObject({ aps: { event: 'end', 'dismissal-date': at + 900 } })
+    expect(sent.at(-1)!.payload).toMatchObject({
+      aps: { event: 'end', 'dismissal-date': at + 900 },
+    })
     expect((await push(access, activity({ event: 'end' }))).status).toBe(200)
     expect(sent.at(-1)!.payload).toMatchObject({ aps: { 'dismissal-date': at } })
     expect((await push(access, activity({ event: 'update', stale: -1 }))).status).toBe(400)

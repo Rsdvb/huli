@@ -2,9 +2,9 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - tapOn:
-    text: ".*${TITLE}.*"
+    text: '.*${TITLE}.*'
 - waitForAnimationToEnd
 - takeScreenshot: w01-waiting
 - tapOn:

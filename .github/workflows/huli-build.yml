@@ -3,8 +3,13 @@ name: Huli build
 # Builds Huli for Windows and Linux on GitHub's runners, macOS on the owner's Mac once the
 # HULI_MAC_RUNNER variable is `true`, and Huli Cloud's bundle; then puts them all on a pre-release
 # of this private repository. The version is 0.<UTC date>.<run number>.
+#
+# It runs by hand, after huli-sync.yml merges Kettu's main, and every night; a night's run builds
+# only when main has commits the latest release lacks, and skips every job otherwise.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '41 19 * * *' # 03:41 in Beijing, after huli-sync.yml's 03:23
 
 permissions:
   contents: read
@@ -14,7 +19,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    name: Look for changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != schedule ]; then
+            echo 'build=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A sync that merges starts a build of the merge itself, which would follow this one.
+          syncing="$(gh api "repos/$GH_REPO/actions/workflows/huli-sync.yml/runs?per_page=5" \
+            --jq '[.workflow_runs[] | select(.status != "completed")] | length')"
+          if [ "$syncing" != 0 ]; then
+            echo 'Huli sync is still running; it starts a build if it merges.'
+            exit 0
+          fi
+          tag="$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // ""')"
+          if [ -n "$tag" ] && [ "$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)" = "$GITHUB_SHA" ]; then
+            echo "main ($GITHUB_SHA) is released already as $tag."
+            exit 0
+          fi
+          # A commit whose build failed is not retried every night; a run by hand retries it.
+          failed="$(gh api "repos/$GH_REPO/actions/workflows/huli-build.yml/runs?head_sha=$GITHUB_SHA&status=failure&per_page=1" \
+            --jq .total_count)"
+          if [ "$failed" != 0 ]; then
+            echo "A build of $GITHUB_SHA failed already; run this workflow by hand to retry it."
+            exit 0
+          fi
+          echo "main ($GITHUB_SHA) has commits since ${tag:-no release yet}; building."
+          echo 'build=true' >> "$GITHUB_OUTPUT"
+
   version:
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}

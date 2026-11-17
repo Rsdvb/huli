@@ -2,20 +2,20 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
-- tapOn: "新会话"
+- tapOn: '会话'
+- tapOn: '新会话'
 - waitForAnimationToEnd
 - tapOn:
-    text: "给 .* 发消息.*"
+    text: '给 .* 发消息.*'
 - waitForAnimationToEnd
 - takeScreenshot: k01-new-keyboard
-- tapOn: "选一个项目，或者直接说你要什么。"
+- tapOn: '选一个项目，或者直接说你要什么。'
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - tapOn:
-    text: ".*Greeting and Conversation.*"
+    text: '.*Greeting and Conversation.*'
 - waitForAnimationToEnd
 - tapOn:
-    text: "给 .* 发消息.*"
+    text: '给 .* 发消息.*'
 - waitForAnimationToEnd
 - takeScreenshot: k02-session-keyboard

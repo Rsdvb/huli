@@ -2,9 +2,9 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - tapOn:
-    text: ".*${TITLE}.*"
+    text: '.*${TITLE}.*'
 - waitForAnimationToEnd
 - takeScreenshot: c01-session
 - swipe:
@@ -13,7 +13,7 @@ appId: io.github.rsdvb.huli
     duration: 500
 - waitForAnimationToEnd
 - takeScreenshot: c02-session-up
-- tapOn: "文件、改动、Artifacts、终端和子会话"
+- tapOn: '文件、改动、Artifacts、终端和子会话'
 - waitForAnimationToEnd
 - takeScreenshot: c03-more-menu
 - tapOn:
@@ -27,28 +27,28 @@ appId: io.github.rsdvb.huli
     point: 50%,90%
 - waitForAnimationToEnd
 - tapOn:
-    text: "权限模式.*"
+    text: '权限模式.*'
 - waitForAnimationToEnd
 - takeScreenshot: c05-mode-menu
 - tapOn:
     point: 50%,40%
 - waitForAnimationToEnd
 - tapOn:
-    text: "模型.*"
+    text: '模型.*'
 - waitForAnimationToEnd
 - takeScreenshot: c06-model-menu
 - tapOn:
     point: 50%,40%
 - waitForAnimationToEnd
 - tapOn:
-    text: "添加照片、文件或命令"
+    text: '添加照片、文件或命令'
 - waitForAnimationToEnd
 - takeScreenshot: c07-attach-menu
 - tapOn:
     point: 50%,40%
 - waitForAnimationToEnd
 - tapOn:
-    text: "上下文已用.*"
+    text: '上下文已用.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: c08-context-sheet
@@ -58,7 +58,7 @@ appId: io.github.rsdvb.huli
     duration: 300
 - waitForAnimationToEnd
 - tapOn:
-    text: ".*限额已用.*"
+    text: '.*限额已用.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: c09-plan-usage

@@ -45,7 +45,9 @@ export function viewOf(version: LoadedVersion): VersionView {
         width: p.width,
         height: p.height,
       }))
-      return pages.length > 0 ? { kind: 'canvas', pages } : { kind: 'broken', reason: '这块画布还没有页面。' }
+      return pages.length > 0
+        ? { kind: 'canvas', pages }
+        : { kind: 'broken', reason: '这块画布还没有页面。' }
     } catch {
       return { kind: 'broken', reason: '没能读出这块画布。' }
     }

@@ -48,7 +48,7 @@ export async function attachProjectFile(
       thumb: null,
     })) as Attachment
   } catch (error) {
-    throw new Error(uploadError(error))
+    throw new Error(uploadError(error), { cause: error })
   }
 }
 
@@ -213,7 +213,7 @@ export async function prepare(source: PickedSource): Promise<Prepared> {
     if (error instanceof Refused) throw error
     console.warn(`Could not read ${source.name}`, error)
     const what = source.kind === 'image' ? '这张图片' : '这个文件'
-    throw new Error(`没能读取「${source.name}」${what}。`)
+    throw new Error(`没能读取「${source.name}」${what}。`, { cause: error })
   }
   const refused = tooLarge(prepared.name, prepared.bytes.byteLength)
   if (refused) throw new Refused(refused)
@@ -228,7 +228,7 @@ export async function upload(link: HostLink, prepared: Prepared): Promise<Attach
       thumb: prepared.thumb,
     })) as Attachment
   } catch (error) {
-    throw new Error(uploadError(error))
+    throw new Error(uploadError(error), { cause: error })
   }
 }
 

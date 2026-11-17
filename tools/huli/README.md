@@ -24,6 +24,7 @@ Code (kept small so upstream merges stay clean):
 | `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts` | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub |
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json`                              | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved                                                                                                                        |
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                    |
+| `eslint.config.mjs`, `.prettierignore`                                                                                                   | lint and formatting reach the phone app in `mobile/` (see Workflows)                                                                                                                                                                                                                 |
 
 ### Import from Kettu
 
@@ -102,13 +103,38 @@ one once upstream fixes the same thing:
 - `features/files/change-badge.tsx` (U for untracked), `features/routines/routines.css` (the
   state column's width).
 - Tests made to pass on Windows: native paths, junctions, hosts and databases closed before their
-  folders are removed, and more time for git.
+  folders are removed, and more time for git and for writing many files (`vitest.config.mts` raises
+  the defaults on Windows only).
 
 ## Kept from Kettu
 
 The Marketplace's MCP Registry, GitHub skills and Claude and Codex plugins need no Kettu account and
 keep working. Its Community tab and publishing to kettu.page need Kettu's services and stay off.
 Remote access uses direct connections over the network or Tailscale.
+
+## Workflows
+
+Only the `huli-*` workflows run here. Kettu's own (`ci.yml`, `docker.yml`, `issue-closed.yml`,
+`release.yml`) stay in the tree unchanged, so syncs merge cleanly, but disabled: `huli-sync.yml`
+disables every other workflow after each merge, new ones included.
+
+- `huli-checks.yml`, on every push to main and every pull request that changes more than Markdown
+  and the licenses (or by hand): on Linux, `pnpm typecheck`, Huli Cloud's types, `pnpm test`,
+  `pnpm lint` and `pnpm format:check`; beside it, the phone app's `npm ci` and `tsc --noEmit`. A
+  newer push to the same branch cancels the run before it. It stands in for Kettu's `ci.yml`,
+  which only runs on pull requests.
+- `huli-sync.yml`, every night at 03:23 Beijing time: merges Kettu's main, checks it, pushes and
+  starts `huli-build.yml`; a conflict or failed check opens an issue instead.
+- `huli-build.yml`, by hand, from a sync that merged, and every night at 03:41 Beijing time. The
+  night's run first compares main with the commit of the latest release and builds only when they
+  differ, and not while a sync is running (the sync starts its own build) nor for a commit whose
+  build failed already (run it by hand to retry); otherwise every job is skipped. Versions stay
+  `0.<UTC date>.<run number>`, and skipped runs use up run numbers, so they only grow.
+
+Lint covers `mobile/` too, through the root ESLint config: the phone app gets the React hooks
+rules as the renderer does, may `require()` images as Metro needs, and drops props by leaving them
+out of a rest spread. `mobile/src/artifact-view/page-runtime.generated.ts` is generated, so
+Prettier skips it.
 
 ## Build
 

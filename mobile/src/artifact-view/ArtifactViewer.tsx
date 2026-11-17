@@ -231,7 +231,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
 
   const view = useMemo(() => (loaded ? viewOf(loaded) : null), [loaded])
   const pages = view?.kind === 'canvas' ? view.pages : null
-  const current: ViewPage | null = pages ? (pages[Math.min(pageIndex, pages.length - 1)] ?? null) : null
+  const current: ViewPage | null = pages
+    ? (pages[Math.min(pageIndex, pages.length - 1)] ?? null)
+    : null
 
   useEffect(() => {
     if (props.page && pages) {
@@ -309,7 +311,10 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     // A deck's comment names its slide as its page, in reading order as the desktop's does.
     if (view?.kind === 'slides') {
       return {
-        anchor: pageAnchor(version, { file: 'index.html', page: { number: slide + 1, name: null } }),
+        anchor: pageAnchor(version, {
+          file: 'index.html',
+          page: { number: slide + 1, name: null },
+        }),
         picked: false,
       }
     }
@@ -370,7 +375,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
             (failure: unknown) =>
               Alert.alert(
                 '没能恢复',
-                codeOf(failure) === 'conflict' ? '刚刚又有了新版本，请再试一次。' : errorText(failure),
+                codeOf(failure) === 'conflict'
+                  ? '刚刚又有了新版本，请再试一次。'
+                  : errorText(failure),
               ),
           )
         },
@@ -390,7 +397,12 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
 
   const session = summary ? host.sessions.get(summary.sessionId) : undefined
   const menuItems: SheetItem[] = [
-    { key: 'versions', label: '版本记录', disabled: !connected, onPress: () => setSheet('versions') },
+    {
+      key: 'versions',
+      label: '版本记录',
+      disabled: !connected,
+      onPress: () => setSheet('versions'),
+    },
     {
       key: 'share',
       label: '分享',
@@ -410,7 +422,12 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
           },
         ]
       : []),
-    { key: 'rename', label: '重命名', disabled: !connected || !summary, onPress: () => setRenaming(true) },
+    {
+      key: 'rename',
+      label: '重命名',
+      disabled: !connected || !summary,
+      onPress: () => setRenaming(true),
+    },
     {
       key: 'reload',
       label: '重新载入',
@@ -425,7 +442,11 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
       onPress: () =>
         summary &&
         link &&
-        confirmDelete((m, p) => link.request(m, p), summary, () => goBack()),
+        confirmDelete(
+          (m, p) => link.request(m, p),
+          summary,
+          () => goBack(),
+        ),
     },
   ]
 
@@ -482,7 +503,13 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
       />
     )
   } else if (phase.kind === 'error' && !loaded) {
-    body = <StateView tone="danger" text={`没能打开：${phase.message}`} retry={() => setAttempt((n) => n + 1)} />
+    body = (
+      <StateView
+        tone="danger"
+        text={`没能打开：${phase.message}`}
+        retry={() => setAttempt((n) => n + 1)}
+      />
+    )
   } else if (phase.kind === 'large') {
     body = (
       <View style={styles.center}>
@@ -523,7 +550,15 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
   } else if (view.kind === 'broken') {
     body = <StateView text={view.reason} />
   } else if (!built) {
-    body = <StateView text={current ? `「${pageName(current)}」的文件不在这个版本里。` : '这个页面的文件不在这个版本里。'} />
+    body = (
+      <StateView
+        text={
+          current
+            ? `「${pageName(current)}」的文件不在这个版本里。`
+            : '这个页面的文件不在这个版本里。'
+        }
+      />
+    )
   } else {
     body = (
       <View style={{ flex: 1, paddingBottom: bottomBar ? bottomBar + insets.bottom : 0 }}>
@@ -552,35 +587,51 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
       <View style={[styles.fill, { paddingTop: contentTop }]}>{body}</View>
 
       {picking && (
-        <View style={[styles.banner, { top: contentTop + 8, backgroundColor: s.menuSolid, borderColor: c.border }]}>
+        <View
+          style={[
+            styles.banner,
+            { top: contentTop + 8, backgroundColor: s.menuSolid, borderColor: c.border },
+          ]}
+        >
           <Text style={[styles.bannerText, { color: c.text }]}>点一下要评论的元素</Text>
           <Pressable onPress={() => setPicking(false)} hitSlop={10}>
             <Text style={[styles.bannerAction, { color: c.tint }]}>取消</Text>
           </Pressable>
         </View>
       )}
-      {!picking && (desktopOnly || (!connected && cached && !loaded) || (built?.partial ?? false)) && (
-        <View style={[styles.banner, { top: contentTop + 8, backgroundColor: s.menuSolid, borderColor: c.border }]}>
-          <Text style={[styles.bannerText, { color: c.textSecondary }]} numberOfLines={2}>
-            {!connected && cached && !loaded
-              ? `离线，显示上次打开的 v${cached.version}`
-              : desktopOnly
-                ? '这个页面要读电脑上的文件或问 Agent，要在电脑上用。'
-                : '这个 Artifact 较大，页面用脚本读取的部分文件没有载入。'}
-          </Text>
-          {desktopOnly && (
-            <Pressable onPress={() => setDesktopOnly(false)} hitSlop={10}>
-              <Icon icon={G.close} size={13} color={c.textSecondary} />
-            </Pressable>
-          )}
-        </View>
-      )}
+      {!picking &&
+        (desktopOnly || (!connected && cached && !loaded) || (built?.partial ?? false)) && (
+          <View
+            style={[
+              styles.banner,
+              { top: contentTop + 8, backgroundColor: s.menuSolid, borderColor: c.border },
+            ]}
+          >
+            <Text style={[styles.bannerText, { color: c.textSecondary }]} numberOfLines={2}>
+              {!connected && cached && !loaded
+                ? `离线，显示上次打开的 v${cached.version}`
+                : desktopOnly
+                  ? '这个页面要读电脑上的文件或问 Agent，要在电脑上用。'
+                  : '这个 Artifact 较大，页面用脚本读取的部分文件没有载入。'}
+            </Text>
+            {desktopOnly && (
+              <Pressable onPress={() => setDesktopOnly(false)} hitSlop={10}>
+                <Icon icon={G.close} size={13} color={c.textSecondary} />
+              </Pressable>
+            )}
+          </View>
+        )}
       {toast !== null && (
         <Animated.View
           pointerEvents="none"
           style={[
             styles.toast,
-            { top: contentTop + 10, backgroundColor: s.menuSolid, borderColor: c.border, opacity: toastOpacity },
+            {
+              top: contentTop + 10,
+              backgroundColor: s.menuSolid,
+              borderColor: c.border,
+              opacity: toastOpacity,
+            },
           ]}
         >
           <Text style={[styles.toastText, { color: c.text }]}>{toast}</Text>
@@ -656,7 +707,10 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
                     accessibilityState={{ selected: on }}
                     style={[
                       styles.pageChip,
-                      { backgroundColor: on ? c.fillStrong : c.fill, borderColor: on ? c.borderStrong : 'transparent' },
+                      {
+                        backgroundColor: on ? c.fillStrong : c.fill,
+                        borderColor: on ? c.borderStrong : 'transparent',
+                      },
                     ]}
                   >
                     <Text
@@ -708,7 +762,12 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
         }
       />
 
-      <Sheet visible={sheet === 'menu'} title={title} items={menuItems} onClose={() => setSheet(null)} />
+      <Sheet
+        visible={sheet === 'menu'}
+        title={title}
+        items={menuItems}
+        onClose={() => setSheet(null)}
+      />
       <Sheet
         visible={sheet === 'versions'}
         title="版本记录"
