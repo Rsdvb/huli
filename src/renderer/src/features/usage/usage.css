@@ -27,22 +27,26 @@
 .k-u__head > [aria-hidden] {
   -webkit-app-region: drag;
 }
+/* A narrow page keeps the title whole and gives the range controls' room up instead: the range
+   scrolls sideways, and the host's name ellipsizes away. */
 .k-u__lead {
   display: flex;
   flex: 1;
   align-items: center;
   gap: 10px;
-  min-width: 0;
   align-self: stretch;
   -webkit-app-region: drag;
 }
 .k-u__title {
+  flex: none;
   margin: 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
 }
 .k-u__host {
+  flex: 1 1 0;
+  width: 0;
   min-width: 0;
   overflow: hidden;
   font-size: 13px;
@@ -53,12 +57,17 @@
 .k-u__away {
   padding: 4px 16px 8px;
 }
+.k-u__head > :not(.k-u__lead) {
+  min-width: 0;
+}
 .k-u__actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .k-u__range {
+  flex: none;
   width: auto;
 }
 /* 4px under the sticky head, which otherwise paints over the controls' top hairline */
