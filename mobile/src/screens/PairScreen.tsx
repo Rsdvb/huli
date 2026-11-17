@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Settings,
   StyleSheet,
   Text,
   TextInput,
@@ -19,7 +20,7 @@ import type { KeyPair } from '@shared/remote/noise'
 import type { Paired, PairFailure } from '@shared/remote/pair'
 import type { PairingPayload } from '@shared/remote/pairing'
 import { pairWith, parseScanned } from '../connection'
-import { onPairing, takePairing } from '../pairLink'
+import { offerPairing, onPairing, takePairing } from '../pairLink'
 import type { SavedHost } from '../store'
 import { Glass } from '../ui/GlassTabBar'
 import { haptic } from '../ui/haptics'
@@ -94,6 +95,10 @@ export function PairScreen(props: {
   const runRef = useRef(run)
   runRef.current = run
   useEffect(() => {
+    // `-huliPair <link>` among the launch arguments (simctl launch, Xcode) pairs too: iOS asks
+    // before it opens a huli:// link, and a simulator has no camera.
+    const launched = Platform.OS === 'ios' ? Settings.get('huliPair') : null
+    if (typeof launched === 'string' && launched) offerPairing(launched)
     const waiting = takePairing()
     if (waiting) void runRef.current(parseScanned(waiting))
     return onPairing(() => {
