@@ -23,8 +23,9 @@ export type Chip =
 
 // A mention starts at a space, the start, or text outside ASCII such as Chinese, and ends at a
 // space or CJK punctuation.
-const MENTION = /(^|\s|[^\x00-\x7f])[@＠]([^\s　-〿！-／：-＠［-｀｛-･]+)/g
-const URL_TEXT = /https?:\/\/[^\s<>"'`　-〿一-鿿＀-￯]+/g
+const MENTION =
+  /(^|\s|[\x80-\uffff])[@＠]([^\s\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]+)/g
+const URL_TEXT = /https?:\/\/[^\s<>"'`\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]+/g
 const TRAILING = /[.,;:!?)\]}>'"。，；：！？）、]+$/
 const SENTENCE_END = /[.,;:!?>'"]/
 const OPENER: Record<string, string> = { ')': '(', ']': '[', '}': '{' }

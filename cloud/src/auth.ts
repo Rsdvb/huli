@@ -444,7 +444,7 @@ export class Auth {
       return sendError(response, this.secure, 429, 'slow_down', 'Too many sign-ins started.')
     }
     const deviceCode = randomToken()
-    let userCode = ''
+    let userCode: string
     do {
       userCode = ''
       for (let i = 0; i < 8; i++) {
