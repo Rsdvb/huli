@@ -9,6 +9,7 @@ import type { SessionWorktree, WorktreeFailure, WorktreeInspection } from '@shar
 import { call, errorText } from '../../git'
 import { useLink } from '../../host'
 import { BottomSheet } from '../../ui/BottomSheet'
+import { ContextMenu } from '../../ui/ContextMenu'
 import { copyText, haptic } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
@@ -276,16 +277,31 @@ export function WorktreeCard(props: { sessionId: string; worktree: SessionWorktr
           在分支 {worktree.branch} 的 worktree 里工作
         </Text>
       </View>
-      <Pressable
-        onLongPress={() =>
-          void copyText(worktree.path).then(() => showNotice({ text: '已复制', tone: 'success' }))
-        }
-        accessibilityHint="长按复制路径"
+      <ContextMenu
+        items={[
+          {
+            key: 'copy',
+            label: '复制路径',
+            icon: 'doc.on.doc',
+            onPress: () =>
+              void copyText(worktree.path).then(() =>
+                showNotice({ text: '已复制', tone: 'success' }),
+              ),
+          },
+        ]}
       >
-        <Text style={[styles.path, { color: c.textTertiary }]} numberOfLines={2}>
-          {worktree.path}
-        </Text>
-      </Pressable>
+        {(longPress) => (
+          <Pressable
+            {...(longPress ? { onLongPress: longPress } : {})}
+            accessibilityHint="长按复制路径"
+            style={{ backgroundColor: s.dockCard }}
+          >
+            <Text style={[styles.path, { color: c.textTertiary }]} numberOfLines={2}>
+              {worktree.path}
+            </Text>
+          </Pressable>
+        )}
+      </ContextMenu>
       <View style={styles.stateRow}>
         {preparing ? <ActivityIndicator size="small" color={c.textSecondary} /> : null}
         <Text
