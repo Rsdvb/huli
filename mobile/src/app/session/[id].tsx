@@ -115,6 +115,7 @@ import { RoundButton } from '../../ui/session/Press'
 import { Icon } from '../../ui/session/Icon'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
+import { SubagentBar } from '../../components/SubagentBar'
 import { latestPlan, threadRows, type Row } from '../../ui/session/turns'
 import {
   askedText,
@@ -834,8 +835,31 @@ export default function SessionScreen() {
           </ScrollView>
         )}
 
+        {summary?.origin === 'subagent' && (
+          <SubagentBar
+            summary={summary}
+            session={session}
+            agentName={agent?.name ?? 'Agent'}
+            bottomInset={insets.bottom}
+            context={
+              share !== null
+                ? {
+                    share,
+                    color: toneColor(usageTone({ usedPercent: share * 100, state: 'ok' }), c),
+                    approximate: !!session?.context?.error,
+                    onPress: () => {
+                      haptic.tap()
+                      setContextOpen(true)
+                    },
+                  }
+                : null
+            }
+            onOpenParent={openSession}
+          />
+        )}
         <Composer
           key={id}
+          hidden={summary?.origin === 'subagent'}
           ref={composer}
           draft={id}
           agentName={shownName}
