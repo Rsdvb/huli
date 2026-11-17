@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
-import { space, type as typeScale, useTokens } from './tokens'
+import { FONT_SCALE, space, type as typeScale, useTokens } from './tokens'
 
 export function SectionHeader(props: {
   title: string
@@ -14,11 +14,17 @@ export function SectionHeader(props: {
   const { c } = useTokens()
   return (
     <View style={styles.row} accessibilityRole="header">
-      <Text style={[typeScale.section, { color: props.color ?? c.textSecondary }]}>
+      <Text
+        maxFontSizeMultiplier={FONT_SCALE.dense}
+        style={[typeScale.section, { color: props.color ?? c.textSecondary }]}
+      >
         {props.title}
       </Text>
       {props.count !== undefined && (
-        <Text style={[typeScale.section, styles.count, { color: c.textTertiary }]}>
+        <Text
+          maxFontSizeMultiplier={FONT_SCALE.dense}
+          style={[typeScale.section, styles.count, { color: c.textTertiary }]}
+        >
           {props.count}
         </Text>
       )}

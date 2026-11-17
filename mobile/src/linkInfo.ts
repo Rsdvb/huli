@@ -3,7 +3,32 @@
 import type { LinkState } from '@shared/remote/link'
 import type { DirectAddress } from '@shared/remote/protocol'
 
-export type LinkTone = 'ok' | 'busy' | 'down'
+/** `off`: not connected for a while, the computer likely off or Huli not running there. */
+export type LinkTone = 'ok' | 'busy' | 'down' | 'off'
+
+/** The link's state in words and a tone, once `unreachable` (see host.tsx) as 连不上. */
+export function linkStatusOf(
+  state: LinkState,
+  unreachable: boolean,
+): { text: string; tone: LinkTone } {
+  if (unreachable && state.kind !== 'connected' && state.kind !== 'stopped') {
+    return { text: '连不上', tone: 'off' }
+  }
+  return linkStatus(state)
+}
+
+/** The computer's OS: as it said, else guessed from the names Windows and macOS give by default. */
+export function platformOf(
+  saved: { platform?: string; name?: string } | null | undefined,
+  live?: string,
+): string | undefined {
+  const known = live ?? saved?.platform
+  if (known) return known
+  const name = saved?.name ?? ''
+  if (/^(DESKTOP|LAPTOP)-[A-Z0-9]+$/i.test(name)) return 'win32'
+  if (/(MacBook|iMac|Mac mini|Mac Studio|Mac Pro|\.local$)/i.test(name)) return 'darwin'
+  return undefined
+}
 
 export function linkStatus(state: LinkState): { text: string; tone: LinkTone } {
   switch (state.kind) {

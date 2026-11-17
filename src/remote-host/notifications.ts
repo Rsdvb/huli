@@ -10,6 +10,7 @@ import {
   type NotificationsState,
   type NotificationsUpdate,
   type PushActions,
+  type PushQuestion,
 } from '@shared/remote/push'
 import type { RelayKey } from '@shared/remote/relay'
 import type { LogFn } from '../agent-host/storage'
@@ -47,6 +48,22 @@ const MAX_FRONT_DEVICES = 1000
 const isId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200
 
+const MAX_QUESTION_CHOICES = 4
+const MAX_CHOICE_TEXT = 40
+
+/** A question a notification may answer, as the agent host gives it; null when it is not one. */
+function parseQuestion(value: unknown): PushQuestion | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { choices, text } = value as Record<string, unknown>
+  if (typeof text !== 'boolean' || !Array.isArray(choices)) return null
+  if (choices.length > MAX_QUESTION_CHOICES) return null
+  const valid = choices.every(
+    (choice) => typeof choice === 'string' && choice.length > 0 && choice.length <= MAX_CHOICE_TEXT,
+  )
+  if (!valid || (choices.length === 0 && !text)) return null
+  return { choices: [...(choices as string[])], text }
+}
+
 function parseAnswer(value: unknown): { optionId: string; label: string } | null {
   if (typeof value !== 'object' || value === null) return null
   const { optionId, name } = value as Record<string, unknown>
@@ -80,7 +97,7 @@ export function parseAttention(value: unknown): Attention | null {
     attention.sessionId = sessionId
   }
   if (kind === 'permission' && typeof request === 'object' && request !== null) {
-    const { id, allow, deny } = request as Record<string, unknown>
+    const { id, allow, deny, question } = request as Record<string, unknown>
     if (isId(id)) {
       attention.requestId = id
       const allowed = parseAnswer(allow)
@@ -89,6 +106,8 @@ export function parseAttention(value: unknown): Attention | null {
         const actions: PushActions = { allow: allowed, ...(denied ? { deny: denied } : {}) }
         attention.actions = actions
       }
+      const asked = allowed ? null : parseQuestion(question)
+      if (asked) attention.question = asked
     }
   }
   if (typeof front === 'object' && front !== null) {

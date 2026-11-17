@@ -12,7 +12,7 @@ import { decodeSealed, openPush, type PushContent, type PushTarget } from '@shar
 import { decodeRelayBytes, verifyRelaySignature } from '@shared/remote/relay'
 import { fromBase64, toBase64 } from '../store'
 import { isMuted, mutedIds, onMutedChange } from './muted'
-import type { OpenedNotification, PushPermission, PushPlatform } from './types'
+import type { PushPermission, PushPlatform } from './types'
 
 const KEYS_ITEM = 'huli.push.keys'
 const MUTED_ITEM = 'huli.push.muted'
@@ -145,15 +145,6 @@ function permissionOf(settings: Notifications.NotificationPermissionsStatus): Pu
   }
 }
 
-function openedOf(response: Notifications.NotificationResponse): OpenedNotification | null {
-  if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return null
-  const data = response.notification.request.content.data as Record<string, unknown> | null
-  if (typeof data?.host !== 'string') return null
-  return { host: data.host, sessionId: typeof data.sessionId === 'string' ? data.sessionId : null }
-}
-
-const handled = new Set<string>()
-
 export const platform: PushPlatform = {
   supported: true,
 
@@ -187,39 +178,26 @@ export const platform: PushPlatform = {
   },
 
   async share({ device, host, quiet }) {
+    // Several computers may be paired; each keeps its key here while the app shows another.
+    const before = await loadShared().catch(() => null)
     const keys: SharedKeys = {
       v: 1,
       device: toBase64(device),
-      hosts: { [host.id]: host.key },
+      hosts: { ...(before?.hosts ?? {}), [host.id]: host.key },
       quiet,
     }
     await SecureStore.setItemAsync(KEYS_ITEM, JSON.stringify(keys), sharedOptions())
   },
 
-  async unshare() {
-    await SecureStore.deleteItemAsync(KEYS_ITEM, sharedOptions())
-  },
-
-  onOpen(listener) {
-    const handle = (response: Notifications.NotificationResponse | null): void => {
-      if (!response) return
-      const { request, date } = response.notification
-      const key = `${request.identifier}\n${date}`
-      if (handled.has(key)) return
-      handled.add(key)
-      const opened = openedOf(response)
-      if (opened) listener(opened)
+  async unshare(hostId) {
+    const before = await loadShared().catch(() => null)
+    if (!before) return
+    const hosts = { ...before.hosts }
+    delete hosts[hostId]
+    if (Object.keys(hosts).length === 0) {
+      await SecureStore.deleteItemAsync(KEYS_ITEM, sharedOptions())
+      return
     }
-    let live = true
-    void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (!live) return
-      handle(response)
-      void Notifications.clearLastNotificationResponseAsync().catch(() => {})
-    })
-    const subscription = Notifications.addNotificationResponseReceivedListener(handle)
-    return () => {
-      live = false
-      subscription.remove()
-    }
+    await SecureStore.setItemAsync(KEYS_ITEM, JSON.stringify({ ...before, hosts }), sharedOptions())
   },
 }

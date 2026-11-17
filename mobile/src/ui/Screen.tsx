@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg'
+import { READABLE_WIDTH, useWide } from './layout'
 import { useTokens } from './tokens'
 
 const GLOW_HEIGHT = 420
@@ -32,11 +33,16 @@ export function Screen(props: {
   /** Pad for the safe area at these edges; tab screens leave it to their top bar. */
   edges?: ('top' | 'bottom')[]
   glow?: boolean
+  /** On a wide window (iPad), keep the content in a centered column of a readable width. */
+  readable?: boolean
   style?: StyleProp<ViewStyle>
 }) {
   const { c } = useTokens()
   const insets = useSafeAreaInsets()
+  const wide = useWide()
   const edges = props.edges ?? []
+  const children =
+    props.readable && wide ? <View style={styles.column}>{props.children}</View> : props.children
   return (
     <View
       style={[
@@ -50,12 +56,13 @@ export function Screen(props: {
       ]}
     >
       {props.glow !== false && <Glow />}
-      {props.children}
+      {children}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1 },
+  column: { flex: 1, width: '100%', maxWidth: READABLE_WIDTH, alignSelf: 'center' },
   glow: { position: 'absolute', top: 0, left: 0, right: 0, height: GLOW_HEIGHT },
 })

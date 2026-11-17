@@ -353,8 +353,13 @@ export function Composer(props: ComposerProps) {
     }
   }
 
+  // Offline the screen may show the cache's copy of the conversation; nothing goes until connected.
   const status = !connected
-    ? '正在连接电脑…'
+    ? host.state.kind === 'connecting'
+      ? '正在连接电脑…连上后才能发送。'
+      : host.state.kind === 'reconnecting'
+        ? '和电脑的连接断了，正在重连。连上后才能发送。'
+        : '没有连上电脑，暂时不能发送。'
     : busy.length > 0
       ? `正在处理附件，还剩 ${busy.length} 个…`
       : block

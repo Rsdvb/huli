@@ -194,11 +194,20 @@ const withExtensionTarget = (config) =>
     project.addTargetAttribute('ProvisioningStyle', 'Automatic', target)
 
     // Embedded right after the app's resources, ahead of its script phases: an extension embedded
-    // after a script phase makes Xcode report a dependency cycle.
+    // after a script phase makes Xcode report a dependency cycle. Another extension's plugin may
+    // have made that phase already, and then this one joins it.
     const phases = app.firstTarget.buildPhases
     const embed = phases.findIndex((phase) => phase.comment === 'Copy Files')
     const resources = phases.findIndex((phase) => phase.comment === 'Resources')
-    if (embed >= 0) {
+    const existing = phases.find((phase) => phase.comment === 'Embed Foundation Extensions')
+    if (embed >= 0 && existing) {
+      const copyPhases = objects.PBXCopyFilesBuildPhase
+      const id = phases[embed].value
+      copyPhases[existing.value].files.push(...copyPhases[id].files)
+      delete copyPhases[id]
+      delete copyPhases[`${id}_comment`]
+      phases.splice(embed, 1)
+    } else if (embed >= 0) {
       const copyPhases = objects.PBXCopyFilesBuildPhase
       const id = phases[embed].value
       copyPhases[id].name = '"Embed Foundation Extensions"'

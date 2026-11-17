@@ -10,7 +10,14 @@ import { decodePairing, parsePairingLink, type PairingPayload } from '@shared/re
 import type { DirectAddress } from '@shared/remote/protocol'
 import type { Transport } from '@shared/remote/transport'
 import { webSocketTransport } from '@shared/remote/websocket-transport'
-import { fromBase64, loadDeviceKey, saveDeviceKey, toBase64, type SavedHost } from './store'
+import {
+  computerIdOf,
+  fromBase64,
+  loadDeviceKey,
+  saveDeviceKey,
+  toBase64,
+  type SavedHost,
+} from './store'
 
 export const APP_VERSION = '0.1.0'
 
@@ -105,14 +112,14 @@ function openSocket(address: DirectAddress, timeoutMs = 8000): Promise<Transport
 }
 
 /** The first address that opens; the others are closed. */
-function dialFirst(addresses: DirectAddress[]): Promise<Transport> {
+function dialFirst(addresses: DirectAddress[], timeoutMs?: number): Promise<Transport> {
   const list = usableAddresses(addresses)
   if (list.length === 0) return Promise.reject(new Error('The computer named no address'))
   return new Promise((resolve, reject) => {
     let left = list.length
     let won = false
     for (const address of list) {
-      openSocket(address).then(
+      openSocket(address, timeoutMs).then(
         (transport) => {
           if (won) return transport.close()
           won = true
@@ -125,6 +132,20 @@ function dialFirst(addresses: DirectAddress[]): Promise<Transport> {
       )
     }
   })
+}
+
+/**
+ * Whether any address of a computer answers now, for a computer the phone keeps no link to. The
+ * socket closes before a handshake, so the computer sees only a connection that went away.
+ */
+export function probe(addresses: DirectAddress[]): Promise<boolean> {
+  return dialFirst(addresses, 4000).then(
+    (transport) => {
+      transport.close()
+      return true
+    },
+    () => false,
+  )
 }
 
 export async function pairWith(
@@ -144,14 +165,18 @@ export async function pairWith(
   )
   if (!paired) return null
   const { welcome } = paired
+  const hostKey = toBase64(payload.hostKey)
   return {
     paired,
     key,
     host: {
-      hostKey: toBase64(payload.hostKey),
+      id: computerIdOf(hostKey),
+      hostKey,
       name: welcome.host.name,
       deviceName: welcome.device.name,
       addresses: welcome.addresses.length > 0 ? welcome.addresses : payload.addresses,
+      platform: welcome.host.platform,
+      lastSeen: Date.now(),
     },
   }
 }

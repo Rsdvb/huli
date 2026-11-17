@@ -130,6 +130,30 @@ describe('sending a push', () => {
     expect(content).toMatchObject({ kind: 'permission', sessionId: 's1', requestId: 'r1' })
   })
 
+  it('carries a question to answer only to a device that wants details', async () => {
+    const asks: PushJob = {
+      ...job,
+      event: {
+        kind: 'permission',
+        sessionId: 's1',
+        requestId: 'r1',
+        question: { choices: ['Tabs', 'Spaces'], text: true },
+      },
+    }
+    const t = await setup([200])
+    t.sender.send(asks)
+    await t.finished
+    expect(await opened(t, t.requests[0]!.body)).toMatchObject({
+      question: { choices: ['Tabs', 'Spaces'], text: true },
+    })
+    const quiet = await setup([200], { choices: { ...DEFAULT_CHOICES, details: false } })
+    quiet.sender.send(asks)
+    await quiet.finished
+    const content = await opened(quiet, quiet.requests[0]!.body)
+    expect(content).not.toHaveProperty('question')
+    expect(content).toMatchObject({ kind: 'permission', requestId: 'r1' })
+  })
+
   it('tries again after the gateway or the network fails, and logs nothing of the push', async () => {
     const t = await setup([502, new TypeError('fetch failed'), 200])
     t.sender.send(job)

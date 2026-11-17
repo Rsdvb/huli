@@ -9,6 +9,7 @@
     "scheme": "huli",
     "ios": {
       "supportsTablet": true,
+      "requireFullScreen": false,
       "bundleIdentifier": "io.github.rsdvb.huli",
       "appleTeamId": "Z5C6TTY2YF",
       "entitlements": {
@@ -54,7 +55,16 @@
       ],
       ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
       "./plugins/withNotificationService",
-      "./plugins/withWidgets"
+      "./plugins/withWidgets",
+      "./plugins/withShareExtension",
+      [
+        "expo-share-intent",
+        {
+          "disableIOS": true,
+          "androidIntentFilters": ["text/*", "*/*"],
+          "androidMultiIntentFilters": ["*/*"]
+        }
+      ]
     ]
   }
 }

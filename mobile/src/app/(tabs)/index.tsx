@@ -1,22 +1,15 @@
 // Home: a greeting and what needs the user, then every session on the computer, pinned ones first.
-// Typing in search filters by title; submitting searches every message.
+// Search is a page of its own (search.tsx), from the top bar. On a wide window (iPad) the list
+// keeps a column on the left and the chosen session opens beside it, in the session screen itself.
 
-import { useMemo, useRef, useState } from 'react'
-import {
-  ActivityIndicator,
-  Animated,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Animated, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
-import type { ConversationHit, SearchIndexing, SessionSummary } from '@shared/agent-host'
+import type { SessionSummary } from '@shared/agent-host'
 import { useSessionActions } from '../../components/SessionActions'
-import { SessionRow } from '../../components/SessionRow'
+import { SessionPaneProvider } from '../../components/SessionPane'
+import { SessionRow, SessionRowSkeleton } from '../../components/SessionRow'
 import {
   FilterNote,
   inFilter,
@@ -25,32 +18,71 @@ import {
   useScrollTopOnTabPress,
   useShell,
 } from '../../components/shell'
+import { SyncNote } from '../../components/SyncNote'
 import { UpdateBanner } from '../../components/UpdateBanner'
 import { useHost } from '../../host'
 import { linkProblem } from '../../linkInfo'
-import { errorText, greeting, listOrder, needsYou, sessionTitle } from '../../sessions'
+import { greeting, listOrder, needsYou } from '../../sessions'
 import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
+import { LIST_COLUMN, useWide } from '../../ui/layout'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
-import { SkeletonRows } from '../../ui/Skeleton'
+import { computerName } from '../../store'
+import { haptic } from '../../ui/haptics'
+import { Pill } from '../../ui/Pill'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
-
-interface Search {
-  query: string
-  state: 'loading' | 'done' | 'error'
-  hits: ConversationHit[]
-  indexing: SearchIndexing | null
-  error: string | null
-}
+import SessionScreen from '../session/[id]'
 
 type Item =
   | { kind: 'section'; key: string; title: string; count: number; waiting?: boolean }
-  | { kind: 'session'; key: string; session: SessionSummary; snippet?: string }
+  | { kind: 'session'; key: string; session: SessionSummary }
 
 export default function Home() {
+  const wide = useWide()
+  const { c } = useTokens()
+  const host = useHost()
+  const [selected, setSelected] = useState<string | null>(null)
+
+  // A session that went away on the computer leaves the pane.
+  const gone = selected !== null && host.loaded && !host.sessions.has(selected)
+  useEffect(() => {
+    if (gone) setSelected(null)
+  }, [gone])
+
+  if (!wide) {
+    return <SessionList selected={null} onOpen={(id) => router.push(`/session/${id}`)} />
+  }
+  return (
+    <View style={[styles.split, { backgroundColor: c.bg }]}>
+      <View style={styles.column}>
+        <SessionList selected={selected} onOpen={setSelected} />
+      </View>
+      <View style={[styles.divider, { backgroundColor: c.border }]} />
+      <View style={styles.pane}>
+        {selected ? (
+          <SessionPaneProvider id={selected} open={setSelected} close={() => setSelected(null)}>
+            <SessionScreen key={selected} />
+          </SessionPaneProvider>
+        ) : (
+          <Screen edges={['top']}>
+            <View style={styles.placeholder}>
+              <EmptyState
+                icon="message"
+                title="选一个会话"
+                message="左边列表里的会话会在这里打开，列表一直留在旁边。"
+              />
+            </View>
+          </Screen>
+        )}
+      </View>
+    </View>
+  )
+}
+
+function SessionList(props: { selected: string | null; onOpen(id: string): void }) {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
@@ -58,8 +90,6 @@ export default function Home() {
   const insets = useSafeAreaInsets()
   const list = useRef<FlatList<Item>>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [query, setQuery] = useState('')
-  const [search, setSearch] = useState<Search | null>(null)
   const actions = useSessionActions('list')
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
@@ -81,60 +111,16 @@ export default function Home() {
     [host.projects],
   )
 
-  const words = shell.searching ? query.trim().toLowerCase() : ''
   const visible = useMemo(
-    () =>
-      listed
-        .filter((s) => inFilter(shell.filter, sessionFilterItem(s)))
-        .filter((s) => !words || sessionTitle(s).toLowerCase().includes(words))
-        .sort(listOrder),
-    [listed, shell.filter, words],
+    () => listed.filter((s) => inFilter(shell.filter, sessionFilterItem(s))).sort(listOrder),
+    [listed, shell.filter],
   )
 
   const connected = host.state.kind === 'connected'
   const waiting = listed.filter(needsYou).length
   const problem = linkProblem(host.state)
 
-  const runSearch = () => {
-    const text = query.trim()
-    if (text.length < 2 || !host.link) {
-      setSearch(null)
-      return
-    }
-    const asked: Search = { query: text, state: 'loading', hits: [], indexing: null, error: null }
-    setSearch(asked)
-    void host.link.request('sessions.search', { query: text }).then(
-      (answer) => {
-        const { hits, indexing } = answer as { hits: ConversationHit[]; indexing?: SearchIndexing }
-        setSearch((current) =>
-          current?.query === text
-            ? { ...asked, state: 'done', hits, indexing: indexing ?? null }
-            : current,
-        )
-      },
-      (error: unknown) =>
-        setSearch((current) =>
-          current?.query === text ? { ...asked, state: 'error', error: errorText(error) } : current,
-        ),
-    )
-  }
-
-  const stopSearching = () => {
-    setQuery('')
-    setSearch(null)
-    shell.setSearching(false)
-  }
-
   const items = useMemo<Item[]>(() => {
-    if (search) {
-      if (search.state !== 'done') return []
-      return search.hits.flatMap((hit) => {
-        const session = host.sessions.get(hit.sessionId)
-        return session
-          ? [{ kind: 'session' as const, key: hit.sessionId, session, snippet: hit.snippet }]
-          : []
-      })
-    }
     const needing = visible.filter(needsYou)
     const rest = visible.filter((s) => !needsYou(s))
     const out: Item[] = []
@@ -153,109 +139,36 @@ export default function Home() {
       for (const s of rest) out.push({ kind: 'session', key: s.id, session: s })
     }
     return out
-  }, [search, visible, host.sessions])
+  }, [visible])
 
-  const summary = !connected
-    ? problem
-    : waiting > 0
-      ? `${waiting} 个会话在等你。`
-      : '这里没有需要你处理的。'
-
-  const searchBar = shell.searching ? (
-    <View style={styles.searchRow}>
-      <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
-        <Icon name="search" size={17} color={c.textSecondary} />
-        <TextInput
-          autoFocus
-          value={query}
-          onChangeText={(text) => {
-            setQuery(text)
-            if (search && text.trim() !== search.query) setSearch(null)
-          }}
-          onSubmitEditing={runSearch}
-          placeholder="搜索标题，回车搜全文"
-          placeholderTextColor={c.textTertiary}
-          returnKeyType="search"
-          autoCorrect={false}
-          autoCapitalize="none"
-          clearButtonMode="while-editing"
-          style={[typeScale.body, styles.searchInput, { color: c.text }]}
-        />
-      </View>
-      <Press onPress={stopSearching} accessibilityRole="button" hitSlop={8}>
-        <Text style={[typeScale.body, { color: c.tint }]}>取消</Text>
-      </Press>
-    </View>
-  ) : null
+  // With the cache's lists the summary still says what they said; the note under it says when.
+  const summary =
+    !connected && !host.loaded
+      ? host.unreachable && host.state.kind !== 'stopped'
+        ? `连不上「${computerName(host.host)}」。`
+        : problem
+      : waiting > 0
+        ? `${waiting} 个会话在等你。`
+        : '这里没有需要你处理的。'
 
   const top = (
     <View style={styles.top}>
-      {!shell.searching && (
-        <View style={styles.greeting} accessibilityRole="header">
-          <Text style={[typeScale.lead, { color: c.textSecondary }]}>{greeting()}。</Text>
-          <Text
-            style={[typeScale.lead, { color: connected && waiting > 0 ? c.text : c.textSecondary }]}
-          >
-            {summary}
-          </Text>
-        </View>
-      )}
-      {searchBar}
+      <View style={styles.greeting} accessibilityRole="header">
+        <Text style={[typeScale.lead, { color: c.textSecondary }]}>{greeting()}。</Text>
+        <Text style={[typeScale.lead, { color: waiting > 0 ? c.text : c.textSecondary }]}>
+          {summary}
+        </Text>
+        {host.loaded ? <SyncNote /> : null}
+      </View>
       <UpdateBanner />
       <FilterNote what="会话" />
-      {search && (
-        <View style={styles.searchStatus}>
-          <Text style={[typeScale.footnote, { color: c.textSecondary, flex: 1 }]}>
-            {search.state === 'done'
-              ? `全文搜索：${items.length} 个会话`
-              : search.state === 'loading'
-                ? '正在搜索…'
-                : '搜索失败'}
-            {search.indexing
-              ? `（索引建立中 ${search.indexing.done}/${search.indexing.total}，结果可能不全）`
-              : ''}
-          </Text>
-          <Press onPress={() => setSearch(null)} hitSlop={8}>
-            <Text style={[typeScale.footnote, { color: c.tint }]}>返回列表</Text>
-          </Press>
-        </View>
-      )}
     </View>
   )
 
   const empty = () => {
-    if (search) {
-      if (search.state === 'loading') {
-        return <ActivityIndicator color={c.textSecondary} style={{ marginTop: space.xxxl }} />
-      }
-      if (search.state === 'error') {
-        return (
-          <EmptyState
-            tone="error"
-            icon="warning"
-            title="搜索失败"
-            message={search.error ?? undefined}
-            action={{ label: '重试', onPress: runSearch }}
-          />
-        )
-      }
-      return <EmptyState icon="search" title={`没有对话包含「${search.query}」`} />
-    }
-    if (!host.loaded)
-      return (
-        <View style={styles.pad}>
-          <SkeletonRows count={7} />
-        </View>
-      )
-    if (words) {
-      return (
-        <EmptyState
-          icon="search"
-          title="没有标题匹配的会话"
-          message="按回车搜索全部对话内容。"
-          action={{ label: '搜索全文', onPress: runSearch }}
-        />
-      )
+    if (!host.loaded) {
+      if (!connected && host.unreachable && host.state.kind !== 'stopped') return <Unreachable />
+      return <SessionRowSkeleton />
     }
     if (shell.filter.kind !== 'all') {
       return (
@@ -277,7 +190,7 @@ export default function Home() {
   }
 
   const footer =
-    archivedCount > 0 && !search ? (
+    archivedCount > 0 ? (
       <Press
         onPress={() => router.push('/archived')}
         scale={false}
@@ -311,8 +224,8 @@ export default function Home() {
         session={s}
         agentName={host.agents.get(s.agentId)?.name}
         projectName={projectNames.get(s.projectPath)}
-        snippet={item.snippet}
-        onPress={() => router.push(`/session/${s.id}`)}
+        selected={props.selected === s.id}
+        onPress={() => props.onOpen(s.id)}
         onLongPress={() => actions.open(s)}
         start={
           connected
@@ -338,11 +251,11 @@ export default function Home() {
       <Animated.FlatList
         ref={list}
         data={items}
+        extraData={props.selected}
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
         {...header.scrollProps}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
         contentContainerStyle={{
           paddingTop: header.contentTop,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
@@ -354,7 +267,7 @@ export default function Home() {
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
-              host.link?.wake()
+              host.retry()
               void host
                 .refresh()
                 .catch(() => {})
@@ -372,22 +285,86 @@ export default function Home() {
   )
 }
 
+const REASONS = [
+  '电脑上的 Huli 没开，或者电脑睡着了',
+  '手机和电脑不在同一个网络，或者 Tailscale 没连上',
+  '电脑上的「设置 › 远程访问」被关掉了',
+]
+
+/** Nothing cached and no link for a while: why that may be, and a way to try again. */
+function Unreachable() {
+  const { c } = useTokens()
+  const host = useHost()
+  const several = host.computers.length > 1
+  return (
+    <View style={styles.pad}>
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <View style={[styles.badge, { backgroundColor: c.fill }]}>
+          <Icon name="wifi" size={24} color={c.textSecondary} />
+        </View>
+        <Text style={[typeScale.headline, { color: c.text }]}>
+          连不上「{computerName(host.host)}」
+        </Text>
+        <Text style={[typeScale.footnote, { color: c.textSecondary }]}>可能是：</Text>
+        {REASONS.map((reason) => (
+          <View key={reason} style={styles.reason}>
+            <Text style={[typeScale.callout, { color: c.textSecondary }]}>·</Text>
+            <Text style={[typeScale.callout, styles.flex, { color: c.text }]}>{reason}</Text>
+          </View>
+        ))}
+        <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
+          Huli 会在后台继续尝试，连上后这里会自动出现会话。
+        </Text>
+        <View style={styles.buttons}>
+          <Pill
+            tone="tint"
+            label="重试"
+            leading={<Icon name="refresh" size={14} color={c.tint} />}
+            onPress={() => {
+              haptic.tap()
+              host.retry()
+            }}
+          />
+          {several ? (
+            <Pill
+              tone="fill"
+              label="换一台电脑"
+              onPress={() => router.push('/settings/computers')}
+            />
+          ) : null}
+        </View>
+      </View>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
+  card: {
+    marginTop: space.lg,
+    padding: space.lg,
+    gap: space.sm,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  badge: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space.xs,
+  },
+  reason: { flexDirection: 'row', gap: space.sm },
+  flex: { flex: 1 },
+  buttons: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
+  split: { flex: 1, flexDirection: 'row' },
+  column: { width: LIST_COLUMN },
+  divider: { width: StyleSheet.hairlineWidth },
+  pane: { flex: 1 },
+  placeholder: { flex: 1, justifyContent: 'center' },
   pad: { paddingHorizontal: space.xl },
   top: { paddingHorizontal: space.xl, paddingTop: space.sm },
   greeting: { gap: space.xs, paddingTop: space.md, paddingBottom: space.sm },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingTop: space.sm },
-  searchBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    borderRadius: radius.md,
-    paddingHorizontal: space.md,
-    height: 44,
-  },
-  searchInput: { flex: 1, paddingVertical: 0 },
-  searchStatus: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingTop: space.md },
   archived: {
     flexDirection: 'row',
     alignItems: 'center',

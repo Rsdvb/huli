@@ -15,9 +15,13 @@ import {
   type ThreadEntry,
   type ThreadState,
 } from '@shared/thread'
+import { readThread, writeThread } from './cache'
+import { useHost } from './host'
 
 export interface ThreadView {
   thread: ThreadState | null
+  /** The thread is the cache's copy from an earlier visit; the computer has not sent it yet. */
+  cached: boolean
   error: string | null
   hasOlder: boolean
   loadingOlder: boolean
@@ -27,8 +31,13 @@ export interface ThreadView {
   reloadRequests(): void
 }
 
+/** How often at most a watched thread is written to the cache while it changes. */
+const SAVE_EVERY = 5000
+
 export function useThread(link: HostLink, sessionId: string, state: LinkState): ThreadView {
+  const computer = useHost().host?.id ?? null
   const [thread, setThread] = useState<ThreadState | null>(null)
+  const [cached, setCached] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [older, setOlder] = useState<number | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -36,7 +45,43 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const seq = useRef(-1)
   const pending = useRef<PatchBatch[] | null>(null)
   const generation = useRef(0)
+  const live = useRef(false)
   const connected = state.kind === 'connected'
+
+  // Until the computer sends the thread, the cache's copy from an earlier visit shows, read-only.
+  useEffect(() => {
+    if (!computer) return
+    let current = true
+    void readThread(computer, sessionId).then((copy) => {
+      if (!current || !copy || live.current) return
+      setThread(threadFromSnapshot({ session: copy.session, entries: copy.entries, seq: -1 }))
+      setCached(true)
+    })
+    return () => {
+      current = false
+    }
+  }, [computer, sessionId])
+
+  // The thread the computer sent goes to the cache now and then, and when the screen closes.
+  const latest = useRef<ThreadState | null>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!computer || cached || !thread) return
+    latest.current = thread
+    if (saveTimer.current) return
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      if (latest.current) void writeThread(computer, latest.current)
+    }, SAVE_EVERY)
+  }, [computer, cached, thread])
+  useEffect(
+    () => () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = null
+      if (computer && latest.current) void writeThread(computer, latest.current)
+    },
+    [computer],
+  )
 
   const reloadRequests = useCallback(() => {
     void (link.request('sessions.requests', { sessionId }) as Promise<{ entries: ThreadEntry[] }>)
@@ -59,13 +104,16 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
         seq.current = batch.seq
       }
       pending.current = null
+      live.current = true
       setThread(next)
+      setCached(false)
       setOlder(snapshot.older)
       setError(null)
       void link.request('sessions.show', { sessionIds: [sessionId] }).catch(() => {})
       reloadRequests()
     } catch (failure) {
-      if (mine === generation.current) setError((failure as { message?: string }).message ?? '打不开这个会话')
+      if (mine === generation.current)
+        setError((failure as { message?: string }).message ?? '打不开这个会话')
     }
   }, [link, sessionId, reloadRequests])
 
@@ -85,8 +133,13 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
         return
       }
       seq.current = batch.seq
-      setThread((current) => (current ? applyPatches(current, batch.patches, { partial: true }) : current))
-      if (batch.patches.some((p) => p.op === 'entry.add' || p.op === 'entry.update')) reloadRequests()
+      // A patch applies to the computer's thread only, never to the cache's copy.
+      if (!live.current) return
+      setThread((current) =>
+        current ? applyPatches(current, batch.patches, { partial: true }) : current,
+      )
+      if (batch.patches.some((p) => p.op === 'entry.add' || p.op === 'entry.update'))
+        reloadRequests()
     })
     return off
   }, [link, sessionId, open, reloadRequests])
@@ -113,5 +166,14 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       .finally(() => setLoadingOlder(false))
   }, [link, sessionId, older, loadingOlder, thread])
 
-  return { thread, error, hasOlder: older !== null, loadingOlder, loadOlder, requests, reloadRequests }
+  return {
+    thread,
+    cached,
+    error,
+    hasOlder: older !== null && !cached,
+    loadingOlder,
+    loadOlder,
+    requests,
+    reloadRequests,
+  }
 }
