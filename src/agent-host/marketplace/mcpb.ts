@@ -412,6 +412,16 @@ function insideArg(dir: string, value: string, prefix: string): boolean {
   return value.startsWith(prefix) && within(dir, value.slice(prefix.length))
 }
 
+/**
+ * An argument that names the bundle's folder, its path in this system's separators: manifests
+ * write `${__dirname}/server/index.js`, which on Windows would join a backslashed folder with
+ * slashes.
+ */
+function nativeArg(value: string, prefix: string): string {
+  if (path.sep === '/') return value
+  return prefix + value.slice(prefix.length).split('/').join(path.sep)
+}
+
 /** `>=x.y.z` against a version; any other range is not checked. */
 function meetsNode(range: string, version: string): boolean {
   const match = /^\s*>=\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?\s*$/.exec(range)
@@ -554,7 +564,7 @@ export async function planBundle(manifest: BundleManifest, ctx: PlanContext): Pr
   const bound: BundleSetup['bound'] = []
   for (const [i, raw] of args.entries()) {
     const where = `server.mcp_config.args[${i}]`
-    const value = own(fill(raw, where))
+    let value = own(fill(raw, where))
     // An argument that names the bundle's folder stays inside it; only fixed text may come first.
     const at = raw.indexOf('${__dirname}')
     if (at >= 0) {
@@ -563,6 +573,7 @@ export async function planBundle(manifest: BundleManifest, ctx: PlanContext): Pr
         throw bad(t('marketBundle.unsafePath', { path: raw.slice(0, 200) }))
       }
       bound.push({ index: i, prefix })
+      value = nativeArg(value, prefix)
     }
     for (const match of value.matchAll(VARIABLE)) {
       const key = USER.exec(match[1]!)![1]!
@@ -610,12 +621,18 @@ export async function planBundle(manifest: BundleManifest, ctx: PlanContext): Pr
   }
 
   const runCommand = runtime === 'node' ? 'node' : program ? program : resolved
-  const shown = outArgs.map((arg) =>
-    arg
-      .split(dir + path.sep)
-      .join('')
-      .replace(VARIABLE, (_, name: string) => `<${inputs.get(USER.exec(name)![1]!)!.title}>`),
-  )
+  const shown = outArgs.map((arg, i) => {
+    let text = arg.split(dir + path.sep).join('')
+    // A path in the folder reads as the bundle writes it, with slashes, on every system.
+    const prefix = bound.find((b) => b.index === i)?.prefix
+    if (prefix !== undefined && path.sep !== '/') {
+      text = prefix + text.slice(prefix.length).split(path.sep).join('/')
+    }
+    return text.replace(
+      VARIABLE,
+      (_, name: string) => `<${inputs.get(USER.exec(name)![1]!)!.title}>`,
+    )
+  })
   return {
     type: manifest.type,
     command: program ? path.join(dir, ...program.split('/')) : resolved,
@@ -704,6 +721,8 @@ export function fillArgs(setup: BundleSetup, values: Readonly<Record<string, str
       if (!tries.every((value) => insideArg(setup.dir, value, bound.prefix))) {
         throw refuse(t('marketBundle.outside', { path: filled.slice(0, 200) }))
       }
+      out.push(nativeArg(filled, bound.prefix))
+      continue
     }
     out.push(filled)
   }
