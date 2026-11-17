@@ -224,7 +224,8 @@ export interface AgentTimings {
 
 // Personal fork: Kettu never runs agy on its own to read Antigravity's limits, neither its print
 // mode (`agy -p /usage`, `/credits`) nor a hidden ACP session, since Google treats a third-party
-// tool driving agy as a terms breach. The plan's name still comes from agy's own ACP answers.
+// tool driving agy as a terms breach. The plan's name still comes from agy's own ACP answers. A
+// read the user asks for with a button (`ask`) still runs `/usage` once, as they would by hand.
 const READ_ANTIGRAVITY_LIMITS = false
 
 export const AGENT_TIMINGS: AgentTimings = {
@@ -2751,20 +2752,25 @@ export class AgentManager {
    * most once a minute, starting the agent if needed; the windows arrive in its status. Rate-limit
    * events report a window only when it changes, so without this most windows would stay unknown.
    */
-  async refreshLimits(agentId: AgentId, options?: { force?: boolean }): Promise<void> {
+  async refreshLimits(
+    agentId: AgentId,
+    options?: { force?: boolean; ask?: boolean },
+  ): Promise<void> {
     if (!this.has(agentId) || this.isDisabled(agentId)) return
     const slot = this.slot(agentId)
     if (slot.def.id === 'opencode') return this.refreshProviders(slot, options?.force === true)
     if (slot.def.id === 'deepseek') return this.refreshBalance(slot, options?.force === true)
     if (!this.hasLimits(agentId)) return
     await this.detectAll()
-    const force = options?.force === true
+    const ask = options?.ask === true
+    // What the user asked for now is read now.
+    const force = options?.force === true || ask
     // A forced read is how a finished sign-in clears "required": the last failure must not stick.
     if (!slot.runtime && slot.h.detection?.state !== 'available') return
     if (!force && slot.signIn === 'required') return
     if (slot.limitsRun) return slot.limitsRun
     if (!force && Date.now() - slot.limitsReadAt < this.timings.limitsMs) return
-    slot.limitsRun = this.limitedRead(slot, this.readLimits(slot))
+    slot.limitsRun = this.limitedRead(slot, this.readLimits(slot, ask))
       .then(
         () => this.limitsReadEnded(slot, null),
         (error: unknown) => {
@@ -2839,10 +2845,10 @@ export class AgentManager {
   }
 
   /** The limits from the connection when it reads them, else from the agent's report. */
-  private async readLimits(slot: Slot): Promise<void> {
+  private async readLimits(slot: Slot, ask = false): Promise<void> {
     const stored = storedSignInReader(slot.def.id)
     if (stored) return this.readWithStoredSignIn(slot, stored)
-    if (slot.def.id === 'antigravity') return this.readAntigravityLimits(slot)
+    if (slot.def.id === 'antigravity') return this.readAntigravityLimits(slot, ask)
     const runtime = await this.ensureReady(slot.id)
     const { connection } = runtime
     if (connection.request && ['grok', 'mistral-vibe'].includes(slot.def.id)) {
@@ -2956,8 +2962,8 @@ export class AgentManager {
    * process running: only on a Google or Gemini Enterprise sign-in, since a signed-out agy answers
    * by opening a browser to sign in. A sign-in Kettu does not know yet it asks agy for first.
    */
-  private async readAntigravityLimits(slot: Slot): Promise<void> {
-    if (!READ_ANTIGRAVITY_LIMITS) return
+  private async readAntigravityLimits(slot: Slot, ask: boolean): Promise<void> {
+    if (!READ_ANTIGRAVITY_LIMITS && !ask) return
     let method = await this.readSignInMethod(slot)
     if ((method === null && !slot.signInAnswered) || slot.signIn === 'required') {
       method = await this.askAntigravitySignIn(slot)

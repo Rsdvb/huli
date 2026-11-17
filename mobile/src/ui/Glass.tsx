@@ -208,16 +208,25 @@ export function GlassBackdrop(props: {
  * The soft edge iOS 26 gives a scroll view under floating glass controls in place of a bar: the
  * screen's color, strong under the status bar and fading out below the controls.
  */
-export function ScrollEdge(props: { color: string; height: number }) {
+export function ScrollEdge(props: {
+  color: string
+  height: number
+  /**
+   * How far down, as a share of the height, the edge stays nearly opaque before it fades: high
+   * where controls sit over busy content such as a tab's charts, so nothing shows through them.
+   */
+  solid?: number
+}) {
   // useId's colons do not survive in an SVG url().
   const id = `edge${useId().replace(/\W/g, '')}`
+  const solid = Math.min(0.95, Math.max(0, props.solid ?? 0.45))
   return (
     <View pointerEvents="none" style={[styles.edge, { height: props.height }]}>
       <Svg width="100%" height="100%">
         <Defs>
           <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={props.color} stopOpacity={0.94} />
-            <Stop offset="0.45" stopColor={props.color} stopOpacity={0.7} />
+            <Stop offset="0" stopColor={props.color} stopOpacity={0.98} />
+            <Stop offset={solid} stopColor={props.color} stopOpacity={0.92} />
             <Stop offset="1" stopColor={props.color} stopOpacity={0} />
           </LinearGradient>
         </Defs>

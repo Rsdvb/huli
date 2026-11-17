@@ -195,7 +195,10 @@ export function ChartTip(props: { x: number; y: number; width: number; content: 
       {props.content.rows?.map((row) => (
         <View key={row.key} style={styles.tipRow}>
           <View style={[styles.tipSwatch, { backgroundColor: row.color }]} />
-          <Text style={[typeScale.caption, styles.tipLabel, { color: c.textSecondary }]}>
+          <Text
+            style={[typeScale.caption, styles.tipLabel, { color: c.textSecondary }]}
+            numberOfLines={1}
+          >
             {row.label}
           </Text>
           <Text style={[typeScale.caption, styles.tabular, { color: c.text }]}>{row.value}</Text>
@@ -500,8 +503,8 @@ const styles = StyleSheet.create({
   tip: {
     position: 'absolute',
     zIndex: 20,
-    minWidth: 120,
-    maxWidth: 240,
+    minWidth: 160,
+    maxWidth: 260,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
     borderRadius: radius.md,
@@ -514,6 +517,8 @@ const styles = StyleSheet.create({
   },
   tipRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
   tipSwatch: { width: 8, height: 8, borderRadius: 2 },
-  tipLabel: { flex: 1, marginRight: space.md },
+  // Grows from its own width, not from zero: the tip sizes itself to its content, and a label of
+  // `flex: 1` there measured nothing and broke a name one character a line.
+  tipLabel: { flexGrow: 1, flexShrink: 1, marginRight: space.md },
   parts: { overflow: 'hidden', flexDirection: 'row' },
 })

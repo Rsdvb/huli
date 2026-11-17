@@ -1206,6 +1206,11 @@ export function createValidators(platform: Platform): Validators {
     const force = optionalFlag(o, 'force')
     return { agentId: agentId(o), ...(force !== undefined ? { force } : {}) }
   }
+  const limitsRefresh = (params: unknown): { agentId: AgentId; force?: boolean; ask?: boolean } => {
+    const o = fields(params)
+    const ask = optionalFlag(o, 'ask')
+    return { ...agentWithForce(params), ...(ask !== undefined ? { ask } : {}) }
+  }
   const artifact = (params: unknown): { id: string } => ({ id: artifactId(fields(params)) })
   const queueItem = (params: unknown): { sessionId: string; itemId: string } => {
     const o = fields(params)
@@ -1301,7 +1306,7 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'agents.readFirstOptions': agent,
-    'agents.refreshLimits': agentWithForce,
+    'agents.refreshLimits': limitsRefresh,
     'agents.details': agent,
     'agents.claudeSettings': agent,
     'agents.setClaudeSetting': (params) => {

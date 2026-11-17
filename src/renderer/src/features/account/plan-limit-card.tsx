@@ -15,7 +15,16 @@ import { hasModelGroups, type PlanCard } from './model'
  * An account's plan windows: its rings and, from the outer ring in, each window's figure. It
  * opens the Usage page; hovered or focused, it shows every window beside it.
  */
-export function PlanLimitCard({ card, onOpen }: { card: PlanCard; onOpen: () => void }) {
+export function PlanLimitCard({
+  card,
+  onOpen,
+  wide = false,
+}: {
+  card: PlanCard
+  onOpen: () => void
+  /** Takes the whole row, as a card left without a neighbour does. */
+  wide?: boolean
+}) {
   const hostName = useHostName()
   // With every host shown, which of them the account is on.
   const hosts = useWindowHost().kind === 'all' ? card.hostIds.map(hostName).join(' · ') : null
@@ -30,7 +39,7 @@ export function PlanLimitCard({ card, onOpen }: { card: PlanCard; onOpen: () => 
             onClick={onOpen}
             className={cn(
               'kettu-plan-card min-w-0 rounded-tile outline-none select-none',
-              hasModelGroups(card) && 'col-span-2',
+              (wide || hasModelGroups(card)) && 'col-span-2',
             )}
           />
         }
@@ -53,8 +62,16 @@ export function PlanLimitCard({ card, onOpen }: { card: PlanCard; onOpen: () => 
   )
 }
 
+/**
+ * A model group's name as a card line shows it: without the "Models" every group of Antigravity's
+ * ends in, and its "and" in the interface's language, e.g. "Claude 和 GPT".
+ */
+function groupName(model: string, and: string): string {
+  return model.replace(/\s+models?$/i, '').replace(/\s+and\s+/i, ` ${and.trim()} `)
+}
+
 function CardFace({ card }: { card: PlanCard }) {
-  const { t } = useTranslation(['sidebar', 'composer', 'common', 'usage'])
+  const { t } = useTranslation(['sidebar', 'composer', 'common', 'usage', 'tasks'])
   const view = useLimitView()
   const count = card.windows.length
   const groups = hasModelGroups(card)
@@ -113,7 +130,7 @@ function CardFace({ card }: { card: PlanCard }) {
             const short = !w.model
               ? t(`composer:usage.shortWindow.${w.window}`)
               : groups
-                ? `${t(`composer:usage.shortWindow.${w.window}`)} ${w.model.replace(/\s+models?$/i, '')}`
+                ? `${t(`composer:usage.shortWindow.${w.window}`)} ${groupName(w.model, t('tasks:and'))}`
                 : w.model
             return (
               <span key={w.id} className="flex min-w-0 flex-col gap-px">
@@ -143,42 +160,44 @@ function CardFace({ card }: { card: PlanCard }) {
               </span>
             )
           })}
+          {/* Amounts and balances sit in the windows' column, so they line up with their rows
+              rather than starting under the rings. */}
+          {amounts.map(({ id, amount }) => (
+            <span
+              key={id}
+              className="min-w-0 truncate text-caption leading-3.25 text-tertiary tabular whitespace-nowrap"
+              title={amount}
+            >
+              {amount}
+            </span>
+          ))}
+          {card.balances.map((balance) => (
+            <span
+              key={`${balance.label}/${balance.currency}`}
+              className="flex min-w-0 justify-between gap-1 text-caption leading-3.25 whitespace-nowrap"
+            >
+              <span className="min-w-0 truncate text-tertiary">
+                {balance.label === 'Prepaid balance'
+                  ? t('usage:limits.prepaidBalance')
+                  : balance.label === 'Extra usage'
+                    ? t('usage:limits.extraUsage')
+                    : balance.label}
+              </span>
+              <span className="shrink-0 text-primary tabular">
+                {planBalance(
+                  balance.amount,
+                  balance.currency,
+                  balance.currency === 'credits'
+                    ? t('usage:limits.units.credits')
+                    : balance.currency === 'requests'
+                      ? t('usage:limits.units.premiumRequests')
+                      : balance.currency,
+                )}
+              </span>
+            </span>
+          ))}
         </span>
       </span>
-      {amounts.map(({ id, amount }) => (
-        <span
-          key={id}
-          className="-mt-px min-w-0 truncate text-badge leading-3.25 text-tertiary tabular whitespace-nowrap"
-          title={amount}
-        >
-          {amount}
-        </span>
-      ))}
-      {card.balances.map((balance) => (
-        <span
-          key={`${balance.label}/${balance.currency}`}
-          className="-mt-px flex min-w-0 justify-between gap-0 text-badge leading-3.25 tracking-tight whitespace-nowrap"
-        >
-          <span className="min-w-0 truncate text-tertiary">
-            {balance.label === 'Prepaid balance'
-              ? t('usage:limits.prepaidBalance')
-              : balance.label === 'Extra usage'
-                ? t('usage:limits.extraUsage')
-                : balance.label}
-          </span>
-          <span className="shrink-0 text-primary tabular">
-            {planBalance(
-              balance.amount,
-              balance.currency,
-              balance.currency === 'credits'
-                ? t('usage:limits.units.credits')
-                : balance.currency === 'requests'
-                  ? t('usage:limits.units.premiumRequests')
-                  : balance.currency,
-            )}
-          </span>
-        </span>
-      ))}
     </>
   )
 }

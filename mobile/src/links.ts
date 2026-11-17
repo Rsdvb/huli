@@ -3,7 +3,7 @@
 //
 //   huli://                       the 会话 tab
 //   huli://session/<sessionId>    a session
-//   huli://new                    a new session
+//   huli://new                    a new session (`text=<text>` goes into its draft, unsent)
 //   huli://search?q=<text>        search, the text filled in and searched (q may be left out)
 //   huli://artifacts              the Artifacts tab
 //   huli://artifact/<artifactId>  an artifact, full screen (`version=<n>` for an older one)
@@ -24,6 +24,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { router, useRootNavigationState } from 'expo-router'
 import { ARTIFACT_ID } from '@shared/artifacts'
+import { loadDrafts, NEW_SESSION_DRAFT, readDraft, writeDraft } from './drafts'
 import { useHost } from './host'
 import { useLockState } from './lock'
 import { setTasksTabView } from './tasks'
@@ -36,7 +37,7 @@ export type LinkTarget =
   | { kind: 'task'; id: string }
   | { kind: 'tasks' }
   | { kind: 'artifact'; id: string; version: number | null }
-  | { kind: 'new' }
+  | { kind: 'new'; text?: string }
   | { kind: 'search'; q: string }
   | { kind: 'tab'; tab: TabName }
 
@@ -46,6 +47,9 @@ export interface AppLink {
   /** A computer's id or its notifications' id; null for the active computer. */
   host: string | null
 }
+
+/** The most of a link's text a new session's composer is filled with. */
+const MAX_TEXT = 8000
 
 const TABS: Record<string, TabName> = {
   '': 'index',
@@ -100,8 +104,10 @@ export function parseLink(url: string): AppLink | null {
       id: decode(id),
       version: /^[1-9][0-9]{0,8}$/.test(version) ? Number(version) : null,
     }
-  } else if (path === 'new') target = { kind: 'new' }
-  else if (path === 'search') target = { kind: 'search', q: params.get('q') ?? '' }
+  } else if (path === 'new') {
+    const text = params.get('text') ?? ''
+    target = text.trim() ? { kind: 'new', text: text.slice(0, MAX_TEXT) } : { kind: 'new' }
+  } else if (path === 'search') target = { kind: 'search', q: params.get('q') ?? '' }
   else if (path in TABS) target = { kind: 'tab', tab: TABS[path]! }
   return target ? { target, host } : null
 }
@@ -127,7 +133,7 @@ export function linkTo(target: LinkTarget, host?: string | null): string {
         ['version', target.version === null ? '' : String(target.version)],
       ])}`
     case 'new':
-      return `huli://new${suffix([])}`
+      return `huli://new${suffix([['text', target.text ?? '']])}`
     case 'search':
       return `huli://search${suffix([['q', target.q]])}`
     case 'tab':
@@ -154,7 +160,8 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
-function navigate(target: LinkTarget): void {
+/** Shows a link's target on the active computer, `computer` (SavedHost.id). */
+function navigate(target: LinkTarget, computer: string | null): void {
   switch (target.kind) {
     case 'session':
       router.push({ pathname: '/session/[id]', params: { id: target.id } })
@@ -175,9 +182,27 @@ function navigate(target: LinkTarget): void {
           : { id: target.id },
       })
       return
-    case 'new':
-      router.push('/new')
+    case 'new': {
+      const text = target.text
+      if (!text || !computer) {
+        router.push('/new')
+        return
+      }
+      // New session's composer shows its draft, so the text goes there, before the attachments
+      // the draft may hold; the draft is read first, so its file cannot replace the text.
+      void loadDrafts(computer)
+        .then(() => {
+          const draft = readDraft(computer, NEW_SESSION_DRAFT)
+          writeDraft(computer, NEW_SESSION_DRAFT, {
+            text,
+            attachments: draft?.attachments ?? [],
+            mentions: [],
+          })
+        })
+        .catch(() => {})
+        .then(() => router.push('/new'))
       return
+    }
     case 'search':
       router.push({ pathname: '/search', params: target.q ? { q: target.q } : {} })
       return
@@ -211,7 +236,7 @@ export function LinkBridge() {
     for (const listener of listeners) listener()
     // After the commit that shows the computer's tabs, so the route lands in them.
     const target = link.target
-    if (target) setTimeout(() => navigate(target), 0)
+    if (target) setTimeout(() => navigate(target, activeId), 0)
   }, [link, mounted, phase, lock.locked, lock.covered, computers, activeId, switchTo])
 
   return null

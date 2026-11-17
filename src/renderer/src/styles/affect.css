@@ -56,6 +56,25 @@
 .ui-as .ui-as-tabs__tab {
   box-shadow: none;
 }
+/* Short of room, a tab never breaks its label one character a line: the tabs keep their width and
+   scroll, and the toolbar puts its tools (search, add) on the next line, still at the right. */
+.ui-as .ui-as-toolbar {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+.ui-as .ui-as-toolbar__right {
+  margin-left: auto;
+}
+.ui-as .ui-as-tabs {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ui-as .ui-as-tabs__tab {
+  flex: none;
+  white-space: nowrap;
+}
 
 .ui-ts.ui-ts {
   --ui-ts-card: var(--bg-surface);

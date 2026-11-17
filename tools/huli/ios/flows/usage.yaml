@@ -1,0 +1,21 @@
+# The usage tab at rest and scrolled, to check the top bar's fade over content.
+appId: io.github.rsdvb.huli
+---
+- tapOn:
+    text: "允许"
+    optional: true
+- tapOn: "用量"
+- waitForAnimationToEnd
+- takeScreenshot: usage-top
+- swipe:
+    start: 50%, 70%
+    end: 50%, 45%
+    duration: 400
+- waitForAnimationToEnd
+- takeScreenshot: usage-scrolled-a
+- swipe:
+    start: 50%, 70%
+    end: 50%, 30%
+    duration: 400
+- waitForAnimationToEnd
+- takeScreenshot: usage-scrolled-b

@@ -10,6 +10,7 @@ import { Bot } from 'lucide-react-native'
 import type { PlanProgress, SessionPullRequest, SessionSummary } from '@shared/agent-host'
 import { folder, listTime, sessionState, sessionTitle, type SessionState } from '../sessions'
 import { sessionPullRequests, topPrState } from '../sessionMenu'
+import { SubagentMenu } from './SubagentMenu'
 import { PR_STATE_TEXT, PrMark } from '../ui/session/gitIcons'
 import { AgentAvatar, type AvatarBadge } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
@@ -260,7 +261,9 @@ export const SessionRow = memo(function SessionRow(props: {
             {sessionTitle(s)}
           </Text>
           {props.subagents && (running || props.subagents.running) ? (
-            <SubagentBadge subagents={props.subagents} />
+            <SubagentMenu parentId={s.id}>
+              <SubagentBadge subagents={props.subagents} />
+            </SubagentMenu>
           ) : null}
           {prs.length > 0 ? <PrBadge prs={prs} /> : null}
           <View style={{ flex: 1 }} />
