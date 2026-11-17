@@ -1,5 +1,6 @@
 // A sheet that rises from the bottom over a dimmed screen, with a grabber and a title. It stays
-// mounted through its exit so it slides away instead of vanishing.
+// mounted through its exit so it slides away instead of vanishing. Android's: iOS presents the
+// system's own sheet (BottomSheet.ios.tsx).
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
@@ -13,12 +14,9 @@ import {
   StyleSheet,
   Text,
   View,
-  type StyleProp,
-  type ViewStyle,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LockLayer } from '../lock'
-import { Glass, useGlassMode } from './Glass'
 import { useReduceMotion } from './Press'
 import { motion, radius, space, type as typeScale, useTokens } from './tokens'
 
@@ -38,9 +36,6 @@ export function BottomSheet(props: {
   const shown = useRef(new Animated.Value(0)).current
   const travel = Dimensions.get('window').height * 0.6
   const [keyboard, setKeyboard] = useState(0)
-  // With Liquid Glass the sheet is glass that floats clear of the screen's edges, as iOS 26's do.
-  const liquid = useGlassMode() === 'liquid'
-  const inset = Math.max(insets.bottom - space.md, space.sm)
 
   // A sheet with a text field rides above the keyboard rather than under it; Android's window
   // already resizes for it.
@@ -76,7 +71,6 @@ export function BottomSheet(props: {
   }, [props.visible, reduce, shown])
 
   if (!mounted) return null
-  const Surface = liquid ? GlassSheet : View
 
   return (
     <Modal
@@ -99,8 +93,12 @@ export function BottomSheet(props: {
       <View style={styles.dock} pointerEvents="box-none">
         <Animated.View
           style={[
+            styles.sheet,
             {
-              marginBottom: keyboard + (liquid ? (keyboard > 0 ? space.sm : inset) : 0),
+              backgroundColor: c.surfaceRaised,
+              borderColor: c.border,
+              paddingBottom: keyboard > 0 ? space.md : Math.max(insets.bottom, space.lg),
+              marginBottom: keyboard,
               opacity: reduce ? shown : 1,
               transform: [
                 {
@@ -110,51 +108,37 @@ export function BottomSheet(props: {
                 },
               ],
             },
-            liquid ? styles.floating : null,
           ]}
         >
-          <Surface
-            style={[
-              styles.sheet,
-              liquid
-                ? styles.glassSheet
-                : {
-                    backgroundColor: c.surfaceRaised,
-                    borderColor: c.border,
-                    paddingBottom: keyboard > 0 ? space.md : Math.max(insets.bottom, space.lg),
-                  },
-            ]}
+          <View style={[styles.grabber, { backgroundColor: c.borderStrong }]} />
+          {props.title || props.message ? (
+            <View style={styles.head}>
+              {props.title ? (
+                <Text style={[typeScale.headline, { color: c.text }]} numberOfLines={2}>
+                  {props.title}
+                </Text>
+              ) : null}
+              {props.message ? (
+                <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+                  {props.message}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+          <ScrollView
+            style={{
+              maxHeight: Math.min(
+                props.maxHeight ?? Dimensions.get('window').height * 0.7,
+                Dimensions.get('window').height - keyboard - insets.top - 120,
+              ),
+            }}
+            contentContainerStyle={styles.body}
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
           >
-            <View style={[styles.grabber, { backgroundColor: c.borderStrong }]} />
-            {props.title || props.message ? (
-              <View style={styles.head}>
-                {props.title ? (
-                  <Text style={[typeScale.headline, { color: c.text }]} numberOfLines={2}>
-                    {props.title}
-                  </Text>
-                ) : null}
-                {props.message ? (
-                  <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                    {props.message}
-                  </Text>
-                ) : null}
-              </View>
-            ) : null}
-            <ScrollView
-              style={{
-                maxHeight: Math.min(
-                  props.maxHeight ?? Dimensions.get('window').height * 0.7,
-                  Dimensions.get('window').height - keyboard - insets.top - 120,
-                ),
-              }}
-              contentContainerStyle={styles.body}
-              bounces={false}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="interactive"
-            >
-              {props.children}
-            </ScrollView>
-          </Surface>
+            {props.children}
+          </ScrollView>
         </Animated.View>
       </View>
       <LockLayer />
@@ -162,25 +146,8 @@ export function BottomSheet(props: {
   )
 }
 
-function GlassSheet(props: { style?: StyleProp<ViewStyle>; children?: ReactNode }) {
-  return (
-    <Glass radius={SHEET_RADIUS} style={props.style}>
-      {props.children}
-    </Glass>
-  )
-}
-
-const SHEET_RADIUS = 36
-
 const styles = StyleSheet.create({
   dock: { flex: 1, justifyContent: 'flex-end' },
-  floating: { marginHorizontal: space.sm },
-  glassSheet: {
-    borderWidth: 0,
-    borderTopLeftRadius: SHEET_RADIUS,
-    borderTopRightRadius: SHEET_RADIUS,
-    paddingBottom: space.lg,
-  },
   sheet: {
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
