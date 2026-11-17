@@ -5,7 +5,7 @@
 // and the effort's levels a segmented row. What a menu cannot hold (an agent's mark, a usage
 // ring) is left out or said in words. Elsewhere the control keeps opening our popover.
 
-import type { ReactElement, ReactNode } from 'react'
+import { Fragment, type ReactElement, type ReactNode } from 'react'
 import { View } from 'react-native'
 import {
   Button,
@@ -15,6 +15,7 @@ import {
   Menu,
   Picker,
   RNHostView,
+  Section,
   Text,
   Toggle,
 } from '@expo/ui/swift-ui'
@@ -51,8 +52,25 @@ function Row(props: { row: MenuRow; source: MenuSource; depth: number }) {
       </Menu>
     )
   }
+  const subtitle = [row.subtitle, row.detail].filter(Boolean).join(' · ')
   if (row.toggle !== undefined || row.checked !== undefined) {
     const on = row.toggle ?? row.checked ?? false
+    if (subtitle) {
+      // Two texts read in a menu as the item's title and its subtitle.
+      return (
+        <Toggle
+          isOn={on}
+          {...(mods ? { modifiers: mods } : {})}
+          onIsOnChange={() => row.onPress?.()}
+        >
+          {[
+            ...(sf ? [<Image key="icon" systemName={sf} />] : []),
+            <Text key="title">{row.label}</Text>,
+            <Text key="subtitle">{subtitle}</Text>,
+          ]}
+        </Toggle>
+      )
+    }
     return (
       <Toggle
         isOn={on}
@@ -63,7 +81,6 @@ function Row(props: { row: MenuRow; source: MenuSource; depth: number }) {
       />
     )
   }
-  const subtitle = [row.subtitle, row.detail].filter(Boolean).join(' · ')
   const role = row.destructive ? ('destructive' as const) : undefined
   if (!subtitle) {
     return (
@@ -98,7 +115,7 @@ function Entry(props: { entry: MenuEntry; source: MenuSource; depth: number }) {
   if (entry.kind === 'custom') {
     const picker = entry.picker
     if (!picker) return null
-    return (
+    const control = (
       <Picker
         label={picker.label}
         selection={picker.value}
@@ -112,8 +129,30 @@ function Entry(props: { entry: MenuEntry; source: MenuSource; depth: number }) {
         ))}
       </Picker>
     )
+    if (!picker.hint) return control
+    return (
+      <>
+        {control}
+        <Text>{picker.hint}</Text>
+      </>
+    )
   }
   return <Row row={entry} source={props.source} depth={props.depth} />
+}
+
+/** The entries in groups: a divider starts one, and a divider with a title a titled section. */
+function groupsOf(entries: MenuEntry[]): { key: string; title?: string; entries: MenuEntry[] }[] {
+  const groups: { key: string; title?: string; entries: MenuEntry[] }[] = [
+    { key: 'start', entries: [] },
+  ]
+  for (const entry of entries) {
+    if (entry.kind === 'divider') {
+      groups.push({ key: entry.key, ...(entry.title ? { title: entry.title } : {}), entries: [] })
+    } else {
+      groups[groups.length - 1]!.entries.push(entry)
+    }
+  }
+  return groups.filter((group) => group.entries.length > 0)
 }
 
 function Entries(props: { page: MenuPage; source: MenuSource; depth: number }) {
@@ -128,9 +167,24 @@ function Entries(props: { page: MenuPage; source: MenuSource; depth: number }) {
       </>
     )
   }
-  const body: ReactNode[] = page.entries.map((entry) => (
-    <Entry key={entry.key} entry={entry} source={props.source} depth={props.depth} />
-  ))
+  const body: ReactNode[] = groupsOf(page.entries).map((group, index) => {
+    const rows = group.entries.map((entry) => (
+      <Entry key={entry.key} entry={entry} source={props.source} depth={props.depth} />
+    ))
+    if (group.title) {
+      return (
+        <Section key={group.key} title={group.title}>
+          {rows}
+        </Section>
+      )
+    }
+    return (
+      <Fragment key={group.key}>
+        {index > 0 ? <Divider /> : null}
+        {rows}
+      </Fragment>
+    )
+  })
   return (
     <>
       {page.entries.length === 0 && page.empty ? <Text>{page.empty}</Text> : null}

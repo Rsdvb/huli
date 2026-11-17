@@ -1,17 +1,19 @@
 // The line under the composer: the computer with its system and whether the link is up, the
 // session's folder, which opens its changes (or, in New session, the project picker) and shows its
 // whole path on a long press, the branch it is on with the worktree's mark, how much of the plan's
-// tightest window is used, which opens the plan's usage, and how full the context is, which opens
-// what fills it.
+// tightest window is used, which opens the plan's usage, how long the prompt cache has left, and how
+// full the context is, both of which open what fills it.
 
 import type { RefObject } from 'react'
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Svg, { Circle } from 'react-native-svg'
 import type { PlanLimit } from '@shared/agent-host'
+import { cachePhase, endingWindow, type KnownExpiry } from '@shared/prompt-cache'
 import type { LinkState } from '@shared/remote/link'
 import { showNotice } from '../NoticeBar'
 import { copyText } from './feedback'
 import { G, Icon, SystemMark } from './icons'
+import { cacheLeftText, useCacheLeft } from './promptCache'
 import type { ViewHandle } from './Popover'
 import {
   backText,
@@ -111,6 +113,8 @@ export function StatusLine(props: {
   onLimitPress?: () => void
   /** The context's share used, which opens its breakdown. */
   context?: { share: number; color: string; approximate: boolean; onPress(): void } | null
+  /** The prompt cache's time left, which opens the context's breakdown with its cache. */
+  cache?: { expiry: KnownExpiry; onPress(): void } | null
 }) {
   const { c, s } = useSessionTokens()
   const path = props.path ?? null
@@ -252,6 +256,7 @@ export function StatusLine(props: {
           )}
         </Pressable>
       )}
+      {props.cache && <CacheChip expiry={props.cache.expiry} onPress={props.cache.onPress} />}
       {props.context && (
         <Pressable
           onPress={props.context.onPress}
@@ -268,6 +273,35 @@ export function StatusLine(props: {
         </Pressable>
       )}
     </View>
+  )
+}
+
+/** The prompt cache's countdown; it ticks alone, so the screen around it does not. */
+function CacheChip(props: { expiry: KnownExpiry; onPress(): void }) {
+  const { c } = useSessionTokens()
+  const { expiry } = props
+  const left = useCacheLeft(expiry.expiresAt)
+  const phase = cachePhase(expiry.expiresAt, endingWindow(expiry.ttl), expiry.expiresAt - left)
+  const time = `${expiry.estimate ? '约 ' : ''}${cacheLeftText(left)}`
+  return (
+    <Pressable
+      onPress={props.onPress}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={`Prompt cache：${
+        phase === 'expired' ? (expiry.estimate ? '可能已过期' : '已过期') : `剩余 ${time}`
+      }`}
+      style={({ pressed }) => [styles.limit, { opacity: pressed ? 0.55 : 1 }]}
+    >
+      <Icon
+        icon={G.timer}
+        size={13}
+        color={phase === 'expired' ? c.textTertiary : phase === 'ending' ? c.warning : c.tint}
+      />
+      <Text style={[styles.text, { color: phase === 'ending' ? c.warning : c.textSecondary }]}>
+        {phase === 'expired' ? '已过期' : time}
+      </Text>
+    </Pressable>
   )
 }
 

@@ -1,11 +1,13 @@
-// The composer's add menu: a photo, the camera or a file; a file of the project to mention, as the
+// The composer's add menu: a photo, the camera, a file or the clipboard's picture, each off once
+// the message holds as many attachments as it may; a file of the project to mention, as the
 // desktop's `@` does (its name in the text, the file attached); and the agent's slash commands,
-// one of which goes at the start of the message.
+// one of which goes at the start of the message, listed only when the agent reports some.
 
 import { useState, type RefObject } from 'react'
 import { StyleSheet, TextInput, View } from 'react-native'
 import type { HostLink } from '@shared/remote/link'
 import type { SlashCommand } from '@shared/thread'
+import { ATTACHMENT_LIMIT } from '../attachments'
 import { matchFiles, useProjectFiles } from '../files'
 import { FileMark, G, Icon, TOOL_ICONS } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
@@ -28,11 +30,15 @@ export function useAttachPages(props: {
   commands: readonly SlashCommand[]
   /** Files of the folder the session's tools read or edited, newest first. */
   touched: readonly string[]
+  /** The attachments the box holds, against the limit of one message. */
+  count: number
 }): AttachPages {
   const { c } = useSessionTokens()
   const [query, setQuery] = useState('')
   const files = useProjectFiles(props.link, props.folder, props.mentioning)
   const commandNames = props.commands.map((command) => command.name)
+  const full = props.count >= ATTACHMENT_LIMIT
+  const limit = full ? { subtitle: `最多 ${ATTACHMENT_LIMIT} 个附件`, disabled: true } : {}
 
   const attach: MenuPage = {
     entries: [
@@ -40,37 +46,46 @@ export function useAttachPages(props: {
         key: 'photos',
         label: '照片',
         icon: G.photo,
+        ...limit,
         onPress: () => props.composer.current?.pickPhotos(),
       },
       {
         key: 'camera',
         label: '拍照',
         icon: G.camera,
+        ...limit,
         onPress: () => props.composer.current?.takePhoto(),
       },
       {
         key: 'files',
         label: '选择文件',
         icon: G.folderOpen,
+        ...limit,
         onPress: () => props.composer.current?.pickFiles(),
+      },
+      {
+        key: 'paste',
+        label: '粘贴图片',
+        icon: G.paste,
+        ...limit,
+        onPress: () => props.composer.current?.pasteImage(),
       },
       { kind: 'divider', key: 'rule' },
       {
         key: 'mention',
         label: '提及文件',
         icon: G.mention,
-        disabled: !props.folder,
-        ...(props.folder ? { page: 'mention' } : { subtitle: '这个会话没有项目' }),
+        disabled: !props.folder || full,
+        ...(full
+          ? { subtitle: `最多 ${ATTACHMENT_LIMIT} 个附件` }
+          : props.folder
+            ? { page: 'mention' }
+            : { subtitle: '选择一个项目后才能提及其中的文件' }),
       },
-      {
-        key: 'slash',
-        label: '斜杠命令',
-        icon: G.slash,
-        disabled: props.commands.length === 0,
-        ...(props.commands.length > 0
-          ? { page: 'slash' }
-          : { subtitle: '这个 Agent 没有报告命令' }),
-      },
+      // An agent that reports no commands gets no row for them.
+      ...(props.commands.length > 0
+        ? [{ key: 'slash', label: '命令', icon: G.slash, page: 'slash' }]
+        : []),
     ],
   }
 
@@ -128,7 +143,7 @@ export function useAttachPages(props: {
   }
 
   const slash: MenuPage = {
-    title: '斜杠命令',
+    title: '命令',
     entries: props.commands.map((command) => ({
       key: command.name,
       label: `/${command.name}`,

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
+import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
@@ -38,51 +39,59 @@ export default function Layout() {
   const { c, scheme } = useTokens()
   useEffect(() => watchUpdates(), [])
   return (
-    <SafeAreaProvider>
-      <HostProvider>
-        <ShellProvider>
-          <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-          <Stack
-            screenOptions={{
-              headerStyle: { backgroundColor: c.bg },
-              headerTintColor: c.text,
-              headerTitleStyle: { color: c.text },
-              headerShadowVisible: false,
-              contentStyle: { backgroundColor: c.bg },
-              headerBackTitle: '返回',
-            }}
-          >
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="session/[id]" options={{ title: '' }} />
-            <Stack.Screen name="new" options={{ headerShown: false }} />
-            <Stack.Screen name="share" options={{ headerShown: false, presentation: 'modal' }} />
-            <Stack.Screen name="settings/index" options={{ headerShown: false }} />
-            <Stack.Screen name="settings/computers" options={{ headerShown: false }} />
-            <Stack.Screen name="settings/computer" options={{ headerShown: false }} />
-            <Stack.Screen name="settings/lock" options={{ headerShown: false }} />
-            <Stack.Screen name="settings/licenses" options={{ headerShown: false }} />
-            {MANAGE_PAGES.map((name) => (
-              <Stack.Screen key={name} name={`settings/${name}`} options={{ headerShown: false }} />
-            ))}
-            <Stack.Screen name="archived" options={{ headerShown: false }} />
-            <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
-            <Stack.Screen name="artifact/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="task/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="start-task" options={{ headerShown: false }} />
-            <Stack.Screen name="workflows" options={{ headerShown: false }} />
-            <Stack.Screen name="workflow/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="search" options={{ headerShown: false, animation: 'fade' }} />
-            <Stack.Screen name="pair" options={{ headerShown: false, presentation: 'modal' }} />
-          </Stack>
-        </ShellProvider>
-        <PushBridge />
-        <LinkBridge />
-        <LiveBridge />
-        <ShareIntake />
-        <NoticeBar />
-        <LockLayer />
-      </HostProvider>
-    </SafeAreaProvider>
+    // The keyboard's frames reach the screens on the UI thread, so the views that make room for it
+    // move with it without a layout pass per frame.
+    <KeyboardProvider>
+      <SafeAreaProvider>
+        <HostProvider>
+          <ShellProvider>
+            <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+            <Stack
+              screenOptions={{
+                headerStyle: { backgroundColor: c.bg },
+                headerTintColor: c.text,
+                headerTitleStyle: { color: c.text },
+                headerShadowVisible: false,
+                contentStyle: { backgroundColor: c.bg },
+                headerBackTitle: '返回',
+              }}
+            >
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="session/[id]" options={{ title: '' }} />
+              <Stack.Screen name="new" options={{ headerShown: false }} />
+              <Stack.Screen name="share" options={{ headerShown: false, presentation: 'modal' }} />
+              <Stack.Screen name="settings/index" options={{ headerShown: false }} />
+              <Stack.Screen name="settings/computers" options={{ headerShown: false }} />
+              <Stack.Screen name="settings/computer" options={{ headerShown: false }} />
+              <Stack.Screen name="settings/lock" options={{ headerShown: false }} />
+              <Stack.Screen name="settings/licenses" options={{ headerShown: false }} />
+              {MANAGE_PAGES.map((name) => (
+                <Stack.Screen
+                  key={name}
+                  name={`settings/${name}`}
+                  options={{ headerShown: false }}
+                />
+              ))}
+              <Stack.Screen name="archived" options={{ headerShown: false }} />
+              <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
+              <Stack.Screen name="artifact/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="task/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="start-task" options={{ headerShown: false }} />
+              <Stack.Screen name="workflows" options={{ headerShown: false }} />
+              <Stack.Screen name="workflow/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="search" options={{ headerShown: false, animation: 'fade' }} />
+              <Stack.Screen name="pair" options={{ headerShown: false, presentation: 'modal' }} />
+            </Stack>
+          </ShellProvider>
+          <PushBridge />
+          <LinkBridge />
+          <LiveBridge />
+          <ShareIntake />
+          <NoticeBar />
+          <LockLayer />
+        </HostProvider>
+      </SafeAreaProvider>
+    </KeyboardProvider>
   )
 }

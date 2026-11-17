@@ -21,6 +21,7 @@ import type { Paired } from '@shared/remote/pair'
 import { admin } from './admin'
 import { clearComputer, dropThread, readLists, writeLists } from './cache'
 import { deviceKey, linkTo } from './connection'
+import { dropDrafts } from './drafts'
 import { stopPush } from './push/sync'
 import {
   computerName,
@@ -234,6 +235,7 @@ export function HostProvider(props: { children: ReactNode }) {
       const gone = computersRef.current.hosts.find((h) => h.id === id)
       await stopPush(null, gone?.pushId ?? null)
       void clearComputer(id)
+      dropDrafts(id)
       const rest = computersRef.current.hosts.filter((h) => h.id !== id)
       if (computersRef.current.active !== id) {
         update(() => rest)

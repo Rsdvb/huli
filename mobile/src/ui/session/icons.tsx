@@ -75,6 +75,10 @@ import {
   Share,
   WifiOff,
   Zap,
+  ClipboardPaste,
+  CornerDownLeft,
+  SlidersHorizontal,
+  Timer,
 } from 'lucide-react-native'
 import type { HarnessId } from '@shared/agents'
 import { harnessOf, markFor } from '../agent-marks'
@@ -153,6 +157,10 @@ export const G = {
   retry: { sf: 'arrow.clockwise', lucide: RotateCw },
   check: { sf: 'checkmark', lucide: Check },
   wifiOff: { sf: 'wifi.slash', lucide: WifiOff },
+  timer: { sf: 'timer', lucide: Timer },
+  paste: { sf: 'doc.on.clipboard', lucide: ClipboardPaste },
+  sliders: { sf: 'slider.horizontal.3', lucide: SlidersHorizontal },
+  sendNow: { sf: 'arrow.turn.down.left', lucide: CornerDownLeft },
 } satisfies Record<string, IconSpec>
 
 export const TOOL_ICONS: Record<ToolKind, IconSpec> = {
