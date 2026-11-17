@@ -230,6 +230,32 @@ export function useHostActions(): HostActions {
   return actions
 }
 
+const selectComputers = (d: HostData) => ({
+  computers: d.computers,
+  state: d.state,
+  unreachable: d.unreachable,
+})
+
+/** The paired computers and the link, without the lists: for the sheets that manage computers. */
+export function useComputers(): Pick<
+  HostContextValue,
+  'host' | 'computers' | 'state' | 'unreachable'
+> &
+  HostActions {
+  const actions = useHostActions()
+  const d = useHostSelector(selectComputers, sameFields)
+  return useMemo(
+    () => ({
+      ...actions,
+      host: d.computers.hosts.find((h) => h.id === d.computers.active) ?? null,
+      computers: d.computers.hosts,
+      state: d.state,
+      unreachable: d.unreachable,
+    }),
+    [actions, d],
+  )
+}
+
 const selectAll = (d: HostData) => d
 
 /** Everything at once; re-renders on any change. Prefer a narrower hook in hot screens. */

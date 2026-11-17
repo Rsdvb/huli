@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import { router } from 'expo-router'
 import type { ArtifactSummary, VersionSummary } from '@shared/artifacts'
 import { artifactKind, KIND_TEXT, openArtifact } from '../artifacts'
-import { useHost } from '../host'
+import { useConnected, useMaybeLink, useProjects, useSessions } from '../host'
 import { whenText } from '../routines'
 import { errorText, folder, sessionTitle } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
@@ -44,7 +44,10 @@ export function confirmDelete(
 
 export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose(): void }) {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useMaybeLink()
+  const sessions = useSessions()
+  const projects = useProjects()
+  const connected = useConnected()
   const a = props.artifact
   const [versions, setVersions] = useState<VersionSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -55,27 +58,26 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
   const latest = a?.version
 
   useEffect(() => {
-    if (!id || !host.link) return
+    if (!id || !link) return
     let live = true
     setVersions(null)
     setError(null)
-    host.link.request('artifacts.versions', { id }).then(
+    link.request('artifacts.versions', { id }).then(
       (answer) => live && setVersions(answer as VersionSummary[]),
       (failure: unknown) => live && setError(errorText(failure)),
     )
     return () => {
       live = false
     }
-  }, [id, latest, host.link])
+  }, [id, latest, link])
 
   const item = a ?? shown
   if (!item) return <BottomSheet visible={false} onClose={props.onClose} />
   const kind = artifactKind(item)
-  const session = host.sessions.get(item.sessionId)
+  const session = sessions.get(item.sessionId)
   const projectName = item.scratch
     ? '无项目'
-    : (host.projects.find((p) => p.path === item.project)?.name ?? folder(item.project))
-  const connected = host.state.kind === 'connected'
+    : (projects.find((p) => p.path === item.project)?.name ?? folder(item.project))
 
   const open = (version?: number) => {
     props.onClose()
@@ -83,18 +85,18 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
   }
 
   const author = (v: VersionSummary) =>
-    v.author === null ? '你' : sessionTitle(host.sessions.get(v.author))
+    v.author === null ? '你' : sessionTitle(sessions.get(v.author))
 
   const restore = (v: VersionSummary) => {
-    if (!host.link || !connected) return
+    if (!link || !connected) return
     haptic.tap()
     Alert.alert(`恢复到 v${v.version}？`, '会把它存成一个新版本，现在的版本仍留在历史里。', [
       { text: '取消', style: 'cancel' },
       {
         text: '恢复',
         onPress: () => {
-          host
-            .link!.request('artifacts.restoreVersion', {
+          link
+            .request('artifacts.restoreVersion', {
               id: item.id,
               version: v.version,
               baseVersion: item.version,
@@ -181,9 +183,9 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
           disabled={!connected}
           leading={<Icon name="trash" size={18} color={c.danger} />}
           onPress={() =>
-            host.link &&
+            link &&
             confirmDelete(
-              (method, params) => host.link!.request(method, params),
+              (method, params) => link!.request(method, params),
               item,
               props.onClose,
             )
