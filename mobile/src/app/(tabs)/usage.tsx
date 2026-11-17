@@ -1,8 +1,9 @@
 // Usage: a sentence on the period, each agent's plan limits as rings, then the period's tokens,
-// requests and estimated cost, its share by agent and its spread over the hours of the day, as the
-// computer counts them.
+// requests and estimated cost, its share by agent, its spread over the hours of the day, the
+// year's activity, the filters, the trend, the breakdown by model or project, the facts and the
+// token composition, as the computer counts them.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
+import { useMemo, useRef, useState, type ComponentRef } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -14,8 +15,8 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { AgentStatus, HostEvent, LimitsReason, PlanLimit } from '@shared/agent-host'
-import { partsTotal, type ClockZone, type UsageStatus, type UsageSummary } from '@shared/usage'
+import type { AgentStatus, LimitsReason, PlanLimit } from '@shared/agent-host'
+import type { UsageScope } from '@shared/usage'
 import { TopBar, useScrollTopOnTabPress } from '../../components/shell'
 import { useHost } from '../../host'
 import { clockOf, errorText } from '../../sessions'
@@ -25,9 +26,11 @@ import { BottomSheet } from '../../ui/BottomSheet'
 import { Card } from '../../ui/Card'
 import { BarChart, ConcentricRings, Donut, Ring } from '../../ui/charts'
 import { EmptyState } from '../../ui/EmptyState'
+import { useMinimizingTabBar } from '../../ui/GlassTabBar'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
+import { Pill } from '../../ui/Pill'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
@@ -42,20 +45,64 @@ import {
   useTokens,
   type Palette,
 } from '../../ui/tokens'
+import {
+  addDays,
+  agentTotals,
+  CLOCK_DAYS,
+  dayTotals,
+  figures,
+  FIRST_DAY,
+  heatmapRange,
+  hourBars,
+  hourSplit,
+  hourValues,
+  metricKind,
+  metricValue,
+  oneDay,
+  seriesOf,
+  trend,
+  type AgentFilter,
+  type Metric,
+  type RangeChoice,
+} from '../../usage/model'
+import {
+  Activity,
+  Breakdown,
+  EmptyNote,
+  Facts,
+  Filters,
+  Footnote,
+  RangeSheet,
+  ScanNote,
+  SectionError,
+  SectionsSkeleton,
+  Trend,
+} from '../../usage/sections'
+import {
+  compact,
+  grouped,
+  hourName,
+  metricText,
+  metricWords,
+  money,
+  percent,
+  rangeText,
+} from '../../usage/text'
+import { useUsage } from '../../usage/useUsage'
 
-type Period = 'today' | 'week' | 'month' | 'all'
+type Period = '1' | '7' | '30' | 'all'
 
 const PERIODS = [
-  { key: 'today', label: '今天' },
-  { key: 'week', label: '7 天' },
-  { key: 'month', label: '30 天' },
+  { key: '1', label: '今天' },
+  { key: '7', label: '7 天' },
+  { key: '30', label: '30 天' },
   { key: 'all', label: '全部' },
 ] as const
 
 const PERIOD_WORDS: Record<Period, string> = {
-  today: '今天',
-  week: '最近 7 天',
-  month: '最近 30 天',
+  '1': '今天',
+  '7': '最近 7 天',
+  '30': '最近 30 天',
   all: '至今',
 }
 
@@ -88,6 +135,8 @@ const REASONS: Record<LimitsReason, string> = {
   'console-managed': '用 API 密钥登录，用量请到服务商控制台查看。',
 }
 
+const DONUT_UNITS = { tokens: 'token', requests: '次请求', turns: '轮', cost: '估算费用' } as const
+
 function limitLabel(limit: PlanLimit): string {
   const known = WINDOWS[limit.window]
   if (known) return known
@@ -95,46 +144,6 @@ function limitLabel(limit: PlanLimit): string {
   if (weekly) return `每周 · ${weekly[1]}`
   const fiveHour = /^5-hour · (.+)$/.exec(limit.label)
   return fiveHour ? `5 小时 · ${fiveHour[1]}` : limit.label
-}
-
-function startOfDay(ms: number): number {
-  const d = new Date(ms)
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-}
-
-function addDays(dayStart: number, days: number): number {
-  const d = new Date(dayStart)
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days).getTime()
-}
-
-/** The phone's UTC offsets over a range, a zone from each day its offset changes. */
-function zonesBetween(from: number, to: number): ClockZone[] {
-  const zones: ClockZone[] = []
-  for (let day = from; day < to; day = addDays(day, 1)) {
-    const offset = -new Date(day).getTimezoneOffset()
-    if (zones.length === 0 || zones[zones.length - 1]!.offset !== offset) {
-      zones.push({ from: day, offset })
-    }
-  }
-  return zones.length > 0 ? zones : [{ from, offset: -new Date(from).getTimezoneOffset() }]
-}
-
-function grouped(n: number): string {
-  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-}
-
-/** A count in Chinese units: 1,573, 12.5万, 6亿. */
-function compact(n: number): string {
-  const trim = (v: number) => (v < 10 ? String(Math.round(v * 10) / 10) : String(Math.round(v)))
-  if (n >= 1e8) return `${trim(n / 1e8)}亿`
-  if (n >= 1e4) return `${trim(n / 1e4)}万`
-  return grouped(n)
-}
-
-function money(cost: number | null): string {
-  if (cost === null) return '—'
-  if (cost > 0 && cost < 0.01) return '< $0.01'
-  return cost >= 100 ? `$${grouped(cost)}` : `$${cost.toFixed(2)}`
 }
 
 function resetText(at: number): string {
@@ -146,13 +155,6 @@ function resetText(at: number): string {
   return `${Math.round(hours / 24)} 天后重置`
 }
 
-function hourName(hour: number): string {
-  const part =
-    hour < 6 ? '凌晨' : hour < 12 ? '上午' : hour < 13 ? '中午' : hour < 18 ? '下午' : '晚上'
-  const h12 = (h: number) => (h % 12 === 0 ? 12 : h % 12)
-  return `${part}${h12(hour)}时至${h12(hour + 1)}时`
-}
-
 function limitColor(c: Palette, limit: PlanLimit): string {
   const used = limit.usedPercent ?? 0
   if (limit.state === 'reached' || used >= 90) return c.danger
@@ -160,92 +162,30 @@ function limitColor(c: Palette, limit: PlanLimit): string {
   return c.tint
 }
 
-interface AgentFigures {
-  agentId: string
-  tokens: number
-  requests: number
-  cost: number | null
-  cacheRead: number
-}
-
-interface Read {
-  period: Period
-  summary: UsageSummary
-  status: UsageStatus
-}
-
 export default function Usage() {
   const { c } = useTokens()
-  const { link, agents, state } = useHost()
-  const header = useCollapsingHeader()
+  const { link, agents, state, host } = useHost()
+  const minimize = useMinimizingTabBar()
+  const header = useCollapsingHeader({ onScroll: minimize })
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
-  const [period, setPeriod] = useState<Period>('today')
-  const [read, setRead] = useState<Read | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [choice, setChoice] = useState<RangeChoice>({ kind: '1' })
+  const [lastPeriod, setLastPeriod] = useState<Period>('1')
+  const [wanted, setWanted] = useState<UsageScope>('computer')
+  const [agent, setAgent] = useState<AgentFilter>('all')
+  const [metric, setMetric] = useState<Metric>('tokens')
+  const [picking, setPicking] = useState(false)
   const [pulled, setPulled] = useState(false)
   const [refreshing, setRefreshing] = useState<Set<string>>(new Set())
   const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
   const [detail, setDetail] = useState<string | null>(null)
   const [hour, setHour] = useState<number | null>(null)
   const connected = state.kind === 'connected'
-  const asked = useRef(0)
+  const usage = useUsage(link, connected, choice, wanted)
+  const { read } = usage
+  const hostName = host?.name ?? '电脑'
 
   useScrollTopOnTabPress((y) => scroll.current?.scrollTo({ y, animated: true }), header)
-
-  const load = useCallback(
-    async (which: Period) => {
-      if (!link) return
-      const ticket = ++asked.current
-      setLoading(true)
-      try {
-        const status = (await link.request('usage.status', undefined)) as UsageStatus
-        const today = startOfDay(Date.now())
-        const tomorrow = addDays(today, 1)
-        let from = today
-        if (which === 'week') from = addDays(today, -6)
-        if (which === 'month') from = addDays(today, -29)
-        if (which === 'all') {
-          const firsts = [status.recordSince, ...status.logs.map((log) => log.first)].filter(
-            (t): t is number => typeof t === 'number',
-          )
-          from = startOfDay(firsts.length > 0 ? Math.min(...firsts) : addDays(today, -365))
-          if (from >= tomorrow) from = today
-        }
-        const summary = (await link.request('usage.summary', {
-          dayStarts: [from, tomorrow],
-          from,
-          to: tomorrow,
-          scope: status.fromComputer ? 'computer' : 'kettu',
-          clock: { from, to: tomorrow, zones: zonesBetween(from, tomorrow) },
-        })) as UsageSummary
-        if (ticket !== asked.current) return
-        setRead({ period: which, summary, status })
-        setError(null)
-      } catch (failure) {
-        if (ticket === asked.current) setError(errorText(failure))
-      } finally {
-        if (ticket === asked.current) setLoading(false)
-      }
-    },
-    [link],
-  )
-
-  useEffect(() => {
-    if (connected) void load(period)
-  }, [connected, load, period])
-
-  useEffect(() => {
-    if (!link) return
-    return link.onHostEvent((raw: unknown) => {
-      const event = raw as HostEvent
-      if (event.type === 'usage.changed') void load(period)
-      if (event.type === 'usage.status') {
-        setRead((current) => (current ? { ...current, status: event.status } : current))
-      }
-    })
-  }, [link, load, period])
 
   const refreshLimits = (agent: AgentStatus) => {
     if (!link) return
@@ -285,39 +225,43 @@ export default function Usage() {
     [agents],
   )
 
-  const figures = useMemo(() => {
+  const hoursRead = usage.hours
+  const derived = useMemo(() => {
     if (!read) return null
-    const byAgent = new Map<string, AgentFigures>()
-    let tokens = 0
-    let requests = 0
-    let cacheRead = 0
-    let cost: number | null = null
-    for (const row of read.summary.days) {
-      const total = partsTotal(row)
-      tokens += total
-      requests += row.requests
-      cacheRead += row.cacheRead
-      if (row.cost !== null) cost = (cost ?? 0) + row.cost
-      const seen = byAgent.get(row.agentId) ?? {
-        agentId: row.agentId,
-        tokens: 0,
-        requests: 0,
-        cost: null,
-        cacheRead: 0,
-      }
-      seen.tokens += total
-      seen.requests += row.requests
-      seen.cacheRead += row.cacheRead
-      if (row.cost !== null) seen.cost = (seen.cost ?? 0) + row.cost
-      byAgent.set(row.agentId, seen)
+    const { summary, starts, range, scope, today } = read
+    const days = dayTotals(summary, starts, agent)
+    const single = oneDay(range)
+    const hours = hoursRead && hoursRead.key === read.key ? hoursRead : null
+    const trendData = single
+      ? hours && {
+          unit: 'hour' as const,
+          bars: hourBars(
+            dayTotals(hours.summary, hours.starts, agent),
+            hours.starts,
+            metric,
+            scope,
+          ),
+        }
+      : trend(days, range, FIRST_DAY, metric, scope)
+    return {
+      kind: metricKind(metric, scope),
+      days,
+      single,
+      facts: figures(days, range, metric, scope),
+      tokenFacts: figures(days, range),
+      byMetric: agentTotals(days, range, metric, scope),
+      byTokens: agentTotals(days, range, 'tokens', scope),
+      hourly: hourValues(summary.clock, agent, metric, scope),
+      heat: heatmapRange(today, FIRST_DAY),
+      trend: trendData,
+      series: trendData ? seriesOf(trendData.bars, summary.agents) : [],
+      used: new Set(
+        dayTotals(summary, starts, 'all')
+          .filter((d) => d.total > 0)
+          .map((d) => d.day),
+      ),
     }
-    const hours = Array.from({ length: 24 }, () => 0)
-    for (const row of read.summary.clock) hours[row.hour] = (hours[row.hour] ?? 0) + partsTotal(row)
-    const agentsUsed = [...byAgent.values()]
-      .filter((a) => a.tokens > 0)
-      .sort((a, b) => b.tokens - a.tokens)
-    return { tokens, requests, cacheRead, cost, agentsUsed, hours }
-  }, [read])
+  }, [read, hoursRead, agent, metric])
 
   // Series slots follow the agent's place in the summary's own agent list, so a period with fewer
   // agents never repaints the rest.
@@ -327,15 +271,6 @@ export default function Usage() {
     return agentColor(agentId, c.series[slot % c.series.length]!)
   }
   const nameOf = (agentId: string) => agents.get(agentId)?.name ?? agentId
-
-  const busiest = (() => {
-    const hours = figures?.hours ?? []
-    let best = -1
-    hours.forEach((v, i) => {
-      if (v > 0 && (best < 0 || v > hours[best]!)) best = i
-    })
-    return best
-  })()
 
   // The plan window nearest its limit, for the summary's second line.
   const tightest = (() => {
@@ -354,6 +289,56 @@ export default function Usage() {
   const { width } = useWindowDimensions()
   const cardWidth = (width - space.xl * 2 - space.md) / 2
 
+  const choosePeriod = (next: Period) => {
+    setHour(null)
+    setLastPeriod(next)
+    setChoice({ kind: next })
+  }
+
+  const planSection = planAgents.length > 0 && (
+    <>
+      <SectionHeader
+        title="套餐限额"
+        count={planAgents.length}
+        right={
+          <Press
+            onPress={() => {
+              haptic.tap()
+              planAgents.filter(readable).forEach(refreshLimits)
+            }}
+            disabled={anyRefreshing || !connected}
+            accessibilityRole="button"
+            accessibilityLabel="刷新套餐限额"
+            hitSlop={8}
+            style={styles.readAt}
+          >
+            <Text style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}>
+              {observed > 0 ? `读取于 ${clockOf(observed)}` : '还没读过'}
+            </Text>
+            {anyRefreshing ? (
+              <ActivityIndicator size="small" color={c.textTertiary} />
+            ) : (
+              <Icon name="refresh" size={14} color={c.textTertiary} />
+            )}
+          </Press>
+        }
+      />
+      <View style={styles.grid}>
+        {planAgents.map((agent) => (
+          <PlanCard
+            key={agent.id}
+            agent={agent}
+            width={cardWidth}
+            refreshing={refreshing.has(agent.id)}
+            error={limitErrors[agent.id] ?? agent.limitsError ?? null}
+            readable={readable(agent)}
+            onPress={() => setDetail(agent.id)}
+          />
+        ))}
+      </View>
+    </>
+  )
+
   const body = () => {
     if (!connected && !read) {
       return (
@@ -364,28 +349,80 @@ export default function Usage() {
         />
       )
     }
-    if (!read && error) {
+    if (!read && usage.error) {
       return (
         <EmptyState
           tone="error"
           icon="warning"
           title="没能读到用量"
-          message={error}
-          action={{ label: '重试', onPress: () => void load(period) }}
+          message={usage.error}
+          action={{ label: '重试', onPress: () => void usage.load() }}
         />
       )
     }
-    if (!read || !figures) return <UsageSkeleton />
-    const periodWord = PERIOD_WORDS[read.period]
-    const top = figures.agentsUsed[0]
+    if (!read || !derived) {
+      return (
+        <>
+          <UsageSkeleton />
+          {planSection}
+          <SectionsSkeleton />
+        </>
+      )
+    }
+    const { range, scope, summary, status, today } = read
+    const { kind, facts, tokenFacts } = derived
+    const custom = choice.kind === 'custom'
+    const customLabel =
+      choice.kind === 'custom' ? rangeText(choice.from, addDays(choice.to, 1)) : ''
+    const periodWord =
+      read.choice.kind === 'custom'
+        ? rangeText(range.from, range.to)
+        : PERIOD_WORDS[read.choice.kind]
+    const top = derived.byTokens[0]
+    const requests = metricValue(tokenFacts.parts, 'requests', scope) ?? 0
+    const waiting = usage.loading && read.key !== usage.key
+    const rangeLabel = rangeText(range.from, range.to)
+    const clockLabel = derived.single ? `最近 ${CLOCK_DAYS} 天` : rangeLabel
+    const hourly = derived.hourly
+    const busiest = hourly.reduce(
+      (best, v, i) => (v > 0 && (best < 0 || v > hourly[best]!) ? i : best),
+      -1,
+    )
+    const never = summary.first === null && tokenFacts.tokens === 0
+    const filters = (
+      <Filters
+        agents={summary.agents}
+        agent={agent}
+        onAgent={(next) => {
+          setHour(null)
+          setAgent(next)
+        }}
+        fromComputer={status.fromComputer}
+        scope={scope}
+        onScope={setWanted}
+        hostName={hostName}
+        metric={metric}
+        onMetric={(next) => {
+          setHour(null)
+          setMetric(next)
+        }}
+        nameOf={nameOf}
+      />
+    )
+    const footnote = (
+      <Footnote status={status} scope={scope} hostName={hostName} pricesAsOf={summary.pricesAsOf} />
+    )
+
     return (
       <>
         <View style={styles.summary} accessibilityRole="header">
           <View style={styles.sentence}>
             {top && <AgentAvatar agentId={top.agentId} name={nameOf(top.agentId)} size={30} />}
             <Text style={[typeScale.lead, styles.flex, { color: c.text }]}>
-              {figures.tokens > 0
-                ? `${periodWord} ${figures.agentsUsed.length} 个 Agent 用了 ${compact(figures.tokens)} token。`
+              {tokenFacts.tokens > 0
+                ? agent === 'all'
+                  ? `${periodWord} ${derived.byTokens.length} 个 Agent 用了 ${compact(tokenFacts.tokens)} token。`
+                  : `${periodWord} ${nameOf(agent)} 用了 ${compact(tokenFacts.tokens)} token。`
                 : `${periodWord}还没有用量。`}
             </Text>
           </View>
@@ -408,114 +445,151 @@ export default function Usage() {
           )}
         </View>
 
-        {planAgents.length > 0 && (
+        {planSection}
+
+        <View style={styles.periodRow}>
+          <View style={styles.flex}>
+            {custom ? (
+              <View style={styles.customRow}>
+                <Pill
+                  tone="tint"
+                  size="lg"
+                  label={customLabel}
+                  onPress={() => setPicking(true)}
+                  accessibilityLabel={`日期范围：${customLabel}，点按更改`}
+                />
+                <Pill
+                  tone="fill"
+                  size="lg"
+                  onPress={() => choosePeriod(lastPeriod)}
+                  accessibilityLabel="清除日期范围"
+                  leading={
+                    <Icon name="close" size={14} color={c.textSecondary} weight="semibold" />
+                  }
+                />
+              </View>
+            ) : (
+              <SegmentedControl segments={PERIODS} value={choice.kind} onChange={choosePeriod} />
+            )}
+          </View>
+          <Press
+            onPress={() => {
+              haptic.tap()
+              setPicking(true)
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="选择日期范围"
+            style={[styles.calendar, { backgroundColor: custom ? c.tintSoft : c.fill }]}
+          >
+            <Icon name="calendar" size={20} color={custom ? c.tint : c.text} />
+          </Press>
+        </View>
+
+        {usage.error ? (
+          <View style={styles.inlineError}>
+            <SectionError message={usage.error} onRetry={() => void usage.load()} />
+          </View>
+        ) : null}
+        <ScanNote status={status} />
+
+        {never ? (
           <>
-            <SectionHeader
-              title="套餐限额"
-              count={planAgents.length}
-              right={
-                <Press
-                  onPress={() => {
-                    haptic.tap()
-                    planAgents.filter(readable).forEach(refreshLimits)
-                  }}
-                  disabled={anyRefreshing || !connected}
-                  accessibilityRole="button"
-                  accessibilityLabel="刷新套餐限额"
-                  hitSlop={8}
-                  style={styles.readAt}
-                >
-                  <Text style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}>
-                    {observed > 0 ? `读取于 ${clockOf(observed)}` : '还没读过'}
-                  </Text>
-                  {anyRefreshing ? (
-                    <ActivityIndicator size="small" color={c.textTertiary} />
-                  ) : (
-                    <Icon name="refresh" size={14} color={c.textTertiary} />
-                  )}
-                </Press>
+            <EmptyState
+              icon="chart"
+              title={status.scanning ? '正在读取日志…' : '还没有用量'}
+              message={
+                scope === 'kettu' && status.fromComputer
+                  ? '只算 Huli 运行的对话时还没有用量；在筛选里换成电脑上的全部日志试试。'
+                  : status.fromComputer
+                    ? `在 ${hostName} 上用 Agent 写代码之后，token、请求和费用会出现在这里。`
+                    : `Huli 会记下它运行的每一轮对话。要算上之前和在终端里的使用，请在 ${hostName} 的 设置 › 用量 里打开「统计本机用量」。`
               }
             />
-            <View style={styles.grid}>
-              {planAgents.map((agent) => (
-                <PlanCard
-                  key={agent.id}
-                  agent={agent}
-                  width={cardWidth}
-                  refreshing={refreshing.has(agent.id)}
-                  error={limitErrors[agent.id] ?? agent.limitsError ?? null}
-                  readable={readable(agent)}
-                  onPress={() => setDetail(agent.id)}
-                />
-              ))}
-            </View>
+            {status.fromComputer && filters}
+            {footnote}
           </>
-        )}
+        ) : (
+          <View style={{ opacity: waiting ? 0.5 : 1 }} accessibilityState={{ busy: waiting }}>
+            <View style={styles.stats}>
+              <Stat
+                value={compact(tokenFacts.tokens)}
+                label="Token"
+                note={
+                  tokenFacts.parts.cacheRead > 0
+                    ? `${compact(tokenFacts.parts.cacheRead)} 来自缓存`
+                    : undefined
+                }
+              />
+              <Stat
+                value={grouped(requests)}
+                label={metricKind('requests', scope) === 'turns' ? '轮' : '请求'}
+                note={derived.single ? undefined : `${tokenFacts.activeDays} 天有用量`}
+              />
+              <Stat
+                value={money(tokenFacts.priced ? tokenFacts.parts.cost : null)}
+                label="估算费用"
+                note="按 API 价格"
+              />
+            </View>
 
-        <View style={styles.segmented}>
-          <SegmentedControl
-            segments={PERIODS}
-            value={period}
-            onChange={(next) => {
-              setHour(null)
-              setPeriod(next)
-            }}
-          />
-        </View>
-
-        <View style={[styles.stats, { opacity: loading && read.period !== period ? 0.5 : 1 }]}>
-          <Stat
-            value={compact(figures.tokens)}
-            label="Token"
-            note={figures.cacheRead > 0 ? `${compact(figures.cacheRead)} 来自缓存` : undefined}
-          />
-          <Stat value={grouped(figures.requests)} label="请求" />
-          <Stat value={money(figures.cost)} label="估算费用" note="按 API 价格" />
-        </View>
-
-        {figures.agentsUsed.length > 0 && (
-          <>
-            <SectionHeader title="按 Agent" />
-            <View style={styles.byAgent}>
-              <Donut
-                size={132}
-                stroke={18}
-                segments={figures.agentsUsed.map((a) => ({
-                  key: a.agentId,
-                  value: a.tokens,
-                  color: colorOf(a.agentId),
-                }))}
-              >
-                <Text style={[typeScale.headline, styles.tabular, { color: c.text }]}>
-                  {compact(figures.tokens)}
-                </Text>
-                <Text style={[typeScale.caption, { color: c.textSecondary }]}>token</Text>
-              </Donut>
-              <View style={styles.legend}>
-                {figures.agentsUsed.slice(0, 6).map((a) => (
-                  <View key={a.agentId} style={styles.legendRow}>
-                    <View style={[styles.swatch, { backgroundColor: colorOf(a.agentId) }]} />
+            {derived.byMetric.length > 0 && (
+              <>
+                <SectionHeader title="按 Agent" />
+                <View
+                  style={styles.byAgent}
+                  accessible
+                  accessibilityLabel={`按 Agent：${derived.byMetric
+                    .map(
+                      (a) =>
+                        `${nameOf(a.agentId)} ${metricWords(kind, a.value)}，${percent(a.value / facts.total)}`,
+                    )
+                    .join('；')}`}
+                >
+                  <Donut
+                    size={132}
+                    stroke={18}
+                    segments={derived.byMetric.map((a) => ({
+                      key: a.agentId,
+                      value: a.value,
+                      color: colorOf(a.agentId),
+                    }))}
+                  >
                     <Text
-                      style={[typeScale.callout, styles.flex, { color: c.text }]}
+                      style={[typeScale.headline, styles.tabular, { color: c.text }]}
                       numberOfLines={1}
+                      adjustsFontSizeToFit
                     >
-                      {nameOf(a.agentId)}
+                      {metricText(kind, facts.total)}
                     </Text>
-                    <Text style={[typeScale.callout, styles.tabular, { color: c.text }]}>
-                      {compact(a.tokens)}
+                    <Text style={[typeScale.caption, { color: c.textSecondary }]}>
+                      {DONUT_UNITS[kind]}
                     </Text>
-                    <Text style={[typeScale.footnote, styles.percent, { color: c.textSecondary }]}>
-                      {Math.round((a.tokens / figures.tokens) * 100)}%
-                    </Text>
+                  </Donut>
+                  <View style={styles.legend}>
+                    {derived.byMetric.slice(0, 6).map((a) => (
+                      <View key={a.agentId} style={styles.legendRow}>
+                        <View style={[styles.swatch, { backgroundColor: colorOf(a.agentId) }]} />
+                        <Text
+                          style={[typeScale.callout, styles.flex, { color: c.text }]}
+                          numberOfLines={1}
+                        >
+                          {nameOf(a.agentId)}
+                        </Text>
+                        <Text style={[typeScale.callout, styles.tabular, { color: c.text }]}>
+                          {metricText(kind, a.value)}
+                        </Text>
+                        <Text
+                          style={[typeScale.footnote, styles.percent, { color: c.textSecondary }]}
+                        >
+                          {percent(facts.total > 0 ? a.value / facts.total : null)}
+                        </Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
-              </View>
-            </View>
-          </>
-        )}
+                </View>
+              </>
+            )}
 
-        {busiest >= 0 && (
-          <>
             <SectionHeader
               title="按小时"
               right={
@@ -524,48 +598,100 @@ export default function Usage() {
                   numberOfLines={1}
                 >
                   {hour !== null
-                    ? `${hourName(hour)} · ${compact(figures.hours[hour] ?? 0)}`
-                    : `${periodWord} · 最忙 ${hourName(busiest)}`}
+                    ? `${hourName(hour)} · ${metricText(kind, hourly[hour] ?? 0)}`
+                    : busiest >= 0
+                      ? `${clockLabel} · 最忙 ${hourName(busiest)}`
+                      : clockLabel}
                 </Text>
               }
             />
-            <Text
-              style={[
-                typeScale.caption,
-                styles.tabular,
-                { color: c.textTertiary, marginBottom: space.xs },
-              ]}
-            >
-              {compact(Math.max(...figures.hours))}
-            </Text>
-            <BarChart
-              values={figures.hours}
-              height={120}
-              selected={hour}
-              onSelect={(next) => {
-                haptic.select()
-                setHour(next)
-              }}
-              labels={{ 0: '0时', 6: '6时', 12: '12时', 18: '18时' }}
-            />
-          </>
-        )}
+            {busiest >= 0 ? (
+              <>
+                <Text
+                  style={[
+                    typeScale.caption,
+                    styles.tabular,
+                    { color: c.textTertiary, marginBottom: space.xs },
+                  ]}
+                >
+                  {metricText(kind, Math.max(...hourly))}
+                </Text>
+                <BarChart
+                  values={hourly}
+                  height={120}
+                  grid={[0.5, 1]}
+                  emphasis={busiest}
+                  selected={hour}
+                  onSelect={setHour}
+                  labels={{ 0: '0时', 6: '6时', 12: '12时', 18: '18时', 23: '24时' }}
+                  tip={(i) => ({
+                    title: `${hourName(i)} · ${clockLabel}`,
+                    value: hourly[i]! > 0 ? metricWords(kind, hourly[i]!) : '没有用量',
+                    rows: (() => {
+                      const split = hourSplit(summary.clock, i, agent, metric, scope)
+                      return split.length > 1
+                        ? split.map((s) => ({
+                            key: s.agentId,
+                            color: colorOf(s.agentId),
+                            label: nameOf(s.agentId),
+                            value: metricText(kind, s.value),
+                          }))
+                        : undefined
+                    })(),
+                  })}
+                  describe={(i) =>
+                    `${hourName(i)}，${hourly[i]! > 0 ? metricWords(kind, hourly[i]!) : '没有用量'}`
+                  }
+                  accessibilityLabel={`按小时，${clockLabel}，最忙的是${hourName(busiest)}`}
+                />
+              </>
+            ) : (
+              <EmptyNote text="这段时间没有用量。" />
+            )}
 
-        <Text style={[typeScale.footnote, styles.note, { color: c.textTertiary }]}>
-          {read.status.unavailable
-            ? '电脑上的用量记录打不开，数字可能不全。'
-            : read.status.fromComputer
-              ? '按这台电脑上各智能体的日志统计，包括 Huli 之外的使用。'
-              : '只统计在 Huli 里发生的使用。'}
-          {read.status.scanning ? ' 正在读取日志…' : ''}
-          {` 费用按 ${read.summary.pricesAsOf} 的价格估算。`}
-        </Text>
-        {error ? <Text style={[typeScale.footnote, { color: c.danger }]}>{error}</Text> : null}
+            <Activity
+              days={derived.days}
+              heat={derived.heat}
+              range={range}
+              today={today}
+              metric={metric}
+              scope={scope}
+              colorOf={colorOf}
+              nameOf={nameOf}
+            />
+
+            {filters}
+
+            <Trend
+              unit={derived.trend?.unit ?? null}
+              bars={derived.trend?.bars ?? []}
+              series={derived.series}
+              kind={kind}
+              rangeLabel={rangeLabel}
+              loading={derived.single && !derived.trend && !usage.hoursError}
+              error={derived.single ? usage.hoursError : null}
+              onRetry={usage.retryHours}
+              colorOf={colorOf}
+              nameOf={nameOf}
+            />
+
+            <Breakdown summary={summary} agent={agent} metric={metric} scope={scope} />
+
+            <Facts facts={facts} tokenFacts={tokenFacts} kind={kind} />
+
+            {footnote}
+          </View>
+        )}
       </>
     )
   }
 
   const shown = detail ? agents.get(detail) : undefined
+  const pickerRange = read
+    ? read.choice.kind === 'custom'
+      ? { from: read.choice.from, to: read.choice.to }
+      : { from: read.range.from, to: addDays(read.range.to, -1) }
+    : null
 
   return (
     <Screen>
@@ -584,7 +710,7 @@ export default function Usage() {
             progressViewOffset={header.height}
             onRefresh={() => {
               setPulled(true)
-              void load(period).finally(() => setPulled(false))
+              void usage.sync().finally(() => setPulled(false))
             }}
           />
         }
@@ -608,6 +734,19 @@ export default function Usage() {
           />
         )}
       </BottomSheet>
+      {read && (
+        <RangeSheet
+          visible={picking}
+          onClose={() => setPicking(false)}
+          today={read.today}
+          initial={pickerRange}
+          used={derived?.used ?? new Set()}
+          onApply={(from, to) => {
+            setHour(null)
+            setChoice({ kind: 'custom', from, to })
+          }}
+        />
+      )}
     </Screen>
   )
 }
@@ -615,7 +754,11 @@ export default function Usage() {
 function Stat(props: { value: string; label: string; note?: string }) {
   const { c } = useTokens()
   return (
-    <View style={styles.stat}>
+    <View
+      style={styles.stat}
+      accessible
+      accessibilityLabel={`${props.label} ${props.value}${props.note ? `，${props.note}` : ''}`}
+    >
       <Text
         style={[typeScale.stat, styles.tabular, { color: c.text }]}
         numberOfLines={1}
@@ -790,20 +933,24 @@ function LimitDetail(props: {
   )
 }
 
+/** The summary and the figures while their first read is on its way. */
 function UsageSkeleton() {
   return (
     <View style={styles.skeleton} accessibilityLabel="正在加载">
       <Skeleton width="85%" height={26} />
       <Skeleton width="60%" height={26} />
-      <View style={styles.skeletonCards}>
-        <Skeleton width="48%" height={128} radius={radius.lg} />
-        <Skeleton width="48%" height={128} radius={radius.lg} />
-      </View>
       <Skeleton height={40} radius={radius.pill} />
       <View style={styles.skeletonCards}>
         <Skeleton width="28%" height={52} />
         <Skeleton width="28%" height={52} />
         <Skeleton width="28%" height={52} />
+      </View>
+      <View style={styles.skeletonCards}>
+        <Skeleton width={132} height={132} radius={66} />
+        <View style={styles.skeletonLegend}>
+          <Skeleton height={18} />
+          <Skeleton width="70%" height={18} />
+        </View>
       </View>
     </View>
   )
@@ -820,7 +967,16 @@ const styles = StyleSheet.create({
   planHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   planBody: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   planLegend: { flex: 1, gap: 2 },
-  segmented: { paddingTop: space.xxl },
+  periodRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingTop: space.xxl },
+  customRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  calendar: {
+    width: 44,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineError: { paddingTop: space.lg },
   stats: { flexDirection: 'row', gap: space.lg, paddingTop: space.xl },
   stat: { flex: 1, gap: 2 },
   byAgent: { flexDirection: 'row', alignItems: 'center', gap: space.xl },
@@ -828,12 +984,12 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   swatch: { width: 10, height: 10, borderRadius: 3 },
   percent: { width: 40, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  note: { paddingTop: space.xxl },
   detail: { borderRadius: radius.lg, padding: space.lg, gap: space.lg },
   limit: { gap: space.sm - 2 },
   limitHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   track: { height: 6, borderRadius: 3, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
   skeleton: { gap: space.lg, paddingTop: space.md },
-  skeletonCards: { flexDirection: 'row', justifyContent: 'space-between' },
+  skeletonCards: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  skeletonLegend: { flex: 1, gap: space.md, marginLeft: space.xl },
 })
