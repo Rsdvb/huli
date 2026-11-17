@@ -4843,9 +4843,12 @@ li[data-row-exit='dust'] > * {
   min-width: 0;
 }
 /* The host's and the project's marks stay whole however narrow the tray: only the branch and the
-   names shrink, so the marks never slide over each other. */
-.kettu-tray__group:has(> .kettu-tray-link--host) {
-  min-width: auto;
+   names shrink, so the marks never slide over each other. The project and the branch keep room
+   for their marks and clip the rest; the group itself may shrink, since keeping its content's
+   width held a long project name or branch whole and pushed the context meter off the tray. */
+.ui-as-tray-link:is(.kettu-tray-link--project, .kettu-branch, .kettu-tray-link--branch) {
+  min-width: 36px;
+  overflow: hidden;
 }
 .kettu-tray {
   container: kettu-tray / inline-size;
@@ -4860,6 +4863,15 @@ li[data-row-exit='dust'] > * {
 }
 .kettu-tray-link--project {
   flex-shrink: 2;
+}
+/* New session's branch or worktree, often the longest, gives way first; the agent and the mode keep
+   their short names whole rather than each losing a letter to an ellipsis. */
+.ui-as-tray-link.kettu-tray-link--branch {
+  flex-shrink: 4;
+}
+.ui-as-tray-link:is(.kettu-tray-link--agent, .kettu-tray-link--workflow) {
+  flex-shrink: 0;
+  max-width: 12em;
 }
 @container kettu-tray (inline-size < 520px) {
   .kettu-tray-link--host {
@@ -4890,10 +4902,22 @@ li[data-row-exit='dust'] > * {
     white-space: nowrap;
   }
 }
-/* Narrower still, the output speed, the least needed of the right end, gives its room up. */
+/* Narrower still, the output speed, the least needed of the right end, gives its room up, and the
+   agent keeps only its mark. */
 @container kettu-tray (inline-size < 360px) {
   .kettu-tray-link--speed {
     display: none;
+  }
+  .ui-as-tray-link.kettu-tray-link--agent {
+    padding-right: 7px;
+  }
+  .kettu-tray-link--agent > .kettu-tray-link__text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 .kettu-tray__group:empty {
