@@ -7,6 +7,7 @@
 import type { ThreadEntry, ThreadState, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
 import { diffTexts } from '../../diff'
 import { baseName, relativePath } from './format'
+import { toolTitle } from './toolNames'
 
 type FileKind = 'read' | 'edit' | 'delete' | 'move'
 
@@ -59,7 +60,7 @@ export function toolLabel(
     const target = entry.rawInput ?? entry.title.replace(/^run\s+/i, '')
     return { verb: verbs.run, target, kind: 'command' }
   }
-  return { verb: null, target: entry.title, kind: 'title' }
+  return { verb: null, target: toolTitle(entry.title), kind: 'title' }
 }
 
 const FENCED = /^(`{3,})[^\n`]*\n([\s\S]*?)\n?\1$/

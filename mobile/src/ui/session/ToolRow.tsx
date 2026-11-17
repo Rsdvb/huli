@@ -284,7 +284,7 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
     <View>
       <StepLine
         icon={TOOL_ICONS[entry.toolKind]}
-        name={label.verb ?? entry.title}
+        name={label.verb ?? label.target ?? entry.title}
         summary={label.verb && label.target ? label.target.split('\n')[0] : (note ?? null)}
         mono={label.kind === 'command'}
         extra={
