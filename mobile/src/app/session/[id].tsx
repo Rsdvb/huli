@@ -125,7 +125,7 @@ import { Icon } from '../../ui/session/Icon'
 import { SelectText } from '../../ui/session/SelectText'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
-import { latestPlan, threadRows, type Row } from '../../ui/session/turns'
+import { latestPlan, rowBuilder, type Row } from '../../ui/session/turns'
 import {
   askedText,
   forgetTools,
@@ -140,6 +140,8 @@ import { ToBottomButton, WorkingRow } from '../../ui/session/Working'
 const AWAY = 280
 
 const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
+
+const NO_ROWS: Row[] = []
 
 const renderRow: ListRenderItem<Row> = ({ item }) => <ThreadRow row={item} />
 
@@ -231,11 +233,12 @@ export default function SessionScreen() {
   const shownModel = pendingConfig ? slotOf(pendingConfig, 'model', false) : config.model
   const shownEffort = pendingConfig ? slotOf(pendingConfig, 'thought_level', false) : config.effort
 
+  const buildRows = useMemo(() => rowBuilder(), [])
   const rows = useMemo(() => {
-    if (!view.thread) return []
+    if (!view.thread) return NO_ROWS
     observeTools(id, view.thread)
-    return threadRows(view.thread, running).reverse()
-  }, [view.thread, id, running])
+    return buildRows(view.thread, running)
+  }, [view.thread, id, running, buildRows])
   useEffect(() => () => forgetTools(id), [id])
 
   // The folder's files, for the references in replies and prompts that open them.
