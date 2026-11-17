@@ -8,7 +8,7 @@
 import type { LogFn } from '../agent-host/storage'
 import { BYTES_PER_FRAME } from '@shared/remote/channel'
 import { bytesOf, findPlaces, isBinary, type Place } from '@shared/remote/places'
-import { MAX_UPLOAD_BYTES } from '@shared/remote/streams'
+import { MEMORY_UPLOAD_BYTES } from '@shared/remote/streams'
 import type { PortError } from '@shared/port-rpc'
 
 /** Bytes the transport may hold before an upload waits for them to leave. */
@@ -157,10 +157,11 @@ export class LinkRequests {
         message: 'This host takes no files; update Kettu on it',
       })
     }
-    if (uploads.some((upload) => upload.bytes.length > MAX_UPLOAD_BYTES)) {
+    // Main's bytes are in memory already, so they go as large as a window hands the host its own.
+    if (uploads.some((upload) => upload.bytes.length > MEMORY_UPLOAD_BYTES)) {
       return this.reject(outgoing, {
         code: 'invalid_params',
-        message: `An upload is at most ${MAX_UPLOAD_BYTES} bytes`,
+        message: `An upload is at most ${MEMORY_UPLOAD_BYTES} bytes`,
       })
     }
     void this.upload(wire, outgoing, attempt, message, uploads)
