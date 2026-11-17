@@ -1,0 +1,60 @@
+{
+  "row": {
+    "group": "从 Kettu 迁移",
+    "name": "从 Kettu 导入",
+    "description": "把这台电脑上官方 Kettu 里的会话搬过来，标题、项目、置顶和归档状态都会保留。只读取 Kettu 的数据。",
+    "keywords": "kettu 导入 迁移 搬家 会话 项目",
+    "looking": "正在查找 Kettu 的会话…",
+    "notFound": "这台电脑上没有 Kettu 的数据。",
+    "found": "Kettu 里有 {{sessions}} · {{projects}}",
+    "foundSome": "Kettu 里有 {{sessions}} · {{projects}}，已导入 {{count}} 个",
+    "allImported": "Kettu 里有 {{sessions}} · {{projects}}，都已导入",
+    "choose": "选择会话…"
+  },
+  "sessions_other": "{{count}} 个会话",
+  "projects_other": "{{count}} 个项目",
+  "subagents_other": "{{count}} 个子智能体",
+  "error": {
+    "newer": "Kettu 的数据来自更新的版本，这个版本读不了。请先更新再试。",
+    "unreadable": "读不了 Kettu 的会话。",
+    "scan": "查找 Kettu 的会话失败：{{error}}"
+  },
+  "dialog": {
+    "title": "从 Kettu 导入",
+    "description": "在 Kettu 里找到 {{sessions}} · {{projects}}。选中的会话会连同标题、项目、置顶和归档状态一起导入，并能接着之前的进度继续。",
+    "selectAll": "全选",
+    "readOnly": "只读取 Kettu 的数据，Kettu 里的会话原样保留。Kettu 正开着的会话会导入为副本；想接着同一个会话继续，请先退出 Kettu。子智能体会在这里打开它的会话时回到会话下面。",
+    "import_other": "导入 {{count}} 个会话",
+    "importNone": "导入",
+    "importing": "正在导入 {{done}}/{{total}}…",
+    "importingTitle": "正在导入 {{done}}/{{total}}：{{title}}",
+    "close": "关闭",
+    "noSessions": "Kettu 里没有可以导入的会话。",
+    "projectCount": "{{count}}",
+    "toggleProject": "选中 {{project}} 的所有会话"
+  },
+  "badge": {
+    "pinned": "置顶",
+    "archived": "已归档",
+    "imported": "已导入",
+    "subagent": "随会话一起",
+    "noAgentSession": "从未开始",
+    "worktree": "在 Kettu 的工作树里",
+    "scratch": "在 Kettu 自己的文件夹里",
+    "unknownAgent": "这里没有这个智能体",
+    "missingFolder": "文件夹不见了"
+  },
+  "result": {
+    "imported_other": "导入了 {{count}} 个会话。",
+    "forked_other": "其中 {{count}} 个当时在 Kettu 里开着，导入的是副本。",
+    "skipped_other": "跳过了 {{count}} 个已经导入或不能导入的。",
+    "failed_other": "{{count}} 个导入失败：",
+    "failure": "{{title}}：{{message}}",
+    "untitled": "未命名"
+  },
+  "offer": {
+    "text_other": "发现 Kettu 里有 {{count}} 个会话，要导入吗？",
+    "detail": "把 Kettu 的会话连同项目搬过来。只读取 Kettu 的数据。",
+    "action": "导入"
+  }
+}
