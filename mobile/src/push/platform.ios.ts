@@ -166,17 +166,27 @@ export const platform: PushPlatform = {
   },
 
   async share({ device, host, quiet }) {
+    // Several computers may be paired; each keeps its key here while the app shows another.
+    const before = await loadShared().catch(() => null)
     const keys: SharedKeys = {
       v: 1,
       device: toBase64(device),
-      hosts: { [host.id]: host.key },
+      hosts: { ...(before?.hosts ?? {}), [host.id]: host.key },
       quiet,
     }
     await SecureStore.setItemAsync(KEYS_ITEM, JSON.stringify(keys), sharedOptions())
   },
 
-  async unshare() {
-    await SecureStore.deleteItemAsync(KEYS_ITEM, sharedOptions())
+  async unshare(hostId) {
+    const before = await loadShared().catch(() => null)
+    if (!before) return
+    const hosts = { ...before.hosts }
+    delete hosts[hostId]
+    if (Object.keys(hosts).length === 0) {
+      await SecureStore.deleteItemAsync(KEYS_ITEM, sharedOptions())
+      return
+    }
+    await SecureStore.setItemAsync(KEYS_ITEM, JSON.stringify({ ...before, hosts }), sharedOptions())
   },
 
   onOpen(listener) {

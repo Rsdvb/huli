@@ -66,26 +66,31 @@ export function usePushStatus(): PushStatus {
 const sent = new WeakMap<HostLink, string>()
 const syncing = new WeakSet<HostLink>()
 
-export async function syncPush(link: HostLink): Promise<void> {
-  if (syncing.has(link)) return
+/**
+ * Registers this phone with the computer on `link`. Each paired computer is synced while it is the
+ * active one, and keeps the registration after; resolves with the id its notifications carry.
+ */
+export async function syncPush(link: HostLink): Promise<string | null> {
+  if (syncing.has(link)) return null
   syncing.add(link)
   try {
-    await syncOnce(link)
+    return await syncOnce(link)
   } finally {
     syncing.delete(link)
   }
 }
 
-async function syncOnce(link: HostLink): Promise<void> {
+async function syncOnce(link: HostLink): Promise<string | null> {
   const state = link.state
-  if (state.kind !== 'connected') return
+  if (state.kind !== 'connected') return null
   const { welcome } = state
   if (
     !platform.supported ||
     welcome.protocol < PUSH_VERSION ||
     !welcome.features.includes(PUSH_FEATURE)
   ) {
-    return setStatus('unsupported')
+    setStatus('unsupported')
+    return null
   }
   const current = (await link.request(NOTIFICATIONS_GET, undefined)) as NotificationsState
   const hostKey = decodeRelayBytes(current.host.key)
@@ -102,23 +107,36 @@ async function syncOnce(link: HostLink): Promise<void> {
   if ((await platform.permission(true)) !== 'granted') {
     if (current.target.apns) await link.request(NOTIFICATIONS_SET, { target: null })
     sent.delete(link)
-    return setStatus('off')
+    setStatus('off')
+    return current.host.id
   }
   const target = await platform.target()
-  if (!target) return setStatus('unsupported')
+  if (!target) {
+    setStatus('unsupported')
+    return current.host.id
+  }
   const text = JSON.stringify(target)
   if (!current.target.apns || sent.get(link) !== text) {
     await link.request(NOTIFICATIONS_SET, { target })
     sent.set(link, text)
   }
   setStatus(current.signedIn ? 'on' : 'signed-out')
+  return current.host.id
 }
 
-/** Before unpairing: the computer stops sending, and the extension forgets it. */
-export async function stopPush(link: HostLink | null): Promise<void> {
-  await platform.unshare().catch(() => {})
+/** Another computer becomes the one shown: its status is not known until it is synced. */
+export function resetPushStatus(): void {
   setStatus('pending')
+}
+
+/**
+ * Before unpairing a computer: it stops sending (when its link is up), and the extension forgets
+ * its key (`hostId`, the id its notifications carry). Other computers' notifications go on.
+ */
+export async function stopPush(link: HostLink | null, hostId: string | null): Promise<void> {
+  if (hostId) await platform.unshare(hostId).catch(() => {})
   if (!link || link.state.kind !== 'connected') return
+  sent.delete(link)
   const timeout = new Promise<void>((resolve) => setTimeout(resolve, 3000))
   await Promise.race([link.request(NOTIFICATIONS_SET, { target: null }), timeout]).catch(() => {})
 }

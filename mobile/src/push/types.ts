@@ -31,8 +31,10 @@ export interface PushPlatform {
   target(): Promise<PushTarget | null>
   /** The system changed the address. */
   onTargetChange(listener: () => void): () => void
+  /** Adds the host's key to those the extension keeps, beside other paired computers' keys. */
   share(keys: PushKeys): Promise<void>
-  unshare(): Promise<void>
+  /** Removes one host's key, by its id. */
+  unshare(host: string): Promise<void>
   /** Each notification the user opens, the one that launched the app included. */
   onOpen(listener: (opened: OpenedNotification) => void): () => void
 }

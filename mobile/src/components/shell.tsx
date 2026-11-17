@@ -1,5 +1,5 @@
-// The tabs' shared state and their top bar: the project filter every list applies, the search the
-// home tab shows, and the sheets the top bar opens.
+// The tabs' shared state and their top bar: the project filter every list applies, and the sheets
+// the top bar opens (projects, and the paired computers).
 
 import {
   createContext,
@@ -10,30 +10,23 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Platform, StyleSheet, Text, View } from 'react-native'
+import { Platform, StyleSheet, View } from 'react-native'
 import { router, useNavigation } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
-import { currentAddress, routeKind } from '../connection'
 import { useHost } from '../host'
-import { hostPort, linkStatus, osName, ROUTE_NAMES, type LinkTone } from '../linkInfo'
+import { linkStatus, type LinkTone } from '../linkInfo'
+import type { SearchScope } from '../search'
 import { folder } from '../sessions'
-import { BottomSheet } from '../ui/BottomSheet'
+import { computerName } from '../store'
 import { haptic } from '../ui/haptics'
 import { Icon } from '../ui/Icon'
 import { IconButton } from '../ui/IconButton'
-import { ListGroup, ListRow } from '../ui/ListRow'
 import { OsIcon } from '../ui/OsIcon'
 import { Pill } from '../ui/Pill'
 import { Press } from '../ui/Press'
 import { FloatingHeader, type CollapsingHeader } from '../ui/ScrollHeader'
-import {
-  radius,
-  size as sizes,
-  space,
-  type as typeScale,
-  useTokens,
-  type Palette,
-} from '../ui/tokens'
+import { size as sizes, space, useTokens, type Palette } from '../ui/tokens'
+import { ComputerSheet } from './ComputerSheet'
 import { Sheet, type SheetItem } from './Sheet'
 
 export type ProjectFilter =
@@ -51,8 +44,6 @@ interface ShellValue {
   setFilter(filter: ProjectFilter): void
   /** The filter's name, or null while it shows everything. */
   filterName: string | null
-  searching: boolean
-  setSearching(on: boolean): void
   openProjects(): void
   openHost(): void
 }
@@ -72,8 +63,13 @@ export function toneColor(c: Palette, tone: LinkTone): string {
 export function ShellProvider(props: { children: ReactNode }) {
   const host = useHost()
   const [filter, setFilter] = useState<ProjectFilter>({ kind: 'all' })
-  const [searching, setSearching] = useState(false)
   const [sheet, setSheet] = useState<'projects' | 'host' | null>(null)
+
+  // A project belongs to one computer: another computer starts with everything shown.
+  const activeId = host.host?.id
+  useEffect(() => {
+    setFilter({ kind: 'all' })
+  }, [activeId])
 
   // The projects the listed sessions are in, latest first, named as the computer names them.
   const projects = useMemo(() => {
@@ -140,8 +136,6 @@ export function ShellProvider(props: { children: ReactNode }) {
     filter,
     setFilter: choose,
     filterName,
-    searching,
-    setSearching,
     openProjects: () => setSheet('projects'),
     openHost: () => setSheet('host'),
   }
@@ -156,86 +150,41 @@ export function ShellProvider(props: { children: ReactNode }) {
         items={items}
         onClose={() => setSheet(null)}
       />
-      <HostSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
+      <ComputerSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
     </ShellContext.Provider>
-  )
-}
-
-function HostSheet(props: { visible: boolean; onClose(): void }) {
-  const { c } = useTokens()
-  const host = useHost()
-  const status = linkStatus(host.state)
-  const welcome = host.state.kind === 'connected' ? host.state.welcome : null
-  const address = props.visible && welcome ? currentAddress() : null
-  const platform = welcome?.host.platform ?? host.host?.platform
-  return (
-    <BottomSheet visible={props.visible} onClose={props.onClose}>
-      <View style={styles.hostHead}>
-        <View style={[styles.hostIcon, { backgroundColor: c.fill }]}>
-          <OsIcon platform={platform} size={28} />
-        </View>
-        <Text style={[typeScale.title, { color: c.text }]} numberOfLines={1}>
-          {host.host?.name ?? '电脑'}
-        </Text>
-        <View style={styles.statusLine}>
-          <View style={[styles.dot, { backgroundColor: toneColor(c, status.tone) }]} />
-          <Text style={[typeScale.subhead, { color: c.textSecondary }]}>{status.text}</Text>
-        </View>
-      </View>
-      <ListGroup>
-        <ListRow title="系统" value={osName(platform)} />
-        <ListRow
-          title="线路"
-          value={address ? `${ROUTE_NAMES[routeKind(address)]} · ${hostPort(address)}` : '—'}
-        />
-        {welcome ? <ListRow title="电脑上的 Huli" value={welcome.host.version} /> : null}
-        <ListRow title="这台手机叫" value={host.host?.deviceName ?? '—'} />
-      </ListGroup>
-      <ListGroup>
-        {host.state.kind !== 'connected' ? (
-          <ListRow
-            title="立即重连"
-            icon="refresh"
-            iconTint={c.tint}
-            action
-            onPress={() => {
-              haptic.tap()
-              host.link?.wake()
-            }}
-          />
-        ) : null}
-        <ListRow
-          title="连接设置"
-          icon="link"
-          chevron
-          onPress={() => {
-            props.onClose()
-            router.push('/settings')
-          }}
-        />
-      </ListGroup>
-    </BottomSheet>
   )
 }
 
 /**
  * The top bar of every tab: account, project filter, the computer, search. The home tab names the
  * computer in a pill; the others (`compact`) name the project filter and mark the computer only.
+ * The computer opens the sheet of paired computers; search opens the search page.
  */
 export function TopBar(props: {
   header: CollapsingHeader
   filter?: boolean
   compact?: boolean
-  /** The tab's own search; without it, search opens the home tab's. */
+  /** The tab's own search, for a list the search page does not cover; replaces the button's. */
   search?: { active: boolean; onPress(): void }
+  /** The scope the search page opens in. */
+  searchScope?: SearchScope
 }) {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
   const status = linkStatus(host.state)
+  const name = computerName(host.host)
   const platform =
     (host.state.kind === 'connected' ? host.state.welcome.host.platform : undefined) ??
     host.host?.platform
+  const several = host.computers.length > 1
+  const openSearch = () => {
+    haptic.tap()
+    router.push({
+      pathname: '/search',
+      params: props.searchScope ? { scope: props.searchScope } : {},
+    })
+  }
   const avatar = (
     <Press
       onPress={() => router.push('/settings')}
@@ -268,7 +217,7 @@ export function TopBar(props: {
         <Press
           onPress={shell.openHost}
           accessibilityRole="button"
-          accessibilityLabel={`${host.host?.name ?? '电脑'}，${status.text}`}
+          accessibilityLabel={`${name}，${status.text}${several ? '，点按切换电脑' : ''}`}
           hitSlop={10}
           style={styles.mark}
         >
@@ -288,7 +237,9 @@ export function TopBar(props: {
             label={props.search.active ? '结束搜索' : '搜索'}
             onPress={props.search.onPress}
           />
-        ) : null}
+        ) : (
+          <IconButton icon="search" label="搜索" onPress={openSearch} />
+        )}
       </FloatingHeader>
     )
   }
@@ -310,7 +261,7 @@ export function TopBar(props: {
         tone="glass"
         size="lg"
         onPress={shell.openHost}
-        accessibilityLabel={`${host.host?.name ?? '电脑'}，${status.text}`}
+        accessibilityLabel={`${name}，${status.text}${several ? '，点按切换电脑' : ''}`}
         leading={
           <View>
             <OsIcon platform={platform} size={18} />
@@ -322,17 +273,15 @@ export function TopBar(props: {
             />
           </View>
         }
-        label={host.host?.name ?? '电脑'}
+        trailing={
+          several ? (
+            <Icon name="upDown" size={13} color={c.textSecondary} weight="semibold" />
+          ) : undefined
+        }
+        label={name}
       />
       <View style={styles.spacer} />
-      <IconButton
-        icon="search"
-        label="搜索会话"
-        onPress={() => {
-          shell.setSearching(true)
-          router.navigate('/')
-        }}
-      />
+      <IconButton icon="search" label="搜索" onPress={openSearch} />
     </FloatingHeader>
   )
 }
@@ -400,15 +349,5 @@ const styles = StyleSheet.create({
   spacer: { flex: 1 },
   mark: { padding: space.xs },
   markDot: { top: 0, right: 0 },
-  hostHead: { alignItems: 'center', gap: space.sm, paddingBottom: space.sm },
-  hostIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.xl,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statusLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm - 2 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
   filterNote: { flexDirection: 'row', marginTop: space.md },
 })

@@ -1,16 +1,23 @@
-// Settings › 已配对的电脑: the computer this phone is paired with, the addresses it tries, and
-// reconnecting or unpairing.
+// Settings › 已配对的电脑 › one computer: how the phone reaches it, the addresses it tries, and
+// switching to it, renaming, reconnecting or unpairing. Without an `id`, the active computer.
 
 import { useEffect, useState } from 'react'
-import { Alert, Animated, StyleSheet, Text, View } from 'react-native'
+import { Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import type { DirectAddress } from '@shared/remote/protocol'
-import { admin } from '../../admin'
-import { toneColor } from '../../components/shell'
+import {
+  lineColor,
+  useComputerActions,
+  useComputerLine,
+  useReach,
+} from '../../components/ComputerSheet'
 import { currentAddress, routeKind, usableAddresses } from '../../connection'
 import { useHost } from '../../host'
-import { hostPort, linkStatus, osName, ROUTE_NAMES } from '../../linkInfo'
+import { hostPort, osName, ROUTE_NAMES } from '../../linkInfo'
+import { ago } from '../../sessions'
+import { computerName } from '../../store'
+import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
@@ -23,56 +30,48 @@ import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 export default function Computer() {
   const { c } = useTokens()
   const host = useHost()
+  const params = useLocalSearchParams<{ id?: string }>()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
+  const computer = params.id ? (host.computers.find((h) => h.id === params.id) ?? null) : host.host
+  const active = !!computer && computer.id === host.host?.id
+  const reach = useReach(!active)
+  const line = useComputerLine(reach)
+  const actions = useComputerActions()
   const [address, setAddress] = useState<DirectAddress | null>(() => currentAddress())
-  const welcome = host.state.kind === 'connected' ? host.state.welcome : null
+  const welcome = active && host.state.kind === 'connected' ? host.state.welcome : null
   const connected = welcome !== null
-  const status = linkStatus(host.state)
-  const platform = welcome?.host.platform ?? host.host?.platform
 
   useEffect(() => {
+    if (!active) return
     setAddress(currentAddress())
     const timer = setInterval(() => setAddress(currentAddress()), 2000)
     return () => clearInterval(timer)
-  }, [host.state])
+  }, [active, host.state])
 
-  const addresses = usableAddresses(host.host?.addresses ?? [])
-  const current = connected && address ? hostPort(address) : null
-
-  const unpair = () => {
-    haptic.warning()
-    const link = host.link
-    Alert.alert(
-      '解除配对？',
-      connected
-        ? '电脑会移除这台 iPhone，这台 iPhone 也会忘掉这台电脑。之后要重新扫码配对。'
-        : '这台 iPhone 会忘掉这台电脑，之后要重新扫码配对。电脑那边可以在设置 › 远程访问里移除它。',
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '解除配对',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              if (link && welcome) {
-                const timeout = new Promise((resolve) => setTimeout(resolve, 4000))
-                await Promise.race([
-                  admin(link, 'remote.removeDevice', { id: welcome.device.id }),
-                  timeout,
-                ]).catch(() => {})
-              }
-              if (router.canDismiss()) router.dismissAll()
-              await host.forget(null)
-            })()
-          },
-        },
-      ],
+  if (!computer) {
+    return (
+      <Screen readable>
+        <View style={{ paddingTop: header.height }}>
+          <EmptyState
+            icon="desktop"
+            title="这台电脑已解除配对"
+            action={{ label: '返回', onPress: () => router.back() }}
+          />
+        </View>
+        <NavBar header={header} title="电脑" titleAlways />
+      </Screen>
     )
   }
 
+  const status = line(computer)
+  const platform = welcome?.host.platform ?? computer.platform
+  const addresses = usableAddresses(computer.addresses)
+  const current = connected && address ? hostPort(address) : null
+  const busy = actions.busy.has(computer.id)
+
   return (
-    <Screen>
+    <Screen readable>
       <Animated.ScrollView
         {...header.scrollProps}
         contentContainerStyle={{
@@ -86,19 +85,34 @@ export default function Computer() {
           <View style={[styles.heroIcon, { backgroundColor: c.fill }]}>
             <OsIcon platform={platform} size={30} />
           </View>
-          <Text style={[typeScale.title, { color: c.text }]} numberOfLines={1}>
-            {host.host?.name ?? '电脑'}
+          <Text style={[typeScale.title, styles.center, { color: c.text }]} numberOfLines={2}>
+            {computerName(computer)}
           </Text>
           <View style={styles.statusLine}>
-            <View style={[styles.dot, { backgroundColor: toneColor(c, status.tone) }]} />
-            <Text style={[typeScale.subhead, { color: c.textSecondary }]}>{status.text}</Text>
+            <View style={[styles.dot, { backgroundColor: lineColor(c, status.tone) }]} />
+            <Text style={[typeScale.subhead, styles.shrink, { color: c.textSecondary }]}>
+              {status.text}
+            </Text>
           </View>
         </View>
 
         <ListGroup>
+          <ListRow
+            title="在手机上的名称"
+            value={computerName(computer)}
+            chevron
+            onPress={() => actions.rename(computer)}
+          />
+          {computer.label ? <ListRow title="电脑自己的名称" value={computer.name} /> : null}
           <ListRow title="系统" value={osName(platform)} />
-          <ListRow title="电脑上的 Huli" value={welcome?.host.version ?? '—'} />
-          <ListRow title="这台 iPhone 在电脑上叫" value={host.host?.deviceName ?? '—'} />
+          {welcome ? <ListRow title="电脑上的 Huli" value={welcome.host.version} /> : null}
+          <ListRow title="这台 iPhone 在电脑上叫" value={computer.deviceName || '—'} />
+          {!active ? (
+            <ListRow
+              title="上次在线"
+              value={computer.lastSeen ? ago(computer.lastSeen) : '还没连上过'}
+            />
+          ) : null}
         </ListGroup>
 
         <ListGroup
@@ -127,7 +141,17 @@ export default function Computer() {
         </ListGroup>
 
         <ListGroup>
-          {connected ? null : (
+          {!active ? (
+            <ListRow
+              title="切换到这台电脑"
+              icon="desktop"
+              plainIcon
+              action
+              disabled={busy}
+              onPress={() => actions.switchTo(computer)}
+            />
+          ) : null}
+          {active && !connected ? (
             <ListRow
               title="立即重连"
               icon="refresh"
@@ -138,16 +162,22 @@ export default function Computer() {
                 host.link?.wake()
               }}
             />
-          )}
+          ) : null}
           <ListRow
-            title="解除配对"
+            title={busy ? '正在解除配对…' : '解除配对'}
             destructive
+            disabled={busy}
             leading={<Icon name="close" size={18} color={c.danger} />}
-            onPress={unpair}
+            onPress={() =>
+              actions.unpair(computer, () => {
+                if (router.canGoBack()) router.back()
+              })
+            }
           />
         </ListGroup>
       </Animated.ScrollView>
-      <NavBar header={header} title="已配对的电脑" titleAlways />
+      <NavBar header={header} title={computerName(computer)} titleAlways />
+      {actions.element}
     </Screen>
   )
 }
@@ -162,6 +192,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: space.xs,
   },
+  center: { textAlign: 'center' },
   statusLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm - 2 },
+  shrink: { flexShrink: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },
 })
