@@ -14,6 +14,7 @@ export function ContextMenu(props: {
   title?: string
   disabled?: boolean
   style?: StyleProp<ViewStyle>
+  fit?: 'width' | 'content'
   children: (longPress: (() => void) | undefined) => ReactElement
 }) {
   const { items, title } = props

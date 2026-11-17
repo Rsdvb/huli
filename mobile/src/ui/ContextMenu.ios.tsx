@@ -96,6 +96,11 @@ export function ContextMenu(props: {
   title?: string
   disabled?: boolean
   style?: StyleProp<ViewStyle>
+  /**
+   * `width` (the default): the view takes the width it is given, as a list row does, and its own
+   * height. `content`: its own width too, as a bubble aligned to one side does.
+   */
+  fit?: 'width' | 'content'
   children: (longPress: (() => void) | undefined) => ReactElement
 }) {
   if (props.disabled || props.items.length === 0) return props.children(undefined)
@@ -103,7 +108,10 @@ export function ContextMenu(props: {
     <Host style={props.style} ignoreSafeArea="all">
       <SystemContextMenu>
         <SystemContextMenu.Trigger>
-          <RNHostView matchContents boundedByHost>
+          <RNHostView
+            matchContents={props.fit === 'content' ? true : { vertical: true }}
+            boundedByHost
+          >
             {props.children(undefined)}
           </RNHostView>
         </SystemContextMenu.Trigger>

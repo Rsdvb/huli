@@ -180,7 +180,7 @@ export const UserMessage = memo(function UserMessage(props: {
       )}
       {tiles.length > 0 && <RefTiles refs={tiles} align="end" />}
       {text ? (
-        <ContextMenu items={menu}>
+        <ContextMenu items={menu} fit="content">
           {(longPress) => (
             <PressScale
               scale={0.98}
