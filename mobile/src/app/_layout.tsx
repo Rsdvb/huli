@@ -16,6 +16,24 @@ import { watchUpdates } from '../update'
 // A screen opened from a link or a notification still has the tabs to go back to.
 export const unstable_settings = { anchor: '(tabs)' }
 
+/** Settings' pages that manage what the computer keeps, each under `settings/`. */
+const MANAGE_PAGES = [
+  'agents',
+  'agent',
+  'harness',
+  'market',
+  'market-plugin',
+  'market-skill',
+  'mcp',
+  'memory',
+  'memory-entry',
+  'projects',
+  'project',
+  'artifacts',
+  'devices',
+  'usage',
+] as const
+
 export default function Layout() {
   const { c, scheme } = useTokens()
   useEffect(() => watchUpdates(), [])
@@ -43,6 +61,9 @@ export default function Layout() {
             <Stack.Screen name="settings/computer" options={{ headerShown: false }} />
             <Stack.Screen name="settings/lock" options={{ headerShown: false }} />
             <Stack.Screen name="settings/licenses" options={{ headerShown: false }} />
+            {MANAGE_PAGES.map((name) => (
+              <Stack.Screen key={name} name={`settings/${name}`} options={{ headerShown: false }} />
+            ))}
             <Stack.Screen name="archived" options={{ headerShown: false }} />
             <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
             <Stack.Screen name="artifact/[id]" options={{ headerShown: false }} />
