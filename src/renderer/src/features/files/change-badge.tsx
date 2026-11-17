@@ -2,10 +2,11 @@ import { useTranslation } from 'react-i18next'
 import type { ChangeStatus } from '@shared/git'
 import { cn } from '@renderer/lib/utils'
 
-// A new file reads as added whether or not it is staged yet, as the agents leave most of them.
+// A new file has an added file's tone whether or not it is staged yet, as the agents leave most of
+// them; an untracked one's letter is U, as editors show it, so it matches the label beside it.
 const LETTERS: Record<ChangeStatus, string> = {
   added: 'A',
-  untracked: 'A',
+  untracked: 'U',
   modified: 'M',
   renamed: 'R',
   copied: 'C',
