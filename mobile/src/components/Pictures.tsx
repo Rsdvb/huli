@@ -24,6 +24,7 @@ import type { AttachmentBytes } from '@shared/agent-host'
 import type { ContentRef } from '@shared/thread'
 import { useLink } from '../host'
 import { LockLayer } from '../lock'
+import { cacheFor } from '../ui/memory'
 import { useSessionRows } from '../ui/session/context'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
@@ -119,7 +120,7 @@ export function PictureStrip(props: { pictures: Picture[]; align: 'start' | 'end
                   source={{ uri: each.thumb }}
                   style={[styles.thumb, { width: side, height: side, borderColor: c.border }]}
                   contentFit="cover"
-                  cachePolicy="memory-disk"
+                  cachePolicy={cacheFor(each.thumb)}
                   recyclingKey={each.thumb}
                   transition={120}
                 />

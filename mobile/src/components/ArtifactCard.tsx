@@ -9,6 +9,7 @@ import { useAgent, useMaybeLink, useSession } from '../host'
 import { AgentGlyph } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
+import { cacheFor } from '../ui/memory'
 import { Skeleton } from '../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
@@ -96,7 +97,7 @@ export function ArtifactPreview(props: { artifact: ArtifactSummary; inset?: numb
             source={{ uri: thumbnail.uri }}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
-            cachePolicy="memory-disk"
+            cachePolicy={cacheFor(thumbnail.uri)}
             recyclingKey={props.artifact.id}
             transition={150}
             accessibilityIgnoresInvertColors

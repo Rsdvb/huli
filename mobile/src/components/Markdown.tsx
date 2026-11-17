@@ -15,6 +15,7 @@ import {
   type TextStyle,
 } from 'react-native'
 import { Image } from 'expo-image'
+import { cacheFor } from '../ui/memory'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { copyText } from '../ui/session/feedback'
 import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
@@ -453,7 +454,7 @@ function Picture(props: { uri: string; alt: string }) {
       accessibilityLabel={props.alt || '图片'}
       accessibilityIgnoresInvertColors
       contentFit="contain"
-      cachePolicy="memory-disk"
+      cachePolicy={cacheFor(props.uri)}
       transition={120}
       onLoad={(event) => {
         const { width, height } = event.source

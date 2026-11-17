@@ -47,6 +47,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
+import { cacheFor } from '../../ui/memory'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { tokensText } from '../../ui/session/limits'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
@@ -180,7 +181,7 @@ export default function MarketPlugin() {
               source={{ uri: logoUri }}
               style={styles.logo}
               contentFit="contain"
-              cachePolicy="memory-disk"
+              cachePolicy={cacheFor(logoUri)}
               transition={120}
               accessibilityIgnoresInvertColors
             />
