@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Huli's fox, drawn on a 1024 grid; the backgrounds are in the files that include it. -->
+  <g stroke-linejoin="round" stroke-linecap="round">
+    <!-- ears -->
+    <path d="M300 478 L258 196 L470 382 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="18"/>
+    <path d="M724 478 L766 196 L554 382 Z" fill="#FFE8D6" stroke="#FFE8D6" stroke-width="18"/>
+    <path d="M300 430 L282 272 L406 384 Z" fill="#4A2C22" stroke="#4A2C22" stroke-width="14"/>
+    <path d="M724 430 L742 272 L618 384 Z" fill="#4A2C22" stroke="#4A2C22" stroke-width="14"/>
+    <!-- head: the left half lit, the right half in its fold's shade -->
+    <path d="M512 366 L304 440 L196 574 L512 862 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="22"/>
+    <path d="M512 366 L720 440 L828 574 L512 862 Z" fill="#FFE8D6" stroke="#FFE8D6" stroke-width="22"/>
+    <!-- the mask's orange tips along the cheeks -->
+    <path d="M196 574 L304 440 L318 560 Z" fill="#FFC9A3" stroke="#FFC9A3" stroke-width="10"/>
+    <path d="M828 574 L720 440 L706 560 Z" fill="#FFBE92" stroke="#FFBE92" stroke-width="10"/>
+    <!-- eyes -->
+    <path d="M362 584 Q404 540 452 566 Q412 612 362 584 Z" fill="#3A221A" stroke="#3A221A" stroke-width="8"/>
+    <path d="M662 584 Q620 540 572 566 Q612 612 662 584 Z" fill="#3A221A" stroke="#3A221A" stroke-width="8"/>
+    <!-- nose -->
+    <path d="M468 770 L556 770 L512 828 Z" fill="#3A221A" stroke="#3A221A" stroke-width="26"/>
+  </g>
+</svg>

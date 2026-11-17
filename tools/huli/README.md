@@ -26,8 +26,8 @@ Generated before a build (not hand edits):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Huli in the locales and a few
   display strings. Idempotent; run it after every upstream merge.
-- `tools/huli/make-icon.ps1` draws `build/icon.png` and `build/icon.ico`. The original icons are in
-  `tools/huli/kettu-original/`.
+- `tools/huli/icon/fox.svg` is the icon; `tools/huli/icon/render.mjs` renders the desktop app's
+  `build/icon.png` and `build/icon.ico` and the phone app's `mobile/assets` from it.
 
 Tests that check upstream's own addresses and defaults (`settings`, `update-sources`, `push`,
 `pairing`, `relay-regions`) fail by design in Huli; on Windows, tests that make symlinks fail too
