@@ -1,0 +1,55 @@
+# Search, the tasks tab's pages (start a task, workflows, a new routine) and the computer menu.
+appId: io.github.rsdvb.huli
+---
+- runFlow: qa-reset.yaml
+- tapOn: "会话"
+- tapOn:
+    point: 93%,10%
+- waitForAnimationToEnd
+- takeScreenshot: m01-search
+- inputText: "你好"
+- waitForAnimationToEnd
+- takeScreenshot: m02-search-results
+- tapOn: "取消"
+- waitForAnimationToEnd
+- tapOn: "任务"
+- tapOn:
+    text: "需求"
+    optional: true
+- tapOn: ".*开始一个需求"
+- waitForAnimationToEnd
+- takeScreenshot: m03-start-task
+- tapOn:
+    point: 8%,10%
+- waitForAnimationToEnd
+- tapOn: ".*工作流, 前进"
+- waitForAnimationToEnd
+- takeScreenshot: m04-workflows
+- tapOn:
+    point: 8%,10%
+- waitForAnimationToEnd
+- tapOn: "定时"
+- tapOn: ".*新建定时任务"
+- waitForAnimationToEnd
+- takeScreenshot: m05-routine-new
+- swipe:
+    start: 50%, 80%
+    end: 50%, 25%
+    duration: 400
+- waitForAnimationToEnd
+- takeScreenshot: m06-routine-new-2
+- tapOn:
+    point: 8%,10%
+- waitForAnimationToEnd
+- tapOn:
+    text: "使用"
+    index: 0
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: m07-routine-example
+- tapOn:
+    point: 8%,10%
+- tapOn: "会话"
+- tapOn: "DESKTOP-7M5UN44"
+- waitForAnimationToEnd
+- takeScreenshot: m08-computer-sheet

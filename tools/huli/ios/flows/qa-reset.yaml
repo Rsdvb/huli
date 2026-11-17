@@ -1,0 +1,11 @@
+# Starts the app afresh on its first tab, without the system's notification prompt.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: "YES"
+- tapOn:
+    text: "允许"
+    optional: true
+- waitForAnimationToEnd

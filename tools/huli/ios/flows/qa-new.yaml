@@ -1,0 +1,23 @@
+# Opens New session, shoots it with its menus, and starts a short session from the PROMPT env.
+appId: io.github.rsdvb.huli
+---
+- runFlow: qa-reset.yaml
+- tapOn: "会话"
+- tapOn: "新会话"
+- waitForAnimationToEnd
+- takeScreenshot: n01-new
+- tapOn:
+    text: "给 .* 发消息.*"
+- inputText: ${PROMPT}
+- waitForAnimationToEnd
+- takeScreenshot: n02-typed
+- tapOn: "选一个项目，或者直接说你要什么。"
+- waitForAnimationToEnd
+- tapOn: "发送"
+- waitForAnimationToEnd
+- takeScreenshot: n03-sent
+- extendedWaitUntil:
+    notVisible: "停止这一轮"
+    timeout: 90000
+- waitForAnimationToEnd
+- takeScreenshot: n04-done

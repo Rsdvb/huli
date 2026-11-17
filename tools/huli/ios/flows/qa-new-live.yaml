@@ -1,0 +1,28 @@
+# Starts a session from the PROMPT env without waiting for its turn to end, for its live states.
+appId: io.github.rsdvb.huli
+---
+- runFlow: qa-reset.yaml
+- tapOn: "会话"
+- tapOn: "新会话"
+- waitForAnimationToEnd
+- takeScreenshot: n01-new
+- tapOn:
+    text: "给 .* 发消息.*"
+- inputText: ${PROMPT}
+- waitForAnimationToEnd
+- takeScreenshot: n02-typed
+- tapOn: "选一个项目，或者直接说你要什么。"
+- waitForAnimationToEnd
+- tapOn: "发送"
+- waitForAnimationToEnd
+- takeScreenshot: n03-sent
+- extendedWaitUntil:
+    visible: "PAUSE_NEVER"
+    timeout: 25000
+    optional: true
+- takeScreenshot: n05-running
+- extendedWaitUntil:
+    visible: "PAUSE_NEVER"
+    timeout: 25000
+    optional: true
+- takeScreenshot: n06-later
