@@ -50,10 +50,8 @@ extension View {
   func widgetBackground<S: ShapeStyle>(_ style: S, padded: Bool = true) -> some View {
     if #available(iOS 17.0, *) {
       containerBackground(style, for: .widget)
-    } else if padded {
-      padding().background(style)
     } else {
-      background(style)
+      padding(padded ? 16 : 0).background(style)
     }
   }
 }
