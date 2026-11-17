@@ -2,7 +2,7 @@
 // session's actions and whose ⋯ opens what it made (files, changes, artifacts, terminals and
 // sub-sessions); what waits for the user above the composer; and the composer, which sends now or
 // queues behind the running turn, with its add menu, the session's mode and model menus, and the
-// computer's status under it, whose ring opens what fills the context.
+// computer's status under it, whose rings open the plan's usage and what fills the context.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -36,6 +36,7 @@ import {
 import { ContextSheet } from '../../components/ContextSheet'
 import { ThreadRow } from '../../components/EntryView'
 import { PermissionCard } from '../../components/PermissionCard'
+import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { useSessionActions } from '../../components/SessionActions'
 import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
 import { call } from '../../git'
@@ -149,6 +150,7 @@ export default function SessionScreen() {
   const [fresh, setFresh] = useState(false)
   const [selecting, setSelecting] = useState<string | null>(null)
   const [contextOpen, setContextOpen] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
   const [pending, setPending] = useState<AgentStatus | null>(null)
   const [counts, setCounts] = useState<{ artifacts: number | null; terminals: number | null }>({
     artifacts: null,
@@ -482,6 +484,10 @@ export default function SessionScreen() {
               ? { disabled: true, hint: '这一轮结束后才能换' }
               : { disabled: false }
             : null,
+          onUsage: () => {
+            menu.close()
+            setUsageOpen(true)
+          },
         })
       case 'more':
         return moreModelsPage(config.control, agentId)
@@ -617,6 +623,10 @@ export default function SessionScreen() {
               changed={changes.count}
               {...(changes.folder && changes.repo !== false ? { onFolderPress: changes.open } : {})}
               limits={agent?.limits ?? []}
+              onLimitPress={() => {
+                haptic.tap()
+                setUsageOpen(true)
+              }}
               context={
                 share !== null
                   ? {
@@ -693,6 +703,12 @@ export default function SessionScreen() {
         agent={agent}
         hostName={computer.name}
         connected={connected}
+      />
+      <PlanUsageSheet
+        visible={usageOpen}
+        onClose={() => setUsageOpen(false)}
+        agentId={agentId || null}
+        usage={usage}
       />
       {actions.element}
       <SelectText text={selecting} onClose={() => setSelecting(null)} />
