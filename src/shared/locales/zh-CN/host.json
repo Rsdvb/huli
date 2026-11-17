@@ -770,5 +770,10 @@
   },
   "marketSkills": {
     "nameTaken": "已经添加过名为 {{name}} 的技能，来自 {{from}}。先移除那一个：同名的两个技能，Agent 只会保留一个。"
+  },
+  "settingsFile": {
+    "notJson": "{{agent}} 的设置文件 {{file}} 不是有效的 JSON。请先在文件里改好，或直接在文件里做这项修改。",
+    "notJsonAt": "{{agent}} 的设置文件 {{file}} 不是有效的 JSON（第 {{line}} 行）。请先在文件里改好，或直接在文件里做这项修改。",
+    "notObject": "{{agent}} 的设置文件 {{file}} 里不是一个 JSON 对象。请先在文件里改好，或直接在文件里做这项修改。"
   }
 }

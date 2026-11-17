@@ -15,7 +15,7 @@ import { isObject, readSettings, writeSettings } from '../settings-file'
 export async function readCodebuddySite(
   file: string,
 ): Promise<Pick<CodebuddySettings, 'site' | 'otherSite'>> {
-  const settings = await readSettings(file)
+  const settings = await readSettings(file, 'Codebuddy Code')
   const raw = isObject(settings.env) ? settings.env[CODEBUDDY_SITE_VARIABLE] : undefined
   const value = raw === undefined || raw === null ? '' : String(raw).trim()
   if (value === '') return { site: 'automatic', otherSite: null }
@@ -45,7 +45,7 @@ export function checkCodebuddySite(change: CodebuddySiteChange): CodebuddySiteCh
 /** Writes the site into the settings file, or removes it for automatic; nothing else changes. */
 export async function writeCodebuddySite(file: string, input: CodebuddySiteChange): Promise<void> {
   const { site } = checkCodebuddySite(input)
-  const settings = await readSettings(file)
+  const settings = await readSettings(file, 'Codebuddy Code')
   const env = isObject(settings.env) ? { ...settings.env } : {}
   if (site === 'automatic') {
     if (!(CODEBUDDY_SITE_VARIABLE in env)) return
