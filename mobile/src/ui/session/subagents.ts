@@ -75,6 +75,44 @@ function read(link: HostLink, child: Pick<SessionSummary, 'id' | 'status' | 'upd
     .finally(() => reading.delete(child.id))
 }
 
+/**
+ * The sub-agents a session's badge lists: those running, the latest started first, then with
+ * `showFinished` the others, the latest finished first. Ported from the desktop's subagents.ts.
+ */
+export function listedSubagents(
+  subagents: readonly SessionSummary[],
+  showFinished: boolean,
+): SessionSummary[] {
+  const running = subagents.filter(subagentRunning).sort((a, b) => b.createdAt - a.createdAt)
+  if (!showFinished) return running
+  const finished = subagents
+    .filter((subagent) => !subagentRunning(subagent))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+  return [...running, ...finished]
+}
+
+let version = 0
+listeners.add(() => {
+  version++
+})
+
+/** The digests of several sub-agents at once, for a list of them such as the badge's menu. */
+export function useSubagentDigests(
+  link: HostLink,
+  children: readonly SessionSummary[],
+  connected: boolean,
+): (id: string) => SubagentDigest | null {
+  const keys = children.map((child) => `${child.id}:${child.status}:${child.updatedAt}`).join(',')
+  useEffect(() => {
+    if (!connected) return
+    for (const child of children) read(link, child)
+    // keys stands for the children's ids and states.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link, connected, keys])
+  useSyncExternalStore(subscribe, () => version)
+  return (id) => reads.get(id)?.digest ?? null
+}
+
 /** The digest of a sub-agent's thread, read when its row shows and again as it changes. */
 export function useSubagentDigest(
   link: HostLink,
