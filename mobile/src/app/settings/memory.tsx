@@ -267,7 +267,7 @@ export default function MemorySettings() {
               )
             ) : projectList.length === 0 ? (
               <EmptyLayer
-                title={`还没有记下 ${project.name} 的事`}
+                title={`还没有记下「${project.name}」的事`}
                 hint="Agent 会在工作中记下怎么运行它、踩过的坑和做过的决定。你也可以自己添加。"
                 onAdd={connected ? () => setAdding(projectScope) : undefined}
               />
