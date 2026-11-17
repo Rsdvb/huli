@@ -22,7 +22,6 @@ import {
   sessionTitle,
   useSessionsStore,
 } from '@renderer/stores/sessions'
-import { useGitHubStarStore } from '@renderer/stores/github-star'
 import type { SettingsSection } from '@renderer/stores/view'
 import { useHostName, useNamesHosts, useWindowHost } from '@renderer/stores/window-host'
 import { haystackOf, SEARCH_ACTIONS, type SearchAction, type SearchEntry } from './search-model'
@@ -297,12 +296,12 @@ function onHost(only: string | null | undefined, hostId: string | null): boolean
 
 function useActionEntries(): SearchEntry[] {
   const { t } = useTranslation('sidebar')
-  const starred = useGitHubStarStore((s) => s.state?.starred ?? false)
   return useMemo(() => {
     const english = i18n.getFixedT('en', 'sidebar')
     const keys = new Map(shortcutList('enter').map((shortcut) => [shortcut.action, shortcut.keys]))
+    // Huli: no palette action asks to star upstream's repository.
     const listed = (action: SearchAction): boolean =>
-      !(isWeb && action === 'openProject') && !(starred && action === 'starKettu')
+      action !== 'starKettu' && !(isWeb && action === 'openProject')
     return SEARCH_ACTIONS.filter(listed).map((action): SearchEntry => {
       const title = t(`search.action.${action}`)
       const shortcut = ACTION_SHORTCUT[action]
@@ -318,7 +317,7 @@ function useActionEntries(): SearchEntry[] {
         shortcut: (shortcut && keys.get(shortcut)) || null,
       }
     })
-  }, [t, starred])
+  }, [t])
 }
 
 function useSectionEntries(): SearchEntry[] {

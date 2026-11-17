@@ -20,7 +20,8 @@ import { useApply } from './use-apply'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { useGitHubOnly } from './use-github-only'
 
-const SOURCE_URL = 'https://github.com/KettuAI/Kettu'
+// Huli: its own private repository.
+const SOURCE_URL = 'https://github.com/Rsdvb/huli'
 
 /**
  * The top of the About page: its title, then a card with Kettu's icon, name, line, version and

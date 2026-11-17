@@ -35,9 +35,8 @@ import { openSettings, showShortcuts, THIS_COMPUTER, useViewStore } from '@rende
 import { chosenHost, systemName, type Identity } from './model'
 import { useMenuClose } from './menu-close'
 import { useThisComputerName } from './use-account'
-import { useStarMenuItem } from '@renderer/features/github-star/use-star'
 
-const DOCS_URL = 'https://github.com/KettuAI/Kettu#readme'
+const DOCS_URL = 'https://github.com/Rsdvb/huli#readme'
 
 /** An http(s) page in the system browser, as the app opens every outside link. */
 function openPage(url: string): void {
@@ -290,7 +289,6 @@ function useHelpItems(close: () => void): ProfileMenuItem[] {
   const name = useThisComputerName()
   const state = status?.state
   const latest = state && 'version' in state ? state.version : (status?.current ?? null)
-  const star = useStarMenuItem()
   return [
     {
       id: 'shortcuts',
@@ -321,7 +319,6 @@ function useHelpItems(close: () => void): ProfileMenuItem[] {
         openPage(DOCS_URL)
       },
     },
-    star,
     ...(info
       ? [
           {

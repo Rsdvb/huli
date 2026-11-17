@@ -87,7 +87,7 @@ export function systemdUnit(command: ServiceCommand): string {
     .join(' ')
   return `[Unit]
 Description=Kettu daemon
-Documentation=https://github.com/KettuAI/Kettu
+Documentation=https://github.com/Rsdvb/huli
 
 [Service]
 Type=simple

@@ -27,5 +27,6 @@ export interface UpdateStatus {
 export const RELEASES_URL = 'https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996'
 
 export function releaseUrl(version: string): string {
-  return `${RELEASES_URL}/tag/v${version}`
+  // Huli: the channel serves files only; release notes are on the repository's releases.
+  return `https://github.com/Rsdvb/huli/releases/tag/v${version}`
 }

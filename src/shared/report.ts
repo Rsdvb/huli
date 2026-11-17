@@ -259,5 +259,6 @@ export function reportIssueUrl(report: { id: string; version: string; system: st
     os: report.system,
     logs: `Problem report ${report.id}`,
   })
-  return `https://github.com/KettuAI/Kettu/issues/new?${query}`
+  // Huli: reports go to its own private repository, never upstream's public one.
+  return `https://github.com/Rsdvb/huli/issues/new?${query}`
 }

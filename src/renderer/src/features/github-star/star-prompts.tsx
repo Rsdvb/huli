@@ -17,6 +17,9 @@ import {
 import { BrowserMark, StarButton, StarMark } from './star-button'
 import { useStarLabel } from './use-star'
 
+/** Huli: never asks to star upstream's repository, whose prompts these are. */
+const HULI = true
+
 /** The floor's stops, crest to bottom; the stylesheet colors them from the theme. */
 const FLOOR_STOPS: [string, string, string] = ['currentColor', 'currentColor', 'currentColor']
 const TEXT_COLORS = [
@@ -52,7 +55,7 @@ function usePromptShown(which: 'card' | 'line'): boolean {
 
 /** The one-time card over the account row; `blocked` while another card is there. */
 export function StarCard({ blocked }: { blocked: boolean }) {
-  const shown = usePromptShown('card')
+  const shown = usePromptShown('card') && !HULI
   return (
     <AnimatePresence initial={false}>
       {shown && !blocked && (
@@ -122,7 +125,7 @@ function StarCardView() {
 
 /** New session's quiet line at the foot of the main area; `hidden` while a message is written. */
 export function StarLine({ hidden }: { hidden: boolean }) {
-  const shown = usePromptShown('line')
+  const shown = usePromptShown('line') && !HULI
   return (
     <div className="kstar-foot-slot">
       <AnimatePresence initial={false}>
@@ -161,6 +164,7 @@ function StarLineView({ hidden }: { hidden: boolean }) {
 /** A block under the agents on onboarding's last step. */
 export function OnboardingStar() {
   const { t } = useTranslation('star')
+  if (HULI) return null
   return (
     <div className="kob-panel kstar-onb">
       <span className="kstar-onb__mark">
@@ -181,6 +185,7 @@ export function AboutStarButton() {
   const phase = useStarPhase()
   const inBrowser = useStarsInBrowser()
   const label = useStarLabel()
+  if (HULI) return null
   const button = (
     <AffectButton
       variant="secondary"

@@ -33,6 +33,7 @@ const COPY = [
   ["Use email, GitHub, Google or Apple. It's free.", 'Sign in with your own Huli Cloud account.'],
   ['如需帮助，请联系 hello@kettu.sh。', '在服务器上用 huli-cloud 命令处理。'],
   ['Contact hello@kettu.sh for help.', 'Fix it on the server with the huli-cloud command.'],
+  ['https://kettu.sh/pair#', 'https://huli.invalid/pair#'],
   ['www.kettu.sh', 'Huli Cloud'],
   ['kettu.sh', 'Huli Cloud'],
 ]
