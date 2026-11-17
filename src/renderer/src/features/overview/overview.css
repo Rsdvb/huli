@@ -10,18 +10,23 @@
   max-width: 1280px;
   margin: 0 auto;
 }
+/* Narrow, the tools move under the title rather than squeezing it a character a line, and the
+   two switches stack when even they do not fit side by side. */
 .k-ov__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 16px;
 }
 .k-ov__tools {
   position: relative;
   z-index: 1;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
 }
 .k-ov-view {
   display: inline-flex;
