@@ -1,8 +1,10 @@
 // One session: its conversation, newest at the bottom, under a glass header whose title opens the
-// session's actions and whose ⋯ opens what it made (files, changes, artifacts, terminals and
-// sub-sessions); what waits for the user above the composer; and the composer, which sends now or
-// queues behind the running turn, with its add menu, the session's mode and model menus, and the
-// computer's status under it, whose rings open the plan's usage and what fills the context.
+// session's actions (by the desktop's menu model, SessionMenu.ts) and whose ⋯ opens what it made
+// (files, changes, artifacts, terminals and sub-sessions), with chips under it for its parent,
+// routine, task, worktree and pull requests; what waits for the user above the composer, a worktree
+// that is not ready among it; and the composer, which sends now or queues behind the running turn,
+// with its add menu, the session's mode and model menus, and the computer's status under it, whose
+// rings open the plan's usage and what fills the context.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -10,6 +12,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -52,7 +55,10 @@ import {
   waitsForUser,
 } from '../../components/entries/Waiting'
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
+import { WorktreeLine } from '../../components/git/WorktreeCard'
 import { useSessionActions } from '../../components/SessionActions'
+import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionChips'
+import { sessionMenuPages } from '../../components/SessionMenu'
 import { useSessionPane } from '../../components/SessionPane'
 import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
 import { useProjectFiles } from '../../files'
@@ -73,12 +79,7 @@ import { NATIVE_MENUS, NativeMenu } from '../../ui/session/NativeMenu'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
 import { toneColor, usageTone } from '../../ui/session/limits'
 import { useSessionTokens } from '../../ui/session/palette'
-import {
-  usePopover,
-  type MenuEntry,
-  type MenuPage,
-  type ViewHandle,
-} from '../../ui/session/Popover'
+import { usePopover, type MenuPage, type ViewHandle } from '../../ui/session/Popover'
 import { RoundButton } from '../../ui/session/Press'
 import { Icon } from '../../ui/session/Icon'
 import { SelectText } from '../../ui/session/SelectText'
@@ -187,6 +188,9 @@ export default function SessionScreen() {
   const cutNotice = useMemo(() => cutNoticeOf(view.thread), [view.thread])
   const childWaiting = waitingBelow(id, host.sessions).length > 0
   const handBack = session?.computer?.control === 'you'
+  // A worktree that is not ready says so above the composer, as the desktop's does.
+  const worktreeWaits = !!summary?.worktree && summary.worktree.state !== 'ready'
+  const chips = hasChips(summary, host.sessions)
 
   // The files of the folder the session's tools read or edited, newest first.
   const touched = useMemo(() => {
@@ -263,7 +267,7 @@ export default function SessionScreen() {
   const forkAtMessage = !!agent?.capabilities.forkAtMessage
   const canFork = forkAtMessage || !!agent?.capabilities.forkSession
   const fork = useCallback(
-    (entryId: string | null) => {
+    (entryId: string | null, worktree?: 'same') => {
       const atMessage = forkAtMessage && entryId !== null
       Alert.alert(
         atMessage ? '从这里分叉？' : '分叉这个会话？',
@@ -279,6 +283,7 @@ export default function SessionScreen() {
                 .request('sessions.fork', {
                   sessionId: id,
                   ...(atMessage ? { entryId: entryId! } : {}),
+                  ...(worktree ? { worktree } : {}),
                 })
                 .then((made) => {
                   haptic.success()
@@ -295,19 +300,10 @@ export default function SessionScreen() {
     [forkAtMessage, link, id, pane],
   )
 
-  const newChild = () => {
-    if (!summary) return
-    call(link, 'sessions.create', {
-      agentId: summary.agentId,
-      projectPath: summary.scratch ? null : summary.projectPath,
-      parentId: id,
-    })
-      .then((made) => {
-        haptic.success()
-        router.push(`/session/${made.id}`)
-      })
-      .catch((error: unknown) => Alert.alert('没能新建子会话', errorText(error)))
-  }
+  // New session opens under this one, in its project, as the desktop's 新建子会话 does.
+  const newChild = () => router.push({ pathname: '/new', params: { parent: id } })
+  const openSession = (sessionId: string) =>
+    pane ? pane.open(sessionId) : router.push(`/session/${sessionId}`)
 
   const commandNames = useMemo(
     () => (session?.commands ?? []).map((command) => command.name),
@@ -409,60 +405,21 @@ export default function SessionScreen() {
   const others = usableAgents(host.agents)
   const switchable = others.length > 1 || (others.length === 1 && others[0]!.id !== agentId)
 
-  const titleMenu = (): MenuPage | null => {
-    if (!summary) return null
-    const archived = summary.archivedAt !== null
-    const entries: MenuEntry[] = [
-      { key: 'rename', label: '重命名', icon: G.pencil, onPress: () => actions.rename(summary) },
-      ...(summary.parentId === null
-        ? [
-            {
-              key: 'pin',
-              label: summary.pinnedAt !== null ? '取消置顶' : '置顶',
-              icon: summary.pinnedAt !== null ? G.unpin : G.pin,
-              onPress: () => actions.togglePin(summary),
-            },
-          ]
-        : []),
-      {
-        key: 'unread',
-        label: summary.attention === 'unread' ? '标为已读' : '标为未读',
-        icon: summary.attention === 'unread' ? G.read : G.unread,
-        onPress: () => actions.toggleUnread(summary),
-      },
-      {
-        key: 'mute',
-        label: muted ? '取消静音' : '静音',
-        icon: muted ? G.unmute : G.mute,
-        onPress: () => void setMuted(id, !muted).then(() => haptic.success()),
-      },
-      ...(canFork ? [{ key: 'fork', label: '分叉', icon: G.fork, onPress: () => fork(null) }] : []),
-      { key: 'child', label: '新建子会话', icon: G.child, onPress: newChild },
-      ...(running ? [{ key: 'stop', label: '停止', icon: G.stopOutline, onPress: stop }] : []),
-      archived
-        ? {
-            key: 'restore',
-            label: '恢复到会话列表',
-            icon: G.archive,
-            onPress: () => actions.restore(summary),
-          }
-        : {
-            key: 'archive',
-            label: '归档',
-            icon: G.archive,
-            onPress: () => actions.archive(summary),
-          },
-      { kind: 'divider', key: 'rule' },
-      {
-        key: 'delete',
-        label: '删除',
-        icon: G.trash,
-        destructive: true,
-        onPress: () => actions.remove(summary),
-      },
-    ]
-    return { entries }
-  }
+  const titlePages = summary
+    ? sessionMenuPages({
+        summary,
+        session,
+        agent,
+        actions,
+        canFork,
+        muted,
+        onMute: () => void setMuted(id, !muted).then(() => haptic.success()),
+        onFork: (worktree) => fork(null, worktree),
+        onNewSubSession: newChild,
+        onShowParent: () => summary.parentId && openSession(summary.parentId),
+        onOpenUrl: (url) => void Linking.openURL(url),
+      })
+    : null
 
   const moreMenu = (): MenuPage => {
     const repo = !!changes.folder && changes.repo !== false
@@ -528,7 +485,8 @@ export default function SessionScreen() {
   const pages = (page: string): MenuPage | null => {
     switch (page) {
       case 'title':
-        return titleMenu()
+      case 'title-prs':
+        return titlePages?.(page) ?? null
       case 'more-menu':
         return moreMenu()
       case 'attach':
@@ -601,7 +559,10 @@ export default function SessionScreen() {
             <View style={{ height: 4 }} />
           )
         }
-        contentContainerStyle={[styles.content, { paddingBottom: headerHeight + 12 }]}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) },
+        ]}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         initialNumToRender={14}
@@ -631,12 +592,16 @@ export default function SessionScreen() {
           handBack ||
           credit !== null ||
           childWaiting ||
+          worktreeWaits ||
           (session?.queue.length ?? 0) > 0) && (
           <ScrollView
             style={styles.waiting}
             contentContainerStyle={styles.waitingContent}
             keyboardShouldPersistTaps="handled"
           >
+            {worktreeWaits && summary?.worktree ? (
+              <WorktreeLine sessionId={id} worktree={summary.worktree} />
+            ) : null}
             <HandBackCard sessionId={id} session={session} />
             {requests.map((entry) => (
               <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
@@ -732,7 +697,10 @@ export default function SessionScreen() {
               platform={computer.platform}
               state={host.state}
               folder={project}
+              path={changes.folder}
               changed={changes.count}
+              branch={changes.branch}
+              worktree={changes.worktree}
               {...(changes.folder && changes.repo !== false ? { onFolderPress: changes.open } : {})}
               limits={limitsForModel(agent?.limits ?? [], config.model?.option)}
               onLimitPress={() => {
@@ -795,10 +763,13 @@ export default function SessionScreen() {
           </View>
         }
       />
+      {summary && chips ? (
+        <SessionChips summary={summary} top={headerHeight} onOpenSession={openSession} />
+      ) : null}
       {linkDown && view.thread && (
         <View
           pointerEvents="none"
-          style={[styles.banner, { top: headerHeight + 8 }]}
+          style={[styles.banner, { top: headerHeight + 8 + (chips ? CHIPS_HEIGHT : 0) }]}
           accessibilityLiveRegion="polite"
         >
           <GlassCapsule height={34} elevated style={styles.bannerPill}>
