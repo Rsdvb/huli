@@ -176,7 +176,12 @@ export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPres
       ]}
     >
       <View>
-        <GlassButton size={40} onPress={props.onPress} accessibilityLabel="回到最新">
+        <GlassButton
+          size={40}
+          systemImage={G.toBottom.sf}
+          onPress={props.onPress}
+          accessibilityLabel="回到最新"
+        >
           <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
         </GlassButton>
         {props.fresh && (

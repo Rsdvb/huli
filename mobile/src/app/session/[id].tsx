@@ -2,7 +2,7 @@
 // session's actions and whose ⋯ opens what it made (files, changes, artifacts, terminals and
 // sub-sessions); what waits for the user above the composer; and the composer, which sends now or
 // queues behind the running turn, with its add menu, the session's mode and model menus, and the
-// computer's status under it, whose ring opens what fills the context.
+// computer's status under it, whose rings open the plan's usage and what fills the context.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -21,6 +21,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import { limitsForModel } from '@shared/plan-limits'
 import type { ThreadEntry, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
 import { AttachPages, useAttachPages } from '../../components/AttachMenu'
@@ -50,6 +51,7 @@ import {
   waitingBelow,
   waitsForUser,
 } from '../../components/entries/Waiting'
+import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { useSessionActions } from '../../components/SessionActions'
 import { useSessionPane } from '../../components/SessionPane'
 import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
@@ -67,6 +69,7 @@ import { FileRefs } from '../../ui/session/fileRefs'
 import { relativePath } from '../../ui/session/format'
 import { G } from '../../ui/session/icons'
 import { GlassCapsule } from '../../ui/Glass'
+import { NATIVE_MENUS, NativeMenu } from '../../ui/session/NativeMenu'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
 import { toneColor, usageTone } from '../../ui/session/limits'
 import { useSessionTokens } from '../../ui/session/palette'
@@ -136,6 +139,7 @@ export default function SessionScreen() {
   const [fresh, setFresh] = useState(false)
   const [selecting, setSelecting] = useState<string | null>(null)
   const [contextOpen, setContextOpen] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
   const [pending, setPending] = useState<AgentStatus | null>(null)
   const [counts, setCounts] = useState<{ artifacts: number | null; terminals: number | null }>({
     artifacts: null,
@@ -143,7 +147,8 @@ export default function SessionScreen() {
   })
   const muted = useMuted(id)
   const terminalAllowed = useTerminalAllowed(link, host.state)
-  const agentOptions = useAgentOptions(link, menu.openId === 'model')
+  // A system menu says nothing as it opens, so what it shows is read beforehand there.
+  const agentOptions = useAgentOptions(link, NATIVE_MENUS || menu.openId === 'model')
 
   const rows = useMemo(() => {
     if (!view.thread) return []
@@ -214,7 +219,7 @@ export default function SessionScreen() {
   }, [newest, away])
 
   // What the ⋯ menu counts is read as it opens.
-  const moreOpen = menu.openId === 'more-menu'
+  const moreOpen = NATIVE_MENUS || menu.openId === 'more-menu'
   useEffect(() => {
     if (!moreOpen || !connected) return
     let alive = true
@@ -542,6 +547,10 @@ export default function SessionScreen() {
               ? { disabled: true, hint: '这一轮结束后才能换' }
               : { disabled: false }
             : null,
+          onUsage: () => {
+            menu.close()
+            setUsageOpen(true)
+          },
         })
       case 'more':
         return moreModelsPage(config.control, agentId)
@@ -666,34 +675,52 @@ export default function SessionScreen() {
           running={running}
           onStop={stop}
           onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
+          attachMenu={(anchor) => ({
+            root: 'attach',
+            pages,
+            popover: {
+              pages: ['mention'],
+              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+            },
+          })}
           left={
-            <ModeButton
-              mode={config.mode}
-              busy={config.setting !== null && config.setting === config.mode?.option.id}
-              disabled={!connected || config.setting !== null}
-              anchor={modeAnchor}
-              onPress={() => menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })}
-            />
+            <NativeMenu source={{ root: 'mode', pages }} disabled={!connected}>
+              <ModeButton
+                mode={config.mode}
+                busy={config.setting !== null && config.setting === config.mode?.option.id}
+                disabled={!connected || config.setting !== null}
+                anchor={modeAnchor}
+                onPress={() =>
+                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
+                }
+              />
+            </NativeMenu>
           }
           right={
             config.model || config.effort || switchable ? (
-              <ModelChip
-                agentId={pending?.id ?? agentId}
-                harness={pending?.harnessId ?? config.harness}
-                model={config.model?.name ?? (config.model ? null : (agent?.name ?? null))}
-                effort={config.effort?.name ?? null}
-                pending={pending?.name ?? null}
-                busy={
-                  config.setting !== null &&
-                  (config.setting === config.model?.option.id ||
-                    config.setting === config.effort?.option.id)
-                }
-                disabled={!connected}
-                anchor={modelAnchor}
-                onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
-                }
-              />
+              <NativeMenu source={{ root: 'model', pages }} disabled={!connected}>
+                <ModelChip
+                  agentId={pending?.id ?? agentId}
+                  harness={pending?.harnessId ?? config.harness}
+                  model={config.model?.name ?? (config.model ? null : (agent?.name ?? null))}
+                  effort={config.effort?.name ?? null}
+                  pending={pending?.name ?? null}
+                  busy={
+                    config.setting !== null &&
+                    (config.setting === config.model?.option.id ||
+                      config.setting === config.effort?.option.id)
+                  }
+                  disabled={!connected}
+                  anchor={modelAnchor}
+                  onPress={() =>
+                    menu.open('model', modelAnchor, {
+                      placement: 'above',
+                      align: 'end',
+                      width: 340,
+                    })
+                  }
+                />
+              </NativeMenu>
             ) : null
           }
           footer={
@@ -704,7 +731,11 @@ export default function SessionScreen() {
               folder={project}
               changed={changes.count}
               {...(changes.folder && changes.repo !== false ? { onFolderPress: changes.open } : {})}
-              limits={agent?.limits ?? []}
+              limits={limitsForModel(agent?.limits ?? [], config.model?.option)}
+              onLimitPress={() => {
+                haptic.tap()
+                setUsageOpen(true)
+              }}
               context={
                 share !== null
                   ? {
@@ -728,6 +759,7 @@ export default function SessionScreen() {
         title={title}
         subtitle={[agent?.name, project].filter(Boolean).join(' · ')}
         titleAnchor={titleAnchor}
+        {...(summary ? { titleMenu: { root: 'title', pages } } : {})}
         {...(summary
           ? {
               onTitlePress: () =>
@@ -740,17 +772,23 @@ export default function SessionScreen() {
           : {})}
         right={
           <View ref={moreAnchor} collapsable={false}>
-            <RoundButton
-              tone="glass"
-              size={44}
-              onPress={() =>
-                menu.open('more-menu', moreAnchor, { placement: 'below', align: 'end', width: 290 })
-              }
-              disabled={!summary}
-              accessibilityLabel="文件、改动、Artifacts、终端和子会话"
-            >
-              <Icon icon={G.more} size={18} color={c.text} weight="bold" />
-            </RoundButton>
+            <NativeMenu source={{ root: 'more-menu', pages }} disabled={!summary}>
+              <RoundButton
+                tone="glass"
+                size={44}
+                onPress={() =>
+                  menu.open('more-menu', moreAnchor, {
+                    placement: 'below',
+                    align: 'end',
+                    width: 290,
+                  })
+                }
+                disabled={!summary}
+                accessibilityLabel="文件、改动、Artifacts、终端和子会话"
+              >
+                <Icon icon={G.more} size={18} color={c.text} weight="bold" />
+              </RoundButton>
+            </NativeMenu>
           </View>
         }
       />
@@ -781,6 +819,12 @@ export default function SessionScreen() {
         agent={agent}
         hostName={computer.name}
         connected={connected}
+      />
+      <PlanUsageSheet
+        visible={usageOpen}
+        onClose={() => setUsageOpen(false)}
+        agentId={agentId || null}
+        usage={usage}
       />
       {actions.element}
       <SelectText text={selecting} onClose={() => setSelecting(null)} />

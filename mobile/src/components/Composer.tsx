@@ -52,7 +52,8 @@ import { FileMark, G, Icon } from '../ui/session/icons'
 import { useKeyboardShown } from '../ui/session/keyboard'
 import { useSessionTokens } from '../ui/session/palette'
 import { Glass, useGlassMode } from '../ui/Glass'
-import { useMenuEdge, type ViewHandle } from '../ui/session/Popover'
+import { NativeMenu } from '../ui/session/NativeMenu'
+import { useMenuEdge, type MenuSource, type ViewHandle } from '../ui/session/Popover'
 import { PressScale, RoundButton } from '../ui/session/Press'
 
 export interface ComposerProps {
@@ -77,6 +78,8 @@ export interface ComposerProps {
   autoFocus?: boolean
   /** Opens the screen's add menu from the add button; without it the system's menu opens. */
   onAttach?: (anchor: RefObject<ViewHandle | null>) => void
+  /** The add menu as the system's menu where there is one; its search pages open over the button. */
+  attachMenu?: (anchor: RefObject<ViewHandle | null>) => MenuSource
   ref?: Ref<ComposerHandle>
 }
 
@@ -428,19 +431,25 @@ export function Composer(props: ComposerProps) {
           />
           <View style={styles.row}>
             <View ref={attachAnchor} collapsable={false}>
-              <RoundButton
-                onPress={openMenu}
+              <NativeMenu
+                source={props.attachMenu ? props.attachMenu(attachAnchor) : null}
                 disabled={sending}
-                accessibilityLabel="添加照片、文件或命令"
               >
-                <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
-              </RoundButton>
+                <RoundButton
+                  onPress={openMenu}
+                  disabled={sending}
+                  accessibilityLabel="添加照片、文件或命令"
+                >
+                  <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
+                </RoundButton>
+              </NativeMenu>
             </View>
             {props.left}
             <View style={styles.right}>{props.right}</View>
             {(!stoppable || !empty || sending) && (
               <RoundButton
                 tone="accent"
+                {...(sending ? {} : { systemImage: props.running ? G.queue.sf : G.send.sf })}
                 onPress={() => void send()}
                 disabled={!canSend}
                 accessibilityLabel={props.running ? '加入队列' : '发送'}
@@ -467,9 +476,10 @@ export function Composer(props: ComposerProps) {
                   props.onStop!()
                 }}
                 accessibilityLabel="停止这一轮"
-                style={{ backgroundColor: s.stop }}
+                tone="glass"
+                systemImage={G.stop.sf}
               >
-                <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
+                <Icon icon={G.stop} size={13} color={c.text} weight="bold" />
               </RoundButton>
             )}
           </View>

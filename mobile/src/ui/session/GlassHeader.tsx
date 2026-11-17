@@ -3,38 +3,17 @@
 // control is glass of its own, the title a capsule; otherwise the bar is frosted as a whole.
 
 import type { ReactNode, RefObject } from 'react'
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { BlurView } from 'expo-blur'
 import { router } from 'expo-router'
-import { GlassCapsule, useGlassMode } from '../Glass'
+import { GlassCapsule, ScrollEdge, useGlassMode } from '../Glass'
 import { useSessionPane } from '../../components/SessionPane'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
-import type { ViewHandle } from './Popover'
+import { NativeMenu } from './NativeMenu'
+import type { MenuSource, ViewHandle } from './Popover'
 import { PressScale, RoundButton } from './Press'
-
-/**
- * The soft edge iOS 26 gives a scroll view under floating controls: the screen's color, strong
- * under the status bar and fading out below the controls.
- */
-function EdgeFade(props: { color: string; height: number }) {
-  return (
-    <View pointerEvents="none" style={[styles.fade, { height: props.height }]}>
-      <Svg width="100%" height="100%">
-        <Defs>
-          <LinearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={props.color} stopOpacity={0.94} />
-            <Stop offset="0.45" stopColor={props.color} stopOpacity={0.7} />
-            <Stop offset="1" stopColor={props.color} stopOpacity={0} />
-          </LinearGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#edge)" />
-      </Svg>
-    </View>
-  )
-}
 
 export const HEADER_BAR = 60
 
@@ -58,6 +37,8 @@ export function GlassHeader(props: {
   /** A sheet presented modally: a close button instead of back, and no status bar room. */
   modal?: boolean
   onTitlePress?: () => void
+  /** The title's menu as the system's menu where there is one, in place of onTitlePress. */
+  titleMenu?: MenuSource
   /** Where a menu the title opens is anchored. */
   titleAnchor?: RefObject<ViewHandle | null>
   right?: ReactNode
@@ -65,6 +46,8 @@ export function GlassHeader(props: {
   const { c, scheme } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const mode = useGlassMode()
+  // A system menu sizes its label by the label's content, so the title is held to a width of its own.
+  const titleWidth = useWindowDimensions().width - 150
   // In the iPad split's pane there is nothing to go back to; the button empties the pane.
   const pane = useSessionPane()
   const top = props.modal && Platform.OS === 'ios' ? 8 : insets.top
@@ -76,7 +59,7 @@ export function GlassHeader(props: {
     <View
       ref={props.titleAnchor}
       collapsable={false}
-      style={{ alignItems: 'center', opacity: pressed ? 0.55 : 1, maxWidth: '100%' }}
+      style={{ alignItems: 'center', opacity: pressed ? 0.55 : 1, maxWidth: titleWidth }}
     >
       <View style={styles.titleRow}>
         <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
@@ -110,7 +93,7 @@ export function GlassHeader(props: {
         props.floating && !liquid && !blur ? { backgroundColor: c.glass } : null,
       ]}
     >
-      {liquid && <EdgeFade color={c.bg} height={top + HEADER_BAR + 12} />}
+      {liquid && <ScrollEdge color={c.bg} height={top + HEADER_BAR + 12} />}
       {blur && (
         <BlurView
           style={StyleSheet.absoluteFill}
@@ -125,6 +108,7 @@ export function GlassHeader(props: {
         <RoundButton
           tone="glass"
           size={44}
+          systemImage={props.modal || pane ? G.close.sf : G.back.sf}
           onPress={props.modal ? () => router.back() : (pane?.close ?? goBack)}
           accessibilityLabel={props.modal || pane ? '关闭' : '返回'}
         >
@@ -141,33 +125,35 @@ export function GlassHeader(props: {
           )}
         </RoundButton>
         <View style={styles.titleBox} pointerEvents="box-none">
-          {liquid ? (
-            <PressScale
-              onPress={props.onTitlePress}
-              disabled={!props.onTitlePress}
-              accessibilityRole={props.onTitlePress ? 'button' : 'header'}
-              hitSlop={4}
-              outerStyle={styles.titleCapsuleOuter}
-            >
-              <GlassCapsule
-                interactive={!!props.onTitlePress}
-                height={44}
-                style={styles.titleCapsule}
+          <NativeMenu source={props.titleMenu ?? null}>
+            {liquid ? (
+              <PressScale
+                onPress={props.onTitlePress}
+                disabled={!props.onTitlePress}
+                accessibilityRole={props.onTitlePress ? 'button' : 'header'}
+                hitSlop={4}
+                outerStyle={styles.titleCapsuleOuter}
               >
-                {titleContent(false)}
-              </GlassCapsule>
-            </PressScale>
-          ) : (
-            <Pressable
-              style={styles.titlePlain}
-              onPress={props.onTitlePress}
-              disabled={!props.onTitlePress}
-              accessibilityRole={props.onTitlePress ? 'button' : 'header'}
-              hitSlop={4}
-            >
-              {({ pressed }) => titleContent(pressed)}
-            </Pressable>
-          )}
+                <GlassCapsule
+                  interactive={!!props.onTitlePress}
+                  height={44}
+                  style={styles.titleCapsule}
+                >
+                  {titleContent(false)}
+                </GlassCapsule>
+              </PressScale>
+            ) : (
+              <Pressable
+                style={styles.titlePlain}
+                onPress={props.onTitlePress}
+                disabled={!props.onTitlePress}
+                accessibilityRole={props.onTitlePress ? 'button' : 'header'}
+                hitSlop={4}
+              >
+                {({ pressed }) => titleContent(pressed)}
+              </Pressable>
+            )}
+          </NativeMenu>
         </View>
         <View style={styles.right}>{props.right}</View>
       </View>
@@ -178,7 +164,6 @@ export function GlassHeader(props: {
 const styles = StyleSheet.create({
   root: { zIndex: 10 },
   floating: { position: 'absolute', top: 0, left: 0, right: 0 },
-  fade: { position: 'absolute', top: 0, left: 0, right: 0 },
   hairline: {
     position: 'absolute',
     left: 0,

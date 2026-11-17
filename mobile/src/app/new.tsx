@@ -1,13 +1,14 @@
 // A new session: a greeting, the recent projects to choose one from (or none), and the same
 // composer as a session's, whose mode and model menus set what the session starts with and whose
 // model menu switches the agent; the status line names the computer, the project, which opens a
-// picker, and the branch it is on.
+// picker, the branch it is on, and the agent's plan usage.
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router } from 'expo-router'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
+import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
@@ -23,6 +24,7 @@ import {
   usableAgents,
   type ConfigControl,
 } from '../components/ConfigMenus'
+import { PlanUsageSheet } from '../components/PlanUsageSheet'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
 import { useHost, useLink } from '../host'
@@ -34,6 +36,7 @@ import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../ui/session/Popover'
+import { NativeMenu } from '../ui/session/NativeMenu'
 import { StatusLine } from '../ui/session/StatusLine'
 
 export default function NewSession() {
@@ -62,6 +65,16 @@ export default function NewSession() {
   const projectPath = chosenProject === undefined ? (projects[0]?.path ?? null) : chosenProject
   const project = projects.find((p) => p.path === projectPath)
   const [picks, setPicks] = useState<Record<string, string | boolean>>({})
+  const [usageOpen, setUsageOpen] = useState(false)
+  const connected = host.state.kind === 'connected'
+
+  // The chosen agent's plan, for the status line's ring; only one already running is asked, so
+  // that none starts just for the read.
+  const readsLimits = !!agent && agent.state === 'ready' && agent.capabilities.reports
+  useEffect(() => {
+    if (!connected || !readsLimits || !agentId) return
+    void link.request('agents.refreshLimits', { agentId }).catch(() => {})
+  }, [connected, readsLimits, agentId, link])
   const changes = useChanges(link, projectPath)
 
   const entry = options.options?.find((o) => o.agentId === agentId)
@@ -134,6 +147,10 @@ export default function NewSession() {
             agent,
             c,
             switchAgent: agents.length > 1 ? { disabled: false } : null,
+            onUsage: () => {
+              menu.close()
+              setUsageOpen(true)
+            },
           }) ?? { entries: [], loading: !entry, empty: '这个 Agent 没有可选的模型' }
         )
       case 'more':
@@ -261,30 +278,48 @@ export default function NewSession() {
           disabled={!agentId}
           bottomInset={insets.bottom}
           onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
+          attachMenu={(anchor) => ({
+            root: 'attach',
+            pages,
+            popover: {
+              pages: ['mention'],
+              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+            },
+          })}
           left={
-            <ModeButton
-              mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
-              busy={false}
-              disabled={false}
-              labelled
-              anchor={modeAnchor}
-              onPress={() => menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })}
-            />
+            <NativeMenu source={{ root: 'mode', pages }}>
+              <ModeButton
+                mode={mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null}
+                busy={false}
+                disabled={false}
+                labelled
+                anchor={modeAnchor}
+                onPress={() =>
+                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
+                }
+              />
+            </NativeMenu>
           }
           right={
             agent ? (
-              <ModelChip
-                agentId={agent.id}
-                harness={agent.harnessId}
-                model={model?.name ?? agent.name}
-                effort={effort?.name ?? null}
-                busy={false}
-                disabled={false}
-                anchor={modelAnchor}
-                onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
-                }
-              />
+              <NativeMenu source={{ root: 'model', pages }}>
+                <ModelChip
+                  agentId={agent.id}
+                  harness={agent.harnessId}
+                  model={model?.name ?? agent.name}
+                  effort={effort?.name ?? null}
+                  busy={false}
+                  disabled={false}
+                  anchor={modelAnchor}
+                  onPress={() =>
+                    menu.open('model', modelAnchor, {
+                      placement: 'above',
+                      align: 'end',
+                      width: 340,
+                    })
+                  }
+                />
+              </NativeMenu>
             ) : null
           }
           footer={
@@ -299,10 +334,16 @@ export default function NewSession() {
                 menu.open('projects', folderAnchor, { placement: 'above', align: 'center' })
               }
               branch={branch}
+              limits={limitsForModel(agent?.limits ?? [], model?.option)}
+              onLimitPress={() => {
+                haptic.tap()
+                setUsageOpen(true)
+              }}
             />
           }
         />
       </KeyboardAvoidingView>
+      <PlanUsageSheet visible={usageOpen} onClose={() => setUsageOpen(false)} agentId={agentId} />
       {menu.render(pages)}
     </View>
   )

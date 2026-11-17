@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { Animated, StyleSheet, View } from 'react-native'
 import { router } from 'expo-router'
 import { GlassButton } from './Glass'
-import { Icon } from './Icon'
+import { Icon, sfSymbol } from './Icon'
 import { FloatingHeader, type CollapsingHeader } from './ScrollHeader'
 import { FONT_SCALE, type as typeScale, useTokens } from './tokens'
 
@@ -24,6 +24,7 @@ export function NavBar(props: {
     <FloatingHeader header={props.header}>
       <GlassButton
         silent
+        systemImage={sfSymbol(close ? 'close' : 'chevronLeft')}
         accessibilityLabel={close ? '关闭' : '返回'}
         onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       >

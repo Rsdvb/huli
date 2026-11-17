@@ -1,7 +1,7 @@
 // The line under the composer: the computer with its system and whether the link is up, the
 // session's folder, which opens its changes (or, in New session, the project picker), the branch
-// it is on, how much of the plan's tightest window is used, and how full the context is, which
-// opens what fills it.
+// it is on, how much of the plan's tightest window is used, which opens the plan's usage, and how
+// full the context is, which opens what fills it.
 
 import type { RefObject } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
@@ -10,7 +10,15 @@ import type { PlanLimit } from '@shared/agent-host'
 import type { LinkState } from '@shared/remote/link'
 import { G, Icon, SystemMark } from './icons'
 import type { ViewHandle } from './Popover'
-import { limitColor, tightestLimit, windowName } from './limits'
+import {
+  backText,
+  isExhausted,
+  limitColor,
+  limitTextColor,
+  shownLimit,
+  windowName,
+  windowShort,
+} from './limits'
 import { useSessionTokens } from './palette'
 
 export function UsageRing(props: {
@@ -92,19 +100,22 @@ export function StatusLine(props: {
   /** The branch the folder is on; `loading` while it is read, null outside a repository. */
   branch?: string | null | 'loading'
   limits?: PlanLimit[]
+  /** The plan ring opens the plan's usage. */
+  onLimitPress?: () => void
   /** The context's share used, which opens its breakdown. */
   context?: { share: number; color: string; approximate: boolean; onPress(): void } | null
 }) {
-  const { c } = useSessionTokens()
+  const { c, s } = useSessionTokens()
   const dot =
     props.state.kind === 'connected'
       ? c.success
       : props.state.kind === 'stopped'
         ? c.danger
         : c.warning
-  const limit = tightestLimit(props.limits ?? [])
-  const shownLimit = limit && limit.usedPercent !== null ? limit : null
-  const percent = Math.round(shownLimit?.usedPercent ?? 0)
+  const now = Date.now()
+  const limit = shownLimit(props.limits ?? [], now)
+  const out = !!limit && isExhausted(limit, now)
+  const percent = out ? 100 : Math.round(limit?.usedPercent ?? 0)
   const connection =
     props.state.kind === 'connected'
       ? '已连接'
@@ -171,14 +182,35 @@ export function StatusLine(props: {
           )}
         </View>
       )}
-      {shownLimit && (
-        <View style={styles.limit} accessibilityLabel={`${shownLimit.label} 已用 ${percent}%`}>
-          <UsageRing percent={percent} color={limitColor(shownLimit, c)} track={c.fillStrong} />
-          <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
-            <Text style={{ color: c.textTertiary }}>{windowName(shownLimit)} </Text>
-            {percent}%
-          </Text>
-        </View>
+      {limit && (
+        <Pressable
+          onPress={props.onLimitPress}
+          disabled={!props.onLimitPress}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={
+            out
+              ? `${windowName(limit)}限额已用完，${backText(limit.resetsAt, now)}，查看套餐用量`
+              : `${windowName(limit)}限额已用 ${percent}%，查看套餐用量`
+          }
+          style={({ pressed }) => [
+            styles.limit,
+            out && [styles.out, { backgroundColor: s.dangerSoft }],
+            { opacity: pressed ? 0.55 : 1 },
+          ]}
+        >
+          <UsageRing percent={percent} color={limitColor(limit, c)} track={c.fillStrong} />
+          {out ? (
+            <Text style={[styles.text, styles.outText, { color: c.danger }]} numberOfLines={1}>
+              {windowShort(limit)}已用完 · {backText(limit.resetsAt, now)}
+            </Text>
+          ) : (
+            <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+              <Text style={{ color: c.textTertiary }}>{windowShort(limit)} </Text>
+              <Text style={{ color: limitTextColor(limit, c, c.textSecondary) }}>{percent}%</Text>
+            </Text>
+          )}
+        </Pressable>
       )}
       {props.context && (
         <Pressable
@@ -225,5 +257,7 @@ const styles = StyleSheet.create({
   badge: { borderRadius: 999, paddingHorizontal: 6, minWidth: 18, alignItems: 'center' },
   badgeText: { fontSize: 11, lineHeight: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
   limit: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  out: { borderRadius: 999, paddingLeft: 4, paddingRight: 8, paddingVertical: 2, flexShrink: 1 },
+  outText: { fontWeight: '600', flexShrink: 1 },
   branch: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, maxWidth: 150 },
 })
