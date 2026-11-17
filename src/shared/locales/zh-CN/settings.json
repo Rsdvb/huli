@@ -310,6 +310,11 @@
       "description": "一次运行结束，或因接近套餐限制而暂停。",
       "keywords": "例程 计划 后台"
     },
+    "limits": {
+      "name": "额度提醒",
+      "description": "套餐的某个限额用到 90% 或用完时，每个重置周期提醒一次。窗口在前台时显示在窗口里。",
+      "keywords": "额度 限额 套餐 用量 5 小时 每周 limit quota"
+    },
     "error": {
       "name": "错误",
       "description": "会话出错或 Agent 停止。"

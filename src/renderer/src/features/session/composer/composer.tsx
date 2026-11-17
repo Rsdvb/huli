@@ -23,6 +23,7 @@ import { SelectionChip } from '@renderer/features/artifacts/selection-chip'
 import { usePane } from '@renderer/features/split/pane-context'
 import { optionsOn, useAgentOptionsStore } from '@renderer/stores/agent-options'
 import {
+  askAgentSwitch,
   setPendingSwitch,
   updatePendingSwitch,
   useAgentSwitchStore,
@@ -282,6 +283,16 @@ export function Composer({
   // only, when the focus is nowhere else, as after New session's composer gave way to it.
   const focused = usePane()?.focused ?? true
   const ready = status === 'ready'
+  // A plan alert's Switch agent opens the agent menu here, between turns.
+  useEffect(
+    () =>
+      useAgentSwitchStore.subscribe((s) => {
+        if (s.asking !== sessionId) return
+        askAgentSwitch(null)
+        if (idle) setChoosingAgent(true)
+      }),
+    [sessionId, idle],
+  )
   useEffect(() => {
     if (!focused || starting) return
     if (document.activeElement === document.body) box.editor.current?.focus()

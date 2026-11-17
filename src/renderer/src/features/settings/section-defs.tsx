@@ -443,6 +443,15 @@ export function useNotificationsSection(): SectionDef {
       ),
     },
     {
+      id: 'limits',
+      name: t('notifications.limits.name'),
+      english: en('notifications.limits.name'),
+      description: t('notifications.limits.description'),
+      keywords: t('notifications.limits.keywords'),
+      group: when,
+      render: () => <NotificationSwitch field="limits" label={t('notifications.limits.name')} />,
+    },
+    {
       id: 'error',
       name: t('notifications.error.name'),
       english: en('notifications.error.name'),

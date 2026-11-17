@@ -7,6 +7,14 @@
     "limit": "{{agent}}, {{limit}}: {{percent}} used",
     "limitShort": "{{limit}} {{percent}} used"
   },
+  "alert": {
+    "near": "{{agent}} · {{limit}} limit {{percent}}% used",
+    "out": "{{agent}} · {{limit}} limit used up",
+    "back": "Back {{time}}",
+    "noReset": "The agent did not say when it resets",
+    "viewUsage": "View usage",
+    "switchAgent": "Switch agent"
+  },
   "page": {
     "title": "Usage",
     "synced": "Synced {{ago}}",

@@ -144,6 +144,10 @@ private enum Notice {
     // expo-notifications hands the app userInfo["body"] as the notification's data.
     var data: [String: Any] = ["host": host, "kind": kind]
     if let tag = content["tag"] as? String { data["tag"] = tag }
+    // A plan limit names the agent whose window it is, which the app opens Usage on.
+    if kind == "plan-limit", let agentId = content["agentId"] as? String {
+      data["agentId"] = agentId
+    }
     let sessionId = content["sessionId"] as? String
     if let sessionId {
       data["sessionId"] = sessionId
@@ -198,6 +202,8 @@ private enum Notice {
       return ("例行任务已结束", "\(hostName) 上的例行任务运行结束了")
     case "routine-paused":
       return ("例行任务已暂停", "\(hostName) 上的例行任务接近套餐上限，已暂停")
+    case "plan-limit":
+      return ("套餐额度快用完了", "\(hostName) 上有 Agent 的套餐限额已用到 90% 以上")
     default:
       return ("Huli", "Huli 有新动态")
     }

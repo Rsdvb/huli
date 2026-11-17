@@ -178,6 +178,18 @@
     "pausedUsedNoReset": "{{limit}} limit {{percent}}% used",
     "pausedReachedNoReset": "{{limit}} limit reached"
   },
+  "planAlert": {
+    "near": "{{agent}} · {{limit}} limit {{percent}}% used",
+    "out": "{{agent}} · {{limit}} limit used up",
+    "resetsIn": "Resets in {{time}}",
+    "resetsAt": "Resets {{time}}",
+    "backIn": "Back in {{time}}",
+    "backAt": "Back {{time}}",
+    "noReset": "The agent did not say when it resets",
+    "hours": "{{hours}} h {{minutes}} min",
+    "hoursOnly": "{{hours}} h",
+    "minutes": "{{minutes}} min"
+  },
   "planWindow": {
     "five_hour": "5-hour",
     "seven_day": "Weekly",

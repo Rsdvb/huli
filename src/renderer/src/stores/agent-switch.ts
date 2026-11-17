@@ -14,9 +14,16 @@ export interface PendingSwitch {
 interface AgentSwitchStore {
   /** By session id. */
   pending: Record<string, PendingSwitch>
+  /** The session whose composer is asked to open its agent menu, as a plan alert's action does. */
+  asking: string | null
 }
 
-export const useAgentSwitchStore = create<AgentSwitchStore>(() => ({ pending: {} }))
+export const useAgentSwitchStore = create<AgentSwitchStore>(() => ({ pending: {}, asking: null }))
+
+/** Opens the session's agent menu in its composer, which clears the ask once it has. */
+export function askAgentSwitch(sessionId: string | null): void {
+  useAgentSwitchStore.setState({ asking: sessionId })
+}
 
 export function setPendingSwitch(sessionId: string, next: PendingSwitch | null): void {
   useAgentSwitchStore.setState((s) => {

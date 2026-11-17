@@ -7,6 +7,14 @@
     "limit": "{{agent}}，{{limit}}：已用 {{percent}}",
     "limitShort": "{{limit}}已用 {{percent}}"
   },
+  "alert": {
+    "near": "{{agent}} · {{limit}}限额已用 {{percent}}%",
+    "out": "{{agent}} · {{limit}}限额已用完",
+    "back": "{{time}} 恢复",
+    "noReset": "Agent 没有说何时重置",
+    "viewUsage": "查看用量",
+    "switchAgent": "切换 Agent"
+  },
   "page": {
     "title": "用量",
     "synced": "{{ago}}同步",

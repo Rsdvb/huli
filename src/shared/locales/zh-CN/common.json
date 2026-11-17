@@ -30,7 +30,8 @@
     "minutesLeft": "{{m}} 分钟",
     "hoursMinutes": "{{h}} 小时 {{m}} 分",
     "hoursMinutesShort": "{{h}} 小时 {{m}} 分",
-    "minutes": "{{m}} 分钟"
+    "minutes": "{{m}} 分钟",
+    "tomorrowAt": "明天 {{time}}"
   },
   "errors": {
     "hostRestarted": "Kettu 的后台进程已重启，请重试。",
@@ -40,6 +41,11 @@
   "planReset": {
     "in": "{{time}}后重置",
     "at": "{{time}} 重置"
+  },
+  "planInline": {
+    "resets": "{{time}}后重置",
+    "back": "{{time}} 恢复",
+    "out": "已用完"
   },
   "planWindow": {
     "five_hour": "5 小时",

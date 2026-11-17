@@ -180,6 +180,8 @@ import {
   type JsonFile,
 } from './storage'
 import { GitHubStar, gitHubStarFile } from './github-star'
+import { alertText } from './limit-text'
+import { PlanAlerts, planAlertsFile } from './plan-alerts'
 import { digestEntries } from './threads/digest'
 import type { ImageMode } from './threads/model'
 import { ThreadStore, type ThreadWorkerFactory } from './threads/store'
@@ -364,6 +366,7 @@ export class AgentHost {
   /** What the last update check found, so a found update shows after a restart. */
   private readonly updates: JsonFile<AgentUpdatesFile>
   private readonly star: GitHubStar
+  private readonly planAlerts: PlanAlerts
   /** Each agent's config options from its last new session, for New session. */
   private readonly agentOptions: AgentOptionsStore
   /** New session's prepared sessions not yet adopted or removed, for the host after a crash. */
@@ -533,6 +536,22 @@ export class AgentHost {
       file: gitHubStarFile(options.userDataPath, log),
       git: () => this.git,
       changed: (state) => this.broadcast({ type: 'star.changed', state }),
+      log,
+    })
+    this.planAlerts = new PlanAlerts({
+      file: planAlertsFile(options.userDataPath, log),
+      alert: (alert) => {
+        this.broadcast({ type: 'agents.limitAlert', alert })
+        const { title, body } = alertText(alert, Date.now())
+        options.send({
+          type: 'host:attention',
+          kind: 'plan-limit',
+          agentId: alert.agentId,
+          window: alert.provider === undefined ? alert.window : `${alert.provider}/${alert.window}`,
+          title,
+          body,
+        })
+      },
       log,
     })
     this.agentOptions = new AgentOptionsStore({
@@ -844,6 +863,7 @@ export class AgentHost {
       ...(options.agentTimings ? { timings: options.agentTimings } : {}),
       status: (status) => {
         this.hub.broadcast({ type: 'agent.status', status })
+        this.planAlerts.observe(status)
         this.routines.limitsChanged(status.id)
         this.tasks?.recheck()
       },
@@ -2254,6 +2274,7 @@ export class AgentHost {
         this.remembered.flush(),
         this.updates.flush(),
         this.star.flush(),
+        this.planAlerts.flush(),
         this.trees.close(),
         this.agentOptions.flush(),
         this.preparedRecords.flush(),

@@ -164,6 +164,24 @@ export interface PlanLimit {
   models?: string[]
 }
 
+/**
+ * A plan window that crossed 90% used, or ran out, as the host says once per reset period for each
+ * account: what a window shows while it is open and a device while the app is in front.
+ */
+export interface PlanAlert {
+  agentId: AgentId
+  /** The agent's name, as the host calls it. */
+  agentName: string
+  /** OpenCode's provider whose window it is; absent for the agent's own plan. */
+  provider?: string
+  window: PlanLimit['window']
+  label: string
+  /** 90 once it crossed 90% used, 100 once it ran out. */
+  level: 90 | 100
+  usedPercent: number | null
+  resetsAt: number | null
+}
+
 export type LimitsReason =
   | 'vendor-disallows'
   | 'harness-does-not-offer'
@@ -1925,6 +1943,8 @@ export type HostEvent =
   | { type: 'agent.options'; options: AgentOptions }
   // To the port whose `agents.authenticate` runs: the agent's sign-in page, for its device to open.
   | { type: 'agents.signInLink'; agentId: AgentId; url: string }
+  // A plan window crossed 90% or ran out, said once per account, window and reset period.
+  | { type: 'agents.limitAlert'; alert: PlanAlert }
   | { type: 'projects.changed'; projects: Project[] }
   | { type: 'environment.changed'; info: EnvironmentInfo }
   | { type: 'git.changed'; status: GitStatus }

@@ -10,6 +10,7 @@ import {
   openRoutines,
   openSession,
   openSettings,
+  openUsage,
   toggleSidebar,
   type SettingsSection,
 } from '@renderer/stores/view'
@@ -51,6 +52,9 @@ export function useAppCommands(): void {
           }
           case 'open-routines':
             openRoutines()
+            break
+          case 'open-usage':
+            openUsage()
             break
           // The menu has these keys when the page leaves them, as it does under a dialog or menu.
           case 'go-back':

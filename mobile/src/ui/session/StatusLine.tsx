@@ -17,6 +17,7 @@ import { cacheLeftText, useCacheLeft } from './promptCache'
 import type { ViewHandle } from './Popover'
 import {
   backText,
+  inlineReset,
   isExhausted,
   limitColor,
   limitTextColor,
@@ -25,6 +26,7 @@ import {
   windowShort,
 } from './limits'
 import { useSessionTokens } from './palette'
+import { useTicking } from './ticking'
 
 export function UsageRing(props: {
   percent: number
@@ -124,10 +126,15 @@ export function StatusLine(props: {
       : props.state.kind === 'stopped'
         ? c.danger
         : c.warning
-  const now = Date.now()
+  // Counts down while the line says when the window resets.
+  const near = shownLimit(props.limits ?? [])
+  const counting = !!near && inlineReset(near) !== null
+  const ticked = useTicking(counting)
+  const now = counting ? ticked : Date.now()
   const limit = shownLimit(props.limits ?? [], now)
   const out = !!limit && isExhausted(limit, now)
   const percent = out ? 100 : Math.round(limit?.usedPercent ?? 0)
+  const reset = limit ? inlineReset(limit, now) : null
   const connection =
     props.state.kind === 'connected'
       ? '已连接'
@@ -237,8 +244,8 @@ export function StatusLine(props: {
           accessibilityRole="button"
           accessibilityLabel={
             out
-              ? `${windowName(limit)}限额已用完，${backText(limit.resetsAt, now)}，查看套餐用量`
-              : `${windowName(limit)}限额已用 ${percent}%，查看套餐用量`
+              ? `${windowName(limit)}限额已用完，${reset ?? backText(limit.resetsAt, now)}，查看套餐用量`
+              : `${windowName(limit)}限额已用 ${percent}%${reset ? `，${reset}` : ''}，查看套餐用量`
           }
           style={({ pressed }) => [
             styles.limit,
@@ -249,12 +256,14 @@ export function StatusLine(props: {
           <UsageRing percent={percent} color={limitColor(limit, c)} track={c.fillStrong} />
           {out ? (
             <Text style={[styles.text, styles.outText, { color: c.danger }]} numberOfLines={1}>
-              {windowShort(limit)}已用完 · {backText(limit.resetsAt, now)}
+              {windowShort(limit)}已用完 · {reset ?? backText(limit.resetsAt, now)}
             </Text>
           ) : (
             <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
               <Text style={{ color: c.textTertiary }}>{windowShort(limit)} </Text>
-              <Text style={{ color: limitTextColor(limit, c, c.textSecondary) }}>{percent}%</Text>
+              <Text style={{ color: limitTextColor(limit, c, c.textSecondary) }}>
+                {percent}%{reset ? ` · ${reset}` : ''}
+              </Text>
             </Text>
           )}
         </Pressable>

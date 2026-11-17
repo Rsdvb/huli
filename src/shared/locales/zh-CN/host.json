@@ -176,6 +176,18 @@
     "pausedUsedNoReset": "{{limit}}限额已用 {{percent}}%",
     "pausedReachedNoReset": "{{limit}}限额已用完"
   },
+  "planAlert": {
+    "near": "{{agent}} · {{limit}}限额已用 {{percent}}%",
+    "out": "{{agent}} · {{limit}}限额已用完",
+    "resetsIn": "{{time}}后重置",
+    "resetsAt": "{{time}} 重置",
+    "backIn": "{{time}}后恢复",
+    "backAt": "{{time}} 恢复",
+    "noReset": "Agent 没有说何时重置",
+    "hours": "{{hours}} 小时 {{minutes}} 分钟",
+    "hoursOnly": "{{hours}} 小时",
+    "minutes": "{{minutes}} 分钟"
+  },
   "planWindow": {
     "five_hour": "5 小时",
     "seven_day": "每周",

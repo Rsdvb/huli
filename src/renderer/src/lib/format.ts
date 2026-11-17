@@ -20,6 +20,13 @@ function makeFormatters(locale: string) {
     }),
     monthDay: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
     clock: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }),
+    // Chinese names the part of the day, 凌晨 2:40, where a 24-hour 2:40 is easily misread.
+    dayClock: new Intl.DateTimeFormat(
+      locale,
+      locale.startsWith('zh')
+        ? { hour: 'numeric', minute: '2-digit', hourCycle: 'h12', dayPeriod: 'short' }
+        : { hour: 'numeric', minute: '2-digit' },
+    ),
     full: new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }),
     compact: new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }),
     integer: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
@@ -88,6 +95,17 @@ export function resetTime(at: number, now = Date.now()): string {
   const days = Math.round((day(at) - day(now)) / DAY)
   if (days === 0) return format().clock.format(at)
   return days > 0 && days <= 6 ? format().weekdayClock.format(at) : format().monthDay.format(at)
+}
+
+/**
+ * When something comes back, as a clock: "2:40 AM" today, "tomorrow 2:40 AM", then as `resetTime`;
+ * in Chinese with the part of the day, 凌晨2:40.
+ */
+export function backTime(at: number, now = Date.now()): string {
+  const days = -daysBefore(at, now)
+  if (days === 0) return format().dayClock.format(at)
+  if (days === 1) return i18n.t('time.tomorrowAt', { time: format().dayClock.format(at) })
+  return resetTime(at, now)
 }
 
 export function fullTime(at: number): string {

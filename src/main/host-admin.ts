@@ -288,7 +288,9 @@ export class HostAdmin {
     const attention: HostAttention =
       message.kind === 'routine-paused'
         ? { kind: message.kind, agentId: message.agentId, title, body }
-        : { kind: message.kind, sessionId: message.sessionId, title, body }
+        : message.kind === 'plan-limit'
+          ? { kind: message.kind, agentId: message.agentId, window: message.window, title, body }
+          : { kind: message.kind, sessionId: message.sessionId, title, body }
     this.deps.send({ type: 'attention', attention }, null)
   }
 

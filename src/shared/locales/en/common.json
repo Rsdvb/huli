@@ -31,7 +31,8 @@
     "minutesLeft": "{{m}} min",
     "hoursMinutes": "{{h}} h {{m}} m",
     "hoursMinutesShort": "{{h}}h {{m}}m",
-    "minutes": "{{m}} m"
+    "minutes": "{{m}} m",
+    "tomorrowAt": "tomorrow {{time}}"
   },
   "errors": {
     "hostRestarted": "A background process of Kettu restarted. Try again.",
@@ -41,6 +42,11 @@
   "planReset": {
     "in": "Resets in {{time}}",
     "at": "Resets {{time}}"
+  },
+  "planInline": {
+    "resets": "resets in {{time}}",
+    "back": "back {{time}}",
+    "out": "Used up"
   },
   "planWindow": {
     "five_hour": "5-hour",

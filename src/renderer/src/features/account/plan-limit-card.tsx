@@ -1,12 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { AgentMark, AgentTile } from '@renderer/components/agents/agent-mark'
-import { PlanRings } from '@renderer/components/plan-rings'
+import { LegendDot, PlanRings } from '@renderer/components/plan-rings'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@renderer/components/ui/hover-card'
 import { PlanPart } from '@renderer/features/session/composer/usage'
+import { inlineReset } from '@renderer/features/sidebar/plan-usage'
 import { ringStroke } from '@renderer/features/usage/plan-cards'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { planAmount, planBalance } from '@renderer/lib/format'
-import { groupName, LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
+import { groupName, isUsedUp, LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
+import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { useHostName, useWindowHost } from '@renderer/stores/window-host'
 import { hasModelGroups, type PlanCard } from './model'
@@ -44,7 +46,7 @@ export function PlanLimitCard({
           />
         }
       >
-        <CardFace card={card} />
+        <CardFace card={card} wide={wide || hasModelGroups(card)} />
       </HoverCardTrigger>
       <HoverCardContent side="right" align="start" sideOffset={6} className="w-68">
         <div className="mb-2.5 flex min-w-0 items-center gap-1.5">
@@ -62,9 +64,15 @@ export function PlanLimitCard({
   )
 }
 
-function CardFace({ card }: { card: PlanCard }) {
+/**
+ * The card's name and plan, then its rings beside a line per window, from the outer ring in, each
+ * led by a dot in its ring's color. A window near its end says when it resets after its figure:
+ * on the same line in a card that takes the whole row, under the figure in a half-width one.
+ */
+function CardFace({ card, wide }: { card: PlanCard; wide: boolean }) {
   const { t } = useTranslation(['sidebar', 'composer', 'common', 'usage', 'tasks'])
   const view = useLimitView()
+  const now = useNow()
   const count = card.windows.length
   const groups = hasModelGroups(card)
   const amounts = card.windows.flatMap((window) => {
@@ -129,20 +137,19 @@ function CardFace({ card }: { card: PlanCard }) {
               : groups
                 ? `${t(`composer:usage.shortWindow.${w.window}`)} ${groupName(w.model, t('tasks:and'))}`
                 : w.model
+            const reset = inlineReset(w.limit, now)
+            const out = reset !== null && isUsedUp(w.limit)
+            const tone = w.level === 'ok' ? 'text-primary' : LIMIT_TEXT[w.level]
             return (
               <span key={w.id} className="flex min-w-0 flex-col gap-px">
-                <span className="flex justify-between gap-1 text-caption leading-3.25 whitespace-nowrap">
-                  <span aria-hidden className="min-w-0 truncate text-tertiary">
+                <span className="flex items-center gap-1 text-caption leading-3.25 whitespace-nowrap">
+                  <LegendDot level={w.level} />
+                  <span aria-hidden className="min-w-0 flex-1 truncate text-tertiary">
                     {short}
                   </span>
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'tabular shrink-0',
-                      w.level === 'ok' ? 'text-primary' : LIMIT_TEXT[w.level],
-                    )}
-                  >
-                    {shownPercent(w.percent, view)}%
+                  <span aria-hidden className={cn('tabular shrink-0', tone)}>
+                    {out ? t('common:planInline.out') : `${shownPercent(w.percent, view)}%`}
+                    {reset && wide && ` · ${reset}`}
                   </span>
                   <span className="sr-only">
                     {t(
@@ -152,8 +159,17 @@ function CardFace({ card }: { card: PlanCard }) {
                         percent: shownPercent(w.percent, view),
                       },
                     )}
+                    {reset && ` ${reset}`}
                   </span>
                 </span>
+                {reset && !wide && (
+                  <span
+                    aria-hidden
+                    className={cn('truncate text-right text-badge leading-3.25 tabular', tone)}
+                  >
+                    {reset}
+                  </span>
+                )}
               </span>
             )
           })}

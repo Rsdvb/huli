@@ -1,6 +1,7 @@
 // This phone's notifications on the paired computer, over the link (notifications.get and .set in
 // src/shared/remote/push.ts): once connected to a host that sends them, it asks the user, gives the
-// host this phone's push target, and gives the extension what opens them.
+// host this phone's push target and whether it wants plan limit alerts, and gives the extension
+// what opens them.
 
 import { useSyncExternalStore } from 'react'
 import type { HostLink } from '@shared/remote/link'
@@ -126,12 +127,17 @@ async function syncOnce(link: HostLink): Promise<string | null> {
     Boolean(current.target.activityStart) !== Boolean(activity?.start) ||
     Boolean(current.target.activityUpdate) !== Boolean(activity?.update) ||
     (follows && current.target.progress !== Boolean(activity?.progress))
+  // Each choice goes only to a computer that answers with it; an older one would ignore it anyway.
+  const choices: { limits?: boolean; liveProgress?: boolean } = {}
+  // 额度提醒 is the phone's own switch.
+  const limits = getPrefs().limitAlerts
+  if ('limits' in current.choices && current.choices.limits !== limits) choices.limits = limits
   // It starts an activity for a turn begun while the phone is away only when asked to.
   const liveProgress = follows && liveTurnsWanted()
-  const choices =
-    follows && current.choices.liveProgress !== liveProgress ? { liveProgress } : undefined
-  if (!current.target.apns || activityChanged || choices || sent.get(link) !== text) {
-    await link.request(NOTIFICATIONS_SET, { target, ...(choices ? { choices } : {}) })
+  if (follows && current.choices.liveProgress !== liveProgress) choices.liveProgress = liveProgress
+  const changed = Object.keys(choices).length > 0
+  if (!current.target.apns || activityChanged || changed || sent.get(link) !== text) {
+    await link.request(NOTIFICATIONS_SET, { target, ...(changed ? { choices } : {}) })
     sent.set(link, text)
   }
   setStatus(current.signedIn ? 'on' : 'signed-out')

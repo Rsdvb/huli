@@ -29,12 +29,17 @@ import { useCacheLeft, useCachePhase } from '@renderer/features/prompt-cache/cac
 import { joinPlanTier } from '@renderer/features/account/model'
 import { breakdownView, shownUsage } from '@renderer/features/session/composer/context-bar'
 import { PANEL } from '@renderer/features/session/entries/helpers'
-import { planReset, usageTone, type UsageTone } from '@renderer/features/sidebar/plan-usage'
+import {
+  inlineReset,
+  planReset,
+  usageTone,
+  type UsageTone,
+} from '@renderer/features/sidebar/plan-usage'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { clockTime, countdown, fullTime, limitLabel, money, tokens } from '@renderer/lib/format'
 import { errorMessage, sessionHost } from '@renderer/lib/host'
-import { limitLevel, shownPercent } from '@renderer/lib/plan-limit'
-import { useNow } from '@renderer/lib/use-now'
+import { isUsedUp, limitLevel, shownPercent } from '@renderer/lib/plan-limit'
+import { useClock, useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { loadContext, refreshLimits, useUsageStore } from '@renderer/stores/usage'
 import { Glyph } from '@renderer/features/shell/glyph'
@@ -328,16 +333,7 @@ export function ContextButton({
           />
         }
       >
-        {warning && (
-          <span
-            key={`${warning.window}-${warning.usedPercent}`}
-            className="kettu-tray-limit"
-            data-level={LIMIT_METER[limitLevel(warning)]}
-          >
-            {isShortWindow(warning.window) ? t(SHORT_WINDOW[warning.window]) : limitLabel(warning)}{' '}
-            {warning.usedPercent !== null && `${Math.round(warning.usedPercent)}%`}
-          </span>
-        )}
+        {warning && <TrayLimit key={`${warning.window}-${warning.usedPercent}`} limit={warning} />}
         {usage && (
           <>
             <MeterRing share={share} level={METER[tone]} />
@@ -375,6 +371,28 @@ export function ContextButton({
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+/**
+ * A plan limit nearing its end on the tray: its short name and figure, and from 80% when it resets,
+ * "5h 97% · resets in 2 h"; it re-renders only when that text changes.
+ */
+function TrayLimit({ limit }: { limit: PlanLimit }) {
+  const { t } = useTranslation(['composer', 'common'])
+  const reset = useClock((now) => inlineReset(limit, now))
+  const name = isShortWindow(limit.window) ? t(SHORT_WINDOW[limit.window]) : limitLabel(limit)
+  const figure =
+    reset && isUsedUp(limit)
+      ? t('common:planInline.out')
+      : limit.usedPercent !== null
+        ? `${Math.round(limit.usedPercent)}%`
+        : null
+  return (
+    <span className="kettu-tray-limit" data-level={LIMIT_METER[limitLevel(limit)]}>
+      {name} {figure}
+      {reset && ` · ${reset}`}
+    </span>
   )
 }
 

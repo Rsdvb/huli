@@ -1,6 +1,6 @@
 // When the host notifies its devices through the push gateway, decided from what the agent host
 // reports: a request starts waiting, a turn ends out of view, a turn or a routine fails, a
-// routine's run ends. Each device's choices decide what it hears; one that shows the session in
+// routine's run ends, a plan window nears its end. Each device's choices decide what it hears; one that shows the session in
 // front hears nothing of it; while the user is at the desktop app, its own notifications tell them
 // and devices that want it only while the user is away wait until they leave. A session's
 // notifications merge into one, and one that no longer applies, a request answered elsewhere or a
@@ -26,14 +26,16 @@ import type {
 } from '@shared/remote/push'
 
 export type AttentionKind =
-  'permission' | 'turn-ended' | 'error' | 'routine-ended' | 'routine-paused'
+  'permission' | 'turn-ended' | 'error' | 'routine-ended' | 'routine-paused' | 'plan-limit'
 
 /** What the agent host says needs the user, as the remote host hears it from its parent. */
 export interface Attention {
   kind: AttentionKind
-  /** Every kind but `routine-paused`, which names its agent instead. */
+  /** Every kind but `routine-paused` and `plan-limit`, which name their agent instead. */
   sessionId?: string
   agentId?: string
+  /** A `plan-limit`'s window. */
+  window?: string
   title: string
   body: string
   /** The request that waits, which the waiting list names until it is answered or withdrawn. */
@@ -167,8 +169,16 @@ interface Activity {
   sessionId: string | null
 }
 
+/** A kind about an agent rather than a session. */
+const ofAgent = (kind: AttentionKind): kind is 'routine-paused' | 'plan-limit' =>
+  kind === 'routine-paused' || kind === 'plan-limit'
+
 const subjectOf = (attention: Attention): string =>
-  attention.kind === 'routine-paused' ? `routines:${attention.agentId}` : attention.sessionId!
+  attention.kind === 'routine-paused'
+    ? `routines:${attention.agentId}`
+    : attention.kind === 'plan-limit'
+      ? `limits:${attention.agentId}:${attention.window}`
+      : attention.sessionId!
 
 function wants(choices: NotificationChoices, kind: AttentionKind): boolean {
   switch (kind) {
@@ -181,6 +191,9 @@ function wants(choices: NotificationChoices, kind: AttentionKind): boolean {
     case 'routine-ended':
     case 'routine-paused':
       return choices.routines
+    case 'plan-limit':
+      // A device's choices stored before the switch was added read it from the defaults.
+      return choices.limits
   }
 }
 
@@ -196,6 +209,8 @@ function pushEvent(attention: Attention): PushEvent {
       }
     case 'routine-paused':
       return { kind: 'routine-paused', agentId: attention.agentId! }
+    case 'plan-limit':
+      return { kind: 'plan-limit', agentId: attention.agentId!, window: attention.window! }
     default:
       return { kind: attention.kind, sessionId: attention.sessionId! }
   }
@@ -240,11 +255,12 @@ export class Notifier {
 
   /** Something needs the user. */
   attention(attention: Attention): void {
-    if (attention.kind === 'routine-paused' ? !attention.agentId : !attention.sessionId) return
+    if (ofAgent(attention.kind) ? !attention.agentId : !attention.sessionId) return
+    if (attention.kind === 'plan-limit' && !attention.window) return
     // A turn that ended in front of someone was seen there.
     if (attention.kind === 'turn-ended' && attention.inFront) return
     const subject = subjectOf(attention)
-    if (attention.kind !== 'routine-paused') this.open.set(subject, attention)
+    if (!ofAgent(attention.kind)) this.open.set(subject, attention)
     if (attention.kind === 'permission') {
       this.order = [...this.order.filter((id) => id !== subject), subject]
     }
@@ -442,7 +458,7 @@ export class Notifier {
 
   /** Whether the attention still needs the user: its request waits, or its turn was not seen. */
   private applies(subject: string, attention: Attention): boolean {
-    if (attention.kind === 'routine-paused') return true
+    if (ofAgent(attention.kind)) return true
     if (attention.kind === 'permission') return this.stillWaiting(attention)
     return this.open.get(subject) === attention
   }

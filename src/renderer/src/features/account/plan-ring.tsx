@@ -9,7 +9,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { errorMessage } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
-import { shownPercent } from '@renderer/lib/plan-limit'
+import { isUsedUp, shownPercent, type LimitLevel } from '@renderer/lib/plan-limit'
+import { inlineReset } from '@renderer/features/sidebar/plan-usage'
 import {
   accountAgents,
   accountCardKey,
@@ -108,7 +109,8 @@ function useCurrentAccount(): { key: string; agentName: string } | null {
  */
 export function PlanRing() {
   const { t } = useTranslation(['sidebar', 'composer'])
-  const cards = planCards(useAccountsWithLimits(), useNow())
+  const now = useNow()
+  const cards = planCards(useAccountsWithLimits(), now)
   const current = useCurrentAccount()
   const view = useLimitView()
   const [open, setOpen] = useState(false)
@@ -116,6 +118,16 @@ export function PlanRing() {
 
   const card = current ? currentCard(cards, current.key) : null
   const tightest = card?.windows.length ? tightestWindow(card) : null
+  const reset = tightest ? inlineReset(tightest.limit, now) : null
+  // Plain until the window nears its end: amber from 90% used, red once used up. A window whose
+  // reset has passed reads 0% and stays plain.
+  const alert: LimitLevel = !tightest
+    ? 'ok'
+    : tightest.level === 'bad' && isUsedUp(tightest.limit)
+      ? 'bad'
+      : tightest.percent >= 90
+        ? 'warn'
+        : 'ok'
   const label =
     card && tightest
       ? t(view === 'left' ? 'sidebar:account.ringLeft' : 'sidebar:account.ring', {
@@ -124,7 +136,7 @@ export function PlanRing() {
             ? `${t(`composer:usage.shortWindow.${tightest.window}`)} ${tightest.model}`
             : t(`composer:usage.shortWindow.${tightest.window}`),
           percent: shownPercent(tightest.percent, view),
-        })
+        }) + (reset ? ` · ${reset}` : '')
       : current
         ? t('sidebar:account.ringNone', { agent: current.agentName })
         : t('sidebar:account.limits')
@@ -156,14 +168,14 @@ export function PlanRing() {
                 ? {
                     id: tightest.id,
                     percent: shownPercent(tightest.percent, view),
-                    level: tightest.level,
+                    level: alert,
                   }
                 : { id: 'none', percent: 0, level: 'ok' },
             ]}
             size={16}
             stroke={2.5}
             gap={0}
-            track="neutral"
+            track={alert === 'ok' ? 'neutral' : 'tint'}
             className="size-4"
           />
         </TooltipTrigger>

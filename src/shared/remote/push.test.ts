@@ -195,6 +195,35 @@ describe("a device's notifications", () => {
     expect(DEFAULT_CHOICES.liveProgress).toBe(false)
   })
 
+  it('take plan limit alerts, on unless the device turns them off', () => {
+    expect(DEFAULT_CHOICES.limits).toBe(true)
+    expect(parseChoices({ limits: false })).toEqual({ limits: false })
+    expect(parseChoices({ limits: 'off' })).toBeNull()
+    // Choices stored before the switch was added read it from the defaults.
+    const stored = { ...DEFAULT_CHOICES } as Partial<typeof DEFAULT_CHOICES>
+    delete stored.limits
+    expect(parseDevicePush({ target: null, choices: stored })?.choices.limits).toBe(true)
+  })
+
+  it('seal a plan limit for its device, which opens it to the agent and the window', async () => {
+    const { host, device } = await keys()
+    const content: PushContent = {
+      v: 1,
+      host: vectors.keys.hostId,
+      hostName: 'Studio',
+      at: 1_800_000_000_000,
+      tag: 'AAAAAAAAAAAAAAAAAAAAAA',
+      title: 'Claude Code · 5-hour limit used up',
+      body: 'Back in 2 h',
+      kind: 'plan-limit',
+      agentId: 'claude-code',
+      window: 'five_hour',
+    }
+    const opened = (await openPush(await sealPush(content, device.publicKey, host), device))!
+    expect(JSON.parse(new TextDecoder().decode(opened.body))).toEqual(content)
+    expect(await verifyRelaySignature(host.publicKey, opened.signature, opened.signed)).toBe(true)
+  })
+
   it('read an update that clears the target, changes it or leaves it', () => {
     expect(parseNotificationsUpdate({ target: null })).toEqual({ target: null })
     expect(parseNotificationsUpdate({ choices: { routines: true } })).toEqual({

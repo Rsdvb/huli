@@ -5,9 +5,9 @@ import type { AgentId } from '@shared/thread'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { LimitViewSwitch } from '@renderer/components/plan-limit-view'
-import { PlanRings } from '@renderer/components/plan-rings'
+import { LegendDot, PlanRings } from '@renderer/components/plan-rings'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@renderer/components/ui/hover-card'
-import { countdown, planReset } from '@renderer/features/sidebar/plan-usage'
+import { countdown, inlineReset, planReset } from '@renderer/features/sidebar/plan-usage'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { limitLabel, longAgo, planAmount, planBalance, shortAgo } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
@@ -149,7 +149,7 @@ function HostPlanLimits({ used }: { used: Readonly<Record<string, readonly Agent
  * Hovered or focused, it lists when each window resets and what each computer calls the account.
  */
 function PlanCard({ card, named, now }: { card: UsageCard; named: boolean; now: number }) {
-  const { t } = useTranslation('usage')
+  const { t } = useTranslation(['usage', 'common'])
   const hostName = useHostName()
   const installed = useAgentsStore((s) => {
     const agent = agentsOn(s, card.hostId).byId[card.agentId]
@@ -237,6 +237,8 @@ function PlanCard({ card, named, now }: { card: UsageCard; named: boolean; now: 
               const name = limitLabel(ring.limit)
               const reset =
                 ring.limit.resetsAt === null ? null : planReset(ring.limit.resetsAt, now)
+              // Near its end, when it resets follows the figure, at any width.
+              const soon = inlineReset(ring.limit, now)
               const unit =
                 ring.limit.amount?.unit === 'credits'
                   ? t('limits.units.credits')
@@ -246,15 +248,19 @@ function PlanCard({ card, named, now }: { card: UsageCard; named: boolean; now: 
               return (
                 <div key={ring.limit.window} className="k-u-plan__window">
                   <span className="k-u-plan__line">
+                    <LegendDot level={ring.level} className="-mr-1 self-center" />
                     <span aria-hidden className="k-u-plan__win">
                       {shortName(ring.limit)}
                     </span>
                     <b aria-hidden className="k-num" data-level={ring.level}>
-                      {ring.reached && ring.limit.resetsAt! > now
-                        ? t('limits.backIn', { time: countdown(ring.limit.resetsAt! - now)! })
-                        : `${shownPercent(ring.percent, view)}%`}
+                      {soon && ring.reached
+                        ? t('common:planInline.out')
+                        : ring.reached && ring.limit.resetsAt! > now
+                          ? t('limits.backIn', { time: countdown(ring.limit.resetsAt! - now)! })
+                          : `${shownPercent(ring.percent, view)}%`}
+                      {soon && <span className="k-u-plan__soon"> · {soon}</span>}
                     </b>
-                    {reset && <small aria-hidden>{reset}</small>}
+                    {reset && !soon && <small aria-hidden>{reset}</small>}
                     <span className="sr-only">
                       {t(view === 'left' ? 'limits.windowLeft' : 'limits.windowUsed', {
                         window: name,
