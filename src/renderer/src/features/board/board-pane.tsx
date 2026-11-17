@@ -13,6 +13,7 @@ import { PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
 import { artifactListShown, artifactStanding, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { useThreadsStore } from '@renderer/stores/threads'
+import { cn } from '@renderer/lib/utils'
 import { toggleBoard } from '@renderer/stores/view'
 import { ArtifactRow } from './artifact-row'
 import {
@@ -39,7 +40,14 @@ const ROOMY = 6
  * then sub-agents, then commands; Earlier counts what ended, a line a kind; Artifacts is what
  * the session wrote.
  */
-export default function BoardRail({ sessionId }: { sessionId: string }) {
+export default function BoardRail({
+  sessionId,
+  overlay = false,
+}: {
+  sessionId: string
+  /** Too narrow for the thread beside it: laid over the thread's right side, as the side chat. */
+  overlay?: boolean
+}) {
   const { t } = useTranslation('board')
   const tasks = useThreadsStore((s) => s.replicas[sessionId]?.state?.session.background ?? NO_TASKS)
   const children = useSessionsStore(
@@ -167,7 +175,10 @@ export default function BoardRail({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <aside className="kb-rail animate-in fade-in" aria-label={t('title')}>
+    <aside
+      className={cn('kb-rail animate-in fade-in', overlay && 'kb-rail--over')}
+      aria-label={t('title')}
+    >
       <div className="kb-head">
         <PaneIcon icon={DashboardSquare02Icon} size={15} />
         <span className="kb-head__title">{t('title')}</span>
