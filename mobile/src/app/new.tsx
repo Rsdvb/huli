@@ -282,7 +282,7 @@ export default function NewSession() {
                 disabled={false}
                 anchor={modelAnchor}
                 onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 300 })
+                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
                 }
               />
             ) : null

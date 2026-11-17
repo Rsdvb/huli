@@ -603,7 +603,7 @@ export default function SessionScreen() {
                 disabled={!connected}
                 anchor={modelAnchor}
                 onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 300 })
+                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
                 }
               />
             ) : null
