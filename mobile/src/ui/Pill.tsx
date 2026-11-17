@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react'
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
 import { Press } from './Press'
-import { radius, space, type as typeScale, useTokens } from './tokens'
+import { FONT_SCALE, radius, space, type as typeScale, useTokens } from './tokens'
 
 export type PillTone = 'glass' | 'fill' | 'tint' | 'accent' | 'outline'
 
@@ -48,6 +48,7 @@ export function Pill(props: {
       {props.label !== undefined ? (
         <Text
           numberOfLines={1}
+          maxFontSizeMultiplier={FONT_SCALE.dense}
           style={[
             size === 'sm'
               ? typeScale.caption
@@ -87,7 +88,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     flexShrink: 1,
   },
-  sm: { gap: space.xs, paddingHorizontal: space.sm, height: 24 },
-  md: { gap: space.sm - 2, paddingHorizontal: space.md, height: 32 },
-  lg: { gap: space.sm + 2, paddingHorizontal: space.lg + 2, height: 48 },
+  sm: { gap: space.xs, paddingHorizontal: space.sm, minHeight: 24 },
+  md: { gap: space.sm - 2, paddingHorizontal: space.md, minHeight: 32 },
+  lg: { gap: space.sm + 2, paddingHorizontal: space.lg + 2, minHeight: 48 },
 })

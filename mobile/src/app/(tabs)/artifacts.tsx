@@ -10,7 +10,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -32,7 +31,14 @@ import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { Skeleton } from '../../ui/Skeleton'
-import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
+import {
+  FONT_SCALE,
+  radius,
+  space,
+  TAB_BAR_CLEARANCE,
+  type as typeScale,
+  useTokens,
+} from '../../ui/tokens'
 
 type Sort = 'updated' | 'created' | 'name'
 
@@ -65,8 +71,6 @@ export default function Artifacts() {
   const [sort, setSort] = useState<Sort>('updated')
   const [agentId, setAgentId] = useState<string | null>(null)
   const [editingOnly, setEditingOnly] = useState(false)
-  const [searching, setSearching] = useState(false)
-  const [query, setQuery] = useState('')
   const [sheet, setSheet] = useState<'sort' | 'filter' | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [menu, setMenu] = useState<ArtifactSummary | null>(null)
@@ -128,14 +132,12 @@ export default function Artifacts() {
     return [...ids]
   }, [inProject, agentOf])
 
-  const words = searching ? query.trim().toLowerCase() : ''
   const shown = useMemo(() => {
     const kept = inProject.filter(
       (a) =>
         (!kind || artifactKind(a) === kind) &&
         (!agentId || agentOf(a) === agentId) &&
-        (!editingOnly || a.editing.length > 0) &&
-        (!words || a.title.toLowerCase().includes(words)),
+        (!editingOnly || a.editing.length > 0),
     )
     return kept.sort((a, b) =>
       sort === 'name'
@@ -144,7 +146,7 @@ export default function Artifacts() {
           ? b.createdAt - a.createdAt
           : b.updatedAt - a.updatedAt,
     )
-  }, [inProject, kind, agentId, editingOnly, words, sort, agentOf])
+  }, [inProject, kind, agentId, editingOnly, sort, agentOf])
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = []
@@ -160,12 +162,11 @@ export default function Artifacts() {
     if (kind && items && !kinds.includes(kind)) setKind(null)
   }, [kind, kinds, items])
 
-  const narrowed = kind !== null || agentId !== null || editingOnly || words !== ''
+  const narrowed = kind !== null || agentId !== null || editingOnly
   const clearFilters = () => {
     setKind(null)
     setAgentId(null)
     setEditingOnly(false)
-    setQuery('')
   }
   const open = items?.find((a) => a.id === openId) ?? null
 
@@ -213,6 +214,7 @@ export default function Artifacts() {
       ]}
     >
       <Text
+        maxFontSizeMultiplier={FONT_SCALE.dense}
         style={[typeScale.callout, { color: on ? c.text : c.textSecondary, fontWeight: '500' }]}
       >
         {label}
@@ -256,24 +258,6 @@ export default function Artifacts() {
       </Press>
     </View>
   )
-
-  const searchBar = searching ? (
-    <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
-      <Icon name="search" size={17} color={c.textSecondary} />
-      <TextInput
-        autoFocus
-        value={query}
-        onChangeText={setQuery}
-        placeholder="搜索 Artifact 标题"
-        placeholderTextColor={c.textTertiary}
-        returnKeyType="search"
-        autoCorrect={false}
-        autoCapitalize="none"
-        clearButtonMode="while-editing"
-        style={[typeScale.body, styles.searchInput, { color: c.text }]}
-      />
-    </View>
-  ) : null
 
   const empty = () => {
     if (!connected && !items) {
@@ -419,7 +403,7 @@ export default function Artifacts() {
   ]
 
   return (
-    <Screen>
+    <Screen readable>
       <Animated.FlatList
         ref={list}
         data={items ? rows : []}
@@ -462,25 +446,13 @@ export default function Artifacts() {
         ListHeaderComponent={
           <View style={styles.top}>
             {summary}
-            {searchBar}
             {items && inProject.length > 0 ? controls : null}
           </View>
         }
         ListEmptyComponent={<View style={styles.pad}>{empty()}</View>}
         ListFooterComponent={footer ?? undefined}
       />
-      <TopBar
-        header={header}
-        compact
-        search={{
-          active: searching,
-          onPress: () => {
-            haptic.tap()
-            if (searching) setQuery('')
-            setSearching(!searching)
-          },
-        }}
-      />
+      <TopBar header={header} compact searchScope="artifacts" />
       <ArtifactSheet artifact={open} onClose={() => setOpenId(null)} />
       <Sheet
         visible={menu !== null}
@@ -527,7 +499,7 @@ const styles = StyleSheet.create({
   controls: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   chips: { gap: space.sm, paddingRight: space.xs },
   chip: {
-    height: 38,
+    minHeight: 38,
     paddingHorizontal: space.lg,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
@@ -542,15 +514,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    borderRadius: radius.md,
-    paddingHorizontal: space.md,
-    height: 44,
-  },
-  searchInput: { flex: 1, paddingVertical: 0 },
   row: {
     flexDirection: 'row',
     gap: space.md,
