@@ -1,7 +1,8 @@
 // A round button holding one icon: glass for the top bar and sheets, plain for inline actions,
-// accent for the one main action on a screen.
+// accent for the one main action on a screen. Glass is Liquid Glass where the system has it.
 
 import { StyleSheet, View } from 'react-native'
+import { GlassButton } from './Glass'
 import { Icon, type IconName } from './Icon'
 import { Press } from './Press'
 import { size as sizes, useTokens } from './tokens'
@@ -20,7 +21,28 @@ export function IconButton(props: {
   const { c } = useTokens()
   const side = props.size ?? sizes.iconButton
   const tone = props.tone ?? 'glass'
-  const fill = tone === 'accent' ? c.accent : tone === 'glass' ? c.glass : 'transparent'
+  const icon = (
+    <Icon
+      name={props.icon}
+      size={props.iconSize ?? Math.round(side * 0.46)}
+      color={props.color ?? (tone === 'accent' ? c.onAccent : c.text)}
+    />
+  )
+  if (tone === 'glass') {
+    // Silent: the actions behind these buttons give their own haptics where they want one.
+    return (
+      <GlassButton
+        silent
+        elevated={false}
+        size={side}
+        onPress={props.onPress}
+        disabled={props.disabled}
+        accessibilityLabel={props.label}
+      >
+        {icon}
+      </GlassButton>
+    )
+  }
   return (
     <Press
       onPress={props.onPress}
@@ -36,25 +58,16 @@ export function IconButton(props: {
             width: side,
             height: side,
             borderRadius: side / 2,
-            backgroundColor: fill,
-            borderColor: tone === 'glass' ? c.borderStrong : 'transparent',
+            backgroundColor: tone === 'accent' ? c.accent : 'transparent',
           },
         ]}
       >
-        <Icon
-          name={props.icon}
-          size={props.iconSize ?? Math.round(side * 0.46)}
-          color={props.color ?? (tone === 'accent' ? c.onAccent : c.text)}
-        />
+        {icon}
       </View>
     </Press>
   )
 }
 
 const styles = StyleSheet.create({
-  body: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-  },
+  body: { alignItems: 'center', justifyContent: 'center' },
 })

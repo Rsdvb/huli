@@ -4,7 +4,15 @@
 // frosted blur the app used before, Android a translucent fill, and Reduce Transparency an opaque
 // surface on either.
 
-import { useEffect, useRef, useState, type ComponentRef, type ReactNode, type Ref } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ComponentRef,
+  type ReactNode,
+  type Ref,
+} from 'react'
 import {
   AccessibilityInfo,
   Animated,
@@ -18,6 +26,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { BlurView } from 'expo-blur'
 import {
   GlassContainer,
@@ -202,6 +211,29 @@ export function GlassBackdrop(props: {
 }
 
 /**
+ * The soft edge iOS 26 gives a scroll view under floating glass controls in place of a bar: the
+ * screen's color, strong under the status bar and fading out below the controls.
+ */
+export function ScrollEdge(props: { color: string; height: number }) {
+  // useId's colons do not survive in an SVG url().
+  const id = `edge${useId().replace(/\W/g, '')}`
+  return (
+    <View pointerEvents="none" style={[styles.edge, { height: props.height }]}>
+      <Svg width="100%" height="100%">
+        <Defs>
+          <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={props.color} stopOpacity={0.94} />
+            <Stop offset="0.45" stopColor={props.color} stopOpacity={0.7} />
+            <Stop offset="1" stopColor={props.color} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${id})`} />
+      </Svg>
+    </View>
+  )
+}
+
+/**
  * Neighbors that melt together as they come within `spacing` of each other, as the tab bar and its
  * round button do while one gives way to the other. A plain view without Liquid Glass.
  */
@@ -331,6 +363,7 @@ export function GlassCapsule(
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
+  edge: { position: 'absolute', top: 0, left: 0, right: 0 },
   capsule: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 6 },
   shadow: {
     shadowOpacity: 0.22,

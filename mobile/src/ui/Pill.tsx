@@ -1,7 +1,8 @@
 // A capsule: the host pill in the top bar, a filter chip, a status tag.
 
 import type { ReactNode } from 'react'
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
+import { Glass, useGlassMode } from './Glass'
 import { Press } from './Press'
 import { FONT_SCALE, radius, size as sizes, space, type as typeScale, useTokens } from './tokens'
 
@@ -23,6 +24,7 @@ export function Pill(props: {
   style?: StyleProp<ViewStyle>
 }) {
   const { c } = useTokens()
+  const mode = useGlassMode()
   const tone = props.tone ?? 'fill'
   const size = props.size ?? 'md'
   const background = {
@@ -33,21 +35,26 @@ export function Pill(props: {
     outline: 'transparent',
   }[tone]
   const ink = props.color ?? (tone === 'accent' ? c.onAccent : tone === 'tint' ? c.tint : c.text)
+  const pressable = !!props.onPress || !!props.onLongPress
+  const glass = tone === 'glass'
+  const liquid = glass && mode === 'liquid'
+  const shape = [
+    styles.pill,
+    size === 'sm' ? styles.sm : size === 'lg' ? styles.lg : size === 'bar' ? styles.bar : styles.md,
+  ]
+  // A glass pill is drawn by Glass: Liquid Glass, or its fallbacks with their own edge.
+  const Body = glass ? GlassPillBody : PlainPillBody
   const body = (
-    <View
+    <Body
+      interactive={liquid && pressable}
       style={[
-        styles.pill,
-        size === 'sm'
-          ? styles.sm
-          : size === 'lg'
-            ? styles.lg
-            : size === 'bar'
-              ? styles.bar
-              : styles.md,
-        {
-          backgroundColor: background,
-          borderColor: tone === 'glass' || tone === 'outline' ? c.borderStrong : 'transparent',
-        },
+        shape,
+        glass
+          ? liquid && styles.glass
+          : {
+              backgroundColor: background,
+              borderColor: tone === 'outline' ? c.borderStrong : 'transparent',
+            },
         props.style,
       ]}
     >
@@ -73,19 +80,51 @@ export function Pill(props: {
       ) : null}
       {props.children}
       {props.trailing}
-    </View>
+    </Body>
   )
-  if (!props.onPress && !props.onLongPress) return body
+  if (!pressable) return body
+  // Liquid Glass answers the touch itself; a fade on top of it would dim the glass.
+  if (liquid) {
+    return (
+      <Pressable
+        onPress={props.onPress}
+        onLongPress={props.onLongPress}
+        accessibilityRole="button"
+        accessibilityLabel={props.accessibilityLabel ?? props.label}
+        style={styles.shrink}
+      >
+        {body}
+      </Pressable>
+    )
+  }
   return (
     <Press
       onPress={props.onPress}
       onLongPress={props.onLongPress}
       accessibilityRole="button"
       accessibilityLabel={props.accessibilityLabel ?? props.label}
-      containerStyle={{ flexShrink: 1 }}
+      containerStyle={styles.shrink}
     >
       {body}
     </Press>
+  )
+}
+
+interface BodyProps {
+  interactive: boolean
+  style: StyleProp<ViewStyle>
+  children?: ReactNode
+}
+
+function PlainPillBody(props: BodyProps) {
+  return <View style={props.style}>{props.children}</View>
+}
+
+function GlassPillBody(props: BodyProps) {
+  return (
+    <Glass shape="capsule" interactive={props.interactive} style={props.style}>
+      {props.children}
+    </Glass>
   )
 }
 
@@ -101,4 +140,6 @@ const styles = StyleSheet.create({
   md: { gap: space.sm - 2, paddingHorizontal: space.md, minHeight: 32 },
   lg: { gap: space.sm + 2, paddingHorizontal: space.lg + 2, minHeight: 48 },
   bar: { gap: space.sm, paddingHorizontal: 14, minHeight: sizes.barPill, alignSelf: 'center' },
+  glass: { borderWidth: 0 },
+  shrink: { flexShrink: 1 },
 })

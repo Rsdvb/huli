@@ -1,5 +1,6 @@
 // A header that floats over its screen's scrolling content: clear at rest, so the screen's title
-// reads as a large title, and frosted with a hairline once content scrolls beneath it.
+// reads as a large title, and frosted with a hairline once content scrolls beneath it; with Liquid
+// Glass only a soft fade, under controls that are glass themselves.
 
 import { useMemo, useRef, type ReactNode } from 'react'
 import {
@@ -12,6 +13,7 @@ import {
 } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { ScrollEdge, useGlassMode } from './Glass'
 import { space, useTokens } from './tokens'
 
 export const HEADER_BAR = 64
@@ -83,13 +85,18 @@ export function useCollapsingHeader(options?: {
 export function FloatingHeader(props: { header: CollapsingHeader; children: ReactNode }) {
   const { c, scheme } = useTokens()
   const insets = useSafeAreaInsets()
+  const mode = useGlassMode()
   return (
     <View style={[styles.wrap, { height: props.header.height }]} pointerEvents="box-none">
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { opacity: props.header.progress }]}
       >
-        {Platform.OS === 'ios' ? (
+        {mode === 'liquid' ? (
+          // No bar with Liquid Glass, as iOS 26 has none: the controls float as glass of their
+          // own, over a soft fade once content scrolls under them.
+          <ScrollEdge color={c.bg} height={props.header.height + space.md} />
+        ) : Platform.OS === 'ios' && mode === 'blur' ? (
           <BlurView
             tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
             intensity={80}
@@ -98,7 +105,7 @@ export function FloatingHeader(props: { header: CollapsingHeader; children: Reac
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: c.bg }]} />
         )}
-        <View style={[styles.hairline, { backgroundColor: c.border }]} />
+        {mode !== 'liquid' && <View style={[styles.hairline, { backgroundColor: c.border }]} />}
       </Animated.View>
       <View style={[styles.bar, { marginTop: insets.top }]} pointerEvents="box-none">
         {props.children}

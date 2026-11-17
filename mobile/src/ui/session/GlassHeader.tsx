@@ -5,36 +5,14 @@
 import type { ReactNode, RefObject } from 'react'
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { BlurView } from 'expo-blur'
 import { router } from 'expo-router'
-import { GlassCapsule, useGlassMode } from '../Glass'
+import { GlassCapsule, ScrollEdge, useGlassMode } from '../Glass'
 import { useSessionPane } from '../../components/SessionPane'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
 import type { ViewHandle } from './Popover'
 import { PressScale, RoundButton } from './Press'
-
-/**
- * The soft edge iOS 26 gives a scroll view under floating controls: the screen's color, strong
- * under the status bar and fading out below the controls.
- */
-function EdgeFade(props: { color: string; height: number }) {
-  return (
-    <View pointerEvents="none" style={[styles.fade, { height: props.height }]}>
-      <Svg width="100%" height="100%">
-        <Defs>
-          <LinearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={props.color} stopOpacity={0.94} />
-            <Stop offset="0.45" stopColor={props.color} stopOpacity={0.7} />
-            <Stop offset="1" stopColor={props.color} stopOpacity={0} />
-          </LinearGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#edge)" />
-      </Svg>
-    </View>
-  )
-}
 
 export const HEADER_BAR = 60
 
@@ -110,7 +88,7 @@ export function GlassHeader(props: {
         props.floating && !liquid && !blur ? { backgroundColor: c.glass } : null,
       ]}
     >
-      {liquid && <EdgeFade color={c.bg} height={top + HEADER_BAR + 12} />}
+      {liquid && <ScrollEdge color={c.bg} height={top + HEADER_BAR + 12} />}
       {blur && (
         <BlurView
           style={StyleSheet.absoluteFill}
@@ -178,7 +156,6 @@ export function GlassHeader(props: {
 const styles = StyleSheet.create({
   root: { zIndex: 10 },
   floating: { position: 'absolute', top: 0, left: 0, right: 0 },
-  fade: { position: 'absolute', top: 0, left: 0, right: 0 },
   hairline: {
     position: 'absolute',
     left: 0,
