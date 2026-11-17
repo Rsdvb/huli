@@ -311,6 +311,11 @@
       "description": "A run ended, or paused near a plan limit.",
       "keywords": "routine schedule background"
     },
+    "limits": {
+      "name": "Plan limit alerts",
+      "description": "A plan limit reached 90% or ran out, once per reset period. With a window in front, it shows there.",
+      "keywords": "limit quota plan usage 5-hour weekly"
+    },
     "error": {
       "name": "Errors",
       "description": "A session failed or an agent stopped."
