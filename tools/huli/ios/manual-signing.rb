@@ -15,8 +15,9 @@ project.targets.each do |target|
     s = config.build_settings
     s['CODE_SIGN_STYLE'] = 'Manual'
     s['DEVELOPMENT_TEAM'] = 'Z5C6TTY2YF'
-    s['CODE_SIGN_IDENTITY'] = 'Apple Distribution'
-    s['CODE_SIGN_IDENTITY[sdk=iphoneos*]'] = 'Apple Distribution'
+    identity = signing['signing'] || 'Apple Distribution'
+    s['CODE_SIGN_IDENTITY'] = identity
+    s['CODE_SIGN_IDENTITY[sdk=iphoneos*]'] = identity
     s['PROVISIONING_PROFILE_SPECIFIER'] = profile['name']
     puts "#{target.name}: #{id} -> #{profile['name']}"
   end
