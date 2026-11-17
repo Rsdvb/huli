@@ -15,7 +15,8 @@
         "com.apple.security.application-groups": ["group.io.github.rsdvb.huli"]
       },
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "Huli 通过局域网或 Tailscale 连接你电脑上的 Huli。"
+        "NSLocalNetworkUsageDescription": "Huli 通过局域网或 Tailscale 连接你电脑上的 Huli。",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
