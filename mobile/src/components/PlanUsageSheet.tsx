@@ -10,7 +10,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { router } from 'expo-router'
 import type { AgentStatus, PlanLimit } from '@shared/agent-host'
 import type { SessionUsage } from '@shared/thread'
-import { useHost } from '../host'
+import { useAgents, useHostState, useMaybeLink } from '../host'
 import { errorText } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
@@ -98,11 +98,12 @@ export function PlanUsageSheet(props: {
   onLeave?(): void
 }) {
   const { c } = useSessionTokens()
-  const host = useHost()
+  const hostState = useHostState()
+  const agents = useAgents()
   const computer = useComputer()
-  const connected = host.state.kind === 'connected'
-  const link = host.link
-  const agent = props.agentId ? host.agents.get(props.agentId) : undefined
+  const connected = hostState.kind === 'connected'
+  const link = useMaybeLink()
+  const agent = props.agentId ? agents.get(props.agentId) : undefined
   const now = useTicking(props.visible)
   const [reading, setReading] = useState<ReadonlySet<string>>(new Set())
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({})
@@ -118,7 +119,11 @@ export function PlanUsageSheet(props: {
         return next
       })
       link
-        .request('agents.refreshLimits', { agentId: target.id, ...(force ? { force } : {}) })
+        .request('agents.refreshLimits', {
+          agentId: target.id,
+          // A refresh the user presses asks for the read now, Antigravity's too.
+          ...(force ? { force, ask: true } : {}),
+        })
         .catch((failure: unknown) =>
           setErrors((was) => ({ ...was, [target.id]: errorText(failure) })),
         )
@@ -140,7 +145,7 @@ export function PlanUsageSheet(props: {
     // Once per opening, not on every push of the agent's status.
   }, [props.visible, connected, agent?.id, read])
 
-  const others = usableAgents(host.agents)
+  const others = usableAgents(agents)
     .filter((a) => a.id !== agent?.id)
     .filter((a) => a.limits.length > 0 || a.capabilities.reports || a.account?.kind === 'account')
     .sort((a, b) => Number(b.limits.length > 0) - Number(a.limits.length > 0))

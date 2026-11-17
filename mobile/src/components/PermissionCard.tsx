@@ -16,7 +16,7 @@ import {
 } from '@shared/thread'
 import { handDiff } from '../diff'
 import { sessionFolder } from '../git'
-import { useHost } from '../host'
+import { useConnected, useSession } from '../host'
 import { useAgentName } from './entries/AccessEntries'
 import { ElicitationCard } from './entries/ElicitationCard'
 import { CardButton, SendState, useSender } from './entries/kit'
@@ -100,9 +100,9 @@ function answersOf(options: readonly PermissionOption[]) {
 function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: HostLink }) {
   const { entry, link, sessionId } = props
   const { c, s } = useSessionTokens()
-  const host = useHost()
+  const connected = useConnected()
   const agent = useAgentName(sessionId)
-  const summary = host.sessions.get(sessionId)
+  const summary = useSession(sessionId)
   const root = summary && !summary.scratch ? sessionFolder(summary) : null
   const sender = useSender(entry.id)
   const [noteFor, setNoteFor] = useState<PermissionOption | null>(null)
@@ -114,7 +114,7 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
   const command = label.kind === 'command' ? label.target : null
   const target = command ? command.split('\n')[0]! : label.target
   const risky = entry.toolKind === 'execute' || entry.toolKind === 'delete'
-  const away = host.state.kind !== 'connected'
+  const away = !connected
   const busy = sender.busy !== null || away
 
   // What it would touch: each file it edits with its counts, or reads.
@@ -395,7 +395,7 @@ function ToolPermissionCard(props: { entry: ToolEntry; sessionId: string; link: 
   const { c, s } = useSessionTokens()
   const permission = entry.permission!
   const sender = useSender(entry.id)
-  const away = useHost().state.kind !== 'connected'
+  const away = !useConnected()
   const sending = sender.busy !== null || away
   const [noteFor, setNoteFor] = useState<PermissionOption | null>(null)
   const [note, setNote] = useState('')

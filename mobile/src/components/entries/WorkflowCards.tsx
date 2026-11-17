@@ -17,7 +17,7 @@ import type {
 import { usableWorkflow, LEGACY_OFFICIAL } from '@shared/workflow'
 import type { ToolEntry } from '@shared/thread'
 import { call } from '../../git'
-import { useHost, useLink } from '../../host'
+import { useAgents, useLink, useSession } from '../../host'
 import { useSessionRows } from '../../ui/session/context'
 import { haptic } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
@@ -141,10 +141,9 @@ function SuggestionPending(props: { entry: ToolEntry; sessionId: string; suggest
   const { entry, sessionId, suggestion } = props
   const { c, s } = useSessionTokens()
   const link = useLink()
-  const { sessions } = useHost()
   const { config } = useSessionRows()
   const agent = useAgentName(sessionId)
-  const summary = sessions.get(sessionId)
+  const summary = useSession(sessionId)
   const { entries, loaded } = useWorkflows()
   const sender = useSender(entry.id)
   const [text, setText] = useState(suggestion.task)
@@ -402,9 +401,8 @@ function nextText(
 function ReportCard(props: { call: ReportCall; sessionId: string }) {
   const { call: report, sessionId } = props
   const { c } = useSessionTokens()
-  const { sessions } = useHost()
   const agent = useAgentName(sessionId)
-  const ref = sessions.get(sessionId)?.task ?? null
+  const ref = useSession(sessionId)?.task ?? null
   const task = useTask(ref?.taskId ?? null)
   const nameOf = (id: string) => task.view?.steps.find((s) => s.id === id)?.name ?? id
   const label = (line: CheckLine<string>): string => {
@@ -528,9 +526,9 @@ function pickLine(check: string, pick: PickCall['picks'][number], who: string): 
 function PickCard(props: { call: PickCall; sessionId: string }) {
   const { call: pick, sessionId } = props
   const { c } = useSessionTokens()
-  const { sessions, agents } = useHost()
+  const agents = useAgents()
   const agent = useAgentName(sessionId)
-  const ref = sessions.get(sessionId)?.task ?? null
+  const ref = useSession(sessionId)?.task ?? null
   const task = useTask(ref?.taskId ?? null)
   const nameOf = (id: string) => task.view?.steps.find((s) => s.id === id)?.name ?? id
   const steps = [...new Set(pick.picks.map((p) => p.step))]

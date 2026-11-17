@@ -27,6 +27,11 @@ export function SwipeRow(props: {
   start?: SwipeAction
   /** Revealed by swiping left, at the row's end. */
   end?: SwipeAction
+  /**
+   * What the row shows, in a list that recycles its rows: when it changes, the row starts closed
+   * rather than as the item it showed before was left.
+   */
+  item?: string
 }) {
   const { c } = useTokens()
   const [width, setWidth] = useState(0)
@@ -49,6 +54,16 @@ export function SwipeRow(props: {
   const close = () => settle(0)
   // A stable handle for the app-wide open row, whichever render set it.
   const closeThis = useRef(close).current
+
+  const shown = useRef(props.item)
+  if (shown.current !== props.item) {
+    shown.current = props.item
+    base.current = 0
+    current.current = 0
+    x.setValue(0)
+    if (closeOpen === closeThis) closeOpen = null
+    if (open) setOpen(false)
+  }
 
   const run = (action: SwipeAction | undefined) => {
     if (!action) return close()

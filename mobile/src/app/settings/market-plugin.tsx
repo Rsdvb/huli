@@ -2,7 +2,8 @@
 // the agents it is installed in, each with its switch and Uninstall, and installing it in another.
 
 import { useState } from 'react'
-import { Image, Linking, StyleSheet, Switch, Text, View } from 'react-native'
+import { Linking, StyleSheet, Switch, Text, View } from 'react-native'
+import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentId } from '@shared/agents'
 import {
@@ -46,6 +47,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
+import { cacheFor } from '../../ui/memory'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { tokensText } from '../../ui/session/limits'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
@@ -178,7 +180,9 @@ export default function MarketPlugin() {
             <Image
               source={{ uri: logoUri }}
               style={styles.logo}
-              resizeMode="contain"
+              contentFit="contain"
+              cachePolicy={cacheFor(logoUri)}
+              transition={120}
               accessibilityIgnoresInvertColors
             />
           ) : (

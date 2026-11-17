@@ -88,6 +88,71 @@ function startsBlock(line: string): boolean {
   )
 }
 
+const sameTexts = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((text, i) => text === b[i])
+
+/** Whether two blocks read the same, all the way down. */
+function sameBlock(a: Block, b: Block): boolean {
+  if (a === b) return true
+  switch (a.kind) {
+    case 'heading':
+      return b.kind === 'heading' && a.level === b.level && a.text === b.text
+    case 'para':
+      return b.kind === 'para' && a.text === b.text
+    case 'code':
+      return (
+        b.kind === 'code' &&
+        a.lang === b.lang &&
+        a.meta === b.meta &&
+        a.open === b.open &&
+        a.text === b.text
+      )
+    case 'rule':
+      return b.kind === 'rule'
+    case 'quote':
+      return b.kind === 'quote' && sameBlocks(a.blocks, b.blocks)
+    case 'table':
+      return (
+        b.kind === 'table' &&
+        sameTexts(a.head, b.head) &&
+        a.align.length === b.align.length &&
+        a.align.every((align, i) => align === b.align[i]) &&
+        a.rows.length === b.rows.length &&
+        a.rows.every((row, i) => sameTexts(row, b.rows[i]!))
+      )
+    case 'list':
+      return (
+        b.kind === 'list' &&
+        a.ordered === b.ordered &&
+        a.start === b.start &&
+        a.items.length === b.items.length &&
+        a.items.every(
+          (item, i) =>
+            item.task === b.items[i]!.task && sameBlocks(item.blocks, b.items[i]!.blocks),
+        )
+      )
+  }
+}
+
+function sameBlocks(a: readonly Block[], b: readonly Block[]): boolean {
+  return a.length === b.length && a.every((block, i) => sameBlock(block, b[i]!))
+}
+
+/**
+ * `next` with each block that reads as the one at its place in `before` replaced by it, and
+ * `before` itself when all do: as a reply streams in, its finished blocks keep their objects.
+ */
+export function keepBlocks(before: readonly Block[], next: readonly Block[]): Block[] {
+  if (before.length === 0) return next as Block[]
+  let all = before.length === next.length
+  const out = next.map((block, i) => {
+    const old = before[i]
+    if (old && sameBlock(old, block)) return old
+    all = false
+    return block
+  })
+  return all ? (before as Block[]) : out
+}
 export function parseBlocks(source: string): Block[] {
   return blocks(source.replace(/\r\n?/g, '\n').split('\n'))
 }

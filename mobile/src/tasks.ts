@@ -21,7 +21,7 @@ import {
   type Workflow,
 } from '@shared/workflow'
 import { call } from './git'
-import { useHost } from './host'
+import { useConnected, useMaybeLink } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
 
@@ -353,7 +353,7 @@ function storeFor(link: HostLink): Store {
 }
 
 function useStore(): { store: Store | null; snapshot: Snapshot } {
-  const { link } = useHost()
+  const link = useMaybeLink()
   const store = link ? storeFor(link) : null
   const subscribe = useCallback(
     (listener: () => void) => {
@@ -402,11 +402,10 @@ export interface TaskData {
 
 /** One task in full, read while its page shows and kept current by the computer's events. */
 export function useTask(taskId: string): TaskData {
-  const host = useHost()
   const { store, snapshot } = useStore()
   const [error, setError] = useState<string | null>(null)
   const [gone, setGone] = useState(false)
-  const connected = host.state.kind === 'connected'
+  const connected = useConnected()
 
   const reload = useCallback(async () => {
     if (!store) return
@@ -530,11 +529,10 @@ export interface Library {
 
 /** The computer's workflows, read while a screen shows them and again when the library changes. */
 export function useWorkflowLibrary(): Library {
-  const host = useHost()
   const [entries, setEntries] = useState<WireWorkflowEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const connected = host.state.kind === 'connected'
-  const link = host.link
+  const connected = useConnected()
+  const link = useMaybeLink()
 
   const reload = useCallback(async () => {
     if (!link) return

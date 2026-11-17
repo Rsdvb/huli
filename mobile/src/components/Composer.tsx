@@ -28,7 +28,6 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
-  Image,
   Linking,
   Platform,
   Pressable,
@@ -40,6 +39,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native'
+import { Image } from 'expo-image'
 import * as Clipboard from 'expo-clipboard'
 import * as DocumentPicker from 'expo-document-picker'
 import { File, Paths } from 'expo-file-system'
@@ -73,8 +73,9 @@ import {
 } from '../composerText'
 import { readDraft, useDraftsReady, writeDraft, type SavedAttachment } from '../drafts'
 import { matchFiles, useProjectFiles } from '../files'
-import { useHost, useLink } from '../host'
+import { useComputerId, useHostState, useLink } from '../host'
 import { BottomSheet } from '../ui/BottomSheet'
+import { countRender } from '../ui/renders'
 import { haptic, showMenu } from '../ui/session/feedback'
 import { openFile } from '../ui/session/fileRefs'
 import { extensionOf } from '../ui/session/format'
@@ -228,9 +229,10 @@ function slashMatches(commands: readonly SlashCommand[], query: string): SlashCo
 }
 
 export function Composer(props: ComposerProps) {
+  countRender('Composer')
   const { placeholder, onSend, failTitle, allowEmpty = false, disabled = false } = props
   const { c, s } = useSessionTokens()
-  const host = useHost()
+  const hostState = useHostState()
   const link = useLink()
   const liquid = useGlassMode() === 'liquid'
   const tray = useRef<ViewHandle>(null)
@@ -255,14 +257,14 @@ export function Composer(props: ComposerProps) {
   // One at a time, so a photo is read and scaled while nothing else holds its memory.
   const queue = useRef<Promise<void>>(Promise.resolve())
   const agent = props.agentName ?? 'Agent'
-  const computer = host.host?.id ?? null
+  const computer = useComputerId()
   const draftKey = props.draft
   const draftsReady = useDraftsReady(draftKey ? computer : null)
   /** The draft has been read into the box, so changes from now on are written back. */
   const [restored, setRestored] = useState(!draftKey)
   /** A restored draft's attachments to ask the computer about, once connected. */
   const unchecked = useRef<Map<string, string> | null>(null)
-  const connected = host.state.kind === 'connected'
+  const connected = hostState.kind === 'connected'
 
   const forget = (id: string) => {
     void link.request('attachments.remove', { id }).catch(() => {})
@@ -804,9 +806,9 @@ export function Composer(props: ComposerProps) {
 
   // Offline the screen may show the cache's copy of the conversation; nothing goes until connected.
   const status = !connected
-    ? host.state.kind === 'connecting'
+    ? hostState.kind === 'connecting'
       ? '正在连接电脑…连上后才能发送。'
-      : host.state.kind === 'reconnecting'
+      : hostState.kind === 'reconnecting'
         ? '和电脑的连接断了，正在重连。连上后才能发送。'
         : '没有连上电脑，暂时不能发送。'
     : blocked && (holds || allowEmpty)
@@ -1257,7 +1259,12 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
       style={[styles.tile, { borderColor: c.border, backgroundColor: c.fill }]}
     >
       {preview ? (
-        <Image source={{ uri: preview }} style={styles.preview} resizeMode="cover" />
+        <Image
+          source={{ uri: preview }}
+          style={styles.preview}
+          contentFit="cover"
+          cachePolicy="memory"
+        />
       ) : textThumb ? (
         <View style={styles.file}>
           <Text style={[styles.textLines, { color: c.textSecondary }]} numberOfLines={3}>
@@ -1345,7 +1352,12 @@ function TileSheet(props: {
           accessibilityRole="imagebutton"
           accessibilityLabel={`查看 ${item?.source.name ?? ''}`}
         >
-          <Image source={{ uri: image }} style={styles.sheetImage} resizeMode="contain" />
+          <Image
+            source={{ uri: image }}
+            style={styles.sheetImage}
+            contentFit="contain"
+            cachePolicy="memory"
+          />
         </Pressable>
       ) : pastedText || textThumb ? (
         <View style={[styles.sheetText, { backgroundColor: c.fill }]}>

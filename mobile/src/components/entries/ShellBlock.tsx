@@ -11,7 +11,7 @@ import {
   type ToolContent,
   type ToolEntry,
 } from '@shared/thread'
-import { useHost } from '../../host'
+import { useSession } from '../../host'
 import { copyText, showMenu } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
@@ -187,9 +187,8 @@ export function ShellBlock(props: {
   status: ToolEntry['status']
 }) {
   const { c } = useSessionTokens()
-  const { sessions } = useHost()
   const [all, setAll] = useState(false)
-  const agentId = sessions.get(props.sessionId)?.agentId
+  const agentId = useSession(props.sessionId)?.agentId
   const harness = agentId && isAgentId(agentId) ? harnessOf(agentId) : null
   const exit = exitOf(props.output, props.status, harness)
   const raw = exit.output?.replace(/\n$/, '') ?? ''

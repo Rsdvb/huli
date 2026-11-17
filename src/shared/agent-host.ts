@@ -791,7 +791,12 @@ export interface HostContract {
   // Reads the options of an agent none are cached for, starting it if need be, before New session
   // has a folder; rejects with the reason.
   'agents.readFirstOptions': { params: { agentId: AgentId }; result: void }
-  'agents.refreshLimits': { params: { agentId: AgentId; force?: boolean }; result: void }
+  // `ask`: the user asked for this read now, with a button of their own. Only such a read runs a
+  // read an agent's terms frown on when done by itself, such as Antigravity's `agy -p /usage`.
+  'agents.refreshLimits': {
+    params: { agentId: AgentId; force?: boolean; ask?: boolean }
+    result: void
+  }
   'agents.details': { params: { agentId: AgentId }; result: AgentDetails }
   // A Claude Code agent's auto-compact windows and prompt cache duration, read from its settings
   // file; rejects with the reason when the file cannot be read.

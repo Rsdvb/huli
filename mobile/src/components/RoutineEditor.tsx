@@ -21,7 +21,7 @@ import type {
 } from '@shared/routines'
 import type { AgentId } from '@shared/agents'
 import { DEFAULT_KEPT_RUN_SESSIONS, DEFAULT_TIME_LIMIT } from '@shared/routines'
-import { useHost } from '../host'
+import { useAgents, useConnected, useMaybeLink, useProjects } from '../host'
 import { LEVEL_TEXT, scheduleText, scopeText } from '../routines'
 import { errorText } from '../sessions'
 import { AgentGlyph } from '../ui/AgentAvatar'
@@ -85,17 +85,20 @@ export function RoutineEditor(props: {
   onSaved?(routine: RoutineView): void
 }) {
   const { c } = useTokens()
-  const host = useHost()
+  const allAgents = useAgents()
+  const allProjects = useProjects()
+  const link = useMaybeLink()
+  const connected = useConnected()
   const agents = useMemo(
     () =>
-      [...host.agents.values()].filter(
+      [...allAgents.values()].filter(
         (a) => !a.hidden && !a.disabled && !a.uninstalled && a.registered !== false,
       ),
-    [host.agents],
+    [allAgents],
   )
   const projects = useMemo(
-    () => host.projects.filter((p) => !p.missing).sort((a, b) => b.lastOpenedAt - a.lastOpenedAt),
-    [host.projects],
+    () => allProjects.filter((p) => !p.missing).sort((a, b) => b.lastOpenedAt - a.lastOpenedAt),
+    [allProjects],
   )
 
   const [name, setName] = useState('')
@@ -168,7 +171,7 @@ export function RoutineEditor(props: {
         : null
 
   const save = async () => {
-    if (problem || !schedule || !agentId || !host.link) return
+    if (problem || !schedule || !agentId || !link) return
     setSaving(true)
     setError(null)
     try {
@@ -182,7 +185,7 @@ export function RoutineEditor(props: {
           scope,
           ...(agentId !== props.routine.agentId ? { agentId, options: [] } : {}),
         }
-        saved = (await host.link.request('routines.update', {
+        saved = (await link.request('routines.update', {
           routineId: props.routine.id,
           changes,
         })) as RoutineView
@@ -198,7 +201,7 @@ export function RoutineEditor(props: {
           timeLimitMinutes: DEFAULT_TIME_LIMIT,
           keptRunSessions: DEFAULT_KEPT_RUN_SESSIONS,
         }
-        saved = (await host.link.request('routines.create', draft)) as RoutineView
+        saved = (await link.request('routines.create', draft)) as RoutineView
       }
       haptic.success()
       props.onClose()
@@ -237,8 +240,6 @@ export function RoutineEditor(props: {
   const label = (text: string) => (
     <Text style={[typeScale.footnote, styles.label, { color: c.textSecondary }]}>{text}</Text>
   )
-
-  const connected = host.state.kind === 'connected'
 
   return (
     <BottomSheet

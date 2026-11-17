@@ -22,7 +22,7 @@ import { DEFAULT_SCHEDULE, DEFAULT_SCOPE } from '@shared/routines'
 import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { TasksView } from '../../components/tasks/TasksView'
-import { useHost } from '../../host'
+import { useAgents, useHostActions, useHostState, useMaybeLink, useProjects } from '../../host'
 import {
   confirmDeleteRoutine,
   routineExamples,
@@ -66,7 +66,11 @@ export default function TasksTab() {
 
 function Routines(props: { switcher: ReactNode }) {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useMaybeLink()
+  const state = useHostState()
+  const { retry } = useHostActions()
+  const agents = useAgents()
+  const projects = useProjects()
   const shell = useShell()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
@@ -76,16 +80,13 @@ function Routines(props: { switcher: ReactNode }) {
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [seed, setSeed] = useState<EditorSeed | null>(null)
-  const connected = host.state.kind === 'connected'
+  const connected = state.kind === 'connected'
   useScrollTopOnTabPress(
     (offset) => scroll.current?.scrollTo({ y: offset, animated: true }),
     header,
   )
 
-  const projectNames = useMemo(
-    () => new Map(host.projects.map((p) => [p.path, p.name])),
-    [host.projects],
-  )
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.path, p.name])), [projects])
   const words = searching ? query.trim().toLowerCase() : ''
   const inProject = useMemo(
     () =>
@@ -130,9 +131,9 @@ function Routines(props: { switcher: ReactNode }) {
   }
 
   const toggle = (r: RoutineView, enabled: boolean) => {
-    if (!host.link) return
+    if (!link) return
     haptic.select()
-    host.link
+    link
       .request('routines.update', { routineId: r.id, changes: { enabled } })
       .catch((failure: unknown) =>
         Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure)),
@@ -146,7 +147,7 @@ function Routines(props: { switcher: ReactNode }) {
     const run = r.activeRun ?? r.lastRun
     const look = run ? runLook(c, run.status) : null
     const quiet = r.state === 'off' || r.state === 'done'
-    const agent = host.agents.get(r.agentId)
+    const agent = agents.get(r.agentId)
     return (
       <View key={r.id}>
         {index > 0 && <View style={[styles.line, { backgroundColor: c.border }]} />}
@@ -167,8 +168,7 @@ function Routines(props: { switcher: ReactNode }) {
                   label: '删除',
                   icon: 'trash',
                   color: c.danger,
-                  onPress: () =>
-                    host.link && confirmDeleteRoutine((m, p) => host.link!.request(m, p), r),
+                  onPress: () => link && confirmDeleteRoutine((m, p) => link!.request(m, p), r),
                 }
               : undefined
           }
@@ -272,7 +272,7 @@ function Routines(props: { switcher: ReactNode }) {
           icon="history"
           title="连上电脑后才能看定时任务"
           message="Huli 正在连接你的电脑。"
-          action={{ label: '立即重连', onPress: () => host.retry() }}
+          action={{ label: '立即重连', onPress: () => retry() }}
         />
       )
     }
@@ -356,7 +356,7 @@ function Routines(props: { switcher: ReactNode }) {
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
-              host.retry()
+              retry()
               void load().finally(() => setRefreshing(false))
             }}
           />

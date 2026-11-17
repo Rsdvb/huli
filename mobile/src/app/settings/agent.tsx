@@ -726,7 +726,8 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
   const refresh = () =>
     void run(
       'limits',
-      () => call(host.link!, 'agents.refreshLimits', { agentId: status.id, force: true }),
+      () =>
+        call(host.link!, 'agents.refreshLimits', { agentId: status.id, force: true, ask: true }),
       '没能读取套餐用量',
     )
   const reason =

@@ -7,7 +7,6 @@
 import { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
-  Image,
   Modal,
   Platform,
   Pressable,
@@ -18,12 +17,14 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native'
+import { Image } from 'expo-image'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { File, Paths } from 'expo-file-system'
 import type { AttachmentBytes } from '@shared/agent-host'
 import type { ContentRef } from '@shared/thread'
 import { useLink } from '../host'
 import { LockLayer } from '../lock'
+import { cacheFor } from '../ui/memory'
 import { useSessionRows } from '../ui/session/context'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
@@ -118,7 +119,10 @@ export function PictureStrip(props: { pictures: Picture[]; align: 'start' | 'end
                 <Image
                   source={{ uri: each.thumb }}
                   style={[styles.thumb, { width: side, height: side, borderColor: c.border }]}
-                  resizeMode="cover"
+                  contentFit="cover"
+                  cachePolicy={cacheFor(each.thumb)}
+                  recyclingKey={each.thumb}
+                  transition={120}
                 />
               ) : (
                 <View
@@ -184,7 +188,12 @@ export function PictureViewer(props: { picture: Picture; onClose(): void }) {
     <Image
       source={{ uri: shown }}
       style={{ width: window.width, height: window.height }}
-      resizeMode="contain"
+      contentFit="contain"
+      // The full picture is large: kept on disk only, so closing the viewer frees its memory.
+      cachePolicy="disk"
+      {...(picture.thumb && shown !== picture.thumb
+        ? { placeholder: { uri: picture.thumb }, placeholderContentFit: 'contain' as const }
+        : {})}
       accessibilityIgnoresInvertColors
     />
   ) : null

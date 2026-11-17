@@ -5,13 +5,13 @@
 import { memo, useMemo, useRef, useState } from 'react'
 import {
   FlatList,
-  Image,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
   type TextStyle,
 } from 'react-native'
+import { Image } from 'expo-image'
 import { CONTENT_ENTRIES } from '@shared/artifact-types'
 import { useSessionTokens } from '../ui/session/palette'
 import { dataUrl, textOf } from './bytes'
@@ -134,7 +134,8 @@ function Picture(props: { path: unknown; alt: unknown; look: Look }) {
     <Image
       source={{ uri }}
       accessibilityLabel={str(props.alt) ?? ''}
-      resizeMode="contain"
+      contentFit="contain"
+      transition={120}
       style={{ flex: 1, width: '100%' }}
     />
   )

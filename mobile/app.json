@@ -65,7 +65,8 @@
           "androidIntentFilters": ["text/*", "*/*"],
           "androidMultiIntentFilters": ["*/*"]
         }
-      ]
+      ],
+      "expo-image"
     ]
   }
 }

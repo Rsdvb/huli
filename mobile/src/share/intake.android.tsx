@@ -6,8 +6,10 @@ import { useEffect } from 'react'
 import { router } from 'expo-router'
 import { useShareIntent, type ShareIntent } from 'expo-share-intent'
 import { isPhoto } from '../attachments'
-import { useHost } from '../host'
+import { useHostSelector, type HostData } from '../host'
 import { keepShared, type SharedItem } from './inbox'
+
+const selectPhase = (d: HostData) => d.phase
 
 function itemsOf(intent: ShareIntent): SharedItem[] {
   const items: SharedItem[] = []
@@ -28,7 +30,7 @@ function itemsOf(intent: ShareIntent): SharedItem[] {
 }
 
 export function ShareIntake() {
-  const { phase } = useHost()
+  const phase = useHostSelector(selectPhase)
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent({
     resetOnBackground: true,
   })

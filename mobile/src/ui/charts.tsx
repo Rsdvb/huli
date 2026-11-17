@@ -3,7 +3,7 @@
 // answer a tap with a selection, a touch and hold with a tooltip, and VoiceOver's swipes up and
 // down by reading one bar after another.
 
-import { useState, type ReactNode } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native'
 import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg'
 import { haptic } from './haptics'
@@ -228,6 +228,75 @@ export interface StackedBar {
 }
 
 /**
+ * The bars themselves, apart from the chart's touch state: holding a bar for its tooltip, or
+ * VoiceOver stepping through them, redraws the tooltip and not every bar.
+ */
+const Bars = memo(function Bars(props: {
+  bars: StackedBar[]
+  width: number
+  height: number
+  grid: number[] | undefined
+  selected: number | null
+}) {
+  const { c } = useTokens()
+  const { width, height, selected } = props
+  const n = props.bars.length
+  const totals = props.bars.map((bar) =>
+    bar.segments.reduce((sum, s) => sum + Math.max(0, s.value), 0),
+  )
+  const max = Math.max(0, ...totals)
+  const slot = n > 0 && width > 0 ? width / n : 0
+  const gap = Math.max(1, Math.min(4, slot * 0.25))
+  const barWidth = slot > 0 ? Math.max(1, slot - gap) : 0
+  const top = height - 2
+  return (
+    <Svg width={width} height={height}>
+      {(props.grid ?? []).map((share) => {
+        const y = Math.round(height - share * top) + 0.5
+        return <Line key={share} x1={0} x2={width} y1={y} y2={y} stroke={c.border} />
+      })}
+      {props.bars.map((bar, i) => {
+        if (max <= 0 || totals[i]! <= 0) return null
+        const x = i * slot + gap / 2
+        const dim = selected !== null && selected !== i ? 0.35 : 1
+        const shown = bar.segments.filter((s) => s.value > 0)
+        let base = height
+        return (
+          <G key={bar.key}>
+            {shown.map((s, k) => {
+              const last = k === shown.length - 1
+              const full = Math.max(last && k === 0 ? 2 : 1, (s.value / max) * top)
+              const h = last ? full : Math.max(0.5, full - 1)
+              const y = base - h
+              base -= full
+              return last ? (
+                <Path
+                  key={s.key}
+                  d={barPath(x, y, barWidth, h)}
+                  fill={s.color}
+                  opacity={(s.opacity ?? 1) * dim}
+                />
+              ) : (
+                <Rect
+                  key={s.key}
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={h}
+                  fill={s.color}
+                  opacity={(s.opacity ?? 1) * dim}
+                />
+              )
+            })}
+          </G>
+        )
+      })}
+      <Line x1={0} x2={width} y1={height - 0.5} y2={height - 0.5} stroke={c.border} />
+    </Svg>
+  )
+})
+
+/**
  * Bars on a shared baseline, each a stack of series with a hairline between them and only the
  * top one rounded. A tap picks a bar and dims the rest, which is the phone's hover; a touch and
  * hold shows `tip` until the finger lifts.
@@ -257,8 +326,6 @@ export function StackedBarChart(props: {
   )
   const max = Math.max(0, ...totals)
   const slot = n > 0 && width > 0 ? width / n : 0
-  const gap = Math.max(1, Math.min(4, slot * 0.25))
-  const barWidth = slot > 0 ? Math.max(1, slot - gap) : 0
   const selected = props.selected ?? null
   const top = height - 2
 
@@ -301,49 +368,13 @@ export function StackedBarChart(props: {
         }}
       >
         {width > 0 && (
-          <Svg width={width} height={height}>
-            {(props.grid ?? []).map((share) => {
-              const y = Math.round(height - share * top) + 0.5
-              return <Line key={share} x1={0} x2={width} y1={y} y2={y} stroke={c.border} />
-            })}
-            {props.bars.map((bar, i) => {
-              if (max <= 0 || totals[i]! <= 0) return null
-              const x = i * slot + gap / 2
-              const dim = selected !== null && selected !== i ? 0.35 : 1
-              const shown = bar.segments.filter((s) => s.value > 0)
-              let base = height
-              return (
-                <G key={bar.key}>
-                  {shown.map((s, k) => {
-                    const last = k === shown.length - 1
-                    const full = Math.max(last && k === 0 ? 2 : 1, (s.value / max) * top)
-                    const h = last ? full : Math.max(0.5, full - 1)
-                    const y = base - h
-                    base -= full
-                    return last ? (
-                      <Path
-                        key={s.key}
-                        d={barPath(x, y, barWidth, h)}
-                        fill={s.color}
-                        opacity={(s.opacity ?? 1) * dim}
-                      />
-                    ) : (
-                      <Rect
-                        key={s.key}
-                        x={x}
-                        y={y}
-                        width={barWidth}
-                        height={h}
-                        fill={s.color}
-                        opacity={(s.opacity ?? 1) * dim}
-                      />
-                    )
-                  })}
-                </G>
-              )
-            })}
-            <Line x1={0} x2={width} y1={height - 0.5} y2={height - 0.5} stroke={c.border} />
-          </Svg>
+          <Bars
+            bars={props.bars}
+            width={width}
+            height={height}
+            grid={props.grid}
+            selected={selected}
+          />
         )}
       </Pressable>
       {props.ticks && slot > 0 && (

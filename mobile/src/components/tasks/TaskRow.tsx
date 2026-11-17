@@ -4,7 +4,7 @@
 import { memo } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import type { TaskSummary, TaskView } from '@shared/workflow'
-import { useHost } from '../../host'
+import { useAgent } from '../../host'
 import { listTime } from '../../sessions'
 import {
   ENDED_TEXT,
@@ -60,7 +60,6 @@ export const TaskRow = memo(function TaskRow(props: {
   onLongPress?(): void
 }) {
   const { c } = useTokens()
-  const host = useHost()
   const task = props.task
   const running = task.status === 'running'
   const waiting = needsAttention(task)
@@ -71,6 +70,7 @@ export const TaskRow = memo(function TaskRow(props: {
   const progress = progressText(task)
   const yours = !!step && (step.state === 'needs_you' || step.agentId === null)
   const agentId = step?.agentId ?? task.agents[task.agents.length - 1] ?? null
+  const agent = useAgent(agentId)
   const badge: AvatarBadge = !running
     ? task.unread
       ? 'unread'
@@ -96,7 +96,7 @@ export const TaskRow = memo(function TaskRow(props: {
         : yours
           ? { text: '你', color: c.textSecondary }
           : {
-              text: agentId ? `${host.agents.get(agentId)?.name ?? agentId} 在做` : '进行中',
+              text: agentId ? `${agent?.name ?? agentId} 在做` : '进行中',
               color: c.textSecondary,
             }
 
@@ -122,12 +122,7 @@ export const TaskRow = memo(function TaskRow(props: {
       {yours && running ? (
         <YouAvatar waiting={waiting} />
       ) : agentId ? (
-        <AgentAvatar
-          size={sizes.rowAvatar}
-          agentId={agentId}
-          name={host.agents.get(agentId)?.name}
-          badge={badge}
-        />
+        <AgentAvatar size={sizes.rowAvatar} agentId={agentId} name={agent?.name} badge={badge} />
       ) : (
         <YouAvatar />
       )}
@@ -178,7 +173,7 @@ export const TaskRow = memo(function TaskRow(props: {
 
   if (!props.start && !props.end) return row
   return (
-    <SwipeRow start={props.start} end={props.end}>
+    <SwipeRow start={props.start} end={props.end} item={task.id}>
       {row}
     </SwipeRow>
   )

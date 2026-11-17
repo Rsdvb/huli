@@ -5,23 +5,23 @@
 // has cached.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ActivityIndicator,
-  FlatList,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  type ListRenderItem,
-} from 'react-native'
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
+import { FlashList, type ListRenderItem } from '@shopify/flash-list'
 import type { ArtifactSummary } from '@shared/artifacts'
 import type { ConversationHit, SearchIndexing, SessionSummary } from '@shared/agent-host'
 import { artifactKind, KIND_ICON, KIND_TEXT, openArtifact } from '../artifacts'
 import { ArtifactSheet } from '../components/ArtifactSheet'
 import { useShell } from '../components/shell'
-import { useHost } from '../host'
+import {
+  useActiveHost,
+  useAgents,
+  useConnected,
+  useMaybeLink,
+  useProjects,
+  useSessions,
+} from '../host'
 import {
   clearSearches,
   forgetSearch,
@@ -82,6 +82,9 @@ type Item =
   | { kind: 'loading'; key: string; text: string }
   | { kind: 'recent'; key: string; query: string }
 
+const itemKey = (item: Item) => item.key
+const itemType = (item: Item) => item.kind
+
 /** Text with the query's words picked out. */
 function Highlighted(props: {
   text: string
@@ -109,7 +112,11 @@ function Highlighted(props: {
 
 export default function Search() {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useMaybeLink()
+  const allSessions = useSessions()
+  const allProjects = useProjects()
+  const agents = useAgents()
+  const active = useActiveHost()
   const shell = useShell()
   const insets = useSafeAreaInsets()
   const params = useLocalSearchParams<{ q?: string; scope?: string }>()
@@ -120,19 +127,19 @@ export default function Search() {
   const [artifacts, setArtifacts] = useState<ArtifactSummary[] | null>(null)
   const [artifactsError, setArtifactsError] = useState<string | null>(null)
   const [open, setOpen] = useState<ArtifactSummary | null>(null)
-  const connected = host.state.kind === 'connected'
+  const connected = useConnected()
   const words = useMemo(() => wordsOf(query), [query])
-  const computer = host.host?.id ?? null
+  const computer = active?.id ?? null
 
   // The Artifacts list is read once the page opens, while the computer is reachable.
   const loadArtifacts = useCallback(() => {
-    if (!host.link || !connected) return
+    if (!link || !connected) return
     setArtifactsError(null)
-    void (host.link.request('artifacts.list', {}) as Promise<ArtifactSummary[]>).then(
+    void (link.request('artifacts.list', {}) as Promise<ArtifactSummary[]>).then(
       (list) => setArtifacts(list.filter((a) => a.deletedAt === null)),
       (failure: unknown) => setArtifactsError(errorText(failure)),
     )
-  }, [host.link, connected])
+  }, [link, connected])
   useEffect(() => {
     if (artifacts === null) loadArtifacts()
   }, [artifacts, loadArtifacts])
@@ -157,9 +164,9 @@ export default function Search() {
       setContent(base)
       const settle = (next: Partial<ContentSearch>) =>
         setContent((current) => (current?.query === asked ? { ...base, ...next } : current))
-      if (host.link && connected) {
+      if (link && connected) {
         void (
-          host.link.request('sessions.search', { query: asked }) as Promise<{
+          link.request('sessions.search', { query: asked }) as Promise<{
             hits: ConversationHit[]
             indexing?: SearchIndexing | null
           }>
@@ -184,7 +191,7 @@ export default function Search() {
         (failure: unknown) => settle({ state: 'error', error: errorText(failure) }),
       )
     },
-    [host.link, connected, computer],
+    [link, connected, computer],
   )
 
   // A link's query is searched at once.
@@ -197,29 +204,29 @@ export default function Search() {
 
   const sessions = useMemo(() => {
     if (words.length === 0) return []
-    return [...host.sessions.values()]
+    return [...allSessions.values()]
       .filter((s) => s.parentId === null && matches(sessionTitle(s), words))
       .sort(
         (a, b) =>
           Number(a.archivedAt !== null) - Number(b.archivedAt !== null) ||
           b.updatedAt - a.updatedAt,
       )
-  }, [host.sessions, words])
+  }, [allSessions, words])
 
   const projects = useMemo(() => {
     if (words.length === 0) return []
-    const names = new Map(host.projects.map((p) => [p.path, p.name]))
+    const names = new Map(allProjects.map((p) => [p.path, p.name]))
     const counts = new Map<string, number>()
-    for (const s of host.sessions.values()) {
+    for (const s of allSessions.values()) {
       if (s.parentId !== null || s.scratch) continue
       counts.set(s.projectPath, (counts.get(s.projectPath) ?? 0) + 1)
     }
-    for (const p of host.projects) if (!counts.has(p.path)) counts.set(p.path, 0)
+    for (const p of allProjects) if (!counts.has(p.path)) counts.set(p.path, 0)
     return [...counts.entries()]
       .map(([path, count]) => ({ path, count, name: names.get(path) ?? folder(path) }))
       .filter((p) => matches(p.name, words) || matches(p.path, words))
       .sort((a, b) => b.count - a.count)
-  }, [host.sessions, host.projects, words])
+  }, [allSessions, allProjects, words])
 
   const artifactHits = useMemo(
     () =>
@@ -297,7 +304,7 @@ export default function Search() {
           action: () => runContent(query),
         })
       } else {
-        const hits = content.hits.map((h) => ({ ...h, session: host.sessions.get(h.sessionId) }))
+        const hits = content.hits.map((h) => ({ ...h, session: allSessions.get(h.sessionId) }))
         group('content', '对话内容', hits, (h) => ({
           kind: 'hit',
           key: `c-${h.sessionId}`,
@@ -362,7 +369,7 @@ export default function Search() {
     content,
     query,
     connected,
-    host.sessions,
+    allSessions,
     projects,
     artifacts,
     artifactsError,
@@ -425,7 +432,7 @@ export default function Search() {
         const place = s.scratch ? '无项目' : folder(s.projectPath)
         return (
           <Press onPress={() => openSession(s.id)} scale={false} style={styles.row}>
-            <AgentAvatar agentId={s.agentId} name={host.agents.get(s.agentId)?.name} size={34} />
+            <AgentAvatar agentId={s.agentId} name={agents.get(s.agentId)?.name} size={34} />
             <View style={styles.flex}>
               <Highlighted
                 text={sessionTitle(s)}
@@ -600,7 +607,7 @@ export default function Search() {
         <EmptyState
           icon="search"
           title="搜索会话、对话内容、项目和 Artifacts"
-          message={`在「${computerName(host.host)}」上找。按键盘上的「搜索」，也会搜全部对话内容。`}
+          message={`在「${computerName(active)}」上找。按键盘上的「搜索」，也会搜全部对话内容。`}
         />
       )
     }
@@ -664,9 +671,10 @@ export default function Search() {
           没连上电脑：会话和项目来自上次同步的列表。
         </Text>
       ) : null}
-      <FlatList
+      <FlashList
         data={items}
-        keyExtractor={(item) => item.key}
+        keyExtractor={itemKey}
+        getItemType={itemType}
         renderItem={renderItem}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"

@@ -3,7 +3,7 @@
 
 import { router } from 'expo-router'
 import { sessionFolder, useChanges } from '../git'
-import { useHost, useLink } from '../host'
+import { useLink, useSession } from '../host'
 
 export interface SessionChanges {
   /** The folder the session works in; null without a project. */
@@ -19,9 +19,8 @@ export interface SessionChanges {
 }
 
 export function useSessionChanges(sessionId: string): SessionChanges {
-  const host = useHost()
   const link = useLink()
-  const summary = host.sessions.get(sessionId)
+  const summary = useSession(sessionId)
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const { status, files, error } = useChanges(link, folder)
   const branch =

@@ -23,7 +23,7 @@ import {
 } from 'lucide-react-native'
 import { ALREADY_ANSWERED } from '@shared/agent-host'
 import type { FromDevice } from '@shared/thread'
-import { useHost } from '../../host'
+import { useActiveHost, useHostState } from '../../host'
 import { haptic } from '../../ui/session/feedback'
 import { clockTime } from '../../ui/session/format'
 import { G, Icon, type IconSpec } from '../../ui/session/icons'
@@ -104,7 +104,8 @@ export interface Sender {
 
 /** Sends a card's answer once at a time, with a haptic on success and the failure kept to retry. */
 export function useSender(entryId?: string): Sender {
-  const { state, host } = useHost()
+  const state = useHostState()
+  const host = useActiveHost()
   const computer = state.kind === 'connected' ? state.welcome.host.name : (host?.name ?? '电脑')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

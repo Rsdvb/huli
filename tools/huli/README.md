@@ -10,7 +10,7 @@ Code (kept small so upstream merges stay clean):
 
 | File | Change |
 |---|---|
-| `src/agent-host/agents.ts` | `READ_ANTIGRAVITY_LIMITS = false`: never runs `agy -p /usage`, `/credits` or a hidden ACP session to read Antigravity's limits |
+| `src/agent-host/agents.ts` | `READ_ANTIGRAVITY_LIMITS = false`: never runs `agy -p /usage`, `/credits` or a hidden ACP session by itself to read Antigravity's limits; only a refresh the user presses (`agents.refreshLimits` with `ask: true`) runs `/usage` and `/credits` once |
 | `src/shared/settings.ts` | defaults: cloud off, relay off, not discoverable |
 | `src/main/update-keys.json`, `src/main/update-sources.ts`, `src/shared/updates.ts`, `src/daemon/update.ts` | updates come from Huli's own channel on Huli Cloud's host, signed with Huli's own release keys (kept off the repository) |
 | `src/shared/account-api.ts`, `src/shared/remote/push.ts` | the account service and push gateway are Huli Cloud, `https://huli.132-145-200-0.sslip.io` (see `cloud/`) |

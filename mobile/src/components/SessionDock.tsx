@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import type { ConfigOption, QueuedPrompt, SessionView, UserContent } from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
-import { useHost } from '../host'
+import { useAgent, useConnected, useMaybeLink } from '../host'
 import { errorText } from '../sessions'
 import { haptic } from '../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
@@ -86,9 +86,10 @@ export function useSessionConfig(
   sessionId: string,
   session: SessionView | undefined,
 ): SessionConfig {
-  const { link, agents, state } = useHost()
+  const link = useMaybeLink()
+  const agent = useAgent(session?.agentId)
   const [setting, setSetting] = useState<string | null>(null)
-  const connected = state.kind === 'connected'
+  const connected = useConnected()
   const running = session?.status === 'running' || session?.status === 'awaiting_permission'
   const config = session?.config ?? []
   const mode = slotOf(config, 'mode', running)
@@ -107,7 +108,7 @@ export function useSessionConfig(
     mode: mode ? { ...mode, look: modeLook(String(mode.option.value)) } : null,
     model: slotOf(config, 'model', running),
     effort: slotOf(config, 'thought_level', running),
-    harness: session ? agents.get(session.agentId)?.harnessId : undefined,
+    harness: session ? agent?.harnessId : undefined,
     setting,
     connected,
   }
@@ -239,14 +240,15 @@ export function QueueStack(props: {
   onEdit(content: UserContent[]): void
 }) {
   const { c, s } = useSessionTokens()
-  const { link, agents, state } = useHost()
+  const link = useMaybeLink()
+  const connected = useConnected()
+  const agent = useAgent(props.session?.agentId)
   const [busyItem, setBusyItem] = useState<string | null>(null)
   const session = props.session
   if (!session || !link || session.queue.length === 0) return null
   const sessionId = props.sessionId
-  const connected = state.kind === 'connected'
   const running = session.status === 'running' || session.status === 'awaiting_permission'
-  const steering = !!agents.get(session.agentId)?.capabilities.steering
+  const steering = !!agent?.capabilities.steering
   const count = session.queue.length
 
   const act = (item: QueuedPrompt, work: () => Promise<unknown>, failed: string) => {

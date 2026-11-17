@@ -317,7 +317,7 @@ export const SessionRow = memo(function SessionRow(props: {
     !props.start && !props.end ? (
       row
     ) : (
-      <SwipeRow start={props.start} end={props.end}>
+      <SwipeRow start={props.start} end={props.end} item={s.id}>
         {row}
       </SwipeRow>
     )

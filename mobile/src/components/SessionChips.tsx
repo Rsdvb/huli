@@ -7,7 +7,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-na
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { call } from '../git'
-import { useHost, useLink } from '../host'
+import { useLink, useSession } from '../host'
 import { sessionTitle } from '../sessions'
 import { sessionPullRequests, topPrState } from '../sessionMenu'
 import { GlassCapsule } from '../ui/Glass'
@@ -19,13 +19,10 @@ import { useSessionTokens } from '../ui/session/palette'
 export const CHIPS_HEIGHT = 40
 
 /** Whether the session has any chip to show, for the room the conversation leaves under them. */
-export function hasChips(
-  summary: SessionSummary | undefined,
-  sessions: ReadonlyMap<string, SessionSummary>,
-): boolean {
+export function hasChips(summary: SessionSummary | undefined, parentKnown: boolean): boolean {
   if (!summary) return false
   return (
-    (summary.parentId !== null && sessions.has(summary.parentId)) ||
+    (summary.parentId !== null && parentKnown) ||
     !!summary.routine ||
     !!summary.task ||
     !!summary.worktree ||
@@ -76,10 +73,9 @@ export function SessionChips(props: {
   onOpenSession(id: string): void
 }) {
   const { c } = useSessionTokens()
-  const host = useHost()
   const link = useLink()
   const { summary } = props
-  const parent = summary.parentId ? host.sessions.get(summary.parentId) : undefined
+  const parent = useSession(summary.parentId)
   const prs = sessionPullRequests(summary)
   const routineId = summary.routine?.routineId ?? null
   const taskId = summary.task?.taskId ?? null
@@ -97,7 +93,7 @@ export function SessionChips(props: {
     taskId,
   )
 
-  if (!hasChips(summary, host.sessions)) return null
+  if (!hasChips(summary, !!parent)) return null
   const openPrs = () => {
     if (prs.length === 1) return void Linking.openURL(prs[0]!.url)
     showMenu(

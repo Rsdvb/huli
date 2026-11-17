@@ -137,12 +137,13 @@ export function foldsIntoRun(entry: ThreadEntry): boolean {
   return true
 }
 
-/**
- * The rows of `thread`, oldest first. Plans are left out for the pinned plan above the composer,
- * as the desktop shows them in its top bar, and so are the messages sent as a card's answer. With
- * `live`, the turn still runs and its last run of work is the latest.
- */
-export function threadRows(thread: ThreadState, live = false): Row[] {
+/** Whether a user entry starts a turn: what a turn's changes and footer count start over at it. */
+function startsTurn(entry: ThreadEntry): boolean {
+  return entry.kind === 'user' && !entry.steered && !entry.approval
+}
+
+/** The rows of entries that hold at most one turn's start, at their beginning, oldest first. */
+function turnRows(entries: readonly ThreadEntry[]): Row[] {
   const rows: Row[] = []
   let tools: ToolEntry[] = []
   let replies: AgentEntry[] = []
@@ -152,10 +153,8 @@ export function threadRows(thread: ThreadState, live = false): Row[] {
     if (run) rows.push({ type: 'run', key: `run:${run[0]!.id}`, entries: run, latest: false })
     run = null
   }
-  const { order, byId } = thread
-  for (let i = 0; i < order.length; i++) {
-    const entry = byId[order[i]!]
-    if (!entry) continue
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!
     if (entry.kind === 'tool' && hasEdits(entry)) tools.push(entry)
     if (foldsIntoRun(entry)) {
       ;(run ??= []).push(entry)
@@ -176,9 +175,9 @@ export function threadRows(thread: ThreadState, live = false): Row[] {
         startedAt ??= entry.at ?? null
         break
       case 'compaction': {
-        // Compactions in a row read as one divider: the latest stands for them all.
-        const next = byId[order[i + 1] ?? '']
-        if (next?.kind === 'compaction') continue
+        // Compactions in a row read as one divider: the latest stands for them all. The entry
+        // after the last of a turn starts the next turn, so it is never one.
+        if (entries[i + 1]?.kind === 'compaction') continue
         break
       }
       case 'turn_end':
@@ -198,11 +197,83 @@ export function threadRows(thread: ThreadState, live = false): Row[] {
     rows.push({ type: 'entry', key: entry.id, entry })
   }
   closeRun()
+  return rows
+}
+
+/** The entries of `thread` in order, cut where each turn starts. */
+function turnsOf(thread: ThreadState): ThreadEntry[][] {
+  const turns: ThreadEntry[][] = []
+  let current: ThreadEntry[] = []
+  for (const id of thread.order) {
+    const entry = thread.byId[id]
+    if (!entry) continue
+    if (startsTurn(entry) && current.length > 0) {
+      turns.push(current)
+      current = []
+    }
+    current.push(entry)
+  }
+  if (current.length > 0) turns.push(current)
+  return turns
+}
+
+function markLatest(rows: Row[], live: boolean): Row[] {
   const last = rows[rows.length - 1]
   if (live && last?.type === 'run') rows[rows.length - 1] = { ...last, latest: true }
   return rows
 }
 
+/**
+ * The rows of `thread`, oldest first. Plans are left out for the pinned plan above the composer,
+ * as the desktop shows them in its top bar, and so are the messages sent as a card's answer. With
+ * `live`, the turn still runs and its last run of work is the latest.
+ */
+export function threadRows(thread: ThreadState, live = false): Row[] {
+  return markLatest(turnsOf(thread).flatMap(turnRows), live)
+}
+
+const sameEntries = (x: readonly ThreadEntry[], y: readonly ThreadEntry[]) =>
+  x.length === y.length && x.every((entry, i) => entry === y[i])
+
+/**
+ * `threadRows` for one screen, newest first, as the conversation's inverted list takes them. A
+ * turn whose entries are the same objects as last time keeps its rows, so a token appended to the
+ * reply being written rebuilds only the latest turn's; and every row that draws the same as
+ * before keeps its object, so the list and its rows compare by reference. While nothing changed,
+ * the same array comes back.
+ */
+export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
+  let turns = new Map<ThreadEntry, { entries: ThreadEntry[]; rows: Row[] }>()
+  let shown: Row[] = []
+  return (thread, live) => {
+    const kept = new Map<ThreadEntry, { entries: ThreadEntry[]; rows: Row[] }>()
+    const rows: Row[] = []
+    for (const entries of turnsOf(thread)) {
+      const known = turns.get(entries[0]!)
+      const turn =
+        known && sameEntries(known.entries, entries) ? known : { entries, rows: turnRows(entries) }
+      kept.set(entries[0]!, turn)
+      for (const row of turn.rows) rows.push(row)
+    }
+    turns = kept
+    shown = keepRows(shown, markLatest(rows, live).reverse())
+    return shown
+  }
+}
+
+/** `next` with each row that draws as one of `before` does replaced by it; `before` if all were. */
+export function keepRows(before: readonly Row[], next: Row[]): Row[] {
+  if (before.length === 0) return next
+  const byKey = new Map<string, Row>()
+  for (const row of before) byKey.set(row.key, row)
+  let same = before.length === next.length
+  for (let i = 0; i < next.length; i++) {
+    const old = byKey.get(next[i]!.key)
+    if (old && old !== next[i] && sameRow(old, next[i]!)) next[i] = old
+    if (next[i] !== before[i]) same = false
+  }
+  return same ? (before as Row[]) : next
+}
 /** The latest plan of the thread, or of the page before it, and whether its turn is the latest. */
 export function latestPlan(
   thread: ThreadState | null,

@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { SessionSummary } from '@shared/agent-host'
 import type { SessionView } from '@shared/thread'
-import { useHost, useLink } from '../host'
+import { useConnected, useLink, useSession } from '../host'
 import { Glass, useGlassMode } from '../ui/Glass'
 import { haptic } from '../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
@@ -29,15 +29,14 @@ export function SubagentBar(props: {
 }) {
   const { c, s } = useSessionTokens()
   const liquid = useGlassMode() === 'liquid'
-  const host = useHost()
   const link = useLink()
   const { summary } = props
-  const parent = summary.parentId ? host.sessions.get(summary.parentId) : undefined
+  const parent = useSession(summary.parentId)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const running = summary.status === 'running' || summary.status === 'awaiting_permission'
   const canStop = running && !!props.session?.subagent?.canCancel
-  const connected = host.state.kind === 'connected'
+  const connected = useConnected()
 
   const stop = () => {
     haptic.firm()

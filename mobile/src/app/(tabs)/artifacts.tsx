@@ -29,7 +29,14 @@ import { ArtifactCard } from '../../components/ArtifactCard'
 import { ArtifactSheet, confirmDelete } from '../../components/ArtifactSheet'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { Sheet, type SheetItem } from '../../components/Sheet'
-import { useHost } from '../../host'
+import {
+  useAgents,
+  useHostActions,
+  useHostSelector,
+  useHostState,
+  useMaybeLink,
+  type HostData,
+} from '../../host'
 import { errorText } from '../../sessions'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
@@ -62,9 +69,23 @@ interface Row {
 
 const collator = new Intl.Collator('zh-CN', { numeric: true })
 
+/** Each session's agent: all the grid needs of the sessions, so a status change passes it by. */
+const pickSessionAgents = (d: HostData): Map<string, string> =>
+  new Map([...d.sessions.values()].map((s) => [s.id, s.agentId]))
+
+function sameAgentIds(a: Map<string, string>, b: Map<string, string>): boolean {
+  if (a.size !== b.size) return false
+  for (const [id, agent] of a) if (b.get(id) !== agent) return false
+  return true
+}
+
 export default function Artifacts() {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useMaybeLink()
+  const state = useHostState()
+  const { retry } = useHostActions()
+  const hostAgents = useAgents()
+  const sessionAgents = useHostSelector(pickSessionAgents, sameAgentIds)
   const shell = useShell()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
@@ -80,18 +101,18 @@ export default function Artifacts() {
   const [sheet, setSheet] = useState<'sort' | 'filter' | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [menu, setMenu] = useState<ArtifactSummary | null>(null)
-  const connected = host.state.kind === 'connected'
+  const connected = state.kind === 'connected'
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
     header,
   )
 
   const load = useCallback(async () => {
-    if (!host.link) return
+    if (!link) return
     try {
       const [live, gone] = await Promise.all([
-        host.link.request('artifacts.list', {}) as Promise<ArtifactSummary[]>,
-        host.link.request('artifacts.list', { deleted: true }) as Promise<ArtifactSummary[]>,
+        link.request('artifacts.list', {}) as Promise<ArtifactSummary[]>,
+        link.request('artifacts.list', { deleted: true }) as Promise<ArtifactSummary[]>,
       ])
       setItems(live)
       setDeleted(gone.length)
@@ -99,23 +120,23 @@ export default function Artifacts() {
     } catch (failure) {
       setError(errorText(failure))
     }
-  }, [host.link])
+  }, [link])
 
   useEffect(() => {
     if (connected) void load()
   }, [connected, load])
 
   useEffect(() => {
-    if (!host.link) return
-    return host.link.onHostEvent((raw: unknown) => {
+    if (!link) return
+    return link.onHostEvent((raw: unknown) => {
       const event = raw as HostEvent
       if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') void load()
     })
-  }, [host.link, load])
+  }, [link, load])
 
   const agentOf = useCallback(
-    (a: ArtifactSummary) => host.sessions.get(a.sessionId)?.agentId ?? null,
-    [host.sessions],
+    (a: ArtifactSummary) => sessionAgents.get(a.sessionId) ?? null,
+    [sessionAgents],
   )
 
   const inProject = useMemo(
@@ -272,7 +293,7 @@ export default function Artifacts() {
           icon="box"
           title="连上电脑后才能看 Artifact"
           message="Huli 正在连接你的电脑。"
-          action={{ label: '立即重连', onPress: () => host.retry() }}
+          action={{ label: '立即重连', onPress: () => retry() }}
         />
       )
     }
@@ -350,7 +371,7 @@ export default function Artifacts() {
     ? [
         { key: 'view', label: '打开', onPress: () => openArtifact(menu.id) },
         { key: 'open', label: '详情与版本', onPress: () => setOpenId(menu.id) },
-        ...(host.sessions.has(menu.sessionId)
+        ...(sessionAgents.has(menu.sessionId)
           ? [
               {
                 key: 'session',
@@ -364,7 +385,7 @@ export default function Artifacts() {
           label: '删除',
           destructive: true,
           disabled: !connected,
-          onPress: () => host.link && confirmDelete((m, p) => host.link!.request(m, p), menu),
+          onPress: () => link && confirmDelete((m, p) => link!.request(m, p), menu),
         },
       ]
     : []
@@ -389,7 +410,7 @@ export default function Artifacts() {
     },
     ...agents.map((id) => ({
       key: id,
-      label: host.agents.get(id)?.name ?? id,
+      label: hostAgents.get(id)?.name ?? id,
       checked: agentId === id,
       onPress: () => {
         haptic.select()
@@ -445,7 +466,7 @@ export default function Artifacts() {
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
-              host.retry()
+              retry()
               void load().finally(() => setRefreshing(false))
             }}
           />

@@ -3,11 +3,11 @@
 // A task opens its page.
 
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Animated, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
+import { RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { TaskSummary } from '@shared/workflow'
-import { useHost } from '../../host'
+import { useHostActions, useHostState, useMaybeLink, useProjects } from '../../host'
 import { folder } from '../../sessions'
 import {
   confirmCancel,
@@ -17,6 +17,7 @@ import {
   useTaskList,
   workflowTitle,
 } from '../../tasks'
+import { AnimatedFlashList, type FlashListRef } from '../../ui/AnimatedList'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
@@ -48,28 +49,31 @@ type Item =
   | { kind: 'section'; key: string; title: string; count: number; waiting: boolean }
   | { kind: 'task'; key: string; task: TaskSummary }
 
+const itemKey = (item: Item) => item.key
+const itemType = (item: Item) => item.kind
+
 export function TasksView(props: { switcher: ReactNode }) {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useMaybeLink()
+  const state = useHostState()
+  const { retry } = useHostActions()
+  const projects = useProjects()
   const shell = useShell()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
-  const list = useRef<FlatList<Item>>(null)
+  const list = useRef<FlashListRef<Item>>(null)
   const { tasks, views, loaded, error, reload } = useTaskList()
   const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<TaskSummary | null>(null)
-  const connected = host.state.kind === 'connected'
+  const connected = state.kind === 'connected'
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
     header,
   )
 
-  const projectNames = useMemo(
-    () => new Map(host.projects.map((p) => [p.path, p.name])),
-    [host.projects],
-  )
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.path, p.name])), [projects])
   const words = searching ? query.trim().toLowerCase() : ''
   const inProject = useMemo(
     () => tasks.filter((t) => inFilter(shell.filter, { scratch: false, path: t.projectPath })),
@@ -132,7 +136,7 @@ export function TasksView(props: { switcher: ReactNode }) {
           key: 'pin',
           label: menu.pinnedAt !== null ? '取消置顶' : '置顶',
           disabled: !connected,
-          onPress: () => host.link && togglePin(host.link, menu),
+          onPress: () => link && togglePin(link, menu),
         },
         menu.status === 'running'
           ? {
@@ -140,14 +144,14 @@ export function TasksView(props: { switcher: ReactNode }) {
               label: '取消需求…',
               destructive: true,
               disabled: !connected,
-              onPress: () => host.link && confirmCancel(host.link, menu),
+              onPress: () => link && confirmCancel(link, menu),
             }
           : {
               key: 'delete',
               label: '删除…',
               destructive: true,
               disabled: !connected,
-              onPress: () => host.link && confirmDelete(host.link, menu),
+              onPress: () => link && confirmDelete(link, menu),
             },
       ]
     : []
@@ -211,7 +215,7 @@ export function TasksView(props: { switcher: ReactNode }) {
           icon="flow"
           title="连上电脑后才能看需求"
           message="Huli 正在连接你的电脑。"
-          action={{ label: '立即重连', onPress: () => host.retry() }}
+          action={{ label: '立即重连', onPress: () => retry() }}
         />
       )
     }
@@ -290,7 +294,7 @@ export function TasksView(props: { switcher: ReactNode }) {
                 label: t.pinnedAt !== null ? '取消置顶' : '置顶',
                 icon: t.pinnedAt !== null ? 'unpin' : 'pin',
                 color: c.accent,
-                onPress: () => host.link && togglePin(host.link, t),
+                onPress: () => link && togglePin(link, t),
               }
             : undefined
         }
@@ -302,13 +306,13 @@ export function TasksView(props: { switcher: ReactNode }) {
                   label: '取消',
                   icon: 'stop',
                   color: c.danger,
-                  onPress: () => host.link && confirmCancel(host.link, t),
+                  onPress: () => link && confirmCancel(link, t),
                 }
               : {
                   label: '删除',
                   icon: 'trash',
                   color: c.danger,
-                  onPress: () => host.link && confirmDelete(host.link, t),
+                  onPress: () => link && confirmDelete(link, t),
                 }
         }
       />
@@ -317,10 +321,11 @@ export function TasksView(props: { switcher: ReactNode }) {
 
   return (
     <Screen readable>
-      <Animated.FlatList
+      <AnimatedFlashList
         ref={list}
         data={items}
-        keyExtractor={(item) => item.key}
+        keyExtractor={itemKey}
+        getItemType={itemType}
         renderItem={renderItem}
         {...header.scrollProps}
         keyboardShouldPersistTaps="handled"
@@ -336,7 +341,7 @@ export function TasksView(props: { switcher: ReactNode }) {
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
-              host.retry()
+              retry()
               void reload().finally(() => setRefreshing(false))
             }}
           />
