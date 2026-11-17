@@ -58,6 +58,8 @@ import { PressScale, RoundButton } from '../ui/session/Press'
 
 export interface ComposerProps {
   placeholder: string
+  /** The text the box starts with, such as a huli://new link's. */
+  initialText?: string
   /** Sends the message; the composer empties once it resolves. */
   onSend(content: UserContent[]): Promise<unknown>
   /** The alert's title when sending fails. */
@@ -112,7 +114,7 @@ export function Composer(props: ComposerProps) {
   const liquid = useGlassMode() === 'liquid'
   const tray = useRef<ViewHandle>(null)
   useMenuEdge(tray)
-  const [text, setText] = useState('')
+  const [text, setText] = useState(props.initialText ?? '')
   const [items, setItems] = useState<PendingAttachment[]>([])
   const [sending, setSending] = useState(false)
   const input = useRef<ComponentRef<typeof TextInput>>(null)

@@ -3,7 +3,7 @@
 //
 //   huli://                       the 会话 tab
 //   huli://session/<sessionId>    a session
-//   huli://new                    a new session
+//   huli://new                    a new session (`text=<text>` fills in its composer)
 //   huli://search?q=<text>        search, the text filled in and searched (q may be left out)
 //   huli://artifacts              the Artifacts tab
 //   huli://artifact/<artifactId>  an artifact, full screen (`version=<n>` for an older one)
@@ -36,7 +36,7 @@ export type LinkTarget =
   | { kind: 'task'; id: string }
   | { kind: 'tasks' }
   | { kind: 'artifact'; id: string; version: number | null }
-  | { kind: 'new' }
+  | { kind: 'new'; text?: string }
   | { kind: 'search'; q: string }
   | { kind: 'tab'; tab: TabName }
 
@@ -46,6 +46,9 @@ export interface AppLink {
   /** A computer's id or its notifications' id; null for the active computer. */
   host: string | null
 }
+
+/** The most of a link's text a new session's composer is filled with. */
+const MAX_TEXT = 8000
 
 const TABS: Record<string, TabName> = {
   '': 'index',
@@ -100,7 +103,10 @@ export function parseLink(url: string): AppLink | null {
       id: decode(id),
       version: /^[1-9][0-9]{0,8}$/.test(version) ? Number(version) : null,
     }
-  } else if (path === 'new') target = { kind: 'new' }
+  } else if (path === 'new') {
+    const text = params.get('text') ?? ''
+    target = text.trim() ? { kind: 'new', text: text.slice(0, MAX_TEXT) } : { kind: 'new' }
+  }
   else if (path === 'search') target = { kind: 'search', q: params.get('q') ?? '' }
   else if (path in TABS) target = { kind: 'tab', tab: TABS[path]! }
   return target ? { target, host } : null
@@ -127,7 +133,7 @@ export function linkTo(target: LinkTarget, host?: string | null): string {
         ['version', target.version === null ? '' : String(target.version)],
       ])}`
     case 'new':
-      return `huli://new${suffix([])}`
+      return `huli://new${suffix([['text', target.text ?? '']])}`
     case 'search':
       return `huli://search${suffix([['q', target.q]])}`
     case 'tab':
@@ -176,7 +182,7 @@ function navigate(target: LinkTarget): void {
       })
       return
     case 'new':
-      router.push('/new')
+      router.push(target.text ? { pathname: '/new', params: { text: target.text } } : '/new')
       return
     case 'search':
       router.push({ pathname: '/search', params: target.q ? { q: target.q } : {} })

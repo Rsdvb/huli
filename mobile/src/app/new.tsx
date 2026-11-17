@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Stack, router } from 'expo-router'
+import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption, UserContent } from '@shared/thread'
@@ -51,6 +51,7 @@ export default function NewSession() {
   const modelAnchor = useRef<ViewHandle>(null)
   const folderAnchor = useRef<ViewHandle>(null)
   const options = useAgentOptions(link, host.state.kind === 'connected')
+  const { text } = useLocalSearchParams<{ text?: string }>()
 
   const agents = useMemo(() => usableAgents(host.agents), [host.agents])
   const projects = useMemo(
@@ -272,6 +273,7 @@ export default function NewSession() {
         <Composer
           ref={composer}
           placeholder="想让 Agent 做什么？"
+          initialText={text}
           onSend={create}
           failTitle="没能新建会话"
           allowEmpty
