@@ -52,6 +52,7 @@ import {
 import { listedTasks, pinnedTasks, useTasksStore } from '@renderer/stores/tasks'
 import { openSettings, PINNED_GROUP, showAllRows, useViewStore } from '@renderer/stores/view'
 import { StarCard } from '@renderer/features/github-star/star-prompts'
+import { KettuImportOffer } from '@renderer/features/kettu-import/kettu-import-entry'
 import { HostEmpty, HostHeading, NeedsYouGroup } from './host-groups'
 import { useHostLabel } from './host-label'
 import { ImportSessionsDialog } from './import-sessions'
@@ -591,6 +592,7 @@ export function SidebarNotices() {
       {isWeb && !window.isSecureContext && <InsecureCard />}
       {signIn.length > 0 && <SignInCard names={signIn} />}
       {card && <UpdateCardView card={card} items={items} />}
+      <KettuImportOffer blocked={isWeb && !window.isSecureContext} />
       <StarCard blocked={(isWeb && !window.isSecureContext) || signIn.length > 0 || !!card} />
     </>
   )

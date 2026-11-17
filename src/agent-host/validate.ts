@@ -17,6 +17,7 @@ import type { BrowserCallAnswer, BrowserOriginAnswer, BrowserOriginDecision } fr
 import { isControlOutcome } from '@shared/control'
 import { isComputerAppDecision } from '@shared/computer-use'
 import { FILE_READ_LIMIT } from '@shared/files'
+import { KETTU_IMPORT_SESSIONS } from '@shared/kettu-import'
 import {
   isMemoryScope,
   MEMORY_BODY_CHARS,
@@ -2584,6 +2585,16 @@ export function createValidators(platform: Platform): Validators {
     'computer.declineSetup': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
+    },
+    'kettuImport.scan': none,
+    'kettuImport.run': (params) => {
+      const { sessionIds } = fields(params)
+      if (!Array.isArray(sessionIds) || sessionIds.length > KETTU_IMPORT_SESSIONS) {
+        throw invalidParams(`sessionIds must be an array of at most ${KETTU_IMPORT_SESSIONS}`)
+      }
+      return {
+        sessionIds: [...new Set(sessionIds.map((id: unknown) => string({ id }, 'id', ID_CHARS)))],
+      }
     },
   }
 }

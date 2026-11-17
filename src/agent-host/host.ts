@@ -188,6 +188,7 @@ import type { LogReader } from './usage/model'
 import { LOG_READERS } from './usage/readers'
 import { UsageStore, type UsageWorkerFactory } from './usage/store'
 import { createValidators } from './validate'
+import { KettuImport, kettuDataFolder, kettuImportFile } from './kettu-import'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
@@ -370,6 +371,8 @@ export class AgentHost {
   /** The agent processes and what they leave behind, until seen gone. */
   private readonly trees: AgentTrees
   readonly sessions: SessionManager
+  /** Huli: an official Kettu's sessions, brought over. */
+  private readonly kettuImport: KettuImport
   /** When idle Claude Code sessions let their agent go, by the setting and the system's memory. */
   private readonly idleRelease: IdleRelease
   /** The saved routines and the lifecycle of their runs. */
@@ -1051,6 +1054,18 @@ export class AgentHost {
         busy: (counts) => options.send({ type: 'host:busy-changed', ...counts }),
         completed: () => void this.star.turnCompleted(),
       },
+    })
+    this.kettuImport = new KettuImport({
+      source: kettuDataFolder(platform, options.homeDir ?? os.homedir(), process.env),
+      ownData: options.userDataPath,
+      platform,
+      ledger: kettuImportFile(options.userDataPath, log),
+      sessions: this.sessions,
+      projects: this.projects,
+      hasAgent: (agentId) => this.agents.has(agentId),
+      progress: (done, total, title) =>
+        this.hub.broadcast({ type: 'kettuImport.progress', done, total, title }),
+      log,
     })
     this.routines = new RoutinesManager({
       userDataPath: options.userDataPath,
@@ -3001,6 +3016,8 @@ export class AgentHost {
           throw new HostError('not_found', `No setup waits in ${entryId}`)
         }
       },
+      'kettuImport.scan': () => this.kettuImport.scan(),
+      'kettuImport.run': ({ sessionIds }) => this.kettuImport.run(sessionIds),
       'browser.answerOrigin': ({ sessionId, entryId, decision }, { device }) => {
         const { owner, requestId } = sessions.answerOrigin(
           sessionId,

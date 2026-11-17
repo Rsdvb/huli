@@ -10350,12 +10350,16 @@ export class SessionManager {
     }
   }
 
-  async importSession(params: {
-    agentId: AgentId
-    projectPath: string
-    acpSessionId: string
-    fork?: boolean
-  }): Promise<SessionSummary> {
+  async importSession(
+    params: {
+      agentId: AgentId
+      projectPath: string
+      acpSessionId: string
+      fork?: boolean
+    },
+    // Huli: what another app's index kept of the session, which the new record takes over.
+    kept: Partial<Pick<SessionRecord, KeptField>> = {},
+  ): Promise<SessionSummary> {
     if (!this.deps.agents.has(params.agentId))
       throw invalidParams(`Unknown agent ${params.agentId}`)
     this.deps.agents.assertEnabled(params.agentId)
@@ -10413,6 +10417,7 @@ export class SessionManager {
       ...(outside ? { outside } : {}),
       // Claude Code keeps the instructions it recorded outside Kettu, which have nothing of Kettu's.
       ...(claude ? { instructionsAhead: true as const } : {}),
+      ...kept,
     }
     this.stampConfig(record)
     this.records.set(record.id, record)
@@ -10523,6 +10528,10 @@ export class SessionManager {
     this.stopped = true
   }
 }
+
+/** Huli: the fields `importSession` takes over from another app's index. */
+export type KeptField =
+  'title' | 'titleSource' | 'customTitle' | 'createdAt' | 'updatedAt' | 'pinnedAt' | 'archivedAt'
 
 /** A new session or fork deleted, or its project removed, while it started. */
 function removedWhileStarting(): HostError {
