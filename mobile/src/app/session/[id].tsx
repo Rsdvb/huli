@@ -35,7 +35,19 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { ThreadRow } from '../../components/EntryView'
-import { PermissionCard } from '../../components/PermissionCard'
+import {
+  cutNoticeOf,
+  OutOfCreditStrip,
+  outOfCreditOf,
+  retryNoticeOf,
+} from '../../components/entries/TurnEnd'
+import {
+  HandBackCard,
+  WaitingCard,
+  WaitingChildren,
+  waitingBelow,
+  waitsForUser,
+} from '../../components/entries/Waiting'
 import { useSessionActions } from '../../components/SessionActions'
 import { useSessionPane } from '../../components/SessionPane'
 import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
@@ -66,10 +78,6 @@ import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
 import { threadRows, type Row } from '../../ui/session/turns'
 import { ToBottomButton, WorkingRow } from '../../ui/session/Working'
-
-function waiting(entry: ThreadEntry): entry is ToolEntry {
-  return entry.kind === 'tool' && entry.permission !== null && entry.permissionResult === null
-}
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
@@ -164,14 +172,21 @@ export default function SessionScreen() {
 
   const rows = useMemo(() => (view.thread ? threadRows(view.thread).reverse() : []), [view.thread])
 
-  // What waits: the thread's own cards, and those on pages not read yet.
+  // What waits: the thread's own cards, and those on pages not read yet, oldest first.
   const requests = useMemo(() => {
-    const seen = new Map<string, ToolEntry>()
-    for (const entry of view.requests) if (waiting(entry)) seen.set(entry.id, entry)
-    for (const row of rows)
-      if (row.type === 'entry' && waiting(row.entry)) seen.set(row.entry.id, row.entry)
+    const seen = new Map<string, ThreadEntry>()
+    for (const entry of view.requests) if (waitsForUser(entry)) seen.set(entry.id, entry)
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i]!
+      if (row.type === 'entry' && waitsForUser(row.entry)) seen.set(row.entry.id, row.entry)
+    }
     return [...seen.values()]
   }, [view.requests, rows])
+  const credit = useMemo(() => outOfCreditOf(view.thread), [view.thread])
+  const retryNotice = useMemo(() => retryNoticeOf(view.thread), [view.thread])
+  const cutNotice = useMemo(() => cutNoticeOf(view.thread), [view.thread])
+  const childWaiting = waitingBelow(id, host.sessions).length > 0
+  const handBack = session?.computer?.control === 'you'
 
   // The files of the folder the session's tools read or edited, newest first.
   const touched = useMemo(() => {
@@ -301,8 +316,11 @@ export default function SessionScreen() {
       fork: canFork ? fork : null,
       forkAtMessage,
       selectText: setSelecting,
+      retryNotice,
+      cutNotice,
+      config: session?.config ?? [],
     }),
-    [id, changes.folder, canFork, fork, forkAtMessage],
+    [id, changes.folder, canFork, fork, forkAtMessage, retryNotice, cutNotice, session?.config],
   )
 
   const title = session?.title ?? summary?.title ?? '会话'
@@ -324,7 +342,11 @@ export default function SessionScreen() {
     <View style={styles.working}>
       <WorkingRow
         since={session?.turnStartedAt ?? summary?.turnStartedAt ?? null}
-        label={activity(rows, status === 'awaiting_permission', changes.folder)}
+        label={activity(
+          rows,
+          status === 'awaiting_permission' || requests.length > 0 || handBack,
+          changes.folder,
+        )}
         tokens={usage && startUsed !== null ? usage.used - startUsed : null}
       />
     </View>
@@ -556,15 +578,38 @@ export default function SessionScreen() {
           <ToBottomButton visible={away} fresh={fresh} onPress={toBottom} />
         </View>
 
-        {(requests.length > 0 || (session?.queue.length ?? 0) > 0) && (
+        {(requests.length > 0 ||
+          handBack ||
+          credit !== null ||
+          childWaiting ||
+          (session?.queue.length ?? 0) > 0) && (
           <ScrollView
             style={styles.waiting}
             contentContainerStyle={styles.waitingContent}
             keyboardShouldPersistTaps="handled"
           >
+            <HandBackCard sessionId={id} session={session} />
             {requests.map((entry) => (
-              <PermissionCard key={entry.id} entry={entry} sessionId={id} link={link} />
+              <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
             ))}
+            {credit && (
+              <OutOfCreditStrip
+                sessionId={id}
+                notice={credit}
+                config={session?.config ?? []}
+                onSwitchModel={
+                  connected
+                    ? () =>
+                        menu.open('model', modelAnchor, {
+                          placement: 'above',
+                          align: 'end',
+                          width: 300,
+                        })
+                    : null
+                }
+              />
+            )}
+            <WaitingChildren sessionId={id} />
             <QueueStack sessionId={id} session={session} />
           </ScrollView>
         )}
