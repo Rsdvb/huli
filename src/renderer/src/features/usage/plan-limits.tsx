@@ -12,7 +12,7 @@ import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { limitLabel, longAgo, planAmount, planBalance, shortAgo } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { currentLocale } from '@renderer/lib/i18n'
-import { shownPercent } from '@renderer/lib/plan-limit'
+import { groupName, shownPercent } from '@renderer/lib/plan-limit'
 import type { LimitWay } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
 import { agentsOn, isInstalled, useAgentsStore, usePlanReadings } from '@renderer/stores/agents'
@@ -353,18 +353,20 @@ function PlanCard({ card, named, now }: { card: UsageCard; named: boolean; now: 
 
 /** A window's short name for its line: 5h, 7d, 7d · Fable, 30d. */
 function useShortWindow(): (limit: CardRing['limit']) => string {
-  const { t, i18n } = useTranslation(['usage', 'composer'])
+  const { t, i18n } = useTranslation(['usage', 'composer', 'tasks'])
   return (limit) => {
     const known = `composer:usage.shortWindow.${limit.window}`
     if (limit.window === 'rolling') return t('composer:usage.shortWindow.five_hour')
     if (limit.window === 'weekly') return t('composer:usage.shortWindow.seven_day')
+    // A model group's line drops the "Models" and says "and" in the interface's language, as the
+    // account menu's cards do, so "5h · Claude and GPT Models" fits a card beside its figure.
     if (limit.window.startsWith('seven_day_')) {
       const model = /^Weekly · (.+)$/.exec(limit.label)?.[1] ?? limitLabel(limit)
-      return t('usage:limits.weeklyOf', { model })
+      return t('usage:limits.weeklyOf', { model: groupName(model, t('tasks:and')) })
     }
     if (limit.window.startsWith('five_hour_')) {
       const model = /^5-hour · (.+)$/.exec(limit.label)?.[1] ?? limitLabel(limit)
-      return t('usage:limits.fiveHourOf', { model })
+      return t('usage:limits.fiveHourOf', { model: groupName(model, t('tasks:and')) })
     }
     if (i18n.exists(known)) return t(known as 'composer:usage.shortWindow.five_hour')
     const counted = /^(\d+)_(minute|hour|day)$/.exec(limit.window)

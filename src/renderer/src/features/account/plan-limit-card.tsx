@@ -6,7 +6,7 @@ import { PlanPart } from '@renderer/features/session/composer/usage'
 import { ringStroke } from '@renderer/features/usage/plan-cards'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { planAmount, planBalance } from '@renderer/lib/format'
-import { LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
+import { groupName, LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
 import { cn } from '@renderer/lib/utils'
 import { useHostName, useWindowHost } from '@renderer/stores/window-host'
 import { hasModelGroups, type PlanCard } from './model'
@@ -60,14 +60,6 @@ export function PlanLimitCard({
       </HoverCardContent>
     </HoverCard>
   )
-}
-
-/**
- * A model group's name as a card line shows it: without the "Models" every group of Antigravity's
- * ends in, and its "and" in the interface's language, e.g. "Claude 和 GPT".
- */
-function groupName(model: string, and: string): string {
-  return model.replace(/\s+models?$/i, '').replace(/\s+and\s+/i, ` ${and.trim()} `)
 }
 
 function CardFace({ card }: { card: PlanCard }) {
