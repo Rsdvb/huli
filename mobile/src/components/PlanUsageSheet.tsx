@@ -21,6 +21,7 @@ import {
   amountText,
   balanceText,
   canReadLimits,
+  inlineReset,
   isExhausted,
   limitColor,
   limitsReadAt,
@@ -38,19 +39,11 @@ import {
 import { useSessionTokens } from '../ui/session/palette'
 import { gentle } from '../ui/session/Press'
 import { UsageRing } from '../ui/session/StatusLine'
+import { useTicking } from '../ui/session/ticking'
 import { usableAgents } from './ConfigMenus'
 
 /** The clock the sheets count down by: every 15 seconds while shown. */
-export function useTicking(on: boolean): number {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    if (!on) return
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 15_000)
-    return () => clearInterval(timer)
-  }, [on])
-  return now
-}
+export { useTicking }
 
 /**
  * The windows shown first, as rings beside a plan's name: the weekly ones, as the desktop's cards
@@ -69,10 +62,12 @@ export function LimitChip(props: { limit: PlanLimit; now: number }) {
   const { c } = useSessionTokens()
   const { limit } = props
   const percent = Math.round(limit.usedPercent ?? 0)
+  const out = isExhausted(limit, props.now)
+  const reset = inlineReset(limit, props.now)
   return (
     <View style={styles.chip}>
       <UsageRing
-        percent={isExhausted(limit, props.now) ? 100 : percent}
+        percent={out ? 100 : percent}
         color={limitColor(limit, c)}
         track={c.fillStrong}
         size={15}
@@ -80,7 +75,8 @@ export function LimitChip(props: { limit: PlanLimit; now: number }) {
       <Text style={[styles.chipText, { color: c.textTertiary }]} numberOfLines={1}>
         {windowShort(limit)}{' '}
         <Text style={{ color: limitTextColor(limit, c, c.text) }}>
-          {limit.usedPercent === null ? '已用完' : `${percent}%`}
+          {limit.usedPercent === null || out ? '已用完' : `${percent}%`}
+          {reset ? ` · ${reset}` : ''}
         </Text>
       </Text>
     </View>
@@ -410,6 +406,7 @@ function WindowRow(props: { limit: PlanLimit; now: number; compact?: boolean }) 
         .join('，')}
     >
       <View style={styles.windowHead}>
+        <View style={[styles.dot, { backgroundColor: color }]} />
         <Text style={[styles.windowName, { color: c.text }]} numberOfLines={1}>
           {windowName(limit)}
         </Text>
@@ -527,6 +524,7 @@ const styles = StyleSheet.create({
   planOf: { fontSize: 13, lineHeight: 17 },
   window: { gap: 6 },
   windowHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dot: { width: 7, height: 7, borderRadius: 3.5, marginRight: -2 },
   windowName: { fontSize: 15, lineHeight: 20, flexShrink: 1 },
   windowValue: { fontSize: 15, lineHeight: 20, fontWeight: '600', fontVariant: ['tabular-nums'] },
   windowFoot: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },

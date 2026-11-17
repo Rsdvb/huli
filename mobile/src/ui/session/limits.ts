@@ -229,6 +229,25 @@ export function backText(at: number | null, now = Date.now()): string {
   return days <= 6 ? `${WEEKDAYS[d.getDay()]}恢复` : `${d.getMonth() + 1}月${d.getDate()}日恢复`
 }
 
+/** From this whole percentage used, a compact line says when the window resets, as the desktop's. */
+export const RESET_SHOWN_AT = 80
+
+/**
+ * When a window near its end resets, for a compact line right after its figure: 「2 小时后重置」,
+ * or for one used up, when it comes back, 「凌晨 2:40 恢复」. Null under 80% used or with no reset
+ * ahead, when the reset stays in the details.
+ */
+export function inlineReset(limit: PlanLimit, now = Date.now()): string | null {
+  const at = limit.resetsAt
+  if (at === null || at <= now) return null
+  if (isExhausted(limit, now)) return `${whenText(at, now)} 恢复`
+  if (Math.round(limit.usedPercent ?? 0) < RESET_SHOWN_AT) return null
+  const left = at - now
+  if (left < HOUR) return `${Math.max(1, Math.floor(left / MINUTE))} 分钟后重置`
+  if (left < DAY) return `${Math.floor(left / HOUR)} 小时后重置`
+  return `${Math.floor(left / DAY)} 天后重置`
+}
+
 /** Calendar days from `from` to `to`, rounded across a change of daylight saving time. */
 function daysBetween(from: number, to: number): number {
   return Math.round((new Date(to).setHours(0, 0, 0, 0) - new Date(from).setHours(0, 0, 0, 0)) / DAY)

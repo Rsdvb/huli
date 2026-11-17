@@ -89,6 +89,8 @@ import {
   rangeText,
 } from './text'
 import { useUsage } from './useUsage'
+import { inlineReset, isExhausted } from '../ui/session/limits'
+import { useTicking } from '../ui/session/ticking'
 
 type Period = '1' | '7' | '30' | 'all'
 
@@ -806,6 +808,10 @@ function PlanCard(props: {
   const { c } = useTokens()
   const { agent } = props
   const limits = agent.limits.slice(0, 3)
+  // Counts down while a window says when it resets.
+  const counting = limits.some((l) => inlineReset(l) !== null)
+  const ticked = useTicking(counting)
+  const now = counting ? ticked : Date.now()
   return (
     <Card
       onPress={props.onPress}
@@ -837,28 +843,52 @@ function PlanCard(props: {
               color: limitColor(c, l),
             }))}
           />
-          {/* Each window as the desktop's card has it: its name on the left, its share on the
-              right, so a long name such as 每周 · Fable shortens itself and never the figure. */}
+          {/* Each window as the desktop's card has it: a dot in its ring's color, the rings from
+              the outer one in, its name on the left and its share on the right, so a long name
+              such as 每周 · Fable shortens itself and never the figure. Near its end, when it
+              resets goes under the figure. */}
           <View style={styles.planLegend}>
-            {limits.map((l) => (
-              <View key={l.window} style={styles.planLine}>
-                <Text
-                  style={[typeScale.caption, styles.planLineName, { color: c.textSecondary }]}
-                  numberOfLines={1}
-                >
-                  {limitLabel(l)}
-                </Text>
-                <Text
-                  style={[
-                    typeScale.subhead,
-                    styles.tabular,
-                    { color: (l.usedPercent ?? 0) >= 95 ? limitColor(c, l) : c.text },
-                  ]}
-                >
-                  {l.usedPercent === null ? '—' : `${Math.round(l.usedPercent)}%`}
-                </Text>
-              </View>
-            ))}
+            {limits.map((l) => {
+              const reset = inlineReset(l, now)
+              const out = reset !== null && isExhausted(l, now)
+              const tone = (l.usedPercent ?? 0) >= 95 || out ? limitColor(c, l) : c.text
+              return (
+                <View key={l.window}>
+                  <View style={styles.planLine}>
+                    <View style={[styles.planDot, { backgroundColor: limitColor(c, l) }]} />
+                    <Text
+                      style={[typeScale.caption, styles.planLineName, { color: c.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {limitLabel(l)}
+                    </Text>
+                    <Text style={[typeScale.subhead, styles.tabular, { color: tone }]}>
+                      {out
+                        ? '已用完'
+                        : l.usedPercent === null
+                          ? '—'
+                          : `${Math.round(l.usedPercent)}%`}
+                    </Text>
+                  </View>
+                  {reset ? (
+                    <Text
+                      style={[
+                        typeScale.caption,
+                        styles.tabular,
+                        styles.planReset,
+                        {
+                          color:
+                            (l.usedPercent ?? 0) >= 90 || out ? limitColor(c, l) : c.textSecondary,
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {reset}
+                    </Text>
+                  ) : null}
+                </View>
+              )
+            })}
           </View>
         </View>
       ) : (
@@ -995,7 +1025,9 @@ const styles = StyleSheet.create({
   planBody: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   planLegend: { flex: 1, gap: 3 },
   planLine: { flexDirection: 'row', alignItems: 'baseline', gap: space.xs },
+  planDot: { width: 6, height: 6, borderRadius: 3, alignSelf: 'center' },
   planLineName: { flex: 1 },
+  planReset: { textAlign: 'right' },
   periodRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingTop: space.xxl },
   customRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   calendar: {
