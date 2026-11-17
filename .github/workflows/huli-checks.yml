@@ -1,0 +1,58 @@
+name: Huli checks
+
+# Every push to main and every pull request: the desktop app's and Huli Cloud's types, the tests,
+# lint and formatting, and the phone app's types, on Linux. A change to docs alone runs nothing.
+# Kettu's own ci.yml stays disabled in this repository (huli-sync.yml keeps it so); this one runs
+# instead, so a sync never has to change it.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE', 'LICENSE-EXCEPTION']
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: ['**/*.md', 'LICENSE', 'LICENSE-EXCEPTION']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: huli-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: Desktop and Huli Cloud
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - name: Type-check Huli Cloud
+        run: pnpm exec tsc -p cloud/tsconfig.json
+      - run: pnpm test
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  mobile:
+    name: Phone app
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - run: npx tsc --noEmit
