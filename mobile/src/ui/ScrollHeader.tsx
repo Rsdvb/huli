@@ -34,11 +34,17 @@ export interface CollapsingHeader {
   contentTop: number
 }
 
-export function useCollapsingHeader(): CollapsingHeader {
+/** `onScroll` also hears every scroll, on the JS thread, as for a minimizing tab bar. */
+export function useCollapsingHeader(options?: {
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void
+}): CollapsingHeader {
   const insets = useSafeAreaInsets()
   const height = insets.top + HEADER_BAR
   const scrollY = useRef(new Animated.Value(0)).current
   const ios = Platform.OS === 'ios'
+  const listener = useRef(options?.onScroll)
+  listener.current = options?.onScroll
+  const listens = !!options?.onScroll
   return useMemo(() => {
     const rest = ios ? -height : 0
     return {
@@ -51,6 +57,12 @@ export function useCollapsingHeader(): CollapsingHeader {
       scrollProps: {
         onScroll: Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           useNativeDriver: true,
+          ...(listens
+            ? {
+                listener: (event: NativeSyntheticEvent<NativeScrollEvent>) =>
+                  listener.current?.(event),
+              }
+            : {}),
         }),
         scrollEventThrottle: 16,
         ...(ios
@@ -64,7 +76,7 @@ export function useCollapsingHeader(): CollapsingHeader {
       },
       contentTop: ios ? 0 : height,
     }
-  }, [height, insets.top, ios, scrollY])
+  }, [height, insets.top, ios, scrollY, listens])
 }
 
 /** The floating header: its backdrop fades in with `progress`, its content sits in the bar. */
