@@ -4,7 +4,6 @@
 
 import { memo, useState } from 'react'
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
-import { router } from 'expo-router'
 import type { ThreadEntry } from '@shared/thread'
 import { useSessionRows } from '../ui/session/context'
 import { copyText, plainText, showMenu } from '../ui/session/feedback'
@@ -16,6 +15,28 @@ import { ToolRow } from '../ui/session/ToolRow'
 import { TurnChanges } from '../ui/session/TurnChanges'
 import { TurnFooter } from '../ui/session/TurnFooter'
 import { sameRow, type Row } from '../ui/session/turns'
+import {
+  BrowserOriginEntry,
+  ComputerAppEntry,
+  ComputerSetupEntry,
+  ControlAskEntry,
+  DeviceAccessEntry,
+  MemoryEntry,
+  ProblemReportEntry,
+  ProjectHooksEntry,
+  ProjectMcpEntry,
+} from './entries/AccessEntries'
+import { ElicitationSettled } from './entries/ElicitationCard'
+import { MarketPublishEntry } from './entries/MarketPublishEntry'
+import {
+  ChildEntry,
+  ControlNoteEntry,
+  SessionMessageEntry,
+  TakeoverEntry,
+  TurnEndEntry,
+} from './entries/NoteEntries'
+import { NoticeEntry } from './entries/TurnEnd'
+import { workflowCardOf, WorkflowToolCard } from './entries/WorkflowCards'
 import { Markdown } from './Markdown'
 import { UserMessage } from './UserMessage'
 
@@ -121,34 +142,6 @@ function Plan(props: { entry: Of<'plan'> }) {
   )
 }
 
-function Notice(props: { entry: Of<'notice'> }) {
-  const { c, s } = useSessionTokens()
-  const { entry } = props
-  const tone =
-    entry.severity === 'error'
-      ? { icon: G.error, color: c.danger, bg: s.dangerSoft }
-      : entry.severity === 'warning'
-        ? { icon: G.warning, color: c.warning, bg: s.warningSoft }
-        : { icon: G.info, color: c.textSecondary, bg: c.fill }
-  return (
-    <View style={[styles.notice, { backgroundColor: tone.bg }]}>
-      <View style={{ height: 20, justifyContent: 'center' }}>
-        <Icon icon={tone.icon} size={15} color={tone.color} />
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text
-          style={[styles.noticeTitle, { color: entry.severity === 'info' ? c.text : tone.color }]}
-        >
-          {entry.title}
-        </Text>
-        {entry.description ? (
-          <Text style={[styles.noticeText, { color: c.textSecondary }]}>{entry.description}</Text>
-        ) : null}
-      </View>
-    </View>
-  )
-}
-
 /** A small line of the host's own record, with an icon and, when it leads somewhere, a chevron. */
 function Note(props: {
   icon: IconSpec
@@ -198,6 +191,9 @@ function Compaction(props: { entry: Of<'compaction'> }) {
 
 export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) {
   const { entry } = props
+  const { sessionId } = useSessionRows()
+  // The host's own requests: a line while their card waits above the composer, then the answer.
+  const request = { sessionId, place: 'thread' as const }
   switch (entry.kind) {
     case 'user':
       if (entry.approval) return null
@@ -213,23 +209,49 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
       return <Reply entry={entry} />
     case 'thought':
       return <Thought entry={entry} />
-    case 'tool':
+    case 'tool': {
+      const waiting = !!entry.permission && !entry.permissionResult
+      if (!waiting && workflowCardOf(entry)) return <WorkflowToolCard entry={entry} />
+      if (!waiting && entry.elicitation) return <ElicitationSettled entry={entry} />
       return <ToolRow entry={entry} />
+    }
     case 'plan':
       return <Plan entry={entry} />
     case 'notice':
-      return <Notice entry={entry} />
+      return <NoticeEntry entry={entry} />
     case 'compaction':
       return <Compaction entry={entry} />
     case 'subagent':
     case 'session_started':
-      return (
-        <Note
-          icon={G.subagent}
-          text="开了一个子会话"
-          onPress={() => router.push(`/session/${entry.sessionId}`)}
-        />
-      )
+      return <ChildEntry entry={entry} />
+    case 'session_message':
+      return <SessionMessageEntry entry={entry} />
+    case 'turn_end':
+      return <TurnEndEntry entry={entry} />
+    case 'takeover':
+      return <TakeoverEntry entry={entry} />
+    case 'control_note':
+      return <ControlNoteEntry entry={entry} sessionId={sessionId} />
+    case 'browser_origin':
+      return <BrowserOriginEntry entry={entry} {...request} />
+    case 'computer_app':
+      return <ComputerAppEntry entry={entry} {...request} />
+    case 'computer_setup':
+      return <ComputerSetupEntry entry={entry} {...request} />
+    case 'control_ask':
+      return <ControlAskEntry entry={entry} {...request} />
+    case 'device_access':
+      return <DeviceAccessEntry entry={entry} {...request} />
+    case 'project_mcp':
+      return <ProjectMcpEntry entry={entry} {...request} />
+    case 'project_hooks':
+      return <ProjectHooksEntry entry={entry} {...request} />
+    case 'problem_report':
+      return <ProblemReportEntry entry={entry} {...request} />
+    case 'memory':
+      return <MemoryEntry entry={entry} {...request} />
+    case 'market_publish':
+      return <MarketPublishEntry entry={entry} {...request} />
     case 'git':
       if (entry.event === 'commit') {
         const count = entry.commits.length + entry.more
@@ -263,6 +285,8 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
   }
 })
 
+const CARD: [number, number] = [6, 6]
+
 // Room above and below each kind of entry: replies breathe, tool lines sit close together.
 const SPACING: Partial<Record<ThreadEntry['kind'], [number, number]>> = {
   user: [10, 10],
@@ -270,6 +294,9 @@ const SPACING: Partial<Record<ThreadEntry['kind'], [number, number]>> = {
   plan: [6, 6],
   notice: [6, 6],
   compaction: [8, 8],
+  session_message: CARD,
+  subagent: CARD,
+  session_started: CARD,
 }
 
 /** A row of the conversation list, which redraws only when its own data changed. */
@@ -329,15 +356,6 @@ const styles = StyleSheet.create({
   count: { fontSize: 13, fontVariant: ['tabular-nums'] },
   planItem: { flexDirection: 'row', gap: 10 },
   planText: { flex: 1, fontSize: 15, lineHeight: 21 },
-  notice: {
-    flexDirection: 'row',
-    gap: 9,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  noticeTitle: { fontSize: 14, lineHeight: 20, fontWeight: '600' },
-  noticeText: { fontSize: 13, lineHeight: 18 },
   divider: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
   rule: { flex: 1, height: StyleSheet.hairlineWidth },
   dividerText: { fontSize: 12 },
