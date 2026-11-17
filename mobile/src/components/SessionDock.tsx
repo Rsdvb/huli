@@ -4,6 +4,7 @@
 
 import { useState, type RefObject } from 'react'
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
+import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import type { ConfigOption, QueuedPrompt, SessionView } from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
 import { useHost } from '../host'
@@ -290,7 +291,10 @@ export function QueueStack(props: { sessionId: string; session: SessionView | un
           </PressScale>
         )
         return (
-          <View
+          <Reanimated.View
+            entering={QUEUE_IN}
+            exiting={QUEUE_OUT}
+            layout={QUEUE_MOVE}
             key={item.id}
             style={[styles.queued, { backgroundColor: s.dockCard, borderColor: c.border }]}
           >
@@ -328,12 +332,17 @@ export function QueueStack(props: { sessionId: string; session: SessionView | un
                 </>
               )}
             </View>
-          </View>
+          </Reanimated.View>
         )
       })}
     </View>
   )
 }
+
+// Queued messages come, go and close up on UIKit-like springs, on the UI thread.
+const QUEUE_IN = FadeIn.duration(220)
+const QUEUE_OUT = FadeOut.duration(160)
+const QUEUE_MOVE = LinearTransition.springify().dampingRatio(0.84).duration(400)
 
 const styles = StyleSheet.create({
   chip: {

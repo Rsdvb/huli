@@ -3,6 +3,7 @@
 
 import { memo, useEffect, useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import Reanimated, { FadeInDown } from 'react-native-reanimated'
 import Svg, { Circle } from 'react-native-svg'
 import { Bot } from 'lucide-react-native'
 import type { PlanProgress, SessionSummary } from '@shared/agent-host'
@@ -160,6 +161,8 @@ export const SessionRow = memo(function SessionRow(props: {
   end?: SwipeAction
   /** The session open beside the list (iPad). */
   selected?: boolean
+  /** New to the list: it fades and slides in, on the UI thread. */
+  appear?: boolean
   onPress(): void
   onLongPress(): void
 }) {
@@ -244,13 +247,26 @@ export const SessionRow = memo(function SessionRow(props: {
     </Press>
   )
 
-  if (!props.start && !props.end) return row
-  return (
-    <SwipeRow start={props.start} end={props.end}>
-      {row}
-    </SwipeRow>
-  )
+  const body =
+    !props.start && !props.end ? (
+      row
+    ) : (
+      <SwipeRow start={props.start} end={props.end}>
+        {row}
+      </SwipeRow>
+    )
+  // Only a row that is new to the list comes in; one the list mounts again as it scrolls doesn't.
+  if (!props.appear) return body
+  return <Reanimated.View entering={ROW_ENTERING}>{body}</Reanimated.View>
 })
+
+const ROW_ENTERING = FadeInDown.springify()
+  .dampingRatio(0.84)
+  .duration(400)
+  .withInitialValues({
+    opacity: 0,
+    transform: [{ translateY: -8 }],
+  })
 
 const TITLE_WIDTHS = ['68%', '54%', '76%', '46%', '62%', '50%', '72%'] as const
 

@@ -263,6 +263,25 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       </Press>
     ) : null
 
+  // Sessions new to the list since it first showed come in with an animation; rows the list only
+  // mounts again as it scrolls do not.
+  const seen = useRef<Set<string> | null>(null)
+  const fresh = useRef(new Set<string>())
+  const ids = items.flatMap((item) => (item.kind === 'section' ? [] : [item.session.id]))
+  if (seen.current === null) {
+    if (ids.length > 0) seen.current = new Set(ids)
+  } else {
+    for (const sid of ids) {
+      if (!seen.current.has(sid)) {
+        seen.current.add(sid)
+        fresh.current.add(sid)
+      }
+    }
+  }
+  useEffect(() => {
+    fresh.current.clear()
+  })
+
   const renderItem = ({ item }: { item: Item }) => {
     if (item.kind === 'section') {
       return (
@@ -283,6 +302,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         agentName={host.agents.get(s.agentId)?.name}
         projectName={projectNames.get(s.projectPath)}
         selected={props.selected === s.id}
+        appear={fresh.current.has(s.id)}
         onPress={() => props.onOpen(s.id)}
         onLongPress={() => actions.open(s)}
         start={
