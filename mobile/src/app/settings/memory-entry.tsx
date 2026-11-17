@@ -54,7 +54,7 @@ export default function MemoryEntryPage() {
   const remove = async (target: MemoryEntry) => {
     const ok = await confirm({
       title: `删除“${target.title}”？`,
-      message: '它会从 Huli 的记忆里删掉，Agent 之后不会再拿到它。',
+      message: '它会从纸鸢的记忆里删掉，Agent 之后不会再拿到它。',
       confirm: '删除',
     })
     if (!ok || !host.link) return

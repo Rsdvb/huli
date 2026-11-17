@@ -127,8 +127,8 @@ export default function ProjectPage() {
     if (!project || !host.link) return
     const parts = [
       sessions.length > 0
-        ? `它的 ${sessions.length} 个会话会从 Huli 里去掉。`
-        : '它在 Huli 里没有会话。',
+        ? `它的 ${sessions.length} 个会话会从纸鸢里去掉。`
+        : '它在纸鸢里没有会话。',
       running > 0 ? `正在运行的 ${running} 个会先停下。` : null,
       '文件夹和里面的文件会留在电脑上。',
     ]
@@ -157,7 +157,7 @@ export default function ProjectPage() {
     return (
       <ManagePage title="项目" onRefresh={() => host.refresh()}>
         {host.loaded ? (
-          <EmptyState icon="folder" title="找不到这个项目" message="它可能已经从 Huli 里移除。" />
+          <EmptyState icon="folder" title="找不到这个项目" message="它可能已经从纸鸢里移除。" />
         ) : (
           <EmptyState icon="folder" title="连上电脑后才能看项目" />
         )}
@@ -187,7 +187,7 @@ export default function ProjectPage() {
           Worktree 设置
         </Text>
         <Text style={[typeScale.footnote, styles.header, { color: c.textTertiary }]}>
-          Huli 怎样为这个项目的新会话命名和准备 worktree。
+          纸鸢怎样为这个项目的新会话命名和准备 worktree。
         </Text>
         {loaded === null ? (
           <ReadState read={read} what="Worktree 设置" icon="sliders" rows={3} />

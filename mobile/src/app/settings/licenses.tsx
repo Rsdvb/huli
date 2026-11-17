@@ -41,7 +41,7 @@ export default function Licenses() {
         <View style={[styles.hero, { backgroundColor: c.surface, borderColor: c.border }]}>
           <HuliIcon size={48} />
           <Text style={[typeScale.callout, { color: c.text }]}>
-            Huli 是 Kettu 的一个分支。和 Kettu 一样，它以 GNU Affero 通用公共许可证第 3
+            纸鸢是 Kettu 的一个分支。和 Kettu 一样，它以 GNU Affero 通用公共许可证第 3
             版（AGPL-3.0）发布，并附带 Kettu 为 affectUI 给出的额外许可。你可以在 GitHub
             上取得它的全部源代码。
           </Text>
@@ -49,14 +49,14 @@ export default function Licenses() {
 
         <ListGroup>
           <ListRow
-            title="Huli 源代码"
+            title="纸鸢源代码"
             value="AGPL-3.0"
             external
             onPress={() => void Linking.openURL(GITHUB_URL)}
           />
           <ListRow
             title="Kettu"
-            subtitle="Huli 基于它而来"
+            subtitle="纸鸢基于它而来"
             value="AGPL-3.0"
             external
             onPress={() => void Linking.openURL(KETTU_URL)}

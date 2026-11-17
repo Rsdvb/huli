@@ -355,11 +355,7 @@ export default function UsageScreen() {
   const body = () => {
     if (!connected && !read) {
       return (
-        <EmptyState
-          icon="chart"
-          title="连上电脑后才能看用量"
-          message="用量由电脑上的 Huli 统计。"
-        />
+        <EmptyState icon="chart" title="连上电脑后才能看用量" message="用量由电脑上的纸鸢统计。" />
       )
     }
     if (!read && usage.error) {
@@ -512,10 +508,10 @@ export default function UsageScreen() {
               title={status.scanning ? '正在读取日志…' : '还没有用量'}
               message={
                 scope === 'kettu' && status.fromComputer
-                  ? '只算 Huli 运行的对话时还没有用量；在筛选里换成电脑上的全部日志试试。'
+                  ? '只算纸鸢运行的对话时还没有用量；在筛选里换成电脑上的全部日志试试。'
                   : status.fromComputer
                     ? `在 ${hostName} 上用 Agent 写代码之后，token、请求和费用会出现在这里。`
-                    : `Huli 会记下它运行的每一轮对话。要算上之前和在终端里的使用，请在 ${hostName} 的 设置 › 用量 里打开「统计本机用量」。`
+                    : `纸鸢会记下它运行的每一轮对话。要算上之前和在终端里的使用，请在 ${hostName} 的 设置 › 用量 里打开「统计本机用量」。`
               }
             />
             {status.fromComputer && filters}

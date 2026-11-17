@@ -5,12 +5,15 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { withDangerousMod, withXcodeProject } = require('expo/config-plugins')
+const { IOSConfig, withDangerousMod, withXcodeProject } = require('expo/config-plugins')
+const { APP_NAME, APP_NAME_ZH } = require('./appName')
 
 const TARGET = 'HuliShareExtension'
 const SWIFT = 'ShareViewController.swift'
 const INFO = `${TARGET}-Info.plist`
 const ENTITLEMENTS = `${TARGET}.entitlements`
+// The share sheet's name for it in Chinese, beside the English one in its Info.plist.
+const ZH_STRINGS = 'zh-Hans.lproj/InfoPlist.strings'
 const EMBED = 'Embed Foundation Extensions'
 
 /** As many as one message carries: the host's ATTACHMENT_LIMIT is 20. */
@@ -86,7 +89,7 @@ const withExtensionFiles = (config) =>
       const info = {
         CFBundleDevelopmentRegion: '$(DEVELOPMENT_LANGUAGE)',
         // What the share sheet names it.
-        CFBundleDisplayName: config.name,
+        CFBundleDisplayName: APP_NAME,
         CFBundleExecutable: '$(EXECUTABLE_NAME)',
         CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)',
         CFBundleInfoDictionaryVersion: '6.0',
@@ -114,6 +117,11 @@ const withExtensionFiles = (config) =>
       const entitlements = { 'com.apple.security.application-groups': [settings.appGroup] }
       await fs.promises.writeFile(path.join(dir, INFO), plist(info))
       await fs.promises.writeFile(path.join(dir, ENTITLEMENTS), plist(entitlements))
+      await fs.promises.mkdir(path.join(dir, path.dirname(ZH_STRINGS)), { recursive: true })
+      await fs.promises.writeFile(
+        path.join(dir, ZH_STRINGS),
+        `"CFBundleDisplayName" = "${APP_NAME_ZH}";\n`,
+      )
       return config
     },
   ])
@@ -229,6 +237,14 @@ const withExtensionTarget = (config) =>
           : { SWIFT_OPTIMIZATION_LEVEL: quote('-O'), SWIFT_COMPILATION_MODE: 'wholemodule' }),
       })
     }
+    IOSConfig.XcodeUtils.ensureGroupRecursively(project, `${TARGET}/${path.dirname(ZH_STRINGS)}`)
+    IOSConfig.XcodeUtils.addResourceFileToGroup({
+      filepath: ZH_STRINGS,
+      groupName: `${TARGET}/${path.dirname(ZH_STRINGS)}`,
+      project,
+      isBuildFile: true,
+      targetUuid: target.uuid,
+    })
     project.addTargetAttribute('DevelopmentTeam', settings.team, target)
     project.addTargetAttribute('ProvisioningStyle', 'Automatic', target)
     embed(project, app)

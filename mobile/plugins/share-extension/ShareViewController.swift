@@ -20,7 +20,7 @@ final class ShareViewController: UIViewController {
     card.backgroundColor = .systemBackground
     card.layer.cornerRadius = 18
     card.translatesAutoresizingMaskIntoConstraints = false
-    label.text = "正在交给 Huli…"
+    label.text = "正在交给纸鸢…"
     label.font = .preferredFont(forTextStyle: .body)
     label.textColor = .label
     label.textAlignment = .center
@@ -62,14 +62,14 @@ final class ShareViewController: UIViewController {
   private func saved(_ id: String?) {
     let scheme = (Bundle.main.object(forInfoDictionaryKey: "HuliURLScheme") as? String) ?? "huli"
     guard let id, let url = URL(string: "\(scheme)://share?id=\(id)") else {
-      return show("没有能交给 Huli 的内容。")
+      return show("没有能交给纸鸢的内容。")
     }
     openApp(url) { opened in
       DispatchQueue.main.async {
         if opened {
           self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
         } else {
-          self.show("已存好，打开 Huli 继续。")
+          self.show("已存好，打开纸鸢继续。")
         }
       }
     }

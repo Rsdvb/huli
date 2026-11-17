@@ -214,7 +214,7 @@ export function TasksView(props: { switcher: ReactNode }) {
         <EmptyState
           icon="flow"
           title="连上电脑后才能看需求"
-          message="Huli 正在连接你的电脑。"
+          message="纸鸢正在连接你的电脑。"
           action={{ label: '立即重连', onPress: () => retry() }}
         />
       )

@@ -331,7 +331,7 @@ export function ReadState<T>(props: {
       <EmptyState
         icon={props.icon}
         title={`连上电脑后才能看${props.what}`}
-        message="电脑开着、Huli 在运行，并且和这台手机在同一网络或 Tailscale 上时就能连上。"
+        message="电脑开着、纸鸢在运行，并且和这台手机在同一网络或 Tailscale 上时就能连上。"
       />
     )
   }
