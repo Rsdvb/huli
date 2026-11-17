@@ -6,6 +6,14 @@ import { Icon, type IconName } from './Icon'
 import { Pill } from './Pill'
 import { radius, space, type as typeScale, useTokens } from './tokens'
 
+/**
+ * Chinese with a word joiner between its characters, so a centered line breaks only after
+ * punctuation or at a space, never inside a word such as 它们 or 自己.
+ */
+export function keepWords(text: string): string {
+  return text.replace(/([一-鿿])(?=[一-鿿])/g, '$1⁠')
+}
+
 export function EmptyState(props: {
   icon: IconName
   title: string
@@ -23,7 +31,7 @@ export function EmptyState(props: {
       <Text style={[typeScale.headline, styles.center, { color: c.text }]}>{props.title}</Text>
       {props.message ? (
         <Text style={[typeScale.callout, styles.center, { color: c.textSecondary }]}>
-          {props.message}
+          {keepWords(props.message)}
         </Text>
       ) : null}
       {props.action && (
