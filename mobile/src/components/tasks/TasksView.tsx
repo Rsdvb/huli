@@ -3,7 +3,7 @@
 // A task opens its page.
 
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Animated, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
+import { RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { TaskSummary } from '@shared/workflow'
@@ -17,6 +17,7 @@ import {
   useTaskList,
   workflowTitle,
 } from '../../tasks'
+import { AnimatedFlashList, type FlashListRef } from '../../ui/AnimatedList'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
@@ -48,6 +49,9 @@ type Item =
   | { kind: 'section'; key: string; title: string; count: number; waiting: boolean }
   | { kind: 'task'; key: string; task: TaskSummary }
 
+const itemKey = (item: Item) => item.key
+const itemType = (item: Item) => item.kind
+
 export function TasksView(props: { switcher: ReactNode }) {
   const { c } = useTokens()
   const link = useMaybeLink()
@@ -57,7 +61,7 @@ export function TasksView(props: { switcher: ReactNode }) {
   const shell = useShell()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
-  const list = useRef<FlatList<Item>>(null)
+  const list = useRef<FlashListRef<Item>>(null)
   const { tasks, views, loaded, error, reload } = useTaskList()
   const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
@@ -320,10 +324,11 @@ export function TasksView(props: { switcher: ReactNode }) {
 
   return (
     <Screen readable>
-      <Animated.FlatList
+      <AnimatedFlashList
         ref={list}
         data={items}
-        keyExtractor={(item) => item.key}
+        keyExtractor={itemKey}
+        getItemType={itemType}
         renderItem={renderItem}
         {...header.scrollProps}
         keyboardShouldPersistTaps="handled"

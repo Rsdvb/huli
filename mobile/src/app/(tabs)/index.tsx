@@ -2,15 +2,20 @@
 // Search is a page of its own (search.tsx), from the top bar. On a wide window (iPad) the list
 // keeps a column on the left and the chosen session opens beside it, in the session screen itself.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Animated, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import type { TaskSummary } from '@shared/workflow'
 import { useSessionActions } from '../../components/SessionActions'
 import { SessionPaneProvider } from '../../components/SessionPane'
-import { SessionRow, SessionRowSkeleton, subagentCounts } from '../../components/SessionRow'
+import {
+  SessionRow,
+  SessionRowSkeleton,
+  subagentCounts,
+  type SubagentCount,
+} from '../../components/SessionRow'
 import { TaskRow } from '../../components/tasks/TaskRow'
 import {
   FilterNote,
@@ -22,7 +27,17 @@ import {
 } from '../../components/shell'
 import { SyncNote } from '../../components/SyncNote'
 import { UpdateBanner } from '../../components/UpdateBanner'
-import { useHost } from '../../host'
+import {
+  sameFields,
+  useActiveHost,
+  useAgents,
+  useHost,
+  useHostActions,
+  useHostSelector,
+  useProjects,
+  useSessions,
+  type HostData,
+} from '../../host'
 import { linkProblem } from '../../linkInfo'
 import { greeting, listOrder, needsYou, withChildWaits } from '../../sessions'
 import { needsAttention, useTaskList } from '../../tasks'
@@ -30,6 +45,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
 import { LIST_COLUMN, useWide } from '../../ui/layout'
 import { Press } from '../../ui/Press'
+import { AnimatedFlashList, type FlashListRef } from '../../ui/AnimatedList'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
@@ -38,7 +54,10 @@ import { haptic } from '../../ui/haptics'
 import { Pill } from '../../ui/Pill'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
-import SessionScreen from '../session/[id]'
+
+// The session screen beside the list is for a wide window only; a phone never loads it here, so
+// the conversation, the composer and their menus stay off the start's path.
+const SessionScreen = lazy(() => import('../session/[id]'))
 
 function isRunning(s: SessionSummary): boolean {
   return s.status === 'running' || s.status === 'starting'
@@ -70,17 +89,22 @@ type Item =
 export default function Home() {
   const wide = useWide()
   const { c } = useTokens()
-  const host = useHost()
   const [selected, setSelected] = useState<string | null>(null)
 
   // A session that went away on the computer leaves the pane.
-  const gone = selected !== null && host.loaded && !host.sessions.has(selected)
+  const gone = useHostSelector(
+    useCallback(
+      (d: HostData) => selected !== null && d.loaded && !d.sessions.has(selected),
+      [selected],
+    ),
+  )
   useEffect(() => {
     if (gone) setSelected(null)
   }, [gone])
+  const close = useCallback(() => setSelected(null), [])
 
   if (!wide) {
-    return <SessionList selected={null} onOpen={(id) => router.push(`/session/${id}`)} />
+    return <SessionList selected={null} onOpen={openScreen} />
   }
   return (
     <View style={[styles.split, { backgroundColor: c.bg }]}>
@@ -90,8 +114,10 @@ export default function Home() {
       <View style={[styles.divider, { backgroundColor: c.border }]} />
       <View style={styles.pane}>
         {selected ? (
-          <SessionPaneProvider id={selected} open={setSelected} close={() => setSelected(null)}>
-            <SessionScreen key={selected} />
+          <SessionPaneProvider id={selected} open={setSelected} close={close}>
+            <Suspense fallback={<View style={[styles.pane, { backgroundColor: c.bg }]} />}>
+              <SessionScreen key={selected} />
+            </Suspense>
           </SessionPaneProvider>
         ) : (
           <Screen edges={['top']}>
@@ -109,13 +135,100 @@ export default function Home() {
   )
 }
 
+const openScreen = (id: string) => router.push(`/session/${id}`)
+
+/** What a row can do, the same functions for the list's whole life so rows can skip renders. */
+interface RowActions {
+  open(id: string): void
+  more(s: SessionSummary): void
+  togglePin(s: SessionSummary): void
+  archive(s: SessionSummary): void
+}
+
+interface HomeRowProps {
+  session: SessionSummary
+  taskTitle: string | undefined
+  subagents: SubagentCount | undefined
+  agentName: string | undefined
+  projectName: string | undefined
+  selected: boolean
+  appear: boolean
+  connected: boolean
+  actions: RowActions
+}
+
+function sameHomeRow(a: HomeRowProps, b: HomeRowProps): boolean {
+  return (
+    // A parent whose child waits is a copy with the count added; its fields are what matter.
+    sameFields(a.session, b.session) &&
+    a.taskTitle === b.taskTitle &&
+    a.subagents?.count === b.subagents?.count &&
+    a.subagents?.running === b.subagents?.running &&
+    a.agentName === b.agentName &&
+    a.projectName === b.projectName &&
+    a.selected === b.selected &&
+    a.appear === b.appear &&
+    a.connected === b.connected &&
+    a.actions === b.actions
+  )
+}
+
+/** A session's row in the list: redraws only when what it shows changed. */
+const HomeRow = memo(function HomeRow(props: HomeRowProps) {
+  const { c } = useTokens()
+  const s = props.session
+  const { actions } = props
+  return (
+    <SessionRow
+      session={s}
+      task={s.task ? { id: s.task.taskId, title: props.taskTitle ?? '需求' } : undefined}
+      subagents={props.subagents}
+      agentName={props.agentName}
+      projectName={props.projectName}
+      selected={props.selected}
+      appear={props.appear}
+      onPress={() => actions.open(s.id)}
+      onLongPress={() => actions.more(s)}
+      start={
+        props.connected
+          ? {
+              label: s.pinnedAt !== null ? '取消置顶' : '置顶',
+              icon: s.pinnedAt !== null ? 'unpin' : 'pin',
+              color: c.accent,
+              onPress: () => actions.togglePin(s),
+            }
+          : undefined
+      }
+      end={
+        props.connected
+          ? { label: '归档', icon: 'archive', color: c.tint, onPress: () => actions.archive(s) }
+          : undefined
+      }
+    />
+  )
+}, sameHomeRow)
+
+const pickLink = (d: HostData) => ({
+  state: d.state,
+  loaded: d.loaded,
+  unreachable: d.unreachable,
+})
+
+const itemType = (item: Item) => item.kind
+const itemKey = (item: Item) => item.key
+
 function SessionList(props: { selected: string | null; onOpen(id: string): void }) {
   const { c } = useTokens()
-  const host = useHost()
+  const sessions = useSessions()
+  const projects = useProjects()
+  const agents = useAgents()
+  const host = useHostSelector(pickLink, sameFields)
+  const active = useActiveHost()
+  const { retry, refresh } = useHostActions()
   const shell = useShell()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
-  const list = useRef<FlatList<Item>>(null)
+  const list = useRef<FlashListRef<Item>>(null)
   const [refreshing, setRefreshing] = useState(false)
   const actions = useSessionActions('list')
   useScrollTopOnTabPress(
@@ -123,24 +236,33 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     header,
   )
 
+  // The rows call through these, so they need not redraw when the list's own state changes.
+  const latest = useRef({ actions, onOpen: props.onOpen })
+  latest.current = { actions, onOpen: props.onOpen }
+  const rowActions = useMemo<RowActions>(
+    () => ({
+      open: (id) => latest.current.onOpen(id),
+      more: (s) => latest.current.actions.open(s),
+      togglePin: (s) => latest.current.actions.togglePin(s),
+      archive: (s) => latest.current.actions.archive(s),
+    }),
+    [],
+  )
+
   // A sub-session's or sub-agent's wait counts on the session the list shows, as on the desktop.
   const listed = useMemo(
     () =>
-      [...withChildWaits(host.sessions).values()].filter(
+      [...withChildWaits(sessions).values()].filter(
         (s) => s.parentId === null && s.archivedAt === null,
       ),
-    [host.sessions],
+    [sessions],
   )
   const archivedCount = useMemo(
     () =>
-      [...host.sessions.values()].filter((s) => s.parentId === null && s.archivedAt !== null)
-        .length,
-    [host.sessions],
+      [...sessions.values()].filter((s) => s.parentId === null && s.archivedAt !== null).length,
+    [sessions],
   )
-  const projectNames = useMemo(
-    () => new Map(host.projects.map((p) => [p.path, p.name])),
-    [host.projects],
-  )
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.path, p.name])), [projects])
 
   const visible = useMemo(
     () => listed.filter((s) => inFilter(shell.filter, sessionFilterItem(s))).sort(listOrder),
@@ -159,7 +281,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   const connected = host.state.kind === 'connected'
   const waiting = listed.filter(ownWait).length + needingTasks.length
   const runningNow = listed.filter((s) => !needsYou(s) && isRunning(s))
-  const subagents = useMemo(() => subagentCounts(host.sessions.values()), [host.sessions])
+  const subagents = useMemo(() => subagentCounts(sessions.values()), [sessions])
   const problem = linkProblem(host.state)
 
   const items = useMemo<Item[]>(() => {
@@ -198,7 +320,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   const summary =
     !connected && !host.loaded
       ? host.unreachable && host.state.kind !== 'stopped'
-        ? `连不上「${computerName(host.host)}」。`
+        ? `连不上「${computerName(active)}」。`
         : problem
       : null
   // Connected, it says what waits and what runs, each with its agents' avatars, as Kettu's does.
@@ -330,44 +452,28 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     }
     const s = item.session
     return (
-      <SessionRow
+      <HomeRow
         session={s}
-        task={
-          s.task ? { id: s.task.taskId, title: taskTitles.get(s.task.taskId) ?? '需求' } : undefined
-        }
+        taskTitle={s.task ? taskTitles.get(s.task.taskId) : undefined}
         subagents={subagents.get(s.id)}
-        agentName={host.agents.get(s.agentId)?.name}
+        agentName={agents.get(s.agentId)?.name}
         projectName={projectNames.get(s.projectPath)}
         selected={props.selected === s.id}
         appear={fresh.current.has(s.id)}
-        onPress={() => props.onOpen(s.id)}
-        onLongPress={() => actions.open(s)}
-        start={
-          connected
-            ? {
-                label: s.pinnedAt !== null ? '取消置顶' : '置顶',
-                icon: s.pinnedAt !== null ? 'unpin' : 'pin',
-                color: c.accent,
-                onPress: () => actions.togglePin(s),
-              }
-            : undefined
-        }
-        end={
-          connected
-            ? { label: '归档', icon: 'archive', color: c.tint, onPress: () => actions.archive(s) }
-            : undefined
-        }
+        connected={connected}
+        actions={rowActions}
       />
     )
   }
 
   return (
     <Screen>
-      <Animated.FlatList
+      <AnimatedFlashList
         ref={list}
         data={items}
         extraData={props.selected}
-        keyExtractor={(item) => item.key}
+        keyExtractor={itemKey}
+        getItemType={itemType}
         renderItem={renderItem}
         {...header.scrollProps}
         keyboardShouldPersistTaps="handled"
@@ -382,9 +488,8 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
-              host.retry()
-              void host
-                .refresh()
+              retry()
+              void refresh()
                 .catch(() => {})
                 .finally(() => setRefreshing(false))
             }}

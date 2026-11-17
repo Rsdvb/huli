@@ -178,7 +178,7 @@ export const TaskRow = memo(function TaskRow(props: {
 
   if (!props.start && !props.end) return row
   return (
-    <SwipeRow start={props.start} end={props.end}>
+    <SwipeRow start={props.start} end={props.end} item={task.id}>
       {row}
     </SwipeRow>
   )
