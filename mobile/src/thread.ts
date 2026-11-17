@@ -36,6 +36,11 @@ export interface ThreadView {
 
 /** How often at most a watched thread is written to the cache while it changes. */
 const SAVE_EVERY = 5000
+/**
+ * How often at most patches reach the screen while they stream in: a reply's tokens come in many
+ * small batches, and each one applied alone would copy the thread and redraw the conversation.
+ */
+const APPLY_EVERY = 50
 
 export function useThread(link: HostLink, sessionId: string, state: LinkState): ThreadView {
   const computer = useComputerId()
@@ -50,6 +55,10 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const pending = useRef<PatchBatch[] | null>(null)
   const generation = useRef(0)
   const live = useRef(false)
+  /** Batches taken in but not yet applied, and the timer that applies them together. */
+  const queued = useRef<PatchBatch[]>([])
+  const applyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const appliedAt = useRef(0)
   const connected = state.kind === 'connected'
 
   // Until the computer sends the thread, the cache's copy from an earlier visit shows, read-only.
@@ -93,8 +102,27 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       .catch(() => {})
   }, [link, sessionId])
 
+  const applyQueued = useCallback(() => {
+    applyTimer.current = null
+    appliedAt.current = Date.now()
+    const batches = queued.current
+    if (batches.length === 0) return
+    queued.current = []
+    const patches = batches.length === 1 ? batches[0]!.patches : batches.flatMap((b) => b.patches)
+    setThread((current) => (current ? applyPatches(current, patches, { partial: true }) : current))
+    if (patches.some((p) => p.op === 'entry.add' || p.op === 'entry.update')) reloadRequests()
+  }, [reloadRequests])
+
+  // Whatever waits to be applied belongs to the thread as it was; a new snapshot replaces it.
+  const dropQueued = () => {
+    queued.current = []
+    if (applyTimer.current) clearTimeout(applyTimer.current)
+    applyTimer.current = null
+  }
+
   const open = useCallback(async () => {
     const mine = ++generation.current
+    dropQueued()
     pending.current = []
     try {
       await link.request('sessions.watch', { sessionId })
@@ -140,14 +168,18 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       seq.current = batch.seq
       // A patch applies to the computer's thread only, never to the cache's copy.
       if (!live.current) return
-      setThread((current) =>
-        current ? applyPatches(current, batch.patches, { partial: true }) : current,
-      )
-      if (batch.patches.some((p) => p.op === 'entry.add' || p.op === 'entry.update'))
-        reloadRequests()
+      queued.current.push(batch)
+      if (applyTimer.current) return
+      // The first batch after a pause shows at once; the rest wait for the next slot.
+      const wait = Math.max(0, appliedAt.current + APPLY_EVERY - Date.now())
+      applyTimer.current = setTimeout(applyQueued, wait)
     })
-    return off
-  }, [link, sessionId, open, reloadRequests])
+    return () => {
+      off()
+      // A new link or session reads its snapshot afresh, which has these.
+      dropQueued()
+    }
+  }, [link, sessionId, open, applyQueued])
 
   useEffect(() => {
     if (!connected) return
