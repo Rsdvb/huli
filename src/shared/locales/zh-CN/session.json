@@ -658,6 +658,19 @@
       "approval": "等待你的授权",
       "working": "处理中"
     },
+    "doing": {
+      "thinking": "正在思考：{{detail}}",
+      "execute": "正在运行 {{detail}}",
+      "executeMany_other": "正在运行 {{count}} 条命令：{{detail}}",
+      "read": "正在读取 {{detail}}",
+      "readMany_other": "正在读取 {{count}} 个文件：{{detail}}",
+      "edit": "正在编辑 {{detail}}",
+      "editMany_other": "正在编辑 {{count}} 个文件：{{detail}}",
+      "search": "正在搜索 {{detail}}",
+      "searchQuoted": "正在搜索“{{detail}}”",
+      "fetch": "正在获取 {{detail}}",
+      "fetchQuoted": "正在搜索网页“{{detail}}”"
+    },
     "resume": "继续",
     "continuePrompt": "继续",
     "outOfCredit": {

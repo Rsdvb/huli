@@ -7,10 +7,25 @@ import { deviceInUse, useDevicesStore } from '@renderer/stores/devices'
 import { terminalInUse, useTerminalsStore } from '@renderer/stores/terminals'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { TurnDots } from './turn-dots'
-import { askedStep, turnPhase, turnTokens, writingId } from './turn-phase'
+import { askedStep, turnDoing, turnTokens, writingId, type TurnPhaseName } from './turn-phase'
 
 /** Phases in which the agent thinks or writes rather than works in the app it uses. */
 const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval'])
+
+/** The `thread.doing` copy for a phase that names what it works on. */
+function doingKey(phase: TurnPhaseName, count: number, quoted: boolean) {
+  switch (phase) {
+    case 'execute':
+    case 'read':
+    case 'edit':
+      return count > 1 ? (`${phase}Many` as const) : phase
+    case 'search':
+    case 'fetch':
+      return quoted ? (`${phase}Quoted` as const) : phase
+    default:
+      return 'thinking'
+  }
+}
 
 /** The time since `since` in whole seconds, ticking on its own so nothing around it re-renders. */
 function TurnClock({ since }: { since: number }) {
@@ -52,8 +67,8 @@ export const TurnStatus = memo(function TurnStatus({
     (s) => s.replicas[sessionId]?.state?.session.turnStartedAt ?? null,
   )
   const added = useThreadsStore((s) => turnTokens(s.replicas[sessionId]?.state?.session))
-  const { phase, count } = useThreadsStore(
-    useShallow((s) => turnPhase(s.replicas[sessionId]?.state)),
+  const { phase, count, detail, quoted } = useThreadsStore(
+    useShallow((s) => turnDoing(s.replicas[sessionId]?.state)),
   )
   const writing = useThreadsStore((s) => writingId(s.replicas[sessionId]?.state) !== null)
   const asked = useThreadsStore((s) => askedStep(s.replicas[sessionId]?.state))
@@ -107,23 +122,17 @@ export const TurnStatus = memo(function TurnStatus({
               ? t('control:status.using.app', { target: app })
               : device.state === 'using'
                 ? t('control:status.using.app', { target: device.name })
-                : t(`thread.phase.${phase}`, { count })
+                : detail === null
+                  ? t(`thread.phase.${phase}`, { count })
+                  : t(`thread.doing.${doingKey(phase, count, quoted)}`, { count, detail })
   return (
     <div role="status" className="ks-status" data-after-sent={afterSent ? '' : undefined}>
       {waiting ? <span aria-hidden className="ks-status__attn" /> : <TurnDots phase={phase} />}
       {/* Only the phase is announced; the clock and the count change too often to read out. */}
       {startedAt !== null && (
         <>
-          <span aria-live="off">
+          <span aria-live="off" className="shrink-0">
             <TurnClock since={startedAt} />
-          </span>
-          {separator}
-        </>
-      )}
-      {added !== null && (
-        <>
-          <span aria-live="off" className="tabular">
-            {t('thread.tokens', { count: added, tokens: tokens(added) })}
           </span>
           {separator}
         </>
@@ -135,10 +144,19 @@ export const TurnStatus = memo(function TurnStatus({
           (appHeld ? 'app-held' : holding !== null ? 'held' : appUsed ? 'app' : device.state) ??
           phase
         }
+        title={text}
         className="min-w-0 animate-in truncate animation-duration-(--duration-base) fade-in slide-in-from-bottom-1"
       >
         {text}
       </span>
+      {added !== null && (
+        <>
+          {separator}
+          <span aria-live="off" className="shrink-0 tabular">
+            {t('thread.tokens', { count: added, tokens: tokens(added) })}
+          </span>
+        </>
+      )}
     </div>
   )
 })

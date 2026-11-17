@@ -5,7 +5,7 @@
 // together, and the plan's usage under them. A session and New session build them alike from the
 // options they hold.
 
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { AgentOptions, AgentStatus } from '@shared/agent-host'
 import { isFullAccessMode, isStartMode } from '@shared/agents'
 import { limitsForModel } from '@shared/plan-limits'
@@ -20,7 +20,7 @@ import {
   tightestLimit,
   windowName,
 } from '../ui/session/limits'
-import { optionDescription, optionName } from '../ui/session/optionText'
+import { modelBlurb, optionDescription, optionName } from '../ui/session/optionText'
 import type { MenuEntry, MenuPage } from '../ui/session/Popover'
 import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
@@ -167,18 +167,6 @@ export function modePage(control: ConfigControl): MenuPage | null {
 const isFast = (o: ConfigOption) => /fast/i.test(o.id)
 const isUltracode = (o: ConfigOption) => /ultracode/i.test(o.id)
 
-function switchHint(option: ConfigOption, locked: boolean): string | undefined {
-  if (locked) return BETWEEN_TURNS
-  if (option.value !== 'default') {
-    return option.description ? optionDescription(option.description) : undefined
-  }
-  return option.defaultValue === true
-    ? '跟随 Agent 的设置：开'
-    : option.defaultValue === false
-      ? '跟随 Agent 的设置：关'
-      : '跟随 Agent 的设置'
-}
-
 export interface ModelMenuContext {
   agentId: string
   agent: AgentStatus | undefined
@@ -208,6 +196,10 @@ function modelKey(config: readonly ConfigOption[]): string | undefined {
   return shownChoice(model)?.modelId ?? String(model.value)
 }
 
+// The window height, in points, from which the model menu has room for a line under each model:
+// an iPhone Pro Max's 956, but not an SE's 667 or a mini's 812.
+const ROOMY_HEIGHT = 850
+
 const EFFORT_HINT = '强度越高，思考越久，消耗的套餐额度也越多'
 
 /** The model menu's first page; null when the agent reports no model, effort or switch. */
@@ -226,6 +218,8 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     const locked = !!model.idleOnly && control.running
     const current = shownChoice(model)
     const { current: main, older } = splitModels(model.choices)
+    // A small phone's menu holds the models by name alone; a tall one has room for a line each.
+    const roomy = Dimensions.get('window').height >= ROOMY_HEIGHT
     const listed = current && !main.includes(current) ? [...main, current] : main
     for (const choice of listed) {
       entries.push({
@@ -234,8 +228,8 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
         lead,
         ...(locked
           ? { subtitle: BETWEEN_TURNS }
-          : choice.description
-            ? { subtitle: optionDescription(choice.description) }
+          : roomy && modelBlurb(choice)
+            ? { subtitle: modelBlurb(choice)! }
             : {}),
         checked: choice.value === current?.value,
         disabled: locked,
@@ -289,42 +283,19 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     }
   }
 
-  if (switches.length > 0 && entries.length > 0) {
-    entries.push({ kind: 'divider', key: 'switch-rule' })
-  }
-  for (const option of switches) {
-    const locked = !!option.idleOnly && control.running
-    const hint = switchHint(option, locked)
+  // The switches and every other option the agent reports go under one 选项 row, so the menu
+  // fits a small phone's screen without scrolling; the switches that are on show beside it.
+  const options = optionEntries(control)
+  if (options.length > 0) {
+    const on = switches.filter((o) => booleanConfigValue(o) === true)
+    entries.push({ kind: 'divider', key: 'options-rule' })
     entries.push({
-      key: `switch:${option.id}`,
-      label: optionName(option.name),
-      icon: isFast(option) ? G.bolt : isUltracode(option) ? G.layers : G.gear,
-      ...(hint ? { subtitle: hint } : {}),
-      toggle: booleanConfigValue(option) === true,
-      disabled: locked,
-      onPress: () => control.set(option, booleanConfigValue(option) !== true),
+      key: 'options',
+      label: '选项',
+      icon: G.sliders,
+      ...(on.length > 0 ? { detail: on.map((o) => optionName(o.name)).join('、') } : {}),
+      page: `option:${ALL_OPTIONS}`,
     })
-  }
-
-  // Every other option the agent reports, each a page of its choices, as the desktop's row has them.
-  if (others.length > 0) {
-    entries.push({ kind: 'divider', key: 'options-rule', title: '选项' })
-    for (const option of others) {
-      const locked = !!option.idleOnly && control.running
-      const choice = shownChoice(option)
-      entries.push({
-        key: `option:${option.id}`,
-        label: optionName(option.name),
-        icon: G.sliders,
-        ...(locked
-          ? { subtitle: BETWEEN_TURNS }
-          : choice
-            ? { detail: optionName(modelName(choice.name)) }
-            : {}),
-        disabled: locked,
-        page: `option:${option.id}`,
-      })
-    }
   }
 
   if (context.switchAgent) {
@@ -392,8 +363,49 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
   return { entries, ...note }
 }
 
-/** The choices of one of the Options, from the model menu. */
+/** The page id of 选项 itself, beside the pages of each option's choices. */
+const ALL_OPTIONS = '*'
+
+/** 选项's rows: the agent's switches, one line each, then its other options, each a page. */
+function optionEntries(control: ConfigControl): MenuEntry[] {
+  const entries: MenuEntry[] = []
+  for (const option of control.config.filter((o) => o.type === 'boolean')) {
+    const locked = !!option.idleOnly && control.running
+    entries.push({
+      key: `switch:${option.id}`,
+      label: optionName(option.name),
+      icon: isFast(option) ? G.bolt : isUltracode(option) ? G.layers : G.gear,
+      ...(locked ? { subtitle: BETWEEN_TURNS } : {}),
+      toggle: booleanConfigValue(option) === true,
+      disabled: locked,
+      onPress: () => control.set(option, booleanConfigValue(option) !== true),
+    })
+  }
+  for (const option of otherOptions(control.config)) {
+    const locked = !!option.idleOnly && control.running
+    const choice = shownChoice(option)
+    entries.push({
+      key: `option:${option.id}`,
+      label: optionName(option.name),
+      icon: G.sliders,
+      ...(locked
+        ? { subtitle: BETWEEN_TURNS }
+        : choice
+          ? { detail: optionName(modelName(choice.name)) }
+          : {}),
+      disabled: locked,
+      page: `option:${option.id}`,
+    })
+  }
+  return entries
+}
+
+/** The choices of one of the Options, from the model menu; 选项 itself for `ALL_OPTIONS`. */
 export function optionPage(control: ConfigControl, id: string): MenuPage | null {
+  if (id === ALL_OPTIONS) {
+    const entries = optionEntries(control)
+    return entries.length > 0 ? { title: '选项', entries } : null
+  }
   const option = otherOptions(control.config).find((o) => o.id === id)
   if (!option) return null
   const locked = !!option.idleOnly && control.running
@@ -424,7 +436,7 @@ export function moreModelsPage(control: ConfigControl, agentId: string): MenuPag
     entries: older.map((choice) => ({
       key: choice.value,
       label: optionName(modelName(choice.name)),
-      ...(choice.description ? { subtitle: optionDescription(choice.description) } : {}),
+      ...(modelBlurb(choice) ? { subtitle: modelBlurb(choice)! } : {}),
       lead: <AgentGlyph agentId={agentId} size={18} />,
       checked: choice.value === current,
       disabled: locked,

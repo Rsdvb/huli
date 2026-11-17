@@ -224,7 +224,7 @@ function markLatest(rows: Row[], live: boolean): Row[] {
 }
 
 /**
- * The rows of `thread`, oldest first. Plans are left out for the pinned plan above the composer,
+ * The rows of `thread`, oldest first. Plans are left out for the plan pinned under the header,
  * as the desktop shows them in its top bar, and so are the messages sent as a card's answer. With
  * `live`, the turn still runs and its last run of work is the latest.
  */
