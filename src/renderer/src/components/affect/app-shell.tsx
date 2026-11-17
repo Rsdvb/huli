@@ -1129,6 +1129,12 @@ export function Tabs({
   useLayoutEffect(() => {
     const tab = list.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     if (tab) setPill({ x: tab.offsetLeft, w: tab.offsetWidth });
+    // Kettu: a narrow window scrolls the tabs sideways; keep the active one in view.
+    const el = list.current;
+    if (tab && el && el.scrollWidth > el.clientWidth) {
+      if (tab.offsetLeft < el.scrollLeft) el.scrollLeft = tab.offsetLeft;
+      else if (tab.offsetLeft + tab.offsetWidth > el.scrollLeft + el.clientWidth) el.scrollLeft = tab.offsetLeft + tab.offsetWidth - el.clientWidth;
+    }
   }, [current, items.join("|")]);
 
   return (
