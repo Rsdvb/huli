@@ -807,6 +807,7 @@ export default function SessionScreen() {
           headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0)
         }
         scrolling={scrolling}
+        waiting={running && (waitingYou || handBack || turn.asked !== null)}
       />
     )
     // The rows' file references open the folder's files.

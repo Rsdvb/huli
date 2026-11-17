@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Platform,
   StyleSheet,
   View,
@@ -28,6 +29,7 @@ import { ThreadRow } from './EntryView'
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
+const AWAY_TYPING = 56
 // Points a millisecond a scroll must move to count as a fling.
 const FLING = 1.2
 
@@ -50,6 +52,8 @@ export function Conversation(props: {
   paddingBottom: number
   /** Set while the conversation scrolls fast. */
   scrolling?: WritableStore<boolean>
+  /** The turn waits for the user, which the way back to the newest message shows. */
+  waiting?: boolean
 }) {
   countRender('Conversation')
   const { c } = useSessionTokens()
@@ -84,12 +88,34 @@ export function Conversation(props: {
     },
     [],
   )
+  // With the keyboard up the view is short, so the way back shows as soon as the newest row, the
+  // working line, scrolls out of it.
+  const keyboardUp = useRef(false)
+  const offset = useRef(0)
+  const place = useCallback((y: number) => {
+    offset.current = y
+    const next = y > (keyboardUp.current ? AWAY_TYPING : AWAY)
+    setAway((was) => (was === next ? was : next))
+    if (!next) setFresh(false)
+  }, [])
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      keyboardUp.current = true
+      place(offset.current)
+    })
+    const hidden = Keyboard.addListener('keyboardDidHide', () => {
+      keyboardUp.current = false
+      place(offset.current)
+    })
+    return () => {
+      shown.remove()
+      hidden.remove()
+    }
+  }, [place])
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const y = event.nativeEvent.contentOffset.y
-      const next = y > AWAY
-      setAway((was) => (was === next ? was : next))
-      if (!next) setFresh(false)
+      place(y)
       if (!scrolling) return
       const now = Date.now()
       const speed = Math.abs(y - last.current.y) / Math.max(1, now - last.current.at)
@@ -99,7 +125,7 @@ export function Conversation(props: {
       if (settle.current) clearTimeout(settle.current)
       settle.current = setTimeout(() => scrolling.set(false), 450)
     },
-    [scrolling],
+    [scrolling, place],
   )
 
   const toBottom = useCallback(() => {
@@ -155,7 +181,12 @@ export function Conversation(props: {
         removeClippedSubviews={Platform.OS === 'android'}
         maintainVisibleContentPosition={MAINTAIN}
       />
-      <ToBottomButton visible={away} fresh={fresh} onPress={toBottom} />
+      <ToBottomButton
+        visible={away}
+        fresh={fresh}
+        state={props.waiting ? 'waiting' : running ? 'running' : 'idle'}
+        onPress={toBottom}
+      />
     </>
   )
 }

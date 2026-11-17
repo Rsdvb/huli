@@ -175,7 +175,39 @@ export function WorkingRow(props: {
   )
 }
 
-export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPress(): void }) {
+/** The orange dot with its halo for a turn that waits for the user, softly pulsing. */
+function AttentionMark() {
+  const { c, s } = useSessionTokens()
+  const pulse = usePulse()
+  return (
+    <Animated.View
+      style={[
+        styles.halo,
+        {
+          backgroundColor: s.accentSoft,
+          opacity: pulse,
+          transform: [
+            { scale: pulse.interpolate({ inputRange: [0.7, 1], outputRange: [0.85, 1.1] }) },
+          ],
+        },
+      ]}
+    >
+      <View style={[styles.haloDot, { backgroundColor: c.accent, shadowColor: c.accent }]} />
+    </Animated.View>
+  )
+}
+
+/**
+ * The way back to the newest message, which says what the turn does: the working dots while it
+ * runs, the attention dot while it waits for the user, else a chevron, marked when new messages
+ * came in while scrolled away.
+ */
+export function ToBottomButton(props: {
+  visible: boolean
+  fresh: boolean
+  state: 'running' | 'waiting' | 'idle'
+  onPress(): void
+}) {
   const { c } = useSessionTokens()
   const shown = useRef(new Animated.Value(0)).current
   useEffect(() => {
@@ -201,17 +233,32 @@ export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPres
     >
       <View>
         <GlassButton
-          size={40}
-          systemImage={G.toBottom.sf}
+          silent
+          size={44}
+          {...(props.state === 'idle' ? { systemImage: G.toBottom.sf } : {})}
           onPress={props.onPress}
-          accessibilityLabel="回到最新"
+          accessibilityLabel={
+            props.state === 'waiting'
+              ? '等你回答，回到最新'
+              : props.state === 'running'
+                ? '正在工作，回到最新'
+                : props.fresh
+                  ? '有新消息，回到最新'
+                  : '回到最新'
+          }
         >
-          <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+          {props.state === 'running' ? (
+            <WorkingDots color={c.accent} size={16} />
+          ) : props.state === 'waiting' ? (
+            <AttentionMark />
+          ) : (
+            <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+          )}
         </GlassButton>
-        {props.fresh && (
+        {props.fresh && props.state === 'idle' && (
           <View
             pointerEvents="none"
-            style={[styles.fresh, { backgroundColor: c.accent, borderColor: c.bg }]}
+            style={[styles.fresh, { backgroundColor: c.tint, borderColor: c.bg }]}
           />
         )}
       </View>
@@ -236,6 +283,21 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
   toBottom: { position: 'absolute', alignSelf: 'center', bottom: 12 },
+  halo: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  haloDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 0 },
+  },
   fresh: {
     position: 'absolute',
     top: 1,
