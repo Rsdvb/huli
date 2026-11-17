@@ -5,6 +5,29 @@ export function needsYou(s: SessionSummary): boolean {
   return s.status === 'awaiting_permission' || s.permissionCount > 0 || s.attention === 'permission'
 }
 
+/** Pinned first; then what waits for the user, what failed, what runs, the rest; newest first. */
+export function listOrder(a: SessionSummary, b: SessionSummary): number {
+  const rankOf = (s: SessionSummary) =>
+    needsYou(s)
+      ? 0
+      : s.status === 'failed' || s.attention === 'error'
+        ? 1
+        : s.status === 'running' || s.status === 'starting'
+          ? 2
+          : 3
+  const pinned = Number(b.pinnedAt !== null) - Number(a.pinnedAt !== null)
+  return pinned || rankOf(a) - rankOf(b) || b.updatedAt - a.updatedAt
+}
+
+export function sessionTitle(s: { title: string | null } | undefined): string {
+  return s?.title?.trim() || '新会话'
+}
+
+export function errorText(error: unknown): string {
+  const message = (error as { message?: unknown } | null)?.message
+  return typeof message === 'string' && message ? message : '请稍后再试。'
+}
+
 export function ago(ms: number): string {
   const s = Math.max(0, (Date.now() - ms) / 1000)
   if (s < 60) return '刚刚'
@@ -19,9 +42,15 @@ export function folder(path: string): string {
   return parts[parts.length - 1] ?? path
 }
 
-export function sessionBadge(s: SessionSummary, theme: Theme): { text: string; color: string } | null {
+export function sessionBadge(
+  s: SessionSummary,
+  theme: Theme,
+): { text: string; color: string } | null {
   if (needsYou(s)) {
-    return { text: s.permissionCount > 1 ? `等你处理 ${s.permissionCount}` : '等你处理', color: theme.warn }
+    return {
+      text: s.permissionCount > 1 ? `等你处理 ${s.permissionCount}` : '等你处理',
+      color: theme.warn,
+    }
   }
   if (s.status === 'failed' || s.attention === 'error') return { text: '出错', color: theme.danger }
   if (s.status === 'running' || s.status === 'starting') return { text: '运行中', color: theme.ok }
