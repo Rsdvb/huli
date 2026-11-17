@@ -266,7 +266,7 @@ export default function Artifacts() {
           icon="box"
           title="连上电脑后才能看 Artifact"
           message="Huli 正在连接你的电脑。"
-          action={{ label: '立即重连', onPress: () => host.link?.wake() }}
+          action={{ label: '立即重连', onPress: () => host.retry() }}
         />
       )
     }
@@ -438,7 +438,7 @@ export default function Artifacts() {
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
-              host.link?.wake()
+              host.retry()
               void load().finally(() => setRefreshing(false))
             }}
           />

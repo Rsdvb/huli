@@ -54,6 +54,13 @@ export interface HostContextValue {
   fromCache: boolean
   /** When the lists were last current with the computer; null when never. */
   syncedAt: number | null
+  /**
+   * The link has not been up for UNREACHABLE_AFTER (or has stopped): the computer is likely off,
+   * Huli is not running there, or the networks differ. The link keeps retrying with backoff.
+   */
+  unreachable: boolean
+  /** Tries the computer again now. */
+  retry(): void
   paired(host: SavedHost, key: KeyPair, paired: Paired): Promise<void>
   /** Forgets the active computer without asking it anything, as when it removed this phone. */
   forget(notice: string | null): Promise<void>
@@ -111,6 +118,9 @@ function timeout(ms: number): Promise<void> {
 
 const EMPTY: SavedComputers = { active: null, hosts: [] }
 
+/** How long the link may try before the app says the computer cannot be reached. */
+export const UNREACHABLE_AFTER = 8000
+
 export function HostProvider(props: { children: ReactNode }) {
   const [phase, setPhase] = useState<HostContextValue['phase']>('loading')
   const [notice, setNotice] = useState<string | null>(null)
@@ -123,6 +133,8 @@ export function HostProvider(props: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false)
   const [fromCache, setFromCache] = useState(false)
   const [syncedAt, setSyncedAt] = useState<number | null>(null)
+  const [unreachable, setUnreachable] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const computersRef = useRef<SavedComputers>(EMPTY)
   const keyRef = useRef<KeyPair | null>(null)
   const linkRef = useRef<HostLink | null>(null)
@@ -168,6 +180,7 @@ export function HostProvider(props: { children: ReactNode }) {
       const mine = ++generation.current
       fresh.current = false
       clearLists()
+      setUnreachable(false)
       setState({ kind: 'connecting' })
       setReady({ host, key, link: linkTo(host, key, adopt) })
       setPhase('ready')
@@ -299,6 +312,28 @@ export function HostProvider(props: { children: ReactNode }) {
     [update, start],
   )
 
+  // Not connected for a while: the screens say so plainly instead of waiting on a spinner.
+  useEffect(() => {
+    if (state.kind === 'connected') {
+      setUnreachable(false)
+      return
+    }
+    if (state.kind === 'stopped') {
+      setUnreachable(true)
+      return
+    }
+    const timer = setTimeout(() => setUnreachable(true), UNREACHABLE_AFTER)
+    return () => clearTimeout(timer)
+  }, [state.kind, ready, attempt])
+
+  const retry = useCallback(() => {
+    const link = linkRef.current
+    if (!link) return
+    setUnreachable(false)
+    setAttempt((n) => n + 1)
+    link.wake()
+  }, [])
+
   // The lists go to the cache a moment after they settle, never while they are the cache's own.
   const activeId = ready?.host.id ?? null
   useEffect(() => {
@@ -369,8 +404,9 @@ export function HostProvider(props: { children: ReactNode }) {
           break
       }
     })
+    // Back in front, the computer is tried at once rather than when the backoff says.
     const offApp = AppState.addEventListener('change', (status) => {
-      if (status === 'active') link.wake()
+      if (status === 'active') retry()
     })
     link.start()
     return () => {
@@ -379,7 +415,7 @@ export function HostProvider(props: { children: ReactNode }) {
       offApp.remove()
       link.stop()
     }
-  }, [ready, refresh, drop, patchHost])
+  }, [ready, refresh, drop, patchHost, retry])
 
   const active = computers.hosts.find((h) => h.id === computers.active) ?? null
 
@@ -396,6 +432,8 @@ export function HostProvider(props: { children: ReactNode }) {
     loaded,
     fromCache,
     syncedAt,
+    unreachable,
+    retry,
     paired: async (host, key, paired) => {
       keyRef.current = key
       const before = computersRef.current.hosts.find((h) => h.id === host.id)

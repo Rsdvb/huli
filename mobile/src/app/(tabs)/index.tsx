@@ -9,7 +9,7 @@ import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { useSessionActions } from '../../components/SessionActions'
 import { SessionPaneProvider } from '../../components/SessionPane'
-import { SessionRow } from '../../components/SessionRow'
+import { SessionRow, SessionRowSkeleton } from '../../components/SessionRow'
 import {
   FilterNote,
   inFilter,
@@ -30,8 +30,10 @@ import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
-import { SkeletonRows } from '../../ui/Skeleton'
-import { space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
+import { computerName } from '../../store'
+import { haptic } from '../../ui/haptics'
+import { Pill } from '../../ui/Pill'
+import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 import SessionScreen from '../session/[id]'
 
 type Item =
@@ -142,7 +144,9 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   // With the cache's lists the summary still says what they said; the note under it says when.
   const summary =
     !connected && !host.loaded
-      ? problem
+      ? host.unreachable && host.state.kind !== 'stopped'
+        ? `连不上「${computerName(host.host)}」。`
+        : problem
       : waiting > 0
         ? `${waiting} 个会话在等你。`
         : '这里没有需要你处理的。'
@@ -162,12 +166,10 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   )
 
   const empty = () => {
-    if (!host.loaded)
-      return (
-        <View style={styles.pad}>
-          <SkeletonRows count={7} />
-        </View>
-      )
+    if (!host.loaded) {
+      if (!connected && host.unreachable && host.state.kind !== 'stopped') return <Unreachable />
+      return <SessionRowSkeleton />
+    }
     if (shell.filter.kind !== 'all') {
       return (
         <EmptyState
@@ -265,7 +267,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
             progressViewOffset={header.height}
             onRefresh={() => {
               setRefreshing(true)
-              host.link?.wake()
+              host.retry()
               void host
                 .refresh()
                 .catch(() => {})
@@ -283,7 +285,78 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   )
 }
 
+const REASONS = [
+  '电脑上的 Huli 没开，或者电脑睡着了',
+  '手机和电脑不在同一个网络，或者 Tailscale 没连上',
+  '电脑上的「设置 › 远程访问」被关掉了',
+]
+
+/** Nothing cached and no link for a while: why that may be, and a way to try again. */
+function Unreachable() {
+  const { c } = useTokens()
+  const host = useHost()
+  const several = host.computers.length > 1
+  return (
+    <View style={styles.pad}>
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <View style={[styles.badge, { backgroundColor: c.fill }]}>
+          <Icon name="wifi" size={24} color={c.textSecondary} />
+        </View>
+        <Text style={[typeScale.headline, { color: c.text }]}>
+          连不上「{computerName(host.host)}」
+        </Text>
+        <Text style={[typeScale.footnote, { color: c.textSecondary }]}>可能是：</Text>
+        {REASONS.map((reason) => (
+          <View key={reason} style={styles.reason}>
+            <Text style={[typeScale.callout, { color: c.textSecondary }]}>·</Text>
+            <Text style={[typeScale.callout, styles.flex, { color: c.text }]}>{reason}</Text>
+          </View>
+        ))}
+        <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
+          Huli 会在后台继续尝试，连上后这里会自动出现会话。
+        </Text>
+        <View style={styles.buttons}>
+          <Pill
+            tone="tint"
+            label="重试"
+            leading={<Icon name="refresh" size={14} color={c.tint} />}
+            onPress={() => {
+              haptic.tap()
+              host.retry()
+            }}
+          />
+          {several ? (
+            <Pill
+              tone="fill"
+              label="换一台电脑"
+              onPress={() => router.push('/settings/computers')}
+            />
+          ) : null}
+        </View>
+      </View>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
+  card: {
+    marginTop: space.lg,
+    padding: space.lg,
+    gap: space.sm,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  badge: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space.xs,
+  },
+  reason: { flexDirection: 'row', gap: space.sm },
+  flex: { flex: 1 },
+  buttons: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   split: { flex: 1, flexDirection: 'row' },
   column: { width: LIST_COLUMN },
   divider: { width: StyleSheet.hairlineWidth },
