@@ -11,6 +11,15 @@ import { inlineReset, windowName } from '../ui/session/limits'
 
 /** Banners shown this run, so a reconnect that hears one again shows it once. */
 const shown = new Set<string>()
+let lastShown = 0
+
+/** How long after a banner the same alert's notification, which comes later, shows no banner. */
+const NOTIFIED_WITHIN_MS = 2 * 60_000
+
+/** Whether a banner just said a plan limit, so its notification arriving now need not. */
+export function limitBannerShown(now = Date.now()): boolean {
+  return now - lastShown < NOTIFIED_WITHIN_MS
+}
 
 function keyOf(alert: PlanAlert): string {
   return [alert.agentId, alert.provider ?? '', alert.window, alert.level, alert.resetsAt].join('\n')
@@ -40,6 +49,7 @@ export function showLimitAlert(alert: PlanAlert): void {
   const key = keyOf(alert)
   if (shown.has(key)) return
   shown.add(key)
+  lastShown = Date.now()
   showNotice({
     text: alertLine(alert),
     tone: 'warning',

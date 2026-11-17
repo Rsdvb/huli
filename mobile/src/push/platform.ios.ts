@@ -12,6 +12,7 @@ import { importKeyPair } from '@shared/remote/noise'
 import { decodeSealed, openPush, type PushContent, type PushTarget } from '@shared/remote/push'
 import { decodeRelayBytes, verifyRelaySignature } from '@shared/remote/relay'
 import { fromBase64, toBase64 } from '../store'
+import { limitBannerShown } from '../usage/limitAlert'
 import { isMuted, mutedIds, onMutedChange } from './muted'
 import type { PushPermission, PushPlatform } from './types'
 
@@ -108,7 +109,10 @@ void Notifications.registerTaskAsync(BACKGROUND_TASK).catch(() => {})
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = notification.request.content.data as Record<string, unknown> | null
-    const quiet = isMuted(typeof data?.sessionId === 'string' ? data.sessionId : null)
+    // A plan limit the app's own banner just said goes to the list only.
+    const quiet =
+      isMuted(typeof data?.sessionId === 'string' ? data.sessionId : null) ||
+      (data?.kind === 'plan-limit' && limitBannerShown())
     return {
       shouldShowBanner: !quiet,
       shouldShowList: true,
