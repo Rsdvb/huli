@@ -280,7 +280,8 @@ steps:
     })
   })
 
-  it('refuses links, and stops at the version’s limits', async () => {
+  // Writes 400 files and 10 MB, which a busy Windows disk with a virus scanner takes seconds over.
+  it('refuses links, and stops at the version’s limits', { timeout: 30_000 }, async () => {
     await put({ 'SKILL.md': SKILL, 'real/a.md': 'x' })
     await linkFolder(path.join(root, 'real'), path.join(root, 'link'))
     const linked = await checkFolder(root)

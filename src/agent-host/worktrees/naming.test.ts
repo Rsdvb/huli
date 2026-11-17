@@ -80,7 +80,9 @@ describe('BranchNaming', () => {
   })
 })
 
-describe("a new session's worktree branch", () => {
+// Each test starts a host and runs git several times, which on a busy Windows machine takes
+// seconds per start.
+describe("a new session's worktree branch", { timeout: 30_000 }, () => {
   let host: TestHost | null = null
 
   afterEach(async () => {

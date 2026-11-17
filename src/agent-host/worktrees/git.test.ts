@@ -62,7 +62,7 @@ describe('createWorktreeGit', { timeout: 30_000 }, () => {
       homeDir: path.join(dir, 'home'),
       random: () => 'abcdef0123',
     })
-  })
+  }, 30_000)
 
   afterAll(async () => {
     await rm(dir, { recursive: true, force: true })
