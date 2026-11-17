@@ -5,6 +5,39 @@ export function needsYou(s: SessionSummary): boolean {
   return s.status === 'awaiting_permission' || s.permissionCount > 0 || s.attention === 'permission'
 }
 
+/**
+ * The sessions with what their sub-sessions and sub-agents wait for, at any depth, counted on them,
+ * as the desktop's sidebar counts them on the row that shows them: a list of top-level sessions
+ * then says "等你处理" for a parent whose child waits.
+ */
+export function withChildWaits(
+  sessions: ReadonlyMap<string, SessionSummary>,
+): Map<string, SessionSummary> {
+  const children = new Map<string, SessionSummary[]>()
+  for (const s of sessions.values()) {
+    if (s.parentId === null || s.archivedAt !== null) continue
+    const list = children.get(s.parentId) ?? []
+    list.push(s)
+    children.set(s.parentId, list)
+  }
+  const waitsBelow = (id: string, depth: number): number =>
+    depth > 8
+      ? 0
+      : (children.get(id) ?? []).reduce(
+          (n, child) =>
+            n +
+            Math.max(child.permissionCount, needsYou(child) ? 1 : 0) +
+            waitsBelow(child.id, depth + 1),
+          0,
+        )
+  const out = new Map<string, SessionSummary>()
+  for (const [id, s] of sessions) {
+    const below = s.parentId === null ? waitsBelow(id, 0) : 0
+    out.set(id, below > 0 ? { ...s, permissionCount: s.permissionCount + below } : s)
+  }
+  return out
+}
+
 /** Pinned first; then what waits for the user, what failed, what runs, the rest; newest first. */
 export function listOrder(a: SessionSummary, b: SessionSummary): number {
   const rankOf = (s: SessionSummary) =>

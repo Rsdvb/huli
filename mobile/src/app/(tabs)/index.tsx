@@ -22,7 +22,7 @@ import { SyncNote } from '../../components/SyncNote'
 import { UpdateBanner } from '../../components/UpdateBanner'
 import { useHost } from '../../host'
 import { linkProblem } from '../../linkInfo'
-import { greeting, listOrder, needsYou } from '../../sessions'
+import { greeting, listOrder, needsYou, withChildWaits } from '../../sessions'
 import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
 import { LIST_COLUMN, useWide } from '../../ui/layout'
@@ -96,8 +96,12 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     header,
   )
 
+  // A sub-session's or sub-agent's wait counts on the session the list shows, as on the desktop.
   const listed = useMemo(
-    () => [...host.sessions.values()].filter((s) => s.parentId === null && s.archivedAt === null),
+    () =>
+      [...withChildWaits(host.sessions).values()].filter(
+        (s) => s.parentId === null && s.archivedAt === null,
+      ),
     [host.sessions],
   )
   const archivedCount = useMemo(
