@@ -1,8 +1,11 @@
 // A segmented control: a capsule track with a raised thumb that springs to the chosen segment.
+// Android's; iOS uses the system's own (SegmentedControl.ios.tsx).
 
 import { useEffect, useRef, useState } from 'react'
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
+import Reanimated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
 import { haptic } from './haptics'
+import { SPRING } from './motion'
 import { useReduceMotion } from './Press'
 import { FONT_SCALE, motion, radius, type as typeScale, useTokens } from './tokens'
 
@@ -26,18 +29,19 @@ export function SegmentedControl<K extends string>(props: {
     props.segments.findIndex((s) => s.key === props.value),
   )
   const segment = width > 0 ? (width - INSET * 2) / props.segments.length : 0
-  const x = useRef(new Animated.Value(0)).current
+  const x = useSharedValue(0)
   const placed = useRef(false)
+  const thumb = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }))
 
   useEffect(() => {
     if (segment === 0) return
     const target = index * segment
     if (!placed.current || reduce) {
-      x.setValue(target)
+      x.value = target
       placed.current = true
       return
     }
-    Animated.spring(x, { toValue: target, useNativeDriver: true, speed: 20, bounciness: 5 }).start()
+    x.value = withSpring(target, SPRING)
   }, [index, segment, reduce, x])
 
   return (
@@ -47,15 +51,15 @@ export function SegmentedControl<K extends string>(props: {
       style={[styles.track, { backgroundColor: c.fill }]}
     >
       {segment > 0 && (
-        <Animated.View
+        <Reanimated.View
           style={[
             styles.thumb,
             {
               width: segment,
               backgroundColor: scheme === 'dark' ? c.fillStrong : c.surface,
               shadowColor: c.shadow,
-              transform: [{ translateX: x }],
             },
+            thumb,
           ]}
         />
       )}
