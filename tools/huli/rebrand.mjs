@@ -86,11 +86,11 @@ function swapName(text) {
   const kept = []
   let out = text
   for (const phrase of KEEP) {
-    out = out.split(phrase).join(`\u0000${kept.length}\u0000`)
+    out = out.split(phrase).join(`\uE000${kept.length}\uE000`)
     kept.push(phrase)
   }
   out = out.replace(WORD, NAME)
-  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => kept[Number(i)])
+  return out.replace(/\uE000(\d+)\uE000/g, (_, i) => kept[Number(i)])
 }
 
 function swapCopy(text) {
