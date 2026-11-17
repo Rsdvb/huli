@@ -34,7 +34,8 @@ const GRADIENT = `<defs>
 const placed = (scale, dy = 0) =>
   `<g transform="translate(512 ${512 + dy}) scale(${scale}) translate(-512 -530)">${fox}</g>`
 
-const svg = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">${GRADIENT}${body}</svg>`
+const svg = (body) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">${GRADIENT}${body}</svg>`
 
 const designs = {
   // macOS-style tile with its margin, which Windows and Linux show as is.
@@ -44,11 +45,15 @@ const designs = {
      ${placed(0.74)}`,
   ),
   // iOS masks the corners itself, so the square is full.
-  ios: svg(`<rect width="1024" height="1024" fill="url(#bg)"/><rect width="1024" height="1024" fill="url(#glow)"/>${placed(0.9)}`),
+  ios: svg(
+    `<rect width="1024" height="1024" fill="url(#bg)"/><rect width="1024" height="1024" fill="url(#glow)"/>${placed(0.9)}`,
+  ),
   // Android's adaptive icon: the fox inside the 66% safe zone, on its own layer.
   androidForeground: svg(placed(0.6)),
   androidBackground: svg(`<rect width="1024" height="1024" fill="url(#bg)"/>`),
-  androidMonochrome: svg(placed(0.6)).replace(/fill="#[0-9A-Fa-f]{6}"/g, 'fill="#000000"').replace(/stroke="#[0-9A-Fa-f]{6}"/g, 'stroke="#000000"'),
+  androidMonochrome: svg(placed(0.6))
+    .replace(/fill="#[0-9A-Fa-f]{6}"/g, 'fill="#000000"')
+    .replace(/stroke="#[0-9A-Fa-f]{6}"/g, 'stroke="#000000"'),
 }
 
 function png(design, size) {

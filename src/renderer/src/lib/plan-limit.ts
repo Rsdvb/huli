@@ -23,6 +23,14 @@ export function shownPercent(used: number, view: LimitView): number {
   return view === 'left' ? Math.max(0, 100 - used) : used
 }
 
+/**
+ * A model group's name as a card line shows it: without the "Models" every group of Antigravity's
+ * ends in, and its "and" in the interface's language, e.g. "Claude 和 GPT".
+ */
+export function groupName(model: string, and: string): string {
+  return model.replace(/\s+models?$/i, '').replace(/\s+and\s+/i, ` ${and.trim()} `)
+}
+
 /** A limit bar's fill at each level. */
 export const LIMIT_FILL: Record<LimitLevel, string> = {
   ok: 'bg-limit-ok',

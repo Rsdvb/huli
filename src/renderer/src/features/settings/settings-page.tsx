@@ -468,8 +468,15 @@ function NavRow({
   count: number | null
   onChoose: () => void
 }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  // A narrow window lays the list out as one row that scrolls sideways: the open section, such as
+  // one the app menu opened, stays in view.
+  useLayoutEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [selected])
   return (
     <button
+      ref={ref}
       type="button"
       aria-current={selected ? 'page' : undefined}
       data-dim={dim || undefined}

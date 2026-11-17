@@ -46,17 +46,18 @@ describe('the first start record on load', () => {
 })
 
 describe('the onboarding and the cloud switch on load', () => {
-  it('starts the onboarding on a fresh install, with the cloud on until a choice', async () => {
+  // The cloud's default is the build's: on in Kettu, off in Huli.
+  it('starts the onboarding on a fresh install, with the cloud at its default', async () => {
     const store = await SettingsStore.load(dir)
     expect(store.get().onboarding).toEqual({ done: false, step: 'welcome' })
-    expect(store.get().cloud).toEqual({ enabled: true })
+    expect(store.get().cloud).toEqual(DEFAULT_SETTINGS.cloud)
   })
 
-  it('skips the onboarding for a file from before it, keeping the cloud on', async () => {
+  it('skips the onboarding for a file from before it, the cloud at its default', async () => {
     await save({ version: 1, initialSetup: { done: true }, general: { language: 'en' } })
     const store = await SettingsStore.load(dir)
     expect(store.get().onboarding.done).toBe(true)
-    expect(store.get().cloud.enabled).toBe(true)
+    expect(store.get().cloud).toEqual(DEFAULT_SETTINGS.cloud)
   })
 
   it('skips it for an unreadable file too, since it has history', async () => {
@@ -81,7 +82,7 @@ describe('the onboarding and the cloud switch on load', () => {
     await save({ version: 1, onboarding: { done: 'no', step: 'nowhere' }, cloud: { enabled: 0 } })
     const store = await SettingsStore.load(dir)
     expect(store.get().onboarding).toEqual({ done: false, step: 'welcome' })
-    expect(store.get().cloud.enabled).toBe(true)
+    expect(store.get().cloud).toEqual(DEFAULT_SETTINGS.cloud)
   })
 })
 

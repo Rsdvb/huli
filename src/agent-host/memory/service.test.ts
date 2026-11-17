@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentId } from '@shared/agents'
 import { MEMORY_BODY_CHARS, MEMORY_ENTRIES_PER_LAYER, type MemoryScope } from '@shared/memory'
+import { linkFolder } from '../testing/links'
 import { claudeMemoryDir } from './claude-import'
 import { INDEX_BYTES } from './index-text'
 import { MemoryError, MemoryService, projectDirName } from './service'
@@ -405,7 +406,7 @@ describe('MemoryService import', () => {
 
   it('lists a memory folder once when two agents share it', async () => {
     const linked = path.join(dir, 'linked')
-    await symlink(claudeDir, linked)
+    await linkFolder(claudeDir, linked)
     const memory = new MemoryService({
       root,
       log: () => {},

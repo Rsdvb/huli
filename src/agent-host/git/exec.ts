@@ -4,7 +4,7 @@ import { execFile, type ChildProcess, type ExecFileException } from 'node:child_
 import { stat } from 'node:fs/promises'
 import type { Platform } from '@shared/platform'
 import { descendantsOf, processControl, type ProcessControl } from '../process-tree'
-import { findWindowsExecutable } from './executable'
+import { findExecutable } from './executable'
 
 export type ExecFailure =
   'not-found' | 'cwd-missing' | 'timeout' | 'max-buffer' | 'killed' | 'spawn'
@@ -55,7 +55,7 @@ const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024
 
 export interface CreateExecOptions {
   platform?: NodeJS.Platform
-  /** Replaces the Windows lookup, for tests. */
+  /** Replaces the lookup of a command's full path, for tests. */
   find?: (name: string, env: NodeJS.ProcessEnv) => Promise<string | null>
   /** Lists and ends processes, for a command that runs out of time. */
   control?: ProcessControl
@@ -86,7 +86,7 @@ export function createExec(
   getEnv: () => NodeJS.ProcessEnv,
   {
     platform = process.platform,
-    find = findWindowsExecutable,
+    find = (name, env) => findExecutable(name, platform as Platform, env),
     control = processControl(platform as Platform),
   }: CreateExecOptions = {},
 ): ExecRunner {
@@ -94,17 +94,18 @@ export function createExec(
   const resolved = new Map<string, string>()
   let stopped = false
 
-  // On Windows the command is found here, because CreateProcess looks in the working
-  // directory first and the working directory is a repository we do not trust.
+  // The command is found here: on Windows because CreateProcess looks in the working directory
+  // first and the working directory is a repository we do not trust; everywhere because git may
+  // be installed outside the PATH the app started with.
   async function commandPath(file: string, env: NodeJS.ProcessEnv): Promise<string | null> {
-    if (platform !== 'win32') return file
     const key = `${file}\0${env.PATH ?? env.Path ?? ''}`
     const known = resolved.get(key)
     if (known !== undefined) return known
     const found = await find(file, env)
     // A miss is not cached: the command may be installed a moment later.
     if (found !== null) resolved.set(key, found)
-    return found
+    // Elsewhere a miss is left to the system's own search, which says why it failed.
+    return found ?? (platform === 'win32' ? null : file)
   }
 
   const exec: Exec = async (file, args, options) => {

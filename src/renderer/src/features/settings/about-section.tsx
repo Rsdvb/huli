@@ -39,6 +39,8 @@ export function AboutHero({ info }: { info: AppInfo | null }) {
         <span className="ui-sg-label">
           <b>Kettu</b>
           <small>{t('about.version.description')}</small>
+          {/* Huli: the fork's attribution, which the rebrand leaves naming Kettu. */}
+          <small>{t('about.version.basedOn')}</small>
           {info ? (
             <small data-selectable="" className="k-num">
               {t('about.version.line', { version: info.version, system: info.system })}

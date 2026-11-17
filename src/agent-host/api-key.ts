@@ -76,12 +76,14 @@ export async function writeClaudeKey(file: string, input: ApiKeyInput): Promise<
 
 /** Removes the variables `writeClaudeKey` sets, and `env` too once nothing else is in it. */
 export async function clearClaudeKey(file: string): Promise<void> {
-  await clearEnvKeys(file, CLAUDE_KEYS)
+  await clearEnvKeys(file, CLAUDE_KEYS, 'Claude Code')
 }
+
+const CODEBUDDY = 'Codebuddy Code'
 
 /** Sets Codebuddy Code's key in the settings file, keeping everything else in it. */
 export async function writeCodebuddyKey(file: string, input: ApiKeyInput): Promise<void> {
-  const settings = await readSettings(file)
+  const settings = await readSettings(file, CODEBUDDY)
   const env = isObject(settings.env) ? { ...settings.env } : {}
   env.CODEBUDDY_API_KEY = input.key
   await writeSettings(file, { ...settings, env })
@@ -89,11 +91,11 @@ export async function writeCodebuddyKey(file: string, input: ApiKeyInput): Promi
 
 /** Removes the variable `writeCodebuddyKey` sets, and `env` too once nothing else is in it. */
 export async function clearCodebuddyKey(file: string): Promise<void> {
-  await clearEnvKeys(file, CODEBUDDY_KEYS)
+  await clearEnvKeys(file, CODEBUDDY_KEYS, CODEBUDDY)
 }
 
-async function clearEnvKeys(file: string, names: readonly string[]): Promise<void> {
-  const settings = await readSettings(file)
+async function clearEnvKeys(file: string, names: readonly string[], agent: string): Promise<void> {
+  const settings = await readSettings(file, agent)
   if (!isObject(settings.env)) return
   const env = { ...settings.env }
   if (!names.some((name) => name in env)) return

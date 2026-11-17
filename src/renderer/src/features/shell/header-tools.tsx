@@ -17,6 +17,7 @@ import type { SessionSummary } from '@shared/agent-host'
 import type { SessionView } from '@shared/thread'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@renderer/components/ui/dropdown-menu'
@@ -141,46 +142,106 @@ export function HeaderTools({
       )}
       {board && sessionId && <BoardToggle sessionId={sessionId} />}
       {board && sessionId && <SideChatToggle sessionId={sessionId} />}
-      {computer && (
-        <PaneToggle
-          panel={panel}
-          pane="computer"
-          label={t('headerTools.computer')}
-          icon={ComputerIcon}
-        />
-      )}
-      {/* Another host's terminal opens only while its owner allows devices it. */}
-      {terminal && (
-        <PaneToggle
-          panel={panel}
-          pane="terminal"
-          label={t('headerTools.terminal')}
-          shortcut="Ctrl+`"
-          icon={ComputerTerminal01Icon}
-        />
-      )}
-      {browser && (
-        <PaneToggle
-          panel={panel}
-          pane="browser"
-          label={t('headerTools.browser')}
-          dot={dot}
-          icon={Globe02Icon}
-        />
-      )}
-      {sessionId && devices && (
-        <PaneToggle
-          panel={panel}
-          pane="devices"
-          label={t('headerTools.devices')}
-          dot={deviceDot}
-          icon={SmartPhone01Icon}
-        />
-      )}
-      <PaneToggle panel={panel} pane="files" label={t('headerTools.files')} icon={File01Icon} />
-      <SidePanelButton panel={panel} available={available} />
+      {/* A narrow bar folds the pane buttons and the side panel button into one menu, so the
+          title keeps its room; affect.css switches between the two. */}
+      <span className="kp-bar-panes">
+        {computer && (
+          <PaneToggle
+            panel={panel}
+            pane="computer"
+            label={t('headerTools.computer')}
+            icon={ComputerIcon}
+          />
+        )}
+        {/* Another host's terminal opens only while its owner allows devices it. */}
+        {terminal && (
+          <PaneToggle
+            panel={panel}
+            pane="terminal"
+            label={t('headerTools.terminal')}
+            shortcut="Ctrl+`"
+            icon={ComputerTerminal01Icon}
+          />
+        )}
+        {browser && (
+          <PaneToggle
+            panel={panel}
+            pane="browser"
+            label={t('headerTools.browser')}
+            dot={dot}
+            icon={Globe02Icon}
+          />
+        )}
+        {sessionId && devices && (
+          <PaneToggle
+            panel={panel}
+            pane="devices"
+            label={t('headerTools.devices')}
+            dot={deviceDot}
+            icon={SmartPhone01Icon}
+          />
+        )}
+        <PaneToggle panel={panel} pane="files" label={t('headerTools.files')} icon={File01Icon} />
+        <SidePanelButton panel={panel} available={available} />
+      </span>
+      <PanesMenu panel={panel} available={available} dot={dot || deviceDot} />
       <ClosePaneButton />
     </NoDrag>
+  )
+}
+
+const PANE_ICONS: Record<Pane, IconSvgElement> = {
+  computer: ComputerIcon,
+  terminal: ComputerTerminal01Icon,
+  browser: Globe02Icon,
+  devices: SmartPhone01Icon,
+  files: File01Icon,
+}
+
+/** The pane buttons as one menu, for a bar too narrow to hold them beside the title. */
+function PanesMenu({ panel, available, dot }: { panel: string; available: Pane[]; dot: boolean }) {
+  const { t } = useTranslation('shell')
+  const context = usePane()
+  const open = useViewStore((s) => (shownPanel(s) === panel ? s.sidePane[panel] : undefined))
+  const label = t('headerTools.panes')
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <button type="button" aria-label={label} className="kp-tool kp-bar-panes-menu" />
+              }
+            />
+          }
+        >
+          <PaneIcon icon={SidebarRightIcon} size={16} />
+          {dot && <span aria-hidden className="kp-bar-dot" />}
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-48">
+        {available.map((pane) => (
+          <DropdownMenuCheckboxItem
+            key={pane}
+            checked={open === pane}
+            closeOnClick
+            onClick={() => {
+              if (context && !context.focused) {
+                focusPane(context.paneId)
+                toggleSidePane(panel, pane, true)
+                return
+              }
+              toggleSidePane(panel, pane)
+            }}
+          >
+            <PaneIcon icon={PANE_ICONS[pane]} size={16} />
+            {t(`headerTools.${pane}`)}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

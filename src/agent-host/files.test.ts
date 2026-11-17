@@ -12,6 +12,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { copyName, FilesService } from './files'
 import { createExec, type Exec } from './git/exec'
+import { FILE_LINKS, linkFolder } from './testing/links'
 import { tempFolder } from './testing/temp'
 
 const noGit: Exec = async () => ({
@@ -75,7 +76,7 @@ describe('FilesService file operations', () => {
   it('refuses paths out of the project, the project itself and .git', async () => {
     const { root, outside, files } = await setup()
     await mkdir(path.join(root, '.git'))
-    await symlink(outside, path.join(root, 'away'))
+    await linkFolder(outside, path.join(root, 'away'))
     for (const bad of ['../x', '/x', 'a/../../x', '', '.', '.git/config', 'a/.git']) {
       await rejectsWith(files.create(root, bad, 'file'), 'invalid_params')
     }
@@ -104,7 +105,7 @@ describe('FilesService file operations', () => {
     await mkdir(path.join(root, 'src/inner'), { recursive: true })
     await mkdir(path.join(root, '.git'))
     await writeFile(path.join(root, 'f.ts'), 'f')
-    await symlink(outside, path.join(root, 'away'))
+    await linkFolder(outside, path.join(root, 'away'))
     await rejectsWith(files.rename(root, 'src', 'src/inner/src'), 'invalid_params')
     await rejectsWith(files.rename(root, 'f.ts', 'away/f.ts'), 'invalid_params')
     await rejectsWith(files.rename(root, 'f.ts', '../f.ts'), 'invalid_params')
@@ -114,7 +115,7 @@ describe('FilesService file operations', () => {
     expect(await exists(path.join(root, 'f.ts'))).toBe(true)
   })
 
-  it('moves a link itself, never what it points to', async () => {
+  it.skipIf(!FILE_LINKS)('moves a link itself, never what it points to', async () => {
     const { root, outside, files } = await setup()
     await writeFile(path.join(outside, 'secret'), 's')
     await symlink(path.join(outside, 'secret'), path.join(root, 'link'))
@@ -127,7 +128,7 @@ describe('FilesService file operations', () => {
     const { root, outside, files } = await setup()
     await mkdir(path.join(root, 'dir'))
     await writeFile(path.join(root, 'dir/a.ts'), 'a')
-    await symlink(outside, path.join(root, 'dir/away'))
+    await linkFolder(outside, path.join(root, 'dir/away'))
     expect(await files.copy(root, ['dir/a.ts'], 'dir')).toEqual(['dir/a copy.ts'])
     expect(await files.copy(root, ['dir/a.ts'], 'dir')).toEqual(['dir/a copy 2.ts'])
     expect(await files.copy(root, ['dir/a.ts', 'dir'], '')).toEqual(['a.ts', 'dir copy'])
@@ -138,25 +139,28 @@ describe('FilesService file operations', () => {
     await rejectsWith(files.copy(root, ['dir/a.ts'], '..'), 'invalid_params')
   })
 
-  it('trashes absolute paths, deletes for good only when asked, and skips what is gone', async () => {
-    const { root, outside, files, trashed } = await setup()
-    await mkdir(path.join(root, 'dir'))
-    await writeFile(path.join(root, 'dir/a.ts'), 'a')
-    await writeFile(path.join(outside, 'kept'), 'k')
-    await symlink(path.join(outside, 'kept'), path.join(root, 'link'))
-    await files.delete(root, ['dir/a.ts', 'gone.ts', 'nowhere/gone.ts'], false)
-    expect(trashed).toEqual([[path.join(root, 'dir', 'a.ts')]])
-    expect(await exists(path.join(root, 'dir/a.ts'))).toBe(true)
-    await files.delete(root, ['dir', 'link'], true)
-    expect(await exists(path.join(root, 'dir'))).toBe(false)
-    expect(await exists(path.join(root, 'link'))).toBe(false)
-    expect(await readFile(path.join(outside, 'kept'), 'utf8')).toBe('k')
-    await mkdir(path.join(root, '.git'))
-    await rejectsWith(files.delete(root, ['.git'], true), 'invalid_params')
-    await rejectsWith(files.delete(root, ['..'], true), 'invalid_params')
-    await rejectsWith(files.delete(root, ['link/../..'], true), 'invalid_params')
-    expect(await exists(path.join(root, '.git'))).toBe(true)
-  })
+  it.skipIf(!FILE_LINKS)(
+    'trashes absolute paths, deletes for good only when asked, and skips what is gone',
+    async () => {
+      const { root, outside, files, trashed } = await setup()
+      await mkdir(path.join(root, 'dir'))
+      await writeFile(path.join(root, 'dir/a.ts'), 'a')
+      await writeFile(path.join(outside, 'kept'), 'k')
+      await symlink(path.join(outside, 'kept'), path.join(root, 'link'))
+      await files.delete(root, ['dir/a.ts', 'gone.ts', 'nowhere/gone.ts'], false)
+      expect(trashed).toEqual([[path.join(root, 'dir', 'a.ts')]])
+      expect(await exists(path.join(root, 'dir/a.ts'))).toBe(true)
+      await files.delete(root, ['dir', 'link'], true)
+      expect(await exists(path.join(root, 'dir'))).toBe(false)
+      expect(await exists(path.join(root, 'link'))).toBe(false)
+      expect(await readFile(path.join(outside, 'kept'), 'utf8')).toBe('k')
+      await mkdir(path.join(root, '.git'))
+      await rejectsWith(files.delete(root, ['.git'], true), 'invalid_params')
+      await rejectsWith(files.delete(root, ['..'], true), 'invalid_params')
+      await rejectsWith(files.delete(root, ['link/../..'], true), 'invalid_params')
+      expect(await exists(path.join(root, '.git'))).toBe(true)
+    },
+  )
 })
 
 describe('FilesService empty folders', () => {

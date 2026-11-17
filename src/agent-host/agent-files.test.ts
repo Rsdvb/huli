@@ -9,6 +9,7 @@ import type { AgentId } from '@shared/agents'
 import type { Platform } from '@shared/platform'
 import { agentFolder, AgentFiles } from './agent-files'
 import { FilesService } from './files'
+import { FILE_LINKS, linkFolder } from './testing/links'
 
 const platform: Platform = process.platform === 'win32' ? 'win32' : 'darwin'
 
@@ -128,10 +129,13 @@ describe('AgentFiles', () => {
   })
 
   it('refuses a link in the folder that leads out of it', async () => {
-    await symlink(path.join(home, 'secret.txt'), path.join(mine, 'leak.md'))
-    await symlink(theirs, path.join(mine, 'other'))
-    expect(await code(service().read('s1', path.join(mine, 'leak.md')))).toBe('forbidden')
+    await linkFolder(theirs, path.join(mine, 'other'))
     expect(await code(service().read('s1', path.join(mine, 'other', 'plan.md')))).toBe('forbidden')
+  })
+
+  it.skipIf(!FILE_LINKS)('refuses a link to a file out of the folder', async () => {
+    await symlink(path.join(home, 'secret.txt'), path.join(mine, 'leak.md'))
+    expect(await code(service().read('s1', path.join(mine, 'leak.md')))).toBe('forbidden')
   })
 
   it('refuses a session whose agent keeps no folder, and one Kettu does not hold', async () => {

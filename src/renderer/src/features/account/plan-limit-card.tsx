@@ -6,7 +6,7 @@ import { PlanPart } from '@renderer/features/session/composer/usage'
 import { ringStroke } from '@renderer/features/usage/plan-cards'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { planAmount, planBalance } from '@renderer/lib/format'
-import { LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
+import { groupName, LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
 import { cn } from '@renderer/lib/utils'
 import { useHostName, useWindowHost } from '@renderer/stores/window-host'
 import { hasModelGroups, type PlanCard } from './model'
@@ -62,14 +62,6 @@ export function PlanLimitCard({
   )
 }
 
-/**
- * A model group's name as a card line shows it: without the "Models" every group of Antigravity's
- * ends in, and its "and" in the interface's language, e.g. "Claude 和 GPT".
- */
-function groupName(model: string, and: string): string {
-  return model.replace(/\s+models?$/i, '').replace(/\s+and\s+/i, ` ${and.trim()} `)
-}
-
 function CardFace({ card }: { card: PlanCard }) {
   const { t } = useTranslation(['sidebar', 'composer', 'common', 'usage', 'tasks'])
   const view = useLimitView()
@@ -92,7 +84,12 @@ function CardFace({ card }: { card: PlanCard }) {
         <AgentMark agent={card.agentId} hostId={card.hostId} size={14} />
         <span className="min-w-0 truncate text-small font-medium text-primary">{card.name}</span>
         {card.tier && (
-          <span className="ml-auto shrink-0 text-badge leading-3.75 font-medium text-tertiary">
+          // At most half the line, so a long plan such as "Business Enterprise" never pushes the
+          // name out or runs past the card.
+          <span
+            className="ml-auto max-w-1/2 min-w-0 shrink-0 truncate text-badge leading-3.75 font-medium text-tertiary"
+            title={card.tier}
+          >
             {card.tier}
           </span>
         )}

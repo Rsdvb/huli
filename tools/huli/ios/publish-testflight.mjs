@@ -28,7 +28,10 @@ async function api(method, path, body) {
         body: body ? JSON.stringify(body) : undefined,
       })
       const text = await res.text()
-      if (!res.ok) throw Object.assign(new Error(`${method} ${path}: ${res.status} ${text}`), { status: res.status })
+      if (!res.ok)
+        throw Object.assign(new Error(`${method} ${path}: ${res.status} ${text}`), {
+          status: res.status,
+        })
       return text ? JSON.parse(text) : null
     } catch (error) {
       // Only the network is retried; Apple's own refusals are final.
@@ -41,7 +44,8 @@ async function api(method, path, body) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let build = null
 for (let i = 0; i < 90; i++) {
-  const found = (await api('GET', `/v1/builds?filter[app]=${APP}&filter[version]=${buildNumber}`)).data[0]
+  const found = (await api('GET', `/v1/builds?filter[app]=${APP}&filter[version]=${buildNumber}`))
+    .data[0]
   if (found?.attributes.processingState === 'VALID') {
     build = found
     break
@@ -71,6 +75,9 @@ await api('POST', `/v1/betaGroups/${PUBLIC_GROUP}/relationships/builds`, {
 })
 console.log('added to the public link group')
 const review = await api('POST', '/v1/betaAppReviewSubmissions', {
-  data: { type: 'betaAppReviewSubmissions', relationships: { build: { data: { type: 'builds', id: build.id } } } },
+  data: {
+    type: 'betaAppReviewSubmissions',
+    relationships: { build: { data: { type: 'builds', id: build.id } } },
+  },
 })
 console.log(`submitted for beta review: ${review.data.attributes.betaReviewState}`)

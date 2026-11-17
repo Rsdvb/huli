@@ -2,16 +2,16 @@
 appId: io.github.rsdvb.huli
 ---
 - tapOn:
-    text: "允许"
+    text: '允许'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: home
-- tapOn: "Artifacts"
+- tapOn: 'Artifacts'
 - waitForAnimationToEnd
 - takeScreenshot: artifacts
-- tapOn: "任务"
+- tapOn: '任务'
 - waitForAnimationToEnd
 - takeScreenshot: tasks
-- tapOn: "用量"
+- tapOn: '用量'
 - waitForAnimationToEnd
 - takeScreenshot: usage

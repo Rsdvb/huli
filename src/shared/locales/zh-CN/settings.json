@@ -1047,7 +1047,8 @@
   "about": {
     "version": {
       "description": "面向 Claude Code、Codex、opencode 和 Pi 的桌面工作台。",
-      "line": "版本 {{version}} · {{system}}"
+      "line": "版本 {{version}} · {{system}}",
+      "basedOn": "基于 Kettu 的个人构建，以 AGPL-3.0 许可发布。"
     },
     "updates": {
       "name": "更新",

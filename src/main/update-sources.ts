@@ -7,7 +7,8 @@ import { RELEASES_URL } from '@shared/updates'
 import KEYS from './update-keys.json'
 
 /** Kettu's download service, laid out as GitHub's releases. */
-export const DOWNLOADS_URL = 'https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996'
+export const DOWNLOADS_URL =
+  'https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996'
 export const SOURCES_URL = `${DOWNLOADS_URL}/sources.json`
 
 /** A base URL laid out as GitHub's releases: `latest/download/<file>`, `download/v<version>/<file>`. */

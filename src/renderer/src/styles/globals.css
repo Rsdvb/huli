@@ -566,6 +566,18 @@
   h3 {
     text-wrap: balance;
   }
+  /* A popup set wider than a narrow window, such as the branch's 356px card, keeps a margin from
+     its edges, so the positioner can fit it in instead of letting it run off the window. In the
+     base layer, so a popup's own max-width utility still wins. */
+  :is(
+    [data-slot='popover-content'],
+    [data-slot='hover-card-content'],
+    [data-slot='dropdown-menu-content'],
+    [data-slot='context-menu-content'],
+    [data-slot='select-content']
+  ) {
+    max-width: calc(100vw - 16px);
+  }
   ::placeholder {
     color: var(--text-placeholder);
     opacity: 1;

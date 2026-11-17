@@ -9,10 +9,12 @@ import {
   mkdir,
   open,
   readdir,
+  readlink,
   realpath,
   rename,
   rm,
   stat,
+  symlink,
   unlink,
   type FileHandle,
 } from 'node:fs/promises'
@@ -176,6 +178,21 @@ export function copyName(name: string, n: number, folder: boolean): string {
   // A leading dot starts a name such as `.env`, not an extension.
   const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
   return `${stem} copy${n > 1 ? ` ${n}` : ''}${extension}`
+}
+
+/**
+ * Makes `to` a link to where the Windows link `from` leads: a junction for a folder, which needs
+ * no right to make, and a file link otherwise.
+ */
+async function copyLink(from: string, to: string): Promise<void> {
+  const target = await readlink(from)
+  const folder = await stat(from).then(
+    (info) => info.isDirectory(),
+    () => false,
+  )
+  // A junction holds only an absolute path, which a relative link's is read from beside it.
+  if (folder) await symlink(path.win32.resolve(path.win32.dirname(from), target), to, 'junction')
+  else await symlink(target, to, 'file')
 }
 
 const nameOf = (relative: string): string => relative.slice(relative.lastIndexOf('/') + 1)
@@ -467,12 +484,26 @@ export class FilesService {
         throw invalidParams(`${source} cannot be copied into itself`)
       }
       const name = await this.freeName(parent, nameOf(source), info.isDirectory())
-      await cp(real, this.paths.join(parent, name), {
+      const destination = this.paths.join(parent, name)
+      // On Windows `cp` follows a junction and copies the folder it leads to, which may be outside
+      // the project; there every link is left out of the copy and made again as a link.
+      const links: [from: string, to: string][] = []
+      const filter =
+        this.deps.platform === 'win32'
+          ? async (from: string, to: string): Promise<boolean> => {
+              if (!(await lstat(from)).isSymbolicLink()) return true
+              links.push([from, to])
+              return false
+            }
+          : undefined
+      await cp(real, destination, {
         recursive: true,
         errorOnExist: true,
         force: false,
         verbatimSymlinks: true,
+        ...(filter ? { filter } : {}),
       })
+      for (const [from, to] of links) await copyLink(from, to)
       copies.push(into === '' ? name : `${into}/${name}`)
     }
     return copies

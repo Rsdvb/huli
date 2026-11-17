@@ -12,6 +12,7 @@ import {
   pushRequestHeaders,
   pushRequestText,
   pushTag,
+  PUSH_URL,
   pushUrlFrom,
   sealPush,
   type PushContent,
@@ -125,7 +126,7 @@ describe('a request to the gateway', () => {
   })
 
   it('goes to the project gateway unless a development run names another', () => {
-    expect(pushUrlFrom(undefined)).toBe('https://push.kettu.sh')
+    expect(pushUrlFrom(undefined)).toBe(PUSH_URL)
     expect(pushUrlFrom('http://localhost:47901/')).toBe('http://localhost:47901')
     expect(() => pushUrlFrom('ftp://push')).toThrow()
   })

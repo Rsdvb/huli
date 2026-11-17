@@ -31,7 +31,8 @@ async function api(method, path, body) {
     })
     const text = await res.text()
     if (res.ok) return text ? JSON.parse(text) : null
-    if (res.status < 500 || attempt >= 4) throw new Error(`${method} ${path}: ${res.status} ${text}`)
+    if (res.status < 500 || attempt >= 4)
+      throw new Error(`${method} ${path}: ${res.status} ${text}`)
     await new Promise((resolve) => setTimeout(resolve, attempt * 5000))
   }
 }
@@ -54,7 +55,14 @@ const profileName = (identifier) =>
 // time still sign: the newest unexpired profile of each name is used as it is.
 function offline(reason) {
   if (!existsSync(`${KEYS}/ios-${KIND}.pem`)) throw reason
-  const sha1 = sh('openssl', ['x509', '-in', `${KEYS}/ios-${KIND}.pem`, '-noout', '-fingerprint', '-sha1'])
+  const sha1 = sh('openssl', [
+    'x509',
+    '-in',
+    `${KEYS}/ios-${KIND}.pem`,
+    '-noout',
+    '-fingerprint',
+    '-sha1',
+  ])
     .split('=')[1]
     .replace(/[:\s]/g, '')
     .toUpperCase()
@@ -64,7 +72,11 @@ function offline(reason) {
       const plist = sh('security', ['cms', '-D', '-i', `${PROFILES_DIR}/${f}`])
       const field = (key, tag) =>
         plist.match(new RegExp(`<key>${key}</key>\\s*<${tag}>([^<]*)</${tag}>`))?.[1] ?? null
-      return { name: field('Name', 'string'), uuid: field('UUID', 'string'), expires: Date.parse(field('ExpirationDate', 'date') ?? '') }
+      return {
+        name: field('Name', 'string'),
+        uuid: field('UUID', 'string'),
+        expires: Date.parse(field('ExpirationDate', 'date') ?? ''),
+      }
     })
     .filter((p) => p.name && p.uuid && p.expires > Date.now())
     .sort((a, b) => b.expires - a.expires)
@@ -75,7 +87,9 @@ function offline(reason) {
     if (!found) throw reason
     out.profiles[identifier] = { name, uuid: found.uuid }
   }
-  console.log(`App Store Connect is unavailable (${reason.message.split('\n')[0]}); using installed profiles`)
+  console.log(
+    `App Store Connect is unavailable (${reason.message.split('\n')[0]}); using installed profiles`,
+  )
   writeFileSync(OUT_FILE, JSON.stringify(out, null, 2))
   console.log(JSON.stringify(out, null, 2))
   process.exit(0)
@@ -107,26 +121,66 @@ if (!cert) {
   writeFileSync(der, Buffer.from(cert.attributes.certificateContent, 'base64'))
   const pem = sh('openssl', ['x509', '-inform', 'DER', '-in', der])
   writeFileSync(`${KEYS}/ios-${KIND}.pem`, pem)
-  sh('openssl', ['pkcs12', '-export', '-inkey', key, '-in', `${KEYS}/ios-${KIND}.pem`, '-out', p12, '-passout', `pass:${kpass}`, '-name', `Huli ${IDENTITY}`])
+  sh('openssl', [
+    'pkcs12',
+    '-export',
+    '-inkey',
+    key,
+    '-in',
+    `${KEYS}/ios-${KIND}.pem`,
+    '-out',
+    p12,
+    '-passout',
+    `pass:${kpass}`,
+    '-name',
+    `Huli ${IDENTITY}`,
+  ])
   sh('chmod', ['600', p12])
   sh('rm', ['-f', key])
   writeFileSync(`${KEYS}/ios-${KIND}.serial`, cert.attributes.serialNumber)
   console.log(`created ${KIND} certificate ${cert.id}`)
 }
 try {
-  sh('security', ['import', p12, '-k', keychain, '-P', kpass, '-T', '/usr/bin/codesign', '-T', '/usr/bin/security'])
+  sh('security', [
+    'import',
+    p12,
+    '-k',
+    keychain,
+    '-P',
+    kpass,
+    '-T',
+    '/usr/bin/codesign',
+    '-T',
+    '/usr/bin/security',
+  ])
 } catch {
   // Already imported.
 }
-sh('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', kpass, keychain])
+sh('security', [
+  'set-key-partition-list',
+  '-S',
+  'apple-tool:,apple:,codesign:',
+  '-s',
+  '-k',
+  kpass,
+  keychain,
+])
 // Apple names the certificate itself, so another of the same kind can sit beside it in the
 // keychain: the one this script made is picked by its fingerprint, and signing names it so.
-const sha1 = sh('openssl', ['x509', '-in', `${KEYS}/ios-${KIND}.pem`, '-noout', '-fingerprint', '-sha1'])
+const sha1 = sh('openssl', [
+  'x509',
+  '-in',
+  `${KEYS}/ios-${KIND}.pem`,
+  '-noout',
+  '-fingerprint',
+  '-sha1',
+])
   .split('=')[1]
   .replace(/[:\s]/g, '')
   .toUpperCase()
 const listed = sh('security', ['find-identity', '-v', '-p', 'codesigning', keychain])
-if (!listed.toUpperCase().includes(sha1)) throw new Error(`no ${IDENTITY} identity ${sha1} in the keychain`)
+if (!listed.toUpperCase().includes(sha1))
+  throw new Error(`no ${IDENTITY} identity ${sha1} in the keychain`)
 
 // 2. A fresh App Store profile per bundle id, installed where Xcode looks.
 const dir = PROFILES_DIR
@@ -142,7 +196,8 @@ for (const identifier of bundles) {
   const bundle = ids.find((b) => b.attributes.identifier === identifier)
   if (!bundle) throw new Error(`bundle id ${identifier} is not registered`)
   const name = profileName(identifier)
-  const old = (await api('GET', `/v1/profiles?filter[name]=${encodeURIComponent(name)}&limit=50`)).data
+  const old = (await api('GET', `/v1/profiles?filter[name]=${encodeURIComponent(name)}&limit=50`))
+    .data
   for (const p of old) await api('DELETE', `/v1/profiles/${p.id}`)
   const profile = (
     await api('POST', '/v1/profiles', {
@@ -157,7 +212,10 @@ for (const identifier of bundles) {
       },
     })
   ).data
-  writeFileSync(`${dir}/${profile.attributes.uuid}.mobileprovision`, Buffer.from(profile.attributes.profileContent, 'base64'))
+  writeFileSync(
+    `${dir}/${profile.attributes.uuid}.mobileprovision`,
+    Buffer.from(profile.attributes.profileContent, 'base64'),
+  )
   out.profiles[identifier] = { name, uuid: profile.attributes.uuid }
 }
 writeFileSync(OUT_FILE, JSON.stringify(out, null, 2))

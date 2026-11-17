@@ -4,11 +4,15 @@ import path from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { MarketSkill } from '@shared/marketplace'
+import type { Platform } from '@shared/platform'
 import type { AgentId } from '@shared/thread'
 import type { GuideFlags } from '../guide/guide'
 import { COMMIT, tarball } from '../testing/tarball'
 import type { SkillRepositorySpec } from './skill-catalog'
 import { MarketSkillsService, skillsCatalogFile } from './skills'
+
+// The service links skill folders as this system can: junctions on Windows, which need no right.
+const PLATFORM: Platform = process.platform === 'win32' ? 'win32' : 'darwin'
 
 let root: string
 
@@ -56,7 +60,7 @@ function service(fetcher: typeof fetch, kept: readonly MarketSkill[] = []) {
     userDataPath: root,
     file: skillsCatalogFile(root, log),
     log,
-    platform: 'darwin',
+    platform: PLATFORM,
     home: root,
     settings: () => kept,
     agents: () => [],
@@ -219,7 +223,7 @@ describe("Kettu's own skills", () => {
       userDataPath: root,
       file: skillsCatalogFile(root, log),
       log,
-      platform: 'darwin',
+      platform: PLATFORM,
       home: root,
       settings: () => kept,
       agents: () => agents,

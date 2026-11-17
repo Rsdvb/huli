@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createExec } from '../git/exec'
+import { FILE_LINKS, linkFolder } from '../testing/links'
 import { checkIncludeEntry, copyLocalFiles, parseWorktreeInclude } from './copy'
 
 describe('parseWorktreeInclude', () => {
@@ -84,16 +85,19 @@ describe('copyLocalFiles', () => {
     await mkdir(path.join(project, 'config'))
     await writeFile(path.join(project, 'config', 'shared.json'), '{}')
     await mkdir(path.join(project, 'escape'))
-    await symlink(outside, path.join(project, 'escape', 'out'))
+    // Without the right to link files on Windows, only the links the second test needs are made.
+    if (FILE_LINKS) await symlink(outside, path.join(project, 'escape', 'out'))
     git(project, 'add', '.')
     git(project, 'commit', '-q', '-m', 'init')
     await writeFile(path.join(project, '.env'), 'KEY=1')
     await writeFile(path.join(project, 'config', 'local.json'), '{"local":true}')
     await mkdir(path.join(project, 'config', 'deep'))
     await writeFile(path.join(project, 'config', 'deep', 'a.txt'), 'a')
-    await symlink('local.json', path.join(project, 'config', 'link.json'))
-    await symlink(path.join(outside, 'secret'), path.join(project, 'config', 'secret'))
-    await symlink(outside, path.join(project, 'outside-dir'))
+    if (FILE_LINKS) {
+      await symlink('local.json', path.join(project, 'config', 'link.json'))
+      await symlink(path.join(outside, 'secret'), path.join(project, 'config', 'secret'))
+      await symlink(outside, path.join(project, 'outside-dir'))
+    }
     await writeFile(path.join(project, 'existing.txt'), 'project')
     await writeFile(path.join(project, 'through.txt'), 'x')
     await writeFile(
@@ -103,14 +107,14 @@ describe('copyLocalFiles', () => {
     git(project, 'worktree', 'add', '-q', worktree)
     await writeFile(path.join(worktree, 'existing.txt'), 'worktree')
     // A link in the worktree that would take a write outside it.
-    await symlink(outside, path.join(worktree, 'redirect'))
+    await linkFolder(outside, path.join(worktree, 'redirect'))
   })
 
   afterAll(async () => {
     await rm(dir, { recursive: true, force: true })
   })
 
-  it('copies untracked local files and reports the rest', async () => {
+  it.skipIf(!FILE_LINKS)('copies untracked local files and reports the rest', async () => {
     const extra = [
       'tracked.txt',
       'existing.txt',
@@ -155,7 +159,9 @@ describe('copyLocalFiles', () => {
     await mkdir(path.join(project, 'redirect'), { recursive: true })
     await writeFile(path.join(project, 'redirect', 'planted'), 'x')
     const result = await copyLocalFiles(exec, process.platform, project, worktree, ['redirect'])
-    expect(result.copied).toEqual([])
+    // The include list's own files are copied here when the first test, which copies them, was
+    // skipped for want of the right to link files.
+    expect(result.copied.filter((file) => file.startsWith('redirect'))).toEqual([])
     expect(result.skipped).toContainEqual({
       path: 'redirect',
       reason: 'redirect is not a folder inside the worktree',

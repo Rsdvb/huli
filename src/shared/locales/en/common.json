@@ -80,5 +80,14 @@
     "restore": "Restore",
     "collapse": "Hide side panel",
     "open": "Show side panel"
+  },
+  "crash": {
+    "title": "Something went wrong",
+    "body": "Kettu’s window ran into an error and couldn’t show this view. Your sessions keep running; reloading the window brings them back.",
+    "reload": "Reload",
+    "copy": "Copy error details",
+    "copied": "Copied",
+    "report": "Report a problem",
+    "details": "Error details"
   }
 }

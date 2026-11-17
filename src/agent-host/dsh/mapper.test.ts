@@ -1,12 +1,15 @@
 // What the DeepSeek Harness mapper makes of its session events, as dsh 0.2.2-rc.2 sent them.
 
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { applyPatches, threadEntries, threadFromSnapshot, type ThreadState } from '@shared/thread'
 import { newTurnScope, type MapperContext, type MapperEffect } from '../session-updates'
 import { SessionMapper, tokenTotals, toolFacts } from './mapper'
 import type { SessionEvent } from './protocol'
 
-const CWD = '/work/app'
+// The session's folder and a file in it as this system writes them, which dsh sends back.
+const CWD = path.resolve('/work/app')
+const NOTES = path.join(CWD, 'notes.txt')
 
 function run(events: [string, unknown, number?][]) {
   let thread: ThreadState = threadFromSnapshot({
@@ -157,17 +160,15 @@ describe('dsh mapper', () => {
       call('toolu_4', 'edit', { file_path: 'notes.txt', old_string: 'two', new_string: 'three' }),
       result('toolu_4', 'The file has been updated successfully.', {
         meta: {
-          path: `${CWD}/notes.txt`,
-          diffs: [{ path: `${CWD}/notes.txt`, oldText: 'one\ntwo', newText: 'one\nthree' }],
+          path: NOTES,
+          diffs: [{ path: NOTES, oldText: 'one\ntwo', newText: 'one\nthree' }],
         },
       }),
     ])
     expect(entries[0]).toMatchObject({
       toolKind: 'edit',
-      locations: [{ path: `${CWD}/notes.txt` }],
-      content: [
-        { type: 'diff', path: `${CWD}/notes.txt`, oldText: 'one\ntwo', newText: 'one\nthree' },
-      ],
+      locations: [{ path: NOTES }],
+      content: [{ type: 'diff', path: NOTES, oldText: 'one\ntwo', newText: 'one\nthree' }],
     })
   })
 
@@ -175,12 +176,12 @@ describe('dsh mapper', () => {
     const { entries } = run([
       call('toolu_3', 'write', { file_path: 'notes.txt', content: 'one\ntwo\n' }),
       result('toolu_3', 'Created file', {
-        meta: { operation: 'create', path: `${CWD}/notes.txt`, diffs: [] },
+        meta: { operation: 'create', path: NOTES, diffs: [] },
       }),
     ])
     expect(entries[0]).toMatchObject({
       status: 'completed',
-      content: [{ type: 'diff', path: `${CWD}/notes.txt`, oldText: null, newText: 'one\ntwo\n' }],
+      content: [{ type: 'diff', path: NOTES, oldText: null, newText: 'one\ntwo\n' }],
     })
   })
 
@@ -188,7 +189,7 @@ describe('dsh mapper', () => {
     const { entries } = run([
       call('toolu_3', 'write', { file_path: 'notes.txt', content: 'one\ntwo\n' }),
       result('toolu_3', 'Updated file', {
-        meta: { operation: 'update', path: `${CWD}/notes.txt`, diffs: [] },
+        meta: { operation: 'update', path: NOTES, diffs: [] },
       }),
     ])
     expect(entries[0]).toMatchObject({ status: 'completed', content: [] })

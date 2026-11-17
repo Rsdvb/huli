@@ -312,6 +312,13 @@
 .kettu-frame.kettu-band > .ui-as-resizer {
   top: calc(var(--title-bar) + var(--frame-gap));
 }
+/* A narrow window's drawer runs up to the window's top, under the band: it keeps the band's
+   height clear, or the corner controls drawn over it cover the search field. */
+@container ui-as (max-width: 900px) {
+  .kettu-frame.kettu-band.ui-as-app > .ui-as-side {
+    padding-top: var(--title-bar);
+  }
+}
 /* The account row's Settings button marks what needs you there with a fox dot. */
 .ui-as-user-action {
   position: relative;
@@ -598,6 +605,11 @@ li[data-row-exit='dust'] > * {
 }
 .kettu-plan-ring__button[aria-expanded='true'] {
   background: var(--bg-selected);
+}
+/* Wider than the account menu's 260px, which left two cards side by side too narrow for a name
+   beside its plan ("Claude …") or a window beside its figure ("5 …"); never past the window. */
+.kettu-plan-ring .ui-as-user-pop {
+  min-width: min(320px, calc(100vw - 24px));
 }
 .kettu-plan-pop {
   padding: 4px;
@@ -2446,6 +2458,22 @@ li[data-row-exit='dust'] > * {
 .kp-bar-tools .kp-tool {
   position: relative;
 }
+/* The pane buttons lay out as the bar's own; a bar too narrow for them beside the title (a narrow
+   window, or a session beside its side panel) folds them into one menu. */
+.kp-bar-panes {
+  display: contents;
+}
+.kp-bar-tools .kp-bar-panes-menu {
+  display: none;
+}
+@container top-bar (inline-size < 520px) {
+  .kp-bar-panes {
+    display: none;
+  }
+  .kp-bar-tools .kp-bar-panes-menu {
+    display: grid;
+  }
+}
 .kp-bar-tools .kp-tool[aria-pressed='true'] {
   background: var(--bg-selected);
 }
@@ -2664,6 +2692,63 @@ li[data-row-exit='dust'] > * {
 .kettu-settings .kettu-settings__scope .ui-as-menu {
   width: 100%;
 }
+/* A narrow window has no room for the list beside the page, which it squeezed to a character a
+   line: the box takes nearly the whole window, and the list goes above the page as one row that
+   scrolls sideways, under the search. */
+@media (max-width: 700px) {
+  .kettu-settings.ui-as {
+    flex-direction: column;
+    width: calc(100% - 24px);
+  }
+  .kettu-settings .kettu-settings__nav {
+    width: auto;
+    padding: 12px 12px 8px;
+    box-shadow: inset 0 -0.5px 0 var(--line);
+  }
+  .kettu-settings .kettu-settings__title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .kettu-settings .kettu-settings__list {
+    display: flex;
+    flex: none;
+    margin: 0 -12px;
+    padding: 2px 12px 4px;
+    overflow: auto hidden;
+    scrollbar-width: thin;
+  }
+  .kettu-settings .kettu-settings__group {
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+  }
+  .kettu-settings .kettu-settings__group + .kettu-settings__group {
+    margin: 0 0 0 6px;
+    padding: 0 0 0 6px;
+    box-shadow: inset 0.5px 0 0 var(--line);
+  }
+  .kettu-settings .kettu-settings__group .ui-as-side__item {
+    width: auto;
+    white-space: nowrap;
+  }
+  .kettu-settings .kettu-settings__scope {
+    flex: none;
+    margin: 0 4px 0 0;
+  }
+  .kettu-settings .kettu-settings__scope .ui-ss-select {
+    width: auto;
+  }
+  .kettu-settings .kettu-settings__scope > .ui-as-side__label {
+    display: none;
+  }
+  .kettu-settings .kettu-settings__search {
+    margin-right: 38px;
+  }
+}
 
 /* The page */
 .kettu-settings .kettu-settings__page {
@@ -2690,6 +2775,19 @@ li[data-row-exit='dust'] > * {
 @container ui-as-main (max-width: 600px) {
   .kettu-settings .kettu-settings__body {
     padding: 36px 16px 40px;
+  }
+}
+/* With the list above the page, Close sits beside the search: floating over the page, it covered
+   the cards' corners. */
+@media (max-width: 700px) {
+  .kettu-settings .kettu-settings__page {
+    position: static;
+  }
+  .kettu-settings .kettu-settings__close {
+    position: absolute;
+    top: 14px;
+    right: 12px;
+    margin: 0;
   }
 }
 
@@ -2799,6 +2897,18 @@ li[data-row-exit='dust'] > * {
 /* Buttons never squeeze into an ellipsis next to a long label, as in affectUI's rows */
 :is(.kettu-settings, .kettu-sd) .k-line > :is(button, .ui-buttonc) {
   flex: none;
+}
+/* Narrow, a line stacks its control under its label as affectUI's rows do; side by side, the
+   label of a row with a wide control (Cloudflare's token and Connect) broke a character a line. */
+@container ui-as-main (max-width: 600px) {
+  :is(.kettu-settings, .kettu-sd) .k-line {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  :is(.kettu-settings, .kettu-sd) .k-line > :is(button, .ui-buttonc) {
+    align-self: flex-start;
+  }
 }
 /* A grid item keeps its content's width, so a long path would push the control out */
 :is(.kettu-settings, .kettu-sd) .ui-sg-label > :is(b, small) {
@@ -3308,7 +3418,10 @@ li[data-row-exit='dust'] > * {
   text-overflow: ellipsis;
   direction: rtl;
 }
+/* No wider than its row however long the sample line: a stacked row's items keep their content's
+   width otherwise, and the sample ran over the card's edge. */
 :is(.kettu-settings, .kettu-sd) .k-term {
+  min-width: 0;
   margin: 0 12px 12px 16px;
   padding: 10px 12px;
   overflow: hidden;
@@ -4730,9 +4843,12 @@ li[data-row-exit='dust'] > * {
   min-width: 0;
 }
 /* The host's and the project's marks stay whole however narrow the tray: only the branch and the
-   names shrink, so the marks never slide over each other. */
-.kettu-tray__group:has(> .kettu-tray-link--host) {
-  min-width: auto;
+   names shrink, so the marks never slide over each other. The project and the branch keep room
+   for their marks and clip the rest; the group itself may shrink, since keeping its content's
+   width held a long project name or branch whole and pushed the context meter off the tray. */
+.ui-as-tray-link:is(.kettu-tray-link--project, .kettu-branch, .kettu-tray-link--branch) {
+  min-width: 36px;
+  overflow: hidden;
 }
 .kettu-tray {
   container: kettu-tray / inline-size;
@@ -4747,6 +4863,15 @@ li[data-row-exit='dust'] > * {
 }
 .kettu-tray-link--project {
   flex-shrink: 2;
+}
+/* New session's branch or worktree, often the longest, gives way first; the agent and the mode keep
+   their short names whole rather than each losing a letter to an ellipsis. */
+.ui-as-tray-link.kettu-tray-link--branch {
+  flex-shrink: 4;
+}
+.ui-as-tray-link:is(.kettu-tray-link--agent, .kettu-tray-link--workflow) {
+  flex-shrink: 0;
+  max-width: 12em;
 }
 @container kettu-tray (inline-size < 520px) {
   .kettu-tray-link--host {
@@ -4777,10 +4902,22 @@ li[data-row-exit='dust'] > * {
     white-space: nowrap;
   }
 }
-/* Narrower still, the output speed, the least needed of the right end, gives its room up. */
+/* Narrower still, the output speed, the least needed of the right end, gives its room up, and the
+   agent keeps only its mark. */
 @container kettu-tray (inline-size < 360px) {
   .kettu-tray-link--speed {
     display: none;
+  }
+  .ui-as-tray-link.kettu-tray-link--agent {
+    padding-right: 7px;
+  }
+  .kettu-tray-link--agent > .kettu-tray-link__text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 .kettu-tray__group:empty {
@@ -5142,6 +5279,11 @@ li[data-row-exit='dust'] > * {
 .kettu-model-picker .ui-mdpc__trigger .ui-mdpc__glyph > svg {
   width: 14px;
   height: 14px;
+}
+/* The name's glide width is what it measured unsqueezed: the line keeps to the box, so a narrow
+   composer ends the name in an ellipsis instead of cutting it at the effort. */
+.kettu-model-picker .ui-mdpc__name .ui-mdpc__swap-item {
+  max-width: 100%;
 }
 .kettu-model-picker .ui-mdpc__caption .ui-mdpc__swap-item {
   display: block;
@@ -5566,6 +5708,15 @@ li[data-row-exit='dust'] > * {
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--composer-faint);
+}
+/* Narrow, the project gives its fixed 96px to the title, which it squeezed to two letters. */
+.kettu-pickup {
+  container: kettu-pickup / inline-size;
+}
+@container kettu-pickup (inline-size < 400px) {
+  .kettu-pickup__project {
+    display: none;
+  }
 }
 /* The project menu's folder marks take the line icons' 15px, so every name starts in one place. */
 .kettu-menu-mark {

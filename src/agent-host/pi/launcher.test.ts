@@ -48,10 +48,15 @@ describe("Kettu's extension for Pi", () => {
     ])
     expect(process.env.KETTU_MCP_URL).toBeUndefined()
     expect(process.env.KETTU_MCP_TOKEN).toBeUndefined()
-    expect((await stat(files.command)).mode & 0o111).not.toBe(0)
     expect(await readFile(files.command, 'utf8')).toContain(
       'exec "$KETTU_PI_COMMAND" -e "$KETTU_PI_EXTENSION" "$@"',
     )
+  })
+
+  // Windows files have no execute bit; there the launcher is a .cmd that cmd.exe runs.
+  it.skipIf(process.platform === 'win32')('writes the shell launcher runnable', async () => {
+    const { files } = await written()
+    expect((await stat(files.command)).mode & 0o111).not.toBe(0)
   })
 
   it('does nothing in a Pi without MCP, and still takes the token out', async () => {

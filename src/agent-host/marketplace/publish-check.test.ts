@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PUBLISH_LIMITS } from '@shared/market-publish'
+import { linkFolder } from '../testing/links'
 import { checkFolder, describe as describeText, findSecrets } from './publish-check'
 
 let root: string
@@ -280,10 +281,10 @@ steps:
   })
 
   it('refuses links, and stops at the version’s limits', async () => {
-    await put({ 'SKILL.md': SKILL, 'real.md': 'x' })
-    await symlink(path.join(root, 'real.md'), path.join(root, 'link.md'))
+    await put({ 'SKILL.md': SKILL, 'real/a.md': 'x' })
+    await linkFolder(path.join(root, 'real'), path.join(root, 'link'))
     const linked = await checkFolder(root)
-    expect(linked.problems).toEqual([{ path: 'link.md', message: expect.stringMatching(/link/) }])
+    expect(linked.problems).toEqual([{ path: 'link', message: expect.stringMatching(/link/) }])
 
     const many = path.join(root, 'many')
     await put({ 'SKILL.md': SKILL }, many)

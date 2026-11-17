@@ -58,6 +58,10 @@ async function setup(
     push?: boolean
   } = {},
 ) {
+  // A test that sets up twice stops the first host too: one still running holds its folder's
+  // files open, which Windows then cannot remove.
+  const previous = agent
+  if (previous) cleanups.push(() => previous.stop())
   agent = await startTestHost()
   const logs: string[] = []
   const log = (level: string, message: string) => logs.push(`${level}: ${message}`)

@@ -9,6 +9,18 @@
   min-height: 0;
   border-left: var(--hairline) solid var(--border-subtle);
 }
+/* Too narrow for both: laid over the thread's right side, which keeps its width, as the side chat
+   is. Beside it, the board squeezed the thread and its composer to a sliver. */
+.kb-rail--over {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: min(340px, 86%);
+  background: var(--bg-app);
+  box-shadow: var(--elevation-popover);
+}
 .kb-body {
   display: flex;
   flex: 1;

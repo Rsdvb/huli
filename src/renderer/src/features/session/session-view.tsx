@@ -29,6 +29,7 @@ import {
   openAgentSettings,
   openHarnessSettings,
   shownPanel,
+  toggleBoard,
   toggleSideChat,
   useViewStore,
 } from '@renderer/stores/view'
@@ -106,7 +107,8 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
   const sideChat =
     useViewStore((s) => !!s.sideChatOpen[sessionId]) && summary.origin !== 'subagent' && !board
   const row = useRef<HTMLDivElement>(null)
-  const narrow = useNarrow(row, sideChat)
+  // The board too: beside a narrow thread it squeezed the thread and its composer to a sliver.
+  const narrow = useNarrow(row, sideChat || board)
 
   useEffect(() => {
     preloadRenderers()
@@ -360,17 +362,19 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
             </div>
           </div>
         </div>
-        {board && (
-          <Suspense fallback={null}>
-            <BoardRail sessionId={sessionId} />
-          </Suspense>
-        )}
-        {sideChat && narrow && (
+        {(sideChat || board) && narrow && (
           <div
             aria-hidden
             className="absolute inset-0 z-10"
-            onClick={() => toggleSideChat(sessionId, false)}
+            onClick={() =>
+              sideChat ? toggleSideChat(sessionId, false) : toggleBoard(sessionId, false)
+            }
           />
+        )}
+        {board && (
+          <Suspense fallback={null}>
+            <BoardRail sessionId={sessionId} overlay={narrow} />
+          </Suspense>
         )}
         {sideChat && (
           <Suspense fallback={null}>
