@@ -12,9 +12,10 @@ import {
   type ToolEntry,
 } from '@shared/thread'
 import { useHost } from '../../host'
-import { copyText } from '../../ui/session/feedback'
+import { copyText, showMenu } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
+import { selectText } from '../../ui/session/SelectText'
 
 const SHELL_TAIL = 12
 // Long output stays a phone's read: past this the earliest lines are left to the full view.
@@ -100,7 +101,7 @@ function plainOutput(text: string): string {
 function Printed(props: { text: string; color: string }) {
   const { c, s } = useSessionTokens()
   return (
-    <Text selectable style={[styles.mono, { color: props.color }]}>
+    <Text style={[styles.mono, { color: props.color }]}>
       {ansiRuns(props.text).map((run, i) =>
         run.tone ? (
           <Text
@@ -133,8 +134,21 @@ function Section(props: {
 }) {
   const { c, s } = useSessionTokens()
   const [copied, setCopied] = useState(false)
+  const text = props.copy
   return (
-    <View style={[styles.section, { backgroundColor: s.code, borderColor: s.codeBorder }]}>
+    <Pressable
+      onLongPress={
+        text
+          ? () =>
+              showMenu(undefined, [
+                { label: '复制', onPress: () => void copyText(text) },
+                { label: '选择文本', onPress: () => selectText({ text, mono: true }) },
+              ])
+          : undefined
+      }
+      delayLongPress={350}
+      style={[styles.section, { backgroundColor: s.code, borderColor: s.codeBorder }]}
+    >
       <View style={styles.head}>
         <Text style={[styles.label, { color: c.textTertiary }]}>
           {props.label}
@@ -161,7 +175,7 @@ function Section(props: {
         ) : null}
       </View>
       {props.children}
-    </View>
+    </Pressable>
   )
 }
 
@@ -185,9 +199,7 @@ export function ShellBlock(props: {
   return (
     <View style={{ gap: 6 }}>
       <Section label="命令" copy={props.command}>
-        <Text selectable style={[styles.mono, { color: c.text }]}>
-          $ {props.command}
-        </Text>
+        <Text style={[styles.mono, { color: c.text }]}>$ {props.command}</Text>
       </Section>
       {(printed !== '' || failed || props.output !== null) && (
         <Section

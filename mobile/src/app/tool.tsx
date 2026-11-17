@@ -3,7 +3,7 @@
 // the call while it runs.
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
@@ -15,6 +15,7 @@ import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon, TOOL_ICONS } from '../ui/session/icons'
 import { MONO, useSessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
+import { selectText } from '../ui/session/SelectText'
 import { StateView } from '../ui/session/StateView'
 import { answerText, EditLine, target, VERBS } from '../ui/session/ToolRow'
 import { toolEdits } from '../ui/session/turns'
@@ -34,10 +35,21 @@ function Block(props: { label: string; text: string; tone?: 'plain' | 'muted' })
   const { c, s } = useSessionTokens()
   const [copied, setCopied] = useState(false)
   const long = props.text.length > SHOWN_CHARS
+  const select = () => selectText({ text: props.text, mono: true, title: props.label })
   return (
     <View style={{ gap: 6 }}>
       <View style={styles.blockHead}>
         <Text style={[styles.label, { color: c.textSecondary }]}>{props.label}</Text>
+        <PressScale
+          onPress={select}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`选择${props.label}的文本`}
+          style={styles.copy}
+        >
+          <Icon icon={G.select} size={14} color={c.textSecondary} />
+          <Text style={[styles.copyText, { color: c.textSecondary }]}>选择</Text>
+        </PressScale>
         <PressScale
           onPress={() =>
             void copyText(props.text).then(() => {
@@ -62,12 +74,13 @@ function Block(props: { label: string; text: string; tone?: 'plain' | 'muted' })
         style={[styles.block, { backgroundColor: s.code, borderColor: s.codeBorder }]}
         contentContainerStyle={{ padding: 12 }}
       >
-        <Text
-          selectable
-          style={[styles.mono, { color: props.tone === 'muted' ? c.textSecondary : c.text }]}
-        >
-          {long ? `${props.text.slice(0, SHOWN_CHARS)}\n…（太长了，复制可以拿到全部）` : props.text}
-        </Text>
+        <Pressable onLongPress={select} delayLongPress={350}>
+          <Text style={[styles.mono, { color: props.tone === 'muted' ? c.textSecondary : c.text }]}>
+            {long
+              ? `${props.text.slice(0, SHOWN_CHARS)}\n…（太长了，复制可以拿到全部）`
+              : props.text}
+          </Text>
+        </Pressable>
       </ScrollView>
     </View>
   )
@@ -183,9 +196,7 @@ export default function ToolScreen() {
   }
 
   return (
-    <SessionRows.Provider
-      value={{ sessionId, root, fork: null, forkAtMessage: false, selectText: () => {} }}
-    >
+    <SessionRows.Provider value={{ sessionId, root, fork: null, forkAtMessage: false }}>
       <View style={{ flex: 1, backgroundColor: c.bg }}>
         <Stack.Screen options={{ headerShown: false }} />
         <GlassHeader
@@ -210,9 +221,9 @@ const styles = StyleSheet.create({
   status: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   statusText: { fontSize: 14, flexShrink: 1 },
   description: { fontSize: 15, lineHeight: 21 },
-  label: { fontSize: 13, fontWeight: '600' },
+  label: { fontSize: 13, fontWeight: '600', marginRight: 'auto' },
   blockHead: { flexDirection: 'row', alignItems: 'center' },
-  copy: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' },
+  copy: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 16 },
   copyText: { fontSize: 13 },
   block: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
   mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17 },

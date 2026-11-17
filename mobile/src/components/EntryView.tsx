@@ -12,6 +12,7 @@ import { G, Icon, type IconSpec } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { gentle } from '../ui/session/Press'
 import { RunRow } from '../ui/session/RunRow'
+import { selectText } from '../ui/session/SelectText'
 import { answerWords, ThoughtRow, ToolRow } from '../ui/session/ToolRow'
 import { TurnChanges } from '../ui/session/TurnChanges'
 import { TurnFooter } from '../ui/session/TurnFooter'
@@ -49,12 +50,11 @@ type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
 function Reply(props: { entry: Of<'agent'> }) {
   const { entry } = props
-  const { selectText } = useSessionRows()
   const menu = () =>
     showMenu(undefined, [
       { label: '复制', onPress: () => void copyText(plainText(entry.markdown)) },
+      { label: '选择文本', onPress: () => selectText({ text: plainText(entry.markdown) }) },
       { label: '复制为 Markdown', onPress: () => void copyText(entry.markdown) },
-      { label: '选择文本', onPress: () => selectText(plainText(entry.markdown)) },
     ])
   if (!entry.markdown && !entry.streaming && entry.attachments.length === 0) return null
   return (

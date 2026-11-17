@@ -2,18 +2,19 @@
 // sideways rather than wrapped, and a button that copies it all.
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import { FlatList, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { DeviceFileContent } from '@shared/files'
 import { formatBytes } from '../attachments'
 import { call, errorText, sessionFolder } from '../git'
 import { useHost, useLink } from '../host'
-import { copyText } from '../ui/session/feedback'
+import { copyText, showMenu } from '../ui/session/feedback'
 import { baseName, dirName } from '../ui/session/format'
 import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
 import { MONO, useSessionTokens } from '../ui/session/palette'
 import { RoundButton } from '../ui/session/Press'
+import { selectText } from '../ui/session/SelectText'
 import { StateView } from '../ui/session/StateView'
 
 export default function FileScreen() {
@@ -42,6 +43,10 @@ export default function FileScreen() {
   // A reference to a line opens the file a few lines above it.
   const target = line ? Math.min(Math.max(0, Number(line) - 4), Math.max(0, lines.length - 1)) : 0
   const marked = line ? Number(line) - 1 : -1
+  const selectAll = () => {
+    if (content?.kind === 'text')
+      selectText({ text: content.text, mono: true, title: baseName(path) })
+  }
 
   let body: ReactElement
   if (error) {
@@ -69,14 +74,21 @@ export default function FileScreen() {
             : {})}
           contentContainerStyle={styles.code}
           renderItem={({ item, index }) => (
-            <View style={[styles.line, index === marked && { backgroundColor: s.inlineCode }]}>
+            <Pressable
+              onLongPress={() =>
+                showMenu(undefined, [
+                  { label: '复制这一行', onPress: () => void copyText(item) },
+                  { label: '选择文本', onPress: selectAll },
+                ])
+              }
+              delayLongPress={350}
+              style={[styles.line, index === marked && { backgroundColor: s.inlineCode }]}
+            >
               <Text style={[styles.number, { color: c.textTertiary, width: gutter * 8 + 8 }]}>
                 {index + 1}
               </Text>
-              <Text selectable style={[styles.text, { color: c.text }]}>
-                {item || ' '}
-              </Text>
-            </View>
+              <Text style={[styles.text, { color: c.text }]}>{item || ' '}</Text>
+            </Pressable>
           )}
         />
       </ScrollView>
@@ -100,19 +112,24 @@ export default function FileScreen() {
         subtitlePath
         right={
           content?.kind === 'text' ? (
-            <RoundButton
-              tone="glass"
-              size={44}
-              onPress={() =>
-                void copyText(content.text).then(() => {
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 1500)
-                })
-              }
-              accessibilityLabel="复制全文"
-            >
-              <Icon icon={copied ? G.copied : G.copy} size={17} color={c.text} />
-            </RoundButton>
+            <View style={styles.actions}>
+              <RoundButton tone="glass" size={44} onPress={selectAll} accessibilityLabel="选择文本">
+                <Icon icon={G.select} size={17} color={c.text} />
+              </RoundButton>
+              <RoundButton
+                tone="glass"
+                size={44}
+                onPress={() =>
+                  void copyText(content.text).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1500)
+                  })
+                }
+                accessibilityLabel="复制全文"
+              >
+                <Icon icon={copied ? G.copied : G.copy} size={17} color={c.text} />
+              </RoundButton>
+            </View>
           ) : null
         }
       />
@@ -125,6 +142,7 @@ const LINE = 18
 
 const styles = StyleSheet.create({
   frame: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
+  actions: { flexDirection: 'row', gap: 8 },
   code: { paddingVertical: 10, paddingRight: 16 },
   line: { flexDirection: 'row', height: LINE },
   number: { fontFamily: MONO, fontSize: 12, lineHeight: LINE, textAlign: 'right', marginRight: 10 },

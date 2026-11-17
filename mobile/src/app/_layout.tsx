@@ -12,6 +12,7 @@ import { PushBridge } from '../push/bridge'
 import { ShareIntake } from '../share/intake'
 import { SystemBridge } from '../system/bridge'
 import { NoticeBar } from '../ui/NoticeBar'
+import { SelectTextHost } from '../ui/session/SelectText'
 import { useTokens } from '../ui/tokens'
 import { watchUpdates } from '../update'
 
@@ -91,6 +92,7 @@ export default function Layout() {
           <SystemBridge />
           <ShareIntake />
           <NoticeBar />
+          <SelectTextHost />
           <LockLayer />
         </HostProvider>
       </SafeAreaProvider>

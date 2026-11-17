@@ -113,7 +113,6 @@ import { useSessionTokens } from '../../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../../ui/session/Popover'
 import { RoundButton } from '../../ui/session/Press'
 import { Icon } from '../../ui/session/Icon'
-import { SelectText } from '../../ui/session/SelectText'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
 import { latestPlan, threadRows, type Row } from '../../ui/session/turns'
@@ -175,7 +174,6 @@ export default function SessionScreen() {
   const list = useRef<FlatList<Row>>(null)
   const [away, setAway] = useState(false)
   const [fresh, setFresh] = useState(false)
-  const [selecting, setSelecting] = useState<string | null>(null)
   const [contextOpen, setContextOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   // Another agent picked to take over with the next message, and the options it starts with.
@@ -386,7 +384,6 @@ export default function SessionScreen() {
       root: changes.folder,
       fork: canFork ? fork : null,
       forkAtMessage,
-      selectText: setSelecting,
       retryNotice,
       cutNotice,
       config: session?.config ?? [],
@@ -1067,7 +1064,6 @@ export default function SessionScreen() {
         usage={usage}
       />
       {actions.element}
-      <SelectText text={selecting} onClose={() => setSelecting(null)} />
       {menu.render(pages)}
     </SessionRows.Provider>
   )
