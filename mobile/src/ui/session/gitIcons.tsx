@@ -72,6 +72,8 @@ export function PrMark(props: {
   state: PullRequestState | null
   size?: number
   failing?: boolean
+  /** The surface under it, which rings the dot. */
+  ring?: string
 }) {
   const { c, s } = useSessionTokens()
   const color = usePrColor()(props.state)
@@ -90,7 +92,7 @@ export function PrMark(props: {
             borderRadius: 3,
             backgroundColor: c.danger,
             borderWidth: 1,
-            borderColor: s.dockCard,
+            borderColor: props.ring ?? s.dockCard,
           }}
         />
       ) : null}
