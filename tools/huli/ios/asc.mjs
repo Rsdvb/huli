@@ -25,6 +25,12 @@ if (text && process.env.RAW) console.log(text)
 else if (text) {
   const json = JSON.parse(text)
   for (const d of json.data ?? [])
-    console.log(d.id, d.attributes?.certificateType ?? '', d.attributes?.name ?? '', d.attributes?.displayName ?? '', d.attributes?.expirationDate ?? '')
+    console.log(
+      d.id,
+      d.attributes?.certificateType ?? '',
+      d.attributes?.name ?? '',
+      d.attributes?.displayName ?? '',
+      d.attributes?.expirationDate ?? '',
+    )
   if (json.errors) console.log(JSON.stringify(json.errors))
 }

@@ -2,9 +2,9 @@
 appId: io.github.rsdvb.huli
 ---
 - tapOn:
-    text: "允许"
+    text: '允许'
     optional: true
-- tapOn: "用量"
+- tapOn: '用量'
 - waitForAnimationToEnd
 - takeScreenshot: usage-top
 - swipe:
