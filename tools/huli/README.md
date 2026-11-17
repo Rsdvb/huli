@@ -25,11 +25,44 @@ Code (kept small so upstream merges stay clean):
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json`                              | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved                                                                                                                        |
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                    |
 
+### Import from Kettu
+
+Brings an official Kettu's sessions on the same computer over: Settings › General › Import from
+Kettu, and a one-time offer over the sidebar's account row while there is no session yet.
+
+Huli's own files:
+
+- `src/agent-host/kettu-import.ts` (+ `.test.ts`): finds Kettu's data folder (`%APPDATA%\Kettu`,
+  `~/Library/Application Support/Kettu`, `$XDG_CONFIG_HOME` or `~/.config/Kettu`;
+  `HULI_KETTU_DATA` points elsewhere), copies `state/sessions.json` and `state/projects.json` into a
+  temporary folder and reads the copies with the index's own parsers. It never writes there, and
+  reads nothing when that folder is Huli's own (a build named Kettu). Each chosen session is
+  imported through `importSession`, as the sidebar's Import sessions does, so Huli resumes the
+  agent's own session; one another program has open (Kettu itself) comes over as a fork. Subagent
+  sessions are not imported: the parent's history brings them back under it when it is opened.
+  Sessions in a Kettu worktree or Kettu's scratch folder, for an agent Huli lacks, or in a folder
+  that is gone are skipped. `state/kettu-import.json` remembers which Kettu session became which.
+- `src/shared/kettu-import.ts`: the scan's and the run's types.
+- `src/renderer/src/features/kettu-import/`: the store, the dialog, the Settings row
+  (`settings-row.tsx`) and the sidebar offer.
+- `src/shared/locales/*/kettuImport.json`: its copy, which the rebrand leaves whole (`KEEP_FILES`).
+
+Hooks into upstream files, one or two lines each:
+
+- `src/agent-host/sessions.ts`: `importSession` takes an optional `kept` (title, times, pin,
+  archive) and the `KeptField` type.
+- `src/shared/agent-host.ts` (`kettuImport.scan`, `kettuImport.run`, the `kettuImport.progress`
+  event), `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`, `src/agent-host/host.ts`.
+- `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (the progress
+  event), `features/settings/section-defs.tsx` (the row), `features/sidebar/app-sidebar.tsx` (the
+  offer).
+
 Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Huli. Idempotent; the build
   workflow runs it, and so must a local build (see Build) or a `pnpm dev` meant to look like Huli.
-  - Every locale but `star.json` (the prompts to star Kettu's repository) has its values rewritten:
+  - Every locale but `star.json` (the prompts to star Kettu's repository) and `kettuImport.json`
+    (the import from an official Kettu) has its values rewritten:
     the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the attribution and
     Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder `.kettu/`; and
     pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
