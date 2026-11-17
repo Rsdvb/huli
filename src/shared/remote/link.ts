@@ -247,6 +247,8 @@ export class HostLink {
   private connecting = false
   private stopped = false
   private failures = 0
+  /** A try under way when `reconnectNow` was asked: the next failure tries again at once. */
+  private hurry = false
   private drops = 0
   private timer: ReturnType<typeof setTimeout> | null = null
   // Rising in the order the requests go, so the host's last one read says which went before it.
@@ -313,6 +315,17 @@ export class HostLink {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     void this.connect()
+  }
+
+  /**
+   * As `wake`, and the backoff starts over, as when the network changed or a phone came back to
+   * the front: a try already under way that fails is followed at once by another.
+   */
+  reconnectNow(): void {
+    if (this.stopped) return
+    this.failures = 0
+    if (!this.session && (this.connecting || this.taking)) this.hurry = true
+    this.wake()
   }
 
   stop(): void {
@@ -488,7 +501,8 @@ export class HostLink {
       this.setState({ kind: 'reconnecting', reason, kept: this.resumeToken !== null })
     }
     if (this.options.visible && !this.options.visible()) return
-    const delay = (this.options.retryDelay ?? retryDelay)(++this.failures)
+    const delay = this.hurry ? 0 : (this.options.retryDelay ?? retryDelay)(++this.failures)
+    this.hurry = false
     this.timer = setTimeout(() => {
       this.timer = null
       void this.connect()
@@ -553,6 +567,7 @@ export class HostLink {
     this.resumeToken = welcome.resume ?? null
     this.session = session
     this.failures = 0
+    this.hurry = false
     for (const message of later.splice(0)) {
       if (message.kind === 'json') this.receive(session, message.value)
       else this.receiveBytes(session, message.stream, message.data)
