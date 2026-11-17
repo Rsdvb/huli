@@ -17,7 +17,7 @@ import { RoundButton } from '../ui/session/Press'
 import { StateView } from '../ui/session/StateView'
 
 export default function FileScreen() {
-  const { id, path } = useLocalSearchParams<{ id: string; path: string }>()
+  const { id, path, line } = useLocalSearchParams<{ id: string; path: string; line?: string }>()
   const { c, s } = useSessionTokens()
   const host = useHost()
   const link = useLink()
@@ -39,6 +39,9 @@ export default function FileScreen() {
 
   const lines = content?.kind === 'text' ? content.text.split(/\r?\n/) : []
   const gutter = String(lines.length).length
+  // A reference to a line opens the file a few lines above it.
+  const target = line ? Math.min(Math.max(0, Number(line) - 4), Math.max(0, lines.length - 1)) : 0
+  const marked = line ? Number(line) - 1 : -1
 
   let body: ReactElement
   if (error) {
@@ -54,9 +57,19 @@ export default function FileScreen() {
           initialNumToRender={60}
           maxToRenderPerBatch={80}
           windowSize={21}
+          {...(target > 0 && Number.isFinite(target)
+            ? {
+                initialScrollIndex: target,
+                getItemLayout: (_: unknown, index: number) => ({
+                  length: LINE,
+                  offset: LINE * index,
+                  index,
+                }),
+              }
+            : {})}
           contentContainerStyle={styles.code}
           renderItem={({ item, index }) => (
-            <View style={styles.line}>
+            <View style={[styles.line, index === marked && { backgroundColor: s.inlineCode }]}>
               <Text style={[styles.number, { color: c.textTertiary, width: gutter * 8 + 8 }]}>
                 {index + 1}
               </Text>
@@ -108,10 +121,12 @@ export default function FileScreen() {
   )
 }
 
+const LINE = 18
+
 const styles = StyleSheet.create({
   frame: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
   code: { paddingVertical: 10, paddingRight: 16 },
-  line: { flexDirection: 'row' },
-  number: { fontFamily: MONO, fontSize: 12, lineHeight: 18, textAlign: 'right', marginRight: 10 },
-  text: { fontFamily: MONO, fontSize: 12.5, lineHeight: 18 },
+  line: { flexDirection: 'row', height: LINE },
+  number: { fontFamily: MONO, fontSize: 12, lineHeight: LINE, textAlign: 'right', marginRight: 10 },
+  text: { fontFamily: MONO, fontSize: 12.5, lineHeight: LINE },
 })

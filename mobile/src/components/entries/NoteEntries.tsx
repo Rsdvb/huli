@@ -2,16 +2,18 @@
 // session over, the user taking a surface over and handing it back, a message from another session,
 // and a session or sub-agent this one started, with whether it waits for the user.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { harnessOf, type ThreadEntry } from '@shared/thread'
-import { useHost } from '../../host'
+import { useHost, useLink } from '../../host'
 import { sessionTitle } from '../../sessions'
 import { gentle } from '../../ui/session/Press'
 import { spanText } from '../../ui/session/format'
 import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
+import { subagentRunning, useSubagentDigest } from '../../ui/session/subagents'
+import { durationText } from '../../ui/session/work'
 import { useAgentName } from './AccessEntries'
 import { E, QuietLine } from './kit'
 
@@ -127,24 +129,140 @@ export function SessionMessageEntry(props: { entry: Of<'session_message'> }) {
  * A session this one started, or a sub-agent of it: its title, and whether it waits for the user,
  * failed, runs or is done; a tap opens it.
  */
+/**
+ * The first line of a sub-session the user started: the session it started from, which it opens.
+ * Nothing else is handed over, so it names nothing more.
+ */
+export function SubSessionStart(props: { sessionId: string }) {
+  const { c } = useSessionTokens()
+  const { sessions } = useHost()
+  const summary = sessions.get(props.sessionId)
+  const parent =
+    summary?.origin === 'user' && summary.parentId ? sessions.get(summary.parentId) : undefined
+  if (!parent) return null
+  return (
+    <View style={[styles.started, { backgroundColor: c.fill }]}>
+      <Icon icon={G.child} size={13} color={c.textTertiary} />
+      <Text style={[styles.startedText, { color: c.textSecondary }]}>
+        从{' '}
+        <Text
+          style={{ color: c.text, fontWeight: '600' }}
+          onPress={() => router.push(`/session/${parent.id}`)}
+          accessibilityRole="link"
+        >
+          {sessionTitle(parent)}
+        </Text>{' '}
+        开始
+      </Text>
+    </View>
+  )
+}
+
+/** How long a running sub-agent has run, ticking each second. */
+function Elapsed(props: { since: number; color: string }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <Text style={[styles.small, { color: props.color, fontVariant: ['tabular-nums'] }]}>
+      {durationText(Math.max(0, now - props.since))}
+    </Text>
+  )
+}
+
 export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'> }) {
   const { entry } = props
   const { c, s } = useSessionTokens()
-  const { sessions } = useHost()
+  const { sessions, state } = useHost()
+  const link = useLink()
   const child = sessions.get(entry.sessionId)
+  const digest = useSubagentDigest(
+    link,
+    entry.kind === 'subagent' ? child : undefined,
+    state.kind === 'connected',
+  )
   const waiting =
     !!child &&
     (child.permissionCount > 0 ||
       child.attention === 'permission' ||
       child.status === 'awaiting_permission')
   const failed = !!child && (child.attention === 'error' || child.status === 'failed')
-  const running = child?.status === 'running' || child?.status === 'starting'
+  const running = !!child && subagentRunning(child)
+  const cancelled = !running && !failed && digest?.stopReason === 'cancelled'
   const title = child
     ? sessionTitle(child)
     : entry.kind === 'subagent'
       ? '子 Agent'
       : '已启动一个会话'
   const label = entry.kind === 'session_started' && child ? `已启动 ${title}` : title
+  // Its tool count and time: while it runs, the time since it started, once it ends its run's.
+  const meta = waiting
+    ? null
+    : [
+        cancelled ? '已取消' : null,
+        digest?.tools != null ? `${digest.tools} 个工具` : null,
+        !running && digest?.durationMs != null ? durationText(digest.durationMs) : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+  const ticking = running && child && digest?.durationMs == null ? child.createdAt : null
+  if (entry.kind === 'subagent') {
+    return (
+      <Pressable
+        onPress={() => child && router.push(`/session/${entry.sessionId}`)}
+        disabled={!child}
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          styles.child,
+          {
+            backgroundColor: waiting ? s.warningSoft : c.fill,
+            opacity: pressed ? 0.7 : 1,
+          },
+        ]}
+      >
+        <Icon icon={G.subagent} size={14} color={waiting ? c.warning : c.textSecondary} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[styles.childTitle, { color: c.text }]} numberOfLines={1}>
+            {title}
+          </Text>
+          {child?.description ? (
+            <Text style={[styles.small, { color: c.textTertiary }]} numberOfLines={2}>
+              {child.description}
+            </Text>
+          ) : null}
+          {meta || ticking !== null ? (
+            <Text style={[styles.small, { color: c.textTertiary }]} numberOfLines={1}>
+              {meta}
+              {meta && ticking !== null ? ' · ' : ''}
+              {ticking !== null ? <Elapsed since={ticking} color={c.textTertiary} /> : null}
+            </Text>
+          ) : null}
+        </View>
+        {waiting ? (
+          <View style={styles.statusCol}>
+            <View style={[styles.dot, { backgroundColor: c.warning }]} />
+            <Text style={[styles.small, { color: c.warning, fontWeight: '600' }]}>需要授权</Text>
+          </View>
+        ) : failed ? (
+          <View style={styles.statusCol}>
+            <Icon icon={G.failed} size={13} color={c.danger} />
+            <Text style={[styles.small, { color: c.danger }]}>失败</Text>
+          </View>
+        ) : running ? (
+          <ActivityIndicator
+            size="small"
+            color={c.textTertiary}
+            style={{ transform: [{ scale: 0.75 }] }}
+          />
+        ) : child && !cancelled ? (
+          <Icon icon={G.check} size={13} color={c.success} weight="semibold" />
+        ) : null}
+        <Icon icon={G.right} size={10} color={c.textTertiary} weight="semibold" />
+      </Pressable>
+    )
+  }
   return (
     <Pressable
       onPress={() => router.push(`/session/${entry.sessionId}`)}
@@ -162,11 +280,6 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
         <Text style={[styles.childTitle, { color: c.text }]} numberOfLines={1}>
           {label}
         </Text>
-        {entry.kind === 'subagent' && child?.description ? (
-          <Text style={[styles.small, { color: c.textTertiary }]} numberOfLines={1}>
-            {child.description}
-          </Text>
-        ) : null}
       </View>
       {waiting ? (
         <Text style={[styles.pill, { color: c.warning, backgroundColor: s.warningSoft }]}>
@@ -226,6 +339,18 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   childTitle: { fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  statusCol: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  started: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  startedText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  dot: { width: 7, height: 7, borderRadius: 4 },
   pill: {
     fontSize: 11,
     fontWeight: '600',

@@ -1,10 +1,11 @@
-// While a turn runs and nothing is being written: a softly pulsing line with how long it has run.
+// While a turn runs and nothing is being written: a softly pulsing line with how long it has run,
+// what it has added to the context and what it does now.
 // And the button that brings a scrolled-up conversation back to its newest message.
 
 import { useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from 'react-native'
-import { spanText } from './format'
 import { G, Icon } from './icons'
+import { compactCount, durationText } from './work'
 import { GlassButton } from '../Glass'
 import { useSessionTokens } from './palette'
 
@@ -88,33 +89,63 @@ function WorkingDots(props: { color: string }) {
   )
 }
 
-/** 「13 秒 · 正在运行 1 个命令 · 3017 token」, ticking each second. */
-export function WorkingRow(props: { since: number | null; label: string; tokens: number | null }) {
+/**
+ * The running turn's status, as the desktop's: 「13 秒 · 4.1万 token · 正在运行 1 条命令」, the
+ * clock ticking each second, with the attention dot in place of the running dots while it waits
+ * for the user.
+ */
+export function WorkingRow(props: {
+  since: number | null
+  label: string
+  tokens: number | null
+  waiting: boolean
+}) {
   const { c } = useSessionTokens()
   const pulse = usePulse()
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+    if (props.since === null) return
+    const since = props.since
+    let timer: ReturnType<typeof setTimeout>
+    // Just past each whole second, so a timer that fires late never skips one.
+    const schedule = () => {
+      const delay = 1000 - (Math.max(0, Date.now() - since) % 1000) + 5
+      timer = setTimeout(() => {
+        setNow(Date.now())
+        schedule()
+      }, delay)
+    }
+    schedule()
+    return () => clearTimeout(timer)
+  }, [props.since])
+  const elapsed = props.since !== null ? Math.max(0, now - props.since) : null
   const parts = [
-    props.since !== null ? spanText(now - props.since) : null,
+    elapsed !== null ? durationText(elapsed - (elapsed % 1000)) : null,
+    props.tokens !== null && props.tokens > 0 ? `${compactCount(props.tokens)} token` : null,
     props.label,
-    props.tokens !== null && props.tokens > 0 ? `${props.tokens} token` : null,
   ].filter(Boolean)
   return (
     <View
       style={styles.row}
       accessible
+      accessibilityRole="text"
       accessibilityLiveRegion="polite"
       accessibilityLabel={props.label}
     >
-      <WorkingDots color={c.accent} />
+      {props.waiting ? (
+        <View style={styles.attention}>
+          <View
+            style={[styles.attentionDot, { backgroundColor: c.warning, shadowColor: c.warning }]}
+          />
+        </View>
+      ) : (
+        <WorkingDots color={c.accent} />
+      )}
       <Animated.Text
-        style={[styles.label, { color: c.textSecondary, opacity: pulse }]}
+        style={[styles.label, { color: c.textSecondary, opacity: props.waiting ? 1 : pulse }]}
         numberOfLines={1}
       >
-        {parts.join('  ·  ')}
+        {parts.join(' · ')}
       </Animated.Text>
     </View>
   )
@@ -169,6 +200,15 @@ const styles = StyleSheet.create({
   label: { flex: 1, fontSize: 15, lineHeight: 20, fontVariant: ['tabular-nums'] },
   dots: { width: 15, height: 15, flexDirection: 'row', flexWrap: 'wrap', gap: 1.5 },
   dot: { width: 4, height: 4, borderRadius: 2 },
+  attention: { width: 15, height: 15, alignItems: 'center', justifyContent: 'center' },
+  attentionDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 0 },
+  },
   toBottom: { position: 'absolute', alignSelf: 'center', bottom: 12 },
   fresh: {
     position: 'absolute',

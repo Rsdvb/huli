@@ -1,22 +1,24 @@
-// One row of a session's conversation: the user's bubble, the agent's reply in full width, its
-// thinking and tool calls as quiet lines that open, the turn's changes and footer, and the host's
-// own records as small notes.
+// One row of a session's conversation: the user's bubble, the agent's reply in full width with what
+// it carried, its work folded into runs of quiet lines that open, an answered request as one line,
+// a plan's answer, the turn's changes and footer, and the host's own records as small notes.
 
 import { memo, useState } from 'react'
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
-import type { ThreadEntry } from '@shared/thread'
+import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { openArtifact } from '../artifacts'
 import { useSessionRows } from '../ui/session/context'
 import { copyText, plainText, showMenu } from '../ui/session/feedback'
-import { spanText } from '../ui/session/format'
 import { G, Icon, type IconSpec } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { gentle } from '../ui/session/Press'
-import { ToolRow } from '../ui/session/ToolRow'
+import { RunRow } from '../ui/session/RunRow'
+import { answerWords, ThoughtRow, ToolRow } from '../ui/session/ToolRow'
 import { TurnChanges } from '../ui/session/TurnChanges'
 import { TurnFooter } from '../ui/session/TurnFooter'
 import { sameRow, type Row } from '../ui/session/turns'
+import { CarriedRefs } from './CarriedRefs'
 import {
+  useAgentName,
   BrowserOriginEntry,
   ComputerAppEntry,
   ComputerSetupEntry,
@@ -28,6 +30,8 @@ import {
   ProjectMcpEntry,
 } from './entries/AccessEntries'
 import { ElicitationSettled } from './entries/ElicitationCard'
+import { QuietLine, WaitingLine } from './entries/kit'
+import { PlanSettled, PlanWaitingLine } from './entries/PlanCards'
 import { MarketPublishEntry } from './entries/MarketPublishEntry'
 import {
   ChildEntry,
@@ -52,93 +56,54 @@ function Reply(props: { entry: Of<'agent'> }) {
       { label: '复制为 Markdown', onPress: () => void copyText(entry.markdown) },
       { label: '选择文本', onPress: () => selectText(plainText(entry.markdown)) },
     ])
-  if (!entry.markdown && !entry.streaming) return null
+  if (!entry.markdown && !entry.streaming && entry.attachments.length === 0) return null
   return (
-    <Pressable onLongPress={entry.markdown ? menu : undefined} delayLongPress={400}>
-      <Markdown markdown={entry.markdown} streaming={entry.streaming} />
-    </Pressable>
-  )
-}
-
-function Thought(props: { entry: Of<'thought'> }) {
-  const { c } = useSessionTokens()
-  const { entry } = props
-  const [open, setOpen] = useState(false)
-  const label = entry.streaming
-    ? '思考中…'
-    : entry.durationMs
-      ? `思考了 ${spanText(entry.durationMs)}`
-      : '思考过程'
-  return (
-    <View>
-      <Pressable
-        onPress={() => {
-          gentle()
-          setOpen((v) => !v)
-        }}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        style={({ pressed }) => [styles.quiet, { opacity: pressed ? 0.55 : 1 }]}
-      >
-        <Icon icon={G.thought} size={14} color={c.textTertiary} />
-        <Text style={[styles.quietText, { color: c.textSecondary }]}>{label}</Text>
-        <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
-          <Icon icon={G.right} size={10} color={c.textTertiary} weight="semibold" />
-        </View>
-      </Pressable>
-      {open && entry.markdown ? (
-        <View style={[styles.thoughtBody, { borderLeftColor: c.borderStrong }]}>
-          <Markdown markdown={entry.markdown} size="compact" color={c.textSecondary} />
-        </View>
+    <View style={{ gap: 8 }}>
+      {entry.markdown || entry.streaming ? (
+        <Pressable onLongPress={entry.markdown ? menu : undefined} delayLongPress={400}>
+          <Markdown markdown={entry.markdown} streaming={entry.streaming} />
+        </Pressable>
       ) : null}
+      {entry.attachments.length > 0 && <CarriedRefs refs={entry.attachments} />}
     </View>
   )
 }
 
-function Plan(props: { entry: Of<'plan'> }) {
-  const { c, s } = useSessionTokens()
-  const items = props.entry.items
-  const done = items.filter((item) => item.status === 'completed').length
+/**
+ * A tool call that asked for permission, once answered: one line of what was chosen and what
+ * follows from it, then an allowed call's own line, as the desktop's folded card.
+ */
+function AnsweredTool(props: { entry: ToolEntry }) {
+  const { entry } = props
+  const { sessionId } = useSessionRows()
+  const agent = useAgentName(sessionId)
+  const words = answerWords(entry, agent)
+  if (!words) return <ToolRow entry={entry} />
+  const questions =
+    typeof entry.permissionResult === 'object' ? (entry.permissionResult?.questions ?? []) : []
   return (
-    <View style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.border }]}>
-      <View style={styles.cardHead}>
-        <Icon icon={G.plan} size={15} color={c.textSecondary} />
-        <Text style={[styles.cardTitle, { color: c.text }]}>计划</Text>
-        <Text style={[styles.count, { color: c.textTertiary }]}>
-          {done}/{items.length}
-        </Text>
-      </View>
-      <View style={{ gap: 8 }}>
-        {items.map((item, i) => {
-          const icon =
-            item.status === 'completed' ? G.done : item.status === 'in_progress' ? G.doing : G.todo
-          const color =
-            item.status === 'completed'
-              ? c.success
-              : item.status === 'in_progress'
-                ? c.tint
-                : c.textTertiary
-          return (
-            <View key={i} style={styles.planItem}>
-              <View style={{ height: 21, justifyContent: 'center' }}>
-                <Icon icon={icon} size={16} color={color} />
-              </View>
-              <Text
-                style={[
-                  styles.planText,
-                  {
-                    color: item.status === 'completed' ? c.textTertiary : c.text,
-                    fontWeight: item.status === 'in_progress' ? '600' : '400',
-                    textDecorationLine: item.status === 'completed' ? 'line-through' : 'none',
-                  },
-                ]}
-              >
-                {item.content}
-              </Text>
-            </View>
-          )
-        })}
-      </View>
+    <View style={{ gap: 2 }}>
+      <QuietLine
+        icon={words.allowed ? G.shieldCheck : questions.length > 0 ? G.hand : G.shield}
+        tone={words.allowed ? 'done' : 'other'}
+        text={
+          questions.length > 0 && entry.question
+            ? `${entry.question} · ${words.headline}`
+            : words.headline
+        }
+        detail={words.note || null}
+      />
+      {questions.map((q, i) => (
+        <QuietLine
+          key={i}
+          icon={G.right}
+          text={q.question}
+          detail={q.answered ? (q.answer ?? '已回答') : '已跳过'}
+        />
+      ))}
+      {words.allowed && questions.length === 0 && entry.question === undefined && (
+        <ToolRow entry={entry} />
+      )}
     </View>
   )
 }
@@ -169,23 +134,48 @@ function Note(props: {
   )
 }
 
+/** A compaction divides the thread: rules on both sides of its words, which open the summary. */
 function Compaction(props: { entry: Of<'compaction'> }) {
   const { c } = useSessionTokens()
+  const [open, setOpen] = useState(false)
   const busy = props.entry.status === 'in_progress'
   const text =
     props.entry.status === 'failed'
-      ? '整理上下文失败'
+      ? '无法压缩上下文'
       : props.entry.status === 'cancelled'
-        ? '整理上下文已取消'
+        ? '已取消压缩'
         : busy
-          ? '正在整理上下文…'
-          : '上下文已整理'
+          ? '正在压缩上下文…'
+          : '上下文已压缩'
+  const expandable = !busy && !!props.entry.summary
   return (
-    <View style={styles.divider}>
-      <View style={[styles.rule, { backgroundColor: c.border }]} />
-      <Icon icon={G.compact} size={13} color={c.textTertiary} />
-      <Text style={[styles.dividerText, { color: c.textTertiary }]}>{text}</Text>
-      <View style={[styles.rule, { backgroundColor: c.border }]} />
+    <View>
+      <Pressable
+        onPress={() => {
+          gentle()
+          setOpen((v) => !v)
+        }}
+        disabled={!expandable}
+        accessibilityRole={expandable ? 'button' : undefined}
+        accessibilityState={expandable ? { expanded: open } : undefined}
+        style={({ pressed }) => [styles.divider, { opacity: pressed ? 0.6 : 1 }]}
+      >
+        <View style={[styles.rule, { backgroundColor: c.border }]} />
+        <Icon icon={G.compact} size={13} color={c.textTertiary} />
+        <Text style={[styles.dividerText, { color: c.textTertiary }]}>{text}</Text>
+        {expandable && (
+          <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
+            <Icon icon={G.right} size={9} color={c.textTertiary} weight="semibold" />
+          </View>
+        )}
+        <View style={[styles.rule, { backgroundColor: c.border }]} />
+      </Pressable>
+      {open && expandable && (
+        <View style={[styles.summary, { backgroundColor: c.fill }]}>
+          <Text style={[styles.summaryLabel, { color: c.textTertiary }]}>摘要</Text>
+          <Markdown markdown={props.entry.summary} size="compact" color={c.textSecondary} />
+        </View>
+      )}
     </View>
   )
 }
@@ -201,6 +191,7 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
       return (
         <UserMessage
           content={entry.content}
+          {...(entry.at !== undefined ? { at: entry.at } : {})}
           {...(entry.steered ? { steered: true } : {})}
           {...(entry.device ? { device: entry.device } : {})}
           {...(entry.from ? { from: entry.from } : {})}
@@ -209,15 +200,22 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
     case 'agent':
       return <Reply entry={entry} />
     case 'thought':
-      return <Thought entry={entry} />
+      return <ThoughtRow entry={entry} />
     case 'tool': {
       const waiting = !!entry.permission && !entry.permissionResult
-      if (!waiting && workflowCardOf(entry)) return <WorkflowToolCard entry={entry} />
-      if (!waiting && entry.elicitation) return <ElicitationSettled entry={entry} />
+      if (waiting && entry.permission?.plan) return <PlanWaitingLine entry={entry} />
+      if (waiting && (entry.permission?.questions?.length || entry.question !== undefined)) {
+        return <WaitingLine icon={G.hand} text={entry.question ?? '智能体在问你'} />
+      }
+      if (waiting) return <ToolRow entry={entry} />
+      if (workflowCardOf(entry)) return <WorkflowToolCard entry={entry} />
+      if (entry.elicitation) return <ElicitationSettled entry={entry} />
+      if (entry.planVersion !== undefined) return <PlanSettled entry={entry} />
+      if (entry.permissionResult) return <AnsweredTool entry={entry} />
       return <ToolRow entry={entry} />
     }
     case 'plan':
-      return <Plan entry={entry} />
+      return null
     case 'notice':
       return <NoticeEntry entry={entry} />
     case 'compaction':
@@ -285,11 +283,7 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
           icon={G.artifact}
           text="Artifact"
           detail={entry.title}
-          onPress={
-            entry.action === 'delete'
-              ? undefined
-              : () => openArtifact(entry.artifactId)
-          }
+          onPress={entry.action === 'delete' ? undefined : () => openArtifact(entry.artifactId)}
         />
       )
     default:
@@ -303,7 +297,6 @@ const CARD: [number, number] = [6, 6]
 const SPACING: Partial<Record<ThreadEntry['kind'], [number, number]>> = {
   user: [10, 10],
   agent: [8, 8],
-  plan: [6, 6],
   notice: [6, 6],
   compaction: [8, 8],
   session_message: CARD,
@@ -329,10 +322,21 @@ export const ThreadRow = memo(
         </View>
       )
     }
+    if (row.type === 'run') {
+      return (
+        <View style={{ paddingVertical: 3 }}>
+          <RunRow entries={row.entries} latest={row.latest} />
+        </View>
+      )
+    }
     const { entry } = row
     if (
       (entry.kind === 'user' && entry.approval) ||
-      (entry.kind === 'agent' && !entry.markdown && !entry.streaming)
+      entry.kind === 'plan' ||
+      (entry.kind === 'agent' &&
+        !entry.markdown &&
+        !entry.streaming &&
+        entry.attachments.length === 0)
     ) {
       return null
     }
@@ -355,20 +359,9 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   quietText: { fontSize: 14, lineHeight: 19 },
-  thoughtBody: {
-    borderLeftWidth: 2,
-    paddingLeft: 12,
-    marginLeft: 6,
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  card: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 10 },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  cardTitle: { fontSize: 15, fontWeight: '600', flex: 1 },
-  count: { fontSize: 13, fontVariant: ['tabular-nums'] },
-  planItem: { flexDirection: 'row', gap: 10 },
-  planText: { flex: 1, fontSize: 15, lineHeight: 21 },
   divider: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
   rule: { flex: 1, height: StyleSheet.hairlineWidth },
   dividerText: { fontSize: 12 },
+  summary: { borderRadius: 12, padding: 12, marginTop: 6, gap: 4 },
+  summaryLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 0.5 },
 })

@@ -20,6 +20,10 @@ export interface SessionRowsContext {
   cutNotice?: string | null
   /** The session's options, which a task started from its suggestion carries on with. */
   config?: readonly ConfigOption[]
+  /** The agent's command names, which a sent prompt's leading `/name` is one of. */
+  commands?: readonly string[]
+  /** Puts a command into the composer, as tapping a sent prompt's command does. */
+  command?: (name: string) => void
 }
 
 export const SessionRows = createContext<SessionRowsContext>({
