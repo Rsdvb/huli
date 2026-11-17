@@ -1,16 +1,19 @@
 // What a device uploads as byte streams, each assembled in a file of the remote host's upload
-// folder until a request names it, read once and deleted. An upload the device cancels, one it
-// leaves without bytes or unnamed for a minute, and every one of a connection that ends goes too.
-// While the disk lags behind what a device sends, its connections stop reading.
+// folder until a request names it. An attachment's file is handed to the agent host as it lies on
+// disk, which moves it out of the folder; any other upload is read once and deleted. An upload the
+// device cancels, one it leaves without bytes or unnamed for a minute, one the disk has no room
+// for, and every one of a connection that ends goes too. While the disk lags behind what a device
+// sends, its connections stop reading.
 
 import { randomBytes } from 'node:crypto'
-import { mkdir, open, readFile, rm, type FileHandle } from 'node:fs/promises'
+import { mkdir, open, readFile, rm, statfs, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import type { PortError } from '@shared/port-rpc'
 import {
   isDeviceStream,
   MAX_UPLOAD_BYTES,
   MAX_UPLOADS,
+  MEMORY_UPLOAD_BYTES,
   UPLOAD_IDLE_MS,
 } from '@shared/remote/streams'
 import type { Transport } from '@shared/remote/transport'
@@ -18,10 +21,23 @@ import type { Transport } from '@shared/remote/transport'
 /** Bytes a device's uploads may hold, received and not yet written, before it is read no more. */
 export const MAX_UNWRITTEN = 1024 * 1024
 
+/** Free disk an upload leaves the computer at the least, past every upload still coming. */
+export const FREE_MARGIN = 256 * 1024 * 1024
+
 /** Empties the upload folder of what an earlier run left, and makes it when there is none. */
 export async function clearUploads(folder: string): Promise<void> {
   await rm(folder, { recursive: true, force: true })
   await mkdir(folder, { recursive: true, mode: 0o700 })
+}
+
+/** The bytes free to this user on the folder's disk, or null when the system does not say. */
+export async function freeSpace(folder: string): Promise<number | null> {
+  try {
+    const info = await statfs(folder)
+    return info.bavail * info.bsize
+  } catch {
+    return null
+  }
 }
 
 /** Uploads in flight per device, over all its connections, and their bytes not yet written. */
@@ -30,6 +46,8 @@ export class UploadCounts {
   private readonly unwrittenBytes = new Map<string, number>()
   /** The connections of each device that stopped reading until its writes are within the bound. */
   private readonly behind = new Map<string, Set<() => void>>()
+  /** Bytes the open uploads of every device have still to bring, which the disk must have room for. */
+  private coming = 0
 
   constructor(
     readonly max = MAX_UPLOADS,
@@ -51,6 +69,16 @@ export class UploadCounts {
 
   of(deviceId: string): number {
     return this.counts.get(deviceId) ?? 0
+  }
+
+  /** Bytes still to come for the open uploads. */
+  get promised(): number {
+    return this.coming
+  }
+
+  /** An upload opened that brings `bytes`, or bytes promised came or will not. */
+  promise(bytes: number): void {
+    this.coming = Math.max(0, this.coming + bytes)
   }
 
   /** Bytes the device's uploads received; whether its writes now lag past the bound. */
@@ -121,21 +149,30 @@ export interface UploadsOptions {
   /** The host gave an upload up, for the device to hear why. */
   cancelled(stream: number, error: PortError): void
   maxBytes?: number
+  /** The largest upload a request other than an attachment's file takes, read into memory. */
+  memoryBytes?: number
   idleMs?: number
+  /** The bytes free on the folder's disk, which tests give; null takes the upload. */
+  freeSpace?: (folder: string) => Promise<number | null>
+  freeMargin?: number
 }
 
 /** One connection's uploads. */
 export class Uploads {
   private readonly uploads = new Map<number, Upload>()
+  /** Files handed to the agent host, until it answers the request that names them. */
+  private readonly handed = new Set<string>()
   private last = 0
   private closed = false
   /** Stops waiting for the device's writes, while this connection reads nothing. */
   private behind: (() => void) | null = null
   private readonly maxBytes: number
+  private readonly memoryBytes: number
   private readonly idleMs: number
 
   constructor(private readonly options: UploadsOptions) {
     this.maxBytes = options.maxBytes ?? MAX_UPLOAD_BYTES
+    this.memoryBytes = options.memoryBytes ?? MEMORY_UPLOAD_BYTES
     this.idleMs = options.idleMs ?? UPLOAD_IDLE_MS
   }
 
@@ -170,11 +207,12 @@ export class Uploads {
     const upload = this.uploads.get(stream)
     // Bytes of an upload the host gave up may still be on their way.
     if (!upload || upload.complete) return
-    upload.received += data.length
-    if (upload.received > upload.size) {
+    if (upload.received + data.length > upload.size) {
       return this.fail(upload, `Upload ${stream} carried more than its ${upload.size} bytes`)
     }
+    upload.received += data.length
     const { counts, deviceId } = this.options
+    counts.promise(-data.length)
     const lagging = counts.received(deviceId, data.length)
     this.queue(
       upload,
@@ -209,17 +247,16 @@ export class Uploads {
 
   /**
    * The bytes of the upload `stream`, which a request names, once they are all in; its file goes
-   * once they are read. It is claimed at once, so no other request may name it.
+   * once they are read. It is claimed at once, so no other request may name it. Only one within
+   * the memory bound is read; a larger one can only be an attachment's file.
    */
   async claim(stream: unknown): Promise<ArrayBuffer> {
-    const upload = typeof stream === 'number' ? this.uploads.get(stream) : undefined
-    if (!upload || upload.claimed) {
-      const message = `Stream ${String(stream)} is no upload waiting on this connection`
-      throw new UploadError({ code: 'invalid_params', message })
-    }
-    upload.claimed = true
-    this.watch(upload)
+    const upload = this.claimed(stream)
     try {
+      if (upload.size > this.memoryBytes) {
+        const message = `Upload ${upload.stream} is over ${this.memoryBytes} bytes, which only an attachment's file may be`
+        throw new UploadError({ code: 'invalid_params', message })
+      }
       await upload.done
       const data = await readFile(upload.file)
       return data.buffer.byteLength === data.byteLength
@@ -234,6 +271,40 @@ export class Uploads {
   }
 
   /**
+   * The name of the file of the upload `stream`, which an attachment's request names, once all
+   * its bytes are in: the agent host takes the file from the folder as it is, unread. The file is
+   * this connection's no longer, but stays handed until `settled` or the connection ends, for
+   * whatever the agent host leaves of it to go.
+   */
+  async claimFile(stream: unknown): Promise<string> {
+    const upload = this.claimed(stream)
+    try {
+      await upload.done
+    } catch (error) {
+      this.drop(upload, null)
+      if (error instanceof UploadError) throw error
+      throw new UploadError({ code: 'internal', message: `Upload ${stream} could not be written` })
+    }
+    // Ended with the connection while the last write closed the file.
+    if (this.uploads.get(upload.stream) !== upload) {
+      throw new UploadError({ code: 'invalid_params', message: 'The connection ended' })
+    }
+    this.uploads.delete(upload.stream)
+    this.options.counts.release(this.options.deviceId)
+    if (upload.timer) clearTimeout(upload.timer)
+    this.handed.add(upload.file)
+    return path.basename(upload.file)
+  }
+
+  /** The agent host answered a request that named these handed files: what it left of them goes. */
+  settled(names: readonly string[]): void {
+    for (const name of names) {
+      const file = path.join(this.options.folder, name)
+      if (this.handed.delete(file)) void rm(file, { force: true }).catch(() => {})
+    }
+  }
+
+  /**
    * The connection dropped while its session stays: the uploads it had not finished go, as their
    * bytes on the way are lost, and the finished ones wait for the requests that name them.
    */
@@ -244,13 +315,27 @@ export class Uploads {
     }
   }
 
-  /** The connection ended: every upload goes. */
+  /** The connection ended: every upload goes, and every file handed over not taken yet. */
   closeAll(): void {
     this.closed = true
     this.behind?.()
     this.behind = null
     const error = { code: 'invalid_params' as const, message: 'The connection ended' }
     for (const upload of [...this.uploads.values()]) this.drop(upload, error)
+    for (const file of this.handed) void rm(file, { force: true }).catch(() => {})
+    this.handed.clear()
+  }
+
+  /** The upload a request names, claimed at once so no other request may name it. */
+  private claimed(stream: unknown): Upload {
+    const upload = typeof stream === 'number' ? this.uploads.get(stream) : undefined
+    if (!upload || upload.claimed) {
+      const message = `Stream ${String(stream)} is no upload waiting on this connection`
+      throw new UploadError({ code: 'invalid_params', message })
+    }
+    upload.claimed = true
+    this.watch(upload)
+    return upload
   }
 
   private start(stream: number, size: number): void {
@@ -271,12 +356,29 @@ export class Uploads {
       done,
       settle,
     }
-    upload.writing = open(file, 'wx', 0o600).catch(() => {
-      this.fail(upload, `Upload ${stream} could not be written`, 'internal')
-      return null
-    })
+    const { counts } = this.options
+    // What the uploads before it have still to write is not on the disk yet either.
+    const ahead = counts.promised
+    counts.promise(size)
+    upload.writing = this.roomFor(size, ahead)
+      .then((room) => {
+        if (room) return open(file, 'wx', 0o600)
+        const message = `The host has too little free disk space for upload ${stream} of ${size} bytes`
+        this.fail(upload, message, 'unavailable')
+        return null
+      })
+      .catch(() => {
+        this.fail(upload, `Upload ${stream} could not be written`, 'internal')
+        return null
+      })
     this.uploads.set(stream, upload)
     this.watch(upload)
+  }
+
+  /** Whether the disk has room for `size` more bytes past `ahead` and the margin it keeps. */
+  private async roomFor(size: number, ahead: number): Promise<boolean> {
+    const free = await (this.options.freeSpace ?? freeSpace)(this.options.folder)
+    return free === null || free - ahead >= size + (this.options.freeMargin ?? FREE_MARGIN)
   }
 
   /**
@@ -339,6 +441,7 @@ export class Uploads {
     if (this.uploads.get(upload.stream) !== upload) return
     this.uploads.delete(upload.stream)
     this.options.counts.release(this.options.deviceId)
+    if (!upload.complete) this.options.counts.promise(-(upload.size - upload.received))
     if (upload.timer) clearTimeout(upload.timer)
     if (error) upload.settle.reject(new UploadError(error))
     const { file } = upload

@@ -7,10 +7,22 @@ import type { HostMethod } from '../agent-host'
 // host checks is one.
 const MAIN_ONLY: ReadonlySet<string> = new Set<HostMethod>(['media.open'])
 
-function hasGrant(params: unknown): boolean {
+function sourceHas(params: unknown, key: string): boolean {
   if (typeof params !== 'object' || params === null) return false
   const source = (params as { source?: unknown }).source
-  return typeof source === 'object' && source !== null && 'grantId' in source
+  return typeof source === 'object' && source !== null && key in source
+}
+
+function hasGrant(params: unknown): boolean {
+  return sourceHas(params, 'grantId')
+}
+
+/**
+ * Whether a device's request names a file of the upload folder itself, which only its remote host
+ * does, in place of the upload the device sent; the remote host refuses it from a device.
+ */
+export function namesUploadFile(method: string, params: unknown): boolean {
+  return method === 'attachments.add' && sourceHas(params, 'upload')
 }
 
 /**

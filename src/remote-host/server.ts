@@ -18,7 +18,7 @@ import type { AdminAnswer } from '@shared/host-control'
 import type { PortChannel } from '@shared/port-channel'
 import { isPortError, type PortError } from '@shared/port-rpc'
 import type { ActivityActor, NewActivity } from '@shared/remote/activity'
-import { forbiddenToDevices } from '@shared/remote/allow-list'
+import { forbiddenToDevices, namesUploadFile } from '@shared/remote/allow-list'
 import { Channel, type ChannelMessage } from '@shared/remote/channel'
 import {
   normalizeDeviceName,
@@ -51,7 +51,7 @@ import {
   type Pong,
 } from '@shared/remote/keepalive'
 import { Handshake, type KeyPair, type TransportCiphers } from '@shared/remote/noise'
-import { bytesOf, findPlaces, isBinary } from '@shared/remote/places'
+import { bytesOf, findPlaces, isBinary, type Place } from '@shared/remote/places'
 import {
   BACKGROUND_PACE_MS,
   BACKGROUND_RESUME_MS,
@@ -173,6 +173,8 @@ export interface RemoteServerOptions {
   uploadIdleMs?: number
   /** Bytes a device's uploads may hold unwritten, MAX_UNWRITTEN unless a test lowers it. */
   maxUnwritten?: number
+  /** The free bytes on the upload folder's disk, as the system says unless a test does. */
+  uploadFreeSpace?: (folder: string) => Promise<number | null>
   /** A port to the agent host for a device's session, or null while the agent host is down. */
   openAgentPort(device: PortDevice): Promise<PortChannel | null>
   /** Whether devices may use the terminal from the start; they may not when absent. */
@@ -1041,6 +1043,8 @@ class DeviceSession {
   private asked = 0
   /** Media reads being authorized or streamed. */
   private mediaReads = 0
+  /** The upload files each request handed the agent host, until it answers. */
+  private readonly handed = new Map<number, string[]>()
   /** Whether uploads stopped reading the device until the disk catches up, on any connection. */
   private readingPaused = false
   /** The sessions the device last said it shows in front, and the pace it last asked for. */
@@ -1088,6 +1092,7 @@ class DeviceSession {
         },
       },
       ...(options.uploadIdleMs ? { idleMs: options.uploadIdleMs } : {}),
+      ...(options.uploadFreeSpace ? { freeSpace: options.uploadFreeSpace } : {}),
       cancelled: (stream, error) => {
         options.log('warn', `Device ${device.id}'s upload failed: ${error.message}`)
         this.send({ type: 'stream.cancel', stream, error } satisfies StreamCancel)
@@ -1153,6 +1158,7 @@ class DeviceSession {
     })
     port.onMessage((data) => {
       if (this.answered(data)) return
+      this.handedBack(data)
       this.forwards.observe(data)
       this.fromHost(data)
       this.toDevice(data)
@@ -1310,6 +1316,7 @@ class DeviceSession {
     this.server.forgetToken(this.token)
     this.token = null
     this.outbox.close()
+    this.handed.clear()
     this.uploads.closeAll()
     this.downloads.closeAll()
     this.forwards.close()
@@ -1481,6 +1488,7 @@ class DeviceSession {
     const refused =
       typeof method === 'string' &&
       (forbiddenToDevices(method, params) ||
+        namesUploadFile(method, params) ||
         REMOTE_HOST_ONLY.has(method) ||
         // A project's worktree setup is a command the host runs, so it needs the terminal's leave.
         (method === 'projects.setWorktreeSettings' && !this.server.terminal))
@@ -1568,20 +1576,34 @@ class DeviceSession {
     else reply({ type: 'response', id, result: answer.result })
   }
 
-  /** Puts the bytes of the uploads a request names in their places, then passes it on. */
+  /**
+   * Puts the uploads a request names in their places, then passes it on: an attachment's file as
+   * the name of its file in the upload folder, which the agent host takes from there unread, and
+   * any other upload as its bytes.
+   */
   private async withUploads(
     request: object,
     id: unknown,
     named: ReturnType<typeof findPlaces>,
   ): Promise<void> {
+    const { method, params } = request as { method?: unknown; params?: unknown }
+    const source =
+      method === 'attachments.add' ? (params as { source?: unknown } | null)?.source : undefined
+    const isFile = (place: Place): boolean => place.holder === source && place.key === 'bytes'
     // Each upload is claimed at once, so one named twice fails here and not later.
-    const claims = named.map(({ holder, key }) =>
-      this.uploads.claim((holder[key] as { $stream: unknown }).$stream),
-    )
+    const claims = named.map((place) => {
+      const stream = (place.holder[place.key] as { $stream: unknown }).$stream
+      return isFile(place) ? this.uploads.claimFile(stream) : this.uploads.claim(stream)
+    })
     const settled = await Promise.allSettled(claims)
-    if (!this.live) return
+    const files = named.flatMap((place, index) => {
+      const result = settled[index]!
+      return isFile(place) && result.status === 'fulfilled' ? [result.value as string] : []
+    })
     const failed = settled.find((result) => result.status === 'rejected')
-    if (failed) {
+    if (!this.live || failed || typeof id !== 'number') {
+      this.uploads.settled(files)
+      if (!this.live || !failed) return
       const reason = failed.reason
       const error: PortError =
         reason instanceof UploadError
@@ -1590,10 +1612,25 @@ class DeviceSession {
       if (typeof id === 'number') this.send({ type: 'error', id, error })
       return
     }
-    named.forEach(({ holder, key }, index) => {
-      holder[key] = (settled[index] as PromiseFulfilledResult<ArrayBuffer>).value
+    named.forEach((place, index) => {
+      const value = (settled[index] as PromiseFulfilledResult<string | ArrayBuffer>).value
+      if (!isFile(place)) return void (place.holder[place.key] = value)
+      delete place.holder.bytes
+      place.holder.upload = value
     })
+    if (files.length > 0) this.handed.set(id, files)
     this.forward(request)
+  }
+
+  /** The agent host answered a request that handed it files: what it left of them goes. */
+  private handedBack(data: unknown): void {
+    if (this.handed.size === 0 || typeof data !== 'object' || data === null) return
+    const { type, id } = data as Record<string, unknown>
+    if ((type !== 'response' && type !== 'error') || typeof id !== 'number') return
+    const files = this.handed.get(id)
+    if (!files) return
+    this.handed.delete(id)
+    this.uploads.settled(files)
   }
 
   private forward(request: object): void {
