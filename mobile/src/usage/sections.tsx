@@ -46,6 +46,7 @@ import {
   type TrendBar,
   type TrendUnit,
 } from './model'
+import { modelTitle } from './modelTitle'
 import {
   agoText,
   barText,
@@ -451,7 +452,14 @@ export function Breakdown(props: {
   const lines = [
     ...rows.map((row) => ({
       key: row.key,
-      name: row.name ?? (grouping === 'model' ? '未知模型' : '无项目'),
+      name:
+        row.name === null
+          ? grouping === 'model'
+            ? '未知模型'
+            : '无项目'
+          : grouping === 'model'
+            ? modelTitle(row.name)
+            : row.name,
       value: row.value,
     })),
     ...(rest ? [{ key: '__rest', name: `其他 ${rest.count} 个`, value: rest.value }] : []),
@@ -915,7 +923,7 @@ const styles = StyleSheet.create({
   grouping: { width: 160 },
   rows: { gap: space.lg },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  rowName: { width: '28%' },
+  rowName: { width: '32%' },
   track: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3, minWidth: 6 },
   rowShare: { width: 44, textAlign: 'right', fontVariant: ['tabular-nums'] },

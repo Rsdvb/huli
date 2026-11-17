@@ -95,7 +95,13 @@ export function FloatingHeader(props: { header: CollapsingHeader; children: Reac
         {mode === 'liquid' ? (
           // No bar with Liquid Glass, as iOS 26 has none: the controls float as glass of their
           // own, over a soft fade once content scrolls under them.
-          <ScrollEdge color={c.bg} height={props.header.height + space.md} />
+          // Nearly opaque down to the controls' bottom, then a short fade: a tab's charts and
+          // numbers scrolling under the bar must not read through its controls.
+          <ScrollEdge
+            color={c.bg}
+            height={props.header.height + space.xxl}
+            solid={(props.header.height - space.xs) / (props.header.height + space.xxl)}
+          />
         ) : Platform.OS === 'ios' && mode === 'blur' ? (
           <BlurView
             tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
