@@ -1006,7 +1006,9 @@ export default function SessionScreen() {
           : {})}
         right={
           <View ref={moreAnchor} collapsable={false}>
-            <NativeMenu source={{ root: 'more-menu', pages }} disabled={!summary}>
+            {/* Our popover, not the system's menu: a system menu cannot hold each row's count on
+                its right, as 文件 1 and 改动 没有改动 read in Kettu. */}
+            <NativeMenu source={{ root: 'more-menu', pages }} disabled>
               <RoundButton
                 tone="glass"
                 size={44}
