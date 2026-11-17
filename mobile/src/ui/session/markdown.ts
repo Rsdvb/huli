@@ -20,13 +20,13 @@ export interface ListItem {
 export type Block =
   | { kind: 'heading'; level: number; text: string }
   | { kind: 'para'; text: string }
-  | { kind: 'code'; lang: string; text: string; open: boolean }
+  | { kind: 'code'; lang: string; text: string; open: boolean; meta: string }
   | { kind: 'list'; ordered: boolean; start: number; items: ListItem[] }
   | { kind: 'quote'; blocks: Block[] }
   | { kind: 'table'; head: string[]; align: Align[]; rows: string[][] }
   | { kind: 'rule' }
 
-const FENCE = /^(\s*)(`{3,}|~{3,})\s*([^\s`]*)/
+const FENCE = /^(\s*)(`{3,}|~{3,})\s*([^\s`]*)([^`]*)$/
 const HEADING = /^\s{0,3}(#{1,6})(?:\s+(.*?))?\s*#*\s*$/
 const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/
 const QUOTE = /^\s{0,3}>\s?(.*)$/
@@ -125,7 +125,13 @@ function blocks(lines: string[]): Block[] {
         }
         code.push(dedent(body, indent))
       }
-      out.push({ kind: 'code', lang: fence[3] ?? '', text: code.join('\n'), open: !closed })
+      out.push({
+        kind: 'code',
+        lang: fence[3] ?? '',
+        text: code.join('\n'),
+        open: !closed,
+        meta: (fence[4] ?? '').trim(),
+      })
       i = closed ? j + 1 : j
       continue
     }
