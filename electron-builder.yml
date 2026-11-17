@@ -37,8 +37,11 @@ npmRebuild: false
 # debug mode (--debug) opens its inspectors from code instead, which the fuse leaves working.
 electronFuses:
   enableNodeCliInspectArguments: false
-# Huli: a personal build that publishes nowhere until its own release channel is set up.
-publish: null
+# Huli: only so that electron-builder writes the update files; huli-build.yml signs and uploads
+# them itself, and the app reads its own channel (src/main/update-sources.ts).
+publish:
+  provider: generic
+  url: https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996/latest/download
 
 mac:
   category: public.app-category.developer-tools
