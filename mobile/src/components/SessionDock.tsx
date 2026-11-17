@@ -22,6 +22,7 @@ import {
   type ConfigControl,
   type ModeLook,
 } from './ConfigMenus'
+import { optionName, shortModelName } from '../ui/session/optionText'
 
 function promptText(item: QueuedPrompt): string {
   return item.content
@@ -61,12 +62,23 @@ export function slotOf(
 ): ConfigSlot | null {
   const option = optionOf(config, category)
   if (!option) return null
-  const name = shownChoice(option)?.name ?? String(option.value)
+  const choice = shownChoice(option)
+  const name = choice?.name ?? String(option.value)
   return {
     option,
-    name: category === 'model' ? modelName(name) : name,
+    name:
+      category === 'model' ? shortModelName(choice ?? { name: modelName(name) }) : optionName(name),
     locked: !!option.idleOnly && running,
   }
+}
+
+/** A mode's name short enough for the composer's pill. */
+const MODE_SHORT: Record<ModeLook, string> = {
+  asks: '询问',
+  edits: '接受编辑',
+  plan: '计划',
+  auto: '自动',
+  full: '完全访问',
 }
 
 export function useSessionConfig(
@@ -112,21 +124,26 @@ export function ModeButton(props: {
   anchor: RefObject<ViewHandle | null>
   labelled?: boolean
 }) {
-  const { c, s } = useSessionTokens()
+  const { c } = useSessionTokens()
   const { mode } = props
   if (!mode) return null
   const full = mode.look === 'full'
+  // Full access is a choice, not a fault: a red shield on the usual fill, never an alarm.
   const color = full ? c.danger : c.textSecondary
   const icon = props.busy ? (
     <ActivityIndicator size="small" color={c.textSecondary} />
   ) : (
-    <Icon icon={MODE_ICON[mode.look]} size={18} color={color} />
+    <Icon
+      icon={MODE_ICON[mode.look]}
+      size={18}
+      color={color}
+      weight={full ? 'semibold' : undefined}
+    />
   )
   return (
-    <View ref={props.anchor} collapsable={false}>
+    <View ref={props.anchor} collapsable={false} style={props.labelled ? styles.modeOuter : null}>
       {props.labelled ? (
         <PressScale
-          scale={0.96}
           onPress={props.onPress}
           disabled={props.disabled}
           accessibilityRole="button"
@@ -134,26 +151,22 @@ export function ModeButton(props: {
           style={[
             styles.modePill,
             {
-              backgroundColor: full ? s.dangerSoft : c.fill,
+              backgroundColor: c.fill,
               opacity: props.disabled ? 0.38 : mode.locked ? 0.5 : 1,
             },
           ]}
         >
           {icon}
           <Text style={[styles.modeText, { color: full ? c.danger : c.text }]} numberOfLines={1}>
-            {mode.name}
+            {MODE_SHORT[mode.look]}
           </Text>
         </PressScale>
       ) : (
         <RoundButton
-          tone={full ? 'warning' : 'fill'}
           onPress={props.onPress}
           disabled={props.disabled}
           accessibilityLabel={`权限模式：${mode.name}`}
-          style={[
-            full ? { backgroundColor: s.dangerSoft } : null,
-            mode.locked ? { opacity: 0.5 } : null,
-          ]}
+          style={mode.locked ? { opacity: 0.5 } : null}
         >
           {icon}
         </RoundButton>
@@ -198,7 +211,7 @@ export function ModelChip(props: {
             <Text style={{ color: c.textSecondary, fontWeight: '400' }}> · 下条消息起</Text>
           ) : props.effort ? (
             <Text style={{ color: c.textSecondary, fontWeight: '400' }}>
-              {label ? ' ' : ''}
+              {label ? ' · ' : ''}
               {props.effort}
             </Text>
           ) : null}
@@ -332,14 +345,16 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   chipOuter: { flexShrink: 1, minWidth: 0 },
+  modeOuter: { flexShrink: 1, minWidth: 40 },
   modePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 6,
     height: 40,
     borderRadius: 20,
-    paddingHorizontal: 13,
-    maxWidth: 200,
+    paddingHorizontal: 12,
+    maxWidth: 140,
+    overflow: 'hidden',
   },
   modeText: { fontSize: 15, fontWeight: '500', flexShrink: 1 },
   chipText: { fontSize: 15, fontWeight: '600', flexShrink: 1 },

@@ -10,6 +10,7 @@ import { booleanConfigValue, isConfigValue, type ConfigOption } from '@shared/th
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { AgentGlyph, G, type IconSpec } from '../ui/session/icons'
 import { limitColor, planName, tightestLimit, windowName } from '../ui/session/limits'
+import { optionDescription, optionName } from '../ui/session/optionText'
 import type { MenuEntry, MenuPage } from '../ui/session/Popover'
 import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
@@ -75,7 +76,7 @@ export const MODE_ICON: Record<ModeLook, IconSpec> = {
   edits: G.pencil,
   plan: G.eye,
   auto: G.shieldCheck,
-  full: G.warning,
+  full: G.shieldAlert,
 }
 
 const LOOKS: Record<string, ModeLook> = {
@@ -114,9 +115,9 @@ export function modePage(control: ConfigControl): MenuPage | null {
   const full = listed.filter((c) => isFullAccessMode(c.value))
   const row = (choice: Choice): MenuEntry => ({
     key: choice.value,
-    label: choice.name,
+    label: optionName(choice.name),
     icon: MODE_ICON[modeLook(choice.value)],
-    ...(choice.description ? { subtitle: choice.description } : {}),
+    ...(choice.description ? { subtitle: optionDescription(choice.description) } : {}),
     checked: choice.value === current,
     destructive: isFullAccessMode(choice.value),
     disabled: locked,
@@ -137,7 +138,9 @@ const isUltracode = (o: ConfigOption) => /ultracode/i.test(o.id)
 
 function switchHint(option: ConfigOption, locked: boolean): string | undefined {
   if (locked) return BETWEEN_TURNS
-  if (option.value !== 'default') return option.description
+  if (option.value !== 'default') {
+    return option.description ? optionDescription(option.description) : undefined
+  }
   return option.defaultValue === true
     ? '跟随 Agent 的设置：开'
     : option.defaultValue === false
@@ -170,7 +173,7 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     for (const choice of listed) {
       entries.push({
         key: `model:${choice.value}`,
-        label: modelName(choice.name),
+        label: optionName(modelName(choice.name)),
         lead,
         checked: choice.value === current?.value,
         disabled: locked,
@@ -203,7 +206,7 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
             accessibilityLabel={effort.name}
           >
             <SegmentedControl
-              segments={levels.map((l) => ({ key: l.value, label: l.name }))}
+              segments={levels.map((l) => ({ key: l.value, label: optionName(l.name) }))}
               value={shown ?? ''}
               onChange={(value) => control.set(effort, value)}
             />
@@ -218,7 +221,7 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     const hint = switchHint(option, locked)
     entries.push({
       key: `switch:${option.id}`,
-      label: option.name,
+      label: optionName(option.name),
       icon: isFast(option) ? G.bolt : isUltracode(option) ? G.layers : G.gear,
       ...(hint ? { subtitle: hint } : {}),
       toggle: booleanConfigValue(option) === true,
@@ -259,7 +262,7 @@ export function moreModelsPage(control: ConfigControl, agentId: string): MenuPag
     title: '更多模型',
     entries: older.map((choice) => ({
       key: choice.value,
-      label: modelName(choice.name),
+      label: optionName(modelName(choice.name)),
       ...(choice.description ? { subtitle: choice.description } : {}),
       lead: <AgentGlyph agentId={agentId} size={18} />,
       checked: choice.value === current,
@@ -350,7 +353,7 @@ function defaultModel(options: AgentOptions | undefined): string | null {
   if (!model) return null
   const value = options.remembered[model.id] ?? model.value
   const choice = model.choices.find((c) => c.value === value) ?? shownChoice(model)
-  return choice ? modelName(choice.name) : null
+  return choice ? optionName(modelName(choice.name)) : null
 }
 
 export function agentsPage(props: {
@@ -377,7 +380,7 @@ export function agentsPage(props: {
         label: agent.name,
         lead: <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={20} />,
         ...(model ? { subtitle: model } : {}),
-        trail:
+        below:
           left !== null && limit ? (
             <View style={styles.left}>
               <UsageRing
@@ -403,6 +406,6 @@ export function agentsPage(props: {
 
 const styles = StyleSheet.create({
   effort: { paddingHorizontal: 4, paddingVertical: 4 },
-  left: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  left: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
   leftText: { fontSize: 13, fontVariant: ['tabular-nums'] },
 })

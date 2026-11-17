@@ -43,19 +43,37 @@ export function limitColor(limit: PlanLimit, c: Palette): string {
   return tone === 'critical' ? c.danger : tone === 'high' ? c.warning : c.tint
 }
 
+// As the desktop's zh-CN catalog names them (planWindowInText in host.json).
 const WINDOW_NAMES: Record<string, string> = {
   five_hour: '5 小时',
-  seven_day: '7 天',
-  seven_day_opus: '7 天 Opus',
-  seven_day_sonnet: '7 天 Sonnet',
-  monthly: '本月',
-  annual: '本年',
+  seven_day: '每周',
+  seven_day_opus: 'Opus 每周',
+  seven_day_sonnet: 'Sonnet 每周',
+  monthly: '每月',
+  annual: '每年',
+  overage: '额外用量',
 }
 
-/** A window's short name: 「7 天」, or the agent's own label for one the phone does not know. */
+/** An agent's own English label in Chinese where its shape is known: 「Fable 每周」「5 小时」. */
+function labelName(label: string): string {
+  const text = label.trim()
+  const weekly = /^weekly(?: · (.+))?$/i.exec(text)
+  if (weekly) return weekly[1] ? `${weekly[1]} 每周` : '每周'
+  const span = /^(\d+)-(minute|hour|day)(?: · (.+))?$/i.exec(text)
+  if (span) {
+    const unit = { minute: '分钟', hour: '小时', day: '天' }[span[2]!.toLowerCase()]
+    return `${span[3] ? `${span[3]} ` : ''}${span[1]} ${unit}`
+  }
+  if (/^monthly$/i.test(text)) return '每月'
+  if (/^(annual|yearly)$/i.test(text)) return '每年'
+  return text
+}
+
+/** A window's short name: 「每周」, or the agent's own label for one the phone does not know. */
 export function windowName(limit: PlanLimit): string {
   return (
-    WINDOW_NAMES[limit.window] ?? (limit.models?.length ? limit.models.join('、') : limit.label)
+    WINDOW_NAMES[limit.window] ??
+    (limit.models?.length ? limit.models.join('、') : labelName(limit.label))
   )
 }
 
