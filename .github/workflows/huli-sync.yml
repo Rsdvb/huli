@@ -73,6 +73,25 @@ jobs:
           pnpm exec tsc -p cloud/tsconfig.json
           pnpm exec vitest run cloud/test
 
+      # The phone app runs Kettu's shared protocol code, so an upstream change can break it without
+      # touching a line of it: it must still type-check and bundle before the merge is pushed.
+      - name: Check the phone app
+        if: steps.merge.outputs.changed == 'true'
+        working-directory: mobile
+        run: |
+          npm ci --legacy-peer-deps --no-audit --no-fund
+          npx tsc --noEmit
+          npx expo export --platform ios --output-dir "$RUNNER_TEMP/expo-ios" > /dev/null
+          npx expo export --platform android --output-dir "$RUNNER_TEMP/expo-android" > /dev/null
+
+      - name: Report a failed check
+        if: failure() && steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "合并官方 Kettu 更新后检查没通过（$(date -u +%F)）" \
+            --body "$(printf '合并 KettuAI/Kettu 的 main 后，类型检查、Huli Cloud 测试或手机端检查失败，所以没有推送。\n\n日志：%s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+
       - name: Push
         if: steps.merge.outputs.changed == 'true'
         run: git push origin HEAD:main

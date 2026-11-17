@@ -139,6 +139,7 @@ jobs:
           distribution: temurin
           java-version: 21
       - run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - run: npx tsc --noEmit
       - name: Set the version
         run: |
           node -e '
