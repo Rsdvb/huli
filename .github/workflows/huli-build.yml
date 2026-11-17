@@ -1,0 +1,148 @@
+name: Huli build
+
+# Builds Huli for Windows and Linux on GitHub's runners, macOS on the owner's Mac once the
+# HULI_MAC_RUNNER variable is `true`, and Huli Cloud's bundle; then puts them all on a pre-release
+# of this private repository. The version is 0.<UTC date>.<run number>.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: huli-build
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        run: echo "version=0.$(date -u +%Y%m%d).${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    name: ${{ matrix.name }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            target: --win --x64
+          - name: Linux x64
+            os: ubuntu-24.04
+            target: --linux --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Set the version
+        shell: bash
+        run: npm pkg set "version=${{ needs.version.outputs.version }}"
+      - name: Rebrand
+        run: node tools/huli/rebrand.mjs
+      - name: Fetch Cua Driver
+        run: node tools/install/cua-driver.mjs
+      - run: pnpm build
+      - name: Fetch the device helpers
+        run: node tools/install/device-helpers.mjs
+      - name: Package
+        run: pnpm exec electron-builder ${{ matrix.target }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: huli-${{ matrix.os }}
+          path: |
+            dist/*-setup.exe
+            dist/*.AppImage
+            dist/latest*.yml
+          if-no-files-found: error
+
+  mac:
+    name: macOS arm64
+    needs: version
+    if: vars.HULI_MAC_RUNNER == 'true'
+    runs-on: [self-hosted, macOS, huli]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - run: npm pkg set "version=${{ needs.version.outputs.version }}"
+      - run: node tools/huli/rebrand.mjs
+      - run: node tools/install/cua-driver.mjs
+      - run: pnpm build
+      - run: node tools/install/device-helpers.mjs
+      - name: Package
+        run: pnpm exec electron-builder --mac --arm64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: huli-macos
+          path: |
+            dist/*.dmg
+            dist/latest*.yml
+          if-no-files-found: error
+
+  cloud:
+    name: Huli Cloud
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -p cloud/tsconfig.json
+      - run: pnpm exec vitest run cloud/test
+      - run: pnpm exec vite build -c vite.cloud.config.mts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: huli-cloud
+          path: |
+            cloud/dist/huli-cloud.mjs
+            cloud/deploy/install.sh
+          if-no-files-found: error
+
+  release:
+    needs: [version, desktop, mac, cloud]
+    if: >-
+      always() && needs.desktop.result == 'success' && needs.cloud.result == 'success' &&
+      (needs.mac.result == 'success' || needs.mac.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: huli-*
+      - name: Publish a pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir release
+          find artifacts -type f \( -name '*-setup.exe' -o -name '*.AppImage' -o -name '*.dmg' \
+            -o -name 'huli-cloud.mjs' -o -name 'install.sh' \) -exec cp {} release/ \;
+          (cd release && sha256sum * > SHA256SUMS.txt)
+          ls -l release
+          gh release create "v$VERSION" release/* --prerelease --target "$GITHUB_SHA" \
+            --title "Huli $VERSION" \
+            --notes "Kettu $(git ls-remote https://github.com/KettuAI/Kettu.git refs/heads/main | cut -c1-8) 合并后的自动编译。"

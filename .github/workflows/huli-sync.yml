@@ -1,0 +1,97 @@
+name: Huli sync
+
+# Once a day: merge Kettu's main into Huli's, check that Huli still type-checks and that Huli
+# Cloud's tests pass, push, then start a build. A conflict stops here and opens an issue instead.
+# Kettu's own workflows stay disabled in this repository, new ones included.
+on:
+  schedule:
+    - cron: '23 19 * * *' # 03:23 in Beijing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: huli-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      # A token that may push changes to workflow files, which Kettu's merges can carry; without
+      # one, GitHub's token is used and such a merge fails to push.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.HULI_SYNC_TOKEN || github.token }}
+
+      - name: Merge Kettu's main
+        id: merge
+        run: |
+          git config user.name 'huli-sync'
+          git config user.email 'huli-sync@users.noreply.github.com'
+          git remote add upstream https://github.com/KettuAI/Kettu.git
+          git fetch --no-tags upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo 'Already up to date with Kettu.'
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git merge --no-edit -m "huli: merge Kettu $(git rev-parse --short upstream/main)" upstream/main; then
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt"
+            git merge --abort
+            echo 'conflict=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Report the conflict
+        if: steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="$(sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/conflicts.txt")"
+          gh issue create --title "合并官方 Kettu 更新有冲突（$(date -u +%F)）" \
+            --body "$(printf '自动合并 KettuAI/Kettu 的 main 时有冲突，需要手动处理：\n\n%s\n' "$files")"
+          exit 1
+
+      - uses: pnpm/action-setup@v6
+        if: steps.merge.outputs.changed == 'true'
+      - uses: actions/setup-node@v7
+        if: steps.merge.outputs.changed == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Check
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm exec tsc -p cloud/tsconfig.json
+          pnpm exec vitest run cloud/test
+
+      - name: Push
+        if: steps.merge.outputs.changed == 'true'
+        run: git push origin HEAD:main
+
+      - name: Keep Kettu's own workflows disabled
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for file in .github/workflows/*.yml; do
+            name="$(basename "$file")"
+            case "$name" in
+              huli-*) ;;
+              *) gh workflow disable "$name" 2>/dev/null || true ;;
+            esac
+          done
+
+      - name: Build
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run huli-build.yml --ref main
