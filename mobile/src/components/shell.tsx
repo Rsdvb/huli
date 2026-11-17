@@ -18,6 +18,7 @@ import { linkStatusOf, platformOf, type LinkTone } from '../linkInfo'
 import type { SearchScope } from '../search'
 import { folder } from '../sessions'
 import { computerName } from '../store'
+import { GlassButton } from '../ui/Glass'
 import { haptic } from '../ui/haptics'
 import { Icon } from '../ui/Icon'
 import { IconButton } from '../ui/IconButton'
@@ -193,15 +194,18 @@ export function TopBar(props: {
       params: props.searchScope ? { scope: props.searchScope } : {},
     })
   }
+  // A grey disc of glass, as the reference app's account button.
   const avatar = (
-    <Press
+    <GlassButton
+      silent
+      elevated={false}
+      size={sizes.barAvatar}
+      tint={c.textTertiary}
       onPress={() => router.push('/settings')}
-      accessibilityRole="button"
       accessibilityLabel="账户与设置"
-      style={[styles.avatar, { backgroundColor: c.avatar, borderColor: c.borderStrong }]}
     >
-      <Icon name="person" size={17} color={c.textSecondary} />
-    </Press>
+      <Icon name="person" size={17} color={c.onAccent} />
+    </GlassButton>
   )
   // The OS mark with the link's dot at its top right, as the reference app draws it.
   const mark = (color?: string) => (
@@ -342,14 +346,6 @@ export function sessionFilterItem(s: SessionSummary) {
 }
 
 const styles = StyleSheet.create({
-  avatar: {
-    width: sizes.barAvatar,
-    height: sizes.barAvatar,
-    borderRadius: sizes.barAvatar / 2,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   markBox: { width: 16, height: 16 },
   statusDot: {
     position: 'absolute',
