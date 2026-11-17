@@ -1,17 +1,19 @@
-// What the phone attaches to a message: photos and files read here, photos scaled and re-encoded
-// first, then handed to the computer with `attachments.add`. The link sends their bytes ahead as
-// a byte stream of their own, and the host keeps each until a message names it.
+// What the phone attaches to a message: photos scaled and re-encoded here, pasted texts, and files
+// as they are, then handed to the computer with `attachments.add`. The link sends each ahead as a
+// byte stream of its own, a file read from disk a part at a time and never whole, and the host
+// keeps each until a message names it.
 
-import { File } from 'expo-file-system'
+import { File, FileMode } from 'expo-file-system'
 import { ImageManipulator, SaveFormat, type ImageRef } from 'expo-image-manipulator'
 import type { HostLink } from '@shared/remote/link'
+import { UploadSource } from '@shared/remote/upload-source'
 import {
-  ATTACHMENT_BYTES,
   ATTACHMENT_LIMIT,
   IMAGE_BYTES,
   IMAGE_SIDE,
   PROMPT_BYTES,
   THUMB_SIDE,
+  UPLOAD_FILE_BYTES,
   embedsText,
   promptShare,
 } from '@shared/attachments'
@@ -74,6 +76,8 @@ export interface PendingAttachment {
   thumb: string | null
   /** The bytes that go, once known. */
   size: number | null
+  /** The bytes sent so far while it uploads. */
+  sent?: number
   attachment: Attachment | null
   error: string | null
   /** A draft's attachment the computer no longer holds. */
@@ -94,25 +98,53 @@ export function isPhoto(mimeType: string | null | undefined): boolean {
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2).replace(/\.?0+$/, '')} GB`
 }
 
-const LIMIT_TEXT = formatBytes(ATTACHMENT_BYTES)
+const LIMIT_TEXT = formatBytes(UPLOAD_FILE_BYTES)
 
 /** A reason to show as it is. */
 class Refused extends Error {}
 
 /** Why a file cannot go before it is read, or null. */
 export function tooLarge(name: string, size: number | null): string | null {
-  if (size === null || size <= ATTACHMENT_BYTES) return null
-  return `「${name}」有 ${formatBytes(size)}，超过了单个附件 ${LIMIT_TEXT} 的上限。`
+  if (size === null || size <= UPLOAD_FILE_BYTES) return null
+  return `「${name}」有 ${formatBytes(size)}，单个附件最多 ${LIMIT_TEXT}。`
 }
 
-interface Prepared {
-  bytes: Uint8Array
+/**
+ * What goes to the computer: a photo or a text prepared in memory, or a file on disk, which is
+ * read a part at a time as it goes.
+ */
+export interface Prepared {
+  body: Uint8Array | { uri: string; size: number }
   mimeType: string
   name: string
   thumb: string | null
+}
+
+/** The bytes a prepared attachment sends. */
+export function preparedSize(prepared: Prepared): number {
+  return prepared.body instanceof Uint8Array ? prepared.body.byteLength : prepared.body.size
+}
+
+/** How much of a file is read at a time: a part, never the whole of a video. */
+const READ_BYTES = 256 * 1024
+
+/** A file on disk to upload as it is read, the same bytes each time the upload starts over. */
+function fileSource(uri: string, size: number, progress: (sent: number) => void): UploadSource {
+  return new UploadSource(
+    size,
+    () => {
+      const handle = new File(uri).open(FileMode.ReadOnly)
+      return {
+        read: (length) => handle.readBytes(Math.min(length, READ_BYTES)),
+        close: () => handle.close(),
+      }
+    },
+    progress,
+  )
 }
 
 /** `image` scaled down to fit `side` on its longer edge, or itself when it fits. */
@@ -168,7 +200,7 @@ async function preparePhoto(source: PickedSource): Promise<Prepared> {
     })
     new File(thumb.uri).delete()
     return {
-      bytes: bytes!,
+      body: bytes!,
       mimeType: png ? 'image/png' : 'image/jpeg',
       name: renamed(source.name, png ? 'png' : 'jpg'),
       thumb: thumb.base64 ? `data:image/jpeg;base64,${thumb.base64}` : null,
@@ -180,19 +212,23 @@ async function preparePhoto(source: PickedSource): Promise<Prepared> {
 
 async function prepareText(source: PickedSource): Promise<Prepared> {
   return {
-    bytes: new TextEncoder().encode(source.text ?? ''),
+    body: new TextEncoder().encode(source.text ?? ''),
     mimeType: 'text/plain',
     name: source.name,
     thumb: null,
   }
 }
 
+/** A file as it is on disk: only its size is read now, its bytes as they go. */
 async function prepareFile(source: PickedSource): Promise<Prepared> {
   const file = new File(source.uri)
-  const refused = tooLarge(source.name, file.size ?? source.size)
+  if (!file.exists) throw new Error(`${source.name} is gone`)
+  const size = file.size ?? source.size ?? 0
+  const refused = tooLarge(source.name, size)
   if (refused) throw new Refused(refused)
+  if (size === 0) throw new Refused(`「${source.name}」是空文件，没有内容可以发送。`)
   return {
-    bytes: await file.bytes(),
+    body: { uri: file.uri, size },
     mimeType: source.mimeType || 'application/octet-stream',
     name: source.name,
     thumb: null,
@@ -215,19 +251,43 @@ export async function prepare(source: PickedSource): Promise<Prepared> {
     const what = source.kind === 'image' ? '这张图片' : '这个文件'
     throw new Error(`没能读取「${source.name}」${what}。`)
   }
-  const refused = tooLarge(prepared.name, prepared.bytes.byteLength)
+  const refused = tooLarge(prepared.name, preparedSize(prepared))
   if (refused) throw new Refused(refused)
   return prepared
 }
 
-/** Hands the prepared bytes to the host, which answers with its record of them. */
-export async function upload(link: HostLink, prepared: Prepared): Promise<Attachment> {
+/** What a request names in place of the bytes, which the link sends ahead as it reads them. */
+export function uploadSource(prepared: Prepared, progress: (sent: number) => void): UploadSource {
+  const { body } = prepared
+  return body instanceof Uint8Array
+    ? UploadSource.of(body, progress)
+    : fileSource(body.uri, body.size, progress)
+}
+
+/** Thrown by an upload its caller gave up, as when its tile is removed. */
+export class UploadCancelled extends Error {}
+
+/**
+ * Hands what was prepared to the host, which answers with its record of it: a file streams from
+ * disk a part at a time, and `progress` hears how many bytes went, from 0 each time it starts.
+ */
+export async function upload(
+  link: HostLink,
+  prepared: Prepared,
+  options: { progress?: (sent: number) => void; signal?: AbortSignal } = {},
+): Promise<Attachment> {
+  const bytes = uploadSource(prepared, options.progress ?? (() => {}))
   try {
-    return (await link.request('attachments.add', {
-      source: { bytes: prepared.bytes, mimeType: prepared.mimeType, name: prepared.name },
-      thumb: prepared.thumb,
-    })) as Attachment
+    return (await link.request(
+      'attachments.add',
+      {
+        source: { bytes, mimeType: prepared.mimeType, name: prepared.name },
+        thumb: prepared.thumb,
+      },
+      options.signal,
+    )) as Attachment
   } catch (error) {
+    if ((error as { name?: string } | null)?.name === 'AbortError') throw new UploadCancelled()
     throw new Error(uploadError(error))
   }
 }
@@ -235,11 +295,16 @@ export async function upload(link: HostLink, prepared: Prepared): Promise<Attach
 /** A failed request's reason in words a person reads. */
 export function uploadError(error: unknown): string {
   const { code, message } = (error ?? {}) as { code?: string; message?: string }
+  if (message?.includes('dropped again')) return '上传时和电脑的连接又断开了，请重试。'
   if (code === 'host_restarted' || message?.includes('connection ended')) {
     return '和电脑的连接断开了，请重试。'
   }
+  if (message?.includes('free disk space')) return '电脑的磁盘空间不够放下这个文件。'
+  if (message?.includes('got shorter')) return '文件在上传时变了，请重新添加。'
   if (code === 'busy') return '电脑正忙，请稍后重试。'
-  if (message?.includes('at most')) return `附件太大了，单个最多 ${LIMIT_TEXT}。`
+  if (message?.includes('at most') || message?.includes('only an attachment')) {
+    return `附件太大了，单个附件最多 ${LIMIT_TEXT}。`
+  }
   if (message?.includes('UTF-8')) return '这个文本文件不是 UTF-8 编码，没法发送。'
   return message ? `上传失败：${message}` : '上传失败，请重试。'
 }
