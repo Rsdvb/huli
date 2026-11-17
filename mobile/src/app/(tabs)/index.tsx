@@ -263,7 +263,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       <EmptyState
         icon="message"
         title="还没有会话"
-        message="在手机上开一个，电脑上的智能体就会开始干活。"
+        message="在手机上开一个，电脑上的 Agent 就会开始干活。"
         action={connected ? { label: '新会话', onPress: () => router.push('/new') } : undefined}
       />
     )

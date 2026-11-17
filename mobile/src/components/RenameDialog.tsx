@@ -81,7 +81,7 @@ export function RenameDialog(props: {
           {error && <Text style={[typeScale.footnote, { color: c.danger }]}>{error}</Text>}
           {props.noReset ? null : (
             <Press onPress={() => void save(null)} disabled={saving} hitSlop={6} scale={false}>
-              <Text style={[typeScale.subhead, { color: c.tint }]}>用智能体起的标题</Text>
+              <Text style={[typeScale.subhead, { color: c.tint }]}>用 Agent 起的标题</Text>
             </Press>
           )}
           <View style={styles.buttons}>

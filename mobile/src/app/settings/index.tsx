@@ -125,7 +125,7 @@ export default function Settings() {
         body: '在电脑上的 Huli 里登录 Huli Cloud 后，这台 iPhone 才能收到通知。',
       }
     }
-    return { title: 'Huli', body: '在 iPhone 上看你电脑上的智能体在做什么，随时接着聊。' }
+    return { title: 'Huli', body: '在 iPhone 上看你电脑上的 Agent 在做什么，随时接着聊。' }
   })()
 
   const route = connected && address ? ROUTE_NAMES[routeKind(address)] : '未连接'
