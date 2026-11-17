@@ -354,6 +354,9 @@ export class Notifier {
    * it, or it ended. Its turn gets no other by push.
    */
   progressGone(deviceId: string): void {
+    const state = this.progressActivities.get(deviceId)
+    const progress = state && this.progress[state.sessionId]
+    if (state && progress) this.rememberTurn(deviceId, turnOf(state.sessionId, progress))
     this.dropProgress(deviceId)
   }
 

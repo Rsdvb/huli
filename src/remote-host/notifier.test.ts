@@ -223,6 +223,21 @@ describe("a turn's Live Activity started by push", () => {
     expect(front.progressJobs()).toMatchObject([{ action: 'start', state: { sessionId: 's2' } }])
   })
 
+  it('starts none for a turn whose activity the user removed', () => {
+    const t = setup({
+      activity: { start: START, progress: { token: FOLLOW, sessionId: 's1' } },
+      choices: { liveProgress: true },
+    })
+    t.notifier.setProgress({ s1: running({ startedAt: 10_000 }) })
+    expect(t.progressJobs()).toMatchObject([{ action: 'update' }])
+    t.notifier.progressGone('phone')
+    t.push.target!.activity = { start: START }
+    t.notifier.deviceChanged()
+    t.advance(120_000)
+    t.notifier.setProgress({ s1: running({ startedAt: 10_000, phase: 'edit' }) })
+    expect(t.progressJobs()).toHaveLength(1)
+  })
+
   it('keeps the activity of what waits from starting beside it', () => {
     const t = setup({ activity: { start: START }, choices: { liveProgress: true } })
     t.notifier.setProgress({ s1: running({ startedAt: 10_000, phase: 'approval', waiting: 1 }) })
