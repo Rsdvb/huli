@@ -1,10 +1,11 @@
-// A pushed or presented screen's floating bar: a round back or close button, the title in the
-// middle once the large title scrolls away, and an optional action on the right.
+// A pushed or presented screen's floating bar: a round glass back or close button, the title in
+// the middle once the large title scrolls away, and an optional action on the right.
 
 import type { ReactNode } from 'react'
 import { Animated, StyleSheet, View } from 'react-native'
 import { router } from 'expo-router'
-import { IconButton } from './IconButton'
+import { GlassButton } from './Glass'
+import { Icon } from './Icon'
 import { FloatingHeader, type CollapsingHeader } from './ScrollHeader'
 import { type as typeScale, useTokens } from './tokens'
 
@@ -21,13 +22,13 @@ export function NavBar(props: {
   const close = props.kind === 'close'
   return (
     <FloatingHeader header={props.header}>
-      <IconButton
-        icon={close ? 'close' : 'chevronLeft'}
-        size={44}
-        iconSize={close ? 18 : 20}
-        label={close ? '关闭' : '返回'}
+      <GlassButton
+        silent
+        accessibilityLabel={close ? '关闭' : '返回'}
         onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-      />
+      >
+        <Icon name={close ? 'close' : 'chevronLeft'} size={close ? 18 : 20} color={c.text} />
+      </GlassButton>
       <View style={styles.titleWrap} pointerEvents="none">
         <Animated.Text
           numberOfLines={1}
