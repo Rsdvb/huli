@@ -23,6 +23,7 @@ import { Composer } from '../../components/Composer'
 import { ThreadRow } from '../../components/EntryView'
 import { PermissionCard } from '../../components/PermissionCard'
 import { useSessionActions } from '../../components/SessionActions'
+import { useSessionPane } from '../../components/SessionPane'
 import { ModeButton, ModelChip, QueueStack, useSessionConfig } from '../../components/SessionDock'
 import { useHost, useLink } from '../../host'
 import { errorText, folder } from '../../sessions'
@@ -51,7 +52,10 @@ const AWAY = 280
 const renderRow: ListRenderItem<Row> = ({ item }) => <ThreadRow row={item} />
 
 export default function SessionScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const params = useLocalSearchParams<{ id: string }>()
+  // On iPad the same screen shows as the pane beside the session list (SessionPane.tsx).
+  const pane = useSessionPane()
+  const id = pane?.id ?? params.id
   const { c } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const headerHeight = useHeaderHeight()
@@ -62,7 +66,7 @@ export default function SessionScreen() {
   const changes = useSessionChanges(id)
   const actions = useSessionActions(
     'session',
-    () => router.back(),
+    () => (pane ? pane.close() : router.back()),
     () =>
       changes.folder && changes.repo !== false
         ? [
@@ -144,7 +148,9 @@ export default function SessionScreen() {
                 })
                 .then((made) => {
                   haptic.success()
-                  router.push(`/session/${(made as SessionSummary).id}`)
+                  const madeId = (made as SessionSummary).id
+                  if (pane) pane.open(madeId)
+                  else router.push(`/session/${madeId}`)
                 })
                 .catch((error: unknown) => Alert.alert('没能分叉', errorText(error)))
             },
@@ -152,7 +158,7 @@ export default function SessionScreen() {
         ],
       )
     },
-    [forkAtMessage, link, id],
+    [forkAtMessage, link, id, pane],
   )
 
   const context = useMemo<SessionRowsContext>(
@@ -229,7 +235,7 @@ export default function SessionScreen() {
 
   return (
     <SessionRows.Provider value={context}>
-      <Stack.Screen options={{ headerShown: false }} />
+      {pane ? null : <Stack.Screen options={{ headerShown: false }} />}
       <KeyboardAvoidingView style={[styles.root, { backgroundColor: c.bg }]} behavior="padding">
         <View style={{ flex: 1 }}>
           {body}

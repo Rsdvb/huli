@@ -319,7 +319,7 @@ export default function Routines() {
   const examples = routineExamples()
 
   return (
-    <Screen>
+    <Screen readable>
       <Animated.ScrollView
         ref={scroll}
         {...header.scrollProps}

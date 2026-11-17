@@ -1,11 +1,14 @@
 // The four tabs under their floating glass bar, once the phone has a computer; pairing until then.
+// The tabs belong to the active computer: switching computers mounts them afresh, so no tab shows
+// one computer's lists while the other's load.
 
-import { View } from 'react-native'
+import { useWindowDimensions, View } from 'react-native'
 import { router } from 'expo-router'
 import { Tabs } from 'expo-router/js-tabs'
 import { useHost } from '../../host'
 import { PairScreen } from '../../screens/PairScreen'
 import { GlassTabBar, type TabItem } from '../../ui/GlassTabBar'
+import { LIST_COLUMN, READABLE_WIDTH, SPLIT_MIN_WIDTH } from '../../ui/layout'
 import { Screen } from '../../ui/Screen'
 import { SkeletonRows } from '../../ui/Skeleton'
 import { space, useTokens } from '../../ui/tokens'
@@ -20,6 +23,8 @@ const TABS: Record<string, TabItem> = {
 export default function TabsLayout() {
   const { c } = useTokens()
   const host = useHost()
+  const { width } = useWindowDimensions()
+  const wide = width >= SPLIT_MIN_WIDTH
 
   if (host.phase === 'loading') {
     return (
@@ -42,14 +47,25 @@ export default function TabsLayout() {
   const connected = host.state.kind === 'connected'
   return (
     <Tabs
-      tabBar={(props) => (
-        <GlassTabBar
-          {...props}
-          items={TABS}
-          onPlus={() => router.push('/new')}
-          plusDisabled={!connected}
-        />
-      )}
+      key={host.host?.id}
+      tabBar={(props) => {
+        const focused = props.state.routes[props.state.index]?.name
+        // On a wide window the bar sits under the session list, or under the centered column.
+        const frame = !wide
+          ? undefined
+          : focused === 'index'
+            ? { left: 0, width: LIST_COLUMN }
+            : { left: (width - Math.min(width, READABLE_WIDTH)) / 2, width: READABLE_WIDTH }
+        return (
+          <GlassTabBar
+            {...props}
+            items={TABS}
+            onPlus={() => router.push('/new')}
+            plusDisabled={!connected}
+            {...(frame ? { frame } : {})}
+          />
+        )
+      }}
       screenOptions={{
         headerShown: false,
         animation: 'fade',

@@ -9,7 +9,7 @@ import { AgentAvatar, type AvatarBadge } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
-import { space, type as typeScale, useTokens, type Palette } from '../ui/tokens'
+import { radius, space, type as typeScale, useTokens, type Palette } from '../ui/tokens'
 
 const BADGES: Record<SessionState, AvatarBadge> = {
   waiting: 'waiting',
@@ -40,6 +40,8 @@ export const SessionRow = memo(function SessionRow(props: {
   time?: number
   start?: SwipeAction
   end?: SwipeAction
+  /** The session open beside the list (iPad). */
+  selected?: boolean
   onPress(): void
   onLongPress(): void
 }) {
@@ -58,7 +60,8 @@ export const SessionRow = memo(function SessionRow(props: {
       accessibilityRole="button"
       accessibilityLabel={`${sessionTitle(s)}，${place}${state ? `，${state.text}` : ''}`}
       accessibilityHint="长按查看更多操作"
-      style={styles.row}
+      accessibilityState={props.selected ? { selected: true } : undefined}
+      style={[styles.row, props.selected && [styles.selected, { backgroundColor: c.fillStrong }]]}
     >
       <AgentAvatar
         agentId={s.agentId}
@@ -126,6 +129,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xl,
     paddingVertical: space.md,
   },
+  selected: { marginHorizontal: space.sm, paddingHorizontal: space.md, borderRadius: radius.md },
   body: { flex: 1, gap: 3 },
   titleLine: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
   title: { flex: 1 },

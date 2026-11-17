@@ -6,6 +6,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import { router } from 'expo-router'
+import { useSessionPane } from '../../components/SessionPane'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
 import { RoundButton } from './Press'
@@ -36,6 +37,8 @@ export function GlassHeader(props: {
 }) {
   const { c, scheme } = useSessionTokens()
   const insets = useSafeAreaInsets()
+  // In the iPad split's pane there is nothing to go back to; the button empties the pane.
+  const pane = useSessionPane()
   const top = props.modal && Platform.OS === 'ios' ? 8 : insets.top
   const glass = props.floating && Platform.OS === 'ios'
   return (
@@ -61,10 +64,10 @@ export function GlassHeader(props: {
         <RoundButton
           tone="glass"
           size={44}
-          onPress={props.modal ? () => router.back() : goBack}
-          accessibilityLabel={props.modal ? '关闭' : '返回'}
+          onPress={props.modal ? () => router.back() : (pane?.close ?? goBack)}
+          accessibilityLabel={props.modal || pane ? '关闭' : '返回'}
         >
-          {props.modal ? (
+          {props.modal || pane ? (
             <Icon icon={G.close} size={17} color={c.text} weight="semibold" />
           ) : (
             <Icon
