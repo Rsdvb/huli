@@ -113,6 +113,7 @@ export function listTime(ms: number, now = Date.now()): string {
 /** The greeting for the hour. */
 export function greeting(now = new Date()): string {
   const h = now.getHours()
+  if (h < 5) return '夜深了'
   if (h >= 5 && h < 12) return '早上好'
   if (h >= 12 && h < 18) return '下午好'
   return '晚上好'
