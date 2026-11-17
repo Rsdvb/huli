@@ -1,7 +1,9 @@
 // What keeps the side panel's browser to plain web pages: one partition for every session, with
-// every permission refused, downloads stopped, and requests to Kettu's own surfaces cancelled.
+// every permission refused, downloads saved only where the user picks, and requests to Kettu's own
+// surfaces cancelled.
 
-import type { Session, WebContents } from 'electron'
+import { basename, join } from 'node:path'
+import { app, type Session, type WebContents } from 'electron'
 import { refuseRequests } from '../request-filter'
 
 /** A request that never leaves the partition: a local file or one of Kettu's own schemes. */
@@ -74,8 +76,8 @@ export function stripElectronUserAgent(userAgent: string): string {
 }
 
 export interface BrowserPolicyDeps {
-  /** A page asked to download; the pane tells the user and points at the system browser. */
-  downloadBlocked(contents: WebContents): void
+  /** A download the user saved, or one that failed; the pane says which, with the file's name. */
+  downloadDone(contents: WebContents, name: string, saved: boolean): void
 }
 
 /** The partition's rules, set once for every page. */
@@ -95,9 +97,17 @@ export class BrowserPolicy {
     this.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
     this.session.setPermissionCheckHandler(() => false)
     this.session.setDevicePermissionHandler(() => false)
-    this.session.on('will-download', (event, _item, contents) => {
-      event.preventDefault()
-      this.deps.downloadBlocked(contents)
+    // Huli: with no save path set, Electron asks in the system's save dialog, so a download lands
+    // on disk only where the user chooses, whether the user or an agent clicked it.
+    this.session.on('will-download', (_event, item, contents) => {
+      item.setSaveDialogOptions({
+        defaultPath: join(app.getPath('downloads'), item.getFilename()),
+      })
+      item.once('done', (_done, state) => {
+        if (state === 'cancelled' || contents.isDestroyed()) return
+        const name = basename(item.getSavePath() || item.getFilename())
+        this.deps.downloadDone(contents, name, state === 'completed')
+      })
     })
     refuseRequests(this.session, (details) => isForbiddenRequest(details.url, this.servicePort))
   }

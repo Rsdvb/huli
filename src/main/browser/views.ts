@@ -187,7 +187,7 @@ export class BrowserViews {
 
   constructor(private readonly deps: BrowserViewsDeps) {
     this.policy = new BrowserPolicy(this.browserSession, {
-      downloadBlocked: (contents) => this.downloadBlocked(contents.id),
+      downloadDone: (contents, name, saved) => this.downloadDone(contents.id, name, saved),
     })
     this.policy.install()
     this.origins = new BrowserOrigins(deps.origins, {
@@ -1347,10 +1347,10 @@ export class BrowserViews {
     }, OVERLAY_KEEP_MS)
   }
 
-  private downloadBlocked(contentsId: number): void {
+  private downloadDone(contentsId: number, name: string, saved: boolean): void {
     for (const tab of this.tabs.values()) {
       if (tab.view?.webContents.id !== contentsId) continue
-      tab.notice = { kind: 'download-blocked' }
+      tab.notice = { kind: saved ? 'downloaded' : 'download-failed', name }
       this.emitTab(tab)
       return
     }

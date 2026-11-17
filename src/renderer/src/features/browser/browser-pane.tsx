@@ -345,7 +345,7 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
   )
 }
 
-/** A blocked download, a page lost to make room, or a page that did not load, crashed or hangs. */
+/** A download saved or failed, or a page that did not load, crashed or hangs. */
 function Notice({ notice, sessionId }: { notice: BrowserNotice; sessionId: string | null }) {
   const { t } = useTranslation('browser')
   const open = () => {
@@ -355,18 +355,19 @@ function Notice({ notice, sessionId }: { notice: BrowserNotice; sessionId: strin
     <div role="status" className="kp-origin" data-answered="" data-denied="">
       <span className="kp-origin__text">
         <span className="truncate">
-          {notice.kind === 'download-blocked' && t('notice.downloadBlocked')}
+          {notice.kind === 'downloaded' && t('notice.downloaded', { name: notice.name })}
+          {notice.kind === 'download-failed' && t('notice.downloadFailed', { name: notice.name })}
           {notice.kind === 'load-failed' && t('notice.loadFailed', { error: notice.description })}
           {notice.kind === 'crashed' && t('notice.crashed')}
           {notice.kind === 'unresponsive' && t('notice.unresponsive')}
         </span>
       </span>
-      {notice.kind === 'download-blocked' && (
+      {notice.kind === 'download-failed' && (
         <button type="button" onClick={open} className="kp-link">
           {t('actions.openExternal')}
         </button>
       )}
-      {notice.kind !== 'download-blocked' && sessionId && (
+      {notice.kind !== 'download-failed' && notice.kind !== 'downloaded' && sessionId && (
         <button
           type="button"
           onClick={() => void window.kettu.browser.reload(sessionId)}

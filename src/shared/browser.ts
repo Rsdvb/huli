@@ -14,11 +14,12 @@ export interface BrowserBounds {
 }
 
 /**
- * Something the pane says under its header: a download it refused, a page that did not load, or
- * one whose renderer crashed or stopped responding.
+ * Something the pane says under its header: a download saved or failed, a page that did not load,
+ * or one whose renderer crashed or stopped responding.
  */
 export type BrowserNotice =
-  | { kind: 'download-blocked' }
+  | { kind: 'downloaded'; name: string }
+  | { kind: 'download-failed'; name: string }
   | { kind: 'load-failed'; description: string }
   | { kind: 'crashed' }
   | { kind: 'unresponsive' }

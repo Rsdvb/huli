@@ -20,7 +20,8 @@ Code (kept small so upstream merges stay clean):
 | `src/main/user-data.ts` | development data folder `Huli Dev` |
 | `src/main/index.ts`, `src/main/computer-use.ts` | app user model id `local.huli.app` |
 | `package.json` | productName `Huli` (data folder `%APPDATA%\Huli`), version 0.1.0 |
-| `electron-builder.yml` | appId `local.huli.app`, productName `Huli`, `publish: null` |
+| `electron-builder.yml` | appId `local.huli.app`, productName `Huli`, `publish` is Huli's update channel (generic) |
+| `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json` | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved |
 
 Generated before a build (not hand edits):
 

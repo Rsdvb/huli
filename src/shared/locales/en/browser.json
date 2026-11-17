@@ -127,7 +127,8 @@
     "closeTab": "Close {{name}}"
   },
   "notice": {
-    "downloadBlocked": "Downloads are blocked in Kettu's browser",
+    "downloaded": "Downloaded {{name}}",
+    "downloadFailed": "{{name}} did not download",
     "loadFailed": "This page did not load: {{error}}",
     "crashed": "This page crashed",
     "unresponsive": "This page stopped responding"

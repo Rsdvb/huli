@@ -127,7 +127,8 @@
     "closeTab": "关闭 {{name}}"
   },
   "notice": {
-    "downloadBlocked": "Kettu 的浏览器会拦截下载",
+    "downloaded": "已下载 {{name}}",
+    "downloadFailed": "{{name}} 没有下载成功",
     "loadFailed": "此页面未能加载：{{error}}",
     "crashed": "此页面已崩溃",
     "unresponsive": "此页面没有响应"
