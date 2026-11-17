@@ -170,9 +170,7 @@ export function useSessions(): Map<string, SessionSummary> {
 
 /** One session's summary; changes only when that one does. */
 export function useSession(id: string | null | undefined): SessionSummary | undefined {
-  return useHostSelector(
-    useCallback((d: HostData) => (id ? d.sessions.get(id) : undefined), [id]),
-  )
+  return useHostSelector(useCallback((d: HostData) => (id ? d.sessions.get(id) : undefined), [id]))
 }
 
 export function useAgents(): Map<string, AgentStatus> {

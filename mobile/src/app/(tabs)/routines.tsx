@@ -22,13 +22,7 @@ import { DEFAULT_SCHEDULE, DEFAULT_SCOPE } from '@shared/routines'
 import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { TasksView } from '../../components/tasks/TasksView'
-import {
-  useAgents,
-  useHostActions,
-  useHostState,
-  useMaybeLink,
-  useProjects,
-} from '../../host'
+import { useAgents, useHostActions, useHostState, useMaybeLink, useProjects } from '../../host'
 import {
   confirmDeleteRoutine,
   routineExamples,
@@ -92,10 +86,7 @@ function Routines(props: { switcher: ReactNode }) {
     header,
   )
 
-  const projectNames = useMemo(
-    () => new Map(projects.map((p) => [p.path, p.name])),
-    [projects],
-  )
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.path, p.name])), [projects])
   const words = searching ? query.trim().toLowerCase() : ''
   const inProject = useMemo(
     () =>
@@ -177,8 +168,7 @@ function Routines(props: { switcher: ReactNode }) {
                   label: '删除',
                   icon: 'trash',
                   color: c.danger,
-                  onPress: () =>
-                    link && confirmDeleteRoutine((m, p) => link!.request(m, p), r),
+                  onPress: () => link && confirmDeleteRoutine((m, p) => link!.request(m, p), r),
                 }
               : undefined
           }

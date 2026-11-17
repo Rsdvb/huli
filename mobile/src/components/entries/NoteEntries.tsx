@@ -175,11 +175,7 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
   const connected = useConnected()
   const link = useLink()
   const child = useSession(entry.sessionId)
-  const digest = useSubagentDigest(
-    link,
-    entry.kind === 'subagent' ? child : undefined,
-    connected,
-  )
+  const digest = useSubagentDigest(link, entry.kind === 'subagent' ? child : undefined, connected)
   const waiting =
     !!child &&
     (child.permissionCount > 0 ||

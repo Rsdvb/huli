@@ -127,7 +127,8 @@ function sameBlock(a: Block, b: Block): boolean {
         a.start === b.start &&
         a.items.length === b.items.length &&
         a.items.every(
-          (item, i) => item.task === b.items[i]!.task && sameBlocks(item.blocks, b.items[i]!.blocks),
+          (item, i) =>
+            item.task === b.items[i]!.task && sameBlocks(item.blocks, b.items[i]!.blocks),
         )
       )
   }

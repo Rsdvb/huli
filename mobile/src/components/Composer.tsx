@@ -1256,7 +1256,12 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
       style={[styles.tile, { borderColor: c.border, backgroundColor: c.fill }]}
     >
       {preview ? (
-        <Image source={{ uri: preview }} style={styles.preview} contentFit="cover" cachePolicy="memory" />
+        <Image
+          source={{ uri: preview }}
+          style={styles.preview}
+          contentFit="cover"
+          cachePolicy="memory"
+        />
       ) : textThumb ? (
         <View style={styles.file}>
           <Text style={[styles.textLines, { color: c.textSecondary }]} numberOfLines={3}>

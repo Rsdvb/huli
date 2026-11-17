@@ -156,8 +156,7 @@ function StepNode(props: { view: TaskView; step: WorkflowStep; front: boolean; l
   const color = stateColor(c, state)
   const waiting = view.waiting.find((w) => w.stepId === step.id)
 
-  const who =
-    step.by === 'you' ? '你' : agentId ? (agents.get(agentId)?.name ?? agentId) : 'Auto'
+  const who = step.by === 'you' ? '你' : agentId ? (agents.get(agentId)?.name ?? agentId) : 'Auto'
   const whyWho = pin && !latest ? '已固定' : null
 
   return (

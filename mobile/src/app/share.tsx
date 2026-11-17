@@ -398,7 +398,12 @@ function SharedPreview(props: { item: SharedItem }) {
     case 'image':
       return (
         <View style={card}>
-          <Image source={{ uri: item.uri }} style={styles.image} contentFit="cover" cachePolicy="memory" />
+          <Image
+            source={{ uri: item.uri }}
+            style={styles.image}
+            contentFit="cover"
+            cachePolicy="memory"
+          />
         </View>
       )
     case 'file':

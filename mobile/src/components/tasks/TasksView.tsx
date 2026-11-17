@@ -73,10 +73,7 @@ export function TasksView(props: { switcher: ReactNode }) {
     header,
   )
 
-  const projectNames = useMemo(
-    () => new Map(projects.map((p) => [p.path, p.name])),
-    [projects],
-  )
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.path, p.name])), [projects])
   const words = searching ? query.trim().toLowerCase() : ''
   const inProject = useMemo(
     () => tasks.filter((t) => inFilter(shell.filter, { scratch: false, path: t.projectPath })),

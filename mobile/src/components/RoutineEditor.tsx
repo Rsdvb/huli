@@ -241,7 +241,6 @@ export function RoutineEditor(props: {
     <Text style={[typeScale.footnote, styles.label, { color: c.textSecondary }]}>{text}</Text>
   )
 
-
   return (
     <BottomSheet
       visible={seed !== null}

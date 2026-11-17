@@ -122,12 +122,7 @@ export const TaskRow = memo(function TaskRow(props: {
       {yours && running ? (
         <YouAvatar waiting={waiting} />
       ) : agentId ? (
-        <AgentAvatar
-          size={sizes.rowAvatar}
-          agentId={agentId}
-          name={agent?.name}
-          badge={badge}
-        />
+        <AgentAvatar size={sizes.rowAvatar} agentId={agentId} name={agent?.name} badge={badge} />
       ) : (
         <YouAvatar />
       )}

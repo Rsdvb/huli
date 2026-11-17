@@ -7,15 +7,7 @@
 // rings open the plan's usage and what fills the context.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  Linking,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { KeyboardAvoidingView, KeyboardGestureArea } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
@@ -289,7 +281,10 @@ export default function SessionScreen() {
   // The files of the folder the session's tools read or edited, newest first.
   const touched = useThreadSelector(
     view,
-    useCallback((thread: ThreadState | null) => touchedFiles(thread, changes.folder), [changes.folder]),
+    useCallback(
+      (thread: ThreadState | null) => touchedFiles(thread, changes.folder),
+      [changes.folder],
+    ),
     sameItems,
   )
 

@@ -261,8 +261,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     [sessions],
   )
   const archivedCount = useMemo(
-    () =>
-      [...sessions.values()].filter((s) => s.parentId === null && s.archivedAt !== null).length,
+    () => [...sessions.values()].filter((s) => s.parentId === null && s.archivedAt !== null).length,
     [sessions],
   )
   const projectNames = useMemo(() => new Map(projects.map((p) => [p.path, p.name])), [projects])

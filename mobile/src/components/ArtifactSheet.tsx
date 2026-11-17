@@ -184,11 +184,7 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
           leading={<Icon name="trash" size={18} color={c.danger} />}
           onPress={() =>
             link &&
-            confirmDelete(
-              (method, params) => link!.request(method, params),
-              item,
-              props.onClose,
-            )
+            confirmDelete((method, params) => link!.request(method, params), item, props.onClose)
           }
         />
       </ListGroup>
