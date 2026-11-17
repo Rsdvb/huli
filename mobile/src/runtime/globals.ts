@@ -58,7 +58,7 @@ class Utf8Decoder {
       if (this.fatal) throw new TypeError('The bytes are not valid UTF-8')
       chunk.push(0xfffd)
     }
-    for (let i = 0; i < bytes.length; ) {
+    for (let i = 0; i < bytes.length;) {
       const b0 = bytes[i]!
       let code = -1
       let need = 0

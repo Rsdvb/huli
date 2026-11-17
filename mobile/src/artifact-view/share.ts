@@ -44,7 +44,8 @@ function fileName(title: string, extension: string): string {
 
 function bytesOf(value: unknown): Uint8Array | null {
   if (value instanceof ArrayBuffer) return new Uint8Array(value)
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  if (ArrayBuffer.isView(value))
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
   return null
 }
 

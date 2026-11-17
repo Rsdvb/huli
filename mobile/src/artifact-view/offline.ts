@@ -45,7 +45,11 @@ export async function readCachedPage(computer: string, id: string): Promise<Cach
 
 let writing: Promise<void> = Promise.resolve()
 
-export function writeCachedPage(computer: string, id: string, page: Omit<CachedPage, 'savedAt'>): void {
+export function writeCachedPage(
+  computer: string,
+  id: string,
+  page: Omit<CachedPage, 'savedAt'>,
+): void {
   if (page.html.length > MAX_CHARS) return
   writing = writing
     .then(async () => {

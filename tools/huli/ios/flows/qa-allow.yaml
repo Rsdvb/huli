@@ -2,24 +2,24 @@
 appId: io.github.rsdvb.huli
 ---
 - runFlow: qa-reset.yaml
-- tapOn: "会话"
+- tapOn: '会话'
 - tapOn:
-    text: ".*${TITLE}.*"
+    text: '.*${TITLE}.*'
 - waitForAnimationToEnd
 - repeat:
     times: 4
     commands:
       - extendedWaitUntil:
-          visible: "允许一次"
+          visible: '允许一次'
           timeout: 40000
           optional: true
       - takeScreenshot: allow-card
       - tapOn:
-          text: "允许一次"
+          text: '允许一次'
           optional: true
       - waitForAnimationToEnd
 - extendedWaitUntil:
-    visible: "PAUSE_NEVER"
+    visible: 'PAUSE_NEVER'
     timeout: 20000
     optional: true
 - takeScreenshot: allow-done

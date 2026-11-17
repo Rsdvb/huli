@@ -72,7 +72,9 @@ async function bindTotp(email: string): Promise<{ secret: string; step: number }
 }
 
 function showRecovery(codes: string[]): void {
-  console.log('\n恢复码（每个只能用一次，手机丢了时代替验证码登录）。现在抄下来，之后不会再显示：\n')
+  console.log(
+    '\n恢复码（每个只能用一次，手机丢了时代替验证码登录）。现在抄下来，之后不会再显示：\n',
+  )
   for (const code of codes) console.log(`  ${code}`)
   console.log('')
 }

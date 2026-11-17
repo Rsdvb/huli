@@ -22,7 +22,15 @@ export function Zoomable(props: {
   const scale = useRef(new Animated.Value(1)).current
   const x = useRef(new Animated.Value(0)).current
   const y = useRef(new Animated.Value(0)).current
-  const state = useRef({ scale: 1, x: 0, y: 0, startScale: 1, startDistance: 0, startX: 0, startY: 0 })
+  const state = useRef({
+    scale: 1,
+    x: 0,
+    y: 0,
+    startScale: 1,
+    startDistance: 0,
+    startX: 0,
+    startY: 0,
+  })
   const lastTap = useRef(0)
   const onZoomed = useRef(props.onZoomed)
   onZoomed.current = props.onZoomed
@@ -113,10 +121,11 @@ export function Zoomable(props: {
   ).current
 
   return (
-    <View style={[styles.clip, { width: props.width, height: props.height }]} {...responder.panHandlers}>
-      <Animated.View
-        style={{ transform: [{ translateX: x }, { translateY: y }, { scale }] }}
-      >
+    <View
+      style={[styles.clip, { width: props.width, height: props.height }]}
+      {...responder.panHandlers}
+    >
+      <Animated.View style={{ transform: [{ translateX: x }, { translateY: y }, { scale }] }}>
         {props.children}
       </Animated.View>
     </View>

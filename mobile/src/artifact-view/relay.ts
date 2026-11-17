@@ -55,7 +55,9 @@ export class RuntimeRelay {
       this.desktopOnly()
       if (kind === 'use') this.answer({ ...header, ok: true, value: null })
       else if (kind !== 'cancel') {
-        this.answer(errorAnswer(header, 'not_allowed', 'Open the artifact on the computer to use this.'))
+        this.answer(
+          errorAnswer(header, 'not_allowed', 'Open the artifact on the computer to use this.'),
+        )
       }
       return
     }
@@ -86,9 +88,7 @@ export class RuntimeRelay {
     this.offEvents()
     const frame = this.frame
     this.frame = null
-    void frame
-      ?.then((path) => this.link.request('artifacts.closeFrame', { path }))
-      .catch(() => {})
+    void frame?.then((path) => this.link.request('artifacts.closeFrame', { path })).catch(() => {})
   }
 
   private answer(answer: RuntimeAnswer): void {

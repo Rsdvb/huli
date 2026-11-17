@@ -57,7 +57,10 @@ export function useComments(
     if (!link) return
     const off = link.onHostEvent((value) => {
       const event = value as HostEvent
-      if ((event.type === 'artifacts.comments' || event.type === 'artifacts.version') && event.id === id) {
+      if (
+        (event.type === 'artifacts.comments' || event.type === 'artifacts.version') &&
+        event.id === id
+      ) {
         read()
       }
     })
