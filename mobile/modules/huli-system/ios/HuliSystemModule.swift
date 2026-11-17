@@ -110,9 +110,12 @@ enum PendingLink {
   /// A link older than this was never taken, and opening it now would surprise.
   static let maxAge: TimeInterval = 600
 
+  /// The App Group the intents write to, with the same fallback as theirs.
   private static var store: UserDefaults? {
-    let group = Bundle.main.object(forInfoDictionaryKey: "HuliAppGroup") as? String
-    return group.flatMap { UserDefaults(suiteName: $0) }
+    let group =
+      (Bundle.main.object(forInfoDictionaryKey: "HuliAppGroup") as? String)
+      ?? "group.io.github.rsdvb.huli"
+    return UserDefaults(suiteName: group)
   }
 
   static func put(_ url: URL) {
