@@ -8,6 +8,7 @@ import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } f
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
@@ -323,7 +324,7 @@ export default function NewSession() {
                 menu.open('projects', folderAnchor, { placement: 'above', align: 'center' })
               }
               branch={branch}
-              limits={agent?.limits ?? []}
+              limits={limitsForModel(agent?.limits ?? [], model?.option)}
               onLimitPress={() => {
                 haptic.tap()
                 setUsageOpen(true)

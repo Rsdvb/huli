@@ -21,6 +21,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import { limitsForModel } from '@shared/plan-limits'
 import type { ThreadEntry, ToolEntry, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
 import { AttachPages, useAttachPages } from '../../components/AttachMenu'
@@ -628,7 +629,7 @@ export default function SessionScreen() {
               folder={project}
               changed={changes.count}
               {...(changes.folder && changes.repo !== false ? { onFolderPress: changes.open } : {})}
-              limits={agent?.limits ?? []}
+              limits={limitsForModel(agent?.limits ?? [], config.model?.option)}
               onLimitPress={() => {
                 haptic.tap()
                 setUsageOpen(true)

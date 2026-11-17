@@ -6,6 +6,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import type { AgentOptions, AgentStatus } from '@shared/agent-host'
 import { isFullAccessMode, isStartMode } from '@shared/agents'
+import { limitsForModel } from '@shared/plan-limits'
 import { booleanConfigValue, isConfigValue, type ConfigOption } from '@shared/thread'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { AgentGlyph, G, Icon, type IconSpec } from '../ui/session/icons'
@@ -247,7 +248,8 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     })
   }
 
-  const limit = context.agent ? shownLimit(context.agent.limits) : null
+  // Only the windows that hold back the chosen model, as the desktop's tray warns about.
+  const limit = context.agent ? shownLimit(limitsForModel(context.agent.limits, model)) : null
   const out = !!limit && isExhausted(limit)
   const footer = [
     planName(context.agent?.account ?? null),
