@@ -181,7 +181,9 @@ export function Glass(props: GlassProps) {
 
 /** Glass behind other content, filling its parent: for a surface whose children it can't hold. */
 export function GlassBackdrop(props: {
-  radius: number
+  /** A capsule rounds to half the height it fills; a rounded rect takes `radius`. */
+  shape?: 'capsule' | 'rounded'
+  radius?: number
   tint?: ColorValue
   variant?: 'regular' | 'clear'
   borderless?: boolean
@@ -189,7 +191,8 @@ export function GlassBackdrop(props: {
   return (
     <Glass
       pointerEvents="none"
-      radius={props.radius}
+      shape={props.shape ?? 'rounded'}
+      {...(props.radius !== undefined ? { radius: props.radius } : {})}
       {...(props.tint ? { tint: props.tint } : {})}
       {...(props.variant ? { variant: props.variant } : {})}
       borderless={props.borderless ?? true}
