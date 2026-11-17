@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Platform } from '@shared/platform'
+import { KETTU_HOME_FOLDER } from '@shared/storage'
 import { createExec } from '../git/exec'
 import type { WorktreeRecord } from '../storage'
 import type { WorktreeGit } from './api'
@@ -35,7 +36,8 @@ async function isThere(target: string): Promise<boolean> {
   )
 }
 
-describe('createWorktreeGit', () => {
+// A worktree takes a dozen git processes, which Windows starts slowly under a full run's load.
+describe('createWorktreeGit', { timeout: 30_000 }, () => {
   const exec = createExec(() => ({ ...process.env, ...ENV })).exec
   let dir: string
   let project: string
@@ -306,7 +308,9 @@ describe('createWorktreeGit', () => {
       try {
         const root = await worktrees.rootFor(path.join(locked, 'inner'), null)
         expect(root).toMatch(
-          new RegExp(`^${path.join(dir, 'home', '.kettu', 'worktrees', 'inner-')}[0-9a-f]{8}$`),
+          new RegExp(
+            `^${path.join(dir, 'home', KETTU_HOME_FOLDER, 'worktrees', 'inner-')}[0-9a-f]{8}$`,
+          ),
         )
       } finally {
         await chmod(locked, 0o755)
