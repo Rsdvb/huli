@@ -5143,6 +5143,11 @@ li[data-row-exit='dust'] > * {
   width: 14px;
   height: 14px;
 }
+/* The name's glide width is what it measured unsqueezed: the line keeps to the box, so a narrow
+   composer ends the name in an ellipsis instead of cutting it at the effort. */
+.kettu-model-picker .ui-mdpc__name .ui-mdpc__swap-item {
+  max-width: 100%;
+}
 .kettu-model-picker .ui-mdpc__caption .ui-mdpc__swap-item {
   display: block;
   white-space: nowrap;
