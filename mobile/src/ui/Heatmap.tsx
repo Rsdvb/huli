@@ -2,7 +2,7 @@
 // how much each day used. Today is outlined and a chosen range framed; it scrolls sideways and
 // opens at today. A tap on a day keeps its tooltip up, a touch and hold shows it while held.
 
-import { useRef, useState, type ComponentRef } from 'react'
+import { memo, useMemo, useRef, useState, type ComponentRef } from 'react'
 import {
   Pressable,
   ScrollView,
@@ -71,6 +71,63 @@ function monthLabels(days: readonly number[]): { col: number; text: string }[] {
   return labels
 }
 
+const cellX = (i: number) => PAD + Math.floor(i / 7) * PITCH
+const cellY = (i: number) => PAD + (i % 7) * PITCH
+
+/** The days' cells, the frame and today's outline: hundreds of shapes, drawn again only when they change. */
+const HeatGrid = memo(function HeatGrid(props: {
+  days: readonly number[]
+  levels: readonly number[]
+  frame: string | null
+  width: number
+  height: number
+}) {
+  const { c } = useTokens()
+  const n = props.days.length
+  const today = n - 1
+  return (
+    <Svg width={props.width} height={props.height}>
+      {props.days.map((day, i) => {
+        const shade = heatColor(c, props.levels[i] ?? 0)
+        return (
+          <Rect
+            key={day}
+            x={cellX(i)}
+            y={cellY(i)}
+            width={CELL}
+            height={CELL}
+            rx={2.5}
+            fill={shade.color}
+            opacity={shade.opacity}
+          />
+        )
+      })}
+      {props.frame && (
+        <Path
+          d={props.frame}
+          fill="none"
+          stroke={c.text}
+          strokeOpacity={0.85}
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+        />
+      )}
+      {n > 0 && (
+        <Rect
+          x={cellX(today) - 1}
+          y={cellY(today) - 1}
+          width={CELL + 2}
+          height={CELL + 2}
+          rx={3.5}
+          fill="none"
+          stroke={c.text}
+          strokeWidth={1.5}
+        />
+      )}
+    </Svg>
+  )
+})
+
 export function Heatmap(props: {
   /** Day starts, oldest first, starting on the first day of a week and ending today. */
   days: readonly number[]
@@ -92,6 +149,7 @@ export function Heatmap(props: {
   const gridWidth = PAD * 2 + columns * PITCH - GAP
   const gridHeight = PAD * 2 + 7 * PITCH - GAP
   const today = n - 1
+  const months = useMemo(() => monthLabels(props.days), [props.days])
 
   let frame: string | null = null
   if (
@@ -117,9 +175,6 @@ export function Heatmap(props: {
     return index < n ? index : null
   }
 
-  const cellX = (i: number) => PAD + Math.floor(i / 7) * PITCH
-  const cellY = (i: number) => PAD + (i % 7) * PITCH
-
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <ScrollView
@@ -139,7 +194,7 @@ export function Heatmap(props: {
       >
         <View>
           <View style={{ height: LABELS, width: gridWidth }}>
-            {monthLabels(props.days).map((label) => (
+            {months.map((label) => (
               <Text
                 key={label.col}
                 style={[
@@ -172,44 +227,20 @@ export function Heatmap(props: {
             }}
             delayLongPress={250}
           >
-            <Svg width={gridWidth} height={gridHeight}>
-              {props.days.map((day, i) => {
-                const shade = heatColor(c, props.levels[i] ?? 0)
-                return (
-                  <Rect
-                    key={day}
-                    x={cellX(i)}
-                    y={cellY(i)}
-                    width={CELL}
-                    height={CELL}
-                    rx={2.5}
-                    fill={shade.color}
-                    opacity={shade.opacity}
-                  />
-                )
-              })}
-              {frame && (
-                <Path
-                  d={frame}
-                  fill="none"
-                  stroke={c.text}
-                  strokeOpacity={0.85}
-                  strokeWidth={1.5}
-                  strokeLinejoin="round"
-                />
-              )}
-              {n > 0 && (
-                <Rect
-                  x={cellX(today) - 1}
-                  y={cellY(today) - 1}
-                  width={CELL + 2}
-                  height={CELL + 2}
-                  rx={3.5}
-                  fill="none"
-                  stroke={c.text}
-                  strokeWidth={1.5}
-                />
-              )}
+            <HeatGrid
+              days={props.days}
+              levels={props.levels}
+              frame={frame}
+              width={gridWidth}
+              height={gridHeight}
+            />
+            {/* The chosen day is drawn over the grid, so choosing one redraws only this. */}
+            <Svg
+              width={gridWidth}
+              height={gridHeight}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            >
               {chosen !== null && chosen !== today && (
                 <Rect
                   x={cellX(chosen) - 1}
