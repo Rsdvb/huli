@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef } 
 import {
   Modal,
   Platform,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -130,24 +131,26 @@ export function SelectTextHost() {
             onPress={() => void Share.share({ message: chosen() }).catch(() => {})}
           />
         </View>
-        <TextInput
-          ref={input}
-          value={text}
-          editable={false}
-          multiline
-          scrollEnabled
-          showSoftInputOnFocus={false}
-          onSelectionChange={onSelection}
-          textAlignVertical="top"
-          selectionColor={c.tint}
-          style={[
-            item?.mono ? styles.mono : styles.text,
-            {
-              color: c.text,
-              paddingBottom: insets.bottom + 24,
-            },
-          ]}
-        />
+        {/* The text view at its full height in a scroll view: scrolling itself, it opened a
+            little scrolled, its first line cut under the buttons. */}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          keyboardShouldPersistTaps="always"
+        >
+          <TextInput
+            ref={input}
+            value={text}
+            editable={false}
+            multiline
+            scrollEnabled={false}
+            showSoftInputOnFocus={false}
+            onSelectionChange={onSelection}
+            textAlignVertical="top"
+            selectionColor={c.tint}
+            style={[item?.mono ? styles.mono : styles.text, { color: c.text }]}
+          />
+        </ScrollView>
       </View>
       <LockLayer />
     </Modal>
@@ -190,15 +193,14 @@ const styles = StyleSheet.create({
     height: 34,
   },
   actionText: { fontSize: 14, fontWeight: '500' },
+  scroll: { flex: 1 },
   text: {
-    flex: 1,
     fontSize: 17,
     lineHeight: 26,
     paddingHorizontal: 20,
     paddingTop: 8,
   },
   mono: {
-    flex: 1,
     fontFamily: MONO,
     fontSize: Platform.OS === 'ios' ? 13 : 12.5,
     lineHeight: 19,

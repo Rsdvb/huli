@@ -162,7 +162,7 @@ export const G = {
   paste: { sf: 'doc.on.clipboard', lucide: ClipboardPaste },
   sliders: { sf: 'slider.horizontal.3', lucide: SlidersHorizontal },
   sendNow: { sf: 'arrow.turn.down.left', lucide: CornerDownLeft },
-  select: { sf: 'selection.pin.in.out', lucide: TextSelect },
+  select: { sf: 'character.cursor.ibeam', lucide: TextSelect },
 } satisfies Record<string, IconSpec>
 
 export const TOOL_ICONS: Record<ToolKind, IconSpec> = {
