@@ -1,46 +1,68 @@
 // The session list's notice of a newer Android build; closing it hides that version for good.
 
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
+import { Icon } from '../ui/Icon'
+import { IconButton } from '../ui/IconButton'
+import { Press } from '../ui/Press'
+import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 import { dismissUpdate, openUpdate, UPDATES_SUPPORTED, useUpdate } from '../update'
-import { useTheme } from '../theme'
 
 export function UpdateBanner() {
-  const theme = useTheme()
+  const { c } = useTokens()
   const { latest, dismissed } = useUpdate()
   if (!UPDATES_SUPPORTED || !latest || dismissed === latest.version) return null
 
   return (
-    <View style={[styles.banner, { backgroundColor: theme.card, borderColor: theme.accent }]}>
-      <Pressable
+    <View style={[styles.banner, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <Press
         onPress={() => openUpdate(latest)}
-        style={({ pressed }) => [styles.text, { opacity: pressed ? 0.6 : 1 }]}
+        scale={false}
+        accessibilityRole="button"
+        containerStyle={styles.flex}
+        style={styles.text}
       >
-        <Text style={{ color: theme.text, fontSize: 14 }}>
-          Huli 有新版本 {latest.version}，点击下载
-        </Text>
-      </Pressable>
-      <Pressable
+        <View style={[styles.badge, { backgroundColor: c.accent }]}>
+          <Icon name="download" size={16} color={c.onAccent} />
+        </View>
+        <View style={styles.flex}>
+          <Text style={[typeScale.subhead, { color: c.text }]}>
+            Huli {latest.version} 可以更新了
+          </Text>
+          <Text style={[typeScale.footnote, { color: c.textSecondary }]}>点按下载新版本</Text>
+        </View>
+      </Press>
+      <IconButton
+        icon="close"
+        tone="plain"
+        size={32}
+        iconSize={14}
+        color={c.textTertiary}
+        label="不再提示这个版本"
         onPress={() => dismissUpdate(latest.version)}
-        hitSlop={10}
-        accessibilityLabel="关闭"
-      >
-        <Text style={{ color: theme.muted, fontSize: 16 }}>✕</Text>
-      </Pressable>
+      />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
+    gap: space.sm,
+    marginTop: space.md,
+    paddingLeft: space.md,
+    paddingRight: space.xs,
+    paddingVertical: space.md,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  text: { flex: 1 },
+  text: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  badge: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 })

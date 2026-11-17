@@ -1,7 +1,15 @@
 // The paired computer, shared by every screen: the kept link, its state, and the sessions, agents
 // and projects it lists, kept current by its events.
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { AppState } from 'react-native'
 import type { AgentStatus, HostEvent, Project, SessionSummary } from '@shared/agent-host'
 import type { HostLink, LinkState } from '@shared/remote/link'
@@ -26,6 +34,8 @@ export interface HostContextValue {
   sessions: Map<string, SessionSummary>
   agents: Map<string, AgentStatus>
   projects: Project[]
+  /** The lists have been read from the computer at least once since pairing. */
+  loaded: boolean
   paired(host: SavedHost, key: KeyPair, paired: Paired): Promise<void>
   forget(notice: string | null): Promise<void>
   refresh(): Promise<void>
@@ -54,6 +64,7 @@ export function HostProvider(props: { children: ReactNode }) {
   const [sessions, setSessions] = useState<Map<string, SessionSummary>>(new Map())
   const [agents, setAgents] = useState<Map<string, AgentStatus>>(new Map())
   const [projects, setProjects] = useState<Project[]>([])
+  const [loaded, setLoaded] = useState(false)
   const hostRef = useRef<SavedHost | null>(null)
   const linkRef = useRef<HostLink | null>(null)
   linkRef.current = ready?.link ?? null
@@ -83,6 +94,7 @@ export function HostProvider(props: { children: ReactNode }) {
     setSessions(new Map(list.map((s) => [s.id, s])))
     setAgents(new Map(agentList.map((a) => [a.id, a])))
     setProjects(projectList)
+    setLoaded(true)
   }, [ready])
 
   const forget = useCallback(async (next: string | null) => {
@@ -93,6 +105,7 @@ export function HostProvider(props: { children: ReactNode }) {
     })
     hostRef.current = null
     setSessions(new Map())
+    setLoaded(false)
     await saveHost(null)
     setNotice(next)
     setPhase('pair')
@@ -110,9 +123,16 @@ export function HostProvider(props: { children: ReactNode }) {
         const changed =
           saved.name !== welcome.host.name ||
           saved.deviceName !== welcome.device.name ||
+          saved.platform !== welcome.host.platform ||
           JSON.stringify(saved.addresses) !== JSON.stringify(addresses)
         if (changed) {
-          hostRef.current = { ...saved, name: welcome.host.name, deviceName: welcome.device.name, addresses }
+          hostRef.current = {
+            ...saved,
+            name: welcome.host.name,
+            deviceName: welcome.device.name,
+            platform: welcome.host.platform,
+            addresses,
+          }
           void saveHost(hostRef.current)
         }
         void refresh().catch(() => {})
@@ -163,6 +183,7 @@ export function HostProvider(props: { children: ReactNode }) {
     sessions,
     agents,
     projects,
+    loaded,
     paired: async (host, key, paired) => {
       await saveHost(host)
       setNotice(null)

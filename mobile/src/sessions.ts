@@ -59,6 +59,65 @@ export function sessionBadge(
   return null
 }
 
+export type SessionState = 'waiting' | 'error' | 'live' | 'auth' | 'unread'
+
+/** What a session's row shows about it, by importance, with its words; null for a quiet one. */
+export function sessionState(s: SessionSummary): { kind: SessionState; text: string } | null {
+  if (needsYou(s)) {
+    return {
+      kind: 'waiting',
+      text: s.permissionCount > 1 ? `等你处理 ${s.permissionCount}` : '等你处理',
+    }
+  }
+  if (s.status === 'failed' || s.attention === 'error') return { kind: 'error', text: '出错' }
+  if (s.status === 'running' || s.status === 'starting') return { kind: 'live', text: '运行中' }
+  if (s.status === 'auth_required') return { kind: 'auth', text: '需要登录' }
+  if (s.attention === 'unread') return { kind: 'unread', text: '有新回复' }
+  return null
+}
+
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+function dayPart(hour: number): string {
+  if (hour < 6) return '凌晨'
+  if (hour < 12) return '上午'
+  if (hour < 13) return '中午'
+  if (hour < 18) return '下午'
+  return '晚上'
+}
+
+/** A time of day as the phone's clock app says it: 下午2:54. */
+export function clockOf(ms: number): string {
+  const d = new Date(ms)
+  const h = d.getHours()
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${dayPart(h)}${h12}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** When something happened, as a list's time column shows it: today's clock, 昨天, a weekday, a date. */
+export function listTime(ms: number, now = Date.now()): string {
+  const day = (t: number) => {
+    const d = new Date(t)
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  }
+  const days = Math.round((day(now) - day(ms)) / 86_400_000)
+  if (days <= 0) return clockOf(ms)
+  if (days === 1) return '昨天'
+  const d = new Date(ms)
+  if (days < 7) return WEEKDAYS[d.getDay()]!
+  if (d.getFullYear() === new Date(now).getFullYear())
+    return `${d.getMonth() + 1}月${d.getDate()}日`
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+/** The greeting for the hour. */
+export function greeting(now = new Date()): string {
+  const h = now.getHours()
+  if (h >= 5 && h < 12) return '早上好'
+  if (h >= 12 && h < 18) return '下午好'
+  return '晚上好'
+}
+
 export function duration(ms: number): string {
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s} 秒`

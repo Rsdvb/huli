@@ -1,25 +1,22 @@
 // A new session: which agent, in which project, and its first message.
 
 import { useMemo, useRef, useState, type ComponentRef } from 'react'
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import type { UserContent } from '@shared/thread'
 import { Composer } from '../components/Composer'
+import { useShell } from '../components/shell'
 import { useHost, useLink } from '../host'
-import { useTheme } from '../theme'
+import { AgentAvatar } from '../ui/AgentAvatar'
+import { haptic } from '../ui/haptics'
+import { Icon } from '../ui/Icon'
+import { Pill } from '../ui/Pill'
+import { space, type as typeScale, useTokens } from '../ui/tokens'
 
 export default function NewSession() {
-  const theme = useTheme()
+  const { c } = useTokens()
   const host = useHost()
   const link = useLink()
   const insets = useSafeAreaInsets()
@@ -38,10 +35,18 @@ export default function NewSession() {
     () => host.projects.filter((p) => !p.missing).sort((a, b) => b.lastOpenedAt - a.lastOpenedAt),
     [host.projects],
   )
+  const { filter } = useShell()
   const [agentId, setAgentId] = useState<string | null>(
     agents.find((a) => a.isDefault)?.id ?? agents[0]?.id ?? null,
   )
-  const [projectPath, setProjectPath] = useState<string | null>(projects[0]?.path ?? null)
+  // Start in the project the tabs are filtered to, else the latest one.
+  const [projectPath, setProjectPath] = useState<string | null>(
+    filter.kind === 'scratch'
+      ? null
+      : filter.kind === 'project' && projects.some((p) => p.path === filter.path)
+        ? filter.path
+        : (projects[0]?.path ?? null),
+  )
 
   const create = async (prompt: UserContent[]) => {
     if (!agentId) return
@@ -50,37 +55,19 @@ export default function NewSession() {
       projectPath,
       ...(prompt.length > 0 ? { prompt } : {}),
     })) as SessionSummary
+    haptic.success()
     router.replace(`/session/${summary.id}`)
   }
 
-  const chip = (label: string, on: boolean, onPress: () => void, key: string) => (
-    <Pressable
-      key={key}
-      onPress={onPress}
-      style={[
-        styles.chip,
-        {
-          borderColor: on ? theme.accent : theme.line,
-          backgroundColor: on ? theme.card : 'transparent',
-        },
-      ]}
-    >
-      <Text
-        style={{
-          color: on ? theme.accent : theme.text,
-          fontSize: 14,
-          fontWeight: on ? '600' : '400',
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  )
+  const pick = (apply: () => void) => {
+    haptic.select()
+    apply()
+  }
 
   return (
     <View
       ref={root}
-      style={{ flex: 1, backgroundColor: theme.bg }}
+      style={{ flex: 1, backgroundColor: c.bg }}
       onLayout={() => root.current?.measureInWindow((_x, y) => setTop(y))}
     >
       <KeyboardAvoidingView
@@ -90,23 +77,54 @@ export default function NewSession() {
       >
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 20, gap: 8 }}
+          contentContainerStyle={styles.page}
           keyboardDismissMode="interactive"
         >
-          <Text style={[styles.label, { color: theme.muted }]}>智能体</Text>
+          <Text style={[typeScale.footnote, styles.label, { color: c.textSecondary }]}>智能体</Text>
           <View style={styles.wrap}>
-            {agents.map((a) => chip(a.name, a.id === agentId, () => setAgentId(a.id), a.id))}
+            {agents.map((a) => {
+              const on = a.id === agentId
+              return (
+                <Pill
+                  key={a.id}
+                  tone={on ? 'tint' : 'outline'}
+                  size="lg"
+                  label={a.name}
+                  color={on ? c.tint : c.text}
+                  leading={<AgentAvatar agentId={a.id} name={a.name} size={26} />}
+                  accessibilityLabel={on ? `${a.name}，已选` : a.name}
+                  onPress={() => pick(() => setAgentId(a.id))}
+                  style={styles.agentPill}
+                />
+              )
+            })}
           </View>
 
-          <Text style={[styles.label, { color: theme.muted }]}>项目</Text>
+          <Text style={[typeScale.footnote, styles.label, { color: c.textSecondary }]}>项目</Text>
           <View style={styles.wrap}>
-            {projects.map((p) =>
-              chip(p.name, p.path === projectPath, () => setProjectPath(p.path), p.path),
-            )}
-            {chip('无项目', projectPath === null, () => setProjectPath(null), '__none')}
+            {projects.map((p) => {
+              const on = p.path === projectPath
+              return (
+                <Pill
+                  key={p.path}
+                  tone={on ? 'tint' : 'outline'}
+                  label={p.name}
+                  color={on ? c.tint : c.text}
+                  leading={<Icon name="folder" size={14} color={on ? c.tint : c.textSecondary} />}
+                  accessibilityLabel={on ? `${p.name}，已选` : p.name}
+                  onPress={() => pick(() => setProjectPath(p.path))}
+                />
+              )
+            })}
+            <Pill
+              tone={projectPath === null ? 'tint' : 'outline'}
+              label="无项目"
+              color={projectPath === null ? c.tint : c.text}
+              onPress={() => pick(() => setProjectPath(null))}
+            />
           </View>
 
-          <Text style={[styles.hint, { color: theme.muted }]}>
+          <Text style={[typeScale.footnote, styles.hint, { color: c.textTertiary }]}>
             在下面写第一条消息，可以带上照片和文件；不写也能直接发送开始。
           </Text>
         </ScrollView>
@@ -125,8 +143,9 @@ export default function NewSession() {
 }
 
 const styles = StyleSheet.create({
-  label: { fontSize: 13, marginTop: 12 },
-  hint: { fontSize: 13, marginTop: 20, lineHeight: 19 },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  page: { padding: space.xl, gap: space.md },
+  label: { marginTop: space.md },
+  hint: { marginTop: space.xl },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  agentPill: { paddingLeft: space.xs + 2 },
 })
