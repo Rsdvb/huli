@@ -134,6 +134,11 @@ export interface RelayHostProfile {
   name: string
   /** As Node.js's `process.platform` names it. */
   platform: string
+  /**
+   * Huli: false when the host registers with its account but takes no pairing requests, which a
+   * relay then keeps off `GET /v1/hosts`; absent, as from Kettu's hosts, it takes them.
+   */
+  pairable?: false
 }
 
 /** A host of the account as `GET /v1/hosts` lists it. */
@@ -366,6 +371,7 @@ export function hostProfile(
   publicKey: Uint8Array,
   name: string,
   platform: string,
+  pairable = true,
 ): RelayHostProfile | null {
   if (publicKey.length !== X25519_KEY_BYTES || !PLATFORM.test(platform)) return null
   let kept = ''
@@ -374,15 +380,18 @@ export function hostProfile(
     kept += char
   }
   kept = kept.trim()
-  return kept ? { key: toBase64Url(publicKey), name: kept, platform } : null
+  if (!kept) return null
+  const profile: RelayHostProfile = { key: toBase64Url(publicKey), name: kept, platform }
+  return pairable ? profile : { ...profile, pairable: false }
 }
 
 function parseProfile(value: unknown): RelayHostProfile | null {
   if (typeof value !== 'object' || value === null) return null
-  const { key, name, platform } = value as Record<string, unknown>
+  const { key, name, platform, pairable } = value as Record<string, unknown>
   if (!isProfileKey(key) || !isProfileName(name)) return null
   if (typeof platform !== 'string' || !PLATFORM.test(platform)) return null
-  return { key, name, platform }
+  if (pairable !== undefined && typeof pairable !== 'boolean') return null
+  return pairable === false ? { key, name, platform, pairable } : { key, name, platform }
 }
 
 /** What `GET /v1/hosts` answered, or null when any of it is not what a relay lists. */
