@@ -1,0 +1,13 @@
+{
+  "place": { "country": null, "asn": null },
+  "regions": [
+    {
+      "id": "ash",
+      "name": "Ashburn",
+      "country": "US",
+      "url": "https://huli.132-145-200-0.sslip.io",
+      "state": "active"
+    }
+  ],
+  "stun": []
+}

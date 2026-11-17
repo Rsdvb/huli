@@ -17,6 +17,8 @@ export default defineConfig([
   globalIgnores([
     'out',
     'dist',
+    // Huli Cloud's bundle, which vite.cloud.config.mts builds.
+    'cloud/dist',
     '.worktrees',
     'src/renderer/src/lib/cn-tables.ts',
     // affectUI's own files, kept as the registry ships them.

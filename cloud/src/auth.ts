@@ -4,12 +4,20 @@
 
 import { randomInt } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { clientInfo, DAEMON_CLIENT, DESKTOP_CLIENT, type ClientInfo } from '@shared/account-api'
+import {
+  clientInfo,
+  DAEMON_CLIENT,
+  DESKTOP_CLIENT,
+  WEB_CLIENT,
+  type ClientInfo,
+} from '@shared/account-api'
+import { MOBILE_CLIENT, MOBILE_REDIRECT, WEB_CALLBACK_PATH } from '@shared/huli-cloud'
 import {
   bearer,
   clientAddress,
   cookies,
   Limiter,
+  pageCsp,
   readForm,
   redirect,
   sendError,
@@ -48,8 +56,7 @@ const DEVICE_INTERVAL_S = 5
 const MAX_TICKET_TRIES = 5
 const USER_CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ'
 
-/** Clients that sign in through the browser, and those that use device codes. */
-const BROWSER_CLIENTS = new Set([DESKTOP_CLIENT])
+/** Clients that use device codes; those that sign in through the browser are `redirectFor`'s. */
 const DEVICE_CLIENTS = new Set([DAEMON_CLIENT])
 
 interface Ticket {
@@ -93,8 +100,32 @@ export interface AuthOptions {
   store: Store
   origin: string
   trustProxy: boolean
+  /** The hosted web client's origin; without one `kettu-web` cannot sign in. */
+  webOrigin?: string | null
   now?: () => number
   log?: (line: string) => void
+}
+
+/**
+ * The redirect URI a client that signs in through the browser may name, as it must be named:
+ * the desktop app's loopback server, the hosted web client's callback page at its origin alone,
+ * or the phone app's own URL. Null for any other, and for a client that does not sign in so.
+ */
+export function redirectFor(
+  clientId: string,
+  uri: string,
+  webOrigin: string | null,
+): string | null {
+  switch (clientId) {
+    case DESKTOP_CLIENT:
+      return loopbackRedirect(uri)
+    case WEB_CLIENT:
+      return webOrigin && uri === `${webOrigin}${WEB_CALLBACK_PATH}` ? uri : null
+    case MOBILE_CLIENT:
+      return uri === MOBILE_REDIRECT ? uri : null
+    default:
+      return null
+  }
 }
 
 /** A loopback redirect URI as RFC 8252 7.3 has it: http, a loopback host, any port, /callback. */
@@ -140,6 +171,8 @@ function withQuery(uri: string, params: Record<string, string>): string {
 
 export class Auth {
   private readonly store: Store
+  private readonly webOrigin: string | null
+  private readonly signInHeaders: Record<string, string>
   private readonly secure: boolean
   private readonly now: () => number
   private readonly log: (line: string) => void
@@ -155,6 +188,14 @@ export class Auth {
 
   constructor(private readonly options: AuthOptions) {
     this.store = options.store
+    this.webOrigin = options.webOrigin ?? null
+    // The sign-in pages' forms answer with a redirect to the web client or the phone app too.
+    this.signInHeaders = {
+      'content-security-policy': pageCsp([
+        ...(this.webOrigin ? [this.webOrigin] : []),
+        `${new URL(MOBILE_REDIRECT).protocol}`,
+      ]),
+    }
     this.secure = options.origin.startsWith('https:')
     this.now = options.now ?? Date.now
     this.log = options.log ?? ((line) => console.warn(line))
@@ -250,11 +291,10 @@ export class Auth {
       return sendHtml(response, this.secure, 200, messagePage('已取消', '这次登录已取消。'))
     }
     const clientId = q.get('client_id') ?? ''
-    const redirectUri = loopbackRedirect(q.get('redirect_uri') ?? '')
+    const redirectUri = redirectFor(clientId, q.get('redirect_uri') ?? '', this.webOrigin)
     const challenge = q.get('code_challenge') ?? ''
     const state = q.get('state') ?? ''
     if (
-      !BROWSER_CLIENTS.has(clientId) ||
       !redirectUri ||
       q.get('code_challenge_method') !== 'S256' ||
       !PKCE_CHALLENGE.test(challenge) ||
@@ -285,6 +325,7 @@ export class Auth {
         this.secure,
         200,
         consentPage({ action: '/signin/app/', fields: { ticket, csrf: session.csrf }, client }),
+        this.signInHeaders,
       )
     }
     sendHtml(
@@ -292,6 +333,7 @@ export class Auth {
       this.secure,
       200,
       loginPage({ action: '/signin/app/', fields: { ticket }, purpose: `登录 ${client}` }),
+      this.signInHeaders,
     )
   }
 
@@ -343,6 +385,7 @@ export class Auth {
             purpose: `登录 ${describeClient(params.info)}`,
             error: failure,
           }),
+          this.signInHeaders,
         )
       }
       headers['set-cookie'] = this.startSession().cookie
@@ -386,7 +429,8 @@ export class Auth {
       if (
         !code ||
         code.clientId !== clientId ||
-        code.redirectUri !== loopbackRedirect(form.get('redirect_uri') ?? '') ||
+        code.redirectUri !==
+          redirectFor(clientId, form.get('redirect_uri') ?? '', this.webOrigin) ||
         !PKCE_VERIFIER.test(verifier) ||
         !sameText(pkceChallenge(verifier), code.challenge)
       ) {
@@ -446,11 +490,11 @@ export class Auth {
     const deviceCode = randomToken()
     let userCode: string
     do {
-      userCode = ''
+      let letters = ''
       for (let i = 0; i < 8; i++) {
-        userCode += USER_CODE_ALPHABET[randomInt(USER_CODE_ALPHABET.length)]
+        letters += USER_CODE_ALPHABET[randomInt(USER_CODE_ALPHABET.length)]
       }
-      userCode = `${userCode.slice(0, 4)}-${userCode.slice(4)}`
+      userCode = `${letters.slice(0, 4)}-${letters.slice(4)}`
     } while (this.userCodes.has(userCode))
     const key = sha256Hex(deviceCode)
     this.devices.set(key, {

@@ -130,14 +130,17 @@ function signOutAll(): void {
 function serve(): void {
   const config = loadConfig()
   const apns = config.apns ? new Apns(config.apns) : null
-  const { server } = makeServer(config, apns ? { send: apns.send, topic: apns.topic } : null)
+  const { server, relay } = makeServer(config, apns ? { send: apns.send, topic: apns.topic } : null)
   server.listen(config.port, config.host, () => {
     console.warn(
       `huli-cloud: listening on ${config.host}:${config.port} for ${config.origin}` +
-        (apns ? '' : ' (no APNs key: pushes are refused)'),
+        (apns ? '' : ' (no APNs key: pushes are refused)') +
+        (config.webOrigin ? `; web client at ${config.webOrigin}` : '') +
+        (config.regions ? '' : '; no signed region list'),
     )
   })
   const stop = () => {
+    relay.close()
     apns?.close()
     server.close(() => process.exit(0))
     setTimeout(() => process.exit(0), 5000).unref()

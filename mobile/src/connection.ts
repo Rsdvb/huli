@@ -1,5 +1,6 @@
 // The phone's way to its computer: Kettu's own device side (pairing, the encrypted channel and the
-// host link) over WebSockets to the computer's direct port, on the local network or Tailscale.
+// host link) over WebSockets to the computer's direct port, on the local network or Tailscale, and
+// through Huli Cloud's relay (relay.ts) when no direct address answers.
 
 import { AppState } from 'react-native'
 import * as Device from 'expo-device'
@@ -8,8 +9,10 @@ import { hello, HostLink, type LinkRoute } from '@shared/remote/link'
 import { pair, type Paired, type PairProgress } from '@shared/remote/pair'
 import { decodePairing, parsePairingLink, type PairingPayload } from '@shared/remote/pairing'
 import type { DirectAddress } from '@shared/remote/protocol'
+import type { HostRelay } from '@shared/remote/relay'
 import type { Transport } from '@shared/remote/transport'
 import { webSocketTransport } from '@shared/remote/websocket-transport'
+import { afterGrace, dialRelayTo } from './relay'
 import {
   computerIdOf,
   fromBase64,
@@ -78,6 +81,46 @@ function tracked(address: DirectAddress, transport: Transport): Transport {
         listener(message)
       }),
   }
+}
+
+/** Whether a direct connection is open now, which the relay then leaves alone. */
+function directOpen(): boolean {
+  return heard.size > 0
+}
+
+/**
+ * The relay as a route: dialed a moment after the direct addresses, unless one of them is open by
+ * then; at once for a computer the phone has no usable address of.
+ */
+function relayRoute(relay: HostRelay, addresses: DirectAddress[]): LinkRoute {
+  return {
+    key: 'relay',
+    relay: true,
+    dial: afterGrace(() => dialRelayTo(relay), {
+      now: usableAddresses(addresses).length === 0,
+      direct: directOpen,
+    }),
+  }
+}
+
+/** The direct addresses first; the relay, when the computer named one, after them. */
+function dialAny(addresses: DirectAddress[], relay: HostRelay | undefined): Promise<Transport> {
+  if (!relay) return dialFirst(addresses)
+  const viaRelay = relayRoute(relay, addresses).dial
+  return new Promise((resolve, reject) => {
+    let left = 2
+    let won = false
+    const fail = (error: unknown) => {
+      if (--left === 0 && !won) reject(error)
+    }
+    for (const dial of [() => dialFirst(addresses), viaRelay]) {
+      dial().then((transport) => {
+        if (won) return transport.close()
+        won = true
+        resolve(transport)
+      }, fail)
+    }
+  })
 }
 
 /** The address the computer was last heard on, among the connections still open. */
@@ -155,7 +198,7 @@ export async function pairWith(
   const key = await deviceKey()
   const paired = await pair(
     {
-      dial: () => dialFirst(payload.addresses),
+      dial: () => dialAny(payload.addresses, payload.relay),
       payload,
       key,
       client: CLIENT,
@@ -177,6 +220,7 @@ export async function pairWith(
       addresses: welcome.addresses.length > 0 ? welcome.addresses : payload.addresses,
       platform: welcome.host.platform,
       lastSeen: Date.now(),
+      ...((welcome.relay ?? payload.relay) ? { relay: welcome.relay ?? payload.relay } : {}),
     },
   }
 }
@@ -204,14 +248,17 @@ export function linkTo(
   adopt?: Paired,
   current: () => SavedHost = () => host,
 ): HostLink {
-  const routes = (): LinkRoute[] =>
-    triedAddresses(current()).map((address) => ({
+  const routes = (): LinkRoute[] => {
+    const saved = current()
+    const direct: LinkRoute[] = triedAddresses(saved).map((address) => ({
       key: routeKey(address),
       relay: false,
       dial: () => openSocket(address),
     }))
+    return saved.relay ? [...direct, relayRoute(saved.relay, saved.addresses)] : direct
+  }
   return new HostLink({
-    dial: () => dialFirst(current().addresses),
+    dial: () => dialAny(current().addresses, current().relay),
     routes,
     hostKey: fromBase64(host.hostKey),
     key,
