@@ -4,7 +4,7 @@
 // inline code that name a file of the session's folder open it. A reply still streaming ends in a
 // blinking caret. A sent prompt's mentions and links read as chips.
 
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import {
   Linking,
   Pressable,
@@ -20,7 +20,7 @@ import { copyText } from '../ui/session/feedback'
 import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
 import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
-import { parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
+import { keepBlocks, parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
 import { gentle, PressScale } from '../ui/session/Press'
 
@@ -480,138 +480,210 @@ function Blocks(props: {
   head?: ReactNode
 }) {
   const { look, depth } = props
-  const { c } = look.t
   const gap = SIZES[look.size].gap
   const last = props.blocks.length - 1
   return (
     <View style={{ gap }}>
-      {props.blocks.map((block, index) => {
-        const tail = index === last ? props.tail : undefined
-        if (index === 0 && props.head && block.kind === 'para') {
-          return <Para key={index} text={block.text} look={look} tail={tail} head={props.head} />
-        }
-        switch (block.kind) {
-          case 'heading': {
-            const big = look.size === 'body'
-            const fontSize =
-              block.level === 1
-                ? big
-                  ? 21
-                  : 18
-                : block.level === 2
-                  ? big
-                    ? 18.5
-                    : 16.5
-                  : look.body.fontSize!
-            return (
-              <Para
-                key={index}
-                text={block.text}
-                look={look}
-                tail={tail}
-                style={{
-                  fontSize,
-                  lineHeight: Math.round(fontSize * 1.4),
-                  fontWeight: block.level <= 3 ? '700' : '600',
-                  marginTop: index > 0 && block.level <= 2 ? 6 : 0,
-                }}
-              />
-            )
-          }
-          case 'para': {
-            const picture = look.image ? solePicture(block.text, look.image) : null
-            if (picture) return <Picture key={index} uri={picture.uri} alt={picture.alt} />
-            return <Para key={index} text={block.text} look={look} tail={tail} />
-          }
-          case 'code':
-            return (
-              <View key={index} style={{ gap: 4 }}>
-                <CodeBlock lang={block.lang} meta={block.meta} text={block.text} look={look} />
-                {tail ? <Text style={look.body}>{tail}</Text> : null}
-              </View>
-            )
-          case 'rule':
-            return (
-              <View
-                key={index}
-                style={{
-                  height: StyleSheet.hairlineWidth,
-                  backgroundColor: c.borderStrong,
-                  marginVertical: 4,
-                }}
-              />
-            )
-          case 'quote':
-            return (
-              <View key={index} style={[styles.quote, { borderLeftColor: c.borderStrong }]}>
-                <Blocks
-                  blocks={block.blocks}
-                  look={{ ...look, color: c.textSecondary }}
-                  depth={depth}
-                  tail={tail}
-                />
-              </View>
-            )
-          case 'table':
-            return (
-              <View key={index} style={{ gap: 4 }}>
-                <Table block={block} look={look} />
-                {tail ? <Text style={look.body}>{tail}</Text> : null}
-              </View>
-            )
-          case 'list': {
-            const lastNumber = block.start + block.items.length - 1
-            const marker = block.ordered
-              ? String(lastNumber).length * (look.body.fontSize! * 0.6) + 14
-              : 18
-            const itemLast = block.items.length - 1
-            return (
-              <View key={index} style={{ gap: look.size === 'body' ? 8 : 5 }}>
-                {block.items.map((item, i) => (
-                  <View key={i} style={styles.item}>
-                    <View style={{ width: marker }}>
-                      {item.task !== null ? (
-                        <View style={{ height: look.body.lineHeight, justifyContent: 'center' }}>
-                          <Icon
-                            icon={item.task ? G.done : G.todo}
-                            size={16}
-                            color={item.task ? c.success : c.textTertiary}
-                          />
-                        </View>
-                      ) : (
-                        <Text
-                          style={[
-                            look.body,
-                            {
-                              color: c.textSecondary,
-                              fontVariant: ['tabular-nums'],
-                              fontWeight: block.ordered ? '500' : '700',
-                            },
-                          ]}
-                        >
-                          {block.ordered
-                            ? `${block.start + i}.`
-                            : BULLETS[Math.min(depth, BULLETS.length - 1)]}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Blocks
-                        blocks={item.blocks}
-                        look={item.task ? { ...look, color: c.textSecondary } : look}
-                        depth={depth + 1}
-                        tail={i === itemLast ? tail : undefined}
-                      />
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )
-          }
-        }
-      })}
+      {props.blocks.map((block, index) => (
+        <BlockItem
+          key={index}
+          block={block}
+          index={index}
+          look={look}
+          depth={depth}
+          tail={index === last ? props.tail : undefined}
+          head={index === 0 ? props.head : undefined}
+        />
+      ))}
     </View>
   )
+}
+
+/**
+ * One block, which redraws only when it changed: while a reply streams in, the blocks before the
+ * one being written keep their objects (keepBlocks) and are passed by.
+ */
+const BlockItem = memo(function BlockItem(props: {
+  block: Block
+  index: number
+  look: Look
+  depth: number
+  tail: ReactNode | undefined
+  head: ReactNode | undefined
+}) {
+  const { block, index, look, depth, tail } = props
+  const { c } = look.t
+  if (index === 0 && props.head && block.kind === 'para') {
+    return <Para text={block.text} look={look} tail={tail} head={props.head} />
+  }
+  switch (block.kind) {
+    case 'heading': {
+      const big = look.size === 'body'
+      const fontSize =
+        block.level === 1
+          ? big
+            ? 21
+            : 18
+          : block.level === 2
+            ? big
+              ? 18.5
+              : 16.5
+            : look.body.fontSize!
+      return (
+        <Para
+          text={block.text}
+          look={look}
+          tail={tail}
+          style={{
+            fontSize,
+            lineHeight: Math.round(fontSize * 1.4),
+            fontWeight: block.level <= 3 ? '700' : '600',
+            marginTop: index > 0 && block.level <= 2 ? 6 : 0,
+          }}
+        />
+      )
+    }
+    case 'para': {
+      const picture = look.image ? solePicture(block.text, look.image) : null
+      if (picture) return <Picture uri={picture.uri} alt={picture.alt} />
+      return <Para text={block.text} look={look} tail={tail} />
+    }
+    case 'code':
+      return (
+        <View style={{ gap: 4 }}>
+          <CodeBlock lang={block.lang} meta={block.meta} text={block.text} look={look} />
+          {tail ? <Text style={look.body}>{tail}</Text> : null}
+        </View>
+      )
+    case 'rule':
+      return (
+        <View
+          style={{
+            height: StyleSheet.hairlineWidth,
+            backgroundColor: c.borderStrong,
+            marginVertical: 4,
+          }}
+        />
+      )
+    case 'quote':
+      return (
+        <View style={[styles.quote, { borderLeftColor: c.borderStrong }]}>
+          <Blocks
+            blocks={block.blocks}
+            look={{ ...look, color: c.textSecondary }}
+            depth={depth}
+            tail={tail}
+          />
+        </View>
+      )
+    case 'table':
+      return (
+        <View style={{ gap: 4 }}>
+          <Table block={block} look={look} />
+          {tail ? <Text style={look.body}>{tail}</Text> : null}
+        </View>
+      )
+    case 'list': {
+      const lastNumber = block.start + block.items.length - 1
+      const marker = block.ordered
+        ? String(lastNumber).length * (look.body.fontSize! * 0.6) + 14
+        : 18
+      const itemLast = block.items.length - 1
+      return (
+        <View style={{ gap: look.size === 'body' ? 8 : 5 }}>
+          {block.items.map((item, i) => (
+            <View key={i} style={styles.item}>
+              <View style={{ width: marker }}>
+                {item.task !== null ? (
+                  <View style={{ height: look.body.lineHeight, justifyContent: 'center' }}>
+                    <Icon
+                      icon={item.task ? G.done : G.todo}
+                      size={16}
+                      color={item.task ? c.success : c.textTertiary}
+                    />
+                  </View>
+                ) : (
+                  <Text
+                    style={[
+                      look.body,
+                      {
+                        color: c.textSecondary,
+                        fontVariant: ['tabular-nums'],
+                        fontWeight: block.ordered ? '500' : '700',
+                      },
+                    ]}
+                  >
+                    {block.ordered
+                      ? `${block.start + i}.`
+                      : BULLETS[Math.min(depth, BULLETS.length - 1)]}
+                  </Text>
+                )}
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Blocks
+                  blocks={item.blocks}
+                  look={item.task ? { ...look, color: c.textSecondary } : look}
+                  depth={depth + 1}
+                  tail={i === itemLast ? tail : undefined}
+                />
+              </View>
+            </View>
+          ))}
+        </View>
+      )
+    }
+  }
+})
+
+/** How often at most a reply being written is read into blocks again. */
+const STREAM_PARSE_EVERY = 100
+/** Finished texts read into blocks, kept for when their rows mount again; the oldest go first. */
+const PARSED_KEPT = 200
+const parsedTexts = new Map<string, Block[]>()
+
+function parseKept(source: string): Block[] {
+  const known = parsedTexts.get(source)
+  if (known) {
+    parsedTexts.delete(source)
+    parsedTexts.set(source, known)
+    return known
+  }
+  const blocks = parseBlocks(source)
+  parsedTexts.set(source, blocks)
+  if (parsedTexts.size > PARSED_KEPT) parsedTexts.delete(parsedTexts.keys().next().value!)
+  return blocks
+}
+
+/** `text`, but while `every` is set no more often than that: the latest arrives after the wait. */
+function useThrottled(text: string, every: number): string {
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  const shown = useRef({ text, at: 0 })
+  const now = Date.now()
+  if (shown.current.text !== text && (every === 0 || now - shown.current.at >= every)) {
+    shown.current = { text, at: now }
+  }
+  const behind = shown.current.text !== text
+  useEffect(() => {
+    if (!behind) return
+    const timer = setTimeout(redraw, Math.max(0, shown.current.at + every - Date.now()))
+    return () => clearTimeout(timer)
+  })
+  return shown.current.text
+}
+
+/**
+ * A text's blocks. A finished one is read once and kept; a streaming one is read at most every
+ * STREAM_PARSE_EVERY, and the blocks it had already keep their objects, so only the one being
+ * written redraws.
+ */
+function useBlocks(markdown: string, streaming: boolean): Block[] {
+  const shown = useThrottled(markdown, streaming ? STREAM_PARSE_EVERY : 0)
+  const before = useRef<Block[]>([])
+  return useMemo(() => {
+    const blocks = keepBlocks(before.current, streaming ? parseBlocks(shown) : parseKept(shown))
+    before.current = blocks
+    return blocks
+  }, [shown, streaming])
 }
 
 export const Markdown = memo(function Markdown(props: {
@@ -633,7 +705,7 @@ export const Markdown = memo(function Markdown(props: {
   const refs = useFileRefs()
   const size = props.size ?? 'body'
   const color = props.color ?? t.c.text
-  const parsed = useMemo(() => parseBlocks(props.markdown), [props.markdown])
+  const parsed = useBlocks(props.markdown, !!props.streaming)
   const look = useMemo<Look>(
     () => ({
       t,
@@ -648,7 +720,10 @@ export const Markdown = memo(function Markdown(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [t.c, t.s, color, size, props.image, props.onLink, refs, props.chips],
   )
-  const tail = props.streaming ? <Caret color={t.c.accent} /> : undefined
+  const tail = useMemo(
+    () => (props.streaming ? <Caret color={t.c.accent} /> : undefined),
+    [props.streaming, t.c.accent],
+  )
   if (parsed.length === 0) {
     return tail || props.head ? (
       <Text style={look.body}>
