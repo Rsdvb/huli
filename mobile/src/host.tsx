@@ -31,6 +31,7 @@ import { deviceKey, linkTo } from './connection'
 import { dropDrafts } from './drafts'
 import { createStore, sameFields, sameItems, useSelector } from './select'
 import { stopPush } from './push/sync'
+import { showLimitAlert } from './usage/limitAlert'
 import {
   computerName,
   loadComputers,
@@ -656,6 +657,9 @@ export function HostProvider(props: { children: ReactNode }) {
           break
         case 'projects.changed':
           setHost((d) => (same(d.projects, event.projects) ? {} : { projects: event.projects }))
+          break
+        case 'agents.limitAlert':
+          showLimitAlert(event.alert)
           break
       }
     })

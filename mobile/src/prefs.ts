@@ -1,5 +1,6 @@
-// The phone's own preferences, kept in the Keychain beside the pairing: the theme, the app lock and
-// whether notifications show what they are about. Read once at start; every screen subscribes.
+// The phone's own preferences, kept in the Keychain beside the pairing: the theme, the app lock,
+// whether notifications show what they are about and whether plan limits alert. Read once at
+// start; every screen subscribes.
 
 import { useSyncExternalStore } from 'react'
 import { Appearance } from 'react-native'
@@ -19,6 +20,11 @@ export interface Prefs {
   hidePreviews: boolean
   /** Live Activities on the Lock Screen and in the Dynamic Island (iOS). */
   liveActivities: boolean
+  /**
+   * 额度提醒: a plan window crossed 90% or ran out, as a notification from the computer, which it
+   * is told, and as a banner while the app is in front.
+   */
+  limitAlerts: boolean
   /** A session's sub-agent list keeps the ones that finished, as the desktop's switch does. */
   showFinishedSubagents: boolean
 }
@@ -29,6 +35,7 @@ const DEFAULTS: Prefs = {
   lockAfter: 0,
   hidePreviews: false,
   liveActivities: true,
+  limitAlerts: true,
   showFinishedSubagents: false,
 }
 
@@ -54,6 +61,7 @@ function parse(text: string | null): Prefs {
         : 0,
       hidePreviews: raw.hidePreviews === true,
       liveActivities: raw.liveActivities !== false,
+      limitAlerts: raw.limitAlerts !== false,
       showFinishedSubagents: raw.showFinishedSubagents === true,
     }
   } catch {

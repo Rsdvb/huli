@@ -12,6 +12,8 @@ export interface NotificationData {
   kind: string | null
   tag: string | null
   sessionId: string | null
+  /** A plan limit's agent. */
+  agentId: string | null
   requestId: string | null
   actions: PushActions | null
   question: PushQuestion | null
@@ -54,6 +56,7 @@ export function notificationData(raw: unknown): NotificationData | null {
     kind,
     tag: text(data.tag),
     sessionId: text(data.sessionId),
+    agentId: text(data.agentId),
     requestId: text(data.requestId),
     actions: actionsOf(data.actions),
     question: questionOf(data.question),
@@ -63,6 +66,11 @@ export function notificationData(raw: unknown): NotificationData | null {
 function targetOf(data: NotificationData): LinkTarget | null {
   if (data.sessionId) return { kind: 'session', id: data.sessionId }
   if (data.kind === 'routine-paused') return { kind: 'tab', tab: 'routines' }
+  if (data.kind === 'plan-limit') {
+    return data.agentId
+      ? { kind: 'tab', tab: 'usage', agent: data.agentId }
+      : { kind: 'tab', tab: 'usage' }
+  }
   return null
 }
 

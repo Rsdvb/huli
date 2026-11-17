@@ -10,7 +10,7 @@
 //   huli://tasks                  the 任务 tab, its tasks (需求)
 //   huli://task/<taskId>          a task
 //   huli://routines               the 任务 tab, its routines (定时)
-//   huli://usage                  the 用量 tab
+//   huli://usage                  the 用量 tab (`agent=<agentId>` filters it to one agent)
 //
 // Any of them may add `host=<id>` (`huli://session/abc?host=1a2b3c4d5e6f`) to show that computer
 // first. The id is either the computer's id in the app (SavedHost.id: the first 6 bytes of its key
@@ -39,7 +39,8 @@ export type LinkTarget =
   | { kind: 'artifact'; id: string; version: number | null }
   | { kind: 'new'; text?: string }
   | { kind: 'search'; q: string }
-  | { kind: 'tab'; tab: TabName }
+  /** `agent` filters the 用量 tab to one agent, as a plan limit's notification does. */
+  | { kind: 'tab'; tab: TabName; agent?: string }
 
 export interface AppLink {
   /** Where to go; null only switches to the computer, as a notification about none does. */
@@ -108,7 +109,11 @@ export function parseLink(url: string): AppLink | null {
     const text = params.get('text') ?? ''
     target = text.trim() ? { kind: 'new', text: text.slice(0, MAX_TEXT) } : { kind: 'new' }
   } else if (path === 'search') target = { kind: 'search', q: params.get('q') ?? '' }
-  else if (path in TABS) target = { kind: 'tab', tab: TABS[path]! }
+  else if (path in TABS) {
+    const tab = TABS[path]!
+    const agent = params.get('agent')?.trim()
+    target = tab === 'usage' && agent ? { kind: 'tab', tab, agent } : { kind: 'tab', tab }
+  }
   return target ? { target, host } : null
 }
 
@@ -137,7 +142,7 @@ export function linkTo(target: LinkTarget, host?: string | null): string {
     case 'search':
       return `huli://search${suffix([['q', target.q]])}`
     case 'tab':
-      return `huli://${target.tab === 'index' ? '' : target.tab}${suffix([])}`
+      return `huli://${target.tab === 'index' ? '' : target.tab}${suffix([['agent', target.agent ?? '']])}`
   }
 }
 
@@ -209,6 +214,13 @@ function navigate(target: LinkTarget, computer: string | null): void {
     case 'tab':
       if (target.tab === 'routines') setTasksTabView('routines')
       if (router.canDismiss()) router.dismissAll()
+      if (target.tab === 'usage' && target.agent) {
+        router.navigate({
+          pathname: '/usage',
+          params: { agent: target.agent, at: String(Date.now()) },
+        })
+        return
+      }
       router.navigate(target.tab === 'index' ? '/' : `/${target.tab}`)
   }
 }

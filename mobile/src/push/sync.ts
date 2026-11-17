@@ -1,6 +1,7 @@
 // This phone's notifications on the paired computer, over the link (notifications.get and .set in
 // src/shared/remote/push.ts): once connected to a host that sends them, it asks the user, gives the
-// host this phone's push target, and gives the extension what opens them.
+// host this phone's push target and whether it wants plan limit alerts, and gives the extension
+// what opens them.
 
 import { useSyncExternalStore } from 'react'
 import type { HostLink } from '@shared/remote/link'
@@ -123,8 +124,14 @@ async function syncOnce(link: HostLink): Promise<string | null> {
   const activityChanged =
     Boolean(current.target.activityStart) !== Boolean(activity?.start) ||
     Boolean(current.target.activityUpdate) !== Boolean(activity?.update)
-  if (!current.target.apns || activityChanged || sent.get(link) !== text) {
-    await link.request(NOTIFICATIONS_SET, { target })
+  // 额度提醒 is the phone's own switch; a computer from before it answers without it and ignores it.
+  const limits = getPrefs().limitAlerts
+  const choices = 'limits' in current.choices && current.choices.limits !== limits
+  if (!current.target.apns || activityChanged || sent.get(link) !== text || choices) {
+    await link.request(NOTIFICATIONS_SET, {
+      target,
+      ...(choices ? { choices: { limits } } : {}),
+    })
     sent.set(link, text)
   }
   setStatus(current.signedIn ? 'on' : 'signed-out')

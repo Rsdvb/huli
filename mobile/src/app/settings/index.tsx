@@ -20,7 +20,7 @@ import { ROUTE_NAMES } from '../../linkInfo'
 import { LIVE_SUPPORTED, useLiveAllowed } from '../../live/activities'
 import { authenticate, useBiometryName } from '../../lock'
 import { setPrefs, usePrefs, type ThemePref } from '../../prefs'
-import { usePushStatus, type PushStatus } from '../../push/sync'
+import { syncPush, usePushStatus, type PushStatus } from '../../push/sync'
 import { useRoutineList } from '../../routines'
 import { haptic } from '../../ui/haptics'
 import { HuliIcon } from '../../ui/HuliMark'
@@ -185,6 +185,24 @@ export default function Settings() {
             value={PUSH_TEXT[push]}
             chevron
             onPress={() => void Linking.openSettings()}
+          />
+          <ListRow
+            title="额度提醒"
+            subtitle="套餐限额用到 90% 或用完时提醒，每个周期一次"
+            icon="chart"
+            plainIcon
+            trailing={
+              <Switch
+                value={prefs.limitAlerts}
+                onValueChange={(on) => {
+                  haptic.select()
+                  setPrefs({ limitAlerts: on })
+                  if (host.link) void syncPush(host.link).catch(() => {})
+                }}
+                trackColor={{ true: c.success }}
+                accessibilityLabel="额度提醒"
+              />
+            }
           />
           {LIVE_SUPPORTED ? (
             <ListRow
