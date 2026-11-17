@@ -112,6 +112,7 @@ import { dissolveRows } from './row-dust'
 import { markReturning } from './row-exit'
 import { sessionPullRequests } from './session-prs'
 import { sessionFolder } from '@renderer/lib/session-folder'
+import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
 import {
   askRemoveWorktree,
   canRemoveWorktree,
@@ -537,6 +538,7 @@ export function SessionMenuItems({
     <DropdownMenuGroup key={group[0]}>
       {index > 0 && <DropdownMenuSeparator />}
       {group.map(item)}
+      {group.includes('pin') && <MoveToFolderMenu ids={[id]} />}
     </DropdownMenuGroup>
   ))
 }
@@ -706,6 +708,7 @@ export function MultiSessionMenuItems({
           ) : (
             <DropdownMenuLabel>{t('row.sessionsCount', { count })}</DropdownMenuLabel>
           )}
+          {index === groups.length - 1 && <MoveToFolderMenu ids={summaries.map((s) => s.id)} />}
           {group.map((name) => {
             const accelerator = MULTI_ACCELERATORS[name]
             const props = { key: name, 'data-accelerator': accelerator }
