@@ -10,6 +10,7 @@ import { LiveBridge } from '../live/bridge'
 import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
 import { ShareIntake } from '../share/intake'
+import { NoticeBar } from '../ui/NoticeBar'
 import { useTokens } from '../ui/tokens'
 import { watchUpdates } from '../update'
 
@@ -50,6 +51,10 @@ export default function Layout() {
               <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
               <Stack.Screen name="artifact/[id]" options={{ headerShown: false }} />
               <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="task/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="start-task" options={{ headerShown: false }} />
+              <Stack.Screen name="workflows" options={{ headerShown: false }} />
+              <Stack.Screen name="workflow/[id]" options={{ headerShown: false }} />
               <Stack.Screen name="search" options={{ headerShown: false, animation: 'fade' }} />
               <Stack.Screen name="pair" options={{ headerShown: false, presentation: 'modal' }} />
             </Stack>
@@ -58,6 +63,7 @@ export default function Layout() {
           <LinkBridge />
           <LiveBridge />
           <ShareIntake />
+          <NoticeBar />
           <LockLayer />
         </HostProvider>
       </SafeAreaProvider>

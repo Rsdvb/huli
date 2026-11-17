@@ -1,13 +1,14 @@
 // A new session: a greeting, the recent projects to choose one from (or none), and the same
 // composer as a session's, whose mode and model menus set what the session starts with and whose
 // model menu switches the agent; the status line names the computer, the project, which opens a
-// picker, the branch it is on, and the agent's plan usage.
+// picker, the branch it is on, and the agent's plan usage. Opened with `parent`, it starts a
+// sub-session of that session, in its project.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Stack, router } from 'expo-router'
+import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption, UserContent } from '@shared/thread'
@@ -36,7 +37,7 @@ import { PlanUsageSheet } from '../components/PlanUsageSheet'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
 import { useHost, useLink } from '../host'
-import { folder, greeting, listTime } from '../sessions'
+import { folder, greeting, listTime, sessionTitle } from '../sessions'
 import { HuliIcon } from '../ui/HuliMark'
 import { useComputer } from '../ui/session/computer'
 import { haptic } from '../ui/session/feedback'
@@ -67,9 +68,13 @@ export default function NewSession() {
   )
 
   const [chosenAgent, setChosenAgent] = useState<string | null>(null)
+  // 新建子会话 opens this screen under its parent, in the parent's project and with its agent.
+  const parentId = useLocalSearchParams<{ parent?: string }>().parent
+  const parent = parentId ? host.sessions.get(parentId) : undefined
   const startable = agents.filter(canStart)
   const agentId =
     chosenAgent ??
+    (parent && host.agents.has(parent.agentId) ? parent.agentId : null) ??
     startable.find((a) => a.isDefault)?.id ??
     startable[0]?.id ??
     agents.find((a) => a.isDefault)?.id ??
@@ -77,7 +82,13 @@ export default function NewSession() {
     null
   const agent = agentId ? host.agents.get(agentId) : undefined
   const [chosenProject, setChosenProject] = useState<string | null | undefined>(undefined)
-  const projectPath = chosenProject === undefined ? (projects[0]?.path ?? null) : chosenProject
+  const projectPath = parent
+    ? parent.scratch
+      ? null
+      : parent.projectPath
+    : chosenProject === undefined
+      ? (projects[0]?.path ?? null)
+      : chosenProject
   const project = projects.find((p) => p.path === projectPath)
   const [picks, setPicks] = useState<Record<string, string | boolean>>({})
   const [usageOpen, setUsageOpen] = useState(false)
@@ -138,6 +149,7 @@ export default function NewSession() {
     const summary = (await link.request('sessions.create', {
       agentId,
       projectPath,
+      ...(parent ? { parentId: parent.id } : {}),
       ...(Object.keys(values).length > 0 ? { options: values } : {}),
       ...(prompt.length > 0 ? { prompt } : {}),
     })) as SessionSummary
@@ -247,7 +259,10 @@ export default function NewSession() {
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <GlassHeader title="新建会话" />
+      <GlassHeader
+        title={parent ? '新建子会话' : '新建会话'}
+        subtitle={parent ? sessionTitle(parent) : null}
+      />
       {/* Clipped, so what the keyboard moves up slides under the header, not over it. */}
       <View style={styles.clip}>
         <KeyboardAvoidingView
@@ -272,10 +287,10 @@ export default function NewSession() {
             </Text>
 
             <Text style={[styles.section, { color: c.textSecondary }]}>
-              最近的项目
-              <Text style={{ color: c.textTertiary }}> {projects.length}</Text>
+              {parent ? '子会话在父会话的项目中工作' : '最近的项目'}
+              {parent ? null : <Text style={{ color: c.textTertiary }}> {projects.length}</Text>}
             </Text>
-            {projectRows.map((row) => {
+            {(parent ? [] : projectRows).map((row) => {
               const on = row.path === projectPath
               return (
                 <Pressable
@@ -329,7 +344,7 @@ export default function NewSession() {
 
           <Composer
             ref={composer}
-            draft={NEW_SESSION_DRAFT}
+            draft={parent ? `new:${parent.id}` : NEW_SESSION_DRAFT}
             agentName={agent?.name ?? null}
             placeholder={agent ? `想让 ${agent.name} 做什么？` : '想让 Agent 做什么？'}
             onSend={create}
@@ -411,12 +426,19 @@ export default function NewSession() {
                 hostName={computer.name}
                 platform={computer.platform}
                 state={host.state}
-                folder={project ? project.name : '无项目'}
-                folderPicker
+                folder={project ? project.name : projectPath ? folder(projectPath) : '无项目'}
+                path={projectPath}
+                folderPicker={!parent}
                 folderAnchor={folderAnchor}
-                onFolderPress={() =>
-                  menu.open('projects', folderAnchor, { placement: 'above', align: 'center' })
-                }
+                {...(parent
+                  ? {}
+                  : {
+                      onFolderPress: () =>
+                        menu.open('projects', folderAnchor, {
+                          placement: 'above',
+                          align: 'center',
+                        }),
+                    })}
                 branch={branch}
                 limits={limitsForModel(agent?.limits ?? [], model?.option)}
                 onLimitPress={() => {

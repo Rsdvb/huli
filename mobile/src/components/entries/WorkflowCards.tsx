@@ -1,10 +1,11 @@
 // The calls of Kettu's workflow tools, once they ended, as the desktop's cards draw them: a
 // suggestion to run the work as a task, which the phone can start or decline; a workflow an agent
-// saved for approval; and a step's report or pick with what Kettu checked, where a report that waits
-// for the user's review can be approved or sent back.
+// saved for approval, which opens its page to approve; and a step's report or pick with what Kettu
+// checked, where a report that waits for the user's review can be approved or sent back.
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { router } from 'expo-router'
 import type {
   CheckLine,
   CheckNext,
@@ -336,10 +337,23 @@ function SavedCard(props: { entry: ToolEntry; sessionId: string }) {
         </Text>
       ) : null}
       <Text style={[styles.meta, { color: c.textTertiary }]}>
-        {state === 'pending'
-          ? '在 Marketplace 里批准之前，什么都不能用它。批准要在电脑上做。'
+        {state === 'pending' || state === 'changed'
+          ? '你批准之前，什么都不能用它。'
           : `${agent} 写的`}
       </Text>
+      {library ? (
+        <Pressable
+          onPress={() => router.push(`/workflow/${encodeURIComponent(library.id)}`)}
+          hitSlop={6}
+          accessibilityRole="link"
+          style={styles.details}
+        >
+          <Text style={[styles.meta, { color: c.accent, fontWeight: '600' }]}>
+            {state === 'pending' || state === 'changed' ? '查看并批准' : '查看工作流'}
+          </Text>
+          <Icon icon={G.right} size={11} color={c.accent} />
+        </Pressable>
+      ) : null}
     </Shell>
   )
 }
