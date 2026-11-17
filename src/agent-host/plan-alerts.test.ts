@@ -64,7 +64,7 @@ async function started(file: ReturnType<typeof memoryFile>, clock: { now: number
   return { planAlerts, alerts }
 }
 
-const key = alertKey('claude-code', 'account:me@example.com', 'five_hour')
+const key = alertKey('claude-code', 'me@example.com', 'five_hour')
 
 describe('alertLevel', () => {
   it('goes by the whole percentage shown, and a reached window is used up', () => {
@@ -147,6 +147,10 @@ describe('PlanAlerts', () => {
         resetsAt: RESET,
       },
     ])
+    // The plan's name the agent reads later is the same account.
+    const named = { kind: 'account' as const, label: 'Claude Ultra', email: 'Me@example.com' }
+    planAlerts.observe(status([limit(95)], { account: named }))
+    expect(alerts).toHaveLength(1)
     // Another account of the same agent has a plan of its own.
     const other = { kind: 'account' as const, label: 'Claude Pro', email: 'work@example.com' }
     planAlerts.observe(status([limit(95)], { account: other }))

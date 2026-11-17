@@ -46,11 +46,12 @@ export function alertLevel(limit: Pick<PlanLimit, 'usedPercent' | 'state'>): Ale
   return used >= 100 ? 100 : used >= 90 ? 90 : null
 }
 
-/** Who a status's plan belongs to: the account it is signed in with, or the agent alone. */
+/**
+ * Who a status's plan belongs to: the account's email, or the agent alone without one. Not its
+ * label, which changes once the agent reads the plan's name.
+ */
 export function accountOf(status: Pick<AgentStatus, 'account'>): string {
-  const account = status.account
-  if (!account) return ''
-  return `${account.kind}:${(account.email ?? account.label).trim().toLowerCase()}`
+  return status.account?.email?.trim().toLowerCase() ?? ''
 }
 
 export function alertKey(agentId: AgentId, account: string, window: string): string {
