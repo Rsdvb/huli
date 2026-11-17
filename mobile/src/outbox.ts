@@ -485,7 +485,15 @@ async function flush(link: HostLink, computer: string): Promise<void> {
     const tried = new Set<string>()
     for (;;) {
       if (link.state.kind !== 'connected' || route?.link !== link) return
-      const item = itemsOf(computer).find((each) => !each.failed && !tried.has(each.id))
+      // A session's later messages wait behind one that failed, so they never arrive out of order.
+      const blocked = new Set<string>()
+      const item = itemsOf(computer).find((each) => {
+        if (each.failed || tried.has(each.id)) {
+          if (each.sessionId !== null) blocked.add(each.sessionId)
+          return false
+        }
+        return each.sessionId === null || !blocked.has(each.sessionId)
+      })
       if (!item) return
       tried.add(item.id)
       setSending(item.id, true)
