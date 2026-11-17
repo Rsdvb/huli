@@ -288,6 +288,13 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'computer.declineSetup': HOST_MS,
   'kettuImport.scan': HOST_MS,
   'kettuImport.run': NONE,
+  'folders.list': HOST_MS,
+  'folders.create': HOST_MS,
+  'folders.rename': HOST_MS,
+  'folders.update': HOST_MS,
+  'folders.delete': HOST_MS,
+  'folders.reorder': HOST_MS,
+  'folders.move': HOST_MS,
 }
 
 /** How long to wait for `method`'s answer; null to wait as long as it takes. */

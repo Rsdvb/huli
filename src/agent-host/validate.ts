@@ -98,6 +98,7 @@ import { bundleToken } from './marketplace/bundles'
 import { TASK_ID } from './workflow/model'
 import { isCompletablePath } from './path-completion'
 import { isAbsolutePath } from './paths'
+import { folderValidators } from './session-folders'
 import { MAX_WORKTREE_COPY_PATHS } from './storage'
 import { checkIncludeEntry } from './worktrees/copy'
 import { branchFromTemplate, checkWorktreeBranch } from './worktrees/names'
@@ -2596,5 +2597,6 @@ export function createValidators(platform: Platform): Validators {
         sessionIds: [...new Set(sessionIds.map((id: unknown) => string({ id }, 'id', ID_CHARS)))],
       }
     },
+    ...folderValidators,
   }
 }

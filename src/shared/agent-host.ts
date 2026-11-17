@@ -23,6 +23,7 @@ import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten 
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
 import type { KettuImportResult, KettuImportScan } from './kettu-import'
+import type { SessionFolder } from './session-folders'
 import type {
   CatalogServer,
   ConnectStart,
@@ -1641,6 +1642,21 @@ export interface HostContract {
   'kettuImport.scan': { params: void; result: KettuImportScan }
   // Imports them by Kettu's ids, telling every port `kettuImport.progress` as it goes.
   'kettuImport.run': { params: { sessionIds: string[] }; result: KettuImportResult }
+  // Huli: the user's folders of sessions, in the user's order; every port hears `folders.changed`.
+  'folders.list': { params: void; result: SessionFolder[] }
+  // A new folder, last in the order, holding `sessionIds` (taken out of any other folder).
+  'folders.create': { params: { name: string; sessionIds?: string[] }; result: SessionFolder }
+  'folders.rename': { params: { folderId: string; name: string }; result: void }
+  'folders.update': {
+    params: { folderId: string; pinned?: boolean; collapsed?: boolean }
+    result: void
+  }
+  // Its sessions go back to the ungrouped ones; no session is deleted.
+  'folders.delete': { params: { folderId: string }; result: void }
+  // The folders named first, in that order; the rest keep theirs after them.
+  'folders.reorder': { params: { folderIds: string[] }; result: void }
+  // Into a folder, or out of every folder with null; ids of sessions not on the host are skipped.
+  'folders.move': { params: { sessionIds: string[]; folderId: string | null }; result: void }
 }
 
 export type HostMethod = keyof HostContract
@@ -1925,6 +1941,13 @@ export const HOST_METHODS = [
   'computer.declineSetup',
   'kettuImport.scan',
   'kettuImport.run',
+  'folders.list',
+  'folders.create',
+  'folders.rename',
+  'folders.update',
+  'folders.delete',
+  'folders.reorder',
+  'folders.move',
 ] as const satisfies readonly HostMethod[]
 
 /** One that has a session in front: the host's own windows as one, or a paired device. */
@@ -2012,6 +2035,8 @@ export type HostEvent =
   | { type: 'browser.askAnswered'; sessionId: string; outcome: ControlOutcome }
   // Huli: a `kettuImport.run` came to its `done`th session of `total`, whose title is `title`.
   | { type: 'kettuImport.progress'; done: number; total: number; title: string | null }
+  // Huli: the session folders changed; every one, in the user's order.
+  | { type: 'folders.changed'; folders: SessionFolder[] }
 
 export interface AgentsApi {
   request<M extends HostMethod>(method: M, params: HostParams<M>): Promise<HostResult<M>>
