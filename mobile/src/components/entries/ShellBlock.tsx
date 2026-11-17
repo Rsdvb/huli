@@ -12,7 +12,9 @@ import {
   type ToolEntry,
 } from '@shared/thread'
 import { useSession } from '../../host'
-import { copyText, showMenu } from '../../ui/session/feedback'
+import { ContextMenu } from '../../ui/ContextMenu'
+import type { MenuNode } from '../../ui/menu'
+import { copyText } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { selectText } from '../../ui/session/SelectText'
@@ -135,47 +137,59 @@ function Section(props: {
   const { c, s } = useSessionTokens()
   const [copied, setCopied] = useState(false)
   const text = props.copy
+  const menu: MenuNode[] = text
+    ? [
+        {
+          key: 'copy',
+          label: '复制',
+          icon: 'doc.on.doc',
+          onPress: () => void copyText(text),
+        },
+        {
+          key: 'select',
+          label: '选择文本',
+          icon: 'character.cursor.ibeam',
+          onPress: () => selectText({ text, mono: true }),
+        },
+      ]
+    : []
   return (
-    <Pressable
-      onLongPress={
-        text
-          ? () =>
-              showMenu(undefined, [
-                { label: '复制', onPress: () => void copyText(text) },
-                { label: '选择文本', onPress: () => selectText({ text, mono: true }) },
-              ])
-          : undefined
-      }
-      delayLongPress={350}
-      style={[styles.section, { backgroundColor: s.code, borderColor: s.codeBorder }]}
-    >
-      <View style={styles.head}>
-        <Text style={[styles.label, { color: c.textTertiary }]}>
-          {props.label}
-          {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
-        </Text>
-        {props.copy !== undefined ? (
-          <Pressable
-            onPress={() =>
-              void copyText(props.copy!).then(() => {
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1500)
-              })
-            }
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={`复制${props.label}`}
-          >
-            <Icon
-              icon={copied ? G.copied : G.copy}
-              size={13}
-              color={copied ? c.success : c.textTertiary}
-            />
-          </Pressable>
-        ) : null}
-      </View>
-      {props.children}
-    </Pressable>
+    <ContextMenu items={menu}>
+      {(longPress) => (
+        <Pressable
+          onLongPress={longPress}
+          delayLongPress={350}
+          style={[styles.section, { backgroundColor: s.code, borderColor: s.codeBorder }]}
+        >
+          <View style={styles.head}>
+            <Text style={[styles.label, { color: c.textTertiary }]}>
+              {props.label}
+              {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
+            </Text>
+            {props.copy !== undefined ? (
+              <Pressable
+                onPress={() =>
+                  void copyText(props.copy!).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1500)
+                  })
+                }
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`复制${props.label}`}
+              >
+                <Icon
+                  icon={copied ? G.copied : G.copy}
+                  size={13}
+                  color={copied ? c.success : c.textTertiary}
+                />
+              </Pressable>
+            ) : null}
+          </View>
+          {props.children}
+        </Pressable>
+      )}
+    </ContextMenu>
   )
 }
 

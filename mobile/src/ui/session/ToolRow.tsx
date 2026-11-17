@@ -14,7 +14,9 @@ import { Markdown } from '../../components/Markdown'
 import { handDiff } from '../../diff'
 import { Clamp } from './Clamp'
 import { useSessionRows } from './context'
-import { copyText, plainText, showMenu } from './feedback'
+import { ContextMenu } from '../ContextMenu'
+import type { MenuNode } from '../menu'
+import { copyText, plainText } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useTenth } from './now'
@@ -314,44 +316,53 @@ function Section(props: { label: string; copy?: string; children: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const text = props.copy
   return (
-    <Pressable
-      onLongPress={
-        text
-          ? () =>
-              showMenu(undefined, [
-                { label: '复制', onPress: () => void copyText(text) },
-                { label: '选择文本', onPress: () => selectText({ text, mono: true }) },
-              ])
-          : undefined
-      }
-      delayLongPress={350}
-      style={{ gap: 6 }}
-    >
-      <View style={styles.sectionHead}>
-        <Text style={[styles.sectionLabel, { color: c.textTertiary }]}>{props.label}</Text>
-        {props.copy !== undefined && (
-          <Pressable
-            onPress={() =>
-              void copyText(props.copy!).then(() => {
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1400)
-              })
-            }
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
-          >
-            <Icon
-              icon={copied ? G.copied : G.copy}
-              size={13}
-              color={copied ? c.success : c.textTertiary}
-            />
-          </Pressable>
-        )}
-      </View>
-      {props.children}
-    </Pressable>
+    <ContextMenu items={text ? copyMenu(text, true) : []}>
+      {(longPress) => (
+        <Pressable
+          onLongPress={longPress}
+          delayLongPress={350}
+          style={{ gap: 6, backgroundColor: c.bg }}
+        >
+          <View style={styles.sectionHead}>
+            <Text style={[styles.sectionLabel, { color: c.textTertiary }]}>{props.label}</Text>
+            {props.copy !== undefined && (
+              <Pressable
+                onPress={() =>
+                  void copyText(props.copy!).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1400)
+                  })
+                }
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
+              >
+                <Icon
+                  icon={copied ? G.copied : G.copy}
+                  size={13}
+                  color={copied ? c.success : c.textTertiary}
+                />
+              </Pressable>
+            )}
+          </View>
+          {props.children}
+        </Pressable>
+      )}
+    </ContextMenu>
   )
+}
+
+/** Copy and select for a block of text, as its context menu offers them. */
+function copyMenu(text: string, mono: boolean): MenuNode[] {
+  return [
+    { key: 'copy', label: '复制', icon: 'doc.on.doc', onPress: () => void copyText(text) },
+    {
+      key: 'select',
+      label: '选择文本',
+      icon: 'character.cursor.ibeam',
+      onPress: () => selectText({ text, mono }),
+    },
+  ]
 }
 
 /**
@@ -472,25 +483,24 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
         }
       />
       {open && has && (
-        <Pressable
-          onLongPress={() =>
-            showMenu(undefined, [
-              { label: '复制', onPress: () => void copyText(plainText(entry.markdown)) },
-              { label: '选择文本', onPress: () => selectText({ text: plainText(entry.markdown) }) },
-            ])
-          }
-          delayLongPress={350}
-          style={[styles.thought, { borderLeftColor: c.borderStrong }]}
-        >
-          <Clamp maxHeight={180}>
-            <Markdown
-              markdown={entry.markdown}
-              streaming={entry.streaming}
-              size="compact"
-              color={c.textSecondary}
-            />
-          </Clamp>
-        </Pressable>
+        <ContextMenu items={entry.streaming ? [] : copyMenu(plainText(entry.markdown), false)}>
+          {(longPress) => (
+            <Pressable
+              onLongPress={longPress}
+              delayLongPress={350}
+              style={[styles.thought, { borderLeftColor: c.borderStrong, backgroundColor: c.bg }]}
+            >
+              <Clamp maxHeight={180}>
+                <Markdown
+                  markdown={entry.markdown}
+                  streaming={entry.streaming}
+                  size="compact"
+                  color={c.textSecondary}
+                />
+              </Clamp>
+            </Pressable>
+          )}
+        </ContextMenu>
       )}
     </View>
   )
