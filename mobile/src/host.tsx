@@ -2,12 +2,19 @@
 // link and state, and the sessions, agents and projects it lists, kept current by its events.
 // Only the active computer has a link; switching closes one link and opens the other. What the
 // active computer listed last is kept in the cache (cache.ts) and shown at once on the next start.
+//
+// The data lives in a small external store rather than in a React context, so a screen subscribes
+// through a selector (`useSession(id)`, `useHostState()`, `useLink()`...) and re-renders only when
+// what it selected changed. A summary that comes in unchanged keeps its object, and so does the map
+// that holds it, so rows compare by reference. `useHost()` still returns everything, for screens
+// that want it all; it re-renders on any change, as the context did.
 
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -22,6 +29,7 @@ import { admin } from './admin'
 import { clearComputer, dropThread, readLists, writeLists } from './cache'
 import { deviceKey, linkTo } from './connection'
 import { dropDrafts } from './drafts'
+import { createStore, sameFields, sameItems, useSelector } from './select'
 import { stopPush } from './push/sync'
 import {
   computerName,
@@ -37,7 +45,41 @@ interface Ready {
   link: HostLink
 }
 
-export interface HostContextValue {
+/** What the store holds; `useHost()` and the selectors read it. */
+export interface HostData {
+  phase: 'loading' | 'pair' | 'ready'
+  notice: string | null
+  computers: SavedComputers
+  ready: Ready | null
+  state: LinkState
+  sessions: Map<string, SessionSummary>
+  agents: Map<string, AgentStatus>
+  projects: Project[]
+  loaded: boolean
+  fromCache: boolean
+  syncedAt: number | null
+  unreachable: boolean
+}
+
+export interface HostActions {
+  /** Tries the computer again now. */
+  retry(): void
+  paired(host: SavedHost, key: KeyPair, paired: Paired): Promise<void>
+  /** Forgets the active computer without asking it anything, as when it removed this phone. */
+  forget(notice: string | null): Promise<void>
+  /** Unpairs a computer: tells it when it can be reached, then forgets it and its cache. */
+  unpair(id: string): Promise<void>
+  switchTo(id: string): void
+  /** The name this phone shows for a computer; null goes back to the computer's own. */
+  rename(id: string, label: string | null): void
+  refresh(): Promise<void>
+  /** The computer took a new name for this phone; kept until its next welcome says so too. */
+  renamedDevice(name: string): void
+  /** The id the active computer's notifications carry, which says which computer sent one. */
+  notePushId(pushId: string): void
+}
+
+export interface HostContextValue extends HostActions {
   phase: 'loading' | 'pair' | 'ready'
   notice: string | null
   /** The active computer. */
@@ -60,36 +102,231 @@ export interface HostContextValue {
    * Huli is not running there, or the networks differ. The link keeps retrying with backoff.
    */
   unreachable: boolean
-  /** Tries the computer again now. */
-  retry(): void
-  paired(host: SavedHost, key: KeyPair, paired: Paired): Promise<void>
-  /** Forgets the active computer without asking it anything, as when it removed this phone. */
-  forget(notice: string | null): Promise<void>
-  /** Unpairs a computer: tells it when it can be reached, then forgets it and its cache. */
-  unpair(id: string): Promise<void>
-  switchTo(id: string): void
-  /** The name this phone shows for a computer; null goes back to the computer's own. */
-  rename(id: string, label: string | null): void
-  refresh(): Promise<void>
-  /** The computer took a new name for this phone; kept until its next welcome says so too. */
-  renamedDevice(name: string): void
-  /** The id the active computer's notifications carry, which says which computer sent one. */
-  notePushId(pushId: string): void
 }
 
-const HostContext = createContext<HostContextValue | null>(null)
+const EMPTY: SavedComputers = { active: null, hosts: [] }
 
-export function useHost(): HostContextValue {
-  const value = useContext(HostContext)
-  if (!value) throw new Error('useHost outside HostProvider')
-  return value
+// ---- The store ----
+
+const store = createStore<HostData>({
+  phase: 'loading',
+  notice: null,
+  computers: EMPTY,
+  ready: null,
+  state: { kind: 'connecting' },
+  sessions: new Map(),
+  agents: new Map(),
+  projects: [],
+  loaded: false,
+  fromCache: false,
+  syncedAt: null,
+  unreachable: false,
+})
+const subscribe = store.subscribe
+
+/** The store as it is now, for code outside React or inside callbacks. */
+export function getHost(): HostData {
+  return store.get()
+}
+
+function setHost(change: Partial<HostData> | ((was: HostData) => Partial<HostData>)): void {
+  store.set((data) => {
+    const patch = typeof change === 'function' ? change(data) : change
+    for (const key in patch) {
+      if (patch[key as keyof HostData] !== data[key as keyof HostData]) return { ...data, ...patch }
+    }
+    return data
+  })
+}
+
+/**
+ * Part of the store: re-renders only when `select`'s answer changes by `equal` (reference by
+ * default). A new answer equal to the last keeps the last's reference.
+ */
+export function useHostSelector<T>(
+  select: (d: HostData) => T,
+  equal: (a: T, b: T) => boolean = Object.is,
+): T {
+  return useSelector(store, select, equal)
+}
+
+export { sameFields, sameItems }
+const activeOf = (d: HostData): SavedHost | null =>
+  d.computers.hosts.find((h) => h.id === d.computers.active) ?? null
+
+const selectSessions = (d: HostData) => d.sessions
+const selectAgents = (d: HostData) => d.agents
+const selectProjects = (d: HostData) => d.projects
+const selectState = (d: HostData) => d.state
+const selectLink = (d: HostData) => d.ready?.link ?? null
+const selectConnected = (d: HostData) => d.state.kind === 'connected'
+const selectComputerId = (d: HostData) => activeOf(d)?.id ?? null
+const selectLoaded = (d: HostData) => d.loaded
+
+/** Every session; changes when any does. */
+export function useSessions(): Map<string, SessionSummary> {
+  return useHostSelector(selectSessions)
+}
+
+/** One session's summary; changes only when that one does. */
+export function useSession(id: string | null | undefined): SessionSummary | undefined {
+  return useHostSelector(useCallback((d: HostData) => (id ? d.sessions.get(id) : undefined), [id]))
+}
+
+export function useAgents(): Map<string, AgentStatus> {
+  return useHostSelector(selectAgents)
+}
+
+export function useAgent(id: string | null | undefined): AgentStatus | undefined {
+  return useHostSelector(useCallback((d: HostData) => (id ? d.agents.get(id) : undefined), [id]))
+}
+
+export function useProjects(): Project[] {
+  return useHostSelector(selectProjects)
+}
+
+export function useHostState(): LinkState {
+  return useHostSelector(selectState)
+}
+
+export function useConnected(): boolean {
+  return useHostSelector(selectConnected)
+}
+
+export function useListsLoaded(): boolean {
+  return useHostSelector(selectLoaded)
+}
+
+/** The active computer's id, which the caches are kept under. */
+export function useComputerId(): string | null {
+  return useHostSelector(selectComputerId)
+}
+
+/** The active computer as saved. */
+export function useActiveHost(): SavedHost | null {
+  return useHostSelector(activeOf)
+}
+
+/** The link, or null while there is none. */
+export function useMaybeLink(): HostLink | null {
+  return useHostSelector(selectLink)
 }
 
 /** The link, for a screen that only shows while one is up. */
 export function useLink(): HostLink {
-  const { link } = useHost()
+  const link = useMaybeLink()
   if (!link) throw new Error('No link to the computer')
   return link
+}
+
+const ActionsContext = createContext<HostActions | null>(null)
+
+/** What can be done with the computers; the same functions for the life of the app. */
+export function useHostActions(): HostActions {
+  const actions = useContext(ActionsContext)
+  if (!actions) throw new Error('useHostActions outside HostProvider')
+  return actions
+}
+
+const selectComputers = (d: HostData) => ({
+  computers: d.computers,
+  state: d.state,
+  unreachable: d.unreachable,
+})
+
+/** The paired computers and the link, without the lists: for the sheets that manage computers. */
+export function useComputers(): Pick<
+  HostContextValue,
+  'host' | 'computers' | 'state' | 'unreachable'
+> &
+  HostActions {
+  const actions = useHostActions()
+  const d = useHostSelector(selectComputers, sameFields)
+  return useMemo(
+    () => ({
+      ...actions,
+      host: d.computers.hosts.find((h) => h.id === d.computers.active) ?? null,
+      computers: d.computers.hosts,
+      state: d.state,
+      unreachable: d.unreachable,
+    }),
+    [actions, d],
+  )
+}
+
+const selectAll = (d: HostData) => d
+
+/** Everything at once; re-renders on any change. Prefer a narrower hook in hot screens. */
+export function useHost(): HostContextValue {
+  const actions = useHostActions()
+  const d = useHostSelector(selectAll)
+  return useMemo(
+    () => ({
+      ...actions,
+      phase: d.phase,
+      notice: d.notice,
+      host: activeOf(d),
+      computers: d.computers.hosts,
+      link: d.ready?.link ?? null,
+      state: d.state,
+      sessions: d.sessions,
+      agents: d.agents,
+      projects: d.projects,
+      loaded: d.loaded,
+      fromCache: d.fromCache,
+      syncedAt: d.syncedAt,
+      unreachable: d.unreachable,
+    }),
+    [actions, d],
+  )
+}
+
+// ---- Keeping unchanged items ----
+
+/** Plain data equal all the way down, as JSON would see it. */
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!same(a[i], b[i])) return false
+    return true
+  }
+  if (Array.isArray(b)) return false
+  const ka = Object.keys(a)
+  if (ka.length !== Object.keys(b).length) return false
+  for (const k of ka) {
+    if (!same((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false
+  }
+  return true
+}
+
+/** A map of `list` by id that keeps `was`'s objects, and `was` itself, where nothing changed. */
+function reconcile<T extends { id: string }>(was: Map<string, T>, list: T[]): Map<string, T> {
+  const next = new Map<string, T>()
+  let kept = list.length === was.size
+  for (const item of list) {
+    const old = was.get(item.id)
+    if (old && same(old, item)) next.set(item.id, old)
+    else {
+      next.set(item.id, item)
+      kept = false
+    }
+  }
+  if (kept) {
+    // Same items: keep the map unless the order changed.
+    const a = was.keys()
+    for (const id of next.keys()) if (a.next().value !== id) return next
+    return was
+  }
+  return next
+}
+
+/** `map` with `item` set, or `map` itself when it holds an equal one. */
+function withItem<T extends { id: string }>(map: Map<string, T>, item: T): Map<string, T> {
+  const old = map.get(item.id)
+  if (old && same(old, item)) return map
+  return new Map(map).set(item.id, item)
 }
 
 /** Resolves true once the link connects, false when it stops or the time runs out. */
@@ -117,29 +354,17 @@ function timeout(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-const EMPTY: SavedComputers = { active: null, hosts: [] }
-
 /** How long the link may try before the app says the computer cannot be reached. */
 export const UNREACHABLE_AFTER = 8000
 
+const selectReady = (d: HostData) => d.ready
+const selectStateKind = (d: HostData) => d.state.kind
+
 export function HostProvider(props: { children: ReactNode }) {
-  const [phase, setPhase] = useState<HostContextValue['phase']>('loading')
-  const [notice, setNotice] = useState<string | null>(null)
-  const [computers, setComputers] = useState<SavedComputers>(EMPTY)
-  const [ready, setReady] = useState<Ready | null>(null)
-  const [state, setState] = useState<LinkState>({ kind: 'connecting' })
-  const [sessions, setSessions] = useState<Map<string, SessionSummary>>(new Map())
-  const [agents, setAgents] = useState<Map<string, AgentStatus>>(new Map())
-  const [projects, setProjects] = useState<Project[]>([])
-  const [loaded, setLoaded] = useState(false)
-  const [fromCache, setFromCache] = useState(false)
-  const [syncedAt, setSyncedAt] = useState<number | null>(null)
-  const [unreachable, setUnreachable] = useState(false)
+  const ready = useHostSelector(selectReady)
+  const stateKind = useHostSelector(selectStateKind)
   const [attempt, setAttempt] = useState(0)
-  const computersRef = useRef<SavedComputers>(EMPTY)
   const keyRef = useRef<KeyPair | null>(null)
-  const linkRef = useRef<HostLink | null>(null)
-  linkRef.current = ready?.link ?? null
   /** Counts the starts, so an answer meant for the computer before a switch is dropped. */
   const generation = useRef(0)
   /** The computer has answered since this start; the cache must not overwrite its lists. */
@@ -149,13 +374,12 @@ export function HostProvider(props: { children: ReactNode }) {
 
   const update = useCallback(
     (change: (hosts: SavedHost[]) => SavedHost[], active?: string | null) => {
-      const current = computersRef.current
+      const current = getHost().computers
       const next: SavedComputers = {
         hosts: change(current.hosts),
         active: active === undefined ? current.active : active,
       }
-      computersRef.current = next
-      setComputers(next)
+      setHost({ computers: next })
       void saveComputers(next).catch(() => {})
     },
     [],
@@ -168,12 +392,14 @@ export function HostProvider(props: { children: ReactNode }) {
   )
 
   const clearLists = useCallback(() => {
-    setSessions(new Map())
-    setAgents(new Map())
-    setProjects([])
-    setLoaded(false)
-    setFromCache(false)
-    setSyncedAt(null)
+    setHost({
+      sessions: new Map(),
+      agents: new Map(),
+      projects: [],
+      loaded: false,
+      fromCache: false,
+      syncedAt: null,
+    })
   }, [])
 
   const start = useCallback(
@@ -181,18 +407,22 @@ export function HostProvider(props: { children: ReactNode }) {
       const mine = ++generation.current
       fresh.current = false
       clearLists()
-      setUnreachable(false)
-      setState({ kind: 'connecting' })
-      setReady({ host, key, link: linkTo(host, key, adopt) })
-      setPhase('ready')
+      setHost({
+        unreachable: false,
+        state: { kind: 'connecting' },
+        ready: { host, key, link: linkTo(host, key, adopt) },
+        phase: 'ready',
+      })
       void readLists(host.id).then((cached) => {
         if (!cached || mine !== generation.current || fresh.current) return
-        setSessions(new Map(cached.sessions.map((s) => [s.id, s])))
-        setAgents(new Map(cached.agents.map((a) => [a.id, a])))
-        setProjects(cached.projects)
-        setLoaded(true)
-        setFromCache(true)
-        setSyncedAt(cached.savedAt)
+        setHost({
+          sessions: new Map(cached.sessions.map((s) => [s.id, s])),
+          agents: new Map(cached.agents.map((a) => [a.id, a])),
+          projects: cached.projects,
+          loaded: true,
+          fromCache: true,
+          syncedAt: cached.savedAt,
+        })
       })
     },
     [clearLists],
@@ -202,16 +432,15 @@ export function HostProvider(props: { children: ReactNode }) {
     void (async () => {
       const [saved, key] = await Promise.all([loadComputers(), deviceKey()])
       keyRef.current = key
-      computersRef.current = saved
-      setComputers(saved)
+      setHost({ computers: saved })
       const active = saved.hosts.find((h) => h.id === saved.active)
       if (active) start(active, key)
-      else setPhase('pair')
+      else setHost({ phase: 'pair' })
     })()
   }, [start])
 
   const refresh = useCallback(async () => {
-    const link = ready?.link
+    const link = getHost().ready?.link
     if (!link) return
     const mine = generation.current
     const [list, agentList, projectList] = await Promise.all([
@@ -221,23 +450,25 @@ export function HostProvider(props: { children: ReactNode }) {
     ])
     if (mine !== generation.current) return
     fresh.current = true
-    setSessions(new Map(list.map((s) => [s.id, s])))
-    setAgents(new Map(agentList.map((a) => [a.id, a])))
-    setProjects(projectList)
-    setLoaded(true)
-    setFromCache(false)
-    setSyncedAt(Date.now())
-  }, [ready])
+    setHost((d) => ({
+      sessions: reconcile(d.sessions, list),
+      agents: reconcile(d.agents, agentList),
+      projects: same(d.projects, projectList) ? d.projects : projectList,
+      loaded: true,
+      fromCache: false,
+      syncedAt: Date.now(),
+    }))
+  }, [])
 
   /** Forgets a computer here: its push keys, its cache, its place in the list. */
   const drop = useCallback(
     async (id: string, next: string | null) => {
-      const gone = computersRef.current.hosts.find((h) => h.id === id)
+      const gone = getHost().computers.hosts.find((h) => h.id === id)
       await stopPush(null, gone?.pushId ?? null)
       void clearComputer(id)
       dropDrafts(id)
-      const rest = computersRef.current.hosts.filter((h) => h.id !== id)
-      if (computersRef.current.active !== id) {
+      const rest = getHost().computers.hosts.filter((h) => h.id !== id)
+      if (getHost().computers.active !== id) {
         update(() => rest)
         return
       }
@@ -250,17 +481,14 @@ export function HostProvider(props: { children: ReactNode }) {
       }
       update(() => rest, successor?.id ?? null)
       generation.current++
-      setReady((current) => {
-        current?.link.stop()
-        return null
-      })
+      getHost().ready?.link.stop()
+      setHost({ ready: null })
       clearLists()
       if (successor && keyRef.current) {
         start(successor, keyRef.current)
         if (next) Alert.alert('已解除配对', next)
       } else {
-        setNotice(next)
-        setPhase('pair')
+        setHost({ notice: next, phase: 'pair' })
       }
     },
     [update, clearLists, start],
@@ -268,7 +496,7 @@ export function HostProvider(props: { children: ReactNode }) {
 
   const forget = useCallback(
     async (next: string | null) => {
-      const id = computersRef.current.active
+      const id = getHost().computers.active
       if (id) await drop(id, next)
     },
     [drop],
@@ -276,11 +504,11 @@ export function HostProvider(props: { children: ReactNode }) {
 
   const unpair = useCallback(
     async (id: string) => {
-      const host = computersRef.current.hosts.find((h) => h.id === id)
+      const host = getHost().computers.hosts.find((h) => h.id === id)
       const key = keyRef.current
       if (!host || !key) return
       unpairing.current.add(id)
-      const active = computersRef.current.active === id ? linkRef.current : null
+      const active = getHost().computers.active === id ? (getHost().ready?.link ?? null) : null
       const link = active ?? linkTo(host, key)
       try {
         if (!active) link.start()
@@ -306,8 +534,9 @@ export function HostProvider(props: { children: ReactNode }) {
   const switchTo = useCallback(
     (id: string) => {
       const key = keyRef.current
-      const host = computersRef.current.hosts.find((h) => h.id === id)
-      if (!host || !key || computersRef.current.active === id) return
+      const { computers } = getHost()
+      const host = computers.hosts.find((h) => h.id === id)
+      if (!host || !key || computers.active === id) return
       update((hosts) => hosts, id)
       start(host, key)
     },
@@ -316,40 +545,63 @@ export function HostProvider(props: { children: ReactNode }) {
 
   // Not connected for a while: the screens say so plainly instead of waiting on a spinner.
   useEffect(() => {
-    if (state.kind === 'connected') {
-      setUnreachable(false)
+    if (stateKind === 'connected') {
+      setHost({ unreachable: false })
       return
     }
-    if (state.kind === 'stopped') {
-      setUnreachable(true)
+    if (stateKind === 'stopped') {
+      setHost({ unreachable: true })
       return
     }
-    const timer = setTimeout(() => setUnreachable(true), UNREACHABLE_AFTER)
+    const timer = setTimeout(() => setHost({ unreachable: true }), UNREACHABLE_AFTER)
     return () => clearTimeout(timer)
-  }, [state.kind, ready, attempt])
+  }, [stateKind, ready, attempt])
 
   const retry = useCallback(() => {
-    const link = linkRef.current
+    const link = getHost().ready?.link
     if (!link) return
-    setUnreachable(false)
+    setHost({ unreachable: false })
     setAttempt((n) => n + 1)
     link.wake()
   }, [])
 
   // The lists go to the cache a moment after they settle, never while they are the cache's own.
-  const activeId = ready?.host.id ?? null
   useEffect(() => {
-    if (!activeId || !loaded || fromCache) return
-    const timer = setTimeout(() => {
-      void writeLists(activeId, {
-        savedAt: Date.now(),
-        sessions: [...sessions.values()],
-        agents: [...agents.values()],
-        projects,
-      })
-    }, 1500)
-    return () => clearTimeout(timer)
-  }, [activeId, loaded, fromCache, sessions, agents, projects])
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let seen: HostData | null = null
+    const check = () => {
+      const d = getHost()
+      if (
+        seen &&
+        d.ready === seen.ready &&
+        d.loaded === seen.loaded &&
+        d.fromCache === seen.fromCache &&
+        d.sessions === seen.sessions &&
+        d.agents === seen.agents &&
+        d.projects === seen.projects
+      )
+        return
+      seen = d
+      if (timer) clearTimeout(timer)
+      timer = null
+      const activeId = d.ready?.host.id ?? null
+      if (!activeId || !d.loaded || d.fromCache) return
+      timer = setTimeout(() => {
+        timer = null
+        void writeLists(activeId, {
+          savedAt: Date.now(),
+          sessions: [...d.sessions.values()],
+          agents: [...d.agents.values()],
+          projects: d.projects,
+        })
+      }, 1500)
+    }
+    const off = subscribe(check)
+    return () => {
+      off()
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
 
   useEffect(() => {
     if (!ready) return
@@ -357,11 +609,11 @@ export function HostProvider(props: { children: ReactNode }) {
     const id = ready.host.id
     let wasConnected = false
     const offState = link.onState((next) => {
-      setState(next)
+      setHost({ state: next })
       if (next.kind === 'connected') {
         wasConnected = true
         const { welcome } = next
-        const saved = computersRef.current.hosts.find((h) => h.id === id)
+        const saved = getHost().computers.hosts.find((h) => h.id === id)
         if (saved) {
           const addresses = welcome.addresses.length > 0 ? welcome.addresses : saved.addresses
           patchHost(id, {
@@ -376,11 +628,11 @@ export function HostProvider(props: { children: ReactNode }) {
       } else if (wasConnected) {
         // The lists were current until now: that is when they were last in step.
         wasConnected = false
-        setSyncedAt(Date.now())
+        setHost({ syncedAt: Date.now() })
         patchHost(id, { lastSeen: Date.now() })
       }
       if (next.kind === 'stopped' && next.reason === 'removed' && !unpairing.current.has(id)) {
-        const name = computerName(computersRef.current.hosts.find((h) => h.id === id))
+        const name = computerName(getHost().computers.hosts.find((h) => h.id === id))
         void drop(id, `「${name}」已在电脑上移除这台手机，要用它请重新配对。`)
       }
     })
@@ -388,21 +640,22 @@ export function HostProvider(props: { children: ReactNode }) {
       const event = raw as HostEvent
       switch (event.type) {
         case 'session.summary':
-          setSessions((map) => new Map(map).set(event.summary.id, event.summary))
+          setHost((d) => ({ sessions: withItem(d.sessions, event.summary) }))
           break
         case 'session.removed':
           void dropThread(id, event.sessionId)
-          setSessions((map) => {
-            const next = new Map(map)
+          setHost((d) => {
+            if (!d.sessions.has(event.sessionId)) return {}
+            const next = new Map(d.sessions)
             next.delete(event.sessionId)
-            return next
+            return { sessions: next }
           })
           break
         case 'agent.status':
-          setAgents((map) => new Map(map).set(event.status.id, event.status))
+          setHost((d) => ({ agents: withItem(d.agents, event.status) }))
           break
         case 'projects.changed':
-          setProjects(event.projects)
+          setHost((d) => (same(d.projects, event.projects) ? {} : { projects: event.projects }))
           break
       }
     })
@@ -419,26 +672,10 @@ export function HostProvider(props: { children: ReactNode }) {
     }
   }, [ready, refresh, drop, patchHost, retry])
 
-  const active = computers.hosts.find((h) => h.id === computers.active) ?? null
-
-  const value: HostContextValue = {
-    phase,
-    notice,
-    host: active,
-    computers: computers.hosts,
-    link: ready?.link ?? null,
-    state,
-    sessions,
-    agents,
-    projects,
-    loaded,
-    fromCache,
-    syncedAt,
-    unreachable,
-    retry,
-    paired: async (host, key, paired) => {
+  const paired = useCallback(
+    async (host: SavedHost, key: KeyPair, adopt: Paired) => {
       keyRef.current = key
-      const before = computersRef.current.hosts.find((h) => h.id === host.id)
+      const before = getHost().computers.hosts.find((h) => h.id === host.id)
       const saved: SavedHost = {
         ...host,
         ...(before?.label ? { label: before.label } : {}),
@@ -448,28 +685,38 @@ export function HostProvider(props: { children: ReactNode }) {
         (hosts) => (before ? hosts.map((h) => (h.id === host.id ? saved : h)) : [...hosts, saved]),
         host.id,
       )
-      setNotice(null)
-      start(saved, key, paired)
+      setHost({ notice: null })
+      start(saved, key, adopt)
     },
-    forget,
-    unpair,
-    switchTo,
-    rename: (id, label) => patchHost(id, { label: label?.trim() || undefined }),
-    refresh,
-    renamedDevice: (name) => {
-      if (computers.active) patchHost(computers.active, { deviceName: name })
-    },
-    notePushId: (pushId) => {
-      const id = computersRef.current.active
-      if (!id) return
-      const known = computersRef.current.hosts.find((h) => h.id === id)
-      if (known?.pushId === pushId) return
-      update((hosts) =>
-        hosts.map((h) =>
-          h.id === id ? { ...h, pushId } : h.pushId === pushId ? { ...h, pushId: undefined } : h,
-        ),
-      )
-    },
-  }
-  return <HostContext.Provider value={value}>{props.children}</HostContext.Provider>
+    [update, start],
+  )
+
+  const actions = useMemo<HostActions>(
+    () => ({
+      retry,
+      paired,
+      forget,
+      unpair,
+      switchTo,
+      rename: (id, label) => patchHost(id, { label: label?.trim() || undefined }),
+      refresh,
+      renamedDevice: (name) => {
+        const active = getHost().computers.active
+        if (active) patchHost(active, { deviceName: name })
+      },
+      notePushId: (pushId) => {
+        const id = getHost().computers.active
+        if (!id) return
+        const known = getHost().computers.hosts.find((h) => h.id === id)
+        if (known?.pushId === pushId) return
+        update((hosts) =>
+          hosts.map((h) =>
+            h.id === id ? { ...h, pushId } : h.pushId === pushId ? { ...h, pushId: undefined } : h,
+          ),
+        )
+      },
+    }),
+    [retry, paired, forget, unpair, switchTo, patchHost, refresh, update],
+  )
+  return <ActionsContext.Provider value={actions}>{props.children}</ActionsContext.Provider>
 }

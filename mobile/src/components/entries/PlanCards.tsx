@@ -8,7 +8,7 @@ import { useMemo, useState } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import Svg, { Circle, Path } from 'react-native-svg'
 import type { ConfigOption, PlanEntry, ToolEntry } from '@shared/thread'
-import { useHost, useLink } from '../../host'
+import { useConnected, useLink } from '../../host'
 import { BottomSheet } from '../../ui/BottomSheet'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { Clamp } from '../../ui/session/Clamp'
@@ -179,7 +179,7 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
   const { entry, sessionId } = props
   const { c, s } = useSessionTokens()
   const link = useLink()
-  const host = useHost()
+  const connected = useConnected()
   const agent = useAgentName(sessionId)
   const sender = useSender(entry.id)
   const permission = entry.permission!
@@ -197,7 +197,7 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
   const [note, setNote] = useState('')
   const [view, setView] = useState<'plan' | 'changes'>(plan.previous ? 'changes' : 'plan')
   const version = entry.planVersion ?? 1
-  const away = host.state.kind !== 'connected'
+  const away = !connected
   const busy = sender.busy !== null || away
 
   const answer = (id: string | undefined, text?: string) => {

@@ -1,13 +1,15 @@
 // The home-screen widget's snapshot (plugins/widgets/HuliSessionsWidget.swift reads it): how many
 // sessions run and wait on the paired computer, and the latest of them with their state. Only
 // titles and states, and no titles while the user hides what notifications say. The module writes
-// it to the App Group and reloads the widget; it is written again only when it changed.
+// it to the App Group and reloads the widget; it is written again only when it changed. Siri,
+// Shortcuts and the Control Center controls read it too (plugins/widgets/HuliOpenIntents.swift):
+// the sessions they offer to open, on the computer `hostId` names (SavedHost.id).
 
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import { HuliLive } from '../../modules/huli-live'
 import { needsYou, sessionTitle } from '../sessions'
 
-const MAX_ROWS = 6
+const MAX_ROWS = 12
 
 type RowState = 'waiting' | 'running' | 'error' | 'done' | 'idle'
 
@@ -24,6 +26,8 @@ function stateOf(s: SessionSummary): RowState {
 export interface WidgetInput {
   paired: boolean
   hostName: string | null
+  /** The computer's id in the app, which links name it by. */
+  hostId?: string | null
   sessions: Map<string, SessionSummary>
   agents: Map<string, AgentStatus>
   hidden: boolean
@@ -55,6 +59,7 @@ export function writeWidget(input: WidgetInput): void {
     v: 1,
     paired: input.paired,
     ...(input.paired && input.hostName ? { host: input.hostName } : {}),
+    ...(input.paired && input.hostId ? { hostId: input.hostId } : {}),
     running: input.paired ? running : 0,
     waiting: input.paired ? waiting : 0,
     sessions: input.paired ? latest : [],

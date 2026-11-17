@@ -7,7 +7,6 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { Image } from 'expo-image'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
@@ -398,7 +398,12 @@ function SharedPreview(props: { item: SharedItem }) {
     case 'image':
       return (
         <View style={card}>
-          <Image source={{ uri: item.uri }} style={styles.image} resizeMode="cover" />
+          <Image
+            source={{ uri: item.uri }}
+            style={styles.image}
+            contentFit="cover"
+            cachePolicy="memory"
+          />
         </View>
       )
     case 'file':

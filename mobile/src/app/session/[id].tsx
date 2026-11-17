@@ -7,25 +7,13 @@
 // rings open the plan's usage and what fills the context.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Linking,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type ListRenderItem,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from 'react-native'
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { KeyboardAvoidingView, KeyboardGestureArea } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
-import { harnessOf, type ThreadEntry, type UserContent } from '@shared/thread'
+import { harnessOf, type ThreadEntry, type ThreadState, type UserContent } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
 import {
   backgroundWork,
@@ -57,8 +45,7 @@ import {
   type ConfigControl,
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
-import { ThreadRow } from '../../components/EntryView'
-import { SubSessionStart } from '../../components/entries/NoteEntries'
+import { Conversation } from '../../components/Conversation'
 import { PlanChip } from '../../components/entries/PlanCards'
 import {
   cutNoticeOf,
@@ -70,7 +57,7 @@ import {
   HandBackCard,
   WaitingCard,
   WaitingChildren,
-  waitingBelow,
+  useWaitingBelow,
   waitsForUser,
 } from '../../components/entries/Waiting'
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
@@ -88,12 +75,22 @@ import {
 } from '../../components/SessionDock'
 import { useProjectFiles } from '../../files'
 import { call } from '../../git'
-import { useHost, useLink } from '../../host'
+import {
+  sameFields,
+  sameItems,
+  useAgents,
+  useHostSelector,
+  useHostState,
+  useLink,
+  useSession,
+  type HostData,
+} from '../../host'
 import { setMuted, useMuted } from '../../push/muted'
 import { errorText, folder } from '../../sessions'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
-import { useThread } from '../../thread'
+import { useThread, useThreadSelector } from '../../thread'
 import { useComputer } from '../../ui/session/computer'
+import { countRender } from '../../ui/renders'
 import { SessionRows, type SessionRowsContext } from '../../ui/session/context'
 import { haptic } from '../../ui/session/feedback'
 import { FileRefs } from '../../ui/session/fileRefs'
@@ -116,21 +113,47 @@ import { Icon } from '../../ui/session/Icon'
 import { SelectText } from '../../ui/session/SelectText'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
-import { latestPlan, threadRows, type Row } from '../../ui/session/turns'
-import {
-  askedText,
-  forgetTools,
-  observeTools,
-  phaseText,
-  turnPhase,
-  writingId,
-} from '../../ui/session/work'
-import { ToBottomButton, WorkingRow } from '../../ui/session/Working'
+import { foldsIntoRun, latestPlan } from '../../ui/session/turns'
+import { askedText, forgetTools, phaseText, turnPhase, writingId } from '../../ui/session/work'
+import { WorkingRow } from '../../ui/session/Working'
 
-// How far up the conversation may be scrolled before the way back to its end shows.
-const AWAY = 280
+const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
 
-const renderRow: ListRenderItem<Row> = ({ item }) => <ThreadRow row={item} />
+// What the screen reads of the thread, each apart, so a token appended to a reply changes none.
+const selectSession = (thread: ThreadState | null) => thread?.session
+const selectHasThread = (thread: ThreadState | null) => thread !== null
+const selectTurn = (thread: ThreadState | null) => ({
+  ...turnPhase(thread),
+  asked: askedText(thread),
+  writing: writingId(thread) !== null,
+})
+
+/** The thread's own cards that wait for the user, as rows of their own, oldest first. */
+function threadWaits(thread: ThreadState | null): ThreadEntry[] {
+  if (!thread) return []
+  const out: ThreadEntry[] = []
+  for (const id of thread.order) {
+    const entry = thread.byId[id]
+    if (entry && !foldsIntoRun(entry) && waitsForUser(entry)) out.push(entry)
+  }
+  return out
+}
+
+/** The files under `root` that the thread's own tool rows read or edited, newest first. */
+function touchedFiles(thread: ThreadState | null, root: string | null): string[] {
+  if (!thread || !root) return []
+  const seen = new Set<string>()
+  for (let i = thread.order.length - 1; i >= 0; i--) {
+    const entry = thread.byId[thread.order[i]!]
+    if (entry?.kind !== 'tool' || foldsIntoRun(entry)) continue
+    if (entry.toolKind !== 'read' && entry.toolKind !== 'edit') continue
+    for (const location of entry.locations) {
+      const inside = relativePath(location.path, root)
+      if (inside !== location.path) seen.add(inside.replace(/\\/g, '/'))
+    }
+  }
+  return [...seen]
+}
 
 const live = (status: string | undefined) =>
   status === 'running' || status === 'awaiting_permission' || status === 'starting'
@@ -139,6 +162,7 @@ const live = (status: string | undefined) =>
 const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval'])
 
 export default function SessionScreen() {
+  countRender('SessionScreen')
   const params = useLocalSearchParams<{ id: string }>()
   // On iPad the same screen shows as the pane beside the session list (SessionPane.tsx).
   const pane = useSessionPane()
@@ -146,24 +170,27 @@ export default function SessionScreen() {
   const { c } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const headerHeight = useHeaderHeight()
-  const host = useHost()
+  const hostState = useHostState()
+  const lists = useHostSelector(pickLists, sameFields)
+  const agents = useAgents()
   const link = useLink()
   const computer = useComputer()
-  const view = useThread(link, id, host.state)
+  const view = useThread(link, id, hostState)
   const changes = useSessionChanges(id)
   const actions = useSessionActions('session', () => (pane ? pane.close() : router.back()))
-  const summary = host.sessions.get(id)
-  const session = view.thread?.session
+  const summary = useSession(id)
+  const session = useThreadSelector(view, selectSession)
+  const hasThread = useThreadSelector(view, selectHasThread)
   const config = useSessionConfig(id, session)
   const status = session?.status ?? summary?.status
   const running = status === 'running' || status === 'awaiting_permission'
   const agentId = session?.agentId ?? summary?.agentId ?? ''
-  const agent = host.agents.get(agentId)
-  const connected = host.state.kind === 'connected'
+  const agent = agents.get(agentId)
+  const connected = hostState.kind === 'connected'
   // The session's agent is gone from the computer: a message goes only once another is picked.
   const mustSwitch =
-    host.loaded &&
-    !host.fromCache &&
+    lists.loaded &&
+    !lists.fromCache &&
     agentId !== '' &&
     (!agent || !!agent.uninstalled || !!agent.disabled || agent.registered === false)
   const menu = usePopover()
@@ -172,15 +199,12 @@ export default function SessionScreen() {
   const moreAnchor = useRef<ViewHandle>(null)
   const modeAnchor = useRef<ViewHandle>(null)
   const modelAnchor = useRef<ViewHandle>(null)
-  const list = useRef<FlatList<Row>>(null)
-  const [away, setAway] = useState(false)
-  const [fresh, setFresh] = useState(false)
   const [selecting, setSelecting] = useState<string | null>(null)
   const [contextOpen, setContextOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   // Another agent picked to take over with the next message, and the options it starts with.
   const pendingSwitch = usePendingSwitch(id)
-  const pending = pendingSwitch ? (host.agents.get(pendingSwitch.agentId) ?? null) : null
+  const pending = pendingSwitch ? (agents.get(pendingSwitch.agentId) ?? null) : null
   const [attachCount, setAttachCount] = useState(0)
   // The cache write the notice was closed for, so it stays closed until the next one expires.
   const [noticeClosedFor, setNoticeClosedFor] = useState<number | null>(null)
@@ -189,7 +213,7 @@ export default function SessionScreen() {
     terminals: null,
   })
   const muted = useMuted(id)
-  const terminalAllowed = useTerminalAllowed(link, host.state)
+  const terminalAllowed = useTerminalAllowed(link, hostState)
   // A system menu says nothing as it opens, so what it shows is read beforehand there.
   const agentOptions = useAgentOptions(
     link,
@@ -218,11 +242,6 @@ export default function SessionScreen() {
   const shownModel = pendingConfig ? slotOf(pendingConfig, 'model', false) : config.model
   const shownEffort = pendingConfig ? slotOf(pendingConfig, 'thought_level', false) : config.effort
 
-  const rows = useMemo(() => {
-    if (!view.thread) return []
-    observeTools(id, view.thread)
-    return threadRows(view.thread, running).reverse()
-  }, [view.thread, id, running])
   useEffect(() => () => forgetTools(id), [id])
 
   // The folder's files, for the references in replies and prompts that open them.
@@ -235,95 +254,82 @@ export default function SessionScreen() {
     () => ({ sessionId: id, root: changes.folder, known }),
     [id, changes.folder, known],
   )
-  const { plan, ownTurn } = useMemo(
-    () => latestPlan(view.thread, view.plan),
-    [view.thread, view.plan],
+  const { plan, ownTurn } = useThreadSelector(
+    view,
+    useCallback((thread: ThreadState | null) => latestPlan(thread, view.plan), [view.plan]),
+    sameFields,
   )
 
   // What waits: the thread's own cards, and those on pages not read yet, oldest first.
+  const waits = useThreadSelector(view, threadWaits, sameItems)
   const requests = useMemo(() => {
     const seen = new Map<string, ThreadEntry>()
     for (const entry of view.requests) if (waitsForUser(entry)) seen.set(entry.id, entry)
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const row = rows[i]!
-      if (row.type === 'entry' && waitsForUser(row.entry)) seen.set(row.entry.id, row.entry)
-    }
+    for (const entry of waits) seen.set(entry.id, entry)
     return [...seen.values()]
-  }, [view.requests, rows])
-  const credit = useMemo(() => outOfCreditOf(view.thread), [view.thread])
-  const retryNotice = useMemo(() => retryNoticeOf(view.thread), [view.thread])
-  const cutNotice = useMemo(() => cutNoticeOf(view.thread), [view.thread])
-  const childWaiting = waitingBelow(id, host.sessions).length > 0
+  }, [view.requests, waits])
+  const credit = useThreadSelector(view, outOfCreditOf)
+  const retryNotice = useThreadSelector(view, retryNoticeOf)
+  const cutNotice = useThreadSelector(view, cutNoticeOf)
+  const childWaiting = useWaitingBelow(id).length > 0
   const handBack = session?.computer?.control === 'you'
   // A worktree that is not ready says so above the composer, as the desktop's does.
   const worktreeWaits = !!summary?.worktree && summary.worktree.state !== 'ready'
-  const chips = hasChips(summary, host.sessions)
+  const parentKnown = !!useSession(summary?.parentId)
+  const chips = hasChips(summary, parentKnown)
 
   // The files of the folder the session's tools read or edited, newest first.
-  const touched = useMemo(() => {
-    const root = changes.folder
-    if (!root) return []
-    const seen = new Set<string>()
-    for (const row of rows) {
-      if (row.type !== 'entry' || row.entry.kind !== 'tool') continue
-      if (row.entry.toolKind !== 'read' && row.entry.toolKind !== 'edit') continue
-      for (const location of row.entry.locations) {
-        const inside = relativePath(location.path, root)
-        if (inside !== location.path) seen.add(inside.replace(/\\/g, '/'))
-      }
-    }
-    return [...seen]
-  }, [rows, changes.folder])
+  const touched = useThreadSelector(
+    view,
+    useCallback(
+      (thread: ThreadState | null) => touchedFiles(thread, changes.folder),
+      [changes.folder],
+    ),
+    sameItems,
+  )
 
-  const children = useMemo(
-    () => [...host.sessions.values()].filter((s) => s.parentId === id),
-    [host.sessions, id],
+  const children = useHostSelector(
+    useCallback((d: HostData) => [...d.sessions.values()].filter((s) => s.parentId === id), [id]),
+    sameItems,
   )
   const childrenRunning = children.filter((s) => live(s.status)).length
 
-  // New rows while the user reads further up mark the way back down.
-  const newest = rows[0]?.key
-  const seenNewest = useRef(newest)
-  useEffect(() => {
-    if (newest !== seenNewest.current && away) setFresh(true)
-    seenNewest.current = newest
-  }, [newest, away])
-
-  // What the ⋯ menu counts is read as it opens.
+  // What the ⋯ menu counts is read as it opens, and again as the session changes. A system menu
+  // is built before it opens, so there it is read all along: once the session's changes pause
+  // rather than on each of them, which while it streams would be many a second.
   const moreOpen = NATIVE_MENUS || menu.openId === 'more-menu'
+  const countsRead = useRef(false)
+  const projectPath = summary?.projectPath ?? null
   useEffect(() => {
-    if (!moreOpen || !connected) return
+    if (!moreOpen || !connected) {
+      countsRead.current = false
+      return
+    }
     let alive = true
-    call(link, 'artifacts.list', {}).then(
-      (all) =>
-        alive &&
-        setCounts((was) => ({
-          ...was,
-          artifacts: all.filter((a) => a.sessionId === id && a.deletedAt === null).length,
-        })),
-      () => {},
-    )
-    if (terminalAllowed && summary) {
-      sessionTerminals(link, summary.projectPath, id).then(
-        (found) => alive && setCounts((was) => ({ ...was, terminals: found.length })),
+    const read = () => {
+      countsRead.current = true
+      call(link, 'artifacts.list', {}).then(
+        (all) =>
+          alive &&
+          setCounts((was) => ({
+            ...was,
+            artifacts: all.filter((a) => a.sessionId === id && a.deletedAt === null).length,
+          })),
         () => {},
       )
+      if (terminalAllowed && projectPath !== null) {
+        sessionTerminals(link, projectPath, id).then(
+          (found) => alive && setCounts((was) => ({ ...was, terminals: found.length })),
+          () => {},
+        )
+      }
     }
+    const timer = setTimeout(read, countsRead.current ? 1000 : 0)
     return () => {
       alive = false
+      clearTimeout(timer)
     }
-  }, [moreOpen, connected, link, id, terminalAllowed, summary])
-
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = event.nativeEvent.contentOffset.y > AWAY
-    setAway((was) => (was === next ? was : next))
-    if (!next) setFresh(false)
-  }, [])
-
-  const toBottom = () => {
-    haptic.tap()
-    list.current?.scrollToOffset({ offset: 0, animated: true })
-  }
+  }, [moreOpen, connected, link, id, terminalAllowed, projectPath, summary])
 
   const stop = () => {
     void link.request('sessions.cancel', { sessionId: id }).catch((error: { message?: string }) => {
@@ -482,11 +488,7 @@ export default function SessionScreen() {
   // caret carries the turn, so the line steps aside.
   const usage = session?.usage ?? null
   const startUsed = session?.turnStartUsed ?? null
-  const turn = useMemo(() => {
-    const thread = view.thread
-    const phase = turnPhase(thread)
-    return { ...phase, asked: askedText(thread), writing: writingId(thread) !== null }
-  }, [view.thread])
+  const turn = useThreadSelector(view, selectTurn, sameFields)
   const app = session?.computer?.app ?? null
   const waitingYou = turn.phase === 'approval' || requests.length > 0
   const workingText =
@@ -528,7 +530,7 @@ export default function SessionScreen() {
     count: attachCount,
   })
 
-  const others = usableAgents(host.agents)
+  const others = usableAgents(agents)
   const switchable = others.length > 1 || (others.length === 1 && others[0]!.id !== agentId)
   const agentMenu: AgentMenuProps = {
     agents: others,
@@ -579,7 +581,7 @@ export default function SessionScreen() {
       ) ?? null,
     [agent?.limits, config.model?.option],
   )
-  const rejected = useMemo(() => endedOnRejection(view.thread), [view.thread])
+  const rejected = useThreadSelector(view, endedOnRejection)
   const shownName = pending?.name ?? agent?.name ?? 'Agent'
   const placeholder = sessionPlaceholder({
     agent: shownName,
@@ -731,49 +733,24 @@ export default function SessionScreen() {
   let body
   if (view.error) {
     body = <StateView text={view.error} tone="danger" />
-  } else if (!view.thread) {
+  } else if (!hasThread) {
     body = <StateView loading />
   } else {
     body = (
-      <FlatList
-        ref={list}
-        inverted
-        data={rows}
-        keyExtractor={(row) => row.key}
-        renderItem={renderRow}
-        onEndReached={view.loadOlder}
-        onEndReachedThreshold={0.6}
-        onScroll={onScroll}
-        scrollEventThrottle={64}
-        ListHeaderComponent={working}
-        ListFooterComponent={
-          view.loadingOlder ? (
-            <View style={styles.older}>
-              <ActivityIndicator size="small" color={c.textTertiary} />
-            </View>
-          ) : !view.hasOlder && summary?.origin === 'user' && summary.parentId ? (
-            <SubSessionStart sessionId={id} />
-          ) : (
-            <View style={{ height: 4 }} />
-          )
-        }
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) },
-        ]}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        initialNumToRender={14}
-        maxToRenderPerBatch={10}
-        windowSize={15}
-        maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 40 }}
+      <Conversation
+        view={view}
+        sessionId={id}
+        running={running}
+        working={working}
+        fromParent={summary?.origin === 'user' && !!summary.parentId}
+        paddingBottom={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0)}
       />
     )
     // The rows' file references open the folder's files.
     body = <FileRefs.Provider value={fileRefs}>{body}</FileRefs.Provider>
   }
 
-  const linkDown = host.state.kind === 'reconnecting' || host.state.kind === 'stopped'
+  const linkDown = hostState.kind === 'reconnecting' || hostState.kind === 'stopped'
 
   return (
     <SessionRows.Provider value={context}>
@@ -788,7 +765,6 @@ export default function SessionScreen() {
       >
         <KeyboardGestureArea interpolator="ios" style={{ flex: 1 }}>
           {body}
-          <ToBottomButton visible={away} fresh={fresh} onPress={toBottom} />
         </KeyboardGestureArea>
 
         <PlanChip plan={plan} running={ownTurn && running} />
@@ -950,7 +926,7 @@ export default function SessionScreen() {
             <StatusLine
               hostName={computer.name}
               platform={computer.platform}
-              state={host.state}
+              state={hostState}
               folder={project}
               path={changes.folder}
               changed={changes.count}
@@ -1032,20 +1008,20 @@ export default function SessionScreen() {
       {summary && chips ? (
         <SessionChips summary={summary} top={headerHeight} onOpenSession={openSession} />
       ) : null}
-      {linkDown && view.thread && (
+      {linkDown && hasThread && (
         <View
           pointerEvents="none"
           style={[styles.banner, { top: headerHeight + 8 + (chips ? CHIPS_HEIGHT : 0) }]}
           accessibilityLiveRegion="polite"
         >
           <GlassCapsule height={34} elevated style={styles.bannerPill}>
-            {host.state.kind === 'reconnecting' ? (
+            {hostState.kind === 'reconnecting' ? (
               <ActivityIndicator size="small" color={c.textSecondary} />
             ) : (
               <Icon icon={G.wifiOff} size={14} color={c.danger} />
             )}
             <Text style={[styles.bannerText, { color: c.textSecondary }]}>
-              {host.state.kind === 'reconnecting' ? '和电脑的连接断了，正在重连…' : '已和电脑断开'}
+              {hostState.kind === 'reconnecting' ? '和电脑的连接断了，正在重连…' : '已和电脑断开'}
             </Text>
           </GlassCapsule>
         </View>
@@ -1075,9 +1051,7 @@ export default function SessionScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: 18, paddingTop: 12 },
   working: { paddingTop: 2, paddingBottom: 4 },
-  older: { paddingVertical: 14, alignItems: 'center' },
   waiting: { maxHeight: '55%', flexGrow: 0 },
   waitingContent: { paddingHorizontal: 10, paddingTop: 8, gap: 10 },
   banner: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 20 },

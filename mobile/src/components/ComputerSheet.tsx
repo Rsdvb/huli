@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { currentAddress, probe, routeKind } from '../connection'
-import { useHost } from '../host'
+import { useComputers } from '../host'
 import { linkStatusOf, platformOf, ROUTE_NAMES, type LinkTone } from '../linkInfo'
 import { ago } from '../sessions'
 import { computerName, type SavedHost } from '../store'
@@ -25,7 +25,7 @@ export type Reach = 'checking' | 'online' | 'offline'
 
 /** Whether each computer the app keeps no link to answers, checked while `watching`. */
 export function useReach(watching: boolean): Map<string, Reach> {
-  const host = useHost()
+  const host = useComputers()
   const [reach, setReach] = useState<Map<string, Reach>>(new Map())
   const others = host.computers.filter((h) => h.id !== host.host?.id)
   const key = others.map((h) => h.id).join(',')
@@ -55,7 +55,7 @@ export interface ComputerLine {
 
 /** What a computer's row says about it: the link for the active one, a check for the others. */
 export function useComputerLine(reach: Map<string, Reach>): (h: SavedHost) => ComputerLine {
-  const host = useHost()
+  const host = useComputers()
   return (h) => {
     if (h.id === host.host?.id) {
       const status = linkStatusOf(host.state, host.unreachable)
@@ -83,7 +83,7 @@ export function lineColor(c: Palette, tone: LinkTone): string {
 
 /** Switching, renaming and unpairing a computer, with the dialog renaming needs. */
 export function useComputerActions() {
-  const host = useHost()
+  const host = useComputers()
   const [renaming, setRenaming] = useState<SavedHost | null>(null)
   const [busy, setBusy] = useState<Set<string>>(new Set())
 
@@ -226,7 +226,7 @@ export function ComputerRow(props: {
 
 export function ComputerSheet(props: { visible: boolean; onClose(): void }) {
   const { c } = useTokens()
-  const host = useHost()
+  const host = useComputers()
   const reach = useReach(props.visible)
   const lineOf = useComputerLine(reach)
   const actions = useComputerActions()

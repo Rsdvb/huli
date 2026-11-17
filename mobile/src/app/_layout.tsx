@@ -10,7 +10,9 @@ import { LiveBridge } from '../live/bridge'
 import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
 import { ShareIntake } from '../share/intake'
+import { SystemBridge } from '../system/bridge'
 import { NoticeBar } from '../ui/NoticeBar'
+import { watchMemory } from '../ui/memory'
 import { useTokens } from '../ui/tokens'
 import { watchUpdates } from '../update'
 
@@ -38,6 +40,7 @@ const MANAGE_PAGES = [
 export default function Layout() {
   const { c, scheme } = useTokens()
   useEffect(() => watchUpdates(), [])
+  useEffect(() => watchMemory(), [])
   return (
     // The keyboard's frames reach the screens on the UI thread, so the views that make room for it
     // move with it without a layout pass per frame.
@@ -87,6 +90,7 @@ export default function Layout() {
           <PushBridge />
           <LinkBridge />
           <LiveBridge />
+          <SystemBridge />
           <ShareIntake />
           <NoticeBar />
           <LockLayer />

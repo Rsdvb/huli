@@ -9,7 +9,7 @@ import { router } from 'expo-router'
 import type { AgentId } from '@shared/agents'
 import type { RoundView, TaskNeed, TaskView } from '@shared/workflow'
 import { useComments } from '../../artifact-view/comments'
-import { useHost } from '../../host'
+import { useAgents, useMaybeLink } from '../../host'
 import { errorText } from '../../sessions'
 import { haptic } from '../../ui/haptics'
 import { blockedText, canDoSteps, stepTitle, STUCK_TEXT, taskRequest } from '../../tasks'
@@ -42,7 +42,7 @@ function nextAfter(view: TaskView, round: RoundView): string | null {
 }
 
 function useAgentName(): (id: string) => string {
-  const { agents } = useHost()
+  const agents = useAgents()
   return (id) => agents.get(id)?.name ?? id
 }
 
@@ -79,7 +79,7 @@ function Need(props: { view: TaskView; need: TaskNeed; onPin(stepId: string): vo
 function ReviewCard(props: { view: TaskView; roundId: string }) {
   const { view, roundId } = props
   const { c } = useTokens()
-  const { link } = useHost()
+  const link = useMaybeLink()
   const agentName = useAgentName()
   const round = view.rounds.find((r) => r.id === roundId)
   const [note, setNote] = useState('')
@@ -151,7 +151,7 @@ function ReviewCard(props: { view: TaskView; roundId: string }) {
 function PersonCard(props: { view: TaskView; roundId: string }) {
   const { view, roundId } = props
   const { c } = useTokens()
-  const { link } = useHost()
+  const link = useMaybeLink()
   const round = view.rounds.find((r) => r.id === roundId)
   const step = view.workflow.steps.find((s) => s.id === round?.stepId)
   const [note, setNote] = useState('')
@@ -319,7 +319,7 @@ function MergeCard(props: { view: TaskView; need: Extract<TaskNeed, { kind: 'end
 
 /** Retry with an optional note for the step's agent, beside the card's other actions. */
 function RetryRow(props: { view: TaskView; stepId: string; extra?: ReactNode }) {
-  const { link } = useHost()
+  const link = useMaybeLink()
   const [note, setNote] = useState('')
   const request = useRequest()
   return (
@@ -365,9 +365,10 @@ function RequestError(props: { text: string }) {
  */
 export function PinSheet(props: { view: TaskView; stepId: string | null; onClose(): void }) {
   const { view, stepId } = props
-  const host = useHost()
+  const agentsMap = useAgents()
+  const link = useMaybeLink()
   const pinned = stepId ? (view.pins[stepId] ?? null) : null
-  const agents = [...host.agents.values()].filter(
+  const agents = [...agentsMap.values()].filter(
     (a) =>
       canDoSteps(a.harnessId) &&
       !a.disabled &&
@@ -376,8 +377,8 @@ export function PinSheet(props: { view: TaskView; stepId: string | null; onClose
       a.registered !== false,
   )
   const send = (agentId: AgentId | null) => {
-    if (!stepId || !host.link) return
-    taskRequest(host.link, 'tasks.pin', {
+    if (!stepId || !link) return
+    taskRequest(link, 'tasks.pin', {
       taskId: view.id,
       stepId,
       pick: agentId ? { agentId, model: null, effort: null } : null,

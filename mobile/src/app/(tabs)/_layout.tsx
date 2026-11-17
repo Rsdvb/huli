@@ -10,15 +10,27 @@
 import { View } from 'react-native'
 import { NativeTabs } from 'expo-router/native-tabs'
 import { SessionRowSkeleton } from '../../components/SessionRow'
-import { useHost } from '../../host'
+import {
+  sameFields,
+  useComputerId,
+  useConnected,
+  useHostActions,
+  useHostSelector,
+  type HostData,
+} from '../../host'
 import { PairScreen } from '../../screens/PairScreen'
 import { Screen } from '../../ui/Screen'
 import { rememberTab } from '../../ui/lastTab'
 import { space, useTokens } from '../../ui/tokens'
 
+const pickPhase = (d: HostData) => ({ phase: d.phase, notice: d.notice })
+
 export default function TabsLayout() {
   const { c } = useTokens()
-  const host = useHost()
+  const host = useHostSelector(pickPhase, sameFields)
+  const { paired } = useHostActions()
+  const connected = useConnected()
+  const hostId = useComputerId()
 
   if (host.phase === 'loading') {
     return (
@@ -33,15 +45,14 @@ export default function TabsLayout() {
     return (
       <PairScreen
         notice={host.notice}
-        onPaired={(saved, key, paired) => void host.paired(saved, key, paired)}
+        onPaired={(saved, key, adopt) => void paired(saved, key, adopt)}
       />
     )
   }
 
-  const connected = host.state.kind === 'connected'
   return (
     <NativeTabs
-      key={host.host?.id}
+      key={hostId ?? undefined}
       minimizeBehavior="onScrollDown"
       tintColor={c.tint}
       backgroundColor={c.bg}

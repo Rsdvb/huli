@@ -3,6 +3,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -13,7 +14,15 @@ import {
 import { Platform, StyleSheet, View } from 'react-native'
 import { router, useNavigation } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
-import { useHost } from '../host'
+import {
+  sameFields,
+  useActiveHost,
+  useComputerId,
+  useHostSelector,
+  useProjects,
+  useSessions,
+  type HostData,
+} from '../host'
 import { linkStatusOf, platformOf, type LinkTone } from '../linkInfo'
 import type { SearchScope } from '../search'
 import { folder } from '../sessions'
@@ -69,22 +78,23 @@ export function toneColor(c: Palette, tone: LinkTone): string {
 }
 
 export function ShellProvider(props: { children: ReactNode }) {
-  const host = useHost()
+  const sessions = useSessions()
+  const hostProjects = useProjects()
   const [filter, setFilter] = useState<ProjectFilter>({ kind: 'all' })
   const [sheet, setSheet] = useState<'projects' | 'host' | null>(null)
 
   // A project belongs to one computer: another computer starts with everything shown.
-  const activeId = host.host?.id
+  const activeId = useComputerId()
   useEffect(() => {
     setFilter({ kind: 'all' })
   }, [activeId])
 
   // The projects the listed sessions are in, latest first, named as the computer names them.
   const projects = useMemo(() => {
-    const names = new Map(host.projects.map((p) => [p.path, p.name]))
+    const names = new Map(hostProjects.map((p) => [p.path, p.name]))
     const latest = new Map<string, { updated: number; count: number }>()
     let scratch = 0
-    for (const s of host.sessions.values()) {
+    for (const s of sessions.values()) {
       if (s.parentId !== null || s.archivedAt !== null) continue
       if (s.scratch) {
         scratch++
@@ -100,7 +110,7 @@ export function ShellProvider(props: { children: ReactNode }) {
       .sort((a, b) => b[1].updated - a[1].updated)
       .map(([path, { count }]) => ({ path, count, name: names.get(path) ?? folder(path) }))
     return { list, scratch }
-  }, [host.sessions, host.projects])
+  }, [sessions, hostProjects])
 
   const filterName =
     filter.kind === 'all'
@@ -109,10 +119,10 @@ export function ShellProvider(props: { children: ReactNode }) {
         ? '无项目'
         : (projects.list.find((p) => p.path === filter.path)?.name ?? folder(filter.path))
 
-  const choose = (next: ProjectFilter) => {
+  const choose = useCallback((next: ProjectFilter) => {
     haptic.select()
     setFilter(next)
-  }
+  }, [])
   const items: SheetItem[] = [
     {
       key: '__all',
@@ -140,13 +150,17 @@ export function ShellProvider(props: { children: ReactNode }) {
       : []),
   ]
 
-  const value: ShellValue = {
-    filter,
-    setFilter: choose,
-    filterName,
-    openProjects: () => setSheet('projects'),
-    openHost: () => setSheet('host'),
-  }
+  // The lists read this on every render, so it changes only with the filter.
+  const value = useMemo<ShellValue>(
+    () => ({
+      filter,
+      setFilter: choose,
+      filterName,
+      openProjects: () => setSheet('projects'),
+      openHost: () => setSheet('host'),
+    }),
+    [filter, choose, filterName],
+  )
 
   return (
     <ShellContext.Provider value={value}>
@@ -163,6 +177,12 @@ export function ShellProvider(props: { children: ReactNode }) {
   )
 }
 
+const pickLink = (d: HostData) => ({
+  state: d.state,
+  unreachable: d.unreachable,
+  several: d.computers.hosts.length > 1,
+})
+
 /**
  * The top bar of every tab: account, project filter, the computer, search. The home tab names the
  * computer in a pill; the others (`compact`) name the project filter and mark the computer only.
@@ -178,15 +198,16 @@ export function TopBar(props: {
   searchScope?: SearchScope
 }) {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useHostSelector(pickLink, sameFields)
+  const active = useActiveHost()
   const shell = useShell()
-  const status = linkStatusOf(host.state, host.unreachable)
-  const name = computerName(host.host)
+  const status = linkStatusOf(link.state, link.unreachable)
+  const name = computerName(active)
   const platform = platformOf(
-    host.host,
-    host.state.kind === 'connected' ? host.state.welcome.host.platform : undefined,
+    active,
+    link.state.kind === 'connected' ? link.state.welcome.host.platform : undefined,
   )
-  const several = host.computers.length > 1
+  const several = link.several
   const openSearch = () => {
     haptic.tap()
     router.push({

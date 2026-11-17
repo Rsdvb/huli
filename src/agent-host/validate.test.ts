@@ -529,6 +529,21 @@ describe('createValidators', () => {
     })
   })
 
+  it('takes a read the user asked for only as a flag', () => {
+    const refresh = posix['agents.refreshLimits']
+    expect(refresh({ agentId: 'antigravity', ask: true })).toEqual({
+      agentId: 'antigravity',
+      ask: true,
+    })
+    expect(refresh({ agentId: 'antigravity', force: true, ask: false })).toEqual({
+      agentId: 'antigravity',
+      force: true,
+      ask: false,
+    })
+    rejects(() => refresh({ agentId: 'antigravity', ask: 'yes' }))
+    rejects(() => refresh({ agentId: 'antigravity', ask: 1 }))
+  })
+
   it('checks a switch to another agent', () => {
     const switchAgent = posix['sessions.switchAgent']
     const content = [{ type: 'text', text: 'go on' }]

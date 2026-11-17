@@ -2,10 +2,10 @@
 // each one with its tool calls and how long it has run or ran, opening its session, and a switch
 // that keeps the finished ones in the list.
 
-import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
-import { useHost, useLink } from '../host'
+import { sameItems, useConnected, useHostSelector, useLink, type HostData } from '../host'
 import { setPrefs, usePrefs } from '../prefs'
 import { sessionTitle } from '../sessions'
 import { spanText } from '../ui/session/format'
@@ -25,21 +25,25 @@ function useSecond(on: boolean): number {
 }
 
 export function SubagentMenu(props: { parentId: string; children: ReactElement }) {
-  const host = useHost()
   const link = useLink()
+  const connected = useConnected()
   const { showFinishedSubagents } = usePrefs()
-  const all = useMemo(
-    () =>
-      [...host.sessions.values()].filter(
-        (s) => s.parentId === props.parentId && s.origin === 'subagent',
-      ),
-    [host.sessions, props.parentId],
+  // Its own sub-agents only, so another session's change passes the row's badge by.
+  const all = useHostSelector(
+    useCallback(
+      (d: HostData) =>
+        [...d.sessions.values()].filter(
+          (s) => s.parentId === props.parentId && s.origin === 'subagent',
+        ),
+      [props.parentId],
+    ),
+    sameItems,
   )
   const listed = useMemo(
     () => listedSubagents(all, showFinishedSubagents),
     [all, showFinishedSubagents],
   )
-  const digestOf = useSubagentDigests(link, listed, host.state.kind === 'connected')
+  const digestOf = useSubagentDigests(link, listed, connected)
   const running = listed.filter(subagentRunning).length
   const now = useSecond(running > 0)
 

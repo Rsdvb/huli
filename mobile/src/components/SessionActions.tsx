@@ -7,7 +7,7 @@ import { useState, type ReactNode } from 'react'
 import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native'
 import type { SessionSummary } from '@shared/agent-host'
 import { call, sessionFolder } from '../git'
-import { useHost } from '../host'
+import { useMaybeLink } from '../host'
 import { errorText, sessionTitle } from '../sessions'
 import {
   canRetry,
@@ -54,7 +54,7 @@ export function useSessionActions(
   /** Items of the place's own, listed first, such as a session's changes. */
   extra?: (summary: SessionSummary) => SheetItem[],
 ): SessionActions {
-  const { link } = useHost()
+  const link = useMaybeLink()
   const [target, setTarget] = useState<SessionSummary | null>(null)
   const [sheet, setSheet] = useState(false)
   const [renaming, setRenaming] = useState(false)
