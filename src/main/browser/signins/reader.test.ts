@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, normalize } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chromiumKey, chromiumProfiles, decryptChromiumValue } from './chromium'
 import { encryptChromium, writeChromiumRoot, writeFirefoxDb, type FixtureCookie } from './fixtures'
@@ -239,23 +239,25 @@ describe('firefoxProfiles', () => {
       '[Install4F96D1932A9F858E]',
       'Default=Profiles/xyz.default-release',
     ].join('\n')
-    expect(firefoxProfiles(ini, '/home/me/.mozilla/firefox')).toEqual([
+    // The folders as this system writes them, as the reader joins them.
+    const root = '/home/me/.mozilla/firefox'
+    expect(firefoxProfiles(ini, root)).toEqual([
       {
         id: 'Profiles/xyz.default-release',
         name: 'default-release',
-        dir: '/home/me/.mozilla/firefox/Profiles/xyz.default-release',
+        dir: join(root, 'Profiles/xyz.default-release'),
         default: true,
       },
       {
         id: 'Profiles/abc.work',
         name: 'work',
-        dir: '/home/me/.mozilla/firefox/Profiles/abc.work',
+        dir: join(root, 'Profiles/abc.work'),
         default: false,
       },
       {
         id: '/data/firefox/profile',
         name: 'elsewhere',
-        dir: '/data/firefox/profile',
+        dir: normalize('/data/firefox/profile'),
         default: false,
       },
     ])
