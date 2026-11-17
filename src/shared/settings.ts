@@ -242,9 +242,10 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     name: null,
     direct: { enabled: true, port: null, addresses: [] },
     terminal: false,
-    // Huli Cloud's own relay, used only while Huli Cloud is on and signed in.
+    // Huli Cloud's own relay, used only while Huli Cloud is on and signed in; the account's phones
+    // and browsers may ask to be added through it, which the owner still allows here each time.
     relay: true,
-    discoverable: false,
+    discoverable: true,
   },
   computerUse: { enabled: false, allowedApps: [], pauseOnUse: true, stopShortcut: '' },
   // Personal fork: the self-hosted mode, in which nothing reaches Kettu's services; paired devices
