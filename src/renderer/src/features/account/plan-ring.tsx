@@ -43,7 +43,8 @@ function readLimits(): void {
   )
   for (const [key, ways] of planLimitWays()) {
     if (!listed.has(key)) continue
-    readLimitsThrough(ways).catch((error: unknown) =>
+    // The user opened the popover: a read they asked for.
+    readLimitsThrough(ways, true).catch((error: unknown) =>
       console.warn(`Could not read the plan limits: ${errorMessage(error)}`),
     )
   }

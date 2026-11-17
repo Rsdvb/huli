@@ -18,8 +18,19 @@ export const IMAGE_SIDE = 2000
 /** An image file larger than this is scaled too: 5 MB once in base64, every model's limit. */
 export const IMAGE_BYTES = 3.75 * 1024 * 1024
 
-/** The most bytes the host takes for one attachment it is handed. */
+/**
+ * The most bytes the host takes for one attachment it is handed in memory: a window's bytes, or a
+ * device's upload it reads to tell a picture or a text. A granted file past it is read no more.
+ */
 export const ATTACHMENT_BYTES = 20 * 1024 * 1024
+
+/**
+ * The most bytes of one file a device uploads as an attachment, such as a video or an archive. The
+ * host keeps it on disk, moving the upload into its attachments without reading it into memory,
+ * and the agent gets a link to it. An upload past `ATTACHMENT_BYTES` goes so whatever its type, as
+ * a granted file past it does; within it, a picture and a text keep their own handling.
+ */
+export const UPLOAD_FILE_BYTES = 2 * 1024 * 1024 * 1024
 
 /** Thumbnails are this many pixels on their longer side, the composer's widest picture. */
 export const THUMB_SIDE = 224

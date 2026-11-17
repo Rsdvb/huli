@@ -26,6 +26,7 @@ import {
   isPhoto,
   messageContent,
   prepare,
+  preparedSize,
   sendBlock,
   tooLarge,
   upload,
@@ -69,7 +70,8 @@ async function send(
   const ready: PendingAttachment[] = []
   try {
     for (const [index, item] of files.entries()) {
-      progress(files.length > 1 ? `正在上传 ${index + 1}/${files.length}…` : '正在上传…')
+      const which = files.length > 1 ? ` ${index + 1}/${files.length}` : ''
+      progress(`正在上传${which}…`)
       // A picture is scaled and re-encoded as the composer's are; a GIF goes as it is.
       const photo = item.kind === 'image' && isPhoto(item.mimeType)
       const source: PickedSource = {
@@ -82,13 +84,23 @@ async function send(
       const refused = tooLarge(source.name, source.size)
       if (refused) throw new Error(refused)
       const prepared = await prepare(source)
-      const attachment = await upload(link, prepared)
+      const size = preparedSize(prepared)
+      let shown = -1
+      const attachment = await upload(link, prepared, {
+        // A file read from disk as it goes says how far it got, a whole percent at a time.
+        progress: (sent) => {
+          const percent = Math.floor((sent / size) * 100)
+          if (percent === shown) return
+          shown = percent
+          progress(`正在上传${which} ${percent}%…`)
+        },
+      })
       ready.push({
         key: attachment.id,
         source,
         status: 'ready',
         thumb: prepared.thumb,
-        size: prepared.bytes.byteLength,
+        size,
         attachment,
         error: null,
       })

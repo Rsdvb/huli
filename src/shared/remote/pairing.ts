@@ -201,7 +201,7 @@ export function parsePairingLink(link: string): PairingPayload | null {
 export const BROWSER_PAIRING_PATH = '/pair'
 
 /** The hosted web client, which reaches hosts through the Kettu relay from any network. */
-export const HOSTED_WEB_URL = 'https://app.huli.invalid'
+export const HOSTED_WEB_URL = 'https://app.huli.132-145-200-0.sslip.io'
 
 /** The link a browser opens a code with on any network: the hosted web client, for a relay code. */
 export function hostedPairingLink(payload: PairingPayload): string | null {

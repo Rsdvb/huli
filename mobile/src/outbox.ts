@@ -6,7 +6,7 @@
 // next connection; a message the computer refuses stays where it was, failed, to retry or withdraw.
 //
 //   <documents>/huli/outbox/<computer id>/outbox.json   { v: 1, items: OutboxItem[] }
-//   <documents>/huli/outbox/<computer id>/files/<name>  a picked file's prepared bytes
+//   <documents>/huli/outbox/<computer id>/files/<name>  a picked file, or a photo's prepared bytes
 //
 // Files are named, not given by URI: iOS moves the app's documents folder when the app updates.
 
@@ -15,7 +15,7 @@ import { Directory, File, Paths } from 'expo-file-system'
 import type { SessionSummary } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import { isAttachment, type Attachment, type UserContent } from '@shared/thread'
-import { isPhoto, type PickedSource } from './attachments'
+import { isPhoto, uploadSource, type PickedSource } from './attachments'
 import { createStore, sameItems, useSelector } from './select'
 
 /** An attachment of a waiting message: held by the computer, a prepared file, or a project's file. */
@@ -254,11 +254,16 @@ export function loadOutbox(computer: string): Promise<void> {
   return read
 }
 
-/** A new file in the computer's files folder for a picked attachment's prepared bytes. */
+/**
+ * A new file in the computer's files folder for a picked attachment: its prepared bytes written,
+ * or a file on disk moved there by the system, or copied when it cannot be moved, never read here.
+ * A file is moved only when `move` says the phone made the copy picked, as a picker's cache copy.
+ */
 export async function keepFile(
   computer: string,
-  bytes: Uint8Array,
+  body: Uint8Array | { uri: string },
   name: string,
+  move = false,
 ): Promise<{ file: string; uri: string }> {
   await loadOutbox(computer)
   const dir = filesOf(computer)
@@ -266,8 +271,21 @@ export async function keepFile(
   const extension = /\.[A-Za-z0-9]{1,8}$/.exec(name)?.[0] ?? ''
   const kept = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${extension}`
   const file = new File(dir, kept)
-  file.create({ overwrite: true })
-  await file.write(bytes)
+  if (body instanceof Uint8Array) {
+    file.create({ overwrite: true })
+    await file.write(body)
+  } else {
+    const from = new File(body.uri)
+    if (move) {
+      try {
+        await from.move(file)
+        return { file: kept, uri: file.uri }
+      } catch {
+        // Copied instead below.
+      }
+    }
+    await from.copy(file)
+  }
   return { file: kept, uri: file.uri }
 }
 
@@ -573,15 +591,22 @@ async function handOver(
     })) as Attachment
   }
   const file = outboxFile(computer, kept.file)
-  let bytes: Uint8Array | null = null
+  let size: number | null = null
   try {
-    if (file.exists) bytes = await file.bytes()
+    if (file.exists) size = file.size
   } catch {
     // Said below.
   }
-  if (!bytes) throw new Refused(`「${kept.name}」在手机上的副本已不在，请撤回后重新添加。`)
+  if (!size) throw new Refused(`「${kept.name}」在手机上的副本已不在，请撤回后重新添加。`)
+  // Streamed from the kept file a part at a time, as a large video is never read whole.
+  const prepared = {
+    body: { uri: file.uri, size },
+    mimeType: kept.mimeType,
+    name: kept.name,
+    thumb: kept.thumb,
+  }
   return (await link.request('attachments.add', {
-    source: { bytes, mimeType: kept.mimeType, name: kept.name },
+    source: { bytes: uploadSource(prepared, () => {}), mimeType: kept.mimeType, name: kept.name },
     thumb: kept.thumb,
   })) as Attachment
 }

@@ -3,10 +3,25 @@
 // text and other file bytes they were read as or a window or device handed over in attachments/,
 // named by SHA-256 and extension,
 // until a prompt sends them or the user removes them; and in attachments/sent/, the copies that
-// links sent to an agent point to.
+// links sent to an agent point to. A device's upload comes as a file of the remote host's upload
+// folder, moved in here rather than passed through memory.
 
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import {
+  copyFile,
+  link,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AttachmentBytes, PromptCapabilities } from '@shared/agent-host'
@@ -16,11 +31,13 @@ import {
   isTextType,
   MODEL_IMAGE_TYPES,
   textThumb,
+  UPLOAD_FILE_BYTES,
   type AttachmentGrant,
 } from '@shared/attachments'
+import { UPLOAD_FILE_NAME, UPLOADS_FOLDER } from '@shared/remote/streams'
 import type { Attachment } from '@shared/thread'
 import type { PromptBlock } from './connection'
-import { invalidParams, notFound } from './errors'
+import { invalidParams, isHostError, notFound } from './errors'
 import { t } from './i18n'
 import { JsonFile, type LogFn } from './storage'
 import type { StoredBlob } from './threads/model'
@@ -66,6 +83,13 @@ export interface AttachmentsFile {
 
 export type AttachmentSource =
   { bytes: ArrayBuffer; mimeType: string; name: string } | { grantId: string }
+
+/** A device's upload, by the name of its file in the remote host's upload folder. */
+export interface UploadedSource {
+  upload: string
+  mimeType: string
+  name: string
+}
 
 /** A granted path as it is when it is read: resolved, and still the kind it was granted as. */
 export interface ResolvedPath {
@@ -383,6 +407,87 @@ export class Attachments {
     return attachmentOf(record)
   }
 
+  /**
+   * A device's upload, which its remote host assembled in its upload folder and names here. It is
+   * moved into attachments/ first, so the remote host's cleanup can no longer touch it. One within
+   * `ATTACHMENT_BYTES` is read and added as bytes are, as a picture, a text or a file; a larger one
+   * is a file the agent gets a link to, hashed as it streams from disk and never read whole.
+   */
+  async addUpload(source: UploadedSource, thumb: string | null): Promise<Attachment> {
+    const taken = await this.takeUpload(source.upload)
+    try {
+      if (taken.size <= ATTACHMENT_BYTES) {
+        const data = await readFile(taken.file)
+        const { mimeType, name } = source
+        return await this.add({ bytes: toArrayBuffer(data), mimeType, name }, thumb)
+      }
+      const named = {
+        type: 'file',
+        name: source.name,
+        mimeType: TYPE_ALIASES[source.mimeType] ?? source.mimeType,
+      } as const
+      const hash = await hashFile(taken.file)
+      const target = this.bytesPath({ ...named, hash })
+      // The same bytes saved before stay as they are, as a sent copy may be reading them.
+      const saved = await stat(target).then(
+        (info) => info.isFile() && info.size === taken.size,
+        () => false,
+      )
+      if (!saved) await rename(taken.file, target)
+      const record: AttachmentRecord = {
+        id: randomUUID(),
+        ...named,
+        size: taken.size,
+        hash,
+        path: null,
+        thumb: null,
+        addedAt: this.now(),
+      }
+      this.records.set(record.id, record)
+      this.save()
+      return attachmentOf(record)
+    } finally {
+      await this.removeFile(taken.file)
+    }
+  }
+
+  /**
+   * Takes an upload's file out of the remote host's upload folder into attachments/, under a name
+   * of its own until it is hashed. Only a plain file of that folder, named as the remote host names
+   * one, is taken: never a path, a link or anything outside it.
+   */
+  private async takeUpload(name: string): Promise<{ file: string; size: number }> {
+    if (!UPLOAD_FILE_NAME.test(name)) throw invalidParams(`${name} is not an upload`)
+    const folder = path.join(this.options.userDataPath, ...UPLOADS_FOLDER)
+    const from = path.join(folder, name)
+    let size: number
+    try {
+      const info = await lstat(from)
+      const inside = path.dirname(await realpath(from)) === (await realpath(folder))
+      if (!info.isFile() || !inside) throw invalidParams(`${name} is not an upload`)
+      size = info.size
+    } catch (error) {
+      if (isHostError(error)) throw error
+      throw notFound(t('session.attachmentMissing'))
+    }
+    if (size === 0 || size > UPLOAD_FILE_BYTES) {
+      throw invalidParams(`An upload is 1 to ${UPLOAD_FILE_BYTES} bytes`)
+    }
+    await mkdir(this.dir, { recursive: true, mode: 0o700 })
+    const file = path.join(this.dir, `${randomUUID()}.incoming`)
+    try {
+      await rename(from, file)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EXDEV') {
+        throw notFound(t('session.attachmentMissing'))
+      }
+      // On another volume than the data folder: copied there by the system, then let go.
+      await copyFile(from, file)
+      await rm(from, { force: true })
+    }
+    return { file, size }
+  }
+
   private addGranted(grantId: string, thumb: string | null): Promise<Attachment> {
     const grant = this.grants.get(grantId)
     this.grants.delete(grantId)
@@ -511,6 +616,10 @@ export class Attachments {
 
   async read(id: string): Promise<AttachmentBytes> {
     const record = this.get(id)
+    // A device's large file is never read whole; only what was handed over in memory is.
+    if ((record.size ?? 0) > ATTACHMENT_BYTES) {
+      throw invalidParams(`${record.name} is too large to read`)
+    }
     const data = await this.bytes(record)
     return { mimeType: record.mimeType!, bytes: toArrayBuffer(data) }
   }
@@ -531,6 +640,35 @@ export class Attachments {
     const file = path.join(this.sentDir, fileName(record))
     await mkdir(this.sentDir, { recursive: true, mode: 0o700 })
     await writeFile(file, data, { mode: 0o600 })
+    const at = new Date(this.now())
+    await utimes(file, at, at)
+    return pathToFileURL(file).href
+  }
+
+  /**
+   * As `sentLink`, for a file handed over as bytes, which may be gigabytes: the copy is a second
+   * link to the saved file where the disk takes one, or a copy the system makes, never read here.
+   */
+  async sentFile(record: AttachmentRecord): Promise<string> {
+    const file = path.join(this.sentDir, fileName(record))
+    await mkdir(this.sentDir, { recursive: true, mode: 0o700 })
+    const same = await stat(file).then(
+      (info) => info.isFile() && info.size === record.size,
+      () => false,
+    )
+    if (!same) {
+      const from = this.bytesPath(record)
+      await rm(file, { force: true })
+      try {
+        await link(from, file)
+      } catch {
+        try {
+          await copyFile(from, file)
+        } catch {
+          throw notFound(t('session.attachmentGone', { name: record.name }))
+        }
+      }
+    }
     const at = new Date(this.now())
     await utimes(file, at, at)
     return pathToFileURL(file).href
@@ -701,7 +839,7 @@ export async function sendAttachment(
   }
   if (record.type === 'file' && record.hash) {
     // Handed over as bytes, it has no file of its own, so the link goes to a copy.
-    const uri = await store.sentLink(record, await store.bytes(record))
+    const uri = await store.sentFile(record)
     return {
       block: linkBlock(uri, record.name, record.mimeType, record.size),
       changes: { uri, sent: 'linked', size: record.size, blob: null },
@@ -803,6 +941,13 @@ function attachmentOf(record: AttachmentRecord): Attachment {
     thumb: record.thumb,
     blob: null,
   }
+}
+
+/** A file's SHA-256, read a part at a time. */
+async function hashFile(file: string): Promise<string> {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer)
+  return hash.digest('hex')
 }
 
 export function toArrayBuffer(data: Uint8Array): ArrayBuffer {

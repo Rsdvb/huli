@@ -2,7 +2,8 @@
 // files and folders, and the project's files and folders an `@` mention names, through the host,
 // removing them, keeping them with the draft across a restart, and the content refs a message
 // carries. In another host's session, what comes from this computer goes up as bytes, as the web
-// client sends it, since that host reads nothing on this disk.
+// client sends it, since that host reads nothing on this disk. The web client streams a file up to
+// 2 GB a part at a time; bytes from this computer's main to another host go in memory, up to 20 MB.
 
 import {
   ATTACHMENT_BYTES,
@@ -11,8 +12,10 @@ import {
   PROMPT_BYTES,
   promptShare,
   textThumb,
+  UPLOAD_FILE_BYTES,
   type GrantedAttachment,
 } from '@shared/attachments'
+import { UploadSource } from '@shared/remote/upload-source'
 import type { Attachment, UserContent } from '@shared/thread'
 import { attachmentHost, errorMessage, host, hostAt, learnAttachmentHost } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
@@ -215,13 +218,18 @@ function addText(
 async function addBytes(
   draft: string,
   item: DraftAttachment,
-  bytes: ArrayBuffer | Promise<ArrayBuffer>,
+  bytes: ArrayBuffer | Promise<ArrayBuffer> | UploadSource,
   mimeType: string,
   hostId: string | null,
 ): Promise<void> {
   try {
     const attachment = await on(hostId, 'attachments.add', {
-      source: { bytes: await bytes, mimeType, name: item.name },
+      // The web client's link sends a source as it reads it, in place of the bytes.
+      source: {
+        bytes: bytes instanceof UploadSource ? (bytes as unknown as ArrayBuffer) : await bytes,
+        mimeType,
+        name: item.name,
+      },
       thumb: null,
     })
     // Removed while it was being added: the host's record goes too.
@@ -278,6 +286,21 @@ export async function pickAttachments(
 
 // Read when called rather than from lib/platform, so this module loads without a window.
 const onWeb = (): boolean => window.kettu.client === 'web'
+
+/** A picked file the web client's link reads a part at a time, never whole. */
+function blobSource(blob: Blob): UploadSource {
+  return new UploadSource(blob.size, () => {
+    let at = 0
+    return {
+      read: async (length) => {
+        const part = new Uint8Array(await blob.slice(at, at + length).arrayBuffer())
+        at += part.length
+        return part
+      },
+      close: () => {},
+    }
+  })
+}
 
 /** The browser's own file picker, for the web client; opened while the click that asked lasts. */
 function chooseFiles(): Promise<File[]> {
@@ -366,7 +389,17 @@ export async function attachFiles(
         limit: `${ATTACHMENT_BYTES / 1024 / 1024} MB`,
       })
       patchDraftAttachment(draft, item.key, { status: 'failed', error })
-    } else if (onWeb() || hostId !== null) {
+    } else if (onWeb() && hostId === null) {
+      if (file.size > UPLOAD_FILE_BYTES) {
+        const error = i18n.t('composer:attachments.tooLargeUpload', {
+          limit: `${UPLOAD_FILE_BYTES / 1024 / 1024 / 1024} GB`,
+        })
+        patchDraftAttachment(draft, item.key, { status: 'failed', error })
+      } else {
+        const type = file.type || 'application/octet-stream'
+        void addBytes(draft, item, blobSource(file), type, null)
+      }
+    } else if (hostId !== null) {
       const type = file.type || 'application/octet-stream'
       void addBytes(draft, item, file.arrayBuffer(), type, hostId)
     } else {

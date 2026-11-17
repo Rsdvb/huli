@@ -35,11 +35,12 @@ Code (kept small so upstream merges stay clean):
 | File                                                                                                                                     | Change                                                                                                                                                                                                                                                                               |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `src/agent-host/agents.ts`                                                                                                               | `READ_ANTIGRAVITY_LIMITS = false`: never runs `agy -p /usage`, `/credits` or a hidden ACP session by itself to read Antigravity's limits; only a refresh the user presses (`agents.refreshLimits` with `ask: true`) runs `/usage` and `/credits` once                                |
-| `src/shared/settings.ts`                                                                                                                 | defaults: cloud off, relay off, not discoverable                                                                                                                                                                                                                                     |
+| `src/shared/settings.ts`                                                                                                                 | defaults: cloud off, relay on (Huli Cloud's, used only with the cloud on and signed in), not discoverable                                                                                                                                                                            |
 | `src/main/update-keys.json`, `src/main/update-sources.ts`, `src/shared/updates.ts`, `src/daemon/update.ts`                               | updates come from Huli's own channel on Huli Cloud's host, signed with Huli's own release keys (kept off the repository)                                                                                                                                                             |
 | `src/shared/account-api.ts`, `src/shared/remote/push.ts`                                                                                 | the account service and push gateway are Huli Cloud, `https://huli.132-145-200-0.sslip.io` (see `cloud/`)                                                                                                                                                                            |
 | `src/shared/kettu-hosts.ts`                                                                                                              | Huli Cloud's host counts as one of the services the cloud switch governs                                                                                                                                                                                                             |
-| `src/shared/remote/{relay,pairing}.ts`                                                                                                   | every other kettu.sh address points at `*.huli.invalid`, which never resolves                                                                                                                                                                                                        |
+| `src/shared/remote/relay.ts`, `relay-regions.ts`                                                                                         | `RELAY_URL` is Huli Cloud too (its relay, one region, Ashburn); `REGION_KEYS` are Huli's own region list keys (`tools/huli/region-list.mjs`, private halves in `~/.huli-keys`)                                                                                                       |
+| `src/shared/remote/pairing.ts`                                                                                                           | `HOSTED_WEB_URL` is Huli's web client, `https://app.huli.132-145-200-0.sslip.io`; `PAIRING_URL` points at `huli.invalid`, which never resolves                                                                                                                                       |
 | `src/shared/storage.ts`, `src/agent-host/worktrees/git.ts`                                                                               | home folder `~/.huli` instead of `~/.kettu`                                                                                                                                                                                                                                          |
 | `src/main/user-data.ts`                                                                                                                  | development data folder `Huli Dev`; an installed build's, `Huli` (`PACKAGED_DATA_FOLDER`), which `src/main/index.ts` pins                                                                                                                                                            |
 | `src/main/index.ts`, `src/main/computer-use.ts`                                                                                          | app user model id `local.huli.app`                                                                                                                                                                                                                                                   |
@@ -161,7 +162,21 @@ one once upstream fixes the same thing:
 
 The Marketplace's MCP Registry, GitHub skills and Claude and Codex plugins need no Kettu account and
 keep working. Its Community tab and publishing to kettu.page need Kettu's services and stay off.
-Remote access uses direct connections over the network or Tailscale.
+Remote access uses direct connections over the network or Tailscale and, with Huli Cloud on and
+signed in, Huli Cloud's relay from any network, which the hosted web client at
+`HOSTED_WEB_URL` uses too (`cloud/README.md` describes both and their deployment).
+
+## Relay and web client
+
+- `cloud/src/relay.ts` is the relay, `cloud/src/relay-tokens.ts` the tokens it takes (access
+  tokens and HMAC-signed relay tokens from `POST /api/v1/relay/token`), both in the Huli Cloud
+  process; `cloud/test/relay.test.ts` drives them with the clients' own `RelayHost` and
+  `dialRelay`.
+- `src/shared/huli-cloud.ts`: Huli's own OAuth client for the phone (`huli-mobile`, redirect
+  `huli://signin`) beside Kettu's `kettu-desktop`, `kettu-daemon` and `kettu-web`.
+- The phone (`mobile/src/relay.ts`) falls back to the relay when no direct address answers, with
+  the token `relayTokens()` is given by the phone's Huli Cloud sign-in.
+- `tools/huli/deploy-cloud.ps1` builds the service and the hosted web client and installs both.
 
 ## Workflows
 

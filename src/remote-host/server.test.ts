@@ -1,7 +1,7 @@
 // The remote host's side of device connections, against an in-process agent host running the
 // fake agent: handshake, pairing, hello and welcome, the session passed through, and what ends it.
 
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -56,6 +56,7 @@ async function setup(
     admin?: RemoteServerOptions['admin']
     /** Whether the host has its signing key, and so sends notifications. */
     push?: boolean
+    uploadFreeSpace?: RemoteServerOptions['uploadFreeSpace']
   } = {},
 ) {
   // A test that sets up twice stops the first host too: one still running holds its folder's
@@ -67,6 +68,8 @@ async function setup(
   const log = (level: string, message: string) => logs.push(`${level}: ${message}`)
   const devices = await DeviceStore.load(agent.dir, log, options.now)
   const activity = await ActivityLog.load(agent.dir, log, options.now)
+  // As the remote host makes it when it starts.
+  await mkdir(path.join(agent.dir, 'remote', 'uploads'), { recursive: true })
   const hostKey = await generateKeyPair()
   const phoneKey = await generateKeyPair()
   const phone = (await devices.add({
@@ -138,6 +141,7 @@ async function setup(
     ...(options.resumeMs ? { resumeMs: options.resumeMs } : {}),
     ...(options.backgroundResumeMs ? { backgroundResumeMs: options.backgroundResumeMs } : {}),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.uploadFreeSpace ? { uploadFreeSpace: options.uploadFreeSpace } : {}),
   })
   const connect = (
     key: KeyPair = phoneKey,
@@ -269,6 +273,48 @@ describe('a paired device', () => {
       `warn: Device ${t.phone.id} asked for media.open, which devices may not call`,
       `warn: Device ${t.phone.id} asked for attachments.add, which devices may not call`,
     ])
+  })
+
+  it("hands an attachment's upload to the agent host as a file, which it moves in", async () => {
+    const t = await setup()
+    const device = await t.connect()
+    await device.first
+    const data = new Uint8Array(70_000).map((_, i) => i % 256)
+    const stream = await device.upload(data, { chunk: 16_000 })
+    const attachment = await device.port.request('attachments.add', {
+      source: { bytes: { $stream: stream }, mimeType: 'application/zip', name: 'a.zip' },
+      thumb: null,
+    } as never)
+    expect(attachment).toMatchObject({ type: 'file', name: 'a.zip', size: data.length })
+    // The agent host was named the file, never handed its bytes.
+    const handed = t.forwarded.find(
+      (message) => (message as { method?: string }).method === 'attachments.add',
+    ) as { params: { source: Record<string, unknown> } }
+    expect(Object.keys(handed.params.source).sort()).toEqual(['mimeType', 'name', 'upload'])
+    expect(await readdir(path.join(t.agent.dir, 'remote', 'uploads'))).toEqual([])
+  })
+
+  it('refuses a device naming an upload file itself', async () => {
+    const t = await setup()
+    const device = await t.connect()
+    await device.first
+    const upload = `${'0'.repeat(32)}.part`
+    await expect(
+      device.port.request('attachments.add', {
+        source: { upload, mimeType: 'text/plain', name: 'x.txt' },
+        thumb: null,
+      } as never),
+    ).rejects.toMatchObject({ code: 'forbidden' })
+    expect(t.forwarded).toEqual([])
+  })
+
+  it('refuses an upload the disk has no room for, before its bytes come', async () => {
+    const t = await setup({ uploadFreeSpace: async () => 1024 })
+    const device = await t.connect()
+    await device.first
+    const stream = await device.upload(new Uint8Array(10), { end: false })
+    await expect.poll(() => device.cancels.map((cancel) => cancel.stream)).toEqual([stream])
+    expect(device.cancels[0]!.error).toMatchObject({ code: 'unavailable' })
   })
 
   it("changes a project's worktree setup command only with the terminal's leave", async () => {

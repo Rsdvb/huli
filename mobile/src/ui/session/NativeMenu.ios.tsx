@@ -19,7 +19,7 @@ import {
   Text,
   Toggle,
 } from '@expo/ui/swift-ui'
-import { disabled, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers'
+import { disabled, menuOrder, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers'
 import type { MenuEntry, MenuPage, MenuRow, MenuSource } from './Popover'
 
 /** Whether menus are the system's here: always on iOS. */
@@ -215,7 +215,10 @@ export function NativeMenu(props: {
   if (!props.source || !page || props.disabled) return props.children
   return (
     <Host matchContents>
+      {/* In the order given, opening up or down: the system's default turns a menu that opens
+          upward around, which pushed the model menu's models to its far end. */}
       <Menu
+        modifiers={[menuOrder('fixed')]}
         label={
           <RNHostView matchContents>
             <View pointerEvents="none">{props.children}</View>

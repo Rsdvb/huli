@@ -138,7 +138,8 @@ export function ContextSheet(props: {
     if (!props.connected) return
     if (canRead) load()
     if (agent?.capabilities.reports) {
-      void link.request('agents.refreshLimits', { agentId: agent.id }).catch(() => {})
+      // The user opened the sheet: a read they asked for.
+      void link.request('agents.refreshLimits', { agentId: agent.id, ask: true }).catch(() => {})
     }
     // Read once each time the sheet opens; later snapshots come with the host's pushes.
   }, [props.visible, props.connected])

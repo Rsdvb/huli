@@ -8,6 +8,8 @@ import { router } from 'expo-router'
 import { harnessOf, type ThreadEntry } from '@shared/thread'
 import { useAgent, useConnected, useLink, useSession } from '../../host'
 import { sessionTitle } from '../../sessions'
+import { AgentAvatar } from '../../ui/AgentAvatar'
+import { WorkingDots } from '../../ui/session/Working'
 import { gentle } from '../../ui/session/Press'
 import { spanText } from '../../ui/session/format'
 import { G, Icon } from '../../ui/session/icons'
@@ -190,69 +192,77 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
       ? '子 Agent'
       : '已启动一个会话'
   const label = entry.kind === 'session_started' && child ? `已启动 ${title}` : title
-  // Its tool count and time: while it runs, the time since it started, once it ends its run's.
-  const meta = waiting
-    ? null
-    : [
-        cancelled ? '已取消' : null,
-        digest?.tools != null ? `${digest.tools} 个工具` : null,
-        !running && digest?.durationMs != null ? durationText(digest.durationMs) : null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
+  // While it runs, the time since it started; once it ends, its run's.
   const ticking = running && child && digest?.durationMs == null ? child.createdAt : null
   if (entry.kind === 'subagent') {
+    // Its state first, then its type and its tools and time: 「正在运行 · general-purpose · 3 个工具
+    // · 12 秒」, 「已完成 · 1 分 20 秒」.
+    const state = waiting
+      ? '需要授权'
+      : failed
+        ? '失败'
+        : running
+          ? '正在运行'
+          : cancelled
+            ? '已取消'
+            : child
+              ? '已完成'
+              : null
+    const facts = [
+      child?.description || null,
+      digest?.tools != null ? `${digest.tools} 个工具` : null,
+      !running && digest?.durationMs != null ? durationText(digest.durationMs) : null,
+    ].filter(Boolean)
+    const stateColor = waiting ? c.warning : failed ? c.danger : c.textSecondary
+    const dot = <Text style={{ color: c.textTertiary }}>{'  ·  '}</Text>
     return (
       <Pressable
         onPress={() => child && router.push(`/session/${entry.sessionId}`)}
         disabled={!child}
         accessibilityRole="button"
+        accessibilityLabel={[title, state, ...facts].filter(Boolean).join('，')}
         style={({ pressed }) => [
-          styles.child,
+          styles.card,
           {
-            backgroundColor: waiting ? s.warningSoft : c.fill,
+            backgroundColor: waiting ? s.warningSoft : c.surface,
+            borderColor: waiting ? c.warning : c.border,
             opacity: pressed ? 0.7 : 1,
           },
         ]}
       >
-        <Icon icon={G.subagent} size={14} color={waiting ? c.warning : c.textSecondary} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.childTitle, { color: c.text }]} numberOfLines={1}>
+        <AgentAvatar agentId={child?.agentId ?? ''} size={36} />
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text style={[styles.cardTitle, { color: c.text }]} numberOfLines={1}>
             {title}
           </Text>
-          {child?.description ? (
-            <Text style={[styles.small, { color: c.textTertiary }]} numberOfLines={2}>
-              {child.description}
+          <View style={styles.cardMeta}>
+            {waiting ? (
+              <View style={[styles.dot, { backgroundColor: c.warning }]} />
+            ) : failed ? (
+              <Icon icon={G.failed} size={12} color={c.danger} />
+            ) : running ? (
+              <WorkingDots color={c.accent} size={11} />
+            ) : child && !cancelled ? (
+              <Icon icon={G.check} size={12} color={c.success} weight="semibold" />
+            ) : null}
+            <Text style={[styles.metaText, { color: c.textTertiary }]} numberOfLines={1}>
+              {state ? <Text style={{ color: stateColor }}>{state}</Text> : null}
+              {facts.map((fact, i) => (
+                <Text key={i}>
+                  {state || i > 0 ? dot : null}
+                  {fact}
+                </Text>
+              ))}
+              {ticking !== null ? (
+                <Text>
+                  {dot}
+                  <Elapsed since={ticking} color={c.textTertiary} />
+                </Text>
+              ) : null}
             </Text>
-          ) : null}
-          {meta || ticking !== null ? (
-            <Text style={[styles.small, { color: c.textTertiary }]} numberOfLines={1}>
-              {meta}
-              {meta && ticking !== null ? ' · ' : ''}
-              {ticking !== null ? <Elapsed since={ticking} color={c.textTertiary} /> : null}
-            </Text>
-          ) : null}
+          </View>
         </View>
-        {waiting ? (
-          <View style={styles.statusCol}>
-            <View style={[styles.dot, { backgroundColor: c.warning }]} />
-            <Text style={[styles.small, { color: c.warning, fontWeight: '600' }]}>需要授权</Text>
-          </View>
-        ) : failed ? (
-          <View style={styles.statusCol}>
-            <Icon icon={G.failed} size={13} color={c.danger} />
-            <Text style={[styles.small, { color: c.danger }]}>失败</Text>
-          </View>
-        ) : running ? (
-          <ActivityIndicator
-            size="small"
-            color={c.textTertiary}
-            style={{ transform: [{ scale: 0.75 }] }}
-          />
-        ) : child && !cancelled ? (
-          <Icon icon={G.check} size={13} color={c.success} weight="semibold" />
-        ) : null}
-        <Icon icon={G.right} size={10} color={c.textTertiary} weight="semibold" />
+        <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
       </Pressable>
     )
   }
@@ -332,6 +342,20 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   childTitle: { fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 16,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 12,
+    paddingRight: 14,
+    paddingVertical: 10,
+  },
+  cardTitle: { fontSize: 15.5, lineHeight: 20, fontWeight: '600' },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metaText: { flexShrink: 1, fontSize: 13.5, lineHeight: 18 },
   statusCol: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   started: {
     flexDirection: 'row',

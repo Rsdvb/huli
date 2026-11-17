@@ -356,10 +356,47 @@ export class KettuTray {
     const cached = this.images.get(name)
     if (cached) return cached
     const image = nativeImage.createFromPath(join(imagesDir(), name))
-    if (image.isEmpty()) log.warn(`The tray image ${name} is missing`)
+    if (image.isEmpty()) {
+      // Right after an update installs, the app can start before the installer has put the tray
+      // images back. An empty image is not kept, the read is tried again shortly, and meanwhile
+      // the app's own icon stands in, so the tray never shows nothing.
+      log.warn(`The tray image ${name} is missing`)
+      this.retryImage()
+      return this.fallbackImage()
+    }
     if (isTemplateImage(process.platform, state)) image.setTemplateImage(true)
     this.images.set(name, image)
     return image
+  }
+
+  private imageRetry: ReturnType<typeof setTimeout> | null = null
+  private imageRetries = 0
+
+  /** Reads the state's image again in a moment, a few times, while it is missing. */
+  private retryImage(): void {
+    if (this.imageRetry || this.imageRetries >= 10) return
+    this.imageRetries++
+    this.imageRetry = setTimeout(() => {
+      this.imageRetry = null
+      this.tray?.setImage(this.image())
+    }, 2000)
+  }
+
+  /**
+   * What the tray shows while its image is missing: the same image as a PNG when only the .ico
+   * failed, else the app's own icon, which Windows hands over a moment later.
+   */
+  private fallbackImage(): Electron.NativeImage {
+    const name = trayImageName(process.platform, this.white, this.state(), BREATH[this.breath])
+    const png = nativeImage.createFromPath(join(imagesDir(), name.replace(/\.ico$/, '.png')))
+    if (!png.isEmpty()) return png
+    void app
+      .getFileIcon(process.execPath, { size: 'small' })
+      .then((icon) => {
+        if (this.imageRetry && !icon.isEmpty()) this.tray?.setImage(icon)
+      })
+      .catch(() => {})
+    return nativeImage.createEmpty()
   }
 
   private async readTheme(): Promise<void> {

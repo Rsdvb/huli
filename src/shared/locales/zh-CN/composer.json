@@ -207,6 +207,7 @@
     "theAgent": "Agent",
     "folderOtherHost": "这台电脑上的文件夹不能发到另一台主机上的会话，请改为添加里面的文件。",
     "tooLargeOtherHost": "超过 {{limit}}，太大，无法发到另一台主机。",
+    "tooLargeUpload": "超过 {{limit}}，太大了：单个附件最多 {{limit}}。",
     "sideChat": "侧聊",
     "btw": "侧聊：问一句，不打断这一轮，也不进对话",
     "sideNoAttachments": "侧聊不带附件"

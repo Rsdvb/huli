@@ -5,6 +5,7 @@
 // read-code.ts, turn-phase.ts and tool-times.ts.
 
 import type { ThreadEntry, ThreadState, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
+import { turnDoing, type TurnDoing, type TurnPhaseName } from '@shared/turn-phase'
 import { diffTexts } from '../../diff'
 import { baseName, relativePath } from './format'
 import { toolTitle } from './toolNames'
@@ -479,70 +480,10 @@ export function toolTime(
 
 // ---- The running turn ----
 
-export type Phase =
-  | 'thinking'
-  | 'execute'
-  | 'read'
-  | 'search'
-  | 'fetch'
-  | 'edit'
-  | 'writing'
-  | 'compacting'
-  | 'approval'
-  | 'working'
+export type Phase = TurnPhaseName
 
-const TOOL_PHASES: Partial<Record<ToolKind, Phase>> = {
-  execute: 'execute',
-  read: 'read',
-  search: 'search',
-  fetch: 'fetch',
-  edit: 'edit',
-  delete: 'edit',
-  move: 'edit',
-}
-
-const WORKING = { phase: 'working' as Phase, count: 1 }
-
-const QUIET = new Set([
-  'plan',
-  'notice',
-  'git',
-  'artifact',
-  'subagent',
-  'memory',
-  'control_ask',
-  'control_note',
-])
-
-/** What the agent does now in its running turn, from the turn's latest entries. */
-export function turnPhase(state: ThreadState | null): { phase: Phase; count: number } {
-  if (!state) return WORKING
-  if (state.session.status === 'awaiting_permission') return { phase: 'approval', count: 1 }
-  const { order, byId } = state
-  const running: ToolEntry[] = []
-  let tools = false
-  for (let i = order.length - 1; i >= Math.max(0, order.length - LOOKBACK); i--) {
-    const entry = byId[order[i]!]
-    if (!entry) continue
-    if (entry.kind === 'tool') {
-      tools = true
-      if (entry.status === 'pending' || entry.status === 'in_progress') running.push(entry)
-      continue
-    }
-    if (entry.kind === 'subagent' && !tools) return WORKING
-    if (QUIET.has(entry.kind)) continue
-    if (tools) break
-    if (entry.kind === 'thought') return entry.streaming ? { phase: 'thinking', count: 1 } : WORKING
-    if (entry.kind === 'agent') return entry.streaming ? { phase: 'writing', count: 1 } : WORKING
-    if (entry.kind === 'compaction' && entry.status === 'in_progress') {
-      return { phase: 'compacting', count: 1 }
-    }
-    return WORKING
-  }
-  const phase = running[0] && TOOL_PHASES[running[0].toolKind]
-  if (!phase) return WORKING
-  return { phase, count: running.filter((tool) => TOOL_PHASES[tool.toolKind] === phase).length }
-}
+/** What the agent does now in its running turn, with what it works on (`turnDoing`). */
+export { turnDoing }
 
 export function phaseText(phase: Phase, count: number): string {
   switch (phase) {
@@ -566,6 +507,32 @@ export function phaseText(phase: Phase, count: number): string {
       return '等待你的授权'
     case 'working':
       return '处理中'
+  }
+}
+
+/**
+ * The phase as a person says it, with what it works on: 「正在读取 index.tsx」, 「正在运行 3 条命令：
+ * ssh mac」, 「正在搜索“tok/s”」, 「正在思考：额度为什么查不到」; the phase alone when there is
+ * nothing to name.
+ */
+export function doingText(doing: TurnDoing): string {
+  const { phase, count, detail, quoted } = doing
+  if (detail === null) return phaseText(phase, count)
+  switch (phase) {
+    case 'thinking':
+      return `正在思考：${detail}`
+    case 'execute':
+      return count > 1 ? `正在运行 ${count} 条命令：${detail}` : `正在运行 ${detail}`
+    case 'read':
+      return count > 1 ? `正在读取 ${count} 个文件：${detail}` : `正在读取 ${detail}`
+    case 'edit':
+      return count > 1 ? `正在编辑 ${count} 个文件：${detail}` : `正在编辑 ${detail}`
+    case 'search':
+      return quoted ? `正在搜索“${detail}”` : `正在搜索 ${detail}`
+    case 'fetch':
+      return quoted ? `正在搜索网页“${detail}”` : `正在获取 ${detail}`
+    default:
+      return phaseText(phase, count)
   }
 }
 

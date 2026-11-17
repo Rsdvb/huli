@@ -7,6 +7,9 @@
 // receives, resumes with the welcome's token, and sends again the requests the host did not read.
 // Given several routes, as a relay's regions, it races them to a finished handshake, says hello on
 // the winner alone, and later moves the session to a route clearly faster than the one it is on.
+// A request may name an UploadSource in place of bytes: a file read and sent a part at a time.
+// The host keeps no half-sent upload across a drop, so such a file starts over on the next
+// connection, once.
 
 import type { PortError, PortErrorCode } from '../port-rpc'
 import { Acknowledger } from './acks'
@@ -40,10 +43,23 @@ import {
 } from './protocol'
 import { AsideConnection } from './standby'
 import type { Transport } from './transport'
+import { UploadSource } from './upload-source'
 import { webSocketTransport } from './websocket-transport'
 
 /** What a transport may hold before an upload waits for it to drain, as the host's downloads do. */
 const HIGH_WATER = 256 * 1024
+
+/** How much of a streamed file is read at a time. */
+const READ_BYTES = 256 * 1024
+
+/**
+ * Times a dropped connection may cut a request's streamed files short before it fails: the host
+ * drops an upload it did not get whole, so the file starts over on the next connection, once.
+ */
+const MAX_CUTS = 1
+
+/** A connection that ended while a request's uploads went, which the next sends again. */
+class Cut extends Error {}
 
 /** How long a known host has from the handshake to its welcome. */
 const WELCOME_TIMEOUT_MS = 15_000
@@ -133,6 +149,8 @@ interface Outgoing {
   aborted: boolean
   /** The byte streams its answer brings, while they come. */
   streams: number[]
+  /** How often a dropped connection cut its streamed files short. */
+  cuts: number
 }
 
 interface Download {
@@ -259,6 +277,8 @@ export class HostLink {
   private readonly outgoing = new Set<Outgoing>()
   private readonly inFlight = new Map<number, Outgoing>()
   private readonly downloads = new Map<number, Download>()
+  /** The uploads going now, with the host's reason once it gave one up. */
+  private readonly uploading = new Map<number, LinkError | null>()
   /** The token of the last welcome, while the host keeps the session for the link to resume. */
   private resumeToken: string | null = null
   /** What the host sent on the session, which a host of version 2 hears of. */
@@ -419,6 +439,7 @@ export class HostLink {
         id: null,
         aborted: false,
         streams: [],
+        cuts: 0,
       }
       this.outgoing.add(outgoing)
       if (this.session) void this.post(this.session, outgoing)
@@ -844,8 +865,9 @@ export class HostLink {
   }
 
   private async post(session: Session, outgoing: Outgoing): Promise<void> {
+    const streamed = { files: false }
     try {
-      const params = await this.withUploads(session, outgoing.params, 0)
+      const params = await this.withUploads(session, outgoing, outgoing.params, 0, streamed)
       // The connection went while uploading: the request goes again on the next one.
       if (this.session !== session || !this.outgoing.has(outgoing)) return
       const id = this.nextId++
@@ -853,7 +875,13 @@ export class HostLink {
       this.inFlight.set(id, outgoing)
       await session.channel.send({ type: 'request', id, method: outgoing.method, params })
     } catch (error) {
-      if (this.session !== session || !this.outgoing.has(outgoing)) return
+      if (!this.outgoing.has(outgoing)) return
+      if (this.session !== session || error instanceof Cut) {
+        // A streamed file starts over on the next connection, but only so often.
+        if (!streamed.files || ++outgoing.cuts <= MAX_CUTS) return
+        const cut = 'The connection dropped again while a file was uploading'
+        return this.settle(outgoing).reject(linkError('host_restarted', cut))
+      }
       this.settle(outgoing).reject(
         typeof error === 'object' && error !== null && 'code' in error
           ? (error as LinkError)
@@ -862,34 +890,92 @@ export class HostLink {
     }
   }
 
-  /** A copy of `value` with each binary value sent ahead as an upload and named in its place. */
-  private async withUploads(session: Session, value: unknown, depth: number): Promise<unknown> {
-    if (isBinary(value)) return { $stream: await this.upload(session, bytesOf(value)) }
+  /**
+   * A copy of `value` with each binary value and each streamed file sent ahead as an upload and
+   * named in its place.
+   */
+  private async withUploads(
+    session: Session,
+    outgoing: Outgoing,
+    value: unknown,
+    depth: number,
+    streamed: { files: boolean },
+  ): Promise<unknown> {
+    if (value instanceof UploadSource) {
+      streamed.files = true
+      return { $stream: await this.upload(session, outgoing, value) }
+    }
+    if (isBinary(value)) {
+      return { $stream: await this.upload(session, outgoing, bytesOf(value)) }
+    }
     if (typeof value !== 'object' || value === null || depth >= MAX_DEPTH) return value
     if (Array.isArray(value)) {
       const copy: unknown[] = []
-      for (const item of value) copy.push(await this.withUploads(session, item, depth + 1))
+      for (const item of value) {
+        copy.push(await this.withUploads(session, outgoing, item, depth + 1, streamed))
+      }
       return copy
     }
     const copy: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(value)) {
-      copy[key] = await this.withUploads(session, item, depth + 1)
+      copy[key] = await this.withUploads(session, outgoing, item, depth + 1, streamed)
     }
     return copy
   }
 
-  private async upload(session: Session, bytes: Uint8Array): Promise<number> {
+  /**
+   * Sends bytes, or a file as it is read, as the next upload. It stops once the connection goes,
+   * the caller gives the request up, which the host hears, or the host gives the upload up.
+   */
+  private async upload(
+    session: Session,
+    outgoing: Outgoing,
+    from: Uint8Array | UploadSource,
+  ): Promise<number> {
     const stream = this.nextUpload
     this.nextUpload += 2
     const { channel, transport } = session
-    await channel.send({ type: 'stream.open', stream, size: bytes.length })
-    for (let offset = 0; offset < bytes.length; offset += BYTES_PER_FRAME) {
-      await channel.sendBytes(stream, bytes.subarray(offset, offset + BYTES_PER_FRAME))
-      if (transport.buffered() > HIGH_WATER) await transport.drained()
-      if (this.session !== session) throw linkError('host_restarted', 'The connection ended')
+    const source = from instanceof UploadSource ? from : UploadSource.of(from)
+    source.progress?.(0)
+    const reader = await source.open()
+    this.uploading.set(stream, null)
+    try {
+      await channel.send({ type: 'stream.open', stream, size: source.size })
+      let sent = 0
+      while (sent < source.size) {
+        const part = (await reader.read(Math.min(READ_BYTES, source.size - sent))).subarray(
+          0,
+          source.size - sent,
+        )
+        if (part.length === 0) {
+          throw linkError('invalid_params', 'The file got shorter while it was uploading')
+        }
+        for (let offset = 0; offset < part.length; offset += BYTES_PER_FRAME) {
+          this.uploadGoes(session, outgoing, stream)
+          await channel.sendBytes(stream, part.subarray(offset, offset + BYTES_PER_FRAME))
+          if (transport.buffered() > HIGH_WATER) await transport.drained()
+        }
+        sent += part.length
+        this.uploadGoes(session, outgoing, stream)
+        source.progress?.(sent)
+      }
+      await channel.send({ type: 'stream.end', stream })
+      return stream
+    } finally {
+      this.uploading.delete(stream)
+      reader.close()
     }
-    await channel.send({ type: 'stream.end', stream })
-    return stream
+  }
+
+  /** Throws when an upload under way is to stop, telling the host when the caller gave it up. */
+  private uploadGoes(session: Session, outgoing: Outgoing, stream: number): void {
+    if (this.session !== session) throw new Cut()
+    const refused = this.uploading.get(stream)
+    if (refused) throw refused
+    if (!this.outgoing.has(outgoing)) {
+      this.send({ type: 'stream.cancel', stream })
+      throw aborted()
+    }
   }
 
   private receive(session: Session, value: unknown): void {
@@ -957,16 +1043,21 @@ export class HostLink {
       }
       case 'stream.cancel': {
         const stream = message.stream as number
+        const error = message.error as Partial<PortError> | undefined
+        const reason = (otherwise: string) =>
+          linkError(
+            typeof error?.code === 'string' ? error.code : 'internal',
+            typeof error?.message === 'string' ? error.message : otherwise,
+          )
+        // An upload the host gave up, as one its disk has no room for: it stops being sent.
+        if (this.uploading.has(stream)) {
+          this.uploading.set(stream, reason('The host gave up an upload'))
+          return
+        }
         const download = this.downloads.get(stream)
         if (!download) return
         this.downloads.delete(stream)
-        const error = message.error as Partial<PortError> | undefined
-        download.reject(
-          linkError(
-            typeof error?.code === 'string' ? error.code : 'internal',
-            typeof error?.message === 'string' ? error.message : 'The host gave up a download',
-          ),
-        )
+        download.reject(reason('The host gave up a download'))
         return
       }
       case 'closing': {

@@ -215,6 +215,7 @@
     "theAgent": "The agent",
     "folderOtherHost": "A folder on this computer can't go to a session on another host. Attach the files in it instead.",
     "tooLargeOtherHost": "Over {{limit}}, too large to send to another host.",
+    "tooLargeUpload": "Over {{limit}}, too large: an attachment is at most {{limit}}.",
     "sideChat": "Side chat",
     "btw": "Side chat: ask without interrupting the turn or adding to the conversation",
     "sideNoAttachments": "A side question takes no attachments"
