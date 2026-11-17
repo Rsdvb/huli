@@ -160,7 +160,7 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/huli.p12"
+          printf '%s' "$KEYSTORE" | tr -cd 'A-Za-z0-9+/=' | base64 -d > "$RUNNER_TEMP/huli.p12"
           mkdir -p out
           "$tools/zipalign" -f -p 4 android/app/build/outputs/apk/release/app-release.apk out/aligned.apk
           "$tools/apksigner" sign --ks "$RUNNER_TEMP/huli.p12" --ks-type PKCS12 --ks-key-alias huli \
