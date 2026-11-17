@@ -4,14 +4,7 @@
 // picker, and the branch it is on.
 
 import { useMemo, useRef, useState } from 'react'
-import {
-  KeyboardAvoidingView,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
