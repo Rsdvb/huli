@@ -17,9 +17,17 @@ export interface Prefs {
   lockAfter: LockDelay
   /** Notifications say only what kind of thing happened, never a session's title or text. */
   hidePreviews: boolean
+  /** Live Activities on the Lock Screen and in the Dynamic Island (iOS). */
+  liveActivities: boolean
 }
 
-const DEFAULTS: Prefs = { theme: 'system', lock: false, lockAfter: 0, hidePreviews: false }
+const DEFAULTS: Prefs = {
+  theme: 'system',
+  lock: false,
+  lockAfter: 0,
+  hidePreviews: false,
+  liveActivities: true,
+}
 
 const ITEM = 'huli.prefs'
 const OPTIONS: SecureStore.SecureStoreOptions = {
@@ -42,6 +50,7 @@ function parse(text: string | null): Prefs {
         ? (raw.lockAfter as LockDelay)
         : 0,
       hidePreviews: raw.hidePreviews === true,
+      liveActivities: raw.liveActivities !== false,
     }
   } catch {
     return DEFAULTS

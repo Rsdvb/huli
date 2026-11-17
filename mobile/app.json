@@ -54,7 +54,8 @@
         { "faceIDPermission": "Huli 用面容 ID 在你回到 App 时解锁，不让别人看到你的会话。" }
       ],
       ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
-      "./plugins/withNotificationService"
+      "./plugins/withNotificationService",
+      "./plugins/withWidgets"
     ]
   }
 }

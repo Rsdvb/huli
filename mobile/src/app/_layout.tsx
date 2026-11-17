@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
 import { LinkBridge } from '../links'
+import { LiveBridge } from '../live/bridge'
 import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
 import { useTokens } from '../ui/tokens'
@@ -48,6 +49,7 @@ export default function Layout() {
         </ShellProvider>
         <PushBridge />
         <LinkBridge />
+        <LiveBridge />
         <LockLayer />
       </HostProvider>
     </SafeAreaProvider>

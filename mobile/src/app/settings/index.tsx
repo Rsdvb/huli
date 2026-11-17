@@ -17,6 +17,7 @@ import { APP_VERSION, currentAddress, routeKind } from '../../connection'
 import { useHost } from '../../host'
 import { computerName } from '../../store'
 import { ROUTE_NAMES } from '../../linkInfo'
+import { LIVE_SUPPORTED, useLiveAllowed } from '../../live/activities'
 import { authenticate, useBiometryName } from '../../lock'
 import { setPrefs, usePrefs, type ThemePref } from '../../prefs'
 import { usePushStatus, type PushStatus } from '../../push/sync'
@@ -78,6 +79,7 @@ export default function Settings() {
   const push = usePushStatus()
   const account = useAccount(push)
   const biometry = useBiometryName()
+  const liveAllowed = useLiveAllowed()
   const updateRows = useUpdateRows()
   const routines = useRoutineList()
   const [address, setAddress] = useState<DirectAddress | null>(() => currentAddress())
@@ -180,6 +182,33 @@ export default function Settings() {
             chevron
             onPress={() => void Linking.openSettings()}
           />
+          {LIVE_SUPPORTED ? (
+            <ListRow
+              title="实时活动"
+              subtitle="在锁屏和灵动岛上显示会话进度"
+              icon="timer"
+              plainIcon
+              {...(liveAllowed
+                ? {
+                    trailing: (
+                      <Switch
+                        value={prefs.liveActivities}
+                        onValueChange={(on) => {
+                          haptic.select()
+                          setPrefs({ liveActivities: on })
+                        }}
+                        trackColor={{ true: c.success }}
+                        accessibilityLabel="实时活动"
+                      />
+                    ),
+                  }
+                : {
+                    value: '已在系统设置中关闭',
+                    chevron: true,
+                    onPress: () => void Linking.openSettings(),
+                  })}
+            />
+          ) : null}
           <ListRow
             title={`需要${biometry}`}
             icon="faceId"
