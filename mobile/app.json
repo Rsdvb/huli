@@ -9,13 +9,17 @@
     "scheme": "huli",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.rsdvb.huli",
+      "bundleIdentifier": "io.github.rsdvb.huli",
+      "appleTeamId": "Z5C6TTY2YF",
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.io.github.rsdvb.huli"]
+      },
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Huli 通过局域网或 Tailscale 连接你电脑上的 Huli。"
       }
     },
     "android": {
-      "package": "com.rsdvb.huli",
+      "package": "io.github.rsdvb.huli",
       "adaptiveIcon": {
         "backgroundColor": "#E2611F",
         "foregroundImage": "./assets/android-icon-foreground.png",
