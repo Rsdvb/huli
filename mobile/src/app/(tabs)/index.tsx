@@ -7,9 +7,11 @@ import { Animated, FlatList, RefreshControl, StyleSheet, Text, View } from 'reac
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
+import type { TaskSummary } from '@shared/workflow'
 import { useSessionActions } from '../../components/SessionActions'
 import { SessionPaneProvider } from '../../components/SessionPane'
 import { SessionRow, SessionRowSkeleton, subagentCounts } from '../../components/SessionRow'
+import { TaskRow } from '../../components/tasks/TaskRow'
 import {
   FilterNote,
   inFilter,
@@ -23,6 +25,7 @@ import { UpdateBanner } from '../../components/UpdateBanner'
 import { useHost } from '../../host'
 import { linkProblem } from '../../linkInfo'
 import { greeting, listOrder, needsYou, withChildWaits } from '../../sessions'
+import { needsAttention, useTaskList } from '../../tasks'
 import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
 import { LIST_COLUMN, useWide } from '../../ui/layout'
@@ -62,6 +65,7 @@ function Inline(props: { agents: SessionSummary[] }) {
 type Item =
   | { kind: 'section'; key: string; title: string; count: number; waiting?: boolean }
   | { kind: 'session'; key: string; session: SessionSummary }
+  | { kind: 'task'; key: string; task: TaskSummary }
 
 export default function Home() {
   const wide = useWide()
@@ -143,25 +147,40 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     [listed, shell.filter],
   )
 
+  // Tasks that wait for the user count with the sessions that do, as the desktop's Needs you
+  // group lists both; a step's session that asks is counted on its task.
+  const { tasks, views: taskViews } = useTaskList()
+  const taskTitles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks])
+  const needingTasks = useMemo(() => tasks.filter(needsAttention), [tasks])
+  const needingTaskIds = useMemo(() => new Set(needingTasks.map((t) => t.id)), [needingTasks])
+  const ownWait = (s: SessionSummary) =>
+    needsYou(s) && !(s.task && needingTaskIds.has(s.task.taskId))
+
   const connected = host.state.kind === 'connected'
-  const waiting = listed.filter(needsYou).length
+  const waiting = listed.filter(ownWait).length + needingTasks.length
   const runningNow = listed.filter((s) => !needsYou(s) && isRunning(s))
   const subagents = useMemo(() => subagentCounts(host.sessions.values()), [host.sessions])
   const problem = linkProblem(host.state)
 
   const items = useMemo<Item[]>(() => {
-    const needing = visible.filter(needsYou)
+    const taskWaits = needingTasks.filter((t) =>
+      inFilter(shell.filter, { scratch: false, path: t.projectPath }),
+    )
+    const needing = visible.filter(
+      (s) => needsYou(s) && !(s.task && needingTaskIds.has(s.task.taskId)),
+    )
     const running = visible.filter((s) => !needsYou(s) && isRunning(s))
     const rest = visible.filter((s) => !needsYou(s) && !isRunning(s))
     const out: Item[] = []
-    if (needing.length > 0) {
+    if (needing.length + taskWaits.length > 0) {
       out.push({
         kind: 'section',
         key: '__waiting',
         title: '需要你处理',
-        count: needing.length,
+        count: needing.length + taskWaits.length,
         waiting: true,
       })
+      for (const t of taskWaits) out.push({ kind: 'task', key: `task:${t.id}`, task: t })
       for (const s of needing) out.push({ kind: 'session', key: s.id, session: s })
     }
     if (running.length > 0) {
@@ -173,7 +192,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       for (const s of rest) out.push({ kind: 'session', key: s.id, session: s })
     }
     return out
-  }, [visible])
+  }, [visible, needingTasks, needingTaskIds, shell.filter])
 
   // With the cache's lists the summary still says what they said; the note under it says when.
   const summary =
@@ -271,7 +290,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   // mounts again as it scrolls do not.
   const seen = useRef<Set<string> | null>(null)
   const fresh = useRef(new Set<string>())
-  const ids = items.flatMap((item) => (item.kind === 'section' ? [] : [item.session.id]))
+  const ids = items.flatMap((item) => (item.kind === 'session' ? [item.session.id] : []))
   if (seen.current === null) {
     if (ids.length > 0) seen.current = new Set(ids)
   } else {
@@ -298,10 +317,24 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         </View>
       )
     }
+    if (item.kind === 'task') {
+      const t = item.task
+      return (
+        <TaskRow
+          task={t}
+          view={taskViews.get(t.id)}
+          projectName={projectNames.get(t.projectPath)}
+          onPress={() => router.push(`/task/${t.id}`)}
+        />
+      )
+    }
     const s = item.session
     return (
       <SessionRow
         session={s}
+        task={
+          s.task ? { id: s.task.taskId, title: taskTitles.get(s.task.taskId) ?? '需求' } : undefined
+        }
         subagents={subagents.get(s.id)}
         agentName={host.agents.get(s.agentId)?.name}
         projectName={projectNames.get(s.projectPath)}

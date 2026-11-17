@@ -1,7 +1,9 @@
-// 定时任务: what routines are, a way to make one, the user's routines (each with its switch, when it
-// last ran and runs next), and ready-made examples to start from. A routine opens its page.
+// 任务: the work that runs without a conversation, in two halves under a segmented switch. 需求 are
+// tasks run through workflows (components/tasks/TasksView.tsx). 定时 are routines: what they are,
+// a way to make one, the user's routines (each with its switch, when it last ran and runs next),
+// and ready-made examples to start from. A task or a routine opens its page.
 
-import { useMemo, useRef, useState, type ComponentRef } from 'react'
+import { useMemo, useRef, useState, type ComponentRef, type ReactNode } from 'react'
 import {
   Alert,
   Animated,
@@ -19,6 +21,7 @@ import type { RoutineView } from '@shared/routines'
 import { DEFAULT_SCHEDULE, DEFAULT_SCOPE } from '@shared/routines'
 import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
+import { TasksView } from '../../components/tasks/TasksView'
 import { useHost } from '../../host'
 import {
   confirmDeleteRoutine,
@@ -32,6 +35,7 @@ import {
   whenText,
 } from '../../routines'
 import { errorText, folder } from '../../sessions'
+import { setTasksTabView, useTasksTabView } from '../../tasks'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
@@ -40,11 +44,27 @@ import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
+import { SegmentedControl } from '../../ui/SegmentedControl'
 import { Skeleton } from '../../ui/Skeleton'
 import { SwipeRow } from '../../ui/SwipeRow'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 
-export default function Routines() {
+export default function TasksTab() {
+  const view = useTasksTabView()
+  const switcher = (
+    <SegmentedControl
+      segments={[
+        { key: 'tasks', label: '需求' },
+        { key: 'routines', label: '定时' },
+      ]}
+      value={view}
+      onChange={setTasksTabView}
+    />
+  )
+  return view === 'tasks' ? <TasksView switcher={switcher} /> : <Routines switcher={switcher} />
+}
+
+function Routines(props: { switcher: ReactNode }) {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
@@ -342,6 +362,7 @@ export default function Routines() {
           />
         }
       >
+        {props.switcher}
         {searching ? (
           <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
             <Icon name="search" size={17} color={c.textSecondary} />

@@ -1,4 +1,5 @@
 // The four tabs under the system's own tab bar, once the phone has a computer; pairing until then.
+// The third, 任务, holds tasks and routines.
 // The tabs belong to the active computer: switching computers mounts them afresh, so no tab shows
 // one computer's lists while the other's load.
 //
@@ -61,8 +62,11 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Label>Artifacts</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="routines" contentStyle={{ backgroundColor: c.bg }}>
-        <NativeTabs.Trigger.Icon sf="clock.arrow.circlepath" md="history" />
-        <NativeTabs.Trigger.Label>定时任务</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'flowchart', selected: 'flowchart.fill' }}
+          md="account_tree"
+        />
+        <NativeTabs.Trigger.Label>任务</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="usage" contentStyle={{ backgroundColor: c.bg }}>
         <NativeTabs.Trigger.Icon sf="chart.bar.fill" md="bar_chart" />

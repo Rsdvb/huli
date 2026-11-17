@@ -4710,12 +4710,21 @@ li[data-row-exit='dust'] > * {
   gap: 2px;
   min-width: 0;
 }
+/* The host's and the project's marks stay whole however narrow the tray: only the branch and the
+   names shrink, so the marks never slide over each other. */
+.kettu-tray__group:has(> .kettu-tray-link--host) {
+  min-width: auto;
+}
 .kettu-tray {
   container: kettu-tray / inline-size;
 }
 /* Short of room, the host and then the project keep only their marks, and the branch shortens. */
 .kettu-tray-link--host {
   flex: none;
+}
+/* Above the tray link's own max-width: 100%, which squeezed the mark under the next one. */
+.ui-as-tray-link.kettu-tray-link--host {
+  max-width: none;
 }
 .kettu-tray-link--project {
   flex-shrink: 2;
@@ -4735,8 +4744,9 @@ li[data-row-exit='dust'] > * {
   }
 }
 @container kettu-tray (inline-size < 420px) {
-  .kettu-tray-link--project {
+  .ui-as-tray-link.kettu-tray-link--project {
     flex: none;
+    max-width: none;
     padding-right: 7px;
   }
   .kettu-tray-link--project > .kettu-tray-link__text {
@@ -4746,6 +4756,12 @@ li[data-row-exit='dust'] > * {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+/* Narrower still, the output speed, the least needed of the right end, gives its room up. */
+@container kettu-tray (inline-size < 360px) {
+  .kettu-tray-link--speed {
+    display: none;
   }
 }
 .kettu-tray__group:empty {

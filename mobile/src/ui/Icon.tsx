@@ -6,6 +6,7 @@ import { SymbolView, type SymbolViewProps, type SymbolWeight } from 'expo-symbol
 import {
   Apple,
   Archive,
+  ArrowUp,
   ArrowUpRight,
   Bell,
   Box,
@@ -20,6 +21,7 @@ import {
   ChevronsUpDown,
   CircleCheck,
   CircleMinus,
+  CircleStop,
   CircleX,
   Clock,
   Code,
@@ -31,6 +33,7 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  GitBranch,
   Globe,
   Hand,
   History,
@@ -74,6 +77,7 @@ import {
   Undo2,
   UserRound,
   Wifi,
+  Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react-native'
@@ -153,6 +157,10 @@ const ICONS = {
   copy: ['doc.on.doc', Copy],
   folderPlus: ['folder.badge.plus', FolderPlus],
   signOut: ['rectangle.portrait.and.arrow.right', LogOut],
+  flow: ['flowchart', Workflow],
+  branch: ['arrow.triangle.branch', GitBranch],
+  stop: ['stop.circle', CircleStop],
+  send: ['arrow.up', ArrowUp],
 } as const satisfies Record<string, readonly [SFSymbol, LucideIcon]>
 
 export type IconName = keyof typeof ICONS
