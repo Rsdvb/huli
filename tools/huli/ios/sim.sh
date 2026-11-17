@@ -33,4 +33,4 @@ xcrun simctl status_bar "$SIM" override --time 9:41 --batteryState charged --bat
   --cellularBars 4 --wifiBars 3 2>/dev/null || true
 xcrun simctl terminate "$SIM" io.github.rsdvb.huli 2>/dev/null || true
 xcrun simctl install "$SIM" "$APP"
-xcrun simctl launch "$SIM" io.github.rsdvb.huli
+xcrun simctl launch "$SIM" io.github.rsdvb.huli -huliNoAsk YES

@@ -2,6 +2,7 @@
 // phone; the Notification Service Extension (plugins/withNotificationService.js) opens alerts
 // before they show, and the background task here takes the silent pushes that withdraw one.
 
+import { Settings } from 'react-native'
 import * as Application from 'expo-application'
 import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
@@ -150,7 +151,9 @@ export const platform: PushPlatform = {
 
   async permission(ask) {
     const current = permissionOf(await Notifications.getPermissionsAsync())
-    if (current !== 'undetermined' || !ask) return current
+    // `-huliNoAsk YES` among the launch arguments keeps the system's prompt away, for a
+    // simulator driven from a script, which cannot answer it.
+    if (current !== 'undetermined' || !ask || Settings.get('huliNoAsk')) return current
     return permissionOf(
       await Notifications.requestPermissionsAsync({
         ios: { allowAlert: true, allowSound: true, allowBadge: false },
