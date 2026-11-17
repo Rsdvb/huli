@@ -20,7 +20,7 @@ import {
   tightestLimit,
   windowName,
 } from '../ui/session/limits'
-import { optionDescription, optionName } from '../ui/session/optionText'
+import { modelBlurb, optionDescription, optionName } from '../ui/session/optionText'
 import type { MenuEntry, MenuPage } from '../ui/session/Popover'
 import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
@@ -167,18 +167,6 @@ export function modePage(control: ConfigControl): MenuPage | null {
 const isFast = (o: ConfigOption) => /fast/i.test(o.id)
 const isUltracode = (o: ConfigOption) => /ultracode/i.test(o.id)
 
-function switchHint(option: ConfigOption, locked: boolean): string | undefined {
-  if (locked) return BETWEEN_TURNS
-  if (option.value !== 'default') {
-    return option.description ? optionDescription(option.description) : undefined
-  }
-  return option.defaultValue === true
-    ? '跟随 Agent 的设置：开'
-    : option.defaultValue === false
-      ? '跟随 Agent 的设置：关'
-      : '跟随 Agent 的设置'
-}
-
 export interface ModelMenuContext {
   agentId: string
   agent: AgentStatus | undefined
@@ -234,8 +222,8 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
         lead,
         ...(locked
           ? { subtitle: BETWEEN_TURNS }
-          : choice.description
-            ? { subtitle: optionDescription(choice.description) }
+          : modelBlurb(choice)
+            ? { subtitle: modelBlurb(choice)! }
             : {}),
         checked: choice.value === current?.value,
         disabled: locked,
@@ -294,7 +282,8 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
   }
   for (const option of switches) {
     const locked = !!option.idleOnly && control.running
-    const hint = switchHint(option, locked)
+    // One line each: what a switch does is in its name, and the menu must fit a small phone.
+    const hint = locked ? BETWEEN_TURNS : undefined
     entries.push({
       key: `switch:${option.id}`,
       label: optionName(option.name),
@@ -424,7 +413,7 @@ export function moreModelsPage(control: ConfigControl, agentId: string): MenuPag
     entries: older.map((choice) => ({
       key: choice.value,
       label: optionName(modelName(choice.name)),
-      ...(choice.description ? { subtitle: optionDescription(choice.description) } : {}),
+      ...(modelBlurb(choice) ? { subtitle: modelBlurb(choice)! } : {}),
       lead: <AgentGlyph agentId={agentId} size={18} />,
       checked: choice.value === current,
       disabled: locked,
