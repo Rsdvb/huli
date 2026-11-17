@@ -6,6 +6,7 @@ import {
   AccessibilityInfo,
   Animated,
   Pressable,
+  StyleSheet,
   type GestureResponderEvent,
   type PressableProps,
   type StyleProp,
@@ -35,6 +36,8 @@ export interface PressProps extends Omit<PressableProps, 'style' | 'children'> {
   containerStyle?: StyleProp<ViewStyle>
   /** Shrink under the finger; off for wide rows, which only fade. */
   scale?: boolean
+  /** A wide row's pressed color, drawn under its content in place of the fade, as iOS lists do. */
+  highlight?: string
 }
 
 export function Press({
@@ -42,6 +45,7 @@ export function Press({
   style,
   containerStyle,
   scale = true,
+  highlight,
   disabled,
   onPressIn,
   onPressOut,
@@ -80,11 +84,13 @@ export function Press({
           disabled
             ? { opacity: 0.4 }
             : {
-                opacity: pressed.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [1, motion.pressOpacity],
-                  extrapolate: 'clamp',
-                }),
+                opacity: highlight
+                  ? 1
+                  : pressed.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1, motion.pressOpacity],
+                      extrapolate: 'clamp',
+                    }),
                 transform: [
                   {
                     scale: pressed.interpolate({
@@ -96,6 +102,22 @@ export function Press({
               },
         ]}
       >
+        {highlight && !disabled ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: highlight,
+                opacity: pressed.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 1],
+                  extrapolate: 'clamp',
+                }),
+              },
+            ]}
+          />
+        ) : null}
         {children}
       </Animated.View>
     </Pressable>

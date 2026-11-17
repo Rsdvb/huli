@@ -1,4 +1,4 @@
-// A segmented control: a capsule track with a raised thumb that slides to the chosen segment.
+// A segmented control: a capsule track with a raised thumb that springs to the chosen segment.
 
 import { useEffect, useRef, useState } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
@@ -37,7 +37,7 @@ export function SegmentedControl<K extends string>(props: {
       placed.current = true
       return
     }
-    Animated.timing(x, { toValue: target, duration: motion.normal, useNativeDriver: true }).start()
+    Animated.spring(x, { toValue: target, useNativeDriver: true, speed: 20, bounciness: 5 }).start()
   }, [index, segment, reduce, x])
 
   return (
@@ -71,7 +71,10 @@ export function SegmentedControl<K extends string>(props: {
               haptic.select()
               props.onChange(s.key)
             }}
-            style={styles.segment}
+            style={({ pressed }) => [
+              styles.segment,
+              pressed && !on && { opacity: motion.pressOpacity },
+            ]}
           >
             <Text
               numberOfLines={1}
