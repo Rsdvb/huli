@@ -22,14 +22,18 @@ function token() {
 }
 
 async function api(method, path, body) {
-  const res = await fetch(`https://api.appstoreconnect.apple.com${path}`, {
-    method,
-    headers: { authorization: `Bearer ${token()}`, 'content-type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const text = await res.text()
-  if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${text}`)
-  return text ? JSON.parse(text) : null
+  // Apple's API now and then answers 5xx for a moment; a few tries ride it out.
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`https://api.appstoreconnect.apple.com${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token()}`, 'content-type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    const text = await res.text()
+    if (res.ok) return text ? JSON.parse(text) : null
+    if (res.status < 500 || attempt >= 4) throw new Error(`${method} ${path}: ${res.status} ${text}`)
+    await new Promise((resolve) => setTimeout(resolve, attempt * 5000))
+  }
 }
 
 const sh = (cmd, args, input) => execFileSync(cmd, args, { input, encoding: 'utf8' })
