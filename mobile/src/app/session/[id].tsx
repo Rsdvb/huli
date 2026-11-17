@@ -1012,6 +1012,7 @@ export default function SessionScreen() {
               <RoundButton
                 tone="glass"
                 size={44}
+                systemImage={G.more.sf}
                 onPress={() =>
                   menu.open('more-menu', moreAnchor, {
                     placement: 'below',
