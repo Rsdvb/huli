@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
+import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
 import { useTokens } from '../ui/tokens'
 import { watchUpdates } from '../update'
@@ -12,13 +13,13 @@ import { watchUpdates } from '../update'
 export const unstable_settings = { anchor: '(tabs)' }
 
 export default function Layout() {
-  const { c } = useTokens()
+  const { c, scheme } = useTokens()
   useEffect(() => watchUpdates(), [])
   return (
     <SafeAreaProvider>
       <HostProvider>
         <ShellProvider>
-          <StatusBar style="auto" />
+          <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
           <Stack
             screenOptions={{
               headerStyle: { backgroundColor: c.bg },
@@ -32,11 +33,17 @@ export default function Layout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="session/[id]" options={{ title: '' }} />
             <Stack.Screen name="new" options={{ title: '新会话', presentation: 'modal' }} />
-            <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />
+            <Stack.Screen name="settings/index" options={{ headerShown: false }} />
+            <Stack.Screen name="settings/computer" options={{ headerShown: false }} />
+            <Stack.Screen name="settings/lock" options={{ headerShown: false }} />
+            <Stack.Screen name="settings/licenses" options={{ headerShown: false }} />
             <Stack.Screen name="archived" options={{ headerShown: false }} />
+            <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
+            <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />
           </Stack>
         </ShellProvider>
         <PushBridge />
+        <LockLayer />
       </HostProvider>
     </SafeAreaProvider>
   )
