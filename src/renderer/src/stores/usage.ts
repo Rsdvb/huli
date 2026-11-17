@@ -131,9 +131,16 @@ export function loadContext(sessionId: string, key: string, force = false): void
     )
 }
 
-/** Asks the agent for the current use of its plan limits; they arrive in its status. */
-export function refreshLimits(agentId: AgentId, hostId: string | null = null): Promise<void> {
-  return hostAt(hostId, 'agents.refreshLimits', { agentId })
+/**
+ * Asks the agent for the current use of its plan limits; they arrive in its status. `ask` when the
+ * user opened a view or pressed a button for them, which some agents' limits are only read for.
+ */
+export function refreshLimits(
+  agentId: AgentId,
+  hostId: string | null = null,
+  ask = false,
+): Promise<void> {
+  return hostAt(hostId, 'agents.refreshLimits', ask ? { agentId, ask } : { agentId })
 }
 
 /** What reads every plan limit this window knows of, by card key, each account once. */
@@ -147,11 +154,11 @@ export function planLimitWays(): Map<string, LimitWay[]> {
 }
 
 /** Reads a card's limits through the first of `ways` that answers; rejects as the last one did. */
-export async function readLimitsThrough(ways: readonly LimitWay[]): Promise<void> {
+export async function readLimitsThrough(ways: readonly LimitWay[], ask = false): Promise<void> {
   let error: unknown = new Error('No host to read the plan limits through')
   for (const way of ways) {
     try {
-      await refreshLimits(way.agentId, way.hostId)
+      await refreshLimits(way.agentId, way.hostId, ask)
       return
     } catch (failed) {
       error = failed
