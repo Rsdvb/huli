@@ -6,6 +6,7 @@ import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
 import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
+import { ShareIntake } from '../share/intake'
 import { useTokens } from '../ui/tokens'
 import { watchUpdates } from '../update'
 
@@ -33,6 +34,7 @@ export default function Layout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="session/[id]" options={{ title: '' }} />
             <Stack.Screen name="new" options={{ title: '新会话', presentation: 'modal' }} />
+            <Stack.Screen name="share" options={{ headerShown: false, presentation: 'modal' }} />
             <Stack.Screen name="settings/index" options={{ headerShown: false }} />
             <Stack.Screen name="settings/computer" options={{ headerShown: false }} />
             <Stack.Screen name="settings/lock" options={{ headerShown: false }} />
@@ -43,6 +45,7 @@ export default function Layout() {
           </Stack>
         </ShellProvider>
         <PushBridge />
+        <ShareIntake />
         <LockLayer />
       </HostProvider>
     </SafeAreaProvider>
