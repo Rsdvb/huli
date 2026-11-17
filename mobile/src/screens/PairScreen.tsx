@@ -1,7 +1,7 @@
 // Pairing: scan the code the computer shows in Settings › Remote access, or paste its link; the
 // owner then allows the phone on the computer.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
@@ -19,6 +19,7 @@ import type { KeyPair } from '@shared/remote/noise'
 import type { Paired, PairFailure } from '@shared/remote/pair'
 import type { PairingPayload } from '@shared/remote/pairing'
 import { pairWith, parseScanned } from '../connection'
+import { onPairing, takePairing } from '../pairLink'
 import type { SavedHost } from '../store'
 import { Glass } from '../ui/GlassTabBar'
 import { haptic } from '../ui/haptics'
@@ -88,6 +89,18 @@ export function PairScreen(props: {
       setStep({ kind: 'start', error: `配对失败：${(error as Error).message}` })
     }
   }
+
+  // A huli://pair link starts pairing at once, whether it opened the app or came while it showed.
+  const runRef = useRef(run)
+  runRef.current = run
+  useEffect(() => {
+    const waiting = takePairing()
+    if (waiting) void runRef.current(parseScanned(waiting))
+    return onPairing(() => {
+      const text = takePairing()
+      if (text) void runRef.current(parseScanned(text))
+    })
+  }, [])
 
   const scan = async () => {
     const granted = permission?.granted || (await requestPermission()).granted
