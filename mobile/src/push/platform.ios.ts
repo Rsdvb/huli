@@ -22,6 +22,8 @@ interface SharedKeys {
   device: string
   /** Each host's Ed25519 public key in base64url, by its id. */
   hosts: Record<string, string>
+  /** The extension shows each notification's kind only, as Settings › 面容 ID 与锁定 asks. */
+  quiet?: boolean
 }
 
 // The keys sit in the Keychain, in an access group only this app and its extension hold, rather
@@ -163,8 +165,13 @@ export const platform: PushPlatform = {
     return () => subscription.remove()
   },
 
-  async share({ device, host }) {
-    const keys: SharedKeys = { v: 1, device: toBase64(device), hosts: { [host.id]: host.key } }
+  async share({ device, host, quiet }) {
+    const keys: SharedKeys = {
+      v: 1,
+      device: toBase64(device),
+      hosts: { [host.id]: host.key },
+      quiet,
+    }
     await SecureStore.setItemAsync(KEYS_ITEM, JSON.stringify(keys), sharedOptions())
   },
 

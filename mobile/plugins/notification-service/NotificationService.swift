@@ -58,8 +58,9 @@ private enum Notice {
     let hostName = text(content["hostName"]) ?? "电脑"
     let fallback = defaultText(kind: kind, hostName: hostName)
     let result = mutable(original)
-    result.title = text(content["title"]) ?? fallback.title
-    result.body = text(content["body"]) ?? fallback.body
+    let quiet = keys.quiet == true
+    result.title = (quiet ? nil : text(content["title"])) ?? fallback.title
+    result.body = (quiet ? nil : text(content["body"])) ?? fallback.body
 
     // expo-notifications hands the app userInfo["body"] as the notification's data.
     var data: [String: Any] = ["host": host, "kind": kind]
@@ -108,6 +109,8 @@ private struct SharedKeys: Decodable {
   let device: String
   /// Each host's Ed25519 public key in base64url, by its id.
   let hosts: [String: String]
+  /// Show only the kind of each notification, never a session's title or text.
+  let quiet: Bool?
 
   static func load() -> SharedKeys? {
     // The app writes the item with expo-secure-store, which names its service with ":no-auth" after

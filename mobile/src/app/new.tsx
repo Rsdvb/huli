@@ -8,6 +8,7 @@ import type { SessionSummary } from '@shared/agent-host'
 import type { UserContent } from '@shared/thread'
 import { Composer } from '../components/Composer'
 import { useHost, useLink } from '../host'
+import { LockLayer } from '../lock'
 import { useComputer } from '../ui/session/computer'
 import { haptic } from '../ui/session/feedback'
 import { GlassHeader, useHeaderHeight } from '../ui/session/GlassHeader'
@@ -201,6 +202,7 @@ export default function NewSession() {
           }
         />
       </KeyboardAvoidingView>
+      <LockLayer />
     </View>
   )
 }
