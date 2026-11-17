@@ -1,7 +1,8 @@
 // Huli's Notification Service Extension. The push gateway sends a placeholder alert and the
 // envelope the computer sealed to this phone (src/shared/remote/push.ts); this opens it with the
-// phone's key, checks the computer's signature, and shows what it says. Whatever fails, the
-// notification still shows, with a generic text.
+// phone's key, checks the computer's signature, and shows what it says, with the buttons that
+// answer it (src/push/actions.ts in the app). Whatever fails, the notification still shows, with a
+// generic text.
 
 import CryptoKit
 import Foundation
@@ -9,24 +10,102 @@ import Security
 import UserNotifications
 
 final class NotificationService: UNNotificationServiceExtension {
+  private let lock = NSLock()
   private var deliver: ((UNNotificationContent) -> Void)?
+  /// What shows if time runs out first: the opened content once there is one.
   private var fallback: UNNotificationContent?
 
   override func didReceive(
     _ request: UNNotificationRequest,
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
+    lock.lock()
     deliver = contentHandler
-    let generic = Notice.generic(request.content)
-    fallback = generic
-    let content = Notice.opened(request.content) ?? generic
-    deliver = nil
-    contentHandler(content)
+    fallback = Notice.generic(request.content)
+    lock.unlock()
+    guard let shown = Notice.opened(request.content) else { return finish(nil) }
+    lock.lock()
+    fallback = shown.content
+    lock.unlock()
+    guard let category = shown.category else { return finish(shown.content) }
+    Categories.add(category) { self.finish(shown.content) }
   }
 
   override func serviceExtensionTimeWillExpire() {
-    if let deliver, let fallback { deliver(fallback) }
+    finish(nil)
+  }
+
+  /// Hands the system its content once: `content`, or the fallback when nil.
+  private func finish(_ content: UNNotificationContent?) {
+    lock.lock()
+    let handler = deliver
+    let shown = content ?? fallback
     deliver = nil
+    lock.unlock()
+    if let handler, let shown { handler(shown) }
+  }
+}
+
+/// An opened notification, and the category of its own buttons when it has some.
+private struct Shown {
+  let content: UNNotificationContent
+  let category: UNNotificationCategory?
+}
+
+/// The notifications' categories. The app registers the fixed ones under the same identifiers
+/// (src/push/actions.ts); a question's buttons are its choices, so its category is made here.
+private enum Categories {
+  static let permission = "huli.permission"
+  static let allowOnly = "huli.permission.allow"
+  static let turnEnded = "huli.turn"
+  static let questionPrefix = "huli.question."
+  private static let maxChoices = 4
+
+  /// A question's buttons: each choice, then a written answer when it takes one.
+  static func question(_ question: [String: Any]) -> UNNotificationCategory? {
+    guard let choices = question["choices"] as? [String],
+      choices.count <= Categories.maxChoices
+    else { return nil }
+    let text = (question["text"] as? Bool) == true
+    if choices.isEmpty && !text { return nil }
+    var actions: [UNNotificationAction] = choices.enumerated().map { item in
+      UNNotificationAction(
+        identifier: "choice.\(item.offset)", title: item.element,
+        options: [.authenticationRequired])
+    }
+    if text {
+      actions.append(
+        UNTextInputNotificationAction(
+          identifier: "reply", title: "回复…", options: [.authenticationRequired],
+          textInputButtonTitle: "发送", textInputPlaceholder: "写下你的回答"))
+    }
+    // The same choices make the same category, so repeated questions share one.
+    let key = ([text ? "text" : "choices"] + choices).joined(separator: "\n")
+    let digest = SHA256.hash(data: Data(key.utf8))
+    let hex = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+    let id = Categories.questionPrefix + hex
+    return UNNotificationCategory(
+      identifier: id, actions: actions, intentIdentifiers: [], options: [])
+  }
+
+  /// Adds a question's category beside the others, dropping the questions' categories no shown
+  /// notification uses any more, then calls `done`.
+  static func add(_ category: UNNotificationCategory, then done: @escaping () -> Void) {
+    let center = UNUserNotificationCenter.current()
+    center.getDeliveredNotifications { delivered in
+      let inUse = Set(delivered.map { $0.request.content.categoryIdentifier })
+      center.getNotificationCategories { existing in
+        var next = existing.filter { other in
+          let id = other.identifier
+          if id == category.identifier { return false }
+          return !id.hasPrefix(Categories.questionPrefix) || inUse.contains(id)
+        }
+        next.insert(category)
+        center.setNotificationCategories(next)
+        // The system takes a new category a moment later; shown sooner, the buttons are missing.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { done() }
+      }
+    }
   }
 }
 
@@ -38,7 +117,7 @@ private enum Notice {
     return content
   }
 
-  static func opened(_ original: UNNotificationContent) -> UNNotificationContent? {
+  static func opened(_ original: UNNotificationContent) -> Shown? {
     guard
       let sealed = original.userInfo["sealed"] as? String,
       let envelope = Base64URL.decode(sealed),
@@ -65,14 +144,41 @@ private enum Notice {
     // expo-notifications hands the app userInfo["body"] as the notification's data.
     var data: [String: Any] = ["host": host, "kind": kind]
     if let tag = content["tag"] as? String { data["tag"] = tag }
-    if let sessionId = content["sessionId"] as? String {
+    let sessionId = content["sessionId"] as? String
+    if let sessionId {
       data["sessionId"] = sessionId
       result.threadIdentifier = "\(host):\(sessionId)"
+    }
+    // Buttons that answer only where the notification says what they answer, as the computer
+    // sends the answers only to a phone that wants details.
+    var category: UNNotificationCategory?
+    if !quiet, sessionId != nil {
+      switch kind {
+      case "permission":
+        if let requestId = content["requestId"] as? String {
+          data["requestId"] = requestId
+          if let actions = content["actions"] as? [String: Any], actions["allow"] is [String: Any] {
+            data["actions"] = actions
+            result.categoryIdentifier =
+              actions["deny"] is [String: Any] ? Categories.permission : Categories.allowOnly
+          } else if let question = content["question"] as? [String: Any],
+            let made = Categories.question(question)
+          {
+            data["question"] = question
+            result.categoryIdentifier = made.identifier
+            category = made
+          }
+        }
+      case "turn-ended":
+        result.categoryIdentifier = Categories.turnEnded
+      default:
+        break
+      }
     }
     var userInfo = original.userInfo
     userInfo["body"] = data
     result.userInfo = userInfo
-    return result
+    return Shown(content: result, category: category)
   }
 
   private static func defaultText(kind: String, hostName: String) -> (title: String, body: String) {

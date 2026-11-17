@@ -5,13 +5,6 @@ import type { PushTarget } from '@shared/remote/push'
 
 export type PushPermission = 'granted' | 'denied' | 'undetermined'
 
-/** A notification the user opened, as the notification extension left it. */
-export interface OpenedNotification {
-  /** The host's id. */
-  host: string
-  sessionId: string | null
-}
-
 /** What opens and checks a host's notifications where the app is not running. */
 export interface PushKeys {
   /** This phone's X25519 private key, which every notification is sealed to. */
@@ -33,6 +26,4 @@ export interface PushPlatform {
   onTargetChange(listener: () => void): () => void
   share(keys: PushKeys): Promise<void>
   unshare(): Promise<void>
-  /** Each notification the user opens, the one that launched the app included. */
-  onOpen(listener: (opened: OpenedNotification) => void): () => void
 }

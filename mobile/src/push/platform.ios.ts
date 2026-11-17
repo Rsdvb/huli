@@ -11,7 +11,7 @@ import { importKeyPair } from '@shared/remote/noise'
 import { decodeSealed, openPush, type PushContent, type PushTarget } from '@shared/remote/push'
 import { decodeRelayBytes, verifyRelaySignature } from '@shared/remote/relay'
 import { fromBase64, toBase64 } from '../store'
-import type { OpenedNotification, PushPermission, PushPlatform } from './types'
+import type { PushPermission, PushPlatform } from './types'
 
 const KEYS_ITEM = 'huli.push.keys'
 const BACKGROUND_TASK = 'huli.push.background'
@@ -124,15 +124,6 @@ function permissionOf(settings: Notifications.NotificationPermissionsStatus): Pu
   }
 }
 
-function openedOf(response: Notifications.NotificationResponse): OpenedNotification | null {
-  if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return null
-  const data = response.notification.request.content.data as Record<string, unknown> | null
-  if (typeof data?.host !== 'string') return null
-  return { host: data.host, sessionId: typeof data.sessionId === 'string' ? data.sessionId : null }
-}
-
-const handled = new Set<string>()
-
 export const platform: PushPlatform = {
   supported: true,
 
@@ -177,28 +168,5 @@ export const platform: PushPlatform = {
 
   async unshare() {
     await SecureStore.deleteItemAsync(KEYS_ITEM, sharedOptions())
-  },
-
-  onOpen(listener) {
-    const handle = (response: Notifications.NotificationResponse | null): void => {
-      if (!response) return
-      const { request, date } = response.notification
-      const key = `${request.identifier}\n${date}`
-      if (handled.has(key)) return
-      handled.add(key)
-      const opened = openedOf(response)
-      if (opened) listener(opened)
-    }
-    let live = true
-    void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (!live) return
-      handle(response)
-      void Notifications.clearLastNotificationResponseAsync().catch(() => {})
-    })
-    const subscription = Notifications.addNotificationResponseReceivedListener(handle)
-    return () => {
-      live = false
-      subscription.remove()
-    }
   },
 }
