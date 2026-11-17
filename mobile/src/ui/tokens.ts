@@ -1,7 +1,7 @@
 // The phone app's design tokens: one palette per scheme, and the shared radii, spacing and type
 // scale. Screens and components take every color and size from here, never a literal.
 
-import { useColorScheme } from 'react-native'
+import { Platform, useColorScheme } from 'react-native'
 import { usePrefs } from '../prefs'
 
 export interface Palette {
@@ -160,8 +160,11 @@ export const size = {
   gutter: 20,
 } as const
 
-/** The room above the bottom inset a scrolling tab leaves so the tab bar never covers its end. */
-export const TAB_BAR_CLEARANCE = size.tabBar + space.xxxl
+/**
+ * The room above the bottom inset a scrolling tab leaves so the tab bar never covers its end. iOS's
+ * tab bar floats over the content; Android's takes its own room below it.
+ */
+export const TAB_BAR_CLEARANCE = Platform.OS === 'ios' ? size.tabBar + space.xxxl : space.xl
 
 export const motion = { pressOpacity: 0.65, pressScale: 0.96, fast: 160, normal: 260 } as const
 

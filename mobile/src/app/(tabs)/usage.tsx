@@ -25,7 +25,6 @@ import { BottomSheet } from '../../ui/BottomSheet'
 import { Card } from '../../ui/Card'
 import { BarChart, ConcentricRings, Donut, Ring } from '../../ui/charts'
 import { EmptyState } from '../../ui/EmptyState'
-import { useMinimizingTabBar } from '../../ui/GlassTabBar'
 import { haptic } from '../../ui/haptics'
 import { useContentWidth } from '../../ui/layout'
 import { Icon } from '../../ui/Icon'
@@ -165,8 +164,7 @@ function limitColor(c: Palette, limit: PlanLimit): string {
 export default function Usage() {
   const { c } = useTokens()
   const { link, agents, state, host } = useHost()
-  const minimize = useMinimizingTabBar()
-  const header = useCollapsingHeader({ onScroll: minimize })
+  const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
   const [choice, setChoice] = useState<RangeChoice>({ kind: '1' })

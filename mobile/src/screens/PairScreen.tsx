@@ -20,7 +20,7 @@ import type { Paired, PairFailure } from '@shared/remote/pair'
 import type { PairingPayload } from '@shared/remote/pairing'
 import { pairWith, parseScanned } from '../connection'
 import type { SavedHost } from '../store'
-import { Glass } from '../ui/GlassTabBar'
+import { GlassBackdrop } from '../ui/Glass'
 import { haptic } from '../ui/haptics'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
@@ -129,7 +129,7 @@ export function PairScreen(props: {
             accessibilityRole="button"
             style={styles.scanCancel}
           >
-            <Glass round={radius.pill} />
+            <GlassBackdrop shape="capsule" borderless={false} />
             <Text style={[typeScale.body, { color: c.text, fontWeight: '600' }]}>取消</Text>
           </Press>
         </View>

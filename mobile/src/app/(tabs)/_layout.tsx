@@ -1,30 +1,23 @@
-// The four tabs under their floating glass bar, once the phone has a computer; pairing until then.
+// The four tabs under the system's own tab bar, once the phone has a computer; pairing until then.
 // The tabs belong to the active computer: switching computers mounts them afresh, so no tab shows
 // one computer's lists while the other's load.
+//
+// On iOS this is UITabBarController: Liquid Glass on iOS 26, minimizing as a list scrolls down,
+// and on iOS 27 the new-session button on a surface of its own beside the tabs. Android gets
+// Material's bottom navigation.
 
-import { useWindowDimensions, View } from 'react-native'
-import { router } from 'expo-router'
-import { Tabs } from 'expo-router/js-tabs'
+import { View } from 'react-native'
+import { NativeTabs } from 'expo-router/native-tabs'
 import { SessionRowSkeleton } from '../../components/SessionRow'
 import { useHost } from '../../host'
 import { PairScreen } from '../../screens/PairScreen'
-import { GlassTabBar, type TabItem } from '../../ui/GlassTabBar'
-import { LIST_COLUMN, READABLE_WIDTH, SPLIT_MIN_WIDTH } from '../../ui/layout'
 import { Screen } from '../../ui/Screen'
+import { rememberTab } from '../../ui/lastTab'
 import { space, useTokens } from '../../ui/tokens'
-
-const TABS: Record<string, TabItem> = {
-  index: { icon: 'inbox', label: '会话' },
-  artifacts: { icon: 'box', label: 'Artifacts' },
-  routines: { icon: 'history', label: '定时任务' },
-  usage: { icon: 'chart', label: '用量' },
-}
 
 export default function TabsLayout() {
   const { c } = useTokens()
   const host = useHost()
-  const { width } = useWindowDimensions()
-  const wide = width >= SPLIT_MIN_WIDTH
 
   if (host.phase === 'loading') {
     return (
@@ -46,35 +39,46 @@ export default function TabsLayout() {
 
   const connected = host.state.kind === 'connected'
   return (
-    <Tabs
+    <NativeTabs
       key={host.host?.id}
-      tabBar={(props) => {
-        const focused = props.state.routes[props.state.index]?.name
-        // On a wide window the bar sits under the session list, or under the centered column.
-        const frame = !wide
-          ? undefined
-          : focused === 'index'
-            ? { left: 0, width: LIST_COLUMN }
-            : { left: (width - Math.min(width, READABLE_WIDTH)) / 2, width: READABLE_WIDTH }
-        return (
-          <GlassTabBar
-            {...props}
-            items={TABS}
-            onPlus={() => router.push('/new')}
-            plusDisabled={!connected}
-            {...(frame ? { frame } : {})}
-          />
-        )
-      }}
-      screenOptions={{
-        headerShown: false,
-        animation: 'fade',
-        sceneStyle: { backgroundColor: c.bg },
-      }}
+      minimizeBehavior="onScrollDown"
+      tintColor={c.tint}
+      backgroundColor={c.bg}
+      indicatorColor={c.tintSoft}
+      screenListeners={({ route }) => ({
+        focus: () => rememberTab(route.name),
+      })}
     >
-      {Object.entries(TABS).map(([name, item]) => (
-        <Tabs.Screen key={name} name={name} options={{ title: item.label }} />
-      ))}
-    </Tabs>
+      <NativeTabs.Trigger name="index" contentStyle={{ backgroundColor: c.bg }}>
+        <NativeTabs.Trigger.Icon sf={{ default: 'tray', selected: 'tray.fill' }} md="inbox" />
+        <NativeTabs.Trigger.Label>会话</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="artifacts" contentStyle={{ backgroundColor: c.bg }}>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'shippingbox', selected: 'shippingbox.fill' }}
+          md="deployed_code"
+        />
+        <NativeTabs.Trigger.Label>Artifacts</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="routines" contentStyle={{ backgroundColor: c.bg }}>
+        <NativeTabs.Trigger.Icon sf="clock.arrow.circlepath" md="history" />
+        <NativeTabs.Trigger.Label>定时任务</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="usage" contentStyle={{ backgroundColor: c.bg }}>
+        <NativeTabs.Trigger.Icon sf="chart.bar.fill" md="bar_chart" />
+        <NativeTabs.Trigger.Label>用量</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      {/* Not a page: choosing it opens New session over the tab that was showing. */}
+      <NativeTabs.Trigger
+        name="compose"
+        prominent
+        disabled={!connected}
+        accessibilityLabel="新会话"
+        contentStyle={{ backgroundColor: c.bg }}
+      >
+        <NativeTabs.Trigger.Icon sf="plus" md="add" />
+        <NativeTabs.Trigger.Label hidden>新会话</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
   )
 }

@@ -34,7 +34,6 @@ import {
 import { errorText, folder } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { EmptyState } from '../../ui/EmptyState'
-import { useMinimizingTabBar } from '../../ui/GlassTabBar'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
@@ -49,8 +48,7 @@ export default function Routines() {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
-  const minimize = useMinimizingTabBar()
-  const header = useCollapsingHeader({ onScroll: minimize })
+  const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
   const { data, error, load } = useRoutineList()
