@@ -81,11 +81,19 @@ export function LiveBridge() {
     }
     if (phase !== 'ready' || !loaded) return
     const timer = setTimeout(
-      () => writeWidget({ paired: true, hostName, sessions, agents, hidden: prefs.hidePreviews }),
+      () =>
+        writeWidget({
+          paired: true,
+          hostName,
+          hostId: host?.id,
+          sessions,
+          agents,
+          hidden: prefs.hidePreviews,
+        }),
       1000,
     )
     return () => clearTimeout(timer)
-  }, [phase, loaded, hostName, sessions, agents, prefs.hidePreviews])
+  }, [phase, loaded, hostName, host?.id, sessions, agents, prefs.hidePreviews])
 
   useEffect(() => {
     if (!LIVE_SUPPORTED) return
