@@ -21,6 +21,8 @@ export function useSessionActions(
   place: ActionsPlace,
   /** After the session was archived, restored or deleted, as a session screen leaves then. */
   onGone?: () => void,
+  /** Items of the place's own, listed first, such as a session's changes. */
+  extra?: (summary: SessionSummary) => SheetItem[],
 ): SessionActions {
   const { link } = useHost()
   const [target, setTarget] = useState<SessionSummary | null>(null)
@@ -94,7 +96,7 @@ export function useSessionActions(
       <Sheet
         visible={sheet && target !== null}
         title={target ? sessionTitle(target) : undefined}
-        items={target ? items(target) : []}
+        items={target ? [...(extra?.(target) ?? []), ...items(target)] : []}
         onClose={() => setSheet(false)}
       />
       <RenameDialog

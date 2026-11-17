@@ -1,14 +1,14 @@
-// The message box of a session and of a new one: text, which the keyboard's dictation fills too,
-// and photos and files, each uploaded as it is added so the message itself goes at once.
+// The message box of a session and of a new one: a rounded card with the text, which the
+// keyboard's dictation fills too, and a row of controls under it; photos and files are uploaded
+// as each is added so the message itself goes at once. While a turn runs and the box is empty, the
+// send button stops the turn.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Image,
   Linking,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,7 +32,12 @@ import {
   type PickedSource,
 } from '../attachments'
 import { useHost, useLink } from '../host'
-import { useTheme, type Theme } from '../theme'
+import { haptic, showMenu } from '../ui/session/feedback'
+import { extensionOf } from '../ui/session/format'
+import { FileMark, G, Icon } from '../ui/session/icons'
+import { useKeyboardShown } from '../ui/session/keyboard'
+import { useSessionTokens } from '../ui/session/palette'
+import { PressScale, RoundButton } from '../ui/session/Press'
 
 export interface ComposerProps {
   placeholder: string
@@ -44,15 +49,26 @@ export interface ComposerProps {
   allowEmpty?: boolean
   disabled?: boolean
   bottomInset: number
+  /** A turn runs: an empty box offers to stop it. */
+  running?: boolean
+  onStop?: () => void
+  /** Controls after the attach button, such as the permission mode. */
+  left?: ReactNode
+  /** Controls before the send button, such as the model. */
+  right?: ReactNode
+  /** Under the card: the status line. */
+  footer?: ReactNode
+  autoFocus?: boolean
 }
 
 let nextKey = 1
 
 export function Composer(props: ComposerProps) {
   const { placeholder, onSend, failTitle, allowEmpty = false, disabled = false } = props
-  const theme = useTheme()
+  const { c, s } = useSessionTokens()
   const host = useHost()
   const link = useLink()
+  const keyboard = useKeyboardShown()
   const [text, setText] = useState('')
   const [items, setItems] = useState<PendingAttachment[]>([])
   const [sending, setSending] = useState(false)
@@ -221,31 +237,19 @@ export function Composer(props: ComposerProps) {
     )
   }
 
-  const choose = (index: number) => {
-    const action = [takePhoto, pickPhotos, pickFiles][index]
-    if (!action) return
+  const choose = (action: () => Promise<void>) => {
     action().catch((error: unknown) => {
       console.warn('Could not pick an attachment', error)
       Alert.alert('没能打开', '请稍后再试。')
     })
   }
 
-  const openMenu = () => {
-    const options = ['拍照', '从相册选', '选文件']
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: [...options, '取消'], cancelButtonIndex: options.length },
-        choose,
-      )
-    } else {
-      Alert.alert(
-        '添加附件',
-        undefined,
-        options.map((label, index) => ({ text: label, onPress: () => choose(index) })),
-        { cancelable: true },
-      )
-    }
-  }
+  const openMenu = () =>
+    showMenu('添加附件', [
+      { label: '拍照', onPress: () => choose(takePhoto) },
+      { label: '从相册选', onPress: () => choose(pickPhotos) },
+      { label: '选文件', onPress: () => choose(pickFiles) },
+    ])
 
   const connected = host.state.kind === 'connected'
   const busy = items.filter((item) => item.status !== 'ready' && item.status !== 'failed')
@@ -253,9 +257,11 @@ export function Composer(props: ComposerProps) {
   const empty = !text.trim() && items.length === 0
   const canSend =
     connected && !sending && !disabled && busy.length === 0 && !block && (allowEmpty || !empty)
+  const stopping = !!props.running && !!props.onStop && empty && !sending
 
   const send = async () => {
     if (!canSend) return
+    haptic.tap()
     const sent = latest.current
     const content = messageContent(text, sent)
     for (const item of sent) carried.current.add(item.key)
@@ -280,93 +286,93 @@ export function Composer(props: ComposerProps) {
       : block
 
   return (
-    <View
-      style={[
-        styles.composer,
-        { borderTopColor: theme.line, paddingBottom: Math.max(props.bottomInset, 8) },
-      ]}
-    >
-      {items.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.tray}
-          keyboardShouldPersistTaps="handled"
-        >
-          {items.map((item) => (
-            <Tile
-              key={item.key}
-              item={item}
-              theme={theme}
-              onPress={() => pressItem(item)}
-              onRemove={() => remove(item.key)}
-            />
-          ))}
-        </ScrollView>
-      )}
-      {status ? (
-        <Text
-          style={[styles.status, { color: status === block ? theme.danger : theme.muted }]}
-          numberOfLines={2}
-        >
-          {status}
-        </Text>
-      ) : null}
-      <View style={styles.row}>
-        <Pressable
-          onPress={openMenu}
-          disabled={sending}
-          hitSlop={6}
-          accessibilityLabel="添加照片或文件"
-          style={({ pressed }) => [
-            styles.round,
-            { borderColor: theme.line, backgroundColor: theme.card, opacity: pressed ? 0.6 : 1 },
-          ]}
-        >
-          <Text style={{ color: theme.accent, fontSize: 24, lineHeight: 26 }}>+</Text>
-        </Pressable>
-        <TextInput
-          value={text}
-          onChangeText={setText}
-          placeholder={placeholder}
-          placeholderTextColor={theme.muted}
-          multiline
-          style={[
-            styles.input,
-            { color: theme.text, backgroundColor: theme.card, borderColor: theme.line },
-          ]}
-        />
-        <Pressable
-          onPress={() => void send()}
-          disabled={!canSend}
-          accessibilityLabel="发送"
-          style={({ pressed }) => [
-            styles.round,
-            {
-              backgroundColor: theme.accent,
-              borderColor: theme.accent,
-              opacity: !canSend ? 0.4 : pressed ? 0.75 : 1,
-            },
-          ]}
-        >
-          {sending ? (
-            <ActivityIndicator color={theme.accentText} />
-          ) : (
-            <Text style={{ color: theme.accentText, fontSize: 18, fontWeight: '700' }}>↑</Text>
+    <View style={[styles.outer, { paddingBottom: keyboard ? 8 : Math.max(props.bottomInset, 8) }]}>
+      <View style={[styles.tray, { backgroundColor: s.dock, borderColor: c.border }]}>
+        <View style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.border }]}>
+          {items.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.tiles}
+              keyboardShouldPersistTaps="handled"
+            >
+              {items.map((item) => (
+                <Tile
+                  key={item.key}
+                  item={item}
+                  onPress={() => pressItem(item)}
+                  onRemove={() => remove(item.key)}
+                />
+              ))}
+            </ScrollView>
           )}
-        </Pressable>
+          {status ? (
+            <Text
+              style={[styles.status, { color: status === block ? c.danger : c.textSecondary }]}
+              numberOfLines={2}
+            >
+              {status}
+            </Text>
+          ) : null}
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            placeholder={placeholder}
+            placeholderTextColor={c.textTertiary}
+            selectionColor={c.accent}
+            cursorColor={c.accent}
+            multiline
+            autoFocus={props.autoFocus}
+            style={[styles.input, { color: c.text }]}
+          />
+          <View style={styles.row}>
+            <RoundButton onPress={openMenu} disabled={sending} accessibilityLabel="添加照片或文件">
+              <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
+            </RoundButton>
+            {props.left}
+            <View style={styles.right}>{props.right}</View>
+            {stopping ? (
+              <RoundButton
+                tone="accent"
+                onPress={() => {
+                  haptic.firm()
+                  props.onStop!()
+                }}
+                accessibilityLabel="停止"
+              >
+                <Icon icon={G.stop} size={13} color={c.onAccent} weight="bold" />
+              </RoundButton>
+            ) : (
+              <RoundButton
+                tone="accent"
+                onPress={() => void send()}
+                disabled={!canSend}
+                accessibilityLabel={props.running ? '排队发送' : '发送'}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color={c.onAccent} />
+                ) : (
+                  <Icon
+                    icon={G.send}
+                    size={18}
+                    color={c.onAccent}
+                    weight="bold"
+                    strokeWidth={2.4}
+                  />
+                )}
+              </RoundButton>
+            )}
+          </View>
+        </View>
+        {props.footer}
       </View>
     </View>
   )
 }
 
-function extension(name: string): string {
-  const dot = name.lastIndexOf('.')
-  return dot > 0 && dot > name.length - 7 ? name.slice(dot + 1).toUpperCase() : '文件'
-}
-
-function Tile(props: { item: PendingAttachment; theme: Theme; onPress(): void; onRemove(): void }) {
-  const { item, theme } = props
+function Tile(props: { item: PendingAttachment; onPress(): void; onRemove(): void }) {
+  const { c, s } = useSessionTokens()
+  const { item } = props
   const preview = item.thumb ?? (item.source.kind === 'image' ? item.source.uri : null)
   const working = item.status !== 'ready' && item.status !== 'failed'
   const label =
@@ -380,101 +386,97 @@ function Tile(props: { item: PendingAttachment; theme: Theme; onPress(): void; o
             : '上传中'
           : null
   return (
-    <Pressable
+    <PressScale
+      scale={0.97}
       onPress={props.onPress}
       accessibilityLabel={item.source.name}
-      style={[styles.tile, { borderColor: theme.line, backgroundColor: theme.card }]}
+      style={[styles.tile, { borderColor: c.border, backgroundColor: c.fill }]}
     >
       {preview ? (
         <Image source={{ uri: preview }} style={styles.preview} resizeMode="cover" />
       ) : (
         <View style={styles.file}>
-          <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
-            {extension(item.source.name)}
+          <FileMark path={item.source.name} size={18} />
+          <Text style={[styles.fileExt, { color: c.textSecondary }]} numberOfLines={1}>
+            {extensionOf(item.source.name).toUpperCase() || '文件'}
           </Text>
-          <Text style={{ color: theme.muted, fontSize: 10, marginTop: 2 }} numberOfLines={2}>
+          <Text style={[styles.fileName, { color: c.text }]} numberOfLines={1}>
             {item.source.name}
           </Text>
         </View>
       )}
       {working && (
-        <View style={styles.cover}>
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg, opacity: 0.6 }]} />
-          <ActivityIndicator color={theme.accent} />
-          {label && <Text style={[styles.coverText, { color: theme.text }]}>{label}</Text>}
+        <View style={[styles.cover, { backgroundColor: s.veil }]}>
+          <ActivityIndicator size="small" color={c.text} />
+          {label && <Text style={[styles.coverText, { color: c.text }]}>{label}</Text>}
         </View>
       )}
       {item.status === 'failed' && (
-        <View style={styles.cover}>
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg, opacity: 0.7 }]} />
-          <Text style={{ color: theme.danger, fontSize: 20, fontWeight: '700' }}>!</Text>
-          <Text style={[styles.coverText, { color: theme.danger }]}>点按查看</Text>
+        <View style={[styles.cover, { backgroundColor: s.dangerSoft }]}>
+          <Icon icon={G.warning} size={18} color={c.danger} />
+          <Text style={[styles.coverText, { color: c.danger }]}>点按查看</Text>
         </View>
       )}
       <Pressable
         onPress={props.onRemove}
         hitSlop={8}
         accessibilityLabel={`移除 ${item.source.name}`}
-        style={[styles.remove, { backgroundColor: theme.text }]}
+        style={[styles.remove, { backgroundColor: c.text, borderColor: s.dockCard }]}
       >
-        <Text style={{ color: theme.bg, fontSize: 12, fontWeight: '700', lineHeight: 14 }}>×</Text>
+        <Icon icon={G.close} size={9} color={c.bg} weight="black" strokeWidth={3.2} />
       </Pressable>
-    </Pressable>
+    </PressScale>
   )
 }
 
-const TILE = 64
+const TILE = 68
 
 const styles = StyleSheet.create({
-  composer: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    gap: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  tray: { gap: 8, paddingTop: 6, paddingRight: 6 },
-  status: { fontSize: 12, paddingHorizontal: 4 },
-  row: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-  round: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  outer: { paddingHorizontal: 10, paddingTop: 6 },
+  tray: { borderRadius: 30, borderWidth: StyleSheet.hairlineWidth, padding: 4, paddingBottom: 6 },
+  card: {
+    borderRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingTop: 6,
+    paddingBottom: 8,
   },
+  tiles: { gap: 10, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 },
+  status: { fontSize: 12, lineHeight: 16, paddingHorizontal: 18, paddingTop: 6 },
   input: {
-    flex: 1,
-    maxHeight: 140,
-    minHeight: 40,
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 14,
+    minHeight: 48,
+    maxHeight: 168,
+    paddingHorizontal: 18,
     paddingTop: 10,
-    paddingBottom: 10,
-    fontSize: 15,
+    paddingBottom: 8,
+    fontSize: 16,
+    lineHeight: 22,
+    textAlignVertical: 'top',
   },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
+  right: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', minWidth: 0 },
   tile: {
     width: TILE,
     height: TILE,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'visible',
+    marginTop: 6,
   },
-  preview: { width: TILE, height: TILE, borderRadius: 10 },
-  file: { flex: 1, padding: 6, justifyContent: 'center' },
+  preview: { width: TILE, height: TILE, borderRadius: 14 },
+  file: { flex: 1, padding: 7, justifyContent: 'space-between' },
+  fileExt: { fontSize: 10, fontWeight: '700' },
+  fileName: { fontSize: 10 },
   cover: {
     position: 'absolute',
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
-    borderRadius: 10,
+    borderRadius: 14,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  coverText: { fontSize: 10, marginTop: 2 },
+  coverText: { fontSize: 10, marginTop: 3, fontWeight: '500' },
   remove: {
     position: 'absolute',
     top: -6,
@@ -482,6 +484,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -1,31 +1,29 @@
-// The session header's way to its changes, with how many files differ; hidden for a session
-// without a project.
+// The way from a session to its folder's changes: how many files differ, for the folder chip of
+// the status line, and the screen that lists them. A session without a project has none.
 
-import { Pressable, Text } from 'react-native'
 import { router } from 'expo-router'
 import { sessionFolder, useChanges } from '../git'
 import { useHost, useLink } from '../host'
-import type { Theme } from '../theme'
 
-export function ChangesButton(props: { sessionId: string; theme: Theme }) {
-  const { sessionId, theme } = props
+export interface SessionChanges {
+  /** The folder the session works in; null without a project. */
+  folder: string | null
+  /** Whether the folder is a repository, once known. */
+  repo: boolean | null
+  count: number
+  open(): void
+}
+
+export function useSessionChanges(sessionId: string): SessionChanges {
   const host = useHost()
   const link = useLink()
   const summary = host.sessions.get(sessionId)
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const { status, files } = useChanges(link, folder)
-  if (!folder || status?.repo === null) return null
-  const count = files?.length ?? 0
-  return (
-    <Pressable
-      onPress={() => router.push({ pathname: '/changes/[id]', params: { id: sessionId } })}
-      hitSlop={8}
-      accessibilityRole="button"
-      accessibilityLabel={count > 0 ? `改动，${count} 个文件` : '改动'}
-    >
-      <Text style={{ color: theme.accent, fontSize: 16 }}>
-        改动{count > 0 ? <Text style={{ fontVariant: ['tabular-nums'] }}> {count}</Text> : null}
-      </Text>
-    </Pressable>
-  )
+  return {
+    folder,
+    repo: status ? status.repo !== null : null,
+    count: files?.length ?? 0,
+    open: () => router.push({ pathname: '/changes/[id]', params: { id: sessionId } }),
+  }
 }
