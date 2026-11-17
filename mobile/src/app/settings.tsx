@@ -5,10 +5,12 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import Constants from 'expo-constants'
 import { Stack, router } from 'expo-router'
 import type { DirectAddress } from '@shared/remote/protocol'
+import { UpdateRows } from '../components/UpdateRows'
 import { APP_VERSION, currentAddress, routeKind } from '../connection'
 import { useHost } from '../host'
 import { pushStatusText, usePushStatus } from '../push/sync'
 import { useTheme } from '../theme'
+import { UPDATES_SUPPORTED } from '../update'
 
 const ROUTE_NAMES = { tailscale: 'Tailscale', lan: '局域网', other: '直连' } as const
 
@@ -132,7 +134,8 @@ export default function Settings() {
 
       <Text style={[styles.heading, { color: theme.muted }]}>关于</Text>
       <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.line }]}>
-        {row('App 版本', version, true)}
+        {row('App 版本', version, !UPDATES_SUPPORTED)}
+        {UPDATES_SUPPORTED && <UpdateRows />}
       </View>
     </ScrollView>
   )

@@ -1,12 +1,15 @@
+import { useEffect } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { HostProvider } from '../host'
 import { PushBridge } from '../push/bridge'
 import { useTheme } from '../theme'
+import { watchUpdates } from '../update'
 
 export default function Layout() {
   const theme = useTheme()
+  useEffect(() => watchUpdates(), [])
   return (
     <SafeAreaProvider>
       <HostProvider>
