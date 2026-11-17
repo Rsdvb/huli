@@ -1,5 +1,18 @@
-import { LIMIT_STROKE, type LimitLevel } from '@renderer/lib/plan-limit'
+import { LIMIT_FILL, LIMIT_STROKE, type LimitLevel } from '@renderer/lib/plan-limit'
 import { cn } from '@renderer/lib/utils'
+
+/**
+ * A window's line's dot in its ring's color, as a legend: the lines list the rings from the outer
+ * one in, so each dot ties its line to its ring.
+ */
+export function LegendDot({ level, className }: { level: LimitLevel; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn('size-1.5 shrink-0 rounded-full', LIMIT_FILL[level], className)}
+    />
+  )
+}
 
 export interface PlanRing {
   id: string

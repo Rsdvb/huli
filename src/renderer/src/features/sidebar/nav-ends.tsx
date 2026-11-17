@@ -16,7 +16,7 @@ import { cn } from '@renderer/lib/utils'
 import { loadToday, useUsageStore } from '@renderer/stores/usage'
 import { usePlanReadings } from '@renderer/stores/agents'
 import { useShownHostAgents } from '@renderer/stores/window-host'
-import { tightestLimit } from './plan-usage'
+import { inlineReset, tightestLimit } from './plan-usage'
 import { costText } from './usage-row'
 
 // The marks at the end of the sidebar menu's Routines and Usage rows.
@@ -107,12 +107,14 @@ function tightestOf(
 export function TightestLimit() {
   const { t } = useTranslation('usage')
   const accounts = accountAgents(useShownHostAgents(), usePlanReadings())
-  const tightest = tightestOf(accounts, useNow())
+  const now = useNow()
+  const tightest = tightestOf(accounts, now)
   if (!tightest) return null
   const {
     account: { agent, hostId, name },
     limit,
   } = tightest
+  const reset = inlineReset(limit, now)
   const percent = `${Math.round(limit.usedPercent ?? 0)}%`
   const level = limitLevel(limit)
   return (
@@ -125,9 +127,11 @@ export function TightestLimit() {
       <AgentMark agent={agent.id} size={12} hostId={hostId} />
       <span aria-hidden className="truncate">
         {t('nav.limitShort', { limit: limitLabel(limit), percent })}
+        {reset && ` · ${reset}`}
       </span>
       <span className="sr-only">
         {t('nav.limit', { agent: name, limit: limitLabel(limit), percent })}
+        {reset && ` ${reset}`}
       </span>
     </span>
   )

@@ -60,6 +60,8 @@ export interface CardWindow {
   percent: number
   level: LimitLevel
   amount?: PlanLimit['amount']
+  /** The window as the agent reported it, for when it resets. */
+  limit: PlanLimit
 }
 
 /** One account's card in the account menu, an OpenCode provider's included. */
@@ -99,6 +101,7 @@ function cardWindows(limits: readonly PlanLimit[], now: number): CardWindow[] {
       percent: stale ? 0 : Math.round(limit.usedPercent),
       level: stale ? 'ok' : limitLevel(limit),
       ...(limit.amount ? { amount: limit.amount } : {}),
+      limit,
     })
   }
   // A window for one model sits inside the ring of the same length it narrows.

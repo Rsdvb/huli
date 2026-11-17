@@ -365,6 +365,11 @@
 .k-u-plan__line b[data-level='bad'] {
   color: var(--plan-bad-text);
 }
+/* When a window near its end resets, right after its figure. */
+.k-u-plan__soon {
+  font-size: 12px;
+  font-weight: 400;
+}
 .k-u-plan__amount {
   overflow: hidden;
   font-size: 12px;
