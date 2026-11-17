@@ -1,13 +1,14 @@
 // The session screens' header: a round back button, a centered title that may open a menu, and
 // round buttons on the right, over frosted glass the conversation scrolls under.
 
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import { router } from 'expo-router'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
+import type { ViewHandle } from './Popover'
 import { RoundButton } from './Press'
 
 export const HEADER_BAR = 60
@@ -32,6 +33,8 @@ export function GlassHeader(props: {
   /** A sheet presented modally: a close button instead of back, and no status bar room. */
   modal?: boolean
   onTitlePress?: () => void
+  /** Where a menu the title opens is anchored. */
+  titleAnchor?: RefObject<ViewHandle | null>
   right?: ReactNode
 }) {
   const { c, scheme } = useSessionTokens()
@@ -84,7 +87,11 @@ export function GlassHeader(props: {
           hitSlop={4}
         >
           {({ pressed }) => (
-            <View style={{ alignItems: 'center', opacity: pressed ? 0.55 : 1 }}>
+            <View
+              ref={props.titleAnchor}
+              collapsable={false}
+              style={{ alignItems: 'center', opacity: pressed ? 0.55 : 1 }}
+            >
               <View style={styles.titleRow}>
                 <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
                   {props.title}
