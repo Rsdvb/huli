@@ -311,6 +311,7 @@ export class Notifier {
         if (what?.kind === attention.kind && what.requestId === attention.requestId) continue
         this.consider(device, subject, attention)
       }
+      this.updateProgress(device.id)
     }
     this.activitiesChanged()
   }
