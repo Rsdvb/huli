@@ -5,6 +5,7 @@ import { memo, useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { ToolEntry } from '@shared/thread'
+import { commandOutput, ShellBlock } from '../../components/entries/ShellBlock'
 import { handDiff } from '../../diff'
 import { useSessionRows } from './context'
 import { baseName, relativePath } from './format'
@@ -102,10 +103,12 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry }) {
     { insertions: 0, deletions: 0 },
   )
   const answer = answerText(entry)
-  const outputs = entry.content.flatMap((part) =>
+  const shell = entry.toolKind === 'execute'
+  // A command's output shows in its shell block, as a terminal prints it, when it is one fence.
+  const printed = shell && entry.rawInput ? commandOutput(entry.content) : null
+  const outputs = (printed === null ? entry.content : entry.content.slice(1)).flatMap((part) =>
     part.type === 'markdown' && part.markdown.trim() ? [part.markdown] : [],
   )
-  const shell = entry.toolKind === 'execute'
   const toggle = () => {
     gentle()
     setOpen((v) => !v)
@@ -165,10 +168,17 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry }) {
             </Text>
           ) : null}
           {answer && <Text style={[styles.description, { color: c.textSecondary }]}>{answer}</Text>}
-          {entry.rawInput ? (
+          {shell && entry.rawInput ? (
+            <ShellBlock
+              sessionId={sessionId}
+              command={entry.rawInput}
+              output={printed}
+              status={entry.status}
+            />
+          ) : entry.rawInput ? (
             <View style={[styles.block, { backgroundColor: s.code, borderColor: s.codeBorder }]}>
               <Text selectable style={[styles.mono, { color: c.text }]}>
-                {shell ? `$ ${entry.rawInput}` : entry.rawInput.slice(0, OUTPUT_CHARS)}
+                {entry.rawInput.slice(0, OUTPUT_CHARS)}
               </Text>
             </View>
           ) : !shell && entry.title !== target(entry, root) ? (
