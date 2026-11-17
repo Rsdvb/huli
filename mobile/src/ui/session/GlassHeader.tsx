@@ -15,7 +15,9 @@ import { NativeMenu } from './NativeMenu'
 import type { MenuSource, ViewHandle } from './Popover'
 import { PressScale, RoundButton } from './Press'
 
-export const HEADER_BAR = 60
+// As the tabs' and Settings' bar (ScrollHeader), so a back button sits in the same place on every
+// screen.
+export const HEADER_BAR = 64
 
 export function useHeaderHeight(modal = false): number {
   const insets = useSafeAreaInsets()
@@ -175,7 +177,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     gap: 8,
   },
   titleBox: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
