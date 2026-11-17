@@ -25,6 +25,7 @@ import { Sheet, type SheetItem } from '../../components/Sheet'
 import { useHost } from '../../host'
 import { errorText } from '../../sessions'
 import { EmptyState } from '../../ui/EmptyState'
+import { useMinimizingTabBar } from '../../ui/GlassTabBar'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
@@ -52,7 +53,8 @@ export default function Artifacts() {
   const { c } = useTokens()
   const host = useHost()
   const shell = useShell()
-  const header = useCollapsingHeader()
+  const minimize = useMinimizingTabBar()
+  const header = useCollapsingHeader({ onScroll: minimize })
   const insets = useSafeAreaInsets()
   const list = useRef<FlatList<Row>>(null)
   const [items, setItems] = useState<ArtifactSummary[] | null>(null)
