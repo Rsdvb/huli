@@ -344,7 +344,11 @@ export default function Artifacts() {
         icon="box"
         title="还没有 Artifact"
         message="让 Agent 做一份报告、一页原型或一套幻灯片，它们会出现在这里。"
-        action={connected ? { label: '新会话', onPress: () => router.push('/new') } : undefined}
+        action={
+          state.kind !== 'stopped'
+            ? { label: '新会话', onPress: () => router.push('/new') }
+            : undefined
+        }
       />
     )
   }

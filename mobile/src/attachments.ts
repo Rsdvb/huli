@@ -52,10 +52,24 @@ export async function attachProjectFile(
   }
 }
 
+/** An attachment prepared while the computer was out of reach, kept in the outbox's files. */
+export interface LocalCopy {
+  /** Its name among the outbox's files, and where it is now. */
+  file: string
+  uri: string
+  mimeType: string
+  name: string
+  thumb: string | null
+  size: number
+}
+
 export interface PendingAttachment {
   key: string
   source: PickedSource
-  status: 'preparing' | 'waiting' | 'uploading' | 'ready' | 'failed'
+  /** `local`: kept on the phone, to go with the message once the computer is reachable. */
+  status: 'preparing' | 'waiting' | 'uploading' | 'ready' | 'local' | 'failed'
+  /** The prepared bytes kept on the phone, for a `local` file; a project's file needs none. */
+  local?: LocalCopy | null
   /** A JPEG data URL for a photo, once it is made. */
   thumb: string | null
   /** The bytes that go, once known. */
@@ -255,6 +269,7 @@ export function sentNote(item: PendingAttachment, takes: Takes | null, agent: st
   if (item.status === 'failed') {
     return item.gone ? '为这份草稿保存的副本已不在，请移除后重新添加。' : (item.error ?? '无法读取')
   }
+  if (item.status === 'local') return '已存在手机上，连上电脑后随消息发送'
   if (item.status !== 'ready') return '正在添加…'
   const kind = item.attachment?.type ?? (item.source.kind === 'image' ? 'image' : 'file')
   if (kind === 'text') return takes?.text === false ? '作为文本接在消息之后发送' : '连同内容发送'

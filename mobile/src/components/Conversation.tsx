@@ -40,6 +40,8 @@ export function Conversation(props: {
   running: boolean
   /** What shows under the newest row, as the running turn's line. */
   working: ReactElement | undefined
+  /** Under that: the messages waiting on the phone to go. */
+  pending?: ReactElement
   /** With no older page, the sub-session's first line names the session it started from. */
   fromParent: boolean
   paddingBottom: number
@@ -95,7 +97,16 @@ export function Conversation(props: {
         onEndReachedThreshold={0.6}
         onScroll={onScroll}
         scrollEventThrottle={64}
-        ListHeaderComponent={props.working}
+        ListHeaderComponent={
+          props.pending ? (
+            <>
+              {props.working}
+              {props.pending}
+            </>
+          ) : (
+            props.working
+          )
+        }
         ListFooterComponent={
           view.loadingOlder ? (
             <View style={styles.older}>

@@ -73,7 +73,8 @@ import {
 } from '../composerText'
 import { readDraft, useDraftsReady, writeDraft, type SavedAttachment } from '../drafts'
 import { matchFiles, useProjectFiles } from '../files'
-import { useComputerId, useHostState, useLink } from '../host'
+import { useComputerId, useHostState, useLink, useLinkDown } from '../host'
+import { dropFile, keepFile, type OutboxAttachment, type OutboxMessage } from '../outbox'
 import { BottomSheet } from '../ui/BottomSheet'
 import { countRender } from '../ui/renders'
 import { haptic, showMenu } from '../ui/session/feedback'
@@ -93,6 +94,11 @@ export interface ComposerProps {
   agentName: string | null
   /** Sends the message; the box empties at once and takes the message back if this fails. */
   onSend(content: UserContent[]): Promise<unknown>
+  /**
+   * Keeps the message on the phone while the computer is out of reach, to go once it is back;
+   * without it nothing can be sent until then.
+   */
+  onQueue?: (message: OutboxMessage) => void
   /** While a turn runs: sends the message into it now, from the held queue button. */
   onSendNow?: (content: UserContent[]) => Promise<unknown>
   /** The agent takes a message into a running turn; without it Send now stops the turn first. */
@@ -155,8 +161,11 @@ export interface ComposerHandle {
   mention(projectPath: string, path: string): void
   /** Puts `/name ` at the start of the text, in place of a command already there. */
   command(name: string, names: readonly string[]): void
-  /** Puts a message back to edit, as a queued one taken back; its attachments come as tiles. */
-  restore(content: readonly UserContent[]): void
+  /**
+   * Puts a message back to edit, as a queued one taken back; its attachments come as tiles, and
+   * `picked` are added again as if just picked.
+   */
+  restore(content: readonly UserContent[], picked?: readonly PickedSource[]): void
   focus(): void
 }
 
@@ -215,6 +224,25 @@ function heldItem(
   }
 }
 
+/** How a tile waits with a message on the phone; one that holds nothing yet is left out. */
+function outboxAttachment(item: PendingAttachment): OutboxAttachment[] {
+  if (item.attachment) return [{ kind: 'held', attachment: item.attachment }]
+  if (item.status !== 'local') return []
+  if (item.local) {
+    const { file, name, mimeType, thumb, size } = item.local
+    return [{ kind: 'file', file, name, mimeType, thumb, size }]
+  }
+  if (item.source.kind !== 'project') return []
+  return [
+    {
+      kind: 'project',
+      projectPath: item.source.projectPath ?? '',
+      path: item.source.uri,
+      name: item.source.name,
+    },
+  ]
+}
+
 /** The commands whose name holds the query, those that start with it first. */
 function slashMatches(commands: readonly SlashCommand[], query: string): SlashCommand[] {
   const needle = query.toLowerCase()
@@ -265,9 +293,19 @@ export function Composer(props: ComposerProps) {
   /** A restored draft's attachments to ask the computer about, once connected. */
   const unchecked = useRef<Map<string, string> | null>(null)
   const connected = hostState.kind === 'connected'
+  const down = useLinkDown()
+  // Read by the uploads as they go, which outlive the render that started them.
+  const connectedRef = useRef(connected)
+  connectedRef.current = connected
 
   const forget = (id: string) => {
     void link.request('attachments.remove', { id }).catch(() => {})
+  }
+
+  /** Lets go of what a tile holds: the computer's record, or the copy kept on the phone. */
+  const release = (item: PendingAttachment) => {
+    if (item.attachment) forget(item.attachment.id)
+    if (item.local && computer) dropFile(computer, item.local.file)
   }
 
   useEffect(() => {
@@ -276,7 +314,9 @@ export function Composer(props: ComposerProps) {
       mounted.current = false
       // A draft keeps what the computer holds for it; without one, the computer forgets it.
       for (const item of latest.current) {
-        if (!item.attachment || carried.current.has(item.key)) continue
+        if (carried.current.has(item.key)) continue
+        if (item.local && computer) dropFile(computer, item.local.file)
+        if (!item.attachment) continue
         if (draftKey && item.status === 'ready') continue
         forget(item.attachment.id)
       }
@@ -383,19 +423,60 @@ export function Composer(props: ComposerProps) {
     change((list) => list.map((item) => (item.key === key ? { ...item, ...changes } : item)))
   }
 
-  const run = async (key: string, source: PickedSource) => {
+  /**
+   * Out of the computer's reach, what was picked is kept on the phone instead (a project's file
+   * needs nothing kept), to go with the message once the computer is back.
+   */
+  const keepLocal = async (key: string, prepared: Awaited<ReturnType<typeof prepare>> | null) => {
+    if (!prepared || !computer) {
+      patch(key, { status: 'local', local: null })
+    } else {
+      const kept = await keepFile(computer, prepared.bytes, prepared.name)
+      if (!held(key)) return dropFile(computer, kept.file)
+      patch(key, {
+        status: 'local',
+        thumb: prepared.thumb,
+        size: prepared.bytes.byteLength,
+        local: {
+          ...kept,
+          mimeType: prepared.mimeType,
+          name: prepared.name,
+          thumb: prepared.thumb,
+          size: prepared.bytes.byteLength,
+        },
+      })
+    }
+    // Back while it was kept: it goes to the computer now after all.
+    const item = latest.current.find((each) => each.key === key)
+    if (connectedRef.current && item) enqueue(key, item.source)
+  }
+
+  const run = async (key: string, picked: PickedSource) => {
     if (!held(key)) return
+    const local = latest.current.find((item) => item.key === key)?.local ?? null
     patch(key, { status: 'preparing', error: null, gone: false })
     try {
-      if (source.kind === 'project') {
+      if (picked.kind === 'project') {
+        if (!connectedRef.current) return await keepLocal(key, null)
         patch(key, { status: 'uploading' })
-        const attachment = await attachProjectFile(link, source.projectPath ?? '', source.uri)
+        const attachment = await attachProjectFile(link, picked.projectPath ?? '', picked.uri)
         if (!held(key)) return forget(attachment.id)
         patch(key, { status: 'ready', attachment, size: attachment.size, thumb: attachment.thumb })
         return
       }
-      const prepared = await prepare(source)
+      const prepared = local
+        ? {
+            bytes: await new File(local.uri).bytes(),
+            mimeType: local.mimeType,
+            name: local.name,
+            thumb: local.thumb,
+          }
+        : await prepare(picked)
       if (!held(key)) return
+      if (!connectedRef.current) {
+        if (local) return patch(key, { status: 'local' })
+        return await keepLocal(key, prepared)
+      }
       patch(key, { status: 'uploading', thumb: prepared.thumb, size: prepared.bytes.byteLength })
       const attachment = await upload(link, prepared)
       // Removed while it went: the host's record goes too.
@@ -403,8 +484,10 @@ export function Composer(props: ComposerProps) {
       patch(key, {
         status: 'ready',
         attachment,
+        local: null,
         ...(attachment.thumb && !prepared.thumb ? { thumb: attachment.thumb } : {}),
       })
+      if (local && computer) dropFile(computer, local.file)
     } catch (error) {
       if (held(key)) patch(key, { status: 'failed', error: (error as Error).message })
     }
@@ -413,6 +496,17 @@ export function Composer(props: ComposerProps) {
   const enqueue = (key: string, source: PickedSource) => {
     queue.current = queue.current.then(() => run(key, source))
   }
+
+  // Back in reach, what was kept on the phone goes to the computer, as if just picked.
+  useEffect(() => {
+    if (!connected) return
+    for (const item of latest.current) {
+      if (item.status !== 'local') continue
+      patch(item.key, { status: 'waiting' })
+      enqueue(item.key, item.source)
+    }
+    // The tiles are read when the link comes back, not on each change of them.
+  }, [connected])
 
   /** Adds what was picked, as many as there is room for; the keys name mention's items. */
   const add = (sources: PickedSource[], keys?: string[]): string[] => {
@@ -441,7 +535,7 @@ export function Composer(props: ComposerProps) {
   const remove = (key: string, fromText = true) => {
     const item = latest.current.find((each) => each.key === key)
     change((list) => list.filter((each) => each.key !== key))
-    if (item?.attachment) forget(item.attachment.id)
+    if (item) release(item)
     const mention = latestMentions.current.find((m) => m.key === key)
     if (mention) {
       const current = latestText.current
@@ -695,7 +789,7 @@ export function Composer(props: ComposerProps) {
     change((list) => (front ? [...message.items, ...list] : [...list, ...message.items]))
   }
 
-  const restore = (content: readonly UserContent[]) => {
+  const restore = (content: readonly UserContent[], picked: readonly PickedSource[] = []) => {
     const words = content
       .map((part) =>
         part.type === 'text' ? part.text : part.ref.kind === 'link' ? part.ref.uri : '',
@@ -712,6 +806,7 @@ export function Composer(props: ComposerProps) {
       { text: words, items: attachments.slice(0, left).map((a) => heldItem(a)), mentions: [] },
       false,
     )
+    if (picked.length > 0) add([...picked])
     setTimeout(() => input.current?.focus(), 50)
   }
 
@@ -742,11 +837,20 @@ export function Composer(props: ComposerProps) {
     ])
   }
 
-  const busy = items.filter((item) => item.status !== 'ready' && item.status !== 'failed')
+  // Out of reach with somewhere to keep it, a message waits on the phone; a stopped link never
+  // comes back by itself, so nothing waits for it.
+  const queueing = !connected && hostState.kind !== 'stopped' && !!props.onQueue
+  // What is kept on the phone is ready to wait with the message; once connected, it is on its way.
+  const busy = items.filter(
+    (item) =>
+      item.status !== 'ready' &&
+      item.status !== 'failed' &&
+      !(item.status === 'local' && !connected),
+  )
   const block = sendBlock(items, text)
   const blocked = props.blocked ?? null
   const canSend =
-    connected &&
+    (connected || queueing) &&
     !sending &&
     !disabled &&
     !blocked &&
@@ -770,6 +874,12 @@ export function Composer(props: ComposerProps) {
     // The box empties at once; the message comes back if it could not go.
     setBox({ text: '', mentions: [] })
     change(() => [])
+    if (!connected && props.onQueue) {
+      haptic.success()
+      props.onQueue({ text: taken.text, attachments: taken.items.flatMap(outboxAttachment) })
+      announce('已存在手机上，连上电脑后发送')
+      return
+    }
     setSending(true)
     try {
       await (now && props.onSendNow ? props.onSendNow(content) : onSend(content))
@@ -804,18 +914,26 @@ export function Composer(props: ComposerProps) {
     ])
   }
 
-  // Offline the screen may show the cache's copy of the conversation; nothing goes until connected.
-  const status = !connected
-    ? hostState.kind === 'connecting'
-      ? '正在连接电脑…连上后才能发送。'
-      : hostState.kind === 'reconnecting'
-        ? '和电脑的连接断了，正在重连。连上后才能发送。'
-        : '没有连上电脑，暂时不能发送。'
-    : blocked && (holds || allowEmpty)
-      ? blocked
-      : busy.length > 0
-        ? `正在处理附件，还剩 ${busy.length} 个…`
-        : block
+  // Offline the screen may show the cache's copy of the conversation; a message sent then waits on
+  // the phone. Said only once the link has been down a moment, so a quick reconnect never flickers.
+  const offline =
+    connected || !down
+      ? null
+      : queueing
+        ? hostState.kind === 'connecting'
+          ? '正在连接电脑…现在发送的消息会先存在手机上，连上后自动发出。'
+          : '正在重新连接…现在发送的消息会先存在手机上，连上后自动发出。'
+        : hostState.kind === 'stopped'
+          ? '没有连上电脑，暂时不能发送。'
+          : '正在连接电脑…连上后才能发送。'
+  const status =
+    offline && !queueing
+      ? offline
+      : blocked && (holds || allowEmpty)
+        ? blocked
+        : busy.length > 0
+          ? `正在处理附件，还剩 ${busy.length} 个…`
+          : (block ?? offline)
 
   // What `/` or `@` at the caret asks for, listed over the box.
   const commands = props.commands ?? []
@@ -932,14 +1050,16 @@ export function Composer(props: ComposerProps) {
                 // Held, the queue button offers Send now; the system's own button takes no hold.
                 {...(sending || props.running ? {} : { systemImage: G.send.sf })}
                 onPress={() => void send()}
-                {...(props.running && props.onSendNow
+                {...(props.running && props.onSendNow && connected
                   ? { onLongPress: holdQueue, delayLongPress: 450 }
                   : {})}
                 disabled={!canSend}
                 accessibilityLabel={props.running ? '加入队列' : '发送'}
-                {...(props.running && props.onSendNow
-                  ? { accessibilityHint: '本轮结束后发送 · 按住可立即发送' }
-                  : {})}
+                {...(queueing
+                  ? { accessibilityHint: '先存在手机上，连上电脑后发送' }
+                  : props.running && props.onSendNow
+                    ? { accessibilityHint: '本轮结束后发送 · 按住可立即发送' }
+                    : {})}
               >
                 {sending ? (
                   <ActivityIndicator size="small" color={c.onAccent} />
@@ -1238,7 +1358,7 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
   const preview = textThumb
     ? null
     : (item.thumb ?? (item.source.kind === 'image' ? item.source.uri : null))
-  const working = item.status !== 'ready' && item.status !== 'failed'
+  const working = item.status !== 'ready' && item.status !== 'failed' && item.status !== 'local'
   const label =
     item.status === 'preparing'
       ? '处理中'

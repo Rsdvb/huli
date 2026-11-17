@@ -29,6 +29,7 @@ import { admin } from './admin'
 import { clearComputer, dropThread, readLists, writeLists } from './cache'
 import { currentAddress, deviceKey, linkTo } from './connection'
 import { dropDrafts } from './drafts'
+import { dropOutbox } from './outbox'
 import { watchWakeups, type WakeReason } from './reconnect'
 import { createStore, sameFields, sameItems, useSelector } from './select'
 import { stopPush } from './push/sync'
@@ -484,6 +485,7 @@ export function HostProvider(props: { children: ReactNode }) {
       await stopPush(null, gone?.pushId ?? null)
       void clearComputer(id)
       dropDrafts(id)
+      dropOutbox(id)
       const rest = getHost().computers.hosts.filter((h) => h.id !== id)
       if (getHost().computers.active !== id) {
         update(() => rest)

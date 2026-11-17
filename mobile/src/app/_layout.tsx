@@ -3,6 +3,7 @@ import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
+import { OutboxBridge } from '../components/OutboxBridge'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
 import { LinkBridge } from '../links'
@@ -89,6 +90,7 @@ export default function Layout() {
             </Stack>
           </ShellProvider>
           <PushBridge />
+          <OutboxBridge />
           <LinkBridge />
           <LiveBridge />
           <SystemBridge />

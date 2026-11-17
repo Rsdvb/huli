@@ -79,6 +79,7 @@ import {
   sameFields,
   sameItems,
   useAgents,
+  useComputerId,
   useHostSelector,
   useHostState,
   useLink,
@@ -107,6 +108,8 @@ import {
   useCacheExpiry,
   useCachePhase,
 } from '../../ui/session/promptCache'
+import { OutboxRows, useHasOutbox } from '../../components/OutboxRows'
+import { queueMessage, withdrawItem, type OutboxMessage } from '../../outbox'
 import { useSessionTokens } from '../../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../../ui/session/Popover'
 import { RoundButton } from '../../ui/session/Press'
@@ -453,6 +456,24 @@ export default function SessionScreen() {
     await link.request('sessions.queue', { sessionId: id, content })
   }
 
+  // Out of the computer's reach a message waits on the phone, shown as the newest, and goes through
+  // the same queue once the link is back. Handing the session to another agent needs the computer.
+  const computerId = useComputerId()
+  const queue = (message: OutboxMessage) => {
+    if (computerId) queueMessage(computerId, { sessionId: id }, message)
+  }
+  const withdraw = useCallback(
+    (itemId: string) => {
+      if (!computerId) return
+      void withdrawItem(computerId, itemId).then((back) => {
+        if (back) composer.current?.restore(back.content, back.picked)
+      })
+    },
+    [computerId],
+  )
+  const hasOutbox = useHasOutbox(id)
+  const down = useLinkDown()
+
   // Into the running turn now: queued, then steered in, or the turn stopped and it sent next.
   const sendNow = async (content: UserContent[]) => {
     const { itemId } = (await link.request('sessions.queue', { sessionId: id, content })) as {
@@ -729,9 +750,23 @@ export default function SessionScreen() {
     }
   }
 
+  const outbox = useMemo(() => <OutboxRows sessionId={id} onWithdraw={withdraw} />, [id, withdraw])
   let body
   if (view.error) {
     body = <StateView text={view.error} tone="danger" />
+  } else if (!hasThread && hasOutbox && !connected) {
+    // Nothing of the conversation kept on the phone: what waits to go shows alone.
+    body = (
+      <ScrollView
+        contentContainerStyle={[
+          styles.outboxOnly,
+          { paddingTop: headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) },
+        ]}
+        keyboardDismissMode="interactive"
+      >
+        {outbox}
+      </ScrollView>
+    )
   } else if (!hasThread) {
     body = <StateView loading />
   } else {
@@ -741,6 +776,7 @@ export default function SessionScreen() {
         sessionId={id}
         running={running}
         working={working}
+        pending={outbox}
         fromParent={summary?.origin === 'user' && !!summary.parentId}
         paddingBottom={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0)}
       />
@@ -749,7 +785,6 @@ export default function SessionScreen() {
     body = <FileRefs.Provider value={fileRefs}>{body}</FileRefs.Provider>
   }
 
-  const down = useLinkDown()
   const linkDown = down && (hostState.kind === 'reconnecting' || hostState.kind === 'stopped')
 
   return (
@@ -843,6 +878,7 @@ export default function SessionScreen() {
           agentName={shownName}
           placeholder={placeholder}
           onSend={send}
+          {...(pendingSwitch ? {} : { onQueue: queue })}
           onSendNow={sendNow}
           steering={steering}
           failTitle={pendingSwitch ? '没能换 Agent' : '没有发出去'}
@@ -1080,6 +1116,7 @@ const styles = StyleSheet.create({
   waiting: { maxHeight: '55%', flexGrow: 0 },
   waitingContent: { paddingHorizontal: 10, paddingTop: 8, gap: 10 },
   banner: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
+  outboxOnly: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 18, paddingBottom: 12 },
   bannerPill: { gap: 8 },
   bannerText: { fontSize: 13, fontWeight: '500' },
 })

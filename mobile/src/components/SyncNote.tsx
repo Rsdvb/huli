@@ -51,7 +51,7 @@ export function SyncNote() {
       <Text style={[typeScale.footnote, styles.text, { color: c.textTertiary }]}>
         {state}
         {since ? ` · ${since}` : ''}
-        {!connected ? ' · 连上前只能看' : ''}
+        {!connected && host.state.kind !== 'stopped' ? ' · 发出的消息会在连上后送达' : ''}
       </Text>
       {canRetry ? (
         <Press

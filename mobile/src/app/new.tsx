@@ -33,10 +33,12 @@ import {
   type ConfigControl,
 } from '../components/ConfigMenus'
 import { NEW_SESSION_DRAFT } from '../drafts'
+import { PendingSessions } from '../components/OutboxRows'
 import { PlanUsageSheet } from '../components/PlanUsageSheet'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
-import { useHost, useLink } from '../host'
+import { useComputerId, useHost, useLink } from '../host'
+import { onCreated, queueMessage, withdrawItem, type OutboxMessage } from '../outbox'
 import { folder, greeting, listTime, sessionTitle } from '../sessions'
 import { HuliIcon } from '../ui/HuliMark'
 import { useComputer } from '../ui/session/computer'
@@ -156,6 +158,41 @@ export default function NewSession() {
     })) as SessionSummary
     router.replace(`/session/${summary.id}`)
   }
+
+  // Out of the computer's reach the session waits on the phone, as a card over the box, and is
+  // made once the link is back; this screen then opens it, if it is still open.
+  const computerId = useComputerId()
+  const queue = (message: OutboxMessage) => {
+    if (!agentId || !computerId) return
+    const values = entry ? startValues(entry, picks) : picks
+    queueMessage(
+      computerId,
+      {
+        create: {
+          agentId,
+          projectPath,
+          ...(parentId ? { parentId } : {}),
+          ...(Object.keys(values).length > 0 ? { options: values } : {}),
+        },
+      },
+      message,
+    )
+  }
+  const withdraw = (itemId: string) => {
+    if (!computerId) return
+    void withdrawItem(computerId, itemId).then((back) => {
+      if (back) composer.current?.restore(back.content, back.picked)
+    })
+  }
+  useEffect(
+    () =>
+      onCreated(({ session }) => {
+        if ((session.parentId ?? undefined) !== parentId) return false
+        router.replace(`/session/${session.id}`)
+        return true
+      }),
+    [parentId],
+  )
 
   const attachPages = useAttachPages({
     link,
@@ -351,6 +388,7 @@ export default function NewSession() {
             agentName={agent?.name ?? null}
             placeholder={agent ? `想让 ${agent.name} 做什么？` : '想让 Agent 做什么？'}
             onSend={create}
+            onQueue={queue}
             failTitle="没能新建会话"
             allowEmpty
             disabled={!agentId}
@@ -366,15 +404,22 @@ export default function NewSession() {
             }
             onCountChange={setAttachCount}
             top={
-              notices.length > 0 ? (
-                <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
-                  {notices.map((text) => (
-                    <Text key={text} style={[styles.noticeText, { color: c.text }]}>
-                      {text}
-                    </Text>
-                  ))}
-                </View>
-              ) : undefined
+              <>
+                <PendingSessions
+                  {...(parentId ? { parentId } : {})}
+                  agentName={(id) => host.agents.get(id)?.name ?? 'Agent'}
+                  onWithdraw={withdraw}
+                />
+                {notices.length > 0 ? (
+                  <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
+                    {notices.map((text) => (
+                      <Text key={text} style={[styles.noticeText, { color: c.text }]}>
+                        {text}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+              </>
             }
             bottomInset={insets.bottom}
             onAttach={(anchor) =>

@@ -13,7 +13,6 @@ import { SessionRowSkeleton } from '../../components/SessionRow'
 import {
   sameFields,
   useComputerId,
-  useConnected,
   useHostActions,
   useHostSelector,
   type HostData,
@@ -24,12 +23,16 @@ import { rememberTab } from '../../ui/lastTab'
 import { space, useTokens } from '../../ui/tokens'
 
 const pickPhase = (d: HostData) => ({ phase: d.phase, notice: d.notice })
+// New session works offline too once the agents are known, its session made when the link is back;
+// a link that stopped never comes back by itself.
+const pickCompose = (d: HostData) =>
+  d.state.kind === 'connected' || (d.loaded && d.state.kind !== 'stopped')
 
 export default function TabsLayout() {
   const { c } = useTokens()
   const host = useHostSelector(pickPhase, sameFields)
   const { paired } = useHostActions()
-  const connected = useConnected()
+  const canCompose = useHostSelector(pickCompose)
   const hostId = useComputerId()
 
   if (host.phase === 'loading') {
@@ -87,7 +90,7 @@ export default function TabsLayout() {
       <NativeTabs.Trigger
         name="compose"
         prominent
-        disabled={!connected}
+        disabled={!canCompose}
         accessibilityLabel="新会话"
         contentStyle={{ backgroundColor: c.bg }}
       >
