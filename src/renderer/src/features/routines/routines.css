@@ -450,7 +450,7 @@
 }
 .k-routine__name {
   field-sizing: content;
-  min-width: 60px;
+  min-width: min(60px, 100%);
   max-width: 320px;
   height: 28px;
   padding: 0 6px;
@@ -463,6 +463,8 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--strong);
+  /* Squeezed by a narrow bar, the name ends in an ellipsis until it is edited. */
+  text-overflow: ellipsis;
 }
 .k-routine__name::placeholder {
   color: var(--placeholder);
@@ -695,6 +697,13 @@
   font-size: 12.5px;
   line-height: 18px;
   color: var(--text);
+}
+/* Where the row stacks its value under the label (Settings' rows at 600px), the times line up at
+   the label's left edge instead of their own right one. */
+@container ui-as-main (max-width: 600px) {
+  .k-next__list {
+    justify-items: start;
+  }
 }
 .k-next__shift {
   display: flex;
@@ -962,6 +971,17 @@ button.k-run:focus-visible {
 @container k-page (max-width: 600px) {
   .k-routine__body {
     padding-inline: 16px;
+  }
+}
+/* Narrow, Run now keeps only its icon, its label still read out, to leave the name some room. */
+@container k-page (max-width: 480px) {
+  .k-routine__acts .ui-buttonc[data-icon-left] > .ui-buttonc__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 /* Narrower still, the state goes under the name, whose column it squeezed to a character. */
