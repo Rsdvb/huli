@@ -49,6 +49,7 @@ import { useWebHostStore } from '@renderer/stores/web-host'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { useUpdatesStore } from '@renderer/stores/updates'
 import { openAgentSettings, openHarnessSettings, openSettingsItem } from '@renderer/stores/view'
+import { useKettuImportRow } from '@renderer/features/kettu-import/settings-row'
 import { AboutHero, AutomaticUpdates, NoUpdates, UpdateRow } from './about-section'
 import { useIdleSessionRows } from './idle-sessions'
 import { useWorkflowRows } from './workflow-settings'
@@ -177,6 +178,7 @@ export function useGeneralSection(): SectionDef {
     note: <GroupNote>{t('general.cloud.note')}</GroupNote>,
   })
   const loginItem = useLoginItemStatus()
+  const kettuImport = useKettuImportRow()
   const openAtLoginDescription = loginItem
     ? !loginItem.available
       ? t('general.openAtLogin.unavailable')
@@ -276,6 +278,7 @@ export function useGeneralSection(): SectionDef {
         group: thread,
         render: () => <OutlineSummaries label={t('general.outlineSummaries.name')} />,
       },
+      kettuImport,
       {
         id: 'open-at-login',
         name: t('general.openAtLogin.name'),
