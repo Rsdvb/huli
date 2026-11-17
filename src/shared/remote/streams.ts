@@ -2,7 +2,7 @@
 // device's request names a stream it uploaded and the host's result names one it sends. Media
 // reads, which a window gets from main's media scheme, are answered the same way.
 
-import { ATTACHMENT_BYTES } from '../attachments'
+import { ATTACHMENT_BYTES, UPLOAD_FILE_BYTES } from '../attachments'
 import type { BrowserForward } from '../browser'
 import type { MediaFile } from '../media'
 import type { PortError } from '../port-rpc'
@@ -10,8 +10,21 @@ import type { PortError } from '../port-rpc'
 /** The welcome's feature for byte streams. */
 export const BYTES_FEATURE = 'bytes'
 
-/** The largest upload, as large as the agent host takes an attachment's bytes. */
-export const MAX_UPLOAD_BYTES = ATTACHMENT_BYTES
+/**
+ * The largest upload: an attachment's file, which `attachments.add` takes from the upload folder
+ * on disk. Any other request that names an upload gets its bytes read into memory, so it takes one
+ * of at most `MEMORY_UPLOAD_BYTES`.
+ */
+export const MAX_UPLOAD_BYTES = UPLOAD_FILE_BYTES
+
+/** The largest upload a request other than an attachment's file takes, read into memory. */
+export const MEMORY_UPLOAD_BYTES = ATTACHMENT_BYTES
+
+/** The remote host's upload folder, under the data folder the agent host shares. */
+export const UPLOADS_FOLDER = ['remote', 'uploads'] as const
+
+/** The name of an upload's file in that folder, which the device never hears. */
+export const UPLOAD_FILE_NAME = /^[0-9a-f]{32}\.part$/
 
 /** Uploads a device may have open or waiting for a request at once, over all its connections. */
 export const MAX_UPLOADS = 8

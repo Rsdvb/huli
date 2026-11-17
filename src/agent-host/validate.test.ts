@@ -885,6 +885,26 @@ describe('attachments', () => {
     rejects(() => posix['attachments.add']({ source: { path: '/etc/passwd' }, thumb: null }))
   })
 
+  it("takes a device's upload by its file's name in the upload folder, never a path", () => {
+    const name = `${'0123456789abcdef'.repeat(2)}.part`
+    const source = { upload: name, mimeType: 'video/mp4', name: 'clip.mp4' }
+    expect(
+      posix['attachments.add']({ source: { ...source, path: '/etc/passwd' }, thumb: null }),
+    ).toEqual({ source, thumb: null })
+    for (const upload of [
+      '../uploads/x.part',
+      '/etc/passwd',
+      `${'0'.repeat(32)}.mp4`,
+      `${'0'.repeat(31)}.part`,
+      `${'A'.repeat(32)}.part`,
+      `..\\${'0'.repeat(32)}.part`,
+      7,
+    ]) {
+      rejects(() => posix['attachments.add']({ source: { ...source, upload }, thumb: null }))
+    }
+    rejects(() => posix['attachments.add']({ source: { upload: name }, thumb: null }))
+  })
+
   it('takes a mention as a path relative to an absolute project path', () => {
     const source = { projectPath: '/work/app', path: 'src/a.ts' }
     expect(posix['attachments.add']({ source, thumb: null })).toEqual({ source, thumb: null })

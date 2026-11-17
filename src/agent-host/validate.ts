@@ -83,6 +83,7 @@ import {
   type RoutineOption,
 } from '@shared/routines'
 import { ATTACHMENT_BYTES, ATTACHMENT_LIMIT, PROMPT_BYTES, THUMB_CHARS } from '@shared/attachments'
+import { UPLOAD_FILE_NAME } from '@shared/remote/streams'
 import {
   isAgentId,
   type AgentId,
@@ -939,6 +940,15 @@ function bytes(o: Fields, key: string, max: number): ArrayBuffer {
   if (!(value instanceof ArrayBuffer)) throw invalidParams(`${key} must be an ArrayBuffer`)
   if (value.byteLength === 0) throw invalidParams(`${key} must not be empty`)
   if (value.byteLength > max) throw invalidParams(`${key} is larger than ${max} bytes`)
+  return value
+}
+
+/** The name of an upload's file in the remote host's upload folder; never a path. */
+function uploadName(o: Fields): string {
+  const value = o.upload
+  if (typeof value !== 'string' || !UPLOAD_FILE_NAME.test(value)) {
+    throw invalidParams('upload must name an upload')
+  }
   return value
 }
 
@@ -2108,11 +2118,17 @@ export function createValidators(platform: Platform): Validators {
                   projectPath: absolutePath(source, 'projectPath', platform),
                   path: relativePath(source, 'path', platform),
                 }
-              : {
-                  bytes: bytes(source, 'bytes', ATTACHMENT_BYTES),
-                  mimeType: string(source, 'mimeType', ID_CHARS),
-                  name: string(source, 'name', TEXT_CHARS),
-                },
+              : source.upload !== undefined
+                ? {
+                    upload: uploadName(source),
+                    mimeType: string(source, 'mimeType', ID_CHARS),
+                    name: string(source, 'name', TEXT_CHARS),
+                  }
+                : {
+                    bytes: bytes(source, 'bytes', ATTACHMENT_BYTES),
+                    mimeType: string(source, 'mimeType', ID_CHARS),
+                    name: string(source, 'name', TEXT_CHARS),
+                  },
         thumb: thumbnail(o),
       }
     },

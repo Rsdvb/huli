@@ -40,6 +40,7 @@ import {
   type ViewStyle,
 } from 'react-native'
 import { Image } from 'expo-image'
+import Svg, { Circle } from 'react-native-svg'
 import * as Clipboard from 'expo-clipboard'
 import * as DocumentPicker from 'expo-document-picker'
 import { File, Paths } from 'expo-file-system'
@@ -54,12 +55,15 @@ import {
   messageContent,
   nextNumber,
   prepare,
+  preparedSize,
   sendBlock,
   sentNote,
   tooLarge,
   upload,
+  UploadCancelled,
   type PendingAttachment,
   type PickedSource,
+  type Prepared,
   type Takes,
 } from '../attachments'
 import {
@@ -284,6 +288,8 @@ export function Composer(props: ComposerProps) {
   const carried = useRef(new Set<string>())
   // One at a time, so a photo is read and scaled while nothing else holds its memory.
   const queue = useRef<Promise<void>>(Promise.resolve())
+  /** The uploads going now, by tile, which removing the tile or leaving the screen stops. */
+  const uploads = useRef(new Map<string, AbortController>())
   const agent = props.agentName ?? 'Agent'
   const computer = useComputerId()
   const draftKey = props.draft
@@ -302,16 +308,22 @@ export function Composer(props: ComposerProps) {
     void link.request('attachments.remove', { id }).catch(() => {})
   }
 
-  /** Lets go of what a tile holds: the computer's record, or the copy kept on the phone. */
+  /** Lets go of what a tile holds: its upload, the computer's record, or the copy kept on the phone. */
   const release = (item: PendingAttachment) => {
+    uploads.current.get(item.key)?.abort()
     if (item.attachment) forget(item.attachment.id)
     if (item.local && computer) dropFile(computer, item.local.file)
   }
 
   useEffect(() => {
     mounted.current = true
+    // The same map for the composer's life.
+    const going = uploads.current
     return () => {
       mounted.current = false
+      // An upload under way would only be forgotten once it got there.
+      for (const controller of going.values()) controller.abort()
+      going.clear()
       // A draft keeps what the computer holds for it; without one, the computer forgets it.
       for (const item of latest.current) {
         if (carried.current.has(item.key)) continue
@@ -427,22 +439,24 @@ export function Composer(props: ComposerProps) {
    * Out of the computer's reach, what was picked is kept on the phone instead (a project's file
    * needs nothing kept), to go with the message once the computer is back.
    */
-  const keepLocal = async (key: string, prepared: Awaited<ReturnType<typeof prepare>> | null) => {
+  const keepLocal = async (key: string, prepared: Prepared | null, picked: PickedSource) => {
     if (!prepared || !computer) {
       patch(key, { status: 'local', local: null })
     } else {
-      const kept = await keepFile(computer, prepared.bytes, prepared.name)
+      const size = preparedSize(prepared)
+      // A picked file is the picker's own copy, so it moves into the outbox rather than doubling.
+      const kept = await keepFile(computer, prepared.body, prepared.name, picked.kind === 'file')
       if (!held(key)) return dropFile(computer, kept.file)
       patch(key, {
         status: 'local',
         thumb: prepared.thumb,
-        size: prepared.bytes.byteLength,
+        size,
         local: {
           ...kept,
           mimeType: prepared.mimeType,
           name: prepared.name,
           thumb: prepared.thumb,
-          size: prepared.bytes.byteLength,
+          size,
         },
       })
     }
@@ -457,16 +471,17 @@ export function Composer(props: ComposerProps) {
     patch(key, { status: 'preparing', error: null, gone: false })
     try {
       if (picked.kind === 'project') {
-        if (!connectedRef.current) return await keepLocal(key, null)
+        if (!connectedRef.current) return await keepLocal(key, null, picked)
         patch(key, { status: 'uploading' })
         const attachment = await attachProjectFile(link, picked.projectPath ?? '', picked.uri)
         if (!held(key)) return forget(attachment.id)
         patch(key, { status: 'ready', attachment, size: attachment.size, thumb: attachment.thumb })
         return
       }
-      const prepared = local
+      // What was kept on the phone goes from its file, read as it is sent.
+      const prepared: Prepared = local
         ? {
-            bytes: await new File(local.uri).bytes(),
+            body: { uri: local.uri, size: local.size },
             mimeType: local.mimeType,
             name: local.name,
             thumb: local.thumb,
@@ -475,20 +490,42 @@ export function Composer(props: ComposerProps) {
       if (!held(key)) return
       if (!connectedRef.current) {
         if (local) return patch(key, { status: 'local' })
-        return await keepLocal(key, prepared)
+        return await keepLocal(key, prepared, picked)
       }
-      patch(key, { status: 'uploading', thumb: prepared.thumb, size: prepared.bytes.byteLength })
-      const attachment = await upload(link, prepared)
+      const size = preparedSize(prepared)
+      patch(key, { status: 'uploading', thumb: prepared.thumb, size, sent: 0 })
+      const controller = new AbortController()
+      uploads.current.set(key, controller)
+      let shown = 0
+      let shownAt = 0
+      const attachment = await upload(link, prepared, {
+        signal: controller.signal,
+        // The tile follows at most every 1 % or a fifth of a second, so a fast upload never
+        // renders the box for each part.
+        progress: (sent) => {
+          const now = Date.now()
+          if (sent !== 0 && sent !== size && sent - shown < size / 100 && now - shownAt < 200) {
+            return
+          }
+          shown = sent
+          shownAt = now
+          if (held(key)) patch(key, { sent })
+        },
+      }).finally(() => {
+        if (uploads.current.get(key) === controller) uploads.current.delete(key)
+      })
       // Removed while it went: the host's record goes too.
       if (!held(key)) return forget(attachment.id)
       patch(key, {
         status: 'ready',
         attachment,
         local: null,
+        sent: size,
         ...(attachment.thumb && !prepared.thumb ? { thumb: attachment.thumb } : {}),
       })
       if (local && computer) dropFile(computer, local.file)
     } catch (error) {
+      if (error instanceof UploadCancelled) return
       if (held(key)) patch(key, { status: 'failed', error: (error as Error).message })
     }
   }
@@ -1359,16 +1396,23 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
     ? null
     : (item.thumb ?? (item.source.kind === 'image' ? item.source.uri : null))
   const working = item.status !== 'ready' && item.status !== 'failed' && item.status !== 'local'
+  // How far an upload got, once it is sending bytes; a project's file is read by the computer.
+  const share =
+    item.status === 'uploading' && item.sent !== undefined && item.size
+      ? Math.min(1, item.sent / item.size)
+      : null
   const label =
     item.status === 'preparing'
       ? '处理中'
       : item.status === 'waiting'
         ? '等待中'
-        : item.status === 'uploading'
-          ? item.size
-            ? formatBytes(item.size)
-            : '上传中'
-          : null
+        : share !== null
+          ? `${Math.floor(share * 100)}%`
+          : item.status === 'uploading'
+            ? item.size
+              ? formatBytes(item.size)
+              : '上传中'
+            : null
   return (
     <PressScale
       scale={0.97}
@@ -1408,8 +1452,22 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
         </View>
       )}
       {working && (
-        <View style={[styles.cover, { backgroundColor: s.veil }]}>
-          <ActivityIndicator size="small" color={c.text} />
+        <View
+          style={[styles.cover, { backgroundColor: s.veil }]}
+          {...(share !== null
+            ? {
+                accessible: true,
+                accessibilityRole: 'progressbar' as const,
+                accessibilityLabel: `正在上传 ${item.source.name}`,
+                accessibilityValue: { min: 0, max: 100, now: Math.floor(share * 100) },
+              }
+            : {})}
+        >
+          {share !== null ? (
+            <ProgressRing share={share} color={c.text} track={c.border as string} />
+          ) : (
+            <ActivityIndicator size="small" color={c.text} />
+          )}
           {label && <Text style={[styles.coverText, { color: c.text }]}>{label}</Text>}
         </View>
       )}
@@ -1424,12 +1482,46 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
       <Pressable
         onPress={props.onRemove}
         hitSlop={8}
-        accessibilityLabel={`移除 ${item.source.name}`}
+        accessibilityLabel={
+          item.status === 'uploading' ? `取消上传 ${item.source.name}` : `移除 ${item.source.name}`
+        }
         style={[styles.remove, { backgroundColor: c.text, borderColor: s.dockCard }]}
       >
         <Icon icon={G.close} size={9} color={c.bg} weight="black" strokeWidth={3.2} />
       </Pressable>
     </PressScale>
+  )
+}
+
+const RING = 26
+const RING_STROKE = 2.5
+
+/** How far an upload got, as a ring filling clockwise from the top. */
+function ProgressRing(props: { share: number; color: string; track: string }) {
+  const radius = (RING - RING_STROKE) / 2
+  const length = 2 * Math.PI * radius
+  return (
+    <Svg width={RING} height={RING} style={styles.ring}>
+      <Circle
+        cx={RING / 2}
+        cy={RING / 2}
+        r={radius}
+        stroke={props.track}
+        strokeWidth={RING_STROKE}
+        fill="none"
+      />
+      <Circle
+        cx={RING / 2}
+        cy={RING / 2}
+        r={radius}
+        stroke={props.color}
+        strokeWidth={RING_STROKE}
+        strokeLinecap="round"
+        strokeDasharray={`${length} ${length}`}
+        strokeDashoffset={length * (1 - props.share)}
+        fill="none"
+      />
+    </Svg>
   )
 }
 
@@ -1449,7 +1541,14 @@ function TileSheet(props: {
   const size = item?.attachment?.size ?? item?.size ?? null
   const textThumb = item ? readTextThumb(item.attachment?.thumb ?? item.thumb) : null
   const facts = item
-    ? [textThumb ? `${textThumb.count} 行` : null, size !== null ? formatBytes(size) : null]
+    ? [
+        textThumb ? `${textThumb.count} 行` : null,
+        size === null
+          ? null
+          : item.status === 'uploading' && item.sent !== undefined
+            ? `已上传 ${formatBytes(item.sent)} / ${formatBytes(size)}`
+            : formatBytes(size),
+      ]
         .filter(Boolean)
         .join(' · ')
     : ''
@@ -1496,7 +1595,7 @@ function TileSheet(props: {
       )}
       {item && (
         <SheetButton
-          label="移除"
+          label={item.status === 'uploading' ? '取消上传' : '移除'}
           icon={G.trash}
           color={c.danger}
           onPress={() => props.onRemove(item.key)}
@@ -1620,7 +1719,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  coverText: { fontSize: 10, marginTop: 3, fontWeight: '500' },
+  coverText: { fontSize: 10, marginTop: 3, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  // From the top, as a clock's hand starts.
+  ring: { transform: [{ rotate: '-90deg' }] },
   remove: {
     position: 'absolute',
     top: -6,
