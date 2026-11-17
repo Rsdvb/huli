@@ -1,7 +1,7 @@
 // Huli's rebranding, run before a build: it swaps the product name the user sees from Kettu to
 // Huli without editing the upstream sources by hand, so merging Kettu's updates stays clean.
 // Idempotent. Only display text changes: JSON keys, identifiers, URL schemes such as kettu-media:
-// and the KettuAI repository name are left as they are.
+// and the KettuAI/Kettu repository name are left as they are, and so is the attribution to Kettu.
 
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -9,19 +9,57 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const NAME = 'Huli'
-const WORD = /\bKettu\b(?!AI)/g
+// Not the KettuAI organization, nor the repository named after it in `KettuAI/Kettu`.
+const WORD = /(?<!KettuAI\/)\bKettu\b(?!AI)/g
 
-/** Code files whose literal display name is swapped, with the exact spellings to swap. */
+/**
+ * Phrases that name Kettu itself and stay as written: About's attribution of the fork, and the
+ * menu item that stars Kettu's repository.
+ */
+const KEEP = ['Based on Kettu', 'based on Kettu', '基于 Kettu', 'Star Kettu']
+
+/** Locale files about Kettu itself, left whole: the prompts to star its repository on GitHub. */
+const KEEP_FILES = new Set(['star.json'])
+
+/**
+ * Code files whose literal display text is swapped. A string has its Kettu swapped for Huli; a
+ * pair is swapped for its second half; a pattern is replaced as `String.replace` does, and a
+ * third pattern finds it already swapped.
+ */
 const CODE = {
   'src/renderer/index.html': ['<title>Kettu</title>'],
   'src/renderer/tray.html': ['<title>Kettu</title>'],
   'src/renderer/overlay.html': ['<title>Kettu</title>'],
   'src/renderer/computer-overlay.html': ['<title>Kettu</title>'],
+  'src/renderer/web/index.html': ['<title>Kettu</title>'],
   'src/renderer/src/app/window-title.ts': ["'Kettu'"],
   'src/renderer/src/components/brand.tsx': ['aria-label="Kettu"'],
   'src/renderer/src/features/settings/about-section.tsx': ['<b>Kettu</b>'],
+  'src/renderer/src/features/settings/theme-section.tsx': ["theme?.name ?? 'Kettu'"],
   'src/renderer/src/features/marketplace/builtin.tsx': ['<h1>Kettu</h1>'],
+  'src/renderer/src/features/marketplace/installed.tsx': ["matchesText(['Kettu']"],
+  'src/renderer/src/features/marketplace/published-keys.ts': ["return 'Kettu'"],
   'src/renderer/src/features/session/entries/computer-setup-entry.tsx': ['label="Kettu"'],
+  'src/renderer/src/features/updates/update-review.tsx': ["item.kind === 'app' ? 'Kettu'"],
+  'src/renderer/src/features/updates/update-card.tsx': ["{ name: 'Kettu',"],
+  'src/renderer/src/features/account/account-menu.tsx': ['label: `Kettu ${info.version}'],
+  // The first run's pictures: the account's site in a browser's address bar, and the web app.
+  'src/renderer/src/features/onboarding/stage.tsx': [
+    [
+      /(<Icon icon=\{SquareLock02Icon\} size=\{11\} \/>\s*)kettu\.sh/,
+      '$1Huli Cloud',
+      /<Icon icon=\{SquareLock02Icon\} size=\{11\} \/>\s*Huli Cloud/,
+    ],
+    ['hint="app.kettu.sh"', 'hint="Huli Cloud"'],
+  ],
+  'src/main/agent-folders.ts': ["{ agent: 'Kettu' }"],
+  'src/main/login-item.ts': ["'Name=Kettu'"],
+  // The pages the browser shows at the end of a sign-in.
+  'src/main/account/loopback.ts': [
+    'This sign-in is over. Go back to Kettu.',
+    'This is not the sign-in Kettu is waiting for. Go back to Kettu and sign in again.',
+    'Kettu stopped this sign-in.',
+  ],
 }
 
 /**
@@ -33,18 +71,36 @@ const COPY = [
   ["Use email, GitHub, Google or Apple. It's free.", 'Sign in with your own Huli Cloud account.'],
   ['如需帮助，请联系 hello@kettu.sh。', '在服务器上用 huli-cloud 命令处理。'],
   ['Contact hello@kettu.sh for help.', 'Fix it on the server with the huli-cloud command.'],
-  ['https://kettu.sh/pair#', 'https://huli.invalid/pair#'],
   ['www.kettu.sh', 'Huli Cloud'],
   ['kettu.sh', 'Huli Cloud'],
+  // The home folder, as `KETTU_HOME_FOLDER` in src/shared/storage.ts names it.
+  ['.kettu/', '.huli/'],
 ]
 
+/** Links shown as examples, swapped even where the text is a URL: a pairing link's address. */
+const LINKS = [['https://kettu.sh/pair#', 'https://huli.invalid/pair#']]
+
+const swapAll = (text, pairs) => pairs.reduce((out, [from, to]) => out.split(from).join(to), text)
+
+function swapName(text) {
+  const kept = []
+  let out = text
+  for (const phrase of KEEP) {
+    out = out.split(phrase).join(`\u0000${kept.length}\u0000`)
+    kept.push(phrase)
+  }
+  out = out.replace(WORD, NAME)
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => kept[Number(i)])
+}
+
 function swapCopy(text) {
-  if (/^https?:\/\//.test(text)) return text
-  return COPY.reduce((out, [from, to]) => out.split(from).join(to), text)
+  const linked = swapAll(text, LINKS)
+  if (/^https?:\/\//.test(linked)) return linked
+  return swapAll(linked, COPY)
 }
 
 function swapValues(value) {
-  if (typeof value === 'string') return swapCopy(value.replace(WORD, NAME))
+  if (typeof value === 'string') return swapCopy(swapName(value))
   if (Array.isArray(value)) return value.map(swapValues)
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, swapValues(v)]))
@@ -58,25 +114,33 @@ async function locales() {
   for (const lang of await readdir(base, { withFileTypes: true })) {
     if (!lang.isDirectory()) continue
     for (const file of await readdir(path.join(base, lang.name))) {
-      if (!file.endsWith('.json')) continue
+      if (!file.endsWith('.json') || KEEP_FILES.has(file)) continue
       const full = path.join(base, lang.name, file)
       const text = await readFile(full, 'utf8')
-      WORD.lastIndex = 0
-      if (!WORD.test(text) && !text.includes('kettu.sh')) continue
-      WORD.lastIndex = 0
-      const next = JSON.stringify(swapValues(JSON.parse(text)), null, 2) + '\n'
-      if (next !== text) {
-        await writeFile(full, next, 'utf8')
-        changed++
-      }
+      const parsed = JSON.parse(text)
+      const swapped = swapValues(parsed)
+      // A file without anything to swap is left byte for byte as it is.
+      if (JSON.stringify(swapped) === JSON.stringify(parsed)) continue
+      await writeFile(full, JSON.stringify(swapped, null, 2) + '\n', 'utf8')
+      changed++
     }
   }
   return changed
 }
 
+/** The text with `swap` made, and whether it was there to make, swapped or not. */
+function swapCode(text, swap) {
+  if (typeof swap === 'string') swap = [swap, swap.replaceAll('Kettu', NAME)]
+  const [from, to, done] = swap
+  if (from instanceof RegExp) {
+    return { next: text.replace(from, to), found: from.test(text) || done.test(text) }
+  }
+  return { next: text.split(from).join(to), found: text.includes(from) || text.includes(to) }
+}
+
 async function code() {
   let changed = 0
-  for (const [rel, spellings] of Object.entries(CODE)) {
+  for (const [rel, swaps] of Object.entries(CODE)) {
     const full = path.join(ROOT, rel)
     let text
     try {
@@ -86,7 +150,12 @@ async function code() {
       continue
     }
     let next = text
-    for (const s of spellings) next = next.split(s).join(s.replace('Kettu', NAME))
+    for (const swap of swaps) {
+      const made = swapCode(next, swap)
+      // A spelling upstream changed is a gap to close in this list.
+      if (!made.found) console.warn(`rebrand: ${rel} no longer holds ${String(swap)}`)
+      next = made.next
+    }
     if (next !== text) {
       await writeFile(full, next, 'utf8')
       changed++
