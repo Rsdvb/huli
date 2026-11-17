@@ -7,7 +7,8 @@
 //                 opens `sealed`), aps.mutable-content = 1, collapse id = the request's collapse
 //   background:   aps.content-available = 1 and `sealed`
 //   liveactivity: aps.content-state = { sealed }; on start also aps.attributes = { sealed } of
-//                 type HuliActivityAttributes
+//                 type HuliActivityAttributes; aps.stale-date and, on end, aps.dismissal-date
+//                 from the request's `stale` and `dismiss`; priority 5 for a `low` update
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
@@ -93,13 +94,15 @@ export function apnsMessage(request: PushRequest, topic: string, nowMs: number):
         aps.attributes = { sealed: push.attributes }
         aps.alert = PLACEHOLDER
       }
-      if (push.event === 'end') aps['dismissal-date'] = timestamp
+      if (push.event === 'end') aps['dismissal-date'] = timestamp + (push.dismiss ?? 0)
+      else if (push.stale !== undefined) aps['stale-date'] = timestamp + push.stale
       return {
         ...base,
         headers: {
           'apns-topic': `${topic}.push-type.liveactivity`,
           'apns-push-type': 'liveactivity',
-          'apns-priority': '10',
+          // A low-priority update waits for a good moment and is not counted against the budget.
+          'apns-priority': push.low && push.event === 'update' ? '5' : '10',
         },
         payload: { aps },
       }

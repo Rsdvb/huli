@@ -383,4 +383,33 @@ describe('push gateway', () => {
     expect(answer.status).toBe(410)
     expect(await answer.json()).toEqual({ error: 'unregistered' })
   })
+
+  it('times a Live Activity as the host asks, urgent unless it says it may wait', async () => {
+    const { access } = await signIn()
+    const sealed = vectors.sealed[0]!.envelope
+    const activity = (fields: Record<string, unknown>) =>
+      JSON.stringify({
+        time: clock,
+        token: TOKEN,
+        environment: 'sandbox',
+        push: { type: 'liveactivity', sealed, ...fields },
+      })
+    const at = Math.floor(clock / 1000)
+    expect((await push(access, activity({ event: 'update', stale: 1800, low: true }))).status).toBe(200)
+    expect(sent.at(-1)!.headers['apns-priority']).toBe('5')
+    expect(sent.at(-1)!.payload).toEqual({
+      aps: { timestamp: at, event: 'update', 'content-state': { sealed }, 'stale-date': at + 1800 },
+    })
+    expect((await push(access, activity({ event: 'update' }))).status).toBe(200)
+    expect(sent.at(-1)!.headers['apns-priority']).toBe('10')
+    expect(sent.at(-1)!.payload).not.toHaveProperty('aps.stale-date')
+    expect((await push(access, activity({ event: 'end', dismiss: 900, low: true }))).status).toBe(200)
+    expect(sent.at(-1)!.headers['apns-priority']).toBe('10')
+    expect(sent.at(-1)!.payload).toMatchObject({ aps: { event: 'end', 'dismissal-date': at + 900 } })
+    expect((await push(access, activity({ event: 'end' }))).status).toBe(200)
+    expect(sent.at(-1)!.payload).toMatchObject({ aps: { 'dismissal-date': at } })
+    expect((await push(access, activity({ event: 'update', stale: -1 }))).status).toBe(400)
+    expect((await push(access, activity({ event: 'end', dismiss: 5 * 60 * 60 }))).status).toBe(400)
+    expect((await push(access, activity({ event: 'update', low: false }))).status).toBe(400)
+  })
 })

@@ -90,9 +90,17 @@ export interface PushTarget {
   apns: { token: string; environment: ApnsEnvironment }
   /**
    * The Live Activity tokens: `start` starts one by push, `update` reaches the one running now,
-   * which the device sends once the activity has it.
+   * which the device sends once the activity has it. `progress` reaches the activity that follows
+   * a session's turn, which the device started itself or the host started by push, with the
+   * session it shows now; the host keeps it up to date while the device is not in front.
    */
-  activity?: { start?: string; update?: string }
+  activity?: { start?: string; update?: string; progress?: ProgressTarget }
+}
+
+/** The activity that follows a session's turn, and the session it shows now. */
+export interface ProgressTarget {
+  token: string
+  sessionId: string
 }
 
 /** What a device wants to hear of this host. */
@@ -111,6 +119,11 @@ export interface NotificationChoices {
   details: boolean
   /** Sessions it hears nothing of. */
   muted: string[]
+  /**
+   * A Live Activity follows a session's turn: the host starts one by push for a turn that starts
+   * while the device is away, and keeps it up to date. Off for a device too old to show one.
+   */
+  liveProgress: boolean
 }
 
 export const DEFAULT_CHOICES: NotificationChoices = {
@@ -121,6 +134,7 @@ export const DEFAULT_CHOICES: NotificationChoices = {
   onlyAway: true,
   details: true,
   muted: [],
+  liveProgress: false,
 }
 
 /** The most sessions a device mutes. */
@@ -141,8 +155,11 @@ export interface NotificationsUpdate {
 /** What `notifications.get` and `notifications.set` answer. */
 export interface NotificationsState {
   choices: NotificationChoices
-  /** Whether a target is set, and which Live Activity tokens. */
-  target: { apns: boolean; activityStart: boolean; activityUpdate: boolean }
+  /**
+   * Whether a target is set, and which Live Activity tokens. `progress`, absent from older hosts,
+   * says the host keeps a turn's activity up to date, and whether it has its token.
+   */
+  target: { apns: boolean; activityStart: boolean; activityUpdate: boolean; progress?: boolean }
   /** Whether the host is signed in to a Kettu account, which it needs to send any. */
   signedIn: boolean
   /** The host's id and its Ed25519 public key in base64url, which signs what it sends. */
@@ -170,13 +187,21 @@ export function parsePushTarget(value: unknown): PushTarget | null {
   const target: PushTarget = { apns: { token, environment } }
   if (activity === undefined) return target
   if (typeof activity !== 'object' || activity === null) return null
-  const { start, update } = activity as Record<string, unknown>
+  const { start, update, progress } = activity as Record<string, unknown>
   if (start !== undefined && !isApnsToken(start)) return null
   if (update !== undefined && !isApnsToken(update)) return null
-  if (start === undefined && update === undefined) return target
+  let follows: ProgressTarget | undefined
+  if (progress !== undefined) {
+    if (typeof progress !== 'object' || progress === null) return null
+    const { token: progressToken, sessionId } = progress as Record<string, unknown>
+    if (!isApnsToken(progressToken) || !isId(sessionId)) return null
+    follows = { token: progressToken, sessionId }
+  }
+  if (start === undefined && update === undefined && follows === undefined) return target
   target.activity = {
     ...(start === undefined ? {} : { start }),
     ...(update === undefined ? {} : { update }),
+    ...(follows === undefined ? {} : { progress: follows }),
   }
   return target
 }
@@ -188,6 +213,7 @@ const SWITCHES = [
   'routines',
   'onlyAway',
   'details',
+  'liveProgress',
 ] as const satisfies readonly (keyof NotificationChoices)[]
 
 /** Choices to change as a device sends them, or null when any of them is not one. */
@@ -273,8 +299,57 @@ export type PushEvent =
   | { kind: 'withdraw'; sessionId?: string }
   /** A Live Activity's state: how many requests wait, and the session of the latest. */
   | { kind: 'waiting'; count: number; sessionId?: string }
-  /** A Live Activity's attributes, fixed while it runs. */
-  | { kind: 'activity' }
+  /** The state of a Live Activity that follows a session's turn; `title` is the session's. */
+  | ProgressState
+  /**
+   * A Live Activity's attributes, fixed while it runs; `progress` for one that follows a turn,
+   * starting with `sessionId`'s.
+   */
+  | { kind: 'activity'; progress?: true; sessionId?: string }
+
+/**
+ * What a turn's activity shows: in HuliLiveActivity.swift's words, the phase a turn is in while it
+ * runs or waits for the user, and how it ended.
+ */
+export type ProgressPhase =
+  | 'starting'
+  | 'thinking'
+  | 'writing'
+  | 'command'
+  | 'read'
+  | 'search'
+  | 'edit'
+  | 'running'
+  | 'approval'
+  | 'question'
+  | 'done'
+  | 'error'
+
+/**
+ * The version of `ProgressState`'s fields. A device shows what it knows of a newer one, so a field
+ * may be added without it; one whose meaning changes takes a new version.
+ */
+export const PROGRESS_FORMAT = 1
+
+export interface ProgressState {
+  kind: 'progress'
+  format: number
+  sessionId: string
+  phase: ProgressPhase
+  /** Present only while the device wants details: the agent's name, the step or the question. */
+  agent?: string
+  step?: string
+  /** The plan's progress; `current`, the step in progress, only while the device wants details. */
+  plan?: { done: number; total: number; current?: string }
+  /** When the turn started and ended, in ms since the epoch. */
+  startedAt?: number
+  endedAt?: number
+  /** The session's subagents at work. */
+  subagents: number
+  /** Top-level sessions at work and sessions waiting for the user on the host, this one among them. */
+  running: number
+  waiting: number
+}
 
 /** The content of an envelope, as UTF-8 JSON. */
 export type PushContent = {
@@ -413,8 +488,24 @@ export type GatewayPush =
   /** A silent update for the app, as to withdraw a notification. */
   | { type: 'background'; sealed: string }
   /** Starts a Live Activity, its state and its fixed attributes each sealed. */
-  | { type: 'liveactivity'; event: 'start'; sealed: string; attributes: string }
-  | { type: 'liveactivity'; event: 'update' | 'end'; sealed: string }
+  | ({ type: 'liveactivity'; event: 'start'; sealed: string; attributes: string } & ActivityTiming)
+  | ({ type: 'liveactivity'; event: 'update' | 'end'; sealed: string } & ActivityTiming)
+
+/**
+ * When a Live Activity's state goes stale or, once it ended, leaves the Lock Screen, in seconds
+ * from now; and `low` for an update that may wait for a good moment, which Apple does not count
+ * against the activity's budget. A gateway that predates them ignores them: no stale date, a
+ * dismissal at once and every update urgent.
+ */
+export interface ActivityTiming {
+  stale?: number
+  dismiss?: number
+  low?: true
+}
+
+/** The longest a Live Activity's state stays fresh or an ended one stays: Apple's 8 and 4 hours. */
+export const MAX_STALE_S = 8 * 60 * 60
+export const MAX_DISMISS_S = 4 * 60 * 60
 
 /** Why the gateway refused a push, in the body of its answer: `{ "error": <reason> }`. */
 export type PushRefusal =
@@ -442,9 +533,26 @@ const isSealed = (value: unknown): value is string =>
 
 const COLLAPSE = /^[A-Za-z0-9_-]{1,64}$/
 
+const isSeconds = (value: unknown, max: number): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= max
+
+/** A Live Activity push's timing, or null when a part of it is not one. */
+function parseTiming(value: Record<string, unknown>): ActivityTiming | null {
+  const { stale, dismiss, low } = value
+  if (stale !== undefined && !isSeconds(stale, MAX_STALE_S)) return null
+  if (dismiss !== undefined && !isSeconds(dismiss, MAX_DISMISS_S)) return null
+  if (low !== undefined && low !== true) return null
+  return {
+    ...(stale === undefined ? {} : { stale }),
+    ...(dismiss === undefined ? {} : { dismiss }),
+    ...(low === undefined ? {} : { low }),
+  }
+}
+
 function parseGatewayPush(value: unknown): GatewayPush | null {
   if (typeof value !== 'object' || value === null) return null
-  const { type, sealed, collapse, event, attributes } = value as Record<string, unknown>
+  const fields = value as Record<string, unknown>
+  const { type, sealed, collapse, event, attributes } = fields
   if (!isSealed(sealed)) return null
   switch (type) {
     case 'alert':
@@ -453,10 +561,14 @@ function parseGatewayPush(value: unknown): GatewayPush | null {
         : null
     case 'background':
       return { type, sealed }
-    case 'liveactivity':
-      if (event === 'start')
-        return isSealed(attributes) ? { type, event, sealed, attributes } : null
-      return event === 'update' || event === 'end' ? { type, event, sealed } : null
+    case 'liveactivity': {
+      const timing = parseTiming(fields)
+      if (!timing) return null
+      if (event === 'start') {
+        return isSealed(attributes) ? { type, event, sealed, attributes, ...timing } : null
+      }
+      return event === 'update' || event === 'end' ? { type, event, sealed, ...timing } : null
+    }
     default:
       return null
   }

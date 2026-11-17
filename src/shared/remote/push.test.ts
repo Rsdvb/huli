@@ -125,6 +125,36 @@ describe('a request to the gateway', () => {
     expect(parsePushRequest('x'.repeat(9000))).toBeNull()
   })
 
+  it("takes a Live Activity's timing within Apple's limits, and refuses the rest", () => {
+    const request = (push: Record<string, unknown>) =>
+      JSON.stringify({
+        time: 1,
+        token: 'a1'.repeat(32),
+        environment: 'sandbox',
+        push: { type: 'liveactivity', sealed: vectors.sealed[0]!.envelope, ...push },
+      })
+    expect(parsePushRequest(request({ event: 'update', stale: 1800, low: true }))?.push).toEqual({
+      type: 'liveactivity',
+      event: 'update',
+      sealed: vectors.sealed[0]!.envelope,
+      stale: 1800,
+      low: true,
+    })
+    expect(parsePushRequest(request({ event: 'end', dismiss: 900 }))?.push).toMatchObject({
+      dismiss: 900,
+    })
+    for (const push of [
+      { event: 'update', stale: -1 },
+      { event: 'update', stale: 8 * 60 * 60 + 1 },
+      { event: 'update', stale: 1.5 },
+      { event: 'end', dismiss: 4 * 60 * 60 + 1 },
+      { event: 'end', dismiss: '900' },
+      { event: 'update', low: false },
+    ]) {
+      expect(parsePushRequest(request(push))).toBeNull()
+    }
+  })
+
   it('goes to the project gateway unless a development run names another', () => {
     expect(pushUrlFrom(undefined)).toBe(PUSH_URL)
     expect(pushUrlFrom('http://localhost:47901/')).toBe('http://localhost:47901')
@@ -142,6 +172,27 @@ describe("a device's notifications", () => {
       muted: ['a', 'b'],
     })
     expect(parseChoices({ muted: Array.from({ length: 501 }, (_, i) => `s${i}`) })).toBeNull()
+  })
+
+  it("take the token of a turn's activity with its session, and only both", () => {
+    const apns = { token: 'a1'.repeat(32), environment: 'sandbox' }
+    const progress = { token: 'd4'.repeat(32), sessionId: 's1' }
+    expect(parsePushTarget({ apns, activity: { progress } })).toEqual({
+      apns,
+      activity: { progress },
+    })
+    for (const bad of [
+      { token: 'zz', sessionId: 's1' },
+      { token: progress.token },
+      { token: progress.token, sessionId: '' },
+      'd4d4',
+    ]) {
+      expect(parsePushTarget({ apns, activity: { progress: bad } })).toBeNull()
+    }
+    expect(parseChoices({ liveProgress: true })).toEqual({ liveProgress: true })
+    expect(parseChoices({ liveProgress: 'yes' })).toBeNull()
+    // A device that never asked hears of no turn.
+    expect(DEFAULT_CHOICES.liveProgress).toBe(false)
   })
 
   it('read an update that clears the target, changes it or leaves it', () => {
