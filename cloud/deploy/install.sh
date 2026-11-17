@@ -135,23 +135,23 @@ EOF
 install -d -o root -g root -m 755 /var/www/huli-static
 cat >/var/www/huli-static/privacy.html <<'EOF'
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Huli 隐私政策</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>纸鸢 Kite 隐私政策</title>
 <style>body{font:16px/1.7 -apple-system,"PingFang SC",sans-serif;max-width:680px;margin:40px auto;padding:0 20px;color:#222}</style>
 </head><body>
-<h1>Huli 隐私政策</h1>
-<p>Huli 是开发者自用的工具：桌面端在自己的电脑上运行 AI 编程助手，手机端用来查看和操作这台电脑上的会话。</p>
+<h1>纸鸢 Kite 隐私政策</h1>
+<p>纸鸢（Kite）是开发者自用的工具：桌面端在自己的电脑上运行 AI 编程助手，手机端用来查看和操作这台电脑上的会话。</p>
 <h2>收集的信息</h2>
-<p>Huli 不收集、不出售、不分享任何个人信息，不含广告和第三方统计。</p>
+<p>纸鸢不收集、不出售、不分享任何个人信息，不含广告和第三方统计。</p>
 <h2>数据去向</h2>
 <ul>
 <li>手机和电脑之间的内容经端到端加密，直接在两者之间传输（局域网或 Tailscale），不经过任何服务器。</li>
-<li>登录和推送由开发者自己的服务器（Huli Cloud）处理：只保存账号、已登录设备和推送所需的设备标识；推送内容在电脑上加密，只有手机能解开，服务器和 Apple 都看不到。</li>
+<li>登录和推送由开发者自己的服务器（Kite Cloud）处理：只保存账号、已登录设备和推送所需的设备标识；推送内容在电脑上加密，只有手机能解开，服务器和 Apple 都看不到。</li>
 <li>拍照、相册和文件只在你主动选择后发送到你自己的电脑。</li>
 </ul>
 <h2>联系</h2>
 <p>a2768811@icloud.com</p>
 <h1 lang="en" style="margin-top:48px">Privacy Policy (English)</h1>
-<p lang="en">Huli collects no personal data and has no ads or analytics. What the phone and the computer exchange is end-to-end encrypted and travels between them directly. The developer's own server handles sign-in and push only, storing the account, signed-in devices and push tokens; push contents are encrypted for the phone alone. Photos and files are sent only when you choose them, to your own computer.</p>
+<p lang="en">Kite collects no personal data and has no ads or analytics. What the phone and the computer exchange is end-to-end encrypted and travels between them directly. The developer's own server handles sign-in and push only, storing the account, signed-in devices and push tokens; push contents are encrypted for the phone alone. Photos and files are sent only when you choose them, to your own computer.</p>
 </body></html>
 EOF
 chmod 644 /var/www/huli-static/privacy.html

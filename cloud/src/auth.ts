@@ -243,7 +243,7 @@ export class Auth {
         response,
         this.secure,
         200,
-        messagePage('已登录', '可以关掉这个页面，回到 Huli 了。'),
+        messagePage('已登录', '可以关掉这个页面，回到纸鸢了。'),
       )
     }
     if (q.get('cancelled') === '1') {
@@ -302,12 +302,7 @@ export class Auth {
     const ticketId = form.get('ticket') ?? ''
     const ticket = this.tickets.get(ticketId)
     if (!ticket) {
-      return sendHtml(
-        response,
-        this.secure,
-        400,
-        messagePage('登录已过期', '回到 Huli 重新点登录。'),
-      )
+      return sendHtml(response, this.secure, 400, messagePage('登录已过期', '回到纸鸢重新点登录。'))
     }
     const { params } = ticket
     if (form.get('action') === 'deny') {

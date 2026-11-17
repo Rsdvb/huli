@@ -38,7 +38,7 @@ const STATUS: Record<PushRefusal, number> = {
   unavailable: 503,
 }
 
-const PLACEHOLDER = { title: 'Huli', body: '有新动态' }
+const PLACEHOLDER = { title: '纸鸢', body: '有新动态' }
 
 export interface PushGatewayOptions {
   auth: Auth
