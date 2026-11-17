@@ -1,7 +1,8 @@
 import type { AgentStatus, PlanLimit } from '@shared/agent-host'
 import type { AgentId } from '@shared/thread'
-import { resetTime } from '@renderer/lib/format'
+import { backTime, resetTime } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
+import { isUsedUp, showsReset } from '@renderer/lib/plan-limit'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -73,6 +74,26 @@ export function countdown(ms: number): string | null {
   return hours
     ? i18n.t('sidebar:countdown.daysHours', { days, hours })
     : i18n.t('sidebar:countdown.days', { count: days })
+}
+
+/** Time left in its largest unit, rounded down, for a compact line: "40 min", "2 h", "3 d". */
+function shortLeft(ms: number): string {
+  if (ms < HOUR) return i18n.t('time.minutesShort', { count: Math.max(1, Math.floor(ms / MINUTE)) })
+  if (ms < DAY) return i18n.t('time.hoursShort', { count: Math.floor(ms / HOUR) })
+  return i18n.t('time.daysShort', { count: Math.floor(ms / DAY) })
+}
+
+/**
+ * When a window near its end resets, for a compact line beside its figure: "resets in 2 h", or for
+ * one used up, when it comes back, "back 2:40 AM". Null when the line says nothing of it: under
+ * 80% used, or with no reset ahead.
+ */
+export function inlineReset(limit: PlanLimit, now: number): string | null {
+  if (!showsReset(limit, now)) return null
+  const at = limit.resetsAt!
+  return isUsedUp(limit)
+    ? i18n.t('planInline.back', { time: backTime(at, now) })
+    : i18n.t('planInline.resets', { time: shortLeft(at - now) })
 }
 
 /**

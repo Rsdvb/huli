@@ -8,6 +8,7 @@ import {
   type ToastId,
   type ToastOptions as AffectToastOptions,
 } from '@renderer/components/affect/toaster'
+import { cn } from '@renderer/lib/utils'
 import { useOverlayStore } from '@renderer/stores/overlays'
 
 /** What a toast reports, which picks its icon and its color. */
@@ -117,6 +118,57 @@ export function progressToast(title: string) {
       }),
     close: () => affectToast.dismiss(id),
   }
+}
+
+let alerts = 0
+/** How long an alert stays: long enough to read and choose, paused under the pointer. */
+const ALERT_MS = 12_000
+
+/**
+ * A warning with a line under it and a row of actions, such as a plan limit nearing its end with
+ * View usage and Switch agent; choosing one closes it. It stays a while, longer under the pointer.
+ */
+export function alertToast(
+  title: string,
+  detail: string,
+  actions: readonly { label: string; onClick: () => void }[],
+  tone: 'warning' | 'danger',
+) {
+  const id = `alert-${++alerts}`
+  const icon = (
+    <HugeiconsIcon
+      icon={Alert02Icon}
+      strokeWidth={1.9}
+      aria-hidden
+      className={cn('size-3.75', tone === 'danger' ? 'text-danger' : 'text-warning')}
+    />
+  )
+  const description = (
+    <span className="flex flex-col gap-2">
+      <span>{detail}</span>
+      <span className="flex flex-wrap gap-1.5">
+        {actions.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            className="h-6 rounded-md bg-subtle px-2 text-small font-medium text-primary outline-none transition-colors duration-(--duration-fast) hover:bg-selected focus-ring"
+            onClick={() => {
+              affectToast.dismiss(id)
+              action.onClick()
+            }}
+          >
+            {action.label}
+          </button>
+        ))}
+      </span>
+    </span>
+  )
+  track((options) => affectToast(title, options), {
+    id,
+    icon,
+    description,
+    duration: ALERT_MS,
+  })
 }
 
 /**

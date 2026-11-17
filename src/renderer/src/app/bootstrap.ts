@@ -95,6 +95,7 @@ import {
   useViewStore,
 } from '@renderer/stores/view'
 import { goneHosts, hostListed, initHostSessions } from './host-sessions'
+import { showLimitAlert } from './limit-alerts'
 import { followWindowTitle } from './window-title'
 
 /** An event of this computer's agent host, or with `hostId` of another host's. */
@@ -150,6 +151,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'agents.signInLink':
       receiveSignInLink(hostId, event.agentId, event.url)
+      return
+    case 'agents.limitAlert':
+      showLimitAlert(event.alert, hostId)
       return
     case 'routine.changed':
       useRoutinesStore.getState().receive(event.routine, hostId)
