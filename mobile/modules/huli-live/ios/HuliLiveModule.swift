@@ -232,8 +232,8 @@ final class LiveActivities {
   }
 }
 
-/// The home-screen widget's snapshot, in the App Group both targets hold; the widget reads it back
-/// and never reaches the computer itself.
+/// The home-screen widget's snapshot, in the App Group both targets hold; the widget, the controls
+/// and the app's Siri intents read it back and never reach the computer themselves.
 enum WidgetData {
   static let key = "huli.widget.snapshot"
 
@@ -244,5 +244,9 @@ enum WidgetData {
     if defaults.string(forKey: key) == json { return }
     defaults.set(json, forKey: key)
     WidgetCenter.shared.reloadAllTimelines()
+    // The 等你处理 control in Control Center shows the count too.
+    if #available(iOS 18.0, *) {
+      ControlCenter.shared.reloadAllControls()
+    }
   }
 }

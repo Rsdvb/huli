@@ -1,5 +1,6 @@
 // Huli's widget extension: the home-screen and Lock Screen widget of the sessions on the paired
-// computer, and the Live Activity of a session's turn or of the requests that wait for the user.
+// computer, the Live Activity of a session's turn or of the requests that wait for the user, and
+// from iOS 18 the controls that open the app (HuliControls.swift).
 
 import SwiftUI
 import WidgetKit
@@ -9,6 +10,10 @@ struct HuliWidgets: WidgetBundle {
   var body: some Widget {
     HuliSessionsWidget()
     HuliLiveActivity()
+    if #available(iOS 18.0, *) {
+      HuliNewSessionControl()
+      HuliWaitingControl()
+    }
   }
 }
 
