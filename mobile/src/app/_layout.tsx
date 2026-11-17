@@ -9,6 +9,7 @@ import { LiveBridge } from '../live/bridge'
 import { LockLayer } from '../lock'
 import { PushBridge } from '../push/bridge'
 import { ShareIntake } from '../share/intake'
+import { NoticeBar } from '../ui/NoticeBar'
 import { useTokens } from '../ui/tokens'
 import { watchUpdates } from '../update'
 
@@ -54,6 +55,7 @@ export default function Layout() {
         <LinkBridge />
         <LiveBridge />
         <ShareIntake />
+        <NoticeBar />
         <LockLayer />
       </HostProvider>
     </SafeAreaProvider>

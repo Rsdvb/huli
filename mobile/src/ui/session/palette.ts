@@ -21,6 +21,8 @@ export interface SessionPalette {
   warningSoft: string
   dangerSoft: string
   successSoft: string
+  /** A merged pull request, the desktop's merged color. */
+  merged: string
   /** Under a picture viewer. */
   scrim: string
   /** Over an attachment while it uploads. */
@@ -60,6 +62,7 @@ const dark: SessionPalette = {
   warningSoft: 'rgba(245,181,68,0.14)',
   dangerSoft: 'rgba(255,107,94,0.13)',
   successSoft: 'rgba(61,210,122,0.13)',
+  merged: '#B798D4',
   scrim: '#000000',
   onScrim: '#FFFFFF',
   scrimFill: 'rgba(255,255,255,0.16)',
@@ -104,6 +107,7 @@ const light: SessionPalette = {
   warningSoft: 'rgba(201,133,0,0.11)',
   dangerSoft: 'rgba(217,58,43,0.09)',
   successSoft: 'rgba(34,163,90,0.10)',
+  merged: '#6F4C8E',
   scrim: '#000000',
   onScrim: '#FFFFFF',
   scrimFill: 'rgba(255,255,255,0.16)',
