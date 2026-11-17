@@ -100,5 +100,5 @@ for (const identifier of bundles) {
   writeFileSync(`${dir}/${profile.attributes.uuid}.mobileprovision`, Buffer.from(profile.attributes.profileContent, 'base64'))
   out.profiles[identifier] = { name, uuid: profile.attributes.uuid }
 }
-writeFileSync(`${HOME}/huli/out/signing.json`, JSON.stringify(out, null, 2))
+writeFileSync(`${process.env.OUT ?? `${HOME}/huli/out`}/signing.json`, JSON.stringify(out, null, 2))
 console.log(JSON.stringify(out, null, 2))

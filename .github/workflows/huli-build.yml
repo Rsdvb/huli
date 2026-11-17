@@ -120,6 +120,43 @@ jobs:
             cloud/deploy/install.sh
           if-no-files-found: error
 
+  # The phone app for iOS, on the owner's Mac: signed through the App Store Connect API key kept
+  # there, uploaded to TestFlight and put on its public link. Its failure never holds anything back.
+  ios:
+    name: iOS
+    needs: version
+    if: vars.HULI_MAC_RUNNER == 'true'
+    runs-on: [self-hosted, macOS, huli]
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - name: Set the version
+        run: |
+          node -e '
+            const fs = require("fs"); const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            app.expo.version = process.env.VERSION;
+            app.expo.ios.buildNumber = process.env.RUN;
+            fs.writeFileSync("app.json", JSON.stringify(app, null, 2));'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RUN: ${{ github.run_number }}
+      - run: CI=1 npx expo prebuild --platform ios --no-install --clean
+      - name: Build, sign and upload
+        run: bash ../tools/huli/ios/build-ios.sh
+        env:
+          APP_DIR: ${{ github.workspace }}/mobile
+          HULI_TOOLS: ${{ github.workspace }}/tools/huli/ios
+          OUT: ${{ runner.temp }}/ios
+      - name: Put it on TestFlight's public link
+        run: node ../tools/huli/ios/publish-testflight.mjs "$RUN" "Huli $VERSION 自动构建，包含电脑端和官方 Kettu 的最新改动。"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RUN: ${{ github.run_number }}
+
   # The phone app for Android, signed with Huli's own key (kept off the repository) and installed
   # straight from Huli's update channel. Its failure never holds the desktop release back.
   android:
