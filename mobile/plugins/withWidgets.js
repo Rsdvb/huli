@@ -25,7 +25,10 @@ const EMBED = 'Embed Foundation Extensions'
 const MIN_IOS = '16.2'
 
 const swiftFiles = () => [
-  ...fs.readdirSync(SOURCES).filter((name) => name.endsWith('.swift')).sort(),
+  ...fs
+    .readdirSync(SOURCES)
+    .filter((name) => name.endsWith('.swift'))
+    .sort(),
   path.basename(SHARED),
 ]
 
