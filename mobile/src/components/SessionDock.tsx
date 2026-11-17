@@ -1,11 +1,11 @@
-// What sits around a session's composer: the messages queued behind the running turn, each to take
-// back, steer in or send now; and the session's permission mode, model and effort as the agent
-// reports them, each a button of the composer's own row that opens its menu.
+// What sits around a session's composer: the messages queued behind the running turn, each to send
+// now, edit in the composer or remove; and the session's permission mode, model and effort as the
+// agent reports them, each a button of the composer's own row that opens its menu.
 
 import { useState, type RefObject } from 'react'
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
-import type { ConfigOption, QueuedPrompt, SessionView } from '@shared/thread'
+import type { ConfigOption, QueuedPrompt, SessionView, UserContent } from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
 import { useHost } from '../host'
 import { errorText } from '../sessions'
@@ -227,8 +227,17 @@ export function ModelChip(props: {
   )
 }
 
-/** The messages queued behind the running turn, newest last. */
-export function QueueStack(props: { sessionId: string; session: SessionView | undefined }) {
+/**
+ * The messages queued behind the running turn, numbered in the order they go. Each can go now
+ * while a turn runs (into the turn where the agent takes that, else stopping it first, which is
+ * asked), come back to the box to edit, attachments and all, or be removed with its attachments.
+ */
+export function QueueStack(props: {
+  sessionId: string
+  session: SessionView | undefined
+  /** Puts a taken-back message in the composer. */
+  onEdit(content: UserContent[]): void
+}) {
   const { c, s } = useSessionTokens()
   const { link, agents, state } = useHost()
   const [busyItem, setBusyItem] = useState<string | null>(null)
@@ -238,19 +247,57 @@ export function QueueStack(props: { sessionId: string; session: SessionView | un
   const connected = state.kind === 'connected'
   const running = session.status === 'running' || session.status === 'awaiting_permission'
   const steering = !!agents.get(session.agentId)?.capabilities.steering
+  const count = session.queue.length
 
-  const queueAction = (
-    item: QueuedPrompt,
-    method: 'sessions.unqueue' | 'sessions.steer' | 'sessions.sendNow',
-    failed: string,
-  ) => {
+  const act = (item: QueuedPrompt, work: () => Promise<unknown>, failed: string) => {
     haptic.tap()
     setBusyItem(item.id)
-    link
-      .request(method, { sessionId, itemId: item.id })
+    work()
       .catch((error: unknown) => Alert.alert(failed, errorText(error)))
       .finally(() => setBusyItem(null))
   }
+
+  const sendNow = (item: QueuedPrompt) => {
+    const go = () =>
+      act(
+        item,
+        () => link.request('sessions.sendNow', { sessionId, itemId: item.id }),
+        '没能立即发送',
+      )
+    if (steering) return go()
+    Alert.alert('立即发送？', '停止本轮，接着发送这条消息', [
+      { text: '取消', style: 'cancel' },
+      { text: '停止并发送', style: 'destructive', onPress: go },
+    ])
+  }
+
+  const edit = (item: QueuedPrompt) =>
+    act(
+      item,
+      () =>
+        link
+          .request('sessions.unqueue', { sessionId, itemId: item.id })
+          .then(() => props.onEdit(item.content)),
+      '没能撤回',
+    )
+
+  const remove = (item: QueuedPrompt) =>
+    act(
+      item,
+      () =>
+        link
+          .request('sessions.unqueue', { sessionId, itemId: item.id })
+          .then(() =>
+            Promise.all(
+              item.content.flatMap((part) =>
+                part.type === 'ref' && part.ref.kind === 'attachment'
+                  ? [link.request('attachments.remove', { id: part.ref.attachment.id })]
+                  : [],
+              ),
+            ),
+          ),
+      '没能移除',
+    )
 
   const resume = () => {
     link
@@ -259,37 +306,59 @@ export function QueueStack(props: { sessionId: string; session: SessionView | un
   }
 
   return (
-    <View style={styles.queue}>
+    <View style={styles.queue} accessibilityLabel={`排队中的消息：${count} 条`}>
       <View style={styles.queueHead}>
         <Text style={[styles.queueTitle, { color: c.textSecondary }]}>
-          排队中 {session.queue.length} 条
+          {count} 条排队
           <Text style={{ color: c.textTertiary, fontWeight: '400' }}>
             {session.queuePaused ? ' · 已暂停' : running ? ' · 本轮结束后发送' : ''}
           </Text>
         </Text>
         {session.queuePaused && (
-          <Pressable onPress={resume} hitSlop={8} disabled={!connected}>
-            <Text style={[styles.action, { color: c.accent }]}>继续发送</Text>
+          <Pressable onPress={resume} hitSlop={8} disabled={!connected} accessibilityRole="button">
+            <Text style={[styles.action, { color: c.accent }]}>继续</Text>
           </Pressable>
         )}
       </View>
-      {session.queue.map((item) => {
+      {session.queue.map((item, index) => {
         const text = promptText(item)
         const attachments = attachmentCount(item)
         const disabled = !connected || busyItem !== null
-        const action = (label: string, onPress: () => void, strong = false) => (
+        const action = (
+          label: string,
+          onPress: () => void,
+          options: { strong?: boolean; hint?: string; danger?: boolean } = {},
+        ) => (
           <PressScale
             onPress={onPress}
             disabled={disabled}
             hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            {...(options.hint ? { accessibilityHint: options.hint } : {})}
             style={[
               styles.actionPill,
-              { backgroundColor: strong ? s.accentSoft : c.fill, opacity: disabled ? 0.5 : 1 },
+              {
+                backgroundColor: options.strong ? s.accentSoft : c.fill,
+                opacity: disabled ? 0.5 : 1,
+              },
             ]}
           >
-            <Text style={[styles.action, { color: strong ? c.accent : c.text }]}>{label}</Text>
+            <Text
+              style={[
+                styles.action,
+                { color: options.strong ? c.accent : options.danger ? c.danger : c.text },
+              ]}
+            >
+              {label}
+            </Text>
           </PressScale>
         )
+        const from = item.device
+          ? `来自 ${item.device.name}`
+          : item.from
+            ? `来自「${item.from.title}」`
+            : null
         return (
           <Reanimated.View
             entering={QUEUE_IN}
@@ -298,37 +367,40 @@ export function QueueStack(props: { sessionId: string; session: SessionView | un
             key={item.id}
             style={[styles.queued, { backgroundColor: s.dockCard, borderColor: c.border }]}
           >
-            <Text style={[styles.queuedText, { color: c.text }]} numberOfLines={2}>
-              {text || (attachments > 0 ? '' : '（空消息）')}
-              {attachments > 0 && (
-                <Text style={{ color: c.textSecondary }}>
-                  {text ? ' · ' : ''}
-                  {attachments} 个附件
-                </Text>
-              )}
-            </Text>
-            <View style={styles.queuedFoot}>
-              <Text style={[styles.from, { color: c.textTertiary }]} numberOfLines={1}>
-                {item.device
-                  ? `来自 ${item.device.name}`
-                  : item.from
-                    ? `来自「${item.from.title}」`
-                    : ''}
+            <View style={styles.queuedHead}>
+              <View
+                style={[styles.number, { backgroundColor: c.fill }]}
+                accessibilityLabel={`${index + 1} / ${count}`}
+              >
+                <Text style={[styles.numberText, { color: c.textSecondary }]}>{index + 1}</Text>
+              </View>
+              <Text style={[styles.queuedText, { color: c.text }]} numberOfLines={2}>
+                {text || (attachments > 0 ? '' : '附件')}
+                {attachments > 0 && (
+                  <Text style={{ color: c.textSecondary }}>
+                    {text ? ' · ' : ''}
+                    {attachments} 个附件
+                  </Text>
+                )}
               </Text>
+            </View>
+            {from && (
+              <Text style={[styles.from, { color: c.textTertiary }]} numberOfLines={1}>
+                {from}
+              </Text>
+            )}
+            <View style={styles.queuedFoot}>
               {busyItem === item.id ? (
                 <ActivityIndicator size="small" color={c.textSecondary} />
               ) : (
                 <>
-                  {action('撤回', () => queueAction(item, 'sessions.unqueue', '没能撤回'))}
+                  {action('移除', () => remove(item), { danger: true })}
+                  {action('在输入框中编辑', () => edit(item))}
                   {running &&
-                    steering &&
-                    action('插话', () => queueAction(item, 'sessions.steer', '没能插话'))}
-                  {(running || session.queuePaused) &&
-                    action(
-                      '立即发送',
-                      () => queueAction(item, 'sessions.sendNow', '没能立即发送'),
-                      true,
-                    )}
+                    action('立即发送', () => sendNow(item), {
+                      strong: true,
+                      hint: steering ? '立即插入当前对话' : '停止本轮，接着发送这条消息',
+                    })}
                 </>
               )}
             </View>
@@ -370,10 +442,21 @@ const styles = StyleSheet.create({
   queue: { gap: 8 },
   queueHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
   queueTitle: { flex: 1, fontSize: 13, fontWeight: '600' },
-  queued: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 12, gap: 10 },
-  queuedText: { fontSize: 15, lineHeight: 21 },
-  queuedFoot: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  from: { flex: 1, fontSize: 12 },
+  queued: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 12, gap: 8 },
+  queuedHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  number: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -1,
+  },
+  numberText: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  queuedText: { flex: 1, fontSize: 15, lineHeight: 21 },
+  queuedFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
+  from: { fontSize: 12, paddingLeft: 32 },
   actionPill: { borderRadius: 999, paddingHorizontal: 12, height: 30, justifyContent: 'center' },
   action: { fontSize: 13, fontWeight: '600' },
 })
