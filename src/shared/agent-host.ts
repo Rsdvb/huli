@@ -22,6 +22,7 @@ import type { ContextBreakdown } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
+import type { KettuImportResult, KettuImportScan } from './kettu-import'
 import type {
   CatalogServer,
   ConnectStart,
@@ -1614,6 +1615,10 @@ export interface HostContract {
     params: { sessionId: string; entryId: string }
     result: void
   }
+  // Huli: an official Kettu's sessions on this computer, read from a copy of its index.
+  'kettuImport.scan': { params: void; result: KettuImportScan }
+  // Imports them by Kettu's ids, telling every port `kettuImport.progress` as it goes.
+  'kettuImport.run': { params: { sessionIds: string[] }; result: KettuImportResult }
 }
 
 export type HostMethod = keyof HostContract
@@ -1896,6 +1901,8 @@ export const HOST_METHODS = [
   'computer.handBack',
   'computer.show',
   'computer.declineSetup',
+  'kettuImport.scan',
+  'kettuImport.run',
 ] as const satisfies readonly HostMethod[]
 
 /** One that has a session in front: the host's own windows as one, or a paired device. */
@@ -1979,6 +1986,8 @@ export type HostEvent =
   | { type: 'browser.turnEnded'; sessionId: string }
   // To that port: Done or Skip on the card of the step the agent asked for on the page.
   | { type: 'browser.askAnswered'; sessionId: string; outcome: ControlOutcome }
+  // Huli: a `kettuImport.run` came to its `done`th session of `total`, whose title is `title`.
+  | { type: 'kettuImport.progress'; done: number; total: number; title: string | null }
 
 export interface AgentsApi {
   request<M extends HostMethod>(method: M, params: HostParams<M>): Promise<HostResult<M>>
