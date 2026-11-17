@@ -8,6 +8,7 @@ import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import type { ThreadEntry } from '@shared/thread'
 import { HuliLive } from '../../modules/huli-live'
+import { isMuted } from '../push/muted'
 import { needsYou, sessionTitle } from '../sessions'
 import { liveSnapshot } from './activities'
 
@@ -235,8 +236,9 @@ async function reconcile(input: LocalInput): Promise<void> {
   }
   const trackedId = tracked?.sessionId
   const rank = (s: SessionSummary): number => (busyAs(s) === 'waiting' ? 0 : 1)
+  // A session muted on this phone still counts, but never takes the Lock Screen.
   const focus = busy
-    .filter((s) => !declined.has(turnOf(s)))
+    .filter((s) => !declined.has(turnOf(s)) && !isMuted(s.id))
     .sort(
       (a, b) =>
         rank(a) - rank(b) ||
