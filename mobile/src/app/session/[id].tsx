@@ -51,6 +51,7 @@ import { haptic } from '../../ui/session/feedback'
 import { baseName, relativePath } from '../../ui/session/format'
 import { G } from '../../ui/session/icons'
 import { GlassCapsule } from '../../ui/Glass'
+import { NATIVE_MENUS, NativeMenu } from '../../ui/session/NativeMenu'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
 import { toneColor, usageTone } from '../../ui/session/limits'
 import { useSessionTokens } from '../../ui/session/palette'
@@ -161,7 +162,8 @@ export default function SessionScreen() {
   })
   const muted = useMuted(id)
   const terminalAllowed = useTerminalAllowed(link, host.state)
-  const agentOptions = useAgentOptions(link, menu.openId === 'model')
+  // A system menu says nothing as it opens, so what it shows is read beforehand there.
+  const agentOptions = useAgentOptions(link, NATIVE_MENUS || menu.openId === 'model')
 
   const rows = useMemo(() => (view.thread ? threadRows(view.thread).reverse() : []), [view.thread])
 
@@ -205,7 +207,7 @@ export default function SessionScreen() {
   }, [newest, away])
 
   // What the ⋯ menu counts is read as it opens.
-  const moreOpen = menu.openId === 'more-menu'
+  const moreOpen = NATIVE_MENUS || menu.openId === 'more-menu'
   useEffect(() => {
     if (!moreOpen || !connected) return
     let alive = true
@@ -585,34 +587,52 @@ export default function SessionScreen() {
           running={running}
           onStop={stop}
           onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
+          attachMenu={(anchor) => ({
+            root: 'attach',
+            pages,
+            popover: {
+              pages: ['mention'],
+              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+            },
+          })}
           left={
-            <ModeButton
-              mode={config.mode}
-              busy={config.setting !== null && config.setting === config.mode?.option.id}
-              disabled={!connected || config.setting !== null}
-              anchor={modeAnchor}
-              onPress={() => menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })}
-            />
+            <NativeMenu source={{ root: 'mode', pages }} disabled={!connected}>
+              <ModeButton
+                mode={config.mode}
+                busy={config.setting !== null && config.setting === config.mode?.option.id}
+                disabled={!connected || config.setting !== null}
+                anchor={modeAnchor}
+                onPress={() =>
+                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
+                }
+              />
+            </NativeMenu>
           }
           right={
             config.model || config.effort || switchable ? (
-              <ModelChip
-                agentId={pending?.id ?? agentId}
-                harness={pending?.harnessId ?? config.harness}
-                model={config.model?.name ?? (config.model ? null : (agent?.name ?? null))}
-                effort={config.effort?.name ?? null}
-                pending={pending?.name ?? null}
-                busy={
-                  config.setting !== null &&
-                  (config.setting === config.model?.option.id ||
-                    config.setting === config.effort?.option.id)
-                }
-                disabled={!connected}
-                anchor={modelAnchor}
-                onPress={() =>
-                  menu.open('model', modelAnchor, { placement: 'above', align: 'end', width: 340 })
-                }
-              />
+              <NativeMenu source={{ root: 'model', pages }} disabled={!connected}>
+                <ModelChip
+                  agentId={pending?.id ?? agentId}
+                  harness={pending?.harnessId ?? config.harness}
+                  model={config.model?.name ?? (config.model ? null : (agent?.name ?? null))}
+                  effort={config.effort?.name ?? null}
+                  pending={pending?.name ?? null}
+                  busy={
+                    config.setting !== null &&
+                    (config.setting === config.model?.option.id ||
+                      config.setting === config.effort?.option.id)
+                  }
+                  disabled={!connected}
+                  anchor={modelAnchor}
+                  onPress={() =>
+                    menu.open('model', modelAnchor, {
+                      placement: 'above',
+                      align: 'end',
+                      width: 340,
+                    })
+                  }
+                />
+              </NativeMenu>
             ) : null
           }
           footer={
@@ -647,6 +667,7 @@ export default function SessionScreen() {
         title={title}
         subtitle={[agent?.name, project].filter(Boolean).join(' · ')}
         titleAnchor={titleAnchor}
+        {...(summary ? { titleMenu: { root: 'title', pages } } : {})}
         {...(summary
           ? {
               onTitlePress: () =>
@@ -659,17 +680,23 @@ export default function SessionScreen() {
           : {})}
         right={
           <View ref={moreAnchor} collapsable={false}>
-            <RoundButton
-              tone="glass"
-              size={44}
-              onPress={() =>
-                menu.open('more-menu', moreAnchor, { placement: 'below', align: 'end', width: 290 })
-              }
-              disabled={!summary}
-              accessibilityLabel="文件、改动、Artifacts、终端和子会话"
-            >
-              <Icon icon={G.more} size={18} color={c.text} weight="bold" />
-            </RoundButton>
+            <NativeMenu source={{ root: 'more-menu', pages }} disabled={!summary}>
+              <RoundButton
+                tone="glass"
+                size={44}
+                onPress={() =>
+                  menu.open('more-menu', moreAnchor, {
+                    placement: 'below',
+                    align: 'end',
+                    width: 290,
+                  })
+                }
+                disabled={!summary}
+                accessibilityLabel="文件、改动、Artifacts、终端和子会话"
+              >
+                <Icon icon={G.more} size={18} color={c.text} weight="bold" />
+              </RoundButton>
+            </NativeMenu>
           </View>
         }
       />

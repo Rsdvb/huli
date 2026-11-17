@@ -199,6 +199,13 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
       entries.push({
         kind: 'custom',
         key: 'effort',
+        picker: {
+          label: optionName(effort.name),
+          options: levels.map((l) => ({ key: l.value, label: optionName(l.name) })),
+          value: shown ?? '',
+          onChange: (value) => control.set(effort, value),
+          disabled: locked,
+        },
         node: (
           <View
             style={[styles.effort, locked && { opacity: 0.4 }]}

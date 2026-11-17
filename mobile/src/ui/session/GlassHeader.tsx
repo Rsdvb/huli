@@ -3,7 +3,7 @@
 // control is glass of its own, the title a capsule; otherwise the bar is frosted as a whole.
 
 import type { ReactNode, RefObject } from 'react'
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import { router } from 'expo-router'
@@ -11,7 +11,8 @@ import { GlassCapsule, ScrollEdge, useGlassMode } from '../Glass'
 import { useSessionPane } from '../../components/SessionPane'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
-import type { ViewHandle } from './Popover'
+import { NativeMenu } from './NativeMenu'
+import type { MenuSource, ViewHandle } from './Popover'
 import { PressScale, RoundButton } from './Press'
 
 export const HEADER_BAR = 60
@@ -36,6 +37,8 @@ export function GlassHeader(props: {
   /** A sheet presented modally: a close button instead of back, and no status bar room. */
   modal?: boolean
   onTitlePress?: () => void
+  /** The title's menu as the system's menu where there is one, in place of onTitlePress. */
+  titleMenu?: MenuSource
   /** Where a menu the title opens is anchored. */
   titleAnchor?: RefObject<ViewHandle | null>
   right?: ReactNode
@@ -43,6 +46,8 @@ export function GlassHeader(props: {
   const { c, scheme } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const mode = useGlassMode()
+  // A system menu sizes its label by the label's content, so the title is held to a width of its own.
+  const titleWidth = useWindowDimensions().width - 150
   // In the iPad split's pane there is nothing to go back to; the button empties the pane.
   const pane = useSessionPane()
   const top = props.modal && Platform.OS === 'ios' ? 8 : insets.top
@@ -54,7 +59,7 @@ export function GlassHeader(props: {
     <View
       ref={props.titleAnchor}
       collapsable={false}
-      style={{ alignItems: 'center', opacity: pressed ? 0.55 : 1, maxWidth: '100%' }}
+      style={{ alignItems: 'center', opacity: pressed ? 0.55 : 1, maxWidth: titleWidth }}
     >
       <View style={styles.titleRow}>
         <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
@@ -119,33 +124,35 @@ export function GlassHeader(props: {
           )}
         </RoundButton>
         <View style={styles.titleBox} pointerEvents="box-none">
-          {liquid ? (
-            <PressScale
-              onPress={props.onTitlePress}
-              disabled={!props.onTitlePress}
-              accessibilityRole={props.onTitlePress ? 'button' : 'header'}
-              hitSlop={4}
-              outerStyle={styles.titleCapsuleOuter}
-            >
-              <GlassCapsule
-                interactive={!!props.onTitlePress}
-                height={44}
-                style={styles.titleCapsule}
+          <NativeMenu source={props.titleMenu ?? null}>
+            {liquid ? (
+              <PressScale
+                onPress={props.onTitlePress}
+                disabled={!props.onTitlePress}
+                accessibilityRole={props.onTitlePress ? 'button' : 'header'}
+                hitSlop={4}
+                outerStyle={styles.titleCapsuleOuter}
               >
-                {titleContent(false)}
-              </GlassCapsule>
-            </PressScale>
-          ) : (
-            <Pressable
-              style={styles.titlePlain}
-              onPress={props.onTitlePress}
-              disabled={!props.onTitlePress}
-              accessibilityRole={props.onTitlePress ? 'button' : 'header'}
-              hitSlop={4}
-            >
-              {({ pressed }) => titleContent(pressed)}
-            </Pressable>
-          )}
+                <GlassCapsule
+                  interactive={!!props.onTitlePress}
+                  height={44}
+                  style={styles.titleCapsule}
+                >
+                  {titleContent(false)}
+                </GlassCapsule>
+              </PressScale>
+            ) : (
+              <Pressable
+                style={styles.titlePlain}
+                onPress={props.onTitlePress}
+                disabled={!props.onTitlePress}
+                accessibilityRole={props.onTitlePress ? 'button' : 'header'}
+                hitSlop={4}
+              >
+                {({ pressed }) => titleContent(pressed)}
+              </Pressable>
+            )}
+          </NativeMenu>
         </View>
         <View style={styles.right}>{props.right}</View>
       </View>
