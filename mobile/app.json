@@ -33,9 +33,17 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Huli 用相机扫描电脑上显示的配对二维码。",
+          "cameraPermission": "Huli 用相机扫描电脑上显示的配对二维码，也用来拍照发给电脑上的智能体。",
           "microphonePermission": false,
           "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Huli 从相册选你挑的图片，发给电脑上的智能体。",
+          "cameraPermission": "Huli 用相机扫描电脑上显示的配对二维码，也用来拍照发给电脑上的智能体。",
+          "microphonePermission": false
         }
       ],
       "expo-router"
