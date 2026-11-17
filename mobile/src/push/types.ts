@@ -1,16 +1,10 @@
 // What notifications need of the phone's system, behind one face so the screens never see which
-// transport a platform uses: APNs on iOS now, Android's own later.
+// transport a platform uses: APNs on iOS now, Android's own later. Presses on a notification are
+// taken by responses.ts, whatever the platform.
 
 import type { PushTarget } from '@shared/remote/push'
 
 export type PushPermission = 'granted' | 'denied' | 'undetermined'
-
-/** A notification the user opened, as the notification extension left it. */
-export interface OpenedNotification {
-  /** The host's id. */
-  host: string
-  sessionId: string | null
-}
 
 /** What opens and checks a host's notifications where the app is not running. */
 export interface PushKeys {
@@ -31,8 +25,8 @@ export interface PushPlatform {
   target(): Promise<PushTarget | null>
   /** The system changed the address. */
   onTargetChange(listener: () => void): () => void
+  /** Adds the host's key to those the extension keeps, beside other paired computers' keys. */
   share(keys: PushKeys): Promise<void>
-  unshare(): Promise<void>
-  /** Each notification the user opens, the one that launched the app included. */
-  onOpen(listener: (opened: OpenedNotification) => void): () => void
+  /** Removes one host's key, by its id. */
+  unshare(host: string): Promise<void>
 }

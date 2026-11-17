@@ -9,6 +9,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { BlurView } from 'expo-blur'
 import { router } from 'expo-router'
 import { GlassCapsule, useGlassMode } from '../Glass'
+import { useSessionPane } from '../../components/SessionPane'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
 import type { ViewHandle } from './Popover'
@@ -64,6 +65,8 @@ export function GlassHeader(props: {
   const { c, scheme } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const mode = useGlassMode()
+  // In the iPad split's pane there is nothing to go back to; the button empties the pane.
+  const pane = useSessionPane()
   const top = props.modal && Platform.OS === 'ios' ? 8 : insets.top
   // With Liquid Glass the bar itself goes, as iOS 26's do: its controls float as glass of their
   // own over a soft fade at the scroll edge. Otherwise the whole bar is frosted.
@@ -122,10 +125,10 @@ export function GlassHeader(props: {
         <RoundButton
           tone="glass"
           size={44}
-          onPress={props.modal ? () => router.back() : goBack}
-          accessibilityLabel={props.modal ? '关闭' : '返回'}
+          onPress={props.modal ? () => router.back() : (pane?.close ?? goBack)}
+          accessibilityLabel={props.modal || pane ? '关闭' : '返回'}
         >
-          {props.modal ? (
+          {props.modal || pane ? (
             <Icon icon={G.close} size={17} color={c.text} weight="semibold" />
           ) : (
             <Icon

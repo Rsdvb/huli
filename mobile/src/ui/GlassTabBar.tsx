@@ -130,6 +130,8 @@ export function GlassTabBar(
     items: Record<string, TabItem>
     onPlus(): void
     plusDisabled?: boolean
+    /** Where the bar sits on a wide window (iPad): under the tab's column instead of across. */
+    frame?: { left: number; width: number }
   },
 ) {
   const { c } = useTokens()
@@ -187,7 +189,14 @@ export function GlassTabBar(
 
   // The group holds only the row of glass, so the room around it lets touches through to the list.
   return (
-    <View pointerEvents="box-none" style={[styles.dock, { paddingBottom: bottom }]}>
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.dock,
+        { paddingBottom: bottom },
+        props.frame && { left: props.frame.left, right: undefined, width: props.frame.width },
+      ]}
+    >
       <GlassGroup spacing={space.sm} style={styles.row}>
         <Animated.View
           pointerEvents={small ? 'none' : 'auto'}

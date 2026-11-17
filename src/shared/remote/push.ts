@@ -244,14 +244,27 @@ export interface PushActions {
   deny?: { optionId: string; label: string }
 }
 
+/**
+ * An ask's only question a notification may answer: `permissions.respond` with `answers` for
+ * question 0, a choice by its position or, when `text`, the user's own words.
+ */
+export interface PushQuestion {
+  choices: string[]
+  text: boolean
+}
+
 /** What the host notifies about, as the sealed content says it. */
 export type PushEvent =
-  /** A request waits: `requestId` answers it with `permissions.respond`, `actions` when they fit. */
+  /**
+   * A request waits: `requestId` answers it with `permissions.respond`, `actions` or `question`
+   * when they fit.
+   */
   | {
       kind: 'permission'
       sessionId: string
       requestId?: string
       actions?: PushActions
+      question?: PushQuestion
     }
   | { kind: 'turn-ended' | 'error' | 'routine-ended'; sessionId: string }
   /** An agent's routines paused near a plan limit; it opens the Routines page. */

@@ -6,7 +6,13 @@
 // notifications merge into one, and one that no longer applies, a request answered elsewhere or a
 // turn seen since, is withdrawn. Requests that wait also drive each device's Live Activity.
 
-import type { DevicePush, NotificationChoices, PushActions, PushEvent } from '@shared/remote/push'
+import type {
+  DevicePush,
+  NotificationChoices,
+  PushActions,
+  PushEvent,
+  PushQuestion,
+} from '@shared/remote/push'
 
 export type AttentionKind =
   'permission' | 'turn-ended' | 'error' | 'routine-ended' | 'routine-paused'
@@ -23,6 +29,8 @@ export interface Attention {
   requestId?: string
   /** The one-time answers a notification may offer, when the request fits in one. */
   actions?: PushActions
+  /** The ask's only question, when a notification may answer it. */
+  question?: PushQuestion
   /** The session was in front of a window or a device when this happened. */
   inFront: boolean
   /** The devices that had it in front then. */
@@ -103,6 +111,7 @@ function pushEvent(attention: Attention): PushEvent {
         sessionId: attention.sessionId!,
         ...(attention.requestId ? { requestId: attention.requestId } : {}),
         ...(attention.actions ? { actions: attention.actions } : {}),
+        ...(attention.question ? { question: attention.question } : {}),
       }
     case 'routine-paused':
       return { kind: 'routine-paused', agentId: attention.agentId! }

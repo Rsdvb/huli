@@ -129,8 +129,17 @@ export const type = {
   lead: { fontSize: 22, lineHeight: 31, fontWeight: '400' },
   /** A list row's title. */
   rowTitle: { fontSize: 17, lineHeight: 23, fontWeight: '500' },
+  /** The top bar's computer pill. */
+  bar: { fontSize: 16, lineHeight: 21, fontWeight: '500' },
   section: { fontSize: 17, lineHeight: 23, fontWeight: '500' },
 } as const
+
+/**
+ * How far text follows the system's text size (Dynamic Type), as a multiple of its size here:
+ * body text up to `body`; dense controls (chips, pills, segmented controls, bars, headers) and
+ * type that is large already up to `dense`. runtime/text.ts applies them to every Text.
+ */
+export const FONT_SCALE = { body: 1.6, dense: 1.3 } as const
 
 /** Fixed sizes of the shell: hit targets, the top bar and the floating tab bar. */
 export const size = {
@@ -138,6 +147,12 @@ export const size = {
   iconButton: 48,
   avatar: 40,
   avatarSmall: 28,
+  /** A session row's agent avatar. */
+  rowAvatar: 30,
+  /** The top bar: the account avatar, the computer pill's height, the round search button. */
+  barAvatar: 34,
+  barPill: 34,
+  barButton: 44,
   tabBar: 64,
   tabItem: 56,
   icon: 22,

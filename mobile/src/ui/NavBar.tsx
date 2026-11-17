@@ -7,7 +7,7 @@ import { router } from 'expo-router'
 import { GlassButton } from './Glass'
 import { Icon } from './Icon'
 import { FloatingHeader, type CollapsingHeader } from './ScrollHeader'
-import { type as typeScale, useTokens } from './tokens'
+import { FONT_SCALE, type as typeScale, useTokens } from './tokens'
 
 export function NavBar(props: {
   header: CollapsingHeader
@@ -32,6 +32,7 @@ export function NavBar(props: {
       <View style={styles.titleWrap} pointerEvents="none">
         <Animated.Text
           numberOfLines={1}
+          maxFontSizeMultiplier={FONT_SCALE.dense}
           style={[
             typeScale.headline,
             { color: c.text, opacity: props.titleAlways ? 1 : props.header.progress },

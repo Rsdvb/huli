@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { haptic } from './haptics'
 import { useReduceMotion } from './Press'
-import { motion, radius, type as typeScale, useTokens } from './tokens'
+import { FONT_SCALE, motion, radius, type as typeScale, useTokens } from './tokens'
 
 export interface Segment<K extends string> {
   key: K
@@ -78,6 +78,7 @@ export function SegmentedControl<K extends string>(props: {
           >
             <Text
               numberOfLines={1}
+              maxFontSizeMultiplier={FONT_SCALE.dense}
               style={[
                 typeScale.subhead,
                 { color: on ? c.text : c.textSecondary, fontWeight: on ? '600' : '500' },
@@ -95,7 +96,7 @@ export function SegmentedControl<K extends string>(props: {
 const styles = StyleSheet.create({
   track: {
     flexDirection: 'row',
-    height: 40,
+    minHeight: 40,
     borderRadius: radius.pill,
     padding: INSET,
   },

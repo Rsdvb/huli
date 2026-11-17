@@ -243,13 +243,23 @@ export interface AttentionAnswer {
 }
 
 /**
+ * An ask's only question when a notification can answer it: its choices' labels, by position,
+ * and whether the user may write an answer of their own.
+ */
+export interface AttentionQuestion {
+  choices: string[]
+  text: boolean
+}
+
+/**
  * The request behind a permission's attention: the id `host:waiting` lists it under while it
- * waits, and the one-time answers when the request fits in a notification.
+ * waits, and the one-time answers or the question when the request fits in a notification.
  */
 export interface AttentionRequest {
   id: string
   allow?: AttentionAnswer
   deny?: AttentionAnswer
+  question?: AttentionQuestion
 }
 
 /** Who had the session in front when it happened: any window or device, and which devices. */

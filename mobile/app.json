@@ -9,6 +9,7 @@
     "scheme": "huli",
     "ios": {
       "supportsTablet": true,
+      "requireFullScreen": false,
       "bundleIdentifier": "io.github.rsdvb.huli",
       "appleTeamId": "Z5C6TTY2YF",
       "entitlements": {
@@ -53,7 +54,17 @@
         { "faceIDPermission": "Huli 用面容 ID 在你回到 App 时解锁，不让别人看到你的会话。" }
       ],
       ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
-      "./plugins/withNotificationService"
+      "./plugins/withNotificationService",
+      "./plugins/withWidgets",
+      "./plugins/withShareExtension",
+      [
+        "expo-share-intent",
+        {
+          "disableIOS": true,
+          "androidIntentFilters": ["text/*", "*/*"],
+          "androidMultiIntentFilters": ["*/*"]
+        }
+      ]
     ]
   }
 }

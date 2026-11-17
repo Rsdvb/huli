@@ -194,6 +194,11 @@ function AgentInitial(props: { agentId: string; size: number }) {
 }
 
 /** An agent's own mark, as the shell draws it, or its initial for a harness without one here. */
+/** A harness's mark where only the harness is known, as the share sheet's rows have it. */
+export function AgentMark(props: { harness: HarnessId | undefined; size?: number }) {
+  return <AgentGlyph agentId={props.harness ?? '?'} {...(props.size ? { size: props.size } : {})} />
+}
+
 export function AgentGlyph(props: { agentId: string; harness?: HarnessId; size?: number }) {
   const { c, scheme } = useSessionTokens()
   const size = props.size ?? 16

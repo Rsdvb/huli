@@ -11,7 +11,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -28,6 +27,7 @@ import { BarChart, ConcentricRings, Donut, Ring } from '../../ui/charts'
 import { EmptyState } from '../../ui/EmptyState'
 import { useMinimizingTabBar } from '../../ui/GlassTabBar'
 import { haptic } from '../../ui/haptics'
+import { useContentWidth } from '../../ui/layout'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { Pill } from '../../ui/Pill'
@@ -286,7 +286,7 @@ export default function Usage() {
   const observed = Math.max(0, ...planAgents.flatMap((a) => a.limits.map((l) => l.observedAt)))
   const anyRefreshing = refreshing.size > 0
 
-  const { width } = useWindowDimensions()
+  const width = useContentWidth()
   const cardWidth = (width - space.xl * 2 - space.md) / 2
 
   const choosePeriod = (next: Period) => {
@@ -694,7 +694,7 @@ export default function Usage() {
     : null
 
   return (
-    <Screen>
+    <Screen readable>
       <Animated.ScrollView
         ref={scroll}
         {...header.scrollProps}

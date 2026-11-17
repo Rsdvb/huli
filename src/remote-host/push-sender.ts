@@ -283,7 +283,7 @@ export class PushSender {
 }
 
 function withoutActions(event: PushEvent): PushEvent {
-  if (event.kind !== 'permission' || !event.actions) return event
+  if (event.kind !== 'permission' || (!event.actions && !event.question)) return event
   const { kind, sessionId, requestId } = event
   return { kind, sessionId, ...(requestId === undefined ? {} : { requestId }) }
 }
