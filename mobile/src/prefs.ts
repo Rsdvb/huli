@@ -19,6 +19,8 @@ export interface Prefs {
   hidePreviews: boolean
   /** Live Activities on the Lock Screen and in the Dynamic Island (iOS). */
   liveActivities: boolean
+  /** A session's sub-agent list keeps the ones that finished, as the desktop's switch does. */
+  showFinishedSubagents: boolean
 }
 
 const DEFAULTS: Prefs = {
@@ -27,6 +29,7 @@ const DEFAULTS: Prefs = {
   lockAfter: 0,
   hidePreviews: false,
   liveActivities: true,
+  showFinishedSubagents: false,
 }
 
 const ITEM = 'huli.prefs'
@@ -51,6 +54,7 @@ function parse(text: string | null): Prefs {
         : 0,
       hidePreviews: raw.hidePreviews === true,
       liveActivities: raw.liveActivities !== false,
+      showFinishedSubagents: raw.showFinishedSubagents === true,
     }
   } catch {
     return DEFAULTS
