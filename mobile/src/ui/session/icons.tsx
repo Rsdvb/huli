@@ -55,8 +55,28 @@ import {
   Wrench,
   X,
   ArrowDown,
+  Archive,
+  ArrowLeftRight,
+  AtSign,
+  Bell,
+  BellOff,
+  CircleSlash,
+  CornerDownRight,
+  Diff,
+  Eye,
+  FolderOpen,
+  Image as ImageIcon,
+  ListPlus,
+  Pin,
+  PinOff,
+  RotateCw,
+  Settings,
+  Share,
+  WifiOff,
+  Zap,
 } from 'lucide-react-native'
 import type { HarnessId } from '@shared/agents'
+import { markFor } from '../agent-marks'
 import type { ToolKind } from '@shared/thread'
 import { extensionOf } from './format'
 import { Icon, type IconSpec } from './Icon'
@@ -104,6 +124,33 @@ export const G = {
   pr: { sf: 'arrow.triangle.pull', lucide: GitPullRequest },
   link: { sf: 'arrow.up.right.square', lucide: ExternalLink },
   terminal: { sf: 'apple.terminal', lucide: SquareTerminal },
+  queue: { sf: 'list.bullet', lucide: ListPlus },
+  photo: { sf: 'photo', lucide: ImageIcon },
+  folderOpen: { sf: 'folder', lucide: FolderOpen },
+  mention: { sf: 'at', lucide: AtSign },
+  slash: { sf: 'slash.circle', lucide: CircleSlash },
+  eye: { sf: 'eye', lucide: Eye },
+  pencil: { sf: 'pencil', lucide: Pencil },
+  bolt: { sf: 'bolt', lucide: Zap },
+  layers: { sf: 'square.stack.3d.up', lucide: Layers },
+  gear: { sf: 'gearshape', lucide: Settings },
+  swap: { sf: 'arrow.left.arrow.right', lucide: ArrowLeftRight },
+  pin: { sf: 'pin', lucide: Pin },
+  unpin: { sf: 'pin.slash', lucide: PinOff },
+  unread: { sf: 'circle', lucide: Circle },
+  read: { sf: 'checkmark.circle', lucide: CircleCheck },
+  mute: { sf: 'bell.slash', lucide: BellOff },
+  unmute: { sf: 'bell', lucide: Bell },
+  archive: { sf: 'archivebox', lucide: Archive },
+  trash: { sf: 'trash', lucide: Trash2 },
+  stopOutline: { sf: 'stop', lucide: Square },
+  child: { sf: 'arrow.turn.down.right', lucide: CornerDownRight },
+  changes: { sf: 'plusminus', lucide: Diff },
+  artifacts: { sf: 'square.on.square', lucide: Copy },
+  share: { sf: 'square.and.arrow.up', lucide: Share },
+  retry: { sf: 'arrow.clockwise', lucide: RotateCw },
+  check: { sf: 'checkmark', lucide: Check },
+  wifiOff: { sf: 'wifi.slash', lucide: WifiOff },
 } satisfies Record<string, IconSpec>
 
 export const TOOL_ICONS: Record<ToolKind, IconSpec> = {
@@ -150,6 +197,19 @@ export function AgentMark(props: { harness: HarnessId | undefined; size?: number
           />
         )
       })}
+    </Svg>
+  )
+}
+
+/** An agent's own mark, as the shell draws it, or the burst for a harness without one here. */
+export function AgentGlyph(props: { agentId: string; harness?: HarnessId; size?: number }) {
+  const { c, scheme } = useSessionTokens()
+  const size = props.size ?? 16
+  const mark = markFor(props.agentId)
+  if (!mark) return <AgentMark harness={props.harness} size={size} />
+  return (
+    <Svg width={size} height={size} viewBox={mark.viewBox}>
+      <mark.Body ink={{ scheme, text: c.text }} />
     </Svg>
   )
 }

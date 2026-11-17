@@ -33,7 +33,7 @@ export default function Layout() {
           >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="session/[id]" options={{ title: '' }} />
-            <Stack.Screen name="new" options={{ title: '新会话', presentation: 'modal' }} />
+            <Stack.Screen name="new" options={{ headerShown: false }} />
             <Stack.Screen name="share" options={{ headerShown: false, presentation: 'modal' }} />
             <Stack.Screen name="settings/index" options={{ headerShown: false }} />
             <Stack.Screen name="settings/computer" options={{ headerShown: false }} />

@@ -1,9 +1,20 @@
 // The message box of a session and of a new one: a rounded card with the text, which the
 // keyboard's dictation fills too, and a row of controls under it; photos and files are uploaded
-// as each is added so the message itself goes at once. While a turn runs and the box is empty, the
-// send button stops the turn.
+// as each is added so the message itself goes at once. While a turn runs, a round stop button
+// sits at the row's end, and once there is something to send, a button that queues it beside it.
+// The screen opens the add menu and reaches the box through its handle: to pick, to mention a
+// project's file and to put a slash command in.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ComponentRef,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+} from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +32,7 @@ import * as ImagePicker from 'expo-image-picker'
 import type { UserContent } from '@shared/thread'
 import {
   ATTACHMENT_LIMIT,
+  attachProjectFile,
   formatBytes,
   isPhoto,
   messageContent,
@@ -37,6 +49,7 @@ import { extensionOf } from '../ui/session/format'
 import { FileMark, G, Icon } from '../ui/session/icons'
 import { useKeyboardShown } from '../ui/session/keyboard'
 import { useSessionTokens } from '../ui/session/palette'
+import type { ViewHandle } from '../ui/session/Popover'
 import { PressScale, RoundButton } from '../ui/session/Press'
 
 export interface ComposerProps {
@@ -59,9 +72,30 @@ export interface ComposerProps {
   /** Under the card: the status line. */
   footer?: ReactNode
   autoFocus?: boolean
+  /** Opens the screen's add menu from the add button; without it the system's menu opens. */
+  onAttach?: (anchor: RefObject<ViewHandle | null>) => void
+  ref?: Ref<ComposerHandle>
+}
+
+export interface ComposerHandle {
+  pickPhotos(): void
+  takePhoto(): void
+  pickFiles(): void
+  /** Mentions a file of the project: `@name` at the caret, and the file attached. */
+  mention(projectPath: string, path: string): void
+  /** Puts `/name ` at the start of the text, in place of a command already there. */
+  command(name: string, names: readonly string[]): void
+  focus(): void
 }
 
 let nextKey = 1
+
+/** The text with `/name ` in front, any command that led it before taken out. */
+function withCommand(text: string, name: string, names: readonly string[]): string {
+  const led = /^\/(\S+)(?=[ \n]|$)/.exec(text)
+  const rest = led && names.includes(led[1]!) ? text.slice(led[0].length).replace(/^ /, '') : text
+  return `/${name} ${rest.trimStart()}`
+}
 
 export function Composer(props: ComposerProps) {
   const { placeholder, onSend, failTitle, allowEmpty = false, disabled = false } = props
@@ -72,6 +106,11 @@ export function Composer(props: ComposerProps) {
   const [text, setText] = useState('')
   const [items, setItems] = useState<PendingAttachment[]>([])
   const [sending, setSending] = useState(false)
+  const input = useRef<ComponentRef<typeof TextInput>>(null)
+  const attachAnchor = useRef<ViewHandle>(null)
+  const caret = useRef<number | null>(null)
+  const latestText = useRef('')
+  latestText.current = text
   const latest = useRef<PendingAttachment[]>([])
   const mounted = useRef(true)
   /** The keys of attachments a message is carrying, which leaving the screen must not remove. */
@@ -110,6 +149,13 @@ export function Composer(props: ComposerProps) {
     if (!held(key)) return
     patch(key, { status: 'preparing', error: null })
     try {
+      if (source.kind === 'project') {
+        patch(key, { status: 'uploading' })
+        const attachment = await attachProjectFile(link, source.projectPath ?? '', source.uri)
+        if (!held(key)) return forget(attachment.id)
+        patch(key, { status: 'ready', attachment, size: attachment.size, thumb: attachment.thumb })
+        return
+      }
       const prepared = await prepare(source)
       if (!held(key)) return
       patch(key, { status: 'uploading', thumb: prepared.thumb, size: prepared.bytes.byteLength })
@@ -244,12 +290,40 @@ export function Composer(props: ComposerProps) {
     })
   }
 
-  const openMenu = () =>
+  const mention = (projectPath: string, path: string) => {
+    if (room() <= 0) return
+    const name = path.slice(path.lastIndexOf('/') + 1)
+    const current = latestText.current
+    const at = caret.current ?? current.length
+    const before = current.slice(0, at)
+    const lead = before === '' || /\s$/.test(before) ? '' : ' '
+    const after = current.slice(at)
+    const typed = `${lead}@${name}${after.startsWith(' ') ? '' : ' '}`
+    setText(`${before}${typed}${after}`)
+    caret.current = at + typed.length
+    add([{ kind: 'project', uri: path, name, mimeType: null, size: null, projectPath }])
+  }
+
+  useImperativeHandle(props.ref, () => ({
+    pickPhotos: () => choose(pickPhotos),
+    takePhoto: () => choose(takePhoto),
+    pickFiles: () => choose(pickFiles),
+    mention,
+    command: (name, names) => {
+      setText((current) => withCommand(current, name, names))
+      setTimeout(() => input.current?.focus(), 50)
+    },
+    focus: () => input.current?.focus(),
+  }))
+
+  const openMenu = () => {
+    if (props.onAttach) return props.onAttach(attachAnchor)
     showMenu('添加附件', [
       { label: '拍照', onPress: () => choose(takePhoto) },
       { label: '从相册选', onPress: () => choose(pickPhotos) },
       { label: '选文件', onPress: () => choose(pickFiles) },
     ])
+  }
 
   const connected = host.state.kind === 'connected'
   const busy = items.filter((item) => item.status !== 'ready' && item.status !== 'failed')
@@ -257,7 +331,7 @@ export function Composer(props: ComposerProps) {
   const empty = !text.trim() && items.length === 0
   const canSend =
     connected && !sending && !disabled && busy.length === 0 && !block && (allowEmpty || !empty)
-  const stopping = !!props.running && !!props.onStop && empty && !sending
+  const stoppable = !!props.running && !!props.onStop
 
   const send = async () => {
     if (!canSend) return
@@ -315,8 +389,13 @@ export function Composer(props: ComposerProps) {
             </Text>
           ) : null}
           <TextInput
+            ref={input}
             value={text}
             onChangeText={setText}
+            onSelectionChange={(event) => {
+              caret.current = event.nativeEvent.selection.end
+            }}
+            accessibilityLabel="消息"
             placeholder={placeholder}
             placeholderTextColor={c.textTertiary}
             selectionColor={c.accent}
@@ -326,31 +405,28 @@ export function Composer(props: ComposerProps) {
             style={[styles.input, { color: c.text }]}
           />
           <View style={styles.row}>
-            <RoundButton onPress={openMenu} disabled={sending} accessibilityLabel="添加照片或文件">
-              <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
-            </RoundButton>
+            <View ref={attachAnchor} collapsable={false}>
+              <RoundButton
+                onPress={openMenu}
+                disabled={sending}
+                accessibilityLabel="添加照片、文件或命令"
+              >
+                <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
+              </RoundButton>
+            </View>
             {props.left}
             <View style={styles.right}>{props.right}</View>
-            {stopping ? (
-              <RoundButton
-                tone="accent"
-                onPress={() => {
-                  haptic.firm()
-                  props.onStop!()
-                }}
-                accessibilityLabel="停止"
-              >
-                <Icon icon={G.stop} size={13} color={c.onAccent} weight="bold" />
-              </RoundButton>
-            ) : (
+            {(!stoppable || !empty || sending) && (
               <RoundButton
                 tone="accent"
                 onPress={() => void send()}
                 disabled={!canSend}
-                accessibilityLabel={props.running ? '排队发送' : '发送'}
+                accessibilityLabel={props.running ? '加入队列' : '发送'}
               >
                 {sending ? (
                   <ActivityIndicator size="small" color={c.onAccent} />
+                ) : props.running ? (
+                  <Icon icon={G.queue} size={18} color={c.onAccent} weight="bold" />
                 ) : (
                   <Icon
                     icon={G.send}
@@ -360,6 +436,18 @@ export function Composer(props: ComposerProps) {
                     strokeWidth={2.4}
                   />
                 )}
+              </RoundButton>
+            )}
+            {stoppable && (
+              <RoundButton
+                onPress={() => {
+                  haptic.firm()
+                  props.onStop!()
+                }}
+                accessibilityLabel="停止这一轮"
+                style={{ backgroundColor: s.stop }}
+              >
+                <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
               </RoundButton>
             )}
           </View>

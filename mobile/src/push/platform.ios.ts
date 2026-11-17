@@ -11,9 +11,11 @@ import { importKeyPair } from '@shared/remote/noise'
 import { decodeSealed, openPush, type PushContent, type PushTarget } from '@shared/remote/push'
 import { decodeRelayBytes, verifyRelaySignature } from '@shared/remote/relay'
 import { fromBase64, toBase64 } from '../store'
+import { isMuted, mutedIds, onMutedChange } from './muted'
 import type { PushPermission, PushPlatform } from './types'
 
 const KEYS_ITEM = 'huli.push.keys'
+const MUTED_ITEM = 'huli.push.muted'
 const BACKGROUND_TASK = 'huli.push.background'
 
 interface SharedKeys {
@@ -103,12 +105,31 @@ TaskManager.defineTask<Notifications.NotificationTaskPayload>(BACKGROUND_TASK, a
 void Notifications.registerTaskAsync(BACKGROUND_TASK).catch(() => {})
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const data = notification.request.content.data as Record<string, unknown> | null
+    const quiet = isMuted(typeof data?.sessionId === 'string' ? data.sessionId : null)
+    return {
+      shouldShowBanner: !quiet,
+      shouldShowList: true,
+      shouldPlaySound: !quiet,
+      shouldSetBadge: false,
+    }
+  },
+})
+
+// The extension reads the muted sessions from an item beside the keys, by the same naming.
+onMutedChange(() => {
+  const ids = mutedIds()
+  try {
+    const options = sharedOptions()
+    const write =
+      ids.length > 0
+        ? SecureStore.setItemAsync(MUTED_ITEM, JSON.stringify(ids), options)
+        : SecureStore.deleteItemAsync(MUTED_ITEM, options)
+    void write.catch(() => {})
+  } catch {
+    // A build without the shared keychain group: only the app itself keeps them quiet.
+  }
 })
 
 function permissionOf(settings: Notifications.NotificationPermissionsStatus): PushPermission {

@@ -1,0 +1,113 @@
+// The artifacts a session made or last changed, newest first: what each is and when it last
+// changed. They open on the computer, which runs them.
+
+import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { Stack, useLocalSearchParams } from 'expo-router'
+import type { ArtifactSummary } from '@shared/artifacts'
+import { formatBytes } from '../../attachments'
+import { call, errorText } from '../../git'
+import { useHost, useLink } from '../../host'
+import { listTime, sessionTitle } from '../../sessions'
+import { GlassHeader } from '../../ui/session/GlassHeader'
+import { G, Icon } from '../../ui/session/icons'
+import { useSessionTokens } from '../../ui/session/palette'
+import { StateView } from '../../ui/session/StateView'
+
+function kindText(artifact: ArtifactSummary): string {
+  if (artifact.canvas || artifact.pages > 1) return `画布 · ${artifact.pages} 页`
+  return artifact.files > 1 ? `${artifact.files} 个文件` : '页面'
+}
+
+export default function SessionArtifacts() {
+  const { id } = useLocalSearchParams<{ id: string }>()
+  const { c, s } = useSessionTokens()
+  const host = useHost()
+  const link = useLink()
+  const [list, setList] = useState<ArtifactSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(() => {
+    setError(null)
+    call(link, 'artifacts.list', {}).then(
+      (all) =>
+        setList(
+          all
+            .filter((a) => a.sessionId === id && a.deletedAt === null)
+            .sort((a, b) => b.updatedAt - a.updatedAt),
+        ),
+      (failed: unknown) => setError(errorText(failed, '没能读取 Artifacts。')),
+    )
+  }, [link, id])
+
+  useEffect(load, [load])
+
+  let body: ReactElement
+  if (!list) {
+    body = error ? <StateView text={error} tone="danger" retry={load} /> : <StateView loading />
+  } else if (list.length === 0) {
+    body = <StateView text="这个会话还没有做出 Artifact。" icon={G.artifacts} />
+  } else {
+    body = (
+      <FlatList
+        data={list}
+        keyExtractor={(a) => a.id}
+        refreshControl={
+          <RefreshControl refreshing={false} onRefresh={load} tintColor={c.textSecondary} />
+        }
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32, gap: 10 }}
+        renderItem={({ item }) => (
+          <View
+            style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.border }]}
+            accessible
+            accessibilityLabel={`${item.title}，${kindText(item)}，第 ${item.version} 版`}
+          >
+            <View style={[styles.icon, { backgroundColor: c.fill }]}>
+              <Icon icon={G.artifacts} size={18} color={c.textSecondary} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+              <Text style={[styles.title, { color: c.text }]} numberOfLines={2}>
+                {item.title}
+              </Text>
+              <Text style={[styles.meta, { color: c.textSecondary }]} numberOfLines={1}>
+                {[item.type, kindText(item), `第 ${item.version} 版`, formatBytes(item.size)]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
+            </View>
+            <Text style={[styles.time, { color: c.textTertiary }]}>{listTime(item.updatedAt)}</Text>
+          </View>
+        )}
+        ListFooterComponent={
+          <Text style={[styles.note, { color: c.textTertiary }]}>
+            在电脑上的 Huli 里打开查看和编辑。
+          </Text>
+        }
+      />
+    )
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <GlassHeader title="Artifacts" subtitle={sessionTitle(host.sessions.get(id))} />
+      {body}
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+  },
+  icon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 15, lineHeight: 20, fontWeight: '600' },
+  meta: { fontSize: 12.5, lineHeight: 17 },
+  time: { fontSize: 12, fontVariant: ['tabular-nums'] },
+  note: { fontSize: 13, textAlign: 'center', paddingVertical: 18 },
+})

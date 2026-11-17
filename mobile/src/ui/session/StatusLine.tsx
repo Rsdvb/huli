@@ -1,16 +1,27 @@
 // The line under the composer: the computer with its system and whether the link is up, the
-// session's folder, which opens its changes, and how much of the plan's windows is used.
+// session's folder, which opens its changes (or, in New session, the project picker), the branch
+// it is on, how much of the plan's tightest window is used, and how full the context is, which
+// opens what fills it.
 
+import type { RefObject } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import Svg, { Circle } from 'react-native-svg'
 import type { PlanLimit } from '@shared/agent-host'
 import type { LinkState } from '@shared/remote/link'
 import { G, Icon, SystemMark } from './icons'
+import type { ViewHandle } from './Popover'
+import { limitColor, tightestLimit, windowName } from './limits'
 import { useSessionTokens } from './palette'
 
-export function UsageRing(props: { percent: number; color: string; track: string; size?: number }) {
+export function UsageRing(props: {
+  percent: number
+  color: string
+  track: string
+  size?: number
+  stroke?: number
+}) {
   const size = props.size ?? 14
-  const stroke = 2.4
+  const stroke = props.stroke ?? 2.4
   const r = (size - stroke) / 2
   const length = 2 * Math.PI * r
   const shown = Math.min(100, Math.max(0, props.percent))
@@ -40,19 +51,31 @@ export function UsageRing(props: { percent: number; color: string; track: string
   )
 }
 
-const WINDOW_NAMES: Record<string, string> = {
-  five_hour: '5 小时',
-  seven_day: '7 天',
-  seven_day_opus: '7 天 Opus',
-  seven_day_sonnet: '7 天 Sonnet',
-}
-
-/** The windows worth a ring: the plan's own ones first, at most two. */
-function shownLimits(limits: PlanLimit[]): PlanLimit[] {
-  const known = limits.filter((l) => l.usedPercent !== null)
-  const rank = (l: PlanLimit) =>
-    l.window === 'seven_day' ? 0 : l.window === 'five_hour' ? 1 : l.models ? 3 : 2
-  return [...known].sort((a, b) => rank(a) - rank(b)).slice(0, 2)
+/**
+ * A pie on a disc tinted in its color: a filling wedge, which cannot read as a spinner as a short
+ * arc can, and the disc shows how much is left.
+ */
+export function PieRing(props: { share: number; color: string; size?: number }) {
+  const size = props.size ?? 15
+  const r = size / 4
+  const length = 2 * Math.PI * r
+  const used = Math.min(1, Math.max(0, props.share))
+  return (
+    <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
+      <Circle cx={size / 2} cy={size / 2} r={size / 2} fill={props.color} opacity={0.22} />
+      {used > 0 && (
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={props.color}
+          strokeWidth={r * 2}
+          strokeDasharray={`${used * length} ${length}`}
+        />
+      )}
+    </Svg>
+  )
 }
 
 export function StatusLine(props: {
@@ -63,7 +86,14 @@ export function StatusLine(props: {
   /** Files changed in the folder, when known. */
   changed?: number
   onFolderPress?: () => void
+  /** The folder opens a picker: a chevron says so. */
+  folderPicker?: boolean
+  folderAnchor?: RefObject<ViewHandle | null>
+  /** The branch the folder is on; `loading` while it is read, null outside a repository. */
+  branch?: string | null | 'loading'
   limits?: PlanLimit[]
+  /** The context's share used, which opens its breakdown. */
+  context?: { share: number; color: string; approximate: boolean; onPress(): void } | null
 }) {
   const { c } = useSessionTokens()
   const dot =
@@ -72,10 +102,18 @@ export function StatusLine(props: {
       : props.state.kind === 'stopped'
         ? c.danger
         : c.warning
-  const limits = shownLimits(props.limits ?? [])
+  const limit = tightestLimit(props.limits ?? [])
+  const shownLimit = limit && limit.usedPercent !== null ? limit : null
+  const percent = Math.round(shownLimit?.usedPercent ?? 0)
+  const connection =
+    props.state.kind === 'connected'
+      ? '已连接'
+      : props.state.kind === 'stopped'
+        ? '已断开'
+        : '正在连接'
   return (
     <View style={styles.row}>
-      <View style={styles.host}>
+      <View style={styles.host} accessibilityLabel={`${props.hostName}，${connection}`}>
         <View>
           <SystemMark platform={props.platform} color={c.textSecondary} size={14} />
           <View style={[styles.dot, { backgroundColor: dot, borderColor: c.bg }]} />
@@ -87,51 +125,76 @@ export function StatusLine(props: {
       {props.folder !== null && (
         <>
           <Text style={[styles.text, { color: c.textTertiary }]}>/</Text>
-          <Pressable
-            onPress={props.onFolderPress}
-            disabled={!props.onFolderPress}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={
-              props.changed ? `${props.folder}，${props.changed} 个文件有改动` : props.folder
-            }
-            style={({ pressed }) => [styles.folder, { opacity: pressed ? 0.55 : 1 }]}
-          >
-            <Icon icon={G.folder} size={14} color={c.tint} />
-            <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
-              {props.folder}
-            </Text>
-            {props.changed ? (
-              <View style={[styles.badge, { backgroundColor: c.fillStrong }]}>
-                <Text style={[styles.badgeText, { color: c.text }]}>{props.changed}</Text>
-              </View>
-            ) : null}
-          </Pressable>
+          <View ref={props.folderAnchor} collapsable={false} style={styles.folderBox}>
+            <Pressable
+              onPress={props.onFolderPress}
+              disabled={!props.onFolderPress}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={
+                props.folderPicker
+                  ? `项目：${props.folder}，点按换一个`
+                  : props.changed
+                    ? `${props.folder}，${props.changed} 个文件有改动`
+                    : props.folder
+              }
+              style={({ pressed }) => [styles.folder, { opacity: pressed ? 0.55 : 1 }]}
+            >
+              <Icon icon={G.folder} size={14} color={c.tint} />
+              <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+                {props.folder}
+              </Text>
+              {props.folderPicker ? (
+                <Icon icon={G.upDown} size={10} color={c.textTertiary} weight="semibold" />
+              ) : props.changed ? (
+                <View style={[styles.badge, { backgroundColor: c.fillStrong }]}>
+                  <Text style={[styles.badgeText, { color: c.text }]}>{props.changed}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </View>
         </>
       )}
       <View style={{ flex: 1 }} />
-      {limits.map((limit) => {
-        const percent = Math.round(limit.usedPercent ?? 0)
-        const color =
-          limit.state === 'reached' || percent >= 95
-            ? c.danger
-            : limit.state === 'warning' || percent >= 80
-              ? c.warning
-              : c.tint
-        return (
-          <View
-            key={limit.window}
-            style={styles.limit}
-            accessibilityLabel={`${limit.label} 已用 ${percent}%`}
-          >
-            <UsageRing percent={percent} color={color} track={c.fillStrong} />
+      {props.branch !== undefined && props.branch !== null && (
+        <View
+          style={styles.branch}
+          accessibilityLabel={`分支：${props.branch === 'loading' ? '正在读取' : props.branch}`}
+        >
+          <Icon icon={G.fork} size={13} color={c.textTertiary} />
+          {props.branch === 'loading' ? (
+            <Text style={[styles.text, { color: c.textTertiary }]}>正在读取…</Text>
+          ) : (
             <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
-              {WINDOW_NAMES[limit.window] ? `${WINDOW_NAMES[limit.window]} ` : ''}
-              {percent}%
+              {props.branch}
             </Text>
-          </View>
-        )
-      })}
+          )}
+        </View>
+      )}
+      {shownLimit && (
+        <View style={styles.limit} accessibilityLabel={`${shownLimit.label} 已用 ${percent}%`}>
+          <UsageRing percent={percent} color={limitColor(shownLimit, c)} track={c.fillStrong} />
+          <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+            <Text style={{ color: c.textTertiary }}>{windowName(shownLimit)} </Text>
+            {percent}%
+          </Text>
+        </View>
+      )}
+      {props.context && (
+        <Pressable
+          onPress={props.context.onPress}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`上下文已用 ${Math.round(props.context.share * 100)}%，查看构成`}
+          style={({ pressed }) => [styles.limit, { opacity: pressed ? 0.55 : 1 }]}
+        >
+          <PieRing share={props.context.share} color={props.context.color} />
+          <Text style={[styles.text, { color: c.textSecondary }]}>
+            {props.context.approximate ? '≈' : ''}
+            {Math.round(props.context.share * 100)}%
+          </Text>
+        </Pressable>
+      )}
     </View>
   )
 }
@@ -157,8 +220,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   text: { fontSize: 13, lineHeight: 17, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  folderBox: { flexShrink: 1 },
   folder: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
   badge: { borderRadius: 999, paddingHorizontal: 6, minWidth: 18, alignItems: 'center' },
   badgeText: { fontSize: 11, lineHeight: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
   limit: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  branch: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, maxWidth: 150 },
 })
