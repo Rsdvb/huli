@@ -31,7 +31,7 @@ export function computerHostOptions(): { driverPath: string; selfPid: number; se
     driverPath: computerDriverPath(),
     selfPid: process.pid,
     // The bundle id on macOS, the executable's name elsewhere, as the host names apps.
-    selfIds: ['sh.kettu.app', basename(process.execPath).toLowerCase()],
+    selfIds: ['local.huli.app', basename(process.execPath).toLowerCase()],
   }
 }
 

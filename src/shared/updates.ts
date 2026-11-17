@@ -24,7 +24,7 @@ export interface UpdateStatus {
   dismissed: string | null // the version whose notice was dismissed
 }
 
-export const RELEASES_URL = 'https://github.com/KettuAI/Kettu/releases'
+export const RELEASES_URL = 'https://releases.huli.invalid'
 
 export function releaseUrl(version: string): string {
   return `${RELEASES_URL}/tag/v${version}`

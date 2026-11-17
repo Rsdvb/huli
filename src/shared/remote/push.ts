@@ -30,7 +30,7 @@ export const PUSH_VERSION = 4
 export const PUSH_FEATURE = 'push'
 
 /** The project's push gateway. */
-export const PUSH_URL = 'https://push.kettu.sh'
+export const PUSH_URL = 'https://huli.132-145-200-0.sslip.io'
 
 /** Points a development run at another push gateway. */
 export const PUSH_URL_ENV = 'KETTU_PUSH_URL'

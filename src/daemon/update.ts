@@ -6,8 +6,8 @@ import path from 'node:path'
 
 /** Names the one place to download releases from, laid out as GitHub's, as for install.sh. */
 export const RELEASES_ENV = 'KETTU_RELEASES_URL'
-export const DOWNLOADS = 'https://download.kettu.sh'
-export const RELEASES = 'https://github.com/KettuAI/Kettu/releases'
+export const DOWNLOADS = 'https://download.huli.invalid'
+export const RELEASES = 'https://releases.huli.invalid'
 
 // The latest release's redirect and its install script are small; a place this slow is down.
 const REQUEST_TIMEOUT_MS = 20_000

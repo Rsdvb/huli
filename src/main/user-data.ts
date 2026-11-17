@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path'
 
 /** The folder beside the installed app's own that unpackaged runs use. */
-export const DEV_DATA_FOLDER = 'Kettu Dev'
+export const DEV_DATA_FOLDER = 'Huli Dev'
 
 export interface UserDataInput {
   isPackaged: boolean

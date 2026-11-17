@@ -222,6 +222,11 @@ export interface AgentTimings {
   quitStopMs: number
 }
 
+// Personal fork: Kettu never runs agy on its own to read Antigravity's limits, neither its print
+// mode (`agy -p /usage`, `/credits`) nor a hidden ACP session, since Google treats a third-party
+// tool driving agy as a terms breach. The plan's name still comes from agy's own ACP answers.
+const READ_ANTIGRAVITY_LIMITS = false
+
 export const AGENT_TIMINGS: AgentTimings = {
   idleMs: 5 * 60_000,
   initializeMs: 30_000,
@@ -2952,6 +2957,7 @@ export class AgentManager {
    * by opening a browser to sign in. A sign-in Kettu does not know yet it asks agy for first.
    */
   private async readAntigravityLimits(slot: Slot): Promise<void> {
+    if (!READ_ANTIGRAVITY_LIMITS) return
     let method = await this.readSignInMethod(slot)
     if ((method === null && !slot.signInAnswered) || slot.signIn === 'required') {
       method = await this.askAntigravitySignIn(slot)

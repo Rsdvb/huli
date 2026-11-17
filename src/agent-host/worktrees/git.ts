@@ -6,6 +6,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { access, constants, lstat, mkdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
+import { KETTU_HOME_FOLDER } from '@shared/storage'
 import { HostError, invalidParams, notFound } from '../errors'
 import { describeFailure, GIT_TIMEOUT_MS, type Exec, type ExecResult } from '../git/exec'
 import { canonicalizePath, folderName, pathKey, samePath } from '../paths'
@@ -194,7 +195,7 @@ export function createWorktreeGit(deps: WorktreeGitDeps): WorktreeGit {
       .update(pathKey(projectPath, platform))
       .digest('hex')
       .slice(0, 8)
-    const fallback = p.join(homeDir, '.kettu', 'worktrees', `${name}-${hash}`)
+    const fallback = p.join(homeDir, KETTU_HOME_FOLDER, 'worktrees', `${name}-${hash}`)
     await mkdir(fallback, { recursive: true })
     return canonical(fallback)
   }

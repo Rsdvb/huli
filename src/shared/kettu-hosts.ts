@@ -4,7 +4,8 @@
 
 import { AccountNetworkError, type AccountFetch } from './account-api'
 
-const KETTU_DOMAINS = ['kettu.sh', 'kettu.page']
+// Huli: its own service, Huli Cloud, counts as one of these.
+const KETTU_DOMAINS = ['kettu.sh', 'kettu.page', 'huli.132-145-200-0.sslip.io']
 
 /**
  * Whether `url` is on one of Kettu's domains or a subdomain of one, or at one of `origins`, as a

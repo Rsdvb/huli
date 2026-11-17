@@ -123,7 +123,7 @@ import {
 } from './window'
 
 // Must match appId in electron-builder.yml so Windows groups taskbar entries correctly.
-const APP_USER_MODEL_ID = 'sh.kettu.app'
+const APP_USER_MODEL_ID = 'local.huli.app'
 
 const log = createLogger('main')
 

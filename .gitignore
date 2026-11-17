@@ -11,3 +11,6 @@ dist
 
 # Cua Driver for computer use, fetched by tools/install/cua-driver.mjs
 resources/cua-driver/
+
+# Huli Cloud's bundle
+cloud/dist/

@@ -12,7 +12,7 @@ import { currentPrimitives } from './primitives'
 export const RELAY_PROTOCOL = 1
 
 /** The project's main relay, which lists the other regions. */
-export const RELAY_URL = 'https://relay.kettu.sh'
+export const RELAY_URL = 'https://relay.huli.invalid'
 
 /** Points a development run at another relay. */
 export const RELAY_URL_ENV = 'KETTU_RELAY_URL'

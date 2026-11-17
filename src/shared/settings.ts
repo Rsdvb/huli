@@ -231,7 +231,8 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   marketplace: { mcp: [], skills: [] },
   startModes: {},
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
-  updates: { automatic: 'download', source: 'auto' },
+  // Personal fork: an official release would replace this build, so it never updates by itself.
+  updates: { automatic: 'off', source: 'github' },
   privacy: { hideAccount: false },
   diagnostics: { verboseUntil: null },
   usage: { fromComputer: false, sidebar: 'today', limits: 'used' },
@@ -240,11 +241,13 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     name: null,
     direct: { enabled: true, port: null, addresses: [] },
     terminal: false,
-    relay: true,
-    discoverable: true,
+    relay: false,
+    discoverable: false,
   },
   computerUse: { enabled: false, allowedApps: [], pauseOnUse: true, stopShortcut: '' },
-  cloud: { enabled: true },
+  // Personal fork: the self-hosted mode, in which nothing reaches Kettu's services; paired devices
+  // connect directly over the network or a VPN such as Tailscale.
+  cloud: { enabled: false },
   onboarding: { done: false, step: 'welcome' },
 }
 

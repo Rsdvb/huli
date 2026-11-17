@@ -1,5 +1,5 @@
-appId: sh.kettu.app
-productName: Kettu
+appId: local.huli.app
+productName: Huli
 directories:
   buildResources: build
   output: dist
@@ -37,11 +37,8 @@ npmRebuild: false
 # debug mode (--debug) opens its inspectors from code instead, which the fuse leaves working.
 electronFuses:
   enableNodeCliInspectArguments: false
-publish:
-  provider: github
-  owner: KettuAI
-  repo: Kettu
-  releaseType: draft
+# Huli: a personal build that publishes nowhere until its own release channel is set up.
+publish: null
 
 mac:
   category: public.app-category.developer-tools

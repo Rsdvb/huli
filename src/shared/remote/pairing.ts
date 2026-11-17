@@ -15,7 +15,7 @@ export const PAIRING_VERSION = 2
 export const DIRECT_PAIRING_VERSION = 1
 
 /** The page that opens a code, in the app where it is installed or in the web client. */
-export const PAIRING_URL = 'https://kettu.sh/pair'
+export const PAIRING_URL = 'https://huli.invalid/pair'
 
 /** The secret's bytes, mixed into the handshake as Noise IKpsk1's pre-shared key. */
 export const PAIRING_SECRET_BYTES = 32
@@ -201,7 +201,7 @@ export function parsePairingLink(link: string): PairingPayload | null {
 export const BROWSER_PAIRING_PATH = '/pair'
 
 /** The hosted web client, which reaches hosts through the Kettu relay from any network. */
-export const HOSTED_WEB_URL = 'https://app.kettu.sh'
+export const HOSTED_WEB_URL = 'https://app.huli.invalid'
 
 /** The link a browser opens a code with on any network: the hosted web client, for a relay code. */
 export function hostedPairingLink(payload: PairingPayload): string | null {

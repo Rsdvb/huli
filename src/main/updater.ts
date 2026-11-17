@@ -36,6 +36,9 @@ import {
 
 const log = createLogger('updater')
 
+/** This build is a personal fork of Kettu, which official releases must not replace. */
+const PERSONAL_FORK = true
+
 // electron-updater's code for an installer whose publisher is not the running app's.
 const INVALID_PUBLISHER = 'ERR_UPDATER_INVALID_SIGNATURE'
 
@@ -128,6 +131,9 @@ export class Updater {
     this.started = true
     log.info(`Updates in ${this.mode} mode`)
     if (this.afterMove) void this.continueAfterMove()
+    // Personal fork: no automatic checks, whatever an older settings file says, since an official
+    // release would replace this build. A check the user asks for still runs.
+    if (PERSONAL_FORK) return
     setTimeout(() => {
       void this.automaticCheck()
       setInterval(() => void this.automaticCheck(), CHECK_INTERVAL_MS).unref()

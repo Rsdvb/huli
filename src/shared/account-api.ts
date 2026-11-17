@@ -5,7 +5,7 @@
 import type { AccountPlan, AccountUsage, SignedOutReason, SignInFailure } from '@shared/account'
 import { REPORT_ID, type ReportSubmitFailure } from '@shared/report'
 
-export const ACCOUNT_URL = 'https://www.kettu.sh'
+export const ACCOUNT_URL = 'https://huli.132-145-200-0.sslip.io'
 
 export const DESKTOP_CLIENT = 'kettu-desktop'
 export const DAEMON_CLIENT = 'kettu-daemon'
