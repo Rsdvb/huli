@@ -3,7 +3,7 @@
 // light tint. A reply still streaming ends in a blinking caret.
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Linking, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
+import { Image, Linking, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
 import { copyText } from '../ui/session/feedback'
 import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
@@ -18,6 +18,10 @@ interface Look {
   color: string
   size: MarkdownSize
   body: TextStyle
+  /** Where a picture's target lies, for a paragraph that is one picture; null shows its label. */
+  image?: (href: string) => string | null
+  /** Opens a link; links open in the browser without one. */
+  link?: (href: string) => void
 }
 
 const SIZES: Record<MarkdownSize, { fontSize: number; lineHeight: number; gap: number }> = {
@@ -82,7 +86,7 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
           <Text
             key={i}
             style={{ color: c.tint }}
-            onPress={() => openLink(node.href)}
+            onPress={() => (look.link ?? openLink)(node.href)}
             accessibilityRole="link"
           >
             <Runs nodes={node.c} look={look} />
@@ -90,7 +94,7 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
         )
       case 'image':
         return (
-          <Text key={i} style={{ color: c.tint }} onPress={() => openLink(node.href)}>
+          <Text key={i} style={{ color: c.tint }} onPress={() => (look.link ?? openLink)(node.href)}>
             {`［图片${node.alt ? `：${node.alt}` : ''}］`}
           </Text>
         )
@@ -229,6 +233,41 @@ function Table(props: { block: Extract<Block, { kind: 'table' }>; look: Look }) 
   )
 }
 
+/** The picture a paragraph is, alone but for spaces, where `resolve` finds it. */
+function solePicture(
+  text: string,
+  resolve: (href: string) => string | null,
+): { uri: string; alt: string } | null {
+  const nodes = inline(text).filter((node) => !(node.t === 'text' && node.v.trim() === ''))
+  const node = nodes.length === 1 ? nodes[0]! : null
+  if (node?.t !== 'image') return null
+  const uri = resolve(node.href)
+  return uri ? { uri, alt: node.alt } : null
+}
+
+function Picture(props: { uri: string; alt: string }) {
+  const { c } = useSessionTokens()
+  const [ratio, setRatio] = useState<number | null>(null)
+  return (
+    <Image
+      source={{ uri: props.uri }}
+      accessibilityLabel={props.alt || '图片'}
+      accessibilityIgnoresInvertColors
+      resizeMode="contain"
+      onLoad={(event) => {
+        const { width, height } = event.nativeEvent.source
+        if (width > 0 && height > 0) setRatio(width / height)
+      }}
+      style={{
+        width: '100%',
+        aspectRatio: ratio ?? 16 / 9,
+        borderRadius: 10,
+        backgroundColor: ratio ? undefined : c.fill,
+      }}
+    />
+  )
+}
+
 const BULLETS = ['•', '◦', '▪']
 
 function Blocks(props: { blocks: Block[]; look: Look; depth: number; tail?: ReactNode }) {
@@ -268,8 +307,11 @@ function Blocks(props: { blocks: Block[]; look: Look; depth: number; tail?: Reac
               />
             )
           }
-          case 'para':
+          case 'para': {
+            const picture = look.image ? solePicture(block.text, look.image) : null
+            if (picture) return <Picture key={index} uri={picture.uri} alt={picture.alt} />
             return <Para key={index} text={block.text} look={look} tail={tail} />
+          }
           case 'code':
             return (
               <View key={index} style={{ gap: 4 }}>
@@ -367,6 +409,10 @@ export const Markdown = memo(function Markdown(props: {
   streaming?: boolean
   size?: MarkdownSize
   color?: string
+  /** Shows a paragraph that is one picture as the picture, where this finds its address. */
+  image?: (href: string) => string | null
+  /** Opens a link instead of the browser. */
+  onLink?: (href: string) => void
 }) {
   const t = useSessionTokens()
   const size = props.size ?? 'body'
@@ -378,8 +424,11 @@ export const Markdown = memo(function Markdown(props: {
       color,
       size,
       body: { fontSize: SIZES[size].fontSize, lineHeight: SIZES[size].lineHeight, color },
+      image: props.image,
+      link: props.onLink,
     }),
-    [t.c, t.s, color, size],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t.c, t.s, color, size, props.image, props.onLink],
   )
   const tail = props.streaming ? <Caret color={t.c.accent} /> : undefined
   if (parsed.length === 0) {
