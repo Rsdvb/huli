@@ -19,7 +19,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Alert, AppState } from 'react-native'
+import { Alert } from 'react-native'
 import { router } from 'expo-router'
 import type { AgentStatus, HostEvent, Project, SessionSummary } from '@shared/agent-host'
 import type { HostLink, LinkState } from '@shared/remote/link'
@@ -27,8 +27,9 @@ import type { KeyPair } from '@shared/remote/noise'
 import type { Paired } from '@shared/remote/pair'
 import { admin } from './admin'
 import { clearComputer, dropThread, readLists, writeLists } from './cache'
-import { deviceKey, linkTo } from './connection'
+import { currentAddress, deviceKey, linkTo } from './connection'
 import { dropDrafts } from './drafts'
+import { watchWakeups, type WakeReason } from './reconnect'
 import { createStore, sameFields, sameItems, useSelector } from './select'
 import { stopPush } from './push/sync'
 import {
@@ -59,6 +60,8 @@ export interface HostData {
   fromCache: boolean
   syncedAt: number | null
   unreachable: boolean
+  /** The link has not been up for DOWN_AFTER, so what says it is down may show. */
+  down: boolean
 }
 
 export interface HostActions {
@@ -121,6 +124,7 @@ const store = createStore<HostData>({
   fromCache: false,
   syncedAt: null,
   unreachable: false,
+  down: false,
 })
 const subscribe = store.subscribe
 
@@ -162,6 +166,7 @@ const selectLink = (d: HostData) => d.ready?.link ?? null
 const selectConnected = (d: HostData) => d.state.kind === 'connected'
 const selectComputerId = (d: HostData) => activeOf(d)?.id ?? null
 const selectLoaded = (d: HostData) => d.loaded
+const selectDown = (d: HostData) => d.down
 
 /** Every session; changes when any does. */
 export function useSessions(): Map<string, SessionSummary> {
@@ -195,6 +200,14 @@ export function useConnected(): boolean {
 
 export function useListsLoaded(): boolean {
   return useHostSelector(selectLoaded)
+}
+
+/**
+ * The link has been down a moment: what says so (正在重新连接…) shows only then, so a quick
+ * reconnect, as on coming back to the front, never flickers.
+ */
+export function useLinkDown(): boolean {
+  return useHostSelector(selectDown)
 }
 
 /** The active computer's id, which the caches are kept under. */
@@ -357,6 +370,9 @@ function timeout(ms: number): Promise<void> {
 /** How long the link may try before the app says the computer cannot be reached. */
 export const UNREACHABLE_AFTER = 8000
 
+/** How long the link may be down before the app says it reconnects. */
+const DOWN_AFTER = 600
+
 const selectReady = (d: HostData) => d.ready
 const selectStateKind = (d: HostData) => d.state.kind
 
@@ -407,10 +423,11 @@ export function HostProvider(props: { children: ReactNode }) {
       const mine = ++generation.current
       fresh.current = false
       clearLists()
+      const saved = () => getHost().computers.hosts.find((h) => h.id === host.id) ?? host
       setHost({
         unreachable: false,
         state: { kind: 'connecting' },
-        ready: { host, key, link: linkTo(host, key, adopt) },
+        ready: { host, key, link: linkTo(host, key, adopt, saved) },
         phase: 'ready',
       })
       void readLists(host.id).then((cached) => {
@@ -557,13 +574,35 @@ export function HostProvider(props: { children: ReactNode }) {
     return () => clearTimeout(timer)
   }, [stateKind, ready, attempt])
 
-  const retry = useCallback(() => {
+  useEffect(() => {
+    if (stateKind === 'connected') {
+      setHost({ down: false })
+      return
+    }
+    if (stateKind === 'stopped') {
+      setHost({ down: true })
+      return
+    }
+    const timer = setTimeout(() => setHost({ down: true }), DOWN_AFTER)
+    return () => clearTimeout(timer)
+  }, [stateKind, ready])
+
+  /** In development: what last set off a reconnect and when, for the time it took. */
+  const reconnecting = useRef<{ reason: string; at: number } | null>(null)
+
+  /** Tries the computer now, the backoff starting over, as when the app comes to the front. */
+  const wake = useCallback((reason: WakeReason) => {
     const link = getHost().ready?.link
     if (!link) return
+    if (__DEV__ && link.state.kind !== 'connected') {
+      reconnecting.current = { reason, at: Date.now() }
+    }
     setHost({ unreachable: false })
     setAttempt((n) => n + 1)
-    link.wake()
+    link.reconnectNow()
   }, [])
+
+  const retry = useCallback(() => wake('retry'), [wake])
 
   // The lists go to the cache a moment after they settle, never while they are the cache's own.
   useEffect(() => {
@@ -616,13 +655,20 @@ export function HostProvider(props: { children: ReactNode }) {
         const saved = getHost().computers.hosts.find((h) => h.id === id)
         if (saved) {
           const addresses = welcome.addresses.length > 0 ? welcome.addresses : saved.addresses
+          const reached = currentAddress()
           patchHost(id, {
             name: welcome.host.name,
             deviceName: welcome.device.name,
             platform: welcome.host.platform,
             addresses,
             lastSeen: Date.now(),
+            ...(reached ? { lastAddress: reached } : {}),
           })
+        }
+        const woke = reconnecting.current
+        reconnecting.current = null
+        if (__DEV__ && woke) {
+          console.log(`[link] reconnected in ${Date.now() - woke.at} ms (${woke.reason})`)
         }
         void refresh().catch(() => {})
       } else if (wasConnected) {
@@ -630,6 +676,7 @@ export function HostProvider(props: { children: ReactNode }) {
         wasConnected = false
         setHost({ syncedAt: Date.now() })
         patchHost(id, { lastSeen: Date.now() })
+        if (__DEV__) reconnecting.current = { reason: 'drop', at: Date.now() }
       }
       if (next.kind === 'stopped' && next.reason === 'removed' && !unpairing.current.has(id)) {
         const name = computerName(getHost().computers.hosts.find((h) => h.id === id))
@@ -659,18 +706,17 @@ export function HostProvider(props: { children: ReactNode }) {
           break
       }
     })
-    // Back in front, the computer is tried at once rather than when the backoff says.
-    const offApp = AppState.addEventListener('change', (status) => {
-      if (status === 'active') retry()
-    })
+    // Back in front, on a new network or with a notification, the computer is tried at once
+    // rather than when the backoff says.
+    const offWakeups = watchWakeups(wake)
     link.start()
     return () => {
       offState()
       offEvents()
-      offApp.remove()
+      offWakeups()
       link.stop()
     }
-  }, [ready, refresh, drop, patchHost, retry])
+  }, [ready, refresh, drop, patchHost, wake])
 
   const paired = useCallback(
     async (host: SavedHost, key: KeyPair, adopt: Paired) => {

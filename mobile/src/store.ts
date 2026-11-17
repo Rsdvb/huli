@@ -27,6 +27,8 @@ export interface SavedHost {
   label?: string
   /** When the phone last heard from it. */
   lastSeen?: number
+  /** The address the link last connected on, tried first the next time. */
+  lastAddress?: DirectAddress
   /** The id its notifications carry (its relay host id), once it said. */
   pushId?: string
 }

@@ -37,7 +37,7 @@ export function linkStatus(state: LinkState): { text: string; tone: LinkTone } {
     case 'connecting':
       return { text: '正在连接…', tone: 'busy' }
     case 'reconnecting':
-      return { text: '正在重连…', tone: 'busy' }
+      return { text: '正在重新连接…', tone: 'busy' }
     case 'stopped':
       return { text: '已断开', tone: 'down' }
   }
@@ -51,7 +51,7 @@ export function linkProblem(state: LinkState): string | null {
     case 'connecting':
       return '正在连接电脑…'
     case 'reconnecting':
-      return '连接断开，正在重连…'
+      return '正在重新连接…'
     case 'stopped':
       return state.reason === 'update_client'
         ? '这个 App 版本太旧，请更新。'

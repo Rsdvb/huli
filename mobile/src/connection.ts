@@ -181,16 +181,37 @@ export async function pairWith(
   }
 }
 
-/** The kept link to the computer, which reconnects by itself while the app is in front. */
-export function linkTo(host: SavedHost, key: KeyPair, adopt?: Paired): HostLink {
+const routeKey = (address: DirectAddress) => `${address.host}:${address.port}`
+
+/**
+ * The addresses to try, the one the computer was last reached on first. Every route is dialed at
+ * once, so this puts it first in line rather than making the others wait.
+ */
+export function triedAddresses(host: SavedHost): DirectAddress[] {
+  const list = usableAddresses(host.addresses)
+  const last = host.lastAddress ? routeKey(host.lastAddress) : null
+  const at = last ? list.findIndex((a) => routeKey(a) === last) : -1
+  return at > 0 ? [list[at]!, ...list.slice(0, at), ...list.slice(at + 1)] : list
+}
+
+/**
+ * The kept link to the computer, which reconnects by itself while the app is in front. `current`
+ * reads the computer as saved now, so a try takes the addresses its last welcome named.
+ */
+export function linkTo(
+  host: SavedHost,
+  key: KeyPair,
+  adopt?: Paired,
+  current: () => SavedHost = () => host,
+): HostLink {
   const routes = (): LinkRoute[] =>
-    usableAddresses(host.addresses).map((address) => ({
-      key: `${address.host}:${address.port}`,
+    triedAddresses(current()).map((address) => ({
+      key: routeKey(address),
       relay: false,
       dial: () => openSocket(address),
     }))
   return new HostLink({
-    dial: () => dialFirst(host.addresses),
+    dial: () => dialFirst(current().addresses),
     routes,
     hostKey: fromBase64(host.hostKey),
     key,

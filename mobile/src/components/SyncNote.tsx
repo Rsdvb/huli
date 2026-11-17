@@ -22,13 +22,15 @@ const pick = (d: HostData) => ({
   fromCache: d.fromCache,
   unreachable: d.unreachable,
   syncedAt: d.syncedAt,
+  down: d.down,
 })
 
 export function SyncNote() {
   const { c } = useTokens()
   const host = useHostSelector(pick, sameFields)
   const { retry } = useHostActions()
-  const connected = host.state.kind === 'connected'
+  // A link down only a moment, as on coming back to the front, says nothing yet.
+  const connected = host.state.kind === 'connected' || !host.down
   if (connected && !host.fromCache) return null
   const away = !connected && host.unreachable
   const state = connected ? '正在同步…' : away ? '未连接' : (linkProblem(host.state) ?? '')

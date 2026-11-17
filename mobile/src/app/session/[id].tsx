@@ -82,6 +82,7 @@ import {
   useHostSelector,
   useHostState,
   useLink,
+  useLinkDown,
   useSession,
   type HostData,
 } from '../../host'
@@ -748,7 +749,8 @@ export default function SessionScreen() {
     body = <FileRefs.Provider value={fileRefs}>{body}</FileRefs.Provider>
   }
 
-  const linkDown = hostState.kind === 'reconnecting' || hostState.kind === 'stopped'
+  const down = useLinkDown()
+  const linkDown = down && (hostState.kind === 'reconnecting' || hostState.kind === 'stopped')
 
   return (
     <SessionRows.Provider value={context}>
@@ -1045,7 +1047,7 @@ export default function SessionScreen() {
               <Icon icon={G.wifiOff} size={14} color={c.danger} />
             )}
             <Text style={[styles.bannerText, { color: c.textSecondary }]}>
-              {hostState.kind === 'reconnecting' ? '和电脑的连接断了，正在重连…' : '已和电脑断开'}
+              {hostState.kind === 'reconnecting' ? '正在重新连接…' : '已和电脑断开'}
             </Text>
           </GlassCapsule>
         </View>
