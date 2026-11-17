@@ -1,7 +1,7 @@
 // The app lock: with 需要面容 ID on, Huli locks once it has been away longer than the chosen delay
 // (and at every cold start), and Face ID, Touch ID or the passcode opens it again. While it is
 // locked or about to leave the screen, a cover hides what it shows, so the app switcher's snapshot
-// holds only the fox.
+// holds only the kite.
 //
 // The cover is a view, not a window, so every layer that floats above the screens (a sheet, a
 // dialog, a modal screen) draws its own LockLayer too; they share this one state.
@@ -96,7 +96,7 @@ export async function authenticate(
 
 export async function unlock(): Promise<void> {
   if (authenticating) return
-  const result = await authenticate('解锁 Huli')
+  const result = await authenticate('解锁纸鸢')
   if (result.ok) {
     haptic.success()
     set({ locked: false, covered: false })
@@ -153,7 +153,7 @@ export function LockLayer() {
       <HuliIcon size={72} />
       {locked && !covered ? (
         <>
-          <Text style={[typeScale.headline, { color: c.text }]}>Huli 已锁定</Text>
+          <Text style={[typeScale.headline, { color: c.text }]}>纸鸢已锁定</Text>
           <Pill
             tone="tint"
             size="lg"
