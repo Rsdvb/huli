@@ -84,11 +84,14 @@ export interface MenuPicker {
   value: string
   onChange(value: string): void
   disabled?: boolean
+  /** A line under the choice, such as what a higher effort costs. */
+  hint?: string
 }
 
 export type MenuEntry =
   | MenuRow
-  | { kind: 'divider'; key: string }
+  /** A rule between groups; with a title, the group after it is a titled section. */
+  | { kind: 'divider'; key: string; title?: string }
   | {
       kind: 'custom'
       key: string
@@ -551,7 +554,16 @@ function PageBody(props: { page: MenuPage; onPush(page: string): void; onClose()
       ) : null}
       {page.entries.map((entry) => {
         if (entry.kind === 'divider') {
-          return <View key={entry.key} style={[styles.divider, { backgroundColor: c.border }]} />
+          return (
+            <View key={entry.key}>
+              <View style={[styles.divider, { backgroundColor: c.border }]} />
+              {entry.title ? (
+                <Text style={[styles.heading, { color: c.textTertiary }]} numberOfLines={1}>
+                  {entry.title}
+                </Text>
+              ) : null}
+            </View>
+          )
         }
         if (entry.kind === 'custom') return <View key={entry.key}>{entry.node}</View>
         return <Row key={entry.key} row={entry} onPush={props.onPush} onClose={props.onClose} />
@@ -714,6 +726,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 4,
     paddingBottom: 6,
+  },
+  heading: {
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 12,
+    paddingTop: 2,
+    paddingBottom: 4,
   },
   state: { alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 64, padding: 12 },
   stateText: { fontSize: 14, lineHeight: 19, textAlign: 'center' },
