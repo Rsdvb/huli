@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSyn
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { FILE_LINKS, linkFolderSync } from '../../testing/links'
 import type { CapabilityContext } from './dispatcher'
 import {
   filesCapability,
@@ -25,10 +26,12 @@ beforeEach(() => {
   writeFileSync(path.join(project, '.git', 'config'), '[core]\n')
   writeFileSync(path.join(base, 'secret.txt'), 'outside\n')
   mkdirSync(path.join(base, 'elsewhere'))
-  symlinkSync(path.join(base, 'secret.txt'), path.join(project, 'leak.txt'))
-  symlinkSync(path.join(base, 'elsewhere'), path.join(project, 'away'))
-  symlinkSync(path.join(project, 'src', 'main.ts'), path.join(project, 'entry.ts'))
-  symlinkSync(path.join(project, '.git', 'config'), path.join(project, 'config'))
+  linkFolderSync(path.join(base, 'elsewhere'), path.join(project, 'away'))
+  if (FILE_LINKS) {
+    symlinkSync(path.join(base, 'secret.txt'), path.join(project, 'leak.txt'))
+    symlinkSync(path.join(project, 'src', 'main.ts'), path.join(project, 'entry.ts'))
+    symlinkSync(path.join(project, '.git', 'config'), path.join(project, 'config'))
+  }
 })
 
 afterEach(() => {
@@ -71,14 +74,20 @@ describe('paths a page gives the files capability', () => {
 })
 
 describe("reading the project's files", () => {
-  it('reads a file, and one a link inside the project leads to', async () => {
+  it.skipIf(!FILE_LINKS)('reads a file, and one a link inside the project leads to', async () => {
     expect((await readProjectFile(project, 'README.md')).toString()).toBe('# Hello\n')
     expect((await readProjectFile(project, 'entry.ts')).toString()).toBe('export {}\n')
   })
 
-  it('refuses what a link leads to outside the project or into .git', async () => {
-    expect(await code(() => readProjectFile(project, 'leak.txt'))).toBe('not_found')
-    expect(await code(() => readProjectFile(project, 'config'))).toBe('not_found')
+  it.skipIf(!FILE_LINKS)(
+    'refuses what a link to a file leads to outside the project or into .git',
+    async () => {
+      expect(await code(() => readProjectFile(project, 'leak.txt'))).toBe('not_found')
+      expect(await code(() => readProjectFile(project, 'config'))).toBe('not_found')
+    },
+  )
+
+  it('refuses what a link leads to outside the project, and paths into .git or out', async () => {
     expect(await code(() => readProjectFile(project, 'away'))).toBe('not_found')
     expect(await code(() => readProjectFile(project, '.git/config'))).toBe('invalid')
     expect(await code(() => readProjectFile(project, '../secret.txt'))).toBe('invalid')
@@ -97,7 +106,7 @@ describe("reading the project's files", () => {
   it('lists folders first, leaving out .git and links that lead out', async () => {
     expect(await listProject(project, '')).toEqual([
       { name: 'src', path: 'src', type: 'folder', size: 0 },
-      { name: 'entry.ts', path: 'entry.ts', type: 'file', size: 10 },
+      ...(FILE_LINKS ? [{ name: 'entry.ts', path: 'entry.ts', type: 'file', size: 10 }] : []),
       { name: 'logo.bin', path: 'logo.bin', type: 'file', size: 4 },
       { name: 'README.md', path: 'README.md', type: 'file', size: 8 },
     ])

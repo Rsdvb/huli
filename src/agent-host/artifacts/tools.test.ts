@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { FILE_LINKS } from '../testing/links'
 import { startThreadService } from '../threads/service'
 import { ThreadStoreError, type ThreadStore } from '../threads/store'
 import { ArtifactStore } from './store'
@@ -12,6 +13,7 @@ let work: string
 let tools: ArtifactTools
 let store: ArtifactStore
 let caller: Caller
+let closeThreads: () => void
 
 /** The thread service in this thread, answering as the worker would. */
 function threadsAt(folder: string): ThreadStore {
@@ -27,6 +29,8 @@ function threadsAt(folder: string): ThreadStore {
       else waiting?.reject(new ThreadStoreError(reply.message, reply.code, reply.data))
     },
   )
+  // Windows removes no file a process holds open, so the database closes before its folder goes.
+  closeThreads = () => handle({ id: ++next, op: 'close' })
   const ask =
     (op: 'artifact' | 'runtime') =>
     (name: string, params: unknown): Promise<unknown> =>
@@ -56,7 +60,10 @@ beforeEach(() => {
   caller = { sessionId: 's1', project: work }
 })
 
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  closeThreads()
+  rmSync(dir, { recursive: true, force: true })
+})
 
 async function call(name: string, input: unknown) {
   const result = await tools.call(caller, name, input)
@@ -77,14 +84,16 @@ async function count(): Promise<number> {
 }
 
 describe('the artifact tools', () => {
-  it.each([
-    ['a path out of it', '../secret.txt'],
-    ['an absolute path out of it', '__SECRET__'],
-    ['a link inside that points out', 'leak.txt'],
-    ['a folder', 'assets'],
-    ['a file that is not there', 'missing.png'],
-  ])('refuse a source that is %s, and make nothing', async (_, source) => {
-    symlinkSync(path.join(dir, 'secret.txt'), path.join(work, 'leak.txt'))
+  it.each(
+    [
+      ['a path out of it', '../secret.txt'],
+      ['an absolute path out of it', '__SECRET__'],
+      ['a link inside that points out', 'leak.txt'],
+      ['a folder', 'assets'],
+      ['a file that is not there', 'missing.png'],
+    ].filter(([, source]) => FILE_LINKS || source !== 'leak.txt'),
+  )('refuse a source that is %s, and make nothing', async (_, source) => {
+    if (FILE_LINKS) symlinkSync(path.join(dir, 'secret.txt'), path.join(work, 'leak.txt'))
     const given = source === '__SECRET__' ? path.join(dir, 'secret.txt') : source
     const { error } = await call('create_artifact', {
       title: 'Report',
@@ -97,12 +106,15 @@ describe('the artifact tools', () => {
     expect(await count()).toBe(0)
   })
 
-  it('take a link inside the working directory that stays inside it', async () => {
-    symlinkSync(path.join(work, 'app.js'), path.join(work, 'alias.js'))
-    const id = await create({ html: '<p>hi</p>', files: [{ path: 'a.js', source: 'alias.js' }] })
-    const { value } = await call('read_artifact', { id, path: 'a.js' })
-    expect(value.text).toBe('console.log(1)')
-  })
+  it.skipIf(!FILE_LINKS)(
+    'take a link inside the working directory that stays inside it',
+    async () => {
+      symlinkSync(path.join(work, 'app.js'), path.join(work, 'alias.js'))
+      const id = await create({ html: '<p>hi</p>', files: [{ path: 'a.js', source: 'alias.js' }] })
+      const { value } = await call('read_artifact', { id, path: 'a.js' })
+      expect(value.text).toBe('console.log(1)')
+    },
+  )
 
   it.each([
     ['_kettu/runtime.js', 'Kettu keeps'],
