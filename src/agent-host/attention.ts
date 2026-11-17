@@ -2,14 +2,37 @@
 // turn's reply says and changed.
 
 import path from 'node:path'
+import type { AttentionQuestion } from '@shared/host-control'
 import {
   previewsCommand,
   type PendingPermission,
+  type PendingQuestion,
   type ThreadEntry,
   type ThreadState,
   type ToolEntry,
 } from '@shared/thread'
 import { t } from './i18n'
+
+/** The most choices a notification offers as buttons, and the longest label each may have. */
+const QUESTION_CHOICES = 4
+const QUESTION_LABEL = 40
+
+/**
+ * The question a notification may answer by itself: an ask's only one, with a single choice to
+ * pick among a few short ones, or a written answer. Several questions, several picks, a secret or
+ * long choices want the session's card.
+ */
+export function notificationQuestion(
+  questions: PendingQuestion[] | undefined,
+): AttentionQuestion | null {
+  if (questions?.length !== 1) return null
+  const question = questions[0]!
+  const { options } = question
+  if (question.multiSelect || question.secret || options.length > QUESTION_CHOICES) return null
+  if (options.some((option) => !option.label || option.label.length > QUESTION_LABEL)) return null
+  if (options.length === 0 && !question.allowsText) return null
+  return { choices: options.map((option) => option.label), text: question.allowsText }
+}
 
 /** A path inside the project as relative to it; one elsewhere as it is. */
 function shown(file: string, projectPath: string): string {

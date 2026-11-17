@@ -123,7 +123,13 @@ import {
   writePatch,
   type ArtifactWrite,
 } from './artifacts/entries'
-import { allowOnceOption, changedFiles, replySummary, requestText } from './attention'
+import {
+  allowOnceOption,
+  changedFiles,
+  notificationQuestion,
+  replySummary,
+  requestText,
+} from './attention'
 import type { MarketAnswer, MarketAsk } from './marketplace/publish-tools'
 import { MODE_OPTION as AGY_MODE_OPTION } from './acp/agy-plan'
 import { parseContextReport } from './acp/claude-reports'
@@ -8634,6 +8640,7 @@ export class SessionManager {
         const optionId = allowOnceOption(tool, request.options)
         const allow = request.options.find((option) => option.id === optionId)
         const deny = request.options.find((option) => option.kind === 'reject_once')
+        const question = notificationQuestion(request.questions)
         this.deps.events.attention(
           live.id,
           'permission',
@@ -8643,6 +8650,7 @@ export class SessionManager {
             id: requestId,
             ...(allow ? { allow: { optionId: allow.id, name: allow.name } } : {}),
             ...(allow && deny ? { deny: { optionId: deny.id, name: deny.name } } : {}),
+            ...(question ? { question } : {}),
           },
         )
       }
