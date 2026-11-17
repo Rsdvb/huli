@@ -40,6 +40,7 @@ import {
   visibleOrder,
   type SessionNode,
 } from '@renderer/stores/sessions'
+import { withFolderOrder } from '@renderer/features/session-folders/drag'
 import { useSessionDragSource } from '@renderer/features/split/session-drag-model'
 import { allPanes, paneWithSession } from '@renderer/features/split/layout'
 import { openSession, useViewStore } from '@renderer/stores/view'
@@ -172,7 +173,7 @@ export const SessionRow = memo(function SessionRow({
         useSessionsStore.getState().byId,
         useProjectsStore.getState().projects,
       )
-      selectRange(summary.id, current, order)
+      selectRange(summary.id, current, withFolderOrder(order))
       return true
     }
     clearSelection()
