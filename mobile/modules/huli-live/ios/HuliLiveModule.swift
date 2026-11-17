@@ -2,7 +2,8 @@
 // launch, the ones the computer starts by push included, with their push tokens and the token that
 // lets the computer start one; JavaScript reads them all as one JSON snapshot after each "onChange"
 // and gives the computer the tokens over the link. It also starts, updates and ends the activities
-// the app runs itself, and hands the home-screen widget its snapshot through the App Group.
+// the app runs itself, with a push token of their own so the computer can follow them, and hands
+// the home-screen widget its snapshot through the App Group.
 
 import ActivityKit
 import ExpoModulesCore
@@ -166,11 +167,17 @@ final class LiveActivities {
     guard ActivityAuthorizationInfo().areActivitiesEnabled else {
       throw LiveActivityError(reason: "Live Activities are off")
     }
-    let activity = try Activity<HuliActivityAttributes>.request(
-      attributes: attributes,
-      content: ActivityContent(state: state, staleDate: LiveActivities.staleDate(staleSeconds)),
-      pushType: nil
-    )
+    let content = ActivityContent(state: state, staleDate: LiveActivities.staleDate(staleSeconds))
+    // With a push token, which the computer gets, it keeps the activity up to date while the app
+    // is away; without one, as when push is not set up for this build, the app alone does.
+    let activity: Activity<HuliActivityAttributes>
+    do {
+      activity = try Activity<HuliActivityAttributes>.request(
+        attributes: attributes, content: content, pushType: .token)
+    } catch {
+      activity = try Activity<HuliActivityAttributes>.request(
+        attributes: attributes, content: content, pushType: nil)
+    }
     watch(activity)
     changed()
     return activity.id

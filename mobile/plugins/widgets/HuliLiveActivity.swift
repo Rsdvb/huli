@@ -1,20 +1,28 @@
 // The Live Activity on the Lock Screen and in the Dynamic Island. Two kinds share it: the one the
 // computer starts by push while requests wait for the user (its attributes and state sealed to this
-// phone, opened here), and the one the app starts for a session's turn while it is open. Tapping
-// either opens the session in the app. Answering a request takes the app's encrypted link to the
-// computer, which an extension does not have, so the activity offers no buttons of its own.
+// phone, opened here), and the one that follows a session's turn: the app starts it while it is
+// open, or the computer by push, and the computer keeps it up to date while the app is away, with
+// sealed states of its own. Tapping either opens the session in the app. Answering a request takes
+// the app's encrypted link to the computer, which an extension does not have, so the activity
+// offers no buttons of its own.
 
 import ActivityKit
 import SwiftUI
 import WidgetKit
 
 enum LivePhase: String {
-  case thinking, command, approval, question, waiting, running, done, error
+  case starting, thinking, writing, command, read, search, edit
+  case approval, question, waiting, running, done, error
 
   var label: String {
     switch self {
+    case .starting: return "正在启动"
     case .thinking: return "思考中"
+    case .writing: return "正在回复"
     case .command: return "正在运行命令"
+    case .read: return "正在读取文件"
+    case .search: return "正在搜索"
+    case .edit: return "正在编辑文件"
     case .approval: return "等你批准"
     case .question: return "等你回答"
     case .waiting: return "等你处理"
@@ -27,8 +35,13 @@ enum LivePhase: String {
   /// A word or two, for the compact Dynamic Island.
   var short: String {
     switch self {
+    case .starting: return "启动"
     case .thinking: return "思考"
+    case .writing: return "回复"
     case .command: return "命令"
+    case .read: return "读取"
+    case .search: return "搜索"
+    case .edit: return "编辑"
     case .approval: return "批准"
     case .question: return "回答"
     case .waiting: return "等你"
@@ -40,8 +53,13 @@ enum LivePhase: String {
 
   var symbol: String {
     switch self {
+    case .starting: return "hourglass"
     case .thinking: return "sparkles"
+    case .writing: return "text.bubble.fill"
     case .command: return "terminal.fill"
+    case .read: return "doc.text.fill"
+    case .search: return "magnifyingglass"
+    case .edit: return "pencil"
     case .approval: return "hand.raised.fill"
     case .question: return "questionmark.bubble.fill"
     case .waiting: return "bell.badge.fill"
@@ -74,36 +92,60 @@ struct LiveModel {
   var until: Date?
   var running: Int?
   var waiting: Int?
+  /// The plan's steps done and in all, and the subagents at work, for a turn.
+  var plan: (done: Int, total: Int)?
+  var subagents: Int?
   var url: URL
 
   init(attributes: HuliActivityAttributes, state: HuliActivityAttributes.ContentState) {
     if let local = state.local {
-      self.init(local: local, hostName: attributes.hostName)
+      self.init(local: local, attributes: attributes)
+      return
+    }
+    let keys = SharedKeys.load()
+    let info = Sealed.open(attributes.sealed, keys: keys)
+    let content = Sealed.open(state.sealed, keys: keys)
+    if let content, (content["kind"] as? String) == "progress" {
+      self.init(
+        progress: content,
+        hostName: LiveModel.text(info?["hostName"]) ?? LiveModel.text(attributes.hostName),
+        quiet: keys?.quiet == true)
     } else {
-      self.init(sealedAttributes: attributes.sealed, sealedState: state.sealed)
+      self.init(waiting: content, info: info, quiet: keys?.quiet == true)
     }
   }
 
-  private init(local: HuliLocalState, hostName: String?) {
+  private init(local: HuliLocalState, attributes: HuliActivityAttributes) {
     phase = LivePhase(rawValue: local.phase) ?? .running
     title = LiveModel.text(local.title) ?? LiveModel.text(local.agent) ?? "Huli 会话"
     detail = LiveModel.text(local.doing)
-    let parts = [local.title == nil ? nil : LiveModel.text(local.agent), LiveModel.text(hostName)]
+    // One the computer started by push names the computer only in its sealed attributes.
+    let hostName =
+      LiveModel.text(attributes.hostName)
+      ?? (attributes.sealed == nil
+        ? nil : LiveModel.text(Sealed.open(attributes.sealed, keys: SharedKeys.load())?["hostName"]))
+    let parts = [local.title == nil ? nil : LiveModel.text(local.agent), hostName]
       .compactMap { $0 }
     source = parts.isEmpty ? nil : parts.joined(separator: " · ")
     since = local.startedAt.map { Date(timeIntervalSince1970: $0 / 1000) }
     until = local.endedAt.map { Date(timeIntervalSince1970: $0 / 1000) }
     running = local.running
     waiting = local.waiting
+    if let done = local.planDone, let total = local.planTotal, total > 0 {
+      plan = (done, total)
+    } else {
+      plan = nil
+    }
+    subagents = local.subagents
     url = Huli.sessionURL(local.sessionId)
   }
 
-  private init(sealedAttributes: String?, sealedState: String?) {
-    let keys = SharedKeys.load()
-    let info = Sealed.open(sealedAttributes, keys: keys)
-    let content = Sealed.open(sealedState, keys: keys)
+  /// What waits for the user, as the computer counts it, from the activity it started for that.
+  private init(waiting content: [String: Any]?, info: [String: Any]?, quiet: Bool) {
+    plan = nil
+    subagents = nil
     let count = content?["count"] as? Int
-    let sessionTitle = keys?.quiet == true ? nil : LiveModel.text(content?["title"])
+    let sessionTitle = quiet ? nil : LiveModel.text(content?["title"])
     let hostName = LiveModel.text(content?["hostName"]) ?? LiveModel.text(info?["hostName"])
 
     phase = count == 0 ? .done : .waiting
@@ -132,13 +174,51 @@ struct LiveModel {
     url = Huli.sessionURL(content?["sessionId"] as? String)
   }
 
+  /// A session's turn, as the computer follows it (ProgressState in src/shared/remote/push.ts).
+  /// A newer `format` may add fields; what this build knows of it still shows.
+  private init(progress content: [String: Any], hostName: String?, quiet: Bool) {
+    phase = LivePhase(rawValue: content["phase"] as? String ?? "") ?? .running
+    let sessionTitle = quiet ? nil : LiveModel.text(content["title"])
+    let agent = LiveModel.text(content["agent"])
+    title = sessionTitle ?? agent ?? "Huli 会话"
+    let planInfo = content["plan"] as? [String: Any]
+    let current = quiet ? nil : LiveModel.text(planInfo?["current"])
+    if phase == .done {
+      detail = "这一轮已完成"
+    } else if phase == .error {
+      detail = "这一轮出错了"
+    } else if !quiet, let step = LiveModel.text(content["step"]) {
+      detail = step
+    } else if let current {
+      detail = "正在：\(current)"
+    } else {
+      detail = nil
+    }
+    let parts = [sessionTitle == nil ? nil : agent, LiveModel.text(content["hostName"]) ?? hostName]
+      .compactMap { $0 }
+    source = parts.isEmpty ? nil : parts.joined(separator: " · ")
+    since = (content["startedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+    until = (content["endedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+    running = content["running"] as? Int
+    waiting = content["waiting"] as? Int
+    if let done = planInfo?["done"] as? Int, let total = planInfo?["total"] as? Int, total > 0 {
+      plan = (done, total)
+    } else {
+      plan = nil
+    }
+    subagents = content["subagents"] as? Int
+    url = Huli.sessionURL(content["sessionId"] as? String)
+  }
+
   /// The line under the title; a state that may have gone stale says so.
   func detailLine(stale: Bool) -> String? {
     if stale && !phase.finished { return "可能不是最新，打开 Huli 查看" }
     return detail
   }
 
-  var hasCounts: Bool { (running ?? 0) > 0 || (waiting ?? 0) > 0 }
+  var hasCounts: Bool {
+    (running ?? 0) > 0 || (waiting ?? 0) > 0 || plan != nil || (subagents ?? 0) > 0
+  }
 
   private static func text(_ value: Any?) -> String? {
     guard let text = value as? String, !text.isEmpty else { return nil }
@@ -179,15 +259,20 @@ struct PhaseBadge: View {
 }
 
 struct LiveCounts: View {
-  let running: Int?
-  let waiting: Int?
+  let model: LiveModel
 
   var body: some View {
     HStack(spacing: 10) {
-      if let running, running > 0 {
+      if let plan = model.plan {
+        Label("\(plan.done)/\(plan.total)", systemImage: "checklist")
+      }
+      if let subagents = model.subagents, subagents > 0 {
+        Label("\(subagents)", systemImage: "person.2.fill")
+      }
+      if let running = model.running, running > 0 {
         Label("\(running) 运行中", systemImage: "bolt.fill")
       }
-      if let waiting, waiting > 0 {
+      if let waiting = model.waiting, waiting > 0 {
         Label("\(waiting) 等你", systemImage: "hand.raised.fill")
           .foregroundStyle(Huli.accent)
       }
@@ -195,6 +280,19 @@ struct LiveCounts: View {
     .font(.caption.weight(.medium))
     .foregroundStyle(.secondary)
     .lineLimit(1)
+  }
+}
+
+/// How far the turn's plan got, as a thin bar under the Lock Screen's text.
+struct PlanBar: View {
+  let model: LiveModel
+
+  var body: some View {
+    if let plan = model.plan, !model.phase.finished {
+      ProgressView(value: Double(min(plan.done, plan.total)), total: Double(plan.total))
+        .progressViewStyle(.linear)
+        .tint(model.phase.tint)
+    }
   }
 }
 
@@ -237,9 +335,10 @@ struct LiveLockScreen: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
           Spacer(minLength: 4)
-          LiveCounts(running: model.running, waiting: model.waiting)
+          LiveCounts(model: model)
         }
       }
+      PlanBar(model: model)
     }
     .padding(16)
   }
@@ -268,7 +367,7 @@ struct LiveExpandedBottom: View {
             .lineLimit(1)
         }
         Spacer(minLength: 8)
-        LiveCounts(running: model.running, waiting: model.waiting)
+        LiveCounts(model: model)
         Link(destination: model.url) {
           Text(model.phase.needsYou ? "去处理" : "查看")
             .font(.caption.weight(.semibold))
