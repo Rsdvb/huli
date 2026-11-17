@@ -24,7 +24,7 @@ export interface UpdateStatus {
   dismissed: string | null // the version whose notice was dismissed
 }
 
-export const RELEASES_URL = 'https://releases.huli.invalid'
+export const RELEASES_URL = 'https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996'
 
 export function releaseUrl(version: string): string {
   return `${RELEASES_URL}/tag/v${version}`

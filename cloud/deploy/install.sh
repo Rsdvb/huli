@@ -91,7 +91,34 @@ curl -fsS http://127.0.0.1:3010/healthz && echo ' <- huli-cloud'
 # 6. Certificate through the shared ACME webroot that port 80 already serves.
 certbot certonly --webroot -w /var/www/acme -d "$DOMAIN" --non-interactive --keep-until-expiring
 
-# 7. nginx site.
+# 7. Huli's update files, served under a random path kept in /etc/huli-updates.path, uploaded by
+# the build through the huli-upload user, who may only write into the folder (rrsync).
+updates_location=''
+if [ -s /etc/huli-updates.path ]; then
+  segment="$(tr -cd 'a-f0-9' </etc/huli-updates.path)"
+  id huli-upload >/dev/null 2>&1 ||
+    useradd --system --create-home --home-dir /var/lib/huli-upload --shell /bin/sh huli-upload
+  install -d -o huli-upload -g huli-upload -m 755 /var/www/huli-updates
+  install -d -o huli-upload -g huli-upload -m 700 /var/lib/huli-upload/.ssh
+  if [ -s /tmp/huli_upload.pub ]; then
+    printf 'restrict,command="/usr/bin/rrsync -wo /var/www/huli-updates" %s\n' \
+      "$(cat /tmp/huli_upload.pub)" >/var/lib/huli-upload/.ssh/authorized_keys
+    chown huli-upload:huli-upload /var/lib/huli-upload/.ssh/authorized_keys
+    chmod 600 /var/lib/huli-upload/.ssh/authorized_keys
+    rm -f /tmp/huli_upload.pub
+  fi
+  # Keeps the five newest versions; latest/ always names one of them.
+  cat >/etc/cron.d/huli-updates-prune <<'EOF'
+17 4 * * * root ls -1dt /var/www/huli-updates/download/v* 2>/dev/null | tail -n +6 | xargs -r rm -rf
+EOF
+  updates_location="
+    location ^~ /u/$segment/ {
+        alias /var/www/huli-updates/;
+        add_header Cache-Control no-cache;
+    }"
+fi
+
+# 8. nginx site.
 cat >/etc/nginx/sites-available/huli-cloud <<EOF
 server {
     listen 443 ssl;
@@ -101,7 +128,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     client_max_body_size 1m;
-    access_log /var/log/nginx/huli-cloud.log;
+    access_log /var/log/nginx/huli-cloud.log;$updates_location
     location / {
         proxy_pass http://127.0.0.1:3010;
         proxy_set_header Host \$host;
@@ -115,7 +142,7 @@ ln -sfn /etc/nginx/sites-available/huli-cloud /etc/nginx/sites-enabled/huli-clou
 nginx -t
 systemctl reload nginx
 
-# 8. fail2ban: five failed sign-ins in 15 minutes ban the address for an hour.
+# 9. fail2ban: five failed sign-ins in 15 minutes ban the address for an hour.
 cat >/etc/fail2ban/filter.d/huli-cloud.conf <<'EOF'
 [Definition]
 failregex = huli-cloud: login failed from <HOST>$

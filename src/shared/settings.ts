@@ -231,8 +231,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   marketplace: { mcp: [], skills: [] },
   startModes: {},
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
-  // Personal fork: an official release would replace this build, so it never updates by itself.
-  updates: { automatic: 'off', source: 'github' },
+  updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
   diagnostics: { verboseUntil: null },
   usage: { fromComputer: false, sidebar: 'today', limits: 'used' },

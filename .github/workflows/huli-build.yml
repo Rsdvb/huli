@@ -63,6 +63,7 @@ jobs:
           name: huli-${{ matrix.os }}
           path: |
             dist/*-setup.exe
+            dist/*-setup.exe.blockmap
             dist/*.AppImage
             dist/latest*.yml
           if-no-files-found: error
@@ -128,21 +129,54 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            tools/workflow
+            src/main/update-keys.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: huli-*
+      - name: Gather and sign
+        run: |
+          mkdir release
+          find artifacts -type f \( -name '*-setup.exe' -o -name '*-setup.exe.blockmap' \
+            -o -name '*.AppImage' -o -name '*.dmg' -o -name 'latest*.yml' \
+            -o -name 'huli-cloud.mjs' -o -name 'install.sh' \) -exec cp {} release/ \;
+          node tools/workflow/sign-update-files.mjs release/latest*.yml
+          (cd release && sha256sum * > SHA256SUMS.txt)
+          ls -l release
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+      # The version's files first, then the update files that name it, so a check never finds a
+      # version whose files are not there yet. huli-upload may only write under its folder.
+      - name: Upload to Huli's update channel
+        env:
+          KEY: ${{ secrets.HULI_UPLOAD_KEY }}
+          KNOWN_HOSTS: ${{ secrets.HULI_UPLOAD_KNOWN_HOSTS }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          install -d -m 700 ~/.ssh
+          (umask 077 && printf '%s\n' "$KEY" > ~/.ssh/huli_upload)
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh="ssh -i $HOME/.ssh/huli_upload -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          host=huli-upload@132.145.200.0
+          mkdir channel
+          cp release/*-setup.exe* release/*.AppImage release/*.dmg release/latest*.yml* channel/ 2>/dev/null || true
+          rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" channel/ "$host:download/v$VERSION/"
+          rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" release/latest*.yml "$host:latest/download/"
+          rm -f ~/.ssh/huli_upload
       - name: Publish a pre-release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          mkdir release
-          find artifacts -type f \( -name '*-setup.exe' -o -name '*.AppImage' -o -name '*.dmg' \
-            -o -name 'huli-cloud.mjs' -o -name 'install.sh' \) -exec cp {} release/ \;
-          (cd release && sha256sum * > SHA256SUMS.txt)
-          ls -l release
           gh release create "v$VERSION" release/* --prerelease --target "$GITHUB_SHA" \
             --title "Huli $VERSION" \
             --notes "Kettu $(git ls-remote https://github.com/KettuAI/Kettu.git refs/heads/main | cut -c1-8) 合并后的自动编译。"

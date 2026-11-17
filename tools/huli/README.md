@@ -11,11 +11,11 @@ Code (kept small so upstream merges stay clean):
 | File | Change |
 |---|---|
 | `src/agent-host/agents.ts` | `READ_ANTIGRAVITY_LIMITS = false`: never runs `agy -p /usage`, `/credits` or a hidden ACP session to read Antigravity's limits |
-| `src/shared/settings.ts` | defaults: cloud off, relay off, not discoverable, updates off with GitHub as source |
-| `src/main/updater.ts` | `PERSONAL_FORK`: no automatic update checks |
+| `src/shared/settings.ts` | defaults: cloud off, relay off, not discoverable |
+| `src/main/update-keys.json`, `src/main/update-sources.ts`, `src/shared/updates.ts`, `src/daemon/update.ts` | updates come from Huli's own channel on Huli Cloud's host, signed with Huli's own release keys (kept off the repository) |
 | `src/shared/account-api.ts`, `src/shared/remote/push.ts` | the account service and push gateway are Huli Cloud, `https://huli.132-145-200-0.sslip.io` (see `cloud/`) |
 | `src/shared/kettu-hosts.ts` | Huli Cloud's host counts as one of the services the cloud switch governs |
-| `src/shared/remote/{relay,pairing}.ts`, `src/main/update-sources.ts`, `src/daemon/update.ts`, `src/shared/updates.ts` | every other kettu.sh address points at `*.huli.invalid`, which never resolves |
+| `src/shared/remote/{relay,pairing}.ts` | every other kettu.sh address points at `*.huli.invalid`, which never resolves |
 | `src/shared/storage.ts`, `src/agent-host/worktrees/git.ts` | home folder `~/.huli` instead of `~/.kettu` |
 | `src/main/user-data.ts` | development data folder `Huli Dev` |
 | `src/main/index.ts`, `src/main/computer-use.ts` | app user model id `local.huli.app` |
