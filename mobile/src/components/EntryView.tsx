@@ -4,11 +4,12 @@
 import { useMemo, useState } from 'react'
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import type { ThreadEntry, ToolEntry, UserContent } from '@shared/thread'
+import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { diffTexts, handDiff, type ToolDiff } from '../diff'
 import { duration } from '../sessions'
 import type { Theme } from '../theme'
 import { Markdown } from './Markdown'
+import { UserMessage } from './UserMessage'
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' })
 
@@ -23,29 +24,6 @@ const TOOL_VERBS: Record<ToolEntry['toolKind'], string> = {
   fetch: '获取',
   switch_mode: '切换模式',
   other: '工具',
-}
-
-function contentText(content: UserContent[]): string {
-  return content
-    .map((part) => {
-      if (part.type === 'text') return part.text
-      const ref = part.ref
-      switch (ref.kind) {
-        case 'image':
-          return '［图片］'
-        case 'attachment':
-          return `［${ref.attachment.name}］`
-        case 'link':
-          return `［${ref.name}］`
-        case 'audio':
-          return '［音频］'
-        case 'video':
-          return '［视频］'
-        default:
-          return `［${ref.label}］`
-      }
-    })
-    .join('\n')
 }
 
 function toolStatus(entry: ToolEntry, theme: Theme): { mark: string; color: string } {
@@ -141,9 +119,7 @@ export function EntryView(props: { entry: ThreadEntry; theme: Theme }) {
       if (entry.approval) return null
       return (
         <View style={[styles.user, { backgroundColor: theme.accent }]}>
-          <Text selectable style={{ color: theme.accentText, fontSize: 15, lineHeight: 21 }}>
-            {contentText(entry.content)}
-          </Text>
+          <UserMessage content={entry.content} theme={theme} />
         </View>
       )
     case 'agent':
