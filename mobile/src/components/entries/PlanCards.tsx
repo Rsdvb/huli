@@ -1,16 +1,27 @@
 // Plans as the desktop shows them. A plan to approve: the plan, what changed since the one sent
 // back, the mode Claude Code builds in (Codex's choices to implement it), and a note for keeping on
 // planning. Once answered, one line says what became of it, with the plan a tap away. The agent's
-// running plan is no card per update but one chip above the composer, its ring and current step,
-// opening to the step list.
+// running plan is no card per update but one glass pill under the header, its ring and current
+// step, opening to the step list.
 
-import { useMemo, useState } from 'react'
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native'
 import Svg, { Circle, Path } from 'react-native-svg'
 import type { ConfigOption, PlanEntry, ToolEntry } from '@shared/thread'
 import { useConnected, useLink } from '../../host'
-import { BottomSheet } from '../../ui/BottomSheet'
+import { useSelector, type Store } from '../../select'
+import { GlassCapsule } from '../../ui/Glass'
 import { SegmentedControl } from '../../ui/SegmentedControl'
+import type { MenuPage, ViewHandle } from '../../ui/session/Popover'
 import { Clamp } from '../../ui/session/Clamp'
 import { useSessionRows } from '../../ui/session/context'
 import { copyText, haptic } from '../../ui/session/feedback'
@@ -476,86 +487,232 @@ function PlanRing(props: { items: PlanEntry['items']; size?: number }) {
   )
 }
 
+/** A ring that turns, for the step being worked on now. Still under Reduce Motion. */
+function PlanSpinner(props: { size?: number }) {
+  const { c } = useSessionTokens()
+  const turn = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    let loop: Animated.CompositeAnimation | null = null
+    let live = true
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
+      if (!live || reduce) return
+      loop = Animated.loop(
+        Animated.timing(turn, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      )
+      loop.start()
+    })
+    return () => {
+      live = false
+      loop?.stop()
+    }
+  }, [turn])
+  const size = props.size ?? 16
+  const r = 6
+  const around = 2 * Math.PI * r
+  return (
+    <Animated.View
+      style={{
+        width: size,
+        height: size,
+        transform: [
+          { rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) },
+        ],
+      }}
+    >
+      <Svg width={size} height={size} viewBox="0 0 16 16">
+        <Circle cx={8} cy={8} r={r} stroke={c.track} strokeWidth={2} fill="none" />
+        <Circle
+          cx={8}
+          cy={8}
+          r={r}
+          stroke={c.tint}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeDasharray={`${around * 0.3} ${around}`}
+          fill="none"
+        />
+      </Svg>
+    </Animated.View>
+  )
+}
+
+type PlanItems = PlanEntry['items']
+
 /**
- * The session's plan above the composer: its ring, the step it is on and which of how many; tapped,
- * the step list. It leaves once every step is done and its turn ended.
+ * The plan's steps while it pins under the header; null once every step is done and its turn
+ * ended, or with no plan.
  */
-export function PlanChip(props: { plan: PlanEntry | null; running: boolean }) {
-  const { c, s } = useSessionTokens()
-  const [open, setOpen] = useState(false)
-  const items = props.plan && props.plan.items.length > 0 ? props.plan.items : null
+export function pinnedPlan(plan: PlanEntry | null, running: boolean): PlanItems | null {
+  const items = plan && plan.items.length > 0 ? plan.items : null
   if (!items) return null
-  const allDone = items.every((item) => item.status === 'completed')
-  if (allDone && !props.running && !open) return null
-  const total = items.length
+  if (!running && items.every((item) => item.status === 'completed')) return null
+  return items
+}
+
+/** The step to show: the one in progress, else the next to do, else the last. */
+function currentStep(items: PlanItems): { index: number; text: string | null } {
   const doing = items.findIndex((item) => item.status === 'in_progress')
   const next = items.findIndex((item) => item.status === 'pending')
-  const index = doing >= 0 ? doing : next >= 0 ? next : total - 1
-  const step = index + 1
-  const text = doing >= 0 || next >= 0 ? items[index]!.content : null
-  const label = text ? `计划：第 ${step} 步，共 ${total} 步，${text}` : `计划：${total} 步都已完成`
+  const index = doing >= 0 ? doing : next >= 0 ? next : items.length - 1
+  return { index, text: doing >= 0 || next >= 0 ? items[index]!.content : null }
+}
+
+function planLabel(items: PlanItems): string {
+  const { index, text } = currentStep(items)
+  return text
+    ? `计划：第 ${index + 1} 步，共 ${items.length} 步，${text}`
+    : `计划：${items.length} 步都已完成`
+}
+
+/** How much room the pill takes under the header, with its gap. */
+export const PLAN_PILL_ROOM = 44
+
+/**
+ * The session's plan, floating under the header as a glass capsule: its ring, or a turning ring
+ * while the step runs, the step it is on and which of how many. Tapped, it opens the step list
+ * (`planPage`). It fades while the conversation is flung, so it never sits over text being read.
+ */
+export function PlanPill(props: {
+  items: PlanItems
+  running: boolean
+  top: number
+  anchor: RefObject<ViewHandle | null>
+  /** True while the conversation scrolls fast. */
+  scrolling: Store<boolean>
+  onPress(): void
+}) {
+  const { c } = useSessionTokens()
+  const { items } = props
+  const { index, text } = currentStep(items)
+  const working = props.running && items[index]?.status === 'in_progress'
+  const hidden = useSelector(props.scrolling, (fast) => fast)
+  const shown = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    Animated.timing(shown, {
+      toValue: hidden ? 0 : 1,
+      duration: hidden ? 140 : 220,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start()
+  }, [hidden, shown])
   return (
-    <View style={styles.chipDock}>
-      <PressScale
-        scale={0.98}
-        onPress={() => {
-          haptic.tap()
-          setOpen(true)
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        style={[styles.chip, { backgroundColor: s.dockCard, borderColor: c.border }]}
+    <Animated.View
+      pointerEvents={hidden ? 'none' : 'box-none'}
+      style={[
+        styles.pillDock,
+        {
+          top: props.top,
+          opacity: shown,
+          transform: [
+            {
+              translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }),
+            },
+            { scale: shown.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
+          ],
+        },
+      ]}
+    >
+      <View ref={props.anchor} collapsable={false} style={styles.pillAnchor}>
+        <PressScale
+          scale={0.97}
+          onPress={props.onPress}
+          accessibilityRole="button"
+          accessibilityLabel={planLabel(items)}
+          accessibilityHint="显示计划的全部步骤"
+          outerStyle={styles.pillOuter}
+        >
+          <GlassCapsule interactive elevated height={34} style={styles.planPill}>
+            {working ? <PlanSpinner /> : <PlanRing items={items} />}
+            <Text style={[styles.pillText, { color: c.text }]} numberOfLines={1}>
+              {text ?? '都已完成'}
+            </Text>
+            <Text style={[styles.pillCount, { color: c.textTertiary }]}>
+              {index + 1}/{items.length}
+            </Text>
+          </GlassCapsule>
+        </PressScale>
+      </View>
+    </Animated.View>
+  )
+}
+
+function PlanStep(props: { item: PlanItems[number]; running: boolean }) {
+  const { c } = useSessionTokens()
+  const { status, content } = props.item
+  return (
+    <View style={styles.step} accessible accessibilityLabel={`${STATUS_WORD[status]}，${content}`}>
+      <View style={styles.stepMark}>
+        {status === 'in_progress' && props.running ? (
+          <PlanSpinner size={18} />
+        ) : status === 'completed' ? (
+          <Icon icon={G.check} size={16} color={c.success} weight="semibold" />
+        ) : (
+          <Icon
+            icon={status === 'in_progress' ? G.doing : G.todo}
+            size={17}
+            color={status === 'in_progress' ? c.tint : c.textTertiary}
+          />
+        )}
+      </View>
+      <Text
+        style={[
+          styles.stepText,
+          {
+            color: status === 'completed' ? c.textTertiary : c.text,
+            fontWeight: status === 'in_progress' ? '600' : '400',
+          },
+        ]}
+        numberOfLines={2}
       >
-        <PlanRing items={items} />
-        <Text style={[styles.chipText, { color: c.text }]} numberOfLines={1}>
-          {text ?? '都已完成'}
-        </Text>
-        <Text style={[styles.chipCount, { color: c.textTertiary }]}>
-          {step}/{total}
-        </Text>
-        <Icon icon={G.upDown} size={11} color={c.textTertiary} />
-      </PressScale>
-      <BottomSheet visible={open} onClose={() => setOpen(false)} title={label}>
-        <View style={{ gap: 10, paddingBottom: 8 }}>
-          {items.map((item, i) => (
-            <View key={i} style={styles.step}>
-              <View style={{ height: 21, justifyContent: 'center' }}>
-                <Icon
-                  icon={
-                    item.status === 'completed'
-                      ? G.done
-                      : item.status === 'in_progress'
-                        ? G.doing
-                        : G.todo
-                  }
-                  size={16}
-                  color={
-                    item.status === 'completed'
-                      ? c.success
-                      : item.status === 'in_progress'
-                        ? c.tint
-                        : c.textTertiary
-                  }
-                />
-              </View>
-              <Text
-                style={[
-                  styles.stepText,
-                  {
-                    color: item.status === 'completed' ? c.textTertiary : c.text,
-                    fontWeight: item.status === 'in_progress' ? '600' : '400',
-                    textDecorationLine: item.status === 'completed' ? 'line-through' : 'none',
-                  },
-                ]}
-              >
-                {item.content}
-              </Text>
-            </View>
-          ))}
-        </View>
-      </BottomSheet>
+        {content}
+      </Text>
     </View>
   )
+}
+
+const STATUS_WORD: Record<string, string> = {
+  completed: '已完成',
+  in_progress: '正在做',
+  pending: '未开始',
+}
+
+/** The plan as a Markdown task list, for 复制计划. */
+function planText(items: PlanItems): string {
+  return items
+    .map((item) => `- [${item.status === 'completed' ? 'x' : ' '}] ${item.content}`)
+    .join('\n')
+}
+
+/** The pill's menu: every step with its state, then 复制计划. */
+export function planPage(items: PlanItems | null, running: boolean): MenuPage | null {
+  if (!items) return null
+  return {
+    entries: [
+      {
+        kind: 'custom',
+        key: 'steps',
+        node: (
+          <View style={styles.steps} accessibilityLabel={planLabel(items)}>
+            {items.map((item, i) => (
+              <PlanStep key={i} item={item} running={running} />
+            ))}
+          </View>
+        ),
+      },
+      { kind: 'divider', key: 'divider' },
+      {
+        key: 'copy',
+        label: '复制计划',
+        icon: G.copy,
+        onPress: () => void copyText(planText(items)),
+      },
+    ],
+  }
 }
 
 const styles = StyleSheet.create({
@@ -624,20 +781,21 @@ const styles = StyleSheet.create({
   settledTitle: { flex: 1, fontSize: 14, lineHeight: 19, fontWeight: '600' },
   quote: { fontSize: 14, lineHeight: 20, borderLeftWidth: 2, paddingLeft: 10 },
   moved: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 4 },
-  chipDock: { paddingHorizontal: 12, paddingTop: 6 },
-  chip: {
-    flexDirection: 'row',
+  pillDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    height: 36,
-    alignSelf: 'flex-start',
-    maxWidth: '100%',
+    paddingHorizontal: 48,
+    zIndex: 9,
   },
-  chipText: { flexShrink: 1, fontSize: 13.5, fontWeight: '500' },
-  chipCount: { fontSize: 12, fontVariant: ['tabular-nums'] },
-  step: { flexDirection: 'row', gap: 10 },
-  stepText: { flex: 1, fontSize: 15, lineHeight: 21 },
+  pillAnchor: { maxWidth: '100%' },
+  pillOuter: { maxWidth: '100%' },
+  planPill: { gap: 8, paddingHorizontal: 12, maxWidth: '100%' },
+  pillText: { flexShrink: 1, fontSize: 14, fontWeight: '500' },
+  pillCount: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  steps: { paddingHorizontal: 8, paddingVertical: 4, gap: 2 },
+  step: { flexDirection: 'row', gap: 12, paddingVertical: 7 },
+  stepMark: { width: 20, height: 21, alignItems: 'center', justifyContent: 'center' },
+  stepText: { flex: 1, fontSize: 16, lineHeight: 21 },
 })

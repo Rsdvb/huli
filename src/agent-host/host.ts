@@ -2788,13 +2788,20 @@ export class AgentHost {
       },
       'star.dismiss': () => this.star.dismiss(),
       'star.opened': () => this.star.opened(),
-      'attachments.add': ({ source, thumb }) =>
-        'projectPath' in source
-          ? this.filesCall(source.projectPath, async (root) => {
-              const found = await this.files.locate(root, source.path)
-              return this.attachments.addPath(found.path, found.kind, thumb)
-            })
-          : this.attachments.add(source, thumb),
+      'attachments.add': ({ source, thumb }, { device }) => {
+        if ('projectPath' in source) {
+          return this.filesCall(source.projectPath, async (root) => {
+            const found = await this.files.locate(root, source.path)
+            return this.attachments.addPath(found.path, found.kind, thumb)
+          })
+        }
+        if ('upload' in source) {
+          // Only a device's remote host has uploads to hand over; a window never names one.
+          if (!device) throw new HostError('forbidden', 'Only a device hands over an upload')
+          return this.attachments.addUpload(source, thumb)
+        }
+        return this.attachments.add(source, thumb)
+      },
       'attachments.read': ({ id }) => this.attachments.read(id),
       'attachments.update': ({ id, thumb, scaled }) => this.attachments.update(id, thumb, scaled),
       'attachments.remove': ({ id }) => this.attachments.remove(id),

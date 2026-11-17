@@ -1,5 +1,6 @@
 // The phone's way to its computer: Kettu's own device side (pairing, the encrypted channel and the
-// host link) over WebSockets to the computer's direct port, on the local network or Tailscale.
+// host link) over WebSockets to the computer's direct port, on the local network or Tailscale, and
+// through Huli Cloud's relay (relay.ts) when no direct address answers.
 
 import { AppState } from 'react-native'
 import * as Device from 'expo-device'
@@ -8,8 +9,10 @@ import { hello, HostLink, type LinkRoute } from '@shared/remote/link'
 import { pair, type Paired, type PairProgress } from '@shared/remote/pair'
 import { decodePairing, parsePairingLink, type PairingPayload } from '@shared/remote/pairing'
 import type { DirectAddress } from '@shared/remote/protocol'
+import type { HostRelay } from '@shared/remote/relay'
 import type { Transport } from '@shared/remote/transport'
 import { webSocketTransport } from '@shared/remote/websocket-transport'
+import { afterGrace, dialRelayTo } from './relay'
 import {
   computerIdOf,
   fromBase64,
@@ -63,13 +66,16 @@ export function routeKind(address: DirectAddress): RouteKind {
 }
 
 // HostLink does not say which route it is on, so each open socket notes when it last heard the
-// computer; the link's own connection is the one heard from most recently.
-const heard = new Map<Transport, { address: DirectAddress; at: number }>()
+// computer; the link's own connection is the one heard from most recently. A link to a computer
+// other than the active one (fleet.ts) keeps its sockets in a map of its own, so they never pass
+// for the active link's route nor keep its relay from dialing.
+type Heard = Map<Transport, { address: DirectAddress; at: number }>
+const heard: Heard = new Map()
 
-function tracked(address: DirectAddress, transport: Transport): Transport {
+function tracked(address: DirectAddress, transport: Transport, into: Heard): Transport {
   const entry = { address, at: 0 }
-  heard.set(transport, entry)
-  transport.onClose(() => heard.delete(transport))
+  into.set(transport, entry)
+  transport.onClose(() => into.delete(transport))
   return {
     ...transport,
     onMessage: (listener) =>
@@ -78,6 +84,50 @@ function tracked(address: DirectAddress, transport: Transport): Transport {
         listener(message)
       }),
   }
+}
+
+/** Whether a direct connection is open now, which the relay then leaves alone. */
+function directOpen(into: Heard): boolean {
+  return into.size > 0
+}
+
+/**
+ * The relay as a route: dialed a moment after the direct addresses, unless one of them is open by
+ * then; at once for a computer the phone has no usable address of.
+ */
+function relayRoute(relay: HostRelay, addresses: DirectAddress[], into: Heard): LinkRoute {
+  return {
+    key: 'relay',
+    relay: true,
+    dial: afterGrace(() => dialRelayTo(relay), {
+      now: usableAddresses(addresses).length === 0,
+      direct: () => directOpen(into),
+    }),
+  }
+}
+
+/** The direct addresses first; the relay, when the computer named one, after them. */
+function dialAny(
+  addresses: DirectAddress[],
+  relay: HostRelay | undefined,
+  into: Heard = heard,
+): Promise<Transport> {
+  if (!relay) return dialFirst(addresses, undefined, into)
+  const viaRelay = relayRoute(relay, addresses, into).dial
+  return new Promise((resolve, reject) => {
+    let left = 2
+    let won = false
+    const fail = (error: unknown) => {
+      if (--left === 0 && !won) reject(error)
+    }
+    for (const dial of [() => dialFirst(addresses, undefined, into), viaRelay]) {
+      dial().then((transport) => {
+        if (won) return transport.close()
+        won = true
+        resolve(transport)
+      }, fail)
+    }
+  })
 }
 
 /** The address the computer was last heard on, among the connections still open. */
@@ -100,18 +150,17 @@ function socketUrl(address: DirectAddress): string {
 }
 
 /**
- * A transport to one address. React Native's WebSocket may not count what it has buffered. A
- * socket of a link to a computer other than the active one is not `track`ed, so it never passes
- * for the active link's route.
+ * A transport to one address, noted `into` the link's sockets. React Native's WebSocket may not
+ * count what it has buffered.
  */
-function openSocket(address: DirectAddress, timeoutMs = 8000, track = true): Promise<Transport> {
+function openSocket(address: DirectAddress, timeoutMs = 8000, into = heard): Promise<Transport> {
   const socket = new WebSocket(socketUrl(address))
   if (typeof socket.bufferedAmount !== 'number') {
     Object.defineProperty(socket, 'bufferedAmount', { value: 0 })
   }
   const timer = setTimeout(() => socket.close(), timeoutMs)
   return webSocketTransport(socket)
-    .then((transport) => (track ? tracked(address, transport) : transport))
+    .then((transport) => tracked(address, transport, into))
     .finally(() => clearTimeout(timer))
 }
 
@@ -119,7 +168,7 @@ function openSocket(address: DirectAddress, timeoutMs = 8000, track = true): Pro
 function dialFirst(
   addresses: DirectAddress[],
   timeoutMs?: number,
-  track = true,
+  into = heard,
 ): Promise<Transport> {
   const list = usableAddresses(addresses)
   if (list.length === 0) return Promise.reject(new Error('The computer named no address'))
@@ -127,7 +176,7 @@ function dialFirst(
     let left = list.length
     let won = false
     for (const address of list) {
-      openSocket(address, timeoutMs, track).then(
+      openSocket(address, timeoutMs, into).then(
         (transport) => {
           if (won) return transport.close()
           won = true
@@ -163,7 +212,7 @@ export async function pairWith(
   const key = await deviceKey()
   const paired = await pair(
     {
-      dial: () => dialFirst(payload.addresses),
+      dial: () => dialAny(payload.addresses, payload.relay),
       payload,
       key,
       client: CLIENT,
@@ -185,6 +234,7 @@ export async function pairWith(
       addresses: welcome.addresses.length > 0 ? welcome.addresses : payload.addresses,
       platform: welcome.host.platform,
       lastSeen: Date.now(),
+      ...((welcome.relay ?? payload.relay) ? { relay: welcome.relay ?? payload.relay } : {}),
     },
   }
 }
@@ -214,15 +264,18 @@ export function linkTo(
   current: () => SavedHost = () => host,
   side = false,
 ): HostLink {
-  const track = !side
-  const routes = (): LinkRoute[] =>
-    triedAddresses(current()).map((address) => ({
+  const into: Heard = side ? new Map() : heard
+  const routes = (): LinkRoute[] => {
+    const saved = current()
+    const direct: LinkRoute[] = triedAddresses(saved).map((address) => ({
       key: routeKey(address),
       relay: false,
-      dial: () => openSocket(address, undefined, track),
+      dial: () => openSocket(address, undefined, into),
     }))
+    return saved.relay ? [...direct, relayRoute(saved.relay, saved.addresses, into)] : direct
+  }
   return new HostLink({
-    dial: () => dialFirst(current().addresses, undefined, track),
+    dial: () => dialAny(current().addresses, current().relay, into),
     routes,
     hostKey: fromBase64(host.hostKey),
     key,

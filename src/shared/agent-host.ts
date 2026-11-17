@@ -1321,12 +1321,15 @@ export interface HostContract {
   // A draft's attachment, kept until it is sent or removed; see attachments in the session model.
   // `grantId`: a file or folder main granted for a pick or a drop. `projectPath` and `path`: one
   // an `@` mention named, relative to the project and checked as `files.read` checks a path.
+  // `upload`: what a device uploaded in place of `bytes`, which only its remote host names, as the
+  // file's name in its upload folder; taken from a device's port alone.
   'attachments.add': {
     params: {
       source:
         | { bytes: ArrayBuffer; mimeType: string; name: string }
         | { grantId: string }
         | { projectPath: string; path: string }
+        | { upload: string; mimeType: string; name: string }
       thumb: string | null
     }
     result: Attachment

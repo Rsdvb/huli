@@ -20,8 +20,8 @@ export const REGION_LIST_CONTEXT = 'kettu-regions/1\n'
 
 /** The keys a list may be signed with, the current and the next: raw Ed25519, base64url. */
 export const REGION_KEYS: Readonly<Record<string, string>> = {
-  r1: 'KzQciiotgrhYBuE9ORd809wCrytrmi_fp-zqZkpjS90',
-  r2: 'IhKnOcq-e_NDb-mUBQywPg89-eHA5YXBAjwo4M06kIA',
+  r1: 'gPIqGyTOYfQf6-nt-9iwEaNNrTovQG5rZ72CbmajEq0',
+  r2: 'VaR7w6bc9IYX77nHRZeDQ_WIxuxRUnC991idTVGO0lo',
 }
 
 /** Adds keys for a development relay: `id=key` pairs, comma separated. */

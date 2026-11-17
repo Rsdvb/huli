@@ -1,7 +1,13 @@
 import type { ControlStep } from '@shared/control'
 import type { SessionView, ThreadState } from '@shared/thread'
 
-export { turnPhase, type TurnPhase } from '@shared/turn-phase'
+export {
+  turnDoing,
+  turnPhase,
+  type TurnDoing,
+  type TurnPhase,
+  type TurnPhaseName,
+} from '@shared/turn-phase'
 
 // The turn's latest entries are read no further back than this, as they are on every chunk.
 const LOOKBACK = 64

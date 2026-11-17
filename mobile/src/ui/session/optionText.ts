@@ -83,6 +83,33 @@ const FAMILY: Record<string, string> = {
   fable: 'Fable',
 }
 
+const BLURBS: [family: RegExp, text: string][] = [
+  [/haiku/, '最快，适合简单问题'],
+  [/sonnet/, '均衡，适合日常任务'],
+  [/opus/, '最强，适合复杂任务'],
+]
+
+const CJK = /[㐀-鿿]/
+
+/**
+ * A model's line under its name in the model menu, short and in Chinese: Default names the model it
+ * stands for, a Claude family says what it suits, a short Chinese description stays; anything
+ * else, as an English sentence that would wrap, is left out.
+ */
+export function modelBlurb(choice: {
+  value: string
+  name: string
+  modelId?: string
+  description?: string
+}): string | null {
+  const isDefault = /^default$/i.test(choice.value) || /^default\b/i.test(choice.name)
+  if (isDefault && choice.modelId) return `使用 ${shortModelName(choice)}`
+  const said = choice.description ? optionDescription(choice.description) : ''
+  if (said && CJK.test(said) && said.length <= 16) return said
+  const id = `${choice.modelId ?? ''} ${choice.name}`.toLowerCase()
+  return BLURBS.find(([family]) => family.test(id))?.[1] ?? null
+}
+
 /**
  * A model's name short enough for the composer's chip: 「Opus 5.5」 for a Claude model by its id,
  * so Default shows the model it stands for; a name without its parenthesis otherwise.

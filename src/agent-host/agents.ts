@@ -228,6 +228,9 @@ export interface AgentTimings {
 // read the user asks for with a button (`ask`) still runs `/usage` once, as they would by hand.
 const READ_ANTIGRAVITY_LIMITS = false
 
+/** How often a read the user asks for may run agy, however many views ask within it. */
+const ASKED_READ_MS = 60_000
+
 export const AGENT_TIMINGS: AgentTimings = {
   idleMs: 5 * 60_000,
   initializeMs: 30_000,
@@ -535,6 +538,8 @@ function registeredByDefault(harnessId: HarnessId, agents: HostSettings['agents'
 export class AgentManager {
   private readonly harnesses = new Map<HarnessId, Harness>()
   private readonly slots = new Map<AgentId, Slot>()
+  /** When a read the user asked for last ran, per agent, for agents only read when asked. */
+  private readonly askedReads = new Map<AgentId, number>()
   /** Processes their stop did not end, kept listed and reaped at quit until they exit. */
   private readonly givenUp = new Map<AgentRun, Slot>()
   private readonly timings: AgentTimings
@@ -2964,6 +2969,12 @@ export class AgentManager {
    */
   private async readAntigravityLimits(slot: Slot, ask: boolean): Promise<void> {
     if (!READ_ANTIGRAVITY_LIMITS && !ask) return
+    // Asked for by opening a view as well as by a button, so a minute of views runs agy once.
+    if (!READ_ANTIGRAVITY_LIMITS) {
+      const last = this.askedReads.get(slot.id) ?? 0
+      if (Date.now() - last < ASKED_READ_MS) return
+      this.askedReads.set(slot.id, Date.now())
+    }
     let method = await this.readSignInMethod(slot)
     if ((method === null && !slot.signInAnswered) || slot.signIn === 'required') {
       method = await this.askAntigravitySignIn(slot)
