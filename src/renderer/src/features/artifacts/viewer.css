@@ -91,6 +91,23 @@
   gap: 2px;
   min-width: 0;
 }
+/* A narrow bar keeps what it needs whole: Back and Share keep their icons, their names still read
+   out, and the version chip drops its age and the slash, so the chip no longer slides under the
+   tools and the title keeps some room. */
+@container top-bar (inline-size < 480px) {
+  .k-av__crumbs > i,
+  .k-av-chip__dim {
+    display: none;
+  }
+  .k-av__back {
+    gap: 0;
+    padding: 0 6px;
+    font-size: 0;
+  }
+  .k-share .ui-buttonc__label {
+    display: none;
+  }
+}
 
 .k-av-chip {
   display: inline-flex;
@@ -311,17 +328,20 @@
 }
 
 /* What shows instead of the latest version, floating over the page's top. */
+/* Centered between 12px insets, so a narrow window wraps its words onto a second line instead
+   of cutting them, and keeps its buttons whole. */
 .k-av-status {
   position: absolute;
   top: 14px;
-  left: 50%;
+  inset-inline: 12px;
   z-index: 10;
   display: flex;
   align-items: center;
   gap: 14px;
-  max-width: calc(100% - 24px);
-  height: 40px;
-  padding: 0 5px 0 14px;
+  width: fit-content;
+  min-height: 40px;
+  margin-inline: auto;
+  padding: 5px 5px 5px 14px;
   border-radius: 12px;
   background: var(--card);
   box-shadow:
@@ -329,14 +349,16 @@
     var(--elevation-float);
   font-size: 12.5px;
   color: var(--muted);
-  white-space: nowrap;
-  translate: -50% 0;
   animation: k-av-in 180ms var(--ease);
 }
 .k-av-status__text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 18px;
+  text-wrap: pretty;
+}
+.k-av-status > :not(.k-av-status__text) {
+  flex: none;
+  white-space: nowrap;
 }
 .k-av-status__text b {
   font-weight: 500;
