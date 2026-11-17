@@ -204,7 +204,7 @@ export default function Usage() {
       return next
     })
     link
-      .request('agents.refreshLimits', { agentId: agent.id, force: true })
+      .request('agents.refreshLimits', { agentId: agent.id, force: true, ask: true })
       .catch((failure: unknown) =>
         setLimitErrors((errors) => ({ ...errors, [agent.id]: errorText(failure) })),
       )
@@ -787,6 +787,8 @@ function Stat(props: { value: string; label: string; note?: string }) {
 function limitWhy(agent: AgentStatus, readable: boolean): string {
   if (agent.limitsReason) return REASONS[agent.limitsReason]
   if (agent.signIn === 'required' && agent.capabilities.reports) return '登录后才能读到额度。'
+  // Huli reads Antigravity's limits only when asked: running agy by itself breaks Google's terms.
+  if (agent.id === 'antigravity' && readable) return '点开后按「刷新」查询额度，只在你点的时候查。'
   return readable ? '还没有报告套餐用量。' : '不报告套餐额度。'
 }
 
