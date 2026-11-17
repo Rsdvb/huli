@@ -139,7 +139,7 @@ export function waitingBelow(id: string, sessions: Map<string, SessionSummary>):
   return found
 }
 
-/** waitingBelow from the store; changes only when the list it gives does. */
+/** `waitingBelow` from the store; changes only when the list it gives does. */
 export function useWaitingBelow(id: string): SessionSummary[] {
   return useHostSelector(
     useCallback((d: HostData) => waitingBelow(id, d.sessions), [id]),

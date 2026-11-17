@@ -1,8 +1,11 @@
 // One session's thread as the phone shows it: the latest page from `sessions.open`, kept current
 // by the host's patches while the screen watches it, with older pages read on demand. A gap in
 // the patches, or a new connection, reads the snapshot again.
+//
+// The thread lives in a store, not in the screen's state: the screen selects what it needs (its
+// session, the turn's phase, what waits) and only the conversation list follows every patch.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HostEvent } from '@shared/agent-host'
 import type { HostLink, LinkState } from '@shared/remote/link'
 import {
@@ -18,9 +21,11 @@ import {
 } from '@shared/thread'
 import { readThread, writeThread } from './cache'
 import { useComputerId } from './host'
+import { createStore, useSelector, type Store } from './select'
 
 export interface ThreadView {
-  thread: ThreadState | null
+  /** The thread, null until there is one; read it with `useThreadSelector`. */
+  store: Store<ThreadState | null>
   /** The thread is the cache's copy from an earlier visit; the computer has not sent it yet. */
   cached: boolean
   error: string | null
@@ -44,8 +49,10 @@ const APPLY_EVERY = 50
 
 export function useThread(link: HostLink, sessionId: string, state: LinkState): ThreadView {
   const computer = useComputerId()
-  const [thread, setThread] = useState<ThreadState | null>(null)
+  const store = useMemo(() => createStore<ThreadState | null>(null), [])
+  const setThread = store.set
   const [cached, setCached] = useState(false)
+  const cachedRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [older, setOlder] = useState<number | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -67,8 +74,9 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     let current = true
     void readThread(computer, sessionId).then((copy) => {
       if (!current || !copy || live.current) return
-      setThread(threadFromSnapshot({ session: copy.session, entries: copy.entries, seq: -1 }))
+      cachedRef.current = true
       setCached(true)
+      setThread(threadFromSnapshot({ session: copy.session, entries: copy.entries, seq: -1 }))
     })
     return () => {
       current = false
@@ -79,14 +87,20 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const latest = useRef<ThreadState | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (!computer || cached || !thread) return
-    latest.current = thread
-    if (saveTimer.current) return
-    saveTimer.current = setTimeout(() => {
-      saveTimer.current = null
-      if (latest.current) void writeThread(computer, latest.current)
-    }, SAVE_EVERY)
-  }, [computer, cached, thread])
+    if (!computer) return
+    const save = () => {
+      const thread = store.get()
+      if (cachedRef.current || !thread) return
+      latest.current = thread
+      if (saveTimer.current) return
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null
+        if (latest.current) void writeThread(computer, latest.current)
+      }, SAVE_EVERY)
+    }
+    save()
+    return store.subscribe(save)
+  }, [computer, store])
   useEffect(
     () => () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -111,7 +125,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     const patches = batches.length === 1 ? batches[0]!.patches : batches.flatMap((b) => b.patches)
     setThread((current) => (current ? applyPatches(current, patches, { partial: true }) : current))
     if (patches.some((p) => p.op === 'entry.add' || p.op === 'entry.update')) reloadRequests()
-  }, [reloadRequests])
+  }, [reloadRequests, setThread])
 
   // Whatever waits to be applied belongs to the thread as it was; a new snapshot replaces it.
   const dropQueued = () => {
@@ -137,8 +151,9 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       }
       pending.current = null
       live.current = true
-      setThread(next)
+      cachedRef.current = false
       setCached(false)
+      setThread(next)
       setOlder(snapshot.older)
       setPlan(snapshot.plan ?? null)
       setError(null)
@@ -192,7 +207,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   }, [connected, open, link, sessionId])
 
   const loadOlder = useCallback(() => {
-    if (older === null || loadingOlder || !thread) return
+    if (older === null || loadingOlder || !store.get()) return
     setLoadingOlder(true)
     void (link.request('sessions.page', { sessionId, before: older }) as Promise<OlderPage>)
       .then((page) => {
@@ -201,10 +216,10 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       })
       .catch(() => {})
       .finally(() => setLoadingOlder(false))
-  }, [link, sessionId, older, loadingOlder, thread])
+  }, [link, sessionId, older, loadingOlder, store, setThread])
 
   return {
-    thread,
+    store,
     cached,
     error,
     hasOlder: older !== null && !cached,
@@ -214,4 +229,13 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     reloadRequests,
     plan,
   }
+}
+
+/** Part of a session's thread: redraws only when it changes by `equal`. */
+export function useThreadSelector<S>(
+  view: Pick<ThreadView, 'store'>,
+  select: (thread: ThreadState | null) => S,
+  equal?: (a: S, b: S) => boolean,
+): S {
+  return useSelector(view.store, select, equal)
 }
