@@ -57,16 +57,22 @@ export function sendError(
   })
 }
 
-// No script anywhere; forms post to this origin, and the sign-in form's answer redirects to the
-// desktop app's loopback server, which form-action must allow as well.
-const PAGE_CSP = [
-  "default-src 'none'",
-  "style-src 'self'",
-  "img-src 'self' data:",
-  "form-action 'self' http://127.0.0.1:* http://localhost:* http://[::1]:*",
-  "frame-ancestors 'none'",
-  "base-uri 'none'",
-].join('; ')
+/**
+ * No script anywhere; forms post to this origin, and the sign-in form's answer redirects to the
+ * desktop app's loopback server, or to `targets`, which form-action must allow as well.
+ */
+export function pageCsp(targets: readonly string[] = []): string {
+  return [
+    "default-src 'none'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    `form-action 'self' http://127.0.0.1:* http://localhost:* http://[::1]:*${targets.map((t) => ` ${t}`).join('')}`,
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+  ].join('; ')
+}
+
+const PAGE_CSP = pageCsp()
 
 export function sendHtml(
   response: ServerResponse,
