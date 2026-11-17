@@ -8,6 +8,7 @@ import type { HostLink, LinkState } from '@shared/remote/link'
 import type { KeyPair } from '@shared/remote/noise'
 import type { Paired } from '@shared/remote/pair'
 import { deviceKey, linkTo } from './connection'
+import { stopPush } from './push/sync'
 import { loadHost, saveHost, type SavedHost } from './store'
 
 interface Ready {
@@ -54,6 +55,8 @@ export function HostProvider(props: { children: ReactNode }) {
   const [agents, setAgents] = useState<Map<string, AgentStatus>>(new Map())
   const [projects, setProjects] = useState<Project[]>([])
   const hostRef = useRef<SavedHost | null>(null)
+  const linkRef = useRef<HostLink | null>(null)
+  linkRef.current = ready?.link ?? null
 
   const start = useCallback((host: SavedHost, key: KeyPair, adopt?: Paired) => {
     hostRef.current = host
@@ -83,6 +86,7 @@ export function HostProvider(props: { children: ReactNode }) {
   }, [ready])
 
   const forget = useCallback(async (next: string | null) => {
+    await stopPush(linkRef.current)
     setReady((current) => {
       current?.link.stop()
       return null

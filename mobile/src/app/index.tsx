@@ -8,6 +8,7 @@ import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import type { LinkState } from '@shared/remote/link'
 import { useHost } from '../host'
+import { pushStatusText, usePushStatus } from '../push/sync'
 import { PairScreen } from '../screens/PairScreen'
 import { ago, folder, needsYou, sessionBadge } from '../sessions'
 import { useTheme } from '../theme'
@@ -45,6 +46,7 @@ export default function Home() {
   const theme = useTheme()
   const host = useHost()
   const [refreshing, setRefreshing] = useState(false)
+  const pushText = pushStatusText(usePushStatus())
 
   const visible = useMemo(
     () =>
@@ -70,7 +72,7 @@ export default function Home() {
   const name = host.host?.name ?? '电脑'
 
   const menu = () =>
-    Alert.alert(name, `这台手机在电脑上叫「${host.host?.deviceName ?? ''}」。`, [
+    Alert.alert(name, [`这台手机在电脑上叫「${host.host?.deviceName ?? ''}」。`, pushText].filter(Boolean).join('\n'), [
       { text: '取消', style: 'cancel' },
       { text: '断开配对', style: 'destructive', onPress: () => void host.forget(null) },
     ])
