@@ -592,7 +592,7 @@ export function SidebarNotices() {
       {isWeb && !window.isSecureContext && <InsecureCard />}
       {signIn.length > 0 && <SignInCard names={signIn} />}
       {card && <UpdateCardView card={card} items={items} />}
-      <KettuImportOffer blocked={(isWeb && !window.isSecureContext) || !!card} />
+      <KettuImportOffer blocked={isWeb && !window.isSecureContext} />
       <StarCard blocked={(isWeb && !window.isSecureContext) || signIn.length > 0 || !!card} />
     </>
   )

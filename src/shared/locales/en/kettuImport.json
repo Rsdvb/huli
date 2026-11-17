@@ -7,6 +7,7 @@
     "looking": "Looking for Kettu's sessions…",
     "notFound": "No Kettu data on this computer.",
     "found": "{{sessions}} · {{projects}} in Kettu",
+    "foundSome": "{{sessions}} · {{projects}} in Kettu, {{count}} imported",
     "allImported": "{{sessions}} · {{projects}} in Kettu, all imported",
     "choose": "Choose sessions…"
   },

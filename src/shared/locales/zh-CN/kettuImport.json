@@ -7,6 +7,7 @@
     "looking": "正在查找 Kettu 的会话…",
     "notFound": "这台电脑上没有 Kettu 的数据。",
     "found": "Kettu 里有 {{sessions}} · {{projects}}",
+    "foundSome": "Kettu 里有 {{sessions}} · {{projects}}，已导入 {{count}} 个",
     "allImported": "Kettu 里有 {{sessions}} · {{projects}}，都已导入",
     "choose": "选择会话…"
   },

@@ -35,9 +35,11 @@ export function KettuImportStatus() {
         ? t('row.notFound')
         : scan.error
           ? t(`error.${scan.error}`)
-          : scan.counts.importable === 0 && scan.counts.sessions > 0
+          : scan.counts.sessions > 0 && scan.counts.imported === scan.counts.sessions
             ? t('row.allImported', found)
-            : t('row.found', found)
+            : scan.counts.imported > 0
+              ? t('row.foundSome', { ...found, count: scan.counts.imported })
+              : t('row.found', found)
   return (
     <>
       {t('row.description')}
