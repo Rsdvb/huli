@@ -154,7 +154,7 @@ export function makeServer(
       case `POST ${ACCOUNT_REVOKE_PATH}`:
         return await devices.revoke(request, response)
       case 'GET /device':
-        return auth.devicePage(request, response, url)
+        return auth.devicePage(request, response)
       case 'POST /device':
         return await auth.deviceSubmit(request, response)
       case 'POST /web/login':

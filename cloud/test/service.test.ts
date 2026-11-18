@@ -306,10 +306,23 @@ describe('device codes', () => {
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('authorization_pending')
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('slow_down')
 
+    // A link with the code in it fills nothing in: the owner types the code their computer shows.
+    expect(device.verificationUriComplete).toBeNull()
     const page = await (
       await fetch(new URL(`/device?code=${device.userCode}`, base), { headers: { cookie } })
     ).text()
+    expect(page).not.toContain(device.userCode)
     const csrf = /name="csrf" value="([^"]+)"/.exec(page)![1]!
+    // The code typed in shows who asked, from where and when, and a warning, before approval.
+    const confirm = await post(
+      '/device',
+      { csrf, user_code: device.userCode.toLowerCase(), action: 'continue' },
+      cookie,
+    )
+    const shown = await confirm.text()
+    expect(shown).toContain('纸鸢命令行 · Test PC')
+    expect(shown).toContain('来自 127.0.0.1 · 0 秒前开始')
+    expect(shown).toContain('只有当这个验证码是你刚刚在自己的电脑上开始登录时显示的')
     const approved = await post(
       '/device',
       { csrf, user_code: device.userCode, action: 'allow' },

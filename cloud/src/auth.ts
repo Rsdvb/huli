@@ -27,6 +27,7 @@ import {
 import {
   consentPage,
   describeClient,
+  deviceConfirmPage,
   devicePage,
   devicesPage,
   loginPage,
@@ -93,6 +94,9 @@ interface DeviceGrant {
   userCode: string
   clientId: string
   info: HuliClientInfo | null
+  /** Where the device sign-in was started from, and when, for the page that approves it. */
+  address: string
+  startedAt: number
   expiresAt: number
   interval: number
   lastPoll: number
@@ -574,18 +578,19 @@ export class Auth {
       userCode,
       clientId,
       info: parseClientInfo(form.get('client_info')),
+      address: clientAddress(request, this.options.trustProxy),
+      startedAt: this.now(),
       expiresAt: this.now() + DEVICE_MS,
       interval: DEVICE_INTERVAL_S,
       lastPoll: 0,
       status: 'pending',
     })
     this.userCodes.set(userCode, key)
-    const verification = `${this.options.origin}/device`
+    // No verification_uri_complete: a link with the code in it is what a phishing message sends.
     sendJson(response, this.secure, 200, {
       device_code: deviceCode,
       user_code: userCode,
-      verification_uri: verification,
-      verification_uri_complete: `${verification}?code=${userCode}`,
+      verification_uri: `${this.options.origin}/device`,
       expires_in: DEVICE_MS / 1000,
       interval: DEVICE_INTERVAL_S,
     })
@@ -596,33 +601,18 @@ export class Auth {
     return clean.length === 8 ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean
   }
 
-  /** GET /device */
-  devicePage(request: IncomingMessage, response: ServerResponse, url: URL): void {
-    const code = this.normalizeUserCode(url.searchParams.get('code') ?? '')
+  /** GET /device: the code is typed in, never taken from the link. */
+  devicePage(request: IncomingMessage, response: ServerResponse): void {
     const session = this.session(request)
     if (!session) {
       return sendHtml(
         response,
         this.secure,
         200,
-        loginPage({
-          action: '/web/login',
-          fields: { next: `/device?code=${code}` },
-          purpose: '登录后确认设备',
-        }),
+        loginPage({ action: '/web/login', fields: { next: '/device' }, purpose: '登录后确认设备' }),
       )
     }
-    const device = this.liveDevice(this.userCodes.get(code))
-    sendHtml(
-      response,
-      this.secure,
-      200,
-      devicePage({
-        csrf: session.csrf,
-        code,
-        client: device ? describeClient(device.info) : undefined,
-      }),
-    )
+    sendHtml(response, this.secure, 200, devicePage({ csrf: session.csrf }))
   }
 
   /** POST /device */
@@ -639,10 +629,26 @@ export class Auth {
         response,
         this.secure,
         400,
-        devicePage({ csrf: session.csrf, code, error: '验证码不对或已过期。' }),
+        devicePage({ csrf: session.csrf, error: '验证码不对或已过期。' }),
       )
     }
-    device.status = form.get('action') === 'allow' ? 'approved' : 'denied'
+    const action = form.get('action')
+    if (action !== 'allow' && action !== 'deny') {
+      // The code typed in: who asked for it, from where and when, before anything is allowed.
+      return sendHtml(
+        response,
+        this.secure,
+        200,
+        deviceConfirmPage({
+          csrf: session.csrf,
+          code,
+          client: describeClient(device.info),
+          address: device.address,
+          startedMsAgo: this.now() - device.startedAt,
+        }),
+      )
+    }
+    device.status = action === 'allow' ? 'approved' : 'denied'
     if (device.status === 'approved')
       this.log(`huli-cloud: approved ${describeClient(device.info)}`)
     sendHtml(

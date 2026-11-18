@@ -99,19 +99,41 @@ export function consentPage(input: {
   )
 }
 
-export function devicePage(input: {
-  csrf: string
-  code: string
-  client?: string
-  error?: string
-}): string {
+/**
+ * Where the owner types the code their own computer shows. It is never filled in from the link, so
+ * a link someone else sent cannot carry a code of theirs to approve.
+ */
+export function devicePage(input: { csrf: string; error?: string }): string {
   return page(
     '设备登录',
-    `<h1>设备登录</h1><p class="muted">输入命令行里显示的验证码。</p>
+    `<h1>设备登录</h1><p class="muted">输入你自己电脑的命令行里显示的验证码。</p>
 <form method="post" action="/device">${hidden('csrf', input.csrf)}
-<label for="user_code">验证码</label><input id="user_code" name="user_code" value="${escape(input.code)}" autocomplete="off" required autofocus>
-${input.client ? `<p>${escape(input.client)}</p>` : ''}
+<label for="user_code">验证码</label><input id="user_code" name="user_code" autocomplete="off" required autofocus>
 ${input.error ? `<p class="error">${escape(input.error)}</p>` : ''}
+<div class="row"><button class="primary" name="action" value="continue">继续</button></div></form>`,
+  )
+}
+
+/** How long ago `ms` milliseconds were, in words. */
+function ago(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  return seconds < 60 ? `${seconds} 秒前` : `${Math.floor(seconds / 60)} 分钟前`
+}
+
+/** The device sign-in a code names: who asked, from where and when, before it is allowed. */
+export function deviceConfirmPage(input: {
+  csrf: string
+  code: string
+  client: string
+  address: string
+  startedMsAgo: number
+}): string {
+  return page(
+    '允许设备登录',
+    `<h1>允许这台设备登录？</h1><p>${escape(input.client)}</p>
+<p class="muted">验证码 ${escape(input.code)} · 来自 ${escape(input.address)} · ${ago(input.startedMsAgo)}开始</p>
+<p class="error">只有当这个验证码是你刚刚在自己的电脑上开始登录时显示的，才点「允许」。如果验证码是别人发给你的，或者你不记得刚刚开始过登录，请点「拒绝」：允许之后，对方就能用你的账号。</p>
+<form method="post" action="/device">${hidden('csrf', input.csrf)}${hidden('user_code', input.code)}
 <div class="row"><button class="primary" name="action" value="allow">允许</button><button name="action" value="deny">拒绝</button></div></form>`,
   )
 }
