@@ -474,12 +474,12 @@ function preview() {
     'Tray · macOS menu bar (18 pt @2x, idle / running / waiting / off), Windows 16 px and zoomed',
   )
   items.push(wall(40, 660, 120, '#ECECEC'), wall(720, 680, 120, '#2B2B2E'))
-  x = 70
-  for (const [ground, bar] of [
-    ['light', '#ECECEC'],
-    ['dark', '#2B2B2E'],
+  for (const [ground, start] of [
+    ['light', 70],
+    ['dark', 750],
   ]) {
     const ink = ground === 'dark' ? '#fff' : '#000'
+    x = start
     for (const options of [
       {},
       { dot: 'running', dotOpacity: 1 },
@@ -490,12 +490,9 @@ function preview() {
       items.push(image(data, x, y + 20, 36), image(data, x + 46, y + 20, 72, 72, true))
       x += 150
     }
-    x = 750
-    void bar
   }
   y += 130
   items.push(wall(40, 660, 90, '#F3F3F3'), wall(720, 680, 90, '#202020'))
-  x = 70
   for (const [color, start] of [
     ['#000', 70],
     ['#fff', 750],
