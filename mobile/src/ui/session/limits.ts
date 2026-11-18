@@ -10,6 +10,7 @@ import type {
   PlanLimit,
   ProviderBalance,
 } from '@shared/agent-host'
+import type { Fallback, PlanQuota } from '@shared/plan-quota'
 import { modelTitle } from '../../usage/modelTitle'
 import type { Palette } from '../tokens'
 
@@ -329,4 +330,22 @@ export function limitsWhy(agent: AgentStatus): string {
 /** The newest reading of an agent's limits, or 0. */
 export function limitsReadAt(agent: AgentStatus): number {
   return Math.max(0, ...agent.limits.map((l) => l.observedAt))
+}
+
+/**
+ * A used-up plan in a line, as the desktop's pickers say it: 「每周限额已用完 · 周一 14:00 恢复」, or
+ * that extra usage pays on; null while the plan has room or its use is unknown.
+ */
+export function quotaText(quota: PlanQuota, now = Date.now()): string | null {
+  if (quota.kind === 'extra') return `${windowName(quota.limit)}限额已用完 · 正在用额外用量`
+  if (quota.kind !== 'out') return null
+  const used = `${windowName(quota.limit)}限额已用完`
+  return quota.resetsAt !== null && quota.resetsAt > now
+    ? `${used} · ${whenText(quota.resetsAt, now)} 恢复`
+    : used
+}
+
+/** The suggestion to go on with another agent: 「换成 Claude Code（已用 65%）」. */
+export function fallbackText(fallback: Fallback): string {
+  return `换成 ${fallback.name}（已用 ${Math.round(fallback.usedPercent)}%）`
 }

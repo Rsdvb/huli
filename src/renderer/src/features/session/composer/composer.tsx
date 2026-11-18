@@ -17,6 +17,7 @@ import { BranchTrayLink } from '@renderer/features/git/git-status'
 import { limitPhrase, resetTime, tokens } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
+import { useNow } from '@renderer/lib/use-now'
 import { isMac, isMod } from '@renderer/lib/platform'
 import { selectionPrompt } from '@renderer/features/artifacts/anchors'
 import { SelectionChip } from '@renderer/features/artifacts/selection-chip'
@@ -61,6 +62,8 @@ import { QueueButton, SendButton, StopButton } from './send-button'
 import { SessionPlace } from './session-place'
 import { SwitchConfirm } from './switch-confirm'
 import { SwitchStrip } from './switch-strip'
+import { QuotaStrip } from './quota-strip'
+import { useFallback } from '../plan-quota'
 import { SpeedButton } from './speed'
 import { CacheButton, ContextButton } from './usage'
 import { useOutOfCredit } from './use-out-of-credit'
@@ -70,6 +73,7 @@ import { useBoxText, usePromptBox } from './use-prompt-box'
 import { useSessionFolder } from '@renderer/lib/session-folder'
 import { firstWaiting, pressWaitingCard } from '../waiting-card'
 import { limitsForModel } from '@shared/plan-limits'
+import { planQuota } from '@shared/plan-quota'
 import { usePhoneWindow } from '@renderer/features/shell/narrow'
 
 const valuesOf = (config: readonly ConfigOption[]): Record<string, string | boolean> =>
@@ -266,6 +270,13 @@ export function Composer({
   // A used-up window of another model does not hold this session back.
   const modelLimits = limitsForModel(limits ?? [], model)
   const reached = modelLimits.find((l) => l.state === 'reached')
+  // Between turns, a used-up plan suggests an agent with room; picking it waits for the message.
+  const clock = useNow()
+  const quota = agent && !pending && !mustSwitch ? planQuota(agent, clock, modelLimits) : null
+  const fallback = useFallback(hostId, session.agentId, quota, clock)
+  const [keptQuota, setKeptQuota] = useState(false)
+  const suggestion =
+    idle && quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null
   const switches = config.filter((o) => o.type === 'boolean')
   const others = config.filter(
     (o): o is SelectOption => isSelect(o) && o !== mode && o !== model && o !== effort,
@@ -619,6 +630,19 @@ export function Composer({
                   )}
                 </AnimatePresence>
                 <AnimatePresence initial={false}>
+                  {suggestion && !outOfCredit && (
+                    <QuotaStrip
+                      key="quota"
+                      agentName={ownName}
+                      quota={suggestion.quota}
+                      fallback={suggestion.fallback}
+                      onSwitch={() => chooseAgent(suggestion.fallback.agentId, null)}
+                      onDismiss={() => setKeptQuota(true)}
+                      now={clock}
+                    />
+                  )}
+                </AnimatePresence>
+                <AnimatePresence initial={false}>
                   {pending && (
                     <SwitchStrip
                       key="switch"
@@ -676,6 +700,7 @@ export function Composer({
               outOfCredit={!!outOfCredit}
               account={agent?.account ?? null}
               limits={limits ?? []}
+              balances={agent?.balances}
               source={agent?.version ? `${agent.harnessName} ${agent.version}` : null}
               cacheNote={cacheNote}
               actions={[

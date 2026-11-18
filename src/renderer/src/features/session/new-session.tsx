@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Alert02Icon, GitBranchIcon, GitCommitIcon } from '@hugeicons/core-free-icons'
+import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { StarLine } from '@renderer/features/github-star/star-prompts'
@@ -7,6 +8,7 @@ import type { Project, SessionSummary, StartNotice } from '@shared/agent-host'
 import type { AgentId, SlashCommand, UserContent } from '@shared/thread'
 import { usableWorkflow, type Workflow, type WireWorkflowEntry } from '@shared/workflow'
 import { limitsForModel } from '@shared/plan-limits'
+import { planQuota } from '@shared/plan-quota'
 import { startNewSession } from '@renderer/app/actions'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { FolderMark } from '@renderer/components/affect/assistant-home'
@@ -72,6 +74,8 @@ import { hasMessage, NEW_SESSION_DRAFT, readDraft, readDraftAttachments } from '
 import { useAddMenu } from './composer/add-menu'
 import { StartStyles, TrayStyles } from './composer/affect-styles'
 import { PromptBox } from './composer/prompt-box'
+import { QuotaStrip } from './composer/quota-strip'
+import { useFallback } from './plan-quota'
 import { useBlockedEnter } from './composer/use-blocked-enter'
 import { useBoxText, usePromptBox } from './composer/use-prompt-box'
 import { AgentPicker } from './new-session/agent-picker'
@@ -360,6 +364,12 @@ function DraftComposer({
   // A used-up window of another model does not hold the picked one back.
   const tightest = limits ? tightestLimit(limitsForModel(limits, model), now) : null
   const reached = tightest?.state === 'reached' ? tightest : null
+  // A used-up plan with another agent to pick in its place; the user may keep this one.
+  const quota = status && limits ? planQuota(status, now, limitsForModel(limits, model)) : null
+  const fallback = useFallback(hostId, agentId, quota, now)
+  const [keptAgent, setKeptAgent] = useState<AgentId | null>(null)
+  const suggestion =
+    quota?.kind === 'out' && fallback && keptAgent !== agentId ? { quota, fallback } : null
   const sending = useRef(false)
   // An agent that must sign in first opens no session until it has, which is known once this
   // computer's agents are read after launch.
@@ -554,6 +564,21 @@ function DraftComposer({
                 lineHeight: 'calc(var(--prose-size) + 7px)',
               }}
               onKeyDown={onKeyDown}
+              top={
+                <AnimatePresence initial={false}>
+                  {suggestion && (
+                    <QuotaStrip
+                      key="quota"
+                      agentName={name ?? ''}
+                      quota={suggestion.quota}
+                      fallback={suggestion.fallback}
+                      onSwitch={() => choose(suggestion.fallback.agentId)}
+                      onDismiss={() => setKeptAgent(agentId)}
+                      now={now}
+                    />
+                  )}
+                </AnimatePresence>
+              }
             />
           }
           onFieldFocus={box.focus}
@@ -583,6 +608,7 @@ function DraftComposer({
                 }}
                 account={status?.account ?? null}
                 limits={limits ?? []}
+                balances={status?.balances}
                 source={status?.version ? `${status.harnessName} ${status.version}` : null}
               />
             )

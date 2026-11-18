@@ -3,6 +3,7 @@ import { ArrowRight01Icon, Search01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentStatus } from '@shared/agent-host'
+import { planQuota, type PlanQuota } from '@shared/plan-quota'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { AgentMarkHost } from '@renderer/components/agents/agent-mark-host'
@@ -33,7 +34,7 @@ import { shownChoice, shownValue } from '@renderer/features/session/composer/mod
 import { cliOutdated, listedInstalled } from '@renderer/features/agents/readiness'
 import { Ring } from '@renderer/features/session/composer/usage'
 import { planReset, tightestLimit } from '@renderer/features/sidebar/plan-usage'
-import { limitLabel } from '@renderer/lib/format'
+import { backTime, limitLabel } from '@renderer/lib/format'
 import { errorMessage, hostAt } from '@renderer/lib/host'
 import { LIMIT_TEXT, limitLevel, type LimitLevel } from '@renderer/lib/plan-limit'
 import { newestLimits } from '@renderer/lib/plan-readings'
@@ -75,6 +76,7 @@ import {
 } from './start-options'
 import { readFirstOptions, refreshOnMenu, retryPrepare, setOption } from './prepared'
 import { useStartConfig } from './use-start-config'
+import { quotaText } from '../plan-quota'
 import { Glyph } from '@renderer/features/shell/glyph'
 
 const isSelect = (o: ConfigOption | undefined): o is SelectOption =>
@@ -582,6 +584,7 @@ function RailRow({ status }: { status: AgentStatus }) {
   const now = useNow()
   const limits = newestLimits(usePlanReadings(), status)
   const limit = tightestLimit(limits, now)
+  const quota = planQuota(status, now, limits)
   const need = agentNeed(status)
   const trailing =
     need === 'setup'
@@ -617,10 +620,46 @@ function RailRow({ status }: { status: AgentStatus }) {
         >
           {trailing}
         </span>
+      ) : quota.kind === 'out' || quota.kind === 'extra' ? (
+        <QuotaNote quota={quota} now={now} />
       ) : (
         limit && <UsageNote limits={limits} now={now} />
       )}
     </TabsTrigger>
+  )
+}
+
+/** A used-up plan's note on the rail: when it comes back, or that extra usage pays on. */
+function QuotaNote({
+  quota,
+  now,
+}: {
+  quota: Extract<PlanQuota, { kind: 'out' | 'extra' }>
+  now: number
+}) {
+  const { t } = useTranslation(['session', 'common'])
+  const short =
+    quota.kind === 'extra'
+      ? t('quota.extraShort')
+      : quota.resetsAt !== null && quota.resetsAt > now
+        ? t('common:planInline.back', { time: backTime(quota.resetsAt, now) })
+        : t('common:planInline.out')
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className={cn(
+              'shrink-0 pl-2 text-xs',
+              quota.kind === 'out' ? 'text-danger' : 'text-warning',
+            )}
+          />
+        }
+      >
+        {short}
+      </TooltipTrigger>
+      <TooltipContent side="right">{quotaText(quota, now)}</TooltipContent>
+    </Tooltip>
   )
 }
 

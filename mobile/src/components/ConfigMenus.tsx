@@ -9,6 +9,7 @@ import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { AgentOptions, AgentStatus } from '@shared/agent-host'
 import { isFullAccessMode, isStartMode } from '@shared/agents'
 import { limitsForModel } from '@shared/plan-limits'
+import { planQuota } from '@shared/plan-quota'
 import { booleanConfigValue, isConfigValue, type ConfigOption } from '@shared/thread'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { AgentGlyph, G, Icon, type IconSpec } from '../ui/session/icons'
@@ -16,6 +17,7 @@ import {
   isExhausted,
   limitColor,
   planName,
+  quotaText,
   shownLimit,
   tightestLimit,
   windowName,
@@ -311,13 +313,17 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
   }
 
   // Only the windows that hold back the chosen model, as the desktop's tray warns about.
-  const limit = context.agent ? shownLimit(limitsForModel(context.agent.limits, model)) : null
+  const held = context.agent ? limitsForModel(context.agent.limits, model) : []
+  const limit = context.agent ? shownLimit(held) : null
   const out = !!limit && isExhausted(limit)
+  const usedUp = context.agent
+    ? quotaText(planQuota({ ...context.agent, limits: held }, Date.now()))
+    : null
   const footer = [
     planName(context.agent?.account ?? null),
     limit
       ? out
-        ? `${windowName(limit)}限额已用完`
+        ? (usedUp ?? `${windowName(limit)}限额已用完`)
         : `${windowName(limit)}限额已用 ${Math.round(limit.usedPercent ?? 0)}%`
       : null,
   ]
@@ -619,6 +625,9 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
       const limit = tightestLimit(agent.limits)
       const left =
         limit?.usedPercent != null ? Math.max(0, 100 - Math.round(limit.usedPercent)) : null
+      // A used-up plan says when it comes back, or that extra usage pays on, in place of its share.
+      const quota = planQuota(agent, Date.now())
+      const usedUp = quotaText(quota)
       const subtitle = need
         ? NEED_TEXT[need]
         : model
@@ -630,7 +639,17 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
         lead: <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={20} />,
         ...(subtitle ? { subtitle } : {}),
         below:
-          !need && left !== null && limit ? (
+          !need && usedUp ? (
+            <Text
+              style={[
+                styles.leftText,
+                styles.quota,
+                { color: quota.kind === 'out' ? c.danger : c.warning },
+              ]}
+            >
+              {usedUp}
+            </Text>
+          ) : !need && left !== null && limit ? (
             <View style={styles.left}>
               <UsageRing
                 percent={limit.usedPercent ?? 0}
@@ -689,6 +708,7 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, lineHeight: 16, paddingHorizontal: 8 },
   left: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
   leftText: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  quota: { marginTop: 3 },
   usage: {
     flexDirection: 'row',
     alignItems: 'center',

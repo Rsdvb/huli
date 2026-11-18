@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
+import { fallbackAgent, planQuota } from '@shared/plan-quota'
 import { harnessOf, type ThreadEntry, type ThreadState, type UserContent } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
 import {
@@ -30,7 +31,7 @@ import {
   SendCancelled,
   type ComposerHandle,
 } from '../../components/Composer'
-import { CacheNotice, SwitchStrip } from '../../components/ComposerNotes'
+import { CacheNotice, QuotaSuggestion, SwitchStrip } from '../../components/ComposerNotes'
 import {
   agentModelsPage,
   agentsPage,
@@ -620,6 +621,20 @@ export default function SessionScreen() {
       ) ?? null,
     [agent?.limits, config.model?.option],
   )
+  // Between turns, a used-up plan suggests an agent with room; picking it waits for the message.
+  const quota =
+    agent && !pendingSwitch && !mustSwitch
+      ? planQuota(
+          { ...agent, limits: limitsForModel(agent.limits, config.model?.option) },
+          Date.now(),
+        )
+      : null
+  const fallback =
+    agent && quota?.kind === 'out' && (status === 'ready' || status === 'closed')
+      ? fallbackAgent(others, agent.id, Date.now())
+      : null
+  const [keptQuota, setKeptQuota] = useState(false)
+  const suggestion = quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null
   const rejected = useThreadSelector(view, endedOnRejection)
   const shownName = pending?.name ?? agent?.name ?? 'Agent'
   const placeholder = sessionPlaceholder({
@@ -923,8 +938,20 @@ export default function SessionScreen() {
           }
           onCountChange={setAttachCount}
           top={(holds) =>
-            pendingSwitch || (cacheNoticeShown && holds) ? (
+            pendingSwitch || suggestion || (cacheNoticeShown && holds) ? (
               <>
+                {suggestion && agent && (
+                  <QuotaSuggestion
+                    agentName={agent.name}
+                    quota={suggestion.quota}
+                    fallback={suggestion.fallback}
+                    onSwitch={() => {
+                      const next = agents.get(suggestion.fallback.agentId)
+                      if (next) chooseAgent(next, null)
+                    }}
+                    onDismiss={() => setKeptQuota(true)}
+                  />
+                )}
                 {cacheNoticeShown && holds && (
                   <CacheNotice
                     estimate={cacheExpiry.estimate}

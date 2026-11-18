@@ -1,7 +1,7 @@
 // Whether an agent's plan can take another turn, and which other agent can when it cannot: what
 // New session, the composer, a turn stopped at its limit and a routine's run all decide by.
 
-import type { AgentStatus, PlanLimit } from './agent-host'
+import type { AgentStatus, PlanLimit, ProviderBalance } from './agent-host'
 import type { AgentId } from './thread'
 
 /** The balance a vendor bills once the plan's windows run out, as the hosts label it. */
@@ -32,7 +32,7 @@ const current = (limit: PlanLimit, now: number): boolean =>
 
 /** Whether extra usage pays once the plan's windows run out: a positive balance or an open overage window. */
 export function hasExtraUsage(
-  status: Pick<AgentStatus, 'balances'>,
+  status: { balances?: readonly ProviderBalance[] | undefined },
   limits: readonly PlanLimit[],
   now: number,
 ): boolean {
@@ -45,7 +45,7 @@ export function hasExtraUsage(
  * back one model or a newer reading of the account. A window whose reset has passed is skipped.
  */
 export function planQuota(
-  status: Pick<AgentStatus, 'balances' | 'limits'>,
+  status: { balances?: readonly ProviderBalance[] | undefined; limits: readonly PlanLimit[] },
   now: number,
   limits: readonly PlanLimit[] = status.limits,
 ): PlanQuota {
