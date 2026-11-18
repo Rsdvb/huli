@@ -79,6 +79,7 @@ function slug(text: string): string {
 function mapWindow(
   window: RateLimitWindow | null,
   pool: string | null,
+  model: string | null,
   now: number,
 ): PlanLimit | null {
   if (!window) return null
@@ -92,15 +93,20 @@ function mapWindow(
     resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
     state: used >= 100 ? 'reached' : 'ok',
     observedAt: now,
+    ...(pool && model ? { models: [model] } : {}),
   }
 }
 
-/** The windows of one limit pool; pools other than Codex's own are named in the label. */
+/**
+ * The windows of one limit pool; pools other than Codex's own are named in the label, and list the
+ * model the pool counts when Codex names one, so a client can tell which model each pool holds.
+ */
 export function mapRateLimits(snapshot: RateLimitSnapshot, now: number): PlanLimit[] {
   const id = snapshot.limitId ?? DEFAULT_POOL
   const pool = id === DEFAULT_POOL ? null : (snapshot.limitName ?? id)
+  const model = snapshot.normalModelSlug?.trim() || null
   return [snapshot.primary, snapshot.secondary]
-    .map((window) => mapWindow(window, pool, now))
+    .map((window) => mapWindow(window, pool, model, now))
     .filter((limit) => limit !== null)
 }
 

@@ -423,6 +423,8 @@ export interface RateLimitWindow {
 export interface RateLimitSnapshot {
   limitId: string | null
   limitName: string | null
+  /** The model whose name describes this pool, such as `gpt-6.2-sol`; absent from an older Codex. */
+  normalModelSlug?: string | null
   primary: RateLimitWindow | null
   secondary: RateLimitWindow | null
   /** The credits that pay once the plan's windows run out; absent from an older Codex. */
