@@ -63,6 +63,7 @@ export function makeServer(
   })
   const push = new PushGateway({
     auth,
+    store,
     origin: config.origin,
     trustProxy: config.trustProxy,
     apns,

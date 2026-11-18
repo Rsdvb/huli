@@ -11,6 +11,7 @@ import { pushRequestHeaders, pushRequestText } from '@shared/remote/push'
 import vectors from '@shared/remote/push-vectors.json'
 import {
   decodeRelayBytes,
+  encodeRelayBytes,
   importRelayKey,
   relayHostId,
   verifyRelaySignature,
@@ -550,6 +551,38 @@ describe('push gateway', () => {
     expect((await push(access, JSON.stringify(old))).status).toBe(401)
     expect((await push(null, alert())).status).toBe(403)
     expect((await push('not-a-real-token-but-long-enough-to-parse', alert())).status).toBe(403)
+  })
+
+  it("takes a computer's sign-in alone, with the key it registered on the relay", async () => {
+    // Each its own request, so that no refusal below is for a replay.
+    const pushNew = (access: string, body: () => string) => {
+      clock += 1000
+      return push(access, body())
+    }
+    for (const client of ['huli-mobile', 'kettu-web']) {
+      const phone = parts.store.issue(client, null).access_token
+      expect((await pushNew(phone, alert)).status).toBe(401)
+    }
+    const { access } = await signIn()
+    const family = parts.store.checkAccess(access)!.id
+    const id = vectors.keys.hostId
+    // Registered under another sign-in: refused.
+    const { access: other } = await signIn()
+    parts.store.registerComputer(id, parts.store.checkAccess(other)!.id, vectors.keys.hostPublicKey)
+    expect((await pushNew(access, alert)).status).toBe(401)
+    // Registered under this sign-in with its key: taken.
+    parts.store.registerComputer(id, family, vectors.keys.hostPublicKey)
+    expect((await pushNew(access, alert)).status).toBe(200)
+    // The same id with another key, as its registration says: refused.
+    const otherKey = encodeRelayBytes(new Uint8Array(32).fill(9))
+    parts.store.registerComputer(id, family, otherKey)
+    expect((await pushNew(access, alert)).status).toBe(401)
+    // A sign-in with a computer registered pushes as no other.
+    parts.store.registerComputer('a'.repeat(26), family, otherKey)
+    parts.store.revokeFamily(family)
+    const { access: fresh } = await signIn()
+    parts.store.registerComputer('b'.repeat(26), parts.store.checkAccess(fresh)!.id, otherKey)
+    expect((await pushNew(fresh, alert)).status).toBe(401)
   })
 
   it('says unregistered when Apple no longer takes the token', async () => {
