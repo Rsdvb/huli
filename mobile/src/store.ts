@@ -51,6 +51,12 @@ export function fromBase64(text: string): Uint8Array {
   return Uint8Array.from(atob(text), (char) => char.charCodeAt(0))
 }
 
+/** A key as Huli Cloud lists it, in base64url. */
+export function fromBase64Url(text: string): Uint8Array {
+  const plain = text.replace(/-/g, '+').replace(/_/g, '/')
+  return fromBase64(plain + '='.repeat((4 - (plain.length % 4)) % 4))
+}
+
 /** A computer's id: the first 6 bytes of its public key in hex, the same on every pairing. */
 export function computerIdOf(hostKey: string): string {
   let hex = ''
