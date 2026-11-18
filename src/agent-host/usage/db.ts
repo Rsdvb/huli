@@ -5,13 +5,15 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite'
 import type { AgentId } from '@shared/thread'
-import type {
-  ClockRequest,
-  DayUsage,
-  HourUsage,
-  TokenParts,
-  UsageSource,
-  UsageSummary,
+import {
+  partsTotal,
+  SESSION_RANKS,
+  type ClockRequest,
+  type DayUsage,
+  type HourUsage,
+  type TokenParts,
+  type UsageSource,
+  type UsageSummary,
 } from '@shared/usage'
 import { PRICES, type FileCursor, type UsageRow } from './model'
 import { keepsNewer } from './rows'
@@ -128,8 +130,19 @@ export type UsageDbLog = (level: 'info' | 'warn' | 'error', message: string) => 
 /** Which source counts for each agent; an agent left out counts nothing. */
 export type SourceMap = Partial<Record<AgentId, UsageSource>>
 
-export type DbSummary = Omit<UsageSummary, 'sources' | 'first' | 'agents' | 'projects'> & {
+export type DbSummary = Omit<
+  UsageSummary,
+  'sources' | 'first' | 'agents' | 'projects' | 'sessions'
+> & {
   projects: Omit<UsageSummary['projects'][number], 'scratch'>[]
+  sessions: DbSession[]
+}
+
+/** A session's sums over a range, before the host names the Kettu session that ran it. */
+export interface DbSession extends TokenParts {
+  agentId: AgentId
+  agentSessionId: string
+  project: string | null
 }
 
 /** What one agent's rows from one source hold, for Settings and the page's first day. */
@@ -274,6 +287,15 @@ function prepareAll(db: DatabaseSync) {
       SELECT b.agent_id, b.source, b.model, ${SUMS} FROM buckets b ${PRICE_JOIN}
       WHERE b.quarter >= ? AND b.quarter < ?
       GROUP BY b.agent_id, b.source, b.model`),
+    // Each row as a bucket of its own, so the sums and prices are the buckets'.
+    sessionSums: sql(`
+      SELECT b.agent_id, b.source, b.session_id, MAX(b.project) AS project, ${SUMS}
+      FROM (
+        SELECT agent_id, source, session_id, project, model, 1 AS rows, turn AS turns, input,
+          output, COALESCE(reasoning, 0) AS reasoning, cache_read, cache_write, cache_write_1h
+        FROM usage WHERE at >= ? AND at < ? AND session_id IS NOT NULL AND session_id != ''
+      ) AS b ${PRICE_JOIN}
+      GROUP BY b.agent_id, b.source, b.session_id`),
     stats: sql(`
       SELECT agent_id, source, SUM(rows) AS rows, MIN(quarter) AS first, MAX(quarter) AS last
       FROM buckets GROUP BY agent_id, source`),
@@ -338,6 +360,8 @@ export class UsageDb {
         this.upgrade(db, version)
       }
       db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;')
+      // The ranking of sessions reads rows by time; an index older apps simply keep up too.
+      db.exec('CREATE INDEX IF NOT EXISTS usage_by_time ON usage (at)')
       fillPrices(db)
       this.sql = prepareAll(db)
       this.db = db
@@ -583,15 +607,25 @@ export class UsageDb {
             }
           })
         }
+        const sessions = sql.sessionSums
+          .all(quarterOf(from) * QUARTER_MS, quarterOf(to) * QUARTER_MS)
+          .filter(counts)
+          .map((row) => ({
+            agentId: String(row.agent_id) as AgentId,
+            agentSessionId: String(row.session_id),
+            project: row.project === null || row.project === '' ? null : String(row.project),
+            ...parts(row),
+          }))
         return {
           days: [...days.values()],
           clock: [...hours.values()],
           models,
           projects: [...projects.values()],
+          sessions: topSessions(sessions),
           pricesAsOf: PRICES.asOf,
         }
       },
-      { days: [], clock: [], models: [], projects: [], pricesAsOf: PRICES.asOf },
+      { days: [], clock: [], models: [], projects: [], sessions: [], pricesAsOf: PRICES.asOf },
     )
   }
 
@@ -657,6 +691,40 @@ export class UsageDb {
       db.close()
     }
   }
+}
+
+const RANKED_BY: readonly ((parts: TokenParts) => number | null)[] = [
+  partsTotal,
+  (parts) => parts.requests,
+  (parts) => parts.turns,
+  (parts) => parts.cost,
+]
+
+/**
+ * Each agent's largest sessions by every measure the page ranks by, `cap` per agent and measure,
+ * each session once. A session with nothing in a measure is not ranked by it.
+ */
+export function topSessions<T extends TokenParts & { agentId: AgentId }>(
+  sessions: readonly T[],
+  cap = SESSION_RANKS,
+): T[] {
+  const byAgent = new Map<AgentId, T[]>()
+  for (const session of sessions) {
+    const list = byAgent.get(session.agentId)
+    if (list) list.push(session)
+    else byAgent.set(session.agentId, [session])
+  }
+  const kept = new Set<T>()
+  for (const list of byAgent.values()) {
+    for (const measure of RANKED_BY) {
+      list
+        .filter((session) => (measure(session) ?? 0) > 0)
+        .sort((a, b) => measure(b)! - measure(a)!)
+        .slice(0, cap)
+        .forEach((session) => kept.add(session))
+    }
+  }
+  return [...kept]
 }
 
 function addParts(sum: TokenParts, add: TokenParts): void {

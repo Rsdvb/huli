@@ -49,6 +49,23 @@ export interface ProjectUsage extends TokenParts {
   scratch: boolean
 }
 
+/** How many of each agent's sessions a summary ranks by each measure. */
+export const SESSION_RANKS = 20
+
+export interface SessionUsage extends TokenParts {
+  agentId: AgentId
+  /** The agent's own id for the session, as its log or Kettu's record names it. */
+  agentSessionId: string
+  /** Kettu's session that ran it; null for one run outside Kettu, or deleted since. */
+  sessionId: string | null
+  title: string | null
+  /** That session's folder, which opens it; null without one. */
+  projectPath: string | null
+  /** The working folder, its project's for a worktree; null when the agent recorded none. */
+  project: string | null
+  scratch: boolean
+}
+
 /** A stretch of the asking page's clocks on one UTC offset, until the next zone starts. */
 export interface ClockZone {
   from: number
@@ -78,6 +95,12 @@ export interface UsageSummary {
   clock: HourUsage[]
   models: ModelUsage[]
   projects: ProjectUsage[]
+  /**
+   * The range's largest sessions, in no order: each agent's top `SESSION_RANKS` by tokens, by
+   * requests, by turns and by cost, so any agent and measure the page picks can rank them.
+   * Absent from older hosts.
+   */
+  sessions?: SessionUsage[]
   /** The source each agent counted from; an agent left out has nothing to count. */
   sources: Partial<Record<AgentId, UsageSource>>
   /** The first quarter hour with usage under those sources, or null with none. */

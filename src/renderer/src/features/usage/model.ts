@@ -6,6 +6,7 @@ import {
   partsTotal,
   type ClockZone,
   type HourUsage,
+  type SessionUsage,
   type TokenParts,
   type UsageScope,
   type UsageSummary,
@@ -665,6 +666,34 @@ export function projectRows(
     )
   }
   return ranked(rows)
+}
+
+/** The sessions ranking shows this many. */
+export const SESSION_ROWS = 10
+
+export interface SessionRow {
+  session: SessionUsage
+  value: number
+}
+
+/**
+ * The range's largest sessions for the agent and metric, or null when a host answered with no
+ * sessions; one with nothing in the metric is left out.
+ */
+export function sessionRows(
+  summary: Pick<UsageSummary, 'sessions'>,
+  agent: AgentFilter,
+  metric: Metric,
+  scope: UsageScope,
+  limit = SESSION_ROWS,
+): SessionRow[] | null {
+  if (!summary.sessions) return null
+  return summary.sessions
+    .filter((session) => agent === 'all' || session.agentId === agent)
+    .map((session) => ({ session, value: metricValue(session, metric, scope) ?? 0 }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit)
 }
 
 export interface Preset {

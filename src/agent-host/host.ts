@@ -858,6 +858,7 @@ export class AgentHost {
       },
       isScratch: (folder) => this.scratch.contains(folder),
       worktreeProject: (folder) => this.sessions.worktreeProject(folder),
+      session: (agentId, agentSessionId) => this.sessions.usageSession(agentId, agentSessionId),
       log,
       changed: () => this.hub.broadcast({ type: 'usage.changed' }),
       status: (status) => this.hub.broadcast({ type: 'usage.status', status }),

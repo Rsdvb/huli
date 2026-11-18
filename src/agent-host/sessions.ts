@@ -1277,6 +1277,21 @@ export class SessionManager {
     return undefined
   }
 
+  /** The session that runs the agent's own session, with its title, for the usage page. */
+  usageSession(
+    agentId: AgentId,
+    acpSessionId: string,
+  ): { id: string; title: string | null; projectPath: string } | null {
+    const record = this.findByAcp(agentId, acpSessionId)
+    if (!record) return null
+    const session = this.live.get(record.id)?.thread.session
+    return {
+      id: record.id,
+      title: record.customTitle ?? (session ? session.title : record.title),
+      projectPath: record.projectPath,
+    }
+  }
+
   /** Whether a session lists the agent's own session as an earlier agent's, which it may take back. */
   private takenEarlier(agentId: AgentId, acpSessionId: string): boolean {
     const holds = (record: SessionRecord): boolean =>

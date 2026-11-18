@@ -12,6 +12,7 @@ import {
   type UsageStatus,
   type UsageSummary,
   type ProjectUsage,
+  type SessionUsage,
   type UsageTotal,
 } from '@shared/usage'
 import type { LogFn } from '../storage'
@@ -42,6 +43,11 @@ export interface UsageManagerDeps {
   isScratch(path: string): boolean
   /** The project a session's worktree belongs to, so its usage counts there; null for others. */
   worktreeProject?(path: string): string | null
+  /** Kettu's session that runs an agent's own session, with its title; null for none. */
+  session?(
+    agentId: AgentId,
+    agentSessionId: string,
+  ): { id: string; title: string | null; projectPath: string } | null
   log: LogFn
   changed(): void
   status(status: UsageStatus): void
@@ -297,6 +303,7 @@ export class UsageManager {
         clock: [],
         models: [],
         projects: [],
+        sessions: [],
         sources,
         first,
         agents,
@@ -304,14 +311,27 @@ export class UsageManager {
       }
     }
     const summary = await store.summary(dayStarts, from, to, sources, clock)
+    const projectOf = (project: string | null) =>
+      (project !== null && this.deps.worktreeProject?.(project)) || project
     const projects = mergeProjects(
       summary.projects.map((p) => ({
         ...p,
-        project: (p.project !== null && this.deps.worktreeProject?.(p.project)) || p.project,
+        project: projectOf(p.project),
         scratch: p.project !== null && this.deps.isScratch(p.project),
       })),
     )
-    return { ...summary, projects, sources, first, agents }
+    const sessions = summary.sessions.map((s): SessionUsage => {
+      const session = this.deps.session?.(s.agentId, s.agentSessionId) ?? null
+      return {
+        ...s,
+        sessionId: session?.id ?? null,
+        title: session?.title ?? null,
+        projectPath: session?.projectPath ?? null,
+        project: projectOf(s.project),
+        scratch: s.project !== null && this.deps.isScratch(s.project),
+      }
+    })
+    return { ...summary, projects, sessions, sources, first, agents }
   }
 
   private agentsWithUsage(): AgentId[] {
@@ -402,6 +422,7 @@ function mergeProjects(rows: ProjectUsage[]): ProjectUsage[] {
     known.cost =
       known.cost === null && row.cost === null ? null : (known.cost ?? 0) + (row.cost ?? 0)
     known.unpricedTokens += row.unpricedTokens
+    known.cacheSaved += row.cacheSaved
     known.input += row.input
     known.output += row.output
     known.reasoning += row.reasoning

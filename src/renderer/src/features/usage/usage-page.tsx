@@ -29,13 +29,15 @@ import { useCornered } from '@renderer/features/shell/corner'
 import { CornerControlsSpace } from '@renderer/features/shell/top-bar'
 import { AwayContent, WindowHostAway } from '@renderer/features/shell/window-host-away'
 import { basename, bytes, count, longAgo, percent, tokens, usd } from '@renderer/lib/format'
-import { errorMessage } from '@renderer/lib/host'
+import { errorMessage, learnSessionHosts } from '@renderer/lib/host'
+import { hostOfPath } from '@renderer/lib/host-paths'
 import { useHostContext } from '@renderer/lib/host-features'
 import { currentLocale } from '@renderer/lib/i18n'
 import { isMac } from '@renderer/lib/platform'
 import { useClock, useNow } from '@renderer/lib/use-now'
 import { HostScopeContext, useHostScope } from '@renderer/stores/host-scope'
 import { openReport } from '@renderer/stores/report'
+import { openSession } from '@renderer/stores/view'
 import {
   loadUsagePage,
   setUsageFilters,
@@ -73,6 +75,7 @@ import {
   projectRows,
   RANGE_KINDS,
   seriesOf,
+  sessionRows,
   shownSeries,
   tokenParts,
   tokensPerRequest,
@@ -84,6 +87,7 @@ import {
   type Metric,
   type MetricKind,
   type RangeKind,
+  type SessionRow,
   type TrendBar,
   type TrendUnit,
 } from './model'
@@ -812,6 +816,14 @@ function Body({
         rangeLabel={rangeLabel}
         tokensUsed={days.some((d) => d.total > 0)}
       />
+      <TopSessions
+        summary={summary}
+        agent={agent}
+        metric={metric}
+        scope={scope}
+        kind={kind}
+        rangeLabel={rangeLabel}
+      />
       <div className="k-u-row k-u-row--tod">
         <TimeOfDay
           page={page}
@@ -1101,6 +1113,17 @@ function Sources({
             <>
               {t('cache.prices', { date: priceDate(asOf, i18n.language) })}
               {unpriced !== null && ` · ${t('cache.unpriced', { tokens: tokens(unpriced) })}`}
+              {saved > 0 && (
+                <>
+                  {' · '}
+                  <Trans
+                    t={t}
+                    i18nKey="cache.savedCost"
+                    values={{ cost: usd(saved) }}
+                    components={{ b: <b /> }}
+                  />
+                </>
+              )}
             </>
           ) : saved > 0 && cache.read > 0 ? (
             <Trans
@@ -1115,6 +1138,106 @@ function Sources({
         </span>
       }
     />
+  )
+}
+
+/** The range's largest sessions in the metric, each opening its session; none from older hosts. */
+function TopSessions({
+  summary,
+  agent,
+  metric,
+  scope,
+  kind,
+  rangeLabel,
+}: {
+  summary: PageData['summary']
+  agent: AgentFilter
+  metric: Metric
+  scope: UsageScope
+  kind: MetricKind
+  rangeLabel: string
+}) {
+  const { t } = useTranslation('usage')
+  const rows = useMemo(
+    () => sessionRows(summary, agent, metric, scope),
+    [summary, agent, metric, scope],
+  )
+  if (!rows) return null
+  const title = t(kind === 'cost' ? 'sessions.titleCost' : 'sessions.title')
+  const metricName = t(`metrics.${kind}`)
+  return (
+    <section className="k-u-card" aria-label={title}>
+      <span className="k-u-cap">{title}</span>
+      <span className="k-u-ss__by">
+        {t('sessions.by', { metric: metricName, range: rangeLabel })}
+      </span>
+      {rows.length === 0 ? (
+        <p className="k-u-ss__empty">{t('sessions.empty', { metric: metricName })}</p>
+      ) : (
+        <ol
+          className="k-u-ss__list"
+          style={{ '--rows': Math.ceil(rows.length / 2) } as CSSProperties}
+        >
+          {rows.map((row, i) => (
+            <SessionItem key={i} row={row} rank={i + 1} max={rows[0]!.value} kind={kind} />
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+function SessionItem({
+  row: { session, value },
+  rank,
+  max,
+  kind,
+}: {
+  row: SessionRow
+  rank: number
+  max: number
+  kind: MetricKind
+}) {
+  const { t } = useTranslation('usage')
+  const { sessionId, projectPath } = session
+  const title = sessionId === null ? t('sessions.outside') : session.title || t('sessions.untitled')
+  const project =
+    session.project !== null && !session.scratch
+      ? basename(session.project)
+      : t('sessions.noProject')
+  const open =
+    sessionId !== null && projectPath !== null
+      ? () => {
+          // Another host's folder names its host, which its session is then asked on.
+          const hostId = hostOfPath(projectPath)
+          if (hostId !== null) learnSessionHosts(hostId, [sessionId])
+          openSession(sessionId, projectPath)
+        }
+      : undefined
+  return (
+    <li>
+      <button
+        type="button"
+        className="k-u-ss__row"
+        disabled={!open}
+        onClick={open}
+        aria-label={open ? t('sessions.open', { title }) : undefined}
+        title={session.project ?? undefined}
+      >
+        <span className="k-u-ss__rank k-num">{rank}</span>
+        <AgentMark agent={session.agentId} size={16} />
+        <span className="k-u-ss__text">
+          <span className="k-u-ss__title">{title}</span>
+          <span className="k-u-ss__meta">
+            {usageAgentName(session.agentId)} · {project}
+          </span>
+        </span>
+        <span className="k-u-ss__value k-num">{kind === 'cost' ? usd(value) : count(value)}</span>
+        <span className="k-u-ss__bar" aria-hidden="true">
+          <i style={{ transform: `scaleX(${max > 0 ? value / max : 0})` }} />
+        </span>
+      </button>
+    </li>
   )
 }
 

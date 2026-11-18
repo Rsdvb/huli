@@ -4,8 +4,10 @@
 
 import { useMemo, useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import { router } from 'expo-router'
 import type { UsageScope, UsageStatus, UsageSummary } from '@shared/usage'
 import { Sheet, type SheetItem } from '../components/Sheet'
+import { AgentAvatar } from '../ui/AgentAvatar'
 import { BottomSheet } from '../ui/BottomSheet'
 import { PartsBar, StackedBarChart, type TipContent } from '../ui/charts'
 import { haptic } from '../ui/haptics'
@@ -33,6 +35,7 @@ import {
   monthStartOf,
   presets,
   projectRows,
+  sessionRows,
   streaks,
   tokenParts,
   type AgentFilter,
@@ -585,6 +588,99 @@ export function Breakdown(props: {
   )
 }
 
+/** The range's largest sessions in the metric; each opens its session. Hidden for an older Kettu. */
+export function TopSessions(props: {
+  summary: UsageSummary
+  agent: AgentFilter
+  metric: Metric
+  scope: UsageScope
+  nameOf: AgentFn
+}) {
+  const { c } = useTokens()
+  const kind = metricKind(props.metric, props.scope)
+  const rows = useMemo(
+    () => sessionRows(props.summary, props.agent, props.metric, props.scope),
+    [props.summary, props.agent, props.metric, props.scope],
+  )
+  if (!rows) return null
+  const max = rows[0]?.value ?? 0
+  return (
+    <>
+      <SectionHeader title={kind === 'cost' ? '花费最多的会话' : '用量最多的会话'} />
+      {rows.length === 0 ? (
+        <EmptyNote text={`这段时间没有能按${METRIC_NAMES[kind]}排的会话。`} />
+      ) : (
+        <View style={styles.sessions}>
+          {rows.map(({ session, value }, i) => {
+            const { sessionId } = session
+            const title =
+              sessionId === null ? '不是在纸鸢里运行的会话' : session.title || '无标题会话'
+            const project =
+              session.project !== null && !session.scratch ? basename(session.project) : '无项目'
+            const meta = `${props.nameOf(session.agentId)} · ${project}`
+            const fill = max > 0 ? value / max : 0
+            return (
+              <Press
+                key={i}
+                disabled={sessionId === null}
+                scale={false}
+                onPress={() => {
+                  if (sessionId === null) return
+                  haptic.tap()
+                  router.push(`/session/${sessionId}`)
+                }}
+                accessibilityRole={sessionId === null ? undefined : 'button'}
+                accessibilityLabel={`第 ${i + 1} 名，${title}，${meta}，${metricWords(kind, value)}`}
+                style={styles.session}
+              >
+                <AgentAvatar
+                  agentId={session.agentId}
+                  name={props.nameOf(session.agentId)}
+                  size={28}
+                />
+                <View style={styles.flex}>
+                  <View style={styles.sessionHead}>
+                    <Text
+                      style={[
+                        typeScale.rowTitle,
+                        styles.flex,
+                        { color: sessionId === null ? c.textSecondary : c.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {title}
+                    </Text>
+                    <Text style={[typeScale.callout, styles.tabular, { color: c.text }]}>
+                      {metricText(kind, value)}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[typeScale.footnote, { color: c.textSecondary }]}
+                    numberOfLines={1}
+                    ellipsizeMode="middle"
+                  >
+                    {meta}
+                  </Text>
+                  <View style={[styles.sessionTrack, { backgroundColor: c.fill }]}>
+                    {fill > 0 && (
+                      <View
+                        style={[
+                          styles.sessionFill,
+                          { backgroundColor: c.tint, width: `${Math.max(fill * 100, 2)}%` },
+                        ]}
+                      />
+                    )}
+                  </View>
+                </View>
+              </Press>
+            )
+          })}
+        </View>
+      )}
+    </>
+  )
+}
+
 const PART_NAMES: Record<TokenPart, string> = {
   cacheRead: '缓存读取',
   cacheWrite: '缓存写入',
@@ -624,6 +720,12 @@ export function Facts(props: { facts: Figures; tokenFacts: Figures; kind: Metric
       label: '来自 prompt cache',
       value: percent(tokenFacts.cacheShare),
     },
+    tokenFacts.priced &&
+      tokenFacts.parts.cacheSaved > 0 && {
+        key: 'saved',
+        label: 'prompt cache 省下（按 API 价格）',
+        value: metricText('cost', tokenFacts.parts.cacheSaved),
+      },
   ].filter((line): line is { key: string; label: string; value: string } => !!line)
 
   return (
@@ -992,6 +1094,11 @@ const styles = StyleSheet.create({
   fill: { height: 6, borderRadius: 3, minWidth: 6 },
   rowShare: { width: 44, textAlign: 'right', fontVariant: ['tabular-nums'] },
   rowValue: { width: 64, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  sessions: { gap: space.lg },
+  session: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  sessionHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  sessionTrack: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: space.xs },
+  sessionFill: { height: 4, borderRadius: 2, minWidth: 4 },
   facts: { gap: space.md },
   fact: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   composition: { gap: space.sm + 2, marginTop: space.xl },
