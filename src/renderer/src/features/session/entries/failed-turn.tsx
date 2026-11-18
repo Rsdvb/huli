@@ -6,7 +6,9 @@ import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { errorMessage } from '@renderer/lib/host'
+import { limitPercent } from '@renderer/lib/plan-limit'
 import { useNow } from '@renderer/lib/use-now'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import { useThreadsStore } from '@renderer/stores/threads'
@@ -47,6 +49,7 @@ export function FailedTurnActions({
     return summary ? hostOfSession(summary) : null
   })
   const now = useNow()
+  const view = useLimitView()
   const fallback = useFallback(hostId, agentId ?? null, planLimit && !!prompt, now)
   const [retrying, setRetrying] = useState(false)
   const [continuing, setContinuing] = useState(false)
@@ -91,9 +94,9 @@ export function FailedTurnActions({
                 {t('quota.continueWith', { agent: fallback.name })}
               </TooltipTrigger>
               <TooltipContent>
-                {t('quota.continueHint', {
+                {t(view === 'left' ? 'quota.continueHintLeft' : 'quota.continueHint', {
                   agent: fallback.name,
-                  percent: Math.round(fallback.usedPercent),
+                  percent: limitPercent(fallback, view),
                 })}
               </TooltipContent>
             </Tooltip>

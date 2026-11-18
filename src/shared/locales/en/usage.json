@@ -5,10 +5,13 @@
     "todayCost": "Today: {{cost}}, estimated at API prices",
     "costEstimate": "Estimated at API prices",
     "limit": "{{agent}}, {{limit}}: {{percent}} used",
-    "limitShort": "{{limit}} {{percent}} used"
+    "limitShort": "{{limit}} {{percent}} used",
+    "limitLeft": "{{agent}}, {{limit}}: {{percent}} left",
+    "limitShortLeft": "{{limit}} {{percent}} left"
   },
   "alert": {
     "near": "{{agent}} · {{limit}} limit {{percent}}% used",
+    "nearLeft": "{{agent}} · {{limit}} limit {{percent}}% left",
     "out": "{{agent}} · {{limit}} limit used up",
     "back": "Back {{time}}",
     "noReset": "The agent did not say when it resets",

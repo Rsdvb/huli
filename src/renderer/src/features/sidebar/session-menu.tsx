@@ -241,11 +241,12 @@ export function SessionMenuItems({
     const shortcut = accelerator && (
       <DropdownMenuShortcut>{shortcutLabel(accelerator)}</DropdownMenuShortcut>
     )
-    const props = { key: name, 'data-accelerator': accelerator }
+    const props = { 'data-accelerator': accelerator }
     switch (name) {
       case 'stop':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             variant="destructive"
             onClick={() => void host('sessions.cancel', { sessionId: id })}
@@ -258,6 +259,7 @@ export function SessionMenuItems({
       case 'retry':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             onClick={() => void host('sessions.retry', { sessionId: id })}
           >
@@ -269,6 +271,7 @@ export function SessionMenuItems({
       case 'open':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             disabled={inFront}
             onClick={() => openSession(id, summary.projectPath)}
@@ -281,7 +284,11 @@ export function SessionMenuItems({
         )
       case 'pin':
         return (
-          <DropdownMenuItem {...props} onClick={() => void pinSession(id, !summary.pinnedAt)}>
+          <DropdownMenuItem
+            key={name}
+            {...props}
+            onClick={() => void pinSession(id, !summary.pinnedAt)}
+          >
             {summary.pinnedAt ? <MenuGlyph icon={PinOffIcon} /> : <MenuGlyph icon={PinIcon} />}
             {summary.pinnedAt ? t('row.unpin') : t('row.pin')}
             {shortcut}
@@ -290,6 +297,7 @@ export function SessionMenuItems({
       case 'unread':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             disabled={inFront}
             onClick={() => void markSessionUnread(id, !unread)}
@@ -301,7 +309,7 @@ export function SessionMenuItems({
         )
       case 'rename':
         return (
-          <DropdownMenuItem {...props} onClick={onRename}>
+          <DropdownMenuItem key={name} {...props} onClick={onRename}>
             <MenuGlyph icon={PencilEdit02Icon} />
             {t('row.rename')}
             {shortcut}
@@ -309,7 +317,7 @@ export function SessionMenuItems({
         )
       case 'fork':
         return (
-          <DropdownMenuItem {...props} onClick={() => void forkSession(id)}>
+          <DropdownMenuItem key={name} {...props} onClick={() => void forkSession(id)}>
             <ForkIcon />
             {summary.worktree && hasLiveWorktree(summary)
               ? t('worktree.forkNew')
@@ -322,6 +330,7 @@ export function SessionMenuItems({
       case 'forkSame':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             onClick={() =>
               void forkSession(id, undefined, 'same').catch((error: unknown) =>
@@ -335,7 +344,7 @@ export function SessionMenuItems({
         )
       case 'removeWorktree':
         return (
-          <DropdownMenuItem {...props} onClick={() => void askRemoveWorktree(summary)}>
+          <DropdownMenuItem key={name} {...props} onClick={() => void askRemoveWorktree(summary)}>
             <MenuGlyph icon={FolderRemoveIcon} />
             {t('worktree.menu')}
           </DropdownMenuItem>
@@ -389,6 +398,7 @@ export function SessionMenuItems({
           const pr = prs[0]!
           return (
             <DropdownMenuItem
+              key={name}
               {...props}
               render={<a href={pr.url} target="_blank" rel="noreferrer" />}
             >
@@ -428,6 +438,7 @@ export function SessionMenuItems({
       case 'showInFolder':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             onClick={() => void window.kettu.shell.showItem(sessionFolder(summary))}
           >
@@ -438,7 +449,7 @@ export function SessionMenuItems({
         )
       case 'openTerminal':
         return (
-          <DropdownMenuItem {...props} onClick={() => toggleTerminal(summary.id, true)}>
+          <DropdownMenuItem key={name} {...props} onClick={() => toggleTerminal(summary.id, true)}>
             <MenuGlyph icon={ComputerTerminal01Icon} />
             {t('row.openTerminal')}
             {shortcut}
@@ -448,6 +459,7 @@ export function SessionMenuItems({
         return (
           resume && (
             <DropdownMenuItem
+              key={name}
               {...props}
               onClick={() => copyWithToast(resume, t('row.copiedResume'))}
             >
@@ -463,6 +475,7 @@ export function SessionMenuItems({
       case 'copySessionId':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             onClick={() =>
               copyWithToast(summary.acpSessionId ?? summary.id, t('row.copiedSessionId'))
@@ -475,6 +488,7 @@ export function SessionMenuItems({
       case 'showInParent':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             onClick={() => {
               const parent = summary.parentId
@@ -490,6 +504,7 @@ export function SessionMenuItems({
       case 'archive':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             onClick={() =>
               archiveWithUndo([id], t('row.archived', { title: sessionTitle(summary) }))
@@ -503,6 +518,7 @@ export function SessionMenuItems({
       case 'delete':
         return (
           <DropdownMenuItem
+            key={name}
             {...props}
             data-quick-accelerator={QUICK_DELETE}
             variant="destructive"
@@ -711,11 +727,12 @@ export function MultiSessionMenuItems({
           {index === groups.length - 1 && <MoveToFolderMenu ids={summaries.map((s) => s.id)} />}
           {group.map((name) => {
             const accelerator = MULTI_ACCELERATORS[name]
-            const props = { key: name, 'data-accelerator': accelerator }
+            const props = { 'data-accelerator': accelerator }
             switch (name) {
               case 'stop':
                 return (
                   <DropdownMenuItem
+                    key={name}
                     {...props}
                     variant="destructive"
                     onClick={each((s) => host('sessions.cancel', { sessionId: s.id }))}
@@ -729,6 +746,7 @@ export function MultiSessionMenuItems({
               case 'unread':
                 return (
                   <DropdownMenuItem
+                    key={name}
                     {...props}
                     onClick={each((s) => markSessionUnread(s.id, name === 'unread'))}
                   >
@@ -740,6 +758,7 @@ export function MultiSessionMenuItems({
               case 'unpin':
                 return (
                   <DropdownMenuItem
+                    key={name}
                     {...props}
                     onClick={each((s) => pinSession(s.id, name === 'pin'))}
                   >
@@ -754,6 +773,7 @@ export function MultiSessionMenuItems({
               case 'archive':
                 return (
                   <DropdownMenuItem
+                    key={name}
                     {...props}
                     onClick={() => {
                       clearSelection()
@@ -771,6 +791,7 @@ export function MultiSessionMenuItems({
               case 'delete':
                 return (
                   <DropdownMenuItem
+                    key={name}
                     {...props}
                     variant="destructive"
                     onClick={(event) => {

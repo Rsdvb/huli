@@ -38,7 +38,7 @@ import {
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { clockTime, countdown, fullTime, limitLabel, money, tokens } from '@renderer/lib/format'
 import { errorMessage, sessionHost } from '@renderer/lib/host'
-import { isUsedUp, limitLevel, shownPercent } from '@renderer/lib/plan-limit'
+import { isUsedUp, limitLevel, limitPercent, shownPercent } from '@renderer/lib/plan-limit'
 import { useClock, useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { loadContext, refreshLimits, useUsageStore } from '@renderer/stores/usage'
@@ -387,13 +387,14 @@ export function ContextButton({
  */
 function TrayLimit({ limit }: { limit: PlanLimit }) {
   const { t } = useTranslation(['composer', 'common'])
+  const view = useLimitView()
   const reset = useClock((now) => inlineReset(limit, now))
   const name = isShortWindow(limit.window) ? t(SHORT_WINDOW[limit.window]) : limitLabel(limit)
   const figure =
     reset && isUsedUp(limit)
       ? t('common:planInline.out')
       : limit.usedPercent !== null
-        ? `${Math.round(limit.usedPercent)}%`
+        ? `${limitPercent(limit, view)}%`
         : null
   return (
     <span className="kettu-tray-limit" data-level={LIMIT_METER[limitLevel(limit)]}>
@@ -624,17 +625,24 @@ function Total({ label, value }: { label: string; value: number | null }) {
 
 /** The plan's limits under the context: the tier as a chip, then each window with its bar. */
 function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAccount | null }) {
-  const { t } = useTranslation('composer')
+  const { t } = useTranslation(['composer', 'common'])
   const now = useNow()
+  const view = useLimitView()
   const plan = account?.label ? joinPlanTier(account.label, account.tier) : null
   return (
     <div className="kettu-ctx__plan">
       <div className="kettu-ctx__plan-head">
-        <span>{t('usage.limits.title')}</span>
+        <span>
+          {t('usage.limits.title')}
+          <span className="font-normal opacity-70">
+            {' · '}
+            {t(view === 'left' ? 'common:planView.left' : 'common:planView.used')}
+          </span>
+        </span>
         {plan && <span className="kettu-ctx__tier">{plan}</span>}
       </div>
       {limits.map((limit) => {
-        const used = limit.usedPercent ?? 0
+        const shown = shownPercent(Math.round(limit.usedPercent ?? 0), view)
         return (
           <div key={limit.window} className="kettu-limit" data-level={METER[usageTone(limit)]}>
             <div className="kettu-limit__row">
@@ -650,7 +658,7 @@ function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAc
                 </Tooltip>
               )}
               <span className="kettu-limit__value tabular">
-                {limit.usedPercent === null ? '—' : `${Math.round(limit.usedPercent)}%`}
+                {limit.usedPercent === null ? '—' : `${shown}%`}
               </span>
             </div>
             <div
@@ -658,10 +666,12 @@ function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAc
               role="meter"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={Math.round(used)}
-              aria-label={t('usage.limits.used', { limit: limitLabel(limit) })}
+              aria-valuenow={shown}
+              aria-label={t(view === 'left' ? 'usage.limits.left' : 'usage.limits.used', {
+                limit: limitLabel(limit),
+              })}
             >
-              <span style={{ width: `${Math.min(100, Math.max(0, used))}%` }} />
+              <span style={{ width: `${Math.min(100, Math.max(0, shown))}%` }} />
             </div>
           </div>
         )

@@ -70,6 +70,7 @@ import { ArchivedRow } from './archived-section'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
+import { FontFamily } from './font-family'
 import { ConsentRow, ConsentsState } from './artifacts-section'
 import { EmptyCard, GroupNote } from './rows'
 import { BROUGHT_SHOWN, useBroughtSites } from './brought-sites'
@@ -135,6 +136,7 @@ import {
   GhTool,
   GitTool,
   Language,
+  NewSessionListChoice,
   NotificationPreview,
   NotificationSwitch,
   OpenAtLogin,
@@ -220,6 +222,15 @@ export function useGeneralSection(): SectionDef {
         description: t('general.defaultAgent.description'),
         group: sessions,
         render: () => <DefaultAgent />,
+      },
+      {
+        id: 'new-session-list',
+        name: t('general.newSessionList.name'),
+        english: en('general.newSessionList.name'),
+        description: t('general.newSessionList.description'),
+        keywords: t('general.newSessionList.keywords'),
+        group: sessions,
+        render: () => <NewSessionListChoice />,
       },
       {
         id: 'restore',
@@ -848,6 +859,15 @@ export function useTerminalSection(): SectionDef {
           : t('terminal.shell.description'),
         group: group('shell', t('terminal.groups.shell')),
         render: () => <ShellPicker />,
+      },
+      {
+        id: 'font-family',
+        name: t('terminal.fontFamily.name'),
+        english: en('terminal.fontFamily.name'),
+        description: t('terminal.fontFamily.description'),
+        keywords: t('terminal.fontFamily.keywords'),
+        group: group('display', t('terminal.groups.display')),
+        render: () => <FontFamily label={t('terminal.fontFamily.name')} />,
       },
       {
         id: 'font-size',

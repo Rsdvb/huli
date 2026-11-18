@@ -5,8 +5,10 @@ import type { Fallback, PlanQuota } from '@shared/plan-quota'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import { Glyph } from '@renderer/features/shell/glyph'
+import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { backTime, limitPhrase } from '@renderer/lib/format'
 import { fadeExit } from '@renderer/lib/motion'
+import { limitPercent } from '@renderer/lib/plan-limit'
 
 /**
  * The note at the top of the composer's box while the chosen agent's plan is used up and another
@@ -30,7 +32,8 @@ export function QuotaStrip({
 }) {
   const { t } = useTranslation('session')
   const limit = limitPhrase(quota.limit)
-  const percent = Math.round(fallback.usedPercent)
+  const view = useLimitView()
+  const percent = limitPercent(fallback, view)
   return (
     <motion.div
       exit={fadeExit}
@@ -48,7 +51,10 @@ export function QuotaStrip({
             : t('quota.suggestNoReset', { agent: agentName, limit })}
         </p>
         <p className="text-xs text-tertiary">
-          {t('quota.switchToUsed', { agent: fallback.name, percent })}
+          {t(view === 'left' ? 'quota.switchToLeft' : 'quota.switchToUsed', {
+            agent: fallback.name,
+            percent,
+          })}
         </p>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">

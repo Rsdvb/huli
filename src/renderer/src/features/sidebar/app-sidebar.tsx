@@ -57,6 +57,7 @@ import { useUngroupDrop } from '@renderer/features/session-folders/drag'
 import { SessionFolderDialogs } from '@renderer/features/session-folders/folder-dialogs'
 import { FolderSection } from '@renderer/features/session-folders/folder-section'
 import { useUnfoldered } from '@renderer/features/session-folders/store'
+import { AddProjectButton } from './add-project'
 import { HostEmpty, HostHeading, NeedsYouGroup } from './host-groups'
 import { useHostLabel } from './host-label'
 import { ImportSessionsDialog } from './import-sessions'
@@ -101,6 +102,7 @@ export function SidebarList() {
     () => others.filter((host) => isAway(host.connection)).map((host) => host.id),
     [others],
   )
+  const scratch = useHasNoProjectSessions(null)
   // The list has one Tab stop, chosen from the store so a hidden shown row leaves it to a header.
   const stopKey = useSessionsStore((s) =>
     tabStopKey(
@@ -168,8 +170,11 @@ export function SidebarList() {
             <PinnedGroup stop={stop} />
             <FolderSection hostId={null} at="above" stop={stop} />
             <div className="ui-as-side__group" role="group" aria-label={t('nav.projects')}>
-              <span className="ui-as-side__label">{t('nav.projects')}</span>
-              {shownProjects.length === 0 && (
+              <div className="ui-as-side__label kettu-projects-label">
+                <span>{t('nav.projects')}</span>
+                <AddProjectButton />
+              </div>
+              {shownProjects.length === 0 && !scratch && (
                 <span className="ui-as-side__empty">{t('nav.empty')}</span>
               )}
               {shownProjects.map((project) => (
@@ -198,6 +203,15 @@ export function SidebarList() {
   )
 }
 
+/** Whether `hostId` has a session started with No project that the list shows. */
+function useHasNoProjectSessions(hostId: string | null): boolean {
+  return useSessionsStore((s) =>
+    Object.values(s.byId).some(
+      (x) => x.scratch && listedOrigin(x) && !x.archivedAt && hostOfSession(x) === hostId,
+    ),
+  )
+}
+
 /** A host's heading, its projects' folders and its No project folder. */
 function HostSection({
   hostId,
@@ -212,16 +226,15 @@ function HostSection({
 }) {
   const away = isAway(useOtherHost(hostId)?.connection ?? null)
   const own = projects.filter((project) => hostOfPath(project.path) === hostId)
-  const scratch = useSessionsStore((s) =>
-    Object.values(s.byId).some(
-      (x) => x.scratch && listedOrigin(x) && !x.archivedAt && hostOfSession(x) === hostId,
-    ),
-  )
+  const scratch = useHasNoProjectSessions(hostId)
   const key = hostGroup(hostId)
   const open = useViewStore((s) => !s.collapsedProjects[key])
   return (
     <section aria-label={useHostLabel(hostId)} className="ui-as-side__group">
-      <HostHeading hostId={hostId} open={open} stop={stop} onToggle={() => toggleGroup(key)} />
+      <div className="kettu-host-head">
+        <HostHeading hostId={hostId} open={open} stop={stop} onToggle={() => toggleGroup(key)} />
+        {!away && <AddProjectButton hostId={hostId} />}
+      </div>
       {open && (
         <>
           <FolderSection hostId={hostId} at="above" stop={stop} />

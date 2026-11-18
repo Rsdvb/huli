@@ -10,7 +10,7 @@ import { TurnDots } from './turn-dots'
 import { askedStep, turnDoing, turnTokens, writingId, type TurnPhaseName } from './turn-phase'
 
 /** Phases in which the agent thinks or writes rather than works in the app it uses. */
-const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval'])
+const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval', 'question'])
 
 /** The `thread.doing` copy for a phase that names what it works on. */
 function doingKey(phase: TurnPhaseName, count: number, quoted: boolean) {
@@ -107,7 +107,12 @@ export const TurnStatus = memo(function TurnStatus({
   // The device or terminal the user holds, which the turn waits for.
   const holding = device.state === 'you' ? device.name : terminal
   const waiting =
-    phase === 'approval' || asked !== null || page === 'you' || appHeld || holding !== null
+    phase === 'approval' ||
+    phase === 'question' ||
+    asked !== null ||
+    page === 'you' ||
+    appHeld ||
+    holding !== null
   const text = asked
     ? t(`control:status.asks.${asked}`)
     : page === 'you'

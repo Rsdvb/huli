@@ -50,6 +50,14 @@
       "description": "新建会话时默认使用的 Agent。",
       "askEachTime": "每次询问"
     },
+    "newSessionList": {
+      "name": "新会话页输入框下面",
+      "description": "新建会话页在输入框下面列出什么。",
+      "keywords": "新会话 新建会话 首页 起始页 下面 列表 接着上次继续 最近的会话 artifact 隐藏 关闭 不显示",
+      "sessions": "接着上次继续",
+      "artifacts": "最近的 artifact",
+      "off": "不显示"
+    },
     "sendKey": {
       "name": "发送快捷键",
       "description": "另一个按键用于换行。",
@@ -218,7 +226,8 @@
       "small": "小",
       "default": "默认",
       "large": "大",
-      "previewAgent": "好的。我先读一下 <code>settings-page.tsx</code> 和设计文档，再逐页给出方案。"
+      "previewLabel": "预览",
+      "preview": "回复和你发送的消息在这个字号下就是这样。行内代码，比如 <code>settings.json</code>，是这样显示的。"
     },
     "reduceMotion": {
       "name": "减弱动态效果",
@@ -256,6 +265,17 @@
       "loginShell": "登录 Shell",
       "reset": "重置",
       "choose": "选择…"
+    },
+    "fontFamily": {
+      "name": "字体",
+      "description": "这台电脑上已安装的字体，例如能显示提示符图标的 Nerd Font。所选字体缺少的字形由主题的代码字体补上。",
+      "keywords": "字体 font nerd font 等宽 图标",
+      "default": "主题的代码字体",
+      "search": "搜索或输入字体名",
+      "use": "使用“{{name}}”",
+      "noMatch": "没有匹配的等宽字体。",
+      "loading": "正在读取已安装的字体…",
+      "unavailable": "这个浏览器列不出字体，输入字体名即可使用。"
     },
     "fontSize": {
       "name": "字号",
@@ -859,7 +879,7 @@
     "default": "默认",
     "footerBefore": "要用别的程序，先到 ",
     "footerAfter": " 里安装。",
-    "registrationNote": "安装或检测到 Harness 不会自动添加 Agent。",
+    "registrationNote": "首次启动时找到的 Harness，以及你在 Kettu 里安装的 Harness，Kettu 会各添加一个 Agent。别的，比如之后在终端里装的程序，请在这里自己添加。移除的 Agent 不会自己加回来。",
     "onHarness": "运行于 {{harness}}",
     "openHarness": "到 Harness 里打开 {{harness}}",
     "mcpServers": {
@@ -1174,8 +1194,8 @@
     "notifications": "Agent 需要你或完成时，Kettu 如何通知你。",
     "notifications_web": "{{host}} 上的 Agent 需要你或完成时，这个页面如何通知你。",
     "account": "你的 Kettu 账号，用于 Kettu 的云服务。",
-    "agents": "Agent 用一个 Harness 和一份账号配置运行。你需要哪个就添加哪个；安装 Harness 本身不会添加 Agent。",
-    "agents_web": "{{host}} 上的 Agent 用那里的一个 Harness 和一份账号配置运行。你需要哪个就添加哪个；安装 Harness 本身不会添加 Agent。",
+    "agents": "Agent 用一个 Harness 和一份账号配置运行。首次启动时找到的 Harness，以及你在 Kettu 里安装的 Harness，Kettu 会各添加一个 Agent；其他的，你需要哪个就添加哪个。",
+    "agents_web": "{{host}} 上的 Agent 用那里的一个 Harness 和一份账号配置运行。{{host}} 首次启动时找到的 Harness，以及你在它上面安装的 Harness，Kettu 会各添加一个 Agent；其他的，你需要哪个就添加哪个。",
     "terminal": "侧边面板的终端运行哪个 shell，以及它的外观。",
     "git": "顶栏的分支与更改、Pull Request 和它的检查结果，都靠下面两个工具。",
     "advanced": "网络代理、诊断信息，以及 Kettu 保存在这台电脑上的数据。",

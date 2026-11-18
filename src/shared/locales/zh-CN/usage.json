@@ -5,10 +5,13 @@
     "todayCost": "今日 {{cost}}，按 API 价格估算",
     "costEstimate": "按 API 价格估算",
     "limit": "{{agent}}，{{limit}}：已用 {{percent}}",
-    "limitShort": "{{limit}}已用 {{percent}}"
+    "limitShort": "{{limit}}已用 {{percent}}",
+    "limitLeft": "{{agent}}，{{limit}}：剩余 {{percent}}",
+    "limitShortLeft": "{{limit}}剩余 {{percent}}"
   },
   "alert": {
     "near": "{{agent}} · {{limit}}限额已用 {{percent}}%",
+    "nearLeft": "{{agent}} · {{limit}}限额剩余 {{percent}}%",
     "out": "{{agent}} · {{limit}}限额已用完",
     "back": "{{time}} 恢复",
     "noReset": "Agent 没有说何时重置",

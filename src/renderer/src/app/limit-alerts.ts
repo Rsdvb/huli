@@ -7,6 +7,7 @@ import { alertToast } from '@renderer/components/ui/toast'
 import { planReset } from '@renderer/features/sidebar/plan-usage'
 import { backTime, limitPhrase } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
+import { shownPercent } from '@renderer/lib/plan-limit'
 import { askAgentSwitch } from '@renderer/stores/agent-switch'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import { useSettingsStore } from '@renderer/stores/settings'
@@ -53,11 +54,12 @@ export function showLimitAlert(alert: PlanAlert, hostId: string | null): void {
   const now = Date.now()
   const out = alert.level === 100
   const params = { agent: alert.agentName, limit: limitPhrase(alert) }
+  const view = useSettingsStore.getState().settings.usage.limits
   const title = out
     ? i18n.t('usage:alert.out', params)
-    : i18n.t('usage:alert.near', {
+    : i18n.t(view === 'left' ? 'usage:alert.nearLeft' : 'usage:alert.near', {
         ...params,
-        percent: Math.round(alert.usedPercent ?? alert.level),
+        percent: shownPercent(Math.round(alert.usedPercent ?? alert.level), view),
       })
   const detail =
     alert.resetsAt === null || alert.resetsAt <= now

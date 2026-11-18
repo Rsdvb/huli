@@ -508,8 +508,10 @@
       "installing": "Installing…",
       "failed": "Failed",
       "signIn": "Sign in",
-      "window": "{{limit}} {{used}}",
-      "windowResets": "{{limit}} {{used}} · {{reset}}",
+      "window": "{{limit}} {{value}}",
+      "windowResets": "{{limit}} {{value}} · {{reset}}",
+      "valueUsed": "{{percent}}% used",
+      "valueLeft": "{{percent}}% left",
       "setsUpLong": "{{agent}} sets up on first use: Kettu installs its adapter, which runs your {{command}}.",
       "needsUpdate": "Needs update",
       "updateLong": "Your {{command}} {{current}} is older than Kettu needs (at least {{minimum}}); update it to use it.",
@@ -585,6 +587,7 @@
       "versionBroken": "{{version}} does not work with Kettu",
       "versionUnsupported": "{{version}} is outside the versions Kettu works with",
       "limitUsed": "{{percent}}% of {{limit}} limit",
+      "limitLeft": "{{percent}}% of {{limit}} limit left",
       "limitReached": "{{limit}} limit reached",
       "manage": "Manage agents…"
     },
@@ -600,6 +603,10 @@
       "failed": "Stopped with an error",
       "signIn": "Waiting for sign-in",
       "finished": "Finished {{ago}}"
+    },
+    "artifacts": {
+      "title": "Latest artifacts",
+      "viewAll": "View all"
     },
     "addAgent": "Add an agent…",
     "guide": {
@@ -682,6 +689,7 @@
     "restore": "Restore",
     "openAgents": "Open Agents",
     "announceApproval": "{{agent}} needs your approval",
+    "announceQuestion": "{{agent}} has a question for you",
     "announceFinished": "{{agent}} finished"
   },
   "find": {
@@ -714,6 +722,7 @@
       "writing": "Writing",
       "compacting": "Compacting context",
       "approval": "Waiting for your approval",
+      "question": "Waiting for your answer",
       "working": "Working"
     },
     "doing": {
@@ -1367,9 +1376,11 @@
     "suggestNoReset": "{{agent}}'s {{limit}} limit is used up.",
     "switchTo": "Switch to {{agent}}",
     "switchToUsed": "{{agent}} has used {{percent}}%",
+    "switchToLeft": "{{agent}} has {{percent}}% left",
     "dismiss": "Not now",
     "continueWith": "Continue with {{agent}}",
     "continueHint": "{{agent}} has used {{percent}}%. It reads the conversation so far and picks up where the turn stopped.",
+    "continueHintLeft": "{{agent}} has {{percent}}% left. It reads the conversation so far and picks up where the turn stopped.",
     "continuePrompt": "Continue the task from where it stopped."
   }
 }

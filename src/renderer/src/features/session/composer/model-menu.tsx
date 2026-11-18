@@ -14,7 +14,9 @@ import {
 import { ShimmerText } from '@renderer/components/affect/shimmer-loader'
 import { joinPlanTier } from '@renderer/features/account/model'
 import { tightestLimit } from '@renderer/features/sidebar/plan-usage'
+import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { limitPhrase } from '@renderer/lib/format'
+import { limitPercent } from '@renderer/lib/plan-limit'
 import { formatShortcut } from '@renderer/lib/platform'
 import { useNow } from '@renderer/lib/use-now'
 import { quotaText } from '../plan-quota'
@@ -78,6 +80,7 @@ export function ModelMenu({
   // A phone has no number keys to pick a model with.
   const phone = usePhoneWindow()
   const { t } = useTranslation('composer')
+  const limitView = useLimitView()
   const now = useNow()
   const model = config.find((o): o is SelectOption => o.category === 'model' && isSelect(o))
   const effort = config.find(
@@ -151,8 +154,8 @@ export function ModelMenu({
     plan,
     usedUp ??
       (limit?.usedPercent != null &&
-        t('controls.limitUsed', {
-          percent: Math.round(limit.usedPercent),
+        t(limitView === 'left' ? 'controls.limitLeft' : 'controls.limitUsed', {
+          percent: limitPercent(limit, limitView),
           limit: limitPhrase(limit),
         })),
   ]

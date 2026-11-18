@@ -22,6 +22,10 @@ export interface OnboardingState {
   step: OnboardingStep // where an unfinished onboarding resumes
 }
 
+/** What New session lists under the input: recent sessions, the latest artifacts, or nothing. */
+export const NEW_SESSION_LISTS = ['sessions', 'artifacts', 'off'] as const
+export type NewSessionList = (typeof NEW_SESSION_LISTS)[number]
+
 export interface SettingsFile {
   version: 1
   agentRegistrationVersion?: 1
@@ -33,6 +37,7 @@ export interface SettingsFile {
     defaultAgent: AgentId | null // null: pick one on the New session screen each time
     sendKey: 'enter' | 'mod-enter' // the other key inserts a newline
     restoreLastSession: boolean
+    newSessionList: NewSessionList // what New session lists under the input
     confirmQuitWhileRunning: boolean
     openAtLogin: boolean // start at login, so routines keep their schedule
     background: boolean // keep running with the tray icon after the last window closes
@@ -89,6 +94,7 @@ export interface SettingsFile {
   terminal: {
     shellPath?: string // picked in a native dialog; the platform default when absent
     fontSize: 12 | 13 | 14
+    fontFamily?: string // an installed face tried before the theme's code font
   }
   // worktreeRoot: where sessions' worktrees go; null puts them beside each project.
   git: { backgroundFetch: boolean; worktreeRoot: string | null }
@@ -142,6 +148,18 @@ export interface DirectSettings {
 /** Where a link opens: the system's default browser, or the session's page in Kettu's browser. */
 export type LinkDestination = 'browser' | 'session'
 export type OpenLinksIn = LinkDestination | 'ask'
+
+export const MAX_FONT_FAMILY_CHARS = 100
+
+/** One face name, safe to put in quotes in a CSS font stack: no quotes, separators or controls. */
+export function isFontFamilyName(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= MAX_FONT_FAMILY_CHARS &&
+    value === value.trim() &&
+    !/[\p{Cc}"'`\\;,{}()<>]/u.test(value)
+  )
+}
 
 /** The most sites the "Always open" choice remembers. */
 export const MAX_LINK_SITES = 500
@@ -259,6 +277,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     defaultAgent: null,
     sendKey: 'enter',
     restoreLastSession: true,
+    newSessionList: 'sessions',
     confirmQuitWhileRunning: true,
     openAtLogin: false,
     background: false,
@@ -348,7 +367,11 @@ export interface SettingsPatch {
     >
   >
   proxy?: ProxySettings
-  terminal?: { shellPath?: null; fontSize?: SettingsFile['terminal']['fontSize'] }
+  terminal?: {
+    shellPath?: null
+    fontSize?: SettingsFile['terminal']['fontSize']
+    fontFamily?: string | null // null goes back to the theme's code font
+  }
   git?: Partial<SettingsFile['git']>
   mcp?: { kettu: { off: AgentId[] } } // the list is replaced whole
   marketplace?: { mcp?: MarketServer[]; skills?: MarketSkill[] } // each list is replaced whole

@@ -4,6 +4,7 @@
     "placeholder": {
       "starting": "正在启动 {{agent}}…",
       "awaiting": "等待你的授权",
+      "awaitingAnswer": "等待你的回答",
       "limitReached": "{{limit}}限额已用完 · {{time}} 重置",
       "ask": "回复 {{agent}}…",
       "denied": "告诉 {{agent}} 改用什么做法",
@@ -42,6 +43,7 @@
     "permissionMode": "权限模式",
     "selected": "已选择 {{label}}",
     "limitUsed": "已用 {{limit}}限额的 {{percent}}%",
+    "limitLeft": "{{limit}}限额剩余 {{percent}}%",
     "effortHint": "强度越高，思考越久，消耗的套餐额度也越多 · {{shortcut}}",
     "modelSettings": "模型设置",
     "speed": "速度",
@@ -63,6 +65,9 @@
     "stopTitle": "停止后台工作并换成 {{agent}}？",
     "stopBody": "这些在 {{current}} 里运行，换 Agent 时会停止：",
     "stopConfirm": "停止并切换"
+  },
+  "heldOutside": {
+    "strip": "这个会话正开在终端里。在那边输入 /exit 退出后，它的对话会同步到这里。"
   },
   "outOfCredit": {
     "modelTitle": "{{model}} 余额不足",
@@ -238,6 +243,9 @@
     "lines": "第 {{lines}} 行",
     "clickToOpen": "点击打开",
     "backspaceRemoves": "{{key}} 移除"
+  },
+  "resize": {
+    "label": "调整输入框高度"
   },
   "place": {
     "thisComputer": "本机",
