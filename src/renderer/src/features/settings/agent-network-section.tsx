@@ -41,7 +41,7 @@ export function useAgentNetworkSection(): SectionDef {
   const order = useAgentsStore((s) => s.order)
   const byId = useAgentsStore((s) => s.byId)
   const agents = usableAgents(order, byId).filter((agent) => !agent.disabled)
-  const [editing, setEditing] = useState<SubscriptionView | null | 'new'>(null)
+  const [editing, setEditing] = useState<SubscriptionView | null | 'new' | 'file'>(null)
   const [removing, setRemoving] = useState<SubscriptionView | null>(null)
   const running = status?.state === 'running'
   const subscriptions = status?.subscriptions ?? []
@@ -62,7 +62,10 @@ export function useAgentNetworkSection(): SectionDef {
     count: subscriptions.length,
     actions: (
       <>
-        {subscriptions.length > 0 && <RefreshAllAction disabled={!running} />}
+        {subscriptions.some((sub) => sub.source === 'url') && <RefreshAllAction />}
+        <SetButton variant="ghost" onClick={() => setEditing('file')}>
+          {t('network.subscriptions.importFile')}
+        </SetButton>
         <SetButton variant="ghost" onClick={() => setEditing('new')}>
           {t('network.subscriptions.add')}
         </SetButton>
@@ -71,8 +74,9 @@ export function useAgentNetworkSection(): SectionDef {
     note: (
       <>
         <SubscriptionDialog
-          key={editing === 'new' ? 'new' : (editing?.id ?? 'closed')}
-          sub={editing === 'new' ? null : editing}
+          key={typeof editing === 'string' ? editing : (editing?.id ?? 'closed')}
+          sub={typeof editing === 'string' ? null : editing}
+          fromFile={editing === 'file'}
           open={editing !== null}
           onOpenChange={(open) => !open && setEditing(null)}
         />
@@ -146,7 +150,6 @@ export function useAgentNetworkSection(): SectionDef {
           render: () => (
             <SubscriptionRow
               sub={sub}
-              running={running}
               onRename={() => setEditing(sub)}
               onRemove={() => setRemoving(sub)}
             />

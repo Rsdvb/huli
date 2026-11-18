@@ -2109,7 +2109,7 @@
       "rename": "Rename",
       "remove": "Remove",
       "emptyTitle": "No subscriptions",
-      "emptyHint": "Add your provider’s subscription link. The link stays on this computer.",
+      "emptyHint": "Add your provider’s subscription link, or import a subscription file. Both stay on this computer.",
       "nodes_one": "{{count}} node",
       "nodes_other": "{{count}} nodes",
       "notRead": "Not read yet",
@@ -2118,13 +2118,18 @@
       "expires": "expires {{date}}",
       "removeTitle": "Remove {{name}}?",
       "removeBody": "Its nodes go with it. Agents that use one of them have no network until you pick another.",
-      "keywords": "subscription airport provider link nodes refresh"
+      "keywords": "subscription airport provider link nodes refresh",
+      "importFile": "Import file",
+      "reimport": "Import again",
+      "fromFile": "From a file",
+      "imported": "imported {{time}}",
+      "failed": "Refresh failed {{time}}: {{error}}"
     },
     "add": {
       "title": "Add subscription",
       "name": "Name",
       "url": "Subscription link",
-      "urlHint": "Kept by this computer’s agent host alone: never in the settings, the logs or on paired devices.",
+      "urlHint": "Downloaded once now through Kettu’s own network (Advanced › Proxy), then every 12 hours. Kept by this computer’s agent host alone: never in the settings, the logs or on paired devices.",
       "save": "Add",
       "invalidUrl": "Enter an http or https link.",
       "invalidName": "Use 1 to 40 characters, without |."
@@ -2166,6 +2171,14 @@
       "unsupported": "Can’t check the exit: the system proxy isn’t an HTTP proxy",
       "unchecked": "Exit not checked yet",
       "check": "Check exit IP"
+    },
+    "import": {
+      "title": "Import a subscription file",
+      "file": "File",
+      "choose": "Choose file…",
+      "hint": "Clash YAML, or node links one per line or in base64, up to 10 MB. Kept on this computer and never refreshed; import it again to update it.",
+      "tooLarge": "The file is larger than 10 MB.",
+      "save": "Import"
     }
   }
 }
