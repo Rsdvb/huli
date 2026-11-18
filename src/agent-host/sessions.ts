@@ -212,6 +212,7 @@ import type { ProjectHooksAnswers } from './project-hooks'
 import type { ProjectMcpAnswers } from './project-mcp'
 import { REPORTS_PER_DAY, type ReportDraft } from './report-tool'
 import { isOutOfCredit } from './out-of-credit'
+import { isPlanLimitStop } from './plan-limit-stop'
 import { planRevision } from './plan-revision'
 import { watchSettings, type PreparedRecords, type WatchTarget } from './prepared'
 import type { Projects } from './projects'
@@ -8108,6 +8109,7 @@ export class SessionManager {
       error: { message: string; detail?: string } | null
       usage: TokenTotals | null
       turn: Turn | null
+      planLimit?: boolean
     },
   ): boolean {
     const hooks = this.deps.routine?.current
@@ -8126,6 +8128,7 @@ export class SessionManager {
       output: result.turn ? this.turnAnswer(live, result.turn) : null,
       usage: result.usage,
       changedFiles: result.turn ? this.turnChanges(live, result.turn) : [],
+      ...(result.planLimit ? { planLimit: true } : {}),
     })
     return true
   }
@@ -8225,6 +8228,10 @@ export class SessionManager {
                     description: mapped.message,
                     // A turn of a message has Retry, which sends it again; the agent's own has none.
                     ...(turn.byAgent ? {} : { cause: 'turn_failed' as const }),
+                    // The thread offers to go on with an agent whose plan has room.
+                    ...(!turn.byAgent && isPlanLimitStop(mapped)
+                      ? { planLimit: true as const }
+                      : {}),
                   }),
           after: agentEntryBefore(live.thread),
         },
@@ -8270,6 +8277,7 @@ export class SessionManager {
         error: mapped,
         usage: null,
         turn,
+        planLimit: isPlanLimitStop(mapped),
       }) || this.reportStep(live)
     if (!routineTurn) {
       this.deps.events.attention(live.id, 'error', this.titleOf(live), mapped.message)

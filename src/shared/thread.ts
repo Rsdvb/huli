@@ -336,6 +336,8 @@ export type ThreadEntry =
       // or the turn of a message failed otherwise.
       cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed'
       model?: string // out_of_credit: the session's model when the turn failed
+      // turn_failed: the agent's plan refused the turn because a usage window ran out.
+      planLimit?: true
       // The agent's entry before it, to put it back after a replay: set on the notices Kettu
       // adds itself, never on an agent's, which its replay sends again.
       after?: string | null
@@ -1360,6 +1362,7 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
           value.cause === 'out_of_credit' ||
           value.cause === 'turn_failed') &&
         (value.model === undefined || typeof value.model === 'string') &&
+        (value.planLimit === undefined || value.planLimit === true) &&
         (value.after === undefined || value.after === null || typeof value.after === 'string')
       )
     case 'compaction':

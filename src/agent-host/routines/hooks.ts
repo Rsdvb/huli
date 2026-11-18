@@ -12,6 +12,8 @@ export interface RunTurnResult {
   output: string | null // the turn's answer, up to 64 KB
   usage: TokenTotals | null // the turn's token counts
   changedFiles: string[] // the locations of its edits, relative to the project
+  /** The turn failed because the agent's plan ran out. */
+  planLimit?: true
 }
 
 /** What the routines manager hears of the sessions its runs use. */

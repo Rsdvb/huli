@@ -1317,7 +1317,15 @@ export class ClaudeConnection implements AgentConnection {
         turn.notice ||
         result.subtype
       const signIn = turn.failure === 'authentication_failed' || SIGN_IN_TEXT.test(text)
-      turn.error = new AgentRequestError(signIn ? 'auth_required' : 'agent_error', text)
+      // The error Claude Code gave its message tells a used-up plan window from other failures.
+      turn.error = signIn
+        ? new AgentRequestError('auth_required', text)
+        : new AgentRequestError(
+            'agent_error',
+            text,
+            null,
+            turn.failure ? { failure: turn.failure } : undefined,
+          )
     } else {
       turn.stopReason = 'end_turn'
     }
