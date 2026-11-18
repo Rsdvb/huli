@@ -80,6 +80,7 @@ import {
   SlidersHorizontal,
   Timer,
   TextSelect,
+  Undo2,
 } from 'lucide-react-native'
 import type { HarnessId } from '@shared/agents'
 import { harnessOf, markFor } from '../agent-marks'
@@ -104,6 +105,7 @@ export const G = {
   copy: { sf: 'doc.on.doc', lucide: Copy },
   copied: { sf: 'checkmark', lucide: Check },
   fork: { sf: 'arrow.triangle.branch', lucide: GitFork },
+  undo: { sf: 'arrow.uturn.backward', lucide: Undo2 },
   warning: { sf: 'exclamationmark.triangle', lucide: TriangleAlert },
   error: { sf: 'xmark.octagon', lucide: OctagonAlert },
   info: { sf: 'info.circle', lucide: Info },

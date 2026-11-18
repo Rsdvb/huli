@@ -289,6 +289,27 @@ export function latestPlan(
   return { plan: before, ownTurn: false }
 }
 
+const NO_TURN = { start: null, end: null }
+
+/**
+ * The latest turn as Undo takes it out: the user's message that starts it, where the computer cuts
+ * the thread as the desktop's Undo does, and the end whose footer offers it; nulls until it ended.
+ */
+export function latestTurn(thread: ThreadState | null): {
+  start: string | null
+  end: string | null
+} {
+  let end: string | null = null
+  for (let i = (thread?.order.length ?? 0) - 1; i >= 0; i--) {
+    const entry = thread!.byId[thread!.order[i]!]
+    if (entry?.kind === 'turn_end') end ??= entry.id
+    if (entry?.kind === 'user' && !entry.steered) {
+      return end === null ? NO_TURN : { start: entry.id, end }
+    }
+  }
+  return NO_TURN
+}
+
 const list = (x: readonly unknown[], y: readonly unknown[]) =>
   x.length === y.length && x.every((item, i) => item === y[i])
 

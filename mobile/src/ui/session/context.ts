@@ -1,5 +1,5 @@
 // What the rows of one session's conversation share: which session, the folder its paths are
-// shown under, and whether a reply can be forked from.
+// shown under, and whether a reply can be forked from or its turn undone.
 
 import { createContext, useContext } from 'react'
 import type { ConfigOption } from '@shared/thread'
@@ -12,6 +12,11 @@ export interface SessionRowsContext {
   fork: ((entryId: string | null) => void) | null
   /** Whether a fork can stop at a reply rather than take the whole session. */
   forkAtMessage: boolean
+  /**
+   * Undo of the latest turn, under the footer of its end `end`, where the agent can take a turn out
+   * of its history; `blocked` while the session is not between turns or an undo runs.
+   */
+  undo?: { end: string; blocked: boolean; run: () => void } | null
   /** The notice of a failed latest turn that Retry sends again, while the session is free. */
   retryNotice?: string | null
   /** The notice of a latest turn the agent's exit cut short, which Resume continues. */

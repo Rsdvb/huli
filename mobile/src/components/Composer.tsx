@@ -170,6 +170,11 @@ export interface ComposerHandle {
    * `picked` are added again as if just picked.
    */
   restore(content: readonly UserContent[], picked?: readonly PickedSource[]): void
+  /**
+   * Puts an undone message's text in the box to edit and send again, only while the box is empty;
+   * returns whether it did, so a draft being written is never changed.
+   */
+  putBack(text: string): boolean
   focus(): void
 }
 
@@ -847,6 +852,15 @@ export function Composer(props: ComposerProps) {
     setTimeout(() => input.current?.focus(), 50)
   }
 
+  const putBack = (words: string): boolean => {
+    // Until the saved draft is read in, the box looks empty but may not be.
+    if (!restored || latestText.current.trim() || latest.current.length > 0) return false
+    setBox({ text: words, mentions: [] })
+    placeCaret(words.length)
+    setTimeout(() => input.current?.focus(), 50)
+    return true
+  }
+
   useImperativeHandle(props.ref, () => ({
     pickPhotos: () => choose(pickPhotos),
     takePhoto: () => choose(takePhoto),
@@ -855,6 +869,7 @@ export function Composer(props: ComposerProps) {
     mention: (projectPath, path) => mention(projectPath, path),
     command,
     restore,
+    putBack,
     focus: () => input.current?.focus(),
   }))
 
