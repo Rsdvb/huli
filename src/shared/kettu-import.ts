@@ -92,5 +92,23 @@ export interface KettuMemoryResult {
   skipped: Record<'imported' | 'same' | 'invalid' | 'secret' | 'full' | 'noProject', number>
 }
 
+/** What bringing Kettu's artifacts over did. Kettu's sharing links are never brought. */
+export interface KettuArtifactsResult {
+  imported: number
+  /** Of `imported`, those whose id an artifact here has, added under `as`. */
+  renamed: { title: string; id: string; as: string }[]
+  /**
+   * `imported`: brought over before and still here. `same`: an artifact here has its latest
+   * version. `invalid`: its records fail the checks. `missingContent`: a file of a version is
+   * gone or not what its record says. `scratch`: it is in a folder inside Kettu's data folder.
+   * `deleted`: it is in Kettu's Recently deleted.
+   */
+  skipped: Record<
+    'imported' | 'same' | 'invalid' | 'missingContent' | 'scratch' | 'deleted',
+    number
+  >
+  failed: { title: string; message: string }[]
+}
+
 /** The most sessions one `kettuImport.run` takes. */
 export const KETTU_IMPORT_SESSIONS = 10_000
