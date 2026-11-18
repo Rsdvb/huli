@@ -1,9 +1,14 @@
-// Huli: choosing which of Kettu's sessions to import, project by project, and the import's progress
-// and outcome. Huli's own; see tools/huli/README.md.
+// Huli: choosing which of Kettu's sessions to import, project by project, and whether its memory
+// and artifacts come too, and the import's progress and outcome. Huli's own; see tools/huli/README.md.
 
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { KettuImportScan, KettuSession } from '@shared/kettu-import'
+import type {
+  KettuArtifactsResult,
+  KettuImportScan,
+  KettuMemoryResult,
+  KettuSession,
+} from '@shared/kettu-import'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
@@ -22,11 +27,13 @@ import { cn } from '@renderer/lib/utils'
 import { useFoundText } from './found-text'
 import {
   clearKettuResult,
+  defaultExtras,
   defaultSelection,
   importable,
   runKettuImport,
   scanKettu,
   useKettuImportStore,
+  type KettuExtras,
 } from './store'
 
 interface ProjectGroup {
@@ -98,9 +105,20 @@ function KettuImportBody({ onClose }: { onClose: () => void }) {
   }, [])
   // The first selection follows the first scan this opening sees.
   const [selected, setSelected] = useState<ReadonlySet<string> | null>(null)
+  const [extras, setExtras] = useState<KettuExtras | null>(null)
   const [seen, setSeen] = useState<KettuImportScan | null>(null)
   if (scan && scan !== seen) {
     setSeen(scan)
+    // Memory and artifacts start chosen while some are new, and stay as the user set them.
+    setExtras((current) => {
+      const fresh = defaultExtras(scan)
+      return current === null
+        ? fresh
+        : {
+            memory: current.memory && fresh.memory,
+            artifacts: current.artifacts && fresh.artifacts,
+          }
+    })
     setSelected((current) =>
       current === null
         ? defaultSelection(scan)
@@ -116,6 +134,13 @@ function KettuImportBody({ onClose }: { onClose: () => void }) {
   const allOn = allIds.length > 0 && allIds.every((id) => chosen.has(id))
   const someOn = allIds.some((id) => chosen.has(id))
   const count = allIds.filter((id) => chosen.has(id)).length
+  const usable =
+    scan?.found && !scan.error ? defaultExtras(scan) : { memory: false, artifacts: false }
+  const wanted: KettuExtras = {
+    memory: usable.memory && (extras?.memory ?? false),
+    artifacts: usable.artifacts && (extras?.artifacts ?? false),
+  }
+  const anything = count > 0 || wanted.memory || wanted.artifacts
 
   return (
     <>
@@ -143,18 +168,28 @@ function KettuImportBody({ onClose }: { onClose: () => void }) {
           <p className="py-2 text-ui text-secondary">{t('row.notFound')}</p>
         ) : scan.error ? (
           <p className="py-2 text-ui text-danger">{t(`error.${scan.error}`)}</p>
-        ) : groups.length === 0 ? (
-          <p className="py-2 text-ui text-secondary">{t('dialog.noSessions')}</p>
         ) : (
-          groups.map((group) => (
-            <ProjectList
-              key={group.path}
-              group={group}
-              selected={chosen}
+          <>
+            {groups.length === 0 ? (
+              <p className="py-2 text-ui text-secondary">{t('dialog.noSessions')}</p>
+            ) : (
+              groups.map((group) => (
+                <ProjectList
+                  key={group.path}
+                  group={group}
+                  selected={chosen}
+                  locked={running}
+                  onSelect={(ids, on) => setSelected(withIds(chosen, ids, on))}
+                />
+              ))
+            )}
+            <Extras
+              scan={scan}
+              chosen={wanted}
               locked={running}
-              onSelect={(ids, on) => setSelected(withIds(chosen, ids, on))}
+              onChange={(next) => setExtras({ ...wanted, ...next })}
             />
-          ))
+          </>
         )}
       </div>
       <div className="flex flex-col gap-2 px-5.5 pt-3">
@@ -193,8 +228,13 @@ function KettuImportBody({ onClose }: { onClose: () => void }) {
           {result ? t('dialog.close') : t('common:actions.cancel')}
         </Button>
         <Button
-          disabled={running || count === 0}
-          onClick={() => void runKettuImport(allIds.filter((id) => chosen.has(id)))}
+          disabled={running || !anything}
+          onClick={() =>
+            void runKettuImport(
+              allIds.filter((id) => chosen.has(id)),
+              wanted,
+            )
+          }
         >
           {running ? (
             <>
@@ -317,21 +357,173 @@ function SessionRow({
   )
 }
 
-/** What the last import did: how many came over, as copies, were skipped, and which failed why. */
+/** Memory and artifacts, each with what Kettu has, what is new, and what an import of it does. */
+function Extras({
+  scan,
+  chosen,
+  locked,
+  onChange,
+}: {
+  scan: KettuImportScan
+  chosen: KettuExtras
+  locked: boolean
+  onChange: (next: Partial<KettuExtras>) => void
+}) {
+  const { t } = useTranslation('kettuImport')
+  const { memory, artifacts } = scan
+  if (memory.found === 0 && artifacts.found === 0 && artifacts.error === null) return null
+  return (
+    <section aria-label={t('extras.title')} className="flex flex-col pb-2">
+      <h3 className="flex h-9 items-center px-1 text-control font-medium text-foreground">
+        {t('extras.title')}
+      </h3>
+      {memory.found > 0 && (
+        <ExtraRow
+          label={
+            memory.importable > 0
+              ? t('extras.memory', { found: memory.found, count: memory.importable })
+              : t('extras.memoryDone', { found: memory.found })
+          }
+          hint={t('extras.memoryHint')}
+          checked={chosen.memory}
+          disabled={locked || memory.importable === 0}
+          onChange={(on) => onChange({ memory: on })}
+        />
+      )}
+      {artifacts.error !== null ? (
+        <p className="px-1 py-1.5 text-hint text-danger">
+          {t(`extras.artifactsError.${artifacts.error}`)}
+        </p>
+      ) : (
+        artifacts.found > 0 && (
+          <ExtraRow
+            label={
+              artifacts.importable > 0
+                ? t('extras.artifacts', { found: artifacts.found, count: artifacts.importable })
+                : t('extras.artifactsDone', { found: artifacts.found })
+            }
+            hint={t('extras.artifactsHint')}
+            checked={chosen.artifacts}
+            disabled={locked || artifacts.importable === 0}
+            onChange={(on) => onChange({ artifacts: on })}
+          />
+        )
+      )}
+    </section>
+  )
+}
+
+function ExtraRow({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string
+  hint: string
+  checked: boolean
+  disabled: boolean
+  onChange: (on: boolean) => void
+}) {
+  return (
+    <label className="flex items-start gap-2.5 border-b border-subtle px-1 py-2">
+      <Checkbox
+        checked={checked}
+        disabled={disabled}
+        className="mt-0.5 data-disabled:opacity-40"
+        onCheckedChange={onChange}
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className={cn('text-[13.5px]', disabled ? 'text-secondary' : 'text-foreground')}>
+          {label}
+        </span>
+        <span className="text-hint text-tertiary">{hint}</span>
+      </span>
+    </label>
+  )
+}
+
+type Translate = ReturnType<typeof useTranslation<'kettuImport'>>['t']
+
+/** The reasons counted, as "3 imported before, 2 already here"; empty when none. */
+function reasonsText(
+  t: Translate,
+  prefix: 'result.memory.reason' | 'result.artifacts.reason',
+  counts: Record<string, number>,
+): string {
+  return Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .map(([reason, count]) => t(`${prefix}.${reason}` as 'result.memory.reason.same', { count }))
+    .join(t('separator'))
+}
+
+function memoryLines(t: Translate, memory: KettuMemoryResult): string[] {
+  const skipped = reasonsText(t, 'result.memory.reason', memory.skipped)
+  return [
+    t('result.memory.imported', { count: memory.imported }),
+    memory.renamed.length > 0 ? t('result.memory.renamed', { count: memory.renamed.length }) : '',
+    skipped ? t('result.memory.skipped', { reasons: skipped }) : '',
+  ].filter(Boolean)
+}
+
+function artifactLines(t: Translate, artifacts: KettuArtifactsResult): string[] {
+  const skipped = reasonsText(t, 'result.artifacts.reason', artifacts.skipped)
+  return [
+    t('result.artifacts.imported', { count: artifacts.imported }),
+    artifacts.renamed.length > 0
+      ? t('result.artifacts.renamed', { count: artifacts.renamed.length })
+      : '',
+    skipped ? t('result.artifacts.skipped', { reasons: skipped }) : '',
+    t('result.artifacts.notShared'),
+  ].filter(Boolean)
+}
+
+/**
+ * What the last import did: how many sessions came over, as copies, were skipped, and which failed
+ * why; then the same of memory and artifacts.
+ */
 function Outcome() {
   const { t } = useTranslation('kettuImport')
   const result = useKettuImportStore((s) => s.result)
   const runError = useKettuImportStore((s) => s.runError)
   if (runError) return <p className="text-hint text-danger">{runError}</p>
   if (!result) return null
+  const sessions = result.imported + result.skipped + result.failed.length > 0
+  const extras = result.memory || result.memoryError || result.artifacts || result.artifactsError
   const lines = [
-    t('result.imported', { count: result.imported }),
+    sessions || !extras ? t('result.imported', { count: result.imported }) : null,
     result.forked > 0 ? t('result.forked', { count: result.forked }) : null,
     result.skipped > 0 ? t('result.skipped', { count: result.skipped }) : null,
   ].filter(Boolean)
+  const artifactFailures = result.artifacts?.failed ?? []
   return (
-    <div className="flex flex-col gap-1 text-hint" role="status">
-      <p className="text-foreground">{lines.join(' ')}</p>
+    <div className="flex max-h-40 flex-col gap-1 overflow-y-auto text-hint" role="status">
+      {lines.length > 0 && <p className="text-foreground">{lines.join(' ')}</p>}
+      {result.memory && (
+        <p className="text-foreground">{memoryLines(t, result.memory).join(' ')}</p>
+      )}
+      {result.memoryError && <p className="text-danger">{result.memoryError}</p>}
+      {result.artifacts && (
+        <p className="text-foreground">{artifactLines(t, result.artifacts).join(' ')}</p>
+      )}
+      {result.artifactsError && (
+        <p className="text-danger">{t(`extras.artifactsError.${result.artifactsError}`)}</p>
+      )}
+      {artifactFailures.length > 0 && (
+        <>
+          <p className="text-danger">
+            {t('result.artifacts.failed', { count: artifactFailures.length })}
+          </p>
+          <ul className="flex flex-col gap-0.5 text-danger">
+            {artifactFailures.map((failure, index) => (
+              <li key={index} className="truncate" title={failure.message}>
+                {t('result.failure', { title: failure.title, message: failure.message })}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {result.failed.length > 0 && (
         <>
           <p className="text-danger">{t('result.failed', { count: result.failed.length })}</p>
