@@ -4,7 +4,15 @@
 
 import type { AccountStatus, SignedOutReason } from '@shared/account'
 import type { KettuApi } from '@shared/ipc'
-import { generateKeyPair } from '@shared/remote/noise'
+import { AccountServiceError } from '@shared/account-api'
+import { HuliCloudApi, type AccountDevices } from '@shared/huli-cloud'
+import { generateKeyPair, type KeyPair } from '@shared/remote/noise'
+import {
+  pairWithAccountHost,
+  type AccountPairFailure,
+  type AccountPairing,
+} from '@shared/remote/pair-account'
+import { decodeRelayBytes } from '@shared/remote/relay'
 import {
   BROWSER_PAIRING_PATH,
   parseBrowserPairingLink,
@@ -21,6 +29,7 @@ import type { PairingNotice } from '../pairing-page'
 import type { WebSettings } from '../settings'
 import { keepStorage, loadDevice, saveDevice, type WebDevice } from '../storage'
 import { HostedAccount } from './account'
+import { AccountComputersPairing, type AccountPairingOptions } from './account-pairing'
 import { accountUrl, regionListKeys, relayUrl } from './config'
 import { HOSTED_FEATURES, HostedRelay } from './relay-regions'
 import { clearBrowser } from './clear'
@@ -262,6 +271,68 @@ async function showPairing(
     await showApp(base, account, kept, next, added, paired)
     return true
   }
+  // Huli: the account's computers, paired with through the relay and a compared code.
+  let accountKey: KeyPair | null = device?.key ?? null
+  const keyForAccount = async (): Promise<KeyPair> => (accountKey ??= await generateKeyPair())
+  const accountPairing: AccountPairingOptions = {
+    list: async () => {
+      const listed = await accountDevices(account)
+      if (!listed) return null
+      return listed.computers.filter(
+        (computer) => !hosts.hosts.some((h) => h.relay.id === computer.id),
+      )
+    },
+    pair: (computer, progress) => {
+      let started: AccountPairing | null = null
+      let cancelled = false
+      const result = keyForAccount().then((key) => {
+        if (cancelled || !computer.key) return null
+        started = pairWithAccountHost(
+          {
+            dial: relayDial(
+              { id: computer.id, urls: [relayUrl] },
+              () => relaysOf(account).token(),
+              () => {},
+              relaysOf(account),
+            ),
+            hostKey: decodeRelayBytes(computer.key)!,
+            key,
+            client: base.client,
+            device: { name, model: base.browser.browser },
+            dialFailure: (error) =>
+              error instanceof RelayMiss ? ACCOUNT_PAIR_FAILURES[error.problem] : null,
+          },
+          progress,
+        )
+        return started.result
+      })
+      return {
+        result,
+        match: (same) => started?.match(same),
+        cancel: () => {
+          cancelled = true
+          started?.cancel()
+        },
+      }
+    },
+    added: async (computer, paired) => {
+      const key = await keyForAccount()
+      const added: HostedHost = {
+        hostKey: decodeRelayBytes(computer.key!)!,
+        relay: paired.welcome.relay ?? { id: computer.id, urls: [relayUrl] },
+        name: paired.welcome.host.name,
+        deviceName: paired.welcome.device.name,
+      }
+      const next = withHost(hosts, added)
+      const kept: WebDevice = { key, host: null }
+      await saveDevice(kept)
+      await saveHosts(accountId, next)
+      void keepStorage()
+      history.replaceState(null, '', '/')
+      page.unmount()
+      await showApp(base, account, kept, next, added, paired)
+    },
+  }
   const shown = device ? currentHost(hosts) : null
   page.render(
     <PairingPage
@@ -272,10 +343,36 @@ async function showPairing(
         email: account.status().state === 'signed-in' ? accountEmail(account) : '',
         onSwitchAccount: () => void switchAccount(account),
         onBack: shown ? () => location.replace('/') : null,
+        computers: <AccountComputersPairing options={accountPairing} />,
       }}
       onPair={onPair}
     />,
   )
+}
+
+const ACCOUNT_PAIR_FAILURES: Record<RelayProblem, AccountPairFailure> = {
+  host_offline: 'host_offline',
+  wrong_account: 'wrong_account',
+  unreachable: 'unreachable',
+  signed_out: 'wrong_account',
+}
+
+const huliCloud = new HuliCloudApi(accountUrl, (url, init) => fetch(url, init))
+
+/** Huli: the account's devices and computers, with the browser's sign-in; null when not had. */
+async function accountDevices(account: HostedAccount): Promise<AccountDevices | null> {
+  for (let tries = 0; tries < 2; tries++) {
+    const token = await account.accessToken()
+    if (!token) return null
+    try {
+      return await huliCloud.devices(token)
+    } catch (error) {
+      if (!(error instanceof AccountServiceError) || error.status !== 401) return null
+      // A token the cloud no longer takes: a refresh gets a new one, or says the sign-in ended.
+      await account.check()
+    }
+  }
+  return null
 }
 
 function accountEmail(account: HostedAccount): string {
@@ -337,6 +434,18 @@ async function showApp(
       location.replace('/')
     },
     onChanged: (listener) => account.onChanged(listener),
+    devices: async () => {
+      const devices = await accountDevices(account)
+      if (devices) return { state: 'ok', devices }
+      return account.status().state === 'signed-in'
+        ? { state: 'unavailable' }
+        : { state: 'signed_out' }
+    },
+    revokeDevice: async (target) => {
+      const token = await account.accessToken()
+      if (!token) throw new Error('Not signed in to Huli Cloud')
+      return huliCloud.revoke(token, target)
+    },
   }
   let linked: HostLink | null = null
   // The host closes this browser's connection as it removes it; nothing more is kept then.
