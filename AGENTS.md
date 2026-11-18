@@ -40,6 +40,8 @@ Beyond the UI stack: `@agentclientprotocol/sdk` for ACP (protocol v1 through the
 
 Computer use runs Cua Driver's `cua-driver` program (MIT) as a child of the agent host, in its direct MCP mode with its usage reports and update checks off. It is no npm dependency: `tools/install/cua-driver.mjs` fetches the pinned release for the target into `resources/cua-driver/`, checked by SHA-256, and the app ships it in its resources.
 
+Agents' network can go through mihomo (GPL-3.0), run as a separate child program of the agent host and not linked into the app: `tools/install/mihomo.mjs` fetches the pinned release for the target into `resources/mihomo/`, checked by SHA-256.
+
 Claude Code's `@anthropic-ai/claude-agent-sdk` is never a dependency: Kettu installs it into its data folder on first use and loads it at runtime, because the SDK's license grants no right to redistribute it. Codex's `@openai/codex` is not one either: Kettu runs the user's own `codex`. The repository holds only its own types for the parts of the SDK it uses, and lint rejects a value import of the package.
 
 ### UI stack: one library per concern

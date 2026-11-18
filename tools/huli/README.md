@@ -269,6 +269,7 @@ Prettier skips it.
 npx -y pnpm@10.11.1 install --frozen-lockfile
 node tools/huli/rebrand.mjs
 npx -y pnpm@10.11.1 fetch:cua-driver
+npx -y pnpm@10.11.1 fetch:mihomo
 npx -y pnpm@10.11.1 fetch:device-helpers
 npx -y pnpm@10.11.1 dist:win      # dist\Kite-<version>-x64-setup.exe
 ```

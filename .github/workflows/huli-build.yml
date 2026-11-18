@@ -99,6 +99,8 @@ jobs:
         run: node tools/huli/rebrand.mjs
       - name: Fetch Cua Driver
         run: node tools/install/cua-driver.mjs
+      - name: Fetch mihomo
+        run: node tools/install/mihomo.mjs
       - run: pnpm build
       - name: Fetch the device helpers
         run: node tools/install/device-helpers.mjs
@@ -131,6 +133,8 @@ jobs:
       - run: npm pkg set "version=${{ needs.version.outputs.version }}"
       - run: node tools/huli/rebrand.mjs
       - run: node tools/install/cua-driver.mjs
+      - name: Fetch mihomo
+        run: node tools/install/mihomo.mjs
       - run: pnpm build
       - run: node tools/install/device-helpers.mjs
       - name: Package

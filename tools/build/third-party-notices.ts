@@ -161,6 +161,22 @@ function cuaDriverNotice(root: string): Notice | null {
   return { name: 'cua-driver', version, license: 'MIT', files, lines: [] }
 }
 
+/**
+ * mihomo, the separate GPL-3.0 program agents' network can go through, which
+ * tools/install/mihomo.mjs puts in resources/mihomo with its license; null for a build without it.
+ */
+function mihomoNotice(root: string): Notice | null {
+  const dir = path.join(root, 'resources', 'mihomo')
+  const stamp = path.join(dir, 'version')
+  if (!existsSync(stamp)) return null
+  const files = ['LICENSE'].map((name) => ({
+    name,
+    text: readFileSync(path.join(dir, name), 'utf8').trim(),
+  }))
+  const version = readFileSync(stamp, 'utf8').split(' ')[0]!.trim()
+  return { name: 'mihomo', version, license: 'GPL-3.0', files, lines: [] }
+}
+
 /** The licenses of the adapted SVG marks shipped by the renderer. */
 export function agentMarkNotice(root: string): Notice {
   const file = 'src/renderer/src/components/agents/marks/LICENSES.txt'
@@ -188,6 +204,8 @@ export function collectNotices(root: string, bundled: Iterable<string>): Notice[
   })
   const driver = cuaDriverNotice(root)
   if (driver) notices.push(driver)
+  const mihomo = mihomoNotice(root)
+  if (mihomo) notices.push(mihomo)
   const electron = locate(root, 'electron')
   if (!electron) throw new Error('electron is not installed')
   const notice = readNotice(electron)
