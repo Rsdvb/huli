@@ -7,6 +7,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { UsageScope, UsageStatus, UsageSummary } from '@shared/usage'
 import { Sheet, type SheetItem } from '../components/Sheet'
+import { clockOf } from '../sessions'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { BottomSheet } from '../ui/BottomSheet'
 import { PartsBar, StackedBarChart, type TipContent } from '../ui/charts'
@@ -613,8 +614,13 @@ export function TopSessions(props: {
         <View style={styles.sessions}>
           {rows.map(({ session, value }, i) => {
             const { sessionId } = session
+            // A session run outside 纸鸢 has no title; its last use tells one from the next.
             const title =
-              sessionId === null ? '不是在纸鸢里运行的会话' : session.title || '无标题会话'
+              sessionId !== null
+                ? session.title || '无标题会话'
+                : session.lastAt
+                  ? `终端里的会话 · ${dateText(session.lastAt)} ${clockOf(session.lastAt)}`
+                  : '不是在纸鸢里运行的会话'
             const project =
               session.project !== null && !session.scratch ? basename(session.project) : '无项目'
             const meta = `${props.nameOf(session.agentId)} · ${project}`

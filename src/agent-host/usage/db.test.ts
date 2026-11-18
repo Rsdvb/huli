@@ -79,6 +79,8 @@ describe('UsageDb.summary sessions', () => {
       requests: 3,
       turns: 2,
       unpricedTokens: 7,
+      // Its latest request in the range, which names a session run outside Kettu.
+      lastAt: DAY + 2 * HOUR,
     })
     expect(s1.cost).toBeCloseTo(150 * price.input + 10 * price.output + 1000 * price.cacheRead)
     expect(s1.cacheSaved).toBeCloseTo(1000 * (price.input - price.cacheRead))

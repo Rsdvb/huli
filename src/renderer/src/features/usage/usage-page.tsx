@@ -28,7 +28,17 @@ import { Notice } from '@renderer/features/routines/kit'
 import { useCornered } from '@renderer/features/shell/corner'
 import { CornerControlsSpace } from '@renderer/features/shell/top-bar'
 import { AwayContent, WindowHostAway } from '@renderer/features/shell/window-host-away'
-import { basename, bytes, count, longAgo, percent, tokens, usd } from '@renderer/lib/format'
+import {
+  basename,
+  bytes,
+  clockTime,
+  count,
+  longAgo,
+  monthDay,
+  percent,
+  tokens,
+  usd,
+} from '@renderer/lib/format'
 import { errorMessage, learnSessionHosts } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { useHostContext } from '@renderer/lib/host-features'
@@ -1200,7 +1210,15 @@ function SessionItem({
 }) {
   const { t } = useTranslation('usage')
   const { sessionId, projectPath } = session
-  const title = sessionId === null ? t('sessions.outside') : session.title || t('sessions.untitled')
+  // A session run outside Kettu has no title, so its last use tells one from the next.
+  const title =
+    sessionId !== null
+      ? session.title || t('sessions.untitled')
+      : session.lastAt
+        ? t('sessions.outsideAt', {
+            when: `${monthDay(session.lastAt)} ${clockTime(session.lastAt)}`,
+          })
+        : t('sessions.outside')
   const project =
     session.project !== null && !session.scratch
       ? basename(session.project)

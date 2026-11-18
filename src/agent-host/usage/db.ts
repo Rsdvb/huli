@@ -143,6 +143,8 @@ export interface DbSession extends TokenParts {
   agentId: AgentId
   agentSessionId: string
   project: string | null
+  /** When its latest counted request in the range was made, in ms. */
+  lastAt: number
 }
 
 /** What one agent's rows from one source hold, for Settings and the page's first day. */
@@ -289,9 +291,10 @@ function prepareAll(db: DatabaseSync) {
       GROUP BY b.agent_id, b.source, b.model`),
     // Each row as a bucket of its own, so the sums and prices are the buckets'.
     sessionSums: sql(`
-      SELECT b.agent_id, b.source, b.session_id, MAX(b.project) AS project, ${SUMS}
+      SELECT b.agent_id, b.source, b.session_id, MAX(b.project) AS project, MAX(b.at) AS last_at,
+        ${SUMS}
       FROM (
-        SELECT agent_id, source, session_id, project, model, 1 AS rows, turn AS turns, input,
+        SELECT agent_id, source, session_id, project, at, model, 1 AS rows, turn AS turns, input,
           output, COALESCE(reasoning, 0) AS reasoning, cache_read, cache_write, cache_write_1h
         FROM usage WHERE at >= ? AND at < ? AND session_id IS NOT NULL AND session_id != ''
       ) AS b ${PRICE_JOIN}
@@ -614,6 +617,7 @@ export class UsageDb {
             agentId: String(row.agent_id) as AgentId,
             agentSessionId: String(row.session_id),
             project: row.project === null || row.project === '' ? null : String(row.project),
+            lastAt: num(row.last_at),
             ...parts(row),
           }))
         return {

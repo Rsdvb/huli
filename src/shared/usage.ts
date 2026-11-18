@@ -64,6 +64,8 @@ export interface SessionUsage extends TokenParts {
   /** The working folder, its project's for a worktree; null when the agent recorded none. */
   project: string | null
   scratch: boolean
+  /** When its latest counted request in the range was made, in ms; absent from an older host. */
+  lastAt?: number
 }
 
 /** A stretch of the asking page's clocks on one UTC offset, until the next zone starts. */

@@ -156,6 +156,7 @@
     "by": "By {{metric}} · {{range}}",
     "untitled": "Untitled session",
     "outside": "Run outside Kettu",
+    "outsideAt": "Run outside Kettu · {{when}}",
     "noProject": "No project",
     "open": "Open session: {{title}}",
     "empty": "No session in this range to rank by {{metric}}."

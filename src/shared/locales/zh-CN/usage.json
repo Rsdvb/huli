@@ -153,6 +153,7 @@
     "by": "按{{metric}}排 · {{range}}",
     "untitled": "无标题会话",
     "outside": "不是在 Kettu 里运行的会话",
+    "outsideAt": "终端里的会话 · {{when}}",
     "noProject": "无项目",
     "open": "打开会话：{{title}}",
     "empty": "这段时间没有能按{{metric}}排的会话。"
