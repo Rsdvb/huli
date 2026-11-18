@@ -10,6 +10,7 @@ import type {
   PlanLimit,
   ProviderBalance,
 } from '@shared/agent-host'
+import { modelTitle } from '../../usage/modelTitle'
 import type { Palette } from '../tokens'
 
 const MINUTE = 60_000
@@ -105,18 +106,48 @@ function labelName(label: string): string {
   return text
 }
 
+/** A window's length by the end of its id: 「5 小时」「每周」「3 天」. */
+function spanName(span: string): string {
+  const named = WINDOW_NAMES[span]
+  if (named) return named
+  const counted = /^(\d+)_(minute|hour|day)$/.exec(span)
+  const unit = { minute: '分钟', hour: '小时', day: '天' }[counted?.[2] ?? '']
+  return counted && unit ? `${counted[1]} ${unit}` : span
+}
+
+/**
+ * The pool of a Codex window outside its default one, `<pool>_seven_day` labelled `Weekly ·
+ * <pool>`: the pool's id, its name, the model it counts when Codex names one, and the window's
+ * length. Null for any other window.
+ */
+export function limitPool(
+  limit: PlanLimit,
+): { id: string; name: string; span: string; models: string[] } | null {
+  const ids = /^(.+)_(five_hour|seven_day|\d+_(?:minute|hour|day)|monthly|annual)$/.exec(
+    limit.window,
+  )
+  const label = /^.+? · (.+)$/.exec(limit.label.trim())
+  if (!ids || !label) return null
+  const models = limit.models ?? []
+  const name = models.length ? models.map(modelTitle).join('、') : label[1]!
+  return { id: ids[1]!, name, span: ids[2]!, models }
+}
+
 /** A window's name: 「每周」「Fable 每周」, or the agent's own label for one the phone does not know. */
 export function windowName(limit: PlanLimit): string {
-  return (
-    WINDOW_NAMES[limit.window] ??
-    (limit.models?.length ? limit.models.join('、') : labelName(limit.label))
-  )
+  const known = WINDOW_NAMES[limit.window]
+  if (known) return known
+  const pool = limitPool(limit)
+  if (pool) return `${pool.name} ${spanName(pool.span)}`
+  return limit.models?.length ? limit.models.join('、') : labelName(limit.label)
 }
 
 /** The model a per-model window counts: 「Weekly · Fable」 gives Fable. */
 function modelOf(limit: PlanLimit): string | null {
   if (limit.window === 'seven_day_opus') return 'Opus'
   if (limit.window === 'seven_day_sonnet') return 'Sonnet'
+  const pool = limitPool(limit)
+  if (pool) return pool.name
   const named = /^(?:Weekly|\d+-(?:minute|hour|day)) · (.+)$/i.exec(limit.label.trim())
   return named?.[1] ?? (limit.models?.length ? limit.models.join('、') : null)
 }

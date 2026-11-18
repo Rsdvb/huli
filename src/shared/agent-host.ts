@@ -160,7 +160,8 @@ export interface PlanLimit {
   amount?: { used: number; total: number; unit: string }
   /**
    * The models a group's window counts, by the names the agent gives them, such as Antigravity's
-   * "Gemini 3.8 Flash"; absent for a window that counts the whole plan.
+   * "Gemini 3.8 Flash" or the model id of a Codex limit pool, "gpt-6.2-sol"; absent for a window
+   * that counts the whole plan.
    */
   models?: string[]
 }

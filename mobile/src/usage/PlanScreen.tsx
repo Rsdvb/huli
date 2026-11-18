@@ -1,6 +1,7 @@
 // One account's plan, from a plan card on the Usage tab: its windows as rings beside each one's
 // share and when it resets, counting down; what happens at 100%; balances and reset credits; the
 // models the current week used, by tokens; and the way to the Usage tab for this account alone.
+// A Codex account with more than one limit pool shows each pool's windows and models apart.
 
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
@@ -23,6 +24,7 @@ import {
   isExhausted,
   leftText,
   limitColor,
+  limitPool,
   planName,
   tokensText,
   whenText,
@@ -37,12 +39,63 @@ const DAY = 86_400_000
 const WEEK = 7 * DAY
 const RING = 148
 
-/** The start of the window the model list covers: the weekly one's, else the last seven days. */
-function weekFrom(agent: AgentStatus, now: number): { from: number; weekly: boolean } {
-  const weekly = agent.limits.find((l) => l.window === 'seven_day' && l.resetsAt)
-  return weekly?.resetsAt
-    ? { from: weekly.resetsAt - WEEK, weekly: true }
-    : { from: now - WEEK, weekly: false }
+/**
+ * A limit pool: its windows, the models it counts when its agent names them, and the start of the
+ * span its model list covers, its weekly window's, else the last seven days. The default pool has
+ * no id and counts every model no other pool names.
+ */
+interface Pool {
+  id: string | null
+  name: string
+  limits: PlanLimit[]
+  models: string[]
+  from: number
+  weekly: boolean
+}
+
+/** An agent's pools, its default one first; only Codex keeps windows in more than one. */
+function poolsOf(agent: AgentStatus, opened: number): Pool[] {
+  type Gathered = Omit<Pool, 'from' | 'weekly'> & { weeks: PlanLimit[] }
+  const pools = new Map<string | null, Gathered>([
+    [null, { id: null, name: agent.name, limits: [], models: [], weeks: [] }],
+  ])
+  for (const limit of agent.limits) {
+    const named = agent.harnessId === 'codex' ? limitPool(limit) : null
+    const id = named?.id ?? null
+    let pool = pools.get(id)
+    if (!pool) {
+      pool = { id, name: named?.name ?? agent.name, limits: [], models: [], weeks: [] }
+      pools.set(id, pool)
+    }
+    pool.limits.push(limit)
+    if ((named?.span ?? limit.window) === 'seven_day') pool.weeks.push(limit)
+    for (const model of named?.models ?? []) {
+      if (!pool.models.includes(model)) pool.models.push(model)
+    }
+  }
+  return [...pools.values()]
+    .filter((pool) => pool.id === null || pool.limits.length > 0)
+    .map(({ weeks, ...pool }) => {
+      const resetsAt = weeks.find((l) => l.resetsAt)?.resetsAt
+      return resetsAt
+        ? { ...pool, from: resetsAt - WEEK, weekly: true }
+        : { ...pool, from: opened - WEEK, weekly: false }
+    })
+}
+
+const modelKey = (model: string) => modelTitle(model).toLowerCase()
+
+/** A pool's share of the rows: the models it names, or for the default pool the rest. */
+function poolRows(rows: BreakdownRow[], pool: Pool, pools: readonly Pool[]): BreakdownRow[] {
+  if (pools.length < 2) return rows
+  const named = new Set(
+    (pool.id === null ? pools.flatMap((p) => p.models) : pool.models).map(modelKey),
+  )
+  if (named.size === 0) return rows
+  return rows.filter((row) => {
+    const counted = row.name !== null && named.has(modelKey(row.name))
+    return pool.id === null ? !counted : counted
+  })
 }
 
 export default function PlanScreen() {
@@ -56,7 +109,8 @@ export default function PlanScreen() {
   const now = useTicking(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [models, setModels] = useState<BreakdownRow[] | null>(null)
+  const [opened] = useState(() => Date.now())
+  const [models, setModels] = useState<Map<number, BreakdownRow[]> | null>(null)
   const [modelsError, setModelsError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -72,26 +126,35 @@ export default function PlanScreen() {
     }
   }, [link, agent])
 
-  const week = agent ? weekFrom(agent, Date.now()) : null
-  const weekStart = week?.from ?? 0
+  const pools = agent ? poolsOf(agent, opened) : []
+  // Pools whose weeks start together share one read.
+  const starts = [...new Set(pools.map((pool) => pool.from))].join(',')
   const agentId = agent?.id ?? null
   const readModels = useCallback(async () => {
-    if (!link || !agentId || !weekStart) return
+    if (!link || !agentId || !starts) return
     setModelsError(null)
     try {
       const status = (await link.request('usage.status', undefined)) as UsageStatus
       const to = Date.now()
-      const summary = (await link.request('usage.summary', {
-        dayStarts: [weekStart, to],
-        from: weekStart,
-        to,
-        scope: status.fromComputer ? 'computer' : 'kettu',
-      })) as UsageSummary
-      setModels(modelRows(summary, agentId))
+      const read = await Promise.all(
+        starts
+          .split(',')
+          .map(Number)
+          .map(async (from) => {
+            const summary = (await link.request('usage.summary', {
+              dayStarts: [from, to],
+              from,
+              to,
+              scope: status.fromComputer ? 'computer' : 'kettu',
+            })) as UsageSummary
+            return [from, modelRows(summary, agentId)] as const
+          }),
+      )
+      setModels(new Map(read))
     } catch (failure) {
       setModelsError(errorText(failure))
     }
-  }, [link, agentId, weekStart])
+  }, [link, agentId, starts])
   useEffect(() => {
     if (connected) void readModels()
   }, [connected, readModels])
@@ -118,7 +181,9 @@ export default function PlanScreen() {
       onRefresh={() => Promise.all([refresh(), readModels()])}
     >
       {agent.limits.length > 0 ? (
-        <Hero agent={agent} now={now} />
+        pools
+          .filter((pool) => pool.limits.length > 0)
+          .map((pool) => <Hero key={pool.id ?? ''} agent={agent} limits={pool.limits} now={now} />)
       ) : (
         <Text style={[typeScale.callout, { color: c.textSecondary }]}>还没有读到套餐用量。</Text>
       )}
@@ -130,12 +195,19 @@ export default function PlanScreen() {
         onRefresh={connected ? () => void refresh() : undefined}
       />
       <Extras agent={agent} />
-      <Models
-        rows={models}
-        error={modelsError}
-        weekly={week?.weekly ?? false}
-        onRetry={() => void readModels()}
-      />
+      {pools.map((pool) => {
+        const rows = models?.get(pool.from)
+        return (
+          <Models
+            key={pool.id ?? ''}
+            pool={pools.length > 1 ? pool.name : null}
+            rows={rows ? poolRows(rows, pool, pools) : null}
+            error={modelsError}
+            weekly={pool.weekly}
+            onRetry={() => void readModels()}
+          />
+        )
+      })}
       <ListGroup header="用量">
         <ListRow
           title="仅此账号的用量"
@@ -155,10 +227,9 @@ export default function PlanScreen() {
 }
 
 /** The rings, the outer one first, beside each window's name, share and reset. */
-function Hero(props: { agent: AgentStatus; now: number }) {
+function Hero(props: { agent: AgentStatus; limits: PlanLimit[]; now: number }) {
   const { c } = useTokens()
-  const { agent, now } = props
-  const limits = agent.limits
+  const { agent, limits, now } = props
   const stroke = limits.length > 3 ? 9 : 12
   return (
     <View style={styles.hero}>
@@ -298,8 +369,12 @@ function Extras(props: { agent: AgentStatus }) {
   )
 }
 
-/** The models the week used, by tokens: each one's name, a bar of its share, the share and tokens. */
+/**
+ * The models the week used, by tokens: each one's name, a bar of its share, the share and tokens.
+ * Under more than one pool, the title names the pool.
+ */
 function Models(props: {
+  pool: string | null
   rows: BreakdownRow[] | null
   error: string | null
   weekly: boolean
@@ -308,7 +383,8 @@ function Models(props: {
   const { c } = useTokens()
   const rows = props.rows ?? []
   const total = rows.reduce((sum, row) => sum + row.total, 0)
-  const title = props.weekly ? '本周使用的模型' : '最近 7 天使用的模型'
+  const span = props.weekly ? '本周使用的模型' : '最近 7 天使用的模型'
+  const title = props.pool ? `${props.pool} · ${span}` : span
   return (
     <View style={styles.models}>
       <SectionHeader

@@ -1832,6 +1832,39 @@ describe('limits and subagents', () => {
     expect(connection.planExtras()).toEqual({ balances: [], resetCredits: null })
   })
 
+  it('names the model each pool other than Codex its own counts', async () => {
+    const { server, connection } = await connect()
+    const week = { usedPercent: 40, windowDurationMins: 10080, resetsAt: 1_795_413_630 }
+    const hours = { usedPercent: 12, windowDurationMins: 300, resetsAt: 1_795_000_000 }
+    const own = {
+      limitId: 'codex',
+      limitName: null,
+      normalModelSlug: 'gpt-6.1',
+      primary: hours,
+      secondary: week,
+    }
+    const sol = {
+      limitId: 'codex_sol',
+      limitName: 'GPT-6.2-Sol',
+      normalModelSlug: 'gpt-6.2-sol',
+      primary: hours,
+      secondary: week,
+    }
+    const other = { limitId: 'codex_other', limitName: null, primary: null, secondary: week }
+    server.on('account/rateLimits/read', () => ({
+      rateLimits: own,
+      rateLimitsByLimitId: { codex: own, codex_sol: sol, codex_other: other },
+    }))
+    const limits = await connection.readLimits()
+    expect(limits.map((l) => [l.window, l.label, l.models])).toEqual([
+      ['five_hour', '5-hour', undefined],
+      ['seven_day', 'Weekly', undefined],
+      ['gpt_6_2_sol_five_hour', '5-hour · GPT-6.2-Sol', ['gpt-6.2-sol']],
+      ['gpt_6_2_sol_seven_day', 'Weekly · GPT-6.2-Sol', ['gpt-6.2-sol']],
+      ['codex_other_seven_day', 'Weekly · codex_other', undefined],
+    ])
+  })
+
   it('redeems a reset credit under a key of its own for each attempt', async () => {
     const { server, connection } = await connect()
     server.on('account/rateLimitResetCredit/consume', () => ({ outcome: 'reset' }))
