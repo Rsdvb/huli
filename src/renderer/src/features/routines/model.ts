@@ -252,6 +252,15 @@ export function runStatus(run: RoutineRun): string {
   }
 }
 
+/** Which agent ran the run in place of its routine's, and why; null for one its own agent ran. */
+export function runSwitch(run: RoutineRun): string | null {
+  if (!run.switched) return null
+  const params = { from: agentName(run.switched.from), to: agentName(run.switched.to) }
+  return run.switched.reason === 'plan_limit'
+    ? i18n.t('routines:run.switchedAtStart', params)
+    : i18n.t('routines:run.switchedAtStop', params)
+}
+
 /** Why a run failed, else the first line of its output, else what became of it. */
 export function runSummary(run: RoutineRun): string {
   // A failed run's partial answer says less than its error.

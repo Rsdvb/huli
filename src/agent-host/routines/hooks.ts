@@ -50,6 +50,11 @@ export interface RoutineSessionStart {
 /** What the routines manager needs of the sessions manager. */
 export interface RoutineSessions {
   createRun(params: RoutineSessionStart): Promise<SessionSummary>
+  /**
+   * Hands a run's session to another agent, in `mode`, and sends `text` to go on with its task;
+   * the run hears how that turn ends as it heard of the first.
+   */
+  continueRun(sessionId: string, agentId: AgentId, mode: string | null, text: string): Promise<void>
   cancel(sessionId: string): Promise<void>
   delete(sessionId: string): Promise<void>
   has(sessionId: string): boolean

@@ -19,7 +19,9 @@ import {
   isSchedule,
   isTimeLimit,
   isKeptRunSessions,
+  isOnLimit,
   DEFAULT_KEPT_RUN_SESSIONS,
+  DEFAULT_ON_LIMIT,
   ROUTINE_ID,
   ROUTINE_NAME_CHARS,
   ROUTINE_OPTION_CHARS,
@@ -495,6 +497,7 @@ function routineOf(value: unknown): Routine | null {
   const agentId = value.agentId
   const keptRunSessions =
     value.keptRunSessions === undefined ? DEFAULT_KEPT_RUN_SESSIONS : value.keptRunSessions
+  const onLimit = value.onLimit === undefined ? DEFAULT_ON_LIMIT : value.onLimit
   if (
     typeof id !== 'string' ||
     !ROUTINE_ID.test(id) ||
@@ -513,6 +516,7 @@ function routineOf(value: unknown): Routine | null {
     !isPermissionScope(value.scope) ||
     !isTimeLimit(value.timeLimitMinutes) ||
     !isKeptRunSessions(keptRunSessions) ||
+    !isOnLimit(onLimit) ||
     typeof value.enabled !== 'boolean' ||
     !isTime(value.createdAt) ||
     !isTime(value.updatedAt) ||
@@ -547,6 +551,7 @@ function routineOf(value: unknown): Routine | null {
     scope: value.scope,
     timeLimitMinutes: value.timeLimitMinutes,
     keptRunSessions,
+    onLimit,
     enabled: value.enabled,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,

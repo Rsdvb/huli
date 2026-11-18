@@ -14,13 +14,16 @@ import { useTranslation } from 'react-i18next'
 import type { Project } from '@shared/agent-host'
 import {
   DEFAULT_KEPT_RUN_SESSIONS,
+  DEFAULT_ON_LIMIT,
   DEFAULT_SCHEDULE,
   DEFAULT_SCOPE,
   DEFAULT_TIME_LIMIT,
   KEPT_RUN_SESSIONS,
+  ON_LIMIT,
   ROUTINE_NAME_CHARS,
   TIME_LIMITS,
   type KeptRunSessions,
+  type OnLimit,
   type PermissionScope,
   type RoutineChanges,
   type RoutineOption,
@@ -397,6 +400,8 @@ function RoutineBody({ routine }: { routine: RoutineView }) {
             onTimeLimit={(timeLimitMinutes) => save({ timeLimitMinutes })}
             kept={routine.keptRunSessions}
             onKept={saveKept}
+            onLimit={routine.onLimit}
+            onOnLimit={(onLimit) => save({ onLimit })}
             scope={routine.scope}
             onScope={(scope) => save({ scope })}
             schedule={routine.trigger.schedule}
@@ -495,6 +500,7 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
   const [values, setValues] = useState<OptionValues>(() => initialValues(agentId, hostId))
   const [timeLimit, setTimeLimit] = useState<TimeLimitMinutes>(DEFAULT_TIME_LIMIT)
   const [kept, setKept] = useState<KeptRunSessions>(DEFAULT_KEPT_RUN_SESSIONS)
+  const [onLimit, setOnLimit] = useState<OnLimit>(DEFAULT_ON_LIMIT)
   const [scope, setScope] = useState<PermissionScope>(seed?.scope ?? DEFAULT_SCOPE)
   const [schedule, setSchedule] = useState<Schedule>(seed?.schedule ?? DEFAULT_SCHEDULE)
   const [scheduleProblem, setScheduleProblem] = useState<ScheduleProblem | null>(null)
@@ -537,6 +543,7 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
           scope,
           timeLimitMinutes: timeLimit,
           keptRunSessions: kept,
+          onLimit,
         },
         hostId,
       )
@@ -640,6 +647,8 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
             onTimeLimit={setTimeLimit}
             kept={kept}
             onKept={setKept}
+            onLimit={onLimit}
+            onOnLimit={setOnLimit}
             scope={scope}
             onScope={setScope}
             schedule={schedule}
@@ -707,6 +716,8 @@ function RoutineFields({
   onTimeLimit,
   kept,
   onKept,
+  onLimit,
+  onOnLimit,
   scope,
   onScope,
   schedule,
@@ -736,6 +747,8 @@ function RoutineFields({
   onTimeLimit: (timeLimit: TimeLimitMinutes) => void
   kept: KeptRunSessions
   onKept: (kept: KeptRunSessions) => void
+  onLimit: OnLimit
+  onOnLimit: (onLimit: OnLimit) => void
   scope: PermissionScope
   onScope: (scope: PermissionScope) => void
   schedule: Schedule
@@ -763,6 +776,10 @@ function RoutineFields({
   const keptOptions = KEPT_RUN_SESSIONS.map((count) => ({
     value: String(count) as `${KeptRunSessions}`,
     label: t('routine.keptRunsOption', { count }),
+  }))
+  const onLimitOptions = ON_LIMIT.map((choice) => ({
+    value: choice,
+    label: t(`routine.onLimitOption.${choice}`),
   }))
 
   return (
@@ -832,6 +849,14 @@ function RoutineFields({
             value={String(kept) as `${KeptRunSessions}`}
             options={keptOptions}
             onChange={(value) => onKept(Number(value) as KeptRunSessions)}
+          />
+        </Row>
+        <Row title={t('routine.onLimit')} note={t('routine.onLimitDescription')}>
+          <Select
+            label={t('routine.onLimit')}
+            value={onLimit}
+            options={onLimitOptions}
+            onChange={onOnLimit}
           />
         </Row>
       </div>

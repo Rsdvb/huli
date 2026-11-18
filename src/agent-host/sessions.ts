@@ -4496,6 +4496,46 @@ export class SessionManager {
   }
 
   /**
+   * Hands a run's session, whose turn its agent's plan limit stopped, to `agentId` in the mode the
+   * run's scope names for it, and sends `text` to go on with the task; the run hears how that turn
+   * ends. A mode that cannot be confirmed for the new agent refuses, so the run never goes on in a
+   * broader mode than its scope.
+   */
+  async continueRun(
+    sessionId: string,
+    agentId: AgentId,
+    mode: string | null,
+    text: string,
+  ): Promise<void> {
+    const live = this.live.get(sessionId)
+    if (!live || live.record.origin !== 'routine') {
+      throw new HostError('not_found', `The run's session ${sessionId} is not open`)
+    }
+    const options: Record<string, string | boolean> = {}
+    if (mode !== null) {
+      const option = this.deps.options
+        ?.get(agentId)
+        ?.config.find((candidate) => candidate.category === 'mode' && candidate.type === 'select')
+      const name = this.deps.agents.name(agentId)
+      if (!option) throw new HostError('restricted', t('routines.modeFailed', { agent: name }))
+      if (!option.choices?.some((choice) => choice.value === mode)) {
+        throw new HostError('restricted', t('routines.noScopeMode', { agent: name }))
+      }
+      options[option.id] = mode
+    }
+    const before = { mode: live.routineMode, ended: live.routineTurnEnded }
+    live.routineMode = mode
+    live.routineTurnEnded = false
+    try {
+      await this.switchAgent({ sessionId, agentId, content: [{ type: 'text', text }], options })
+    } catch (error) {
+      live.routineMode = before.mode
+      live.routineTurnEnded = before.ended
+      throw error
+    }
+  }
+
+  /**
    * Removes and returns the messages kept for a session, or for every one when `sessionId` is
    * undefined, oldest first, but those held for another port; a taken one is gone.
    */

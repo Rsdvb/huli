@@ -773,6 +773,21 @@ describe('routine requests', () => {
     rejects(() => posix['routines.update']({ routineId, changes: { keptRunSessions: 0 } }))
     rejects(() => posix['routines.update']({ routineId, changes: { keptRunSessions: 1000 } }))
   })
+
+  it('waits at a used-up plan unless the draft or a change chooses to switch agents', () => {
+    expect(posix['routines.create'](draft)).toMatchObject({ onLimit: 'wait' })
+    expect(posix['routines.create']({ ...draft, onLimit: 'switch' })).toMatchObject({
+      onLimit: 'switch',
+    })
+    rejects(() => posix['routines.create']({ ...draft, onLimit: 'skip' }))
+    rejects(() => posix['routines.create']({ ...draft, onLimit: true }))
+    const routineId = 'r-0123456789ab'
+    expect(posix['routines.update']({ routineId, changes: { onLimit: 'wait' } })).toEqual({
+      routineId,
+      changes: { onLimit: 'wait' },
+    })
+    rejects(() => posix['routines.update']({ routineId, changes: { onLimit: null } }))
+  })
 })
 
 describe('promptContent', () => {

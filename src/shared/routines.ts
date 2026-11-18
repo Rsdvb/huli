@@ -1,6 +1,7 @@
 // Routines: prompts that Kettu sends, each run a session of its own. See the routines design.
 
 import type { SessionSummary } from './agent-host'
+import { isAgentId } from './agents'
 import type { AgentId, StopReason, TokenTotals } from './thread'
 
 /** A run's trigger. Chaining adds kinds of its own later. */
@@ -44,6 +45,7 @@ export interface Routine {
   scope: PermissionScope
   timeLimitMinutes: TimeLimitMinutes
   keptRunSessions: KeptRunSessions // the latest runs whose sessions it keeps
+  onLimit: OnLimit // what a run does once its agent's plan is used up
   enabled: boolean
   createdAt: number
   updatedAt: number
@@ -63,6 +65,30 @@ export const ROUTINE_NAME_FROM_PROMPT = 60
 export const ROUTINE_OPTION_LIMIT = 20
 export const ROUTINE_OPTION_CHARS = 200
 export const ROUTINE_ID = /^r-[0-9a-f]{12}$/
+
+/**
+ * What a routine's run does once its agent's plan is used up: wait for the plan to come back, or
+ * go on with another agent whose plan has room, when one has.
+ */
+export const ON_LIMIT = ['wait', 'switch'] as const
+export type OnLimit = (typeof ON_LIMIT)[number]
+
+/** Also what a routine saved before the setting existed keeps. */
+export const DEFAULT_ON_LIMIT: OnLimit = 'wait'
+
+export function isOnLimit(value: unknown): value is OnLimit {
+  return (ON_LIMIT as readonly unknown[]).includes(value)
+}
+
+/**
+ * The agent a run went on with in place of its routine's, and why: its plan was used up when the
+ * run would start, or the plan limit stopped the run's turn.
+ */
+export interface RunSwitch {
+  from: AgentId
+  to: AgentId
+  reason: 'plan_limit' | 'limit_stop'
+}
 
 /** A new routine, as the renderer asks for one; the host adds the rest. */
 export type RoutineDraft = Omit<
@@ -123,6 +149,7 @@ export interface RoutineRun {
   usage: TokenTotals | null
   changedFiles: string[] // paths its edits touched, relative to the project
   seen: boolean
+  switched?: RunSwitch // set when another agent ran it in place of the routine's
 }
 
 /** How many runs of one routine the history reads at a time. */
@@ -277,6 +304,17 @@ export function isRoutineRun(value: unknown): value is RoutineRun {
     (run.usage === null || typeof run.usage === 'object') &&
     Array.isArray(run.changedFiles) &&
     run.changedFiles.every((path) => typeof path === 'string') &&
-    typeof run.seen === 'boolean'
+    typeof run.seen === 'boolean' &&
+    (run.switched === undefined || isRunSwitch(run.switched))
+  )
+}
+
+function isRunSwitch(value: unknown): value is RunSwitch {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const change = value as Record<string, unknown>
+  return (
+    isAgentId(change.from) &&
+    isAgentId(change.to) &&
+    (change.reason === 'plan_limit' || change.reason === 'limit_stop')
   )
 }

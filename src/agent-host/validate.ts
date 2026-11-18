@@ -72,7 +72,9 @@ import {
   isSchedule,
   isTimeLimit,
   isKeptRunSessions,
+  isOnLimit,
   DEFAULT_KEPT_RUN_SESSIONS,
+  DEFAULT_ON_LIMIT,
   ROUTINE_ID,
   ROUTINE_NAME_CHARS,
   ROUTINE_OPTION_CHARS,
@@ -673,6 +675,11 @@ function routineKeptRunSessions(value: unknown): import('@shared/routines').Kept
   return value
 }
 
+function routineOnLimit(value: unknown): import('@shared/routines').OnLimit {
+  if (!isOnLimit(value)) throw invalidParams('onLimit must be wait or switch')
+  return value
+}
+
 function routineProjectPath(o: Fields, platform: Platform): string | null {
   return o.projectPath === null ? null : absolutePath(o, 'projectPath', platform)
 }
@@ -700,6 +707,7 @@ function routineDraft(value: unknown, platform: Platform): RoutineDraft {
       o.keptRunSessions === undefined
         ? DEFAULT_KEPT_RUN_SESSIONS
         : routineKeptRunSessions(o.keptRunSessions),
+    onLimit: o.onLimit === undefined ? DEFAULT_ON_LIMIT : routineOnLimit(o.onLimit),
   }
 }
 
@@ -716,6 +724,7 @@ function routineChanges(value: unknown, platform: Platform): RoutineChanges {
     'scope',
     'timeLimitMinutes',
     'keptRunSessions',
+    'onLimit',
     'enabled',
   ])
   for (const key of Object.keys(o)) {
@@ -743,6 +752,7 @@ function routineChanges(value: unknown, platform: Platform): RoutineChanges {
     changes.timeLimitMinutes = routineTimeLimit(o.timeLimitMinutes)
   if (o.keptRunSessions !== undefined)
     changes.keptRunSessions = routineKeptRunSessions(o.keptRunSessions)
+  if (o.onLimit !== undefined) changes.onLimit = routineOnLimit(o.onLimit)
   if (o.enabled !== undefined) changes.enabled = flag(o, 'enabled')
   return changes
 }
