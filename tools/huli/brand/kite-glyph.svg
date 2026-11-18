@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Kite's glyph in one color, on the icon's grid: the kite's lit half solid, its shaded half and the
+       string's S lighter only by opacity, the spars cut out. For monochrome uses (Android's themed
+       icon, tints) that read alpha alone; render.mjs fills it with any color. -->
+  <defs>
+    <clipPath id="glyphLit"><rect x="-200" y="-200" width="200" height="560"/></clipPath>
+    <clipPath id="glyphShade"><rect x="0" y="-200" width="200" height="560"/></clipPath>
+    <mask id="glyphSpars" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#FFFFFF"/>
+      <g transform="translate(575 340) rotate(12)" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="round">
+        <path d="M0 -133 L0 275"/>
+        <path d="M-131 0 Q0 -24 131 0"/>
+      </g>
+    </mask>
+  </defs>
+  <g id="glyph" fill="#000000">
+    <g id="string">
+      <path d="M513 630 C507 680 457 731 407 745 S307 810 301 860" fill="none" stroke="#000000" stroke-width="24" stroke-linecap="round"/>
+      <circle cx="301" cy="860" r="32"/>
+    </g>
+    <g id="kite" mask="url(#glyphSpars)">
+      <g transform="translate(575 340) rotate(12)" stroke-linejoin="round">
+        <path d="M0 -153 L151 0 L0 297 L-151 0 Z" stroke="#000000" stroke-width="20" clip-path="url(#glyphLit)"/>
+        <path d="M0 -153 L151 0 L0 297 L-151 0 Z" stroke="#000000" stroke-width="20" opacity="0.62" clip-path="url(#glyphShade)"/>
+      </g>
+    </g>
+  </g>
+</svg>

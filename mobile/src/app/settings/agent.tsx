@@ -302,7 +302,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
           <Sheet
             visible={removing}
             title={`移除 ${status.name}？`}
-            message="它的会话仍留在列表里，标明 Agent 已移除，不能再继续。这个目录是 Huli 新建的，里面有它的登录凭据和 Harness 的会话记录。"
+            message="它的会话仍留在列表里，标明 Agent 已移除，不能再继续。这个目录是纸鸢新建的，里面有它的登录凭据和 Harness 的会话记录。"
             items={[
               {
                 key: 'keep',
@@ -440,7 +440,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
                     </Text>
                   ) : null}
                   <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                    由 Harness 自己在终端里登录，Huli 不经手凭据。在电脑的终端里运行：
+                    由 Harness 自己在终端里登录，纸鸢不经手凭据。在电脑的终端里运行：
                   </Text>
                   <Code>{method.command!}</Code>
                   <View style={styles.row}>
@@ -537,7 +537,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
               title={variable.name}
               subtitle={
                 variable.set
-                  ? `已设置。Huli 保存它，只在 ${status.name} 启动时交给它。`
+                  ? `已设置。纸鸢保存它，只在 ${status.name} 启动时交给它。`
                   : variable.optional
                     ? '可选'
                     : undefined
@@ -598,8 +598,8 @@ function AgentBody({ status }: { status: AgentStatus }) {
         ) : null}
         {details.value?.config.map((item) => {
           const notes = [
-            item.id === 'folder' && status.configDir?.created ? '由 Huli 创建' : null,
-            item.chosen ? '在 Huli 中选定' : null,
+            item.id === 'folder' && status.configDir?.created ? '由纸鸢创建' : null,
+            item.chosen ? '在纸鸢中选定' : null,
             item.env ? `由 ${item.env} 设定` : null,
             item.exists ? null : '尚未创建。',
           ].filter(Boolean)
@@ -620,7 +620,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
 
       {takesClaudeSettings(id) ? <ClaudeSettingsGroup agentId={id} /> : null}
 
-      <ListGroup footer="它的会话会留着，但不能再继续。新会话的模式和标志颜色在电脑上的 Huli 里设置。">
+      <ListGroup footer="它的会话会留着，但不能再继续。新会话的模式和标志颜色在电脑上的纸鸢里设置。">
         <ListRow
           title="移除 Agent…"
           destructive
@@ -782,7 +782,7 @@ function Providers({ status }: { status: AgentStatus }) {
       header="厂商"
       footer={
         status.providersError ??
-        '在电脑上的 Huli 里添加厂商、登录或填写 key；这里只显示它们的状态和用量。'
+        '在电脑上的纸鸢里添加厂商、登录或填写 key；这里只显示它们的状态和用量。'
       }
     >
       {providers.length === 0 ? (
@@ -819,10 +819,10 @@ function ApiKeySheet(props: { status: AgentStatus; visible: boolean; onClose(): 
   }, [props.visible])
   const providers = status.apiKey?.providers ?? false
   const note = providers
-    ? `key 交给 Claude Code，存进这个 Agent 配置目录里的 settings.json；Huli 不留副本，也不读回。终端里用这个目录运行 ${status.cli?.command ?? ''} 也能用。`
+    ? `key 交给 Claude Code，存进这个 Agent 配置目录里的 settings.json；纸鸢不留副本，也不读回。终端里用这个目录运行 ${status.cli?.command ?? ''} 也能用。`
     : status.harnessId === 'codebuddy'
-      ? 'key 交给 Codebuddy Code，存进这个 Agent 配置目录里的 settings.json；Huli 不留副本，也不读回。要在这个 Agent 用的站点上创建 key：国际站在 codebuddy.ai/profile/keys，国内站在 copilot.tencent.com/profile。'
-      : 'key 经 Codex 自己的 codex login 保存；Huli 不留副本。要接别的服务商，在这个目录的 config.toml 里自己配。'
+      ? 'key 交给 Codebuddy Code，存进这个 Agent 配置目录里的 settings.json；纸鸢不留副本，也不读回。要在这个 Agent 用的站点上创建 key：国际站在 codebuddy.ai/profile/keys，国内站在 copilot.tencent.com/profile。'
+      : 'key 经 Codex 自己的 codex login 保存；纸鸢不留副本。要接别的服务商，在这个目录的 config.toml 里自己配。'
   const warning = status.isDefault
     ? status.cli?.command
       ? `这是终端里 ${status.harnessName} 也在用的目录，终端里的 ${status.cli.command} 也会改用这个 key。`
@@ -908,7 +908,7 @@ function EnvSheet(props: {
     <FormSheet
       visible={props.variable !== null}
       title={shown.current ?? ''}
-      message={set ? `已设置。Huli 保存它，只在 ${props.agentName} 启动时交给它。` : undefined}
+      message={set ? `已设置。纸鸢保存它，只在 ${props.agentName} 启动时交给它。` : undefined}
       onClose={props.onClose}
       submitLabel="保存"
       canSubmit={value.trim().length > 0}

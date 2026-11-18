@@ -5,6 +5,7 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
+const { APP_NAME } = require('./appName')
 const { withDangerousMod, withEntitlementsPlist, withXcodeProject } = require('expo/config-plugins')
 
 const TARGET = 'HuliNotificationService'
@@ -87,7 +88,7 @@ const withExtensionFiles = (config) =>
       )
       const info = {
         CFBundleDevelopmentRegion: '$(DEVELOPMENT_LANGUAGE)',
-        CFBundleDisplayName: config.name,
+        CFBundleDisplayName: APP_NAME,
         CFBundleExecutable: '$(EXECUTABLE_NAME)',
         CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)',
         CFBundleInfoDictionaryVersion: '6.0',

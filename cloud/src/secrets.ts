@@ -136,8 +136,8 @@ export function checkTotp(
 }
 
 export function otpauthUri(secret: string, account: string): string {
-  const label = encodeURIComponent(`Huli Cloud:${account}`)
-  const params = new URLSearchParams({ secret, issuer: 'Huli Cloud', period: '30', digits: '6' })
+  const label = encodeURIComponent(`Kite Cloud:${account}`)
+  const params = new URLSearchParams({ secret, issuer: 'Kite Cloud', period: '30', digits: '6' })
   return `otpauth://totp/${label}?${params.toString()}`
 }
 

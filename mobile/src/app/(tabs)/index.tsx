@@ -512,7 +512,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
 }
 
 const REASONS = [
-  '电脑上的 Huli 没开，或者电脑睡着了',
+  '电脑上的纸鸢没开，或者电脑睡着了',
   '手机和电脑不在同一个网络，或者 Tailscale 没连上',
   '电脑上的「设置 › 远程访问」被关掉了',
 ]
@@ -539,7 +539,7 @@ function Unreachable() {
           </View>
         ))}
         <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
-          Huli 会在后台继续尝试，连上后这里会自动出现会话。
+          纸鸢会在后台继续尝试，连上后这里会自动出现会话。
         </Text>
         <View style={styles.buttons}>
           <Pill

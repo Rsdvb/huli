@@ -11,7 +11,7 @@ import type { ApnsSender } from './apns'
 import { Auth } from './auth'
 import type { Config } from './config'
 import { sendError, sendHtml, sendJson, TooBig } from './http'
-import { messagePage, STYLE } from './pages'
+import { messagePage, SERVICE_NAME, STYLE } from './pages'
 import { PushGateway } from './push'
 import { Relay, type RelayLimits } from './relay'
 import { loadRelayTokenKey, RelayTokens } from './relay-tokens'
@@ -122,7 +122,7 @@ export function makeServer(
       }
       switch (route) {
         case 'GET /':
-          return sendHtml(response, secure, 200, messagePage('Huli Cloud', '这是一个私人服务。'))
+          return sendHtml(response, secure, 200, messagePage(SERVICE_NAME, '这是一个私人服务。'))
         case 'GET /healthz':
           response.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' })
           return response.end('ok')
@@ -175,7 +175,7 @@ export function makeServer(
             secure,
             404,
             'not_available',
-            'Huli Cloud does not offer this.',
+            `${SERVICE_NAME} does not offer this.`,
           )
         default:
           return sendError(response, secure, 404, 'not_found', 'Not found.')

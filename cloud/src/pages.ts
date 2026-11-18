@@ -23,7 +23,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.danger{color:var(--danger)}
 .error{color:var(--danger);margin-top:12px}
 .brand{display:flex;align-items:center;gap:8px;margin-bottom:16px;font-weight:600}
-.dot{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,#ff9933,#d6481c);color:#fff;display:grid;place-items:center;font-size:16px}
+.dot{width:28px;height:28px;border-radius:7px}
 table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
 td{padding:8px 4px;border-top:1px solid var(--line);vertical-align:middle}
 td form{margin:0}
@@ -38,14 +38,23 @@ export function escape(text: string): string {
   )
 }
 
+/** The service's name on its pages, after the app it serves. */
+export const SERVICE_NAME = 'Kite Cloud'
+
+// Kite's icon, drawn small (tools/huli/brand/kite-light.svg with a thicker string): the pages'
+// favicon and the mark beside their title, inline as the pages' CSP allows images from data URLs.
+const ICON = `data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'><defs><linearGradient id='g' x2='1' y2='1'><stop stop-color='#FF9A5A'/><stop offset='1' stop-color='#E2541F'/></linearGradient></defs><rect width='1024' height='1024' rx='230' fill='url(#g)'/><path d='M513 630C507 680 457 731 407 745S307 810 301 860' fill='none' stroke='#fff' stroke-width='44' stroke-linecap='round'/><circle cx='301' cy='860' r='54' fill='#fff'/><path transform='translate(575 340) rotate(12)' d='M0-153L151 0 0 297-151 0Z' fill='#fff' stroke='#fff' stroke-width='24' stroke-linejoin='round'/></svg>",
+)}`
+
 function page(title: string, body: string): string {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escape(title)} · Huli Cloud</title><link rel="stylesheet" href="/static/style.css"></head><body><main><div class="brand"><span class="dot">狐</span>Huli Cloud</div><div class="card">${body}</div></main></body></html>`
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escape(title)} · ${SERVICE_NAME}</title><link rel="icon" type="image/svg+xml" href="${ICON}"><link rel="stylesheet" href="/static/style.css"></head><body><main><div class="brand"><img class="dot" src="${ICON}" alt="">${SERVICE_NAME}</div><div class="card">${body}</div></main></body></html>`
 }
 
 export function describeClient(info: HuliClientInfo | null): string {
   if (!info) return '未知设备'
   const kind =
-    { desktop: 'Huli 桌面端', daemon: 'Huli 命令行', web: '网页版', mobile: 'Huli 手机端' }[
+    { desktop: '纸鸢桌面端', daemon: '纸鸢命令行', web: '网页版', mobile: '纸鸢手机端' }[
       info.kind
     ] ?? info.kind
   return `${kind} · ${info.name}（${info.os} ${info.arch}${info.version ? ` · ${info.version}` : ''}）`

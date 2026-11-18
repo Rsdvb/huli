@@ -176,7 +176,7 @@ export default function MemorySettings() {
             footer={
               switchError ??
               (read.enabled
-                ? '打开时，每个 Agent 开会话都会拿到记忆，也能往里记。在 Huli 的会话里，Harness 自己的记忆会关掉。'
+                ? '打开时，每个 Agent 开会话都会拿到记忆，也能往里记。在纸鸢的会话里，Harness 自己的记忆会关掉。'
                 : '已关上：各 Agent 回到自己原来的记忆，由各自的 Harness 保存。')
             }
           >
@@ -205,7 +205,7 @@ export default function MemorySettings() {
                 />
               }
             >
-              把它们导入 Huli 的记忆，每个 Agent 都能用上。原来的记忆保持不变。
+              把它们导入纸鸢的记忆，每个 Agent 都能用上。原来的记忆保持不变。
             </Notice>
           ) : null}
 
@@ -415,7 +415,7 @@ function ImportSheet(props: { visible: boolean; onClose(): void; onDone(): void 
       visible={props.visible}
       onClose={close}
       title="导入 Agent 的记忆"
-      message="这些是各 Agent 自己记下的、关于 Huli 里已有项目的事。每条会放进它所属项目的记忆，原来的保持不变。"
+      message="这些是各 Agent 自己记下的、关于纸鸢里已有项目的事。每条会放进它所属项目的记忆，原来的保持不变。"
       maxHeight={640}
     >
       {done ? (

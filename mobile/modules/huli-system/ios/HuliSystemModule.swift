@@ -71,7 +71,7 @@ public final class HuliSystemModule: Module {
     let identifier = SessionIndex.identifier(domain: current.host, session: current.id)
     let url = HuliLinks.session(current.id, host: current.host)
     let next = NSUserActivity(activityType: SessionActivity.type)
-    next.title = current.title ?? "Huli 会话"
+    next.title = current.title ?? "纸鸢会话"
     next.userInfo = ["url": url.absoluteString]
     next.requiredUserInfoKeys = ["url"]
     next.isEligibleForHandoff = true
@@ -199,7 +199,7 @@ enum SessionIndex {
       attributes.displayName = item.title
       let about = [item.project, item.agent].compactMap { $0 }
       if !about.isEmpty { attributes.contentDescription = about.joined(separator: " · ") }
-      attributes.keywords = ["Huli"] + about
+      attributes.keywords = ["纸鸢", "Kite", "Huli"] + about
       attributes.contentModificationDate = Date(timeIntervalSince1970: item.at / 1000)
       return CSSearchableItem(
         uniqueIdentifier: identifier(domain: domain, session: item.id),

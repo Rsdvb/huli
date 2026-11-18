@@ -684,6 +684,22 @@
       "approval": "Waiting for your approval",
       "working": "Working"
     },
+    "doing": {
+      "thinking": "Thinking: {{detail}}",
+      "execute": "Running {{detail}}",
+      "executeMany_one": "Running {{count}} command: {{detail}}",
+      "executeMany_other": "Running {{count}} commands: {{detail}}",
+      "read": "Reading {{detail}}",
+      "readMany_one": "Reading {{count}} file: {{detail}}",
+      "readMany_other": "Reading {{count}} files: {{detail}}",
+      "edit": "Editing {{detail}}",
+      "editMany_one": "Editing {{count}} file: {{detail}}",
+      "editMany_other": "Editing {{count}} files: {{detail}}",
+      "search": "Searching {{detail}}",
+      "searchQuoted": "Searching for \"{{detail}}\"",
+      "fetch": "Fetching {{detail}}",
+      "fetchQuoted": "Searching the web for \"{{detail}}\""
+    },
     "resume": "Resume",
     "continuePrompt": "Continue",
     "outOfCredit": {

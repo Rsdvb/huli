@@ -123,7 +123,7 @@ extension HuliSessionsSnapshot.Row {
   }
 
   /// Its title, or what it is without one while titles are hidden.
-  var name: String { title ?? "\(agent ?? "Huli") 会话" }
+  var name: String { title ?? agent.map { "\($0) 会话" } ?? "纸鸢会话" }
 }
 
 /// The places of the app the Control Center controls open.
@@ -131,7 +131,7 @@ enum HuliPlace: String, AppEnum {
   case newSession
   case waiting
 
-  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Huli 页面")
+  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "纸鸢页面")
   static let caseDisplayRepresentations: [HuliPlace: DisplayRepresentation] = [
     .newSession: DisplayRepresentation(title: "新建会话"),
     .waiting: DisplayRepresentation(title: "等你处理"),
@@ -140,9 +140,9 @@ enum HuliPlace: String, AppEnum {
 
 /// Opens the app on a new session, or on the session that waits for the user.
 struct HuliOpenPlaceIntent: OpenIntent {
-  static let title: LocalizedStringResource = "打开 Huli"
+  static let title: LocalizedStringResource = "打开纸鸢"
   static let description: IntentDescription? = IntentDescription(
-    "打开 Huli 新建会话，或者打开等你处理的会话。")
+    "打开纸鸢新建会话，或者打开等你处理的会话。")
 
   @Parameter(title: "页面")
   var target: HuliPlace

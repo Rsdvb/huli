@@ -36,15 +36,15 @@ const FAILURES: Record<PairFailure, string> = {
   void: '这个配对码已经失效或用过了，请在电脑上重新显示二维码。',
   rejected: '电脑上拒绝了这台手机。',
   unreachable: '连不上电脑。确认手机和电脑在同一个网络，或者都开着 Tailscale。',
-  update_client: '这个 App 版本太旧，电脑上的 Huli 不支持，请更新 App。',
-  update_host: '电脑上的 Huli 版本太旧，请先更新电脑端。',
-  relay_off: '这个配对码需要中继，而 Huli 不使用中继。请在电脑上用直连的二维码。',
+  update_client: '这个 App 版本太旧，电脑上的纸鸢不支持，请更新 App。',
+  update_host: '电脑上的纸鸢版本太旧，请先更新电脑端。',
+  relay_off: '这个配对码需要中继，而纸鸢不使用中继。请在电脑上用直连的二维码。',
   wrong_account: '这个配对码属于另一个账号。',
   host_offline: '电脑现在不在线。',
 }
 
 const STEPS = [
-  '在电脑上的 Huli 里打开「设置 › 远程访问」并开启。',
+  '在电脑上的纸鸢里打开「设置 › 远程访问」并开启。',
   '手机和电脑连同一个网络，或者都开着 Tailscale。',
   '扫描电脑上显示的二维码，再在电脑上点「允许」。',
 ]
@@ -69,7 +69,7 @@ export function PairScreen(props: {
   const run = async (payload: PairingPayload | null) => {
     if (!payload) {
       haptic.warning()
-      setStep({ kind: 'start', error: '这不是 Huli 的配对码。' })
+      setStep({ kind: 'start', error: '这不是纸鸢的配对码。' })
       return
     }
     setStep({ kind: 'working', text: '正在连接电脑…' })
@@ -115,7 +115,7 @@ export function PairScreen(props: {
     if (!granted) {
       setStep({
         kind: 'start',
-        error: '没有相机权限。可以到「设置 › Huli」里打开，或者粘贴配对链接。',
+        error: '没有相机权限。可以到「设置 › 纸鸢」里打开，或者粘贴配对链接。',
       })
       return
     }
@@ -189,7 +189,7 @@ export function PairScreen(props: {
           <Text style={[typeScale.body, { color: c.textSecondary }]}>
             {props.onCancel
               ? '已配对的电脑都会留着，随时在顶部的电脑标记里切换。'
-              : 'Huli 在手机上看着、指挥电脑上的 Agent。配对一次，之后打开就连上。'}
+              : '纸鸢在手机上看着、指挥电脑上的 Agent。配对一次，之后打开就连上。'}
           </Text>
 
           <View style={[styles.steps, { backgroundColor: c.surface, borderColor: c.border }]}>

@@ -195,15 +195,16 @@ export const brand = {
     violet: '#749BFF',
   },
   huli: '#E2611F',
-  /** The app icon's fox: its orange ground, light to dark, and the face's tones. */
-  fox: {
-    groundLight: '#FDB46F',
-    groundDark: '#DD4C1C',
-    face: '#FFFFFF',
-    faceShade: '#FFE6D5',
-    cheek: '#FFC49C',
-    ear: '#4A2B22',
-    nose: '#3B201A',
+  /**
+   * The app icon (tools/huli/brand/kite-light.svg): its orange ground, light to dark, the kite's lit
+   * and shaded halves, and its spars.
+   */
+  kite: {
+    groundLight: '#FF9A5A',
+    groundDark: '#E2541F',
+    paper: '#FFFFFF',
+    paperShade: '#FFE4D3',
+    spar: '#E2541F',
   },
 } as const
 

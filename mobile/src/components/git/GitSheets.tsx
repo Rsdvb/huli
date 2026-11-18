@@ -339,7 +339,7 @@ export function PublishBranchSheet(props: {
       visible={props.visible}
       onClose={props.onClose}
       title={`发布 ${branch}？`}
-      message={`此分支还不在远程仓库上。Huli 会把它推送到 ${remote ?? 'origin'} 并跟踪它。`}
+      message={`此分支还不在远程仓库上。纸鸢会把它推送到 ${remote ?? 'origin'} 并跟踪它。`}
     >
       <Label>远程仓库</Label>
       {list.error ? (

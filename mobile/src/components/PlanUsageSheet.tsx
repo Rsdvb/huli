@@ -117,8 +117,10 @@ export function PlanUsageSheet(props: {
       link
         .request('agents.refreshLimits', {
           agentId: target.id,
-          // A refresh the user presses asks for the read now, Antigravity's too.
-          ...(force ? { force, ask: true } : {}),
+          // Opening the sheet and pressing 刷新 are both the user asking, Antigravity's too; the
+          // host runs such a read at most once a minute.
+          ask: true,
+          ...(force ? { force } : {}),
         })
         .catch((failure: unknown) =>
           setErrors((was) => ({ ...was, [target.id]: errorText(failure) })),

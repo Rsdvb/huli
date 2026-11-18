@@ -10,7 +10,7 @@ import Foundation
 
 /// A session on the paired computer, as the snapshot lists it.
 struct HuliSessionEntity: AppEntity {
-  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Huli 会话")
+  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "纸鸢会话")
   static let defaultQuery = HuliSessionQuery()
 
   /// `<computer id>:<session id>`, so a saved shortcut still opens it on its own computer.
@@ -51,7 +51,7 @@ struct HuliSessionQuery: EntityStringQuery {
     let known = HuliSessionEntity.all()
     // A session the snapshot no longer lists still opens: the app says if it is gone.
     return identifiers.map { id in
-      known.first { $0.id == id } ?? HuliSessionEntity(id: id, name: "Huli 会话", detail: "")
+      known.first { $0.id == id } ?? HuliSessionEntity(id: id, name: "纸鸢会话", detail: "")
     }
   }
 
@@ -72,9 +72,9 @@ struct HuliSessionQuery: EntityStringQuery {
 
 /// 新建 Huli 会话: the app opens on a new session with the text in its composer, to send from there.
 struct HuliNewSessionIntent: AppIntent {
-  static let title: LocalizedStringResource = "新建 Huli 会话"
+  static let title: LocalizedStringResource = "新建纸鸢会话"
   static let description: IntentDescription? = IntentDescription(
-    "打开 Huli 新建会话，把这段话先填进输入框，你确认后再发给电脑上的 Agent。")
+    "打开纸鸢新建会话，把这段话先填进输入框，你确认后再发给电脑上的 Agent。")
   static let openAppWhenRun: Bool = true
 
   @Parameter(title: "内容", requestValueDialog: IntentDialog("想让 Agent 做什么？"))
@@ -88,8 +88,8 @@ struct HuliNewSessionIntent: AppIntent {
 
 /// 打开 Huli 会话: one of the sessions the app last saw.
 struct HuliOpenSessionIntent: OpenIntent {
-  static let title: LocalizedStringResource = "打开 Huli 会话"
-  static let description: IntentDescription? = IntentDescription("在 Huli 里打开电脑上的一个会话。")
+  static let title: LocalizedStringResource = "打开纸鸢会话"
+  static let description: IntentDescription? = IntentDescription("在纸鸢里打开电脑上的一个会话。")
 
   @Parameter(title: "会话", requestValueDialog: IntentDialog("打开哪个会话？"))
   var target: HuliSessionEntity
@@ -102,13 +102,13 @@ struct HuliOpenSessionIntent: OpenIntent {
 
 /// Huli 有几个在等我: answered from the snapshot, without opening the app.
 struct HuliWaitingIntent: AppIntent {
-  static let title: LocalizedStringResource = "Huli 有几个在等我"
+  static let title: LocalizedStringResource = "纸鸢有几个在等我"
   static let description: IntentDescription? = IntentDescription(
-    "说出电脑上有几个会话在等你处理、几个正在运行。数字是 Huli 上次打开时看到的。")
+    "说出电脑上有几个会话在等你处理、几个正在运行。数字是纸鸢上次打开时看到的。")
 
   func perform() async throws -> some IntentResult & ReturnsValue<Int> & ProvidesDialog {
     guard let snapshot = HuliSessionsSnapshot.load(), snapshot.paired else {
-      return .result(value: 0, dialog: IntentDialog("Huli 还没有配对电脑。打开 Huli 配对以后再问我。"))
+      return .result(value: 0, dialog: IntentDialog("纸鸢还没有配对电脑。打开纸鸢配对以后再问我。"))
     }
     let answer = HuliWaitingIntent.answer(snapshot)
     return .result(value: snapshot.waiting, dialog: IntentDialog("\(answer)"))
@@ -133,7 +133,7 @@ struct HuliWaitingIntent: AppIntent {
     if Date().timeIntervalSince(snapshot.date) > 120 {
       let formatter = RelativeDateTimeFormatter()
       formatter.locale = Locale(identifier: "zh-Hans")
-      text += "这是 Huli \(formatter.localizedString(for: snapshot.date, relativeTo: Date()))看到的。"
+      text += "这是纸鸢\(formatter.localizedString(for: snapshot.date, relativeTo: Date()))看到的。"
     }
     return text
   }
@@ -141,8 +141,8 @@ struct HuliWaitingIntent: AppIntent {
 
 /// 搜索 Huli: the app's search, the text filled in and searched.
 struct HuliSearchIntent: AppIntent {
-  static let title: LocalizedStringResource = "搜索 Huli"
-  static let description: IntentDescription? = IntentDescription("在 Huli 里搜索会话。")
+  static let title: LocalizedStringResource = "搜索纸鸢"
+  static let description: IntentDescription? = IntentDescription("在纸鸢里搜索会话。")
   static let openAppWhenRun: Bool = true
 
   @Parameter(title: "搜索内容", requestValueDialog: IntentDialog("要搜什么？"))

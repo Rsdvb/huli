@@ -15,8 +15,8 @@ struct HuliNewSessionControl: ControlWidget {
         Label("新建会话", systemImage: "plus.bubble")
       }
     }
-    .displayName("新建 Huli 会话")
-    .description("打开 Huli，新建一个会话。")
+    .displayName("新建纸鸢会话")
+    .description("打开纸鸢，新建一个会话。")
   }
 }
 
@@ -28,8 +28,8 @@ struct HuliWaitingControl: ControlWidget {
         Label(HuliWaitingControl.label(), systemImage: "hand.raised.fill")
       }
     }
-    .displayName("Huli 等你处理")
-    .description("打开 Huli 里等你处理的会话。")
+    .displayName("纸鸢等你处理")
+    .description("打开纸鸢里等你处理的会话。")
   }
 
   static func label() -> String {

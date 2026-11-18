@@ -68,7 +68,8 @@
     "agentFile": "{{agent}}'s file, read-only"
   },
   "link": {
-    "open": "Open {{target}}"
+    "open": "Open {{target}}",
+    "openInPanel": "Open in Side Panel"
   },
   "unsaved": {
     "title": "Save changes to {{name}}?",
