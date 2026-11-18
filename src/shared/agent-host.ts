@@ -198,6 +198,24 @@ export interface ProviderBalance {
   currency: string
 }
 
+/** A credit that resets a plan's current limit windows once, as its vendor names it. */
+export interface ResetCredit {
+  id: string
+  title: string | null
+  description: string | null
+  /** When it expires, in ms; null when it does not. */
+  expiresAt: number | null
+}
+
+/** The limit reset credits an account has: how many, and those the vendor detailed. */
+export interface ResetCredits {
+  available: number
+  credits: ResetCredit[]
+}
+
+/** What redeeming a reset credit did, as Codex answers. */
+export type ResetCreditOutcome = 'reset' | 'nothingToReset' | 'noCredit' | 'alreadyRedeemed'
+
 export interface AgentProvider {
   id: string
   name: string
@@ -394,6 +412,8 @@ export interface AgentStatus {
    */
   movedAccounts?: { to: HarnessId; audience: string; refused: boolean }
   limits: PlanLimit[] // subscription windows, see plan limits in the session model
+  /** The limit reset credits the account has, for an agent that can redeem them (Codex). */
+  resetCredits?: ResetCredits
   limitsError?: string // why the last limits read failed, until one succeeds; `limits` stay
   detail: string | null // install hint or error message
   installUrl: string | null
@@ -864,6 +884,12 @@ export interface HostContract {
   'agents.refreshLimits': {
     params: { agentId: AgentId; force?: boolean; ask?: boolean }
     result: void
+  }
+  // Redeems one of the account's limit reset credits, the one named or the next the vendor picks,
+  // then reads the limits again.
+  'agents.useResetCredit': {
+    params: { agentId: AgentId; creditId?: string }
+    result: { outcome: ResetCreditOutcome }
   }
   'agents.details': { params: { agentId: AgentId }; result: AgentDetails }
   // A Claude Code agent's auto-compact windows and prompt cache duration, read from its settings
@@ -1751,6 +1777,7 @@ export const HOST_METHODS = [
   'agents.readOptions',
   'agents.readFirstOptions',
   'agents.refreshLimits',
+  'agents.useResetCredit',
   'agents.details',
   'agents.claudeSettings',
   'agents.setClaudeSetting',

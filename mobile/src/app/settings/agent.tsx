@@ -2,7 +2,7 @@
 // key, its plan usage, its configuration, and removing it.
 
 import { useEffect, useRef, useState } from 'react'
-import { Linking, StyleSheet, Text, View } from 'react-native'
+import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
 import type {
@@ -10,6 +10,7 @@ import type {
   AgentStatus,
   ClaudeCompactRow,
   HostEvent,
+  ResetCreditOutcome,
   PlanLimit,
 } from '@shared/agent-host'
 import {
@@ -715,6 +716,13 @@ function LimitRow({ limit }: { limit: PlanLimit }) {
   )
 }
 
+const RESET_OUTCOME: Record<ResetCreditOutcome, string> = {
+  reset: '已重置，用量已重新读取。',
+  nothingToReset: '现在没有可以重置的用量窗口，卡没有用掉。',
+  noCredit: '账号里已经没有可用的重置卡。',
+  alreadyRedeemed: '这张卡刚才已经用过了。',
+}
+
 /** Plan usage, one row per window, with the read and why there is none. */
 function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean }) {
   const host = useHost()
@@ -730,6 +738,29 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
         call(host.link!, 'agents.refreshLimits', { agentId: status.id, force: true, ask: true }),
       '没能读取套餐用量',
     )
+  const redeemCredit = async () => {
+    const credits = status.resetCredits
+    if (!credits || credits.available === 0) return
+    const next = credits.credits[0]
+    const go = await confirm({
+      title: '使用一张重置卡？',
+      message: `${next?.title ? `${next.title}。` : ''}会立即重置正在计算的用量窗口，用掉后不能退回。现在还有 ${credits.available} 张。`,
+      confirm: '使用一张',
+      destructive: false,
+    })
+    if (!go) return
+    await run(
+      'reset',
+      async () => {
+        const { outcome } = await call(host.link!, 'agents.useResetCredit', {
+          agentId: status.id,
+          ...(next ? { creditId: next.id } : {}),
+        })
+        Alert.alert(RESET_OUTCOME[outcome])
+      },
+      '没能使用重置卡',
+    )
+  }
   const reason =
     status.limitsReason || status.account?.kind === 'api_key'
       ? limitsWhy(status)
@@ -757,6 +788,37 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
         ) : (
           <ListRow key="none" title="套餐限额" value="—" />
         )}
+        {limits.length > 0
+          ? (status.balances ?? []).map((balance) => {
+              const text = balanceText(balance)
+              return (
+                <ListRow
+                  key={`${balance.label}/${balance.currency}`}
+                  title={text.name}
+                  subtitle={
+                    balance.label === 'Extra usage' ? '套餐用量用完后，从这里继续扣。' : undefined
+                  }
+                  value={text.value}
+                />
+              )
+            })
+          : null}
+        {status.resetCredits ? (
+          <ListRow
+            key="reset-credits"
+            title="重置卡"
+            subtitle={
+              status.resetCredits.available > 0
+                ? '用一张可以立即重置当前的用量窗口。'
+                : '账号里现在没有重置卡。'
+            }
+            value={`${status.resetCredits.available} 张`}
+            action={status.resetCredits.available > 0}
+            disabled={!connected || busy('reset') || status.resetCredits.available === 0}
+            trailing={busy('reset') ? <Tag label="正在重置…" tone="tint" /> : undefined}
+            onPress={() => void redeemCredit()}
+          />
+        ) : null}
         {readable ? (
           <ListRow
             key="refresh"

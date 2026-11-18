@@ -1,8 +1,13 @@
 // Codex's account and plan limits in Kettu's terms, with the labels codex-acp gave them.
 
-import type { AgentAccount, PlanLimit } from '@shared/agent-host'
+import type { AgentAccount, PlanLimit, ProviderBalance, ResetCredits } from '@shared/agent-host'
 import { t } from '../i18n'
-import type { GetAccountResponse, RateLimitSnapshot, RateLimitWindow } from './protocol'
+import type {
+  GetAccountRateLimitsResponse,
+  GetAccountResponse,
+  RateLimitSnapshot,
+  RateLimitWindow,
+} from './protocol'
 
 const PLANS: Record<string, string> = {
   free: 'Free',
@@ -97,4 +102,35 @@ export function mapRateLimits(snapshot: RateLimitSnapshot, now: number): PlanLim
   return [snapshot.primary, snapshot.secondary]
     .map((window) => mapWindow(window, pool, now))
     .filter((limit) => limit !== null)
+}
+
+/**
+ * What a limits read says beside the windows: the credits balance that pays once a window runs
+ * out, as an extra usage balance, and the reset credits. An older Codex reports no reset credits,
+ * which leaves them null rather than none.
+ */
+export function mapPlanExtras(
+  response: GetAccountRateLimitsResponse,
+  snapshots: readonly RateLimitSnapshot[],
+): { balances: ProviderBalance[]; resetCredits: ResetCredits | null } {
+  const credits = [response.rateLimits, ...snapshots].find((s) => s?.credits)?.credits
+  const amount = credits?.hasCredits && !credits.unlimited ? Number(credits.balance) : NaN
+  const balances: ProviderBalance[] = Number.isFinite(amount)
+    ? [{ label: 'Extra usage', amount, currency: 'credits' }]
+    : []
+  const summary = response.rateLimitResetCredits
+  const resetCredits: ResetCredits | null = summary
+    ? {
+        available: Math.max(0, Math.floor(summary.availableCount)),
+        credits: (summary.credits ?? [])
+          .filter((credit) => credit.status === 'available')
+          .map((credit) => ({
+            id: credit.id,
+            title: credit.title ?? null,
+            description: credit.description ?? null,
+            expiresAt: credit.expiresAt ? credit.expiresAt * 1000 : null,
+          })),
+      }
+    : null
+  return { balances, resetCredits }
 }

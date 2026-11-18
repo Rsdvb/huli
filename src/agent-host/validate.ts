@@ -1319,6 +1319,11 @@ export function createValidators(platform: Platform): Validators {
     },
     'agents.readFirstOptions': agent,
     'agents.refreshLimits': limitsRefresh,
+    'agents.useResetCredit': (params) => {
+      const o = fields(params)
+      const creditId = optionalString(o, 'creditId', ID_CHARS)
+      return { agentId: agentId(o), ...(creditId !== undefined ? { creditId } : {}) }
+    },
     'agents.details': agent,
     'agents.claudeSettings': agent,
     'agents.setClaudeSetting': (params) => {

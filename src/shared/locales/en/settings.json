@@ -671,6 +671,25 @@
     "notReported": "Not reported",
     "planLimits": "Plan limits",
     "usageNotReported": "{{name}} does not report plan usage.",
+    "resetCredits": {
+      "name": "Reset credits",
+      "description": "One resets the current usage windows right away.",
+      "none": "The account has no reset credits now.",
+      "expires": "The first one expires on {{date}}.",
+      "count_one": "{{count}} left",
+      "count_other": "{{count}} left",
+      "use": "Use one",
+      "confirmTitle": "Use a reset credit?",
+      "confirmBody_one": "It resets the usage windows in use now and cannot be taken back. You have {{count}} left.",
+      "confirmBody_other": "It resets the usage windows in use now and cannot be taken back. You have {{count}} left.",
+      "balanceHint": "Pays for use once the plan's windows run out.",
+      "outcome": {
+        "reset": "Reset. The usage was read again.",
+        "nothingToReset": "No usage window can be reset now, so no credit was used.",
+        "noCredit": "The account has no reset credits left.",
+        "alreadyRedeemed": "That credit was used already."
+      }
+    },
     "usageAfterSignIn": "Plan usage shows here once {{name}} is signed in.",
     "usageReasons": {
       "vendor-disallows": "Google does not allow other apps to read it.",

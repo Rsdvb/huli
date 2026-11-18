@@ -6,6 +6,9 @@ import type {
   ContextBreakdown,
   PlanLimit,
   PromptCapabilities,
+  ProviderBalance,
+  ResetCreditOutcome,
+  ResetCredits,
 } from '@shared/agent-host'
 import type {
   ConfigOption,
@@ -528,6 +531,13 @@ export interface AgentConnection {
    * runs the agent's report command in a hidden session.
    */
   readLimits?(): Promise<PlanLimit[]>
+  /**
+   * What the last `readLimits` read beside the windows: balances that pay once a window runs out,
+   * and the credits that reset the windows; null before a read.
+   */
+  planExtras?(): { balances: ProviderBalance[]; resetCredits: ResetCredits | null } | null
+  /** Redeems a limit reset credit: the one named, or the next the vendor picks. */
+  useResetCredit?(creditId: string | null): Promise<ResetCreditOutcome>
   /** A request of the agent's own protocol outside any session, for what only its harness has. */
   request?<T>(method: string, params?: unknown): Promise<T>
   /**

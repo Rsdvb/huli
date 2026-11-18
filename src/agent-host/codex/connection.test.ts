@@ -1777,6 +1777,72 @@ describe('side questions', () => {
 })
 
 describe('limits and subagents', () => {
+  it('reads the credits balance and the reset credits beside the windows', async () => {
+    const { server, connection } = await connect()
+    expect(connection.planExtras()).toBeNull()
+    const snapshot = {
+      limitId: 'codex',
+      limitName: null,
+      primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1_795_413_630 },
+      secondary: null,
+      credits: { hasCredits: true, unlimited: false, balance: '62500.0000000000' },
+    }
+    server.on('account/rateLimits/read', () => ({
+      rateLimits: snapshot,
+      rateLimitsByLimitId: { codex: snapshot },
+      rateLimitResetCredits: {
+        availableCount: 2,
+        credits: [
+          {
+            id: 'rc_1',
+            title: 'Limit reset',
+            description: 'Resets your Codex limits once',
+            expiresAt: 1_796_000_000,
+            grantedAt: 1_794_000_000,
+            resetType: 'codexRateLimits',
+            status: 'available',
+          },
+          { id: 'rc_0', grantedAt: 1, resetType: 'codexRateLimits', status: 'redeemed' },
+        ],
+      },
+    }))
+    const limits = await connection.readLimits()
+    expect(limits.map((l) => [l.window, l.state])).toEqual([['seven_day', 'reached']])
+    expect(connection.planExtras()).toEqual({
+      balances: [{ label: 'Extra usage', amount: 62500, currency: 'credits' }],
+      resetCredits: {
+        available: 2,
+        credits: [
+          {
+            id: 'rc_1',
+            title: 'Limit reset',
+            description: 'Resets your Codex limits once',
+            expiresAt: 1_796_000_000_000,
+          },
+        ],
+      },
+    })
+
+    // An older Codex names no reset credits, and no credits but unlimited ones.
+    server.on('account/rateLimits/read', () => ({
+      rateLimits: { ...snapshot, credits: { hasCredits: true, unlimited: true, balance: null } },
+      rateLimitsByLimitId: null,
+    }))
+    await connection.readLimits()
+    expect(connection.planExtras()).toEqual({ balances: [], resetCredits: null })
+  })
+
+  it('redeems a reset credit under a key of its own for each attempt', async () => {
+    const { server, connection } = await connect()
+    server.on('account/rateLimitResetCredit/consume', () => ({ outcome: 'reset' }))
+    expect(await connection.useResetCredit('rc_1')).toBe('reset')
+    expect(await connection.useResetCredit(null)).toBe('reset')
+    const [first, second] = server.sent('account/rateLimitResetCredit/consume')
+    expect(first).toMatchObject({ creditId: 'rc_1', idempotencyKey: expect.any(String) })
+    expect(second).not.toHaveProperty('creditId')
+    expect(second!.idempotencyKey).not.toBe(first!.idempotencyKey)
+  })
+
   it('reports a subagent thread to its parent, with its turns, and stops it on its own', async () => {
     const { server, connection } = await connect()
     await connection.newSession('/project')

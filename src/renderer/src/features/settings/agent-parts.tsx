@@ -10,12 +10,22 @@ import {
   Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import type { AgentStatus, AgentTask, PlanLimit } from '@shared/agent-host'
+import type { AgentStatus, AgentTask, PlanLimit, ResetCreditOutcome } from '@shared/agent-host'
 import { Icon } from '@renderer/components/affect/app-shell'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@renderer/components/ui/alert-dialog'
 import { useRefresh } from '@renderer/components/refresh'
 import { planReset } from '@renderer/features/sidebar/plan-usage'
 import { addDays, dayOf, monthStartOf } from '@renderer/features/usage/model'
-import { limitLabel, mediumAgo, money } from '@renderer/lib/format'
+import { limitLabel, mediumAgo, money, monthDay, planBalance } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
 import { limitLevel } from '@renderer/lib/plan-limit'
@@ -385,6 +395,8 @@ export function UsageGroup({
               </RowFrame>
             )
           })}
+          <BalanceRows status={status} />
+          <ResetCreditRow status={status} />
         </RowGroup>
       ) : limitsReason ? (
         <p className="k-reading">{limitsReason}</p>
@@ -417,6 +429,117 @@ export function UsageGroup({
         </p>
       )}
     </section>
+  )
+}
+
+/** The balances that pay once the plan's windows run out, such as Codex's credits. */
+function BalanceRows({ status }: { status: AgentStatus }) {
+  const { t } = useTranslation(['settings', 'usage'])
+  return (status.balances ?? []).map((balance) => (
+    <RowFrame
+      key={`${balance.label}/${balance.currency}`}
+      text={
+        <RowText
+          name={
+            balance.label === 'Extra usage'
+              ? t('usage:limits.extraUsage')
+              : balance.label === 'Prepaid balance'
+                ? t('usage:limits.prepaidBalance')
+                : balance.label
+          }
+          description={
+            balance.label === 'Extra usage' ? t('agents.resetCredits.balanceHint') : undefined
+          }
+        />
+      }
+    >
+      <span className="k-figure">
+        {planBalance(
+          balance.amount,
+          balance.currency,
+          balance.currency === 'credits' ? t('usage:limits.units.credits') : balance.currency,
+        )}
+      </span>
+    </RowFrame>
+  ))
+}
+
+/**
+ * The account's limit reset credits and a button that redeems one, after asking: a credit spent
+ * cannot be had back, and Codex resets only windows that are in use.
+ */
+function ResetCreditRow({ status }: { status: AgentStatus }) {
+  const { request } = useHostScope()
+  const { t } = useTranslation(['settings', 'common'])
+  const [act, busy, error] = useAction()
+  const [asking, setAsking] = useState(false)
+  const [outcome, setOutcome] = useState<ResetCreditOutcome | null>(null)
+  const credits = status.resetCredits
+  if (!credits) return null
+  const next = credits.credits[0]
+  const expires = credits.credits
+    .map((credit) => credit.expiresAt)
+    .filter((at): at is number => at !== null)
+    .sort((a, b) => a - b)[0]
+  return (
+    <>
+      <RowFrame
+        text={
+          <RowText
+            name={t('agents.resetCredits.name')}
+            description={
+              outcome
+                ? t(`agents.resetCredits.outcome.${outcome}`)
+                : credits.available === 0
+                  ? t('agents.resetCredits.none')
+                  : expires
+                    ? t('agents.resetCredits.expires', { date: monthDay(expires) })
+                    : t('agents.resetCredits.description')
+            }
+          />
+        }
+      >
+        <ControlError error={error} />
+        <span className="k-figure">
+          {t('agents.resetCredits.count', { count: credits.available })}
+        </span>
+        <SetButton
+          loading={busy}
+          disabled={credits.available === 0}
+          onClick={() => setAsking(true)}
+        >
+          {t('agents.resetCredits.use')}
+        </SetButton>
+      </RowFrame>
+      <AlertDialog open={asking} onOpenChange={setAsking}>
+        <AlertDialogContent className="sm:max-w-[400px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('agents.resetCredits.confirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {next?.title ? `${next.title}. ` : ''}
+              {t('agents.resetCredits.confirmBody', { count: credits.available })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                act(async () => {
+                  setOutcome(null)
+                  const result = await request('agents.useResetCredit', {
+                    agentId: status.id,
+                    ...(next ? { creditId: next.id } : {}),
+                  })
+                  setOutcome(result.outcome)
+                })
+              }
+            >
+              {t('agents.resetCredits.use')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
 

@@ -529,6 +529,18 @@ describe('createValidators', () => {
     })
   })
 
+  it('takes a reset credit to redeem only by its id', () => {
+    const redeem = posix['agents.useResetCredit']
+    expect(redeem({ agentId: 'codex' })).toEqual({ agentId: 'codex' })
+    expect(redeem({ agentId: 'codex', creditId: 'rc_1', extra: 1 })).toEqual({
+      agentId: 'codex',
+      creditId: 'rc_1',
+    })
+    rejects(() => redeem({ agentId: 'codex', creditId: 7 }))
+    rejects(() => redeem({ agentId: 'codex', creditId: 'x'.repeat(257) }))
+    rejects(() => redeem({ creditId: 'rc_1' }))
+  })
+
   it('takes a read the user asked for only as a flag', () => {
     const refresh = posix['agents.refreshLimits']
     expect(refresh({ agentId: 'antigravity', ask: true })).toEqual({

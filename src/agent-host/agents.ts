@@ -24,6 +24,8 @@ import type {
   McpStatus,
   PlanLimit,
   ProviderBalance,
+  ResetCreditOutcome,
+  ResetCredits,
   VersionMoveReason,
 } from '@shared/agent-host'
 import {
@@ -480,6 +482,8 @@ class Slot {
   balanceReadAt = 0
   limits = new Map<string, PlanLimit>()
   balances: ProviderBalance[] = []
+  /** The limit reset credits the last read found, for an agent that can redeem them. */
+  resetCredits: ResetCredits | null = null
   /** Kettu handed the harness an API key for this agent, which it never reads back. */
   apiKey = false
   /** The capabilities of the last `initialize`, from this run or an earlier one. */
@@ -3600,7 +3604,25 @@ export class AgentManager {
     const merged = mergeReadLimits([...slot.limits.values()], limits, now)
     slot.limits.clear()
     for (const limit of merged) slot.limits.set(limit.window, limit)
+    const extras = connection.planExtras?.()
+    if (extras) {
+      slot.balances = extras.balances
+      slot.resetCredits = extras.resetCredits
+    }
     this.emit(slot)
+  }
+
+  /** Redeems one of the account's limit reset credits, then reads the limits it reset. */
+  async useResetCredit(agentId: AgentId, creditId: string | null): Promise<ResetCreditOutcome> {
+    const slot = this.registeredSlot(agentId)
+    if (slot.def.id !== 'codex') throw invalidParams(`${slot.def.name} has no reset credits`)
+    const runtime = await this.ensureReady(slot.id)
+    if (!runtime.connection.useResetCredit) {
+      throw invalidParams(`${slot.def.name} has no reset credits`)
+    }
+    const outcome = await runtime.connection.useResetCredit(creditId)
+    await this.refreshLimits(agentId, { force: true }).catch(() => {})
+    return outcome
   }
 
   /**
@@ -3827,6 +3849,7 @@ export class AgentManager {
     slot.account = null
     slot.limits.clear()
     slot.balances = []
+    slot.resetCredits = null
     this.emit(slot)
   }
 
@@ -4860,6 +4883,7 @@ export class AgentManager {
           }
         : {}),
       limits: [...slot.limits.values()],
+      ...(slot.resetCredits ? { resetCredits: slot.resetCredits } : {}),
       ...(slot.limitsError ? { limitsError: slot.limitsError } : {}),
       detail: slot.detail ?? h.adapterNote,
       installNotice: slot.def.install.notice ? t(slot.def.install.notice) : null,

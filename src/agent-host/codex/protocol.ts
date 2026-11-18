@@ -425,11 +425,40 @@ export interface RateLimitSnapshot {
   limitName: string | null
   primary: RateLimitWindow | null
   secondary: RateLimitWindow | null
+  /** The credits that pay once the plan's windows run out; absent from an older Codex. */
+  credits?: CreditsSnapshot | null
+}
+
+export interface CreditsSnapshot {
+  hasCredits: boolean
+  unlimited: boolean
+  /** A decimal number as text, such as `62500.0000000000`. */
+  balance?: string | null
+}
+
+export interface RateLimitResetCredit {
+  id: string
+  title?: string | null
+  description?: string | null
+  /** Unix seconds. */
+  expiresAt?: number | null
+  grantedAt: number
+  resetType: string
+  status: 'available' | 'redeeming' | 'redeemed' | 'unknown' | (string & {})
 }
 
 export interface GetAccountRateLimitsResponse {
   rateLimits: RateLimitSnapshot
   rateLimitsByLimitId: Record<string, RateLimitSnapshot | undefined> | null
+  /** Absent from an older Codex. `credits` null means only the count is known. */
+  rateLimitResetCredits?: {
+    availableCount: number
+    credits?: RateLimitResetCredit[] | null
+  } | null
+}
+
+export interface ConsumeResetCreditResponse {
+  outcome: 'reset' | 'nothingToReset' | 'noCredit' | 'alreadyRedeemed'
 }
 
 // What Codex's commands use.

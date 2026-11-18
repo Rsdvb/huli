@@ -667,6 +667,23 @@
     "notReported": "未提供",
     "planLimits": "套餐限额",
     "usageNotReported": "{{name}} 不提供套餐用量。",
+    "resetCredits": {
+      "name": "重置卡",
+      "description": "用一张可以立即重置当前的用量窗口。",
+      "none": "账号里现在没有重置卡。",
+      "expires": "最早一张 {{date}} 过期。",
+      "count_other": "{{count}} 张",
+      "use": "使用一张",
+      "confirmTitle": "使用一张重置卡？",
+      "confirmBody_other": "会立即重置正在计算的用量窗口，用掉后不能退回。现在还有 {{count}} 张。",
+      "balanceHint": "套餐用量用完后，从这里继续扣。",
+      "outcome": {
+        "reset": "已重置，用量已重新读取。",
+        "nothingToReset": "现在没有可以重置的用量窗口，卡没有用掉。",
+        "noCredit": "账号里已经没有可用的重置卡。",
+        "alreadyRedeemed": "这张卡刚才已经用过了。"
+      }
+    },
     "usageAfterSignIn": "{{name}} 登录后，套餐用量会显示在这里。",
     "usageReasons": {
       "vendor-disallows": "Google 不允许其他应用读取此用量。",

@@ -2,8 +2,15 @@
 // session is a Codex thread under the thread's own id; its settings live here and go with each
 // turn, since app-server keeps none between them that Kettu could read back.
 
+import { randomUUID } from 'node:crypto'
 import os from 'node:os'
-import type { AgentAccount, PlanLimit } from '@shared/agent-host'
+import type {
+  AgentAccount,
+  PlanLimit,
+  ProviderBalance,
+  ResetCreditOutcome,
+  ResetCredits,
+} from '@shared/agent-host'
 import type { Platform } from '@shared/platform'
 import type { ConfigOption, PermissionOption, SideChatStep, TokenTotals } from '@shared/thread'
 import {
@@ -41,7 +48,7 @@ import { t } from '../i18n'
 import { planMarkdown } from '../plan-revision'
 import { mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
-import { mapAccount, mapRateLimits } from './account'
+import { mapAccount, mapPlanExtras, mapRateLimits } from './account'
 import { isAsyncQuestion, type AsyncQuestionItem } from './async-questions'
 import {
   asyncQuestionApproval,
@@ -85,6 +92,7 @@ import {
 } from './mcp-status'
 import type {
   CollaborationMode,
+  ConsumeResetCreditResponse,
   GetAccountRateLimitsResponse,
   GetAccountResponse,
   InitializeResponse,
@@ -421,6 +429,7 @@ export class CodexConnection implements AgentConnection {
   private readonly collectors = new Map<string, (delivery: Delivery) => void>()
   /** Subagent threads, to the thread each runs under. */
   private readonly parents = new Map<string, string>()
+  private extras: { balances: ProviderBalance[]; resetCredits: ResetCredits | null } | null = null
   private models: Promise<Model[]> | null = null
   /** When the models were last listed; an older list is read again behind the one in use. */
   private modelsAt = 0
@@ -1967,7 +1976,21 @@ export class CodexConnection implements AgentConnection {
     const snapshots = response.rateLimitsByLimitId
       ? Object.values(response.rateLimitsByLimitId).filter((s) => s !== undefined)
       : [response.rateLimits]
+    this.extras = mapPlanExtras(response, snapshots)
     return snapshots.flatMap((snapshot) => mapRateLimits(snapshot, now))
+  }
+
+  planExtras(): { balances: ProviderBalance[]; resetCredits: ResetCredits | null } | null {
+    return this.extras
+  }
+
+  async useResetCredit(creditId: string | null): Promise<ResetCreditOutcome> {
+    const response = await this.call<ConsumeResetCreditResponse>(
+      'account/rateLimitResetCredit/consume',
+      // One key per attempt: Codex answers a repeat of a redeemed one without spending another.
+      { idempotencyKey: randomUUID(), ...(creditId ? { creditId } : {}) },
+    )
+    return response.outcome
   }
 }
 
