@@ -45,7 +45,7 @@
     "connect": "Connect",
     "connectLabel": "Connect to {{name}}",
     "none": "No computer of the account takes requests now.",
-    "connecting": "Asking the computer through Huli Cloud…",
+    "connecting": "Asking the computer through Kite Cloud…",
     "compare": "{{name}} shows Add this device? Check that it shows these digits, then click Add there.",
     "same": "The digits match",
     "differ": "They differ",
@@ -55,18 +55,18 @@
       "rejected": "The computer refused this browser.",
       "busy": "The computer is asked about another device. Try again shortly.",
       "cooling_down": "The computer refused too many requests and takes none for ten minutes.",
-      "update_client": "This page is too old for the computer's Huli. Reload it.",
-      "update_host": "The computer's Huli is too old. Update it first.",
+      "update_client": "This page is too old for the computer's Kite. Reload it.",
+      "update_host": "The computer's Kite is too old. Update it first.",
       "refused": "The computer took no request: it does not let devices of the account find it, or the key listed is not its own.",
       "host_offline": "The computer is offline.",
       "wrong_account": "The computer is not on this account.",
-      "unreachable": "Huli Cloud's relay could not be reached.",
+      "unreachable": "Kite Cloud's relay could not be reached.",
       "cancelled": "Cancelled."
     }
   },
   "state": {
     "loading": "Reading the account…",
-    "unavailable": "Huli Cloud could not be reached.",
+    "unavailable": "Kite Cloud could not be reached.",
     "retry": "Try again",
     "failed": "Could not sign it out: {{reason}}"
   }

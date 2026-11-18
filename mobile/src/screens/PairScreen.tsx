@@ -284,7 +284,7 @@ function AccountOption() {
   if (cloud.state === 'signed-in') {
     return (
       <AccountComputers
-        header="Huli Cloud 账号里的电脑"
+        header="Kite Cloud 账号里的电脑"
         footer="点一台电脑，在电脑上核对数字并同意，就配对好了。"
         unpairedOnly
       />
@@ -311,7 +311,7 @@ function AccountOption() {
         ) : (
           <Icon name="person" size={18} color={c.text} />
         )}
-        <Text style={[typeScale.headline, { color: c.text }]}>用 Huli Cloud 账号登录</Text>
+        <Text style={[typeScale.headline, { color: c.text }]}>用 Kite Cloud 账号登录</Text>
       </Press>
       <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
         登录后，账号里的电脑会列在这里，不用扫码；不在同一个网络也能经中转连接。

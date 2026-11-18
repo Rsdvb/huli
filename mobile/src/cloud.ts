@@ -113,7 +113,7 @@ export const ACCOUNT_PAGE_URL = `${ACCOUNT_URL}${ACCOUNT_PAGE_PATH}`
 export const SIGN_IN_FAILURES: Record<Exclude<SignInResult, 'signed-in' | 'cancelled'>, string> = {
   denied: '登录被取消了。',
   failed: '登录没有完成，请再试一次。',
-  network: '连不上 Huli Cloud，检查网络后再试。',
+  network: '连不上 Kite Cloud，检查网络后再试。',
 }
 
 /** The account's devices and computers now; null while signed out. */
@@ -176,7 +176,7 @@ export function useAccountDevices(): { list: DevicesState; reload(): Promise<voi
 /** Signs out one of the account's devices, or all but this phone. */
 export async function revokeDevices(which: { device: string } | { others: true }): Promise<void> {
   const revoked = await session.withAccess((token) => cloudApi.revoke(token, which))
-  if (revoked === null) throw new Error('没有登录 Huli Cloud。')
+  if (revoked === null) throw new Error('没有登录 Kite Cloud。')
   await reloadAccount()
 }
 

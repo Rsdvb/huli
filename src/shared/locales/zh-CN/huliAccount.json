@@ -45,7 +45,7 @@
     "connect": "连接",
     "connectLabel": "连接 {{name}}",
     "none": "账号里现在没有接受请求的电脑。",
-    "connecting": "正在通过 Huli Cloud 联系电脑…",
+    "connecting": "正在通过 Kite Cloud 联系电脑…",
     "compare": "{{name}} 上会弹出「要添加这台设备吗？」。核对那里显示的数字和这里一样，再在电脑上点「添加」。",
     "same": "数字一致",
     "differ": "不一致",
@@ -56,17 +56,17 @@
       "busy": "电脑正在处理另一台设备的请求，稍后再试。",
       "cooling_down": "电脑上的请求被拒绝太多次，十分钟内不再接受。",
       "update_client": "这个页面版本太旧，请刷新。",
-      "update_host": "电脑上的 Huli 版本太旧，请先更新。",
+      "update_host": "电脑上的纸鸢版本太旧，请先更新。",
       "refused": "电脑没有接受请求：它没开「让账号下的设备找到这台电脑」，或者账号里记的不是它的密钥。",
       "host_offline": "电脑现在不在线。",
       "wrong_account": "这台电脑不在这个账号下。",
-      "unreachable": "连不上 Huli Cloud 的中转。",
+      "unreachable": "连不上 Kite Cloud 的中转。",
       "cancelled": "已取消。"
     }
   },
   "state": {
     "loading": "正在读取账号…",
-    "unavailable": "连不上 Huli Cloud。",
+    "unavailable": "连不上 Kite Cloud。",
     "retry": "重试",
     "failed": "没能让它退出：{{reason}}"
   }

@@ -145,7 +145,7 @@ export function devicesPage(input: {
 ${rows ? `<table>${rows}</table>` : '<p class="muted">没有已登录的设备。</p>'}
 <h2>电脑</h2><p class="muted">登录了这个账号、开着远程访问和中转的电脑。让一台退出，在上面退出它的登录。</p>
 ${computers ? `<table>${computers}</table>` : '<p class="muted">还没有电脑。</p>'}
-<p class="muted gap">改密码和两步验证：在服务器上运行 <b>huli-cloud passwd</b> 或 <b>huli-cloud totp</b>（见 Huli Cloud 的说明）。</p>
+<p class="muted gap">改密码和两步验证：在服务器上运行 <b>huli-cloud passwd</b> 或 <b>huli-cloud totp</b>（见服务端的说明）。</p>
 <form method="post" action="/account/signout">${hidden('csrf', input.csrf)}<div class="row"><button>退出网页登录</button></div></form>`,
   )
 }

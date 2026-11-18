@@ -24,13 +24,13 @@ const FAILURES: Record<AccountPairFailure, string> = {
   rejected: '电脑上拒绝了这台手机。',
   busy: '电脑正在处理另一台设备的请求，稍后再试。',
   cooling_down: '电脑上的请求被拒绝太多次，暂时不接受新的请求，过十分钟再试。',
-  update_client: '这个 App 版本太旧，电脑上的 Huli 不支持，请更新 App。',
-  update_host: '电脑上的 Huli 版本太旧，请先更新电脑端。',
+  update_client: '这个 App 版本太旧，电脑上的纸鸢不支持，请更新 App。',
+  update_host: '电脑上的纸鸢版本太旧，请先更新电脑端。',
   refused:
     '电脑没有接受请求：它可能关了「让账号下的设备找到这台电脑」，或者账号里记的不是它的密钥。',
-  host_offline: '电脑现在不在线。打开电脑上的 Huli，并在「设置 › 远程访问」里开着中转。',
-  wrong_account: '这台电脑不在你的 Huli Cloud 账号下，或者这台手机已退出登录。',
-  unreachable: '连不上 Huli Cloud 的中转，检查网络后再试。',
+  host_offline: '电脑现在不在线。打开电脑上的纸鸢，并在「设置 › 远程访问」里开着中转。',
+  wrong_account: '这台电脑不在你的 Kite Cloud 账号下，或者这台手机已退出登录。',
+  unreachable: '连不上 Kite Cloud 的中转，检查网络后再试。',
   cancelled: '已取消。',
 }
 
@@ -117,7 +117,7 @@ export default function PairComputer() {
             <View style={[styles.working, { backgroundColor: c.fill }]}>
               <ActivityIndicator color={c.textSecondary} />
               <Text style={[typeScale.callout, styles.flex, { color: c.text }]}>
-                正在通过 Huli Cloud 联系电脑…
+                正在通过 Kite Cloud 联系电脑…
               </Text>
             </View>
           ) : null}
@@ -184,7 +184,7 @@ export default function PairComputer() {
           ) : null}
 
           <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
-            Huli Cloud
+            Kite Cloud
             只负责转交加密的连接，看不到内容；它也无法替你完成配对——那需要电脑上的同意和这里的数字核对。
           </Text>
         </ScrollView>

@@ -50,7 +50,7 @@ export function AccountComputers(props: {
     return (
       <ListGroup header={props.header}>
         <ListRow
-          title="用 Huli Cloud 账号登录"
+          title="用 Kite Cloud 账号登录"
           subtitle="登录后列出账号里的电脑，点一下就能添加，不用扫码。"
           icon="person"
           plainIcon
@@ -86,7 +86,7 @@ export function AccountComputers(props: {
       {rows.length === 0 ? (
         <ListRow
           title="账号里还没有电脑"
-          subtitle="在电脑上的 Huli 里登录 Huli Cloud，并在「远程访问」里开着中转。"
+          subtitle="在电脑上的纸鸢里登录 Kite Cloud，并在「远程访问」里开着中转。"
         />
       ) : (
         rows.map(({ computer, paired }) => (

@@ -23,8 +23,8 @@ import { ListGroup, ListRow } from '../../ui/ListRow'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 
 const KIND_TEXT: Record<DeviceKind, string> = {
-  desktop: 'Huli 桌面端',
-  daemon: 'Huli 命令行',
+  desktop: '纸鸢桌面端',
+  daemon: '纸鸢命令行',
   web: '网页版',
   mobile: '手机',
   other: '其他',
@@ -76,7 +76,7 @@ export default function AccountSettings() {
         <View style={[styles.hero, { backgroundColor: c.surface, borderColor: c.border }]}>
           <HuliIcon size={56} />
           <View style={styles.flex}>
-            <Text style={[typeScale.headline, { color: c.text }]}>Huli Cloud 账号</Text>
+            <Text style={[typeScale.headline, { color: c.text }]}>Kite Cloud 账号</Text>
             <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
               {cloud.state === 'signed-out' && cloud.reason === 'revoked'
                 ? '这台手机已在别处退出登录。重新登录后，才能经中转连接电脑、看到账号里的电脑。'
@@ -86,14 +86,14 @@ export default function AccountSettings() {
         </View>
         {error ? <GroupNote tone="error">{error}</GroupNote> : null}
         <Button
-          label={cloud.state === 'signing-in' ? '正在登录…' : '登录 Huli Cloud'}
+          label={cloud.state === 'signing-in' ? '正在登录…' : '登录 Kite Cloud'}
           tone="primary"
           wide
           busy={cloud.state === 'signing-in'}
           onPress={() => void startSignIn()}
         />
         <Text style={[typeScale.footnote, styles.note, { color: c.textTertiary }]}>
-          登录在系统的登录页里完成，Huli 看不到你的密码。登录凭据只存在这台 iPhone
+          登录在系统的登录页里完成，纸鸢看不到你的密码。登录凭据只存在这台 iPhone
           的钥匙串里，不会同步到别的设备。
         </Text>
       </ManagePage>
@@ -128,7 +128,7 @@ export default function AccountSettings() {
 
   const leave = async () => {
     const ok = await confirm({
-      title: '退出 Huli Cloud？',
+      title: '退出 Kite Cloud？',
       message: '这台 iPhone 不再经中转连接电脑；局域网和 Tailscale 照常。已配对的电脑都会留着。',
       confirm: '退出登录',
     })
@@ -144,7 +144,7 @@ export default function AccountSettings() {
             {account.name ?? account.email}
           </Text>
           <Text style={[typeScale.footnote, { color: c.textSecondary }]} numberOfLines={1}>
-            {account.name ? account.email : 'Huli Cloud 账号'}
+            {account.name ? account.email : 'Kite Cloud 账号'}
           </Text>
         </View>
       </View>
@@ -176,7 +176,7 @@ export default function AccountSettings() {
       ) : null}
 
       {devices ? (
-        <ListGroup header="其他设备" footer="登录了这个账号的手机、浏览器和电脑上的 Huli。">
+        <ListGroup header="其他设备" footer="登录了这个账号的手机、浏览器和电脑上的纸鸢。">
           {others.length === 0 ? (
             <ListRow title="没有其他设备" />
           ) : (
