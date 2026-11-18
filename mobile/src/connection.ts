@@ -3,6 +3,8 @@
 // through Huli Cloud's relay (relay.ts) when no direct address answers.
 
 import { AppState } from 'react-native'
+import * as Application from 'expo-application'
+import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import { generateKeyPair, importKeyPair, type KeyPair } from '@shared/remote/noise'
 import { hello, HostLink, type LinkRoute } from '@shared/remote/link'
@@ -29,7 +31,9 @@ import {
   type SavedHost,
 } from './store'
 
-export const APP_VERSION = '0.1.0'
+/** This build's version, which the release run gives the phone and the desktop alike. */
+export const APP_VERSION =
+  Constants.expoConfig?.version || Application.nativeApplicationVersion || '0.1.0'
 
 const CLIENT = {
   kind: 'ios',

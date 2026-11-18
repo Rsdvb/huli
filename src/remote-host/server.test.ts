@@ -231,6 +231,7 @@ describe('a paired device', () => {
     })
     expect(t.server.online()).toEqual([t.phone.id])
     expect(t.devices.get(t.phone.id)!.lastConnectedAt).not.toBeNull()
+    expect(t.devices.get(t.phone.id)!.version).toBe('1.0.0')
 
     const session = await device.port.request('sessions.create', {
       agentId: 'fake-agent',

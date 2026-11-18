@@ -4,6 +4,7 @@ import {
   type DeviceChangeFailure,
   type PairedDevice,
 } from '@shared/remote/device'
+import { isOlderApp } from '@shared/remote/app-version'
 import { removalAt, UNSEEN_NOTICE_DAYS } from '@shared/remote/status'
 import type { SystemLogoName } from '@renderer/components/system-logo'
 import { clockTime, daysBefore, monthDay } from '@renderer/lib/format'
@@ -25,6 +26,15 @@ export function deviceLine(t: TFunction<'settings'>, device: Device): string {
   return [kindLabel(t, device.kind), device.model, platformName(device.platform)]
     .filter(Boolean)
     .join(' · ')
+}
+
+/** The app version of a device older than its host's, which its row and page note; else null. */
+export function olderDeviceVersion(
+  device: Pick<PairedDevice, 'version'>,
+  hostVersion: string | undefined,
+): string | null {
+  const { version } = device
+  return version && hostVersion && isOlderApp(version, hostVersion) ? version : null
 }
 
 /** A trimmed rename that fits, or null when the draft is empty, unchanged or too long. */

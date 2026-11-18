@@ -1697,6 +1697,8 @@
       "lastConnected": "Last connected",
       "onlineSince": "Online now, connected at {{time}}",
       "never": "Never",
+      "version": "Kettu version",
+      "oldApp": "Kettu on this device is an older version ({{version}}), so some features won’t work. Update it on the device.",
       "activity": "Activity",
       "days": "Last 30 days",
       "activityNote": "Only what happened is kept, never content, commands or addresses; at most 500 events.",

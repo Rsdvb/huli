@@ -1677,6 +1677,8 @@
       "lastConnected": "上次连接",
       "onlineSince": "现在在线，{{time}} 连上",
       "never": "还没连接过",
+      "version": "Kettu 版本",
+      "oldApp": "这台设备上的 Kettu 是旧版（{{version}}），部分功能用不了。请在设备上更新。",
       "activity": "活动记录",
       "days": "最近 30 天",
       "activityNote": "只记做了什么，不记内容、命令和地址；最多留 500 条。",
