@@ -1,6 +1,7 @@
-// The sixteen browser tools of the `kettu` MCP server: what agents are told, the schemas, the
+// The seventeen browser tools of the `kettu` MCP server: what agents are told, the schemas, the
 // checks, and the forwarding to main, which drives the calling session's page.
 
+import { isAbsolute } from 'node:path'
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
 import type {
   BrowserCallAnswer,
@@ -12,6 +13,8 @@ import {
   BROWSER_TAB_ACTIONS,
   BROWSER_TOOL_NAMES,
   MAX_SESSION_TABS,
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_FILES,
   ORIGIN_WAIT_MS,
 } from '@shared/browser'
 import { CONTROL_STEPS, CONTROL_WAIT_MS, isControlStep } from '@shared/control'
@@ -28,6 +31,7 @@ const MAX_TEXT_CHARS = 20_000
 const MAX_SCRIPT_CHARS = 20_000
 const MAX_VALUES = 50
 const MAX_REASON_CHARS = 500
+const MAX_PATH_CHARS = 4_096
 
 export type BrowserToolDeps = {
   /** Runs a call on main, which drives the session's page; `caller` is the calling session. */
@@ -412,6 +416,36 @@ export const BROWSER_TOOLS: Tool[] = [
     outputSchema: output({ tabs: { type: 'array', items: TAB } }),
     annotations: { openWorldHint: false },
   },
+  {
+    name: 'browser_upload_file',
+    title: 'Upload file',
+    description:
+      'Puts files from this computer into a file input on the page: the file chooser your last ' +
+      'action opened (click the page’s upload button first), or the file input a snapshot ref ' +
+      `names. Give absolute paths of existing files, at most ${MAX_UPLOAD_FILES} and ` +
+      `${MAX_UPLOAD_BYTES / 1024 / 1024} MB in all. The user is asked every time, on the page, ` +
+      'whether these files may go to this site; nothing is uploaded unless they allow it, and ' +
+      'a refusal or no answer fails with not_allowed. Returns the page with a snapshot.',
+    inputSchema: object(
+      {
+        paths: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_UPLOAD_FILES,
+          items: { type: 'string', maxLength: MAX_PATH_CHARS },
+          description: 'Absolute paths of the files.',
+        },
+        ref: {
+          ...REF,
+          description: 'A file input from the snapshot; the open chooser by default.',
+        },
+        element: ELEMENT,
+      },
+      ['paths'],
+    ),
+    outputSchema: output(PAGE),
+    annotations: { openWorldHint: true },
+  },
 ]
 
 const NAMES = new Set<string>(BROWSER_TOOL_NAMES)
@@ -465,6 +499,7 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_evaluate: ['function', 'ref'],
     browser_ask_user: ['step', 'reason'],
     browser_tabs: ['action', 'index'],
+    browser_upload_file: ['paths', 'ref', 'element'],
   }
   for (const key of Object.keys(o)) {
     if (!allowed[name].includes(key)) throw invalid(`Unknown argument ${key}.`)
@@ -621,6 +656,25 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
       }
       break
     }
+    case 'browser_upload_file': {
+      // Main checks the files themselves; this keeps a malformed call from reaching it.
+      if (!Array.isArray(o.paths) || o.paths.length === 0 || o.paths.length > MAX_UPLOAD_FILES) {
+        throw invalid(`paths must list 1 to ${MAX_UPLOAD_FILES} files.`)
+      }
+      for (const path of o.paths) {
+        if (typeof path !== 'string' || path.length === 0 || path.length > MAX_PATH_CHARS) {
+          throw invalid('Each path must be text.')
+        }
+        if (!isAbsolute(path)) {
+          throw invalid(`${JSON.stringify(path)} is not an absolute path.`)
+        }
+      }
+      args.paths = o.paths
+      const element = ref(false)
+      if (element !== undefined) args.ref = element
+      if (o.element !== undefined) args.element = text('element', false, 200)
+      break
+    }
     case 'browser_evaluate': {
       const source = text('function', true, MAX_SCRIPT_CHARS)!
       if (source.trim() === '') throw invalid('function must be JavaScript.')
@@ -638,7 +692,9 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
 /** How long a call may take, by the tool and its arguments. */
 export function timeoutFor(tool: BrowserToolName, args: Args): number {
   // It returns once the user answers, or to be called again before the harness's own limit.
-  if (tool === 'browser_ask_user') return CONTROL_WAIT_MS + WAIT_EXTRA_MS
+  if (tool === 'browser_ask_user' || tool === 'browser_upload_file') {
+    return CONTROL_WAIT_MS + WAIT_EXTRA_MS
+  }
   // Selecting a released tab loads its page again.
   if (
     tool === 'browser_navigate' ||

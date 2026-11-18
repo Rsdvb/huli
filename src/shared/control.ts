@@ -400,9 +400,19 @@ export const OVERLAY_PILL_ROOM = 12
 /** The pill's gap from the surface's bottom edge, in the overlay's CSS pixels. */
 export const OVERLAY_PILL_BOTTOM = 14
 
+/** Files an agent wants to put into the page, which the user allows or refuses on the overlay. */
+export interface UploadConsent {
+  id: number
+  /** The page's site, as the question names it. */
+  site: string
+  files: { name: string; size: number }[]
+}
+
 /** What main tells the overlay's page. */
 export type ControlOverlayEvent =
   | { type: 'state'; state: ControlOverlayState }
+  /** The upload waiting for the user's answer on this surface, or null once none waits. */
+  | { type: 'consent'; consent: UploadConsent | null }
   /** The agent acts: at a point, which its pointer glides to, or on the surface as a whole. */
   | { type: 'act'; at: ControlPoint | null; click: boolean }
   /** The user's input reached the surface itself and was held back there. */
@@ -418,6 +428,8 @@ export type ControlOverlayRequest =
   | { type: 'wheel'; x: number; y: number; deltaX: number; deltaY: number }
   /** The pill's box with its shadow's room, in CSS pixels, for the `pill` layout's bounds. */
   | { type: 'pill'; width: number; height: number }
+  /** The user's Allow or Deny on the upload `id`. */
+  | { type: 'consent'; id: number; allow: boolean }
 
 const MAX_WHEEL = 10_000
 const MAX_EDGE = 100_000
@@ -451,6 +463,10 @@ export function parseOverlayRequest(value: unknown): ControlOverlayRequest | nul
       if (!finite('width', MAX_EDGE) || !finite('height', MAX_EDGE)) return null
       if ((request.width as number) <= 0 || (request.height as number) <= 0) return null
       return { type: 'pill', width: request.width as number, height: request.height as number }
+    case 'consent':
+      if (!Number.isSafeInteger(request.id) || (request.id as number) < 1) return null
+      if (typeof request.allow !== 'boolean') return null
+      return { type: 'consent', id: request.id as number, allow: request.allow }
     default:
       return null
   }

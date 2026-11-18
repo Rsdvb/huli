@@ -3,14 +3,21 @@
 // real input event, so a framework that listens for one behaves as it would for the user.
 
 import type { WebContents } from 'electron'
-import { siteOf, type BrowserCallResult, type BrowserToolName } from '@shared/browser'
+import {
+  siteOf,
+  type BrowserCallResult,
+  type BrowserToolName,
+  type UploadAnswer,
+} from '@shared/browser'
 import {
   ControlWait,
   isControlStep,
   type ControlWaitOptions,
   type SurfaceControls,
+  type UploadConsent,
 } from '@shared/control'
 import { isNeverOpened } from './policy'
+import { UploadRefused, type UploadFile } from './upload'
 
 /** The outline an agent reads, before its "… N more lines" marker. */
 export const MAX_SNAPSHOT_LINES = 2_000
@@ -31,8 +38,8 @@ const POLL_MS = 50
 
 /** What an action that opened a file chooser adds to its result. */
 const CHOOSER_OPENED =
-  'It opened a file chooser, which the browser does not show while you use the page. To pick ' +
-  'files, ask the user with browser_ask_user to choose them.'
+  'It opened a file chooser, which waits for files: give them with browser_upload_file, which ' +
+  'asks the user first.'
 
 /** A refused call, with the code an agent reads and text that says what to do. */
 export class ToolFailure extends Error {
@@ -75,6 +82,17 @@ export interface BrowserCdpDeps {
   /** The agent acts on the page, at a point for a click or a field, for its pointer and light. */
   acted?(sessionId: string, at: { x: number; y: number } | null, click: boolean): void
   log(level: 'warn' | 'error', message: string): void
+  /** The files a `browser_upload_file` call names, checked; UploadRefused for any other. */
+  uploadFiles(paths: unknown): Promise<UploadFile[]>
+  /**
+   * Asks the user whether the files may go into the session's page at `site`, and settles with
+   * their answer, or `timeout` at the call's deadline.
+   */
+  askUpload(
+    sessionId: string,
+    ask: Omit<UploadConsent, 'id'>,
+    wait: ControlWaitOptions,
+  ): Promise<UploadAnswer>
 }
 
 interface ConsoleMessage {
@@ -717,6 +735,8 @@ export class BrowserCdp {
         return this.evaluate(sessionId, args)
       case 'browser_tabs':
         return this.deps.tabs(sessionId, args)
+      case 'browser_upload_file':
+        return this.upload(sessionId, args)
       case 'browser_ask_user':
         throw new ToolFailure('invalid', 'browser_ask_user does not run as a page action.')
     }
@@ -1438,6 +1458,112 @@ export class BrowserCdp {
       page,
       `Selected ${values.map((value) => JSON.stringify(value)).join(', ')} in ${describe(args, 'the element')}.`,
     )
+  }
+
+  /**
+   * Puts local files into a file input: the one a ref names, or the chooser the agent's last
+   * action opened. The user is asked every time, on the page, with the files' names and the
+   * page's site; without their Allow nothing reaches the page.
+   */
+  private async upload(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const page = this.pageOf(sessionId)
+    const contents = this.contentsOf(sessionId)
+    const site = siteOf(contents.getURL())
+    if (!site) {
+      throw new ToolFailure('invalid', 'Files go only into a web page. Open one first.')
+    }
+    let files: UploadFile[]
+    try {
+      files = await this.deps.uploadFiles(args.paths)
+    } catch (error) {
+      if (error instanceof UploadRefused) throw new ToolFailure('invalid', error.message)
+      throw error
+    }
+    const target = await this.uploadTarget(sessionId, page, args)
+    if (files.length > 1 && !target.multiple) {
+      throw new ToolFailure(
+        'invalid',
+        `${describe(args, 'The file input')} takes one file. Give one path.`,
+      )
+    }
+    const wait = this.waits.get(sessionId)
+    if (!wait) throw new ToolFailure('stopped', 'The call ended before the user was asked.')
+    const nav = page.nav
+    const names = files.map((file) => JSON.stringify(file.name)).join(', ')
+    this.deps.acted?.(sessionId, null, false)
+    const answer = await this.deps.askUpload(
+      sessionId,
+      { site, files: files.map(({ name, size }) => ({ name, size })) },
+      wait,
+    )
+    if (answer !== 'allow') {
+      throw new ToolFailure(
+        'not_allowed',
+        answer === 'deny'
+          ? `The user did not allow uploading ${names} to ${site}. Nothing was uploaded; do not ask again unless they say so.`
+          : `The user did not answer whether to upload ${names} to ${site}, so nothing was uploaded.`,
+      )
+    }
+    // The answer was for this document; one the page moved to while the user read it gets none.
+    await this.gate(sessionId)
+    if (page.nav !== nav || siteOf(contents.getURL()) !== site) {
+      throw new ToolFailure(
+        'not_allowed',
+        'The page changed while the user was asked, so nothing was uploaded.',
+      )
+    }
+    await this.send(sessionId, 'DOM.setFileInputFiles', {
+      files: files.map((file) => file.path),
+      backendNodeId: target.backend,
+    })
+    if (page.chooser?.backend === target.backend) page.chooser = null
+    return this.afterAction(
+      sessionId,
+      page,
+      `Uploaded ${names} into ${describe(args, 'the file chooser')}.`,
+    )
+  }
+
+  /** The file input an upload goes to, and whether it takes several files. */
+  private async uploadTarget(
+    sessionId: string,
+    page: PageState,
+    args: Record<string, unknown>,
+  ): Promise<{ backend: number; multiple: boolean }> {
+    if (args.ref === undefined) {
+      const chooser = page.chooser
+      if (!chooser || chooser.nav !== page.nav) {
+        throw new ToolFailure(
+          'invalid',
+          'No file chooser is open. Click the page’s upload button with browser_click first, ' +
+            'or give the ref of a file input from the snapshot.',
+        )
+      }
+      return { backend: chooser.backend, multiple: chooser.multiple }
+    }
+    const backend = this.resolveRef(page, String(args.ref))
+    const input = await this.onElement<{ file: boolean; multiple: boolean; disabled: boolean }>(
+      sessionId,
+      backend,
+      `function () {
+        const file = String(this.localName).toLowerCase() === 'input' && this.type === 'file'
+        return { file, multiple: file && this.multiple, disabled: file && this.disabled }
+      }`,
+    )
+    if (!input?.file) {
+      throw new ToolFailure(
+        'invalid',
+        `${describe(args, 'The element')} is not a file input. Click the page’s upload button ` +
+          'with browser_click, then call browser_upload_file without a ref.',
+      )
+    }
+    if (input.disabled) {
+      throw new ToolFailure('invalid', `${describe(args, 'The file input')} is disabled.`)
+    }
+    return { backend, multiple: input.multiple }
   }
 
   private async screenshot(

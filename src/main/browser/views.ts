@@ -13,6 +13,7 @@ import {
   type BrowserOriginDecision,
   type BrowserState,
   type BrowserTab,
+  type UploadAnswer,
 } from '@shared/browser'
 import {
   IDLE_CONTROL,
@@ -20,6 +21,7 @@ import {
   type ControlOverlayRequest,
   type ControlPoint,
   type SurfaceControl,
+  type UploadConsent,
 } from '@shared/control'
 import type { SettingsFile } from '@shared/settings'
 import type { ThemesState } from '@shared/themes'
@@ -162,6 +164,8 @@ export interface BrowserViewsDeps {
   ended?(sessionId: string): void
   /** A page opened a site, and later named its icons, which links in replies show. */
   siteOpened?(pageUrl: string, favicons?: string[]): void
+  /** An upload waits for the user's answer on the overlay: the pane should show the page. */
+  uploadAsked?(sessionId: string): void
   /** How long a new origin waits for the user; set only by tests, which cannot wait 2 minutes. */
   originWaitMs?: number
 }
@@ -186,6 +190,12 @@ export class BrowserViews {
   private overlayLeave: ReturnType<typeof setTimeout> | null = null
   /** Lets the overlay's page go once no turn has used a page for a while. */
   private overlayDrop: ReturnType<typeof setTimeout> | null = null
+  /** The upload each session's agent waits on the user's answer for, at most one each. */
+  private readonly consents = new Map<
+    string,
+    { consent: UploadConsent; settle: (answer: UploadAnswer) => void }
+  >()
+  private nextConsent = 1
 
   constructor(private readonly deps: BrowserViewsDeps) {
     this.policy = new BrowserPolicy(this.browserSession, {
@@ -209,6 +219,7 @@ export class BrowserViews {
       zoom: () => deps.settings?.().appearance.zoom ?? 1,
       request: (sessionId, request) => {
         if (request.type === 'wheel') this.wheel(sessionId, request)
+        else if (request.type === 'consent') this.answerUpload(sessionId, request.id, request.allow)
         else deps.overlayRequest?.(sessionId, request)
       },
       key: (sessionId, input) => this.appKey(sessionId, input),
@@ -241,6 +252,47 @@ export class BrowserViews {
   /** The pane's or the card's answer to a new origin; both show the one request. */
   answerOrigin(sessionId: string, requestId: number, decision: BrowserOriginDecision): void {
     this.origins.answer(sessionId, requestId, decision)
+  }
+
+  /**
+   * Asks the user, on the overlay over the agent's tab, whether files may be uploaded into its
+   * page, and settles with their answer: `timeout` at `deadline`, and `deny` when the turn ends,
+   * the browser goes or a newer question replaces it. Only Allow lets a file through.
+   */
+  askUpload(
+    sessionId: string,
+    ask: Omit<UploadConsent, 'id'>,
+    deadline: number,
+  ): Promise<UploadAnswer> {
+    this.consents.get(sessionId)?.settle('deny')
+    const consent: UploadConsent = { id: this.nextConsent++, ...ask }
+    return new Promise<UploadAnswer>((resolve) => {
+      const settle = (answer: UploadAnswer): void => {
+        clearTimeout(timer)
+        if (this.consents.get(sessionId)?.consent !== consent) return
+        this.consents.delete(sessionId)
+        this.sendConsent()
+        resolve(answer)
+      }
+      const timer = setTimeout(() => settle('timeout'), Math.max(0, deadline - Date.now()))
+      this.consents.set(sessionId, { consent, settle })
+      this.sendConsent()
+      if (this.overlay.sessionId !== sessionId) this.deps.uploadAsked?.(sessionId)
+    })
+  }
+
+  /** The overlay's Allow or Deny; only the question that waits now takes it. */
+  private answerUpload(sessionId: string, id: number, allow: boolean): void {
+    const waiting = this.consents.get(sessionId)
+    if (waiting?.consent.id !== id) return
+    waiting.settle(allow ? 'allow' : 'deny')
+  }
+
+  /** Tells the overlay the question of the session it covers, or that none waits. */
+  private sendConsent(): void {
+    const sessionId = this.overlay.sessionId
+    const consent = sessionId === null ? null : (this.consents.get(sessionId)?.consent ?? null)
+    this.overlay.send({ type: 'consent', consent })
   }
 
   /** Settings' always-allowed sites, and what its Remove takes away. */
@@ -292,6 +344,7 @@ export class BrowserViews {
     if (!browser) return
     for (const tab of this.tabsOf(browser)) this.dropTab(tab)
     browser.strip.clear()
+    this.consents.get(sessionId)?.settle('deny')
     this.origins.close(sessionId)
     this.emit(browser)
     this.deps.ended?.(sessionId)
@@ -567,6 +620,7 @@ export class BrowserViews {
     for (const [sessionId, browser] of this.browsers) {
       if (live.has(sessionId)) continue
       for (const tab of this.tabsOf(browser)) this.dropTab(tab)
+      this.consents.get(sessionId)?.settle('deny')
       this.origins.close(sessionId)
       this.browsers.delete(sessionId)
       this.deps.ended?.(sessionId)
@@ -1334,6 +1388,7 @@ export class BrowserViews {
         layout: control.kind === 'agent' ? 'full' : 'pill',
         radius: at.radius,
       })
+      this.sendConsent()
       return
     }
     if (this.overlay.sessionId === null) return
@@ -1422,6 +1477,10 @@ export class BrowserViews {
 
   /** Who uses a session's browser changed: its state goes out again, and the overlay follows. */
   controlChanged(sessionId: string): void {
+    // A question outlives no turn: once nothing uses the page, nobody waits for its answer.
+    if ((this.deps.control?.(sessionId) ?? IDLE_CONTROL).kind === 'idle') {
+      this.consents.get(sessionId)?.settle('deny')
+    }
     const browser = this.browsers.get(sessionId)
     if (browser) this.emit(browser)
     this.syncOverlay()

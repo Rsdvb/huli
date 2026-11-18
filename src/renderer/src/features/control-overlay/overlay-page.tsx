@@ -15,11 +15,13 @@ import {
   type ControlOverlayApi,
   type ControlOverlayState,
   type ControlPoint,
+  type UploadConsent,
 } from '@shared/control'
 import { ControlPointer } from '@renderer/components/control/control-pointer'
 import { HeldBubble } from '@renderer/components/control/held-bubble'
 import { SurfaceLight } from '@renderer/components/control/surface-light'
 import { SurfacePill } from '@renderer/components/control/surface-pill'
+import { UploadConsentCard } from '@renderer/components/control/upload-consent'
 import { useSettingsStore } from '@renderer/stores/settings'
 
 const overlay = (window.kettu as unknown as ControlOverlayApi).overlay
@@ -63,6 +65,7 @@ function OverlayPage() {
   const [bubble, setBubble] = useState<Bubble | null>(null)
   const [clicks, setClicks] = useState<{ id: number; at: ControlPoint }[]>([])
   const [nudge, setNudge] = useState(0)
+  const [consent, setConsent] = useState<UploadConsent | null>(null)
   const current = useRef<ControlOverlayState | null>(null)
   const sequence = useRef(0)
   const bubbleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -97,6 +100,10 @@ function OverlayPage() {
         }
         return
       }
+      if (event.type === 'consent') {
+        setConsent(event.consent)
+        return
+      }
       if (event.type === 'act') {
         const { at, click } = event
         setAct((last) => ({ count: last.count + 1, at }))
@@ -115,6 +122,7 @@ function OverlayPage() {
       if (event.repeat || event.key === 'Tab') return
       const button = event.target instanceof HTMLButtonElement
       if (button && (event.key === 'Enter' || event.key === ' ')) return
+      if (event.target instanceof Element && event.target.closest('.ctl-consent')) return
       held(null)
     }
     window.addEventListener('keydown', onKey)
@@ -178,7 +186,7 @@ function OverlayPage() {
       style={{ '--surface-width': `${state.width}px` } as CSSProperties}
       onPointerDown={(event) => {
         if (!agentState || event.button !== 0) return
-        if ((event.target as Element).closest('.ctl-pill-nudge, .ctl-bubble')) return
+        if ((event.target as Element).closest('.ctl-pill-nudge, .ctl-bubble, .ctl-consent')) return
         held({ x: event.clientX, y: event.clientY })
       }}
       onWheel={full ? onWheel : undefined}
@@ -202,6 +210,14 @@ function OverlayPage() {
             onAnimationEnd={() => setClicks((list) => list.filter((c) => c.id !== click.id))}
           />
         ))}
+      {full && consent && (
+        <UploadConsentCard
+          key={consent.id}
+          consent={consent}
+          agentName={agentName}
+          onAnswer={(allow) => overlay.request({ type: 'consent', id: consent.id, allow })}
+        />
+      )}
       {agentState && bubble && (
         <HeldBubble
           key={bubble.id}
