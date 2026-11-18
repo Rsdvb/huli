@@ -778,7 +778,7 @@ export default function SessionScreen() {
         working={working}
         pending={outbox}
         fromParent={summary?.origin === 'user' && !!summary.parentId}
-        paddingBottom={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0)}
+        paddingTop={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0)}
       />
     )
     // The rows' file references open the folder's files.

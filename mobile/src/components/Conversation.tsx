@@ -1,19 +1,24 @@
-// A session's conversation: its rows, newest at the bottom, in an inverted list that keeps its
-// place as rows come in and reads older pages as it nears the top, with the way back down once it
-// is scrolled up. It alone follows every patch of the thread; the session screen around it reads
-// only the parts it shows, so a token streaming in redraws this list and not the composer.
+// A session's conversation: its rows, oldest first and newest at the bottom, where it opens. It
+// stays at the bottom while the newest row grows, if the reader is there; keeps its place when
+// older pages come in at the top or a row above changes height; reads older pages as it nears the
+// top; and shows the way back down once it is scrolled up. It alone follows every patch of the
+// thread; the session screen around it reads only the parts it shows, so a token streaming in
+// redraws this list and not the composer.
+//
+// Legend List draws it rather than an inverted FlatList: it measures rows of any height as they
+// come into view, anchors the view on a row when the rows above it change, and follows the end on
+// its own, so no row is laid out twice nor the list flipped. Rows are not recycled between items:
+// cards keep drafts and open parts in state of their own, which must not pass to another row.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
   ActivityIndicator,
-  FlatList,
-  Platform,
   StyleSheet,
   View,
-  type ListRenderItem,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native'
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native'
 import type { ThreadState } from '@shared/thread'
 import { useThreadSelector, type ThreadView } from '../thread'
 import { countRender } from '../ui/renders'
@@ -27,11 +32,26 @@ import { ThreadRow } from './EntryView'
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
+// A row's height before it is measured, until rows of its kind have been.
+const GUESS = 90
+// How far past the screen rows are drawn ahead of a fling.
+const DRAW_AHEAD = 500
 
 const NO_ROWS: Row[] = []
 const selectThread = (thread: ThreadState | null) => thread
 const rowKey = (row: Row) => row.key
-const renderRow: ListRenderItem<Row> = ({ item }) => <ThreadRow row={item} />
+const renderRow = ({ item }: { item: Row }) => <ThreadRow row={item} />
+
+/** A row's kind: the list guesses a row's height from those of its kind measured so far. */
+function rowType(row: Row): string {
+  return row.type === 'entry' ? row.entry.kind : row.type
+}
+
+/** How far the conversation is scrolled up from its end. */
+function distanceFromEnd(event: NativeSyntheticEvent<NativeScrollEvent>): number {
+  const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+  return contentSize.height - layoutMeasurement.height - contentOffset.y
+}
 
 export function Conversation(props: {
   view: ThreadView
@@ -44,13 +64,14 @@ export function Conversation(props: {
   pending?: ReactElement
   /** With no older page, the sub-session's first line names the session it started from. */
   fromParent: boolean
-  paddingBottom: number
+  /** Room above the oldest row, under the floating header. */
+  paddingTop: number
 }) {
   countRender('Conversation')
   const { c } = useSessionTokens()
   const { view, sessionId: id, running } = props
   const thread = useThreadSelector(view, selectThread)
-  const list = useRef<FlatList<Row>>(null)
+  const list = useRef<LegendListRef>(null)
   const [away, setAway] = useState(false)
   const [fresh, setFresh] = useState(false)
 
@@ -62,7 +83,7 @@ export function Conversation(props: {
   }, [thread, id, running, buildRows])
 
   // New rows while the user reads further up mark the way back down.
-  const newest = rows[0]?.key
+  const newest = rows[rows.length - 1]?.key
   const seenNewest = useRef(newest)
   useEffect(() => {
     if (newest !== seenNewest.current && away) setFresh(true)
@@ -70,44 +91,45 @@ export function Conversation(props: {
   }, [newest, away])
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = event.nativeEvent.contentOffset.y > AWAY
+    const next = distanceFromEnd(event) > AWAY
     setAway((was) => (was === next ? was : next))
     if (!next) setFresh(false)
   }, [])
 
   const toBottom = useCallback(() => {
     haptic.tap()
-    list.current?.scrollToOffset({ offset: 0, animated: true })
+    void list.current?.scrollToEnd({ animated: true })
   }, [])
 
   const contentStyle = useMemo(
-    () => [styles.content, { paddingBottom: props.paddingBottom }],
-    [props.paddingBottom],
+    () => [styles.content, { paddingTop: props.paddingTop }],
+    [props.paddingTop],
   )
 
   return (
     <>
-      <FlatList
+      <LegendList
         ref={list}
-        inverted
         data={rows}
         keyExtractor={rowKey}
         renderItem={renderRow}
-        onEndReached={view.loadOlder}
-        onEndReachedThreshold={0.6}
+        getItemType={rowType}
+        estimatedItemSize={GUESS}
+        drawDistance={DRAW_AHEAD}
+        recycleItems={false}
+        // Opens at the newest row, a short thread sitting at the bottom as a chat does.
+        initialScrollAtEnd
+        alignItemsAtEnd
+        // At the end, it stays there as the reply grows, rows come in and the keyboard opens.
+        maintainScrollAtEnd
+        maintainScrollAtEndThreshold={0.1}
+        // Anywhere else, the rows on screen stay put as pages come in above or rows change.
+        maintainVisibleContentPosition
+        onStartReached={view.loadOlder}
+        onStartReachedThreshold={0.6}
         onScroll={onScroll}
         scrollEventThrottle={64}
         ListHeaderComponent={
-          props.pending ? (
-            <>
-              {props.working}
-              {props.pending}
-            </>
-          ) : (
-            props.working
-          )
-        }
-        ListFooterComponent={
           view.loadingOlder ? (
             <View style={styles.older}>
               <ActivityIndicator size="small" color={c.textTertiary} />
@@ -118,25 +140,27 @@ export function Conversation(props: {
             <View style={styles.end} />
           )
         }
+        ListFooterComponent={
+          props.pending ? (
+            <>
+              {props.working}
+              {props.pending}
+            </>
+          ) : (
+            props.working
+          )
+        }
         contentContainerStyle={contentStyle}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
-        initialNumToRender={14}
-        maxToRenderPerBatch={10}
-        windowSize={11}
-        // Android draws rows far off screen otherwise; iOS clips them itself.
-        removeClippedSubviews={Platform.OS === 'android'}
-        maintainVisibleContentPosition={MAINTAIN}
       />
       <ToBottomButton visible={away} fresh={fresh} onPress={toBottom} />
     </>
   )
 }
 
-const MAINTAIN = { minIndexForVisible: 1, autoscrollToTopThreshold: 40 }
-
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 18, paddingTop: 12 },
+  content: { paddingHorizontal: 18, paddingBottom: 12 },
   older: { paddingVertical: 14, alignItems: 'center' },
   end: { height: 4 },
 })
