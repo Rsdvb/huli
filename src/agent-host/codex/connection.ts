@@ -394,6 +394,9 @@ function threadRecord(
   }
 }
 
+/** How long a list of Codex's models is used before it is read again. */
+const MODELS_MS = 10 * 60_000
+
 const UNKNOWN_SETTINGS: Settings = {
   mode: DEFAULT_MODE,
   collaboration: 'default',
@@ -419,6 +422,9 @@ export class CodexConnection implements AgentConnection {
   /** Subagent threads, to the thread each runs under. */
   private readonly parents = new Map<string, string>()
   private models: Promise<Model[]> | null = null
+  /** When the models were last listed; an older list is read again behind the one in use. */
+  private modelsAt = 0
+  private modelsRefresh: Promise<void> | null = null
   /** The models once listed, which each turn's service tier is read from. */
   private knownModels: Model[] = []
   private initialized = false
@@ -631,26 +637,46 @@ export class CodexConnection implements AgentConnection {
 
   // Sessions.
 
+  /**
+   * Codex's models, listed once and read again in the background once the list is older than
+   * `MODELS_MS`: a plan can gain a model or a speed tier while app-server runs, and only a new
+   * read shows it.
+   */
   private listModels(): Promise<Model[]> {
-    this.models ??= (async () => {
-      const models: Model[] = []
-      let cursor: string | null = null
-      do {
-        const page: ModelListResponse = await this.call<ModelListResponse>('model/list', {
-          cursor,
-          limit: null,
+    if (this.models && !this.modelsRefresh && Date.now() - this.modelsAt > MODELS_MS) {
+      this.modelsRefresh = this.readModels()
+        .then((models) => {
+          this.models = Promise.resolve(models)
         })
-        models.push(...page.data)
-        cursor = page.nextCursor
-      } while (cursor)
-      this.knownModels = models
-      return models
-    })().catch((error: unknown) => {
+        .catch((error: unknown) => {
+          this.hooks.log('warn', `Could not list Codex's models again: ${(error as Error).message}`)
+        })
+        .finally(() => {
+          this.modelsRefresh = null
+        })
+    }
+    this.models ??= this.readModels().catch((error: unknown) => {
       this.models = null
       this.hooks.log('warn', `Could not list Codex's models: ${(error as Error).message}`)
       return []
     })
     return this.models
+  }
+
+  private async readModels(): Promise<Model[]> {
+    this.modelsAt = Date.now()
+    const models: Model[] = []
+    let cursor: string | null = null
+    do {
+      const page: ModelListResponse = await this.call<ModelListResponse>('model/list', {
+        cursor,
+        limit: null,
+      })
+      models.push(...page.data)
+      cursor = page.nextCursor
+    } while (cursor)
+    this.knownModels = models
+    return models
   }
 
   private async record(

@@ -3,7 +3,7 @@
 // limits and sign-in.
 
 import os from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentAccount } from '@shared/agent-host'
 import {
   applyPatches,
@@ -23,7 +23,13 @@ import {
 } from '../connection'
 import { TextRing } from '../ring'
 import { newTurnScope, type MapperEffect } from '../session-updates'
-import { FakeAppServer, FakeRpcError, threadResponse, turn } from '../testing/fake-app-server'
+import {
+  FAKE_MODELS,
+  FakeAppServer,
+  FakeRpcError,
+  threadResponse,
+  turn,
+} from '../testing/fake-app-server'
 import { SIDE_INSTRUCTIONS } from '../side-chat'
 import { CodexConnection } from './connection'
 
@@ -531,6 +537,28 @@ describe('sessions', () => {
 
     await connection.setConfigOption('thread-1', 'fast-mode', false)
     expect((await sendTurn(3)).serviceTier).toBe('default')
+  })
+
+  it('lists Codex’s models again once the list is ten minutes old', async () => {
+    const { server, connection } = await connect()
+    const first = await connection.newSession('/project')
+    const ids = (config: typeof first.config) =>
+      config.find((o) => o.id === 'model')?.choices?.map((c) => c.value)
+    expect(ids(first.config)).toEqual(['gpt-6.1-sol', 'gpt-5.6-luna'])
+    const newer = { ...FAKE_MODELS[0]!, id: 'gpt-6.2-sol', displayName: 'gpt-6.2-sol' }
+    server.on('model/list', () => ({ data: [newer, ...FAKE_MODELS], nextCursor: null }))
+    expect(ids((await connection.newSession('/project')).config)).not.toContain('gpt-6.2-sol')
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 11 * 60_000)
+    try {
+      // The old list serves while the new one is read, which the next session then has.
+      await connection.newSession('/project')
+      await until(() => server.sent('model/list').length === 2)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(ids((await connection.newSession('/project')).config)).toContain('gpt-6.2-sol')
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('refuses a value Codex does not have', async () => {
