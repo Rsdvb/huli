@@ -10,7 +10,7 @@ import {
   RELAY_URL,
   decodeRelayBytes,
   relayOrigin,
-  trustedRelay,
+  underMainDomain,
   verifyRelaySignature,
   type RelayRegion,
 } from './relay'
@@ -157,7 +157,7 @@ export function regionOrigin(url: string, pin: string | null, main: string): str
   const origin = relayOrigin(url)
   if (!origin) return null
   const parsed = URL.parse(origin)!
-  if (pin === null) return trustedRelay(origin, main) ? origin : null
+  if (pin === null) return underMainDomain(origin, main) ? origin : null
   if (parsed.protocol !== 'https:' || !isIpHost(parsed.hostname) || parsed.port === '') return null
   return origin
 }

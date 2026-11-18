@@ -19,7 +19,7 @@ export interface AccountDevicesOptions {
   auth: Pick<Auth, 'authorize'>
   /** Whether a computer is signed in to the relay now. */
   online(id: string): boolean
-  /** A device was signed out: hosts signed in with it leave the relay now. */
+  /** A device was signed out: hosts signed in with it, and its connections, leave the relay now. */
   revoked(): void
   now(): number
   secure: boolean

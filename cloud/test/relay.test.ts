@@ -335,6 +335,75 @@ describe('joining a device to a host', () => {
   })
 })
 
+describe('sockets not signed in', () => {
+  let small: ServerParts
+  let origin: string
+  let smallDir: string
+
+  beforeAll(async () => {
+    smallDir = mkdtempSync(path.join(tmpdir(), 'huli-relay-small-'))
+    const port = await freePort()
+    origin = `http://127.0.0.1:${port}`
+    small = makeServer({ origin, dataDir: smallDir, trustProxy: true }, null, {
+      log: () => {},
+      relayLimits: { maxUnsignedSockets: 3, maxUnsignedSocketsPerAddress: 2 },
+    })
+    small.store.setAccount(parts.store.account!)
+    await new Promise<void>((resolve) => small.server.listen(port, '127.0.0.1', resolve))
+  })
+
+  afterAll(() => {
+    small.relay.close()
+    small.server.close()
+    rmSync(smallDir, { recursive: true, force: true })
+  })
+
+  it('have a cap of their own, in all and from one address, apart from signed-in hosts', async () => {
+    const { WebSocket: Ws } = await import('ws')
+    // A host signed in takes none of their room.
+    const key = await importRelayKey(await newRelaySeed())
+    const id = await relayHostId(key.publicKey)
+    const signedHost = new RelayHost({
+      main: origin,
+      id,
+      key,
+      openSocket,
+      fetchInfo,
+      accepted: () => {},
+      profile: () => null,
+      changed: () => {},
+      log: () => {},
+    })
+    signedHost.setToken(small.store.issue('kettu-desktop', INFO).access_token)
+    signedHost.start()
+    await expect.poll(() => signedHost.status[0]?.connection.state).toBe('connected')
+    const opened: InstanceType<typeof Ws>[] = []
+    const open = (address: string): Promise<'challenged' | number> => {
+      const socket = new Ws(relaySocketUrl(origin, hostSocketPath(id)), {
+        headers: { 'x-real-ip': address },
+      })
+      opened.push(socket)
+      return new Promise((resolve) => {
+        socket.once('message', () => resolve('challenged'))
+        socket.once('close', (code) => resolve(code))
+      })
+    }
+    expect(await open('198.51.100.1')).toBe('challenged')
+    expect(await open('198.51.100.1')).toBe('challenged')
+    expect(await open('198.51.100.1')).toBe(RELAY_CLOSE.tooMany)
+    expect(await open('198.51.100.2')).toBe('challenged')
+    expect(await open('198.51.100.3')).toBe(RELAY_CLOSE.tooMany)
+    expect(signedHost.status[0]?.connection.state).toBe('connected')
+    for (const socket of opened) socket.close()
+    await expect.poll(() => small.relay.counts().sockets).toBe(1)
+    expect(await open('198.51.100.3')).toBe('challenged')
+    for (const socket of opened) socket.close()
+    signedHost.stop()
+    // Gone before the folder is, as the host's leaving is written down.
+    await expect.poll(() => small.relay.counts().sockets).toBe(0)
+  })
+})
+
 describe('hosted clients', () => {
   async function signInPage(clientId: string, redirectUri: string): Promise<Response> {
     const url = new URL('/signin/app/', base)

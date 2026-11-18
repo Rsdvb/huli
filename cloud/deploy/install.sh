@@ -135,7 +135,9 @@ if [ -d /var/www/huli-app ]; then
 fi
 
 # 7. Huli's update files, served under a random path kept in /etc/huli-updates.path, uploaded by
-# the build through the huli-upload user, who may only write into the folder (rrsync).
+# the build through the huli-upload user, who may only write into the folder (rrsync). Its key
+# comes from the deploy folder as huli_upload.pub, only when that folder and the file are root's or
+# the deploying user's and nobody else may write the folder: a fixed name in /tmp is anyone's.
 updates_location=''
 if [ -s /etc/huli-updates.path ]; then
   segment="$(tr -cd 'a-f0-9' </etc/huli-updates.path)"
@@ -143,12 +145,30 @@ if [ -s /etc/huli-updates.path ]; then
     useradd --system --create-home --home-dir /var/lib/huli-upload --shell /bin/sh huli-upload
   install -d -o huli-upload -g huli-upload -m 755 /var/www/huli-updates
   install -d -o huli-upload -g huli-upload -m 700 /var/lib/huli-upload/.ssh
-  if [ -s /tmp/huli_upload.pub ]; then
-    printf 'restrict,command="/usr/bin/rrsync -wo /var/www/huli-updates" %s\n' \
-      "$(cat /tmp/huli_upload.pub)" >/var/lib/huli-upload/.ssh/authorized_keys
-    chown huli-upload:huli-upload /var/lib/huli-upload/.ssh/authorized_keys
-    chmod 600 /var/lib/huli-upload/.ssh/authorized_keys
-    rm -f /tmp/huli_upload.pub
+  pub="$FROM/huli_upload.pub"
+  if [ -f "$pub" ] && [ ! -L "$pub" ]; then
+    ours() {
+      local owner
+      owner=$(stat -c %U "$1")
+      [ "$owner" = root ] || [ "$owner" = "${SUDO_USER:-root}" ]
+    }
+    key_type='(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com|ssh-rsa)'
+    if ours "$FROM" && ours "$pub" && [ -z "$(find "$FROM" -maxdepth 0 -perm /022)" ] &&
+      [ "$(grep -c '' "$pub")" = 1 ] &&
+      grep -Eq "^$key_type [A-Za-z0-9+/]+={0,3}( [A-Za-z0-9@._+-]*)?\$" "$pub" &&
+      ssh-keygen -l -f "$pub" >/dev/null 2>&1; then
+      # The type and the key alone, after the options that confine it to rrsync in the folder.
+      printf 'restrict,command="/usr/bin/rrsync -wo /var/www/huli-updates" %s huli-upload\n' \
+        "$(cut -d' ' -f1,2 "$pub")" >/var/lib/huli-upload/.ssh/authorized_keys.new
+      chown huli-upload:huli-upload /var/lib/huli-upload/.ssh/authorized_keys.new
+      chmod 600 /var/lib/huli-upload/.ssh/authorized_keys.new
+      mv /var/lib/huli-upload/.ssh/authorized_keys.new /var/lib/huli-upload/.ssh/authorized_keys
+      echo 'huli-upload key replaced'
+    else
+      echo "$pub is not one SSH public key in a folder only root or ${SUDO_USER:-root} writes;" \
+        'the upload key is unchanged' >&2
+    fi
+    rm -f "$pub"
   fi
   # Keeps the five newest versions; latest/ always names one of them.
   cat >/etc/cron.d/huli-updates-prune <<'EOF'
@@ -166,12 +186,17 @@ EOF
     }"
 fi
 
-# 7b. A snapshot of the service's state every night, kept two weeks, readable by the server's admin
-# user so a copy can be pulled off the server. The state is one small file written atomically.
-BACKUP_GROUP="${HULI_BACKUP_GROUP:-ubuntu}"
-install -d -o root -g "$BACKUP_GROUP" -m 750 /var/backups/huli-cloud
-cat >/etc/cron.d/huli-cloud-backup <<EOF
-41 3 * * * root f=/var/backups/huli-cloud/state-\$(date -u +\\%Y\\%m\\%d).json; install -m 640 -g $BACKUP_GROUP /var/lib/huli-cloud/state.json "\$f" && ln -sfn "\$f" /var/backups/huli-cloud/latest.json && find /var/backups/huli-cloud -name 'state-*.json' -mtime +14 -delete
+# 7b. A snapshot of the service's state every night, kept two weeks, root's alone: it holds the
+# account's TOTP secret and password hash, so a copy is pulled off the server with sudo. The state
+# is one small file written atomically. Snapshots an earlier run left readable by a group are
+# closed too.
+install -d -o root -g root -m 700 /var/backups/huli-cloud
+chown root:root /var/backups/huli-cloud
+chmod 700 /var/backups/huli-cloud
+find /var/backups/huli-cloud -maxdepth 1 -type f -name 'state-*.json' \
+  -exec chown root:root {} + -exec chmod 600 {} +
+cat >/etc/cron.d/huli-cloud-backup <<'EOF'
+41 3 * * * root f=/var/backups/huli-cloud/state-$(date -u +\%Y\%m\%d).json; install -m 600 -o root -g root /var/lib/huli-cloud/state.json "$f" && ln -sfn "$f" /var/backups/huli-cloud/latest.json && find /var/backups/huli-cloud -name 'state-*.json' -mtime +14 -delete
 EOF
 
 # 7c. The privacy policy, which TestFlight's external testing asks a link to.
@@ -200,7 +225,26 @@ EOF
 chmod 644 /var/www/huli-static/privacy.html
 
 # 8. nginx sites. The relay's WebSockets (/v1/hosts/...) are upgraded to the service, which pings
-# every socket every 30 s, so two minutes without a frame either way means the peer is gone.
+# every socket every 30 s, so two minutes without a frame either way means the peer is gone. The
+# files before are kept, and put back when nginx refuses the new ones, so that nginx's next reload
+# or restart does not trip on them.
+nginx_files='sites-available/huli-cloud sites-available/huli-app snippets/huli-app-headers.conf
+  sites-enabled/huli-cloud sites-enabled/huli-app'
+nginx_before=$(mktemp -d)
+for f in $nginx_files; do
+  if [ -e "/etc/nginx/$f" ] || [ -L "/etc/nginx/$f" ]; then
+    mkdir -p "$nginx_before/$(dirname "$f")"
+    cp -P -p "/etc/nginx/$f" "$nginx_before/$f"
+  fi
+done
+restore_nginx() {
+  for f in $nginx_files; do
+    rm -f "/etc/nginx/$f"
+    if [ -e "$nginx_before/$f" ] || [ -L "$nginx_before/$f" ]; then
+      cp -P -p "$nginx_before/$f" "/etc/nginx/$f"
+    fi
+  done
+}
 cat >/etc/nginx/sites-available/huli-cloud <<EOF
 map \$http_upgrade \$huli_connection_upgrade {
     default upgrade;
@@ -289,7 +333,13 @@ EOF
   ln -sfn /etc/nginx/sites-available/huli-app /etc/nginx/sites-enabled/huli-app
 fi
 ln -sfn /etc/nginx/sites-available/huli-cloud /etc/nginx/sites-enabled/huli-cloud
-nginx -t
+if ! nginx -t; then
+  restore_nginx
+  rm -rf "$nginx_before"
+  echo 'nginx refused the new sites; the ones before are back and nginx was not reloaded' >&2
+  exit 1
+fi
+rm -rf "$nginx_before"
 systemctl reload nginx
 
 # 9. fail2ban: five failed sign-ins in 15 minutes ban the address for an hour.

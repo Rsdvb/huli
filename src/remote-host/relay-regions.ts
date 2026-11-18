@@ -462,13 +462,24 @@ export class RemoteRegions {
   }
 
   /**
-   * The relays the token in hand may go to: any with a relay token, or while the main relay takes
-   * none; the main relay alone with the access token once it does, or before it said.
+   * The relays the token in hand may go to: with a relay token, the main relay and the regions of
+   * the signed list; any while the main relay takes none; the main relay alone with the access
+   * token once it does, or before it said.
    */
   allowed(urls: string[]): string[] {
-    if (this.options.relayToken() !== null) return urls
+    if (this.options.relayToken() !== null) {
+      const listed = this.listed()
+      return urls.filter((url) => url === this.options.main || listed.includes(url))
+    }
     if (this.features !== null && !this.features.includes(RELAY_TOKENS_FEATURE)) return urls
     return urls.filter((url) => url === this.options.main)
+  }
+
+  /** The origins of the active regions of the signed list this computer holds. */
+  listed(): string[] {
+    return (this.source.list?.regions ?? [])
+      .filter((region) => region.state === 'active')
+      .map((region) => region.url)
   }
 
   /** The relay a session went through says its region drains: tried last for a while. */

@@ -40,23 +40,31 @@ sudo -u huli env HULI_DATA_DIR=/var/lib/huli-cloud node /opt/huli-cloud/huli-clo
 
 ## 接口
 
-| 路径                                               | 作用                                                                                 |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `GET/POST /signin/app/`                            | 浏览器登录（PKCE）：桌面端回本机、网页版回 `HULI_WEB_ORIGIN`、手机回 `huli://signin` |
-| `POST /api/oauth/token`                            | 授权码、刷新（轮换，重放旧令牌整组作废）、设备码                                     |
-| `POST /api/oauth/device`、`GET/POST /device`       | 设备码登录                                                                           |
-| `POST /api/oauth/revoke`                           | 退出登录                                                                             |
-| `GET /api/v1/me`                                   | 账号信息                                                                             |
-| `POST /api/v1/relay/token`                         | 用访问令牌换中转令牌（只能用来连中转，1 小时过期）                                   |
-| `GET /api/v1/account/devices`                      | 账号的已登录设备和电脑（登记表），只认访问令牌（不认中转令牌）                       |
-| `POST /api/v1/account/devices/revoke`              | `device=<id>` 让一台设备退出，`others=1` 让除自己外的都退出；电脑立刻离开中转        |
-| `GET /account/devices/`                            | 已登录设备和电脑，可踢出（踢出后它在中转上的主机立刻或一分钟内下线）                 |
-| `POST /v1/push`                                    | 推送网关                                                                             |
-| `GET /v1`、`/v1/regions`、`/v1/ping`、`/v1/hosts`  | 中转站信息、签名区域列表、测延迟、本账号的主机                                       |
-| `WS /v1/hosts/<id>`、`/connect`、`/accept/<token>` | 中转的 WebSocket：主机控制连接、设备连接、主机接受连接                               |
-| `GET /healthz`                                     | 健康检查                                                                             |
+| 路径                                               | 作用                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `GET/POST /signin/app/`                            | 浏览器登录（PKCE）：桌面端回本机、网页版回 `HULI_WEB_ORIGIN`、手机回 `huli://signin`  |
+| `POST /api/oauth/token`                            | 授权码、刷新（轮换，重放旧令牌整组作废）、设备码                                      |
+| `POST /api/oauth/device`、`GET/POST /device`       | 设备码登录（验证码要手动输入，链接不预填；确认页显示发起的 IP 和时间）                |
+| `POST /api/oauth/revoke`                           | 退出登录                                                                              |
+| `GET /api/v1/me`                                   | 账号信息                                                                              |
+| `POST /api/v1/relay/token`                         | 用访问令牌换中转令牌（只能用来连中转，1 小时过期）                                    |
+| `GET /api/v1/account/devices`                      | 账号的已登录设备和电脑（登记表），只认访问令牌（不认中转令牌）                        |
+| `POST /api/v1/account/devices/revoke`              | `device=<id>` 让一台设备退出，`others=1` 让除自己外的都退出；它在中转上的连接立刻断开 |
+| `GET /account/devices/`                            | 已登录设备和电脑，可踢出（踢出后它在中转上的主机和设备连接立刻断开）                  |
+| `POST /v1/push`                                    | 推送网关（只认电脑的登录，签名的钥匙要和电脑登记表一致）                              |
+| `GET /v1`、`/v1/regions`、`/v1/ping`、`/v1/hosts`  | 中转站信息、签名区域列表、测延迟、本账号的主机                                        |
+| `WS /v1/hosts/<id>`、`/connect`、`/accept/<token>` | 中转的 WebSocket：主机控制连接、设备连接、主机接受连接                                |
+| `GET /healthz`                                     | 健康检查                                                                              |
 
-日志里 `huli-cloud: login failed from <IP>` 给 fail2ban 用。中转只记事件（主机 id 前 8 位上线/下线/被拒、关闭码），不记令牌和转发的内容。
+日志里 `huli-cloud: login failed from <IP>` 给 fail2ban 用。客户端发来的设备名、系统等先去掉控制字符和换行再存、再记日志，伪造不出这一行。出错只记错误类型和调用栈，不记错误消息（可能带令牌）。中转只记事件（主机 id 前 8 位上线/下线/被拒、关闭码），不记令牌和转发的内容。
+
+## 登录的限制
+
+- 每个 IP 15 分钟内 5 次没成功的登录就暂时拒绝（尝试在验证密码之前就记下，成功了再撤回，同时发出的请求绕不过去）；没有全局上限，别人换几个 IP 也锁不住机主。
+- 同时最多验证 2 个密码（scrypt 每次 32 MiB），其余的回 429，过几秒再试。
+- 浏览器登录页每打开一次存一张 10 分钟的票：每个 IP 最多 20 张、总共最多 1000 张，满了挤掉最旧的；等待中的设备码登录总共最多 1000 个。过期的每分钟清一次。
+- 设备码登录：服务不给 `verification_uri_complete`，`/device` 也不从链接里读验证码，要机主自己输入自己电脑上显示的验证码；下一页显示是哪个客户端、从哪个 IP、多久前发起的，并提醒只允许自己刚刚发起的登录。
+- 推送：只认电脑（`kettu-desktop`、`kettu-daemon`）的登录；电脑在登记表里时，签名的 Ed25519 钥匙和登录都要和登记的一致，一次登录登记过电脑后就只能以它的身份推送。没开中转（没登记）的电脑仍只验签名。
 
 ## 中转站（relay）
 
@@ -67,11 +75,13 @@ sudo -u huli env HULI_DATA_DIR=/var/lib/huli-cloud node /opt/huli-cloud/huli-clo
 - 设备（手机、网页、别的电脑）连 `/v1/hosts/<id>/connect`，带同一账号的令牌；中转确认这台主机**在登记表里、属于同一账号、登记它的登录还有效**，才通知主机 `incoming`，主机开 `/accept/<一次性令牌>`，两个连接接在一起。
 - `GET /v1/hosts`（Kettu 客户端的列表）只列在线、接受配对请求的主机；完整的电脑列表（含离线的、最近在线时间）在 `GET /api/v1/account/devices`。
 - 接上之后中转只原样转发二进制消息（Noise 加密过的通道消息，中转看不到明文）；文本消息只认 `ping`，其他一律断开。设备能不能连，主机还会在加密通道里自己判断（配对密钥）。
-- 限制：单条消息 64 KiB（超了 1009 断开两边）、每台主机 16 个设备、登录/连接/接受各 10 秒、全局 512 个连接、单个 IP 64 个连接、每分钟 120 次新连接、同一主机每分钟 10 次登录、15 分钟内 20 次令牌被拒就暂时拒绝该 IP；主机控制连接 90 秒无消息、接通的一对 5 分钟无消息就断；每 30 秒 WebSocket ping，没回就断；转发积压 1 MiB 暂停读取。
+- 限制：单条消息 64 KiB（超了 1009 断开两边）、每台主机 16 个设备、登录/连接/接受各 10 秒、全局 512 个连接、单个 IP 64 个连接、还没登录的连接（主机签名前、设备交令牌前、未配上的接受连接）另有上限：总共 128 个、单个 IP 16 个、每分钟 120 次新连接、同一主机每分钟 10 次登录、15 分钟内 20 次令牌被拒就暂时拒绝该 IP；主机控制连接 90 秒无消息、接通的一对 5 分钟无消息就断；每 30 秒 WebSocket ping，没回就断；转发积压 1 MiB 暂停读取。
 - 浏览器的 `Origin` 只认 `HULI_ORIGIN` 和 `HULI_WEB_ORIGIN`。
-- 主机的令牌每分钟复查一次：所属登录被踢出、或令牌过期超过 5 分钟没续，就以 4401 断开。
+- 主机和设备的令牌每分钟复查一次，踢出设备时立刻复查：主机所属登录被踢出、或令牌过期超过 5 分钟没续，就以 4401 断开；设备（手机、网页、别的电脑）所属登录被踢出，它的连接也以 4401 断开（接通的那一头一起断）。设备只查登录还在不在，不查令牌过期，因为接通后它没法续令牌。
 
 区域列表：只有一个区域 Ashburn（就是主站）。签名私钥只在机主电脑 `%USERPROFILE%\.huli-keys\region-list-{current,next}.pem`，公钥写在 `src/shared/remote/relay-regions.ts` 的 `REGION_KEYS`（r1 现用、r2 备用）。改列表：编辑 `cloud/deploy/regions.json`，运行 `node tools/huli/region-list.mjs sign`（序号自动加 1），提交 `regions.signed.json` 再部署。
+
+客户端（桌面端、手机、网页版）只把账号令牌和中转令牌发给主中转本身（`RELAY_URL`）和签名区域列表里的区域；配对码、welcome 或保存的主机里写的其他地址，哪怕在同一个域名下也不认：sslip.io 的任何 `a-b-c-d.132-145-200-0.sslip.io` 都解析到 a.b.c.d，谁都能起一个指向自己服务器的名字。要加区域，就加进签名列表。
 
 ## 账号、电脑登记表和免扫码配对
 
@@ -115,6 +125,8 @@ powershell -ExecutionPolicy Bypass -File tools\huli\deploy-cloud.ps1 -BuildOnly 
 5. 用现有的 ACME webroot 申请 `app.huli.132-145-200-0.sslip.io` 的证书（80 端口的 default_server 已经提供 `/.well-known/acme-challenge/`）；
 6. nginx：huli 站点加 `location /v1/hosts/`（WebSocket 升级头、读写超时 120 秒、不缓冲）；新站点 `huli-app`（静态文件、CSP 等安全头见 `snippets/huli-app-headers.conf`）；`nginx -t` 后 reload；
 7. 隐私政策页加上中转的说明；最后从服务器上自测 `https://…/healthz`、`/v1`、`/v1/regions` 和网页版首页。
+
+另外：`nginx -t` 不通过时，先把这次改之前的站点文件和 snippet 放回去再退出，nginx 不 reload；每晚 3:41 备份 `state.json` 到 `/var/backups/huli-cloud/`（保留两周），里面有 TOTP 密钥和密码哈希，所以只有 root 能读（文件 600、目录 700），要拷下来用 sudo，以前留下的组可读的备份也在这次改成 600；更新文件上传用户 `huli-upload` 的公钥只从部署目录里的 `huli_upload.pub` 读（目录和文件属于 root 或执行 sudo 的用户、别人不能写，内容只有一行 SSH 公钥），不再读 `/tmp/huli_upload.pub`，写入时仍带 `restrict` 和只能 rrsync 到更新目录的限制。
 
 防火墙 / OCI：**不用改**，只用已经放行的 TCP 443（新证书走已放行的 80）。数据、账号、证书、APNs 都保留。
 

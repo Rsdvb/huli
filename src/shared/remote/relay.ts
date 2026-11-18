@@ -298,11 +298,29 @@ export const acceptSocketPath = (id: string, token: string): string =>
 export const hostsPath = (): string => '/v1/hosts'
 
 /**
- * Whether a relay named by a region list, a pairing code or a welcome is one the account's token
- * may be sent to: the main relay's host, or another host under the same parent domain, over the
- * same scheme. Anything else could take the token.
+ * Whether a relay a pairing code, a welcome or a stored host names is one the account's token may
+ * be sent to: the main relay itself, or one of `listed`, the regions of a signed list that
+ * verified. Anything else could take the token. A name under the main relay's domain is not
+ * enough: under a wildcard DNS name such as sslip.io's, anyone can make one that points at their
+ * own address and get it a certificate.
  */
-export function trustedRelay(origin: string, main: string): boolean {
+export function trustedRelay(
+  origin: string,
+  main: string,
+  listed: readonly string[] = [],
+): boolean {
+  const relay = relayOrigin(origin)
+  const ours = relayOrigin(main)
+  if (!relay || !ours) return false
+  return relay === ours || listed.some((url) => relayOrigin(url) === relay)
+}
+
+/**
+ * Whether a region lies under the main relay's parent domain, over the same scheme: the rule for
+ * the regions of lists only the main relay or a built-in key vouches for, `GET /v1`'s and the
+ * signed list's, never for a relay a code or a welcome names.
+ */
+export function underMainDomain(origin: string, main: string): boolean {
   const relay = URL.parse(origin)
   const ours = URL.parse(main)
   if (!relay || !ours || relay.protocol !== ours.protocol) return false
@@ -313,7 +331,7 @@ export function trustedRelay(origin: string, main: string): boolean {
   return relay.hostname.endsWith(`.${labels.slice(1).join('.')}`)
 }
 
-/** The relays to use, in order: the main one, then each region not the same. */
+/** The relays to use, in order: the main one, then each region `GET /v1` gave not the same. */
 export function relayList(main: string, regions: readonly RelayRegion[]): RelayRegion[] {
   const origin = relayOrigin(main)
   if (!origin) return []
@@ -321,7 +339,7 @@ export function relayList(main: string, regions: readonly RelayRegion[]): RelayR
   const list: RelayRegion[] = [{ id: listed?.id ?? 'main', url: origin }]
   for (const region of regions) {
     const url = relayOrigin(region.url)
-    if (!url || !trustedRelay(url, origin) || list.some((kept) => kept.url === url)) continue
+    if (!url || !underMainDomain(url, origin) || list.some((kept) => kept.url === url)) continue
     list.push({ id: region.id, url })
     if (list.length === MAX_REGIONS) break
   }

@@ -1,6 +1,8 @@
 // The push gateway: POST /v1/push as src/shared/remote/push.ts has hosts send it. It checks the
-// account's access token, the host's Ed25519 signature over the request, the time and that the
-// request is new, then hands the sealed content to Apple. It never sees what a notification says.
+// account's access token, that it is a computer's (the desktop app's or the daemon's, whose remote
+// host alone sends pushes), the host's Ed25519 signature over the request against the computer
+// registry, the time and that the request is new, then hands the sealed content to Apple. It never
+// sees what a notification says.
 //
 // The APNs payloads below are Huli's own contract with its iOS app:
 //   alert:        aps.alert (a placeholder the Notification Service Extension replaces after it
@@ -21,11 +23,18 @@ import {
   type PushRefusal,
   type PushRequest,
 } from '@shared/remote/push'
-import { decodeRelayBytes, relayHostId, verifyRelaySignature } from '@shared/remote/relay'
+import {
+  decodeRelayBytes,
+  encodeRelayBytes,
+  relayHostId,
+  verifyRelaySignature,
+} from '@shared/remote/relay'
+import { HOST_CLIENTS } from '@shared/huli-cloud'
 import type { ApnsMessage, ApnsSender } from './apns'
 import type { Auth } from './auth'
 import { clientAddress, Limiter, readBody, sendJson, TooBig } from './http'
 import { sha256Hex } from './secrets'
+import type { Store } from './store'
 
 const STATUS: Record<PushRefusal, number> = {
   malformed: 400,
@@ -42,6 +51,8 @@ const PLACEHOLDER = { title: '纸鸢', body: '有新动态' }
 
 export interface PushGatewayOptions {
   auth: Auth
+  /** The computer registry the relay keeps. */
+  store: Pick<Store, 'computer' | 'computers'>
   origin: string
   trustProxy: boolean
   /** Null while no APNs key is set up: every push answers `apns`. */
@@ -151,7 +162,10 @@ export class PushGateway {
       if (error instanceof TooBig) return this.refuse(response, 'too_big')
       throw error
     }
-    if (!this.options.auth.accessFamily(request)) return this.refuse(response, 'signed_out')
+    const family = this.options.auth.accessFamily(request)
+    if (!family) return this.refuse(response, 'signed_out')
+    // A phone's or a browser's sign-in sends no pushes.
+    if (!HOST_CLIENTS.includes(family.clientId)) return this.refuse(response, 'unauthorized')
 
     const keyHeader = request.headers[HOST_KEY_HEADER.toLowerCase()]
     const signatureHeader = request.headers[SIGNATURE_HEADER.toLowerCase()]
@@ -163,6 +177,18 @@ export class PushGateway {
     const id = await relayHostId(key)
     const signed = pushRequestText(this.options.origin, id, body)
     if (!(await verifyRelaySignature(key, signature, signed))) {
+      return this.refuse(response, 'unauthorized')
+    }
+    // A computer registered on the relay pushes under the sign-in it registered with, and a
+    // sign-in with a computer registered pushes only as that computer, so a token taken from it is
+    // no use with a key of the taker's. A computer with the relay off is registered under none.
+    const { store } = this.options
+    const owner = store.computer(id)
+    if (owner) {
+      if (owner.family !== family.id || owner.signKey !== encodeRelayBytes(key)) {
+        return this.refuse(response, 'unauthorized')
+      }
+    } else if (store.computers().some((computer) => computer.family === family.id)) {
       return this.refuse(response, 'unauthorized')
     }
     const parsed = parsePushRequest(body)

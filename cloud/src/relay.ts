@@ -63,6 +63,13 @@ export interface RelayLimits {
   /** Sockets at once, in all and from one address. */
   maxSockets: number
   maxSocketsPerAddress: number
+  /**
+   * Sockets at once that have not signed in yet, in all and from one address: a host before its
+   * sign-in, a device before its token, an accept before it is matched. Kept below `maxSockets`,
+   * so that sockets anyone may open cannot crowd out those of the account.
+   */
+  maxUnsignedSockets: number
+  maxUnsignedSocketsPerAddress: number
   /** Sockets one address may open in a minute. */
   opensPerMinute: number
   /** Sign-ins of one host id in a minute, so two copies replacing each other slow down. */
@@ -77,7 +84,10 @@ export interface RelayLimits {
   joinedIdleMs: number
   /** How often every socket gets a WebSocket ping; one without its pong by the next is cut. */
   pingMs: number
-  /** How often a signed-in host's token is checked again: signed out, or lapsed past the grace. */
+  /**
+   * How often the tokens of signed-in hosts and joined devices are checked again: a host's or a
+   * device's client signed out, or a host's token lapsed past the grace.
+   */
   tokenCheckMs: number
   /** Bytes queued toward one side before the other is paused, and resumed below the low mark. */
   highWater: number
@@ -87,6 +97,8 @@ export interface RelayLimits {
 export const RELAY_LIMITS: RelayLimits = {
   maxSockets: 512,
   maxSocketsPerAddress: 64,
+  maxUnsignedSockets: 128,
+  maxUnsignedSocketsPerAddress: 16,
   opensPerMinute: 120,
   signInsPerMinute: 10,
   refusalsPer15Minutes: 20,
@@ -108,7 +120,7 @@ export interface RelayOptions {
   regionId: string
   /** The signed region list as served, or null for none. */
   regions: string | null
-  tokens: Pick<RelayTokens, 'check' | 'holds'>
+  tokens: Pick<RelayTokens, 'check' | 'holds' | 'signedIn'>
   registry: RelayRegistry
   trustProxy: boolean
   limits?: Partial<RelayLimits>
@@ -162,6 +174,10 @@ export class Relay {
   private readonly joinedHosts = new Map<WebSocket, string>()
   private readonly peers = new Map<WebSocket, Peer>()
   private readonly perAddress = new Map<string, number>()
+  /** Sockets not signed in yet, with their address. */
+  private readonly unsigned = new Map<WebSocket, string>()
+  /** What each device waiting for or joined to a host connected with. */
+  private readonly deviceGrants = new Map<WebSocket, RelayGrant>()
   private readonly opens: Limiter
   private readonly signIns: Limiter
   private readonly refusals: Limiter
@@ -185,7 +201,7 @@ export class Relay {
     })
     this.sweeper = setInterval(() => this.ping(), this.limits.pingMs)
     this.sweeper.unref()
-    this.checker = setInterval(() => this.checkHosts(), this.limits.tokenCheckMs)
+    this.checker = setInterval(() => this.checkGrants(), this.limits.tokenCheckMs)
     this.checker.unref()
   }
 
@@ -357,12 +373,17 @@ export class Relay {
       if (error.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH') this.ended(ws, RELAY_CLOSE.tooBig)
     })
     ws.on('close', (code) => this.ended(ws, code))
+    let unsignedHere = 0
+    for (const from of this.unsigned.values()) if (from === address) unsignedHere++
     const crowded =
       this.peers.size > this.limits.maxSockets ||
       (this.perAddress.get(address) ?? 0) > this.limits.maxSocketsPerAddress ||
+      this.unsigned.size >= this.limits.maxUnsignedSockets ||
+      unsignedHere >= this.limits.maxUnsignedSocketsPerAddress ||
       !this.opens.hit(address) ||
       this.refusals.blocked(address)
     if (crowded) return this.refuse(ws, RELAY_CLOSE.tooMany)
+    this.unsigned.set(ws, address)
     const match = PATH.exec(pathname)
     if (!match) return this.refuse(ws, RELAY_CLOSE.malformed)
     const [, id, connect, token] = match as unknown as [string, string, string?, string?]
@@ -474,6 +495,7 @@ export class Relay {
       return false
     }
     this.hosts.set(id, { socket: ws, grant, signKey, profile: null })
+    this.unsigned.delete(ws)
     if (before) {
       this.sendJson(before.socket, { type: 'replaced' })
       this.refuse(before.socket, RELAY_CLOSE.replaced)
@@ -513,6 +535,8 @@ export class Relay {
         return this.refuse(ws, RELAY_CLOSE.offline)
       }
       if (this.devices(id) >= MAX_DEVICE_CONNECTIONS) return this.refuse(ws, RELAY_CLOSE.tooMany)
+      this.unsigned.delete(ws)
+      this.deviceGrants.set(ws, grant)
       const token = newRelayToken()
       this.waiting.set(token, {
         device: ws,
@@ -533,6 +557,7 @@ export class Relay {
       return this.refuse(ws, RELAY_CLOSE.offline)
     }
     const { device } = waiting
+    this.unsigned.delete(ws)
     this.joined.set(device, ws)
     this.joined.set(ws, device)
     this.joinedHosts.set(ws, id)
@@ -584,12 +609,20 @@ export class Relay {
     return count
   }
 
-  /** Signed-out hosts and lapsed tokens: the control socket closes with 4401. */
-  checkHosts(): void {
+  /**
+   * Hosts signed out or with lapsed tokens, and devices signed out: each closes with 4401, a joined
+   * device's host side with it.
+   */
+  checkGrants(): void {
     for (const [id, host] of this.hosts) {
       if (this.options.tokens.holds(host.grant, TOKEN_GRACE_MS)) continue
       this.log(`huli-cloud: relay host ${short(id)} is no longer signed in`)
       this.refuse(host.socket, RELAY_CLOSE.unauthorized)
+    }
+    for (const [device, grant] of this.deviceGrants) {
+      if (this.options.tokens.signedIn(grant)) continue
+      this.log('huli-cloud: relay device is no longer signed in')
+      this.refuse(device, RELAY_CLOSE.unauthorized)
     }
   }
 
@@ -616,6 +649,8 @@ export class Relay {
 
   /** Either end closing closes the other; a host going leaves its waiting devices offline. */
   private ended(ws: WebSocket, code: number): void {
+    this.unsigned.delete(ws)
+    this.deviceGrants.delete(ws)
     const peer = this.peers.get(ws)
     if (peer) {
       this.peers.delete(ws)

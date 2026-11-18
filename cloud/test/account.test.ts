@@ -23,6 +23,7 @@ import {
   importRelayKey,
   newRelaySeed,
   parseRelayHosts,
+  RELAY_CLOSE,
   relayHostId,
   type RelayHostProfile,
 } from '@shared/remote/relay'
@@ -336,6 +337,23 @@ describe('the account API and the relay with the registry', () => {
     expect((await cloud.devices(phone)).computers.map((c) => c.id)).not.toContain(t.id)
     await expect.poll(state(t), { timeout: 3000 }).toBe('refused')
     expect((await dial(t.id, phone)).kind).toBe('offline')
+  })
+
+  it('cuts a joined device off once it is signed out, and leaves its host on', async () => {
+    const desktop = signIn(DESKTOP_CLIENT, PC)
+    const t = await startHost(desktop.access_token)
+    await expect.poll(state(t)).toBe('connected')
+    const phone = signIn(MOBILE_CLIENT, PHONE).access_token
+    const joined = await dial(t.id, phone)
+    if (joined.kind !== 'joined') throw new Error(joined.kind)
+    const closed = new Promise<number>((resolve) =>
+      joined.socket.addEventListener('close', (event) => resolve(event.code), { once: true }),
+    )
+    const device = parts.store.checkAccess(phone)!.id
+    expect(await cloud.revoke(desktop.access_token, { device })).toBe(1)
+    expect(await closed).toBe(RELAY_CLOSE.unauthorized)
+    expect(state(t)()).toBe('connected')
+    expect(lines.join('\n')).toContain('relay device is no longer signed in')
   })
 
   it('signs out every other device and spares the one asking', async () => {

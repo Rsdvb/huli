@@ -107,6 +107,21 @@ describe('the remote host’s relay regions', () => {
     const t = await regions({ features: ['regions', 'relay-tokens'], relayToken: 'relay-token' })
     await expect.poll(() => t.plans.at(-1)?.map((r) => r.id)).toEqual(['main', 'hk-1', 'sh-1'])
     expect(t.regions.allowed([MAIN, 'https://hk-1.relay.kettu.sh'])).toHaveLength(2)
+    // The relay token too goes to the list's regions alone, not to any name under the domain,
+    // nor to a region the list only probes.
+    expect(
+      t.regions.allowed([
+        MAIN,
+        'https://evil.relay.kettu.sh',
+        'https://hk-1.relay.kettu.sh',
+        'https://tyo-2.relay.kettu.sh',
+      ]),
+    ).toEqual([MAIN, 'https://hk-1.relay.kettu.sh'])
+    expect(t.regions.listed()).toEqual([
+      'https://hk-1.relay.kettu.sh',
+      'https://203.0.113.7:7443',
+      MAIN,
+    ])
 
     // The access token alone: the main relay alone, whatever the list and GET /v1 name.
     t.setRelayToken(null)

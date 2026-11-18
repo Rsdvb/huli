@@ -2,7 +2,7 @@
 // a change on either side that breaks the other fails here.
 
 import { mkdtempSync, rmSync } from 'node:fs'
-import type { AddressInfo } from 'node:net'
+import { connect, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -11,6 +11,7 @@ import { pushRequestHeaders, pushRequestText } from '@shared/remote/push'
 import vectors from '@shared/remote/push-vectors.json'
 import {
   decodeRelayBytes,
+  encodeRelayBytes,
   importRelayKey,
   relayHostId,
   verifyRelaySignature,
@@ -148,6 +149,23 @@ async function failure(promise: Promise<unknown>): Promise<string> {
   }
   throw new Error('It did not fail')
 }
+
+/** The status line's code for a request sent as written, path and all. */
+async function rawStatus(target: string): Promise<number> {
+  const { port } = parts.server.address() as AddressInfo
+  const socket = connect(port, '127.0.0.1')
+  socket.write(`GET ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`)
+  let text = ''
+  for await (const chunk of socket) text += String(chunk)
+  return Number(/^HTTP\/1\.1 (\d{3})/.exec(text)?.[1] ?? 0)
+}
+
+describe('requests', () => {
+  it('answers 400 to a path no URL parses, and keeps serving', async () => {
+    for (const target of ['//', '///', '//[']) expect(await rawStatus(target)).toBe(400)
+    expect((await fetch(new URL('/healthz', base))).status).toBe(200)
+  })
+})
 
 describe('browser sign-in', () => {
   it('signs a desktop client in and answers /me', async () => {
@@ -289,10 +307,23 @@ describe('device codes', () => {
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('authorization_pending')
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('slow_down')
 
+    // A link with the code in it fills nothing in: the owner types the code their computer shows.
+    expect(device.verificationUriComplete).toBeNull()
     const page = await (
       await fetch(new URL(`/device?code=${device.userCode}`, base), { headers: { cookie } })
     ).text()
+    expect(page).not.toContain(device.userCode)
     const csrf = /name="csrf" value="([^"]+)"/.exec(page)![1]!
+    // The code typed in shows who asked, from where and when, and a warning, before approval.
+    const confirm = await post(
+      '/device',
+      { csrf, user_code: device.userCode.toLowerCase(), action: 'continue' },
+      cookie,
+    )
+    const shown = await confirm.text()
+    expect(shown).toContain('纸鸢命令行 · Test PC')
+    expect(shown).toContain('来自 127.0.0.1 · 0 秒前开始')
+    expect(shown).toContain('只有当这个验证码是你刚刚在自己的电脑上开始登录时显示的')
     const approved = await post(
       '/device',
       { csrf, user_code: device.userCode, action: 'allow' },
@@ -305,6 +336,25 @@ describe('device codes', () => {
     await api.me(tokens.accessToken)
     clock += 60_000
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('expired_token')
+  })
+
+  it('keeps no line break of a client name, which could forge a log line', async () => {
+    const { cookie } = await signIn()
+    const separator = String.fromCharCode(0x2028)
+    const forged = `PC\nhuli-cloud: login failed from 192.0.2.66\r${separator}x`
+    const device = await api.startDevice({ ...INFO, kind: 'daemon', name: forged, os: 'linux\n' })
+    const page = await (await fetch(new URL('/device', base), { headers: { cookie } })).text()
+    const csrf = /name="csrf" value="([^"]+)"/.exec(page)![1]!
+    await post('/device', { csrf, user_code: device.userCode, action: 'allow' }, cookie)
+    clock += 60_000
+    const tokens = await api.pollDevice(device.deviceCode)
+    const family = parts.store.checkAccess(tokens.accessToken)!
+    expect(family.info?.name).toBe('PC huli-cloud: login failed from 192.0.2.66  x')
+    expect(family.info?.os).toBe('linux')
+    const logged = lines.flatMap((line) => line.split(/[\r\n]/)).flatMap((l) => l.split(separator))
+    expect(logged.filter((line) => line.includes('192.0.2.66'))).toEqual([
+      'huli-cloud: approved 纸鸢命令行 · PC huli-cloud: login failed from 192.0.2.66  x（linux x64 · 0.1.0）',
+    ])
   })
 })
 
@@ -333,6 +383,112 @@ describe('brute force', () => {
     expect(lines.filter((l) => l.includes('login failed from')).length).toBeGreaterThanOrEqual(5)
     // The window passes.
     clock += 16 * 60 * 1000
+  })
+})
+
+describe('limits by address, behind the proxy', () => {
+  let proxied: ServerParts
+  let origin: string
+  let proxiedDir: string
+  const proxiedLines: string[] = []
+
+  beforeAll(async () => {
+    proxiedDir = mkdtempSync(path.join(tmpdir(), 'huli-proxied-'))
+    proxied = makeServer({ origin: ORIGIN, dataDir: proxiedDir, trustProxy: true }, null, {
+      now,
+      log: (line) => proxiedLines.push(line),
+    })
+    proxied.store.setAccount({ ...parts.store.account!, totpLastStep: -1 })
+    await new Promise<void>((resolve) => proxied.server.listen(0, '127.0.0.1', resolve))
+    origin = `http://127.0.0.1:${(proxied.server.address() as AddressInfo).port}`
+  })
+
+  afterAll(() => {
+    proxied.server.close()
+    rmSync(proxiedDir, { recursive: true, force: true })
+  })
+
+  async function ticketFrom(address: string): Promise<string> {
+    const url = new URL('/signin/app/', origin)
+    url.search = new URLSearchParams({
+      client_id: 'kettu-desktop',
+      redirect_uri: REDIRECT,
+      code_challenge: pkceChallenge(randomToken(48)),
+      code_challenge_method: 'S256',
+      state: 's',
+    }).toString()
+    const html = await (await fetch(url, { headers: { 'x-real-ip': address } })).text()
+    return /name="ticket" value="([^"]+)"/.exec(html)![1]!
+  }
+
+  function submit(address: string, fields: Record<string, string>) {
+    return fetch(new URL('/signin/app/', origin), {
+      method: 'POST',
+      body: new URLSearchParams(fields),
+      redirect: 'manual',
+      headers: { 'x-real-ip': address },
+    })
+  }
+
+  it('keeps only the newest sign-in pages of one address', async () => {
+    const other = await ticketFrom('198.51.100.9')
+    const first = await ticketFrom('198.51.100.1')
+    for (let i = 0; i < 20; i++) await ticketFrom('198.51.100.1')
+    const gone = await submit('198.51.100.1', { ticket: first, action: 'deny' })
+    expect(gone.status).toBe(400)
+    // Another address's page is untouched.
+    expect((await submit('198.51.100.9', { ticket: other, action: 'deny' })).status).toBe(302)
+  })
+
+  it('counts sign-ins sent at once before checking them, and checks two at a time', async () => {
+    const address = '198.51.100.2'
+    const tickets = await Promise.all(Array.from({ length: 8 }, () => ticketFrom(address)))
+    const answers = await Promise.all(
+      tickets.map((ticket) =>
+        submit(address, { ticket, password: 'wrong password', code: '000000', action: 'allow' }),
+      ),
+    )
+    const statuses = answers.map((answer) => answer.status)
+    expect(statuses.every((status) => status === 401 || status === 429)).toBe(true)
+    expect(statuses).toContain(429)
+    const checked = proxiedLines.filter((l) => l === `huli-cloud: login failed from ${address}`)
+    expect(checked.length).toBeLessThanOrEqual(5)
+    // A sign-in that succeeds is not counted against its address.
+    clock += 16 * 60 * 1000
+    for (let i = 0; i < 6; i++) {
+      nextStep()
+      const ok = await submit(address, {
+        ticket: await ticketFrom(address),
+        password: PASSWORD,
+        code: code(),
+        action: 'allow',
+      })
+      expect(ok.status).toBe(302)
+    }
+  })
+
+  it('never locks the owner out for failures from other addresses', async () => {
+    for (let a = 0; a < 8; a++) {
+      for (let i = 0; i < 5; i++) {
+        const address = `203.0.113.${a}`
+        // Too long a password fails without scrypt, as it still counts.
+        const answer = await submit(address, {
+          ticket: await ticketFrom(address),
+          password: 'x'.repeat(1025),
+          code: '000000',
+          action: 'allow',
+        })
+        expect(answer.status).toBe(401)
+      }
+    }
+    nextStep()
+    const owner = await submit('192.0.2.1', {
+      ticket: await ticketFrom('192.0.2.1'),
+      password: PASSWORD,
+      code: code(),
+      action: 'allow',
+    })
+    expect(owner.status).toBe(302)
   })
 })
 
@@ -395,6 +551,38 @@ describe('push gateway', () => {
     expect((await push(access, JSON.stringify(old))).status).toBe(401)
     expect((await push(null, alert())).status).toBe(403)
     expect((await push('not-a-real-token-but-long-enough-to-parse', alert())).status).toBe(403)
+  })
+
+  it("takes a computer's sign-in alone, with the key it registered on the relay", async () => {
+    // Each its own request, so that no refusal below is for a replay.
+    const pushNew = (access: string, body: () => string) => {
+      clock += 1000
+      return push(access, body())
+    }
+    for (const client of ['huli-mobile', 'kettu-web']) {
+      const phone = parts.store.issue(client, null).access_token
+      expect((await pushNew(phone, alert)).status).toBe(401)
+    }
+    const { access } = await signIn()
+    const family = parts.store.checkAccess(access)!.id
+    const id = vectors.keys.hostId
+    // Registered under another sign-in: refused.
+    const { access: other } = await signIn()
+    parts.store.registerComputer(id, parts.store.checkAccess(other)!.id, vectors.keys.hostPublicKey)
+    expect((await pushNew(access, alert)).status).toBe(401)
+    // Registered under this sign-in with its key: taken.
+    parts.store.registerComputer(id, family, vectors.keys.hostPublicKey)
+    expect((await pushNew(access, alert)).status).toBe(200)
+    // The same id with another key, as its registration says: refused.
+    const otherKey = encodeRelayBytes(new Uint8Array(32).fill(9))
+    parts.store.registerComputer(id, family, otherKey)
+    expect((await pushNew(access, alert)).status).toBe(401)
+    // A sign-in with a computer registered pushes as no other.
+    parts.store.registerComputer('a'.repeat(26), family, otherKey)
+    parts.store.revokeFamily(family)
+    const { access: fresh } = await signIn()
+    parts.store.registerComputer('b'.repeat(26), parts.store.checkAccess(fresh)!.id, otherKey)
+    expect((await pushNew(fresh, alert)).status).toBe(401)
   })
 
   it('says unregistered when Apple no longer takes the token', async () => {

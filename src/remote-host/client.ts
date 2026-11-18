@@ -182,6 +182,8 @@ export interface ClientRegions {
    * with a relay token or where the main relay takes none, else the main relay alone.
    */
   allowed(urls: string[]): string[]
+  /** The origins of the active regions of the signed list this computer holds. */
+  listed?(): string[]
   /** The name the signed list gives the region at `url`, or null. */
   regionName?(url: string): string | null
 }
@@ -1804,9 +1806,11 @@ export class HostClient {
     if (!relay || !client) return null
     const token = client.token()
     if (!token) return 'signed_out'
-    // The account's token goes only to the project's relays, whatever a code or a host names.
+    // The account's token goes only to the main relay and the regions of the signed list,
+    // whatever a code or a host names.
+    const listed = client.regions?.listed?.() ?? []
     const named = [...new Set([...relay.urls, client.main])].filter((url) =>
-      trustedRelay(url, client.main),
+      trustedRelay(url, client.main, listed),
     )
     const urls = client.regions ? client.regions.allowed(named) : named
     if (last && urls.includes(last)) urls.sort((a, b) => (a === last ? -1 : b === last ? 1 : 0))
