@@ -107,6 +107,7 @@ export default function Layout() {
                 <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
                 <Stack.Screen name="artifact/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />
+                <Stack.Screen name="plan/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="task/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="start-task" options={{ headerShown: false }} />
                 <Stack.Screen name="workflows" options={{ headerShown: false }} />

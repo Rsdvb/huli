@@ -12,6 +12,8 @@ import { FONT_SCALE, type as typeScale, useTokens } from './tokens'
 export function NavBar(props: {
   header: CollapsingHeader
   title: string
+  /** A second, smaller line under the title: 「Claude Code · Claude Ultra」. */
+  subtitle?: string
   /** Close for a modal, back for a pushed screen. */
   kind?: 'back' | 'close'
   right?: ReactNode
@@ -41,6 +43,21 @@ export function NavBar(props: {
         >
           {props.title}
         </Animated.Text>
+        {props.subtitle ? (
+          <Animated.Text
+            numberOfLines={1}
+            maxFontSizeMultiplier={FONT_SCALE.dense}
+            style={[
+              typeScale.caption,
+              {
+                color: c.textSecondary,
+                opacity: props.titleAlways ? 1 : props.header.progress,
+              },
+            ]}
+          >
+            {props.subtitle}
+          </Animated.Text>
+        ) : null}
       </View>
       <View style={styles.right}>{props.right}</View>
     </FloatingHeader>

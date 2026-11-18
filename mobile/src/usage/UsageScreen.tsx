@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useLocalSearchParams } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, LimitsReason, PlanLimit } from '@shared/agent-host'
 import type { UsageScope } from '@shared/usage'
 import { TopBar, useScrollTopOnTabPress } from '../components/shell'
@@ -22,14 +22,12 @@ import { useActiveHost, useAgents, useHostState, useMaybeLink } from '../host'
 import { clockOf, errorText } from '../sessions'
 import { agentColor } from '../ui/agent-marks'
 import { AgentAvatar } from '../ui/AgentAvatar'
-import { BottomSheet } from '../ui/BottomSheet'
 import { Card } from '../ui/Card'
 import { BarChart, ConcentricRings, Donut, Ring } from '../ui/charts'
 import { EmptyState } from '../ui/EmptyState'
 import { haptic } from '../ui/haptics'
 import { useContentWidth } from '../ui/layout'
 import { Icon } from '../ui/Icon'
-import { ListGroup, ListRow } from '../ui/ListRow'
 import { Pill } from '../ui/Pill'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
@@ -170,15 +168,6 @@ function limitLabel(limit: PlanLimit): string {
   return fiveHour ? `5 小时 · ${fiveHour[1]}` : limit.label
 }
 
-function resetText(at: number): string {
-  const left = at - Date.now()
-  if (left <= 0) return '已重置'
-  const hours = Math.floor(left / 3_600_000)
-  if (hours < 1) return `${Math.max(1, Math.round(left / 60_000))} 分钟后重置`
-  if (hours < 48) return `${hours} 小时后重置`
-  return `${Math.round(hours / 24)} 天后重置`
-}
-
 function limitColor(c: Palette, limit: PlanLimit): string {
   const used = limit.usedPercent ?? 0
   if (limit.state === 'reached' || used >= 90) return c.danger
@@ -204,7 +193,6 @@ export default function UsageScreen() {
   const [pulled, setPulled] = useState(false)
   const [refreshing, setRefreshing] = useState<Set<string>>(new Set())
   const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
-  const [detail, setDetail] = useState<string | null>(null)
   const [hour, setHour] = useState<number | null>(null)
   const connected = state.kind === 'connected'
 
@@ -384,7 +372,7 @@ export default function UsageScreen() {
             refreshing={refreshing.has(agent.id)}
             error={limitErrors[agent.id] ?? agent.limitsError ?? null}
             readable={readable(agent)}
-            onPress={() => setDetail(agent.id)}
+            onPress={() => router.push({ pathname: '/plan/[id]', params: { id: agent.id } })}
           />
         ))}
       </View>
@@ -753,6 +741,7 @@ export default function UsageScreen() {
               scope={scope}
               colorOf={colorOf}
               nameOf={nameOf}
+              periodName={periodName}
             />
 
             {filters}
@@ -781,7 +770,6 @@ export default function UsageScreen() {
     )
   }
 
-  const shown = detail ? agents.get(detail) : undefined
   const pickerRange = read
     ? read.choice.kind === 'custom'
       ? { from: read.choice.from, to: read.choice.to }
@@ -813,22 +801,6 @@ export default function UsageScreen() {
         {body()}
       </Animated.ScrollView>
       <TopBar header={header} filter={false} />
-      <BottomSheet
-        visible={!!shown}
-        onClose={() => setDetail(null)}
-        title={shown ? (shown.account?.label ?? shown.name) : undefined}
-        message={shown?.account?.label ? shown.name : undefined}
-      >
-        {shown && (
-          <LimitDetail
-            agent={shown}
-            readable={readable(shown)}
-            refreshing={refreshing.has(shown.id)}
-            error={limitErrors[shown.id] ?? shown.limitsError ?? null}
-            onRefresh={connected ? () => refreshLimits(shown) : undefined}
-          />
-        )}
-      </BottomSheet>
       {read && (
         <RangeSheet
           visible={picking}
@@ -987,91 +959,6 @@ function PlanCard(props: {
   )
 }
 
-function LimitDetail(props: {
-  agent: AgentStatus
-  readable: boolean
-  refreshing: boolean
-  error: string | null
-  onRefresh: (() => void) | undefined
-}) {
-  const { c } = useTokens()
-  const { agent } = props
-  const observed = Math.max(0, ...agent.limits.map((l) => l.observedAt))
-  return (
-    <>
-      {agent.limits.length > 0 ? (
-        <View style={[styles.detail, { backgroundColor: c.fill }]}>
-          {agent.limits.map((limit) => {
-            const used = Math.round(limit.usedPercent ?? 0)
-            const color = limitColor(c, limit)
-            return (
-              <View key={limit.window} style={styles.limit}>
-                <View style={styles.limitHead}>
-                  <Text style={[typeScale.callout, styles.flex, { color: c.text }]}>
-                    {limitLabel(limit)}
-                    {limit.state === 'reached' ? ' · 已用完' : ''}
-                  </Text>
-                  <Text
-                    style={[
-                      typeScale.callout,
-                      styles.tabular,
-                      { color: c.text, fontWeight: '600' },
-                    ]}
-                  >
-                    {limit.usedPercent === null ? '—' : `${used}%`}
-                  </Text>
-                </View>
-                <View style={[styles.track, { backgroundColor: c.track }]}>
-                  <View
-                    style={[
-                      styles.fill,
-                      { backgroundColor: color, width: `${Math.min(100, Math.max(0, used))}%` },
-                    ]}
-                  />
-                </View>
-                <Text style={[typeScale.caption, styles.tabular, { color: c.textTertiary }]}>
-                  {[
-                    limit.resetsAt ? resetText(limit.resetsAt) : null,
-                    limit.amount
-                      ? `${limit.amount.used}/${limit.amount.total} ${limit.amount.unit}`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ') || ' '}
-                </Text>
-              </View>
-            )
-          })}
-        </View>
-      ) : (
-        <Text style={[typeScale.callout, { color: c.textSecondary }]}>
-          {limitWhy(agent, props.readable)}
-        </Text>
-      )}
-      {props.error ? (
-        <Text style={[typeScale.footnote, { color: c.danger }]}>{props.error}</Text>
-      ) : null}
-      {props.readable && props.onRefresh && (
-        <ListGroup footer={observed > 0 ? `读取于 ${clockOf(observed)}` : undefined}>
-          <ListRow
-            title={
-              props.refreshing ? '正在读取…' : agent.limits.length > 0 ? '重新读取' : '读取额度'
-            }
-            icon="refresh"
-            iconTint={c.tint}
-            action
-            disabled={props.refreshing}
-            onPress={() => {
-              haptic.tap()
-              props.onRefresh?.()
-            }}
-          />
-        </ListGroup>
-      )}
-    </>
-  )
-}
-
 /** The summary and the figures while their first read is on its way. */
 function UsageSkeleton() {
   return (
@@ -1136,11 +1023,6 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   swatch: { width: 10, height: 10, borderRadius: 3 },
   percent: { width: 40, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  detail: { borderRadius: radius.lg, padding: space.lg, gap: space.lg },
-  limit: { gap: space.sm - 2 },
-  limitHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  track: { height: 6, borderRadius: 3, overflow: 'hidden' },
-  fill: { height: 6, borderRadius: 3 },
   skeleton: { gap: space.lg, paddingTop: space.md },
   skeletonCards: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   skeletonLegend: { flex: 1, gap: space.md, marginLeft: space.xl },

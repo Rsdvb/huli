@@ -228,6 +228,8 @@ export function confirm(input: {
  */
 export function ManagePage(props: {
   title: string
+  /** Under the title in the bar. */
+  subtitle?: string
   intro?: string
   children?: ReactNode
   onRefresh?: () => Promise<unknown>
@@ -274,7 +276,13 @@ export function ManagePage(props: {
         ) : null}
         {props.children}
       </Animated.ScrollView>
-      <NavBar header={header} title={props.title} titleAlways right={props.right} />
+      <NavBar
+        header={header}
+        title={props.title}
+        subtitle={props.subtitle}
+        titleAlways
+        right={props.right}
+      />
       {props.overlay}
     </Screen>
   )

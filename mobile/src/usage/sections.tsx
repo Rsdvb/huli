@@ -104,6 +104,8 @@ export function Activity(props: {
   scope: UsageScope
   colorOf: AgentFn
   nameOf: AgentFn
+  /** The chosen period as the summary names it: 「本月」「11月」. */
+  periodName?: string
 }) {
   const { c } = useTokens()
   const { days, heat, range, today, metric, scope } = props
@@ -137,6 +139,11 @@ export function Activity(props: {
     .filter(Boolean)
     .join(' · ')
 
+  // The chosen period's own figures, so a day, week, month or year on the year's grid says how
+  // much it used; a single day has no average or busiest day to tell.
+  const framed = periodFigures(days, range, today, metric, scope)
+  const several = dayCount(range) > 1
+
   return (
     <>
       <SectionHeader
@@ -145,6 +152,35 @@ export function Activity(props: {
           <Text style={[typeScale.footnote, { color: c.textTertiary }]}>过去一年 · 今天有描边</Text>
         }
       />
+      {framed ? (
+        <View
+          style={styles.framed}
+          accessible
+          accessibilityLabel={`${props.periodName ?? '这段时间'}共${metricWords(kind, framed.total)}`}
+        >
+          <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+            {props.periodName ?? '这段时间'}共
+          </Text>
+          <Text style={[typeScale.headline, styles.tabular, { color: c.text }]}>
+            {framed.total > 0 ? metricWords(kind, framed.total) : '没有用量'}
+          </Text>
+          {framed.total > 0 && several ? (
+            <Text
+              style={[typeScale.footnote, styles.tabular, styles.flex, { color: c.textSecondary }]}
+              numberOfLines={2}
+            >
+              {[
+                `日均 ${metricWords(kind, framed.average)}`,
+                framed.peak
+                  ? `最多 ${dateText(framed.peak.day)} ${metricWords(kind, framed.peak.value)}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       <Heatmap
         days={heatDays.map((d) => d.day)}
         levels={levels}
@@ -168,6 +204,27 @@ export function Activity(props: {
       </Text>
     </>
   )
+}
+
+/** A period's total, its average over the days gone by and its busiest day. */
+function periodFigures(
+  days: readonly DayTotal[],
+  range: DayRange,
+  today: number,
+  metric: Metric,
+  scope: UsageScope,
+): { total: number; average: number; peak: { day: number; value: number } | null } {
+  let total = 0
+  let count = 0
+  let peak: { day: number; value: number } | null = null
+  for (const d of days) {
+    if (d.day < range.from || d.day >= range.to || d.day > today) continue
+    const value = metricValue(d.parts, metric, scope) ?? 0
+    total += value
+    count += 1
+    if (value > 0 && (!peak || value > peak.value)) peak = { day: d.day, value }
+  }
+  return { total, average: count > 0 ? total / count : 0, peak }
 }
 
 /** A chip that opens a list of choices: "所有 Agent ⌄". */
@@ -909,6 +966,13 @@ export function SectionsSkeleton() {
 }
 
 const styles = StyleSheet.create({
+  framed: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    columnGap: space.sm,
+    marginBottom: space.sm,
+  },
   flex: { flex: 1 },
   tabular: { fontVariant: ['tabular-nums'] },
   centerText: { textAlign: 'center' },
