@@ -128,6 +128,27 @@ signed in, Huli Cloud's relay from any network, which the hosted web client at
   the token `relayTokens()` is given by the phone's Huli Cloud sign-in.
 - `tools/huli/deploy-cloud.ps1` builds the service and the hosted web client and installs both.
 
+## Account and computers
+
+Huli Cloud keeps a registry of the account's computers (`cloud/src/store.ts`); `cloud/README.md`
+describes it, the pairing without a code and its threat model.
+
+- `src/shared/huli-cloud.ts`: the account API beyond Kettu's (`GET /api/v1/account/devices`,
+  `POST /api/v1/account/devices/revoke`), its types and parsers, and `HOST_CLIENTS`, the sign-ins
+  that may put a host on the relay.
+- `src/shared/huli-signin.ts` (+ `.test.ts`): the phone's sign-in (PKCE, the vault, refresh
+  rotation, sign out), apart from the phone's APIs; `mobile/src/cloud.ts` gives it the Keychain and
+  ASWebAuthenticationSession and hands the relay its tokens.
+- `src/shared/remote/pair-account.ts`: the device side of Kettu's discovery for the phone and the
+  hosted web client; `src/remote-host/account-pairing.test.ts` checks that a computer adds a device
+  only with both yeses, and that a device refuses a welcome before its user's.
+- Desktop: `src/main/huli-account.ts` (+ `.test.ts`, the IPC calls `account:devices` and
+  `account:revoke-device`), `src/renderer/src/stores/account-devices.ts`,
+  `features/settings/account-devices.tsx`, `locales/*/huliAccount.json`.
+- Phone: `mobile/src/app/settings/account.tsx`, `mobile/src/app/pair-computer.tsx`,
+  `mobile/src/components/AccountComputers.tsx`. Hosted web client:
+  `src/renderer/src/web/hosted/account-pairing.tsx`.
+
 ## Workflows
 
 Only the `huli-*` workflows run here. Kettu's own (`ci.yml`, `docker.yml`, `issue-closed.yml`,
