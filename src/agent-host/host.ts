@@ -3159,7 +3159,7 @@ export class AgentHost {
       },
       'kettuImport.scan': () => this.kettuImport.scan(),
       'kettuImport.run': ({ sessionIds }) => this.kettuImport.run(sessionIds),
-      // A device never gets here: the allow-list refuses these methods to every device's port.
+      // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),
       'agentNetwork.renameSubscription': ({ id, name }) =>
@@ -3171,6 +3171,11 @@ export class AgentHost {
         results: await this.nodeProxy.testLatency(nodes),
       }),
       'agentNetwork.exitIp': ({ agentId, fresh }) => this.nodeProxy.exitIp(agentId, fresh),
+      // These two a device may call: they carry no subscription's address.
+      'agentNetwork.deviceStatus': () => this.nodeProxy.deviceStatus(),
+      'agentNetwork.deviceLatency': async ({ nodes }) => ({
+        results: await this.nodeProxy.testLatency(nodes),
+      }),
       'folders.list': () => this.sessionFolders.list(),
       'folders.create': ({ name, sessionIds }) => this.sessionFolders.create(name, sessionIds),
       'folders.rename': ({ folderId, name }) => this.sessionFolders.rename(folderId, name),

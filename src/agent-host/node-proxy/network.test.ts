@@ -13,9 +13,16 @@ import {
 } from '@shared/agent-network'
 import { createRedactor } from '@shared/log/redact'
 import { forbiddenToDevices } from '@shared/remote/allow-list'
+import { isHostAdminMethod, splitSettingsPatch } from '@shared/remote/host-admin'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { AgentId } from '@shared/thread'
-import { hostSettings, validateSettingsPatch, mergeSettings } from '../../main/settings-schema'
+import {
+  hostSettings,
+  mergeSettings,
+  validateSettingsPatch,
+  withAgentNetworkChoice,
+  withDefaultNode,
+} from '../../main/settings-schema'
 import { applyNodeProxy, EnvironmentService } from '../shell-env'
 import { createValidators } from '../validate'
 import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
@@ -32,11 +39,76 @@ function rejects(run: () => unknown): void {
   expect(run).toThrow(expect.objectContaining({ code: 'invalid_params' }))
 }
 
+/** The agent network's requests a paired device may make: they carry no subscription's address. */
+const DEVICE_SAFE = ['agentNetwork.deviceStatus', 'agentNetwork.deviceLatency']
+
 describe('the agent network requests', () => {
-  it('are refused to every paired device', () => {
+  it('are refused to every paired device, but for the device-safe ones', () => {
+    for (const method of [
+      'agentNetwork.status',
+      'agentNetwork.addSubscription',
+      'agentNetwork.renameSubscription',
+      'agentNetwork.removeSubscription',
+      'agentNetwork.refresh',
+      'agentNetwork.nodes',
+      'agentNetwork.testLatency',
+      'agentNetwork.exitIp',
+    ]) {
+      expect(HOST_METHODS).toContain(method)
+      expect(forbiddenToDevices(method, {})).toBe(true)
+    }
+    // A method added later is the windows' alone unless it is listed here on purpose.
     const network = HOST_METHODS.filter((method) => method.startsWith('agentNetwork.'))
-    expect(network.length).toBeGreaterThan(0)
-    for (const method of network) expect(forbiddenToDevices(method, {})).toBe(true)
+    for (const method of network) {
+      expect(forbiddenToDevices(method, {})).toBe(!DEVICE_SAFE.includes(method))
+    }
+    for (const method of DEVICE_SAFE) expect(HOST_METHODS).toContain(method)
+  })
+
+  it('let a device pick nodes only through the two narrow admin calls', () => {
+    expect(isHostAdminMethod('settings.setDefaultNode')).toBe(true)
+    expect(isHostAdminMethod('settings.setAgentNetwork')).toBe(true)
+    // The generic settings call still treats the whole section as the computer's own.
+    expect(splitSettingsPatch({ agentNetwork: { enabled: true } }).host).toBeNull()
+    expect(
+      splitSettingsPatch({
+        agentNetwork: { defaultNode: { subscription: 'abcdef012345', node: 'JP' } },
+      }).host,
+    ).toBeNull()
+
+    const ref = { subscription: 'abcdef012345', node: '香港 01' }
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    expect(withDefaultNode(settings, ref).agentNetwork.defaultNode).toEqual(ref)
+    expect(withDefaultNode(settings, null).agentNetwork.defaultNode).toBeNull()
+    const chosen = withAgentNetworkChoice(
+      withAgentNetworkChoice(settings, 'codex', 'system'),
+      'claude-code',
+      ref,
+    )
+    expect(chosen.agentNetwork.agents).toEqual({ codex: 'system', 'claude-code': ref })
+    expect(withAgentNetworkChoice(chosen, 'codex', null).agentNetwork.agents).toEqual({
+      'claude-code': ref,
+    })
+    // Only a node reference goes in: no address, no extra field, nothing else switched.
+    for (const node of [
+      URL_WITH_TOKEN,
+      { ...ref, url: URL_WITH_TOKEN },
+      { subscription: '../x', node: 'a' },
+      { subscription: 'abcdef012345', node: '' },
+      'system',
+    ]) {
+      expect(() => withDefaultNode(settings, node)).toThrow()
+    }
+    for (const [agentId, choice] of [
+      ['codex', 'direct'],
+      ['codex', { ...ref, url: URL_WITH_TOKEN }],
+      ['codex', URL_WITH_TOKEN],
+      ['../codex', 'system'],
+      [7, 'system'],
+    ] as const) {
+      expect(() => withAgentNetworkChoice(settings, agentId, choice)).toThrow()
+    }
+    expect(withDefaultNode(settings, ref).agentNetwork.enabled).toBe(settings.agentNetwork.enabled)
   })
 
   it('take only the known fields', () => {
@@ -322,6 +394,66 @@ describe('NodeProxy', () => {
       () => '',
     )
     expect(state).not.toContain(TOKEN)
+    await service.shutdown()
+  })
+
+  it('shows a device names, counts, choices and exits, and never an address or token', async () => {
+    const settings: AgentNetworkSettings = {
+      ...DEFAULT_AGENT_NETWORK,
+      enabled: true,
+      agents: { codex: 'system' },
+    }
+    const { service } = await proxy(settings, {
+      systemProxy: () => ({ proxy: null, noProxy: null }),
+      trace: async () => 'ip=198.51.100.9\nloc=DE\n',
+    })
+    service.start()
+    const first = await service.addSubscription('Airport', URL_WITH_TOKEN)
+    await service.addSubscription('Other', PATH_TOKEN_URL)
+    settings.defaultNode = { subscription: first.id, node: 'JP 01' }
+    settings.agents = { codex: 'system', 'claude-code': { subscription: first.id, node: 'US' } }
+    await service.exitIp('codex' as AgentId)
+    await service.exitIp('claude-code' as AgentId)
+
+    const status = await service.deviceStatus()
+    const json = JSON.stringify(status)
+    for (const secret of [
+      TOKEN,
+      URL_WITH_TOKEN,
+      PATH_TOKEN_URL,
+      'sub.example.net',
+      'airport.example.org',
+      '/api/v1',
+      'https://',
+      'token=',
+    ]) {
+      expect(json).not.toContain(secret)
+    }
+    expect(Object.keys(status).sort()).toEqual([
+      'agents',
+      'available',
+      'defaultNode',
+      'enabled',
+      'exits',
+      'interface',
+      'nodes',
+      'problem',
+      'state',
+      'subscriptions',
+    ])
+    for (const sub of status.subscriptions) {
+      expect(Object.keys(sub).sort()).toEqual(['id', 'name', 'nodes', 'usage'])
+    }
+    expect(status.subscriptions.map((s) => s.name)).toEqual(['Airport', 'Other'])
+    expect(status.defaultNode).toEqual({ subscription: first.id, node: 'JP 01' })
+    expect(status.agents).toEqual([
+      { agentId: 'claude-code', choice: { subscription: first.id, node: 'US' } },
+      { agentId: 'codex', choice: 'system' },
+    ])
+    expect(status.exits.map((e) => [e.agentId, e.via, e.ip])).toEqual([
+      ['claude-code', 'node', '198.51.100.9'],
+      ['codex', 'system', '198.51.100.9'],
+    ])
     await service.shutdown()
   })
 

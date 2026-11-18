@@ -219,6 +219,31 @@ export interface AgentNetworkStatus {
   exits: ExitIp[]
 }
 
+/**
+ * The agent network as a paired device sees it: names, counts, choices and exits, and never a
+ * subscription's address, host or token, nor what mihomo said.
+ */
+export interface AgentNetworkDeviceStatus {
+  available: boolean
+  enabled: boolean
+  state: AgentNetworkState
+  problem: AgentNetworkProblem | null
+  /** The network interface nodes dial out on now. */
+  interface: string | null
+  subscriptions: {
+    id: string
+    name: string
+    nodes: number | null
+    usage: SubscriptionUsage | null
+  }[]
+  /** Empty while the network is not running. */
+  nodes: { subscription: string; node: string; delay: number | null }[]
+  defaultNode: NodeRef | null
+  /** Every agent of the host, with `default` for one that follows the default node. */
+  agents: { agentId: AgentId; choice: AgentNetworkChoice | 'default' }[]
+  exits: ExitIp[]
+}
+
 export interface LatencyResult extends NodeRef {
   /** Round trip in ms; null when the node did not answer in time. */
   delay: number | null

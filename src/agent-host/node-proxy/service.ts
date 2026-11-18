@@ -16,6 +16,7 @@ import {
   isSubscriptionName,
   MAX_SUBSCRIPTIONS,
   type AgentNetworkAgent,
+  type AgentNetworkDeviceStatus,
   type AgentNetworkProblem,
   type AgentNetworkSettings,
   type AgentNetworkState,
@@ -332,6 +333,38 @@ export class NodeProxy {
         }
       }),
       agents,
+      exits: this.currentExits(),
+    }
+  }
+
+  /**
+   * What a paired device may see: no subscription's address or host, no mihomo message, only
+   * names, counts, choices and exits. The phone shows and switches nodes from it.
+   */
+  async deviceStatus(): Promise<AgentNetworkDeviceStatus> {
+    const settings = this.deps.settings()
+    const nodes = await this.nodes().catch(() => [])
+    return {
+      available: this.available,
+      enabled: settings.enabled,
+      state: this.state,
+      problem: this.problem,
+      interface: this.inUse,
+      subscriptions: this.subscriptions.map((s) => {
+        const provider = this.providers.get(s.id)
+        return {
+          id: s.id,
+          name: s.name,
+          nodes: provider?.nodes ?? null,
+          usage: provider?.usage ?? null,
+        }
+      }),
+      nodes: nodes.map(({ subscription, node, delay }) => ({ subscription, node, delay })),
+      defaultNode: settings.defaultNode,
+      agents: this.deps.agentIds().map((agentId) => ({
+        agentId,
+        choice: settings.agents[agentId] ?? 'default',
+      })),
       exits: this.currentExits(),
     }
   }

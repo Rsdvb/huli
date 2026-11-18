@@ -21,6 +21,8 @@ import {
   withoutAgent,
   withRenamedAgent,
   withAllowedComputerApp,
+  withAgentNetworkChoice,
+  withDefaultNode,
   withShellPath,
 } from './settings-schema'
 
@@ -236,6 +238,16 @@ export class SettingsStore {
 
   setShellPath(shellPath: string): SettingsFile {
     return this.replace(withShellPath(this.current, shellPath))
+  }
+
+  /** Huli: a paired device picked the agent network's default node. */
+  setDefaultNode(node: unknown): SettingsFile {
+    return this.replace(withDefaultNode(this.current, node))
+  }
+
+  /** Huli: a paired device picked one agent's network. */
+  setAgentNetwork(agentId: unknown, choice: unknown): SettingsFile {
+    return this.replace(withAgentNetworkChoice(this.current, agentId, choice))
   }
 
   /** A session's card allowed an app always. */

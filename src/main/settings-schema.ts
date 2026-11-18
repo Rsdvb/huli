@@ -1159,6 +1159,39 @@ export function withAgentColor(
   return next
 }
 
+/** Huli: the agent network's default node as a paired device picked it; null for none. */
+export function withDefaultNode(current: SettingsFile, node: unknown): SettingsFile {
+  if (node !== null && !isNodeRef(node)) {
+    throw new SettingsError('"node" must be null or a { subscription, node }')
+  }
+  const next = structuredClone(current)
+  next.agentNetwork.defaultNode =
+    node === null ? null : { subscription: node.subscription, node: node.node }
+  return next
+}
+
+/**
+ * Huli: one agent's network as a paired device picked it: a node, the system's network, or null
+ * to follow the default node. The other agents' choices stay as they are.
+ */
+export function withAgentNetworkChoice(
+  current: SettingsFile,
+  agentId: unknown,
+  choice: unknown,
+): SettingsFile {
+  if (!isAgentId(agentId)) throw new SettingsError(`"${String(agentId)}" is not an agent id`)
+  if (choice !== null && !isAgentNetworkChoice(choice)) {
+    throw new SettingsError('"choice" must be null, "system" or a { subscription, node }')
+  }
+  const next = structuredClone(current)
+  if (choice === null) delete next.agentNetwork.agents[agentId]
+  else {
+    next.agentNetwork.agents[agentId] =
+      choice === 'system' ? 'system' : { subscription: choice.subscription, node: choice.node }
+  }
+  return next
+}
+
 /** Points a created agent at the folder it was moved to. */
 export function withMovedAgent(
   current: SettingsFile,

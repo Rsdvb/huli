@@ -17,7 +17,14 @@ import type {
   BrowserOriginDecision,
 } from './browser'
 import type { ComputerAppDecision } from './computer-use'
-import type { AgentNetworkStatus, ExitIp, LatencyResult, NodeRef, NodeView } from './agent-network'
+import type {
+  AgentNetworkDeviceStatus,
+  AgentNetworkStatus,
+  ExitIp,
+  LatencyResult,
+  NodeRef,
+  NodeView,
+} from './agent-network'
 import type { ControlOutcome } from './control'
 import type { ContextBreakdown } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
@@ -1752,6 +1759,16 @@ export interface HostContract {
   // system's network); a check under a minute old answers unless `fresh`. Every window hears it
   // in `agentNetwork.changed` too.
   'agentNetwork.exitIp': { params: { agentId: AgentId; fresh?: boolean }; result: ExitIp }
+  // Huli: what a paired device may see and do of the agent network, from any window or device:
+  // names, counts, choices and exits, never a subscription's address. A device changes the
+  // default node and an agent's choice through the admin calls `settings.setDefaultNode` and
+  // `settings.setAgentNetwork`.
+  'agentNetwork.deviceStatus': { params: void; result: AgentNetworkDeviceStatus }
+  // Tests the nodes named, or every node with `nodes` null, as `testLatency` does.
+  'agentNetwork.deviceLatency': {
+    params: { nodes: NodeRef[] | null }
+    result: { results: LatencyResult[] }
+  }
   // Huli: the user's folders of sessions, in the user's order; every port hears `folders.changed`.
   'folders.list': { params: void; result: SessionFolder[] }
   // A new folder, last in the order, holding `sessionIds` (taken out of any other folder).
@@ -2064,6 +2081,8 @@ export const HOST_METHODS = [
   'agentNetwork.nodes',
   'agentNetwork.testLatency',
   'agentNetwork.exitIp',
+  'agentNetwork.deviceStatus',
+  'agentNetwork.deviceLatency',
   'folders.list',
   'folders.create',
   'folders.rename',

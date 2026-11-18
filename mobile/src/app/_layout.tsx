@@ -42,6 +42,8 @@ const MANAGE_PAGES = [
   'artifacts',
   'devices',
   'usage',
+  'network',
+  'network-node',
 ] as const
 
 // Launched to measure the conversation list (dev/LongThreadScreen.tsx): that screen, and no other.

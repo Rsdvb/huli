@@ -362,6 +362,15 @@ export class HostAdmin {
         agentFolders.rename(agentId, name)
         return null
       }
+      case 'settings.setDefaultNode': {
+        settings.setDefaultNode(fields(params).node)
+        return null
+      }
+      case 'settings.setAgentNetwork': {
+        const { agentId, choice } = fields(params)
+        settings.setAgentNetwork(agentId, choice)
+        return null
+      }
       case 'settings.setAgentColor': {
         const { agentId, color } = fields(params)
         settings.colorAgent(agentId, color)

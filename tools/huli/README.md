@@ -208,7 +208,16 @@ Huli's own files:
 
 Subscription links carry tokens: they never go into settings.json, a status, an event or a log
 (each link and its parts are log secrets), and the `agentNetwork.*` methods are refused to paired
-devices (`src/shared/remote/allow-list.ts`), whose ports never hear `agentNetwork.changed`.
+devices (`src/shared/remote/allow-list.ts`), whose ports never hear `agentNetwork.changed`, but
+for two device-safe ones: `agentNetwork.deviceStatus` (on, state, problem, interface name,
+subscriptions as id, name, node count and traffic, nodes as subscription id, name and latency, the
+default node, each agent's choice and the exits; `network.test.ts` checks no link, host or token
+is in it) and `agentNetwork.deviceLatency`. A device changes the default node and an agent's
+choice through the admin calls `settings.setDefaultNode` and `settings.setAgentNetwork`
+(`src/shared/remote/host-admin.ts`, `src/main/host-admin.ts`, `withDefaultNode` and
+`withAgentNetworkChoice` in `settings-schema.ts`); the generic `settings.update` still refuses the
+section, so its switch and interface stay the computer's, as adding, removing and refreshing
+subscriptions do.
 
 Hooks into upstream files: `src/shared/settings.ts` and `src/main/settings-schema.ts` (the
 `agentNetwork` section, a client's own like `computerUse`), `src/shared/agent-host.ts`,
@@ -217,7 +226,9 @@ Hooks into upstream files: `src/shared/settings.ts` and `src/main/settings-schem
 (`networkChanged`: an idle agent's process stops so its next start takes the new variables),
 `src/main/computer-use.ts`, `agent-host.ts`, and in the renderer `bootstrap.ts`,
 `settings-page.tsx`, `web-sections.ts`, `agents-section.tsx` and `stores/view.ts`. The phone app
-does not show it.
+shows it in `mobile/src/app/settings/network.tsx` (设置 › Agent 网络), `network-node.tsx` (the
+node picker with latencies), the 网络出口 group of `settings/agent.tsx`, and
+`mobile/src/manage/network.ts`.
 
 ## Tests
 
