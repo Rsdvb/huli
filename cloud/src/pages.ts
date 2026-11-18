@@ -51,13 +51,27 @@ function page(title: string, body: string): string {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escape(title)} · ${SERVICE_NAME}</title><link rel="icon" type="image/svg+xml" href="${ICON}"><link rel="stylesheet" href="/static/style.css"></head><body><main><div class="brand"><img class="dot" src="${ICON}" alt="">${SERVICE_NAME}</div><div class="card">${body}</div></main></body></html>`
 }
 
+// C0 and C1 control characters, DEL, and the Unicode line and paragraph separators.
+// eslint-disable-next-line no-control-regex
+const UNPRINTABLE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
+
+/**
+ * Text a client sent, without the characters that could break a log line: a name with a line
+ * break in it could otherwise write a `login failed from` line of its own, which fail2ban acts on.
+ */
+export function printable(text: string): string {
+  return text.replace(UNPRINTABLE, ' ')
+}
+
 export function describeClient(info: HuliClientInfo | null): string {
   if (!info) return '未知设备'
   const kind =
     { desktop: '纸鸢桌面端', daemon: '纸鸢命令行', web: '网页版', mobile: '纸鸢手机端' }[
       info.kind
     ] ?? info.kind
-  return `${kind} · ${info.name}（${info.os} ${info.arch}${info.version ? ` · ${info.version}` : ''}）`
+  return printable(
+    `${kind} · ${info.name}（${info.os} ${info.arch}${info.version ? ` · ${info.version}` : ''}）`,
+  )
 }
 
 const hidden = (name: string, value: string) =>

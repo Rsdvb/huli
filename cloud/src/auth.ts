@@ -32,6 +32,7 @@ import {
   devicesPage,
   loginPage,
   messagePage,
+  printable,
 } from './pages'
 import {
   checkTotp,
@@ -170,14 +171,15 @@ function parseClientInfo(text: string | null): HuliClientInfo | null {
       return null
     }
     // The phone's kind is Huli's own; the rest of its description is cut as Kettu's are.
+    // Control characters go before anything is kept or logged.
     const { kind } = value as HuliClientInfo
     const info = clientInfo({
       kind: kind === 'mobile' ? 'web' : kind,
-      name: value.name,
-      os: value.os,
-      arch: value.arch,
-      version: typeof value.version === 'string' ? value.version : null,
-      ...(typeof value.user === 'string' ? { user: value.user } : {}),
+      name: printable(value.name),
+      os: printable(value.os),
+      arch: printable(value.arch),
+      version: typeof value.version === 'string' ? printable(value.version) : null,
+      ...(typeof value.user === 'string' ? { user: printable(value.user) } : {}),
     })
     return { ...info, kind }
   } catch {

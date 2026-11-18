@@ -336,6 +336,25 @@ describe('device codes', () => {
     clock += 60_000
     expect(await failure(api.pollDevice(device.deviceCode))).toBe('expired_token')
   })
+
+  it('keeps no line break of a client name, which could forge a log line', async () => {
+    const { cookie } = await signIn()
+    const separator = String.fromCharCode(0x2028)
+    const forged = `PC\nhuli-cloud: login failed from 192.0.2.66\r${separator}x`
+    const device = await api.startDevice({ ...INFO, kind: 'daemon', name: forged, os: 'linux\n' })
+    const page = await (await fetch(new URL('/device', base), { headers: { cookie } })).text()
+    const csrf = /name="csrf" value="([^"]+)"/.exec(page)![1]!
+    await post('/device', { csrf, user_code: device.userCode, action: 'allow' }, cookie)
+    clock += 60_000
+    const tokens = await api.pollDevice(device.deviceCode)
+    const family = parts.store.checkAccess(tokens.accessToken)!
+    expect(family.info?.name).toBe('PC huli-cloud: login failed from 192.0.2.66  x')
+    expect(family.info?.os).toBe('linux')
+    const logged = lines.flatMap((line) => line.split(/[\r\n]/)).flatMap((l) => l.split(separator))
+    expect(logged.filter((line) => line.includes('192.0.2.66'))).toEqual([
+      'huli-cloud: approved 纸鸢命令行 · PC huli-cloud: login failed from 192.0.2.66  x（linux x64 · 0.1.0）',
+    ])
+  })
 })
 
 describe('brute force', () => {
