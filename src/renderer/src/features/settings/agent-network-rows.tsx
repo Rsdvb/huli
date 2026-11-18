@@ -61,6 +61,9 @@ import {
   SettingsField,
 } from './settings-dialog'
 
+/** One empty list, so a selector before the status came returns the same value each time. */
+const NO_SUBSCRIPTIONS: SubscriptionView[] = []
+
 function update(patch: Parameters<ReturnType<typeof useSettingsStore.getState>['update']>[0]) {
   return useSettingsStore.getState().update(patch)
 }
@@ -442,7 +445,7 @@ function nodeLabel(ref: { subscription: string; node: string }, subs: Subscripti
 export function DefaultNodeControl({ label }: { label: string }) {
   const { t } = useTranslation('settings')
   const chosen = useSettingsStore((s) => s.settings.agentNetwork.defaultNode)
-  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? [])
+  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? NO_SUBSCRIPTIONS)
   const running = useAgentNetworkStore((s) => s.status?.state === 'running')
   const testing = useAgentNetworkStore((s) => s.testing)
   const options = useNodeOptions()
@@ -487,7 +490,7 @@ export function DefaultNodeControl({ label }: { label: string }) {
 export function NetworkChoiceSelect({ agentId, label }: { agentId: AgentId; label: string }) {
   const { t } = useTranslation('settings')
   const network = useSettingsStore((s) => s.settings.agentNetwork)
-  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? [])
+  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? NO_SUBSCRIPTIONS)
   const options = useNodeOptions()
   const [error, setError] = useState<string | null>(null)
   const choice = network.agents[agentId]
