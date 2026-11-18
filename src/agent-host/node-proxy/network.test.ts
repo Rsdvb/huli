@@ -27,8 +27,21 @@ import { applyNodeProxy, EnvironmentService } from '../shell-env'
 import { createValidators } from '../validate'
 import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
 import type { Downloaded } from './download'
-import { networkStateFile, providerFile, subscriptionSecrets, subscriptionsFile } from './files'
-import { parseLinuxRoutes, parseMacRoutes, pickInterface } from './interface'
+import {
+  networkStateFile,
+  parseNetworkStateFile,
+  providerFile,
+  subscriptionSecrets,
+  subscriptionsFile,
+} from './files'
+import {
+  parseLinuxLinks,
+  parseLinuxRoutes,
+  parseMacInterfaces,
+  parseMacRoutes,
+  parseWindowsAdapters,
+  pickInterface,
+} from './interface'
 import { NodeProxy } from './service'
 
 const TOKEN = '8f2c1d9a7b6e5f4a3c2b1d0e9f8a7b6c'
@@ -44,6 +57,12 @@ function served(body: string, userinfo: string | null = USERINFO): Downloaded {
 }
 
 const validators = createValidators('win32')
+
+const INTERFACES = [
+  { name: 'Meta', description: 'Meta Tunnel', up: true, tunnel: true },
+  { name: 'eth0', description: 'Realtek PCIe GbE', up: true, tunnel: false },
+  { name: 'wlan0', description: null, up: false, tunnel: false },
+]
 
 function rejects(run: () => unknown): void {
   expect(run).toThrow(expect.objectContaining({ code: 'invalid_params' }))
@@ -65,6 +84,7 @@ describe('the agent network requests', () => {
       'agentNetwork.nodes',
       'agentNetwork.testLatency',
       'agentNetwork.exitIp',
+      'agentNetwork.interfaces',
     ]) {
       expect(HOST_METHODS).toContain(method)
       expect(forbiddenToDevices(method, {})).toBe(true)
@@ -121,6 +141,45 @@ describe('the agent network requests', () => {
       expect(() => withAgentNetworkChoice(settings, agentId, choice)).toThrow()
     }
     expect(withDefaultNode(settings, ref).agentNetwork.enabled).toBe(settings.agentNetwork.enabled)
+  })
+
+  it('let a device bind an agent to one interface, by a bounded name alone', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    for (const name of [
+      'Mihomo',
+      '以太网 2',
+      'vEthernet (WSL (Hyper-V firewall))',
+      'utun4',
+      'Wi-Fi',
+    ]) {
+      const chosen = withAgentNetworkChoice(settings, 'codex', { interface: name })
+      expect(chosen.agentNetwork.agents).toEqual({ codex: { interface: name } })
+    }
+    for (const choice of [
+      { interface: '' },
+      { interface: ' Mihomo' },
+      { interface: 'x'.repeat(129) },
+      { interface: 'Mihomo#proxy' },
+      { interface: 'a&b' },
+      { interface: 'a=b' },
+      { interface: 'Mi\u0000homo' },
+      { interface: 7 },
+      { interface: 'Mihomo', node: 'JP' },
+      { interface: 'Mihomo', subscription: 'abcdef012345', node: 'JP' },
+      { name: 'Mihomo' },
+    ]) {
+      expect(() => withAgentNetworkChoice(settings, 'codex', choice)).toThrow()
+    }
+    expect(() =>
+      validateSettingsPatch({ agentNetwork: { agents: { codex: { interface: 'a&b' } } } }),
+    ).toThrow()
+    const patch = validateSettingsPatch({
+      agentNetwork: { agents: { codex: { interface: 'Mihomo' }, 'claude-code': 'system' } },
+    })
+    expect(patch.agentNetwork?.agents).toEqual({
+      codex: { interface: 'Mihomo' },
+      'claude-code': 'system',
+    })
   })
 
   it('take a file’s text to import only as text of at most 10 MiB, never echoed back', () => {
@@ -334,6 +393,61 @@ describe('the physical interface', () => {
   })
 })
 
+describe('the computer’s interfaces', () => {
+  it('lists Windows adapters with their state, TUNs marked, names as they are', () => {
+    const json = JSON.stringify([
+      { name: 'WLAN', description: 'Qualcomm Wi-Fi 7', status: 'Up' },
+      { name: 'Mihomo', description: 'Meta Tunnel', status: 'Up' },
+      { name: '以太网', description: 'Realtek PCIe 5GbE', status: 'Disconnected' },
+      { name: 'Tailscale', description: 'Tailscale Tunnel', status: 'Disabled' },
+    ])
+    expect(parseWindowsAdapters(json)).toEqual([
+      { name: 'Mihomo', description: 'Meta Tunnel', up: true, tunnel: true },
+      { name: 'WLAN', description: 'Qualcomm Wi-Fi 7', up: true, tunnel: false },
+      { name: 'Tailscale', description: 'Tailscale Tunnel', up: false, tunnel: true },
+      { name: '以太网', description: 'Realtek PCIe 5GbE', up: false, tunnel: false },
+    ])
+    expect(parseWindowsAdapters(JSON.stringify({ name: 'WLAN', status: 'Up' }))).toEqual([
+      { name: 'WLAN', description: null, up: true, tunnel: false },
+    ])
+    expect(parseWindowsAdapters('')).toEqual([])
+  })
+
+  it('lists a Mac’s interfaces but loopback, an inactive one as down', () => {
+    const ifconfig = [
+      'lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384',
+      'en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500',
+      '\tstatus: active',
+      'en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500',
+      '\tstatus: inactive',
+      'utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1500',
+      '\tinet 198.18.0.1 --> 198.18.0.1 netmask 0xffff0000',
+    ].join('\n')
+    const ports = 'Hardware Port: Wi-Fi\nDevice: en0\n\nHardware Port: Thunderbolt 1\nDevice: en1\n'
+    expect(parseMacInterfaces(ifconfig, ports)).toEqual([
+      { name: 'en0', description: 'Wi-Fi', up: true, tunnel: false },
+      { name: 'utun4', description: null, up: true, tunnel: true },
+      { name: 'en1', description: 'Thunderbolt 1', up: false, tunnel: false },
+    ])
+  })
+
+  it('lists Linux links but loopback, up only with a carrier', () => {
+    const ip = [
+      '1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 state UNKNOWN\\    link/loopback 00:00',
+      '2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP\\    link/ether 00:11',
+      '3: wlan0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 state DOWN\\    link/ether 00:12',
+      '4: Meta: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 9000 state UNKNOWN\\    link/none ',
+      '5: veth1@if4: <BROADCAST,UP,LOWER_UP> mtu 1500 state UP\\    link/ether 00:13',
+    ].join('\n')
+    expect(parseLinuxLinks(ip)).toEqual([
+      { name: 'Meta', description: null, up: true, tunnel: true },
+      { name: 'eth0', description: null, up: true, tunnel: false },
+      { name: 'veth1', description: null, up: true, tunnel: false },
+      { name: 'wlan0', description: null, up: false, tunnel: false },
+    ])
+  })
+})
+
 describe('applyNodeProxy', () => {
   const inherited = {
     PATH: '/usr/bin',
@@ -394,6 +508,13 @@ describe('EnvironmentService with nodes', () => {
     service.setNodeRoutes((agentId) => (agentId === 'codex' ? 30001 : null))
     expect(service.agentEnv('codex' as AgentId).HTTPS_PROXY).toBe('http://127.0.0.1:30001')
     expect(service.agentEnv('claude-code' as AgentId).HTTPS_PROXY).toBe('http://corp:8080')
+    // An agent bound to an interface gets its own listener just the same, and nothing else.
+    service.setNodeRoutes((agentId) => (agentId === 'claude-code' ? 30002 : null))
+    const bound = service.agentEnv('claude-code' as AgentId)
+    for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']) {
+      expect(bound[name]).toBe('http://127.0.0.1:30002')
+    }
+    expect(JSON.stringify(bound)).not.toContain('corp:8080')
     // Git and commands are Kite's own: never through a node.
     expect(service.agentEnv().HTTPS_PROXY).toBe('http://corp:8080')
   })
@@ -439,6 +560,20 @@ describe('the agent network settings', () => {
   })
 })
 
+describe('the agent network state file', () => {
+  it('keeps the interfaces’ mihomo processes to stop after a crash, and drops odd entries', () => {
+    const record = { pid: 42, controllerPort: 40000, secret: 'a'.repeat(48) }
+    const parsed = parseNetworkStateFile({
+      ports: {},
+      running: record,
+      sides: [record, { pid: -1, controllerPort: 40001, secret: 'b'.repeat(48) }, 'x'],
+      subscriptions: {},
+    })
+    expect(parsed).toMatchObject({ running: record, sides: [record] })
+    expect(parseNetworkStateFile({ ports: {}, running: null })).toMatchObject({ sides: [] })
+  })
+})
+
 describe('NodeProxy', () => {
   const folders: string[] = []
   afterEach(async () => {
@@ -466,6 +601,7 @@ describe('NodeProxy', () => {
       changed: (status) => events.push(status),
       routesChanged: () => {},
       detect: async () => 'eth0',
+      listInterfaces: async () => INTERFACES,
       download: async () => served(NODES_YAML),
       ...extra,
     })
@@ -667,6 +803,7 @@ describe('NodeProxy', () => {
       'enabled',
       'exits',
       'interface',
+      'interfaces',
       'nodes',
       'problem',
       'state',
@@ -675,6 +812,12 @@ describe('NodeProxy', () => {
     for (const sub of status.subscriptions) {
       expect(Object.keys(sub).sort()).toEqual(['id', 'name', 'nodes', 'usage'])
     }
+    // Names and states of the interfaces alone.
+    expect(status.interfaces).toEqual([
+      { name: 'Meta', up: true, tunnel: true },
+      { name: 'eth0', up: true, tunnel: false },
+      { name: 'wlan0', up: false, tunnel: false },
+    ])
     expect(status.subscriptions.map((s) => s.name)).toEqual(['Airport', 'Other', 'From file'])
     expect(status.subscriptions[0]!.usage).toMatchObject({ total: 1000 })
     expect(status.defaultNode).toEqual({ subscription: first.id, node: 'JP 01' })
@@ -731,6 +874,36 @@ describe('NodeProxy', () => {
     await service.exitIp('codex' as AgentId, true)
     expect(hops).toHaveLength(3)
     await expect(service.exitIp('nobody' as AgentId)).rejects.toThrow()
+    await service.shutdown()
+  })
+
+  it('sends an agent bound to an interface through its own listener alone, and fails closed', async () => {
+    const hops: (ProxyHop | null)[] = []
+    const settings: AgentNetworkSettings = {
+      ...DEFAULT_AGENT_NETWORK,
+      enabled: true,
+      agents: { 'claude-code': { interface: 'Meta' }, codex: 'system' },
+    }
+    const { service } = await proxy(settings, {
+      trace: async (hop) => {
+        hops.push(hop)
+        throw new Error('connect ECONNREFUSED')
+      },
+    })
+    service.start()
+    const listener = service.portFor('claude-code' as AgentId)
+    expect(listener).toEqual(expect.any(Number))
+    expect(service.portFor('codex' as AgentId)).toBeNull()
+    const exit = await service.exitIp('claude-code' as AgentId)
+    expect(hops).toEqual([{ host: '127.0.0.1', port: listener, auth: null }])
+    expect(exit).toMatchObject({ via: 'interface', ip: null, failure: 'unreachable' })
+    expect(service.status().agents).toEqual([
+      { agentId: 'claude-code', port: listener, node: null, interface: 'Meta' },
+    ])
+    expect(await service.interfaces()).toEqual(INTERFACES)
+    expect(service.status().interfaces).toEqual(INTERFACES)
+    // Without mihomo it has no network at all, as an agent on a node has none.
+    expect(service.status()).toMatchObject({ state: 'error', problem: 'missing' })
     await service.shutdown()
   })
 

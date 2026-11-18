@@ -2,9 +2,9 @@
 // carry the provider's token: they live in a file of their own, never in the settings, and leave
 // it only for Kite's own download of them. The nodes they hold, which carry the nodes' passwords,
 // go into mihomo's home, one file each. The state file holds what is no secret: the listeners'
-// ports, kept so an agent's proxy variables stay valid across restarts, the mihomo the host last
-// started, so a host after a crash can stop the one it left running, and each subscription's last
-// download: when, its traffic and expiry, and why it failed.
+// ports, kept so an agent's proxy variables stay valid across restarts, the mihomo processes the
+// host last started, so a host after a crash can stop those it left running, and each
+// subscription's last download: when, its traffic and expiry, and why it failed.
 
 import { randomBytes } from 'node:crypto'
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -57,8 +57,13 @@ export interface NetworkStateFile {
   ports: Partial<Record<AgentId, number>>
   /** The mihomo last started: its process and how to reach its API, to stop it after a crash. */
   running: { pid: number; controllerPort: number; secret: string } | null
+  /** The mihomo of each interface agents were bound to, started with the one above. */
+  sides: { pid: number; controllerPort: number; secret: string }[]
   subscriptions: Record<string, SubscriptionRecord>
 }
+
+/** More interfaces than agents are bound to, with room to spare. */
+const MAX_SIDES = 64
 
 /** An http(s) address with a host and no spaces; its token, if any, is the provider's business. */
 export function isSubscriptionUrl(value: unknown): value is string {
@@ -146,21 +151,13 @@ export function parseNetworkStateFile(data: Record<string, unknown>): NetworkSta
       if (isAgentId(id) && isPortNumber(port)) ports[id] = port
     }
   }
-  let running: NetworkStateFile['running'] = null
-  const r = data.running
-  if (typeof r === 'object' && r !== null) {
-    const o = r as Record<string, unknown>
-    if (
-      typeof o.pid === 'number' &&
-      Number.isInteger(o.pid) &&
-      o.pid > 0 &&
-      isPortNumber(o.controllerPort) &&
-      typeof o.secret === 'string' &&
-      /^[a-f0-9]{32,128}$/.test(o.secret)
-    ) {
-      running = { pid: o.pid, controllerPort: o.controllerPort, secret: o.secret }
-    }
-  }
+  const running = parseRunning(data.running)
+  const sides = (Array.isArray(data.sides) ? data.sides.slice(0, MAX_SIDES) : []).flatMap(
+    (value: unknown) => {
+      const side = parseRunning(value)
+      return side ? [side] : []
+    },
+  )
   const subscriptions: NetworkStateFile['subscriptions'] = {}
   const records = data.subscriptions
   if (typeof records === 'object' && records !== null && !Array.isArray(records)) {
@@ -168,7 +165,23 @@ export function parseNetworkStateFile(data: Record<string, unknown>): NetworkSta
       if (SUBSCRIPTION_ID.test(id)) subscriptions[id] = parseRecord(value)
     }
   }
-  return { version: 1, ports, running, subscriptions }
+  return { version: 1, ports, running, sides, subscriptions }
+}
+
+function parseRunning(value: unknown): NetworkStateFile['running'] {
+  if (typeof value !== 'object' || value === null) return null
+  const o = value as Record<string, unknown>
+  if (
+    typeof o.pid === 'number' &&
+    Number.isInteger(o.pid) &&
+    o.pid > 0 &&
+    isPortNumber(o.controllerPort) &&
+    typeof o.secret === 'string' &&
+    /^[a-f0-9]{32,128}$/.test(o.secret)
+  ) {
+    return { pid: o.pid, controllerPort: o.controllerPort, secret: o.secret }
+  }
+  return null
 }
 
 function time(value: unknown): number | null {
@@ -222,7 +235,7 @@ export function networkStateFile(userDataPath: string, log: LogFn): JsonFile<Net
     version: 1,
     migrations: {},
     parse: parseNetworkStateFile,
-    empty: () => ({ version: 1, ports: {}, running: null, subscriptions: {} }),
+    empty: () => ({ version: 1, ports: {}, running: null, sides: [], subscriptions: {} }),
     log,
     debounceMs: 0,
   })

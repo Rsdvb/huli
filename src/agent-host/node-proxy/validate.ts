@@ -101,6 +101,7 @@ export const networkValidators: Pick<Validators, NetworkMethod> = {
     return { id: o.id === null || o.id === undefined ? null : subscriptionId(o.id) }
   },
   'agentNetwork.testLatency': latencyParams,
+  'agentNetwork.interfaces': none,
   'agentNetwork.deviceStatus': none,
   'agentNetwork.deviceLatency': latencyParams,
   'agentNetwork.exitIp': (params) => {
