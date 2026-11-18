@@ -354,6 +354,8 @@ async function start(): Promise<void> {
       if (!remoteBrowser.originAnswered(request)) hostRef.current?.originAnswered(request)
     },
     removed: (sessionId) => remoteBrowser.pageRemoved(sessionId),
+    // As for a page the agent opened: the pane shows it unless the side panel shows another pane.
+    uploadAsked: (sessionId) => broadcast('browser:opened', { sessionId }),
     siteOpened: (pageUrl, favicons) => {
       if (favicons) void siteIcons.favicons(pageUrl, favicons)
       else siteIcons.visited(pageUrl)

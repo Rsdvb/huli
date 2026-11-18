@@ -292,6 +292,7 @@ Use it without being asked when it fits: after you change a page or a component,
 - \`browser_wait_for\` waits for text to show or to go.
 - \`browser_console_messages\` and \`browser_network_requests\` show errors and failed requests; \`since_navigation\` keeps those of the current page.
 - \`browser_evaluate\` runs a function on the page to inspect it; act with the other tools.
+- \`browser_upload_file\` puts files from this computer into a file input: click the page's upload button first, then call it with absolute paths. The user is asked each time whether those files may go to that site, and nothing is uploaded without their Allow.
 
 ## Tabs
 

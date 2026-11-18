@@ -45,6 +45,13 @@
       "other": "<b>Do the step here</b>, then press Done"
     }
   },
+  "upload": {
+    "one": "Upload <b>{{name}}</b> to <b>{{site}}</b>?",
+    "many": "Upload {{count}} files to <b>{{site}}</b>?",
+    "hint": "{{agent}} asks to upload into this page. Allow only files you mean to share with this site.",
+    "allow": "Allow",
+    "deny": "Deny"
+  },
   "bubble": {
     "title": "{{agent}} is using {{scope}}.",
     "hint": "Take over to click and type here.",

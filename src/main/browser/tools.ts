@@ -17,6 +17,7 @@ import {
 } from '@shared/control'
 import { BrowserCdp, ToolFailure } from './cdp'
 import { listTabs, tabsText } from './tabs'
+import { uploadFiles } from './upload'
 import type { BrowserViews, NavigateResult } from './views'
 
 export interface BrowserToolsDeps {
@@ -76,6 +77,16 @@ export class BrowserTools {
       controls: this.controls,
       acted: (sessionId, at, click) => deps.acted?.(sessionId, at, click),
       log: (level, message) => deps.log(level, message),
+      uploadFiles: (paths) => uploadFiles(paths),
+      askUpload: async (sessionId, ask, wait) => {
+        // The call's own limit covers the user's answer, as it covers a new site's.
+        wait.waiting?.(true)
+        try {
+          return await deps.views.askUpload(sessionId, ask, wait.deadline)
+        } finally {
+          wait.waiting?.(false)
+        }
+      },
     })
   }
 

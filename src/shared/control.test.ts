@@ -233,6 +233,11 @@ describe('parseOverlayRequest', () => {
       width: 320,
       height: 60,
     })
+    expect(parseOverlayRequest({ type: 'consent', id: 3, allow: true })).toEqual({
+      type: 'consent',
+      id: 3,
+      allow: true,
+    })
   })
 
   it('refuses anything else', () => {
@@ -245,6 +250,11 @@ describe('parseOverlayRequest', () => {
       { type: 'wheel', x: 1, y: 1, deltaX: Infinity, deltaY: 0 },
       { type: 'wheel', x: 1, y: 1, deltaX: 0, deltaY: 1e9 },
       { type: 'pill', width: 0, height: 10 },
+      { type: 'consent', id: 3 },
+      { type: 'consent', id: 3, allow: 'yes' },
+      { type: 'consent', id: 0, allow: true },
+      { type: 'consent', id: 1.5, allow: true },
+      { type: 'consent', id: '3', allow: true },
     ]) {
       expect(parseOverlayRequest(value)).toBeNull()
     }

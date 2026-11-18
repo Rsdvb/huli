@@ -63,6 +63,7 @@ const OWN_TOOLS: Record<string, string> = {
   browser_evaluate: '在浏览器中运行脚本',
   browser_ask_user: '请你在浏览器中操作',
   browser_tabs: '浏览器标签页',
+  browser_upload_file: '浏览器上传文件',
   // Computer use
   computer_list_apps: '列出电脑上的 App',
   computer_list_windows: '列出电脑上的窗口',

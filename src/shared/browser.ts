@@ -31,6 +31,9 @@ export function isOriginDecision(value: unknown): value is BrowserOriginDecision
   return value === 'session' || value === 'project' || value === 'deny'
 }
 
+/** The user's answer to files an agent wants to upload; `timeout` when they did not answer. */
+export type UploadAnswer = 'allow' | 'deny' | 'timeout'
+
 /** The answer to a request to open a new origin; `timeout` when the user did not answer. */
 export type BrowserOriginAnswer = BrowserOriginDecision | 'timeout'
 
@@ -116,7 +119,14 @@ export const BROWSER_TOOL_NAMES = [
   'browser_evaluate',
   'browser_ask_user',
   'browser_tabs',
+  'browser_upload_file',
 ] as const
+
+/** The most files one `browser_upload_file` call puts into a page. */
+export const MAX_UPLOAD_FILES = 10
+
+/** The most bytes one `browser_upload_file` call puts into a page, all its files together. */
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 /** What `browser_tabs` does. */
 export const BROWSER_TAB_ACTIONS = ['list', 'new', 'select', 'close'] as const

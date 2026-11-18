@@ -248,6 +248,17 @@ export class RemoteBrowser {
     if ((owner !== undefined && owner !== hostId) || this.local.has(sessionId)) {
       return { error: { code: 'no_page', message: 'Another host’s session has this page.' } }
     }
+    // Its paths name files on the agent's host, which this computer's page must never read here.
+    if (tool === 'browser_upload_file') {
+      return {
+        error: {
+          code: 'unavailable',
+          message:
+            'browser_upload_file works only when the agent runs on the computer whose browser ' +
+            'shows the page. Ask the user to add the file themselves.',
+        },
+      }
+    }
     this.hosts.set(sessionId, hostId)
     let args = call.args
     if (tool === 'browser_navigate' && call.forward && typeof args.url === 'string') {
