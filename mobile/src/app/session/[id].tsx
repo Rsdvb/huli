@@ -14,7 +14,13 @@ import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
 import { fallbackAgent, planQuota } from '@shared/plan-quota'
-import { harnessOf, type ThreadEntry, type ThreadState, type UserContent } from '@shared/thread'
+import {
+  harnessOf,
+  turnText,
+  type ThreadEntry,
+  type ThreadState,
+  type UserContent,
+} from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
 import {
   backgroundWork,
@@ -77,6 +83,7 @@ import {
   useSessionConfig,
 } from '../../components/SessionDock'
 import { useProjectFiles } from '../../files'
+import { confirm } from '../../manage/kit'
 import { call } from '../../git'
 import {
   sameFields,
@@ -97,7 +104,7 @@ import { useThread, useThreadSelector } from '../../thread'
 import { useComputer } from '../../ui/session/computer'
 import { countRender } from '../../ui/renders'
 import { SessionRows, type SessionRowsContext } from '../../ui/session/context'
-import { haptic } from '../../ui/session/feedback'
+import { copyText, haptic } from '../../ui/session/feedback'
 import { FileRefs } from '../../ui/session/fileRefs'
 import { relativePath } from '../../ui/session/format'
 import { G } from '../../ui/session/icons'
@@ -120,7 +127,7 @@ import { Icon } from '../../ui/session/Icon'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
 import { SubagentBar } from '../../components/SubagentBar'
-import { foldsIntoRun, latestPlan } from '../../ui/session/turns'
+import { foldsIntoRun, latestPlan, latestTurn } from '../../ui/session/turns'
 import {
   askedText,
   doingText,
@@ -395,6 +402,48 @@ export default function SessionScreen() {
     [forkAtMessage, link, id, pane],
   )
 
+  // Undo takes the latest turn out of the session, as the desktop's does, where the agent can; its
+  // message goes back to the composer to edit, unless the user is writing another there.
+  const lastTurn = useThreadSelector(view, latestTurn, sameFields)
+  const canRevert = !!agent?.capabilities.revertTurns && summary?.origin === 'user'
+  const [reverting, setReverting] = useState(false)
+  const revertStart = lastTurn.start
+  const revert = useCallback(async () => {
+    if (revertStart === null) return
+    const go = await confirm({
+      title: '撤销最近一轮？',
+      message:
+        '你的上一条消息和这条回复会从对话里移除，Agent 也会忘掉它们。这一轮改过的文件保持原样。',
+      confirm: '撤销这一轮',
+    })
+    if (!go) return
+    // Read before the turn's entries leave the thread.
+    const thread = view.store.get()
+    const text = thread ? turnText(thread, revertStart) : ''
+    setReverting(true)
+    try {
+      await link.request('sessions.revert', { sessionId: id, entryId: revertStart })
+      haptic.success()
+      if (text.trim() && !composer.current?.putBack(text)) {
+        Alert.alert('输入框里已有草稿', '撤销的消息没有放回去。', [
+          { text: '复制消息', onPress: () => void copyText(text) },
+          { text: '好', style: 'cancel' },
+        ])
+      }
+    } catch (error) {
+      Alert.alert('没能撤销', errorText(error))
+    } finally {
+      setReverting(false)
+    }
+  }, [revertStart, view.store, link, id])
+  const undoEnd = canRevert ? lastTurn.end : null
+  const undoBlocked = reverting || (status !== 'ready' && status !== 'closed')
+  const undo = useMemo(
+    () =>
+      undoEnd === null ? null : { end: undoEnd, blocked: undoBlocked, run: () => void revert() },
+    [undoEnd, undoBlocked, revert],
+  )
+
   // New session opens under this one, in its project, as the desktop's 新建子会话 does.
   const newChild = () => router.push({ pathname: '/new', params: { parent: id } })
   const openSession = (sessionId: string) =>
@@ -438,6 +487,7 @@ export default function SessionScreen() {
       root: changes.folder,
       fork: canFork ? fork : null,
       forkAtMessage,
+      undo,
       retryNotice,
       cutNotice,
       carryOn,
@@ -451,6 +501,7 @@ export default function SessionScreen() {
       canFork,
       fork,
       forkAtMessage,
+      undo,
       retryNotice,
       cutNotice,
       carryOn,

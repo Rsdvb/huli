@@ -1,5 +1,5 @@
 // The line under a finished turn: when it ended and how long it took, and buttons to copy its
-// reply and to fork the session from it.
+// reply, to fork the session from it and, under the latest turn, to undo that turn.
 
 import { memo, useEffect, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
@@ -26,7 +26,7 @@ export const TurnFooter = memo(function TurnFooter(props: {
   replies: Footer['replies']
 }) {
   const { c } = useSessionTokens()
-  const { fork } = useSessionRows()
+  const { fork, undo } = useSessionRows()
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
@@ -77,6 +77,19 @@ export const TurnFooter = memo(function TurnFooter(props: {
             <Icon icon={G.fork} size={16} color={c.textTertiary} />
           </PressScale>
         ) : null}
+        {undo && undo.end === props.end.id ? (
+          <PressScale
+            hitSlop={10}
+            disabled={undo.blocked}
+            onPress={undo.run}
+            accessibilityRole="button"
+            accessibilityLabel="撤销这一轮"
+            accessibilityState={{ disabled: undo.blocked }}
+            style={[styles.button, undo.blocked && styles.blocked]}
+          >
+            <Icon icon={G.undo} size={16} color={c.textTertiary} />
+          </PressScale>
+        ) : null}
       </View>
     </View>
   )
@@ -87,4 +100,5 @@ const styles = StyleSheet.create({
   text: { flex: 1, fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   button: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  blocked: { opacity: 0.38 },
 })

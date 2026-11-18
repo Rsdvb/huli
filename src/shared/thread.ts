@@ -1058,6 +1058,25 @@ export function retryableTurn(state: Pick<ThreadState, 'order' | 'byId'>): Ended
   return turnEndedOn(state, ['out_of_credit', 'turn_failed'])
 }
 
+/**
+ * What the user wrote in the turn the message `startId` starts, through the thread's end, as Undo
+ * gives it back to the composer: the text of that message and of those steered into the turn, a
+ * blank line apart. Answers Kettu sent for a card are no message of the user's, and attachments
+ * and images are left out.
+ */
+export function turnText(state: Pick<ThreadState, 'order' | 'byId'>, startId: string): string {
+  const at = state.order.indexOf(startId)
+  if (at === -1) return ''
+  return state.order
+    .slice(at)
+    .flatMap((id) => {
+      const entry = state.byId[id]
+      if (entry?.kind !== 'user' || entry.approval) return []
+      return entry.content.flatMap((c) => (c.type === 'text' && c.text.trim() ? [c.text] : []))
+    })
+    .join('\n\n')
+}
+
 /** The id the agent gave a message, from its entry id (`m:<messageId>`); null when it gave none. */
 export function entryMessageId(id: string): string | null {
   return id.startsWith('m:') ? id.slice(2).replace(/#(agent|thought|user)$/, '') : null

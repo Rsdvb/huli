@@ -393,6 +393,8 @@
     "revertTitle": "Undo the latest turn?",
     "revertBody": "Your last message and this reply leave the thread, and the agent forgets them. Files the turn changed stay as they are.",
     "revertConfirm": "Undo turn",
+    "revertDraftKept": "Your draft was kept, so the undone message was not put back",
+    "copyMessage": "Copy message",
     "label": "Reply actions"
   },
   "changes": {

@@ -169,6 +169,30 @@ export function putBackDraft(draft: string, text: string, held: readonly DraftAt
   emitAppEvent({ kind: 'draft-written', draft })
 }
 
+/**
+ * Gives an undone turn's message back to the session's draft to edit and send again. A draft that
+ * holds text or attachments stays as it is, so nothing being written changes under the user; a
+ * note offers the message to copy instead.
+ */
+export function putBackUndone(sessionId: string, text: string): void {
+  if (!text.trim()) return
+  if (!draftIsEmpty(sessionId)) {
+    toast(
+      i18n.t('session:replyFooter.revertDraftKept'),
+      {
+        label: i18n.t('session:replyFooter.copyMessage'),
+        onClick: () => void navigator.clipboard?.writeText(text).catch(() => {}),
+      },
+      { tone: 'info' },
+    )
+    return
+  }
+  writeDraft(sessionId, text)
+  flushDraft(sessionId)
+  emitAppEvent({ kind: 'draft-written', draft: sessionId })
+  emitAppEvent({ kind: 'focus-composer' })
+}
+
 function removedWhileStarting(error: unknown): boolean {
   const data = (error as { data?: { reason?: unknown } } | null)?.data
   return errorCode(error) === 'not_found' && data?.reason === REMOVED_WHILE_STARTING
