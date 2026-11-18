@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   agentGroup,
   DEFAULT_GROUP,
+  HOP_USER,
+  hopName,
   INTERFACE_PROXY,
   interfaceConfig,
   mihomoConfig,
@@ -9,6 +11,7 @@ import {
 } from './config'
 
 const SECRET = 'f'.repeat(48)
+const HOP_PASSWORD = 'a'.repeat(48)
 
 function config(subscriptions = 2, agents = ['claude-code', 'codex~work']) {
   return mihomoConfig({
@@ -19,7 +22,13 @@ function config(subscriptions = 2, agents = ['claude-code', 'codex~work']) {
       id: `${i}`.repeat(12),
       name: `Sub ${i}`,
     })),
-    agents: agents.map((agentId, i) => ({ agentId: agentId as never, port: 30000 + i })),
+    agents: agents.map((agentId, i) => ({
+      agentId: agentId as never,
+      port: 30000 + i,
+      hopPort: 32000 + i,
+    })),
+    hopPassword: HOP_PASSWORD,
+    loopbackInterface: 'Loopback Pseudo-Interface 1',
   })
 }
 
@@ -91,7 +100,7 @@ describe('mihomoConfig', () => {
     expect(groups[0]!.use).toEqual(providers)
     expect(groups[1]).toMatchObject({
       name: agentGroup('claude-code'),
-      proxies: ['REJECT', DEFAULT_GROUP],
+      proxies: ['REJECT', DEFAULT_GROUP, hopName('claude-code')],
       use: providers,
     })
     // No subscription: the groups hold REJECT alone, never an empty list.
@@ -130,6 +139,27 @@ describe('mihomoConfig', () => {
     }
   })
 
+  it('gives each agent its own hop: SOCKS5 to 127.0.0.1 with the password, in its group alone', () => {
+    const c = config()
+    expect(c.proxies).toEqual([
+      {
+        name: hopName('claude-code'),
+        type: 'socks5',
+        server: '127.0.0.1',
+        port: 32000,
+        username: HOP_USER,
+        password: HOP_PASSWORD,
+        udp: false,
+        'interface-name': 'Loopback Pseudo-Interface 1',
+      },
+      expect.objectContaining({ name: hopName('codex~work' as never), port: 32001 }),
+    ])
+    const groups = c['proxy-groups'] as Group[]
+    // The default group and every other agent's group never reach this agent's interface.
+    expect(groups[0]!.proxies).toEqual(['REJECT'])
+    expect(groups[2]!.proxies).toEqual(['REJECT', DEFAULT_GROUP, hopName('codex~work' as never)])
+  })
+
   it('resolves through DNS over HTTPS by address, bound to the interface', () => {
     const dns = config().dns as Record<string, unknown>
     expect(dns.enable).toBe(true)
@@ -142,34 +172,37 @@ describe('mihomoConfig', () => {
 })
 
 describe('interfaceConfig', () => {
-  function bound(networkInterface = 'Mihomo', agents = ['claude-code', 'codex~work']) {
+  function bound(networkInterface = 'Mihomo', agentId = 'claude-code') {
     return interfaceConfig({
       controllerPort: 41235,
       secret: SECRET,
       networkInterface,
-      agents: agents.map((agentId, i) => ({ agentId: agentId as never, port: 31000 + i })),
+      agentId: agentId as never,
+      port: 32000,
+      hopPassword: HOP_PASSWORD,
     })
   }
 
-  it('gives each agent its own listener on 127.0.0.1, its API on loopback alone', () => {
+  it('takes the hop alone, on 127.0.0.1 with its password, its API on loopback alone', () => {
     const c = bound()
     expect(c['external-controller']).toBe('127.0.0.1:41235')
+    expect(c.secret).toBe(SECRET)
     expect(c['allow-lan']).toBe(false)
     expect(c['bind-address']).toBe('127.0.0.1')
     for (const key of ['port', 'socks-port', 'mixed-port', 'redir-port', 'tproxy-port', 'tun']) {
       expect(c).not.toHaveProperty(key)
     }
+    expect(c['skip-auth-prefixes']).toEqual([])
     expect(c.listeners).toEqual([
-      expect.objectContaining({
+      {
+        name: 'kite-hop-claude-code',
+        type: 'socks',
         listen: '127.0.0.1',
-        port: 31000,
+        port: 32000,
+        udp: false,
+        users: [{ username: HOP_USER, password: HOP_PASSWORD }],
         proxy: agentGroup('claude-code'),
-      }),
-      expect.objectContaining({
-        listen: '127.0.0.1',
-        port: 31001,
-        proxy: agentGroup('codex~work' as never),
-      }),
+      },
     ])
   })
 

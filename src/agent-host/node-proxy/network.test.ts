@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HOST_METHODS } from '@shared/agent-host'
 import {
   DEFAULT_AGENT_NETWORK,
@@ -35,6 +35,8 @@ import {
   subscriptionsFile,
 } from './files'
 import {
+  InterfaceWatch,
+  type InterfaceChange,
   parseLinuxLinks,
   parseLinuxRoutes,
   parseMacInterfaces,
@@ -445,6 +447,106 @@ describe('the computer’s interfaces', () => {
       { name: 'veth1', description: null, up: true, tunnel: false },
       { name: 'wlan0', description: null, up: false, tunnel: false },
     ])
+  })
+})
+
+describe('the watch on bound interfaces', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function watching(initial: string[]) {
+    let present: string[] | null = initial
+    let reads = 0
+    const changes: InterfaceChange[] = []
+    const watch = new InterfaceWatch({
+      read: () => {
+        reads++
+        if (present === null) throw new Error('cannot read')
+        return present
+      },
+      intervalMs: 2_500,
+      changed: (change) => changes.push(change),
+    })
+    return {
+      watch,
+      changes,
+      reads: () => reads,
+      set: (names: string[] | null) => {
+        present = names
+      },
+    }
+  }
+
+  it('reads nothing while no agent is bound, and at once when one is', () => {
+    vi.useFakeTimers()
+    const w = watching(['Mihomo', 'WLAN'])
+    w.watch.watch([])
+    vi.advanceTimersByTime(60_000)
+    expect(w.reads()).toBe(0)
+    expect(w.watch.usable('Mihomo')).toBeNull()
+    w.watch.watch(['Mihomo', 'Gone'])
+    expect(w.reads()).toBe(1)
+    expect(w.watch.usable('Mihomo')).toBe(true)
+    expect(w.watch.usable('Gone')).toBe(false)
+    // A new binding is no change: the host picks its group as it starts it.
+    expect(w.changes).toEqual([])
+    w.watch.watch([])
+    vi.advanceTimersByTime(60_000)
+    expect(w.reads()).toBe(1)
+    expect(w.watch.usable('Mihomo')).toBeNull()
+  })
+
+  it('reports an interface that goes within one interval, and once', () => {
+    vi.useFakeTimers()
+    const w = watching(['Mihomo', 'WLAN'])
+    w.watch.watch(['Mihomo', 'WLAN'])
+    w.set(['WLAN'])
+    vi.advanceTimersByTime(2_500)
+    expect(w.changes).toEqual([{ gone: ['Mihomo'], back: [] }])
+    expect(w.watch.usable('Mihomo')).toBe(false)
+    expect(w.watch.usable('WLAN')).toBe(true)
+    vi.advanceTimersByTime(10_000)
+    expect(w.changes).toHaveLength(1)
+  })
+
+  it('reports it back once it returns, and only interfaces it watches', () => {
+    vi.useFakeTimers()
+    const w = watching(['WLAN'])
+    w.watch.watch(['Mihomo'])
+    expect(w.watch.usable('Mihomo')).toBe(false)
+    w.set(['WLAN', 'Mihomo', 'Other'])
+    vi.advanceTimersByTime(2_500)
+    expect(w.changes).toEqual([{ gone: [], back: ['Mihomo'] }])
+    w.set(['Mihomo'])
+    vi.advanceTimersByTime(2_500)
+    expect(w.changes).toHaveLength(1)
+    expect(w.watch.usable('Mihomo')).toBe(true)
+  })
+
+  it('knows nothing while the read fails, and reports what changed meanwhile once it works', () => {
+    vi.useFakeTimers()
+    const w = watching(['Mihomo'])
+    w.watch.watch(['Mihomo'])
+    w.set(null)
+    vi.advanceTimersByTime(2_500)
+    expect(w.watch.usable('Mihomo')).toBeNull()
+    expect(w.changes).toEqual([])
+    w.set([])
+    vi.advanceTimersByTime(2_500)
+    expect(w.changes).toEqual([{ gone: ['Mihomo'], back: [] }])
+    expect(w.watch.usable('Mihomo')).toBe(false)
+  })
+
+  it('forgets an interface no agent is bound to any more', () => {
+    vi.useFakeTimers()
+    const w = watching(['Mihomo', 'WLAN'])
+    w.watch.watch(['Mihomo', 'WLAN'])
+    w.watch.watch(['WLAN'])
+    w.set(['WLAN'])
+    vi.advanceTimersByTime(2_500)
+    expect(w.changes).toEqual([])
+    expect(w.watch.usable('Mihomo')).toBeNull()
   })
 })
 

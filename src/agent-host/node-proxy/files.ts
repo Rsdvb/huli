@@ -57,12 +57,12 @@ export interface NetworkStateFile {
   ports: Partial<Record<AgentId, number>>
   /** The mihomo last started: its process and how to reach its API, to stop it after a crash. */
   running: { pid: number; controllerPort: number; secret: string } | null
-  /** The mihomo of each interface agents were bound to, started with the one above. */
+  /** The mihomo of each agent bound to an interface, which start and stop on their own. */
   sides: { pid: number; controllerPort: number; secret: string }[]
   subscriptions: Record<string, SubscriptionRecord>
 }
 
-/** More interfaces than agents are bound to, with room to spare. */
+/** More than the agents bound to interfaces, with room to spare. */
 const MAX_SIDES = 64
 
 /** An http(s) address with a host and no spaces; its token, if any, is the provider's business. */

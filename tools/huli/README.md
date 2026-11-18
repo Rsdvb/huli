@@ -195,9 +195,10 @@ node tools/huli/brand/render.mjs ..\ref\kite-preview.png   # the optional sheet 
 Each agent can reach the network through a node of the user's proxy subscriptions (机场订阅)
 instead of the system's network, which may be a Clash or Karing TUN. The agent host runs mihomo
 (`tools/install/mihomo.mjs`, GPL-3.0, a separate program) with one `mixed` listener on 127.0.0.1
-per agent that uses a node, and gives that agent only its listener in `HTTP_PROXY`, `HTTPS_PROXY`
-and `ALL_PROXY`, with loopback, the private ranges and Tailscale in `NO_PROXY`. Kite's own traffic
-keeps Advanced › Proxy.
+per agent of the host, whatever its choice, so a change of choice never changes that mihomo, and
+gives an agent that uses a node or an interface only its listener in `HTTP_PROXY`, `HTTPS_PROXY`
+and `ALL_PROXY`, with loopback, the private ranges and Tailscale in `NO_PROXY`; the group of an
+agent on the system's network stays on REJECT. Kite's own traffic keeps Advanced › Proxy.
 
 It fails closed: every group starts on REJECT, lists it and falls back on it (an empty group
 would fall back to DIRECT), the rules reject everything, and the host picks each group's node
@@ -210,17 +211,31 @@ goes out on the system's network.
 
 An agent can instead be bound to one network interface (选择网卡), any the computer has, such as a
 proxy client's TUN or Wi-Fi: `{ interface: <name> }` beside `'system'` and a node. Its listener
-stays the same; behind it, the host runs a mihomo of that interface's own (`interfaceConfig`,
-one per interface in use, started, stopped and restarted with the nodes' one, each in
-`agent-network/mihomo/interfaces/<n>/`), whose agent groups hold REJECT first and a `type: direct`
-proxy with `interface-name`, and nothing else; the global DIRECT is in no group. mihomo binds
-that proxy's sockets to the interface (IP_UNICAST_IF on Windows, IP_BOUND_IF on macOS,
-SO_BINDTODEVICE on Linux) and a dial fails when the interface is gone (`interface not found`) or
-down (unreachable), never on another interface; the host also puts a group on REJECT while the
-interface list (`interface.ts`: `Get-NetAdapter`, `ifconfig` with `networksetup`, `ip -o link`,
-read every minute while one is bound and on `agentNetwork.interfaces`) shows it gone or down.
-A direct proxy resolves names with mihomo's process-wide `direct-nameserver`, which is why each
-interface needs its own mihomo: there names go out as plain UDP DNS (223.5.5.5, 119.29.29.29)
+stays the same, in the nodes' mihomo, whose group for each agent also holds a hop: a `socks5`
+proxy to 127.0.0.1 on a port of the agent's own, signed in with a password the host makes at
+start, and bound to the loopback interface (mihomo binds no socket to 127.0.0.1, but on Windows
+and macOS it looks the interface up first, so the physical one would fail the hop while gone).
+Behind the hop the host runs a mihomo of that agent's own (`interfaceConfig`, in
+`agent-network/mihomo/interfaces/<n>/`), whose one `socks` listener on 127.0.0.1 takes only the
+hop's user (`skip-auth-prefixes: []`), and whose group holds REJECT first and a `type: direct`
+proxy with `interface-name`, and nothing else; the global DIRECT is in no group. Binding an agent,
+unbinding it or moving it to another interface so starts or stops that agent's mihomo alone, on
+the same hop port, and picks its group through the API: the nodes' mihomo, the other agents'
+mihomo processes and every connection through them carry on. The nodes' group picks the hop only
+while the agent's mihomo answers and the interface is up, else REJECT; that mihomo's group picks
+the direct proxy under the same rule. mihomo binds that proxy's sockets to the interface
+(IP_UNICAST_IF on Windows, IP_BOUND_IF on macOS, SO_BINDTODEVICE on Linux) and a dial fails when
+the interface is gone (`interface not found`) or down (unreachable), never on another interface.
+While an agent is bound, the host reads `os.networkInterfaces()` every 2.5 s (`InterfaceWatch`:
+a few ms, no child process; Node lists an interface only while it is up with an address, by the
+name mihomo uses), puts the agent's groups on REJECT as soon as its interface is gone, and when it
+is back starts the agent's mihomo anew, since mihomo keeps its interface table for 20 s, and
+picks the hop again: measured with the pinned mihomo, cut off 2.1 to 2.7 s after the interface
+went and through again 1.3 to 3.0 s after it came back. The full list (`interface.ts`:
+`Get-NetAdapter`, `ifconfig` with `networksetup`, `ip -o link`) is read for the windows, on
+`agentNetwork.interfaces` and after such a change, and decides only while that read fails. A
+direct proxy resolves names with mihomo's process-wide `direct-nameserver`, which is why each
+bound agent needs its own mihomo: there names go out as plain UDP DNS (223.5.5.5, 119.29.29.29)
 bound to the same interface, which a TUN's DNS hijack answers, with a fake IP in fake-ip mode, so
 the TUN sees the name and routes by its domain rules; DoH would hide the query from it.
 
