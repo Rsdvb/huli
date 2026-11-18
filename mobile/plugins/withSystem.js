@@ -19,7 +19,9 @@ const {
 const SOURCES = path.join(__dirname, 'system')
 const SHARED = path.join(__dirname, 'widgets', 'HuliOpenIntents.swift')
 const PHRASES = path.join(SOURCES, 'HuliAppIntents.swift')
-const SPOKEN_NAMES = ['纸鸢', 'Kite', '风筝', '狐狸', 'Huli']
+// Siri knows the display names (Kite, 纸鸢) already. iOS refuses to install an app with more than
+// three other names (TooManyAlternativeAppNames).
+const SPOKEN_NAMES = ['风筝', '狐狸', 'Huli']
 
 const sourceFiles = () => [
   ...fs
