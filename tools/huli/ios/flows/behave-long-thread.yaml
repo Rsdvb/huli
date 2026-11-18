@@ -1,0 +1,57 @@
+# Shoots what the conversation list must keep doing, in the LIST list engine of the developer's
+# long thread with a turn that keeps writing: it opens at the newest message (b1), stays at the
+# bottom while the reply grows (b2), keeps its place when scrolled up as rows come in below (b3
+# and b4 alike), comes back down with the button (b5), and makes room for the keyboard at the
+# bottom (b6) and scrolled up (b7, b8).
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevThread: entries=600&stream=1&label=behave-${LIST}
+- extendedWaitUntil:
+    visible:
+      id: frame-meter
+    timeout: 20000
+- takeScreenshot: b1-open-${LIST}
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 5000
+    optional: true
+- takeScreenshot: b2-streaming-${LIST}
+- swipe:
+    start: 50%, 40%
+    end: 50%, 75%
+    duration: 900
+- takeScreenshot: b3-away-${LIST}
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 4000
+    optional: true
+- takeScreenshot: b4-away-later-${LIST}
+- tapOn: '回到最新'
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 1500
+    optional: true
+- takeScreenshot: b5-bottom-${LIST}
+- tapOn: 'Message'
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 1500
+    optional: true
+- takeScreenshot: b6-keyboard-${LIST}
+- hideKeyboard
+- swipe:
+    start: 50%, 40%
+    end: 50%, 75%
+    duration: 900
+- takeScreenshot: b7-away-${LIST}
+- tapOn: 'Message'
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 1500
+    optional: true
+- takeScreenshot: b8-away-keyboard-${LIST}

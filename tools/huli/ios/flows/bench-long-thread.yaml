@@ -1,0 +1,13 @@
+# Times drawing every row of the developer's long thread off screen (RowBench), LABEL naming it.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevThread: entries=2000&bench=1&label=${LIST}
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 12000
+    optional: true

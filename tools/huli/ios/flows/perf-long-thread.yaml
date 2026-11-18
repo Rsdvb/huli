@@ -1,0 +1,38 @@
+# Flings a long made-up session up and down while the frame meter counts: the developer's screen
+# (mobile/src/dev/LongThreadScreen.tsx) shown at launch in place of the app, with ENTRIES entries
+# labelled LIST. The counts land in the app's documents as huli-frames.json, which frames.sh
+# prints. Run it as behave.sh runs a flow, with -e ENTRIES=2000 -e LIST=<label>.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevThread: entries=${ENTRIES}&label=${LIST}
+- extendedWaitUntil:
+    visible:
+      id: frame-meter
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot: open-${LIST}
+- tapOn:
+    id: frame-meter
+- repeat:
+    times: 20
+    commands:
+      - swipe:
+          start: 50%, 22%
+          end: 50%, 92%
+          duration: 40
+- takeScreenshot: up-${LIST}
+- repeat:
+    times: 20
+    commands:
+      - swipe:
+          start: 50%, 92%
+          end: 50%, 22%
+          duration: 40
+- tapOn:
+    id: frame-meter
+- takeScreenshot: frames-${LIST}
