@@ -3476,6 +3476,7 @@ export class SessionManager {
       ...(kettuService ? { kettuService } : {}),
       ...(record.instructionsAhead ? { promptAhead: true } : {}),
       ...(append ? { systemPromptAppend: append } : {}),
+      ...(record.origin === 'routine' ? { routine: true } : {}),
     }
   }
 

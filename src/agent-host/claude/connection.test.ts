@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAccount } from '@shared/agent-host'
+import type { ClaudeRunSettings } from '@shared/settings'
 import {
   applyPatches,
   threadFromSnapshot,
@@ -130,6 +131,7 @@ async function setup(
   env: Record<string, string> = {},
   spec: Partial<LaunchSpec> = {},
   claudeTestEntrypoint?: () => string | null,
+  claudeRun?: () => ClaudeRunSettings | null,
 ) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-sdk-'))
   dirs.push(dir)
@@ -159,6 +161,7 @@ async function setup(
     },
     env: { PATH: '/usr/bin', HOME: '/home/ada', ...env },
     ...(claudeTestEntrypoint ? { claudeTestEntrypoint } : {}),
+    ...(claudeRun ? { claudeRun } : {}),
     spawn: (options) => {
       spawned.push(options)
       const child = new FakeChild()
@@ -366,6 +369,41 @@ describe('the Claude Agent SDK driver', () => {
       'kite_lab-42',
       'sdk-ts',
     ])
+  })
+
+  it('passes the fallback model, and the budget to routine runs unless it holds for all', async () => {
+    let run: ClaudeRunSettings | null = null
+    const { sdk, connection } = await setup({}, {}, undefined, () => run)
+    const limits = () => {
+      const { fallbackModel, maxBudgetUsd } = sdk.last.options
+      return { fallbackModel, maxBudgetUsd }
+    }
+    await connection.newSession('/repo', { routine: true })
+    expect(limits()).toEqual({ fallbackModel: undefined, maxBudgetUsd: undefined })
+
+    run = { fallbackModel: 'claude-sonnet-5-5', budgetUsd: 2.5, budgetAllSessions: false }
+    await connection.newSession('/repo', {})
+    expect(limits()).toEqual({ fallbackModel: 'claude-sonnet-5-5', maxBudgetUsd: undefined })
+    await connection.newSession('/repo', { routine: true })
+    expect(limits()).toEqual({ fallbackModel: 'claude-sonnet-5-5', maxBudgetUsd: 2.5 })
+    // A session Kettu opens for itself takes neither.
+    await connection.newSession('/repo', { routine: true, hidden: 'titles' })
+    expect(limits()).toEqual({ fallbackModel: undefined, maxBudgetUsd: undefined })
+
+    run = { fallbackModel: null, budgetUsd: 4, budgetAllSessions: true }
+    await connection.newSession('/repo', {})
+    expect(limits()).toEqual({ fallbackModel: undefined, maxBudgetUsd: 4 })
+  })
+
+  it('passes no fallback model that is the main model, which the SDK rejects', async () => {
+    const { sdk, connection } = await setup(
+      { ANTHROPIC_MODEL: 'claude-sonnet-5-5-20260301' },
+      {},
+      undefined,
+      () => ({ fallbackModel: 'claude-sonnet-5-5', budgetUsd: null, budgetAllSessions: false }),
+    )
+    await connection.newSession('/repo', {})
+    expect(sdk.last.options).not.toHaveProperty('fallbackModel')
   })
 
   it("appends Kettu's memory to the system prompt and turns Claude Code's own memory off", async () => {
@@ -1443,6 +1481,21 @@ describe('a turn', () => {
       kind: 'agent_error',
       message: 'Credit balance is too low',
     })
+  })
+
+  it('fails a turn that ran out of budget with what Claude Code says', async () => {
+    s.sdk.script = (query) => {
+      query.running()
+      query.finish({
+        subtype: 'error_max_budget_usd',
+        is_error: true,
+        stop_reason: null,
+        errors: ['Reached maximum budget ($2.5)'],
+      })
+    }
+    await expect(
+      s.connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }]),
+    ).rejects.toMatchObject({ kind: 'agent_error', message: 'Reached maximum budget ($2.5)' })
   })
 
   it('steers a running turn, and leaves a message with no turn to Kettu', async () => {

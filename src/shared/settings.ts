@@ -39,6 +39,9 @@ export interface SettingsFile {
     sessionTitles: boolean // a small model titles a session its agent leaves untitled
     claudeTestEntrypoint: boolean
     claudeTestEntrypointLabel: string
+    // By Claude Code agent; an agent without an entry runs with no fallback and no budget.
+    // Replaced whole.
+    claudeRuns: Partial<Record<AgentId, ClaudeRunSettings>>
   }
   thread: {
     outlineSummaries: boolean // a small model titles the outline's messages
@@ -211,6 +214,41 @@ export function isClaudeTestEntrypointLabel(value: unknown): value is string {
   )
 }
 
+/** How a Claude Code agent's sessions run: a model for when the main one is overloaded, and a cap. */
+export interface ClaudeRunSettings {
+  fallbackModel: string | null
+  budgetUsd: number | null // what one run may spend; null for no limit
+  budgetAllSessions: boolean // false: the budget holds for routine runs only
+}
+
+export const CLAUDE_RUN_DEFAULTS: ClaudeRunSettings = {
+  fallbackModel: null,
+  budgetUsd: null,
+  budgetAllSessions: false,
+}
+
+export const CLAUDE_BUDGET_MAX_USD = 10_000
+const CLAUDE_MODEL_CHARS = 256
+
+/** A model id as Claude Code takes one: one word, since a comma or a space would make it a list. */
+export function isClaudeFallbackModel(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= CLAUDE_MODEL_CHARS &&
+    /^[^\s,]+$/.test(value)
+  )
+}
+
+export function isClaudeBudgetUsd(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    value <= CLAUDE_BUDGET_MAX_USD
+  )
+}
+
 export const DEFAULT_SETTINGS: SettingsFile = {
   version: 1,
   agentRegistrationVersion: 1,
@@ -227,6 +265,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     sessionTitles: true,
     claudeTestEntrypoint: false,
     claudeTestEntrypointLabel: 'huli-test',
+    claudeRuns: {},
   },
   thread: { outlineSummaries: true, confirmLinks: true, openLinksIn: 'browser', alwaysOpenIn: {} },
   appearance: {
@@ -351,6 +390,7 @@ export interface HostSettings {
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled
   claudeTestEntrypoint: string | null
+  claudeRuns: SettingsFile['general']['claudeRuns']
   defaultAgent: AgentId | null // the agent new sessions start with, which answers artifacts' questions
   computerUse: ComputerUseSettings
   agentNetwork: AgentNetworkSettings

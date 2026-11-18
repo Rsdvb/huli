@@ -126,6 +126,7 @@ async function manager(setup: Setup) {
     agentNetwork: DEFAULT_SETTINGS.agentNetwork,
     downloadService: !setup.noDownloads,
     claudeTestEntrypoint: null,
+    claudeRuns: {},
   }
   const def = setup.def ?? DEF
   const vendor = def.launch.kind === 'package' && !!def.launch.fromVendor

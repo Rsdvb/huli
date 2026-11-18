@@ -1,6 +1,6 @@
 // A Claude Code agent's common settings on its page: the auto-compact window for all models and
 // for each model, and the prompt cache duration, read from and saved to its settings file on the
-// agent's host.
+// agent's host; and Kettu's own settings for how its sessions run, the fallback model and budget.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
@@ -14,7 +14,14 @@ import {
   PROMPT_CACHE_TTLS,
   type PromptCacheTtl,
 } from '@shared/agents'
-import { CLAUDE_TEST_ENTRYPOINT_LABEL_CHARS, isClaudeTestEntrypointLabel } from '@shared/settings'
+import {
+  CLAUDE_RUN_DEFAULTS,
+  CLAUDE_TEST_ENTRYPOINT_LABEL_CHARS,
+  isClaudeBudgetUsd,
+  isClaudeTestEntrypointLabel,
+  type ClaudeRunSettings,
+} from '@shared/settings'
+import type { AgentId } from '@shared/thread'
 import { Icon } from '@renderer/components/affect/app-shell'
 import {
   Combobox,
@@ -32,6 +39,7 @@ import { BlockLine, RowLine, RowShell, RowText } from './rows'
 import { DIALOG_MONO_FIELD } from './settings-dialog'
 
 const AUTO = 'auto'
+const NO_FALLBACK = ''
 const MAX_MODEL_CHARS = 256
 
 type Read =
@@ -304,7 +312,163 @@ export function ClaudeSettingsRows({ status }: { status: AgentStatus }) {
           </p>
         )}
       </RowShell>
+      <ClaudeRunRows
+        agentId={status.id}
+        models={settings ? settings.compact.filter((row) => row.name !== null) : []}
+        loading={read.state === 'loading'}
+      />
       {hostId === null && <ClaudeTestEntrypointRow />}
+    </>
+  )
+}
+
+/** The typed budget: null when empty, undefined when it is no budget. */
+function parseBudget(text: string): number | null | undefined {
+  const trimmed = text.trim()
+  if (trimmed === '') return null
+  const value = Number(trimmed)
+  return isClaudeBudgetUsd(value) ? value : undefined
+}
+
+/** The fallback model and the budget per run, kept in Kettu's settings by agent. */
+function ClaudeRunRows({
+  agentId,
+  models,
+  loading,
+}: {
+  agentId: AgentId
+  models: readonly ClaudeCompactRow[]
+  loading: boolean
+}) {
+  const { useSettingsStore } = useHostScope()
+  const { t } = useTranslation('settings')
+  const [save, busy, error] = useAction()
+  const [draft, setDraft] = useState<string | null>(null)
+  // An older host sends none.
+  const run =
+    useSettingsStore((s) => s.settings.general.claudeRuns?.[agentId]) ?? CLAUDE_RUN_DEFAULTS
+  const stored = run.budgetUsd === null ? '' : String(run.budgetUsd)
+  const text = draft ?? stored
+  const budget = parseBudget(text)
+  const canSave = !busy && budget !== undefined && text.trim() !== stored
+  const fallbackName = t('agents.claudeSettings.runs.fallback.name')
+  const budgetName = t('agents.claudeSettings.runs.budget.name')
+  const allName = t('agents.claudeSettings.runs.allSessions.name')
+
+  const write = (change: Partial<ClaudeRunSettings>): Promise<void> => {
+    const store = useSettingsStore.getState()
+    const runs = { ...store.settings.general.claudeRuns }
+    const next = { ...CLAUDE_RUN_DEFAULTS, ...runs[agentId], ...change }
+    if (next.fallbackModel === null && next.budgetUsd === null && !next.budgetAllSessions) {
+      delete runs[agentId]
+    } else {
+      runs[agentId] = next
+    }
+    return store.update({ general: { claudeRuns: runs } })
+  }
+
+  const fallback = run.fallbackModel
+  const fallbackOptions = [
+    { value: NO_FALLBACK, label: t('agents.claudeSettings.runs.fallback.none') },
+    ...models.map((model) => ({ value: model.model, label: model.name ?? model.model })),
+    ...(fallback !== null && !models.some((model) => model.model === fallback)
+      ? [
+          {
+            value: fallback,
+            label: t('agents.claudeSettings.runs.fallback.unlisted', {
+              id: knownName(fallback) ?? fallback,
+            }),
+          },
+        ]
+      : []),
+  ]
+
+  return (
+    <>
+      <RowShell>
+        <RowLine
+          text={
+            <RowText
+              name={fallbackName}
+              description={t('agents.claudeSettings.runs.fallback.description')}
+            />
+          }
+        >
+          {loading ? (
+            <Skel width={210} className="k-skel--field" />
+          ) : (
+            <SettingSelect
+              label={fallbackName}
+              value={fallback ?? NO_FALLBACK}
+              disabled={busy}
+              options={fallbackOptions}
+              onChange={(next) =>
+                save(() => write({ fallbackModel: next === NO_FALLBACK ? null : next }))
+              }
+            />
+          )}
+        </RowLine>
+      </RowShell>
+      <RowShell>
+        <div className="k-block">
+          <BlockLine
+            text={
+              <RowText
+                name={budgetName}
+                description={t('agents.claudeSettings.runs.budget.description')}
+              />
+            }
+          >
+            <form
+              className="flex min-w-0 items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (!canSave || budget === undefined) return
+                save(async () => {
+                  await write({ budgetUsd: budget })
+                  setDraft(null)
+                })
+              }}
+            >
+              <input
+                className={DIALOG_MONO_FIELD + ' w-28 min-w-0'}
+                aria-label={budgetName}
+                aria-invalid={budget === undefined}
+                inputMode="decimal"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={t('agents.claudeSettings.runs.budget.placeholder')}
+                value={text}
+                disabled={busy}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+              <SetButton type="submit" disabled={!canSave}>
+                {t('agents.key.save')}
+              </SetButton>
+            </form>
+          </BlockLine>
+          <BlockLine
+            text={
+              <RowText
+                name={allName}
+                description={t('agents.claudeSettings.runs.allSessions.description')}
+              />
+            }
+          >
+            <SettingSwitch
+              label={allName}
+              checked={run.budgetAllSessions}
+              disabled={busy || run.budgetUsd === null}
+              onChange={(next) => save(() => write({ budgetAllSessions: next }))}
+            />
+          </BlockLine>
+        </div>
+        {(error || budget === undefined) && (
+          <p role="status" className="k-row-note k-error" data-wrap="">
+            {error ?? t('agents.claudeSettings.runs.budget.invalid')}
+          </p>
+        )}
+      </RowShell>
     </>
   )
 }
