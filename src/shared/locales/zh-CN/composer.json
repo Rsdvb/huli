@@ -1,6 +1,10 @@
 {
   "prompt": {
     "label": "给 {{agent}} 发消息",
+    "suggestion": {
+      "key": "Tab",
+      "label": "建议：{{text}}。按 Tab 填入。"
+    },
     "placeholder": {
       "starting": "正在启动 {{agent}}…",
       "awaiting": "等待你的授权",

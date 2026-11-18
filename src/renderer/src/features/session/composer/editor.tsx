@@ -39,6 +39,15 @@ export interface ComposerEditorHandle {
   measure(): { height: number; least: number }
 }
 
+/** A predicted next prompt the empty box shows in its placeholder's place. */
+export interface GhostPrompt {
+  text: string
+  /** The key that fills it in, as its cap shows it. */
+  key: string
+  /** What a screen reader hears for it. */
+  label: string
+}
+
 /** The list a popover shows, for the box's combobox attributes. */
 export interface PopoverAria {
   listId: string
@@ -50,6 +59,26 @@ const fromBox = Annotation.define<boolean>()
 
 function editability(disabled: boolean): Extension {
   return [EditorView.editable.of(!disabled), EditorState.readOnly.of(disabled)]
+}
+
+/** The placeholder, or a predicted prompt drawn as one, faint, with the key that takes it. */
+function placeholderOf(placeholder: string, ghost: GhostPrompt | null): Extension {
+  if (!ghost) return placeholderText(placeholder)
+  const element = document.createElement('span')
+  element.className = 'cm-ghost'
+  const text = document.createElement('span')
+  text.className = 'cm-ghost-text'
+  text.textContent = ghost.text
+  const key = document.createElement('kbd')
+  // The Kbd component's cap, which a widget cannot render.
+  key.className =
+    'cm-ghost-key inline-flex h-5 items-center rounded-tile bg-card px-1.5 font-sans text-xs font-medium text-secondary shadow-outline select-none'
+  key.textContent = ghost.key
+  element.append(text, key)
+  return [
+    placeholderText(element),
+    EditorView.contentAttributes.of({ 'aria-placeholder': ghost.label }),
+  ]
 }
 
 function attributes(label: string, popover: PopoverAria | null): Extension {
@@ -98,6 +127,16 @@ const theme = EditorView.theme({
     whiteSpace: 'nowrap',
     color: 'var(--text-placeholder)',
   },
+  // A predicted prompt is cut on its line too, but its key stays in view.
+  '.cm-ghost': {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: '8px',
+    verticalAlign: 'top',
+  },
+  '.cm-ghost-text': { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' },
+  '.cm-ghost-key': { flex: 'none' },
   // The command as marks, colored text as a sent message shows it, so the caret moves through it.
   '.cm-chip-command': { color: 'var(--control-on)', fontWeight: 'var(--font-weight-medium)' },
   '.cm-chip-slash': { color: 'color-mix(in srgb, var(--control-on) 55%, transparent)' },
@@ -150,6 +189,7 @@ export function ComposerEditor({
   initialText,
   label,
   placeholder,
+  ghost = null,
   disabled,
   chipContext,
   size,
@@ -167,6 +207,8 @@ export function ComposerEditor({
   initialText: string
   label: string
   placeholder: string
+  /** A predicted prompt shown in the placeholder's place while the box is empty. */
+  ghost?: GhostPrompt | null
   disabled: boolean
   /** What the chips resolve against, and what they report. */
   chipContext: ChipHooks
@@ -195,7 +237,7 @@ export function ComposerEditor({
     chips: new Compartment(),
   }))
   // What the first render had, which the editor starts with.
-  const initial = useRef({ initialText, placeholder, disabled, label, popover, chipContext })
+  const initial = useRef({ initialText, placeholder, ghost, disabled, label, popover, chipContext })
   const changed = useEffectEvent(onChange)
   const moved = useEffectEvent(onCaret)
   const keyDown = useEffectEvent(onKeyDown)
@@ -253,7 +295,7 @@ export function ComposerEditor({
           EditorView.lineWrapping,
           EditorView.cursorScrollMargin.of({ x: 5, y: 16 }),
           theme,
-          parts.placeholder.of(placeholderText(first.placeholder)),
+          parts.placeholder.of(placeholderOf(first.placeholder, first.ghost)),
           parts.editable.of(editability(first.disabled)),
           parts.attributes.of(attributes(first.label, first.popover)),
           chips(),
@@ -276,9 +318,18 @@ export function ComposerEditor({
     }
   }, [parts])
 
+  const ghostText = ghost?.text
+  const ghostKey = ghost?.key
+  const ghostLabel = ghost?.label
   useEffect(() => {
-    view.current?.dispatch({ effects: parts.placeholder.reconfigure(placeholderText(placeholder)) })
-  }, [parts, placeholder])
+    const shown =
+      ghostText !== undefined && ghostKey !== undefined && ghostLabel !== undefined
+        ? { text: ghostText, key: ghostKey, label: ghostLabel }
+        : null
+    view.current?.dispatch({
+      effects: parts.placeholder.reconfigure(placeholderOf(placeholder, shown)),
+    })
+  }, [parts, placeholder, ghostText, ghostKey, ghostLabel])
   useEffect(() => {
     view.current?.dispatch({ effects: parts.editable.reconfigure(editability(disabled)) })
   }, [parts, disabled])

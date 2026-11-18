@@ -1,6 +1,10 @@
 {
   "prompt": {
     "label": "Message {{agent}}",
+    "suggestion": {
+      "key": "Tab",
+      "label": "Suggested: {{text}}. Press Tab to use it."
+    },
     "placeholder": {
       "starting": "Starting {{agent}}…",
       "awaiting": "Waiting for your approval",
