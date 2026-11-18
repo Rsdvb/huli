@@ -177,11 +177,12 @@
     "needsApproval": "{{name}} needs approval",
     "noScopeMode": "{{agent}} offers no mode for this routine's permissions",
     "modeFailed": "{{agent}} would not set the mode for this routine's permissions",
-    "pausedTitle": "Routines paused for {{agent}}",
-    "pausedUsed": "{{limit}} limit {{percent}}% used · resets {{time}}",
-    "pausedReached": "{{limit}} limit reached · resets {{time}}",
-    "pausedUsedNoReset": "{{limit}} limit {{percent}}% used",
-    "pausedReachedNoReset": "{{limit}} limit reached"
+    "pausedTitle": "Routines of {{agent}} wait for its plan",
+    "pausedUsed": "{{limit}} limit {{percent}}% used · they run again once it resets {{time}}",
+    "pausedReached": "{{limit}} limit reached · they run again once it resets {{time}}",
+    "pausedUsedNoReset": "{{limit}} limit {{percent}}% used · checked again in an hour",
+    "pausedReachedNoReset": "{{limit}} limit reached · checked again in an hour",
+    "continuePrompt": "Continue the task from where it stopped."
   },
   "planAlert": {
     "near": "{{agent}} · {{limit}} limit {{percent}}% used",

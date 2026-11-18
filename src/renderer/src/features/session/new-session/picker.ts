@@ -1,10 +1,12 @@
 // What New session's agent picker and its list of recent sessions show.
 
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import { planQuota } from '@shared/plan-quota'
 import { tightestLimit } from '@renderer/features/sidebar/plan-usage'
 import { limitPhrase } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
 import { hostOfSession } from '@renderer/stores/sessions'
+import { quotaText } from '../plan-quota'
 import { agentNeed } from './start-options'
 
 export type LineTone = 'muted' | 'attention' | 'danger'
@@ -51,6 +53,13 @@ export function agentLine(
   const parts: string[] = []
   if (status.name !== status.harnessName) parts.push(status.harnessName)
   if (status.account?.label) parts.push(status.account.label)
+  // A used-up plan says when it comes back, or that extra usage pays on, in place of its share.
+  const quota = planQuota(status, now, limits)
+  const used = quotaText(quota, now)
+  if (used) {
+    parts.push(used)
+    return { text: parts.join(' · '), tone: quota.kind === 'out' ? 'danger' : 'muted' }
+  }
   const limit = tightestLimit(limits, now)
   if (limit) {
     parts.push(

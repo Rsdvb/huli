@@ -3,7 +3,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
-import type { PlanLimit, RoutineList, SessionSummary } from '@shared/agent-host'
+import type { AgentStatus, PlanLimit, RoutineList, SessionSummary } from '@shared/agent-host'
 import { markdownFirstLine } from '@shared/markdown-line'
 import { nextRuns } from '@shared/schedule'
 import {
@@ -20,6 +20,7 @@ import {
   type RoutineRun,
   type RoutineView,
   type RoutinesProblem,
+  type RunSwitch,
   type RunPage,
   type RunStatus,
   type RunView,
@@ -32,6 +33,7 @@ import { resetTime, windowName } from '../limit-text'
 import type { JsonFile, LogFn, RoutinesFile } from '../storage'
 import type { ThreadStore } from '../threads/store'
 import type { RoutineCallName, RoutineCalls, RoutineRunStats } from './calls'
+import { limitDecision } from './fallback'
 import type { RoutineSessionHooks, RoutineSessions, RunTurnResult } from './hooks'
 import {
   LIMITS_FRESH_MS,
@@ -77,6 +79,8 @@ export interface RoutineAgents {
   /** Reads the agent's plan limits again from its own report; nothing for an agent without one. */
   readLimits(agentId: AgentId): Promise<void>
   name(agentId: AgentId): string
+  /** Every agent's status, to find one whose plan has room when a routine's is used up. */
+  statuses(): readonly AgentStatus[]
 }
 
 export interface RoutinesDeps {
@@ -122,6 +126,8 @@ export class RoutinesManager {
   private readonly lastSkips = new Map<string, RoutineRun>()
   /** When the routines last read each agent's plan limits, whatever the reading found. */
   private readonly limitsRead = new Map<AgentId, number>()
+  /** The agents and models whose pause was announced, until it ends; one pause is told once. */
+  private readonly announced = new Set<string>()
   private readonly reading = new Map<AgentId, Promise<void>>()
   private readonly writes = new Set<Promise<unknown>>()
   private readonly deleting = new Set<string>()
@@ -265,6 +271,7 @@ export class RoutinesManager {
     if (changes.scope !== undefined) next.scope = changes.scope
     if (changes.timeLimitMinutes !== undefined) next.timeLimitMinutes = changes.timeLimitMinutes
     if (changes.keptRunSessions !== undefined) next.keptRunSessions = changes.keptRunSessions
+    if (changes.onLimit !== undefined) next.onLimit = changes.onLimit
     const turnedOn = changes.enabled === true && !routine.enabled
     if (changes.enabled !== undefined) next.enabled = changes.enabled
     // Turning on or changing the schedule never catches up the time it was off or different.
@@ -374,7 +381,7 @@ export class RoutinesManager {
 
   /**
    * A scheduled time came due: run it, or record it skipped while the routine still works or
-   * its agent is near a plan limit.
+   * its agent is near a plan limit and it waits for it rather than going on with another agent.
    */
   private scheduled(
     routineId: string,
@@ -384,8 +391,13 @@ export class RoutinesManager {
   ): void {
     const routine = this.routines.get(routineId)
     if (!routine || !routine.enabled || this.stopped) return
-    const reason = this.activeOf(routineId) ? 'overlap' : this.held(routine) ? 'plan_limit' : null
+    const reason = this.activeOf(routineId)
+      ? 'overlap'
+      : this.held(routine) && !this.fallbackOf(routine)
+        ? 'plan_limit'
+        : null
     if (reason) {
+      if (reason === 'plan_limit') this.announceWait(routine)
       this.skip(routine, at, count, reason)
       if (routine.trigger.schedule.kind === 'once') this.finishOnce(routineId)
       return
@@ -404,6 +416,37 @@ export class RoutinesManager {
     if (this.scheduler.pauseOf(routine.agentId, model)) return true
     return (
       !this.limitsStale(routine.agentId) && this.scheduler.check(routine.agentId, model) !== null
+    )
+  }
+
+  /** The agent a routine that switches at a used-up plan would go on with now; null to wait. */
+  private fallbackOf(routine: Routine, from: AgentId = routine.agentId): AgentId | null {
+    const decision = limitDecision(routine.onLimit, from, this.deps.agents.statuses(), this.now())
+    return decision.kind === 'switch' ? decision.to.agentId : null
+  }
+
+  /**
+   * A run that has not started goes on with another agent, as its routine chose for a used-up
+   * plan; false when it waits instead. Its record says which agent and why.
+   */
+  private switchRun(live: LiveRun, routine: Routine): boolean {
+    const to = this.fallbackOf(routine)
+    if (!to) return false
+    this.recordSwitch(live, { from: routine.agentId, to, reason: 'plan_limit' })
+    return true
+  }
+
+  private recordSwitch(live: LiveRun, change: RunSwitch): void {
+    live.run.switched = change
+    this.persist(live.run)
+    this.emit(live.run)
+    void this.publish(live.run.routineId)
+    const why =
+      change.reason === 'plan_limit' ? 'its plan is used up' : 'its turn hit the plan limit'
+    this.deps.log(
+      'info',
+      `Run ${live.run.id} of ${this.nameOf(live.run.routineId)} goes on with ` +
+        `${this.deps.agents.name(change.to)}, since ${this.deps.agents.name(change.from)} ${why}`,
     )
   }
 
@@ -460,14 +503,17 @@ export class RoutinesManager {
       for (const runId of [...this.queued]) {
         const live = this.runs.get(runId)
         if (!live || live.run.trigger === 'manual') continue
-        if (holds(this.routines.get(live.run.routineId))) this.skipHeld(live)
+        const routine = this.routines.get(live.run.routineId)
+        // One that goes on with another agent switches as it starts instead.
+        if (routine && holds(routine) && !this.fallbackOf(routine)) this.skipHeld(live)
       }
-      // A window of every model pauses each model's routines; it is announced once.
-      const told = this.scheduler
-        .pausesOf(agentId)
-        .some((other) => other !== pause && other.limit.window === pause.limit.window)
-      if (!told) this.announce(pause)
+      // Routines that go on with another agent do not wait, so only one that waits is told.
+      const waits = [...this.routines.values()].some(
+        (routine) => routine.enabled && holds(routine) && !this.fallbackOf(routine),
+      )
+      if (waits) this.announceOnce(pause)
     }
+    if (!pause) this.announced.delete(pauseKey({ agentId, model }))
     // Its time is up: a fresh reading lifts it, or moves it to the window that still holds.
     if (change === 'time-up') void this.readLimits(agentId)
     if (change !== 'changed') {
@@ -482,6 +528,31 @@ export class RoutinesManager {
     for (const routine of this.routines.values()) {
       if (holds(routine)) void this.publish(routine.id)
     }
+  }
+
+  /**
+   * A routine's run waits for its agent's plan: the pause holding it is announced, once. A routine
+   * that meant to switch agents but found none with room waits too.
+   */
+  private announceWait(routine: Routine): void {
+    const pause = this.scheduler.pauseOf(routine.agentId, this.modelOf(routine))
+    if (pause) this.announceOnce(pause)
+  }
+
+  /** A window of every model pauses each model's routines; it is announced once. */
+  private announceOnce(pause: LimitPause): void {
+    const key = pauseKey(pause)
+    if (this.announced.has(key)) return
+    const told = this.scheduler
+      .pausesOf(pause.agentId)
+      .some(
+        (other) =>
+          other.model !== pause.model &&
+          other.limit.window === pause.limit.window &&
+          this.announced.has(pauseKey(other)),
+      )
+    this.announced.add(key)
+    if (!told) this.announce(pause)
   }
 
   /** One notification per pause: the agent, the window, its use and when it resets. */
@@ -671,6 +742,7 @@ export class RoutinesManager {
   private turnEnded(sessionId: string, result: RunTurnResult): void {
     const live = this.liveOfSession(sessionId)
     if (!live || this.deleting.has(live.run.routineId)) return
+    if (result.planLimit && !live.intent && this.carryOn(live, sessionId)) return
     const status: RunStatus =
       live.intent === 'timed_out'
         ? 'timed_out'
@@ -688,6 +760,37 @@ export class RoutinesManager {
       usage: result.usage,
       changedFiles: result.changedFiles,
     })
+  }
+
+  /**
+   * The plan limit stopped the run's turn: a routine that switches at a used-up plan goes on with
+   * another agent, once per run, which takes the session over and is asked to carry on. False when
+   * the run ends instead.
+   */
+  private carryOn(live: LiveRun, sessionId: string): boolean {
+    const routine = this.routines.get(live.run.routineId)
+    if (!routine || this.stopped || live.run.switched?.reason === 'limit_stop') return false
+    const from = live.run.switched?.to ?? routine.agentId
+    const to = this.fallbackOf(routine, from)
+    if (!to) return false
+    this.recordSwitch(live, { from, to, reason: 'limit_stop' })
+    // The session finishes reporting the stopped turn before it is handed over.
+    void Promise.resolve()
+      .then(() =>
+        this.deps.sessions.continueRun(
+          sessionId,
+          to,
+          askingMode(to, routine.scope.level),
+          t('routines.continuePrompt'),
+        ),
+      )
+      .catch((error: unknown) => {
+        this.deps.log('warn', `The run could not go on with ${to}: ${messageOf(error)}`)
+        if (this.runs.get(live.run.id) === live) {
+          this.finish(live, 'failed', { error: { message: messageOf(error) } })
+        }
+      })
+    return true
   }
 
   private sessionGone(sessionId: string): void {
@@ -746,7 +849,8 @@ export class RoutinesManager {
     if (!routine || this.stopped) return
     // Run now starts outside a plan-limit pause, since the user asked for it.
     const scheduled = live.run.trigger !== 'manual'
-    if (scheduled && this.held(routine)) {
+    if (scheduled && !live.run.switched && this.held(routine) && !this.switchRun(live, routine)) {
+      this.announceWait(routine)
       this.skipHeld(live)
       return
     }
@@ -757,25 +861,34 @@ export class RoutinesManager {
     this.emit(live.run)
     void this.publish(routine.id)
     this.setWorking()
-    if (scheduled && this.limitsStale(routine.agentId)) {
+    if (scheduled && !live.run.switched && this.limitsStale(routine.agentId)) {
       await this.readLimits(routine.agentId)
       if (this.runs.get(live.run.id) !== live || this.stopped) return
       if (live.intent) {
         this.finish(live, 'cancelled', {})
         return
       }
-      if (this.scheduler.check(routine.agentId, this.modelOf(routine))) {
+      if (
+        this.scheduler.check(routine.agentId, this.modelOf(routine)) &&
+        !this.switchRun(live, routine)
+      ) {
+        this.announceWait(routine)
         this.skipHeld(live)
         return
       }
     }
+    // Another agent runs it without the routine's options, which name its own agent's models.
+    const agentId = live.run.switched?.to ?? routine.agentId
+    const options = live.run.switched
+      ? {}
+      : Object.fromEntries(routine.options.map((option) => [option.id, option.value]))
     let summary: SessionSummary
     try {
       const folder = routine.projectPath ?? (await this.routineFolder(routine.id))
       summary = await this.deps.sessions.createRun({
-        agentId: routine.agentId,
+        agentId,
         projectPath: folder,
-        options: Object.fromEntries(routine.options.map((option) => [option.id, option.value])),
+        options,
         prompt: routine.prompt,
         routine: {
           routineId: routine.id,
@@ -784,7 +897,7 @@ export class RoutinesManager {
           scheduledFor: live.run.scheduledFor,
         },
         scope: routine.scope,
-        mode: askingMode(routine.agentId, routine.scope.level),
+        mode: askingMode(agentId, routine.scope.level),
       })
     } catch (error) {
       this.deps.log('warn', `The run of ${routine.name} could not start: ${messageOf(error)}`)
@@ -1012,7 +1125,9 @@ export class RoutinesManager {
   private async viewOf(routine: Routine): Promise<RoutineView> {
     const stats = await this.stats(routine.id)
     const model = this.modelOf(routine)
-    const pause = routine.enabled ? this.scheduler.pauseOf(routine.agentId, model) : null
+    const held = routine.enabled ? this.scheduler.pauseOf(routine.agentId, model) : null
+    // A routine that goes on with another agent keeps its schedule through its own agent's pause.
+    const pause = held && !this.fallbackOf(routine) ? held : null
     const state: RoutineView['state'] = !routine.enabled
       ? isDone(routine, stats.last)
         ? 'done'
@@ -1023,7 +1138,7 @@ export class RoutinesManager {
     return {
       ...routine,
       state,
-      nextRunAt: this.scheduler.nextRunAt(schedulerRoutine(routine, model)),
+      nextRunAt: this.scheduler.nextRunAt(schedulerRoutine(routine, model), undefined, !pause),
       pause: pause ? pauseView(pause) : null,
       activeRun: stats.active,
       lastRun: stats.last,
@@ -1111,6 +1226,10 @@ function schedulerRoutine(routine: Routine, model: string | null): SchedulerRout
     enabled: routine.enabled,
     checkedThrough: routine.checkedThrough,
   }
+}
+
+function pauseKey({ agentId, model }: Pick<LimitPause, 'agentId' | 'model'>): string {
+  return JSON.stringify([agentId, model])
 }
 
 function pauseView({ agentId, limit }: LimitPause): NonNullable<RoutineView['pause']> {

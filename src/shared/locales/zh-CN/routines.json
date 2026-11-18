@@ -24,7 +24,7 @@
       "status": "状态",
       "name": "名称"
     },
-    "footnote": "例程只在 Kettu 打开时运行。Agent 距离套餐限额不到 10% 时，例程会暂停。"
+    "footnote": "例程只在 Kettu 打开时运行。Agent 距离套餐限额不到 10% 时，例程会暂停，或按它的设置换用有额度的 Agent。"
   },
   "examples": {
     "heading": "从示例开始",
@@ -222,6 +222,12 @@
     "keptRuns": "保留的运行会话",
     "keptRunsDescription": "更早的运行会话会被移除，结果仍留在运行记录里。",
     "keptRunsOption": "最近 {{count}} 次",
+    "onLimit": "额度用完时",
+    "onLimitDescription": "Agent 的套餐额度用完时，等它恢复，或换用另一个还有额度的 Agent；没有可换的就等待。",
+    "onLimitOption": {
+      "wait": "等待恢复",
+      "switch": "换用有额度的 Agent"
+    },
     "keptConfirmTitle": "只保留最近 {{count}} 次的运行会话？",
     "keptConfirm_one": "会移除 {{count}} 个更早的运行会话，结果仍留在运行记录里。",
     "keptConfirm_other": "会移除 {{count}} 个更早的运行会话，结果仍留在运行记录里。",
@@ -317,6 +323,8 @@
     "duration": "工作了 {{duration}}",
     "working": "已工作 {{duration}}",
     "waitingFor": "已等待 {{duration}}",
-    "announce": "{{name}}：{{status}}"
+    "announce": "{{name}}：{{status}}",
+    "switchedAtStart": "{{from}} 额度已用完，换成 {{to}} 运行",
+    "switchedAtStop": "{{from}} 运行中额度用完，换成 {{to}} 继续"
   }
 }

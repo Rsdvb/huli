@@ -175,11 +175,12 @@
     "needsApproval": "{{name}} 需要批准",
     "noScopeMode": "{{agent}} 没有提供符合这组权限的模式",
     "modeFailed": "{{agent}} 无法设置符合这组权限的模式",
-    "pausedTitle": "{{agent}} 的例程已暂停",
-    "pausedUsed": "{{limit}}限额已用 {{percent}}% · {{time}} 重置",
-    "pausedReached": "{{limit}}限额已用完 · {{time}} 重置",
-    "pausedUsedNoReset": "{{limit}}限额已用 {{percent}}%",
-    "pausedReachedNoReset": "{{limit}}限额已用完"
+    "pausedTitle": "{{agent}} 的例程在等额度恢复",
+    "pausedUsed": "{{limit}}限额已用 {{percent}}% · 等到 {{time}} 重置后再运行",
+    "pausedReached": "{{limit}}限额已用完 · 等到 {{time}} 恢复后再运行",
+    "pausedUsedNoReset": "{{limit}}限额已用 {{percent}}% · 一小时后再看",
+    "pausedReachedNoReset": "{{limit}}限额已用完 · 一小时后再看",
+    "continuePrompt": "继续刚才的任务。"
   },
   "planAlert": {
     "near": "{{agent}} · {{limit}}限额已用 {{percent}}%",

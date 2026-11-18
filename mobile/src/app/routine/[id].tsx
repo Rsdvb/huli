@@ -14,7 +14,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
-import type { RoutineView, RunPage, RunView } from '@shared/routines'
+import type { RoutineView, RunPage, RunSwitch, RunView } from '@shared/routines'
 import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
 import { useHost } from '../../host'
 import {
@@ -185,6 +185,14 @@ export default function RoutinePage() {
       )
   }
 
+  // Which agent ran it in place of the routine's, and why.
+  const switchText = ({ from, to, reason }: RunSwitch): string => {
+    const name = (id: string) => host.agents.get(id)?.name ?? id
+    return reason === 'plan_limit'
+      ? `${name(from)} 额度已用完，换成 ${name(to)} 运行`
+      : `${name(from)} 运行中额度用完，换成 ${name(to)} 继续`
+  }
+
   const runRow = (run: RunView, i: number) => {
     const look = runLook(c, run.status)
     const when = run.startedAt ?? run.scheduledFor ?? run.endedAt
@@ -210,6 +218,11 @@ export default function RoutinePage() {
           ) : title ? (
             <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
               {title}
+            </Text>
+          ) : null}
+          {run.switched ? (
+            <Text style={[typeScale.footnote, { color: c.textSecondary }]} numberOfLines={2}>
+              {switchText(run.switched)}
             </Text>
           ) : null}
         </View>
@@ -400,6 +413,7 @@ export default function RoutinePage() {
                 prompt: routine.prompt,
                 schedule: routine.trigger.schedule,
                 scope: routine.scope,
+                onLimit: routine.onLimit,
                 agentId: routine.agentId,
                 projectPath: routine.projectPath,
               })

@@ -24,7 +24,7 @@
       "status": "Status",
       "name": "Name"
     },
-    "footnote": "Routines only run while Kettu is open. A routine pauses when its agent is within 10% of a plan limit."
+    "footnote": "Routines only run while Kettu is open. A routine pauses when its agent is within 10% of a plan limit, or uses another agent with room if it is set to."
   },
   "examples": {
     "heading": "Start from an example",
@@ -223,6 +223,12 @@
     "keptRuns": "Run sessions kept",
     "keptRunsDescription": "Older run sessions are removed; their results stay in Runs.",
     "keptRunsOption": "Last {{count}} runs",
+    "onLimit": "When the plan runs out",
+    "onLimitDescription": "When the agent's plan is used up, wait for it to come back, or use another agent that has room left; with none, it waits.",
+    "onLimitOption": {
+      "wait": "Wait for it",
+      "switch": "Use an agent with room"
+    },
     "keptConfirmTitle": "Keep only the last {{count}} run sessions?",
     "keptConfirm_one": "{{count}} older run session is removed. Its result stays in Runs.",
     "keptConfirm_other": "{{count}} older run sessions are removed. Their results stay in Runs.",
@@ -318,6 +324,8 @@
     "duration": "Worked for {{duration}}",
     "working": "Working for {{duration}}",
     "waitingFor": "Waiting {{duration}}",
-    "announce": "{{name}}: {{status}}"
+    "announce": "{{name}}: {{status}}",
+    "switchedAtStart": "{{from}}'s plan was used up, so {{to}} ran it",
+    "switchedAtStop": "{{from}}'s plan ran out mid-run, so {{to}} went on"
   }
 }

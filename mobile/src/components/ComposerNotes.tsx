@@ -1,11 +1,14 @@
 // Notes over a session's composer, as the desktop shows them at the box's top edge: the agent
-// picked to take the session over with the next message (composer/switch-strip.tsx), and the
-// prompt cache that expired while a message is being written (composer/cache-notice.tsx).
+// picked to take the session over with the next message (composer/switch-strip.tsx), the prompt
+// cache that expired while a message is being written (composer/cache-notice.tsx), and another
+// agent to pick while the chosen one's plan is used up (composer/quota-strip.tsx).
 
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
 import Reanimated, { FadeIn, FadeOut } from 'react-native-reanimated'
+import type { Fallback, PlanQuota } from '@shared/plan-quota'
 import type { ConfigOption } from '@shared/thread'
-import { tokensText } from '../ui/session/limits'
+import { haptic } from '../ui/session/feedback'
+import { fallbackText, quotaText, tokensText } from '../ui/session/limits'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { optionName, shortModelName } from '../ui/session/optionText'
@@ -115,6 +118,55 @@ export function CacheNotice(props: { estimate: boolean; used: number; onDismiss(
       >
         <Icon icon={G.close} size={13} color={c.textSecondary} weight="semibold" />
       </Pressable>
+    </Reanimated.View>
+  )
+}
+
+/**
+ * While the chosen agent's plan is used up and another agent has room: when the plan comes back,
+ * and one tap to pick that agent instead. Nothing switches until the user taps it.
+ */
+export function QuotaSuggestion(props: {
+  agentName: string
+  quota: Extract<PlanQuota, { kind: 'out' }>
+  fallback: Fallback
+  onSwitch(): void
+  onDismiss(): void
+}) {
+  const { c, s } = useSessionTokens()
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.note, { backgroundColor: s.dockCard, borderColor: c.border }]}
+      accessibilityLiveRegion="polite"
+    >
+      <View style={styles.head}>
+        <Icon icon={G.swap} size={15} color={c.warning} />
+        <View style={styles.body}>
+          <Text style={[styles.text, { color: c.text }]}>
+            {props.agentName} 的{quotaText(props.quota)}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.actions}>
+        <Pressable
+          onPress={() => {
+            haptic.tap()
+            props.onSwitch()
+          }}
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.undo,
+            { borderColor: c.border, backgroundColor: pressed ? c.fill : 'transparent' },
+          ]}
+        >
+          <Text style={[styles.undoText, { color: c.text }]}>{fallbackText(props.fallback)}</Text>
+        </Pressable>
+        <Pressable onPress={props.onDismiss} hitSlop={8} accessibilityRole="button">
+          <Text style={[styles.small, { color: c.textSecondary }]}>不用了</Text>
+        </Pressable>
+      </View>
     </Reanimated.View>
   )
 }

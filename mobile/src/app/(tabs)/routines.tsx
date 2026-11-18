@@ -429,7 +429,8 @@ function Routines(props: { switcher: ReactNode }) {
               ))}
             </View>
             <Text style={[typeScale.footnote, styles.footnote, { color: c.textTertiary }]}>
-              定时任务在电脑上的纸鸢开着时按电脑的时间运行。Agent 接近套餐限额时，它会先暂停。
+              定时任务在电脑上的纸鸢开着时按电脑的时间运行。Agent
+              接近套餐限额时，它会先暂停，或按设置换用有额度的 Agent。
             </Text>
           </>
         ) : null}

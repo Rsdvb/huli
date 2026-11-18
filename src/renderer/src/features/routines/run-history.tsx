@@ -18,6 +18,7 @@ import {
   runEntries,
   runStatus,
   runSummary,
+  runSwitch,
   runsHint,
   runTime,
   runTone,
@@ -184,6 +185,7 @@ function RunRow({
   const time = runTime(run, now)
   const took = runDuration(run, now)
   const trigger = skipped > 1 ? t('run.skippedTimes', { count: skipped }) : runTrigger(run)
+  const switched = runSwitch(run)
 
   const body = (
     <>
@@ -199,6 +201,7 @@ function RunRow({
           </span>
         </span>
         {time !== null && <span className="k-run__line">{runSummary(run)}</span>}
+        {switched && <span className="k-run__line">{switched}</span>}
       </span>
     </>
   )

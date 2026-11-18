@@ -16,6 +16,11 @@ export interface SessionRowsContext {
   retryNotice?: string | null
   /** The notice of a latest turn the agent's exit cut short, which Resume continues. */
   cutNotice?: string | null
+  /**
+   * The agent to go on with after a turn the plan limit stopped, with its share used, and how to
+   * hand the session to it; null while none has room.
+   */
+  carryOn?: { name: string; usedPercent: number; go: () => Promise<void> } | null
   /** The session's options, which a task started from its suggestion carries on with. */
   config?: readonly ConfigOption[]
   /** The agent's command names, which a sent prompt's leading `/name` is one of. */

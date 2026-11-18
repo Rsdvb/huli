@@ -31,6 +31,13 @@ export function retryNoticeOf(thread: ThreadState | null): string | null {
   return retryableTurn(thread)?.notice.id ?? null
 }
 
+/** Whether the failed latest turn, which Retry sends again, stopped at the agent's plan limit. */
+export function planLimitStopOf(thread: ThreadState | null): boolean {
+  const id = retryNoticeOf(thread)
+  const entry = id ? thread?.byId[id] : undefined
+  return entry?.kind === 'notice' && entry.planLimit === true
+}
+
 /** The latest turn's notice of the agent's exit, which Resume continues, for a user's session. */
 export function cutNoticeOf(thread: ThreadState | null): string | null {
   if (!thread || !free(thread.session.status) || thread.session.origin !== 'user') return null
@@ -52,7 +59,7 @@ export function outOfCreditOf(thread: ThreadState | null): Notice | null {
 export function NoticeEntry(props: { entry: Notice }) {
   const { entry } = props
   const { c, s } = useSessionTokens()
-  const { sessionId, retryNotice, cutNotice } = useSessionRows()
+  const { sessionId, retryNotice, cutNotice, carryOn } = useSessionRows()
   const link = useLink()
   const sender = useSender()
   const [open, setOpen] = useState(false)
@@ -68,6 +75,7 @@ export function NoticeEntry(props: { entry: Notice }) {
         ? { icon: G.warning, color: c.warning, bg: s.warningSoft }
         : { icon: G.info, color: c.textSecondary, bg: c.fill }
   const retry = entry.cause === 'turn_failed' && retryNotice === entry.id
+  const carry = retry && entry.planLimit === true ? (carryOn ?? null) : null
   const resume = cut && cutNotice === entry.id
 
   return (
@@ -117,6 +125,14 @@ export function NoticeEntry(props: { entry: Notice }) {
         ) : null}
         {(retry || resume) && (
           <View style={styles.actions}>
+            {carry && (
+              <CardButton
+                label={`换成 ${carry.name} 继续`}
+                busy={sender.busy === 'carry'}
+                disabled={sender.busy !== null || sent}
+                onPress={() => void sender.send('carry', carry.go).then(setSent)}
+              />
+            )}
             <CardButton
               label={retry ? '重试' : '继续'}
               busy={sender.busy !== null || sent}

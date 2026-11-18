@@ -270,6 +270,29 @@ export async function createSession(
  */
 export async function retryTurn(sessionId: string, content: readonly UserContent[]): Promise<void> {
   await host('sessions.retry', { sessionId })
+  takeBackGiven(sessionId, content)
+}
+
+/**
+ * Hands a session whose turn stopped at its plan limit to `agentId`, which reads the conversation
+ * so far and is asked to go on with the task. The stopped turn's message, when the host gave it
+ * back to the draft, leaves it, since the new agent carries on with it.
+ */
+export async function continueWith(
+  sessionId: string,
+  agentId: AgentId,
+  content: readonly UserContent[],
+): Promise<void> {
+  await host('sessions.switchAgent', {
+    sessionId,
+    agentId,
+    content: [{ type: 'text', text: i18n.t('session:quota.continuePrompt') }],
+  })
+  takeBackGiven(sessionId, content)
+}
+
+/** The draft drops a failed turn's message given back to it, while it holds only that. */
+function takeBackGiven(sessionId: string, content: readonly UserContent[]): void {
   const ids = new Set(contentAttachments(content).map((a) => a.id))
   const items = draftAttachments(sessionId)
   if (draftIsEmpty(sessionId) || readDraft(sessionId).trim() !== promptText(content).trim()) return

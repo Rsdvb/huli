@@ -20,7 +20,12 @@ import type {
   Schedule,
 } from '@shared/routines'
 import type { AgentId } from '@shared/agents'
-import { DEFAULT_KEPT_RUN_SESSIONS, DEFAULT_TIME_LIMIT } from '@shared/routines'
+import {
+  DEFAULT_KEPT_RUN_SESSIONS,
+  DEFAULT_ON_LIMIT,
+  DEFAULT_TIME_LIMIT,
+  type OnLimit,
+} from '@shared/routines'
 import { useAgents, useConnected, useMaybeLink, useProjects } from '../host'
 import { LEVEL_TEXT, scheduleText, scopeText } from '../routines'
 import { errorText } from '../sessions'
@@ -38,6 +43,7 @@ export interface EditorSeed {
   scope: PermissionScope
   agentId?: AgentId
   projectPath?: string | null
+  onLimit?: OnLimit
 }
 
 type Pattern = 'daily' | 'weekdays' | 'weekly' | 'every' | 'kept'
@@ -111,6 +117,7 @@ export function RoutineEditor(props: {
   const [time, setTime] = useState('09:00')
   const [hours, setHours] = useState(6)
   const [scope, setScope] = useState<PermissionScope>({ level: 'read', web: false })
+  const [onLimit, setOnLimit] = useState<OnLimit>(DEFAULT_ON_LIMIT)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -130,6 +137,7 @@ export function RoutineEditor(props: {
     if (seed.schedule.kind === 'every')
       setHours(Math.max(1, Math.round(seed.schedule.minutes / 60)))
     setScope(seed.scope)
+    setOnLimit(seed.onLimit ?? DEFAULT_ON_LIMIT)
     setSaving(false)
     setError(null)
     // The seed alone decides what the form starts from; the lists only fill in defaults.
@@ -183,6 +191,7 @@ export function RoutineEditor(props: {
           projectPath,
           trigger: { kind: 'schedule', schedule },
           scope,
+          onLimit,
           ...(agentId !== props.routine.agentId ? { agentId, options: [] } : {}),
         }
         saved = (await link.request('routines.update', {
@@ -200,6 +209,7 @@ export function RoutineEditor(props: {
           scope,
           timeLimitMinutes: DEFAULT_TIME_LIMIT,
           keptRunSessions: DEFAULT_KEPT_RUN_SESSIONS,
+          onLimit,
         }
         saved = (await link.request('routines.create', draft)) as RoutineView
       }
@@ -408,6 +418,21 @@ export function RoutineEditor(props: {
             ? '可编辑：还能在项目文件夹里新建、修改和删除文件。'
             : '可编辑和运行：还能运行命令，这些命令能做你能做的任何事。'}
         超出权限的操作会停下来等你批准。
+      </Text>
+
+      {label('额度用完时')}
+      <SegmentedControl<OnLimit>
+        segments={[
+          { key: 'wait', label: '等待恢复' },
+          { key: 'switch', label: '换用有额度的 Agent' },
+        ]}
+        value={onLimit}
+        onChange={(next) => setOnLimit(next)}
+      />
+      <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
+        {onLimit === 'wait'
+          ? 'Agent 的套餐额度用完时，等它恢复后再运行，并通知你等到什么时候。'
+          : 'Agent 的套餐额度用完时，换用另一个还有额度的 Agent；没有可换的就等待。运行记录会写明换成了谁。'}
       </Text>
 
       {error ? <Text style={[typeScale.footnote, { color: c.danger }]}>{error}</Text> : null}

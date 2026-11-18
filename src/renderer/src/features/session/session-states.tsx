@@ -292,17 +292,26 @@ export function FailedActions({
   report,
   error,
   className,
+  lead,
 }: {
   onRetry: () => void
   retrying?: boolean
   report?: { hostId: string | null; sessionId?: string; agentId?: AgentId }
   error: string
   className?: string
+  /** An action before Retry, such as going on with another agent. */
+  lead?: ReactNode
 }) {
   const { t } = useTranslation(['session', 'common'])
   return (
     <div className={cn('flex flex-wrap items-center gap-1.5', className)}>
-      <Button size="compact" disabled={retrying} onClick={onRetry}>
+      {lead}
+      <Button
+        size="compact"
+        variant={lead ? 'outline' : 'default'}
+        disabled={retrying}
+        onClick={onRetry}
+      >
         {retrying ? (
           <Spinner data-icon="inline-start" />
         ) : (

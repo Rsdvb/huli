@@ -1,6 +1,7 @@
 import { FlashIcon, Settings02Icon, WorkflowSquare01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import type { AgentAccount, PlanLimit } from '@shared/agent-host'
+import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
+import { planQuota } from '@shared/plan-quota'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { GradientFloor } from '@renderer/components/affect/gradient-floor'
@@ -16,6 +17,7 @@ import { tightestLimit } from '@renderer/features/sidebar/plan-usage'
 import { limitPhrase } from '@renderer/lib/format'
 import { formatShortcut } from '@renderer/lib/platform'
 import { useNow } from '@renderer/lib/use-now'
+import { quotaText } from '../plan-quota'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { levelsOf, splitName, type SelectOption } from './levels'
 import { mainModels, shownValue, splitModels } from './model-list'
@@ -47,6 +49,7 @@ export function ModelMenu({
   outOfCredit = false,
   account,
   limits,
+  balances,
   source,
   actions,
   cacheNote = null,
@@ -63,6 +66,8 @@ export function ModelMenu({
   outOfCredit?: boolean
   account: AgentAccount | null
   limits: readonly PlanLimit[]
+  /** The agent's balances, which say whether extra usage pays on once the plan is used up. */
+  balances?: readonly ProviderBalance[]
   /** The harness and version the models come from. */
   source: string | null
   /** Rows after the switches, such as Switch agent. */
@@ -140,14 +145,16 @@ export function ModelMenu({
 
   const limit = tightestLimit(limits, now)
   const plan = account?.label ? joinPlanTier(account.label, account.tier) : null
+  const usedUp = quotaText(planQuota({ balances, limits }, now), now)
   const note = [
     account?.email,
     plan,
-    limit?.usedPercent != null &&
-      t('controls.limitUsed', {
-        percent: Math.round(limit.usedPercent),
-        limit: limitPhrase(limit),
-      }),
+    usedUp ??
+      (limit?.usedPercent != null &&
+        t('controls.limitUsed', {
+          percent: Math.round(limit.usedPercent),
+          limit: limitPhrase(limit),
+        })),
   ]
     .filter(Boolean)
     .join(' · ')

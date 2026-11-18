@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
+import { fallbackAgent, planQuota } from '@shared/plan-quota'
 import type { ConfigOption, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
@@ -35,6 +36,7 @@ import {
 import { NEW_SESSION_DRAFT } from '../drafts'
 import { PendingSessions } from '../components/OutboxRows'
 import { PlanUsageSheet } from '../components/PlanUsageSheet'
+import { QuotaSuggestion } from '../components/ComposerNotes'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
 import { useComputerId, useHost, useLink } from '../host'
@@ -117,6 +119,16 @@ export default function NewSession() {
   const mode = slotOf(config, 'mode', false)
   const model = slotOf(config, 'model', false)
   const effort = slotOf(config, 'thought_level', false)
+
+  // A used-up plan with another agent to pick in its place; the user may keep this one.
+  const quota = agent
+    ? planQuota({ ...agent, limits: limitsForModel(agent.limits, model?.option) }, Date.now())
+    : null
+  const fallback =
+    agent && quota?.kind === 'out'
+      ? fallbackAgent(agents, agent.id, Date.now(), { eligible: canStart })
+      : null
+  const [keptAgent, setKeptAgent] = useState<string | null>(null)
 
   // An agent and one of its models are chosen together.
   const chooseAgent = (next: AgentStatus, modelValue: string | null) => {
@@ -410,6 +422,18 @@ export default function NewSession() {
                   agentName={(id) => host.agents.get(id)?.name ?? 'Agent'}
                   onWithdraw={withdraw}
                 />
+                {agent && quota?.kind === 'out' && fallback && keptAgent !== agentId ? (
+                  <QuotaSuggestion
+                    agentName={agent.name}
+                    quota={quota}
+                    fallback={fallback}
+                    onSwitch={() => {
+                      const next = host.agents.get(fallback.agentId)
+                      if (next) chooseAgent(next, null)
+                    }}
+                    onDismiss={() => setKeptAgent(agentId)}
+                  />
+                ) : null}
                 {notices.length > 0 ? (
                   <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
                     {notices.map((text) => (

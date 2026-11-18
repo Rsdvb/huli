@@ -280,6 +280,16 @@ describe('isThreadEntry', () => {
       cause: 'turn_failed',
       after: 'm:1',
     },
+    {
+      kind: 'notice',
+      id: 'e:12',
+      severity: 'error',
+      title: 'The turn failed',
+      description: "You've hit your limit",
+      cause: 'turn_failed',
+      planLimit: true,
+      after: 'm:1',
+    },
     { kind: 'compaction', id: 'c:1', status: 'completed', summary: '' },
     { kind: 'turn_end', id: 'e:4', stopReason: 'end_turn', durationMs: 5 },
     { kind: 'turn_end', id: 'e:8', stopReason: 'cancelled', durationMs: 5, after: 't:1' },
@@ -445,6 +455,9 @@ describe('isThreadEntry', () => {
     ).toBe(false)
     expect(
       isThreadEntry({ kind: 'notice', id: 'n', severity: 'warning', title: 'x', model: 1 }),
+    ).toBe(false)
+    expect(
+      isThreadEntry({ kind: 'notice', id: 'n', severity: 'error', title: 'x', planLimit: false }),
     ).toBe(false)
   })
 })

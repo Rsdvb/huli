@@ -1145,6 +1145,8 @@ export class AgentHost {
       threads: this.threads,
       sessions: {
         createRun: (params) => this.sessions.createRun(params),
+        continueRun: (sessionId, agentId, mode, text) =>
+          this.sessions.continueRun(sessionId, agentId, mode, text),
         cancel: (sessionId) => this.sessions.cancel(sessionId),
         delete: (sessionId) => this.sessions.delete(sessionId),
         has: (sessionId) => this.sessions.has(sessionId),
@@ -1157,6 +1159,7 @@ export class AgentHost {
           this.agentOptions.get(agentId)?.config.find((option) => option.category === 'model'),
         readLimits: (agentId) => this.agents.refreshLimits(agentId),
         name: (agentId) => this.agents.name(agentId),
+        statuses: () => this.agents.statuses(),
       },
       log,
       resolveProject: (value) => this.projects.resolveDirectory(value),

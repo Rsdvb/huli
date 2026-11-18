@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
+import { fallbackAgent, planQuota } from '@shared/plan-quota'
 import { harnessOf, type ThreadEntry, type ThreadState, type UserContent } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
 import {
@@ -30,7 +31,7 @@ import {
   SendCancelled,
   type ComposerHandle,
 } from '../../components/Composer'
-import { CacheNotice, SwitchStrip } from '../../components/ComposerNotes'
+import { CacheNotice, QuotaSuggestion, SwitchStrip } from '../../components/ComposerNotes'
 import {
   agentModelsPage,
   agentsPage,
@@ -52,6 +53,7 @@ import {
   cutNoticeOf,
   OutOfCreditStrip,
   outOfCreditOf,
+  planLimitStopOf,
   retryNoticeOf,
 } from '../../components/entries/TurnEnd'
 import {
@@ -402,6 +404,30 @@ export default function SessionScreen() {
     () => (session?.commands ?? []).map((command) => command.name),
     [session?.commands],
   )
+  // After a turn the plan limit stopped, the agent with the most room may carry the task on: it
+  // takes the session over and is asked to go on from the conversation so far.
+  const limitStopped = useThreadSelector(view, planLimitStopOf)
+  const carryTo =
+    limitStopped && agent ? fallbackAgent(usableAgents(agents), agent.id, Date.now()) : null
+  const carryAgent = carryTo?.agentId ?? null
+  const carryName = carryTo?.name ?? ''
+  const carryUsed = carryTo?.usedPercent ?? 0
+  const carryOn = useMemo(
+    () =>
+      carryAgent
+        ? {
+            name: carryName,
+            usedPercent: carryUsed,
+            go: () =>
+              call(link, 'sessions.switchAgent', {
+                sessionId: id,
+                agentId: carryAgent,
+                content: [{ type: 'text' as const, text: '继续刚才的任务。' }],
+              }),
+          }
+        : null,
+    [carryAgent, carryName, carryUsed, link, id],
+  )
   const putCommand = useCallback(
     (name: string) => composer.current?.command(name, commandNames),
     [commandNames],
@@ -414,6 +440,7 @@ export default function SessionScreen() {
       forkAtMessage,
       retryNotice,
       cutNotice,
+      carryOn,
       config: session?.config ?? [],
       commands: commandNames,
       command: putCommand,
@@ -426,6 +453,7 @@ export default function SessionScreen() {
       forkAtMessage,
       retryNotice,
       cutNotice,
+      carryOn,
       session?.config,
       commandNames,
       putCommand,
@@ -620,6 +648,20 @@ export default function SessionScreen() {
       ) ?? null,
     [agent?.limits, config.model?.option],
   )
+  // Between turns, a used-up plan suggests an agent with room; picking it waits for the message.
+  const quota =
+    agent && !pendingSwitch && !mustSwitch
+      ? planQuota(
+          { ...agent, limits: limitsForModel(agent.limits, config.model?.option) },
+          Date.now(),
+        )
+      : null
+  const fallback =
+    agent && quota?.kind === 'out' && (status === 'ready' || status === 'closed')
+      ? fallbackAgent(others, agent.id, Date.now())
+      : null
+  const [keptQuota, setKeptQuota] = useState(false)
+  const suggestion = quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null
   const rejected = useThreadSelector(view, endedOnRejection)
   const shownName = pending?.name ?? agent?.name ?? 'Agent'
   const placeholder = sessionPlaceholder({
@@ -923,8 +965,20 @@ export default function SessionScreen() {
           }
           onCountChange={setAttachCount}
           top={(holds) =>
-            pendingSwitch || (cacheNoticeShown && holds) ? (
+            pendingSwitch || suggestion || (cacheNoticeShown && holds) ? (
               <>
+                {suggestion && agent && (
+                  <QuotaSuggestion
+                    agentName={agent.name}
+                    quota={suggestion.quota}
+                    fallback={suggestion.fallback}
+                    onSwitch={() => {
+                      const next = agents.get(suggestion.fallback.agentId)
+                      if (next) chooseAgent(next, null)
+                    }}
+                    onDismiss={() => setKeptQuota(true)}
+                  />
+                )}
                 {cacheNoticeShown && holds && (
                   <CacheNotice
                     estimate={cacheExpiry.estimate}

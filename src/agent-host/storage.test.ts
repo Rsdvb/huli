@@ -491,6 +491,7 @@ describe('the host files', () => {
       scope: { level: 'read' as const, web: false },
       timeLimitMinutes: 60 as const,
       keptRunSessions: 50 as const,
+      onLimit: 'switch' as const,
       enabled: true,
       createdAt: 1,
       updatedAt: 2,
@@ -511,6 +512,18 @@ describe('the host files', () => {
       routines: [{ ...routine, keptRunSessions: 100 }],
     })
     expect(parseRoutinesFile({ routines: [{ ...routine, keptRunSessions: 30 }] })).toBe(
+      'routine 0 is malformed',
+    )
+
+    // One saved before the plan-limit choice existed waits, as every routine did.
+    const unchosen = Object.fromEntries(
+      Object.entries(routine).filter(([key]) => key !== 'onLimit'),
+    )
+    expect(parseRoutinesFile({ routines: [unchosen] })).toEqual({
+      version: 1,
+      routines: [{ ...routine, onLimit: 'wait' }],
+    })
+    expect(parseRoutinesFile({ routines: [{ ...routine, onLimit: 'skip' }] })).toBe(
       'routine 0 is malformed',
     )
   })

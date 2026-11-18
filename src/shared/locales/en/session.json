@@ -1355,5 +1355,19 @@
     "removeQuote": "Remove the quote",
     "seconds": "{{n}} s",
     "by": "Answered by {{agent}}"
+  },
+  "quota": {
+    "out": "{{limit}} limit used up · back {{time}}",
+    "outNoReset": "{{limit}} limit used up",
+    "extra": "{{limit}} limit used up · on extra usage",
+    "extraShort": "Extra usage",
+    "suggest": "{{agent}}'s {{limit}} limit is used up until {{time}}.",
+    "suggestNoReset": "{{agent}}'s {{limit}} limit is used up.",
+    "switchTo": "Switch to {{agent}}",
+    "switchToUsed": "{{agent}} has used {{percent}}%",
+    "dismiss": "Not now",
+    "continueWith": "Continue with {{agent}}",
+    "continueHint": "{{agent}} has used {{percent}}%. It reads the conversation so far and picks up where the turn stopped.",
+    "continuePrompt": "Continue the task from where it stopped."
   }
 }

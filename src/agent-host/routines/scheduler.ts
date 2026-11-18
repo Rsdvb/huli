@@ -122,9 +122,17 @@ export class RoutineScheduler {
     else this.evaluate()
   }
 
-  /** The next scheduled time after now, or null while off, done, paused or beyond the horizon. */
-  nextRunAt(routine: SchedulerRoutine, now = this.deps.clock.now()): number | null {
-    if (!routine.enabled || this.pauses.has(keyOf(routine.agentId, routine.model))) return null
+  /**
+   * The next scheduled time after now, or null while off, done, paused or beyond the horizon;
+   * with `throughPause`, a routine that goes on with another agent keeps its times while paused.
+   */
+  nextRunAt(
+    routine: SchedulerRoutine,
+    now = this.deps.clock.now(),
+    throughPause = false,
+  ): number | null {
+    if (!routine.enabled) return null
+    if (!throughPause && this.pauses.has(keyOf(routine.agentId, routine.model))) return null
     const after = Math.max(routine.checkedThrough, now)
     return nextRuns(routine.schedule, after, { count: 1 })[0]?.at ?? null
   }

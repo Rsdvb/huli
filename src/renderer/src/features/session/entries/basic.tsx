@@ -305,6 +305,7 @@ export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: Ent
           sessionId={sessionId}
           entryId={entryId}
           error={entry.description ? `${entry.title}\n${entry.description}` : entry.title}
+          planLimit={entry.planLimit === true}
         />
       )}
     </Alert>

@@ -212,6 +212,7 @@ import type { ProjectHooksAnswers } from './project-hooks'
 import type { ProjectMcpAnswers } from './project-mcp'
 import { REPORTS_PER_DAY, type ReportDraft } from './report-tool'
 import { isOutOfCredit } from './out-of-credit'
+import { isPlanLimitStop } from './plan-limit-stop'
 import { planRevision } from './plan-revision'
 import { watchSettings, type PreparedRecords, type WatchTarget } from './prepared'
 import type { Projects } from './projects'
@@ -4495,6 +4496,46 @@ export class SessionManager {
   }
 
   /**
+   * Hands a run's session, whose turn its agent's plan limit stopped, to `agentId` in the mode the
+   * run's scope names for it, and sends `text` to go on with the task; the run hears how that turn
+   * ends. A mode that cannot be confirmed for the new agent refuses, so the run never goes on in a
+   * broader mode than its scope.
+   */
+  async continueRun(
+    sessionId: string,
+    agentId: AgentId,
+    mode: string | null,
+    text: string,
+  ): Promise<void> {
+    const live = this.live.get(sessionId)
+    if (!live || live.record.origin !== 'routine') {
+      throw new HostError('not_found', `The run's session ${sessionId} is not open`)
+    }
+    const options: Record<string, string | boolean> = {}
+    if (mode !== null) {
+      const option = this.deps.options
+        ?.get(agentId)
+        ?.config.find((candidate) => candidate.category === 'mode' && candidate.type === 'select')
+      const name = this.deps.agents.name(agentId)
+      if (!option) throw new HostError('restricted', t('routines.modeFailed', { agent: name }))
+      if (!option.choices?.some((choice) => choice.value === mode)) {
+        throw new HostError('restricted', t('routines.noScopeMode', { agent: name }))
+      }
+      options[option.id] = mode
+    }
+    const before = { mode: live.routineMode, ended: live.routineTurnEnded }
+    live.routineMode = mode
+    live.routineTurnEnded = false
+    try {
+      await this.switchAgent({ sessionId, agentId, content: [{ type: 'text', text }], options })
+    } catch (error) {
+      live.routineMode = before.mode
+      live.routineTurnEnded = before.ended
+      throw error
+    }
+  }
+
+  /**
    * Removes and returns the messages kept for a session, or for every one when `sessionId` is
    * undefined, oldest first, but those held for another port; a taken one is gone.
    */
@@ -8108,6 +8149,7 @@ export class SessionManager {
       error: { message: string; detail?: string } | null
       usage: TokenTotals | null
       turn: Turn | null
+      planLimit?: boolean
     },
   ): boolean {
     const hooks = this.deps.routine?.current
@@ -8126,6 +8168,7 @@ export class SessionManager {
       output: result.turn ? this.turnAnswer(live, result.turn) : null,
       usage: result.usage,
       changedFiles: result.turn ? this.turnChanges(live, result.turn) : [],
+      ...(result.planLimit ? { planLimit: true } : {}),
     })
     return true
   }
@@ -8225,6 +8268,10 @@ export class SessionManager {
                     description: mapped.message,
                     // A turn of a message has Retry, which sends it again; the agent's own has none.
                     ...(turn.byAgent ? {} : { cause: 'turn_failed' as const }),
+                    // The thread offers to go on with an agent whose plan has room.
+                    ...(!turn.byAgent && isPlanLimitStop(mapped)
+                      ? { planLimit: true as const }
+                      : {}),
                   }),
           after: agentEntryBefore(live.thread),
         },
@@ -8270,6 +8317,7 @@ export class SessionManager {
         error: mapped,
         usage: null,
         turn,
+        planLimit: isPlanLimitStop(mapped),
       }) || this.reportStep(live)
     if (!routineTurn) {
       this.deps.events.attention(live.id, 'error', this.titleOf(live), mapped.message)
