@@ -8,6 +8,7 @@
     "userInterfaceStyle": "automatic",
     "scheme": "huli",
     "ios": {
+      "icon": "./assets/kite.icon",
       "supportsTablet": true,
       "requireFullScreen": false,
       "bundleIdentifier": "io.github.rsdvb.huli",
@@ -16,26 +17,31 @@
         "com.apple.security.application-groups": ["group.io.github.rsdvb.huli"]
       },
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "Huli 通过局域网或 Tailscale 连接你电脑上的 Huli。",
+        "CFBundleAllowMixedLocalizations": true,
+        "NSLocalNetworkUsageDescription": "纸鸢通过局域网或 Tailscale 连接你电脑上的纸鸢。",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "io.github.rsdvb.huli",
       "adaptiveIcon": {
-        "backgroundColor": "#E2611F",
+        "backgroundColor": "#F07A3E",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
     },
+    "locales": {
+      "zh-Hans": "./locales/zh-Hans.json"
+    },
     "plugins": [
+      "./plugins/withAppName",
       "expo-secure-store",
       [
         "expo-camera",
         {
-          "cameraPermission": "Huli 用相机扫描电脑上显示的配对二维码，也用来拍照发给电脑上的智能体。",
+          "cameraPermission": "纸鸢用相机扫描电脑上显示的配对二维码，也用来拍照发给电脑上的智能体。",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
@@ -43,15 +49,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Huli 从相册选你挑的图片，发给电脑上的智能体。",
-          "cameraPermission": "Huli 用相机扫描电脑上显示的配对二维码，也用来拍照发给电脑上的智能体。",
+          "photosPermission": "纸鸢从相册选你挑的图片，发给电脑上的智能体。",
+          "cameraPermission": "纸鸢用相机扫描电脑上显示的配对二维码，也用来拍照发给电脑上的智能体。",
           "microphonePermission": false
         }
       ],
       "expo-router",
       [
         "expo-local-authentication",
-        { "faceIDPermission": "Huli 用面容 ID 在你回到 App 时解锁，不让别人看到你的会话。" }
+        { "faceIDPermission": "纸鸢用面容 ID 在你回到 App 时解锁，不让别人看到你的会话。" }
       ],
       ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
       "./plugins/withNotificationService",
@@ -66,7 +72,8 @@
           "androidMultiIntentFilters": ["*/*"]
         }
       ],
-      "expo-image"
+      "expo-image",
+      "expo-web-browser"
     ]
   }
 }

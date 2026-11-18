@@ -307,7 +307,8 @@ export function ContextButton({
   const percent = Math.round(share * 100)
   const onOpenChange = (open: boolean) => {
     if (!open) return
-    refreshLimits(agentId, sessionHost(sessionId)).catch((error: unknown) =>
+    // The user opened the popover: a read they asked for.
+    refreshLimits(agentId, sessionHost(sessionId), true).catch((error: unknown) =>
       console.warn(`Could not read the plan limits: ${errorMessage(error)}`),
     )
     const own = closed ? read : context

@@ -46,7 +46,8 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { Conversation } from '../../components/Conversation'
-import { PlanChip } from '../../components/entries/PlanCards'
+import { PLAN_PILL_ROOM, PlanPill, pinnedPlan, planPage } from '../../components/entries/PlanCards'
+import { createStore } from '../../select'
 import {
   cutNoticeOf,
   OutOfCreditStrip,
@@ -118,7 +119,14 @@ import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
 import { SubagentBar } from '../../components/SubagentBar'
 import { foldsIntoRun, latestPlan } from '../../ui/session/turns'
-import { askedText, forgetTools, phaseText, turnPhase, writingId } from '../../ui/session/work'
+import {
+  askedText,
+  doingText,
+  forgetTools,
+  phaseText,
+  turnDoing,
+  writingId,
+} from '../../ui/session/work'
 import { WorkingRow } from '../../ui/session/Working'
 
 const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
@@ -127,7 +135,7 @@ const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache }
 const selectSession = (thread: ThreadState | null) => thread?.session
 const selectHasThread = (thread: ThreadState | null) => thread !== null
 const selectTurn = (thread: ThreadState | null) => ({
-  ...turnPhase(thread),
+  ...turnDoing(thread),
   asked: askedText(thread),
   writing: writingId(thread) !== null,
 })
@@ -203,6 +211,9 @@ export default function SessionScreen() {
   const moreAnchor = useRef<ViewHandle>(null)
   const modeAnchor = useRef<ViewHandle>(null)
   const modelAnchor = useRef<ViewHandle>(null)
+  const planAnchor = useRef<ViewHandle>(null)
+  // Whether the conversation is flung, which only the plan's pill reads.
+  const scrolling = useMemo(() => createStore(false), [])
   const [contextOpen, setContextOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   // Another agent picked to take over with the next message, and the options it starts with.
@@ -262,6 +273,8 @@ export default function SessionScreen() {
     useCallback((thread: ThreadState | null) => latestPlan(thread, view.plan), [view.plan]),
     sameFields,
   )
+  const planRunning = ownTurn && running
+  const pinned = pinnedPlan(plan, planRunning)
 
   // What waits: the thread's own cards, and those on pages not read yet, oldest first.
   const waits = useThreadSelector(view, threadWaits, sameItems)
@@ -275,6 +288,10 @@ export default function SessionScreen() {
   const retryNotice = useThreadSelector(view, retryNoticeOf)
   const cutNotice = useThreadSelector(view, cutNoticeOf)
   const childWaiting = useWaitingBelow(id).length > 0
+  // A question of the agent's waits: the working line and the composer say it waits for an answer.
+  const asking = requests.some(
+    (entry) => entry.kind === 'tool' && !!entry.permission?.questions?.length,
+  )
   const handBack = session?.computer?.control === 'you'
   // A worktree that is not ready says so above the composer, as the desktop's does.
   const worktreeWaits = !!summary?.worktree && summary.worktree.state !== 'ready'
@@ -515,11 +532,13 @@ export default function SessionScreen() {
     turn.asked ??
     (handBack
       ? `等你交还 ${app ?? '电脑'}`
-      : waitingYou && turn.phase !== 'approval'
-        ? phaseText('approval', 1)
-        : app && !QUIET_PHASES.has(turn.phase)
-          ? `正在使用 ${app}`
-          : phaseText(turn.phase, turn.count))
+      : asking
+        ? '等待你的回答'
+        : waitingYou && turn.phase !== 'approval'
+          ? phaseText('approval', 1)
+          : app && !QUIET_PHASES.has(turn.phase)
+            ? `正在使用 ${app}`
+            : doingText(turn))
   const added =
     usage && startUsed !== null && usage.used > startUsed ? usage.used - startUsed : null
   const working =
@@ -608,6 +627,7 @@ export default function SessionScreen() {
     starting,
     pickAgent: mustSwitch && !pendingSwitch,
     awaiting,
+    asking,
     running,
     steering,
     reached,
@@ -701,6 +721,8 @@ export default function SessionScreen() {
         return titlePages?.(page) ?? null
       case 'more-menu':
         return moreMenu()
+      case 'plan':
+        return planPage(pinned, planRunning)
       case 'attach':
         return attachPages.attach
       case 'mention':
@@ -760,7 +782,10 @@ export default function SessionScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.outboxOnly,
-          { paddingTop: headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) },
+          {
+            paddingTop:
+              headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0),
+          },
         ]}
         keyboardDismissMode="interactive"
       >
@@ -778,7 +803,9 @@ export default function SessionScreen() {
         working={working}
         pending={outbox}
         fromParent={summary?.origin === 'user' && !!summary.parentId}
-        paddingTop={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0)}
+        paddingTop={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0)}
+        scrolling={scrolling}
+        waiting={running && (waitingYou || handBack || turn.asked !== null)}
       />
     )
     // The rows' file references open the folder's files.
@@ -801,8 +828,6 @@ export default function SessionScreen() {
         <KeyboardGestureArea interpolator="ios" style={{ flex: 1 }}>
           {body}
         </KeyboardGestureArea>
-
-        <PlanChip plan={plan} running={ownTurn && running} />
 
         {(requests.length > 0 ||
           handBack ||
@@ -1069,6 +1094,18 @@ export default function SessionScreen() {
       />
       {summary && chips ? (
         <SessionChips summary={summary} top={headerHeight} onOpenSession={openSession} />
+      ) : null}
+      {pinned && hasThread ? (
+        <PlanPill
+          items={pinned}
+          running={planRunning}
+          top={headerHeight + 6 + (chips ? CHIPS_HEIGHT : 0) + (linkDown ? 42 : 0)}
+          anchor={planAnchor}
+          scrolling={scrolling}
+          onPress={() =>
+            menu.open('plan', planAnchor, { placement: 'below', align: 'center', width: 340 })
+          }
+        />
       ) : null}
       {linkDown && hasThread && (
         <View

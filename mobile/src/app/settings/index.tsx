@@ -1,4 +1,4 @@
-// Settings: the computer's Huli Cloud account, this iPhone (its name there, notifications, the app
+// Settings: the computer's Huli Cloud account, this iPhone's own (账号), this iPhone (its name there, notifications, the app
 // lock), appearance, the paired computer and how the phone reaches it, and about.
 
 import { useEffect, useState } from 'react'
@@ -14,6 +14,7 @@ import { RenameDialog } from '../../components/RenameDialog'
 import { Sheet } from '../../components/Sheet'
 import { useUpdateRows } from '../../components/UpdateRows'
 import { APP_VERSION, currentAddress, routeKind } from '../../connection'
+import { useCloudStatus } from '../../cloud'
 import { useHost } from '../../host'
 import { computerName } from '../../store'
 import { ROUTE_NAMES } from '../../linkInfo'
@@ -78,6 +79,7 @@ export default function Settings() {
   const insets = useSafeAreaInsets()
   const push = usePushStatus()
   const account = useAccount(push)
+  const cloud = useCloudStatus()
   const biometry = useBiometryName()
   const liveAllowed = useLiveAllowed()
   const updateRows = useUpdateRows()
@@ -111,21 +113,21 @@ export default function Settings() {
       setPrefs({ lock: on })
     } else if (result.error === 'passcode_not_set' || result.error === 'not_available') {
       haptic.warning()
-      Alert.alert('这台 iPhone 没有设置密码', '先在系统设置里设置锁屏密码，才能用它锁定 Huli。')
+      Alert.alert('这台 iPhone 没有设置密码', '先在系统设置里设置锁屏密码，才能用它锁定纸鸢。')
     }
   }
 
   const accountCard = (() => {
     if (account.kind === 'signed-in') {
-      return { title: account.email, body: '电脑已登录 Huli Cloud，通知经它送到这台 iPhone。' }
+      return { title: account.email, body: '电脑已登录 Kite Cloud，通知经它送到这台 iPhone。' }
     }
     if (account.kind === 'signed-out') {
       return {
-        title: '未登录 Huli Cloud',
-        body: '在电脑上的 Huli 里登录 Huli Cloud 后，这台 iPhone 才能收到通知。',
+        title: '未登录 Kite Cloud',
+        body: '在电脑上的纸鸢里登录 Kite Cloud 后，这台 iPhone 才能收到通知。',
       }
     }
-    return { title: 'Huli', body: '在 iPhone 上看你电脑上的 Agent 在做什么，随时接着聊。' }
+    return { title: '纸鸢', body: '在 iPhone 上看你电脑上的 Agent 在做什么，随时接着聊。' }
   })()
 
   const route = connected && address ? ROUTE_NAMES[routeKind(address)] : '未连接'
@@ -161,12 +163,23 @@ export default function Settings() {
           </View>
         </View>
 
+        <ListGroup header="账号">
+          <ListRow
+            title="Huli Cloud 账号"
+            icon="person"
+            plainIcon
+            value={cloud.state === 'signed-in' ? cloud.account.email : '未登录'}
+            chevron
+            onPress={() => router.push('/settings/account')}
+          />
+        </ListGroup>
+
         <ListGroup
           header="这台 iPhone"
           footer={
             prefs.lock
-              ? `离开 Huli 后它会锁定，再打开时需要${biometry}。`
-              : `开启后，离开 Huli 一段时间它就会锁定，再打开时需要${biometry}。`
+              ? `离开纸鸢后它会锁定，再打开时需要${biometry}。`
+              : `开启后，离开纸鸢一段时间它就会锁定，再打开时需要${biometry}。`
           }
         >
           <ListRow
@@ -306,7 +319,7 @@ export default function Settings() {
         </ListGroup>
 
         <ListGroup
-          header="电脑上的 Huli"
+          header="电脑上的纸鸢"
           footer="这些都存在电脑上，在这里改和在电脑上改一样，对所有配对的设备都生效。"
         >
           <ListRow
@@ -424,7 +437,7 @@ export default function Settings() {
           style={styles.footer}
         >
           <Text style={[typeScale.caption, { color: c.textTertiary }]}>
-            Huli {version} · 基于 Kettu，AGPL-3.0
+            纸鸢 {version} · 基于 Kettu，AGPL-3.0
           </Text>
         </Press>
       </Animated.ScrollView>
@@ -447,7 +460,7 @@ export default function Settings() {
       <Sheet
         visible={sheet === 'language'}
         title="语言"
-        message="Huli 目前只有简体中文。"
+        message="纸鸢目前只有简体中文。"
         items={[{ key: 'zh', label: '简体中文', checked: true, onPress: () => {} }]}
         onClose={() => setSheet(null)}
       />

@@ -57,15 +57,20 @@ const QUIET = new Set([
 // The phase is read on every streamed chunk, so a long run of tool calls is read no further back.
 const LOOKBACK = 64
 
-/**
- * The phase, from the turn's latest entries: a thought or a message of the agent that streams, or
- * the latest of the tool calls at the end that still runs. Finished tool calls at the end are
- * work between steps.
- */
-export function turnWork(state: ThreadState | null | undefined): TurnWork {
-  if (!state) return WORKING
+interface TurnRead {
+  work: TurnWork
+  /** The latest running tool call the phase comes from. */
+  tool: ToolEntry | null
+  /** The thought that streams, while the agent thinks. */
+  thought: string | null
+}
+
+const quiet = (work: TurnWork): TurnRead => ({ work, tool: null, thought: null })
+
+function readTurn(state: ThreadState | null | undefined): TurnRead {
+  if (!state) return quiet(WORKING)
   if (state.session.status === 'awaiting_permission') {
-    return { phase: 'approval', count: 1, step: null }
+    return quiet({ phase: 'approval', count: 1, step: null })
   }
   const { order, byId } = state
   const running: ToolEntry[] = []
@@ -79,29 +84,121 @@ export function turnWork(state: ThreadState | null | undefined): TurnWork {
       continue
     }
     // A subagent's card after the message: the agent waits on it rather than writes.
-    if (entry.kind === 'subagent' && !tools) return WORKING
+    if (entry.kind === 'subagent' && !tools) return quiet(WORKING)
     if (QUIET.has(entry.kind)) continue
     if (tools) break
     if (entry.kind === 'thought') {
-      return entry.streaming ? { phase: 'thinking', count: 1, step: null } : WORKING
+      return entry.streaming
+        ? { work: { phase: 'thinking', count: 1, step: null }, tool: null, thought: entry.markdown }
+        : quiet(WORKING)
     }
     if (entry.kind === 'agent') {
-      return entry.streaming ? { phase: 'writing', count: 1, step: null } : WORKING
+      return quiet(entry.streaming ? { phase: 'writing', count: 1, step: null } : WORKING)
     }
     if (entry.kind === 'compaction' && entry.status === 'in_progress') {
-      return { phase: 'compacting', count: 1, step: null }
+      return quiet({ phase: 'compacting', count: 1, step: null })
     }
     // The turn's own message, or anything that ends a step.
-    return WORKING
+    return quiet(WORKING)
   }
   const latest = running[0]
   const phase = latest && TOOL_PHASES[latest.toolKind]
-  if (!phase) return WORKING
-  return {
+  if (!phase) return quiet(WORKING)
+  const work = {
     phase,
     count: running.filter((tool) => TOOL_PHASES[tool.toolKind] === phase).length,
     step: latest.title || null,
   }
+  return { work, tool: latest, thought: null }
+}
+
+/**
+ * The phase, from the turn's latest entries: a thought or a message of the agent that streams, or
+ * the latest of the tool calls at the end that still runs. Finished tool calls at the end are
+ * work between steps.
+ */
+export function turnWork(state: ThreadState | null | undefined): TurnWork {
+  return readTurn(state).work
+}
+
+/**
+ * The phase with what it works on, as a person would say it: the file a call reads or edits, the
+ * command it runs, what it searches for, or the heading of the thought being written.
+ */
+export interface TurnDoing extends TurnPhase {
+  /** One line; null when there is nothing to name. */
+  detail: string | null
+  /** Whether `detail` is a search's query, which reads in quotes. */
+  quoted: boolean
+}
+
+const firstLine = (text: string): string => text.trim().split('\n', 1)[0]!.trim()
+
+const baseName = (path: string): string =>
+  path
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/]/)
+    .pop() || path
+
+// "x", `x`, “x” or 'x'; the last one in a title is what a search looks for (Grep's pattern comes
+// after its --include="...", Glob's pattern after its path).
+const QUOTED = /"([^"\n]+)"|`([^`\n]+)`|“([^”\n]+)”|'([^'\n]+)'/g
+
+function lastQuoted(title: string): string | null {
+  let found: string | null = null
+  for (const match of title.matchAll(QUOTED)) {
+    found = match[1] ?? match[2] ?? match[3] ?? match[4] ?? null
+  }
+  return found
+}
+
+// A heading alone on its line, closed: "**Checking the quota**".
+const HEADING = /^[ \t]*(?:\*\*|__)([^\n*_]+?)(?:\*\*|__)[ \t]*$/gm
+
+let headingKept: { markdown: string; heading: string | null } | null = null
+
+/** The latest heading in a thought that streams, as the agent's reasoning summaries mark them. */
+export function thoughtHeading(markdown: string): string | null {
+  if (headingKept?.markdown === markdown) return headingKept.heading
+  let heading: string | null = null
+  for (const match of markdown.matchAll(HEADING)) heading = match[1]!.trim() || heading
+  headingKept = { markdown, heading }
+  return heading
+}
+
+function toolDetail(tool: ToolEntry): { detail: string | null; quoted: boolean } {
+  const plain = (detail: string | null) => ({ detail: detail || null, quoted: false })
+  switch (tool.toolKind) {
+    case 'read':
+    case 'edit':
+    case 'delete':
+    case 'move': {
+      const diff = tool.content.find((c) => c.type === 'diff')
+      const path = tool.locations[0]?.path ?? (diff?.type === 'diff' ? diff.path : undefined)
+      if (path) return plain(baseName(path))
+      return plain(firstLine(tool.title.replace(/^(read|edit|write|delete|move)\s+/i, '')))
+    }
+    case 'execute':
+      // Without the input, the title is the agent's own label and may already say "Run".
+      return plain(firstLine(tool.rawInput ?? tool.title.replace(/^run\s+/i, '')))
+    case 'search':
+    case 'fetch': {
+      const query = lastQuoted(tool.title)
+      if (query) return { detail: query.trim(), quoted: true }
+      return plain(firstLine(tool.title.replace(/^fetch\s+/i, '')))
+    }
+    default:
+      return plain(null)
+  }
+}
+
+/** What the agent is doing now, with what it works on; see `TurnDoing`. */
+export function turnDoing(state: ThreadState | null | undefined): TurnDoing {
+  const { work, tool, thought } = readTurn(state)
+  const base = { phase: work.phase, count: work.count }
+  if (tool) return { ...base, ...toolDetail(tool) }
+  if (thought !== null) return { ...base, detail: thoughtHeading(thought), quoted: false }
+  return { ...base, detail: null, quoted: false }
 }
 
 /** The phase alone, as the desktop's working row reads it. */

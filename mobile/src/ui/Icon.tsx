@@ -19,6 +19,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
+  ChevronUp,
+  Circle,
   CircleCheck,
   CircleMinus,
   CircleStop,
@@ -161,6 +163,10 @@ const ICONS = {
   branch: ['arrow.triangle.branch', GitBranch],
   stop: ['stop.circle', CircleStop],
   send: ['arrow.up', ArrowUp],
+  circle: ['circle', Circle],
+  checkCircle: ['checkmark.circle.fill', CircleCheck],
+  folderFill: ['folder.fill', Folder],
+  chevronUp: ['chevron.up', ChevronUp],
 } as const satisfies Record<string, readonly [SFSymbol, LucideIcon]>
 
 export type IconName = keyof typeof ICONS

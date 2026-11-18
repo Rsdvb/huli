@@ -13,6 +13,7 @@ import type devices from './locales/en/devices.json'
 import type files from './locales/en/files.json'
 import type git from './locales/en/git.json'
 import type host from './locales/en/host.json'
+import type huliAccount from './locales/en/huliAccount.json'
 import type kettuImport from './locales/en/kettuImport.json'
 import type main from './locales/en/main.json'
 import type marketplace from './locales/en/marketplace.json'
@@ -21,6 +22,7 @@ import type report from './locales/en/report.json'
 import type overview from './locales/en/overview.json'
 import type routines from './locales/en/routines.json'
 import type session from './locales/en/session.json'
+import type sessionFolders from './locales/en/sessionFolders.json'
 import type settings from './locales/en/settings.json'
 import type shell from './locales/en/shell.json'
 import type sidebar from './locales/en/sidebar.json'
@@ -50,6 +52,7 @@ declare module 'i18next' {
       files: typeof files
       git: typeof git
       host: typeof host
+      huliAccount: typeof huliAccount
       kettuImport: typeof kettuImport
       main: typeof main
       marketplace: typeof marketplace
@@ -58,6 +61,7 @@ declare module 'i18next' {
       overview: typeof overview
       routines: typeof routines
       session: typeof session
+      sessionFolders: typeof sessionFolders
       settings: typeof settings
       shell: typeof shell
       sidebar: typeof sidebar

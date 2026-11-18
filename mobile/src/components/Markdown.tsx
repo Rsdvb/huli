@@ -27,7 +27,8 @@ import { Image } from 'expo-image'
 import { cacheFor } from '../ui/memory'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { textKey, useDisclosure } from '../ui/session/disclosure'
-import { copyText, showMenu } from '../ui/session/feedback'
+import { ContextMenu } from '../ui/ContextMenu'
+import { copyText } from '../ui/session/feedback'
 import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
 import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
@@ -317,50 +318,56 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
           </Text>
         </PressScale>
       </View>
-      <Pressable
-        onLongPress={() =>
-          showMenu(undefined, [
-            { label: '复制代码', onPress: copy },
-            {
-              label: '选择文本',
-              onPress: () => selectText({ text: props.text.replace(/\n$/, ''), mono: true }),
-            },
-          ])
-        }
-        delayLongPress={350}
-        style={styles.codeRow}
+      <ContextMenu
+        items={[
+          { key: 'copy', label: '复制代码', icon: 'doc.on.doc', onPress: copy },
+          {
+            key: 'select',
+            label: '选择文本',
+            icon: 'character.cursor.ibeam',
+            onPress: () => selectText({ text: props.text.replace(/\n$/, ''), mono: true }),
+          },
+        ]}
       >
-        {firstLine !== null && (
-          <Text style={[styles.codeText, styles.gutter, { color: c.textTertiary }]}>
-            {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
-          </Text>
+        {(longPress) => (
+          <Pressable
+            onLongPress={longPress}
+            delayLongPress={350}
+            style={[styles.codeRow, { backgroundColor: s.code }]}
+          >
+            {firstLine !== null && (
+              <Text style={[styles.codeText, styles.gutter, { color: c.textTertiary }]}>
+                {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
+              </Text>
+            )}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={[styles.codeBody, firstLine !== null && { paddingLeft: 8 }]}
+            >
+              <Text style={[styles.codeText, { color: c.text }]}>
+                {tokens
+                  ? tokens.map((token, i) =>
+                      token.kind === 'plain' ? (
+                        token.text
+                      ) : (
+                        <Text
+                          key={i}
+                          style={{
+                            color: s.syntax[token.kind],
+                            fontStyle: token.kind === 'comment' ? 'italic' : 'normal',
+                          }}
+                        >
+                          {token.text}
+                        </Text>
+                      ),
+                    )
+                  : shown}
+              </Text>
+            </ScrollView>
+          </Pressable>
         )}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={[styles.codeBody, firstLine !== null && { paddingLeft: 8 }]}
-        >
-          <Text style={[styles.codeText, { color: c.text }]}>
-            {tokens
-              ? tokens.map((token, i) =>
-                  token.kind === 'plain' ? (
-                    token.text
-                  ) : (
-                    <Text
-                      key={i}
-                      style={{
-                        color: s.syntax[token.kind],
-                        fontStyle: token.kind === 'comment' ? 'italic' : 'normal',
-                      }}
-                    >
-                      {token.text}
-                    </Text>
-                  ),
-                )
-              : shown}
-          </Text>
-        </ScrollView>
-      </Pressable>
+      </ContextMenu>
       {foldable && (
         <Pressable
           onPress={() => {

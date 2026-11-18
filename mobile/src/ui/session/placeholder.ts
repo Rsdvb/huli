@@ -33,6 +33,8 @@ export function sessionPlaceholder(state: {
   /** The session's agent cannot go on, and none is picked yet. */
   pickAgent: boolean
   awaiting: boolean
+  /** A question of the agent's waits above the composer, which the reply may answer too. */
+  asking?: boolean
   running: boolean
   steering: boolean
   /** A used-up window of the session's model, with when it resets. */
@@ -41,6 +43,7 @@ export function sessionPlaceholder(state: {
 }): string {
   if (state.starting) return `正在启动 ${state.agent}…`
   if (state.pickAgent) return '选一个 Agent 接着做…'
+  if (state.asking) return '回复，或在上方作答'
   if (state.awaiting) return '等待你的授权'
   if (!state.running && state.reached?.resetsAt) {
     return `${windowName(state.reached)}限额已用完 · ${whenText(state.reached.resetsAt, Date.now())} 重置`

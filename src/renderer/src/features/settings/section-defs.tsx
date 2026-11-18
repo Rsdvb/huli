@@ -115,6 +115,8 @@ import {
   StorageUsage,
   SubscriptionState,
 } from './account-section'
+import { AccountComputerList, AccountDeviceList, ThisComputerRow } from './account-devices'
+import { accountDevicesSupported } from '@renderer/stores/account-devices'
 import { english, type GroupDef, type RowDef, type SectionDef } from './model'
 import {
   AllowedSiteRow,
@@ -568,6 +570,48 @@ export function useAccountSection(): SectionDef {
       group: card,
       render: () => <SubscriptionState status={signedIn.subscription} />,
     })
+  }
+  // Huli: the account's computers and devices on Huli Cloud.
+  if (signedIn && accountDevicesSupported()) {
+    const huli = i18n.getFixedT(null, 'huliAccount')
+    const huliEn = i18n.getFixedT('en', 'huliAccount')
+    const computers = group('huli-computers', huli('computers.name'))
+    const devices = group('huli-devices', huli('devices.name'))
+    // A browser is no computer of the account; the desktop app's window is.
+    if (window.kettu.client === 'desktop') {
+      rows.push({
+        id: 'huli-this-computer',
+        name: huli('thisComputer.name'),
+        english: huliEn('thisComputer.name'),
+        description: huli('thisComputer.description'),
+        keywords: huli('thisComputer.keywords'),
+        group: card,
+        layout: 'custom',
+        render: () => <ThisComputerRow />,
+      })
+    }
+    rows.push(
+      {
+        id: 'huli-computers',
+        name: huli('computers.name'),
+        english: huliEn('computers.name'),
+        description: huli('computers.description'),
+        keywords: huli('computers.keywords'),
+        group: computers,
+        layout: 'custom',
+        render: () => <AccountComputerList />,
+      },
+      {
+        id: 'huli-devices',
+        name: huli('devices.name'),
+        english: huliEn('devices.name'),
+        description: huli('devices.description'),
+        keywords: huli('devices.keywords'),
+        group: devices,
+        layout: 'custom',
+        render: () => <AccountDeviceList />,
+      },
+    )
   }
   return {
     id: 'account',

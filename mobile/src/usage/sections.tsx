@@ -218,7 +218,7 @@ export function Filters(props: {
       ? props.agents
       : [...props.agents, props.agent]
   const agentName = props.agent === 'all' ? '所有 Agent' : props.nameOf(props.agent)
-  const scopeName = props.scope === 'computer' ? props.hostName : '仅 Huli'
+  const scopeName = props.scope === 'computer' ? props.hostName : '仅纸鸢'
   const requests = METRIC_NAMES[metricKind('requests', props.scope)]
   const metricName =
     props.metric === 'tokens' ? 'Token' : props.metric === 'cost' ? '费用' : requests
@@ -242,14 +242,14 @@ export function Filters(props: {
       {
         key: 'computer',
         label: props.hostName,
-        detail: 'Huli 和各 Agent 自己的日志，包括在终端里的使用',
+        detail: '纸鸢和各 Agent 自己的日志，包括在终端里的使用',
         checked: props.scope === 'computer',
         onPress: pick(props.onScope, 'computer' as UsageScope),
       },
       {
         key: 'kettu',
-        label: '仅 Huli',
-        detail: '只算 Huli 运行的轮次',
+        label: '仅纸鸢',
+        detail: '只算纸鸢运行的轮次',
         checked: props.scope === 'kettu',
         onPress: pick(props.onScope, 'kettu' as UsageScope),
       },
@@ -667,7 +667,7 @@ export function Footnote(props: {
               ? `${agoText(synced)}同步`
               : '还没同步过'
         }。`
-      : '只统计在 Huli 里运行的对话。'
+      : '只统计在纸鸢里运行的对话。'
   return (
     <Text style={[typeScale.footnote, styles.footnote, { color: c.textTertiary }]}>
       {source}

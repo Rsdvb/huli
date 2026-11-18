@@ -1,6 +1,6 @@
 // The phone's own preferences, kept in the Keychain beside the pairing: the theme, the app lock,
-// whether notifications show what they are about and whether plan limits alert. Read once at
-// start; every screen subscribes.
+// whether notifications show what they are about, whether plan limits alert, and how the home list
+// is shown. Read once at start; every screen subscribes.
 
 import { useSyncExternalStore } from 'react'
 import { Appearance } from 'react-native'
@@ -27,7 +27,21 @@ export interface Prefs {
   limitAlerts: boolean
   /** A session's sub-agent list keeps the ones that finished, as the desktop's switch does. */
   showFinishedSubagents: boolean
+  /** Home: every paired computer's sessions together, or the active computer's alone. */
+  homeScope: HomeScope
+  /** Home: sessions in groups by folder and project, or one list by time. */
+  homeGrouping: HomeGrouping
+  /** Home: archived sessions listed with the others. */
+  homeShowArchived: boolean
+  /** Home: the project groups shown closed, by key. */
+  homeCollapsed: string[]
 }
+
+export type HomeScope = 'all' | 'one'
+export type HomeGrouping = 'project' | 'time'
+
+/** The most closed project groups kept. */
+const COLLAPSED_KEPT = 200
 
 const DEFAULTS: Prefs = {
   theme: 'system',
@@ -37,6 +51,10 @@ const DEFAULTS: Prefs = {
   liveActivities: true,
   limitAlerts: true,
   showFinishedSubagents: false,
+  homeScope: 'one',
+  homeGrouping: 'project',
+  homeShowArchived: false,
+  homeCollapsed: [],
 }
 
 const ITEM = 'huli.prefs'
@@ -63,6 +81,14 @@ function parse(text: string | null): Prefs {
       liveActivities: raw.liveActivities !== false,
       limitAlerts: raw.limitAlerts !== false,
       showFinishedSubagents: raw.showFinishedSubagents === true,
+      homeScope: raw.homeScope === 'all' ? 'all' : 'one',
+      homeGrouping: raw.homeGrouping === 'time' ? 'time' : 'project',
+      homeShowArchived: raw.homeShowArchived === true,
+      homeCollapsed: Array.isArray(raw.homeCollapsed)
+        ? raw.homeCollapsed
+            .filter((key): key is string => typeof key === 'string')
+            .slice(0, COLLAPSED_KEPT)
+        : [],
     }
   } catch {
     return DEFAULTS

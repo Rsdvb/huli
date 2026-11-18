@@ -1,0 +1,66 @@
+{
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "kite.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "kite-dark.png"
+            }
+          ],
+          "name": "kite"
+        },
+        {
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "string.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "string-dark.png"
+            }
+          ],
+          "name": "string"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name-specializations": [
+            {
+              "value": "ground.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "ground-dark.png"
+            }
+          ],
+          "name": "ground"
+        }
+      ],
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

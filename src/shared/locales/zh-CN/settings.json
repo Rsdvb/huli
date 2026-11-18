@@ -909,6 +909,11 @@
       "noteCodebuddy": "key 交给 Codebuddy Code，存进这个 Agent 配置目录里的 settings.json；Kettu 不留副本，也不读回。要在这个 Agent 用的站点上创建 key：国际站在 codebuddy.ai/profile/keys，国内站在 copilot.tencent.com/profile。",
       "baseUrlOptional": "Base URL（可选）",
       "modelOptional": "模型（可选）",
+      "presets": "快速填入：",
+      "preset": {
+        "doubao": "豆包（火山方舟）",
+        "doubaoIntl": "豆包（BytePlus 国际站）"
+      },
       "envSet": "已设置。Kettu 保存它，只在 {{name}} 启动时交给它。"
     },
     "needsSignInLine": "需要你登录",

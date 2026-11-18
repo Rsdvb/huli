@@ -18,9 +18,11 @@ import {
   workflowTitle,
 } from '../../tasks'
 import { AnimatedFlashList, type FlashListRef } from '../../ui/AnimatedList'
+import { ContextMenu } from '../../ui/ContextMenu'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
+import type { MenuNode } from '../../ui/menu'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
@@ -28,7 +30,6 @@ import { SectionHeader } from '../../ui/SectionHeader'
 import { Skeleton } from '../../ui/Skeleton'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../shell'
-import { Sheet, type SheetItem } from '../Sheet'
 import { TaskRow } from './TaskRow'
 
 type Section = 'waiting' | 'running' | 'done' | 'dropped'
@@ -66,7 +67,6 @@ export function TasksView(props: { switcher: ReactNode }) {
   const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
-  const [menu, setMenu] = useState<TaskSummary | null>(null)
   const connected = state.kind === 'connected'
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
@@ -129,32 +129,39 @@ export function TasksView(props: { switcher: ReactNode }) {
     )
   }
 
-  const menuItems: SheetItem[] = menu
-    ? [
-        { key: 'open', label: '打开', onPress: () => router.push(`/task/${menu.id}`) },
-        {
-          key: 'pin',
-          label: menu.pinnedAt !== null ? '取消置顶' : '置顶',
+  const menuOf = (t: TaskSummary): MenuNode[] => [
+    {
+      key: 'open',
+      label: '打开',
+      icon: 'arrow.up.right.square',
+      onPress: () => router.push(`/task/${t.id}`),
+    },
+    {
+      key: 'pin',
+      label: t.pinnedAt !== null ? '取消置顶' : '置顶',
+      icon: t.pinnedAt !== null ? 'pin.slash' : 'pin',
+      disabled: !connected,
+      onPress: () => link && togglePin(link, t),
+    },
+    { kind: 'divider', key: 'danger' },
+    t.status === 'running'
+      ? {
+          key: 'cancel',
+          label: '取消需求…',
+          icon: 'xmark.circle',
+          destructive: true,
           disabled: !connected,
-          onPress: () => link && togglePin(link, menu),
+          onPress: () => link && confirmCancel(link, t),
+        }
+      : {
+          key: 'delete',
+          label: '删除…',
+          icon: 'trash',
+          destructive: true,
+          disabled: !connected,
+          onPress: () => link && confirmDelete(link, t),
         },
-        menu.status === 'running'
-          ? {
-              key: 'cancel',
-              label: '取消需求…',
-              destructive: true,
-              disabled: !connected,
-              onPress: () => link && confirmCancel(link, menu),
-            }
-          : {
-              key: 'delete',
-              label: '删除…',
-              destructive: true,
-              disabled: !connected,
-              onPress: () => link && confirmDelete(link, menu),
-            },
-      ]
-    : []
+  ]
 
   const top = (
     <View style={styles.top}>
@@ -214,7 +221,7 @@ export function TasksView(props: { switcher: ReactNode }) {
         <EmptyState
           icon="flow"
           title="连上电脑后才能看需求"
-          message="Huli 正在连接你的电脑。"
+          message="纸鸢正在连接你的电脑。"
           action={{ label: '立即重连', onPress: () => retry() }}
         />
       )
@@ -279,43 +286,44 @@ export function TasksView(props: { switcher: ReactNode }) {
     }
     const t = item.task
     return (
-      <TaskRow
-        task={t}
-        view={views.get(t.id)}
-        projectName={place(t)}
-        onPress={() => router.push(`/task/${t.id}`)}
-        onLongPress={() => {
-          haptic.tap()
-          setMenu(t)
-        }}
-        start={
-          connected
-            ? {
-                label: t.pinnedAt !== null ? '取消置顶' : '置顶',
-                icon: t.pinnedAt !== null ? 'unpin' : 'pin',
-                color: c.accent,
-                onPress: () => link && togglePin(link, t),
-              }
-            : undefined
-        }
-        end={
-          !connected
-            ? undefined
-            : t.status === 'running'
-              ? {
-                  label: '取消',
-                  icon: 'stop',
-                  color: c.danger,
-                  onPress: () => link && confirmCancel(link, t),
-                }
-              : {
-                  label: '删除',
-                  icon: 'trash',
-                  color: c.danger,
-                  onPress: () => link && confirmDelete(link, t),
-                }
-        }
-      />
+      <ContextMenu items={menuOf(t)} title={t.title}>
+        {(longPress) => (
+          <TaskRow
+            task={t}
+            view={views.get(t.id)}
+            projectName={place(t)}
+            onPress={() => router.push(`/task/${t.id}`)}
+            {...(longPress ? { onLongPress: longPress } : {})}
+            start={
+              connected
+                ? {
+                    label: t.pinnedAt !== null ? '取消置顶' : '置顶',
+                    icon: t.pinnedAt !== null ? 'unpin' : 'pin',
+                    color: c.accent,
+                    onPress: () => link && togglePin(link, t),
+                  }
+                : undefined
+            }
+            end={
+              !connected
+                ? undefined
+                : t.status === 'running'
+                  ? {
+                      label: '取消',
+                      icon: 'stop',
+                      color: c.danger,
+                      onPress: () => link && confirmCancel(link, t),
+                    }
+                  : {
+                      label: '删除',
+                      icon: 'trash',
+                      color: c.danger,
+                      onPress: () => link && confirmDelete(link, t),
+                    }
+            }
+          />
+        )}
+      </ContextMenu>
     )
   }
 
@@ -360,13 +368,6 @@ export function TasksView(props: { switcher: ReactNode }) {
             setSearching(!searching)
           },
         }}
-      />
-      <Sheet
-        visible={menu !== null}
-        title={menu?.title}
-        message={menu ? workflowTitle(menu, views.get(menu.id)) : undefined}
-        items={menuItems}
-        onClose={() => setMenu(null)}
       />
     </Screen>
   )

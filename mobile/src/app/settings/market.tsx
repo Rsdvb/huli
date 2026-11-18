@@ -353,7 +353,7 @@ export default function Market() {
               note={
                 settings.error
                   ? `没能读取电脑上的设置：${settings.error}`
-                  : 'Huli 还没有保存任何技能。可以在“技能”中安装。'
+                  : '纸鸢还没有保存任何技能。可以在“技能”中安装。'
               }
             />
           )
@@ -525,7 +525,7 @@ export default function Market() {
         style={styles.search}
       />
       {tab === 'installed' ? installed() : directory()}
-      <FieldNote>发布、工作流和 MCP 服务器目录在电脑上的 Huli 里管理。</FieldNote>
+      <FieldNote>发布、工作流和 MCP 服务器目录在电脑上的纸鸢里管理。</FieldNote>
     </ManagePage>
   )
 }
@@ -615,7 +615,7 @@ function AddSkill(props: {
         setChoice('all')
       }}
       title="从 GitHub 添加技能"
-      message="Huli 会把技能复制到电脑上，并交给你选择的 Agent。"
+      message="纸鸢会把技能复制到电脑上，并交给你选择的 Agent。"
       submitLabel="添加"
       canSubmit={valid}
       onSubmit={async () => {

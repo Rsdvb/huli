@@ -67,7 +67,8 @@
     "agentFile": "{{agent}} 的文件，只读"
   },
   "link": {
-    "open": "打开 {{target}}"
+    "open": "打开 {{target}}",
+    "openInPanel": "在侧边栏打开"
   },
   "unsaved": {
     "title": "要保存对 {{name}} 的更改吗？",

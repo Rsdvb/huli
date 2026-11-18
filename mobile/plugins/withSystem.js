@@ -4,7 +4,8 @@
 // opens the app must be in both). Siri matches the phrases in Chinese only from a zh-Hans
 // localization, so they also go into zh-Hans.lproj/AppShortcuts.strings, read from the Swift so the
 // two never differ. The app's Info.plist gets the open session's activity type (Handoff and Siri
-// suggestions, modules/huli-system) and 狐狸 as another name Siri knows Huli by.
+// suggestions, modules/huli-system) and the other names Siri knows the app by (SPOKEN_NAMES): its
+// names, the everyday Chinese word for a kite, and its old names, so phrases learned then still work.
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -18,7 +19,9 @@ const {
 const SOURCES = path.join(__dirname, 'system')
 const SHARED = path.join(__dirname, 'widgets', 'HuliOpenIntents.swift')
 const PHRASES = path.join(SOURCES, 'HuliAppIntents.swift')
-const SPOKEN_NAMES = ['狐狸']
+// Siri knows the display names (Kite, 纸鸢) already. iOS refuses to install an app with more than
+// three other names (TooManyAlternativeAppNames).
+const SPOKEN_NAMES = ['风筝', '狐狸', 'Huli']
 
 const sourceFiles = () => [
   ...fs

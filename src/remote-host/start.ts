@@ -283,10 +283,10 @@ export function startRemoteHost(
             (transport) => server.accept(transport, 'relay'),
             () => {},
           ),
+        // Huli: signed in, the host is always its account's computer; whether devices of the
+        // account may ask to be added is what discoverable says.
         profile: () =>
-          discovery.on
-            ? hostProfile(staticKey.publicKey, server.options.host.name, platform)
-            : null,
+          hostProfile(staticKey.publicKey, server.options.host.name, platform, discovery.on),
         changed,
         drained: () => regions?.hostDrained(),
         failed: () => regions?.regionFailed(),

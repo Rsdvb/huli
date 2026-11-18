@@ -15,10 +15,14 @@ const KEY_FILE = 'relay-token.key'
 const KEY_BYTES = 32
 const FAMILY = /^[A-Za-z0-9_-]{1,64}$/
 
-/** Who a token the relay took belongs to: the account, the signed-in client, and its end. */
+/**
+ * Who a token the relay took belongs to: the account, the signed-in client and which client it is
+ * (only a computer's may sign a host in), and when the token lapses.
+ */
 export interface RelayGrant {
   account: string
   family: string
+  client: string
   expiresAt: number
 }
 
@@ -56,22 +60,27 @@ export class RelayTokens {
     if (!account || token.length > 4096) return null
     if (!token.startsWith(PREFIX)) {
       const entry = this.store.accessEntry(token)
-      return entry ? { account, family: entry.family.id, expiresAt: entry.expiresAt } : null
+      if (!entry || entry.family.account !== account) return null
+      const { id, clientId } = entry.family
+      return { account, family: id, client: clientId, expiresAt: entry.expiresAt }
     }
     const [body, mac, extra] = token.slice(PREFIX.length).split('.')
     if (!body || !mac || extra !== undefined || !sameText(mac, this.mac(body))) return null
     const [family, expires] = Buffer.from(body, 'base64url').toString('utf8').split('.')
     const expiresAt = Number(expires)
     if (!family || !FAMILY.test(family) || !Number.isSafeInteger(expiresAt)) return null
-    if (expiresAt <= this.now() || !this.store.hasFamily(family)) return null
-    return { account, family, expiresAt }
+    if (expiresAt <= this.now()) return null
+    // The family is looked up again, so a relay token outlives neither its sign-in nor its account.
+    const owner = this.store.family(family)
+    if (!owner || owner.account !== account) return null
+    return { account, family, client: owner.clientId, expiresAt }
   }
 
   /** Whether a grant taken before still holds: its client signed in, its token not long lapsed. */
   holds(grant: RelayGrant, graceMs: number): boolean {
     return (
       this.store.account?.id === grant.account &&
-      this.store.hasFamily(grant.family) &&
+      this.store.family(grant.family)?.account === grant.account &&
       grant.expiresAt + graceMs > this.now()
     )
   }

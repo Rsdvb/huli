@@ -33,6 +33,8 @@ import {
   type SyncButton,
 } from '../../gitRules'
 import { ago } from '../../sessions'
+import { ContextMenu } from '../../ui/ContextMenu'
+import type { MenuNode } from '../../ui/menu'
 import { showNotice } from '../../ui/NoticeBar'
 import { copyText, haptic } from '../../ui/session/feedback'
 import { baseName, dirName } from '../../ui/session/format'
@@ -543,14 +545,25 @@ function ChangeBadge(props: { status: ChangeStatus }) {
   )
 }
 
-export function FileRow(props: {
+interface FileRowProps {
   file: ChangedFile
   first: boolean
   last: boolean
   onPress(): void
-  onLongPress?(): void
+  /** What its long press offers. */
+  menu?: MenuNode[]
   nested?: boolean
-}) {
+}
+
+export function FileRow(props: FileRowProps) {
+  return (
+    <ContextMenu items={props.menu ?? []} title={props.file.path}>
+      {(longPress) => <FileRowBody {...props} longPress={longPress} />}
+    </ContextMenu>
+  )
+}
+
+function FileRowBody(props: FileRowProps & { longPress: (() => void) | undefined }) {
   const { c, s } = useSessionTokens()
   const { file } = props
   const dir = dirName(file.path)
@@ -558,11 +571,10 @@ export function FileRow(props: {
   return (
     <Pressable
       onPress={props.onPress}
-      onLongPress={props.onLongPress}
-      delayLongPress={350}
+      {...(props.longPress ? { onLongPress: props.longPress, delayLongPress: 350 } : {})}
       accessibilityRole="button"
       accessibilityLabel={`${STATUS_TEXT[file.status]} ${file.path}`}
-      {...(props.onLongPress ? { accessibilityHint: '长按查看更多操作' } : {})}
+      {...(props.menu?.length ? { accessibilityHint: '长按查看更多操作' } : {})}
       style={({ pressed }) => [
         styles.file,
         props.nested && styles.nestedFile,
@@ -667,7 +679,7 @@ function CommitRow(props: {
   open: boolean
   onToggle(): void
 }) {
-  const { c } = useSessionTokens()
+  const { c, s } = useSessionTokens()
   const { commit, status } = props
   const [details, setDetails] = useState<CommitDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -683,26 +695,54 @@ function CommitRow(props: {
     }
   }, [props.open, details, props.link, status.projectPath, commit.oid])
   const github = status.remote?.github
+  const commitUrl =
+    github && commit.pushed
+      ? `https://github.com/${github.owner}/${github.repo}/commit/${commit.oid}`
+      : null
+  const menu: MenuNode[] = [
+    {
+      key: 'copy',
+      label: '复制提交 ID',
+      icon: 'doc.on.doc',
+      onPress: () =>
+        void copyText(commit.oid).then(() =>
+          showNotice({ text: '已复制提交 ID', tone: 'success' }),
+        ),
+    },
+    ...(commitUrl
+      ? [
+          {
+            key: 'github',
+            label: '在 GitHub 上打开',
+            icon: 'link' as const,
+            onPress: () => void Linking.openURL(commitUrl),
+          },
+        ]
+      : []),
+  ]
   return (
     <View>
-      <Pressable
-        onPress={props.onToggle}
-        onLongPress={() =>
-          void copyText(commit.oid).then(() =>
-            showNotice({ text: '已复制提交 ID', tone: 'success' }),
-          )
-        }
-        accessibilityRole="button"
-        accessibilityState={{ expanded: props.open }}
-        accessibilityHint="长按复制提交 ID"
-        style={({ pressed }) => [styles.commitRow, { opacity: pressed ? 0.55 : 1 }]}
-      >
-        <Text style={[styles.oid, { color: c.textTertiary }]}>{commit.oid.slice(0, 7)}</Text>
-        <Text style={[styles.subject, { color: c.text }]} numberOfLines={1}>
-          {commit.subject}
-        </Text>
-        <Text style={[styles.when, { color: c.textTertiary }]}>{ago(commit.authoredAt)}</Text>
-      </Pressable>
+      <ContextMenu items={menu} title={commit.subject}>
+        {(longPress) => (
+          <Pressable
+            onPress={props.onToggle}
+            {...(longPress ? { onLongPress: longPress } : {})}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: props.open }}
+            accessibilityHint="长按查看更多操作"
+            style={({ pressed }) => [
+              styles.commitRow,
+              { backgroundColor: s.dockCard, opacity: pressed ? 0.55 : 1 },
+            ]}
+          >
+            <Text style={[styles.oid, { color: c.textTertiary }]}>{commit.oid.slice(0, 7)}</Text>
+            <Text style={[styles.subject, { color: c.text }]} numberOfLines={1}>
+              {commit.subject}
+            </Text>
+            <Text style={[styles.when, { color: c.textTertiary }]}>{ago(commit.authoredAt)}</Text>
+          </Pressable>
+        )}
+      </ContextMenu>
       {props.open ? (
         <View style={styles.commitFiles}>
           {details ? (
@@ -733,15 +773,11 @@ function CommitRow(props: {
                   }
                 />
               ))}
-              {github && commit.pushed ? (
+              {commitUrl ? (
                 <PillButton
                   label="在 GitHub 上打开"
                   icon={G.link}
-                  onPress={() =>
-                    void Linking.openURL(
-                      `https://github.com/${github.owner}/${github.repo}/commit/${commit.oid}`,
-                    )
-                  }
+                  onPress={() => void Linking.openURL(commitUrl)}
                 />
               ) : null}
             </>
@@ -756,27 +792,40 @@ function CommitRow(props: {
   )
 }
 
-/** The folder the branch is checked out in; a long press copies it. */
+/** The folder the branch is checked out in; its long press offers to copy it. */
 export function FolderFooter(props: { status: GitStatus }) {
   const { c } = useSessionTokens()
   const repo = props.status.repo
   if (!repo) return null
   const linked = isLinkedWorktree(repo.gitDir)
+  const root = repo.root
   return (
-    <Pressable
-      onLongPress={() =>
-        void copyText(repo.root).then(() => showNotice({ text: '已复制', tone: 'success' }))
-      }
-      accessibilityRole="text"
-      accessibilityLabel={repo.root}
-      accessibilityHint="长按复制路径"
-      style={styles.footer}
+    <ContextMenu
+      items={[
+        {
+          key: 'copy',
+          label: '复制路径',
+          icon: 'doc.on.doc',
+          onPress: () =>
+            void copyText(root).then(() => showNotice({ text: '已复制', tone: 'success' })),
+        },
+      ]}
     >
-      <Icon icon={linked ? G.fork : G.folderOpen} size={13} color={c.textTertiary} />
-      <Text style={[styles.path, { color: c.textTertiary }]} numberOfLines={2}>
-        {repo.root}
-      </Text>
-    </Pressable>
+      {(longPress) => (
+        <Pressable
+          {...(longPress ? { onLongPress: longPress } : {})}
+          accessibilityRole="text"
+          accessibilityLabel={root}
+          accessibilityHint="长按复制路径"
+          style={[styles.footer, { backgroundColor: c.bg }]}
+        >
+          <Icon icon={linked ? G.fork : G.folderOpen} size={13} color={c.textTertiary} />
+          <Text style={[styles.path, { color: c.textTertiary }]} numberOfLines={2}>
+            {root}
+          </Text>
+        </Pressable>
+      )}
+    </ContextMenu>
   )
 }
 

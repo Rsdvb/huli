@@ -3,7 +3,7 @@
 // Only red, green, dim and bold survive of the output's colors.
 
 import { useState, type ReactNode } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import {
   harnessOf,
   isAgentId,
@@ -12,7 +12,9 @@ import {
   type ToolEntry,
 } from '@shared/thread'
 import { useSession } from '../../host'
-import { copyText, showMenu } from '../../ui/session/feedback'
+import { ContextMenu } from '../../ui/ContextMenu'
+import type { MenuNode } from '../../ui/menu'
+import { copyText } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { selectText } from '../../ui/session/SelectText'
@@ -126,56 +128,78 @@ function Printed(props: { text: string; color: string }) {
   )
 }
 
-function Section(props: {
+/**
+ * A section of an opened step's card, under a hairline: its label, a copy button on the right
+ * when it has text to copy, and its content. Long-pressed, it offers to copy or select its text.
+ */
+export function StepSection(props: {
   label: string
   extra?: string | null
-  copy?: string
+  copy?: string | undefined
+  /** Selects its text in the monospaced face. */
+  mono?: boolean
   children: ReactNode
 }) {
-  const { c, s } = useSessionTokens()
+  const { c } = useSessionTokens()
   const [copied, setCopied] = useState(false)
   const text = props.copy
+  const menu: MenuNode[] = text
+    ? [
+        {
+          key: 'copy',
+          label: '复制',
+          icon: 'doc.on.doc',
+          onPress: () => void copyText(text),
+        },
+        {
+          key: 'select',
+          label: '选择文本',
+          icon: 'character.cursor.ibeam',
+          onPress: () => selectText({ text, mono: props.mono ?? true }),
+        },
+      ]
+    : []
   return (
-    <Pressable
-      onLongPress={
-        text
-          ? () =>
-              showMenu(undefined, [
-                { label: '复制', onPress: () => void copyText(text) },
-                { label: '选择文本', onPress: () => selectText({ text, mono: true }) },
-              ])
-          : undefined
-      }
-      delayLongPress={350}
-      style={[styles.section, { backgroundColor: s.code, borderColor: s.codeBorder }]}
-    >
-      <View style={styles.head}>
-        <Text style={[styles.label, { color: c.textTertiary }]}>
-          {props.label}
-          {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
-        </Text>
-        {props.copy !== undefined ? (
-          <Pressable
-            onPress={() =>
-              void copyText(props.copy!).then(() => {
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1500)
-              })
-            }
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={`复制${props.label}`}
-          >
-            <Icon
-              icon={copied ? G.copied : G.copy}
-              size={13}
-              color={copied ? c.success : c.textTertiary}
-            />
-          </Pressable>
-        ) : null}
-      </View>
-      {props.children}
-    </Pressable>
+    <ContextMenu items={menu}>
+      {(longPress) => (
+        <Pressable
+          onLongPress={longPress}
+          delayLongPress={350}
+          style={[styles.section, { borderTopColor: c.border }]}
+        >
+          <View style={styles.head}>
+            <Text style={[styles.label, { color: c.textSecondary }]}>
+              {props.label}
+              {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
+            </Text>
+            {text !== undefined ? (
+              <Pressable
+                onPress={() =>
+                  void copyText(text).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1500)
+                  })
+                }
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
+                style={({ pressed }) => [
+                  styles.copy,
+                  { borderColor: c.border, backgroundColor: pressed ? c.fillStrong : c.fill },
+                ]}
+              >
+                <Icon
+                  icon={copied ? G.copied : G.copy}
+                  size={14}
+                  color={copied ? c.success : c.textSecondary}
+                />
+              </Pressable>
+            ) : null}
+          </View>
+          {props.children}
+        </Pressable>
+      )}
+    </ContextMenu>
   )
 }
 
@@ -196,12 +220,14 @@ export function ShellBlock(props: {
   const { shown, earlier } = shellTail(printed)
   const failed = (exit.code !== null && exit.code !== 0) || props.status === 'failed'
   return (
-    <View style={{ gap: 6 }}>
-      <Section label="命令" copy={props.command}>
-        <Text style={[styles.mono, { color: c.text }]}>$ {props.command}</Text>
-      </Section>
+    <View>
+      <StepSection label="命令" copy={props.command}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
+          <Text style={[styles.mono, styles.command, { color: c.text }]}>{props.command}</Text>
+        </ScrollView>
+      </StepSection>
       {(printed !== '' || failed || props.output !== null) && (
-        <Section
+        <StepSection
           label="输出"
           extra={
             failed ? (exit.code !== null && exit.code !== 0 ? `退出码 ${exit.code}` : '失败') : null
@@ -212,32 +238,55 @@ export function ShellBlock(props: {
             <Text style={[styles.none, { color: c.textTertiary }]}>没有输出</Text>
           ) : (
             <>
+              <Printed text={all ? printed : shown} color={c.text} />
               {earlier > 0 && !all && (
-                <Pressable onPress={() => setAll(true)} hitSlop={6} style={styles.earlier}>
-                  <Icon
-                    icon={G.down}
-                    size={11}
-                    color={c.tint}
-                    style={{ transform: [{ rotate: '180deg' }] }}
-                  />
-                  <Text style={[styles.earlierText, { color: c.tint }]}>前面 {earlier} 行</Text>
+                <Pressable
+                  onPress={() => setAll(true)}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`显示全部，还有前面 ${earlier} 行`}
+                  style={styles.earlier}
+                >
+                  <Text style={[styles.earlierText, { color: c.tint }]}>显示全部</Text>
+                  <Text style={[styles.earlierText, { color: c.textTertiary }]}>
+                    前面还有 {earlier} 行
+                  </Text>
                 </Pressable>
               )}
-              <Printed text={all ? printed : shown} color={c.textSecondary} />
             </>
           )}
-        </Section>
+        </StepSection>
       )}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  section: { borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, padding: 10, gap: 6 },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  label: { fontSize: 11, fontWeight: '600' },
-  mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17 },
-  none: { fontSize: 12 },
-  earlier: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
-  earlierText: { fontSize: 12, fontWeight: '500' },
+  section: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 30,
+  },
+  label: { fontSize: 12.5, fontWeight: '600' },
+  copy: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mono: { fontFamily: MONO, fontSize: 13, lineHeight: 19 },
+  command: { paddingRight: 12 },
+  none: { fontSize: 13 },
+  earlier: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' },
+  earlierText: { fontSize: 13, fontWeight: '500' },
 })

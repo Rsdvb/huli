@@ -105,7 +105,7 @@ export default function Computer() {
           />
           {computer.label ? <ListRow title="电脑自己的名称" value={computer.name} /> : null}
           <ListRow title="系统" value={osName(platform)} />
-          {welcome ? <ListRow title="电脑上的 Huli" value={welcome.host.version} /> : null}
+          {welcome ? <ListRow title="电脑上的纸鸢" value={welcome.host.version} /> : null}
           <ListRow title="这台 iPhone 在电脑上叫" value={computer.deviceName || '—'} />
           {!active ? (
             <ListRow

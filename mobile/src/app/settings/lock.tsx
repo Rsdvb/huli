@@ -38,7 +38,7 @@ export default function LockSettings() {
       setPrefs({ lock: on })
     } else if (result.error === 'passcode_not_set' || result.error === 'not_available') {
       haptic.warning()
-      Alert.alert('这台 iPhone 没有设置密码', '先在系统设置里设置锁屏密码，才能用它锁定 Huli。')
+      Alert.alert('这台 iPhone 没有设置密码', '先在系统设置里设置锁屏密码，才能用它锁定纸鸢。')
     }
   }
 
@@ -54,7 +54,7 @@ export default function LockSettings() {
         }}
       >
         <ListGroup
-          footer={`开启后，多任务界面里看不到 Huli 的画面；离开 Huli 超过下面选的时间，再打开时需要${biometry}或密码。`}
+          footer={`开启后，多任务界面里看不到纸鸢的画面；离开纸鸢超过下面选的时间，再打开时需要${biometry}或密码。`}
         >
           <ListRow
             title={`需要${biometry}`}

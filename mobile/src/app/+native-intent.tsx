@@ -7,6 +7,8 @@ import { offerPairing, pairingFromPath } from '../pairLink'
 
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }) {
   try {
+    // huli://signin is the Huli Cloud sign-in coming back, which its own session takes.
+    if (/^(huli:\/\/|\/)signin(\?|#|$)/.test(path)) return initial ? '/' : null
     // huli://pair#<code> pairs a computer: the first one's screen shows by itself, another's
     // opens at /pair.
     const pairing = pairingFromPath(path)

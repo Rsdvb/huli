@@ -26,6 +26,8 @@ import { stepZoom, type SettingsFile, type ZoomStep } from '@shared/settings'
 import { AGENTS_FOLDER, KETTU_HOME_FOLDER } from '@shared/storage'
 import { Account, NotSignedIn } from './account'
 import { ACCOUNT_URL, AccountApi, accountBaseUrl, clientInfo } from './account/service'
+import { HuliCloudApi } from '@shared/huli-cloud'
+import { HuliAccountDevices } from './huli-account'
 import { accountFile } from './account/store'
 import { AgentFolders } from './agent-folders'
 import { AgentHost } from './agent-host'
@@ -97,7 +99,7 @@ import { readThemeFolder, readThemeSources, ThemeStore } from './themes'
 import { KettuTray } from './tray'
 import { openTrayTarget, TrayPanel } from './tray-panel'
 import { Updater } from './updater'
-import { devUserDataPath } from './user-data'
+import { devUserDataPath, PACKAGED_DATA_FOLDER } from './user-data'
 import {
   applyVerbose,
   logsFolder,
@@ -147,6 +149,8 @@ const devUserData = devUserDataPath({
 if (devUserData) {
   app.setPath('userData', devUserData)
   log.info(`Development run: data in ${devUserData}`)
+} else if (app.isPackaged && !userDataSwitch.trim()) {
+  app.setPath('userData', join(app.getPath('appData'), PACKAGED_DATA_FOLDER))
 }
 openAppLog(devUserData ?? (userDataSwitch.trim() ? app.getPath('userData') : null), isDebugRun())
 
@@ -980,6 +984,7 @@ async function start(): Promise<void> {
   registerIpcHandlers({
     settings,
     account,
+    accountDevices: new HuliAccountDevices(account, new HuliCloudApi(accountBase, accountFetch)),
     agentFolders,
     themes,
     avatars,

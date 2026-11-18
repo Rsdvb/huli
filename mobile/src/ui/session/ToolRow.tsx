@@ -5,23 +5,22 @@
 // its edits, each opening to its diff.
 
 import { memo, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
-import { ShellBlock } from '../../components/entries/ShellBlock'
+import { ShellBlock, StepSection } from '../../components/entries/ShellBlock'
 import { Markdown } from '../../components/Markdown'
 import { handDiff } from '../../diff'
 import { Clamp } from './Clamp'
 import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
-import { copyText, plainText, showMenu } from './feedback'
+import { plainText } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useTenth } from './now'
 import { MONO, useSessionTokens } from './palette'
 import { gentle } from './Press'
-import { selectText } from './SelectText'
 import { Counts } from './TurnChanges'
 import { toolEdits, type FileEdit } from './turns'
 import {
@@ -187,25 +186,26 @@ export function StepMark(props: {
     case 'cancelled':
       return <Text style={[styles.time, { color: c.textTertiary }]}>已取消</Text>
     case 'success':
-      return (
-        <View style={styles.mark}>
-          <Icon icon={G.check} size={12} color={c.tint} weight="semibold" />
-          {props.duration !== undefined && (
-            <Text style={[styles.time, { color: c.textTertiary }]}>
-              {formatMs(props.duration, false)}
-            </Text>
-          )}
-        </View>
-      )
+      return props.duration !== undefined ? (
+        <Text style={[styles.time, { color: c.textTertiary }]}>
+          {formatMs(props.duration, false)}
+        </Text>
+      ) : null
   }
 }
 
-/** A step's line: its icon, name and summary, what follows them, and its chevron when it opens. */
+/**
+ * A step's line, as the official app's timeline draws it: an icon tile, the verb in bold, the
+ * dimmed detail cut in its middle for a path or a command, and its time at the end. Tapped, it
+ * opens into a card it heads.
+ */
 export function StepLine(props: {
   icon: IconSpec
   name: string
   summary?: string | null
   mono?: boolean
+  /** Cut the summary in its middle, as a path or a command wants. */
+  middle?: boolean
   extra?: ReactNode
   mark: ReactNode
   open: boolean
@@ -218,42 +218,52 @@ export function StepLine(props: {
       disabled={!props.onToggle}
       accessibilityRole={props.onToggle ? 'button' : undefined}
       accessibilityState={props.onToggle ? { expanded: props.open } : undefined}
-      style={({ pressed }) => [styles.line, { opacity: pressed ? 0.6 : 1 }]}
+      accessibilityLabel={[props.name, props.summary].filter(Boolean).join(' ')}
+      style={({ pressed }) => [
+        styles.line,
+        props.open && styles.lineOpen,
+        { opacity: pressed ? 0.6 : 1 },
+      ]}
     >
-      <View style={[styles.badge, { backgroundColor: c.fill }]}>
+      <View style={[styles.badge, { backgroundColor: c.fill, borderColor: c.border }]}>
         <Icon icon={props.icon} size={13} color={c.textSecondary} />
       </View>
-      <Text style={[styles.name, { color: c.textSecondary }]} numberOfLines={1}>
+      <Text
+        style={[styles.name, { color: c.text }, !props.summary && styles.nameAlone]}
+        numberOfLines={1}
+      >
         {props.name}
       </Text>
-      <Text
-        style={[styles.summary, { color: c.text }, props.mono && styles.monoSummary]}
-        numberOfLines={1}
-        ellipsizeMode={props.mono ? 'tail' : 'head'}
-      >
-        {props.summary ?? ''}
-      </Text>
+      {props.summary ? (
+        <Text
+          style={[styles.summary, { color: c.textSecondary }, props.mono && styles.monoSummary]}
+          numberOfLines={1}
+          ellipsizeMode={props.middle ? 'middle' : 'tail'}
+        >
+          {props.summary}
+        </Text>
+      ) : null}
       {props.extra}
       {props.mark}
-      {props.onToggle ? (
-        <View style={{ transform: [{ rotate: props.open ? '90deg' : '0deg' }] }}>
-          <Icon icon={G.right} size={11} color={c.textTertiary} weight="semibold" />
-        </View>
-      ) : (
-        <View style={styles.noChevron} />
-      )}
     </Pressable>
+  )
+}
+
+/** An opened step: a rounded card its line heads, over its sections. */
+export function StepCard(props: { open: boolean; line: ReactNode; children?: ReactNode }) {
+  const { c } = useSessionTokens()
+  if (!props.open) return <>{props.line}</>
+  return (
+    <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+      {props.line}
+      {props.children}
+    </View>
   )
 }
 
 /** Whether a call has details to open: content, or a command too long for its line. */
 function hasBody(entry: ToolEntry, label: ToolLabel): boolean {
-  const command = label.kind === 'command' ? label.target : null
-  return (
-    entry.content.length > 0 ||
-    !!entry.description ||
-    (!!command && (command.length > 60 || command.includes('\n')))
-  )
+  return entry.content.length > 0 || !!entry.description || label.kind === 'command'
 }
 
 export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: string }) {
@@ -282,83 +292,84 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
     gentle()
     setOpen((v) => !v)
   }
+  const line = (
+    <StepLine
+      icon={TOOL_ICONS[entry.toolKind]}
+      name={label.verb ?? label.target ?? entry.title}
+      summary={label.verb && label.target ? label.target.split('\n')[0] : (note ?? null)}
+      mono={label.kind === 'command'}
+      middle={label.kind !== 'title'}
+      extra={
+        <>
+          {stats && (stats.insertions > 0 || stats.deletions > 0) ? (
+            <Counts insertions={stats.insertions} deletions={stats.deletions} size={12} />
+          ) : null}
+          {note && label.verb ? (
+            <Text style={[styles.time, { color: c.textTertiary }]} numberOfLines={1}>
+              · {note}
+            </Text>
+          ) : null}
+        </>
+      }
+      mark={<StepMark status={status} startedAt={time.startedAt} duration={time.durationMs} />}
+      open={open && body}
+      onToggle={body ? toggle : null}
+    />
+  )
   return (
-    <View>
-      <StepLine
-        icon={TOOL_ICONS[entry.toolKind]}
-        name={label.verb ?? label.target ?? entry.title}
-        summary={label.verb && label.target ? label.target.split('\n')[0] : (note ?? null)}
-        mono={label.kind === 'command'}
-        extra={
-          <>
-            {stats && (stats.insertions > 0 || stats.deletions > 0) ? (
-              <Counts insertions={stats.insertions} deletions={stats.deletions} size={12} />
-            ) : null}
-            {note && label.verb ? (
-              <Text style={[styles.time, { color: c.textTertiary }]} numberOfLines={1}>
-                · {note}
-              </Text>
-            ) : null}
-          </>
-        }
-        mark={<StepMark status={status} startedAt={time.startedAt} duration={time.durationMs} />}
-        open={open}
-        onToggle={body ? toggle : null}
-      />
-      {open && body && <ToolBody entry={entry} label={label} />}
-    </View>
+    <StepCard open={open && body} line={line}>
+      <ToolBody entry={entry} label={label} />
+    </StepCard>
   )
 })
 
-/** A section of a step's details: a small label, Copy when it has text to copy, and its content. */
-function Section(props: { label: string; copy?: string; children: ReactNode }) {
+// How much of an edit's diff the card shows before the diff screen.
+const DIFF_ROWS = 14
+
+/** The first rows of an edit's diff, tinted, under the file it changed, which opens it whole. */
+function DiffPreview(props: { edit: FileEdit; root: string | null }) {
   const { c } = useSessionTokens()
-  const [copied, setCopied] = useState(false)
-  const text = props.copy
+  const rows = props.edit.diff.rows.slice(0, DIFF_ROWS)
+  const more = props.edit.diff.rows.length - rows.length
   return (
-    <Pressable
-      onLongPress={
-        text
-          ? () =>
-              showMenu(undefined, [
-                { label: '复制', onPress: () => void copyText(text) },
-                { label: '选择文本', onPress: () => selectText({ text, mono: true }) },
-              ])
-          : undefined
-      }
-      delayLongPress={350}
-      style={{ gap: 6 }}
-    >
-      <View style={styles.sectionHead}>
-        <Text style={[styles.sectionLabel, { color: c.textTertiary }]}>{props.label}</Text>
-        {props.copy !== undefined && (
-          <Pressable
-            onPress={() =>
-              void copyText(props.copy!).then(() => {
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1400)
-              })
-            }
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
-          >
-            <Icon
-              icon={copied ? G.copied : G.copy}
-              size={13}
-              color={copied ? c.success : c.textTertiary}
-            />
-          </Pressable>
-        )}
-      </View>
-      {props.children}
-    </Pressable>
+    <View style={{ gap: 8 }}>
+      <EditLine edit={props.edit} root={props.root} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
+        <View>
+          {rows.map((row, i) =>
+            row.kind === 'hunk' ? (
+              <Text key={i} style={[styles.diffRow, { color: c.textTertiary }]}>
+                {row.text}
+              </Text>
+            ) : (
+              <Text
+                key={i}
+                style={[
+                  styles.diffRow,
+                  {
+                    color: row.kind === 'add' ? c.added : row.kind === 'del' ? c.removed : c.text,
+                    backgroundColor:
+                      row.kind === 'add' ? c.addedBg : row.kind === 'del' ? c.removedBg : undefined,
+                  },
+                ]}
+              >
+                {row.kind === 'add' ? '+ ' : row.kind === 'del' ? '- ' : '  '}
+                {row.text}
+              </Text>
+            ),
+          )}
+        </View>
+      </ScrollView>
+      {more > 0 ? (
+        <Text style={[styles.description, { color: c.textTertiary }]}>还有 {more} 行</Text>
+      ) : null}
+    </View>
   )
 }
 
 /**
- * A call's details: its command and what it printed, its text result or the file it read with
- * its line numbers, its changes, and its pictures; then the full view.
+ * A call's details as sections of its card: its command and what it printed, the file it read
+ * with its line numbers or its raw result, its changes, and its pictures; then the full view.
  */
 function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
   const { c, s } = useSessionTokens()
@@ -371,9 +382,11 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
   const edits = toolEdits(entry)
   let edit = 0
   return (
-    <View style={styles.body}>
+    <View>
       {entry.description && entry.description !== command ? (
-        <Text style={[styles.description, { color: c.textSecondary }]}>{entry.description}</Text>
+        <Text style={[styles.description, styles.lead, { color: c.textSecondary }]}>
+          {entry.description}
+        </Text>
       ) : null}
       {command ? (
         <ShellBlock sessionId={sessionId} command={command} output={output} status={entry.status} />
@@ -382,42 +395,52 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
         if (part.type === 'markdown') {
           if (!part.markdown.trim()) return null
           const read = entry.toolKind === 'read' ? numberedRead(part.markdown, path) : null
-          const markdown = read ?? part.markdown
+          if (read) {
+            return (
+              <StepSection key={i} label="内容" copy={fenceBody(read)}>
+                <Clamp maxHeight={320} more="显示全部" id={`result:${entry.id}:${i}`}>
+                  <Markdown markdown={read} size="compact" />
+                </Clamp>
+              </StepSection>
+            )
+          }
+          const raw = fenceBody(part.markdown)
           return (
-            <Section
-              key={i}
-              label={entry.toolKind === 'read' ? '内容' : '结果'}
-              copy={fenceBody(markdown)}
-            >
-              <Clamp maxHeight={320} more="显示全部" id={`result:${entry.id}:${i}`}>
-                <Markdown markdown={markdown} size="compact" />
+            <StepSection key={i} label="结果" copy={raw}>
+              <Clamp maxHeight={240} more="显示全部" id={`result:${entry.id}:${i}`}>
+                <Text style={[styles.raw, { color: c.text }]}>{raw}</Text>
               </Clamp>
-            </Section>
+            </StepSection>
           )
         }
         if (part.type === 'diff') {
           const made = edits[edit++]
           return made ? (
-            <Section key={i} label="更改">
-              <EditLine edit={made} root={root} />
-            </Section>
+            <StepSection key={i} label="更改" copy={made.newText}>
+              <DiffPreview edit={made} root={root} />
+            </StepSection>
           ) : null
         }
         const ref = part.ref
         if (ref.kind === 'image' && 'data' in ref) {
           return (
-            <Image
-              key={i}
-              source={{ uri: `data:${ref.mimeType};base64,${ref.data}` }}
-              style={[styles.picture, { borderColor: s.codeBorder }]}
-              contentFit="contain"
-              cachePolicy="memory"
-              accessibilityIgnoresInvertColors
-            />
+            <View key={i} style={[styles.pictureBox, { borderTopColor: c.border }]}>
+              <Image
+                source={{ uri: `data:${ref.mimeType};base64,${ref.data}` }}
+                style={[styles.picture, { borderColor: s.codeBorder }]}
+                contentFit="contain"
+                cachePolicy="memory"
+                accessibilityIgnoresInvertColors
+              />
+            </View>
           )
         }
         return (
-          <Text key={i} style={[styles.description, { color: c.textTertiary }]} numberOfLines={1}>
+          <Text
+            key={i}
+            style={[styles.description, styles.lead, { color: c.textTertiary }]}
+            numberOfLines={1}
+          >
             {ref.kind === 'link'
               ? ref.name || ref.uri
               : ref.kind === 'unsupported'
@@ -437,7 +460,10 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
         hitSlop={6}
         accessibilityRole="button"
         accessibilityLabel="全屏查看这次调用"
-        style={({ pressed }) => [styles.full, { opacity: pressed ? 0.55 : 1 }]}
+        style={({ pressed }) => [
+          styles.full,
+          { borderTopColor: c.border, opacity: pressed ? 0.55 : 1 },
+        ]}
       >
         <Text style={[styles.fullText, { color: c.tint }]}>全屏查看</Text>
         <Icon icon={G.right} size={10} color={c.tint} weight="semibold" />
@@ -446,7 +472,7 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
   )
 }
 
-/** A thought as a step: 思考, its heading, and its text a few lines tall until shown whole. */
+/** A thought as a step: 思考 and its heading; opened, a card with its text. */
 export const ThoughtRow = memo(function ThoughtRow(props: {
   entry: Extract<ThreadEntry, { kind: 'thought' }>
 }) {
@@ -454,60 +480,59 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
   const { entry } = props
   const [open, setOpen] = useDisclosure(`thought:${entry.id}`)
   const has = entry.markdown.trim() !== ''
+  const line = (
+    <StepLine
+      icon={G.thought}
+      name="思考"
+      summary={thoughtTitle(entry.markdown)}
+      mark={
+        <StepMark status={entry.streaming ? 'running' : 'success'} duration={entry.durationMs} />
+      }
+      open={open && has}
+      onToggle={
+        has
+          ? () => {
+              gentle()
+              setOpen((v) => !v)
+            }
+          : null
+      }
+    />
+  )
   return (
-    <View>
-      <StepLine
-        icon={G.thought}
-        name="思考"
-        summary={thoughtTitle(entry.markdown)}
-        mark={
-          <StepMark status={entry.streaming ? 'running' : 'success'} duration={entry.durationMs} />
-        }
-        open={open}
-        onToggle={
-          has
-            ? () => {
-                gentle()
-                setOpen((v) => !v)
-              }
-            : null
-        }
-      />
-      {open && has && (
-        <Pressable
-          onLongPress={() =>
-            showMenu(undefined, [
-              { label: '复制', onPress: () => void copyText(plainText(entry.markdown)) },
-              { label: '选择文本', onPress: () => selectText({ text: plainText(entry.markdown) }) },
-            ])
-          }
-          delayLongPress={350}
-          style={[styles.thought, { borderLeftColor: c.borderStrong }]}
-        >
-          <Clamp maxHeight={180} id={`thought-text:${entry.id}`}>
-            <Markdown
-              markdown={entry.markdown}
-              streaming={entry.streaming}
-              size="compact"
-              color={c.textSecondary}
-            />
-          </Clamp>
-        </Pressable>
-      )}
-    </View>
+    <StepCard open={open && has} line={line}>
+      <StepSection label="思考" copy={plainText(entry.markdown)} mono={false}>
+        <Clamp maxHeight={240} more="显示全部" id={`thought-text:${entry.id}`}>
+          <Markdown
+            markdown={entry.markdown}
+            streaming={entry.streaming}
+            size="compact"
+            color={c.textSecondary}
+          />
+        </Clamp>
+      </StepSection>
+    </StepCard>
   )
 })
 
 const styles = StyleSheet.create({
-  line: { flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 32 },
-  badge: { width: 24, height: 24, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
-  name: { fontSize: 14, lineHeight: 19, fontWeight: '500', flexShrink: 1 },
-  summary: { flex: 1, fontSize: 14, lineHeight: 19 },
-  monoSummary: { fontFamily: MONO, fontSize: 12.5 },
+  line: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 34 },
+  lineOpen: { paddingHorizontal: 10 },
+  badge: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  name: { fontSize: 15, lineHeight: 20, fontWeight: '600', flexShrink: 0, maxWidth: '70%' },
+  nameAlone: { flex: 1, flexShrink: 1, maxWidth: undefined },
+  summary: { flex: 1, fontSize: 15, lineHeight: 20 },
+  monoSummary: { fontFamily: MONO, fontSize: 13.5 },
   mark: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   spinner: { transform: [{ scale: 0.7 }], width: 16, height: 16 },
-  time: { fontSize: 12, fontVariant: ['tabular-nums'] },
-  noChevron: { width: 0 },
+  time: { fontSize: 13, fontVariant: ['tabular-nums'] },
   pill: {
     fontSize: 11,
     fontWeight: '600',
@@ -516,10 +541,18 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     overflow: 'hidden',
   },
-  body: { marginLeft: 31, marginTop: 4, marginBottom: 6, gap: 10 },
+  card: {
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  lead: { paddingHorizontal: 12, paddingBottom: 10 },
   description: { fontSize: 13, lineHeight: 18 },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  sectionLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.4 },
+  raw: { fontFamily: MONO, fontSize: 13, lineHeight: 19 },
+  diffRow: { fontFamily: MONO, fontSize: 12, lineHeight: 18, paddingHorizontal: 4 },
+  pictureBox: { borderTopWidth: StyleSheet.hairlineWidth, padding: 12 },
   picture: { height: 160, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth },
   edit: {
     flexDirection: 'row',
@@ -534,9 +567,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    alignSelf: 'flex-start',
-    paddingVertical: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   fullText: { fontSize: 13, fontWeight: '500' },
-  thought: { borderLeftWidth: 2, paddingLeft: 12, marginLeft: 11, marginTop: 4, marginBottom: 4 },
 })

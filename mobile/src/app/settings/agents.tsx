@@ -277,7 +277,7 @@ function HarnessRow({ status, statuses }: { status: AgentStatus; statuses: Agent
         : task?.state === 'failed'
           ? (task.error ?? '')
           : status.uninstalled
-            ? '已从 Huli 卸载'
+            ? '已从纸鸢卸载'
             : cliOutdated(status) !== null
               ? [version, '需要更新'].filter(Boolean).join(' · ')
               : awaitsPackage(status) && status.package?.isSdk
@@ -506,14 +506,12 @@ function AddAgentSheet(props: {
       {multiple
         ? choice(
             '新建一个',
-            'Huli 在你的主目录下的 .huli/agents 里新建，加好后登录。',
+            '纸鸢在你的主目录下的 .huli/agents 里新建，加好后登录。',
             selected === 'new',
             () => setFolder('new'),
           )
         : null}
-      {multiple ? (
-        <FieldNote>要用电脑上已有的配置目录，请在电脑上的 Huli 里添加。</FieldNote>
-      ) : null}
+      {multiple ? <FieldNote>要用电脑上已有的配置目录，请在电脑上的纸鸢里添加。</FieldNote> : null}
 
       {!useDefault ? (
         <>

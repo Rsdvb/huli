@@ -3,7 +3,7 @@
 // And the button that brings a scrolled-up conversation back to its newest message.
 
 import { useEffect, useRef, useState } from 'react'
-import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from 'react-native'
+import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'react-native'
 import { G, Icon } from './icons'
 import { compactCount, durationText } from './work'
 import { GlassButton } from '../Glass'
@@ -38,8 +38,15 @@ function usePulse(): Animated.Value {
   return value
 }
 
+// The grid at 15 points: dots of 4 with gaps of 1.5, scaled for another size.
+const gapOf = (size: number) => (size * 1.5) / 15
+const dotOf = (size: number) => {
+  const side = (size * 4) / 15
+  return { width: side, height: side, borderRadius: side / 2 }
+}
+
 /** A three by three grid of dots a wave of light runs across while the agent works. */
-function WorkingDots(props: { color: string }) {
+export function WorkingDots(props: { color: string; size?: number }) {
   const wave = useRef(new Animated.Value(0)).current
   const [still, setStill] = useState(false)
   useEffect(() => {
@@ -64,7 +71,14 @@ function WorkingDots(props: { color: string }) {
     }
   }, [wave])
   return (
-    <View style={styles.dots} accessibilityElementsHidden importantForAccessibility="no">
+    <View
+      style={[
+        styles.dots,
+        props.size ? { width: props.size, height: props.size, gap: gapOf(props.size) } : null,
+      ]}
+      accessibilityElementsHidden
+      importantForAccessibility="no"
+    >
       {Array.from({ length: 9 }, (_, i) => {
         const at = 0.05 + (((i % 3) + Math.floor(i / 3)) / 4) * 0.5
         return (
@@ -72,6 +86,7 @@ function WorkingDots(props: { color: string }) {
             key={i}
             style={[
               styles.dot,
+              props.size ? dotOf(props.size) : null,
               {
                 backgroundColor: props.color,
                 opacity: still
@@ -90,9 +105,9 @@ function WorkingDots(props: { color: string }) {
 }
 
 /**
- * The running turn's status, as the desktop's: 「13 秒 · 4.1万 token · 正在运行 1 条命令」, the
- * clock ticking each second, with the attention dot in place of the running dots while it waits
- * for the user.
+ * The running turn's status, as the desktop's: 「13 秒 · 正在读取 index.tsx · 4.1万 token」, the
+ * clock ticking each second and only what it does giving way on a narrow screen, with the
+ * attention dot in place of the running dots while it waits for the user.
  */
 export function WorkingRow(props: {
   since: number | null
@@ -119,11 +134,8 @@ export function WorkingRow(props: {
     return () => clearTimeout(timer)
   }, [props.since])
   const elapsed = props.since !== null ? Math.max(0, now - props.since) : null
-  const parts = [
-    elapsed !== null ? durationText(elapsed - (elapsed % 1000)) : null,
-    props.tokens !== null && props.tokens > 0 ? `${compactCount(props.tokens)} token` : null,
-    props.label,
-  ].filter(Boolean)
+  const tone = { color: c.textSecondary }
+  const dot = <Text style={[styles.fixed, { color: c.textTertiary }]}>{'  ·  '}</Text>
   return (
     <View
       style={styles.row}
@@ -141,17 +153,61 @@ export function WorkingRow(props: {
       ) : (
         <WorkingDots color={c.accent} />
       )}
-      <Animated.Text
-        style={[styles.label, { color: c.textSecondary, opacity: props.waiting ? 1 : pulse }]}
-        numberOfLines={1}
-      >
-        {parts.join(' · ')}
-      </Animated.Text>
+      {/* Time · what it does · tokens, as the desktop orders them: only the middle one gives way. */}
+      <Animated.View style={[styles.line, { opacity: props.waiting ? 1 : pulse }]}>
+        {elapsed !== null && (
+          <>
+            <Text style={[styles.fixed, tone]}>{durationText(elapsed - (elapsed % 1000))}</Text>
+            {dot}
+          </>
+        )}
+        <Text style={[styles.label, tone]} numberOfLines={1}>
+          {props.label}
+        </Text>
+        {props.tokens !== null && props.tokens > 0 && (
+          <>
+            {dot}
+            <Text style={[styles.fixed, tone]}>{compactCount(props.tokens)} token</Text>
+          </>
+        )}
+      </Animated.View>
     </View>
   )
 }
 
-export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPress(): void }) {
+/** The orange dot with its halo for a turn that waits for the user, softly pulsing. */
+function AttentionMark() {
+  const { c, s } = useSessionTokens()
+  const pulse = usePulse()
+  return (
+    <Animated.View
+      style={[
+        styles.halo,
+        {
+          backgroundColor: s.accentSoft,
+          opacity: pulse,
+          transform: [
+            { scale: pulse.interpolate({ inputRange: [0.7, 1], outputRange: [0.85, 1.1] }) },
+          ],
+        },
+      ]}
+    >
+      <View style={[styles.haloDot, { backgroundColor: c.accent, shadowColor: c.accent }]} />
+    </Animated.View>
+  )
+}
+
+/**
+ * The way back to the newest message, which says what the turn does: the working dots while it
+ * runs, the attention dot while it waits for the user, else a chevron, marked when new messages
+ * came in while scrolled away.
+ */
+export function ToBottomButton(props: {
+  visible: boolean
+  fresh: boolean
+  state: 'running' | 'waiting' | 'idle'
+  onPress(): void
+}) {
   const { c } = useSessionTokens()
   const shown = useRef(new Animated.Value(0)).current
   useEffect(() => {
@@ -177,17 +233,32 @@ export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPres
     >
       <View>
         <GlassButton
-          size={40}
-          systemImage={G.toBottom.sf}
+          silent
+          size={44}
+          {...(props.state === 'idle' ? { systemImage: G.toBottom.sf } : {})}
           onPress={props.onPress}
-          accessibilityLabel="回到最新"
+          accessibilityLabel={
+            props.state === 'waiting'
+              ? '等你回答，回到最新'
+              : props.state === 'running'
+                ? '正在工作，回到最新'
+                : props.fresh
+                  ? '有新消息，回到最新'
+                  : '回到最新'
+          }
         >
-          <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+          {props.state === 'running' ? (
+            <WorkingDots color={c.accent} size={16} />
+          ) : props.state === 'waiting' ? (
+            <AttentionMark />
+          ) : (
+            <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+          )}
         </GlassButton>
-        {props.fresh && (
+        {props.fresh && props.state === 'idle' && (
           <View
             pointerEvents="none"
-            style={[styles.fresh, { backgroundColor: c.accent, borderColor: c.bg }]}
+            style={[styles.fresh, { backgroundColor: c.tint, borderColor: c.bg }]}
           />
         )}
       </View>
@@ -197,7 +268,9 @@ export function ToBottomButton(props: { visible: boolean; fresh: boolean; onPres
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 32 },
-  label: { flex: 1, fontSize: 15, lineHeight: 20, fontVariant: ['tabular-nums'] },
+  line: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
+  label: { flexShrink: 1, fontSize: 15, lineHeight: 20 },
+  fixed: { flexShrink: 0, fontSize: 15, lineHeight: 20, fontVariant: ['tabular-nums'] },
   dots: { width: 15, height: 15, flexDirection: 'row', flexWrap: 'wrap', gap: 1.5 },
   dot: { width: 4, height: 4, borderRadius: 2 },
   attention: { width: 15, height: 15, alignItems: 'center', justifyContent: 'center' },
@@ -210,6 +283,21 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
   toBottom: { position: 'absolute', alignSelf: 'center', bottom: 12 },
+  halo: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  haloDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 0 },
+  },
   fresh: {
     position: 'absolute',
     top: 1,

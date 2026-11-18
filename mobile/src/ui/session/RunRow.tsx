@@ -118,6 +118,9 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
         accessibilityLabel={label}
         style={({ pressed }) => [styles.line, { opacity: pressed ? 0.6 : 1 }]}
       >
+        <View style={[styles.chevron, { transform: [{ rotate: open ? '90deg' : '0deg' }] }]}>
+          <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
+        </View>
         <View style={[styles.stack, { width: 24 + (stack.length - 1) * 10 }]}>
           {stack.map((icon, i) => (
             <View
@@ -145,17 +148,51 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
         ) : known && total > 0 ? (
           <Text style={[styles.meta, { color: c.textTertiary }]}>· {formatMs(total, false)}</Text>
         ) : null}
-        <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
-          <Icon icon={G.right} size={11} color={c.textTertiary} weight="semibold" />
-        </View>
       </Pressable>
       {open && (
-        <View style={[styles.steps, { borderLeftColor: c.border }]}>
-          {entries.map((entry) => (
-            <Step key={entry.id} entry={entry} />
+        <View style={styles.steps}>
+          {entries.map((entry, i) => (
+            <TimelineStep
+              key={entry.id}
+              entry={entry}
+              first={i === 0}
+              last={i === entries.length - 1}
+            />
           ))}
         </View>
       )}
+    </View>
+  )
+})
+
+// Where a step's dot sits: the middle of its line, closed or heading its card.
+const DOT_AT = 17
+
+/**
+ * A step of an opened run on its timeline: a dot by its line, joined to the steps before and after
+ * by a thin line that runs on past a card it opened into; red for a step that failed.
+ */
+const TimelineStep = memo(function TimelineStep(props: {
+  entry: ThreadEntry
+  first: boolean
+  last: boolean
+}) {
+  const { c } = useSessionTokens()
+  const failed = props.entry.kind === 'tool' && props.entry.status === 'failed'
+  return (
+    <View style={styles.timelineStep}>
+      <View style={styles.gutter} pointerEvents="none">
+        {!props.first && (
+          <View style={[styles.rail, { top: 0, height: DOT_AT, backgroundColor: c.tint }]} />
+        )}
+        {!props.last && (
+          <View style={[styles.rail, { top: DOT_AT, bottom: 0, backgroundColor: c.tint }]} />
+        )}
+        <View style={[styles.dot, { backgroundColor: failed ? c.danger : c.tint }]} />
+      </View>
+      <View style={styles.stepBody}>
+        <Step entry={props.entry} />
+      </View>
     </View>
   )
 })
@@ -177,5 +214,11 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12, fontVariant: ['tabular-nums'] },
   mark: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   spinner: { transform: [{ scale: 0.7 }], width: 16, height: 16 },
-  steps: { marginLeft: 11, paddingLeft: 10, borderLeftWidth: StyleSheet.hairlineWidth, gap: 2 },
+  chevron: { width: 14, alignItems: 'center' },
+  steps: { marginTop: 2 },
+  timelineStep: { flexDirection: 'row' },
+  gutter: { width: 22 },
+  rail: { position: 'absolute', left: 7.25, width: 1.5, opacity: 0.55 },
+  dot: { position: 'absolute', left: 5, top: DOT_AT - 3, width: 6, height: 6, borderRadius: 3 },
+  stepBody: { flex: 1, minWidth: 0 },
 })

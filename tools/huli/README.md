@@ -2,7 +2,31 @@
 
 Huli is Kettu (AGPL-3.0, https://github.com/KettuAI/Kettu) built for one person's own use, with
 Kettu's cloud services cut off and its own name, so it installs beside an official Kettu without
-sharing data with it.
+sharing data with it. People see it as **Kite**, **纸鸢** in Chinese: the agent flies on the
+computer, you hold the string on your phone. Huli stays its name inside (see Names).
+
+## Names
+
+Only what people see is named Kite. These stay Huli, so existing installs, pairings and syncs keep
+working:
+
+- Ids: the desktop appId and app user model id `local.huli.app`; the phone's bundle ids
+  `io.github.rsdvb.huli*`, App Group `group.io.github.rsdvb.huli`, keychain groups, the `huli://`
+  scheme, widget kinds and activity types.
+- Data: `%APPDATA%\Huli` (and `~/Library/Application Support/Huli`, `~/.config/Huli`), which
+  `PACKAGED_DATA_FOLDER` in `src/main/user-data.ts` pins now that the product name is Kite;
+  `Huli Dev`; the home folder `~/.huli`.
+- Services: the update channel and Kite Cloud's host (`huli.132-145-200-0.sslip.io`), the server's
+  `huli-cloud` command and `HULI_*` settings, the pairing, relay and push constants, the repository
+  `Rsdvb/huli` and the `huli-*` workflows.
+- The phone app's `expo.name`, which names its Xcode project, scheme and `Huli.app` that
+  `tools/huli/ios` builds; the name people see comes from `mobile/plugins/appName.js` and
+  `mobile/locales/zh-Hans.json`.
+- Code identifiers (`HuliIcon`, `HuliLive`, `Huli*.swift`, …) and comments.
+
+Chinese copy says 纸鸢 wherever it names the product; English copy, window titles, the installer,
+shortcuts, the macOS menu bar, the tray's tooltip and file names say Kite; About says 纸鸢 Kite in
+Chinese. The account service is Kite Cloud in both.
 
 ## What differs from upstream
 
@@ -11,17 +35,18 @@ Code (kept small so upstream merges stay clean):
 | File                                                                                                                                     | Change                                                                                                                                                                                                                                                                               |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `src/agent-host/agents.ts`                                                                                                               | `READ_ANTIGRAVITY_LIMITS = false`: never runs `agy -p /usage`, `/credits` or a hidden ACP session by itself to read Antigravity's limits; only a refresh the user presses (`agents.refreshLimits` with `ask: true`) runs `/usage` and `/credits` once                                |
-| `src/shared/settings.ts`                                                                                                                 | defaults: cloud off, relay on (Huli Cloud's, used only with the cloud on and signed in), not discoverable                                                                                                                                                                            |
+| `src/shared/settings.ts`                                                                                                                 | defaults: cloud off, relay on (Huli Cloud's, used only with the cloud on and signed in), discoverable (the account's phones and browsers may ask to be added; the owner allows each)                                                                                                 |
+| `src/remote-host/start.ts`, `src/shared/remote/relay.ts`                                                                                 | signed in to the relay, the host always sends its profile, so Huli Cloud registers it as the account's computer; `pairable: false` in it while it is not discoverable                                                                                                                |
 | `src/main/update-keys.json`, `src/main/update-sources.ts`, `src/shared/updates.ts`, `src/daemon/update.ts`                               | updates come from Huli's own channel on Huli Cloud's host, signed with Huli's own release keys (kept off the repository)                                                                                                                                                             |
 | `src/shared/account-api.ts`, `src/shared/remote/push.ts`                                                                                 | the account service and push gateway are Huli Cloud, `https://huli.132-145-200-0.sslip.io` (see `cloud/`)                                                                                                                                                                            |
 | `src/shared/kettu-hosts.ts`                                                                                                              | Huli Cloud's host counts as one of the services the cloud switch governs                                                                                                                                                                                                             |
 | `src/shared/remote/relay.ts`, `relay-regions.ts`                                                                                         | `RELAY_URL` is Huli Cloud too (its relay, one region, Ashburn); `REGION_KEYS` are Huli's own region list keys (`tools/huli/region-list.mjs`, private halves in `~/.huli-keys`)                                                                                                       |
 | `src/shared/remote/pairing.ts`                                                                                                           | `HOSTED_WEB_URL` is Huli's web client, `https://app.huli.132-145-200-0.sslip.io`; `PAIRING_URL` points at `huli.invalid`, which never resolves                                                                                                                                       |
 | `src/shared/storage.ts`, `src/agent-host/worktrees/git.ts`                                                                               | home folder `~/.huli` instead of `~/.kettu`                                                                                                                                                                                                                                          |
-| `src/main/user-data.ts`                                                                                                                  | development data folder `Huli Dev`                                                                                                                                                                                                                                                   |
+| `src/main/user-data.ts`                                                                                                                  | development data folder `Huli Dev`; an installed build's, `Huli` (`PACKAGED_DATA_FOLDER`), which `src/main/index.ts` pins                                                                                                                                                            |
 | `src/main/index.ts`, `src/main/computer-use.ts`                                                                                          | app user model id `local.huli.app`                                                                                                                                                                                                                                                   |
-| `package.json`                                                                                                                           | productName `Huli` (data folder `%APPDATA%\Huli`), version 0.1.0                                                                                                                                                                                                                     |
-| `electron-builder.yml`                                                                                                                   | appId `local.huli.app`, productName `Huli`, `publish` is Huli's update channel (generic)                                                                                                                                                                                             |
+| `package.json`                                                                                                                           | productName `Kite`, version 0.1.0                                                                                                                                                                                                                                                    |
+| `electron-builder.yml`                                                                                                                   | appId `local.huli.app`, productName `Kite`, `publish` is Huli's update channel (generic)                                                                                                                                                                                             |
 | `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts` | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub |
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json`                              | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved                                                                                                                        |
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                    |
@@ -59,22 +84,88 @@ Hooks into upstream files, one or two lines each:
   event), `features/settings/section-defs.tsx` (the row), `features/sidebar/app-sidebar.tsx` (the
   offer).
 
+### Session folders
+
+Folders the user makes to organize sessions, kept by the agent host so every window and paired
+device shows the same ones. A folder only groups sessions: a session's project is unchanged, and
+deleting a folder puts its sessions back among the ungrouped ones, never deleting a session.
+
+Huli's own files:
+
+- `src/shared/session-folders.ts`: `SessionFolder` (name, pinned, collapsed, its session ids) and
+  helpers.
+- `src/agent-host/session-folders.ts` (+ `.test.ts`): the store, kept in
+  `state/session-folders.json`, and the validators of `folders.list`, `folders.create`,
+  `folders.rename`, `folders.update` (pinned, collapsed), `folders.delete`, `folders.reorder` and
+  `folders.move` (into a folder, or out with `folderId: null`). A change is broadcast as
+  `folders.changed`; sessions that went away are left out as the folders are read. Paired devices
+  may call them all.
+- `src/renderer/src/features/session-folders/`: each host's folders (`store.ts`), the sidebar's
+  Folders section above or below the projects (`folder-section.tsx`, the choice kept per
+  device), naming and deleting (`folder-dialogs.tsx`), Move to folder › in the session menus
+  (`move-menu.tsx`) and dropping dragged sessions on a folder, a project or the Folders label
+  (`drag.ts`).
+- `src/shared/locales/*/sessionFolders.json`: the desktop's copy.
+
+Hooks into upstream files, one or two lines each:
+
+- `src/shared/agent-host.ts` (the `folders.*` methods and the `folders.changed` event),
+  `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts` (spreads
+  `folderValidators`), `src/agent-host/host.ts` (the store, its load and flush, the handlers).
+- `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (loading, the
+  `folders.changed` event, another host connecting).
+- `features/sidebar/app-sidebar.tsx` (the `FolderSection`s, `SessionFolderDialogs`, and in
+  `ProjectGroup` the sessions left out because a folder holds them and the header's drop),
+  `features/sidebar/session-menu.tsx` (two `MoveToFolderMenu`s), `features/sidebar/session-row.tsx`
+  (a range selection in the order folders show), `features/split/session-drag.tsx` (a drop on a
+  folder).
+
+The phone app (`mobile/`) shows them on its home list, with the system's context menus and the
+other paired computers' sessions (`mobile/src/fleet.ts`, `folders.tsx`, `homeList.ts`).
+
 Generated before a build (not hand edits, never committed):
 
-- `node tools/huli/rebrand.mjs` swaps the display name Kettu to Huli. Idempotent; the build
-  workflow runs it, and so must a local build (see Build) or a `pnpm dev` meant to look like Huli.
+- `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy
+  (`ZH_NAME`), dropping the spaces that set a Latin word off from Chinese, and puts Kite's artwork
+  in place. Idempotent; the build workflow runs it, and so must a local build (see Build) or a
+  `pnpm dev` meant to look like Kite.
   - Every locale but `star.json` (the prompts to star Kettu's repository) and `kettuImport.json`
     (the import from an official Kettu) has its values rewritten:
     the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the attribution and
     Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder `.kettu/`; and
     pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
+  - `ZH_APP_NAME` lists the Chinese strings whose `{{name}}` is the app's own (the macOS app menu,
+    the quit dialog, the tray's menu), which main fills with `app.name`, Kite: in Chinese they say
+    纸鸢. `ADD` adds the keys rebranded code reads: About's title, 纸鸢 Kite in Chinese.
   - `CODE` lists the exact display strings swapped in code: window titles, About, the update cards,
     the account menu's version line, the built-in theme's name, the Marketplace's own server, the
     first run's pictures, the Linux login item and the sign-in pages. When upstream changes one of
     those spellings the script warns `no longer holds …`; add the new spelling there.
   - It never touches tests: they read the constants the code uses (below).
-- `tools/huli/icon/fox.svg` is the icon; `tools/huli/icon/render.mjs` renders the desktop app's
-  `build/icon.png` and `build/icon.ico` and the phone app's `mobile/assets` from it.
+  - `ARTWORK`: it copies `tools/huli/brand/assets/desktop/`, a mirror of the repository, over
+    Kettu's icons (`build/icon.png`, `build/icon.ico`, `build/icon.icon`, emptied first), the
+    tray's images (`resources/tray`), the renderer's icon, mark and glyphs
+    (`src/renderer/src/assets/kettu-*.svg`) and the first run's pictures
+    (`assets/onboarding/fox-*.webp`, now paper kites). The tree keeps Kettu's, so Kettu's own icon
+    changes merge cleanly; it warns about a tray image or brand file upstream adds that Kite lacks.
+
+### Kite's artwork
+
+`tools/huli/brand/` holds the masters, SVG on a 1024 grid: `kite-light.svg` (the icon, white kite
+on orange), `kite-dark.svg`, `kite-tinted.svg`, `kite-glyph.svg` (one color, for themed icons),
+`kite-tray.svg` (the 18 pt tray glyph) and the first run's `scene-flying.svg` and
+`scene-resting.svg`. `render.mjs` renders the rest, all committed: the desktop's files into
+`assets/desktop/` (above) plus `assets/icon.icns` for a Mac without Xcode 26, and the phone's
+straight into `mobile/assets`: `kite.icon` (Icon Composer: ground, kite and string layers with
+their dark appearances, which iOS 26 draws in Liquid Glass and derives tinted and clear from),
+`ios/icon-{light,dark,tinted}.png` (the same flat, for `ios.icon` as an object should the
+`.icon` not build), `icon.png`, the splash, the favicon and Android's adaptive layers. After
+changing a master:
+
+```powershell
+npm i --no-save --no-package-lock --prefix tools/huli/brand @resvg/resvg-js sharp
+node tools/huli/brand/render.mjs ..\ref\kite-preview.png   # the optional sheet of every icon
+```
 
 ## Tests
 
@@ -127,6 +218,27 @@ signed in, Huli Cloud's relay from any network, which the hosted web client at
   the token `relayTokens()` is given by the phone's Huli Cloud sign-in.
 - `tools/huli/deploy-cloud.ps1` builds the service and the hosted web client and installs both.
 
+## Account and computers
+
+Huli Cloud keeps a registry of the account's computers (`cloud/src/store.ts`); `cloud/README.md`
+describes it, the pairing without a code and its threat model.
+
+- `src/shared/huli-cloud.ts`: the account API beyond Kettu's (`GET /api/v1/account/devices`,
+  `POST /api/v1/account/devices/revoke`), its types and parsers, and `HOST_CLIENTS`, the sign-ins
+  that may put a host on the relay.
+- `src/shared/huli-signin.ts` (+ `.test.ts`): the phone's sign-in (PKCE, the vault, refresh
+  rotation, sign out), apart from the phone's APIs; `mobile/src/cloud.ts` gives it the Keychain and
+  ASWebAuthenticationSession and hands the relay its tokens.
+- `src/shared/remote/pair-account.ts`: the device side of Kettu's discovery for the phone and the
+  hosted web client; `src/remote-host/account-pairing.test.ts` checks that a computer adds a device
+  only with both yeses, and that a device refuses a welcome before its user's.
+- Desktop: `src/main/huli-account.ts` (+ `.test.ts`, the IPC calls `account:devices` and
+  `account:revoke-device`), `src/renderer/src/stores/account-devices.ts`,
+  `features/settings/account-devices.tsx`, `locales/*/huliAccount.json`.
+- Phone: `mobile/src/app/settings/account.tsx`, `mobile/src/app/pair-computer.tsx`,
+  `mobile/src/components/AccountComputers.tsx`. Hosted web client:
+  `src/renderer/src/web/hosted/account-pairing.tsx`.
+
 ## Workflows
 
 Only the `huli-*` workflows run here. Kettu's own (`ci.yml`, `docker.yml`, `issue-closed.yml`,
@@ -158,7 +270,7 @@ npx -y pnpm@10.11.1 install --frozen-lockfile
 node tools/huli/rebrand.mjs
 npx -y pnpm@10.11.1 fetch:cua-driver
 npx -y pnpm@10.11.1 fetch:device-helpers
-npx -y pnpm@10.11.1 dist:win      # dist\Huli-<version>-x64-setup.exe
+npx -y pnpm@10.11.1 dist:win      # dist\Kite-<version>-x64-setup.exe
 ```
 
 The rebrand leaves its output in the working tree; never commit it.

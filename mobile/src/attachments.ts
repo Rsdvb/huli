@@ -305,6 +305,11 @@ export function uploadError(error: unknown): string {
   if (message?.includes('got shorter')) return '文件在上传时变了，请重新添加。'
   if (code === 'busy') return '电脑正忙，请稍后重试。'
   if (message?.includes('at most') || message?.includes('only an attachment')) {
+    // An older computer takes less than this phone may send; say its own limit and the way out.
+    const limit = Number(/at most (\d+) bytes/.exec(message)?.[1] ?? NaN)
+    if (limit > 0 && limit < UPLOAD_FILE_BYTES) {
+      return `电脑上的 Kite 是旧版，只收 ${formatBytes(limit)} 以内的附件。更新电脑上的 Kite 后重试。`
+    }
     return `附件太大了，单个附件最多 ${LIMIT_TEXT}。`
   }
   if (message?.includes('UTF-8')) return '这个文本文件不是 UTF-8 编码，没法发送。'

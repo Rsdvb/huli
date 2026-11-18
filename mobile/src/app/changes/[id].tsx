@@ -36,7 +36,7 @@ import { useGitSteps } from '../../components/git/useGitSteps'
 import { WorktreeCard } from '../../components/git/WorktreeCard'
 import { sessionFolder, useChanges, useCurrentPr, useGitRunning, useGitTools } from '../../git'
 import { useHost, useLink } from '../../host'
-import { showMenu } from '../../ui/session/feedback'
+import { joinGroups, type MenuNode } from '../../ui/menu'
 import { baseName } from '../../ui/session/format'
 import { GI } from '../../ui/session/gitIcons'
 import { GlassHeader } from '../../ui/session/GlassHeader'
@@ -97,20 +97,37 @@ export default function ChangesScreen() {
   }
 
   const blocked = !status || status.changes.conflicted > 0 || !!status.operation
-  const fileMenu = (file: ChangedFile) =>
-    showMenu(file.path, [
-      { label: '打开差异', onPress: () => open(file) },
-      ...(blocked || file.status === 'conflicted'
+  const fileMenu = (file: ChangedFile): MenuNode[] =>
+    joinGroups([
+      [
+        {
+          key: 'diff',
+          label: '打开差异',
+          icon: 'plus.forwardslash.minus',
+          onPress: () => open(file),
+        },
+        ...(blocked || file.status === 'conflicted'
+          ? []
+          : [
+              {
+                key: 'commit',
+                label: '提交…',
+                icon: 'checkmark.circle' as const,
+                onPress: () => steps.setSheet({ kind: 'commit', paths: [file.path] }),
+              },
+            ]),
+      ],
+      running
         ? []
         : [
             {
-              label: '提交…',
-              onPress: () => steps.setSheet({ kind: 'commit', paths: [file.path] }),
+              key: 'discard',
+              label: '丢弃',
+              icon: 'arrow.uturn.backward',
+              destructive: true,
+              onPress: () => discard([file.path]),
             },
-          ]),
-      ...(running
-        ? []
-        : [{ label: '丢弃', destructive: true, onPress: () => discard([file.path]) }]),
+          ],
     ])
 
   let body: ReactElement
@@ -151,7 +168,7 @@ export default function ChangesScreen() {
             first={index === 0}
             last={index === files.length - 1}
             onPress={() => open(item)}
-            onLongPress={() => fileMenu(item)}
+            menu={fileMenu(item)}
           />
         )}
         ItemSeparatorComponent={Separator}

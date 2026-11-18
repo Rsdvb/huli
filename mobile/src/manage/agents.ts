@@ -92,7 +92,7 @@ export function readiness(status: AgentStatus): Readiness {
       if (cliOutdated(status) !== null) {
         return {
           kind: 'missing',
-          message: status.detail ?? '版本比 Huli 要的旧，更新后才能用。',
+          message: status.detail ?? '版本比纸鸢要的旧，更新后才能用。',
           action: '更新方法',
           url: null,
         }
@@ -205,7 +205,7 @@ export function environmentText(environment: EnvironmentInfo | null): string {
       ? `${ago(environment.resolvedAt)}从登录 Shell（${environment.shell}）读取，耗时 ${environment.durationMs} ms。`
       : '已从登录 Shell 读取。'
   }
-  return source === 'inherited' ? '继承自 Huli 的启动方式。' : '正在使用备用 PATH。'
+  return source === 'inherited' ? '继承自纸鸢的启动方式。' : '正在使用备用 PATH。'
 }
 
 /**

@@ -3,6 +3,12 @@ import { join, resolve } from 'node:path'
 /** The folder beside the installed app's own that unpackaged runs use. */
 export const DEV_DATA_FOLDER = 'Huli Dev'
 
+/**
+ * Huli: the installed app's data folder. The product is named Kite now, which would move Electron's
+ * default folder to `Kite`; installs keep the folder they had while it was named Huli.
+ */
+export const PACKAGED_DATA_FOLDER = 'Huli'
+
 export interface UserDataInput {
   isPackaged: boolean
   /** The value of Electron's `--user-data-dir` switch; empty when it has none. */

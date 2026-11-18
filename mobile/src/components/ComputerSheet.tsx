@@ -1,27 +1,32 @@
 // The paired computers, from the top bar's computer mark: which one the app shows, whether each
 // can be reached, and switching, renaming, adding and unpairing. Settings › 已配对的电脑 uses the
-// same rows and actions.
+// same rows and actions. Below them, 全部电脑: every computer of the phone's Huli Cloud account, the
+// ones it is not paired with yet marked 未配对.
 
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { currentAddress, probe, routeKind } from '../connection'
+import { AccountComputers } from './AccountComputers'
 import { useComputers } from '../host'
 import { linkStatusOf, platformOf, ROUTE_NAMES, type LinkTone } from '../linkInfo'
 import { ago } from '../sessions'
 import { computerName, type SavedHost } from '../store'
 import { BottomSheet } from '../ui/BottomSheet'
+import { ContextMenu, SYSTEM_MENUS, TapMenu } from '../ui/ContextMenu'
 import { haptic } from '../ui/haptics'
 import { Icon } from '../ui/Icon'
 import { IconButton } from '../ui/IconButton'
 import { ListGroup, ListRow } from '../ui/ListRow'
+import type { MenuNode } from '../ui/menu'
 import { OsIcon } from '../ui/OsIcon'
 import { Press } from '../ui/Press'
-import { showMenu } from '../ui/session/feedback'
 import { radius, space, type as typeScale, useTokens, type Palette } from '../ui/tokens'
 import { RenameDialog } from './RenameDialog'
 
 export type Reach = 'checking' | 'online' | 'offline'
+
+const noop = () => {}
 
 /** Whether each computer the app keeps no link to answers, checked while `watching`. */
 export function useReach(watching: boolean): Map<string, Reach> {
@@ -127,12 +132,23 @@ export function useComputerActions() {
   }
 
   /** The row's menu; `then` runs before a choice opens something of its own, as closing a sheet. */
-  const menu = (h: SavedHost, then?: () => void) => {
+  const menu = (h: SavedHost, then?: () => void): MenuNode[] => {
     const active = h.id === host.host?.id
-    showMenu(computerName(h), [
-      ...(active ? [] : [{ label: '切换到这台电脑', onPress: () => switchTo(h) }]),
+    return [
+      ...(active
+        ? []
+        : [
+            {
+              key: 'switch',
+              label: '切换到这台电脑',
+              icon: 'arrow.left.arrow.right' as const,
+              onPress: () => switchTo(h),
+            },
+          ]),
       {
+        key: 'rename',
         label: '重命名',
+        icon: 'pencil',
         onPress: () => {
           then?.()
           // A dialog cannot open over a sheet that is still on screen.
@@ -140,14 +156,23 @@ export function useComputerActions() {
         },
       },
       {
+        key: 'details',
         label: '连接详情',
+        icon: 'info.circle',
         onPress: () => {
           then?.()
           router.push({ pathname: '/settings/computer', params: { id: h.id } })
         },
       },
-      { label: '解除配对', destructive: true, onPress: () => unpair(h) },
-    ])
+      { kind: 'divider', key: 'danger' },
+      {
+        key: 'unpair',
+        label: '解除配对',
+        icon: 'minus.circle',
+        destructive: true,
+        onPress: () => unpair(h),
+      },
+    ]
   }
 
   const element = (
@@ -177,50 +202,75 @@ export function ComputerRow(props: {
   active: boolean
   busy: boolean
   onPress(): void
-  onMenu(): void
+  /** What its long press and its 更多操作 button offer. */
+  menu: MenuNode[]
+  /**
+   * In a sheet, only the button opens the menu on iOS: the sheet is presented in a view
+   * controller of its own, where a context menu's hosted row would not get its taps.
+   */
+  inSheet?: boolean
 }) {
   const { c } = useTokens()
   const h = props.computer
+  const name = computerName(h)
   return (
-    <Press
-      onPress={props.onPress}
-      onLongPress={props.onMenu}
-      scale={false}
-      disabled={props.busy}
-      accessibilityRole="button"
-      accessibilityLabel={`${computerName(h)}，${props.line.text}`}
-      accessibilityState={{ selected: props.active }}
-      accessibilityHint={props.active ? undefined : '点按切换到这台电脑，长按查看更多操作'}
-      style={styles.row}
+    <ContextMenu
+      items={props.menu}
+      title={name}
+      disabled={props.busy || (props.inSheet && SYSTEM_MENUS)}
     >
-      <View style={[styles.icon, { backgroundColor: props.active ? c.tintSoft : c.fill }]}>
-        <OsIcon platform={platformOf(h)} size={22} color={props.active ? c.tint : c.text} />
-      </View>
-      <View style={styles.text}>
-        <Text style={[typeScale.rowTitle, { color: c.text }]} numberOfLines={1}>
-          {computerName(h)}
-        </Text>
-        <View style={styles.line}>
-          {props.busy ? (
-            <ActivityIndicator size="small" color={c.textSecondary} />
-          ) : (
-            <View style={[styles.dot, { backgroundColor: lineColor(c, props.line.tone) }]} />
-          )}
-          <Text style={[typeScale.footnote, styles.flex, { color: c.textSecondary }]}>
-            {props.busy ? '正在解除配对…' : props.line.text}
-          </Text>
+      {(longPress) => (
+        // Opaque, so the row lifts as itself when its context menu opens. The button sits beside
+        // the row's press rather than in it, so its menu's tap is not the row's too.
+        <View style={[styles.row, { backgroundColor: c.surface }]}>
+          <Press
+            onPress={props.onPress}
+            {...(longPress ? { onLongPress: longPress } : {})}
+            scale={false}
+            disabled={props.busy}
+            accessibilityRole="button"
+            accessibilityLabel={`${name}，${props.line.text}`}
+            accessibilityState={{ selected: props.active }}
+            accessibilityHint={props.active ? undefined : '点按切换到这台电脑，长按查看更多操作'}
+            containerStyle={styles.flex}
+            style={styles.main}
+          >
+            <View style={[styles.icon, { backgroundColor: props.active ? c.tintSoft : c.fill }]}>
+              <OsIcon platform={platformOf(h)} size={22} color={props.active ? c.tint : c.text} />
+            </View>
+            <View style={styles.text}>
+              <Text style={[typeScale.rowTitle, { color: c.text }]} numberOfLines={1}>
+                {name}
+              </Text>
+              <View style={styles.line}>
+                {props.busy ? (
+                  <ActivityIndicator size="small" color={c.textSecondary} />
+                ) : (
+                  <View style={[styles.dot, { backgroundColor: lineColor(c, props.line.tone) }]} />
+                )}
+                <Text style={[typeScale.footnote, styles.flex, { color: c.textSecondary }]}>
+                  {props.busy ? '正在解除配对…' : props.line.text}
+                </Text>
+              </View>
+            </View>
+            {props.active ? <Icon name="check" size={18} color={c.tint} weight="semibold" /> : null}
+          </Press>
+          <TapMenu items={props.menu} title={name} disabled={props.busy}>
+            {(open) => (
+              <IconButton
+                icon="more"
+                tone="plain"
+                size={36}
+                iconSize={18}
+                label="更多操作"
+                disabled={props.busy}
+                onPress={open ?? noop}
+              />
+            )}
+          </TapMenu>
         </View>
-      </View>
-      {props.active ? <Icon name="check" size={18} color={c.tint} weight="semibold" /> : null}
-      <IconButton
-        icon="more"
-        tone="plain"
-        size={36}
-        iconSize={18}
-        label="更多操作"
-        onPress={props.onMenu}
-      />
-    </Press>
+      )}
+    </ContextMenu>
   )
 }
 
@@ -238,7 +288,7 @@ export function ComputerSheet(props: { visible: boolean; onClose(): void }) {
         visible={props.visible}
         onClose={props.onClose}
         title="电脑"
-        message="Huli 一次显示一台电脑的会话、Artifacts、定时任务和用量。"
+        message="纸鸢一次显示一台电脑的会话、Artifacts、定时任务和用量。"
       >
         <View style={[styles.group, { backgroundColor: c.surface, borderColor: c.border }]}>
           {host.computers.map((h, i) => (
@@ -254,11 +304,13 @@ export function ComputerSheet(props: { visible: boolean; onClose(): void }) {
                   actions.switchTo(h)
                   props.onClose()
                 }}
-                onMenu={() => actions.menu(h, props.onClose)}
+                menu={actions.menu(h, props.onClose)}
+                inSheet
               />
             </View>
           ))}
         </View>
+        <AccountComputers header="全部电脑" before={props.onClose} />
         <ListGroup>
           {!connected ? (
             <ListRow
@@ -301,13 +353,14 @@ export function ComputerSheet(props: { visible: boolean; onClose(): void }) {
 const styles = StyleSheet.create({
   group: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 64 },
-  row: {
+  row: { flexDirection: 'row', alignItems: 'center', paddingRight: space.sm },
+  main: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
     minHeight: 64,
     paddingLeft: space.lg,
-    paddingRight: space.sm,
+    paddingRight: space.md,
     paddingVertical: space.md,
   },
   icon: {

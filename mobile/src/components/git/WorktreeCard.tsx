@@ -9,6 +9,7 @@ import type { SessionWorktree, WorktreeFailure, WorktreeInspection } from '@shar
 import { call, errorText } from '../../git'
 import { useLink } from '../../host'
 import { BottomSheet } from '../../ui/BottomSheet'
+import { ContextMenu } from '../../ui/ContextMenu'
 import { copyText, haptic } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
@@ -200,7 +201,7 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
         <Icon icon={G.info} size={14} color={c.tint} />
         <Text style={[styles.lineText, { color: c.textSecondary, flex: 1 }]}>
           {state === 'missing'
-            ? `worktree 的文件夹在 Huli 之外被删掉了。发下一条消息时会按分支 ${branch} 重建。`
+            ? `worktree 的文件夹在纸鸢之外被删掉了。发下一条消息时会按分支 ${branch} 重建。`
             : `worktree 的文件夹已删除。发下一条消息时会按分支 ${branch} 重建。`}
         </Text>
       </View>
@@ -224,7 +225,7 @@ const STATE_TEXT: Record<SessionWorktree['state'], string> = {
   setup: '正在准备 worktree…',
   'setup-failed': 'worktree 没能准备好',
   ready: '就绪',
-  missing: '文件夹在 Huli 之外被删掉了',
+  missing: '文件夹在纸鸢之外被删掉了',
   removed: '文件夹已删除',
   gone: 'worktree 和分支都已删除',
 }
@@ -276,16 +277,31 @@ export function WorktreeCard(props: { sessionId: string; worktree: SessionWorktr
           在分支 {worktree.branch} 的 worktree 里工作
         </Text>
       </View>
-      <Pressable
-        onLongPress={() =>
-          void copyText(worktree.path).then(() => showNotice({ text: '已复制', tone: 'success' }))
-        }
-        accessibilityHint="长按复制路径"
+      <ContextMenu
+        items={[
+          {
+            key: 'copy',
+            label: '复制路径',
+            icon: 'doc.on.doc',
+            onPress: () =>
+              void copyText(worktree.path).then(() =>
+                showNotice({ text: '已复制', tone: 'success' }),
+              ),
+          },
+        ]}
       >
-        <Text style={[styles.path, { color: c.textTertiary }]} numberOfLines={2}>
-          {worktree.path}
-        </Text>
-      </Pressable>
+        {(longPress) => (
+          <Pressable
+            {...(longPress ? { onLongPress: longPress } : {})}
+            accessibilityHint="长按复制路径"
+            style={{ backgroundColor: s.dockCard }}
+          >
+            <Text style={[styles.path, { color: c.textTertiary }]} numberOfLines={2}>
+              {worktree.path}
+            </Text>
+          </Pressable>
+        )}
+      </ContextMenu>
       <View style={styles.stateRow}>
         {preparing ? <ActivityIndicator size="small" color={c.textSecondary} /> : null}
         <Text

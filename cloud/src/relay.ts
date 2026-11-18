@@ -7,6 +7,10 @@
 // expect (64 KiB a message, 16 devices a host, the sign-in, connect and accept timeouts), and logs
 // events and close codes, never what passes. GET /v1, /v1/regions, /v1/ping and /v1/hosts answer
 // over HTTP, to browsers of the hosted web client too.
+//
+// Huli: only a computer's sign-in (the desktop app's or the daemon's) may sign a host in, and each
+// host that does is registered as the account's computer with the key it proved, and its profile;
+// a device reaches only a host registered to its own account under a sign-in still live.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -27,6 +31,7 @@ import {
   SIGN_IN_TIMEOUT_MS,
   TOKEN_GRACE_MS,
   decodeRelayBytes,
+  encodeRelayBytes,
   newRelayToken,
   parseDeviceToRelay,
   parseHostToRelay,
@@ -37,9 +42,22 @@ import {
   type RelayInfo,
   type RelayListedHost,
 } from '@shared/remote/relay'
+import { HOST_CLIENTS } from '@shared/huli-cloud'
 import { bearer, clientAddress, Limiter } from './http'
 import type { RelayGrant, RelayTokens } from './relay-tokens'
 import { sha256Hex } from './secrets'
+import type { ComputerProfile } from './store'
+
+/** The account's computers as the relay keeps them, in the service's store. */
+export interface RelayRegistry {
+  /** A host signed in with `signKey` under `family`; false when the sign-in cannot register. */
+  register(id: string, family: string, signKey: string): boolean
+  profile(id: string, profile: ComputerProfile | null): void
+  /** Online until now; `left` as it goes. */
+  seen(id: string, left: boolean): void
+  /** The account and sign-in a computer is registered under, while that sign-in is live. */
+  owner(id: string): { account: string; family: string } | null
+}
 
 export interface RelayLimits {
   /** Sockets at once, in all and from one address. */
@@ -91,6 +109,7 @@ export interface RelayOptions {
   /** The signed region list as served, or null for none. */
   regions: string | null
   tokens: Pick<RelayTokens, 'check' | 'holds'>
+  registry: RelayRegistry
   trustProxy: boolean
   limits?: Partial<RelayLimits>
   now?: () => number
@@ -100,6 +119,8 @@ export interface RelayOptions {
 interface Host {
   socket: WebSocket
   grant: RelayGrant
+  /** The Ed25519 key its sign-in proved, in base64url. */
+  signKey: string
   profile: RelayHostProfile | null
 }
 
@@ -190,6 +211,11 @@ export class Relay {
     }
   }
 
+  /** Whether a host is signed in to the relay now. */
+  online(id: string): boolean {
+    return this.hosts.has(id)
+  }
+
   close(): void {
     clearInterval(this.sweeper)
     clearInterval(this.checker)
@@ -265,10 +291,16 @@ export class Relay {
           send(401, { error: 'unauthorized' })
           return true
         }
+        // The hosts that take pairing requests now, as Kettu's clients list them; the account's
+        // computers in all are the account API's.
         const hosts: RelayListedHost[] = []
         for (const [id, host] of this.hosts) {
-          if (host.grant.account === grant.account && host.profile)
-            hosts.push({ id, ...host.profile })
+          const profile = host.profile
+          if (host.grant.account !== grant.account || !profile || profile.pairable === false) {
+            continue
+          }
+          if (this.options.registry.owner(id)?.account !== grant.account) continue
+          hosts.push({ id, ...profile })
         }
         send(200, { hosts: hosts.slice(0, MAX_LISTED_HOSTS) })
         return true
@@ -347,6 +379,7 @@ export class Relay {
     const heard = (): void => {
       clearTimeout(idle)
       idle = setTimeout(() => ws.close(1001), this.limits.hostIdleMs)
+      if (this.hosts.get(id)?.socket === ws) this.options.registry.seen(id, false)
     }
     ws.on('close', () => clearTimeout(idle))
     ws.on('message', (data: RawData, isBinary: boolean) => {
@@ -372,11 +405,27 @@ export class Relay {
       if (!signedIn || host?.socket !== ws) return this.refuse(ws, RELAY_CLOSE.malformed)
       heard()
       if (message.type === 'profile') {
-        host.profile = message.profile
+        const { profile } = message
+        host.profile = profile
+        this.options.registry.profile(
+          id,
+          profile && {
+            key: profile.key,
+            name: profile.name,
+            platform: profile.platform,
+            pairable: profile.pairable !== false,
+          },
+        )
         return
       }
       const grant = this.options.tokens.check(message.token)
-      if (!grant || grant.account !== host.grant.account) {
+      if (
+        !grant ||
+        grant.account !== host.grant.account ||
+        !HOST_CLIENTS.includes(grant.client) ||
+        (grant.family !== host.grant.family &&
+          !this.options.registry.register(id, grant.family, host.signKey))
+      ) {
         this.refusals.hit(address)
         this.log(`huli-cloud: relay host ${short(id)} renewed with a token refused`)
         return this.refuse(ws, RELAY_CLOSE.unauthorized)
@@ -407,12 +456,24 @@ export class Relay {
       this.refuse(ws, RELAY_CLOSE.unauthorized)
       return false
     }
+    // A phone's or a browser's token reaches hosts; it never makes one.
+    if (!HOST_CLIENTS.includes(grant.client)) {
+      this.refusals.hit(address)
+      this.log(`huli-cloud: relay sign-in of ${short(id)} refused: not a computer's sign-in`)
+      this.refuse(ws, RELAY_CLOSE.unauthorized)
+      return false
+    }
     const before = this.hosts.get(id)
     if (!this.signIns.hit(id) || (!before && this.hosts.size >= this.limits.maxHosts)) {
       this.refuse(ws, RELAY_CLOSE.tooMany)
       return false
     }
-    this.hosts.set(id, { socket: ws, grant, profile: null })
+    const signKey = encodeRelayBytes(publicKey)
+    if (!this.options.registry.register(id, grant.family, signKey)) {
+      this.refuse(ws, RELAY_CLOSE.unauthorized)
+      return false
+    }
+    this.hosts.set(id, { socket: ws, grant, signKey, profile: null })
     if (before) {
       this.sendJson(before.socket, { type: 'replaced' })
       this.refuse(before.socket, RELAY_CLOSE.replaced)
@@ -445,6 +506,12 @@ export class Relay {
       const host = this.hosts.get(id)
       if (!host) return this.refuse(ws, RELAY_CLOSE.offline)
       if (host.grant.account !== grant.account) return this.refuse(ws, RELAY_CLOSE.forbidden)
+      // The host is the account's computer only under the sign-in it registered with, while that
+      // sign-in lasts; one signed out is offline here before the token check closes its socket.
+      const owner = this.options.registry.owner(id)
+      if (owner?.account !== grant.account || owner.family !== host.grant.family) {
+        return this.refuse(ws, RELAY_CLOSE.offline)
+      }
       if (this.devices(id) >= MAX_DEVICE_CONNECTIONS) return this.refuse(ws, RELAY_CLOSE.tooMany)
       const token = newRelayToken()
       this.waiting.set(token, {
@@ -518,7 +585,7 @@ export class Relay {
   }
 
   /** Signed-out hosts and lapsed tokens: the control socket closes with 4401. */
-  private checkHosts(): void {
+  checkHosts(): void {
     for (const [id, host] of this.hosts) {
       if (this.options.tokens.holds(host.grant, TOKEN_GRACE_MS)) continue
       this.log(`huli-cloud: relay host ${short(id)} is no longer signed in`)
@@ -574,6 +641,7 @@ export class Relay {
     for (const [id, host] of this.hosts) {
       if (host.socket !== ws) continue
       this.hosts.delete(id)
+      this.options.registry.seen(id, true)
       this.log(`huli-cloud: relay host ${short(id)} left (${code})`)
       for (const [token, waiting] of this.waiting) {
         if (waiting.host !== id) continue

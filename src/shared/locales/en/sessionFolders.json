@@ -1,0 +1,41 @@
+{
+  "section": "Folders",
+  "empty": "Drop sessions here to put them in a new folder.",
+  "folderEmpty": "No sessions yet. Drag some here.",
+  "ungrouped": "Ungrouped",
+  "ungroupHint": "Drop here to take sessions out of their folder",
+  "sessions_one": "{{count}} session",
+  "sessions_other": "{{count}} sessions",
+  "pinnedFolder": "Pinned",
+  "failed": "Could not change the folders: {{error}}",
+  "actions": {
+    "new": "New folder",
+    "newMore": "New folder…",
+    "rename": "Rename folder…",
+    "pin": "Pin folder",
+    "unpin": "Unpin folder",
+    "delete": "Delete folder…",
+    "moveTo": "Move to folder",
+    "removeFrom": "Remove from folder",
+    "moreFor": "More for {{name}}",
+    "options": "Folder options"
+  },
+  "place": {
+    "label": "Show folders",
+    "above": "Folders above projects",
+    "below": "Folders below projects"
+  },
+  "dialog": {
+    "newTitle": "New folder",
+    "newWith_one": "The session you picked goes into it.",
+    "newWith_other": "The {{count}} sessions you picked go into it.",
+    "renameTitle": "Rename folder",
+    "name": "Folder name",
+    "create": "Create",
+    "rename": "Rename",
+    "tooLong": "A folder name can be at most {{count}} characters.",
+    "deleteTitle": "Delete the folder “{{name}}”?",
+    "deleteBody": "Its sessions go back to Ungrouped. No session is deleted.",
+    "delete": "Delete folder"
+  }
+}

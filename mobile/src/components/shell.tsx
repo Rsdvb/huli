@@ -1,5 +1,5 @@
-// The tabs' shared state and their top bar: the project filter every list applies, and the sheets
-// the top bar opens (projects, and the paired computers).
+// The tabs' shared state and their top bar: the project filter every list applies, the system
+// menu the layers button opens (projects), and the sheet of the paired computers.
 
 import {
   createContext,
@@ -36,8 +36,11 @@ import { Pill } from '../ui/Pill'
 import { Press } from '../ui/Press'
 import { FloatingHeader, type CollapsingHeader } from '../ui/ScrollHeader'
 import { size as sizes, space, useTokens, type Palette } from '../ui/tokens'
+import { TapMenu } from '../ui/ContextMenu'
+import type { MenuNode } from '../ui/menu'
 import { ComputerSheet } from './ComputerSheet'
-import { Sheet, type SheetItem } from './Sheet'
+
+const noop = () => {}
 
 export type ProjectFilter =
   { kind: 'all' } | { kind: 'scratch' } | { kind: 'project'; path: string }
@@ -54,8 +57,49 @@ interface ShellValue {
   setFilter(filter: ProjectFilter): void
   /** The filter's name, or null while it shows everything. */
   filterName: string | null
-  openProjects(): void
   openHost(): void
+}
+
+/** The layers button's menu, apart from the filter so the lists do not redraw with its counts. */
+const ProjectMenuContext = createContext<MenuNode[]>([])
+
+/** The project filter's choices as menu items: 全部项目, each project with its count, 无项目. */
+export function projectMenuNodes(
+  filter: ProjectFilter,
+  projects: readonly { path: string; name: string; count: number }[],
+  scratch: number,
+  choose: (filter: ProjectFilter) => void,
+): MenuNode[] {
+  return [
+    {
+      key: '__all',
+      label: '全部项目',
+      icon: 'square.3.layers.3d',
+      checked: filter.kind === 'all',
+      onPress: () => choose({ kind: 'all' }),
+    },
+    { kind: 'divider', key: '__projects', title: '项目' },
+    ...projects.map((p) => ({
+      key: p.path,
+      label: p.name,
+      subtitle: `${p.count} 个会话`,
+      icon: 'folder' as const,
+      checked: filter.kind === 'project' && filter.path === p.path,
+      onPress: () => choose({ kind: 'project', path: p.path }),
+    })),
+    ...(scratch > 0
+      ? [
+          {
+            key: '__scratch',
+            label: '无项目',
+            subtitle: `${scratch} 个会话`,
+            icon: 'tray' as const,
+            checked: filter.kind === 'scratch',
+            onPress: () => choose({ kind: 'scratch' }),
+          },
+        ]
+      : []),
+  ]
 }
 
 const ShellContext = createContext<ShellValue | null>(null)
@@ -81,7 +125,7 @@ export function ShellProvider(props: { children: ReactNode }) {
   const sessions = useSessions()
   const hostProjects = useProjects()
   const [filter, setFilter] = useState<ProjectFilter>({ kind: 'all' })
-  const [sheet, setSheet] = useState<'projects' | 'host' | null>(null)
+  const [sheet, setSheet] = useState<'host' | null>(null)
 
   // A project belongs to one computer: another computer starts with everything shown.
   const activeId = useComputerId()
@@ -123,32 +167,10 @@ export function ShellProvider(props: { children: ReactNode }) {
     haptic.select()
     setFilter(next)
   }, [])
-  const items: SheetItem[] = [
-    {
-      key: '__all',
-      label: '全部项目',
-      checked: filter.kind === 'all',
-      onPress: () => choose({ kind: 'all' }),
-    },
-    ...projects.list.map((p) => ({
-      key: p.path,
-      label: p.name,
-      detail: `${p.count} 个会话`,
-      checked: filter.kind === 'project' && filter.path === p.path,
-      onPress: () => choose({ kind: 'project', path: p.path }),
-    })),
-    ...(projects.scratch > 0
-      ? [
-          {
-            key: '__scratch',
-            label: '无项目',
-            detail: `${projects.scratch} 个会话`,
-            checked: filter.kind === 'scratch',
-            onPress: () => choose({ kind: 'scratch' }),
-          },
-        ]
-      : []),
-  ]
+  const projectMenu = useMemo(
+    () => projectMenuNodes(filter, projects.list, projects.scratch, choose),
+    [filter, projects, choose],
+  )
 
   // The lists read this on every render, so it changes only with the filter.
   const value = useMemo<ShellValue>(
@@ -156,7 +178,6 @@ export function ShellProvider(props: { children: ReactNode }) {
       filter,
       setFilter: choose,
       filterName,
-      openProjects: () => setSheet('projects'),
       openHost: () => setSheet('host'),
     }),
     [filter, choose, filterName],
@@ -164,15 +185,10 @@ export function ShellProvider(props: { children: ReactNode }) {
 
   return (
     <ShellContext.Provider value={value}>
-      {props.children}
-      <Sheet
-        visible={sheet === 'projects'}
-        title="按项目查看"
-        message="会话、Artifacts 和定时任务都只显示这个项目的。"
-        items={items}
-        onClose={() => setSheet(null)}
-      />
-      <ComputerSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
+      <ProjectMenuContext.Provider value={projectMenu}>
+        {props.children}
+        <ComputerSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
+      </ProjectMenuContext.Provider>
     </ShellContext.Provider>
   )
 }
@@ -196,11 +212,16 @@ export function TopBar(props: {
   search?: { active: boolean; onPress(): void }
   /** The scope the search page opens in. */
   searchScope?: SearchScope
+  /** The layers button's menu, when the tab has its own (home); the project filter's otherwise. */
+  layers?: MenuNode[]
+  /** The computer pill's menu (home): 全部电脑 and each computer, instead of the sheet. */
+  computers?: { items: MenuNode[]; all: boolean }
 }) {
   const { c } = useTokens()
   const link = useHostSelector(pickLink, sameFields)
   const active = useActiveHost()
   const shell = useShell()
+  const projectMenu = useContext(ProjectMenuContext)
   const status = linkStatusOf(link.state, link.unreachable)
   const name = computerName(active)
   const platform = platformOf(
@@ -260,25 +281,30 @@ export function TopBar(props: {
       onPress={openSearch}
     />
   )
+  const layers = props.layers ?? projectMenu
   if (props.compact) {
     return (
       <FloatingHeader header={props.header}>
         {avatar}
-        <Pill
-          tone="glass"
-          size="bar"
-          onPress={shell.openProjects}
-          accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
-          leading={
-            <Icon
-              name="layers"
-              size={16}
-              color={shell.filterName ? c.tint : c.text}
-              weight="medium"
+        <TapMenu items={layers} title="按项目查看">
+          {(open) => (
+            <Pill
+              tone="glass"
+              size="bar"
+              {...(open ? { onPress: open } : {})}
+              accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
+              leading={
+                <Icon
+                  name="layers"
+                  size={16}
+                  color={shell.filterName ? c.tint : c.text}
+                  weight="medium"
+                />
+              }
+              label={shell.filterName ?? '全部'}
             />
-          }
-          label={shell.filterName ?? '全部'}
-        />
+          )}
+        </TapMenu>
         <Press
           onPress={shell.openHost}
           accessibilityRole="button"
@@ -297,29 +323,53 @@ export function TopBar(props: {
     <FloatingHeader header={props.header}>
       {avatar}
       {props.filter !== false && (
-        <IconButton
-          icon="layers"
-          tone="plain"
-          size={28}
-          iconSize={19}
-          label={shell.filterName ? `项目：${shell.filterName}` : '按项目查看'}
-          color={shell.filterName ? c.tint : c.textSecondary}
-          onPress={shell.openProjects}
+        <TapMenu items={layers}>
+          {(open) => (
+            <IconButton
+              icon="layers"
+              tone="plain"
+              size={28}
+              iconSize={19}
+              label={shell.filterName ? `项目：${shell.filterName}` : '按项目查看'}
+              color={shell.filterName ? c.tint : c.textSecondary}
+              onPress={open ?? noop}
+            />
+          )}
+        </TapMenu>
+      )}
+      {props.computers ? (
+        <TapMenu items={props.computers.items}>
+          {(open) => (
+            <Pill
+              tone="glass"
+              size="bar"
+              {...(open ? { onPress: open } : {})}
+              accessibilityLabel={
+                props.computers?.all ? '全部电脑，点按切换' : `${hostLabel}，点按切换电脑`
+              }
+              leading={
+                props.computers?.all ? <Icon name="layers" size={16} color={c.text} /> : mark()
+              }
+              trailing={<Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />}
+              label={props.computers?.all ? '全部电脑' : name}
+            />
+          )}
+        </TapMenu>
+      ) : (
+        <Pill
+          tone="glass"
+          size="bar"
+          onPress={shell.openHost}
+          accessibilityLabel={hostLabel}
+          leading={mark()}
+          trailing={
+            several ? (
+              <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
+            ) : undefined
+          }
+          label={name}
         />
       )}
-      <Pill
-        tone="glass"
-        size="bar"
-        onPress={shell.openHost}
-        accessibilityLabel={hostLabel}
-        leading={mark()}
-        trailing={
-          several ? (
-            <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
-          ) : undefined
-        }
-        label={name}
-      />
       <View style={styles.spacer} />
       {search}
     </FloatingHeader>

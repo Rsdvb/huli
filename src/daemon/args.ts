@@ -113,7 +113,7 @@ Options:
 
 Environment:
   KETTU_DAEMON_DATA            The data folder to use instead of the default
-  KETTU_ACCOUNT_URL            The account service to sign in to instead of Huli Cloud
+  KETTU_ACCOUNT_URL            The account service to sign in to instead of Kite Cloud
   KETTU_DIRECT_PORT            The port for direct connections, applied at every start; without
                                it the first start picks one at random and keeps it
 

@@ -14,6 +14,7 @@ import { SubagentMenu } from './SubagentMenu'
 import { PR_STATE_TEXT, PrMark } from '../ui/session/gitIcons'
 import { AgentAvatar, type AvatarBadge } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
+import { OsIcon } from '../ui/OsIcon'
 import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
 import { Skeleton } from '../ui/Skeleton'
@@ -219,8 +220,13 @@ export const SessionRow = memo(function SessionRow(props: {
   selected?: boolean
   /** New to the list: it fades and slides in, on the UI thread. */
   appear?: boolean
+  /** The computer it is on, when the list shows several: its system and name. */
+  mark?: { platform: string | undefined; name: string; offline: boolean }
+  /** While the list selects: whether this one is chosen. */
+  check?: boolean
   onPress(): void
-  onLongPress(): void
+  /** Where the system gives no context menu (Android), the long press opens the session's menu. */
+  onLongPress?: () => void
 }) {
   const { c } = useTokens()
   const s = props.session
@@ -236,18 +242,32 @@ export const SessionRow = memo(function SessionRow(props: {
   // The avatar's badge already says it runs; the meta line keeps only what asks for the user.
   const stateText = state && state.kind !== 'live' ? state : null
 
+  const selecting = props.check !== undefined
   const row = (
     <Press
       onPress={props.onPress}
-      onLongPress={props.onLongPress}
-      delayLongPress={350}
+      {...(props.onLongPress ? { onLongPress: props.onLongPress, delayLongPress: 350 } : {})}
       scale={false}
-      accessibilityRole="button"
-      accessibilityLabel={`${sessionTitle(s)}，${place}${state ? `，${state.text}` : ''}`}
-      accessibilityHint="长按查看更多操作"
-      accessibilityState={props.selected ? { selected: true } : undefined}
-      style={[styles.row, props.selected && [styles.selected, { backgroundColor: c.fillStrong }]]}
+      accessibilityRole={selecting ? 'checkbox' : 'button'}
+      accessibilityLabel={`${sessionTitle(s)}，${place}${props.mark ? `，${props.mark.name}` : ''}${state ? `，${state.text}` : ''}`}
+      accessibilityHint={selecting ? '点按选择，按住拖到文件夹上' : '长按查看更多操作'}
+      accessibilityState={
+        selecting ? { checked: props.check } : props.selected ? { selected: true } : undefined
+      }
+      // Opaque, so the row lifts as itself when its context menu opens.
+      style={[
+        styles.row,
+        { backgroundColor: c.bg },
+        props.selected && [styles.selected, { backgroundColor: c.fillStrong }],
+      ]}
     >
+      {selecting ? (
+        <Icon
+          name={props.check ? 'checkCircle' : 'circle'}
+          size={22}
+          color={props.check ? c.tint : c.textTertiary}
+        />
+      ) : null}
       <AgentAvatar
         size={sizes.rowAvatar}
         agentId={s.agentId}
@@ -289,6 +309,25 @@ export const SessionRow = memo(function SessionRow(props: {
               </Text>
             </>
           )}
+          {props.mark ? (
+            <View style={styles.mark}>
+              <OsIcon
+                platform={props.mark.platform}
+                size={11}
+                color={props.mark.offline ? c.textTertiary : c.textSecondary}
+              />
+              <Text
+                style={[
+                  typeScale.footnote,
+                  styles.markName,
+                  { color: props.mark.offline ? c.textTertiary : c.textSecondary },
+                ]}
+                numberOfLines={1}
+              >
+                {props.mark.name}
+              </Text>
+            </View>
+          ) : null}
           {stateText && (
             <Text
               style={[
@@ -314,7 +353,7 @@ export const SessionRow = memo(function SessionRow(props: {
   )
 
   const body =
-    !props.start && !props.end ? (
+    selecting || (!props.start && !props.end) ? (
       row
     ) : (
       <SwipeRow start={props.start} end={props.end} item={s.id}>
@@ -404,4 +443,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   plan: { flexShrink: 1 },
+  mark: { flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 1, maxWidth: '35%' },
+  markName: { flexShrink: 1 },
 })
