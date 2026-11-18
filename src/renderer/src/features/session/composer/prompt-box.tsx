@@ -6,7 +6,7 @@ import { cn } from '@renderer/lib/utils'
 import { TextDialog, type TextDialogTarget } from '../attachments/text-dialog'
 import { AttachmentTray } from './attachment-tray'
 import { attachMention } from './attachments'
-import { ComposerEditor } from './editor'
+import { ComposerEditor, type GhostPrompt } from './editor'
 import { MentionFooter, MentionItem } from './mention-popover'
 import {
   mentionAt,
@@ -39,6 +39,7 @@ export function PromptBox({
   agentName,
   commands,
   placeholder,
+  ghost = null,
   label,
   size,
   top,
@@ -51,6 +52,8 @@ export function PromptBox({
   agentName: string
   commands: SlashCommand[]
   placeholder: string
+  /** A predicted prompt the empty box shows in the placeholder's place. */
+  ghost?: GhostPrompt | null
   label: string
   /** The text's least height, its padding and its line height, as CSS lengths. */
   size: { minHeight: string; padding: string; lineHeight?: string }
@@ -285,6 +288,7 @@ export function PromptBox({
             initialText={source.text}
             label={label}
             placeholder={placeholder}
+            ghost={ghost}
             disabled={disabled}
             chipContext={chips.chipContext}
             size={size}

@@ -365,6 +365,7 @@ export async function startTestHost(options: TestHostOptions = {}): Promise<Test
       sessionTitles: true,
       claudeTestEntrypoint: null,
       claudeRuns: {},
+      promptSuggestions: true,
       initialSetupDone: true,
       defaultAgent: null,
       computerUse: DEFAULT_SETTINGS.computerUse,

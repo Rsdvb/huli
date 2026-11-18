@@ -1,6 +1,7 @@
 // A Claude Code agent's common settings on its page: the auto-compact window for all models and
 // for each model, and the prompt cache duration, read from and saved to its settings file on the
-// agent's host; and Kettu's own settings for how its sessions run, the fallback model and budget.
+// agent's host; and Kettu's own settings for how its sessions run, the fallback model and budget,
+// and whether they predict the next prompt.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
@@ -317,6 +318,7 @@ export function ClaudeSettingsRows({ status }: { status: AgentStatus }) {
         models={settings ? settings.compact.filter((row) => row.name !== null) : []}
         loading={read.state === 'loading'}
       />
+      <PromptSuggestionsRow />
       {hostId === null && <ClaudeTestEntrypointRow />}
     </>
   )
@@ -470,6 +472,39 @@ function ClaudeRunRows({
         )}
       </RowShell>
     </>
+  )
+}
+
+/** Claude Code's predicted next prompt in the composer, for every Claude Code agent. */
+function PromptSuggestionsRow() {
+  const { useSettingsStore } = useHostScope()
+  const { t } = useTranslation('settings')
+  const [save, busy, error] = useAction()
+  // An older host sends none, and offers them as the default does.
+  const checked = useSettingsStore((s) => s.settings.general.promptSuggestions) ?? true
+  const name = t('agents.claudeSettings.suggestions.name')
+  return (
+    <RowShell>
+      <RowLine
+        text={
+          <RowText name={name} description={t('agents.claudeSettings.suggestions.description')} />
+        }
+      >
+        <SettingSwitch
+          label={name}
+          checked={checked}
+          disabled={busy}
+          onChange={(next) =>
+            save(() => useSettingsStore.getState().update({ general: { promptSuggestions: next } }))
+          }
+        />
+      </RowLine>
+      {error && (
+        <p role="status" className="k-row-note k-error" data-wrap="">
+          {error}
+        </p>
+      )}
+    </RowShell>
   )
 }
 

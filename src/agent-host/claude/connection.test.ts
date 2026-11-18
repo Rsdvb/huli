@@ -132,6 +132,7 @@ async function setup(
   spec: Partial<LaunchSpec> = {},
   claudeTestEntrypoint?: () => string | null,
   claudeRun?: () => ClaudeRunSettings | null,
+  claudePromptSuggestions?: () => boolean,
 ) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-sdk-'))
   dirs.push(dir)
@@ -162,6 +163,7 @@ async function setup(
     env: { PATH: '/usr/bin', HOME: '/home/ada', ...env },
     ...(claudeTestEntrypoint ? { claudeTestEntrypoint } : {}),
     ...(claudeRun ? { claudeRun } : {}),
+    ...(claudePromptSuggestions ? { claudePromptSuggestions } : {}),
     spawn: (options) => {
       spawned.push(options)
       const child = new FakeChild()
@@ -3861,5 +3863,107 @@ describe('the connection', () => {
   it('is the connection the driver makes', async () => {
     const s = await setup()
     expect(s.connection).toBeInstanceOf(ClaudeConnection)
+  })
+})
+
+describe("Claude Code's predicted next prompt", () => {
+  function suggestion(query: FakeQuery, text: unknown, uuid = 'sug-1'): SdkMessage {
+    return {
+      type: 'prompt_suggestion',
+      suggestion: text,
+      uuid,
+      session_id: query.sessionId,
+    } as SdkMessage
+  }
+
+  it("asks for it only while the setting is on, and only in the user's own sessions", async () => {
+    let on = false
+    const { sdk, connection } = await setup({}, {}, undefined, undefined, () => on)
+    await connection.newSession('/repo', {})
+    expect(sdk.last.options).not.toHaveProperty('promptSuggestions')
+    on = true
+    await connection.newSession('/repo', {})
+    expect(sdk.last.options.promptSuggestions).toBe(true)
+    for (const hidden of ['titles', 'options', 'limits', 'context', 'side', 'sample'] as const) {
+      await connection.newSession('/repo', { hidden })
+      expect(sdk.last.options).not.toHaveProperty('promptSuggestions')
+    }
+  })
+
+  it('offers the one after a turn as one clean line, and clears it on the next prompt', async () => {
+    const s = await setup({}, {}, undefined, undefined, () => true)
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit(assistant(query, `msg_${query.inputs.length}`, [{ type: 'text', text: 'ok' }]))
+      query.finish()
+      if (query.inputs.length === 1) {
+        query.emit(suggestion(query, '  run the\ttests\r\nnow\u0007 \u202eplease  '))
+      }
+    }
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'fix it' }])
+    await settle()
+    expect(target.thread.session.suggestion).toEqual({
+      id: 'sug-1',
+      text: 'run the tests now please',
+    })
+
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'run the tests now please' }])
+    await settle()
+    expect(target.thread.session.suggestion).toBeNull()
+    expect(s.ignored).not.toContain('prompt_suggestion')
+  })
+
+  it('cuts a long one, and drops an empty one or one the setting turned off since', async () => {
+    let on = true
+    const s = await setup({}, {}, undefined, undefined, () => on)
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    let next: unknown = 'x'.repeat(600)
+    s.sdk.script = (query) => {
+      query.running()
+      query.finish()
+      query.emit(suggestion(query, next, `sug-${query.inputs.length}`))
+    }
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'one' }])
+    await settle()
+    expect(target.thread.session.suggestion?.text).toBe('x'.repeat(500))
+
+    next = ' \n\u0000 '
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'two' }])
+    await settle()
+    expect(target.thread.session.suggestion).toBeNull()
+
+    next = 'commit it'
+    on = false
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'three' }])
+    await settle()
+    expect(target.thread.session.suggestion).toBeNull()
+  })
+
+  it('drops one for a conversation that moved on, and clears one when the agent starts a turn', async () => {
+    const s = await setup({}, {}, undefined, undefined, () => true)
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    s.sdk.script = (query) => {
+      // The first turn's comes only once the second prompt went.
+      if (query.inputs.length === 2) query.emit(suggestion(query, 'stale', 'sug-stale'))
+      query.running()
+      query.finish()
+      if (query.inputs.length === 2) query.emit(suggestion(query, 'fresh', 'sug-fresh'))
+    }
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'one' }])
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'two' }])
+    await settle()
+    expect(target.thread.session.suggestion).toEqual({ id: 'sug-fresh', text: 'fresh' })
+
+    // A turn Claude Code starts by itself, as when a background command ends.
+    s.sdk.last.running()
+    await settle()
+    expect(target.thread.session.suggestion).toBeNull()
   })
 })

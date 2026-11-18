@@ -210,6 +210,23 @@ export function Composer({
   const blockedBy = useBoxText(box, (text) => attachmentsBlock(attachments, text)?.message ?? null)
   const blocked = blockedBy === null ? null : attachmentsBlock(attachments, box.source.text)
   const { canSend, canQueue } = can(holdsMessage, blocked)
+  // The agent's predicted next prompt, faint in the empty box between turns until Esc puts it away.
+  // A phone has no Tab to take it with.
+  const empty = useBoxText(box, (text) => text === '')
+  const [ghostDismissed, setGhostDismissed] = useState<string | null>(null)
+  const predicted = session.suggestion ?? null
+  const ghost =
+    predicted &&
+    predicted.id !== ghostDismissed &&
+    idle &&
+    empty &&
+    attachments.length === 0 &&
+    !pending &&
+    !mustSwitch &&
+    !phone &&
+    !box.historyPosition
+      ? predicted
+      : null
   // Starting a message, not opening the session with a draft in it, attaches a closed session.
   const held = useRef(holdsMessage)
   useEffect(() => {
@@ -464,6 +481,23 @@ export function Composer({
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
+    // Tab fills the box with the predicted prompt, which never goes by itself; Esc puts it away.
+    if (
+      ghost &&
+      (event.key === 'Tab' || event.key === 'Escape') &&
+      !event.isComposing &&
+      event.keyCode !== 229 &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      (box.editor.current?.text() ?? '') === ''
+    ) {
+      event.preventDefault()
+      if (event.key === 'Tab') box.update(ghost.text)
+      else setGhostDismissed(ghost.id)
+      return
+    }
     if (onCycleKeys(event, cycle)) {
       event.preventDefault()
       return
@@ -614,6 +648,13 @@ export function Composer({
             agentName={agentName}
             commands={commands}
             placeholder={placeholder}
+            ghost={
+              ghost && {
+                text: ghost.text,
+                key: t('prompt.suggestion.key'),
+                label: t('prompt.suggestion.label', { text: ghost.text }),
+              }
+            }
             label={t('prompt.label', { agent: agentName })}
             size={{
               minHeight: 'calc(2 * var(--prose-size) + 14px)',

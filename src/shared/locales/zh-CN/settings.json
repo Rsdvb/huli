@@ -744,6 +744,10 @@
     },
     "claudeSettings": {
       "auto": "Auto",
+      "suggestions": {
+        "name": "输入建议",
+        "description": "每次回复后，Claude Code 会猜你接下来可能发什么，在空输入框里以浅色文字显示，按 Tab 填入。对所有 Claude Code Agent 生效。"
+      },
       "testEntrypoint": {
         "name": "测试入口标识",
         "description": "为本机新启动的 Claude Code 会话设置 CLAUDE_CODE_ENTRYPOINT。",
