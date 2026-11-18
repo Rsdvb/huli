@@ -793,12 +793,107 @@
   transition: transform 300ms var(--ease);
 }
 
+/* The largest sessions */
+.k-u-ss__by {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.k-u-ss__empty {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.k-u-ss__list {
+  display: grid;
+  grid-template-rows: repeat(var(--rows, 1), auto);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: column;
+  column-gap: 16px;
+  margin: 10px -8px 0;
+  padding: 0;
+  list-style: none;
+}
+.k-u-ss__row {
+  display: grid;
+  grid-template-columns: 18px 16px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--ink);
+}
+.k-u-ss__row:enabled:hover {
+  background: var(--hover);
+}
+.k-u-ss__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.k-u-ss__row:disabled {
+  cursor: default;
+}
+.k-u-ss__rank {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
+.k-u-ss__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.k-u-ss__title,
+.k-u-ss__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.k-u-ss__title {
+  font-size: 13px;
+}
+.k-u-ss__row:disabled .k-u-ss__title {
+  color: var(--muted);
+}
+.k-u-ss__meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.k-u-ss__value {
+  font-size: 13px;
+  font-weight: 500;
+}
+.k-u-ss__bar {
+  grid-column: 3 / 5;
+  height: 3px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--chip);
+}
+.k-u-ss__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transform-origin: left;
+}
+
 @container k-usage (max-width: 1080px) {
   .k-u-plans[data-cols='4'] {
     --cols: 2;
   }
 }
 @container k-usage (max-width: 900px) {
+  .k-u-ss__list {
+    grid-template-rows: none;
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-flow: row;
+  }
   .k-u-figs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

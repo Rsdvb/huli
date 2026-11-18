@@ -19,6 +19,7 @@ import { useRefresh } from '@renderer/components/refresh'
 import { errorMessage } from '@renderer/lib/host'
 import { useHostContext, useHostHas } from '@renderer/lib/host-features'
 import { isMac, isWeb, isWindows } from '@renderer/lib/platform'
+import { useAppInfo } from '@renderer/lib/use-app-info'
 import { useNow } from '@renderer/lib/use-now'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { openSettingsItem } from '@renderer/stores/view'
@@ -37,7 +38,14 @@ import { PairDialog } from './remote-pairing'
 import { DeviceIcon, DeviceTile } from './remote-parts'
 import { RelaySignIn, RetryRelay } from './remote-relay'
 import { useRelayLine } from './relay-text'
-import { daysToRemoval, daysUnseen, focusDirectPort, kindLabel, lastSeen } from './remote-text'
+import {
+  daysToRemoval,
+  daysUnseen,
+  focusDirectPort,
+  kindLabel,
+  lastSeen,
+  olderDeviceVersion,
+} from './remote-text'
 import { EmptyRow, GroupNote, ItemLine, ItemRow } from './rows'
 import { useApply } from './use-apply'
 
@@ -303,6 +311,7 @@ export function DeviceRow({ device, online }: { device: PairedDevice; online: bo
   const { t } = useTranslation('settings')
   const now = useNow()
   const removal = online ? null : daysToRemoval(device, now)
+  const old = olderDeviceVersion(device, useAppInfo()?.version)
   return (
     <ItemRow
       item={device.id}
@@ -326,6 +335,7 @@ export function DeviceRow({ device, online }: { device: PairedDevice; online: bo
       }
     >
       <ItemLine>{kindLabel(t, device.kind)}</ItemLine>
+      {old && <ItemLine>{t('remote.device.oldApp', { version: old })}</ItemLine>}
     </ItemRow>
   )
 }

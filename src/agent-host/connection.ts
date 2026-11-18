@@ -361,6 +361,8 @@ export interface SessionOptions {
    * `newSession` takes it.
    */
   systemPromptAppend?: string
+  /** The session is a routine's run, which an agent's budget for routine runs holds. */
+  routine?: boolean
 }
 
 /** Kettu's memory as a session starts with it. */

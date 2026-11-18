@@ -464,11 +464,11 @@ export class RemoteServer {
     return session?.live && session.device.id === deviceId ? session : null
   }
 
-  /** A connection's hello opened a session, which it now belongs to. */
-  started(connection: DeviceConnection, session: DeviceSession): void {
+  /** A connection's hello, naming the device's app version, opened a session it now belongs to. */
+  started(connection: DeviceConnection, session: DeviceSession, version: string): void {
     this.connections.delete(connection)
     this.sessions.add(session)
-    this.options.devices.connected(session.device.id)
+    this.options.devices.connected(session.device.id, version)
     this.options.activity.opened(session.device.id)
     this.options.changed()
   }
@@ -859,7 +859,7 @@ class DeviceConnection {
     this.state = 'session'
     session.start(this)
     this.keepAlive(version)
-    this.server.started(this, session)
+    this.server.started(this, session, hello.client.version)
   }
 
   /** The connection now belongs to a session that was there before it, as active or standby. */

@@ -747,6 +747,24 @@
         "description": "Claude Code 让对话的 prompt cache 保持多久。Auto：订阅账号在限额内用 1 小时，API key 和云服务商用 5 分钟；1 小时的缓存写入收费更高。项目自己的设置在该项目里优先，改动从下一个会话起生效。",
         "5m": "5 分钟",
         "1h": "1 小时"
+      },
+      "runs": {
+        "fallback": {
+          "name": "备用模型",
+          "description": "主模型过载或不可用时改用这个模型，你发下一条消息时再试主模型。从下一个会话起生效。",
+          "none": "无",
+          "unlisted": "{{id}}（不在列表中）"
+        },
+        "budget": {
+          "name": "每次运行的预算（美元）",
+          "description": "例程的一次运行花费超过这个金额时停止。留空表示不限。从下一个会话起生效。",
+          "placeholder": "不限",
+          "invalid": "请填大于 0、不超过 10000 的金额，或留空。"
+        },
+        "allSessions": {
+          "name": "也用于所有会话",
+          "description": "这个 Agent 的每个会话，自打开起花费超过这个金额时停止。"
+        }
       }
     },
     "keyOnly": {
@@ -1677,6 +1695,8 @@
       "lastConnected": "上次连接",
       "onlineSince": "现在在线，{{time}} 连上",
       "never": "还没连接过",
+      "version": "Kettu 版本",
+      "oldApp": "这台设备上的 Kettu 是旧版（{{version}}），部分功能用不了。请在设备上更新。",
       "activity": "活动记录",
       "days": "最近 30 天",
       "activityNote": "只记做了什么，不记内容、命令和地址；最多留 500 条。",

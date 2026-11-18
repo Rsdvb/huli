@@ -204,6 +204,10 @@ export interface QueryOptions {
   settings?: FlagSettings
   extraArgs?: Record<string, string | null>
   persistSession?: boolean
+  /** Taken while the main model is overloaded or unavailable; the SDK throws when it is `model`. */
+  fallbackModel?: string
+  /** What the query may spend in USD from its start; past it a result is `error_max_budget_usd`. */
+  maxBudgetUsd?: number
   /** The id a new session gets. */
   sessionId?: string
   resume?: string

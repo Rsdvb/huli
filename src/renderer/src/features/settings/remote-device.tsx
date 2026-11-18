@@ -15,6 +15,7 @@ import {
 } from '@renderer/components/ui/alert-dialog'
 import { basename, monthDay } from '@renderer/lib/format'
 import { useHostContext } from '@renderer/lib/host-features'
+import { useAppInfo } from '@renderer/lib/use-app-info'
 import { useNow } from '@renderer/lib/use-now'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -25,8 +26,8 @@ import { Fact } from './agent-parts'
 import { CONFIRM, ControlError, DangerButton, IconAction, Pill, Spin } from './controls'
 import { DeviceIcon, DeviceTile } from './remote-parts'
 import { ThisBrowserBadge } from './remote-section'
-import { changeDevice, deviceLine, nextDeviceName, whenAt } from './remote-text'
-import { GroupLabel, ItemPageHeader, RowFrame, RowGroup, RowText } from './rows'
+import { changeDevice, deviceLine, nextDeviceName, olderDeviceVersion, whenAt } from './remote-text'
+import { GroupLabel, GroupNote, ItemPageHeader, RowFrame, RowGroup, RowText } from './rows'
 
 const back = () => openSettingsItem('remote', null)
 
@@ -58,6 +59,7 @@ function DevicePageBody({ device, online }: { device: PairedDevice; online: bool
   const onHost = useHostContext()
   const now = useNow()
   const events = useActivity(device)
+  const old = olderDeviceVersion(device, useAppInfo()?.version)
   // The latest pairing, as the activity of the last 30 days still holds it.
   const paired = events?.find((event) => event.kind === 'paired')
   const joined = t(
@@ -94,7 +96,13 @@ function DevicePageBody({ device, online }: { device: PairedDevice; online: bool
           <RowGroup>
             <Fact name={t('remote.device.joined')}>{joined}</Fact>
             <Fact name={t('remote.device.lastConnected')}>{last}</Fact>
+            {device.version && (
+              <Fact name={t('remote.device.version')} mono>
+                {device.version}
+              </Fact>
+            )}
           </RowGroup>
+          {old && <GroupNote>{t('remote.device.oldApp', { version: old })}</GroupNote>}
         </section>
         <Activity device={device} events={events} />
         <section aria-label={t('remote.device.remove.name')} className="k-group">

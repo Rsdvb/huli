@@ -40,6 +40,75 @@ it('sends the exact Claude test label only when enabled and takes any text', asy
   }
 })
 
+describe("Claude Code agents' fallback model and budget", () => {
+  const run = { fallbackModel: 'claude-sonnet-5-5', budgetUsd: 2.5, budgetAllSessions: false }
+
+  it('reads a file from before them as no fallback and no budget', async () => {
+    await save({ version: 1, general: { language: 'en' } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.general.claudeRuns).toEqual({})
+    expect(hostSettings(settings, 'en').claudeRuns).toEqual({})
+  })
+
+  it('keeps valid entries and sends them to the host', async () => {
+    await save({ version: 1, general: { claudeRuns: { 'claude-code': run } } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(hostSettings(settings, 'en').claudeRuns).toEqual({ 'claude-code': run })
+    const none = { fallbackModel: null, budgetUsd: null, budgetAllSessions: true }
+    const next = mergeSettings(settings, { general: { claudeRuns: { 'claude-code': none } } })
+    expect(hostSettings(next, 'en').claudeRuns).toEqual({ 'claude-code': none })
+  })
+
+  it('drops a file entry that does not validate, leaving the default', async () => {
+    await save({
+      version: 1,
+      general: { claudeRuns: { 'claude-code': { ...run, budgetUsd: -1 } } },
+    })
+    expect((await SettingsStore.load(dir)).get().general.claudeRuns).toEqual({})
+  })
+
+  it('takes a model id and a budget above 0 up to the cap', () => {
+    for (const change of [
+      { fallbackModel: null, budgetUsd: null },
+      { budgetUsd: 0.01 },
+      { budgetUsd: 10_000 },
+      { fallbackModel: 'claude-opus-5-5[1m]' },
+    ]) {
+      expect(() =>
+        validateSettingsPatch({
+          general: { claudeRuns: { 'claude-code': { ...run, ...change } } },
+        }),
+      ).not.toThrow()
+    }
+  })
+
+  it('rejects other budgets, models, keys and agents', () => {
+    const bad: unknown[] = [
+      { 'claude-code': { ...run, budgetUsd: 0 } },
+      { 'claude-code': { ...run, budgetUsd: -5 } },
+      { 'claude-code': { ...run, budgetUsd: 10_000.01 } },
+      { 'claude-code': { ...run, budgetUsd: Number.POSITIVE_INFINITY } },
+      { 'claude-code': { ...run, budgetUsd: Number.NaN } },
+      { 'claude-code': { ...run, budgetUsd: '5' } },
+      { 'claude-code': { ...run, fallbackModel: 42 } },
+      { 'claude-code': { ...run, fallbackModel: '' } },
+      { 'claude-code': { ...run, fallbackModel: 'opus sonnet' } },
+      { 'claude-code': { ...run, fallbackModel: 'opus,sonnet' } },
+      { 'claude-code': { ...run, fallbackModel: 'x'.repeat(257) } },
+      { 'claude-code': { ...run, budgetAllSessions: 'yes' } },
+      { 'claude-code': { fallbackModel: null, budgetUsd: null } },
+      { 'claude-code': { ...run, maxTurns: 3 } },
+      { 'claude-code': null },
+      { codex: run },
+      { nobody: run },
+      [],
+    ]
+    for (const claudeRuns of bad) {
+      expect(() => validateSettingsPatch({ general: { claudeRuns } })).toThrow()
+    }
+  })
+})
+
 describe('the first start record on load', () => {
   it('leaves a host without a settings file to run its first start', async () => {
     const store = await SettingsStore.load(dir)

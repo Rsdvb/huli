@@ -33,6 +33,7 @@ import {
   useScrollTopOnTabPress,
   useShell,
 } from '../../components/shell'
+import { HostVersionBanner } from '../../components/HostVersionBanner'
 import { SyncNote } from '../../components/SyncNote'
 import { UpdateBanner } from '../../components/UpdateBanner'
 import { fleetLink, useFleet, useFleetLinks, wakeFleet } from '../../fleet'
@@ -1035,6 +1036,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         {host.loaded ? <SyncNote /> : null}
       </View>
       <UpdateBanner />
+      <HostVersionBanner />
       <FilterNote what="会话" />
     </View>
   )

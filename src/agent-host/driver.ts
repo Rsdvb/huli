@@ -4,6 +4,7 @@
 // in the agent's process trees so that an idle stop, a restart, a quit or a crash stops it too.
 
 import type { ChildProcess } from 'node:child_process'
+import type { ClaudeRunSettings } from '@shared/settings'
 import type { ConfigOption } from '@shared/thread'
 import type { AgentDefinition, LaunchSpec } from './catalog'
 import type { AgentConnection, ConnectionHooks } from './connection'
@@ -77,6 +78,8 @@ export interface HostedContext extends DriverContext {
   env: Env
   spawn: HostedSpawn
   claudeTestEntrypoint?(): string | null
+  /** The agent's fallback model and budget as the settings hold them now; null for none. */
+  claudeRun?(): ClaudeRunSettings | null
 }
 
 export interface HostedDriver extends StoredConfig {

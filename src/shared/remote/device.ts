@@ -27,6 +27,11 @@ export interface PairedDevice {
   addedAt: number
   /** When a session last opened or ended; while one is open, when it opened. */
   lastConnectedAt: number | null
+  /**
+   * The app version its hello named when a session last opened; absent until it opens one on a
+   * host that keeps it.
+   */
+  version?: string
 }
 
 /** What pairing learns of a device; the host derives its id and the times. */

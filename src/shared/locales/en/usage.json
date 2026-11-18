@@ -116,7 +116,8 @@
       "turns": "Turns don’t split by token type. Switch the metric to Tokens or Cost."
     },
     "prices": "Estimated at API prices as of {{date}}",
-    "unpriced": "{{tokens}} tokens have no price"
+    "unpriced": "{{tokens}} tokens have no price",
+    "savedCost": "prompt cache <b>saved about {{cost}}</b>"
   },
   "trend": {
     "title": "Over time",
@@ -148,6 +149,16 @@
     "plot": "{{title}}; use the arrow keys to read each value",
     "footer": "One line per agent · {{range}}",
     "footerOne": "{{agent}} · {{range}}"
+  },
+  "sessions": {
+    "title": "Sessions that used the most",
+    "titleCost": "Sessions that cost the most",
+    "by": "By {{metric}} · {{range}}",
+    "untitled": "Untitled session",
+    "outside": "Run outside Kettu",
+    "noProject": "No project",
+    "open": "Open session: {{title}}",
+    "empty": "No session in this range to rank by {{metric}}."
   },
   "limits": {
     "title": "Plan limits",

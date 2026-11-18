@@ -76,6 +76,7 @@ import {
   ScanNote,
   SectionError,
   SectionsSkeleton,
+  TopSessions,
   Trend,
 } from './sections'
 import {
@@ -760,6 +761,14 @@ export default function UsageScreen() {
             />
 
             <Breakdown summary={summary} agent={agent} metric={metric} scope={scope} />
+
+            <TopSessions
+              summary={summary}
+              agent={agent}
+              metric={metric}
+              scope={scope}
+              nameOf={nameOf}
+            />
 
             <Facts facts={facts} tokenFacts={tokenFacts} kind={kind} />
 

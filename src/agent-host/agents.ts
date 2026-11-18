@@ -1313,6 +1313,7 @@ export class AgentManager {
         ...context,
         spawn: run.spawn,
         claudeTestEntrypoint: () => this.deps.settings().claudeTestEntrypoint,
+        claudeRun: () => this.deps.settings().claudeRuns[slot.id] ?? null,
       })
     } catch (error) {
       slot.launched = null

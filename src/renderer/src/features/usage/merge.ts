@@ -67,6 +67,10 @@ export function mergeSummaries(summaries: readonly UsageSummary[]): UsageSummary
       summaries.map((s) => s.projects),
       (row) => JSON.stringify([row.agentId, row.project]),
     ),
+    // A host's sessions are its own, each opened through its folder, which names its host.
+    ...(summaries.some((s) => s.sessions) && {
+      sessions: summaries.flatMap((s) => s.sessions ?? []),
+    }),
     sources,
     first: firsts.length > 0 ? Math.min(...firsts) : null,
     agents: [...new Set(summaries.flatMap((s) => s.agents))],

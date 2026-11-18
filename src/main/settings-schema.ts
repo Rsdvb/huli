@@ -1,12 +1,15 @@
 // Pure validation and merging of settings.json and of the renderer's patches.
 
-import { isStartMode, takesStartMode } from '@shared/agents'
+import { isStartMode, takesClaudeSettings, takesStartMode } from '@shared/agents'
 import {
   AGENT_NAME_CHARS,
   CONFIG_VARIABLES,
   DEFAULT_SETTINGS,
   AGENT_COLORS,
+  CLAUDE_BUDGET_MAX_USD,
   isAgentColor,
+  isClaudeBudgetUsd,
+  isClaudeFallbackModel,
   isClaudeTestEntrypointLabel,
   nextAgentColor,
   isLinkSite,
@@ -106,6 +109,30 @@ const isStopShortcutValue: Check = (value, path) =>
     ? null
     : `"${path}" must be empty or two or more modifiers and a key, such as Control+Alt+Command+.`
 
+const CLAUDE_RUN_KEYS = ['fallbackModel', 'budgetUsd', 'budgetAllSessions']
+
+/** Each Claude Code agent's fallback model and budget, every field given. */
+const isClaudeRuns: Check = (value, path) => {
+  if (!isRecord(value)) return `"${path}" must be an object`
+  for (const [id, run] of Object.entries(value)) {
+    const at = `${path}.${id}`
+    if (!isAgentId(id) || !takesClaudeSettings(id)) return `"${at}" is not a Claude Code agent`
+    if (!isRecord(run)) return `"${at}" must be an object`
+    const extra = Object.keys(run).find((key) => !CLAUDE_RUN_KEYS.includes(key))
+    if (extra !== undefined) return `Unknown setting "${at}.${extra}"`
+    if (run.fallbackModel !== null && !isClaudeFallbackModel(run.fallbackModel)) {
+      return `"${at}.fallbackModel" must be null or a model id without spaces or commas`
+    }
+    if (run.budgetUsd !== null && !isClaudeBudgetUsd(run.budgetUsd)) {
+      return `"${at}.budgetUsd" must be null or more than 0 and at most ${CLAUDE_BUDGET_MAX_USD}`
+    }
+    if (typeof run.budgetAllSessions !== 'boolean') {
+      return `"${at}.budgetAllSessions" must be a boolean`
+    }
+  }
+  return null
+}
+
 /** The sites the "Always open" choice remembers, each a host mapped to where it opens. */
 /** Apps the user always allows, each once, with an identity the host would make. */
 const MAX_ALLOWED_APPS = 500
@@ -191,6 +218,7 @@ const SECTION_FIELDS = {
       isClaudeTestEntrypointLabel(value)
         ? null
         : `"${path}" must be a valid custom Claude entrypoint label`,
+    claudeRuns: isClaudeRuns,
   },
   thread: {
     outlineSummaries: isBoolean,
@@ -1226,6 +1254,7 @@ export function withMovedAgent(
   }
   next.disabledAgents = next.disabledAgents.filter((id) => id !== agentId)
   delete next.startModes[agentId]
+  delete next.general.claudeRuns[agentId]
   delete next.agentNetwork.agents[agentId]
   if (next.general.defaultAgent === agentId) next.general.defaultAgent = null
   return next
@@ -1567,6 +1596,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     claudeTestEntrypoint: settings.general.claudeTestEntrypoint
       ? settings.general.claudeTestEntrypointLabel
       : null,
+    claudeRuns: structuredClone(settings.general.claudeRuns),
     defaultAgent: settings.general.defaultAgent,
     computerUse: structuredClone(settings.computerUse),
     agentNetwork: structuredClone(settings.agentNetwork),

@@ -753,6 +753,24 @@
         "description": "How long Claude Code keeps a conversation’s prompt cache warm. Auto is 1 hour on a subscription within its limits, and 5 minutes on an API key or a cloud provider; 1-hour cache writes cost more. A project’s own settings win in that project, and a change applies from the next session.",
         "5m": "5 minutes",
         "1h": "1 hour"
+      },
+      "runs": {
+        "fallback": {
+          "name": "Fallback model",
+          "description": "Claude Code switches to this model while the main one is overloaded or unavailable, and tries the main one again at your next message. Applies from the next session.",
+          "none": "None",
+          "unlisted": "{{id}} (not listed)"
+        },
+        "budget": {
+          "name": "Budget per run (USD)",
+          "description": "A routine’s run stops once it would spend more than this. Leave it empty for no limit. Applies from the next session.",
+          "placeholder": "No limit",
+          "invalid": "Enter an amount above 0 and up to 10,000, or leave it empty."
+        },
+        "allSessions": {
+          "name": "Also for all sessions",
+          "description": "Every session of this agent stops once it has spent this much since it was opened."
+        }
       }
     },
     "keyOnly": {
@@ -1697,6 +1715,8 @@
       "lastConnected": "Last connected",
       "onlineSince": "Online now, connected at {{time}}",
       "never": "Never",
+      "version": "Kettu version",
+      "oldApp": "Kettu on this device is an older version ({{version}}), so some features won’t work. Update it on the device.",
       "activity": "Activity",
       "days": "Last 30 days",
       "activityNote": "Only what happened is kept, never content, commands or addresses; at most 500 events.",

@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AgentAccount, ContextBreakdown, PlanLimit } from '@shared/agent-host'
 import { canonicalClaudeModel } from '@shared/agents'
+import type { ClaudeRunSettings } from '@shared/settings'
 import type { ConfigOption, PendingElicitation, TokenTotals, ToolEntry } from '@shared/thread'
 import {
   AgentRequestError,
@@ -150,6 +151,29 @@ function signInSettings(settings: Record<string, unknown>): Record<string, unkno
   const picked: Record<string, unknown> = {}
   for (const key of SIGN_IN_SETTINGS) if (settings[key] !== undefined) picked[key] = settings[key]
   return picked
+}
+
+/**
+ * The fallback model and budget a session's query takes from its agent's settings: none for a
+ * session Kettu opens for itself, no fallback that is the main model, and the budget for a
+ * routine's run, or for every session when the settings say so.
+ */
+function runLimits(
+  run: ClaudeRunSettings | null,
+  options: SessionOptions,
+  mainModel: string | null,
+): { fallbackModel?: string; maxBudgetUsd?: number } {
+  if (!run || options.hidden) return {}
+  const { fallbackModel: fallback, budgetUsd: budget } = run
+  const sameModel =
+    fallback !== null &&
+    mainModel !== null &&
+    canonicalClaudeModel(fallback) === canonicalClaudeModel(mainModel)
+  const budgeted = options.routine === true || run.budgetAllSessions
+  return {
+    ...(fallback !== null && !sameModel ? { fallbackModel: fallback } : {}),
+    ...(budget !== null && budgeted ? { maxBudgetUsd: budget } : {}),
+  }
 }
 
 /** How Claude Code says a request failed for want of a sign-in. */
@@ -872,6 +896,10 @@ export class ClaudeConnection implements AgentConnection {
     const mode: PermissionMode = modes.includes(wanted as PermissionMode)
       ? (wanted as PermissionMode)
       : 'default'
+    const mainModel =
+      typeof settings.values.model === 'string'
+        ? settings.values.model
+        : (this.env.ANTHROPIC_MODEL ?? null)
     const input = new Input()
     const windowOf = (model: string): number | null =>
       contextWindow(session.compact, model, ownWindow(session.totals, model))
@@ -1025,6 +1053,7 @@ export class ClaudeConnection implements AgentConnection {
       ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(plugins.length > 0 ? { plugins } : {}),
       ...(Object.keys(flags).length > 0 ? { settings: flags } : {}),
+      ...runLimits(this.context.claudeRun?.() ?? null, options, mainModel),
       extraArgs: { 'replay-user-messages': null },
       ...(hidden ? { persistSession: false } : {}),
       ...(how.from
@@ -1062,11 +1091,7 @@ export class ClaudeConnection implements AgentConnection {
     if (servers.some((server) => server.secret)) this.addSecretServers(session, query, servers)
     this.reportAccount(init.account)
     session.models = init.models ?? []
-    const model =
-      typeof settings.values.model === 'string'
-        ? settings.values.model
-        : (this.env.ANTHROPIC_MODEL ?? null)
-    session.choices.model = settingsModel(session.models, model)
+    session.choices.model = settingsModel(session.models, mainModel)
     if (typeof settings.values.effortLevel === 'string') {
       session.choices.effort = settings.values.effortLevel
     }
@@ -1309,9 +1334,9 @@ export class ClaudeConnection implements AgentConnection {
     if (turn.cancelled || aborted) turn.stopReason = 'cancelled'
     else if (result.stop_reason === 'max_tokens') turn.stopReason = 'max_tokens'
     else if (result.stop_reason === 'refusal') turn.stopReason = 'refusal'
-    else if (result.subtype === 'error_max_turns' || result.subtype === 'error_max_budget_usd') {
-      turn.stopReason = 'max_turn_requests'
-    } else if (result.is_error) {
+    else if (result.subtype === 'error_max_turns') turn.stopReason = 'max_turn_requests'
+    // A budget that ran out fails the turn with Claude Code's own words, which name the budget.
+    else if (result.is_error) {
       const text =
         (result.subtype === 'success' ? result.result : result.errors?.join('\n')) ||
         turn.notice ||

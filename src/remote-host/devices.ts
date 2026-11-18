@@ -55,7 +55,7 @@ const isTime = (value: unknown): value is number =>
 
 function parseDevice(value: unknown): StoredDevice | null {
   if (typeof value !== 'object' || value === null) return null
-  const { id, publicKey, name, kind, platform, model, addedAt, lastConnectedAt, push } =
+  const { id, publicKey, name, kind, platform, model, addedAt, lastConnectedAt, version, push } =
     value as Record<string, unknown>
   if (typeof id !== 'string' || publicKeyBytes(publicKey) === null) return null
   if (!isDeviceName(name) || !isDeviceField(kind) || !isDeviceField(platform)) return null
@@ -74,6 +74,8 @@ function parseDevice(value: unknown): StoredDevice | null {
     model: kept,
     addedAt,
     lastConnectedAt,
+    // Absent from files written before versions were kept; one that does not read is dropped alone.
+    ...(isDeviceField(version) ? { version } : {}),
     ...(notifications ? { push: notifications } : {}),
   }
 }
@@ -241,13 +243,14 @@ export class DeviceStore {
   }
 
   /**
-   * Notes a session opening or ending now; the write waits a moment, as connections come in
-   * bursts.
+   * Notes a session opening or ending now, and the app version a session opens with; the write
+   * waits a moment, as connections come in bursts.
    */
-  connected(id: string): void {
+  connected(id: string, version?: string): void {
     const device = this.byId.get(id)
     if (!device) return
-    this.put({ ...device, lastConnectedAt: this.now() })
+    const known = isDeviceField(version) ? { version } : {}
+    this.put({ ...device, ...known, lastConnectedAt: this.now() })
     this.save()
   }
 
