@@ -59,10 +59,12 @@ import {
   metricKind,
   metricValue,
   oneDay,
+  periodOf,
   seriesOf,
   trend,
   type AgentFilter,
   type Metric,
+  type PeriodUnit,
   type RangeChoice,
 } from './model'
 import {
@@ -92,20 +94,40 @@ import { useUsage } from './useUsage'
 import { inlineReset, isExhausted } from '../ui/session/limits'
 import { useTicking } from '../ui/session/ticking'
 
-type Period = '1' | '7' | '30' | 'all'
+type Period = PeriodUnit | 'all'
 
 const PERIODS = [
-  { key: '1', label: '今天' },
-  { key: '7', label: '7 天' },
-  { key: '30', label: '30 天' },
+  { key: 'day', label: '日' },
+  { key: 'week', label: '周' },
+  { key: 'month', label: '月' },
+  { key: 'year', label: '年' },
   { key: 'all', label: '全部' },
 ] as const
 
-const PERIOD_WORDS: Record<Period, string> = {
-  '1': '今天',
-  '7': '最近 7 天',
-  '30': '最近 30 天',
-  all: '至今',
+const NEAR_WORDS: Record<PeriodUnit, [string, string]> = {
+  day: ['今天', '昨天'],
+  week: ['本周', '上周'],
+  month: ['本月', '上月'],
+  year: ['今年', '去年'],
+}
+
+const UNIT_WORDS: Record<PeriodUnit, string> = { day: '天', week: '周', month: '月', year: '年' }
+
+/** How the page names a period: 今天, 上周, 2025年10月. */
+function periodWord(unit: PeriodUnit, step: number, today: number, near = true): string {
+  if (near && (step === 0 || step === -1)) return NEAR_WORDS[unit][-step]!
+  const { from, to } = periodOf(unit, step, today)
+  const d = new Date(from)
+  const sameYear = d.getFullYear() === new Date(today).getFullYear()
+  switch (unit) {
+    case 'day':
+    case 'week':
+      return rangeText(from, to)
+    case 'month':
+      return sameYear ? `${d.getMonth() + 1}月` : `${d.getFullYear()}年${d.getMonth() + 1}月`
+    case 'year':
+      return `${d.getFullYear()}年`
+  }
 }
 
 const WINDOWS: Record<string, string> = {
@@ -173,8 +195,8 @@ export default function UsageScreen() {
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
-  const [choice, setChoice] = useState<RangeChoice>({ kind: '1' })
-  const [lastPeriod, setLastPeriod] = useState<Period>('1')
+  const [choice, setChoice] = useState<RangeChoice>({ kind: 'day', step: 0 })
+  const [lastPeriod, setLastPeriod] = useState<Period>('day')
   const [wanted, setWanted] = useState<UsageScope>('computer')
   const [agent, setAgent] = useState<AgentFilter>('all')
   const [metric, setMetric] = useState<Metric>('tokens')
@@ -255,7 +277,14 @@ export default function UsageScreen() {
             scope,
           ),
         }
-      : trend(days, range, FIRST_DAY, metric, scope)
+      : trend(
+          days,
+          range,
+          FIRST_DAY,
+          metric,
+          scope,
+          read.choice.kind === 'year' ? 'month' : undefined,
+        )
     return {
       kind: metricKind(metric, scope),
       days,
@@ -305,7 +334,17 @@ export default function UsageScreen() {
   const choosePeriod = (next: Period) => {
     setHour(null)
     setLastPeriod(next)
-    setChoice({ kind: next })
+    setChoice(next === 'all' ? { kind: 'all' } : { kind: next, step: 0 })
+  }
+
+  // ‹ and › move a calendar period back and forth, never past the current one.
+  const stepPeriod = (by: number) => {
+    if (choice.kind === 'all' || choice.kind === 'custom') return
+    const step = Math.min(0, choice.step + by)
+    if (step === choice.step) return
+    haptic.tap()
+    setHour(null)
+    setChoice({ kind: choice.kind, step })
   }
 
   const planSection = planAgents.length > 0 && (
@@ -387,10 +426,18 @@ export default function UsageScreen() {
     const custom = choice.kind === 'custom'
     const customLabel =
       choice.kind === 'custom' ? rangeText(choice.from, addDays(choice.to, 1)) : ''
-    const periodWord =
-      read.choice.kind === 'custom'
+    const readChoice = read.choice
+    const periodName =
+      readChoice.kind === 'custom'
         ? rangeText(range.from, range.to)
-        : PERIOD_WORDS[read.choice.kind]
+        : readChoice.kind === 'all'
+          ? '至今'
+          : periodWord(readChoice.kind, readChoice.step, today)
+    const stepping = choice.kind !== 'custom' && choice.kind !== 'all' ? choice : null
+    // The navigator names the period, and under 今天 or 上周 also its dates.
+    const shownWord = stepping ? periodWord(stepping.kind, stepping.step, today) : ''
+    const shownDates =
+      stepping && stepping.step >= -1 ? periodWord(stepping.kind, stepping.step, today, false) : ''
     const top = derived.byTokens[0]
     const requests = metricValue(tokenFacts.parts, 'requests', scope) ?? 0
     const waiting = usage.loading && read.key !== usage.key
@@ -434,9 +481,9 @@ export default function UsageScreen() {
             <Text style={[typeScale.lead, styles.flex, { color: c.text }]}>
               {tokenFacts.tokens > 0
                 ? agent === 'all'
-                  ? `${periodWord} ${derived.byTokens.length} 个 Agent 用了 ${compact(tokenFacts.tokens)} token。`
-                  : `${periodWord} ${nameOf(agent)} 用了 ${compact(tokenFacts.tokens)} token。`
-                : `${periodWord}还没有用量。`}
+                  ? `${periodName} ${derived.byTokens.length} 个 Agent 用了 ${compact(tokenFacts.tokens)} token。`
+                  : `${periodName} ${nameOf(agent)} 用了 ${compact(tokenFacts.tokens)} token。`
+                : `${periodName}还没有用量。`}
             </Text>
           </View>
           {tightest && (
@@ -497,6 +544,45 @@ export default function UsageScreen() {
             <Icon name="calendar" size={20} color={custom ? c.tint : c.text} />
           </Press>
         </View>
+        {stepping && (
+          <View style={styles.stepRow}>
+            <Press
+              onPress={() => stepPeriod(-1)}
+              accessibilityRole="button"
+              accessibilityLabel={`上一${UNIT_WORDS[stepping.kind]}`}
+              hitSlop={8}
+              style={[styles.stepButton, { backgroundColor: c.fill }]}
+            >
+              <Icon name="chevronLeft" size={16} color={c.text} weight="semibold" />
+            </Press>
+            <View style={styles.stepLabel} accessible accessibilityRole="text">
+              <Text style={[typeScale.headline, { color: c.text }]} numberOfLines={1}>
+                {shownWord}
+              </Text>
+              {shownDates !== '' && (
+                <Text
+                  style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}
+                  numberOfLines={1}
+                >
+                  {shownDates}
+                </Text>
+              )}
+            </View>
+            <Press
+              onPress={() => stepPeriod(1)}
+              disabled={stepping.step >= 0}
+              accessibilityRole="button"
+              accessibilityLabel={`下一${UNIT_WORDS[stepping.kind]}`}
+              hitSlop={8}
+              style={[
+                styles.stepButton,
+                { backgroundColor: c.fill, opacity: stepping.step >= 0 ? 0.35 : 1 },
+              ]}
+            >
+              <Icon name="chevronRight" size={16} color={c.text} weight="semibold" />
+            </Press>
+          </View>
+        )}
 
         {usage.error ? (
           <View style={styles.inlineError}>
@@ -1030,6 +1116,15 @@ const styles = StyleSheet.create({
   planReset: { textAlign: 'right' },
   periodRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingTop: space.xxl },
   customRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingTop: space.md },
+  stepButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepLabel: { flex: 1, alignItems: 'center', gap: 2 },
   calendar: {
     width: 44,
     height: 40,

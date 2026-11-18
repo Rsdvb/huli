@@ -44,9 +44,9 @@ export interface HoursRead {
 }
 
 export function choiceKey(choice: RangeChoice, scope: UsageScope): string {
-  return choice.kind === 'custom'
-    ? `${scope}:custom:${choice.from}:${choice.to}`
-    : `${scope}:${choice.kind}`
+  if (choice.kind === 'custom') return `${scope}:custom:${choice.from}:${choice.to}`
+  if (choice.kind === 'all') return `${scope}:all`
+  return `${scope}:${choice.kind}:${choice.step}`
 }
 
 export function useUsage(
