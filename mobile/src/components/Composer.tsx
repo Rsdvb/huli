@@ -629,7 +629,7 @@ export function Composer(props: ComposerProps) {
     if (room() <= 0) return
     const permission = await ImagePicker.requestCameraPermissionsAsync()
     if (!permission.granted) {
-      Alert.alert('不能使用相机', '请在系统设置里允许 Huli 使用相机。', [
+      Alert.alert('不能使用相机', '请在系统设置里允许纸鸢使用相机。', [
         { text: '取消', style: 'cancel' },
         { text: '去设置', onPress: () => void Linking.openSettings() },
       ])

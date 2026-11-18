@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'cloud/test/**/*.test.ts'],
+    // A poll waits for a connection or a file that comes later under a loaded full run; its 1 s
+    // default failed there now and then though the thing came.
+    expect: { poll: { timeout: 5_000 } },
     // A full run on Windows starts processes and writes files many times slower than on Linux,
     // so tests that write a few hundred files outlast the defaults there.
     ...(process.platform === 'win32' ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}),

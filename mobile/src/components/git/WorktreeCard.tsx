@@ -201,7 +201,7 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
         <Icon icon={G.info} size={14} color={c.tint} />
         <Text style={[styles.lineText, { color: c.textSecondary, flex: 1 }]}>
           {state === 'missing'
-            ? `worktree 的文件夹在 Huli 之外被删掉了。发下一条消息时会按分支 ${branch} 重建。`
+            ? `worktree 的文件夹在纸鸢之外被删掉了。发下一条消息时会按分支 ${branch} 重建。`
             : `worktree 的文件夹已删除。发下一条消息时会按分支 ${branch} 重建。`}
         </Text>
       </View>
@@ -225,7 +225,7 @@ const STATE_TEXT: Record<SessionWorktree['state'], string> = {
   setup: '正在准备 worktree…',
   'setup-failed': 'worktree 没能准备好',
   ready: '就绪',
-  missing: '文件夹在 Huli 之外被删掉了',
+  missing: '文件夹在纸鸢之外被删掉了',
   removed: '文件夹已删除',
   gone: 'worktree 和分支都已删除',
 }

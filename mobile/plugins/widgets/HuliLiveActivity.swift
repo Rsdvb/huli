@@ -117,7 +117,7 @@ struct LiveModel {
 
   private init(local: HuliLocalState, attributes: HuliActivityAttributes) {
     phase = LivePhase(rawValue: local.phase) ?? .running
-    title = LiveModel.text(local.title) ?? LiveModel.text(local.agent) ?? "Huli 会话"
+    title = LiveModel.text(local.title) ?? LiveModel.text(local.agent) ?? "纸鸢会话"
     detail = LiveModel.text(local.doing)
     // One the computer started by push names the computer only in its sealed attributes.
     let hostName =
@@ -164,9 +164,9 @@ struct LiveModel {
       detail = nil
     } else {
       title = "有请求等你处理"
-      detail = content == nil ? "打开 Huli 查看" : nil
+      detail = content == nil ? "打开纸鸢查看" : nil
     }
-    source = hostName ?? "Huli"
+    source = hostName ?? "纸鸢"
     since = (info?["at"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
     until = nil
     running = nil
@@ -180,7 +180,7 @@ struct LiveModel {
     phase = LivePhase(rawValue: content["phase"] as? String ?? "") ?? .running
     let sessionTitle = quiet ? nil : LiveModel.text(content["title"])
     let agent = LiveModel.text(content["agent"])
-    title = sessionTitle ?? agent ?? "Huli 会话"
+    title = sessionTitle ?? agent ?? "纸鸢会话"
     let planInfo = content["plan"] as? [String: Any]
     let current = quiet ? nil : LiveModel.text(planInfo?["current"])
     if phase == .done {
@@ -212,7 +212,7 @@ struct LiveModel {
 
   /// The line under the title; a state that may have gone stale says so.
   func detailLine(stale: Bool) -> String? {
-    if stale && !phase.finished { return "可能不是最新，打开 Huli 查看" }
+    if stale && !phase.finished { return "可能不是最新，打开纸鸢查看" }
     return detail
   }
 

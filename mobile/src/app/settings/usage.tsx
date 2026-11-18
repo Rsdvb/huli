@@ -64,7 +64,7 @@ export default function UsageRecords() {
     const name = agentName(log.agentId)
     const ok = await confirm({
       title: `重新导入 ${name} 的日志？`,
-      message: `Huli 会清除从 ${name} 导入的数据，然后重新读取它的日志。Agent 已经从日志中删除的历史无法恢复。`,
+      message: `纸鸢会清除从 ${name} 导入的数据，然后重新读取它的日志。Agent 已经从日志中删除的历史无法恢复。`,
       confirm: '重新导入',
     })
     if (!ok || !host.link) return
@@ -78,8 +78,8 @@ export default function UsageRecords() {
 
   const clear = async () => {
     const ok = await confirm({
-      title: '清除 Huli 的用量记录？',
-      message: '删除 Huli 自己统计的数据。Agent 自己的日志不受影响。',
+      title: '清除纸鸢的用量记录？',
+      message: '删除纸鸢自己统计的数据。Agent 自己的日志不受影响。',
       confirm: '清除记录',
     })
     if (!ok || !host.link) return
@@ -99,12 +99,12 @@ export default function UsageRecords() {
         <>
           {value.unavailable ? (
             <Text style={[typeScale.footnote, styles.note, { color: c.danger }]}>
-              无法读取用量数据库。请重启 Huli；如果仍然无法读取，请报告问题。
+              无法读取用量数据库。请重启纸鸢；如果仍然无法读取，请报告问题。
             </Text>
           ) : null}
           <ListGroup
             header="统计来源"
-            footer="同时统计 Claude Code、Codex 和 opencode 在 Huli 之外的日志。只读 token 数、模型和时间，不读内容。"
+            footer="同时统计 Claude Code、Codex 和 opencode 在纸鸢之外的日志。只读 token 数、模型和时间，不读内容。"
           >
             <SwitchRow
               title="统计电脑上的用量"
@@ -171,12 +171,12 @@ export default function UsageRecords() {
             header="危险操作"
             footer={
               value.recordSince
-                ? `删除 Huli 自己统计的数据（${dateText(value.recordSince)} 起）。Agent 自己的日志不受影响。`
-                : '删除 Huli 自己统计的数据。Agent 自己的日志不受影响。'
+                ? `删除纸鸢自己统计的数据（${dateText(value.recordSince)} 起）。Agent 自己的日志不受影响。`
+                : '删除纸鸢自己统计的数据。Agent 自己的日志不受影响。'
             }
           >
             <ListRow
-              title="清除 Huli 的记录…"
+              title="清除纸鸢的记录…"
               icon="trash"
               plainIcon
               iconTint={c.danger}

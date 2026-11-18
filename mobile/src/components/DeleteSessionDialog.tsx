@@ -73,7 +73,7 @@ export function DeleteSessionDialog(props: {
 
   let stakeLine: string | null = null
   if (stake && folder) {
-    if (stake.files === null) stakeLine = `Huli 没能检查它的文件夹 ${name} 里有没有未提交的文件。`
+    if (stake.files === null) stakeLine = `纸鸢没能检查它的文件夹 ${name} 里有没有未提交的文件。`
     else if (worktree) {
       stakeLine =
         stake.files === 0
@@ -85,7 +85,7 @@ export function DeleteSessionDialog(props: {
     (children > 0
       ? `对话、历史记录及其 ${children} 个子会话将无法恢复。归档会保留它们。`
       : '对话及其历史记录将无法恢复。归档会保留两者。') +
-    (shared ? ` ${shared} 自己保留的那份，Huli 删不掉。` : '')
+    (shared ? ` ${shared} 自己保留的那份，纸鸢删不掉。` : '')
   const canArchive = summary.parentId === null && summary.archivedAt === null
 
   return (

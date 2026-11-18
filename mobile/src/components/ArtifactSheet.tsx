@@ -147,7 +147,7 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
         ) : null}
       </View>
       <Text style={[typeScale.footnote, styles.hint, { color: c.textTertiary }]}>
-        {session ? '在电脑上的 Huli 里可以编辑它。' : '做它的会话已经不在了。'}
+        {session ? '在电脑上的纸鸢里可以编辑它。' : '做它的会话已经不在了。'}
       </Text>
 
       <ListGroup header="版本">

@@ -1,45 +1,59 @@
-// Huli's fox as the app icon draws it, in vector: on its orange tile, or the face alone.
+// Kite's icon as the home screen shows it, in vector: tools/huli/brand/kite-light.svg on its tile.
 
 import { useId } from 'react'
-import Svg, { Defs, LinearGradient, Path, Polygon, Rect, Stop } from 'react-native-svg'
+import Svg, { Circle, ClipPath, Defs, G, LinearGradient, Path, Rect, Stop } from 'react-native-svg'
 import { brand } from './tokens'
 
-const FOX = brand.fox
+const KITE = brand.kite
+const SHAPE = 'M0 -153 L151 0 L0 297 L-151 0 Z'
 
-function Face() {
-  return (
-    <>
-      <Polygon points="278,205 470,366 316,428" fill={FOX.face} />
-      <Polygon points="746,205 554,366 708,428" fill={FOX.faceShade} />
-      <Polygon points="300,274 422,380 318,420" fill={FOX.ear} />
-      <Polygon points="724,274 602,380 706,420" fill={FOX.ear} />
-      <Polygon points="512,354 470,366 316,428 220,550 512,818" fill={FOX.face} />
-      <Polygon points="512,354 554,366 708,428 804,550 512,818" fill={FOX.faceShade} />
-      <Polygon points="324,430 340,544 226,550" fill={FOX.cheek} />
-      <Polygon points="700,430 684,544 798,550" fill={FOX.cheek} />
-      <Path d="M374 556 Q418 518 462 546 Q418 590 374 556 Z" fill={FOX.nose} />
-      <Path d="M650 556 Q606 518 562 546 Q606 590 650 556 Z" fill={FOX.nose} />
-      <Path
-        d="M466 716 L558 716 Q566 720 560 730 L520 786 Q512 794 504 786 L464 730 Q458 720 466 716 Z"
-        fill={FOX.nose}
-      />
-    </>
-  )
-}
-
-/** The fox on its rounded orange tile, as the home screen shows the app. */
+/** The kite on its rounded orange tile, as the home screen shows the app. */
 export function HuliIcon(props: { size: number }) {
-  const id = `fox${useId().replace(/[^a-zA-Z0-9]/g, '')}`
+  const id = `kite${useId().replace(/[^a-zA-Z0-9]/g, '')}`
+  // Small icons get the thicker string the icon's small sizes have, so it stays a line.
+  const small = props.size < 40
   return (
     <Svg width={props.size} height={props.size} viewBox="0 0 1024 1024">
       <Defs>
-        <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor={FOX.groundLight} />
-          <Stop offset="1" stopColor={FOX.groundDark} />
+        <LinearGradient id={`${id}g`} x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor={KITE.groundLight} />
+          <Stop offset="1" stopColor={KITE.groundDark} />
         </LinearGradient>
+        <ClipPath id={`${id}s`}>
+          <Rect x="0" y="-200" width="200" height="560" />
+        </ClipPath>
       </Defs>
-      <Rect x="0" y="0" width="1024" height="1024" rx="230" fill={`url(#${id})`} />
-      <Face />
+      <Rect x="0" y="0" width="1024" height="1024" rx="230" fill={`url(#${id}g)`} />
+      <Path
+        d="M513 630 C507 680 457 731 407 745 S307 810 301 860"
+        fill="none"
+        stroke={KITE.paper}
+        strokeWidth={small ? 40 : 20}
+        strokeLinecap="round"
+      />
+      <Circle cx="301" cy="860" r={small ? 50 : 30} fill={KITE.paper} />
+      <G transform="translate(575 340) rotate(12)" strokeLinejoin="round">
+        <Path d={SHAPE} fill={KITE.paper} stroke={KITE.paper} strokeWidth={20} />
+        <Path
+          d={SHAPE}
+          fill={KITE.paperShade}
+          stroke={KITE.paperShade}
+          strokeWidth={20}
+          clipPath={`url(#${id}s)`}
+        />
+        {!small && (
+          <G
+            fill="none"
+            stroke={KITE.spar}
+            strokeOpacity={0.22}
+            strokeWidth={7}
+            strokeLinecap="round"
+          >
+            <Path d="M0 -143 L0 285" />
+            <Path d="M-141 0 Q0 -24 141 0" />
+          </G>
+        )}
+      </G>
     </Svg>
   )
 }

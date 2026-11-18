@@ -119,7 +119,7 @@ struct HuliSessionsWidget: Widget {
     StaticConfiguration(kind: "HuliSessions", provider: SessionsProvider()) { entry in
       SessionsWidgetView(entry: entry)
     }
-    .configurationDisplayName("Huli 会话")
+    .configurationDisplayName("纸鸢会话")
     .description("电脑上有几个会话在运行、几个在等你，点一下直接打开。")
     .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
   }
@@ -152,10 +152,10 @@ private struct Header: View {
 
   var body: some View {
     HStack(spacing: 5) {
-      Image(systemName: "pawprint.fill")
-        .font(.caption.weight(.bold))
+      KiteMark()
+        .frame(width: 14, height: 14)
         .foregroundStyle(Huli.accent)
-      Text("Huli")
+      Text("纸鸢")
         .font(.caption.weight(.semibold))
       Spacer(minLength: 4)
       if let date {
@@ -193,7 +193,7 @@ private struct Unpaired: View {
     VStack(alignment: .leading, spacing: 6) {
       Header(date: nil)
       Spacer(minLength: 0)
-      Text("打开 Huli 配对电脑")
+      Text("打开纸鸢配对电脑")
         .font(.subheadline.weight(.semibold))
       Text("配对后，这里会显示电脑上的会话。")
         .font(.caption)
@@ -343,8 +343,9 @@ private struct RectangularSessions: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 1) {
       HStack(spacing: 4) {
-        Image(systemName: "pawprint.fill")
-        Text("Huli")
+        KiteMark()
+          .frame(width: 16, height: 16)
+        Text("纸鸢")
       }
       .font(.headline)
       .widgetAccentable()
@@ -359,7 +360,7 @@ private struct RectangularSessions: View {
             .lineLimit(1)
         }
       } else {
-        Text("打开 Huli 配对电脑")
+        Text("打开纸鸢配对电脑")
           .font(.caption)
           .lineLimit(1)
       }

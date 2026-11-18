@@ -85,7 +85,7 @@ export default function SessionArtifacts() {
           </PressScale>
         )}
         ListFooterComponent={
-          <Text style={[styles.note, { color: c.textTertiary }]}>编辑要在电脑上的 Huli 里。</Text>
+          <Text style={[styles.note, { color: c.textTertiary }]}>编辑要在电脑上的纸鸢里。</Text>
         }
       />
     )

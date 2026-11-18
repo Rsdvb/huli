@@ -916,6 +916,11 @@
       "noteCodebuddy": "Codebuddy Code keeps the key in the settings.json of this agent’s folder; Kettu keeps no copy and never reads it back. Create the key on the site this agent uses: codebuddy.ai/profile/keys for International, copilot.tencent.com/profile for China.",
       "baseUrlOptional": "Base URL (optional)",
       "modelOptional": "Model (optional)",
+      "presets": "Fill in:",
+      "preset": {
+        "doubao": "Doubao (Volcano Engine Ark)",
+        "doubaoIntl": "Doubao (BytePlus)"
+      },
       "envSet": "Set. Kettu keeps it and passes it only to {{name}} when it starts."
     },
     "needsSignInLine": "needs you to sign in",

@@ -26,7 +26,7 @@ export function UpdateBanner() {
         </View>
         <View style={styles.flex}>
           <Text style={[typeScale.subhead, { color: c.text }]}>
-            Huli {latest.version} 可以更新了
+            纸鸢 {latest.version} 可以更新了
           </Text>
           <Text style={[typeScale.footnote, { color: c.textSecondary }]}>点按下载新版本</Text>
         </View>

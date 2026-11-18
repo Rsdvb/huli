@@ -271,7 +271,7 @@ function Routines(props: { switcher: ReactNode }) {
         <EmptyState
           icon="history"
           title="连上电脑后才能看定时任务"
-          message="Huli 正在连接你的电脑。"
+          message="纸鸢正在连接你的电脑。"
           action={{ label: '立即重连', onPress: () => retry() }}
         />
       )
@@ -429,7 +429,7 @@ function Routines(props: { switcher: ReactNode }) {
               ))}
             </View>
             <Text style={[typeScale.footnote, styles.footnote, { color: c.textTertiary }]}>
-              定时任务在电脑上的 Huli 开着时按电脑的时间运行。Agent 接近套餐限额时，它会先暂停。
+              定时任务在电脑上的纸鸢开着时按电脑的时间运行。Agent 接近套餐限额时，它会先暂停。
             </Text>
           </>
         ) : null}

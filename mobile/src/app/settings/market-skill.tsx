@@ -273,7 +273,7 @@ function AddSheet(props: {
       visible={props.visible}
       onClose={props.onClose}
       title={`安装 ${displayTitle(props.skill.name)}`}
-      message="由 Huli 保存在电脑上，在会话开始时交给这些 Agent。"
+      message="由纸鸢保存在电脑上，在会话开始时交给这些 Agent。"
       submitLabel="安装"
       onSubmit={() => props.onAdd(choice)}
     >

@@ -13,9 +13,17 @@ import {
 
 type AgentId = string
 
-export type RangeKind = '1' | '7' | '30' | 'all'
-/** A custom range holds local day starts, both ends included. */
-export type RangeChoice = { kind: RangeKind } | { kind: 'custom'; from: number; to: number }
+/** A calendar period: a day, a week from Monday, a month or a year. */
+export type PeriodUnit = 'day' | 'week' | 'month' | 'year'
+export type RangeKind = PeriodUnit | 'all'
+/**
+ * A period is `step` of its unit from the current one: 0 this one, -1 the one before. A custom
+ * range holds local day starts, both ends included.
+ */
+export type RangeChoice =
+  | { kind: 'all' }
+  | { kind: PeriodUnit; step: number }
+  | { kind: 'custom'; from: number; to: number }
 export type AgentFilter = AgentId | 'all'
 
 /** What the figures, the trend and the breakdowns count. */
@@ -96,6 +104,33 @@ export function monthStartOf(day: number): number {
   return new Date(date.getFullYear(), date.getMonth(), 1).getTime()
 }
 
+/** The whole period `step` units from the one `today` is in; it may run past today. */
+export function periodOf(unit: PeriodUnit, step: number, today: number): DayRange {
+  const date = new Date(today)
+  const y = date.getFullYear()
+  const m = date.getMonth()
+  switch (unit) {
+    case 'day': {
+      const from = addDays(today, step)
+      return { from, to: addDays(from, 1) }
+    }
+    case 'week': {
+      const from = addDays(weekStartOf(today, FIRST_DAY), 7 * step)
+      return { from, to: addDays(from, 7) }
+    }
+    case 'month':
+      return {
+        from: new Date(y, m + step, 1).getTime(),
+        to: new Date(y, m + step + 1, 1).getTime(),
+      }
+    case 'year':
+      return {
+        from: new Date(y + step, 0, 1).getTime(),
+        to: new Date(y + step + 1, 0, 1).getTime(),
+      }
+  }
+}
+
 export function rangeOf(choice: RangeChoice, today: number, first: number | null): DayRange {
   const to = addDays(today, 1)
   switch (choice.kind) {
@@ -103,8 +138,11 @@ export function rangeOf(choice: RangeChoice, today: number, first: number | null
       return { from: choice.from, to: addDays(choice.to, 1) }
     case 'all':
       return { from: first === null ? today : Math.min(dayOf(first), today), to }
-    default:
-      return { from: addDays(today, 1 - Number(choice.kind)), to }
+    default: {
+      // The current period stops at today: its days to come have no usage yet.
+      const period = periodOf(choice.kind, Math.min(0, choice.step), today)
+      return { from: period.from, to: Math.min(period.to, to) }
+    }
   }
 }
 
@@ -399,7 +437,8 @@ export type TrendUnit = 'hour' | 'day' | 'week' | 'month'
 
 /**
  * A bar per day for a range up to `DAILY_BARS` days, per week up to `WEEKLY_DAYS`, else per
- * month, clipped to the range, in the chosen metric.
+ * month, clipped to the range, in the chosen metric. `force` takes another unit, such as a bar
+ * per month for a calendar year.
  */
 export function trend(
   days: readonly DayTotal[],
@@ -407,9 +446,11 @@ export function trend(
   firstDay: number,
   metric: Metric = 'tokens',
   scope: UsageScope = 'computer',
+  force?: Exclude<TrendUnit, 'hour'>,
 ): { unit: Exclude<TrendUnit, 'hour'>; bars: TrendBar[] } {
   const inRange = days.filter((d) => d.day >= range.from && d.day < range.to)
-  const unit = inRange.length > WEEKLY_DAYS ? 'month' : inRange.length > DAILY_BARS ? 'week' : 'day'
+  const unit =
+    force ?? (inRange.length > WEEKLY_DAYS ? 'month' : inRange.length > DAILY_BARS ? 'week' : 'day')
   const bars: TrendBar[] = []
   for (const day of inRange) {
     const start =

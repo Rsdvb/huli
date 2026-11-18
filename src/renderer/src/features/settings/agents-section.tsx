@@ -681,6 +681,21 @@ interface KeyValue {
   model: string
 }
 
+// Providers whose Anthropic-compatible address Claude Code takes, filled in with one click. Volcano
+// Engine Ark's Coding Plan (Doubao), as its documentation gives it: no /v3 on the path.
+const PROVIDER_PRESETS = [
+  {
+    id: 'doubao',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding',
+    model: 'ark-code-latest',
+  },
+  {
+    id: 'doubaoIntl',
+    baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/coding',
+    model: 'ark-code-latest',
+  },
+] as const
+
 /** The provider's address, the key and the model; Codex takes only an OpenAI key. */
 function ApiKeyFields({
   status,
@@ -708,6 +723,19 @@ function ApiKeyFields({
       />
       {providers && (
         <>
+          <p className="kettu-sd__hint">
+            {t('agents.key.presets')}
+            {PROVIDER_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="ml-2 font-medium text-foreground underline-offset-2 hover:underline focus-ring rounded-xs"
+                onClick={() => onChange({ ...value, baseUrl: preset.baseUrl, model: preset.model })}
+              >
+                {t(`agents.key.preset.${preset.id}`)}
+              </button>
+            ))}
+          </p>
           <input
             id="agent-base-url"
             value={value.baseUrl}

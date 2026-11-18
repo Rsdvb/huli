@@ -202,7 +202,7 @@ jobs:
       # Beta review often refuses a fresh build with "try again later"; the upload itself stands.
       - name: Put it on TestFlight's public link
         continue-on-error: true
-        run: node ../tools/huli/ios/publish-testflight.mjs "$RUN" "Huli $VERSION 自动构建，包含电脑端和官方 Kettu 的最新改动。"
+        run: node ../tools/huli/ios/publish-testflight.mjs "$RUN" "纸鸢 $VERSION 自动构建，包含电脑端和官方 Kettu 的最新改动。"
         env:
           VERSION: ${{ needs.version.outputs.version }}
           RUN: ${{ github.run_number }}
@@ -332,5 +332,5 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           gh release create "v$VERSION" release/* --prerelease --target "$GITHUB_SHA" \
-            --title "Huli $VERSION" \
+            --title "Kite $VERSION" \
             --notes "Kettu $(git ls-remote https://github.com/KettuAI/Kettu.git refs/heads/main | cut -c1-8) 合并后的自动编译。"

@@ -2,7 +2,31 @@
 
 Huli is Kettu (AGPL-3.0, https://github.com/KettuAI/Kettu) built for one person's own use, with
 Kettu's cloud services cut off and its own name, so it installs beside an official Kettu without
-sharing data with it.
+sharing data with it. People see it as **Kite**, **纸鸢** in Chinese: the agent flies on the
+computer, you hold the string on your phone. Huli stays its name inside (see Names).
+
+## Names
+
+Only what people see is named Kite. These stay Huli, so existing installs, pairings and syncs keep
+working:
+
+- Ids: the desktop appId and app user model id `local.huli.app`; the phone's bundle ids
+  `io.github.rsdvb.huli*`, App Group `group.io.github.rsdvb.huli`, keychain groups, the `huli://`
+  scheme, widget kinds and activity types.
+- Data: `%APPDATA%\Huli` (and `~/Library/Application Support/Huli`, `~/.config/Huli`), which
+  `PACKAGED_DATA_FOLDER` in `src/main/user-data.ts` pins now that the product name is Kite;
+  `Huli Dev`; the home folder `~/.huli`.
+- Services: the update channel and Kite Cloud's host (`huli.132-145-200-0.sslip.io`), the server's
+  `huli-cloud` command and `HULI_*` settings, the pairing, relay and push constants, the repository
+  `Rsdvb/huli` and the `huli-*` workflows.
+- The phone app's `expo.name`, which names its Xcode project, scheme and `Huli.app` that
+  `tools/huli/ios` builds; the name people see comes from `mobile/plugins/appName.js` and
+  `mobile/locales/zh-Hans.json`.
+- Code identifiers (`HuliIcon`, `HuliLive`, `Huli*.swift`, …) and comments.
+
+Chinese copy says 纸鸢 wherever it names the product; English copy, window titles, the installer,
+shortcuts, the macOS menu bar, the tray's tooltip and file names say Kite; About says 纸鸢 Kite in
+Chinese. The account service is Kite Cloud in both.
 
 ## What differs from upstream
 
@@ -18,10 +42,10 @@ Code (kept small so upstream merges stay clean):
 | `src/shared/remote/relay.ts`, `relay-regions.ts`                                                                                         | `RELAY_URL` is Huli Cloud too (its relay, one region, Ashburn); `REGION_KEYS` are Huli's own region list keys (`tools/huli/region-list.mjs`, private halves in `~/.huli-keys`)                                                                                                       |
 | `src/shared/remote/pairing.ts`                                                                                                           | `HOSTED_WEB_URL` is Huli's web client, `https://app.huli.132-145-200-0.sslip.io`; `PAIRING_URL` points at `huli.invalid`, which never resolves                                                                                                                                       |
 | `src/shared/storage.ts`, `src/agent-host/worktrees/git.ts`                                                                               | home folder `~/.huli` instead of `~/.kettu`                                                                                                                                                                                                                                          |
-| `src/main/user-data.ts`                                                                                                                  | development data folder `Huli Dev`                                                                                                                                                                                                                                                   |
+| `src/main/user-data.ts`                                                                                                                  | development data folder `Huli Dev`; an installed build's, `Huli` (`PACKAGED_DATA_FOLDER`), which `src/main/index.ts` pins                                                                                                                                                            |
 | `src/main/index.ts`, `src/main/computer-use.ts`                                                                                          | app user model id `local.huli.app`                                                                                                                                                                                                                                                   |
-| `package.json`                                                                                                                           | productName `Huli` (data folder `%APPDATA%\Huli`), version 0.1.0                                                                                                                                                                                                                     |
-| `electron-builder.yml`                                                                                                                   | appId `local.huli.app`, productName `Huli`, `publish` is Huli's update channel (generic)                                                                                                                                                                                             |
+| `package.json`                                                                                                                           | productName `Kite`, version 0.1.0                                                                                                                                                                                                                                                    |
+| `electron-builder.yml`                                                                                                                   | appId `local.huli.app`, productName `Kite`, `publish` is Huli's update channel (generic)                                                                                                                                                                                             |
 | `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts` | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub |
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json`                              | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved                                                                                                                        |
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                    |
@@ -100,20 +124,47 @@ other paired computers' sessions (`mobile/src/fleet.ts`, `folders.tsx`, `homeLis
 
 Generated before a build (not hand edits, never committed):
 
-- `node tools/huli/rebrand.mjs` swaps the display name Kettu to Huli. Idempotent; the build
-  workflow runs it, and so must a local build (see Build) or a `pnpm dev` meant to look like Huli.
+- `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy
+  (`ZH_NAME`), dropping the spaces that set a Latin word off from Chinese, and puts Kite's artwork
+  in place. Idempotent; the build workflow runs it, and so must a local build (see Build) or a
+  `pnpm dev` meant to look like Kite.
   - Every locale but `star.json` (the prompts to star Kettu's repository) and `kettuImport.json`
     (the import from an official Kettu) has its values rewritten:
     the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the attribution and
     Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder `.kettu/`; and
     pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
+  - `ZH_APP_NAME` lists the Chinese strings whose `{{name}}` is the app's own (the macOS app menu,
+    the quit dialog, the tray's menu), which main fills with `app.name`, Kite: in Chinese they say
+    纸鸢. `ADD` adds the keys rebranded code reads: About's title, 纸鸢 Kite in Chinese.
   - `CODE` lists the exact display strings swapped in code: window titles, About, the update cards,
     the account menu's version line, the built-in theme's name, the Marketplace's own server, the
     first run's pictures, the Linux login item and the sign-in pages. When upstream changes one of
     those spellings the script warns `no longer holds …`; add the new spelling there.
   - It never touches tests: they read the constants the code uses (below).
-- `tools/huli/icon/fox.svg` is the icon; `tools/huli/icon/render.mjs` renders the desktop app's
-  `build/icon.png` and `build/icon.ico` and the phone app's `mobile/assets` from it.
+  - `ARTWORK`: it copies `tools/huli/brand/assets/desktop/`, a mirror of the repository, over
+    Kettu's icons (`build/icon.png`, `build/icon.ico`, `build/icon.icon`, emptied first), the
+    tray's images (`resources/tray`), the renderer's icon, mark and glyphs
+    (`src/renderer/src/assets/kettu-*.svg`) and the first run's pictures
+    (`assets/onboarding/fox-*.webp`, now paper kites). The tree keeps Kettu's, so Kettu's own icon
+    changes merge cleanly; it warns about a tray image or brand file upstream adds that Kite lacks.
+
+### Kite's artwork
+
+`tools/huli/brand/` holds the masters, SVG on a 1024 grid: `kite-light.svg` (the icon, white kite
+on orange), `kite-dark.svg`, `kite-tinted.svg`, `kite-glyph.svg` (one color, for themed icons),
+`kite-tray.svg` (the 18 pt tray glyph) and the first run's `scene-flying.svg` and
+`scene-resting.svg`. `render.mjs` renders the rest, all committed: the desktop's files into
+`assets/desktop/` (above) plus `assets/icon.icns` for a Mac without Xcode 26, and the phone's
+straight into `mobile/assets`: `kite.icon` (Icon Composer: ground, kite and string layers with
+their dark appearances, which iOS 26 draws in Liquid Glass and derives tinted and clear from),
+`ios/icon-{light,dark,tinted}.png` (the same flat, for `ios.icon` as an object should the
+`.icon` not build), `icon.png`, the splash, the favicon and Android's adaptive layers. After
+changing a master:
+
+```powershell
+npm i --no-save --no-package-lock --prefix tools/huli/brand @resvg/resvg-js sharp
+node tools/huli/brand/render.mjs ..\ref\kite-preview.png   # the optional sheet of every icon
+```
 
 ## Tests
 
@@ -197,7 +248,7 @@ npx -y pnpm@10.11.1 install --frozen-lockfile
 node tools/huli/rebrand.mjs
 npx -y pnpm@10.11.1 fetch:cua-driver
 npx -y pnpm@10.11.1 fetch:device-helpers
-npx -y pnpm@10.11.1 dist:win      # dist\Huli-<version>-x64-setup.exe
+npx -y pnpm@10.11.1 dist:win      # dist\Kite-<version>-x64-setup.exe
 ```
 
 The rebrand leaves its output in the working tree; never commit it.

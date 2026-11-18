@@ -49,6 +49,58 @@ enum Huli {
   }
 }
 
+/// The app's mark beside its name: Kite's tray glyph (tools/huli/brand/kite-tray.svg), the kite
+/// with its shaded half lighter and its string, drawn in the foreground style.
+struct KiteMark: View {
+  var body: some View {
+    ZStack {
+      KiteMarkShape(part: .lit)
+      KiteMarkShape(part: .shade).opacity(0.55)
+    }
+    .aspectRatio(1, contentMode: .fit)
+  }
+}
+
+/// A part of the mark, on the glyph's 18-unit canvas scaled to fit.
+struct KiteMarkShape: Shape {
+  enum Part { case lit, shade }
+  let part: Part
+
+  // The kite's corners: top, right, bottom (where the string is tied) and left.
+  private static let top = CGPoint(x: 12.09, y: 1.03)
+  private static let right = CGPoint(x: 15.46, y: 6.51)
+  private static let bottom = CGPoint(x: 8.94, y: 13.65)
+  private static let left = CGPoint(x: 6.54, y: 4.29)
+
+  func path(in rect: CGRect) -> Path {
+    let side = min(rect.width, rect.height)
+    let scale = side / 18
+    let transform = CGAffineTransform(
+      translationX: rect.midX - side / 2, y: rect.midY - side / 2
+    ).scaledBy(x: scale, y: scale)
+    var path = Path()
+    switch part {
+    case .shade:
+      path.addLines([Self.top, Self.right, Self.bottom])
+      path.closeSubpath()
+    case .lit:
+      path.addLines([Self.top, Self.left, Self.bottom])
+      path.closeSubpath()
+      var string = Path()
+      string.move(to: CGPoint(x: 8.95, y: 13.4))
+      string.addCurve(
+        to: CGPoint(x: 5.4, y: 15.5), control1: CGPoint(x: 8.7, y: 15.1),
+        control2: CGPoint(x: 6.7, y: 14.9))
+      string.addCurve(
+        to: CGPoint(x: 3.1, y: 16.5), control1: CGPoint(x: 4.1, y: 16.1),
+        control2: CGPoint(x: 3.4, y: 16.4))
+      path.addPath(string.strokedPath(StrokeStyle(lineWidth: 1.25, lineCap: .round)))
+      path.addEllipse(in: CGRect(x: 1.5, y: 14.9, width: 2.8, height: 2.8))
+    }
+    return path.applying(transform)
+  }
+}
+
 extension View {
   /// The widget's background: the container's from iOS 17, which also sets the margins.
   @ViewBuilder
