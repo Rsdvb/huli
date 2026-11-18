@@ -36,6 +36,22 @@ function Item(props: { item: MenuItem; depth: number }) {
       </Menu>
     )
   }
+  if (item.checked !== undefined && item.subtitle) {
+    // Two texts read in a menu as the item's title and its subtitle.
+    return (
+      <Toggle
+        isOn={item.checked}
+        {...(mods ? { modifiers: mods } : {})}
+        onIsOnChange={() => item.onPress?.()}
+      >
+        {[
+          ...(item.icon ? [<Image key="icon" systemName={item.icon} />] : []),
+          <Text key="title">{item.label}</Text>,
+          <Text key="subtitle">{item.subtitle}</Text>,
+        ]}
+      </Toggle>
+    )
+  }
   if (item.checked !== undefined) {
     return (
       <Toggle
