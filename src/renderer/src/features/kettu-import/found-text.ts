@@ -18,15 +18,3 @@ export function useFoundText(scan: KettuImportScan | null): { found: string } {
   if (scan && scan.artifacts.found > 0) parts.push(t('artifacts', { count: scan.artifacts.found }))
   return { found: parts.join(' · ') }
 }
-
-/** What can still come over beside the sessions, as "31 memory entries, 3 artifacts"; empty when nothing. */
-export function useNewExtrasText(scan: KettuImportScan | null): string {
-  const { t } = useTranslation('kettuImport')
-  if (!scan) return ''
-  const parts: string[] = []
-  if (scan.memory.importable > 0) parts.push(t('memory', { count: scan.memory.importable }))
-  if (scan.artifacts.importable > 0) {
-    parts.push(t('artifacts', { count: scan.artifacts.importable }))
-  }
-  return parts.join(t('separator'))
-}

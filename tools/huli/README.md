@@ -55,8 +55,8 @@ Code (kept small so upstream merges stay clean):
 ### Import from Kettu
 
 Brings an official Kettu's sessions, memory and artifacts on the same computer over: Settings ›
-General › Import from Kettu, and a one-time offer over the sidebar's account row while there is
-no session yet.
+General › Import from Kettu. Nothing looks for Kettu's data until its dialog opens, since a look
+copies Kettu's whole thread database (some 300 MB); the dialog looks each time it opens.
 
 Huli's own files:
 
@@ -91,8 +91,8 @@ Huli's own files:
   Recently deleted, its scratch folders and `published-artifacts.json` (sharing links of Kettu's
   account) stay behind; thumbnails are drawn anew.
 - `src/shared/kettu-import.ts`: the scan's and the run's types.
-- `src/renderer/src/features/kettu-import/`: the store, the dialog, the Settings row
-  (`settings-row.tsx`) and the sidebar offer.
+- `src/renderer/src/features/kettu-import/`: the store, the dialog and the Settings row
+  (`settings-row.tsx`).
 - `src/shared/locales/*/kettuImport.json`: its copy, which the rebrand leaves whole (`KEEP_FILES`).
 
 Hooks into upstream files, one or two lines each:
@@ -104,8 +104,7 @@ Hooks into upstream files, one or two lines each:
 - `src/shared/agent-host.ts` (`kettuImport.scan`, `kettuImport.run`, the `kettuImport.progress`
   event), `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`, `src/agent-host/host.ts`.
 - `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (the progress
-  event), `features/settings/section-defs.tsx` (the row), `features/sidebar/app-sidebar.tsx` (the
-  offer).
+  event), `features/settings/section-defs.tsx` (the row).
 
 ### Session folders
 
