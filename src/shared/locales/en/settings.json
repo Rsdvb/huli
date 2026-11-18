@@ -708,8 +708,8 @@
         "name": "Test entrypoint identifier",
         "description": "Sets CLAUDE_CODE_ENTRYPOINT for new local Claude Code sessions in Kite.",
         "label": "Test label",
-        "labelHint": "Enter the full label, such as kite-dev or my-test.",
-        "invalid": "Use up to 64 letters, digits, hyphens or underscores, starting with a letter or digit. Claude Code’s built-in labels are reserved."
+        "labelHint": "Sent to Claude Code as you type it, such as kite-dev, cli or sdk-ts.",
+        "invalid": "Use up to 1024 characters, with no NUL character."
       },
       "compact": {
         "name": "Auto-compact window",

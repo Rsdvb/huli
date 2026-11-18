@@ -365,7 +365,7 @@ function ClaudeTestEntrypointRow() {
             }}
           >
             <input
-              className={DIALOG_MONO_FIELD + ' min-w-0 max-w-36'}
+              className={DIALOG_MONO_FIELD + ' min-w-0 max-w-56'}
               aria-label={label}
               aria-invalid={!valid}
               autoComplete="off"

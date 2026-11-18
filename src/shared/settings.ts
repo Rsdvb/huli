@@ -193,16 +193,14 @@ export type ZoomStep = -1 | 0 | 1
 export type ProxySettings =
   { mode: 'environment' } | { mode: 'custom'; url: string; noProxy: string }
 
-export const CLAUDE_TEST_ENTRYPOINT_LABEL_CHARS = 64
-const CLAUDE_ENTRYPOINT_RESERVED = new Set(['cli', 'claude-desktop', 'sdk-cli', 'sdk-ts', 'sdk-py'])
+export const CLAUDE_TEST_ENTRYPOINT_LABEL_CHARS = 1024
 
+/** Any text goes into CLAUDE_CODE_ENTRYPOINT as it is, short of a NUL, which no environment can hold. */
 export function isClaudeTestEntrypointLabel(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length <= CLAUDE_TEST_ENTRYPOINT_LABEL_CHARS &&
-    /^[A-Za-z0-9]/.test(value) &&
-    !/[^A-Za-z0-9_-]/.test(value) &&
-    !CLAUDE_ENTRYPOINT_RESERVED.has(value.toLowerCase())
+    !value.includes('\0')
   )
 }
 

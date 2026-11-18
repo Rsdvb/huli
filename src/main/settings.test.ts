@@ -20,7 +20,7 @@ afterEach(async () => {
 const save = (value: unknown): Promise<void> =>
   writeFile(join(dir, 'settings.json'), typeof value === 'string' ? value : JSON.stringify(value))
 
-it('sends the exact Claude test label only when enabled and rejects reserved identifiers', async () => {
+it('sends the exact Claude test label only when enabled and takes any text', async () => {
   await save({ version: 1, general: { claudeTestEntrypointLabel: 'kite_lab-42' } })
   const store = await SettingsStore.load(dir)
   const settings = store.get()
@@ -28,7 +28,12 @@ it('sends the exact Claude test label only when enabled and rejects reserved ide
   expect(hostSettings(settings, 'en').claudeTestEntrypoint).toBeNull()
   const enabled = mergeSettings(settings, { general: { claudeTestEntrypoint: true } })
   expect(hostSettings(enabled, 'en').claudeTestEntrypoint).toBe('kite_lab-42')
-  for (const label of ['invalid\n', 'CLI', 'claude-desktop']) {
+  for (const label of ['cli', 'claude-desktop', 'sdk-ts', '中文 标识/1.0', '-x', '']) {
+    expect(() =>
+      validateSettingsPatch({ general: { claudeTestEntrypointLabel: label } }),
+    ).not.toThrow()
+  }
+  for (const label of ['a\0b', 'x'.repeat(1025), 42]) {
     expect(() => validateSettingsPatch({ general: { claudeTestEntrypointLabel: label } })).toThrow(
       'valid custom Claude entrypoint label',
     )
