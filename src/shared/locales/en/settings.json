@@ -51,6 +51,14 @@
       "description": "Which agent New session starts with.",
       "askEachTime": "Ask each time"
     },
+    "newSessionList": {
+      "name": "Under the New session input",
+      "description": "What New session lists below the input.",
+      "keywords": "new session home start page below list recent sessions pick up where you left off artifacts hide nothing",
+      "sessions": "Pick up where you left off",
+      "artifacts": "Latest artifacts",
+      "off": "Nothing"
+    },
     "sendKey": {
       "name": "Send with",
       "description": "The other key adds a new line.",
@@ -219,7 +227,8 @@
       "small": "Small",
       "default": "Default",
       "large": "Large",
-      "previewAgent": "Sure. I’ll read <code>settings-page.tsx</code> and the design doc first, then go page by page."
+      "previewLabel": "Preview",
+      "preview": "This is how replies and your messages read at this size. Inline code, like <code>settings.json</code>, looks like this."
     },
     "reduceMotion": {
       "name": "Reduce motion",
@@ -257,6 +266,17 @@
       "loginShell": "Login shell",
       "reset": "Reset",
       "choose": "Choose…"
+    },
+    "fontFamily": {
+      "name": "Font",
+      "description": "A font installed on this computer, such as a Nerd Font for prompt icons. The theme’s code font fills in what it lacks.",
+      "keywords": "font family typeface nerd font monospace icons",
+      "default": "Theme’s code font",
+      "search": "Search or type a font name",
+      "use": "Use “{{name}}”",
+      "noMatch": "No monospace font matches.",
+      "loading": "Reading the installed fonts…",
+      "unavailable": "This browser cannot list fonts. Type a name to use it."
     },
     "fontSize": {
       "name": "Font size",
@@ -866,7 +886,7 @@
     "default": "Default",
     "footerBefore": "To use another program, install it in ",
     "footerAfter": ".",
-    "registrationNote": "Installing or detecting a harness does not add an agent.",
+    "registrationNote": "Kettu adds an agent for each harness it finds when a computer first starts, and for each one you install in Kettu. Any other, such as a program you install later in a terminal, you add here yourself. An agent you remove is not added back on its own.",
     "onHarness": "on {{harness}}",
     "openHarness": "Open {{harness}} in Harnesses",
     "mcpServers": {
@@ -1185,8 +1205,8 @@
     "notifications": "How Kettu reaches you when an agent needs you or finishes.",
     "notifications_web": "How this page reaches you when an agent on {{host}} needs you or finishes.",
     "account": "Your Kettu account, for Kettu’s cloud services.",
-    "agents": "An agent runs on a harness with one account and configuration. Add the ones you want to use; installing a harness does not add one.",
-    "agents_web": "An agent on {{host}} runs there on a harness with one account and configuration. Add the ones you want to use; installing a harness does not add one.",
+    "agents": "An agent runs on a harness with one account and configuration. Kettu adds one for each harness it finds on first start and for each one you install in Kettu; add any other you want to use.",
+    "agents_web": "An agent on {{host}} runs there on a harness with one account and configuration. Kettu adds one there for each harness it finds when {{host}} first starts and for each one you install on it; add any other you want to use.",
     "terminal": "Which shell the side panel’s terminal runs, and how it looks.",
     "git": "The top bar’s branch and changes, pull requests and their checks all come from these two tools.",
     "advanced": "Network proxy, diagnostics and the data Kettu keeps on this computer.",

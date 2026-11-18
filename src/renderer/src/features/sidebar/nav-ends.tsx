@@ -8,8 +8,9 @@ import { strongestSignal } from '@renderer/features/routines/model'
 import { TurnDots } from '@renderer/features/session/turn-dots'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { dayOf } from '@renderer/features/usage/model'
+import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { limitLabel, tokens } from '@renderer/lib/format'
-import { LIMIT_TEXT, limitLevel } from '@renderer/lib/plan-limit'
+import { LIMIT_TEXT, limitLevel, limitPercent } from '@renderer/lib/plan-limit'
 import { accountAgents, type AccountAgent } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
@@ -106,6 +107,7 @@ function tightestOf(
 /** The tightest limit of the window's hosts' accounts, each at its newest reading. */
 export function TightestLimit() {
   const { t } = useTranslation('usage')
+  const view = useLimitView()
   const accounts = accountAgents(useShownHostAgents(), usePlanReadings())
   const now = useNow()
   const tightest = tightestOf(accounts, now)
@@ -115,7 +117,7 @@ export function TightestLimit() {
     limit,
   } = tightest
   const reset = inlineReset(limit, now)
-  const percent = `${Math.round(limit.usedPercent ?? 0)}%`
+  const percent = `${limitPercent(limit, view) ?? 0}%`
   const level = limitLevel(limit)
   return (
     <span
@@ -126,11 +128,18 @@ export function TightestLimit() {
     >
       <AgentMark agent={agent.id} size={12} hostId={hostId} />
       <span aria-hidden className="truncate">
-        {t('nav.limitShort', { limit: limitLabel(limit), percent })}
+        {t(view === 'left' ? 'nav.limitShortLeft' : 'nav.limitShort', {
+          limit: limitLabel(limit),
+          percent,
+        })}
         {reset && ` · ${reset}`}
       </span>
       <span className="sr-only">
-        {t('nav.limit', { agent: name, limit: limitLabel(limit), percent })}
+        {t(view === 'left' ? 'nav.limitLeft' : 'nav.limit', {
+          agent: name,
+          limit: limitLabel(limit),
+          percent,
+        })}
         {reset && ` ${reset}`}
       </span>
     </span>

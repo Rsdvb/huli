@@ -4,6 +4,7 @@
     "placeholder": {
       "starting": "Starting {{agent}}…",
       "awaiting": "Waiting for your approval",
+      "awaitingAnswer": "Waiting for your answer",
       "limitReached": "{{limit}} limit reached · resets {{time}}",
       "ask": "Reply to {{agent}}…",
       "denied": "Tell {{agent}} what to do differently",
@@ -42,6 +43,7 @@
     "permissionMode": "Permission mode",
     "selected": "{{label}} selected",
     "limitUsed": "{{percent}}% of {{limit}} limit",
+    "limitLeft": "{{percent}}% of {{limit}} limit left",
     "effortHint": "Higher thinks longer, uses more of your plan · {{shortcut}}",
     "modelSettings": "Model settings",
     "speed": "Speed",
@@ -63,6 +65,9 @@
     "stopTitle": "Stop background work and switch to {{agent}}?",
     "stopBody": "These run in {{current}} and stop when the session switches:",
     "stopConfirm": "Stop and switch"
+  },
+  "heldOutside": {
+    "strip": "This session is open in a terminal. Exit it there with /exit, and its conversation shows up here."
   },
   "outOfCredit": {
     "modelTitle": "{{model}} is out of credit",
@@ -247,6 +252,9 @@
     "lines": "lines {{lines}}",
     "clickToOpen": "Click to open",
     "backspaceRemoves": "{{key}} removes it"
+  },
+  "resize": {
+    "label": "Resize the message box"
   },
   "place": {
     "thisComputer": "This computer",

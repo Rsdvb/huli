@@ -487,8 +487,10 @@
       "installing": "正在安装…",
       "failed": "出错",
       "signIn": "需要登录",
-      "window": "{{limit}} {{used}}",
-      "windowResets": "{{limit}} {{used}} · {{reset}}",
+      "window": "{{limit}} {{value}}",
+      "windowResets": "{{limit}} {{value}} · {{reset}}",
+      "valueUsed": "已用 {{percent}}%",
+      "valueLeft": "剩余 {{percent}}%",
       "setsUpLong": "{{agent}} 会在首次使用时自动配置：Kettu 会为它安装适配器，适配器运行你的 {{command}}。",
       "needsUpdate": "需要更新",
       "updateLong": "你的 {{command}} {{current}} 比 Kettu 要的旧（至少 {{minimum}}），更新后才能用。",
@@ -564,6 +566,7 @@
       "versionBroken": "{{version}} 和 Kettu 不能一起用",
       "versionUnsupported": "{{version}} 不在 Kettu 能用的版本里",
       "limitUsed": "已用 {{limit}}限额的 {{percent}}%",
+      "limitLeft": "{{limit}}限额剩余 {{percent}}%",
       "limitReached": "已达 {{limit}}限额",
       "manage": "管理 Agent…"
     },
@@ -579,6 +582,10 @@
       "failed": "出错停止",
       "signIn": "等待登录",
       "finished": "{{ago}}完成"
+    },
+    "artifacts": {
+      "title": "最近的 artifact",
+      "viewAll": "查看全部"
     },
     "addAgent": "添加 Agent…",
     "guide": {
@@ -659,6 +666,7 @@
     "restore": "恢复",
     "openAgents": "打开 Agents",
     "announceApproval": "{{agent}} 需要你的授权",
+    "announceQuestion": "{{agent}} 有问题要问你",
     "announceFinished": "{{agent}} 已完成"
   },
   "find": {
@@ -686,6 +694,7 @@
       "writing": "正在回复",
       "compacting": "正在压缩上下文",
       "approval": "等待你的授权",
+      "question": "等待你的回答",
       "working": "处理中"
     },
     "doing": {

@@ -534,6 +534,37 @@ li[data-row-exit='dust'] > * {
   text-overflow: ellipsis;
   color: var(--muted);
 }
+/* Open project at the end of a group's title. The button's box hangs outside the title's line so the
+   title keeps its height, and its right edge lines up with the rows' tools. */
+.kettu-projects-label.ui-as-side__label,
+.kettu-host-head {
+  display: flex;
+  align-items: center;
+}
+.kettu-projects-label.ui-as-side__label {
+  justify-content: space-between;
+}
+.kettu-host-head {
+  margin: 16px 0 4px;
+}
+.kettu-side-list .ui-as-side__group > .kettu-host-head:first-child {
+  margin-top: 6px;
+}
+.kettu-host-head > .kettu-host-label {
+  flex: 1 1 0;
+  margin: 0;
+}
+.kettu-add-project {
+  flex: none;
+  margin: -4px -2px -4px 0;
+}
+.kettu-host-head > .kettu-add-project {
+  margin-right: 4px;
+}
+/* The collapsed rail shows a title as a short line only. */
+.ui-as-app[data-collapsed] .kettu-add-project {
+  display: none;
+}
 /* The account menu on Profile Menu (features/account/account-menu.tsx), as wide as the sidebar and
    at least 260 px. */
 .kettu-account .ui-pmc.kettu-account__card {
@@ -2962,6 +2993,13 @@ li[data-row-exit='dust'] > * {
   line-height: 20px;
   color: var(--text);
 }
+:is(.kettu-settings, .kettu-sd) .k-preview-label {
+  display: block;
+  margin: 0 16px 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+}
 /* Text size's preview: the thread's prose, which the inset's type would otherwise fix at 13 px. */
 :is(.kettu-settings, .kettu-sd) .k-inset.markdown {
   font-size: calc(var(--thread-prose-size) * var(--prose-scale));
@@ -4775,6 +4813,38 @@ li[data-row-exit='dust'] > * {
 .kettu-prompt[data-disabled] {
   cursor: default;
 }
+/* The handle on the card's top edge: its padding and 4px above it, clear of the corners. It shows
+   a short bar while hovered, focused or dragged. */
+.kettu-prompt-grip {
+  position: absolute;
+  inset: -18px 10px auto;
+  z-index: 1;
+  height: 18px;
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+.kettu-prompt-grip::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  width: 32px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--composer-faint);
+  opacity: 0;
+  translate: -50% 0;
+  transition: opacity var(--duration-fast);
+}
+.kettu-prompt-grip:hover::after,
+.kettu-prompt-grip:focus-visible::after,
+.kettu-prompt-grip[data-dragging]::after {
+  opacity: 1;
+}
+.kettu-prompt-grip[data-dragging]::after {
+  background: var(--composer-muted);
+}
 .kettu-menu-keys {
   flex: none;
   font-size: 11px;
@@ -5718,6 +5788,25 @@ li[data-row-exit='dust'] > * {
   font-weight: 500;
   color: var(--composer-faint);
 }
+.kettu-pickup__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.kettu-pickup__all {
+  padding: 0 10px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--composer-faint);
+  transition: color 120ms ease;
+}
+.kettu-pickup__all:hover {
+  color: var(--composer-ink);
+}
+.kettu-pickup__all:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
 .kettu-pickup__row {
   display: flex;
   align-items: center;
@@ -5791,8 +5880,8 @@ li[data-row-exit='dust'] > * {
   place-items: center;
   width: 15px;
 }
-/* A provider out of credit, or another agent about to take over: a tinted note over the text,
-   inside the writing area. */
+/* A provider out of credit, another agent about to take over, or a terminal that holds the
+   session: a tinted note over the text, inside the writing area. */
 .kettu-credit,
 .kettu-switch {
   margin: -4px -6px 10px;
@@ -5805,7 +5894,7 @@ li[data-row-exit='dust'] > * {
   color: var(--ui-ccc-ink);
 }
 /* The composer body's unlayered button reset beats the button's own padding utilities. */
-.kettu-switch [data-slot='button'] {
+:is(.kettu-credit, .kettu-switch) [data-slot='button'] {
   padding-inline: calc(var(--spacing) * 2);
 }
 /* New session's menus as AppShell's: rows in the quiet gray, the chosen one in ink. */

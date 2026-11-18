@@ -137,6 +137,7 @@ import {
 import { findCommand, isExecutableFile, type Env } from './find-command'
 import type { GitServiceApi, GitServiceDeps } from './git/api'
 import { createExec, type ExecRunner } from './git/exec'
+import { GitRetains } from './git/retains'
 import type { SkillsListResponse } from './codex/protocol'
 import { completePath } from './path-completion'
 import { pathKey } from './paths'
@@ -304,6 +305,8 @@ export interface HostOptions {
   usageReaders?: readonly LogReader[]
   /** Where the agents' logs are looked for; the user's home by default. */
   homeDir?: string
+  /** Where harness packages are installed; `~/.kettu/harnesses` by default, which apps share. */
+  harnessesDir?: string
   /** Reads a session's prompt cache lifetime; Claude Code's transcripts by default. */
   cacheTtl?: CacheTtlReader
   /** Reads Claude Code sessions run outside Kettu; tests pass their own. */
@@ -358,6 +361,13 @@ async function moveHarnessInstalls(
       log(`Could not move ${legacy} to ${target}: ${(copyError as Error).message}`)
     }
   }
+}
+
+function harnessesFolder(options: HostOptions): string {
+  return (
+    options.harnessesDir ??
+    path.join(options.homeDir ?? os.homedir(), KETTU_HOME_FOLDER, HARNESSES_FOLDER)
+  )
 }
 
 const REPLY_RUN_ERRORS: Record<TerminalCallErrorCode, PortErrorCode> = {
@@ -439,7 +449,7 @@ export class AgentHost {
   private readonly media: MediaService
   private gitUnsubscribe: (() => void)[] = []
   /** Ports keeping a project's git status live, by path key. */
-  private readonly gitRetains = new Map<string, { path: string; ports: Set<string> }>()
+  private readonly gitRetains = new GitRetains()
   /** Browser calls awaiting main's answer, by the id the call was given. */
   private readonly browserCalls = new Map<number, (answer: BrowserCallAnswer) => void>()
   private readonly deviceCalls = new Map<number, (answer: DeviceCallAnswer) => void>()
@@ -864,11 +874,7 @@ export class AgentHost {
       status: (status) => this.hub.broadcast({ type: 'usage.status', status }),
       ...(options.usageTimings ? { timings: options.usageTimings } : {}),
     })
-    const adaptersDir = path.join(
-      options.homeDir ?? os.homedir(),
-      KETTU_HOME_FOLDER,
-      HARNESSES_FOLDER,
-    )
+    const adaptersDir = harnessesFolder(options)
     this.agents = new AgentManager({
       catalog,
       platform,
@@ -1321,7 +1327,7 @@ export class AgentHost {
   static async start(options: HostOptions): Promise<AgentHost> {
     await moveHarnessInstalls(
       path.join(options.userDataPath, 'agents'),
-      path.join(options.homeDir ?? os.homedir(), KETTU_HOME_FOLDER, HARNESSES_FOLDER),
+      harnessesFolder(options),
       (message) => writeLog('warn', 'host', message),
     )
     const host = new AgentHost(options)
@@ -1497,8 +1503,7 @@ export class AgentHost {
   }
 
   private sendToRetainers(projectPath: string, event: HostEvent): void {
-    const retained = this.gitRetains.get(pathKey(projectPath, this.options.platform))
-    if (retained) this.hub.send(retained.ports, event)
+    this.hub.send(this.gitRetains.ports(pathKey(projectPath, this.options.platform)), event)
   }
 
   private reportProcesses(processes: AgentProcess[]): void {
@@ -1520,9 +1525,7 @@ export class AgentHost {
     this.browserTurns.portClosed(portId)
     this.sessions.portClosed(portId)
     this.artifacts.portClosed(portId)
-    for (const [key, retained] of this.gitRetains) {
-      if (retained.ports.delete(portId) && retained.ports.size === 0) this.gitRetains.delete(key)
-    }
+    this.gitRetains.dropPort(portId)
     this.git?.releaseAll(portId)
   }
 
@@ -2833,32 +2836,24 @@ export class AgentHost {
               : { optionId: optionId!, ...(note === undefined ? {} : { note }) },
           fromDevice(device),
         ),
-      'git.status': async ({ projectPath }, { portId }) => {
+      'git.status': async ({ projectPath, watcher }, { portId }) => {
         const git = this.requireGit()
         const canonical = await this.gitProject(projectPath)
         await this.env.ready()
         if (!this.hub.has(portId)) return this.gitCall((g) => g.status(canonical))
         const key = pathKey(canonical, this.options.platform)
-        let retained = this.gitRetains.get(key)
-        if (!retained) {
-          retained = { path: canonical, ports: new Set() }
-          this.gitRetains.set(key, retained)
-        }
-        if (!retained.ports.has(portId)) {
-          retained.ports.add(portId)
+        if (this.gitRetains.add(key, canonical, portId, watcher ?? '')) {
           git.retain(canonical, portId)
         }
         return this.gitCall((g) => g.status(canonical))
       },
-      'git.unwatch': async ({ projectPath }, { portId }) => {
+      'git.unwatch': async ({ projectPath, watcher }, { portId }) => {
         const git = this.requireGit()
         // The folder may be gone by now; the retained entry still knows its canonical path.
         const canonical = await projects.resolveDirectory(projectPath).catch(() => projectPath)
         const key = pathKey(canonical, this.options.platform)
-        const retained = this.gitRetains.get(key)
-        if (!retained?.ports.delete(portId)) return
-        if (retained.ports.size === 0) this.gitRetains.delete(key)
-        git.release(retained.path, portId)
+        const path = this.gitRetains.remove(key, portId, watcher ?? '')
+        if (path !== null) git.release(path, portId)
       },
       'git.fetch': ({ projectPath }) => this.gitProjectCall(projectPath, (g, p) => g.fetch(p)),
       'git.pull': ({ projectPath }) => this.gitProjectCall(projectPath, (g, p) => g.pull(p)),
@@ -3128,9 +3123,8 @@ export class AgentHost {
       'sessions.answerProjectHooks': ({ sessionId, entryId, decision }, { device }) => {
         sessions.answerProjectHooks(sessionId, entryId, decision, fromDevice(device))
       },
-      'sessions.answerReport': ({ sessionId, entryId, outcome }, { device }) => {
-        sessions.answerReport(sessionId, entryId, outcome, fromDevice(device))
-      },
+      'sessions.answerReport': ({ sessionId, entryId, outcome }, { device }) =>
+        sessions.answerReport(sessionId, entryId, outcome, fromDevice(device)),
       'sessions.answerMemory': ({ sessionId, entryId, decision }, { device }) =>
         memoryCall(() => sessions.answerMemory(sessionId, entryId, decision, fromDevice(device))),
       'sessions.undoMemory': ({ sessionId, entryId }) =>

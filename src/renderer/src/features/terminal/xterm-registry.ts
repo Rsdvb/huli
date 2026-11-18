@@ -6,6 +6,7 @@ import { terminals } from '@renderer/lib/host'
 import { isMac, isMod } from '@renderer/lib/platform'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { holdsTerminalInput, setSink, useTerminalsStore } from '@renderer/stores/terminals'
+import { terminalFontStack } from './font-stack'
 import { passesHeld } from './held-keys'
 import { onColorsChange } from '@renderer/stores/themes'
 
@@ -54,6 +55,17 @@ export interface Instance {
 const instances = new Map<string, Promise<Instance>>()
 const ready = new Map<string, Instance>()
 
+let colorContext: CanvasRenderingContext2D | null | undefined
+
+/** xterm.js reads only hex and comma rgb(), so the canvas rewrites any color, keeping alpha. */
+function xtermColor(value: string): string {
+  if (!value || !CSS.supports('color', value)) return value
+  colorContext ??= document.createElement('canvas').getContext('2d')
+  if (!colorContext) return value
+  colorContext.fillStyle = value
+  return colorContext.fillStyle
+}
+
 function readTheme(): ITheme {
   const css = getComputedStyle(document.documentElement)
   const v = (name: string) => css.getPropertyValue(name).trim()
@@ -62,7 +74,7 @@ function readTheme(): ITheme {
     foreground: v('--terminal-foreground'),
     cursor: v('--terminal-cursor'),
     cursorAccent: v('--terminal-background'),
-    selectionBackground: v('--terminal-selection'),
+    selectionBackground: xtermColor(v('--terminal-selection')),
     black: v('--ansi-black'),
     red: v('--ansi-red'),
     green: v('--ansi-green'),
@@ -83,9 +95,9 @@ function readTheme(): ITheme {
 }
 
 function fontFamily(): string {
-  return (
+  const theme =
     getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace'
-  )
+  return terminalFontStack(useSettingsStore.getState().settings.terminal.fontFamily, theme)
 }
 
 /** xterm.js measures its cells as a terminal opens, so the face must be loaded by then. */
@@ -100,29 +112,38 @@ async function loadFont(): Promise<void> {
 
 let watching = false
 
-/** Follows the colors, the font size and removed terminals for every instance. */
+/** A face must load before xterm.js measures it, so the instances follow once it has. */
+function syncFontFamily(): void {
+  void loadFont().then(() => {
+    const family = fontFamily()
+    for (const instance of ready.values()) {
+      if (instance.term.options.fontFamily === family) continue
+      instance.term.options.fontFamily = family
+      if (instance.visible) fitNow(instance)
+    }
+  })
+}
+
+/** Follows the colors, the font and removed terminals for every instance. */
 function watchOnce(): void {
   if (watching) return
   watching = true
   onColorsChange(() => {
     const theme = readTheme()
     for (const instance of ready.values()) instance.term.options.theme = theme
-    // A theme may name another face for code, which must load before xterm.js measures it.
-    const family = fontFamily()
-    void loadFont().then(() => {
-      for (const instance of ready.values()) {
-        if (instance.term.options.fontFamily === family) continue
-        instance.term.options.fontFamily = family
-        if (instance.visible) fitNow(instance)
-      }
-    })
+    // A theme may name another face for code.
+    syncFontFamily()
   })
   useSettingsStore.subscribe((state, previous) => {
     const size = state.settings.terminal.fontSize
-    if (size === previous.settings.terminal.fontSize) return
-    for (const instance of ready.values()) {
-      instance.term.options.fontSize = size
-      if (instance.visible) fitNow(instance)
+    if (size !== previous.settings.terminal.fontSize) {
+      for (const instance of ready.values()) {
+        instance.term.options.fontSize = size
+        if (instance.visible) fitNow(instance)
+      }
+    }
+    if (state.settings.terminal.fontFamily !== previous.settings.terminal.fontFamily) {
+      syncFontFamily()
     }
   })
   useTerminalsStore.subscribe((state, previous) => {
@@ -303,8 +324,16 @@ function releaseWebgl(instance: Instance): void {
   webgl.canvas?.getContext('webgl2')?.getExtension('WEBGL_lose_context')?.loseContext()
 }
 
+/**
+ * The side panel glides its pane open and closed, and a terminal that fits on the way would tell
+ * its shell a width of a few columns. It fits once the glide ends.
+ */
+function isGliding(instance: Instance): boolean {
+  return instance.element.closest('.kettu-pane-area[data-glide]') !== null
+}
+
 export function fitNow(instance: Instance): void {
-  if (!instance.visible || !instance.element.isConnected) return
+  if (!instance.visible || !instance.element.isConnected || isGliding(instance)) return
   const dims = instance.fit.proposeDimensions()
   if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return
   const cols = Math.max(2, Math.min(1000, dims.cols))
