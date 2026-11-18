@@ -28,6 +28,7 @@ import { createValidators } from '../validate'
 import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
 import type { Downloaded } from './download'
 import { networkStateFile, providerFile, subscriptionSecrets, subscriptionsFile } from './files'
+import { parseLinuxRoutes, parseMacRoutes, pickInterface } from './interface'
 import { NodeProxy } from './service'
 
 const TOKEN = '8f2c1d9a7b6e5f4a3c2b1d0e9f8a7b6c'
@@ -293,6 +294,43 @@ describe('the exit check', () => {
     } finally {
       proxy.close()
     }
+  })
+})
+
+describe('the physical interface', () => {
+  it('is the Mac’s scoped Wi-Fi route while a TUN holds the default', () => {
+    const netstat = [
+      'Destination        Gateway            Flags               Netif Expire',
+      'default            link#34            UCSg                utun8',
+      'default            192.168.1.1        UGScIg                en0',
+      'default            link#33            UCSIg               utun4',
+      '10.20.0.1          10.20.0.1          UH                  utun8',
+    ].join('\n')
+    expect(pickInterface(parseMacRoutes(netstat))).toBe('en0')
+  })
+
+  it('prefers the Mac’s unscoped physical route to a scoped one', () => {
+    const netstat = [
+      'default            192.168.1.1        UGScg                 en0',
+      'default            192.168.2.1        UGScIg                en7',
+    ].join('\n')
+    expect(pickInterface(parseMacRoutes(netstat))).toBe('en0')
+  })
+
+  it('is the lowest-metric Linux route that is no TUN, Tailscale or bridge', () => {
+    const ip = [
+      'default dev tun0 scope link',
+      'default via 100.100.100.100 dev tailscale0 metric 5',
+      'default via 172.17.0.1 dev docker0 metric 10',
+      'default via 192.168.1.1 dev wlp3s0 proto dhcp metric 600',
+      'default via 172.27.48.1 dev eth0 proto kernel onlink',
+    ].join('\n')
+    expect(pickInterface(parseLinuxRoutes(ip))).toBe('eth0')
+  })
+
+  it('is none when only a TUN has a default route', () => {
+    expect(pickInterface(parseMacRoutes('default  link#34  UCSg  utun8'))).toBeNull()
+    expect(pickInterface(parseLinuxRoutes('default dev Meta scope link'))).toBeNull()
   })
 })
 

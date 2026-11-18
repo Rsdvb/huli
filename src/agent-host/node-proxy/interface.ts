@@ -35,18 +35,20 @@ export function parseLinuxRoutes(text: string): RouteCandidate[] {
 }
 
 /**
- * `netstat -rn -f inet` rows of the default route, `default 192.168.1.1 UGScg en0`, in the order
- * the system prefers them.
+ * `netstat -rn -f inet` rows of the default route, `default 192.168.1.1 UGScg en0`: the unscoped
+ * ones first, then the interface-scoped ones (the I flag), each in the table's order.
  */
 export function parseMacRoutes(text: string): RouteCandidate[] {
-  let order = 0
-  return text.split('\n').flatMap((line) => {
+  const rows = text.split('\n').flatMap((line) => {
     const cols = line.trim().split(/\s+/)
     if (cols[0] !== 'default' || cols.length < 4) return []
-    // Interface-scoped duplicates carry the I flag; the unscoped ones decide.
-    if (cols[2]?.includes('I')) return []
-    return [{ name: cols[3]!, metric: order++ }]
+    return [{ name: cols[3]!, scoped: cols[2]!.includes('I') }]
   })
+  // While a TUN holds the unscoped default, the physical interface keeps only a scoped one.
+  return [...rows.filter((r) => !r.scoped), ...rows.filter((r) => r.scoped)].map((r, metric) => ({
+    name: r.name,
+    metric,
+  }))
 }
 
 /** The PowerShell rows: the adapter of each IPv4 default route, with the route's whole metric. */
