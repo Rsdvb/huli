@@ -14,11 +14,7 @@ import {
   PROMPT_CACHE_TTLS,
   type PromptCacheTtl,
 } from '@shared/agents'
-import {
-  CLAUDE_TEST_ENTRYPOINT_PREFIX,
-  CLAUDE_TEST_ENTRYPOINT_SUFFIX_CHARS,
-  isClaudeTestEntrypointSuffix,
-} from '@shared/settings'
+import { CLAUDE_TEST_ENTRYPOINT_LABEL_CHARS, isClaudeTestEntrypointLabel } from '@shared/settings'
 import { Icon } from '@renderer/components/affect/app-shell'
 import {
   Combobox,
@@ -319,12 +315,12 @@ function ClaudeTestEntrypointRow() {
   const [save, busy, error] = useAction()
   const [draft, setDraft] = useState<string | null>(null)
   const checked = useSettingsStore((s) => s.settings.general.claudeTestEntrypoint)
-  const suffix = useSettingsStore((s) => s.settings.general.claudeTestEntrypointSuffix)
-  const value = draft ?? suffix
-  const valid = isClaudeTestEntrypointSuffix(value)
-  const canSave = !busy && valid && value !== suffix
+  const stored = useSettingsStore((s) => s.settings.general.claudeTestEntrypointLabel)
+  const value = draft ?? stored
+  const valid = isClaudeTestEntrypointLabel(value)
+  const canSave = !busy && valid && value !== stored
   const name = t('agents.claudeSettings.testEntrypoint.name')
-  const label = t('agents.claudeSettings.testEntrypoint.suffix')
+  const label = t('agents.claudeSettings.testEntrypoint.label')
   return (
     <RowShell>
       <div className="k-block">
@@ -351,7 +347,7 @@ function ClaudeTestEntrypointRow() {
           text={
             <RowText
               name={label}
-              description={t('agents.claudeSettings.testEntrypoint.suffixHint')}
+              description={t('agents.claudeSettings.testEntrypoint.labelHint')}
             />
           }
         >
@@ -363,19 +359,18 @@ function ClaudeTestEntrypointRow() {
               save(async () => {
                 await useSettingsStore
                   .getState()
-                  .update({ general: { claudeTestEntrypointSuffix: value } })
+                  .update({ general: { claudeTestEntrypointLabel: value } })
                 setDraft(null)
               })
             }}
           >
-            <span className="font-mono text-tertiary">{CLAUDE_TEST_ENTRYPOINT_PREFIX}</span>
             <input
               className={DIALOG_MONO_FIELD + ' min-w-0 max-w-36'}
               aria-label={label}
               aria-invalid={!valid}
               autoComplete="off"
               spellCheck={false}
-              maxLength={CLAUDE_TEST_ENTRYPOINT_SUFFIX_CHARS}
+              maxLength={CLAUDE_TEST_ENTRYPOINT_LABEL_CHARS}
               value={value}
               disabled={busy}
               onChange={(event) => setDraft(event.target.value)}
@@ -386,9 +381,9 @@ function ClaudeTestEntrypointRow() {
           </form>
         </BlockLine>
       </div>
-      {error && (
+      {(error || !valid) && (
         <p role="status" className="k-row-note k-error" data-wrap="">
-          {error}
+          {error ?? t('agents.claudeSettings.testEntrypoint.invalid')}
         </p>
       )}
     </RowShell>

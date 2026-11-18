@@ -707,8 +707,9 @@
       "testEntrypoint": {
         "name": "Test entrypoint identifier",
         "description": "Sets CLAUDE_CODE_ENTRYPOINT for new local Claude Code sessions in Kite.",
-        "suffix": "Test label suffix",
-        "suffixHint": "Starts with a letter or digit. Up to 32 letters, digits, hyphens or underscores."
+        "label": "Test label",
+        "labelHint": "Enter the full label, such as kite-dev or my-test.",
+        "invalid": "Use up to 64 letters, digits, hyphens or underscores, starting with a letter or digit. Claude Code’s built-in labels are reserved."
       },
       "compact": {
         "name": "Auto-compact window",

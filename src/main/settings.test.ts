@@ -20,17 +20,19 @@ afterEach(async () => {
 const save = (value: unknown): Promise<void> =>
   writeFile(join(dir, 'settings.json'), typeof value === 'string' ? value : JSON.stringify(value))
 
-it('keeps the Claude test label under the Huli prefix and sends it only when enabled', async () => {
-  await save({ version: 1, general: { claudeTestEntrypointSuffix: 'my-test' } })
+it('sends the exact Claude test label only when enabled and rejects reserved identifiers', async () => {
+  await save({ version: 1, general: { claudeTestEntrypointLabel: 'kite_lab-42' } })
   const store = await SettingsStore.load(dir)
   const settings = store.get()
-  expect(settings.general.claudeTestEntrypointSuffix).toBe('my-test')
+  expect(settings.general.claudeTestEntrypointLabel).toBe('kite_lab-42')
   expect(hostSettings(settings, 'en').claudeTestEntrypoint).toBeNull()
   const enabled = mergeSettings(settings, { general: { claudeTestEntrypoint: true } })
-  expect(hostSettings(enabled, 'en').claudeTestEntrypoint).toBe('huli-my-test')
-  expect(() =>
-    validateSettingsPatch({ general: { claudeTestEntrypointSuffix: 'invalid\n' } }),
-  ).toThrow('valid Huli entrypoint suffix')
+  expect(hostSettings(enabled, 'en').claudeTestEntrypoint).toBe('kite_lab-42')
+  for (const label of ['invalid\n', 'CLI', 'claude-desktop']) {
+    expect(() => validateSettingsPatch({ general: { claudeTestEntrypointLabel: label } })).toThrow(
+      'valid custom Claude entrypoint label',
+    )
+  }
 })
 
 describe('the first start record on load', () => {

@@ -703,8 +703,9 @@
       "testEntrypoint": {
         "name": "测试入口标识",
         "description": "为本机新启动的 Claude Code 会话设置 CLAUDE_CODE_ENTRYPOINT。",
-        "suffix": "测试标识后缀",
-        "suffixHint": "以英文字母或数字开头，最多 32 个英文字母、数字、短横线或下划线。"
+        "label": "测试标识",
+        "labelHint": "输入完整标识，例如 kite-dev 或 my-test。",
+        "invalid": "以英文字母或数字开头，最多 64 个英文字母、数字、短横线或下划线。Claude Code 的内置标识为保留值。"
       },
       "compact": {
         "name": "自动压缩窗口",

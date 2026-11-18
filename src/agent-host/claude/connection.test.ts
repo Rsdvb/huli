@@ -357,13 +357,13 @@ describe('the Claude Agent SDK driver', () => {
       () => entrypoint,
     )
     await connection.newSession('/repo', {})
-    entrypoint = 'huli-my-test'
+    entrypoint = 'kite_lab-42'
     await connection.newSession('/repo', {})
     entrypoint = null
     await connection.newSession('/repo', {})
     expect(spawned.map((process) => process.env.CLAUDE_CODE_ENTRYPOINT)).toEqual([
       'sdk-ts',
-      'huli-my-test',
+      'kite_lab-42',
       'sdk-ts',
     ])
   })

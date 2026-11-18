@@ -4,11 +4,10 @@ import { isStartMode, takesStartMode } from '@shared/agents'
 import {
   AGENT_NAME_CHARS,
   CONFIG_VARIABLES,
-  CLAUDE_TEST_ENTRYPOINT_PREFIX,
   DEFAULT_SETTINGS,
   AGENT_COLORS,
   isAgentColor,
-  isClaudeTestEntrypointSuffix,
+  isClaudeTestEntrypointLabel,
   nextAgentColor,
   isLinkSite,
   MAX_LINK_SITES,
@@ -162,10 +161,10 @@ const SECTION_FIELDS = {
     background: isBoolean,
     sessionTitles: isBoolean,
     claudeTestEntrypoint: isBoolean,
-    claudeTestEntrypointSuffix: (value, path) =>
-      isClaudeTestEntrypointSuffix(value)
+    claudeTestEntrypointLabel: (value, path) =>
+      isClaudeTestEntrypointLabel(value)
         ? null
-        : `"${path}" must be a valid Huli entrypoint suffix`,
+        : `"${path}" must be a valid custom Claude entrypoint label`,
   },
   thread: {
     outlineSummaries: isBoolean,
@@ -1491,7 +1490,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     usage: { fromComputer: settings.usage.fromComputer },
     sessionTitles: settings.general.sessionTitles,
     claudeTestEntrypoint: settings.general.claudeTestEntrypoint
-      ? CLAUDE_TEST_ENTRYPOINT_PREFIX + settings.general.claudeTestEntrypointSuffix
+      ? settings.general.claudeTestEntrypointLabel
       : null,
     defaultAgent: settings.general.defaultAgent,
     computerUse: structuredClone(settings.computerUse),
