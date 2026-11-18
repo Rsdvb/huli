@@ -186,9 +186,11 @@ describe('a streamed file', () => {
     for (const drop of [3, 4]) {
       await expect.poll(() => again.sent.filter((bytes) => bytes === 0).length).toBe(drop - 2)
       transports.at(-1)!.close()
+      // Held again at once: on a fast machine the start over sends the whole file before a poll
+      // sees the new link, and the upload this test drops twice would finish.
       again.go()
-      await expect.poll(() => transports.length).toBe(drop)
       again.hold()
+      await expect.poll(() => transports.length).toBe(drop)
     }
     again.go()
     await expect(second).rejects.toMatchObject({ code: 'host_restarted' })
