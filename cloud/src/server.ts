@@ -211,7 +211,10 @@ export function makeServer(
       socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
     }
   })
-  server.on('close', () => relay.close())
+  server.on('close', () => {
+    relay.close()
+    auth.close()
+  })
   server.headersTimeout = 15_000
   server.requestTimeout = 30_000
   return { server, store, auth, relay }

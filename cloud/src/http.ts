@@ -178,6 +178,13 @@ export class Limiter {
     return recent.length <= this.max
   }
 
+  /** Takes back the key's last event, as for an attempt counted before it turned out to succeed. */
+  undo(key: string): void {
+    const times = this.hits.get(key)
+    times?.pop()
+    if (times?.length === 0) this.hits.delete(key)
+  }
+
   /** Whether the key is over its limit, without counting. */
   blocked(key: string): boolean {
     const now = this.now()

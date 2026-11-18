@@ -353,6 +353,112 @@ describe('brute force', () => {
   })
 })
 
+describe('limits by address, behind the proxy', () => {
+  let proxied: ServerParts
+  let origin: string
+  let proxiedDir: string
+  const proxiedLines: string[] = []
+
+  beforeAll(async () => {
+    proxiedDir = mkdtempSync(path.join(tmpdir(), 'huli-proxied-'))
+    proxied = makeServer({ origin: ORIGIN, dataDir: proxiedDir, trustProxy: true }, null, {
+      now,
+      log: (line) => proxiedLines.push(line),
+    })
+    proxied.store.setAccount({ ...parts.store.account!, totpLastStep: -1 })
+    await new Promise<void>((resolve) => proxied.server.listen(0, '127.0.0.1', resolve))
+    origin = `http://127.0.0.1:${(proxied.server.address() as AddressInfo).port}`
+  })
+
+  afterAll(() => {
+    proxied.server.close()
+    rmSync(proxiedDir, { recursive: true, force: true })
+  })
+
+  async function ticketFrom(address: string): Promise<string> {
+    const url = new URL('/signin/app/', origin)
+    url.search = new URLSearchParams({
+      client_id: 'kettu-desktop',
+      redirect_uri: REDIRECT,
+      code_challenge: pkceChallenge(randomToken(48)),
+      code_challenge_method: 'S256',
+      state: 's',
+    }).toString()
+    const html = await (await fetch(url, { headers: { 'x-real-ip': address } })).text()
+    return /name="ticket" value="([^"]+)"/.exec(html)![1]!
+  }
+
+  function submit(address: string, fields: Record<string, string>) {
+    return fetch(new URL('/signin/app/', origin), {
+      method: 'POST',
+      body: new URLSearchParams(fields),
+      redirect: 'manual',
+      headers: { 'x-real-ip': address },
+    })
+  }
+
+  it('keeps only the newest sign-in pages of one address', async () => {
+    const other = await ticketFrom('198.51.100.9')
+    const first = await ticketFrom('198.51.100.1')
+    for (let i = 0; i < 20; i++) await ticketFrom('198.51.100.1')
+    const gone = await submit('198.51.100.1', { ticket: first, action: 'deny' })
+    expect(gone.status).toBe(400)
+    // Another address's page is untouched.
+    expect((await submit('198.51.100.9', { ticket: other, action: 'deny' })).status).toBe(302)
+  })
+
+  it('counts sign-ins sent at once before checking them, and checks two at a time', async () => {
+    const address = '198.51.100.2'
+    const tickets = await Promise.all(Array.from({ length: 8 }, () => ticketFrom(address)))
+    const answers = await Promise.all(
+      tickets.map((ticket) =>
+        submit(address, { ticket, password: 'wrong password', code: '000000', action: 'allow' }),
+      ),
+    )
+    const statuses = answers.map((answer) => answer.status)
+    expect(statuses.every((status) => status === 401 || status === 429)).toBe(true)
+    expect(statuses).toContain(429)
+    const checked = proxiedLines.filter((l) => l === `huli-cloud: login failed from ${address}`)
+    expect(checked.length).toBeLessThanOrEqual(5)
+    // A sign-in that succeeds is not counted against its address.
+    clock += 16 * 60 * 1000
+    for (let i = 0; i < 6; i++) {
+      nextStep()
+      const ok = await submit(address, {
+        ticket: await ticketFrom(address),
+        password: PASSWORD,
+        code: code(),
+        action: 'allow',
+      })
+      expect(ok.status).toBe(302)
+    }
+  })
+
+  it('never locks the owner out for failures from other addresses', async () => {
+    for (let a = 0; a < 8; a++) {
+      for (let i = 0; i < 5; i++) {
+        const address = `203.0.113.${a}`
+        // Too long a password fails without scrypt, as it still counts.
+        const answer = await submit(address, {
+          ticket: await ticketFrom(address),
+          password: 'x'.repeat(1025),
+          code: '000000',
+          action: 'allow',
+        })
+        expect(answer.status).toBe(401)
+      }
+    }
+    nextStep()
+    const owner = await submit('192.0.2.1', {
+      ticket: await ticketFrom('192.0.2.1'),
+      password: PASSWORD,
+      code: code(),
+      action: 'allow',
+    })
+    expect(owner.status).toBe(302)
+  })
+})
+
 describe('push gateway', () => {
   const TOKEN = 'a1'.repeat(32)
 

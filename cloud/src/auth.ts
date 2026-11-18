@@ -53,6 +53,14 @@ const CODE_MS = 60 * 1000
 const DEVICE_MS = 10 * 60 * 1000
 const DEVICE_INTERVAL_S = 5
 const MAX_TICKET_TRIES = 5
+/** Sign-in pages open at once, from one address and in all; the oldest goes first. */
+const MAX_TICKETS_PER_ADDRESS = 20
+const MAX_TICKETS = 1000
+/** Device sign-ins waiting at once; each address may start only so many an hour besides. */
+const MAX_DEVICE_GRANTS = 1000
+/** Password checks at once: each takes 32 MiB and tens of milliseconds of the thread pool. */
+const MAX_VERIFYING = 2
+const SWEEP_MS = 60_000
 const USER_CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ'
 
 /** Clients that use device codes; those that sign in through the browser are `redirectFor`'s. */
@@ -60,6 +68,7 @@ const DEVICE_CLIENTS = new Set([DAEMON_CLIENT])
 
 interface Ticket {
   params: AuthorizeParams
+  address: string
   expiresAt: number
   tries: number
 }
@@ -93,6 +102,11 @@ interface DeviceGrant {
 interface Session {
   csrf: string
   expiresAt: number
+}
+
+interface LoginFailure {
+  status: 401 | 429
+  message: string
 }
 
 export interface AuthOptions {
@@ -185,10 +199,12 @@ export class Auth {
   private readonly devices = new Map<string, DeviceGrant>()
   private readonly userCodes = new Map<string, string>()
   private readonly sessions = new Map<string, Session>()
-  // Failed sign-ins: five per address in 15 minutes, thirty overall in an hour.
+  // Sign-ins that did not succeed: five per address in 15 minutes. No limit holds for all
+  // addresses together, as anyone with a few addresses could use it to lock the owner out.
   private readonly failedByAddress: Limiter
-  private readonly failedOverall: Limiter
   private readonly deviceStarts: Limiter
+  private verifying = 0
+  private readonly sweeper: ReturnType<typeof setInterval>
 
   constructor(private readonly options: AuthOptions) {
     this.store = options.store
@@ -204,8 +220,44 @@ export class Auth {
     this.now = options.now ?? Date.now
     this.log = options.log ?? ((line) => console.warn(line))
     this.failedByAddress = new Limiter(15 * 60 * 1000, 5, this.now)
-    this.failedOverall = new Limiter(60 * 60 * 1000, 30, this.now)
     this.deviceStarts = new Limiter(60 * 60 * 1000, 30, this.now)
+    // On a timer rather than on each request, which anyone may send.
+    this.sweeper = setInterval(() => this.sweep(), SWEEP_MS)
+    this.sweeper.unref()
+  }
+
+  close(): void {
+    clearInterval(this.sweeper)
+  }
+
+  /** The entry under `key` while it lasts; one past its time is dropped. */
+  private live<T extends { expiresAt: number }>(map: Map<string, T>, key: string): T | undefined {
+    const entry = map.get(key)
+    if (!entry || entry.expiresAt > this.now()) return entry
+    map.delete(key)
+    return undefined
+  }
+
+  /** The device sign-in under `key` while it lasts, by its device code's hash. */
+  private liveDevice(key: string | undefined): DeviceGrant | undefined {
+    const device = key === undefined ? undefined : this.devices.get(key)
+    if (!device || device.expiresAt > this.now()) return device
+    this.devices.delete(key!)
+    this.userCodes.delete(device.userCode)
+    return undefined
+  }
+
+  /** Keeps a new ticket, dropping the oldest of its address's and of all over the caps. */
+  private keepTicket(id: string, ticket: Ticket): void {
+    const own = [...this.tickets].filter(([, kept]) => kept.address === ticket.address)
+    for (const [old] of own.slice(0, Math.max(0, own.length + 1 - MAX_TICKETS_PER_ADDRESS))) {
+      this.tickets.delete(old)
+    }
+    for (const old of this.tickets.keys()) {
+      if (this.tickets.size < MAX_TICKETS) break
+      this.tickets.delete(old)
+    }
+    this.tickets.set(id, ticket)
   }
 
   private sweep(): void {
@@ -243,36 +295,52 @@ export class Auth {
     return sessionCookie(SESSION_COOKIE, '', 0, this.secure)
   }
 
-  /** Checks a password and a one-time or recovery code, counting failures; why it failed, or null. */
+  /**
+   * Checks a password and a one-time or recovery code, counting failures; why it failed and the
+   * status to answer, or null.
+   */
   private async verifyLogin(
     request: IncomingMessage,
     password: string,
     code: string,
-  ): Promise<string | null> {
+  ): Promise<LoginFailure | null> {
     const address = clientAddress(request, this.options.trustProxy)
-    if (this.failedByAddress.blocked(address) || this.failedOverall.blocked('all')) {
+    if (this.failedByAddress.blocked(address)) {
       this.log(`huli-cloud: login blocked from ${address}`)
-      return '尝试次数太多，请过一会儿再试。'
+      return { status: 401, message: '尝试次数太多，请过一会儿再试。' }
     }
+    if (this.verifying >= MAX_VERIFYING) {
+      return { status: 429, message: '正在验证别的登录，请过几秒再试。' }
+    }
+    // Counted before the password is checked, so that requests sent at once cannot all pass the
+    // check above while the first wait for scrypt; taken back when the sign-in succeeds.
+    this.failedByAddress.hit(address)
     const account = this.store.account
-    const fail = (): string => {
-      this.failedByAddress.hit(address)
-      this.failedOverall.hit('all')
+    const fail = (): LoginFailure => {
       this.log(`huli-cloud: login failed from ${address}`)
-      return '密码或验证码不对。'
+      return { status: 401, message: '密码或验证码不对。' }
+    }
+    const succeed = (): null => {
+      this.failedByAddress.undo(address)
+      return null
     }
     if (!account || password.length > 1024 || code.length > 64) return fail()
-    if (!(await verifyPassword(password, account.password))) return fail()
+    this.verifying++
+    try {
+      if (!(await verifyPassword(password, account.password))) return fail()
+    } finally {
+      this.verifying--
+    }
     const step = checkTotp(account.totp, code.trim(), this.now(), account.totpLastStep)
     if (step !== null) {
       this.store.updateAccount({ totpLastStep: step })
-      return null
+      return succeed()
     }
     const recovery = sha256Hex(normalizeRecovery(code))
     if (account.recovery.includes(recovery)) {
       this.store.updateAccount({ recovery: account.recovery.filter((r) => r !== recovery) })
       this.log('huli-cloud: a recovery code was used')
-      return null
+      return succeed()
     }
     return fail()
   }
@@ -281,7 +349,6 @@ export class Auth {
 
   /** GET /signin/app/ */
   signInPage(request: IncomingMessage, response: ServerResponse, url: URL): void {
-    this.sweep()
     const q = url.searchParams
     if (q.get('done') === '1') {
       return sendHtml(
@@ -320,7 +387,12 @@ export class Auth {
       info: parseClientInfo(q.get('client_info')),
     }
     const ticket = randomToken(18)
-    this.tickets.set(ticket, { params, expiresAt: this.now() + TICKET_MS, tries: 0 })
+    this.keepTicket(ticket, {
+      params,
+      address: clientAddress(request, this.options.trustProxy),
+      expiresAt: this.now() + TICKET_MS,
+      tries: 0,
+    })
     const session = this.session(request)
     const client = describeClient(params.info)
     if (session) {
@@ -343,10 +415,9 @@ export class Auth {
 
   /** POST /signin/app/ */
   async signInSubmit(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    this.sweep()
     const form = await readForm(request)
     const ticketId = form.get('ticket') ?? ''
-    const ticket = this.tickets.get(ticketId)
+    const ticket = this.live(this.tickets, ticketId)
     if (!ticket) {
       return sendHtml(response, this.secure, 400, messagePage('登录已过期', '回到纸鸢重新点登录。'))
     }
@@ -372,17 +443,17 @@ export class Auth {
         form.get('code') ?? '',
       )
       if (failure) {
-        ticket.tries++
+        if (failure.status !== 429) ticket.tries++
         if (ticket.tries >= MAX_TICKET_TRIES) this.tickets.delete(ticketId)
         return sendHtml(
           response,
           this.secure,
-          401,
+          failure.status,
           loginPage({
             action: '/signin/app/',
             fields: { ticket: ticketId },
             purpose: `登录 ${describeClient(params.info)}`,
-            error: failure,
+            error: failure.message,
           }),
           this.signInHeaders,
         )
@@ -411,7 +482,6 @@ export class Auth {
 
   /** POST /api/oauth/token */
   async token(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    this.sweep()
     const form = await readForm(request)
     const grant = form.get('grant_type')
     const clientId = form.get('client_id') ?? ''
@@ -421,7 +491,7 @@ export class Auth {
     if (grant === 'authorization_code') {
       const codeText = form.get('code') ?? ''
       const key = sha256Hex(codeText)
-      const code = this.codes.get(key)
+      const code = this.live(this.codes, key)
       // A code is spent by its first use, whether that use succeeds or not.
       this.codes.delete(key)
       const verifier = form.get('code_verifier') ?? ''
@@ -450,7 +520,7 @@ export class Auth {
 
     if (grant === DEVICE_GRANT) {
       const key = sha256Hex(form.get('device_code') ?? '')
-      const device = this.devices.get(key)
+      const device = this.liveDevice(key)
       if (!device || device.clientId !== clientId) {
         return fail(400, 'expired_token', 'The device code has expired.')
       }
@@ -477,7 +547,6 @@ export class Auth {
 
   /** POST /api/oauth/device */
   async deviceStart(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    this.sweep()
     const form = await readForm(request)
     const clientId = form.get('client_id') ?? ''
     if (!DEVICE_CLIENTS.has(clientId)) {
@@ -496,6 +565,11 @@ export class Auth {
       userCode = `${letters.slice(0, 4)}-${letters.slice(4)}`
     } while (this.userCodes.has(userCode))
     const key = sha256Hex(deviceCode)
+    for (const [old, grant] of this.devices) {
+      if (this.devices.size < MAX_DEVICE_GRANTS) break
+      this.devices.delete(old)
+      this.userCodes.delete(grant.userCode)
+    }
     this.devices.set(key, {
       userCode,
       clientId,
@@ -524,7 +598,6 @@ export class Auth {
 
   /** GET /device */
   devicePage(request: IncomingMessage, response: ServerResponse, url: URL): void {
-    this.sweep()
     const code = this.normalizeUserCode(url.searchParams.get('code') ?? '')
     const session = this.session(request)
     if (!session) {
@@ -539,8 +612,7 @@ export class Auth {
         }),
       )
     }
-    const key = this.userCodes.get(code)
-    const device = key ? this.devices.get(key) : undefined
+    const device = this.liveDevice(this.userCodes.get(code))
     sendHtml(
       response,
       this.secure,
@@ -555,15 +627,13 @@ export class Auth {
 
   /** POST /device */
   async deviceSubmit(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    this.sweep()
     const form = await readForm(request)
     const session = this.session(request)
     if (!session || !sameText(form.get('csrf') ?? '', session.csrf)) {
       return redirect(response, this.secure, '/device')
     }
     const code = this.normalizeUserCode(form.get('user_code') ?? '')
-    const key = this.userCodes.get(code)
-    const device = key ? this.devices.get(key) : undefined
+    const device = this.liveDevice(this.userCodes.get(code))
     if (!device || device.status !== 'pending') {
       return sendHtml(
         response,
@@ -607,8 +677,13 @@ export class Auth {
       return sendHtml(
         response,
         this.secure,
-        401,
-        loginPage({ action: '/web/login', fields: { next }, purpose: '登录', error: failure }),
+        failure.status,
+        loginPage({
+          action: '/web/login',
+          fields: { next },
+          purpose: '登录',
+          error: failure.message,
+        }),
       )
     }
     redirect(response, this.secure, next, { 'set-cookie': this.startSession().cookie })
