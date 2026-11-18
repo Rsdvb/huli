@@ -79,5 +79,18 @@ export interface KettuImportResult {
   failed: KettuImportFailure[]
 }
 
+/** What bringing Kettu's memory over did. */
+export interface KettuMemoryResult {
+  imported: number
+  /** Of `imported`, those whose id an entry here with other content has, added under `as`. */
+  renamed: { title: string; id: string; as: string }[]
+  /**
+   * `imported`: brought over before, as it is now. `same`: an entry here has its title and body.
+   * `invalid`: no entry, or past memory's limits. `secret`: it seems to hold a secret. `full`: its
+   * layer holds as many entries as it may. `noProject`: its project's folder is gone.
+   */
+  skipped: Record<'imported' | 'same' | 'invalid' | 'secret' | 'full' | 'noProject', number>
+}
+
 /** The most sessions one `kettuImport.run` takes. */
 export const KETTU_IMPORT_SESSIONS = 10_000
