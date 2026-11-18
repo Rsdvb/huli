@@ -36,6 +36,8 @@ export interface SettingsFile {
     openAtLogin: boolean // start at login, so routines keep their schedule
     background: boolean // keep running with the tray icon after the last window closes
     sessionTitles: boolean // a small model titles a session its agent leaves untitled
+    claudeTestEntrypoint: boolean
+    claudeTestEntrypointSuffix: string
   }
   thread: {
     outlineSummaries: boolean // a small model titles the outline's messages
@@ -191,6 +193,18 @@ export type ZoomStep = -1 | 0 | 1
 export type ProxySettings =
   { mode: 'environment' } | { mode: 'custom'; url: string; noProxy: string }
 
+export const CLAUDE_TEST_ENTRYPOINT_PREFIX = 'huli-'
+export const CLAUDE_TEST_ENTRYPOINT_SUFFIX_CHARS = 32
+
+export function isClaudeTestEntrypointSuffix(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= CLAUDE_TEST_ENTRYPOINT_SUFFIX_CHARS &&
+    /^[A-Za-z0-9]/.test(value) &&
+    !/[^A-Za-z0-9_-]/.test(value)
+  )
+}
+
 export const DEFAULT_SETTINGS: SettingsFile = {
   version: 1,
   agentRegistrationVersion: 1,
@@ -205,6 +219,8 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     openAtLogin: false,
     background: false,
     sessionTitles: true,
+    claudeTestEntrypoint: false,
+    claudeTestEntrypointSuffix: 'test',
   },
   thread: { outlineSummaries: true, confirmLinks: true, openLinksIn: 'browser', alwaysOpenIn: {} },
   appearance: {
@@ -324,6 +340,7 @@ export interface HostSettings {
   idleSessions: SettingsFile['idleSessions']
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled
+  claudeTestEntrypoint: string | null
   defaultAgent: AgentId | null // the agent new sessions start with, which answers artifacts' questions
   computerUse: ComputerUseSettings
 }

@@ -964,11 +964,13 @@ export class ClaudeConnection implements AgentConnection {
       },
       pathToClaudeCodeExecutable: this.requireCli(),
       spawnClaudeCodeProcess: (spawn) => {
+        const env = spawn.env as Env
+        const entrypoint = this.context.claudeTestEntrypoint?.()
         const child = this.context.spawn({
           command: spawn.command,
           args: spawn.args,
           ...(spawn.cwd ? { cwd: spawn.cwd } : {}),
-          env: spawn.env as Env,
+          env: entrypoint ? { ...env, CLAUDE_CODE_ENTRYPOINT: entrypoint } : env,
           signal: spawn.signal,
         })
         session.process = child

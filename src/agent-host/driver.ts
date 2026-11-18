@@ -76,6 +76,7 @@ export interface HostedContext extends DriverContext {
   spec: LaunchSpec
   env: Env
   spawn: HostedSpawn
+  claudeTestEntrypoint?(): string | null
 }
 
 export interface HostedDriver extends StoredConfig {

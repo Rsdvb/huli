@@ -1104,7 +1104,11 @@ export class AgentManager {
     slot.launched = run
     let connection: AgentConnection
     try {
-      connection = driver.connect({ ...context, spec, env, spawn: run.spawn })
+      connection = driver.connect({
+        ...context,
+        spawn: run.spawn,
+        claudeTestEntrypoint: () => this.deps.settings().claudeTestEntrypoint,
+      })
     } catch (error) {
       slot.launched = null
       throw error

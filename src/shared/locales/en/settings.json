@@ -704,6 +704,12 @@
     },
     "claudeSettings": {
       "auto": "Auto",
+      "testEntrypoint": {
+        "name": "Test entrypoint identifier",
+        "description": "Sets CLAUDE_CODE_ENTRYPOINT for new local Claude Code sessions in Kite.",
+        "suffix": "Test label suffix",
+        "suffixHint": "Starts with a letter or digit. Up to 32 letters, digits, hyphens or underscores."
+      },
       "compact": {
         "name": "Auto-compact window",
         "description": "How many tokens of a conversation Claude Code lets build up before it compacts it. Set one for all models, and a different one for a model if you like. Auto lets Claude Code decide. A project’s own settings win in that project, and a change applies from the next session.",

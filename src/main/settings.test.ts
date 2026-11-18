@@ -20,6 +20,19 @@ afterEach(async () => {
 const save = (value: unknown): Promise<void> =>
   writeFile(join(dir, 'settings.json'), typeof value === 'string' ? value : JSON.stringify(value))
 
+it('keeps the Claude test label under the Huli prefix and sends it only when enabled', async () => {
+  await save({ version: 1, general: { claudeTestEntrypointSuffix: 'my-test' } })
+  const store = await SettingsStore.load(dir)
+  const settings = store.get()
+  expect(settings.general.claudeTestEntrypointSuffix).toBe('my-test')
+  expect(hostSettings(settings, 'en').claudeTestEntrypoint).toBeNull()
+  const enabled = mergeSettings(settings, { general: { claudeTestEntrypoint: true } })
+  expect(hostSettings(enabled, 'en').claudeTestEntrypoint).toBe('huli-my-test')
+  expect(() =>
+    validateSettingsPatch({ general: { claudeTestEntrypointSuffix: 'invalid\n' } }),
+  ).toThrow('valid Huli entrypoint suffix')
+})
+
 describe('the first start record on load', () => {
   it('leaves a host without a settings file to run its first start', async () => {
     const store = await SettingsStore.load(dir)

@@ -126,7 +126,11 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function setup(env: Record<string, string> = {}, spec: Partial<LaunchSpec> = {}) {
+async function setup(
+  env: Record<string, string> = {},
+  spec: Partial<LaunchSpec> = {},
+  claudeTestEntrypoint?: () => string | null,
+) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-sdk-'))
   dirs.push(dir)
   const entry = path.join(dir, 'sdk.mjs')
@@ -154,6 +158,7 @@ async function setup(env: Record<string, string> = {}, spec: Partial<LaunchSpec>
       ...spec,
     },
     env: { PATH: '/usr/bin', HOME: '/home/ada', ...env },
+    ...(claudeTestEntrypoint ? { claudeTestEntrypoint } : {}),
     spawn: (options) => {
       spawned.push(options)
       const child = new FakeChild()
@@ -341,6 +346,25 @@ describe('the Claude Agent SDK driver', () => {
       'plan',
       'auto',
       ...(process.getuid?.() === 0 ? [] : ['bypassPermissions']),
+    ])
+  })
+
+  it('uses the test entrypoint only for processes started with the setting on', async () => {
+    let entrypoint: string | null = null
+    const { connection, spawned } = await setup(
+      { CLAUDE_CODE_ENTRYPOINT: 'sdk-ts' },
+      {},
+      () => entrypoint,
+    )
+    await connection.newSession('/repo', {})
+    entrypoint = 'huli-my-test'
+    await connection.newSession('/repo', {})
+    entrypoint = null
+    await connection.newSession('/repo', {})
+    expect(spawned.map((process) => process.env.CLAUDE_CODE_ENTRYPOINT)).toEqual([
+      'sdk-ts',
+      'huli-my-test',
+      'sdk-ts',
     ])
   })
 

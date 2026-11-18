@@ -14,6 +14,11 @@ import {
   PROMPT_CACHE_TTLS,
   type PromptCacheTtl,
 } from '@shared/agents'
+import {
+  CLAUDE_TEST_ENTRYPOINT_PREFIX,
+  CLAUDE_TEST_ENTRYPOINT_SUFFIX_CHARS,
+  isClaudeTestEntrypointSuffix,
+} from '@shared/settings'
 import { Icon } from '@renderer/components/affect/app-shell'
 import {
   Combobox,
@@ -26,8 +31,9 @@ import {
 import { errorMessage } from '@renderer/lib/host'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { useAction } from './agent-helpers'
-import { SettingSelect, Skel } from './controls'
+import { SetButton, SettingSelect, SettingSwitch, Skel } from './controls'
 import { BlockLine, RowLine, RowShell, RowText } from './rows'
+import { DIALOG_MONO_FIELD } from './settings-dialog'
 
 const AUTO = 'auto'
 const MAX_MODEL_CHARS = 256
@@ -70,7 +76,7 @@ function isTtl(value: string): value is PromptCacheTtl {
 }
 
 export function ClaudeSettingsRows({ status }: { status: AgentStatus }) {
-  const { request } = useHostScope()
+  const { hostId, request } = useHostScope()
   const { t } = useTranslation('settings')
   const [read, setRead] = useState<Read>({ state: 'loading' })
   // Models typed in, kept as rows until the file holds a window for them.
@@ -302,6 +308,89 @@ export function ClaudeSettingsRows({ status }: { status: AgentStatus }) {
           </p>
         )}
       </RowShell>
+      {hostId === null && <ClaudeTestEntrypointRow />}
     </>
+  )
+}
+
+function ClaudeTestEntrypointRow() {
+  const { useSettingsStore } = useHostScope()
+  const { t } = useTranslation('settings')
+  const [save, busy, error] = useAction()
+  const [draft, setDraft] = useState<string | null>(null)
+  const checked = useSettingsStore((s) => s.settings.general.claudeTestEntrypoint)
+  const suffix = useSettingsStore((s) => s.settings.general.claudeTestEntrypointSuffix)
+  const value = draft ?? suffix
+  const valid = isClaudeTestEntrypointSuffix(value)
+  const canSave = !busy && valid && value !== suffix
+  const name = t('agents.claudeSettings.testEntrypoint.name')
+  const label = t('agents.claudeSettings.testEntrypoint.suffix')
+  return (
+    <RowShell>
+      <div className="k-block">
+        <BlockLine
+          text={
+            <RowText
+              name={name}
+              description={t('agents.claudeSettings.testEntrypoint.description')}
+            />
+          }
+        >
+          <SettingSwitch
+            label={name}
+            checked={checked}
+            disabled={busy}
+            onChange={(next) =>
+              save(() =>
+                useSettingsStore.getState().update({ general: { claudeTestEntrypoint: next } }),
+              )
+            }
+          />
+        </BlockLine>
+        <BlockLine
+          text={
+            <RowText
+              name={label}
+              description={t('agents.claudeSettings.testEntrypoint.suffixHint')}
+            />
+          }
+        >
+          <form
+            className="flex min-w-0 items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (!canSave) return
+              save(async () => {
+                await useSettingsStore
+                  .getState()
+                  .update({ general: { claudeTestEntrypointSuffix: value } })
+                setDraft(null)
+              })
+            }}
+          >
+            <span className="font-mono text-tertiary">{CLAUDE_TEST_ENTRYPOINT_PREFIX}</span>
+            <input
+              className={DIALOG_MONO_FIELD + ' min-w-0 max-w-36'}
+              aria-label={label}
+              aria-invalid={!valid}
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={CLAUDE_TEST_ENTRYPOINT_SUFFIX_CHARS}
+              value={value}
+              disabled={busy}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            <SetButton type="submit" disabled={!canSave}>
+              {t('agents.key.save')}
+            </SetButton>
+          </form>
+        </BlockLine>
+      </div>
+      {error && (
+        <p role="status" className="k-row-note k-error" data-wrap="">
+          {error}
+        </p>
+      )}
+    </RowShell>
   )
 }
