@@ -78,10 +78,17 @@ export class RelayTokens {
 
   /** Whether a grant taken before still holds: its client signed in, its token not long lapsed. */
   holds(grant: RelayGrant, graceMs: number): boolean {
+    return this.signedIn(grant) && grant.expiresAt + graceMs > this.now()
+  }
+
+  /**
+   * Whether the client of a grant taken before is still signed in to the account, however old the
+   * token: a joined device has no way to send a newer one.
+   */
+  signedIn(grant: RelayGrant): boolean {
     return (
       this.store.account?.id === grant.account &&
-      this.store.family(grant.family)?.account === grant.account &&
-      grant.expiresAt + graceMs > this.now()
+      this.store.family(grant.family)?.account === grant.account
     )
   }
 

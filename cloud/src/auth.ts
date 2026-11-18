@@ -122,6 +122,8 @@ export interface AuthOptions {
   webOrigin?: string | null
   /** Whether one of the account's computers is on the relay now, for the account page. */
   online?: (id: string) => boolean
+  /** A device was signed out: its hosts and connections leave the relay now. */
+  revoked?: () => void
   now?: () => number
   log?: (line: string) => void
 }
@@ -736,6 +738,7 @@ export class Auth {
       if (this.store.families().some((f) => f.id === family)) {
         this.store.revokeFamily(family)
         this.log('huli-cloud: a device was signed out from the web')
+        this.options.revoked?.()
       }
     }
     redirect(response, this.secure, '/account/devices/')

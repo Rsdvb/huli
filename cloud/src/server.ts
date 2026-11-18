@@ -58,6 +58,7 @@ export function makeServer(
     trustProxy: config.trustProxy,
     webOrigin,
     online: (id) => relay.online(id),
+    revoked: () => relay.checkGrants(),
     ...options,
   })
   const push = new PushGateway({
@@ -93,7 +94,7 @@ export function makeServer(
     store,
     auth,
     online: (id) => relay.online(id),
-    revoked: () => relay.checkHosts(),
+    revoked: () => relay.checkGrants(),
     now: options.now ?? Date.now,
     secure,
     log,
