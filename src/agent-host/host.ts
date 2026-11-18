@@ -1115,6 +1115,12 @@ export class AgentHost {
       ledger: kettuImportFile(options.userDataPath, log),
       sessions: this.sessions,
       projects: this.projects,
+      memory: this.memory,
+      threads: this.threads,
+      artifactsChanged: () => {
+        this.hub.broadcast({ type: 'artifacts.changed' })
+        this.options.send({ type: 'host:artifacts-changed' })
+      },
       hasAgent: (agentId) => this.agents.has(agentId),
       progress: (done, total, title) =>
         this.hub.broadcast({ type: 'kettuImport.progress', done, total, title }),
@@ -3168,7 +3174,11 @@ export class AgentHost {
         }
       },
       'kettuImport.scan': () => this.kettuImport.scan(),
-      'kettuImport.run': ({ sessionIds }) => this.kettuImport.run(sessionIds),
+      'kettuImport.run': ({ sessionIds, memory, artifacts }) =>
+        this.kettuImport.run(sessionIds, {
+          memory: memory ?? false,
+          artifacts: artifacts ?? false,
+        }),
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),

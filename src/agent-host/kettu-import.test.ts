@@ -14,7 +14,12 @@ import {
   type ImportSessions,
   type KettuImportDeps,
 } from './kettu-import'
+import { newArtifactId } from './artifacts/ids'
+import { formatEntry } from './memory/entry-file'
+import { MemoryService } from './memory/service'
 import { projectsFile, sessionsFile, type ProjectRecord, type SessionRecord } from './storage'
+import { inThreadWorker } from './testing/thread-worker'
+import { ThreadStore } from './threads/store'
 import { createValidators } from './validate'
 
 const platform = process.platform as Platform
@@ -88,6 +93,15 @@ function fixture(): SessionRecord[] {
   ]
 }
 
+function threadStore(data: string): ThreadStore {
+  return new ThreadStore({
+    file: path.join(data, 'state', 'threads.db'),
+    contentDir: path.join(data, 'artifacts', 'content'),
+    createWorker: (worker) => inThreadWorker(worker),
+    log,
+  })
+}
+
 interface Fakes {
   imports: { params: Parameters<ImportSessions['importSession']>[0]; kept: unknown }[]
   added: string[]
@@ -130,6 +144,9 @@ function setup(extra: Partial<KettuImportDeps> = {}): { importer: KettuImport; f
         fakes.added.push(value)
       },
     },
+    memory: { list: async () => [], adopt: async () => [] },
+    threads: null,
+    artifactsChanged: () => {},
     hasAgent: (agentId) => agentId === 'claude-code',
     progress: (done, total, title) => fakes.progress.push([done, total, title]),
     log,
@@ -289,6 +306,69 @@ describe('KettuImport', () => {
     expect(await readdir(copies)).toEqual([])
   })
 
+  it('brings memory and artifacts over after the sessions, naming the sessions they became', async () => {
+    await writeKettu(fixture(), [])
+    const entry = {
+      id: 'reply-in-chinese',
+      title: 'Reply in Chinese',
+      description: '',
+      body: 'Always.',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      source: { agentId: 'claude-code' as AgentId, sessionId: 'pinned' },
+    }
+    await mkdir(path.join(kettu, 'memory', 'global'), { recursive: true })
+    await writeFile(path.join(kettu, 'memory', 'global', `${entry.id}.md`), formatEntry(entry))
+    const kettuThreads = threadStore(kettu)
+    await kettuThreads.ready
+    const artifactId = newArtifactId(1_000)
+    await kettuThreads.artifact('create', {
+      id: artifactId,
+      project: alpha,
+      sessionId: 'pinned',
+      title: 'Plan',
+      files: [{ path: 'index.html', data: new TextEncoder().encode('<p>plan</p>') }],
+      pages: 1,
+      note: null,
+      at: 1_000,
+    })
+    await kettuThreads.close()
+    const threads = threadStore(huli)
+    await threads.ready
+    const added: string[] = []
+    const memory = new MemoryService({
+      root: path.join(huli, 'memory'),
+      log,
+      projects: () => added.map((folder) => ({ path: folder, name: '' })),
+      claudeAgents: () => [],
+    })
+    let changed = 0
+    const { importer } = setup({ memory, threads, artifactsChanged: () => changed++ })
+    const before = await snapshot(kettu)
+
+    const scan = await importer.scan()
+    expect(scan.memory).toEqual({ found: 1, importable: 1 })
+    expect(scan.artifacts).toEqual({ found: 1, importable: 1, error: null })
+    const result = await importer.run(['pinned'], { memory: true, artifacts: true })
+
+    expect(result.memory).toMatchObject({ imported: 1 })
+    expect(result.artifacts).toMatchObject({ imported: 1 })
+    expect(changed).toBe(1)
+    const [global] = await memory.list({ layer: 'global' })
+    expect(global!.source.sessionId).toBe('huli-0')
+    const found = await threads.artifact('get', { id: artifactId, version: null, project: null })
+    expect(found.artifact.sessionId).toBe('huli-0')
+    const again = await importer.scan()
+    expect(again.memory).toEqual({ found: 1, importable: 0 })
+    expect(again.artifacts).toEqual({ found: 1, importable: 0, error: null })
+    const ledger = JSON.parse(await readFile(path.join(huli, 'state', 'kettu-import.json'), 'utf8'))
+    expect(ledger.artifacts).toEqual([{ kettuId: artifactId, artifactId }])
+    expect(ledger.memory).toHaveLength(1)
+    expect(await snapshot(kettu)).toEqual(before)
+    expect(await readdir(copies)).toEqual([])
+    await threads.close()
+  })
+
   it('runs one import at a time', async () => {
     await writeKettu(fixture(), [])
     const { importer } = setup()
@@ -305,6 +385,9 @@ describe('kettuImport validators', () => {
     expect(validators['kettuImport.run']({ sessionIds: ['a', 'b', 'a'], extra: 1 })).toEqual({
       sessionIds: ['a', 'b'],
     })
+    expect(
+      validators['kettuImport.run']({ sessionIds: [], memory: true, artifacts: false }),
+    ).toEqual({ sessionIds: [], memory: true, artifacts: false })
     expect(validators['kettuImport.scan'](undefined)).toBeUndefined()
   })
 
@@ -313,6 +396,7 @@ describe('kettuImport validators', () => {
     expect(() => validators['kettuImport.run']({ sessionIds: 'a' })).toThrow(/sessionIds/)
     expect(() => validators['kettuImport.run']({ sessionIds: [1] })).toThrow()
     expect(() => validators['kettuImport.run']({ sessionIds: [''] })).toThrow()
+    expect(() => validators['kettuImport.run']({ sessionIds: [], memory: 'yes' })).toThrow()
     expect(() => validators['kettuImport.scan']({ x: 1 })).toThrow()
   })
 })

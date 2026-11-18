@@ -1,5 +1,5 @@
-// Huli: what was found of an official Kettu's sessions on this computer, and an import of them in
-// progress. Huli's own; see tools/huli/README.md.
+// Huli: what was found of an official Kettu's sessions, memory and artifacts on this computer, and
+// an import of them in progress. Huli's own; see tools/huli/README.md.
 
 import { create } from 'zustand'
 import type { HostEvent } from '@shared/agent-host'
@@ -46,12 +46,21 @@ export function scanKettu(): Promise<void> {
   return scanning
 }
 
-/** Imports the sessions by Kettu's ids, then looks again, so what came over shows as imported. */
-export async function runKettuImport(sessionIds: string[]): Promise<void> {
+/** What an import brings beside the sessions. */
+export interface KettuExtras {
+  memory: boolean
+  artifacts: boolean
+}
+
+/**
+ * Imports the sessions by Kettu's ids, and memory and artifacts as chosen, then looks again, so
+ * what came over shows as imported.
+ */
+export async function runKettuImport(sessionIds: string[], extras: KettuExtras): Promise<void> {
   if (useKettuImportStore.getState().running) return
   useKettuImportStore.setState({ running: true, progress: null, result: null, runError: null })
   try {
-    const result = await host('kettuImport.run', { sessionIds })
+    const result = await host('kettuImport.run', { sessionIds, ...extras })
     useKettuImportStore.setState({ result })
   } catch (error) {
     useKettuImportStore.setState({ runError: errorMessage(error) })
@@ -71,6 +80,14 @@ export function receiveKettuImportProgress(event: Progress, hostId: string | nul
   if (hostId !== null) return
   const { done, total, title } = event
   useKettuImportStore.setState({ progress: { done, total, title } })
+}
+
+/** What starts chosen beside the sessions: memory and artifacts that are not here yet. */
+export function defaultExtras(scan: KettuImportScan): KettuExtras {
+  return {
+    memory: scan.memory.importable > 0,
+    artifacts: scan.artifacts.error === null && scan.artifacts.importable > 0,
+  }
 }
 
 /** A top-level session that can come over and has not yet. */

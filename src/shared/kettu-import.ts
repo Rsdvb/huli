@@ -62,7 +62,18 @@ export interface KettuImportScan {
     importable: number
     imported: number
   }
+  /** Kettu's global and project memory entries: all read, and those not here yet. */
+  memory: { found: number; importable: number }
+  /** Kettu's artifacts outside its Recently deleted: all read, and those not here yet. */
+  artifacts: { found: number; importable: number; error: KettuArtifactsError | null }
 }
+
+/**
+ * Why Kettu's artifacts could not be read. `newer`: its database is from a newer version.
+ * `unreadable`: its database could not be copied or read. `noSpace`: the disk lacks room for the
+ * copy. `unavailable`: this app's own thread database is not open.
+ */
+export type KettuArtifactsError = 'newer' | 'unreadable' | 'noSpace' | 'unavailable'
 
 export interface KettuImportFailure {
   sessionId: string
@@ -77,6 +88,43 @@ export interface KettuImportResult {
   /** Already here, subagents, and those `KettuSkipReason` keeps out. */
   skipped: number
   failed: KettuImportFailure[]
+  /** Null when memory was not asked for, or could not be read (`memoryError`). */
+  memory: KettuMemoryResult | null
+  memoryError: string | null
+  /** Null when artifacts were not asked for, or could not be read (`artifactsError`). */
+  artifacts: KettuArtifactsResult | null
+  artifactsError: KettuArtifactsError | null
+}
+
+/** What bringing Kettu's memory over did. */
+export interface KettuMemoryResult {
+  imported: number
+  /** Of `imported`, those whose id an entry here with other content has, added under `as`. */
+  renamed: { title: string; id: string; as: string }[]
+  /**
+   * `imported`: brought over before, as it is now. `same`: an entry here has its title and body.
+   * `invalid`: no entry, or past memory's limits. `secret`: it seems to hold a secret. `full`: its
+   * layer holds as many entries as it may. `noProject`: its project's folder is gone.
+   */
+  skipped: Record<'imported' | 'same' | 'invalid' | 'secret' | 'full' | 'noProject', number>
+}
+
+/** What bringing Kettu's artifacts over did. Kettu's sharing links are never brought. */
+export interface KettuArtifactsResult {
+  imported: number
+  /** Of `imported`, those whose id an artifact here has, added under `as`. */
+  renamed: { title: string; id: string; as: string }[]
+  /**
+   * `imported`: brought over before and still here. `same`: an artifact here has its latest
+   * version. `invalid`: its records fail the checks. `missingContent`: a file of a version is
+   * gone or not what its record says. `scratch`: it is in a folder inside Kettu's data folder.
+   * `deleted`: it is in Kettu's Recently deleted.
+   */
+  skipped: Record<
+    'imported' | 'same' | 'invalid' | 'missingContent' | 'scratch' | 'deleted',
+    number
+  >
+  failed: { title: string; message: string }[]
 }
 
 /** The most sessions one `kettuImport.run` takes. */

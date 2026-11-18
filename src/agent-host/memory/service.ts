@@ -751,4 +751,71 @@ export class MemoryService {
       return result
     })
   }
+
+  /**
+   * Huli: entries of another copy of the app, an official Kettu's, added to the scope's layer with
+   * their ids, times and sources. Each is checked as a write is, secrets refused. One whose title
+   * and body the layer holds already is `same`; one whose id is taken by other content is added
+   * under a new id. See kettu-import-memory.ts.
+   */
+  adopt(scope: MemoryScope, entries: readonly MemoryEntry[]): Promise<AdoptOutcome[]> {
+    const layer = this.layer(scope)
+    return this.exclusive(async () => {
+      const held = await this.readLayer(layer)
+      const contents = new Set(held.map(contentKey))
+      const taken = new Set(held.map((entry) => entry.id))
+      const written: MemoryEntry[] = []
+      const outcomes: AdoptOutcome[] = []
+      for (const entry of entries) {
+        let clean: MemoryDraft
+        try {
+          clean = this.clean(entry)
+        } catch (error) {
+          const code = error instanceof MemoryError ? error.code : 'invalid'
+          outcomes.push({ id: entry.id, kind: code === 'secret' ? 'secret' : 'invalid' })
+          continue
+        }
+        if (contents.has(contentKey(clean))) {
+          outcomes.push({ id: entry.id, kind: 'same' })
+          continue
+        }
+        if (held.length + written.length >= MEMORY_ENTRIES_PER_LAYER) {
+          outcomes.push({ id: entry.id, kind: 'full' })
+          continue
+        }
+        const free = MEMORY_ID.test(entry.id) && !taken.has(entry.id)
+        const id = free ? entry.id : newId(clean.title, taken)
+        const now = this.now()
+        const adopted: MemoryEntry = {
+          ...clean,
+          id,
+          createdAt: Math.min(entry.createdAt, now),
+          updatedAt: Math.min(entry.updatedAt, now),
+          source: entry.source,
+        }
+        await this.prepare(layer)
+        await writeFileAtomic(path.join(layer.dir, `${id}.md`), formatEntry(adopted))
+        taken.add(id)
+        contents.add(contentKey(clean))
+        written.push(adopted)
+        outcomes.push(
+          free ? { id: entry.id, kind: 'added' } : { id: entry.id, kind: 'renamed', as: id },
+        )
+      }
+      if (written.length > 0) {
+        await this.writeIndex(layer, [...held, ...written])
+        this.deps.log(
+          'info',
+          `Memory adopted ${written.length} ${layer.project ? 'project' : 'global'} entries`,
+        )
+        this.changed()
+      }
+      return outcomes
+    })
+  }
 }
+
+/** Huli: what `adopt` did with an entry, by the id it came with. */
+export type AdoptOutcome =
+  | { id: string; kind: 'added' | 'same' | 'full' | 'invalid' | 'secret' }
+  | { id: string; kind: 'renamed'; as: string }

@@ -1,7 +1,9 @@
-// Huli: the sessions of an official Kettu on the same computer, brought over. Kettu's index is
-// copied out of its data folder and read from the copy, so nothing of Kettu's is ever opened for
-// writing, locked or changed; each session is then imported as the sidebar's Import sessions does,
-// through its agent's own session, which Huli resumes. Huli's own; see tools/huli/README.md.
+// Huli: the sessions of an official Kettu on the same computer, brought over, with its memory and
+// artifacts. Kettu's index is copied out of its data folder and read from the copy, so nothing of
+// Kettu's is ever opened for writing, locked or changed; each session is then imported as the
+// sidebar's Import sessions does, through its agent's own session, which Huli resumes. Memory and
+// artifacts come through kettu-import-memory.ts and kettu-import-artifacts.ts. Huli's own; see
+// tools/huli/README.md.
 
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -9,6 +11,7 @@ import path from 'node:path'
 import type { SessionSummary } from '@shared/agent-host'
 import type { AgentId } from '@shared/agents'
 import type {
+  KettuArtifactsError,
   KettuImportFailure,
   KettuImportResult,
   KettuImportScan,
@@ -19,6 +22,25 @@ import type {
 import type { Platform } from '@shared/platform'
 import { HostError } from './errors'
 import { currentLocale } from './i18n'
+import {
+  checkKettuArtifacts,
+  copyKettuDatabase,
+  countNewArtifacts,
+  importKettuArtifacts,
+  kettuDatabaseSignature,
+  NoSpaceError,
+  type ArtifactCaller,
+  type ArtifactLedgerItem,
+  type KettuArtifactsRead,
+} from './kettu-import-artifacts'
+import {
+  countNewMemory,
+  importKettuMemory,
+  readKettuMemory,
+  type KettuMemoryRead,
+  type MemoryImportDeps,
+  type MemoryLedgerItem,
+} from './kettu-import-memory'
 import { folderName, isInside, pathKey } from './paths'
 import type { KeptField } from './sessions'
 import {
@@ -62,24 +84,43 @@ export function kettuDataFolder(
   return path.posix.join(env.XDG_CONFIG_HOME || path.posix.join(home, '.config'), KETTU_APP_NAME)
 }
 
-/** Which of Kettu's sessions were imported as which of this app's. */
+/** Which of Kettu's sessions, memory entries and artifacts were imported, as which of this app's. */
 export interface KettuImportFile {
   version: 1
   imported: { kettuId: string; sessionId: string }[]
+  memory: MemoryLedgerItem[]
+  artifacts: ArtifactLedgerItem[]
 }
 
 export const KETTU_IMPORT_VERSION = 1
 
-export function parseKettuImportFile(data: Record<string, unknown>): KettuImportFile | string {
-  if (!Array.isArray(data.imported)) return 'imported is not a list'
-  const imported = data.imported.flatMap((item: unknown) => {
+/** The items of a list whose two fields are strings; none when it is no list. */
+function pairs<A extends string, B extends string>(
+  value: unknown,
+  a: A,
+  b: B,
+): ({ [K in A]: string } & { [K in B]: string })[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item: unknown) => {
     if (typeof item !== 'object' || item === null) return []
-    const { kettuId, sessionId } = item as Record<string, unknown>
-    return typeof kettuId === 'string' && typeof sessionId === 'string'
-      ? [{ kettuId, sessionId }]
+    const fields = item as Record<string, unknown>
+    const first = fields[a]
+    const second = fields[b]
+    return typeof first === 'string' && typeof second === 'string'
+      ? [{ [a]: first, [b]: second } as { [K in A]: string } & { [K in B]: string }]
       : []
   })
-  return { version: 1, imported }
+}
+
+export function parseKettuImportFile(data: Record<string, unknown>): KettuImportFile | string {
+  if (!Array.isArray(data.imported)) return 'imported is not a list'
+  return {
+    version: 1,
+    imported: pairs(data.imported, 'kettuId', 'sessionId'),
+    // Added later: a file from before has neither.
+    memory: pairs(data.memory, 'key', 'hash'),
+    artifacts: pairs(data.artifacts, 'kettuId', 'artifactId'),
+  }
 }
 
 export function kettuImportFile(userDataPath: string, log: LogFn): JsonFile<KettuImportFile> {
@@ -88,7 +129,7 @@ export function kettuImportFile(userDataPath: string, log: LogFn): JsonFile<Kett
     version: KETTU_IMPORT_VERSION,
     migrations: {},
     parse: parseKettuImportFile,
-    empty: () => ({ version: 1, imported: [] }),
+    empty: () => ({ version: 1, imported: [], memory: [], artifacts: [] }),
     log,
     debounceMs: 0,
   })
@@ -118,6 +159,11 @@ export interface KettuImportDeps {
   ledger: JsonFile<KettuImportFile>
   sessions: ImportSessions
   projects: ImportProjects
+  memory: MemoryImportDeps['memory']
+  /** This app's thread database, which keeps the artifacts; null when it is not open. */
+  threads: ArtifactCaller | null
+  /** Artifacts came over, for the clients' lists. */
+  artifactsChanged(): void
   /** Whether an agent of this id is set up here. */
   hasAgent(agentId: AgentId): boolean
   /** Where the copies of Kettu's index are read from; the system's temporary folder by default. */
@@ -125,6 +171,12 @@ export interface KettuImportDeps {
   isDirectory?(folder: string): Promise<boolean>
   progress(done: number, total: number, title: string | null): void
   log: LogFn
+}
+
+/** What a run brings beside the sessions. */
+export interface KettuImportParts {
+  memory: boolean
+  artifacts: boolean
 }
 
 /** Kettu's index as read from a copy. */
@@ -149,11 +201,13 @@ const MESSAGES = {
     busy: 'An import from Kettu is already running.',
     notFound: 'Kettu no longer has this session.',
     unreadable: "Kettu's sessions could not be read.",
+    memory: "Kettu's memory could not be read.",
   },
   'zh-CN': {
     busy: '已经在从 Kettu 导入了。',
     notFound: 'Kettu 里已经没有这个会话了。',
     unreadable: '读不了 Kettu 的会话。',
+    memory: '读不了 Kettu 的记忆。',
   },
 } as const
 
@@ -165,6 +219,8 @@ export class KettuImport {
   private ledger: KettuImportFile | null = null
   private running = false
   private readonly isDirectory: (folder: string) => Promise<boolean>
+  /** The artifacts last read, while Kettu's database is as it was then. */
+  private artifactsRead: { signature: string; read: KettuArtifactsRead } | null = null
 
   constructor(private readonly deps: KettuImportDeps) {
     this.isDirectory = deps.isDirectory ?? isDirectory
@@ -175,13 +231,109 @@ export class KettuImport {
     return this.ledger
   }
 
+  private saveLedger(ledger: KettuImportFile): void {
+    this.deps.ledger.save({
+      version: 1,
+      imported: [...ledger.imported],
+      memory: [...ledger.memory],
+      artifacts: [...ledger.artifacts],
+    })
+  }
+
+  /** The session here that Kettu's became; null when it was not imported or is gone. */
+  private sessionOf(ledger: KettuImportFile): (kettuId: string) => string | null {
+    const here = new Set(this.deps.sessions.list().map((summary) => summary.id))
+    const map = new Map(ledger.imported.map((item) => [item.kettuId, item.sessionId]))
+    return (kettuId) => {
+      const id = map.get(kettuId)
+      return id !== undefined && here.has(id) ? id : null
+    }
+  }
+
+  /** Whether the source is this app's own folder, as in a build named Kettu. */
+  private isOwn(): boolean {
+    const { source, ownData, platform } = this.deps
+    return pathKey(path.resolve(source), platform) === pathKey(path.resolve(ownData), platform)
+  }
+
+  private tempFolder(): Promise<string> {
+    return mkdtemp(path.join(this.deps.tempDir ?? os.tmpdir(), 'huli-kettu-'))
+  }
+
+  /** Kettu's memory, from copies of its files. */
+  private async readMemory(): Promise<KettuMemoryRead> {
+    const temp = await this.tempFolder()
+    try {
+      return await readKettuMemory(this.deps.source, temp, this.deps.platform, this.deps.log)
+    } finally {
+      await rm(temp, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
+  private memoryDeps(ledger: KettuImportFile): MemoryImportDeps {
+    return {
+      memory: this.deps.memory,
+      hasProject: (folder) => this.deps.projects.find(folder) !== undefined,
+      addProject: (folder) => this.deps.projects.add(folder),
+      isDirectory: this.isDirectory,
+      sessionOf: this.sessionOf(ledger),
+      ledger: ledger.memory,
+      platform: this.deps.platform,
+    }
+  }
+
+  /** Kettu's artifacts, from a copy of its database, read again only when that changed. */
+  private async readArtifacts(): Promise<KettuArtifactsRead | KettuArtifactsError> {
+    const { threads, source, platform } = this.deps
+    if (!threads) return 'unavailable'
+    const signature = await kettuDatabaseSignature(source)
+    if (this.artifactsRead?.signature === signature) return this.artifactsRead.read
+    const temp = await this.tempFolder()
+    try {
+      const copy = await copyKettuDatabase(source, temp)
+      const read = copy
+        ? await threads.artifact('readKettu', { file: copy })
+        : { kind: 'ok' as const, artifacts: [], deleted: 0, malformed: 0 }
+      if (read.kind === 'newer') return 'newer'
+      const checked = checkKettuArtifacts(read, source, platform)
+      this.artifactsRead = { signature, read: checked }
+      return checked
+    } catch (error) {
+      if (error instanceof NoSpaceError) return 'noSpace'
+      this.deps.log('warn', `Could not read Kettu's artifacts: ${(error as Error).message}`)
+      return 'unreadable'
+    } finally {
+      await rm(temp, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
+  private async scanMemory(): Promise<KettuImportScan['memory']> {
+    try {
+      const read = await this.readMemory()
+      const ledger = await this.imported()
+      const importable = await countNewMemory(read, this.memoryDeps(ledger))
+      return { found: read.entries.length, importable }
+    } catch (error) {
+      this.deps.log('warn', `Could not read Kettu's memory: ${(error as Error).message}`)
+      return { found: 0, importable: 0 }
+    }
+  }
+
+  private async scanArtifacts(): Promise<KettuImportScan['artifacts']> {
+    const read = await this.readArtifacts()
+    if (typeof read === 'string') return { found: 0, importable: 0, error: read }
+    const ledger = await this.imported()
+    const importable = await countNewArtifacts(read, this.deps.threads!, ledger.artifacts).catch(
+      () => read.artifacts.length,
+    )
+    return { found: read.artifacts.length, importable, error: null }
+  }
+
   /** Kettu's index, read from copies of its files in a folder of the import's own. */
   private async readIndex(): Promise<ReadIndex> {
-    const { source, ownData, platform } = this.deps
-    if (pathKey(path.resolve(source), platform) === pathKey(path.resolve(ownData), platform)) {
-      return { kind: 'missing' }
-    }
-    const temp = await mkdtemp(path.join(this.deps.tempDir ?? os.tmpdir(), 'huli-kettu-'))
+    const { source } = this.deps
+    if (this.isOwn()) return { kind: 'missing' }
+    const temp = await this.tempFolder()
     try {
       const sessions = await copyAndRead(source, 'sessions.json', temp)
       if (sessions === null) return { kind: 'missing' }
@@ -219,10 +371,16 @@ export class KettuImport {
       projects: [],
       sessions: [],
       counts: { sessions: 0, subagents: 0, importable: 0, imported: 0 },
+      memory: { found: 0, importable: 0 },
+      artifacts: { found: 0, importable: 0, error: null },
     }
     if (read.kind === 'missing') return empty
     if (read.kind !== 'ok') return { ...empty, found: true, error: read.kind }
-    const sessions = await this.describe(read.index)
+    const [sessions, memory, artifacts] = await Promise.all([
+      this.describe(read.index),
+      this.scanMemory(),
+      this.scanArtifacts(),
+    ])
     const top = sessions.filter((session) => session.origin !== 'subagent')
     return {
       found: true,
@@ -236,20 +394,28 @@ export class KettuImport {
         importable: top.filter((session) => !session.imported && session.skip === null).length,
         imported: top.filter((session) => session.imported).length,
       },
+      memory,
+      artifacts,
     }
   }
 
-  async run(sessionIds: readonly string[]): Promise<KettuImportResult> {
+  async run(
+    sessionIds: readonly string[],
+    parts: KettuImportParts = { memory: false, artifacts: false },
+  ): Promise<KettuImportResult> {
     if (this.running) throw new HostError('busy', message('busy'))
     this.running = true
     try {
-      return await this.runNow(sessionIds)
+      return await this.runNow(sessionIds, parts)
     } finally {
       this.running = false
     }
   }
 
-  private async runNow(sessionIds: readonly string[]): Promise<KettuImportResult> {
+  private async runNow(
+    sessionIds: readonly string[],
+    parts: KettuImportParts,
+  ): Promise<KettuImportResult> {
     const read = await this.readIndex()
     if (read.kind !== 'ok') {
       throw new HostError(
@@ -258,7 +424,16 @@ export class KettuImport {
       )
     }
     const described = new Map((await this.describe(read.index)).map((s) => [s.id, s]))
-    const result: KettuImportResult = { imported: 0, forked: 0, skipped: 0, failed: [] }
+    const result: KettuImportResult = {
+      imported: 0,
+      forked: 0,
+      skipped: 0,
+      failed: [],
+      memory: null,
+      memoryError: null,
+      artifacts: null,
+      artifactsError: null,
+    }
     const wanted: KettuSession[] = []
     for (const id of new Set(sessionIds)) {
       const session = described.get(id)
@@ -286,7 +461,7 @@ export class KettuImport {
         }
         const { summary, forked } = await this.importOne(record)
         ledger.imported.push({ kettuId: record.id, sessionId: summary.id })
-        this.deps.ledger.save({ version: 1, imported: [...ledger.imported] })
+        this.saveLedger(ledger)
         result.imported++
         if (forked) result.forked++
       } catch (error) {
@@ -294,10 +469,46 @@ export class KettuImport {
       }
     }
     this.deps.progress(wanted.length, wanted.length, null)
+    // After the sessions, so memory and artifacts name the sessions they became here.
+    if (parts.memory) {
+      try {
+        const brought = await importKettuMemory(await this.readMemory(), this.memoryDeps(ledger))
+        result.memory = brought.result
+        ledger.memory.push(...brought.ledger)
+        this.saveLedger(ledger)
+      } catch (error) {
+        this.deps.log('warn', `Could not import Kettu's memory: ${(error as Error).message}`)
+        result.memoryError = message('memory')
+      }
+    }
+    if (parts.artifacts) {
+      const read = await this.readArtifacts()
+      if (typeof read === 'string') result.artifactsError = read
+      else {
+        try {
+          const brought = await importKettuArtifacts(read, {
+            threads: this.deps.threads!,
+            source: this.deps.source,
+            sessionOf: this.sessionOf(ledger),
+            ledger: ledger.artifacts,
+            progress: (done, total, title) => this.deps.progress(done, total, title || null),
+          })
+          result.artifacts = brought.result
+          ledger.artifacts.push(...brought.ledger)
+          this.saveLedger(ledger)
+          if (brought.result.imported > 0) this.deps.artifactsChanged()
+        } catch (error) {
+          this.deps.log('warn', `Could not import Kettu's artifacts: ${(error as Error).message}`)
+          result.artifactsError = 'unreadable'
+        }
+      }
+    }
     await this.deps.ledger.flush()
     this.deps.log(
       'info',
-      `Imported ${result.imported} of Kettu's sessions (${result.forked} as copies), skipped ${result.skipped}, ${result.failed.length} failed`,
+      `Imported ${result.imported} of Kettu's sessions (${result.forked} as copies), skipped ${result.skipped}, ${result.failed.length} failed` +
+        (result.memory ? `; ${result.memory.imported} memory entries` : '') +
+        (result.artifacts ? `; ${result.artifacts.imported} artifacts` : ''),
     )
     return result
   }

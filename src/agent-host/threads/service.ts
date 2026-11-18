@@ -6,6 +6,7 @@ import { INDEX_FILE, SearchIndex } from '../search/index'
 import { Indexer, type IndexerOptions } from '../search/indexer'
 import { IndexReads } from '../search/reads'
 import { ThreadDb, ThreadDbError } from './db'
+import { readKettuArtifacts } from './kettu-artifacts'
 import type { ThreadReply, ThreadRequest, ThreadWorkerData } from './protocol'
 
 /**
@@ -173,5 +174,7 @@ function artifact(db: ThreadDb, call: ArtifactCall): unknown {
       return db.markThreadsSent(call.params)
     case 'reanchor':
       return db.reanchorThreads(call.params)
+    case 'readKettu':
+      return readKettuArtifacts(call.params.file)
   }
 }

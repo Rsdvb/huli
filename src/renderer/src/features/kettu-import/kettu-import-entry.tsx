@@ -11,7 +11,7 @@ import { NoticeCard } from '@renderer/features/updates/update-notice'
 import { SetButton } from '@renderer/features/settings/controls'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { hostOfSession, listedOrigin, useSessionsStore } from '@renderer/stores/sessions'
-import { useFoundText } from './found-text'
+import { useFoundText, useNewExtrasText } from './found-text'
 import { KettuImportDialog } from './kettu-import-dialog'
 import { scanKettu, useKettuImportStore } from './store'
 
@@ -65,7 +65,8 @@ export function KettuImportButton() {
 }
 
 /**
- * Once, while this computer has no session of its own: Kettu's sessions were found, to import.
+ * Once, while this computer has no session of its own: Kettu's sessions, or its memory and
+ * artifacts, were found, to import.
  * Closing it or opening the import answers it for good on this device.
  */
 export function KettuImportOffer({ blocked }: { blocked: boolean }) {
@@ -79,9 +80,9 @@ export function KettuImportOffer({ blocked }: { blocked: boolean }) {
         (x) => listedOrigin(x) && !x.archivedAt && hostOfSession(x) === null,
       ),
   )
-  const importable = useKettuImportStore((s) =>
-    s.scan?.found && !s.scan.error ? s.scan.counts.importable : 0,
-  )
+  const scan = useKettuImportStore((s) => (s.scan?.found && !s.scan.error ? s.scan : null))
+  const importable = scan?.counts.importable ?? 0
+  const extras = useNewExtrasText(scan)
   const asking = loaded && empty && !answered
   useEffect(() => {
     if (asking) void scanKettu()
@@ -90,10 +91,11 @@ export function KettuImportOffer({ blocked }: { blocked: boolean }) {
     writeJson(OFFERED_KEY, true)
     setAnswered(true)
   }
-  const label = t('offer.text', { count: importable })
+  const label =
+    importable > 0 ? t('offer.text', { count: importable }) : t('offer.extras', { found: extras })
   return (
     <>
-      {asking && !blocked && importable > 0 && (
+      {asking && !blocked && (importable > 0 || extras !== '') && (
         <NoticeCard
           icon={<Glyph icon={Download04Icon} size={14} />}
           text={label}

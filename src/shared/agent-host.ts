@@ -1739,10 +1739,14 @@ export interface HostContract {
     params: { sessionId: string; entryId: string }
     result: void
   }
-  // Huli: an official Kettu's sessions on this computer, read from a copy of its index.
+  // Huli: an official Kettu's sessions, memory and artifacts on this computer, read from copies.
   'kettuImport.scan': { params: void; result: KettuImportScan }
-  // Imports them by Kettu's ids, telling every port `kettuImport.progress` as it goes.
-  'kettuImport.run': { params: { sessionIds: string[] }; result: KettuImportResult }
+  // Imports the sessions by Kettu's ids, and its memory and artifacts when asked, telling every
+  // port `kettuImport.progress` as it goes.
+  'kettuImport.run': {
+    params: { sessionIds: string[]; memory?: boolean; artifacts?: boolean }
+    result: KettuImportResult
+  }
   // Huli: the agents' network through the user's proxy subscriptions, for this computer's windows
   // alone: a paired device may call none of these, and `agentNetwork.changed` reaches no device.
   // A subscription's address goes in with `addSubscription` and never comes out; the host

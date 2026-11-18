@@ -2,31 +2,36 @@
   "row": {
     "group": "Moving from Kettu",
     "name": "Import from Kettu",
-    "description": "Bring the sessions of the official Kettu app on this computer here, with their titles, projects, pins and archives. Kettu's data is only read.",
-    "keywords": "kettu import migrate move sessions projects",
-    "looking": "Looking for Kettu's sessions…",
+    "description": "Bring the sessions, memory and artifacts of the official Kettu app on this computer here, with their titles, projects, pins and archives. Kettu's data is only read.",
+    "keywords": "kettu import migrate move sessions projects memory artifacts",
+    "looking": "Looking for Kettu's data…",
     "notFound": "No Kettu data on this computer.",
-    "found": "{{sessions}} · {{projects}} in Kettu",
-    "foundSome": "{{sessions}} · {{projects}} in Kettu, {{count}} imported",
-    "allImported": "{{sessions}} · {{projects}} in Kettu, all imported",
-    "choose": "Choose sessions…"
+    "found": "{{found}} in Kettu",
+    "foundSome": "{{found}} in Kettu, {{count}} sessions imported",
+    "allImported": "{{found}} in Kettu, all sessions imported",
+    "choose": "Choose what to import…"
   },
   "sessions_one": "{{count}} session",
   "sessions_other": "{{count}} sessions",
   "projects_one": "{{count}} project",
   "projects_other": "{{count}} projects",
+  "memory_one": "{{count}} memory entry",
+  "memory_other": "{{count}} memory entries",
+  "artifacts_one": "{{count}} artifact",
+  "artifacts_other": "{{count}} artifacts",
+  "separator": ", ",
   "subagents_one": "{{count}} subagent",
   "subagents_other": "{{count}} subagents",
   "error": {
     "newer": "Kettu's data is from a newer version than this app reads. Update this app and try again.",
     "unreadable": "Kettu's sessions could not be read.",
-    "scan": "Could not look for Kettu's sessions: {{error}}"
+    "scan": "Could not look for Kettu's data: {{error}}"
   },
   "dialog": {
     "title": "Import from Kettu",
-    "description": "Found {{sessions}} · {{projects}} in Kettu. The chosen ones come over with their titles, projects, pins and archives, and pick up where they left off.",
+    "description": "Found {{found}} in Kettu. The chosen sessions come over with their titles, projects, pins and archives, and pick up where they left off.",
     "selectAll": "Select all",
-    "readOnly": "Kettu's data is only read: its sessions stay there as they are. A session Kettu has open right now comes over as a copy; quit Kettu first to continue the same one. Subagents come back under their session when it is opened here.",
+    "readOnly": "Kettu's data is only read: its sessions, memory and artifacts stay there as they are. A session Kettu has open right now comes over as a copy; quit Kettu first to continue the same one. Subagents come back under their session when it is opened here.",
     "import_one": "Import {{count}} session",
     "import_other": "Import {{count}} sessions",
     "importNone": "Import",
@@ -36,6 +41,21 @@
     "noSessions": "Kettu has no sessions to import.",
     "projectCount": "{{count}}",
     "toggleProject": "Select every session of {{project}}"
+  },
+  "extras": {
+    "title": "Also import",
+    "memory": "Memory: {{found}} entries, {{count}} not here yet",
+    "memoryDone": "Memory: {{found}} entries, all here already",
+    "memoryHint": "Global memory, about you, comes over as global memory; project memory into the same project. Copies are skipped, and the undo history stays.",
+    "artifacts": "Artifacts: {{found}}, {{count}} not here yet",
+    "artifactsDone": "Artifacts: {{found}}, all here already",
+    "artifactsHint": "Each comes with its title and every version; copies are skipped. Kettu's sharing links belong to its account and do not come over, nor does its Recently deleted.",
+    "artifactsError": {
+      "newer": "Kettu's artifacts are from a newer version than this app reads.",
+      "unreadable": "Kettu's artifacts could not be read.",
+      "noSpace": "There is not enough disk space to copy Kettu's artifacts.",
+      "unavailable": "Artifacts are not ready here yet. Try again shortly."
+    }
   },
   "badge": {
     "pinned": "Pinned",
@@ -58,12 +78,58 @@
     "failed_one": "{{count}} could not be imported:",
     "failed_other": "{{count}} could not be imported:",
     "failure": "{{title}}: {{message}}",
-    "untitled": "Untitled"
+    "untitled": "Untitled",
+    "memory": {
+      "imported_one": "Imported {{count}} memory entry.",
+      "imported_other": "Imported {{count}} memory entries.",
+      "renamed_one": "{{count}} had an id an entry here already uses, so it came under a new id and the one here is unchanged.",
+      "renamed_other": "{{count}} had ids entries here already use, so they came under new ids and the ones here are unchanged.",
+      "skipped": "Memory skipped: {{reasons}}.",
+      "reason": {
+        "imported_one": "{{count}} imported before",
+        "imported_other": "{{count}} imported before",
+        "same_one": "{{count}} already here",
+        "same_other": "{{count}} already here",
+        "invalid_one": "{{count}} malformed or past memory's limits",
+        "invalid_other": "{{count}} malformed or past memory's limits",
+        "secret_one": "{{count}} seems to hold a secret",
+        "secret_other": "{{count}} seem to hold secrets",
+        "full_one": "{{count}} because memory is full",
+        "full_other": "{{count}} because memory is full",
+        "noProject_one": "{{count}} whose project folder is gone",
+        "noProject_other": "{{count}} whose project folder is gone"
+      }
+    },
+    "artifacts": {
+      "imported_one": "Imported {{count}} artifact.",
+      "imported_other": "Imported {{count}} artifacts.",
+      "renamed_one": "{{count}} had an id already used here, so it came under a new id and the one here is unchanged.",
+      "renamed_other": "{{count}} had ids already used here, so they came under new ids and the ones here are unchanged.",
+      "skipped": "Artifacts skipped: {{reasons}}.",
+      "reason": {
+        "imported_one": "{{count}} imported before",
+        "imported_other": "{{count}} imported before",
+        "same_one": "{{count}} whose latest version is here",
+        "same_other": "{{count}} whose latest versions are here",
+        "invalid_one": "{{count}} with malformed records",
+        "invalid_other": "{{count}} with malformed records",
+        "missingContent_one": "{{count}} with missing or mismatched files",
+        "missingContent_other": "{{count}} with missing or mismatched files",
+        "scratch_one": "{{count}} in Kettu's own folder",
+        "scratch_other": "{{count}} in Kettu's own folder",
+        "deleted_one": "{{count}} in Kettu's Recently deleted",
+        "deleted_other": "{{count}} in Kettu's Recently deleted"
+      },
+      "notShared": "Kettu's sharing links belong to its account and were not imported.",
+      "failed_one": "{{count}} artifact could not be imported:",
+      "failed_other": "{{count}} artifacts could not be imported:"
+    }
   },
   "offer": {
     "text_one": "Kettu has {{count}} session. Import it?",
     "text_other": "Kettu has {{count}} sessions. Import them?",
-    "detail": "Brings Kettu's sessions here, with their projects. Kettu's data is only read.",
+    "extras": "Kettu has {{found}}. Import them?",
+    "detail": "Brings Kettu's sessions, memory and artifacts here. Kettu's data is only read.",
     "action": "Import"
   }
 }
