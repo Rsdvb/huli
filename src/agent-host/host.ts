@@ -191,6 +191,7 @@ import { LOG_READERS } from './usage/readers'
 import { UsageStore, type UsageWorkerFactory } from './usage/store'
 import { createValidators } from './validate'
 import { KettuImport, kettuDataFolder, kettuImportFile } from './kettu-import'
+import { SessionFolders, sessionFoldersFile } from './session-folders'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
@@ -376,6 +377,8 @@ export class AgentHost {
   readonly sessions: SessionManager
   /** Huli: an official Kettu's sessions, brought over. */
   private readonly kettuImport: KettuImport
+  /** Huli: the user's folders of sessions. */
+  private readonly sessionFolders: SessionFolders
   /** When idle Claude Code sessions let their agent go, by the setting and the system's memory. */
   private readonly idleRelease: IdleRelease
   /** The saved routines and the lifecycle of their runs. */
@@ -1087,6 +1090,11 @@ export class AgentHost {
         this.hub.broadcast({ type: 'kettuImport.progress', done, total, title }),
       log,
     })
+    this.sessionFolders = new SessionFolders({
+      file: sessionFoldersFile(options.userDataPath, log),
+      isSession: (id) => this.sessions.has(id),
+      changed: (folders) => this.hub.broadcast({ type: 'folders.changed', folders }),
+    })
     this.routines = new RoutinesManager({
       userDataPath: options.userDataPath,
       file: routinesFile(options.userDataPath, log),
@@ -1266,6 +1274,7 @@ export class AgentHost {
       host.routines.load(),
       host.memory.load(),
       host.workflowLibrary.load(),
+      host.sessionFolders.load(),
     ])
     // After the sessions, whose step sessions it messages when it resumes.
     await host.tasks.load()
@@ -2285,6 +2294,7 @@ export class AgentHost {
         this.marketCommunity.flush(),
         this.marketBundles.flush(),
         this.publishDrafts.flush(),
+        this.sessionFolders.flush(),
         this.threads?.close(),
         this.usage.close(),
       ])
@@ -3046,6 +3056,13 @@ export class AgentHost {
       },
       'kettuImport.scan': () => this.kettuImport.scan(),
       'kettuImport.run': ({ sessionIds }) => this.kettuImport.run(sessionIds),
+      'folders.list': () => this.sessionFolders.list(),
+      'folders.create': ({ name, sessionIds }) => this.sessionFolders.create(name, sessionIds),
+      'folders.rename': ({ folderId, name }) => this.sessionFolders.rename(folderId, name),
+      'folders.update': ({ folderId, ...change }) => this.sessionFolders.update(folderId, change),
+      'folders.delete': ({ folderId }) => this.sessionFolders.delete(folderId),
+      'folders.reorder': ({ folderIds }) => this.sessionFolders.reorder(folderIds),
+      'folders.move': ({ sessionIds, folderId }) => this.sessionFolders.move(sessionIds, folderId),
       'browser.answerOrigin': ({ sessionId, entryId, decision }, { device }) => {
         const { owner, requestId } = sessions.answerOrigin(
           sessionId,

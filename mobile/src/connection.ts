@@ -66,13 +66,16 @@ export function routeKind(address: DirectAddress): RouteKind {
 }
 
 // HostLink does not say which route it is on, so each open socket notes when it last heard the
-// computer; the link's own connection is the one heard from most recently.
-const heard = new Map<Transport, { address: DirectAddress; at: number }>()
+// computer; the link's own connection is the one heard from most recently. A link to a computer
+// other than the active one (fleet.ts) keeps its sockets in a map of its own, so they never pass
+// for the active link's route nor keep its relay from dialing.
+type Heard = Map<Transport, { address: DirectAddress; at: number }>
+const heard: Heard = new Map()
 
-function tracked(address: DirectAddress, transport: Transport): Transport {
+function tracked(address: DirectAddress, transport: Transport, into: Heard): Transport {
   const entry = { address, at: 0 }
-  heard.set(transport, entry)
-  transport.onClose(() => heard.delete(transport))
+  into.set(transport, entry)
+  transport.onClose(() => into.delete(transport))
   return {
     ...transport,
     onMessage: (listener) =>
@@ -84,36 +87,40 @@ function tracked(address: DirectAddress, transport: Transport): Transport {
 }
 
 /** Whether a direct connection is open now, which the relay then leaves alone. */
-function directOpen(): boolean {
-  return heard.size > 0
+function directOpen(into: Heard): boolean {
+  return into.size > 0
 }
 
 /**
  * The relay as a route: dialed a moment after the direct addresses, unless one of them is open by
  * then; at once for a computer the phone has no usable address of.
  */
-function relayRoute(relay: HostRelay, addresses: DirectAddress[]): LinkRoute {
+function relayRoute(relay: HostRelay, addresses: DirectAddress[], into: Heard): LinkRoute {
   return {
     key: 'relay',
     relay: true,
     dial: afterGrace(() => dialRelayTo(relay), {
       now: usableAddresses(addresses).length === 0,
-      direct: directOpen,
+      direct: () => directOpen(into),
     }),
   }
 }
 
 /** The direct addresses first; the relay, when the computer named one, after them. */
-function dialAny(addresses: DirectAddress[], relay: HostRelay | undefined): Promise<Transport> {
-  if (!relay) return dialFirst(addresses)
-  const viaRelay = relayRoute(relay, addresses).dial
+function dialAny(
+  addresses: DirectAddress[],
+  relay: HostRelay | undefined,
+  into: Heard = heard,
+): Promise<Transport> {
+  if (!relay) return dialFirst(addresses, undefined, into)
+  const viaRelay = relayRoute(relay, addresses, into).dial
   return new Promise((resolve, reject) => {
     let left = 2
     let won = false
     const fail = (error: unknown) => {
       if (--left === 0 && !won) reject(error)
     }
-    for (const dial of [() => dialFirst(addresses), viaRelay]) {
+    for (const dial of [() => dialFirst(addresses, undefined, into), viaRelay]) {
       dial().then((transport) => {
         if (won) return transport.close()
         won = true
@@ -142,27 +149,34 @@ function socketUrl(address: DirectAddress): string {
   return `ws://${host}:${address.port}/channel`
 }
 
-/** A transport to one address. React Native's WebSocket may not count what it has buffered. */
-function openSocket(address: DirectAddress, timeoutMs = 8000): Promise<Transport> {
+/**
+ * A transport to one address, noted `into` the link's sockets. React Native's WebSocket may not
+ * count what it has buffered.
+ */
+function openSocket(address: DirectAddress, timeoutMs = 8000, into = heard): Promise<Transport> {
   const socket = new WebSocket(socketUrl(address))
   if (typeof socket.bufferedAmount !== 'number') {
     Object.defineProperty(socket, 'bufferedAmount', { value: 0 })
   }
   const timer = setTimeout(() => socket.close(), timeoutMs)
   return webSocketTransport(socket)
-    .then((transport) => tracked(address, transport))
+    .then((transport) => tracked(address, transport, into))
     .finally(() => clearTimeout(timer))
 }
 
 /** The first address that opens; the others are closed. */
-function dialFirst(addresses: DirectAddress[], timeoutMs?: number): Promise<Transport> {
+function dialFirst(
+  addresses: DirectAddress[],
+  timeoutMs?: number,
+  into = heard,
+): Promise<Transport> {
   const list = usableAddresses(addresses)
   if (list.length === 0) return Promise.reject(new Error('The computer named no address'))
   return new Promise((resolve, reject) => {
     let left = list.length
     let won = false
     for (const address of list) {
-      openSocket(address, timeoutMs).then(
+      openSocket(address, timeoutMs, into).then(
         (transport) => {
           if (won) return transport.close()
           won = true
@@ -240,25 +254,28 @@ export function triedAddresses(host: SavedHost): DirectAddress[] {
 
 /**
  * The kept link to the computer, which reconnects by itself while the app is in front. `current`
- * reads the computer as saved now, so a try takes the addresses its last welcome named.
+ * reads the computer as saved now, so a try takes the addresses its last welcome named. A link
+ * that is not the active computer's (`side`) keeps its sockets out of `currentAddress`.
  */
 export function linkTo(
   host: SavedHost,
   key: KeyPair,
   adopt?: Paired,
   current: () => SavedHost = () => host,
+  side = false,
 ): HostLink {
+  const into: Heard = side ? new Map() : heard
   const routes = (): LinkRoute[] => {
     const saved = current()
     const direct: LinkRoute[] = triedAddresses(saved).map((address) => ({
       key: routeKey(address),
       relay: false,
-      dial: () => openSocket(address),
+      dial: () => openSocket(address, undefined, into),
     }))
-    return saved.relay ? [...direct, relayRoute(saved.relay, saved.addresses)] : direct
+    return saved.relay ? [...direct, relayRoute(saved.relay, saved.addresses, into)] : direct
   }
   return new HostLink({
-    dial: () => dialAny(current().addresses, current().relay),
+    dial: () => dialAny(current().addresses, current().relay, into),
     routes,
     hostKey: fromBase64(host.hostKey),
     key,

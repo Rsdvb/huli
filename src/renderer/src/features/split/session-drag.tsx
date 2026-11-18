@@ -9,6 +9,7 @@ import {
 } from '@dnd-kit/react'
 import { BotIcon } from '@hugeicons/core-free-icons'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
+import { dropIntoFolder } from '@renderer/features/session-folders/drag'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { dropViewAt } from '@renderer/stores/view'
@@ -52,6 +53,8 @@ export function SplitDragProvider({ children }: { children: React.ReactNode }) {
   }
   const end = (event: DragEndEvent) => {
     const drop = dragEnded(event.canceled)
+    const { source, target } = event.operation
+    if (!event.canceled && dropIntoFolder(source?.data, target?.data)) return
     const size = splitSize()
     if (!drop || !size) return
     const view = viewOf(drop.data)

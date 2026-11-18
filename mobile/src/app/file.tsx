@@ -8,7 +8,8 @@ import type { DeviceFileContent } from '@shared/files'
 import { formatBytes } from '../attachments'
 import { call, errorText, sessionFolder } from '../git'
 import { useHost, useLink } from '../host'
-import { copyText, showMenu } from '../ui/session/feedback'
+import { ContextMenu } from '../ui/ContextMenu'
+import { copyText } from '../ui/session/feedback'
 import { baseName, dirName } from '../ui/session/format'
 import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
@@ -74,21 +75,33 @@ export default function FileScreen() {
             : {})}
           contentContainerStyle={styles.code}
           renderItem={({ item, index }) => (
-            <Pressable
-              onLongPress={() =>
-                showMenu(undefined, [
-                  { label: '复制这一行', onPress: () => void copyText(item) },
-                  { label: '选择文本', onPress: selectAll },
-                ])
-              }
-              delayLongPress={350}
-              style={[styles.line, index === marked && { backgroundColor: s.inlineCode }]}
+            <ContextMenu
+              items={[
+                {
+                  key: 'copy',
+                  label: '复制这一行',
+                  icon: 'doc.on.doc',
+                  onPress: () => void copyText(item),
+                },
+                { key: 'select', label: '选择文本', icon: 'text.cursor', onPress: selectAll },
+              ]}
             >
-              <Text style={[styles.number, { color: c.textTertiary, width: gutter * 8 + 8 }]}>
-                {index + 1}
-              </Text>
-              <Text style={[styles.text, { color: c.text }]}>{item || ' '}</Text>
-            </Pressable>
+              {(longPress) => (
+                <Pressable
+                  {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
+                  style={[
+                    styles.line,
+                    { backgroundColor: c.bg },
+                    index === marked && { backgroundColor: s.inlineCode },
+                  ]}
+                >
+                  <Text style={[styles.number, { color: c.textTertiary, width: gutter * 8 + 8 }]}>
+                    {index + 1}
+                  </Text>
+                  <Text style={[styles.text, { color: c.text }]}>{item || ' '}</Text>
+                </Pressable>
+              )}
+            </ContextMenu>
           )}
         />
       </ScrollView>

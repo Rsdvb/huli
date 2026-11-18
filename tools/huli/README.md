@@ -83,6 +83,45 @@ Hooks into upstream files, one or two lines each:
   event), `features/settings/section-defs.tsx` (the row), `features/sidebar/app-sidebar.tsx` (the
   offer).
 
+### Session folders
+
+Folders the user makes to organize sessions, kept by the agent host so every window and paired
+device shows the same ones. A folder only groups sessions: a session's project is unchanged, and
+deleting a folder puts its sessions back among the ungrouped ones, never deleting a session.
+
+Huli's own files:
+
+- `src/shared/session-folders.ts`: `SessionFolder` (name, pinned, collapsed, its session ids) and
+  helpers.
+- `src/agent-host/session-folders.ts` (+ `.test.ts`): the store, kept in
+  `state/session-folders.json`, and the validators of `folders.list`, `folders.create`,
+  `folders.rename`, `folders.update` (pinned, collapsed), `folders.delete`, `folders.reorder` and
+  `folders.move` (into a folder, or out with `folderId: null`). A change is broadcast as
+  `folders.changed`; sessions that went away are left out as the folders are read. Paired devices
+  may call them all.
+- `src/renderer/src/features/session-folders/`: each host's folders (`store.ts`), the sidebar's
+  Folders section above or below the projects (`folder-section.tsx`, the choice kept per
+  device), naming and deleting (`folder-dialogs.tsx`), Move to folder › in the session menus
+  (`move-menu.tsx`) and dropping dragged sessions on a folder, a project or the Folders label
+  (`drag.ts`).
+- `src/shared/locales/*/sessionFolders.json`: the desktop's copy.
+
+Hooks into upstream files, one or two lines each:
+
+- `src/shared/agent-host.ts` (the `folders.*` methods and the `folders.changed` event),
+  `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts` (spreads
+  `folderValidators`), `src/agent-host/host.ts` (the store, its load and flush, the handlers).
+- `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (loading, the
+  `folders.changed` event, another host connecting).
+- `features/sidebar/app-sidebar.tsx` (the `FolderSection`s, `SessionFolderDialogs`, and in
+  `ProjectGroup` the sessions left out because a folder holds them and the header's drop),
+  `features/sidebar/session-menu.tsx` (two `MoveToFolderMenu`s), `features/sidebar/session-row.tsx`
+  (a range selection in the order folders show), `features/split/session-drag.tsx` (a drop on a
+  folder).
+
+The phone app (`mobile/`) shows them on its home list, with the system's context menus and the
+other paired computers' sessions (`mobile/src/fleet.ts`, `folders.tsx`, `homeList.ts`).
+
 Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy

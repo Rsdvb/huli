@@ -53,6 +53,10 @@ import { listedTasks, pinnedTasks, useTasksStore } from '@renderer/stores/tasks'
 import { openSettings, PINNED_GROUP, showAllRows, useViewStore } from '@renderer/stores/view'
 import { StarCard } from '@renderer/features/github-star/star-prompts'
 import { KettuImportOffer } from '@renderer/features/kettu-import/kettu-import-entry'
+import { useUngroupDrop } from '@renderer/features/session-folders/drag'
+import { SessionFolderDialogs } from '@renderer/features/session-folders/folder-dialogs'
+import { FolderSection } from '@renderer/features/session-folders/folder-section'
+import { useUnfoldered } from '@renderer/features/session-folders/store'
 import { HostEmpty, HostHeading, NeedsYouGroup } from './host-groups'
 import { useHostLabel } from './host-label'
 import { ImportSessionsDialog } from './import-sessions'
@@ -162,6 +166,7 @@ export function SidebarList() {
         ) : (
           <>
             <PinnedGroup stop={stop} />
+            <FolderSection hostId={null} at="above" stop={stop} />
             <div className="ui-as-side__group" role="group" aria-label={t('nav.projects')}>
               <span className="ui-as-side__label">{t('nav.projects')}</span>
               {shownProjects.length === 0 && (
@@ -177,9 +182,11 @@ export function SidebarList() {
               ))}
               <ProjectGroup project={null} stop={stop} onImport={importSessions} />
             </div>
+            <FolderSection hostId={null} at="below" stop={stop} />
           </>
         )}
       </div>
+      <SessionFolderDialogs />
       {importing && (
         <ImportSessionsDialog
           project={importing.project}
@@ -217,6 +224,7 @@ function HostSection({
       <HostHeading hostId={hostId} open={open} stop={stop} onToggle={() => toggleGroup(key)} />
       {open && (
         <>
+          <FolderSection hostId={hostId} at="above" stop={stop} />
           {own.map((project) => (
             <ProjectGroup
               key={project.path}
@@ -235,6 +243,7 @@ function HostSection({
             away={away}
           />
           {own.length === 0 && !scratch && <HostEmpty />}
+          <FolderSection hostId={hostId} at="below" stop={stop} />
         </>
       )}
     </section>
@@ -278,10 +287,13 @@ function ProjectGroup({
     ),
   )
   const projectPath = project?.path ?? null
+  // Huli: a session in one of the user's folders shows there instead; the header takes it back.
+  const listed = useUnfoldered(summaries, hostId)
+  const [ungroupTarget, ungroupOver] = useUngroupDrop(key, hostId)
   const tree = useKeptNodes(
     useMemo(
-      () => sessionTree(Object.fromEntries(summaries.map((x) => [x.id, x])), projectPath, hostId),
-      [summaries, projectPath, hostId],
+      () => sessionTree(Object.fromEntries(listed.map((x) => [x.id, x])), projectPath, hostId),
+      [listed, projectPath, hostId],
     ),
   )
   const tasks = useTasksStore(
@@ -302,10 +314,12 @@ function ProjectGroup({
 
   const row = (
     <button
+      ref={ungroupTarget}
       type="button"
       data-sidebar-row=""
       tabIndex={groupStop ? 0 : -1}
       aria-expanded={open}
+      data-drop={ungroupOver || undefined}
       onClick={toggle}
       onKeyDown={(event) => {
         // The context menu key opens the More menu, the row's menu for the keyboard.

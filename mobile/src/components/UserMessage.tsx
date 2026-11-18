@@ -11,7 +11,9 @@ import type { Attachment, ContentRef, FromDevice, FromSession, UserContent } fro
 import { leadingCommand, mentionResolver, type Chip } from '../ui/session/chips'
 import { Clamp } from '../ui/session/Clamp'
 import { useSessionRows } from '../ui/session/context'
-import { copyText, showMenu } from '../ui/session/feedback'
+import { ContextMenu } from '../ui/ContextMenu'
+import type { MenuNode } from '../ui/menu'
+import { copyText } from '../ui/session/feedback'
 import { foldersOf, openFile, parseFileRef, useFileRefs } from '../ui/session/fileRefs'
 import { G, Icon } from '../ui/session/icons'
 import { useMinute } from '../ui/session/now'
@@ -148,11 +150,26 @@ export const UserMessage = memo(function UserMessage(props: {
       ? `从 ${props.device.name} 发送`
       : null
 
-  const menu = () =>
-    showMenu(undefined, [
-      { label: '复制', onPress: () => void copyText(copiedText(content)) },
-      { label: '选择文本', onPress: () => selectText({ text }) },
-    ])
+  const menu: MenuNode[] = [
+    {
+      key: 'copy',
+      label: '复制',
+      icon: 'doc.on.doc',
+      onPress: () => void copyText(copiedText(content)),
+    },
+    {
+      key: 'select',
+      label: '选择文本',
+      icon: 'character.cursor.ibeam',
+      onPress: () => selectText({ text }),
+    },
+    {
+      key: 'markdown',
+      label: '复制为 Markdown',
+      icon: 'doc.plaintext',
+      onPress: () => void copyText(text),
+    },
+  ]
 
   return (
     <View style={styles.root}>
@@ -163,16 +180,19 @@ export const UserMessage = memo(function UserMessage(props: {
       )}
       {tiles.length > 0 && <RefTiles refs={tiles} align="end" />}
       {text ? (
-        <PressScale
-          scale={0.98}
-          onLongPress={menu}
-          delayLongPress={350}
-          style={[styles.bubble, { backgroundColor: s.bubble }]}
-        >
-          <Clamp maxHeight={COLLAPSED_HEIGHT} align="end">
-            <Markdown markdown={body} chips={chips} head={head} />
-          </Clamp>
-        </PressScale>
+        <ContextMenu items={menu} fit="content">
+          {(longPress) => (
+            <PressScale
+              scale={0.98}
+              {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
+              style={[styles.bubble, { backgroundColor: s.bubble }]}
+            >
+              <Clamp maxHeight={COLLAPSED_HEIGHT} align="end">
+                <Markdown markdown={body} chips={chips} head={head} />
+              </Clamp>
+            </PressScale>
+          )}
+        </ContextMenu>
       ) : null}
       {(props.steered || props.at !== undefined) && (
         <View style={styles.metaRow}>

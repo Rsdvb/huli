@@ -12,7 +12,9 @@ import {
   type ToolEntry,
 } from '@shared/thread'
 import { useSession } from '../../host'
-import { copyText, showMenu } from '../../ui/session/feedback'
+import { ContextMenu } from '../../ui/ContextMenu'
+import type { MenuNode } from '../../ui/menu'
+import { copyText } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { selectText } from '../../ui/session/SelectText'
@@ -141,54 +143,63 @@ export function StepSection(props: {
   const { c } = useSessionTokens()
   const [copied, setCopied] = useState(false)
   const text = props.copy
+  const menu: MenuNode[] = text
+    ? [
+        {
+          key: 'copy',
+          label: '复制',
+          icon: 'doc.on.doc',
+          onPress: () => void copyText(text),
+        },
+        {
+          key: 'select',
+          label: '选择文本',
+          icon: 'character.cursor.ibeam',
+          onPress: () => selectText({ text, mono: props.mono ?? true }),
+        },
+      ]
+    : []
   return (
-    <Pressable
-      onLongPress={
-        text
-          ? () =>
-              showMenu(undefined, [
-                { label: '复制', onPress: () => void copyText(text) },
-                {
-                  label: '选择文本',
-                  onPress: () => selectText({ text, mono: props.mono ?? true }),
-                },
-              ])
-          : undefined
-      }
-      delayLongPress={350}
-      style={[styles.section, { borderTopColor: c.border }]}
-    >
-      <View style={styles.head}>
-        <Text style={[styles.label, { color: c.textSecondary }]}>
-          {props.label}
-          {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
-        </Text>
-        {text !== undefined ? (
-          <Pressable
-            onPress={() =>
-              void copyText(text).then(() => {
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1500)
-              })
-            }
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
-            style={({ pressed }) => [
-              styles.copy,
-              { borderColor: c.border, backgroundColor: pressed ? c.fillStrong : c.fill },
-            ]}
-          >
-            <Icon
-              icon={copied ? G.copied : G.copy}
-              size={14}
-              color={copied ? c.success : c.textSecondary}
-            />
-          </Pressable>
-        ) : null}
-      </View>
-      {props.children}
-    </Pressable>
+    <ContextMenu items={menu}>
+      {(longPress) => (
+        <Pressable
+          onLongPress={longPress}
+          delayLongPress={350}
+          style={[styles.section, { borderTopColor: c.border }]}
+        >
+          <View style={styles.head}>
+            <Text style={[styles.label, { color: c.textSecondary }]}>
+              {props.label}
+              {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
+            </Text>
+            {text !== undefined ? (
+              <Pressable
+                onPress={() =>
+                  void copyText(text).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1500)
+                  })
+                }
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
+                style={({ pressed }) => [
+                  styles.copy,
+                  { borderColor: c.border, backgroundColor: pressed ? c.fillStrong : c.fill },
+                ]}
+              >
+                <Icon
+                  icon={copied ? G.copied : G.copy}
+                  size={14}
+                  color={copied ? c.success : c.textSecondary}
+                />
+              </Pressable>
+            ) : null}
+          </View>
+          {props.children}
+        </Pressable>
+      )}
+    </ContextMenu>
   )
 }
 

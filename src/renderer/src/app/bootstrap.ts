@@ -14,6 +14,11 @@ import { restoreDraftAttachments } from '@renderer/features/session/composer/att
 import { allPanes } from '@renderer/features/split/layout'
 import { receiveKettuImportProgress } from '@renderer/features/kettu-import/store'
 import {
+  foldersHostOpened,
+  loadFolders,
+  receiveFolders,
+} from '@renderer/features/session-folders/store'
+import {
   errorMessage,
   forgetSessionHost,
   host,
@@ -180,6 +185,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
     case 'kettuImport.progress':
       receiveKettuImportProgress(event, hostId)
       return
+    case 'folders.changed':
+      receiveFolders(event.folders, hostId)
+      return
   }
   receiveArtifactEvent(event, hostId)
   if (event.type === 'artifacts.changed') artifactsChanged(hostId)
@@ -225,6 +233,7 @@ function loadSessionState(): Promise<unknown> {
     useRoutinesStore.getState().load(),
     useTasksStore.getState().load(),
     loadAgentOptions(),
+    loadFolders(),
   ])
 }
 
@@ -404,6 +413,7 @@ export function bootstrap(): Promise<unknown> {
         artifactsHostOpened(hostId)
         routinesHostOpened(hostId)
         tasksHostOpened(hostId)
+        foldersHostOpened(hostId)
         hostScopeOpened(hostId)
         hostRestarted(hostId)
         rewatchAll((sessionId) => sessionHost(sessionId) === hostId)

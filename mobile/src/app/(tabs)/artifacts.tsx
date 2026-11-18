@@ -1,6 +1,6 @@
 // Artifacts: what the agents made on the computer, as a grid of previews. A line says how many and
 // of which kinds; chips pick a kind; sort and filter sheets, and search, narrow the grid. A card
-// opens the artifact, and its long press a menu with its sheet (preview, session, versions);
+// opens the artifact, and its long press the system's menu (open, details, session, delete);
 // Recently deleted sits at the end.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -25,7 +25,7 @@ import {
   openArtifact,
   type ArtifactKind,
 } from '../../artifacts'
-import { ArtifactCard } from '../../components/ArtifactCard'
+import { ArtifactCard, artifactMenu } from '../../components/ArtifactCard'
 import { ArtifactSheet, confirmDelete } from '../../components/ArtifactSheet'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { Sheet, type SheetItem } from '../../components/Sheet'
@@ -100,7 +100,6 @@ export default function Artifacts() {
   const [editingOnly, setEditingOnly] = useState(false)
   const [sheet, setSheet] = useState<'sort' | 'filter' | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [menu, setMenu] = useState<ArtifactSummary | null>(null)
   const connected = state.kind === 'connected'
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
@@ -371,28 +370,12 @@ export default function Artifacts() {
       </Press>
     ) : null
 
-  const menuItems: SheetItem[] = menu
-    ? [
-        { key: 'view', label: '打开', onPress: () => openArtifact(menu.id) },
-        { key: 'open', label: '详情与版本', onPress: () => setOpenId(menu.id) },
-        ...(sessionAgents.has(menu.sessionId)
-          ? [
-              {
-                key: 'session',
-                label: '打开会话',
-                onPress: () => router.push(`/session/${menu.sessionId}`),
-              },
-            ]
-          : []),
-        {
-          key: 'delete',
-          label: '删除',
-          destructive: true,
-          disabled: !connected,
-          onPress: () => link && confirmDelete((m, p) => link!.request(m, p), menu),
-        },
-      ]
-    : []
+  const menuOf = (a: ArtifactSummary) =>
+    artifactMenu(a, {
+      details: () => setOpenId(a.id),
+      session: sessionAgents.has(a.sessionId),
+      remove: connected && link ? () => confirmDelete((m, p) => link.request(m, p), a) : null,
+    })
 
   const sortItems: SheetItem[] = (Object.keys(SORT_TEXT) as Sort[]).map((key) => ({
     key,
@@ -447,10 +430,7 @@ export default function Artifacts() {
                 key={a.id}
                 artifact={a}
                 onPress={() => openArtifact(a.id)}
-                onLongPress={() => {
-                  haptic.tap()
-                  setMenu(a)
-                }}
+                menu={menuOf(a)}
               />
             ))}
             {item.cells.length === 1 ? <View style={styles.flex} /> : null}
@@ -486,12 +466,6 @@ export default function Artifacts() {
       />
       <TopBar header={header} compact searchScope="artifacts" />
       <ArtifactSheet artifact={open} onClose={() => setOpenId(null)} />
-      <Sheet
-        visible={menu !== null}
-        title={menu?.title}
-        items={menuItems}
-        onClose={() => setMenu(null)}
-      />
       <Sheet
         visible={sheet === 'sort'}
         title="排序"

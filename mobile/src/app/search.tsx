@@ -12,7 +12,9 @@ import { FlashList, type ListRenderItem } from '@shopify/flash-list'
 import type { ArtifactSummary } from '@shared/artifacts'
 import type { ConversationHit, SearchIndexing, SessionSummary } from '@shared/agent-host'
 import { artifactKind, KIND_ICON, KIND_TEXT, openArtifact } from '../artifacts'
-import { ArtifactSheet } from '../components/ArtifactSheet'
+import { artifactMenu } from '../components/ArtifactCard'
+import { ArtifactSheet, confirmDelete } from '../components/ArtifactSheet'
+import { useSessionActions } from '../components/SessionActions'
 import { useShell } from '../components/shell'
 import {
   useActiveHost,
@@ -38,6 +40,7 @@ import {
 import { errorText, folder, listTime, sessionTitle } from '../sessions'
 import { computerName } from '../store'
 import { AgentAvatar } from '../ui/AgentAvatar'
+import { ContextMenu } from '../ui/ContextMenu'
 import { EmptyState } from '../ui/EmptyState'
 import { haptic } from '../ui/haptics'
 import { Icon, type IconName } from '../ui/Icon'
@@ -128,6 +131,7 @@ export default function Search() {
   const [artifactsError, setArtifactsError] = useState<string | null>(null)
   const [open, setOpen] = useState<ArtifactSummary | null>(null)
   const connected = useConnected()
+  const actions = useSessionActions('list')
   const words = useMemo(() => wordsOf(query), [query])
   const computer = active?.id ?? null
 
@@ -378,6 +382,8 @@ export default function Search() {
     loadArtifacts,
   ])
 
+  const sessionMenu = (s: SessionSummary) => (connected ? actions.menu(s) : [])
+
   const openSession = (id: string) => {
     haptic.tap()
     rememberSearch(query)
@@ -431,43 +437,64 @@ export default function Search() {
         const s = item.session
         const place = s.scratch ? '无项目' : folder(s.projectPath)
         return (
-          <Press onPress={() => openSession(s.id)} scale={false} style={styles.row}>
-            <AgentAvatar agentId={s.agentId} name={agents.get(s.agentId)?.name} size={34} />
-            <View style={styles.flex}>
-              <Highlighted
-                text={sessionTitle(s)}
-                words={words}
-                style={typeScale.rowTitle}
-                color={c.text}
-                numberOfLines={2}
-              />
-              <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
-                {place} · {listTime(s.updatedAt)}
-                {s.archivedAt !== null ? ' · 已归档' : ''}
-              </Text>
-            </View>
-          </Press>
+          <ContextMenu items={sessionMenu(s)} title={sessionTitle(s)}>
+            {(longPress) => (
+              <Press
+                onPress={() => openSession(s.id)}
+                {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
+                scale={false}
+                style={[styles.row, { backgroundColor: c.bg }]}
+              >
+                <AgentAvatar agentId={s.agentId} name={agents.get(s.agentId)?.name} size={34} />
+                <View style={styles.flex}>
+                  <Highlighted
+                    text={sessionTitle(s)}
+                    words={words}
+                    style={typeScale.rowTitle}
+                    color={c.text}
+                    numberOfLines={2}
+                  />
+                  <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
+                    {place} · {listTime(s.updatedAt)}
+                    {s.archivedAt !== null ? ' · 已归档' : ''}
+                  </Text>
+                </View>
+              </Press>
+            )}
+          </ContextMenu>
         )
       }
       case 'hit':
         return (
-          <Press onPress={() => openSession(item.sessionId)} scale={false} style={styles.row}>
-            <View style={[styles.glyph, { backgroundColor: c.fill }]}>
-              <Icon name="message" size={17} color={c.textSecondary} />
-            </View>
-            <View style={styles.flex}>
-              <Text style={[typeScale.rowTitle, { color: c.text }]} numberOfLines={1}>
-                {item.session ? sessionTitle(item.session) : '会话'}
-              </Text>
-              <Highlighted
-                text={`${item.role === 'user' ? '你：' : ''}${item.snippet}`}
-                words={words}
-                style={typeScale.footnote}
-                color={c.textSecondary}
-                numberOfLines={3}
-              />
-            </View>
-          </Press>
+          <ContextMenu
+            items={item.session ? sessionMenu(item.session) : []}
+            {...(item.session ? { title: sessionTitle(item.session) } : {})}
+          >
+            {(longPress) => (
+              <Press
+                onPress={() => openSession(item.sessionId)}
+                {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
+                scale={false}
+                style={[styles.row, { backgroundColor: c.bg }]}
+              >
+                <View style={[styles.glyph, { backgroundColor: c.fill }]}>
+                  <Icon name="message" size={17} color={c.textSecondary} />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={[typeScale.rowTitle, { color: c.text }]} numberOfLines={1}>
+                    {item.session ? sessionTitle(item.session) : '会话'}
+                  </Text>
+                  <Highlighted
+                    text={`${item.role === 'user' ? '你：' : ''}${item.snippet}`}
+                    words={words}
+                    style={typeScale.footnote}
+                    color={c.textSecondary}
+                    numberOfLines={3}
+                  />
+                </View>
+              </Press>
+            )}
+          </ContextMenu>
         )
       case 'project':
         return (
@@ -510,37 +537,46 @@ export default function Search() {
       case 'artifact': {
         const a = item.artifact
         const kind = artifactKind(a)
+        const menu = artifactMenu(a, {
+          details: () => setOpen(a),
+          session: allSessions.has(a.sessionId),
+          remove:
+            connected && link
+              ? () => confirmDelete((m, p) => link.request(m, p), a, loadArtifacts)
+              : null,
+        })
         return (
-          <Press
-            onPress={() => {
-              haptic.tap()
-              rememberSearch(query)
-              openArtifact(a.id)
-            }}
-            onLongPress={() => {
-              haptic.tap()
-              setOpen(a)
-            }}
-            scale={false}
-            style={styles.row}
-          >
-            <View style={[styles.glyph, { backgroundColor: c.fill }]}>
-              <Icon name={KIND_ICON[kind] as IconName} size={17} color={c.textSecondary} />
-            </View>
-            <View style={styles.flex}>
-              <Highlighted
-                text={a.title}
-                words={words}
-                style={typeScale.rowTitle}
-                color={c.text}
-                numberOfLines={2}
-              />
-              <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
-                {KIND_TEXT[kind]} · {a.scratch ? '无项目' : folder(a.project)} ·{' '}
-                {listTime(a.updatedAt)}
-              </Text>
-            </View>
-          </Press>
+          <ContextMenu items={menu} title={a.title || '未命名'}>
+            {(longPress) => (
+              <Press
+                onPress={() => {
+                  haptic.tap()
+                  rememberSearch(query)
+                  openArtifact(a.id)
+                }}
+                {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
+                scale={false}
+                style={[styles.row, { backgroundColor: c.bg }]}
+              >
+                <View style={[styles.glyph, { backgroundColor: c.fill }]}>
+                  <Icon name={KIND_ICON[kind] as IconName} size={17} color={c.textSecondary} />
+                </View>
+                <View style={styles.flex}>
+                  <Highlighted
+                    text={a.title}
+                    words={words}
+                    style={typeScale.rowTitle}
+                    color={c.text}
+                    numberOfLines={2}
+                  />
+                  <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
+                    {KIND_TEXT[kind]} · {a.scratch ? '无项目' : folder(a.project)} ·{' '}
+                    {listTime(a.updatedAt)}
+                  </Text>
+                </View>
+              </Press>
+            )}
+          </ContextMenu>
         )
       }
       case 'note':
@@ -682,6 +718,7 @@ export default function Search() {
         ListEmptyComponent={empty()}
       />
       <ArtifactSheet artifact={open} onClose={() => setOpen(null)} />
+      {actions.element}
     </Screen>
   )
 }

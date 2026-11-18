@@ -3,10 +3,20 @@
 
 import { StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
+import { router } from 'expo-router'
 import type { ArtifactSummary } from '@shared/artifacts'
-import { age, artifactKind, KIND_TEXT, useThumbnail, type ArtifactKind } from '../artifacts'
+import {
+  age,
+  artifactKind,
+  KIND_TEXT,
+  openArtifact,
+  useThumbnail,
+  type ArtifactKind,
+} from '../artifacts'
 import { useAgent, useMaybeLink, useSession } from '../host'
 import { AgentGlyph } from '../ui/AgentAvatar'
+import { ContextMenu } from '../ui/ContextMenu'
+import type { MenuNode } from '../ui/menu'
 import { Icon } from '../ui/Icon'
 import { Press } from '../ui/Press'
 import { cacheFor } from '../ui/memory'
@@ -116,10 +126,47 @@ export function ArtifactPreview(props: { artifact: ArtifactSummary; inset?: numb
   )
 }
 
+/** An artifact's menu: open it, its details and versions, its session, delete it. */
+export function artifactMenu(
+  a: ArtifactSummary,
+  act: {
+    details(): void
+    /** Whether its session is on this computer, so it can be opened. */
+    session: boolean
+    /** Deletes it after asking; null while it cannot be deleted. */
+    remove: (() => void) | null
+  },
+): MenuNode[] {
+  return [
+    { key: 'view', label: '打开', icon: 'eye', onPress: () => openArtifact(a.id) },
+    { key: 'open', label: '详情与版本', icon: 'info.circle', onPress: act.details },
+    ...(act.session
+      ? [
+          {
+            key: 'session',
+            label: '打开会话',
+            icon: 'bubble.left.and.bubble.right' as const,
+            onPress: () => router.push(`/session/${a.sessionId}`),
+          },
+        ]
+      : []),
+    { kind: 'divider', key: 'danger' },
+    {
+      key: 'delete',
+      label: '删除',
+      icon: 'trash',
+      destructive: true,
+      disabled: !act.remove,
+      onPress: () => act.remove?.(),
+    },
+  ]
+}
+
 export function ArtifactCard(props: {
   artifact: ArtifactSummary
   onPress(): void
-  onLongPress(): void
+  /** What its long press offers, as `artifactMenu` makes it. */
+  menu: MenuNode[]
 }) {
   const { c } = useTokens()
   const a = props.artifact
@@ -128,37 +175,41 @@ export function ArtifactCard(props: {
   const agent = useAgent(session?.agentId)
   const editing = a.editing.length > 0
   return (
-    <Press
-      onPress={props.onPress}
-      onLongPress={props.onLongPress}
-      delayLongPress={350}
-      accessibilityRole="button"
-      accessibilityLabel={`${a.title}，${KIND_TEXT[kind]}，${age(a.updatedAt)}${editing ? '，正在编辑' : ''}`}
-      accessibilityHint="打开；长按显示更多操作"
-      containerStyle={styles.cell}
-      style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}
-    >
-      <View style={styles.head}>
-        <Text style={[typeScale.headline, { color: c.text }]} numberOfLines={1}>
-          {a.title || '未命名'}
-        </Text>
-        <View style={styles.meta}>
-          {session ? (
-            <AgentGlyph agentId={session.agentId} name={agent?.name} size={14} />
-          ) : (
-            <Icon name="doc" size={13} color={c.textTertiary} />
-          )}
-          <Text
-            style={[typeScale.footnote, styles.metaText, { color: c.textSecondary }]}
-            numberOfLines={1}
+    <View style={styles.cell}>
+      <ContextMenu items={props.menu} title={a.title || '未命名'}>
+        {(longPress) => (
+          <Press
+            onPress={props.onPress}
+            {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
+            accessibilityRole="button"
+            accessibilityLabel={`${a.title}，${KIND_TEXT[kind]}，${age(a.updatedAt)}${editing ? '，正在编辑' : ''}`}
+            accessibilityHint="打开；长按显示更多操作"
+            style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}
           >
-            {KIND_TEXT[kind]} · {age(a.updatedAt)}
-          </Text>
-          {editing ? <View style={[styles.live, { backgroundColor: c.success }]} /> : null}
-        </View>
-      </View>
-      <ArtifactPreview artifact={a} />
-    </Press>
+            <View style={styles.head}>
+              <Text style={[typeScale.headline, { color: c.text }]} numberOfLines={1}>
+                {a.title || '未命名'}
+              </Text>
+              <View style={styles.meta}>
+                {session ? (
+                  <AgentGlyph agentId={session.agentId} name={agent?.name} size={14} />
+                ) : (
+                  <Icon name="doc" size={13} color={c.textTertiary} />
+                )}
+                <Text
+                  style={[typeScale.footnote, styles.metaText, { color: c.textSecondary }]}
+                  numberOfLines={1}
+                >
+                  {KIND_TEXT[kind]} · {age(a.updatedAt)}
+                </Text>
+                {editing ? <View style={[styles.live, { backgroundColor: c.success }]} /> : null}
+              </View>
+            </View>
+            <ArtifactPreview artifact={a} />
+          </Press>
+        )}
+      </ContextMenu>
+    </View>
   )
 }
 

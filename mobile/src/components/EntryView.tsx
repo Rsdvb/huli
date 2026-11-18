@@ -7,7 +7,9 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { openArtifact } from '../artifacts'
 import { useSessionRows } from '../ui/session/context'
-import { copyText, plainText, showMenu } from '../ui/session/feedback'
+import { ContextMenu } from '../ui/ContextMenu'
+import { joinGroups, type MenuNode } from '../ui/menu'
+import { copyText, plainText } from '../ui/session/feedback'
 import { G, Icon, type IconSpec } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { gentle } from '../ui/session/Press'
@@ -50,19 +52,54 @@ type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
 function Reply(props: { entry: Of<'agent'> }) {
   const { entry } = props
-  const menu = () =>
-    showMenu(undefined, [
-      { label: '复制', onPress: () => void copyText(plainText(entry.markdown)) },
-      { label: '选择文本', onPress: () => selectText({ text: plainText(entry.markdown) }) },
-      { label: '复制为 Markdown', onPress: () => void copyText(entry.markdown) },
-    ])
+  const { fork, forkAtMessage } = useSessionRows()
+  // A reply still streaming has no menu yet; its text is not done.
+  const menu: MenuNode[] =
+    entry.markdown && !entry.streaming
+      ? joinGroups([
+          [
+            {
+              key: 'copy',
+              label: '复制',
+              icon: 'doc.on.doc',
+              onPress: () => void copyText(plainText(entry.markdown)),
+            },
+            {
+              key: 'select',
+              label: '选择文本',
+              icon: 'character.cursor.ibeam',
+              onPress: () => selectText({ text: plainText(entry.markdown) }),
+            },
+            {
+              key: 'markdown',
+              label: '复制为 Markdown',
+              icon: 'doc.plaintext',
+              onPress: () => void copyText(entry.markdown),
+            },
+          ],
+          fork
+            ? [
+                {
+                  key: 'fork',
+                  label: '从这里分叉',
+                  icon: 'arrow.triangle.branch',
+                  onPress: () => fork(forkAtMessage ? entry.id : null),
+                },
+              ]
+            : [],
+        ])
+      : []
   if (!entry.markdown && !entry.streaming && entry.attachments.length === 0) return null
   return (
     <View style={{ gap: 8 }}>
       {entry.markdown || entry.streaming ? (
-        <Pressable onLongPress={entry.markdown ? menu : undefined} delayLongPress={400}>
-          <Markdown markdown={entry.markdown} streaming={entry.streaming} />
-        </Pressable>
+        <ContextMenu items={menu}>
+          {(longPress) => (
+            <Pressable onLongPress={longPress} delayLongPress={400}>
+              <Markdown markdown={entry.markdown} streaming={entry.streaming} />
+            </Pressable>
+          )}
+        </ContextMenu>
       ) : null}
       {entry.attachments.length > 0 && <CarriedRefs refs={entry.attachments} />}
     </View>

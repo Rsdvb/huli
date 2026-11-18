@@ -1,0 +1,39 @@
+{
+  "section": "文件夹",
+  "empty": "把会话拖到这里，放进一个新文件夹。",
+  "folderEmpty": "还没有会话，把会话拖到这里。",
+  "ungrouped": "未分组",
+  "ungroupHint": "拖到这里，把会话移出文件夹",
+  "sessions_other": "{{count}} 个会话",
+  "pinnedFolder": "已置顶",
+  "failed": "无法更改文件夹：{{error}}",
+  "actions": {
+    "new": "新建文件夹",
+    "newMore": "新建文件夹…",
+    "rename": "重命名文件夹…",
+    "pin": "置顶文件夹",
+    "unpin": "取消置顶",
+    "delete": "删除文件夹…",
+    "moveTo": "移到文件夹",
+    "removeFrom": "移出文件夹",
+    "moreFor": "{{name}} 的更多操作",
+    "options": "文件夹选项"
+  },
+  "place": {
+    "label": "文件夹位置",
+    "above": "文件夹放在项目上方",
+    "below": "文件夹放在项目下方"
+  },
+  "dialog": {
+    "newTitle": "新建文件夹",
+    "newWith_other": "选中的 {{count}} 个会话会放进这个文件夹。",
+    "renameTitle": "重命名文件夹",
+    "name": "文件夹名称",
+    "create": "创建",
+    "rename": "重命名",
+    "tooLong": "文件夹名称最多 {{count}} 个字符。",
+    "deleteTitle": "删除文件夹“{{name}}”？",
+    "deleteBody": "删除文件夹后，其中的会话会回到未分组，不会被删除。",
+    "delete": "删除文件夹"
+  }
+}

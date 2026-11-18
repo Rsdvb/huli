@@ -10,10 +10,11 @@ import { call } from '../git'
 import { useLink, useSession } from '../host'
 import { sessionTitle } from '../sessions'
 import { sessionPullRequests, topPrState } from '../sessionMenu'
+import { TapMenu } from '../ui/ContextMenu'
 import { GlassCapsule } from '../ui/Glass'
+import type { MenuNode } from '../ui/menu'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import { GI, PrMark } from '../ui/session/gitIcons'
-import { showMenu } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 
 export const CHIPS_HEIGHT = 40
@@ -94,16 +95,16 @@ export function SessionChips(props: {
   )
 
   if (!hasChips(summary, !!parent)) return null
-  const openPrs = () => {
-    if (prs.length === 1) return void Linking.openURL(prs[0]!.url)
-    showMenu(
-      'Pull Request',
-      prs.slice(0, 6).map((pr) => ({
-        label: `${pr.repo}#${pr.number}`,
-        onPress: () => void Linking.openURL(pr.url),
-      })),
-    )
-  }
+  // One pull request opens at a tap; several make the chip a menu of them.
+  const prMenu: MenuNode[] =
+    prs.length > 1
+      ? prs.slice(0, 6).map((pr) => ({
+          key: pr.url,
+          label: `${pr.repo}#${pr.number}`,
+          icon: 'arrow.triangle.pull',
+          onPress: () => void Linking.openURL(pr.url),
+        }))
+      : []
   const failing = prs.some((pr) => pr.failing)
 
   return (
@@ -161,15 +162,19 @@ export function SessionChips(props: {
           </Chip>
         ) : null}
         {prs.length > 0 ? (
-          <Chip
-            label={`${prs.length} 个 Pull Request${failing ? '，检查失败' : ''}`}
-            onPress={openPrs}
-          >
-            <PrMark state={topPrState(prs)} size={13} failing={failing} />
-            <Text style={[styles.text, { color: c.text }]}>
-              {prs.length === 1 ? `#${prs[0]!.number}` : prs.length}
-            </Text>
-          </Chip>
+          <TapMenu items={prMenu} title="Pull Request">
+            {(open) => (
+              <Chip
+                label={`${prs.length} 个 Pull Request${failing ? '，检查失败' : ''}`}
+                onPress={open ?? (() => void Linking.openURL(prs[0]!.url))}
+              >
+                <PrMark state={topPrState(prs)} size={13} failing={failing} />
+                <Text style={[styles.text, { color: c.text }]}>
+                  {prs.length === 1 ? `#${prs[0]!.number}` : prs.length}
+                </Text>
+              </Chip>
+            )}
+          </TapMenu>
         ) : null}
       </ScrollView>
     </View>

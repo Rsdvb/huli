@@ -21,6 +21,7 @@ import type report from './locales/en/report.json'
 import type overview from './locales/en/overview.json'
 import type routines from './locales/en/routines.json'
 import type session from './locales/en/session.json'
+import type sessionFolders from './locales/en/sessionFolders.json'
 import type settings from './locales/en/settings.json'
 import type shell from './locales/en/shell.json'
 import type sidebar from './locales/en/sidebar.json'
@@ -58,6 +59,7 @@ declare module 'i18next' {
       overview: typeof overview
       routines: typeof routines
       session: typeof session
+      sessionFolders: typeof sessionFolders
       settings: typeof settings
       shell: typeof shell
       sidebar: typeof sidebar

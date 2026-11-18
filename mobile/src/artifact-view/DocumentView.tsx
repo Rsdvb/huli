@@ -6,7 +6,8 @@ import { useMemo } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { CONTENT_ENTRIES } from '@shared/artifact-types'
 import { Markdown } from '../components/Markdown'
-import { copyText, plainText, showMenu } from '../ui/session/feedback'
+import { ContextMenu } from '../ui/ContextMenu'
+import { copyText, plainText } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 import { selectText } from '../ui/session/SelectText'
 import { dataUrl, textOf } from './bytes'
@@ -64,25 +65,46 @@ export function DocumentView(props: { version: LoadedVersion; top: number; botto
       contentInsetAdjustmentBehavior="never"
       scrollIndicatorInsets={{ top: props.top }}
     >
-      <Pressable
-        onLongPress={() =>
-          showMenu(undefined, [
-            { label: '复制', onPress: () => void copyText(plainText(text)) },
-            { label: '选择文本', onPress: () => selectText({ text: plainText(text) }) },
-            { label: '复制为 Markdown', onPress: () => void copyText(text) },
-          ])
-        }
-        delayLongPress={400}
-        style={styles.article}
-      >
-        <Markdown markdown={text} image={image} onLink={confirmLink} />
-      </Pressable>
+      <View style={styles.article}>
+        <ContextMenu
+          items={[
+            {
+              key: 'copy',
+              label: '复制',
+              icon: 'doc.on.doc',
+              onPress: () => void copyText(plainText(text)),
+            },
+            {
+              key: 'select',
+              label: '选择文本',
+              icon: 'text.cursor',
+              onPress: () => selectText({ text: plainText(text) }),
+            },
+            {
+              key: 'markdown',
+              label: '复制为 Markdown',
+              icon: 'doc.text',
+              onPress: () => void copyText(text),
+            },
+          ]}
+        >
+          {(longPress) => (
+            <Pressable
+              {...(longPress ? { onLongPress: longPress, delayLongPress: 400 } : {})}
+              style={[styles.page, { backgroundColor: c.bg }]}
+            >
+              <Markdown markdown={text} image={image} onLink={confirmLink} />
+            </Pressable>
+          )}
+        </ContextMenu>
+      </View>
     </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
-  article: { paddingHorizontal: 20, maxWidth: 720, width: '100%', alignSelf: 'center' },
+  article: { maxWidth: 720, width: '100%', alignSelf: 'center' },
+  page: { paddingHorizontal: 20 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   note: { fontSize: 15 },
 })

@@ -50,7 +50,7 @@ export default function Computers() {
                   onPress={() =>
                     router.push({ pathname: '/settings/computer', params: { id: h.id } })
                   }
-                  onMenu={() => actions.menu(h)}
+                  menu={actions.menu(h)}
                 />
               </View>
             ))}

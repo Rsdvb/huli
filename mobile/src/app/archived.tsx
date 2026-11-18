@@ -8,6 +8,8 @@ import type { SessionSummary } from '@shared/agent-host'
 import { useSessionActions } from '../components/SessionActions'
 import { SessionRow } from '../components/SessionRow'
 import { useHost } from '../host'
+import { sessionTitle } from '../sessions'
+import { ContextMenu } from '../ui/ContextMenu'
 import { EmptyState } from '../ui/EmptyState'
 import { LargeTitle } from '../ui/LargeTitle'
 import { NavBar } from '../ui/NavBar'
@@ -61,24 +63,28 @@ export default function Archived() {
           />
         }
         renderItem={({ item }: { item: SessionSummary }) => (
-          <SessionRow
-            session={item}
-            agentName={host.agents.get(item.agentId)?.name}
-            projectName={projectNames.get(item.projectPath)}
-            time={item.archivedAt ?? item.updatedAt}
-            onPress={() => router.push(`/session/${item.id}`)}
-            onLongPress={() => actions.open(item)}
-            end={
-              connected
-                ? {
-                    label: '恢复',
-                    icon: 'inbox',
-                    color: c.tint,
-                    onPress: () => actions.restore(item),
-                  }
-                : undefined
-            }
-          />
+          <ContextMenu items={connected ? actions.menu(item) : []} title={sessionTitle(item)}>
+            {(longPress) => (
+              <SessionRow
+                session={item}
+                agentName={host.agents.get(item.agentId)?.name}
+                projectName={projectNames.get(item.projectPath)}
+                time={item.archivedAt ?? item.updatedAt}
+                onPress={() => router.push(`/session/${item.id}`)}
+                {...(longPress ? { onLongPress: longPress } : {})}
+                end={
+                  connected
+                    ? {
+                        label: '恢复',
+                        icon: 'inbox',
+                        color: c.tint,
+                        onPress: () => actions.restore(item),
+                      }
+                    : undefined
+                }
+              />
+            )}
+          </ContextMenu>
         )}
       />
       <NavBar header={header} title="已归档" />

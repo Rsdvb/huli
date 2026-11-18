@@ -1,13 +1,21 @@
 // What can be done to a session from the phone, by the desktop's menu rules: retry or stop it, pin,
-// rename, mark unread, open its pull request, copy its resume command, archive it (asking first
-// when work runs, with Undo after) or restore it, and delete it through the desktop's dialog. The
-// list, the archive and a session's own menu each offer their part of it.
+// rename, mark unread, mute, move to a folder, fork, open its pull request, copy its resume
+// command, archive it (asking first when work runs, with Undo after) or restore it, and delete it
+// through the desktop's dialog. The list, the archive and search each offer their part of it, as
+// the system's context menu on a long press (`menu`).
+//
+// A session of another computer than the active one (全部电脑) goes through that computer's own
+// light link (`linkFor`); what needs the active computer's full link, deleting and forking, is
+// left out of its menu.
 
 import { useState, type ReactNode } from 'react'
-import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native'
+import { Alert, Linking } from 'react-native'
+import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
+import type { HostLink } from '@shared/remote/link'
 import { call, sessionFolder } from '../git'
 import { useMaybeLink } from '../host'
+import { isMuted, setMuted } from '../push/muted'
 import { errorText, sessionTitle } from '../sessions'
 import {
   canRetry,
@@ -18,16 +26,30 @@ import {
   workLabel,
 } from '../sessionMenu'
 import { haptic } from '../ui/haptics'
+import { joinGroups, type MenuNode } from '../ui/menu'
+import { openMenuSheet } from '../ui/MenuSheet'
 import { showNotice } from '../ui/NoticeBar'
 import { copyText } from '../ui/session/feedback'
 import { DeleteSessionDialog } from './DeleteSessionDialog'
 import { RenameDialog } from './RenameDialog'
-import { Sheet, type SheetItem } from './Sheet'
 
 export type ActionsPlace = 'list' | 'archive' | 'session'
 
+/** What a list adds to a session's menu: its folders, forking and selecting. */
+export interface MenuExtras {
+  /** 移到文件夹's submenu, built by `moveToFolderNodes`; none on a computer without folders. */
+  folders?: MenuNode[]
+  /** Forks the whole session; none when its agent cannot. */
+  fork?: () => void
+  /** Starts selecting with this session. */
+  select?: () => void
+}
+
 export interface SessionActions {
+  /** Opens the session's menu as a sheet, where no context menu can be shown. */
   open(summary: SessionSummary): void
+  /** The session's menu, for a context menu. */
+  menu(summary: SessionSummary, extras?: MenuExtras): MenuNode[]
   /** The swipe actions: each at once, with a haptic for how it went. */
   togglePin(summary: SessionSummary): void
   /** Asks first when work of its runs, then archives with Undo. */
@@ -43,7 +65,7 @@ export interface SessionActions {
   resumeOf(summary: SessionSummary): string | null
   /** Asks with the desktop's dialog, then deletes; refused while a turn runs. */
   remove(summary: SessionSummary): void
-  /** Renders the sheet and the dialogs; put it anywhere in the screen. */
+  /** Renders the dialogs; put it anywhere in the screen. */
   element: ReactNode
 }
 
@@ -51,18 +73,34 @@ export function useSessionActions(
   place: ActionsPlace,
   /** After the session was archived, restored or deleted, as a session screen leaves then. */
   onGone?: () => void,
-  /** Items of the place's own, listed first, such as a session's changes. */
-  extra?: (summary: SessionSummary) => SheetItem[],
+  /** The link of a session's computer when it is not the active one (全部电脑). */
+  linkFor?: (summary: SessionSummary) => HostLink | null | undefined,
 ): SessionActions {
-  const link = useMaybeLink()
+  const active = useMaybeLink()
   const [target, setTarget] = useState<SessionSummary | null>(null)
-  const [sheet, setSheet] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
 
-  const run = (failed: string, request: () => Promise<unknown>, after?: () => void) => {
-    if (!link) return
-    request().then(
+  /** The session's computer's link: another computer's own, else the active one's. */
+  const linkOf = (s: SessionSummary): HostLink | null => {
+    const other = linkFor?.(s)
+    return other === undefined ? active : other
+  }
+  const onActive = (s: SessionSummary) => linkFor?.(s) === undefined
+
+  const run = (
+    s: SessionSummary,
+    failed: string,
+    request: (link: HostLink) => Promise<unknown>,
+    after?: () => void,
+  ) => {
+    const link = linkOf(s)
+    if (!link) {
+      haptic.warning()
+      Alert.alert(failed, '现在连不上这个会话所在的电脑。')
+      return
+    }
+    request(link).then(
       () => {
         haptic.success()
         after?.()
@@ -76,8 +114,9 @@ export function useSessionActions(
 
   const archiveNow = (s: SessionSummary) =>
     run(
+      s,
       '没能归档',
-      () => link!.request('sessions.archive', { sessionId: s.id }),
+      (link) => link.request('sessions.archive', { sessionId: s.id }),
       () => {
         onGone?.()
         showNotice({
@@ -85,7 +124,7 @@ export function useSessionActions(
           action: {
             label: '撤销',
             onPress: () =>
-              void link
+              void linkOf(s)
                 ?.request('sessions.unarchive', { sessionId: s.id })
                 .catch((error: unknown) => Alert.alert('没能恢复', errorText(error))),
           },
@@ -95,7 +134,8 @@ export function useSessionActions(
 
   // Archiving stops the agent's work and its terminals, so running work is named and confirmed.
   const archive = (s: SessionSummary) => {
-    if (!link) return
+    const link = linkOf(s)
+    if (!link) return archiveNow(s)
     call(link, 'sessions.runningWork', { sessionIds: [s.id] })
       .then(({ sessions }) => workItems(sessions))
       .catch(() => [])
@@ -122,23 +162,28 @@ export function useSessionActions(
     setDeleting(s)
   }
 
+  const rename = (s: SessionSummary) => {
+    setTarget(s)
+    setRenaming(true)
+  }
+
   const resumeOf = (s: SessionSummary) => resumeCommand(s, sessionFolder(s))
 
   const actions = {
     togglePin: (s: SessionSummary) =>
-      run('没能置顶', () =>
-        link!.request('sessions.pin', { sessionId: s.id, pinned: s.pinnedAt === null }),
+      run(s, '没能置顶', (link) =>
+        link.request('sessions.pin', { sessionId: s.id, pinned: s.pinnedAt === null }),
       ),
     restore: (s: SessionSummary) =>
-      run('没能恢复', () => link!.request('sessions.unarchive', { sessionId: s.id }), onGone),
+      run(s, '没能恢复', (link) => link.request('sessions.unarchive', { sessionId: s.id }), onGone),
     toggleUnread: (s: SessionSummary) =>
-      run('没能标记', () =>
-        link!.request('sessions.markUnread', { sessionId: s.id, unread: s.attention !== 'unread' }),
+      run(s, '没能标记', (link) =>
+        link.request('sessions.markUnread', { sessionId: s.id, unread: s.attention !== 'unread' }),
       ),
     retry: (s: SessionSummary) =>
-      run('没能重试', () => link!.request('sessions.retry', { sessionId: s.id })),
+      run(s, '没能重试', (link) => link.request('sessions.retry', { sessionId: s.id })),
     stop: (s: SessionSummary) =>
-      run('没能停止', () => link!.request('sessions.cancel', { sessionId: s.id })),
+      run(s, '没能停止', (link) => link.request('sessions.cancel', { sessionId: s.id })),
     copyResume: (s: SessionSummary) => {
       const command = resumeOf(s)
       if (!command) return
@@ -150,77 +195,175 @@ export function useSessionActions(
       ),
   }
 
-  const items = (s: SessionSummary): SheetItem[] => {
+  const menu = (s: SessionSummary, extras: MenuExtras = {}): MenuNode[] => {
     const running = isRunning(s)
-    const prs = sessionPullRequests(s)
-    const state: SheetItem[] = running
-      ? [{ key: 'stop', label: '停止', destructive: true, onPress: () => actions.stop(s) }]
-      : canRetry(s)
-        ? [{ key: 'retry', label: '重试', onPress: () => actions.retry(s) }]
-        : []
-    const pin: SheetItem = {
-      key: 'pin',
-      label: s.pinnedAt !== null ? '取消置顶' : '置顶',
-      onPress: () => actions.togglePin(s),
-    }
-    const rename: SheetItem = {
-      key: 'rename',
-      label: '重命名…',
-      onPress: () => {
-        setTarget(s)
-        setRenaming(true)
-      },
-    }
-    const unread: SheetItem = {
-      key: 'unread',
-      label: s.attention === 'unread' ? '标为已读' : '标为未读',
-      onPress: () => actions.toggleUnread(s),
-    }
-    const pr: SheetItem[] = prs.slice(0, 3).map((p) => ({
-      key: `pr:${p.url}`,
-      label: `打开 Pull Request #${p.number}`,
-      onPress: () => void Linking.openURL(p.url),
-    }))
-    const resume: SheetItem[] = resumeOf(s)
-      ? [{ key: 'resume', label: '复制恢复命令', onPress: () => actions.copyResume(s) }]
-      : []
-    const archiveItem: SheetItem = { key: 'archive', label: '归档', onPress: () => archive(s) }
-    const restore: SheetItem = {
-      key: 'restore',
-      label: '恢复到会话列表',
-      onPress: () => actions.restore(s),
-    }
-    const del: SheetItem[] = running
-      ? []
-      : [{ key: 'delete', label: '删除…', destructive: true, onPress: () => remove(s) }]
     const topLevel = s.parentId === null
-    if (place === 'archive') return [restore, rename, ...del]
-    return [
-      ...state,
-      ...(topLevel ? [pin] : []),
-      rename,
-      unread,
-      ...pr,
-      ...resume,
-      ...(topLevel ? [s.archivedAt !== null ? restore : archiveItem] : []),
-      ...del,
+    const here = onActive(s)
+    const muted = isMuted(s.id)
+    const prs = sessionPullRequests(s)
+    const resume = resumeOf(s)
+    if (place === 'archive') {
+      return joinGroups([
+        [
+          {
+            key: 'restore',
+            label: '恢复到会话列表',
+            icon: 'arrow.uturn.backward',
+            onPress: () => actions.restore(s),
+          },
+          { key: 'rename', label: '重命名…', icon: 'pencil', onPress: () => rename(s) },
+        ],
+        here && !running
+          ? [
+              {
+                key: 'delete',
+                label: '删除…',
+                icon: 'trash',
+                destructive: true,
+                onPress: () => remove(s),
+              },
+            ]
+          : [],
+      ])
+    }
+    const state: MenuNode[] = running
+      ? [
+          {
+            key: 'stop',
+            label: '停止',
+            icon: 'stop',
+            destructive: true,
+            onPress: () => actions.stop(s),
+          },
+        ]
+      : canRetry(s)
+        ? [
+            {
+              key: 'retry',
+              label: '重试',
+              icon: 'arrow.clockwise',
+              onPress: () => actions.retry(s),
+            },
+          ]
+        : []
+    const own: MenuNode[] = [
+      { key: 'rename', label: '重命名…', icon: 'pencil', onPress: () => rename(s) },
+      ...(topLevel
+        ? [
+            {
+              key: 'pin',
+              label: s.pinnedAt !== null ? '取消置顶' : '置顶',
+              icon: s.pinnedAt !== null ? ('pin.slash' as const) : ('pin' as const),
+              onPress: () => actions.togglePin(s),
+            },
+          ]
+        : []),
+      {
+        key: 'unread',
+        label: s.attention === 'unread' ? '标为已读' : '标为未读',
+        icon: s.attention === 'unread' ? 'checkmark.circle' : 'circlebadge',
+        onPress: () => actions.toggleUnread(s),
+      },
+      {
+        key: 'mute',
+        label: muted ? '取消静音' : '静音通知',
+        icon: muted ? 'bell' : 'bell.slash',
+        onPress: () => void setMuted(s.id, !muted).then(() => haptic.success()),
+      },
     ]
+    const organize: MenuNode[] = [
+      ...(topLevel && extras.folders
+        ? [{ key: 'move', label: '移到文件夹', icon: 'folder' as const, items: extras.folders }]
+        : []),
+      ...(extras.fork && here
+        ? [
+            {
+              key: 'fork',
+              label: '分叉',
+              icon: 'arrow.triangle.branch' as const,
+              onPress: extras.fork,
+            },
+          ]
+        : []),
+      ...(topLevel
+        ? [
+            s.archivedAt !== null
+              ? {
+                  key: 'restore',
+                  label: '恢复到会话列表',
+                  icon: 'arrow.uturn.backward' as const,
+                  onPress: () => actions.restore(s),
+                }
+              : {
+                  key: 'archive',
+                  label: '归档',
+                  icon: 'archivebox' as const,
+                  onPress: () => archive(s),
+                },
+          ]
+        : []),
+    ]
+    const more: MenuNode[] = [
+      ...prs.slice(0, 3).map((p) => ({
+        key: `pr:${p.url}`,
+        label: `打开 Pull Request #${p.number}`,
+        icon: 'arrow.triangle.pull' as const,
+        onPress: () => void Linking.openURL(p.url),
+      })),
+      ...(resume
+        ? [
+            {
+              key: 'resume',
+              label: '复制恢复命令',
+              icon: 'apple.terminal' as const,
+              onPress: () => actions.copyResume(s),
+            },
+          ]
+        : []),
+      {
+        key: 'copy-id',
+        label: '复制会话 ID',
+        icon: 'doc.on.doc',
+        onPress: () => actions.copySessionId(s),
+      },
+    ]
+    const end: MenuNode[] = [
+      ...(extras.select
+        ? [
+            {
+              key: 'select',
+              label: '选择',
+              icon: 'checkmark.circle' as const,
+              onPress: extras.select,
+            },
+          ]
+        : []),
+      { key: 'more', label: '更多', icon: 'ellipsis.circle', items: more },
+    ]
+    const del: MenuNode[] =
+      here && !running
+        ? [
+            {
+              key: 'delete',
+              label: '删除…',
+              icon: 'trash',
+              destructive: true,
+              onPress: () => remove(s),
+            },
+          ]
+        : []
+    return joinGroups([state, own, organize, end, del])
   }
 
   const element = (
     <>
-      <Sheet
-        visible={sheet && target !== null}
-        title={target ? sessionTitle(target) : undefined}
-        items={target ? [...(extra?.(target) ?? []), ...items(target)] : []}
-        onClose={() => setSheet(false)}
-      />
       <RenameDialog
         visible={renaming && target !== null}
         title={target?.title ?? ''}
         onClose={() => setRenaming(false)}
         onSave={async (title) => {
-          if (!link || !target) return
+          const link = target ? linkOf(target) : null
+          if (!link || !target) throw new Error('现在连不上这个会话所在的电脑。')
           await link.request('sessions.rename', { sessionId: target.id, title })
         }}
       />
@@ -236,39 +379,46 @@ export function useSessionActions(
         onDelete={() => {
           const s = deleting
           setDeleting(null)
-          if (s)
-            run('没能删除', () => link!.request('sessions.delete', { sessionId: s.id }), onGone)
+          if (s) {
+            run(
+              s,
+              '没能删除',
+              (link) => link.request('sessions.delete', { sessionId: s.id }),
+              onGone,
+            )
+          }
         }}
       />
     </>
   )
 
   return {
-    open: (summary) => {
-      setTarget(summary)
-      // iOS has the system's own action sheet, glass on iOS 26; elsewhere ours.
-      if (Platform.OS !== 'ios') return setSheet(true)
-      const list = [...(extra?.(summary) ?? []), ...items(summary)]
-      const destructive = list.flatMap((item, index) => (item.destructive ? [index] : []))
-      haptic.tap()
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: sessionTitle(summary),
-          options: [...list.map((item) => item.label), '取消'],
-          cancelButtonIndex: list.length,
-          ...(destructive.length > 0 ? { destructiveButtonIndex: destructive } : {}),
-        },
-        (index) => list[index]?.onPress(),
-      )
-    },
+    open: (summary) => openMenuSheet(sessionTitle(summary), menu(summary)),
+    menu,
     ...actions,
     archive,
-    rename: (s) => {
-      setTarget(s)
-      setRenaming(true)
-    },
+    rename,
     resumeOf,
     remove,
     element,
   }
+}
+
+/** Asks, then forks a whole session on the active computer and opens the new one. */
+export function forkSession(link: HostLink | null, summary: SessionSummary): void {
+  if (!link) return
+  Alert.alert('分叉这个会话？', '新会话会带上目前的整个对话，原来的会话不受影响。', [
+    { text: '取消', style: 'cancel' },
+    {
+      text: '分叉',
+      onPress: () =>
+        void link.request('sessions.fork', { sessionId: summary.id }).then(
+          (made) => {
+            haptic.success()
+            router.push(`/session/${(made as SessionSummary).id}`)
+          },
+          (error: unknown) => Alert.alert('没能分叉', errorText(error)),
+        ),
+    },
+  ])
 }
