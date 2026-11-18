@@ -29,7 +29,7 @@ import {
   type Place,
 } from '@renderer/features/split/layout'
 import type { RoutineExampleId } from '@renderer/features/routines/examples'
-import { NARROW_WINDOW } from '@renderer/features/shell/narrow'
+import { NARROW_WINDOW, PHONE_WINDOW } from '@renderer/features/shell/narrow'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
@@ -166,6 +166,11 @@ interface ViewStore {
   sidebarCollapsed: boolean
   /** The sidebar as a drawer over a narrow window, apart from its collapsed state. Not persisted. */
   sidebarDrawer: boolean
+  /**
+   * The collapsed sidebar floating over a wide window while the pointer is on its toggle or on it;
+   * `closing` while it fades out. Not persisted.
+   */
+  sidebarPeek: 'open' | 'closing' | null
   /** Groups the user collapsed, by path, `NO_PROJECT_GROUP` or `PINNED_GROUP`; open by default. */
   collapsedProjects: Record<string, true>
   /** The one host the sidebar lists, by id or `THIS_COMPUTER`; null lists every host. */
@@ -235,6 +240,7 @@ export const useViewStore = create<ViewStore>()(() => ({
   history: { back: [], forward: [] },
   sidebarCollapsed: saved.sidebarCollapsed ?? false,
   sidebarDrawer: false,
+  sidebarPeek: null,
   collapsedProjects: saved.collapsedProjects ?? {},
   hostFilter: typeof saved.hostFilter === 'string' ? saved.hostFilter : null,
   expandedParents: saved.expandedParents ?? {},
@@ -788,8 +794,14 @@ export function chooseNewSessionHost(hostId: string | null, projectPath: string 
 
 /** Without a section, shows the one shown last; with one, switches to it even when already open. */
 export function openSettings(section: SettingsSection | null = null): void {
+  // A phone shows one screen at a time, so Settings opens at its list of sections there.
+  const list = window.matchMedia(PHONE_WINDOW).matches
   useViewStore.setState((s) => ({
-    settings: section ? { open: true, section, item: null } : { ...s.settings, open: true },
+    settings: section
+      ? { open: true, section, item: null }
+      : list
+        ? { open: true, section: null, item: null }
+        : { ...s.settings, open: true },
   }))
 }
 
@@ -812,6 +824,7 @@ export function openHarnessSettings(harness: HarnessId | null): void {
 export function settingsBack(): void {
   const { settings } = useViewStore.getState()
   if (settings.item) openSettingsItem(settings.section ?? 'agents', null)
+  else if (settings.section && window.matchMedia(PHONE_WINDOW).matches) openSettings()
   else closeSettings()
 }
 

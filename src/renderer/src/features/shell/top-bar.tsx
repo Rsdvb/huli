@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { SidebarLeftIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '@renderer/components/affect/app-shell'
@@ -13,6 +13,7 @@ import { cn } from '@renderer/lib/utils'
 import { toggleSidebar, useViewStore } from '@renderer/stores/view'
 import { useCornered } from './corner'
 import { useNarrowWindow } from './narrow'
+import { leaveToggle, pointAtToggle } from './sidebar-peek'
 
 /**
  * A sheet's head, as App Shell's chat bar: 52 px, the window's drag region. In the window's top
@@ -96,6 +97,26 @@ export function CornerDragHole() {
   )
 }
 
+/**
+ * As the corner's hole, for the sidebar floating over the page: the page heads' drag regions under
+ * its top come later in the document and would take its clicks.
+ */
+export function PeekDragHole() {
+  const hole = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const side = document.querySelector<HTMLElement>('.ui-as-app > .ui-as-side')
+    const origin = side?.parentElement?.getBoundingClientRect()
+    if (!side || !origin || !hole.current) return
+    Object.assign(hole.current.style, {
+      left: `${origin.left + side.offsetLeft}px`,
+      top: `${origin.top + side.offsetTop}px`,
+      width: `${side.offsetWidth}px`,
+      height: `${side.offsetHeight}px`,
+    })
+  }, [])
+  return <div ref={hole} aria-hidden className="app-region-no-drag pointer-events-none fixed" />
+}
+
 /** Reserves the corner controls' width in a head without moving the controls into that sheet. */
 export function CornerControlsSpace({ className }: { className?: string; divided?: boolean }) {
   return (
@@ -106,8 +127,20 @@ export function CornerControlsSpace({ className }: { className?: string; divided
 }
 
 /** Something clickable inside the drag region. */
-export function NoDrag({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('app-region-no-drag flex items-center', className)}>{children}</div>
+export function NoDrag({
+  children,
+  className,
+  ref,
+}: {
+  children: ReactNode
+  className?: string
+  ref?: Ref<HTMLDivElement>
+}) {
+  return (
+    <div ref={ref} className={cn('app-region-no-drag flex items-center', className)}>
+      {children}
+    </div>
+  )
 }
 
 export function SidebarToggle({ className }: { className?: string }) {
@@ -117,6 +150,8 @@ export function SidebarToggle({ className }: { className?: string }) {
   // A narrow window's sidebar is a drawer, shown only while it is open.
   const shown = useNarrowWindow() ? drawer : !collapsed
   const { summary } = useNotices()
+  // The sidebar shows over the page while the pointer is on this button, which says the same.
+  const peeking = useViewStore((s) => s.sidebarPeek !== null)
   const button = useRef<HTMLButtonElement>(null)
   // Move focus out of the sidebar before collapsing makes it inert; a closing drawer, whose own
   // button App Shell would return it to is not drawn, gives it back to this one.
@@ -136,7 +171,7 @@ export function SidebarToggle({ className }: { className?: string }) {
   const notices = shown ? null : summary
   const label = shown ? t('topBar.hideSidebar') : t('topBar.showSidebar')
   return (
-    <Tooltip>
+    <Tooltip disabled={peeking}>
       <TooltipTrigger
         render={
           <button
@@ -147,6 +182,8 @@ export function SidebarToggle({ className }: { className?: string }) {
             aria-expanded={shown}
             aria-description={notices?.name}
             onClick={toggleSidebar}
+            onPointerEnter={(event) => event.pointerType !== 'touch' && pointAtToggle()}
+            onPointerLeave={leaveToggle}
             className={cn(TITLE_BUTTON, className)}
           />
         }

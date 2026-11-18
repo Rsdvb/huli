@@ -52,6 +52,7 @@ export interface SettingsFile {
     textSize: 'small' | 'default' | 'large' // the composer: 14, 15 or 16 px; thread prose a pixel less
     reduceMotion: 'system' | 'always'
     zoom: ZoomLevel // Chromium's page zoom of the whole window
+    sidebarHover: boolean // pointing at the toggle of a collapsed sidebar shows it over the page
   }
   notifications: {
     permission: boolean
@@ -64,6 +65,7 @@ export interface SettingsFile {
   }
   // Keyed by harness: the program picked for it, and its default agent's folder and visibility.
   // configDir: a folder picked before agents could be added, which the default agent keeps.
+  // autoUpdate: false when Kettu's own install no longer follows the Registry's versions by itself.
   agents: Partial<
     Record<
       HarnessId,
@@ -73,6 +75,7 @@ export interface SettingsFile {
         hidden?: true
         enabled?: boolean
         uninstalled?: true
+        autoUpdate?: false
       }
     >
   >
@@ -228,6 +231,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     textSize: 'default',
     reduceMotion: 'system',
     zoom: 1.1,
+    sidebarHover: true,
   },
   notifications: {
     permission: true,
@@ -295,6 +299,7 @@ export interface SettingsPatch {
         hidden?: boolean
         enabled?: boolean
         uninstalled?: boolean
+        autoUpdate?: boolean
       }
     >
   >
@@ -342,6 +347,9 @@ export interface HostSettings {
   claudeTestEntrypoint: string | null
   defaultAgent: AgentId | null // the agent new sessions start with, which answers artifacts' questions
   computerUse: ComputerUseSettings
+  // Kettu's download service may be asked, as for the harness compatibility manifest: off in
+  // Local mode and with GitHub only as the download source.
+  downloadService: boolean
 }
 
 /** The part of the settings the terminal host receives. */

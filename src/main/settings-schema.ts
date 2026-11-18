@@ -178,6 +178,7 @@ const SECTION_FIELDS = {
     textSize: oneOf('small', 'default', 'large'),
     reduceMotion: oneOf('system', 'always'),
     zoom: oneOf(...ZOOM_LEVELS),
+    sidebarHover: isBoolean,
   },
   notifications: {
     permission: isBoolean,
@@ -257,6 +258,7 @@ const AGENT_KEYS: readonly string[] = [
   'hidden',
   'enabled',
   'uninstalled',
+  'autoUpdate',
 ]
 
 /** A list of agents, as the MCP switches and the turned-off agents are: each an id, once. */
@@ -888,7 +890,7 @@ export function validateSettingsPatch(raw: unknown): SettingsPatch {
           Object.keys(entry).some((key) => !AGENT_KEYS.includes(key))
         ) {
           problems.push(
-            `"agents.${harnessId}" accepts only "binaryPath", "configDir", "hidden", "enabled" and "uninstalled"`,
+            `"agents.${harnessId}" accepts only "binaryPath", "configDir", "hidden", "enabled", "uninstalled" and "autoUpdate"`,
           )
         } else {
           if ('binaryPath' in entry && entry.binaryPath !== null) {
@@ -899,7 +901,7 @@ export function validateSettingsPatch(raw: unknown): SettingsPatch {
           if ('configDir' in entry && entry.configDir !== null) {
             problems.push(`"agents.${harnessId}.configDir" can only be cleared with null`)
           }
-          for (const key of ['hidden', 'enabled', 'uninstalled']) {
+          for (const key of ['hidden', 'enabled', 'uninstalled', 'autoUpdate']) {
             const problem =
               key in entry ? isBoolean(entry[key], `agents.${harnessId}.${key}`) : null
             if (problem) problems.push(problem)
@@ -1003,6 +1005,8 @@ export function mergeSettings(current: SettingsFile, patch: SettingsPatch): Sett
       if (change?.configDir === null) delete entry.configDir
       if (change?.hidden === true) entry.hidden = true
       if (change?.hidden === false) delete entry.hidden
+      if (change?.autoUpdate === false) entry.autoUpdate = false
+      if (change?.autoUpdate === true) delete entry.autoUpdate
       if (Object.keys(entry).length > 0) next.agents[harnessId] = entry
       else delete next.agents[harnessId]
     }
@@ -1249,6 +1253,11 @@ export function parseSettingsFile(raw: unknown): LoadedSettings {
           if (problem) problems.push(problem)
           else if (entry.uninstalled) stored.uninstalled = true
         }
+        if (entry.autoUpdate !== undefined) {
+          const problem = isBoolean(entry.autoUpdate, `agents.${harnessId}.autoUpdate`)
+          if (problem) problems.push(problem)
+          else if (entry.autoUpdate === false) stored.autoUpdate = false
+        }
         if (Object.keys(stored).length > 0) settings.agents[harnessId] = stored
       }
     }
@@ -1494,6 +1503,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
       : null,
     defaultAgent: settings.general.defaultAgent,
     computerUse: structuredClone(settings.computerUse),
+    downloadService: settings.cloud.enabled && settings.updates.source === 'auto',
   }
 }
 
@@ -1523,6 +1533,8 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'idleSessions',
   'usage',
   'computerUse',
+  'cloud',
+  'updates',
 ])
 
 /** Whether a change touches what the agent host is sent; a language change is checked apart. */

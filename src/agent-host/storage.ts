@@ -2,7 +2,7 @@
 
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
-import type { AgentAccount, AgentUpdate, PlanLimit } from '@shared/agent-host'
+import type { AgentAccount, AgentUpdate, PlanLimit, VersionMoveReason } from '@shared/agent-host'
 import { GITHUB_PULL_REQUEST_URL, type ProjectWorktreeSettings } from '@shared/git'
 import type { SessionTaskRef } from '@shared/workflow'
 import {
@@ -416,20 +416,22 @@ export interface RememberedInit {
 
 /**
  * What the last update check found for each package agent: the newest adapter and the CLI it
- * carries. Whether that is an update follows from what is installed, so it is not stored.
+ * carries. Whether that is an update follows from what is installed, so it is not stored. Beside
+ * it, which version of Kettu's own install runs, and what moved it.
  */
 export interface AgentUpdatesFile {
   version: 1
   /**
-   * `attemptedAt`: when a check last ran, found or failed; `checkedAt` and `latest`: the last one
-   * that found something, or null. Files written before `attemptedAt` take `checkedAt` for it.
+   * `attemptedAt`: when a check last ran, found or failed, null before any; `checkedAt` and
+   * `latest`: the last one that found something, or null. Files written before `attemptedAt` take
+   * `checkedAt` for it.
    */
   agents: Partial<
     Record<
       AgentId,
       {
         checkedAt: number | null
-        attemptedAt: number
+        attemptedAt: number | null
         latest: AgentUpdate | null
         /** The newest version of the user's own CLI on npm. */
         cli?: string
@@ -437,9 +439,46 @@ export interface AgentUpdatesFile {
         skipped?: AgentUpdate
         /** The version of the user's CLI whose notice the user dismissed. */
         skippedCli?: string
+        /** The version of Kettu's own install that last started and answered. */
+        ran?: string
+        /** With automatic updates off, the version the user last moved to. */
+        stay?: string
+        /** A new version that failed to start in place of the one before it, and why. */
+        failed?: { version: string; reason: string }
+        /**
+         * The last move automatic updates made, when and why; `withdrawn` when it went to an older
+         * version than the one it had. Files written before `reason` moved only for the Registry.
+         */
+        moved?: {
+          from: string
+          to: string
+          at: number
+          withdrawn: boolean
+          reason?: VersionMoveReason
+        }
       }
     >
   >
+}
+
+/**
+ * Kettu's harness compatibility manifest as last read, in the envelope it came in, so it is
+ * verified again before it is used; empty while none was.
+ */
+export interface HarnessManifestFile {
+  version: 1
+  /** When it was last read; 0 while none was. */
+  readAt: number
+  payload: string
+  signature: string
+}
+
+/** The ACP Registry's listing as last read, cut to what Kettu reads, for a start offline. */
+export interface RegistryListingFile {
+  version: 1
+  /** When it was read; 0 while none was. */
+  readAt: number
+  agents: unknown[]
 }
 
 export interface RoutinesFile {
@@ -567,6 +606,8 @@ export const PROJECT_MCP_VERSION = 1
 export const PROJECT_HOOKS_VERSION = 1
 export const AGENT_PROCESSES_VERSION = 1
 export const AGENT_UPDATES_VERSION = 1
+export const REGISTRY_LISTING_VERSION = 1
+export const HARNESS_MANIFEST_VERSION = 1
 export const ROUTINES_VERSION = 1
 // No older formats exist yet; each future version adds its step here, with a test.
 export const ROUTINES_MIGRATIONS: Readonly<Record<number, Migration>> = {}
@@ -578,6 +619,8 @@ export const PROJECT_MCP_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const PROJECT_HOOKS_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const AGENT_PROCESSES_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const AGENT_UPDATES_MIGRATIONS: Readonly<Record<number, Migration>> = {}
+export const REGISTRY_LISTING_MIGRATIONS: Readonly<Record<number, Migration>> = {}
+export const HARNESS_MANIFEST_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -1074,9 +1117,10 @@ export function parseAgentUpdatesFile(data: Record<string, unknown>): AgentUpdat
             cliVersion: skippedEntry.cliVersion,
           }
         : null
-    if (attemptedAt === null) continue
     const cli = isVersion(entry.cli) ? entry.cli : null
     const skippedCli = isVersion(entry.skippedCli) ? entry.skippedCli : null
+    const versions = parseRunVersions(entry)
+    if (attemptedAt === null && Object.keys(versions).length === 0) continue
     agents[id] = {
       checkedAt,
       attemptedAt,
@@ -1084,9 +1128,72 @@ export function parseAgentUpdatesFile(data: Record<string, unknown>): AgentUpdat
       ...(cli ? { cli } : {}),
       ...(skipped ? { skipped } : {}),
       ...(skippedCli ? { skippedCli } : {}),
+      ...versions,
     }
   }
   return { version: 1, agents }
+}
+
+/** Longer reasons are cut, so a program's long error does not grow the file. */
+const MAX_REASON = 2000
+
+type RunVersions = Pick<
+  NonNullable<AgentUpdatesFile['agents'][AgentId]>,
+  'ran' | 'stay' | 'failed' | 'moved'
+>
+
+/** Which version runs and what moved it; only versions pass, since one names an install folder. */
+function parseRunVersions(entry: Record<string, unknown>): RunVersions {
+  const failed = isRecord(entry.failed) ? entry.failed : null
+  const moved = isRecord(entry.moved) ? entry.moved : null
+  return {
+    ...(isVersion(entry.ran) ? { ran: entry.ran } : {}),
+    ...(isVersion(entry.stay) ? { stay: entry.stay } : {}),
+    ...(failed && isVersion(failed.version) && typeof failed.reason === 'string'
+      ? { failed: { version: failed.version, reason: failed.reason.slice(0, MAX_REASON) } }
+      : {}),
+    ...(moved &&
+    isVersion(moved.from) &&
+    isVersion(moved.to) &&
+    isTime(moved.at) &&
+    typeof moved.withdrawn === 'boolean'
+      ? {
+          moved: {
+            from: moved.from,
+            to: moved.to,
+            at: moved.at,
+            withdrawn: moved.withdrawn,
+            ...(isMoveReason(moved.reason) ? { reason: moved.reason } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+const MOVE_REASONS: readonly string[] = ['registry', 'manifest', 'broken', 'bundled']
+
+function isMoveReason(value: unknown): value is VersionMoveReason {
+  return typeof value === 'string' && MOVE_REASONS.includes(value)
+}
+
+/** The kept manifest; its signature is checked where it is used, as a live one's is. */
+export function parseHarnessManifestFile(
+  data: Record<string, unknown>,
+): HarnessManifestFile | string {
+  if (!isTime(data.readAt)) return 'readAt is not a time'
+  if (typeof data.payload !== 'string' || typeof data.signature !== 'string') {
+    return 'it holds no signed manifest'
+  }
+  return { version: 1, readAt: data.readAt, payload: data.payload, signature: data.signature }
+}
+
+/** The cached listing; the entries are checked as they are read, like the live listing's. */
+export function parseRegistryListingFile(
+  data: Record<string, unknown>,
+): RegistryListingFile | string {
+  if (!isTime(data.readAt)) return 'readAt is not a time'
+  if (!Array.isArray(data.agents)) return 'agents is not a list'
+  return { version: 1, readAt: data.readAt, agents: data.agents.filter(isRecord) }
 }
 
 const MAX_AGENT_PROCESSES = 10_000
@@ -1215,6 +1322,34 @@ export function routinesFile(userDataPath: string, log: LogFn): JsonFile<Routine
     migrations: ROUTINES_MIGRATIONS,
     parse: parseRoutinesFile,
     empty: () => ({ version: 1, routines: [] }),
+    log,
+  })
+}
+
+export function registryListingFile(
+  userDataPath: string,
+  log: LogFn,
+): JsonFile<RegistryListingFile> {
+  return new JsonFile<RegistryListingFile>({
+    file: path.join(userDataPath, 'state', 'acp-registry.json'),
+    version: REGISTRY_LISTING_VERSION,
+    migrations: REGISTRY_LISTING_MIGRATIONS,
+    parse: parseRegistryListingFile,
+    empty: () => ({ version: 1, readAt: 0, agents: [] }),
+    log,
+  })
+}
+
+export function harnessManifestFile(
+  userDataPath: string,
+  log: LogFn,
+): JsonFile<HarnessManifestFile> {
+  return new JsonFile<HarnessManifestFile>({
+    file: path.join(userDataPath, 'state', 'harness-manifest.json'),
+    version: HARNESS_MANIFEST_VERSION,
+    migrations: HARNESS_MANIFEST_MIGRATIONS,
+    parse: parseHarnessManifestFile,
+    empty: () => ({ version: 1, readAt: 0, payload: '', signature: '' }),
     log,
   })
 }

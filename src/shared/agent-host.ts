@@ -252,6 +252,13 @@ export interface ConversationHit {
   matches?: number
 }
 
+/** A message of one session that holds every word of a search in it. */
+export interface SessionFindMatch {
+  pos: number
+  entryId: string
+  role: 'user' | 'agent'
+}
+
 /** The search index is still being built: sessions done of those it started with. */
 export interface SearchIndexing {
   done: number
@@ -297,6 +304,13 @@ export interface AgentTask {
   progress: string[] // the latest output lines
   error: string | null // why it failed, in the user's terms
 }
+
+/**
+ * Why Kettu's own install of a harness moved to another version: the ACP Registry lists it, Kettu's
+ * compatibility manifest recommends it, the manifest says the one before does not work, or this
+ * build of Kettu bundles it.
+ */
+export type VersionMoveReason = 'registry' | 'manifest' | 'broken' | 'bundled'
 
 /** The user's own Claude Code or Codex, the only CLI a start runs. */
 export interface AgentCli {
@@ -348,9 +362,9 @@ export interface AgentStatus {
   // From `initialize`, a binary agent's `--version`, or the `requires` program's (Pi's `pi`); for
   // Kettu's own install of a program that reports none, the release it installed.
   version: string | null
-  // The adapter a start runs, the pin until one is installed; `isCli` for a package that is the
-  // agent's CLI itself, which runs with no adapter, and `isSdk` for the agent's SDK, which Kettu
-  // loads itself and which runs the agent's CLI.
+  // The adapter a start runs, the version it wants until one is installed; `isCli` for a package
+  // that is the agent's CLI itself, which runs with no adapter, and `isSdk` for the agent's SDK,
+  // which Kettu loads itself and which runs the agent's CLI.
   package: {
     name: string
     version: string
@@ -394,6 +408,36 @@ export interface AgentStatus {
   update: AgentUpdate | null // from the last update check; null when up to date or unchecked
   // When that check finished; null for a binary agent unless Kettu installed it from the registry
   updateCheckedAt: number | null
+  // How Kettu's own install of a harness follows the version it is given, from the ACP Registry or
+  // Kettu's compatibility manifest (`follows`): whether it updates by itself, its last move, when
+  // and why (`withdrawn` when it went back to an older version), and whether the update on offer
+  // goes back to an older version, and why. Null for the other harnesses, and absent on older
+  // hosts; `follows` and the reasons are absent on older hosts too.
+  automatic?: {
+    on: boolean
+    moved: {
+      from: string
+      to: string
+      at: number
+      withdrawn: boolean
+      reason?: VersionMoveReason
+    } | null
+    back: boolean
+    backReason?: VersionMoveReason
+    follows?: 'registry' | 'kettu'
+  } | null
+  // The user's own program is a version Kettu's compatibility manifest says does not work:
+  // `broken` when it names it, else it is outside `supported`; `recommended` is the version Kettu
+  // checked last. Null when it is fine or not known, and absent on older hosts.
+  versionWarning?: {
+    version: string
+    broken: boolean
+    supported: string | null
+    recommended: string | null
+  } | null
+  // A new version of Kettu's own install that failed to start, why, and the version that runs in
+  // its place; null when none did, and absent on older hosts.
+  failedVersion?: { version: string; reason: string; runs: string | null } | null
   updateSkipped: boolean // the user dismissed this update in the sidebar's notice
   task: AgentTask | null
   installMethods: AgentInstallMethod[] // a binary agent's ways to install; empty for the others
@@ -1130,6 +1174,13 @@ export interface HostContract {
     params: { query: string }
     result: { hits: ConversationHit[]; indexing?: SearchIndexing | null }
   }
+  // The messages of one session that hold every word of `query`, oldest first, for finding in the
+  // session on screen: user messages and replies as in `sessions.search`, at most 500, the
+  // newest when there are more (`capped`). Empty for a query of fewer than 2 characters.
+  'sessions.find': {
+    params: { sessionId: string; query: string }
+    result: { matches: SessionFindMatch[]; capped: boolean; indexing?: SearchIndexing | null }
+  }
   // What the session made, for its card in the sidebar; empty for a session without a thread.
   'sessions.outputs': { params: { sessionId: string }; result: SessionOutputs }
   // Summarizes the messages without a title; empty while a summary of the session runs.
@@ -1231,6 +1282,8 @@ export interface HostContract {
     params: { sessionId: string; optionId: string; value: string | boolean }
     result: void
   }
+  // Lists the models the agent offers now in a session that listed them when it attached.
+  'sessions.refreshModels': { params: { sessionId: string }; result: void }
   // title null: back to the agent's title.
   'sessions.rename': { params: { sessionId: string; title: string | null }; result: void }
   'sessions.close': { params: { sessionId: string }; result: void }
@@ -1278,6 +1331,9 @@ export interface HostContract {
   }
   'git.commit': { params: { projectPath: string; oid: string }; result: CommitDetails }
   'git.changes': { params: { projectPath: string }; result: ChangedFile[] }
+  // A commit message for the files' working tree changes, paths as `git.commitChanges` takes them,
+  // written by the project's preferred agent from the diffs and the repository's recent commits.
+  'git.commitMessage': { params: { projectPath: string; paths: string[] }; result: string }
   'git.incoming': {
     params: { projectPath: string; from: 'upstream' | 'base' }
     result: LogCommit[]
@@ -1764,6 +1820,7 @@ export const HOST_METHODS = [
   'sessions.requests',
   'sessions.outline',
   'sessions.search',
+  'sessions.find',
   'sessions.outputs',
   'sessions.outlineTitles',
   'sessions.watch',
@@ -1797,6 +1854,7 @@ export const HOST_METHODS = [
   'sessions.resumeQueue',
   'sessions.blob',
   'sessions.setConfigOption',
+  'sessions.refreshModels',
   'sessions.rename',
   'sessions.close',
   'sessions.pin',
@@ -1846,6 +1904,7 @@ export const HOST_METHODS = [
   'git.createPullRequest',
   'git.commit',
   'git.changes',
+  'git.commitMessage',
   'git.incoming',
   'git.fileDiff',
   'git.branches',

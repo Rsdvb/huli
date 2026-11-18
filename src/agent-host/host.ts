@@ -106,6 +106,7 @@ import {
   type BrowserTarget,
 } from './device-browser'
 import { BrowserTurns } from './browser-turns'
+import { writeCommitMessage } from './commit-message'
 import { Diagnostics } from './diagnostics'
 import { HostError, invalidParams } from './errors'
 import { setLocale, t } from './i18n'
@@ -172,12 +173,16 @@ import {
   projectsFile,
   projectHooksFile,
   projectMcpFile,
+  registryListingFile,
+  harnessManifestFile,
   returnedFile,
   routinesFile,
   sessionsFile,
   type AgentsFile,
   type AgentUpdatesFile,
   type JsonFile,
+  type RegistryListingFile,
+  type HarnessManifestFile,
 } from './storage'
 import { GitHubStar, gitHubStarFile } from './github-star'
 import { alertText } from './limit-text'
@@ -302,6 +307,8 @@ export interface HostOptions {
   outside?: OutsideReader
   /** The desktop app's computer use; the daemon has none. */
   computer?: ComputerHostOptions | null
+  /** What the host's requests to Kettu's download service say they are: the app or the daemon. */
+  userAgent?: string
 }
 
 /** What the desktop app gives the host for computer use. */
@@ -366,6 +373,8 @@ export class AgentHost {
   private readonly remembered: JsonFile<AgentsFile>
   /** What the last update check found, so a found update shows after a restart. */
   private readonly updates: JsonFile<AgentUpdatesFile>
+  private readonly registryListing: JsonFile<RegistryListingFile>
+  private readonly harnessManifest: JsonFile<HarnessManifestFile>
   private readonly star: GitHubStar
   private readonly planAlerts: PlanAlerts
   /** Each agent's config options from its last new session, for New session. */
@@ -535,6 +544,8 @@ export class AgentHost {
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
     this.remembered = agentsFile(options.userDataPath, log)
     this.updates = agentUpdatesFile(options.userDataPath, log)
+    this.registryListing = registryListingFile(options.userDataPath, log)
+    this.harnessManifest = harnessManifestFile(options.userDataPath, log)
     this.star = new GitHubStar({
       file: gitHubStarFile(options.userDataPath, log),
       git: () => this.git,
@@ -876,6 +887,9 @@ export class AgentHost {
       authCommands: (commands) => options.send({ type: 'host:auth-commands', commands }),
       remember: (file) => this.remembered.save(file),
       rememberUpdates: (file) => this.updates.save(file),
+      rememberRegistry: (file) => this.registryListing.save(file),
+      rememberManifest: (file) => this.harnessManifest.save(file),
+      ...(options.userAgent ? { userAgent: options.userAgent } : {}),
       launchEnv: (agentId, env) => ({
         ...this.marketSkills.launchEnv(agentId, env),
         ...(this.agentEnvKeys[agentId] ?? {}),
@@ -1260,12 +1274,14 @@ export class AgentHost {
       (message) => writeLog('warn', 'host', message),
     )
     const host = new AgentHost(options)
-    const [, , , remembered, updates] = await Promise.all([
+    const [, , , remembered, updates, listing, manifest] = await Promise.all([
       host.scratch.ready(),
       host.projects.load(),
       host.sessions.load(),
       host.remembered.load(),
       host.updates.load(),
+      host.registryListing.load(),
+      host.harnessManifest.load(),
       host.trees.load(),
       host.agentOptions.load(),
       host.preparedRecords.load(),
@@ -1279,6 +1295,8 @@ export class AgentHost {
     // After the sessions, whose step sessions it messages when it resumes.
     await host.tasks.load()
     host.agents.restore(remembered)
+    host.agents.restoreRegistry(listing)
+    host.agents.restoreManifest(manifest)
     host.agents.restoreUpdates(updates)
     void host.moveLocalMarketplaces()
     host.routines.start()
@@ -1295,6 +1313,7 @@ export class AgentHost {
     void host.agents.removeAntigravityUsageServer()
     void host.agents.detectAll().then(() => {
       host.agents.scheduleUpdateChecks()
+      host.agents.scheduleRegistryReads()
       host.firstStart()
     })
     return host
@@ -1929,6 +1948,16 @@ export class AgentHost {
    * without tools.
    */
   private async sampleAgent(project: string | null): Promise<SampleAgent | null> {
+    const agentId = this.preferredAgent(project)
+    if (agentId === null || !QUESTION_HARNESSES.has(harnessOf(agentId))) return null
+    return { id: agentId, name: this.agents.name(agentId) }
+  }
+
+  /**
+   * The agent Kettu asks on its own account about `project`, null for No project: the agent new
+   * sessions start with, else the one its latest session used; null when it is gone or off.
+   */
+  private preferredAgent(project: string | null): AgentId | null {
     let agentId = this.settings.defaultAgent
     if (agentId === null) {
       const sessions = project === null ? this.sessions.list() : this.sessions.list(project)
@@ -1936,8 +1965,29 @@ export class AgentHost {
     }
     if (agentId === null || !this.agents.has(agentId) || this.agents.isDisabled(agentId))
       return null
-    if (!QUESTION_HARNESSES.has(harnessOf(agentId))) return null
-    return { id: agentId, name: this.agents.name(agentId) }
+    return agentId
+  }
+
+  /** A commit message for the changed files at `paths`, from the project's preferred agent. */
+  private async commitMessage(projectPath: string, paths: string[]): Promise<string> {
+    const context = await this.gitProjectCall(projectPath, (g, p) => g.commitContext(p, paths))
+    const agentId = this.preferredAgent(projectPath)
+    if (agentId === null) throw new HostError('agent_error', t('git.commitMessageNoAgent'))
+    const agent = this.agents.name(agentId)
+    try {
+      const runtime = await this.agents.ensureReady(agentId)
+      const dir = path.join(this.options.userDataPath, 'agent-reports')
+      await mkdir(dir, { recursive: true })
+      return await writeCommitMessage(runtime, {
+        dir,
+        context,
+        log: (line) => this.diagnostics.log('warn', line),
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      this.diagnostics.log('warn', `${agent}: could not write a commit message: ${reason}`)
+      throw new HostError('agent_error', t('git.commitMessageFailed', { agent, reason }))
+    }
   }
 
   /** A page's question to the agent, in a hidden session with no tools in the reports' folder. */
@@ -2282,6 +2332,8 @@ export class AgentHost {
         this.sessions.flush(),
         this.remembered.flush(),
         this.updates.flush(),
+        this.registryListing.flush(),
+        this.harnessManifest.flush(),
         this.star.flush(),
         this.planAlerts.flush(),
         this.trees.close(),
@@ -2598,6 +2650,7 @@ export class AgentHost {
         sessions.requests(sessionId, imagesFor(device)),
       'sessions.outline': ({ sessionId }) => sessions.outline(sessionId),
       'sessions.search': ({ query }) => sessions.search(query),
+      'sessions.find': ({ sessionId, query }) => sessions.find(sessionId, query),
       'sessions.outputs': ({ sessionId }) => sessions.outputs(sessionId),
       'sessions.outlineTitles': ({ sessionId }) => sessions.outlineTitles(sessionId),
       'sessions.watch': ({ sessionId }, { portId }) => sessions.watch(sessionId, portId),
@@ -2640,6 +2693,7 @@ export class AgentHost {
       'sessions.blob': ({ sessionId, hash }) => sessions.blob(sessionId, hash),
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
         sessions.setConfigOption(sessionId, optionId, value),
+      'sessions.refreshModels': ({ sessionId }) => sessions.refreshModels(sessionId),
       'sessions.rename': ({ sessionId, title }) => sessions.rename(sessionId, title),
       'sessions.close': ({ sessionId }) => sessions.close(sessionId),
       'sessions.pin': ({ sessionId, pinned }) => sessions.pin(sessionId, pinned),
@@ -2755,6 +2809,7 @@ export class AgentHost {
       'git.commit': ({ projectPath, oid }) =>
         this.gitProjectCall(projectPath, (g, p) => g.commit(p, oid)),
       'git.changes': ({ projectPath }) => this.gitProjectCall(projectPath, (g, p) => g.changes(p)),
+      'git.commitMessage': ({ projectPath, paths }) => this.commitMessage(projectPath, paths),
       'git.incoming': ({ projectPath, from }) =>
         this.gitProjectCall(projectPath, (g, p) => g.incoming(p, from)),
       'git.fileDiff': ({ projectPath, path, oldPath, ref }) =>

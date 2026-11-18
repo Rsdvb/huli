@@ -194,8 +194,6 @@ export interface SideQuestion {
   question: string
   /** The earlier questions and answers of the same side chat, oldest first. */
   history: readonly { question: string; answer: string }[]
-  /** The running turn so far, for an agent whose answer cannot see it otherwise. */
-  running: string | null
   /**
    * The options the session opened with, for a fork that keeps its tools so that its prompt
    * stays the session's and reads its cache.
@@ -310,7 +308,7 @@ export interface PromptResult {
 }
 
 /** What Kettu opens a session no thread shows for. */
-export type HiddenPurpose = 'options' | 'limits' | 'context' | 'titles' | 'sample'
+export type HiddenPurpose = 'options' | 'limits' | 'context' | 'titles' | 'sample' | 'side'
 
 /** How a session is opened, loaded, resumed or forked. */
 export interface SessionOptions {
@@ -365,6 +363,12 @@ export interface KettuService {
  * router, which takes it out into that session's process environment for Kettu's extension.
  */
 export const KETTU_SERVICE_META = 'sh.kettu/mcp'
+
+/**
+ * Where ACP's `session/new` names the file Kettu's extension writes the session's model scope to;
+ * the session router takes it out into that session's process environment as well.
+ */
+export const MODEL_SCOPE_META = 'sh.kettu/model-scope'
 
 /** Decides which of the MCP servers a session's folder declares itself may start. */
 export interface ProjectMcpGate {

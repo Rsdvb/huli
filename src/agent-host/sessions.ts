@@ -24,6 +24,7 @@ import {
   type SessionOutputs,
   type SessionPullRequest,
   type SearchIndexing,
+  type SessionFindMatch,
   type SessionSummary,
   type SideChatAgent,
   type StartNotice,
@@ -111,6 +112,8 @@ import {
   type ProjectMcpDecision,
   type ProjectMcpEntry,
   type SideChatEntry,
+  type SideChatRoute,
+  type SideChatSaw,
   type SideChatView,
   type ThreadEntry,
   type ThreadState,
@@ -140,6 +143,7 @@ import {
   isValueOf,
   startModeIn,
   startOrder,
+  withFreshModels,
   type AgentOptionsStore,
   type ReplacedValue,
 } from './agent-options'
@@ -240,7 +244,8 @@ import type { PrepareState, SetupLog, WorktreeManager } from './worktrees/manage
 import { BranchNaming } from './worktrees/naming'
 import {
   carriedContext,
-  renderTurns,
+  compactedTurns,
+  sideContext,
   threadTurns,
   type CarriedContext,
   type RenderedTurn,
@@ -261,13 +266,17 @@ import {
   SIDE_ANSWER_CHARS,
   SIDE_STEPS,
   SIDE_TEXT_MS,
+  answerFork,
   answerHidden,
   answersForOthers,
-  carriedOf,
+  copySaw,
+  forkPrompt,
   hiddenPrompt,
+  ownSaw,
   questionText,
   sideHistory,
   sideRoute,
+  sideRouteWith,
 } from './side-chat'
 import { SIDE_ENTRIES, type StoredSideChat } from './threads/side-chat'
 import { listedTitle, titleMessageText, writeBranchSlug, writeSessionTitle } from './session-titles'
@@ -745,6 +754,11 @@ interface Live {
    * of the cache it read: the context it had before, in tokens.
    */
   resumeRead: { before: number; lastRequestAt: number; expiresAt: number } | null
+  /** When its model list was last read again, and the read running now. */
+  modelsReadAt: number | null
+  modelsRead: Promise<void> | null
+  /** The models a read again added to a list its agent process gave when it attached. */
+  refreshedModels: Set<string>
   contextTimer: ReturnType<typeof setTimeout> | null
   contextDueAt: number
   contextDirty: boolean
@@ -764,6 +778,8 @@ const TITLE_LENGTH = 60
 const LISTED_SESSIONS = 1_000
 // The sessions a search of the conversations returns, the most recently changed first.
 const SEARCH_SESSIONS = 100
+// The messages a find in one session lists, the newest when it has more.
+const FIND_MESSAGES = 500
 // Requests whose answerer a session remembers, so a late answer hears where it was answered.
 const ANSWERS_KEPT = 50
 
@@ -776,6 +792,8 @@ function originKey(owner: string, requestId: number): string {
 }
 
 const MINUTE = 60_000
+// A session's model list is read again when its menu opens, at most this often.
+const MODELS_FRESH_MS = MINUTE
 /** How long a prompt cache lasts when the agent's own records do not say. */
 const CACHE_TTL_MS = 5 * MINUTE
 /** A session used outside Kettu longer ago than this has no cache left worth carrying over. */
@@ -3077,6 +3095,26 @@ export class SessionManager {
     return { hits, indexing }
   }
 
+  /**
+   * The messages of one session that hold every word of `query`, oldest first. A live session
+   * writes its pending entries first, so a reply that has just ended is found.
+   */
+  async find(
+    sessionId: string,
+    query: string,
+  ): Promise<{ matches: SessionFindMatch[]; capped: boolean; indexing: SearchIndexing | null }> {
+    const words = queryWords(query)
+    const threads = this.deps.threads
+    if (!longEnough(words) || !threads) return { matches: [], capped: false, indexing: null }
+    const live = this.live.get(sessionId)
+    if (!live && !this.records.has(sessionId)) {
+      return { matches: [], capped: false, indexing: null }
+    }
+    if (live) this.checkpoint(live)
+    const { matches, capped, indexing } = await threads.find(sessionId, words, FIND_MESSAGES)
+    return { matches, capped, indexing }
+  }
+
   /** Whether a session list shows the session: not a sub-agent's, not archived with its tree. */
   private searchable(sessionId: string): boolean {
     const live = this.live.get(sessionId)
@@ -3246,7 +3284,9 @@ export class SessionManager {
       queuePaused: (record.queue?.length ?? 0) > 0,
       ...(record.origin === 'subagent'
         ? {}
-        : { sideChat: { route: sideRoute(record.agentId), answerAgent: null, entries: [] } }),
+        : {
+            sideChat: { route: this.sideRouteOf(record.agentId), answerAgent: null, entries: [] },
+          }),
     }
   }
 
@@ -3344,6 +3384,9 @@ export class SessionManager {
       releaseTimer: null,
       harnessVersion: null,
       resumeRead: null,
+      modelsReadAt: null,
+      modelsRead: null,
+      refreshedModels: new Set(),
       contextTimer: null,
       contextDueAt: 0,
       contextDirty: false,
@@ -6212,6 +6255,7 @@ export class SessionManager {
   /** A loaded or resumed session's options, which New session also learns from. */
   private opened(live: Live, config: ConfigOption[]): void {
     const { agentId } = live.record
+    live.refreshedModels.clear()
     this.update(live, { config })
     this.deps.options?.opened(agentId, config)
   }
@@ -6693,7 +6737,7 @@ export class SessionManager {
       speed: undefined,
       // The side chat stays; the new agent answers it its own way.
       ...(live.thread.session.sideChat
-        ? { sideChat: { ...live.thread.session.sideChat, route: sideRoute(agentId) } }
+        ? { sideChat: { ...live.thread.session.sideChat, route: this.sideRouteOf(agentId) } }
         : {}),
       status: 'closed',
       error: null,
@@ -8326,12 +8370,20 @@ export class SessionManager {
 
   // Side questions.
 
+  /** How the agent answers side questions, by what it is known to do. */
+  private sideRouteOf(agentId: AgentId): SideChatRoute {
+    const capabilities = this.deps.agents.has(agentId)
+      ? this.deps.agents.status(agentId).capabilities
+      : null
+    return sideRouteWith(agentId, capabilities)
+  }
+
   /** The session's side chat; null for a subagent, which has none. */
   private sideOf(live: Live): SideChatView | null {
     if (live.record.origin === 'subagent') return null
     return (
       live.thread.session.sideChat ?? {
-        route: sideRoute(live.record.agentId),
+        route: this.sideRouteOf(live.record.agentId),
         answerAgent: null,
         entries: [],
       }
@@ -8339,7 +8391,7 @@ export class SessionManager {
   }
 
   private setSide(live: Live, side: SideChatView): void {
-    this.update(live, { sideChat: { ...side, route: sideRoute(live.record.agentId) } })
+    this.update(live, { sideChat: { ...side, route: this.sideRouteOf(live.record.agentId) } })
   }
 
   private sideEntry(live: Live, entryId: string): SideChatEntry | null {
@@ -8373,7 +8425,7 @@ export class SessionManager {
       throw new HostError('restricted', t('session.side.archived'))
     }
     if (this.sideRuns.has(sessionId)) throw new HostError('busy', t('session.side.busy'))
-    const own = sideRoute(record.agentId)
+    const own = this.sideRouteOf(record.agentId)
     const borrowed = agentId !== null && agentId !== record.agentId
     if (borrowed && !this.sideAgents(sessionId).some((agent) => agent.agentId === agentId)) {
       throw new HostError(
@@ -8394,16 +8446,18 @@ export class SessionManager {
       )
     }
     this.deps.agents.assertEnabled(answering)
+    const route = answering === record.agentId && own !== 'none' ? own : 'hidden'
     const entry: SideChatEntry = {
       id: randomUUID(),
       question,
       quote,
       agentId: answering,
-      route: answering === record.agentId && own !== 'none' ? own : 'hidden',
+      route,
       status: 'answering',
       answer: '',
       steps: [],
-      carried: null,
+      saw:
+        route === 'hidden' ? null : ownSaw(route, null, compactedTurns(threadEntries(live.thread))),
       error: null,
       askedAt: this.now(),
       answeredAt: null,
@@ -8446,6 +8500,15 @@ export class SessionManager {
     const ended = (changes: Partial<SideChatEntry>): void => {
       if (timer) clearTimeout(timer)
       this.patchSideEntry(live, entry.id, { ...changes, answeredAt: this.now() })
+      // An answer that ends out of sight leaves the session unread; a stopped or cleared one
+      // has nothing to show.
+      if (
+        changes.status !== 'stopped' &&
+        this.sideEntry(live, entry.id) &&
+        !this.inFront(live.id)
+      ) {
+        this.markUnread(live.id, true)
+      }
     }
     try {
       const result = await this.sideAnswer(live, entry, ask, events, signal)
@@ -8471,7 +8534,10 @@ export class SessionManager {
     }
   }
 
-  /** Answers the agent's own way where it has one, else in a hidden session given the context. */
+  /**
+   * Answers the agent's own way where it has one, then in a fork of the session, else in a hidden
+   * session given a text copy; the first that cannot says why the question moved on.
+   */
   private async sideAnswer(
     live: Live,
     entry: SideChatEntry,
@@ -8479,19 +8545,43 @@ export class SessionManager {
     events: SideAnswerEvents,
     signal: AbortSignal,
   ): Promise<SideAnswer> {
-    if (entry.route === 'claude' || entry.route === 'codex') {
+    let fellBackFrom: SideChatSaw['fellBackFrom'] = null
+    for (const way of await this.sideWays(live, entry)) {
       try {
-        return await this.sideOwn(live, entry.route, ask, events, signal)
+        if (way !== entry.route) {
+          this.patchSideEntry(live, entry.id, {
+            route: way,
+            saw: ownSaw(way, fellBackFrom, compactedTurns(threadEntries(live.thread))),
+          })
+        }
+        return way === 'fork'
+          ? await this.sideFork(live, ask, events, signal)
+          : await this.sideOwn(live, way, ask, events, signal)
       } catch (error) {
         if (!(error instanceof SideQuestionUnsupported)) throw error
         this.deps.diagnostics.log(
           'info',
-          `The side question of ${live.id} goes to a hidden session: ${error.message}`,
+          `The side question of ${live.id} cannot go ${way}: ${error.message}`,
         )
-        this.patchSideEntry(live, entry.id, { route: 'hidden' })
+        fellBackFrom ??= way
       }
     }
-    return this.sideHidden(live, entry, ask, events, signal)
+    this.patchSideEntry(live, entry.id, { route: 'hidden', saw: null })
+    return this.sideHidden(live, entry, ask, events, signal, fellBackFrom)
+  }
+
+  /** The agent's own ways to answer, best first; none for an agent given a text copy. */
+  private async sideWays(
+    live: Live,
+    entry: SideChatEntry,
+  ): Promise<('claude' | 'codex' | 'fork')[]> {
+    if (entry.route === 'claude') return ['claude', 'fork']
+    if (entry.route === 'codex') return ['codex']
+    if (entry.route === 'fork') return ['fork']
+    // An agent not known yet to fork may turn out to when it runs.
+    if (entry.agentId !== live.record.agentId || sideRoute(entry.agentId) !== 'hidden') return []
+    const runtime = await this.deps.agents.ensureReady(entry.agentId)
+    return runtime.init.capabilities.forkSession ? ['fork'] : []
   }
 
   private async sideOwn(
@@ -8510,30 +8600,45 @@ export class SessionManager {
     const runtime = await this.deps.agents.ensureReady(live.record.agentId)
     const { connection } = runtime
     if (!connection.sideQuestion) throw new SideQuestionUnsupported()
-    const { status } = live.thread.session
-    const running = status === 'running' || status === 'awaiting_permission'
-    // A fork of Codex's thread ends at its last finished turn, so it is told the running one, and
-    // keeps the session's tools so that its prompt starts as the session's and reads its cache.
-    const codex = route === 'codex'
-    const options = codex ? await this.attachOptions(live.id, live.record, runtime) : undefined
+    // A fork of Codex's thread keeps the session's tools so that its prompt starts as the
+    // session's and reads its cache.
+    const options =
+      route === 'codex' ? await this.attachOptions(live.id, live.record, runtime) : undefined
     return connection.sideQuestion(
       live.record.acpSessionId,
-      {
-        ...ask,
-        running: codex && running ? this.runningTurnText(live) : null,
-        ...(options ? { options } : {}),
-      },
+      { ...ask, ...(options ? { options } : {}) },
       events,
       signal,
     )
   }
 
-  /** The running turn so far, as carried context renders a turn. */
-  private runningTurnText(live: Live): string | null {
-    const name = (agentId: AgentId): string => this.deps.agents.name(agentId)
-    const turns = threadTurns(threadEntries(live.thread), this.firstAgentOf(live.record), name)
-    const last = turns[turns.length - 1]
-    return last ? renderTurns([last], name) : null
+  /** Answers in a fork of the session that the agent makes and Kettu removes after. */
+  private async sideFork(
+    live: Live,
+    ask: Pick<SideQuestion, 'question' | 'history'>,
+    events: SideAnswerEvents,
+    signal: AbortSignal,
+  ): Promise<SideAnswer> {
+    // Not every agent forks a session it does not have open, so a closed one attaches first.
+    try {
+      await this.attachClosed(live)
+    } catch (error) {
+      throw agentError(error)
+    }
+    const runtime = await this.deps.agents.ensureReady(live.record.agentId)
+    if (!runtime.init.capabilities.forkSession) throw new SideQuestionUnsupported()
+    const { connection } = runtime
+    const text = await answerFork(runtime, {
+      // The session's folder: an agent forks a session only where it was made.
+      open: () =>
+        connection.forkSession(live.record.acpSessionId, workDir(live.record), { hidden: 'side' }),
+      model: modelOf(live.thread.session.config),
+      prompt: forkPrompt(ask),
+      signal,
+      text: events.text,
+      log: (message) => this.deps.diagnostics.log('warn', message),
+    })
+    return { text, synthetic: false }
   }
 
   private async sideHidden(
@@ -8542,20 +8647,25 @@ export class SessionManager {
     ask: Pick<SideQuestion, 'question' | 'history'>,
     events: SideAnswerEvents,
     signal: AbortSignal,
+    fellBackFrom: SideChatSaw['fellBackFrom'],
   ): Promise<SideAnswer> {
     const runtime = await this.deps.agents.ensureReady(entry.agentId)
-    const carried = carriedContext(threadEntries(live.thread), {
+    // The session's own window only counts when its own agent answers.
+    const own = entry.agentId === live.record.agentId
+    const carried = sideContext(threadEntries(live.thread), {
       firstAgent: this.firstAgentOf(live.record),
       agentName: (agentId) => this.deps.agents.name(agentId),
-      side: true,
+      ...(own && live.thread.session.usage?.size ? { window: live.thread.session.usage.size } : {}),
     })
-    this.patchSideEntry(live, entry.id, { carried: carriedOf(carried) })
+    this.patchSideEntry(live, entry.id, {
+      saw: copySaw(carried, fellBackFrom, compactedTurns(threadEntries(live.thread))),
+    })
     // Kettu's own folder, never the project's: an agent without permissions could change it.
     await mkdir(this.deps.reportsDir, { recursive: true })
     const text = await answerHidden(runtime, {
       dir: this.deps.reportsDir,
       prompt: hiddenPrompt(carried?.text ?? null, ask),
-      model: entry.agentId === live.record.agentId ? modelOf(live.thread.session.config) : null,
+      model: own ? modelOf(live.thread.session.config) : null,
       signal,
       text: events.text,
       log: (message) => this.deps.diagnostics.log('warn', message),
@@ -9039,7 +9149,7 @@ export class SessionManager {
     if (this.recordOf(sessionId).origin === 'subagent') {
       throw new HostError('restricted', t('session.subagent.noConfig'))
     }
-    const live = await this.revive(sessionId)
+    let live = await this.revive(sessionId)
     const status = live.thread.session.status
     if (!live.connection && status !== 'closed') throw busyError(status)
     const option = live.thread.session.config.find((o) => o.id === optionId)
@@ -9061,7 +9171,15 @@ export class SessionManager {
           ),
         })
       } else {
-        const config = await connection.setConfigOption(live.record.acpSessionId, optionId, value)
+        let config: ConfigOption[]
+        try {
+          config = await connection.setConfigOption(live.record.acpSessionId, optionId, value)
+        } catch (error) {
+          // A model its agent process did not list when it attached is new to that process.
+          if (!this.listedAfterAttach(live, option, value)) throw error
+          live = await this.attachAgain(live)
+          config = await live.connection!.setConfigOption(live.record.acpSessionId, optionId, value)
+        }
         const next = mergeConfig(live.thread.session.config, config)
         this.update(live, { config: next })
         this.deps.options?.chose(live.record.agentId, option, value, next)
@@ -9074,6 +9192,51 @@ export class SessionManager {
     } catch (error) {
       throw agentError(error)
     }
+  }
+
+  /**
+   * Lists the models the agent offers now in a session that listed them when it attached, or
+   * kept them when its agent was let go, read from a hidden session in its folder.
+   */
+  async refreshModels(sessionId: string): Promise<void> {
+    this.assertRegistered(sessionId)
+    if (this.recordOf(sessionId).origin === 'subagent') return
+    const live = await this.revive(sessionId)
+    if (live.prepared || live.closing) return
+    if (!live.connection && live.thread.session.status !== 'closed') return
+    if (live.modelsRead) return live.modelsRead
+    const readAt = live.modelsReadAt
+    if (readAt !== null && this.now() - readAt < MODELS_FRESH_MS) return
+    live.modelsRead = this.readModels(live).finally(() => {
+      live.modelsRead = null
+    })
+    return live.modelsRead
+  }
+
+  private async readModels(live: Live): Promise<void> {
+    const fresh = await this.deps.agents.readConfig(live.record.agentId, workDir(live.record))
+    live.modelsReadAt = this.now()
+    if (!fresh || live.closing || this.live.get(live.id) !== live) return
+    const read = withFreshModels(live.thread.session.config, fresh)
+    if (!read) return
+    for (const model of read.added) live.refreshedModels.add(model)
+    this.update(live, { config: read.config })
+  }
+
+  /** Whether `value` is a model that a read again added to what the session's process listed. */
+  private listedAfterAttach(live: Live, option: ConfigOption, value: string | boolean): boolean {
+    if (option.category !== 'model' || typeof value !== 'string') return false
+    // Letting the agent go ends a session that was never saved, and a turn's work with it.
+    return live.refreshedModels.has(value) && live.saved && this.holdReason(live) === null
+  }
+
+  /** Lets the session's agent go and attaches it again, which then lists what it offers now. */
+  private async attachAgain(live: Live): Promise<Live> {
+    this.release(live, 'models listed again')
+    await this.releasing.get(live.id)
+    const again = await this.revive(live.id)
+    await this.attachClosed(again)
+    return again
   }
 
   // Closing, deleting and importing.
@@ -9472,8 +9635,13 @@ export class SessionManager {
     const entry = live.thread.byId[turn.entryId]
     if (entry?.kind !== 'user' || entry.from?.sessionId !== starterId) return
     if (entry.from.report === false) return
-    const text = reportText(this.agentName(live.id), live.id, stopReason)
-    const from: FromSession = { sessionId: live.id, title: this.toolName(live.id) }
+    const agent = this.agentName(live.id)
+    const text = reportText(agent, live.id, stopReason)
+    const from: FromSession = {
+      sessionId: live.id,
+      title: this.toolName(live.id),
+      ended: { agent, stopReason },
+    }
     queueMicrotask(() => {
       void this.deliverReport(starterId, text, from).catch((error: unknown) => {
         this.deps.diagnostics.log(

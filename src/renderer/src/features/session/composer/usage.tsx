@@ -155,12 +155,13 @@ export function CacheButton({
             type="button"
             aria-label={t('usage.cache.button', { time: label })}
             data-tone={phase === 'ending' && !running ? 'warn' : undefined}
-            className="ui-as-tray-link kettu-tray-link--meter"
+            data-expired={expired ? '' : undefined}
+            className="ui-as-tray-link kettu-tray-link--meter kettu-tray-link--cache"
           />
         }
       >
-        <Glyph icon={Timer02Icon} size={14} />
-        <span className="tabular">{label}</span>
+        <Glyph icon={Timer02Icon} size={14} className="kettu-tray-cache__icon" />
+        <span className="tabular kettu-tray-cache__label">{label}</span>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" sideOffset={8} className="kettu-pop w-70">
         <CachePart cache={timed} phase={phase} used={used} />
@@ -338,9 +339,14 @@ export function ContextButton({
         {usage && (
           <>
             <MeterRing share={share} level={METER[tone]} />
-            <span className="tabular">
+            <span className="tabular kettu-tray-meter__percent">
               {read?.error && '≈'}
-              {t('usage.contextShort', { percent })}
+              <Trans
+                t={t}
+                i18nKey="usage.contextShort"
+                values={{ percent }}
+                components={{ word: <span className="kettu-tray-meter__word" /> }}
+              />
             </span>
           </>
         )}

@@ -98,7 +98,7 @@ export interface SessionView {
  * finished turn; a hidden session of the same agent given carried context; or, for an agent whose
  * hidden sessions are not removed cleanly, a hidden session of another agent the user picks.
  */
-export type SideChatRoute = 'claude' | 'codex' | 'hidden' | 'none'
+export type SideChatRoute = 'claude' | 'codex' | 'fork' | 'hidden' | 'none'
 
 export interface SideChatView {
   route: SideChatRoute
@@ -120,8 +120,8 @@ export interface SideChatEntry {
   answer: string
   /** What a read-only answer looked at first. */
   steps: SideChatStep[]
-  /** For an answer from a hidden session: how much of the conversation it was given. */
-  carried: SideChatCarried | null
+  /** What the answer saw of the conversation, and how it got it. */
+  saw: SideChatSaw | null
   error: string | null
   askedAt: number
   answeredAt: number | null
@@ -132,13 +132,18 @@ export interface SideChatStep {
   title: string
 }
 
-export interface SideChatCarried {
-  /** Whether the first request was kept, and how many of the newest turns. */
-  first: boolean
-  recent: number
-  omitted: number
-  /** The carried text's UTF-8 bytes, about its tokens. */
-  bytes: number
+/**
+ * Where a side question's answer got the conversation: the agent's own side question, the agent's
+ * fork of the session, or a text copy Kettu built.
+ */
+export interface SideChatSaw {
+  source: 'agent' | 'fork' | 'copy'
+  /** The turns the agent's compaction folded into a summary, which are not in what it saw. */
+  compacted: number
+  /** For a copy: its turns of the conversation's, whether the first request stands apart, its size. */
+  copy: { turns: number; total: number; first: boolean; bytes: number } | null
+  /** The route tried first, when the answer fell back from it to another. */
+  fellBackFrom: 'claude' | 'codex' | 'fork' | null
 }
 
 /** A command or monitor an agent runs beside its turn, as the session board lists it. */
@@ -190,6 +195,11 @@ export interface FromSession {
   title: string
   /** The sender asked not to be told when the turn this message begins ends. */
   report?: false
+  /**
+   * Set on Kettu's report of a turn the receiver asked this session for: the agent's name and how
+   * the turn ended, null for a failure. The thread draws it from these, not from the message text.
+   */
+  ended?: { agent: string; stopReason: StopReason | null }
 }
 
 /** The paired device a message or answer came from, under the name the host lists it by. */

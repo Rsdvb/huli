@@ -67,6 +67,7 @@ import type { MarketKeysPush } from './market-keys'
 import { marketCallOf } from './market-api'
 import { t } from './i18n'
 import { createLogger } from './log'
+import { updaterUserAgent } from './update-sources'
 import { UtilityHost, type UtilityHostEvent, type UtilityHostState } from './utility-host'
 
 const log = createLogger('agent-host')
@@ -384,6 +385,7 @@ export class AgentHost {
         sessionRouterPath: unpackedPath(sessionRouterPath),
         settings: deps.settings(),
         computer: computerHostOptions(),
+        userAgent: updaterUserAgent(app.getVersion(), process.platform, process.arch),
       }),
       startMessages: () => [
         { type: 'host:market-keys', ...deps.marketKeys() },

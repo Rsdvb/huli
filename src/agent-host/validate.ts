@@ -1678,6 +1678,10 @@ export function createValidators(platform: Platform): Validators {
     'sessions.requests': session,
     'sessions.outline': session,
     'sessions.search': (params) => ({ query: string(fields(params), 'query', SEARCH_QUERY_CHARS) }),
+    'sessions.find': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), query: string(o, 'query', SEARCH_QUERY_CHARS) }
+    },
     'sessions.outputs': session,
     'sessions.outlineTitles': session,
     'sessions.watch': session,
@@ -1815,6 +1819,7 @@ export function createValidators(platform: Platform): Validators {
       }
       return { sessionId: sessionId(o), optionId: string(o, 'optionId', ID_CHARS), value }
     },
+    'sessions.refreshModels': session,
     'sessions.rename': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), title: o.title === null ? null : string(o, 'title', 200) }
@@ -2004,6 +2009,10 @@ export function createValidators(platform: Platform): Validators {
       return { projectPath: absolutePath(o, 'projectPath', platform), oid: objectId(o, 'oid') }
     },
     'git.changes': project,
+    'git.commitMessage': (params) => {
+      const o = fields(params)
+      return { projectPath: absolutePath(o, 'projectPath', platform), paths: gitPaths(o, 'paths') }
+    },
     'git.incoming': (params) => {
       const o = fields(params)
       if (o.from !== 'upstream' && o.from !== 'base')

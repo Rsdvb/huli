@@ -88,6 +88,43 @@
   line-height: inherit;
   color: inherit;
 }
+/* A message another session's agent sent: a quoted card on the agent's side, not the user's bubble.
+   Its time and Copy sit under it at the left. */
+.ks-user--agent {
+  align-items: flex-start;
+}
+.ks-from {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 88%;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 9px 14px 10px;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  font-size: var(--prose-size);
+  line-height: 1.55;
+  color: var(--thread-ink);
+}
+.ks-from__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--thread-muted);
+}
+.ks-user--agent .ks-user__meta {
+  margin: -4px 0 0;
+}
+.ks-user--agent .ks-user__foot {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
 .ks-user__note {
   max-width: 80%;
   overflow: hidden;
@@ -825,6 +862,83 @@
   .ks-thread__column > [data-message-id][data-found] {
     animation: none;
   }
+}
+/* The find bar over the thread's top right, and the words it marks in the messages. */
+.ks-find {
+  position: absolute;
+  top: 12px;
+  right: 24px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  animation: ks-find-in var(--duration-fast) var(--ease-standard) both;
+}
+.ks-find__bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 6px 0 11px;
+  border-radius: var(--radius-xl);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--menu-ring);
+}
+.ks-find__bar > svg:first-child {
+  margin-right: 6px;
+}
+.ks-find__input {
+  width: 200px;
+  min-width: 0;
+  background: transparent;
+  font-size: var(--text-control);
+  line-height: var(--text-control--line-height);
+  outline: none;
+}
+.ks-find__input::placeholder {
+  color: var(--text-placeholder);
+}
+.ks-find__count {
+  display: inline-flex;
+  min-width: 3.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-hint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ks-find__count[data-state='none'],
+.ks-find__count[data-state='failed'] {
+  color: var(--danger);
+}
+.ks-find__note {
+  max-width: 280px;
+  padding: 0 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-hint);
+  line-height: var(--text-hint--line-height);
+  text-align: right;
+}
+@keyframes ks-find-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-find {
+    animation: none;
+  }
+}
+::highlight(find-match) {
+  background-color: var(--mark);
+}
+::highlight(find-current) {
+  background-color: color-mix(in srgb, var(--attention-dot) 45%, transparent);
 }
 @keyframes ks-step-draw {
   from {
@@ -1597,23 +1711,76 @@
   }
 }
 
-/* The message outline: a dash per message at the thread's left, the list on hover. */
+/* The message outline: a dash per message at the thread's left, packed at rest. The pointer spreads
+   it into rows of 10 px, each dash lengthening as the pointer nears it, and the message under the
+   pointer shows beside it. Only transform and color move. */
 .ks-outline {
+  width: 36px;
+  height: 0;
+}
+.ks-outline__row {
+  position: absolute;
+  top: -5px;
+  left: 0;
   display: flex;
-  flex-direction: column;
-  gap: 7px;
-  align-items: flex-start;
-  padding: 6px 4px;
+  align-items: center;
+  width: 100%;
+  height: 10px;
+  padding-left: 14px;
+  cursor: pointer;
+  transition: transform 260ms var(--ease-out-quint);
 }
 .ks-outline__dash {
-  width: 10px;
+  width: 20px;
   height: 2px;
   border-radius: 1px;
   background: var(--thread-line-strong);
+  transform-origin: left center;
+  transition:
+    transform var(--duration-base) var(--ease-out-quint),
+    background-color var(--duration-fast) var(--ease-standard);
 }
-.ks-outline__dash[data-current] {
-  width: 16px;
+.ks-outline__row[data-near] > .ks-outline__dash {
+  background: var(--thread-faint);
+}
+.ks-outline__row[data-current] > .ks-outline__dash {
   background: var(--thread-muted);
+}
+/* While a find is open: the turns with matches in the find color, the current one deepest. */
+.ks-outline__row[data-quiet] > .ks-outline__dash {
+  background: color-mix(in srgb, var(--thread-line-strong) 60%, transparent);
+}
+.ks-outline__row[data-hits] > .ks-outline__dash {
+  background: color-mix(in srgb, var(--attention-dot) 60%, transparent);
+}
+.ks-outline__row[data-found] > .ks-outline__dash {
+  background: var(--attention-dot);
+}
+.ks-outline__row[data-pointed] > .ks-outline__dash {
+  background: var(--thread-ink);
+}
+.ks-outline__row[data-hits][data-pointed] > .ks-outline__dash {
+  background: var(--attention-dot);
+}
+.ks-outline__keys {
+  position: absolute;
+  left: 8px;
+  width: 26px;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+/* The ring is drawn around the packed rail, so the pointer spreading it hides the ring. */
+.ks-outline[data-open] > .ks-outline__keys {
+  outline-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-outline__row,
+  .ks-outline__dash {
+    transition: none;
+  }
+}
+:root[data-reduce-motion='always'] :is(.ks-outline__row, .ks-outline__dash) {
+  transition: none;
 }
 .ks-outline__item {
   padding: 6px 8px;
@@ -1626,6 +1793,19 @@
 }
 .ks-outline__item[data-reading] {
   font-weight: 500;
+}
+/* A row with matches in the find's color, as its dash; the current match's turn in bold. */
+.ks-outline__item[data-hits] {
+  color: var(--attention);
+}
+.ks-outline__item[data-quiet]:not([data-highlighted]) {
+  color: color-mix(in srgb, var(--thread-faint) 70%, transparent);
+}
+.ks-outline__hits {
+  flex-shrink: 0;
+  opacity: 0.7;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Reply to a selected passage, or ask about it in the side chat: one ink capsule above it. */
@@ -1691,9 +1871,11 @@
   padding: 2px 4px 6px;
   font-size: 13px;
   color: var(--thread-ink);
+  container-type: inline-size;
 }
 .ks-changes__head b {
   font-weight: 500;
+  white-space: nowrap;
 }
 .ks-changes__counts {
   display: inline-flex;
@@ -1703,6 +1885,23 @@
   display: flex;
   gap: 6px;
   margin-left: auto;
+}
+.ks-changes__actions .ks-btn svg {
+  display: none;
+}
+/* In a narrow column the actions keep only their icons, so the head stays on one line. */
+@container (inline-size < 440px) {
+  .ks-changes__actions .ks-btn {
+    width: 26px;
+    padding: 0;
+    justify-content: center;
+  }
+  .ks-changes__actions .ks-btn svg {
+    display: block;
+  }
+  .ks-changes__actions .ks-btn__label {
+    display: none;
+  }
 }
 .ks-btn {
   height: 26px;

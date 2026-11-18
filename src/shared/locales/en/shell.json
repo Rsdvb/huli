@@ -9,7 +9,8 @@
     "closePane": "Close pane",
     "leaveSession": "Leave session",
     "sideChat": "Side chat",
-    "panes": "Side panel"
+    "sideChatNews": "New answer",
+    "more": "More tools"
   },
   "hostBanner": {
     "restarting": "Restarting the agent host. Your sessions come back by themselves.",
@@ -45,6 +46,7 @@
     "focusPane": "Go to pane 1–9",
     "answerPermission": "Answer a request",
     "cancelTurn": "Stop",
+    "findInSession": "Find in the session",
     "send": "Send",
     "sendNow": "Send now while running",
     "newLine": "New line",

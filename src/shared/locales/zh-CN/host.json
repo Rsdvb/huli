@@ -219,6 +219,7 @@
     "signInCancelled": "{{agent}} 的登录已取消。",
     "geminiAccountMoved": "Gemini CLI 不再支持个人 Google 账号：Google 已把它们转到 Google Antigravity。这个账号请在 Google Antigravity 里使用；Gemini CLI 仍可用于 Gemini Code Assist Standard 或 Enterprise，以及付费的 Gemini API 或 Vertex AI key。",
     "noOptions": "{{agent}} 在 {{seconds}} 秒内没有给出模型",
+    "keychainRefused": "没有授权 Kettu 从钥匙串读取 {{agent}} 的登录，所以暂时读不到用量，10 分钟后会再问一次。",
     "noLimits": "{{agent}} 在 {{seconds}} 秒内没有给出套餐限额",
     "unreadableLimits": "Kettu 没能从 {{agent}} 的 {{command}} 回复里读出套餐限额",
     "antigravitySignedOut": "{{agent}} 已登出。请在终端里重新登录，才能读取套餐限额。",
@@ -277,6 +278,7 @@
     }
   },
   "detect": {
+    "noVersion": "没有适合这台电脑的 {{agent}} 版本，所以无法安装。",
     "nodeMissing": "{{agent}} 需要 Node.js，但在 PATH 中找不到 node。",
     "nodeToInstall": "{{agent}} 首次使用时通过 npm 安装，这需要 Node.js，但在 PATH 中找不到 node。",
     "nodeOutdated": "{{agent}} 需要 Node.js {{required}} 或更高版本，当前安装的是 {{installed}}。",
@@ -348,7 +350,9 @@
     "sameBranch": "此分支和目标分支是同一个分支",
     "localUpstream": "此分支跟踪的是本仓库的分支，没有可推送的远程仓库",
     "otherName": "此分支跟踪的是名称不同的 {{upstream}}，请在终端中推送",
-    "unknownRemote": "此仓库有多个远程仓库，且没有为此分支指定其中一个"
+    "unknownRemote": "此仓库有多个远程仓库，且没有为此分支指定其中一个",
+    "commitMessageNoAgent": "没有可用来写提交信息的 Agent，请先在设置里添加或开启一个",
+    "commitMessageFailed": "{{agent}} 没能写出提交信息：{{reason}}"
   },
   "permission": {
     "allowOnce": "允许一次",

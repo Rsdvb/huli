@@ -235,6 +235,60 @@
 .ui-as-app[data-collapsed] > .ui-as-side-open:hover {
   background: var(--chip);
 }
+/* Collapsed, with the toggle pointed at (features/shell/sidebar-peek.ts): the sidebar floats over
+   the page on its own layer and the columns stay as they are; the corner's controls stay over it. */
+.kettu-frame.ui-as-app[data-peek] {
+  --side-col: 0px;
+}
+.kettu-frame.ui-as-app[data-peek] > .ui-as-side {
+  position: absolute;
+  z-index: 30;
+  inset-block: 0;
+  left: 0;
+  border-radius: 0 var(--radius-card) var(--radius-card) 0;
+  background: var(--bg-sidebar);
+  box-shadow:
+    0 0 0 var(--hairline) var(--border-subtle),
+    var(--elevation-dialog);
+  animation: kettu-peek-in 200ms var(--ease-out-quint) backwards;
+}
+/* Out of the grid, the sidebar no longer holds the first column, so the main area keeps the second. */
+.kettu-frame.ui-as-app[data-peek] > .ui-as-main {
+  grid-column: 2;
+}
+.kettu-frame.kettu-band.ui-as-app[data-peek] > .ui-as-side {
+  top: var(--title-bar);
+}
+.kettu-frame.ui-as-app[data-peek] > .ui-as-corner {
+  z-index: 51;
+}
+.kettu-frame.ui-as-app.kettu-peek-out[data-peek] > .ui-as-side {
+  opacity: 0;
+  translate: -8px 0;
+  transition:
+    opacity 160ms ease,
+    translate 160ms ease;
+}
+@keyframes kettu-peek-in {
+  from {
+    opacity: 0;
+    translate: -8px 0;
+  }
+}
+/* Reduce motion keeps the fade and drops the slide. */
+@keyframes kettu-peek-fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kettu-frame.ui-as-app[data-peek] > .ui-as-side {
+    animation-name: kettu-peek-fade;
+  }
+}
+:root[data-reduce-motion='always'] .kettu-frame.ui-as-app[data-peek] > .ui-as-side {
+  animation-name: kettu-peek-fade;
+}
 .ui-as-side__group.ui-as-chats {
   display: none;
 }
@@ -2457,22 +2511,6 @@ li[data-row-exit='dust'] > * {
 }
 .kp-bar-tools .kp-tool {
   position: relative;
-}
-/* The pane buttons lay out as the bar's own; a bar too narrow for them beside the title (a narrow
-   window, or a session beside its side panel) folds them into one menu. */
-.kp-bar-panes {
-  display: contents;
-}
-.kp-bar-tools .kp-bar-panes-menu {
-  display: none;
-}
-@container top-bar (inline-size < 520px) {
-  .kp-bar-panes {
-    display: none;
-  }
-  .kp-bar-tools .kp-bar-panes-menu {
-    display: grid;
-  }
 }
 .kp-bar-tools .kp-tool[aria-pressed='true'] {
   background: var(--bg-selected);
@@ -4902,22 +4940,50 @@ li[data-row-exit='dust'] > * {
     white-space: nowrap;
   }
 }
-/* Narrower still, the output speed, the least needed of the right end, gives its room up, and the
-   agent keeps only its mark. */
-@container kettu-tray (inline-size < 360px) {
+/* Narrower still, the right side gives way and the host, project and branch stay: the branch's
+   name, the context's word, the speed, then the links tighten, the countdown loses its icon, the
+   context its percent and last the countdown itself. */
+@container kettu-tray (inline-size < 480px) {
+  .kettu-branch__name {
+    display: none;
+  }
+}
+@container kettu-tray (inline-size < 440px) {
+  .kettu-tray-meter__word {
+    display: none;
+  }
+}
+@container kettu-tray (inline-size < 420px) {
+  .kettu-tray-link--cache[data-expired] > .kettu-tray-cache__label {
+    display: none;
+  }
+}
+@container kettu-tray (inline-size < 410px) {
   .kettu-tray-link--speed {
     display: none;
   }
-  .ui-as-tray-link.kettu-tray-link--agent {
-    padding-right: 7px;
+}
+@container kettu-tray (inline-size < 340px) {
+  .kettu-tray .ui-as-tray-link {
+    padding-inline: 5px;
   }
-  .kettu-tray-link--agent > .kettu-tray-link__text {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+  .kettu-tray .kettu-tray__group {
+    gap: 0;
+  }
+}
+@container kettu-tray (inline-size < 300px) {
+  .kettu-tray-link--cache:not([data-expired]) > .kettu-tray-cache__icon {
+    display: none;
+  }
+}
+@container kettu-tray (inline-size < 270px) {
+  .kettu-tray-meter__percent {
+    display: none;
+  }
+}
+@container kettu-tray (inline-size < 230px) {
+  .kettu-tray-link--cache {
+    display: none;
   }
 }
 .kettu-tray__group:empty {

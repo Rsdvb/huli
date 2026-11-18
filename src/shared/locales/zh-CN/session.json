@@ -323,8 +323,14 @@
     "label": "{{names, list(style: narrow)}} 上也开着这个会话"
   },
   "userEntry": {
-    "from": "来自 {{title}}",
     "device": "从 {{device}} 发送"
+  },
+  "sessionReport": {
+    "agent": "该会话",
+    "finished": "{{agent}} 做完了",
+    "stopped": "{{agent}} 被停止了",
+    "failed": "{{agent}} 出错了",
+    "failedWith": "{{agent}} 出错了 · {{reason}}"
   },
   "sessionStarted": {
     "label": "已启动 <title>{{title}}</title>",
@@ -387,6 +393,7 @@
     "resume": "继续",
     "attachment": "附件",
     "from": "来自 {{device}}",
+    "fromSession": "来自 {{title}}",
     "attachments_other": "{{count}} 个附件",
     "sendNow": "立即发送",
     "steer": "立即插入当前对话",
@@ -494,7 +501,11 @@
       "moreModels": "更多模型 ({{number}})",
       "noMatch": "没有匹配的 Agent 或模型",
       "checking": "正在检查 {{agent}} 的模型…",
-      "prepareFailed": "{{agent}} 无法打开会话：{{error}}"
+      "prepareFailed": "{{agent}} 无法打开会话：{{error}}",
+      "versionBroken": "Kettu 检查发现你的 {{command}} {{version}} 和它不能一起用。",
+      "versionUnsupported": "你的 {{command}} {{version}} 不在 Kettu 能用的版本里（{{supported}}）。",
+      "versionOnHost": "在 {{host}} 上把 {{agent}} 换成 Kettu 能用的版本。",
+      "howToChange": "更换方法…"
     },
     "startNotice": {
       "model": {
@@ -544,6 +555,8 @@
       "signedOut": "已退出 · 登录后使用",
       "failed": "启动失败",
       "needsUpdate": "版本太旧 · 点击更新",
+      "versionBroken": "{{version}} 和 Kettu 不能一起用",
+      "versionUnsupported": "{{version}} 不在 Kettu 能用的版本里",
       "limitUsed": "已用 {{limit}}限额的 {{percent}}%",
       "limitReached": "已达 {{limit}}限额",
       "manage": "管理 Agent…"
@@ -642,6 +655,17 @@
     "announceApproval": "{{agent}} 需要你的授权",
     "announceFinished": "{{agent}} 已完成"
   },
+  "find": {
+    "placeholder": "在会话中查找",
+    "previous": "上一条（Shift+Enter）",
+    "next": "下一条（Enter）",
+    "close": "关闭（Esc）",
+    "none": "无结果",
+    "failed": "查找失败",
+    "short": "至少输入 2 个字",
+    "indexing": "正在为对话建立索引，结果可能不全",
+    "unsupported": "这台主机还不能在会话中查找"
+  },
   "thread": {
     "label": "对话",
     "olderFailed": "无法加载更早的消息",
@@ -678,7 +702,9 @@
       "copy": "复制原始信息"
     },
     "outline": {
-      "label_other": "大纲，{{count}} 条消息"
+      "label_other": "大纲，{{count}} 条消息",
+      "noText": "没有文字",
+      "matches_other": "{{count}} 处"
     },
     "jump": {
       "label": "跳到最新",
@@ -1193,28 +1219,32 @@
     "note": {
       "claude": "不进对话 · 不用工具",
       "codex": "不进对话 · 只读，不问授权",
+      "fork": "不进对话 · 临时分叉，用完即删",
       "hidden": "不进对话 · 临时会话，用完即删",
       "other": "由 {{agent}} 回答 · 临时会话"
     },
     "empty": {
       "title": "问 {{agent}} 一句",
-      "claudeSees": "看得到这个会话到现在的对话，连正在跑的这一轮",
-      "codexSees": "看得到上一轮结束为止的对话，正在跑的这一轮 Kettu 附上文字",
+      "claudeSees": "看得到这个会话到现在的全部对话，连正在跑的这一轮，只缺还在写的那条回复",
+      "codexSees": "看得到这个会话到现在的全部对话，连正在跑的这一轮已做完的部分",
       "noInterrupt": "不打断它，问答也不进对话",
       "claudeTools": "不用工具；要查文件、跑命令，请在主对话里说",
       "codexTools": "能读文件、跑只读命令，不改东西、不问授权",
       "claudeCost": "用这个会话的额度、和主会话共用缓存；Claude Code 不单独报侧聊的用量，用量页里没有这部分",
       "codexCost": "用这个会话的额度、和主会话共用缓存",
-      "hiddenHow": "{{agent}} 没有自带的侧问，Kettu 开一个用完即删的临时会话来答",
-      "hiddenCarried": "带上最近的对话，最多约 16k token，早前的工具输出会截掉",
+      "forkHow": "{{agent}} 把这个会话分叉出一份来答，Kettu 答完就删掉这份分叉",
+      "forkSees": "看得到到现在的全部对话；还在跑的那个工具调用不一定带上",
+      "forkCost": "和主会话共用一部分缓存；开分叉要几秒",
+      "hiddenHow": "{{agent}} 没有自带的侧问和分叉，Kettu 开一个用完即删的临时会话来答",
+      "hiddenCarried": "放得下模型的窗口就带上全部对话，放不下带第一条请求和最近的几轮，并写明带了多少",
       "hiddenCost": "和主会话不共用缓存，第一问要全价付这段对话、慢几秒，追问会便宜下来"
     },
     "pick": {
       "title": "{{agent}} 还不能侧聊",
-      "why": "它开的临时会话现在删不干净，会留在它自己的会话历史里。可以换一个 Agent 来答，Kettu 带上这个会话最近的对话。",
+      "why": "它开的临时会话现在删不干净，会留在它自己的会话历史里。可以换一个 Agent 来答，Kettu 带上这个会话的对话。",
       "before": "由",
       "after": "来答",
-      "cost": "花的是 {{agent}} 的额度；带上的对话最多约 16k token。",
+      "cost": "花的是 {{agent}} 的额度；放得下就带上全部对话，放不下带第一条请求和最近的几轮。",
       "ask": "用 {{agent}} 问",
       "none": "这台电脑上没有能侧聊的 Agent。",
       "change": "换一个 Agent 来答"
@@ -1226,9 +1256,20 @@
     "quote": "引用到输入框",
     "copy": "复制",
     "copied": "已复制",
-    "carried_other": "带上了第一条请求和最近 {{count}} 轮 · 约 {{tokens}}k token",
-    "carriedAll_other": "带上了全部 {{count}} 轮对话 · 约 {{tokens}}k token",
-    "carriedNone": "会话还没有对话",
+    "saw": {
+      "agent": "看到整段对话 · {{agent}} 自带的侧问",
+      "fork": "看到整段对话 · 临时分叉",
+      "agentCompacted": "看到的是 Agent 现在记得的对话 · {{agent}} 自带的侧问",
+      "forkCompacted": "看到的是 Agent 现在记得的对话 · 临时分叉",
+      "compacted_other": "Agent 压缩过上下文：前 {{count}} 轮只在它的摘要里",
+      "compactedNone": "Agent 压缩过上下文，之后还没有新的对话",
+      "copyAfter_other": "看到压缩之后的全部 {{count}} 轮对话 · 约 {{tokens}}k token · 临时会话",
+      "none": "会话还没有对话",
+      "copyAll_other": "看到全部 {{count}} 轮对话 · 约 {{tokens}}k token · 临时会话",
+      "copyPart_other": "看到第一条请求和最近 {{count}} 轮，共 {{total}} 轮 · 约 {{tokens}}k token · 临时会话",
+      "fellBackAgent": "{{agent}} 自带的侧问用不了，改由临时会话来答",
+      "fellBackFork": "{{agent}} 分叉不了这个会话，改由临时会话来答"
+    },
     "step": {
       "read": "读了 {{title}}",
       "search": "搜索了 {{title}}",
