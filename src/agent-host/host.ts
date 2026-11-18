@@ -50,6 +50,7 @@ import type { PortChannel } from '@shared/port-channel'
 import type { FromPort, PortErrorCode } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
 import type { MemorySource } from '@shared/memory'
+import { DEFAULT_AGENT_NETWORK } from '@shared/agent-network'
 import type { HostSettings } from '@shared/settings'
 import { serverFor, type MarketConnection, type MarketServer } from '@shared/marketplace'
 import { listingIdOf } from '@shared/market-community'
@@ -162,6 +163,8 @@ import { ScratchFolders } from './scratch'
 import { createWorktreeGit } from './worktrees/git'
 import { WorktreeManager } from './worktrees/manager'
 import { ComputerDriver, probePermissions } from './computer/driver'
+import { networkStateFile, subscriptionsFile } from './node-proxy/files'
+import { NodeProxy, type NodeProxyDeps } from './node-proxy/service'
 import { ComputerUse } from './computer/service'
 import { SessionFiles } from './session-files'
 import { SessionManager, type SessionTimings } from './sessions'
@@ -307,6 +310,10 @@ export interface HostOptions {
   outside?: OutsideReader
   /** The desktop app's computer use; the daemon has none. */
   computer?: ComputerHostOptions | null
+  /** Huli: the `mihomo` program the desktop app ships for the agents' network; the daemon has none. */
+  mihomoPath?: string | null
+  /** How the agents' network finds the physical interface; the system's tools by default. */
+  detectInterface?: NodeProxyDeps['detect']
   /** What the host's requests to Kettu's download service say they are: the app or the daemon. */
   userAgent?: string
 }
@@ -388,6 +395,8 @@ export class AgentHost {
   private readonly kettuImport: KettuImport
   /** Huli: the user's folders of sessions. */
   private readonly sessionFolders: SessionFolders
+  /** Huli: the agents' network through the user's proxy subscriptions. */
+  private readonly nodeProxy: NodeProxy
   /** When idle Claude Code sessions let their agent go, by the setting and the system's memory. */
   private readonly idleRelease: IdleRelease
   /** The saved routines and the lifecycle of their runs. */
@@ -1109,6 +1118,27 @@ export class AgentHost {
       isSession: (id) => this.sessions.has(id),
       changed: (folders) => this.hub.broadcast({ type: 'folders.changed', folders }),
     })
+    this.nodeProxy = new NodeProxy({
+      userDataPath: options.userDataPath,
+      platform,
+      mihomoPath: options.mihomoPath ?? null,
+      log,
+      subscriptions: subscriptionsFile(options.userDataPath, log),
+      state: networkStateFile(options.userDataPath, log),
+      settings: () => this.settings.agentNetwork ?? DEFAULT_AGENT_NETWORK,
+      agentIds: () => this.agents.ids(),
+      // The subscriptions' names and hosts are the owner's alone: no device hears them.
+      changed: (status) => this.hub.sendToWindows({ type: 'agentNetwork.changed', status }),
+      routesChanged: (agentIds) => {
+        for (const agentId of agentIds) {
+          void this.agents.networkChanged(agentId).catch((error: unknown) => {
+            log('warn', `Could not restart ${agentId} for its network: ${(error as Error).message}`)
+          })
+        }
+      },
+      ...(options.detectInterface ? { detect: options.detectInterface } : {}),
+    })
+    this.env.setNodeRoutes((agentId) => this.nodeProxy.portFor(agentId))
     this.routines = new RoutinesManager({
       userDataPath: options.userDataPath,
       file: routinesFile(options.userDataPath, log),
@@ -1291,6 +1321,7 @@ export class AgentHost {
       host.memory.load(),
       host.workflowLibrary.load(),
       host.sessionFolders.load(),
+      host.nodeProxy.load(),
     ])
     // After the sessions, whose step sessions it messages when it resumes.
     await host.tasks.load()
@@ -1306,6 +1337,7 @@ export class AgentHost {
     host.usage.start()
     host.artifacts.start()
     host.idleRelease.start()
+    host.nodeProxy.start()
     options.send({ type: 'host:service-port', port: host.artifactService.listeningPort })
     options.send({ type: 'host:ready' })
     void host.trees.stopLeftovers()
@@ -1504,6 +1536,10 @@ export class AgentHost {
     }
     this.countCommunity(previous.marketplace, next.marketplace)
     const removed = await this.agents.settingsChanged(previous, next)
+    await this.nodeProxy.settingsChanged(
+      previous.agentNetwork ?? DEFAULT_AGENT_NETWORK,
+      this.agents.ids(),
+    )
     const turnedOff = next.disabledAgents.filter((id) => !previous.disabledAgents.includes(id))
     const gone = [...removed, ...turnedOff]
     if (gone.length > 0) await this.sessions.agentsRemoved(gone)
@@ -2328,6 +2364,7 @@ export class AgentHost {
       await Promise.all([
         this.artifactService.stop(),
         this.computer?.shutdown(),
+        this.nodeProxy.shutdown(),
         this.projects.flush(),
         this.sessions.flush(),
         this.remembered.flush(),
@@ -3114,6 +3151,17 @@ export class AgentHost {
       },
       'kettuImport.scan': () => this.kettuImport.scan(),
       'kettuImport.run': ({ sessionIds }) => this.kettuImport.run(sessionIds),
+      // A device never gets here: the allow-list refuses these methods to every device's port.
+      'agentNetwork.status': () => this.nodeProxy.status(),
+      'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),
+      'agentNetwork.renameSubscription': ({ id, name }) =>
+        this.nodeProxy.renameSubscription(id, name),
+      'agentNetwork.removeSubscription': ({ id }) => this.nodeProxy.removeSubscription(id),
+      'agentNetwork.refresh': ({ id }) => this.nodeProxy.refresh(id),
+      'agentNetwork.nodes': async () => ({ nodes: await this.nodeProxy.nodes() }),
+      'agentNetwork.testLatency': async ({ nodes }) => ({
+        results: await this.nodeProxy.testLatency(nodes),
+      }),
       'folders.list': () => this.sessionFolders.list(),
       'folders.create': ({ name, sessionIds }) => this.sessionFolders.create(name, sessionIds),
       'folders.rename': ({ folderId, name }) => this.sessionFolders.rename(folderId, name),

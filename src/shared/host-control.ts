@@ -95,6 +95,8 @@ export type MainToHost =
       socketPath?: string
       // The desktop app's computer use: the driver it ships and Kettu's own process and app ids.
       computer?: { driverPath: string; selfPid: number; selfIds: string[] }
+      // Huli: the mihomo program the desktop app ships for the agents' network.
+      mihomoPath?: string
       // What the host's requests to Kettu's download service say they are: the app or the daemon.
       userAgent?: string
     }

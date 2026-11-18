@@ -367,6 +367,7 @@ export async function startTestHost(options: TestHostOptions = {}): Promise<Test
       initialSetupDone: true,
       defaultAgent: null,
       computerUse: DEFAULT_SETTINGS.computerUse,
+      agentNetwork: DEFAULT_SETTINGS.agentNetwork,
       // Tests never reach Kettu's download service.
       downloadService: false,
     },

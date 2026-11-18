@@ -7,6 +7,18 @@ import type { HostMethod } from '../agent-host'
 // host checks is one.
 const MAIN_ONLY: ReadonlySet<string> = new Set<HostMethod>(['media.open'])
 
+// Huli: the agents' network is this computer's alone. Its subscriptions' addresses carry tokens
+// and its nodes are the owner's, so a device can neither see nor change them.
+const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
+  'agentNetwork.status',
+  'agentNetwork.addSubscription',
+  'agentNetwork.renameSubscription',
+  'agentNetwork.removeSubscription',
+  'agentNetwork.refresh',
+  'agentNetwork.nodes',
+  'agentNetwork.testLatency',
+])
+
 function sourceHas(params: unknown, key: string): boolean {
   if (typeof params !== 'object' || params === null) return false
   const source = (params as { source?: unknown }).source
@@ -26,10 +38,10 @@ export function namesUploadFile(method: string, params: unknown): boolean {
 }
 
 /**
- * Whether a device is refused this request: a host method that needs main, or an attachment from
- * a file main granted to a window. A method the host does not know is not this list's to refuse.
+ * Whether a device is refused this request: a host method that needs main or is the windows'
+ * alone, or an attachment from a file main granted to a window. A method the host does not know is not this list's to refuse.
  */
 export function forbiddenToDevices(method: string, params: unknown): boolean {
-  if (MAIN_ONLY.has(method)) return true
+  if (MAIN_ONLY.has(method) || WINDOW_ONLY.has(method)) return true
   return method === 'attachments.add' && hasGrant(params)
 }

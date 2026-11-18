@@ -22,6 +22,7 @@ import {
   ZOOM_LEVELS,
 } from '@shared/settings'
 import { isComputerApp, isStopShortcut } from '@shared/computer-use'
+import { isAgentNetworkChoice, isInterfaceName, isNodeRef } from '@shared/agent-network'
 import {
   IDLE_LIMITS,
   IDLE_RELEASE_MODES,
@@ -122,6 +123,31 @@ const isComputerApps: Check = (value, path) => {
   return null
 }
 
+const isNodeChoice: Check = (value, path) =>
+  value === null || isNodeRef(value) ? null : `"${path}" must be null or a { subscription, node }`
+
+const isNetworkInterface: Check = (value, path) =>
+  value === null || isInterfaceName(value)
+    ? null
+    : `"${path}" must be null or the name of a network interface`
+
+// More agents than any host has, with room to spare.
+const MAX_NETWORK_AGENTS = 500
+const isAgentNetworkChoices: Check = (value, path) => {
+  if (!isRecord(value)) return `"${path}" must be an object`
+  const entries = Object.entries(value)
+  if (entries.length > MAX_NETWORK_AGENTS) {
+    return `"${path}" may hold at most ${MAX_NETWORK_AGENTS} agents`
+  }
+  for (const [id, choice] of entries) {
+    if (!isAgentId(id)) return `"${path}.${id}" is not an agent id`
+    if (!isAgentNetworkChoice(choice)) {
+      return `"${path}.${id}" must be "system" or a { subscription, node }`
+    }
+  }
+  return null
+}
+
 const isLinkSites: Check = (value, path) => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return `"${path}" must be an object`
@@ -212,6 +238,12 @@ const SECTION_FIELDS = {
     allowedApps: isComputerApps,
     pauseOnUse: isBoolean,
     stopShortcut: isStopShortcutValue,
+  },
+  agentNetwork: {
+    enabled: isBoolean,
+    defaultNode: isNodeChoice,
+    agents: isAgentNetworkChoices,
+    interface: isNetworkInterface,
   },
   cloud: { enabled: isBoolean },
   onboarding: { done: isBoolean, step: oneOf(...ONBOARDING_STEPS) },
@@ -1161,6 +1193,7 @@ export function withMovedAgent(
   }
   next.disabledAgents = next.disabledAgents.filter((id) => id !== agentId)
   delete next.startModes[agentId]
+  delete next.agentNetwork.agents[agentId]
   if (next.general.defaultAgent === agentId) next.general.defaultAgent = null
   return next
 }
@@ -1503,6 +1536,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
       : null,
     defaultAgent: settings.general.defaultAgent,
     computerUse: structuredClone(settings.computerUse),
+    agentNetwork: structuredClone(settings.agentNetwork),
     downloadService: settings.cloud.enabled && settings.updates.source === 'auto',
   }
 }
@@ -1533,6 +1567,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'idleSessions',
   'usage',
   'computerUse',
+  'agentNetwork',
   'cloud',
   'updates',
 ])
