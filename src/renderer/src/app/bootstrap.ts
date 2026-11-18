@@ -30,6 +30,7 @@ import { whenHostHas } from '@renderer/lib/host-features'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { isHosted, isWeb, platform } from '@renderer/lib/platform'
 import { initAccount } from '@renderer/stores/account'
+import { receiveAgentNetwork } from '@renderer/stores/agent-network'
 import { loadAgentOptions, receiveAgentOptions } from '@renderer/stores/agent-options'
 import { initDevices } from '@renderer/stores/devices'
 import { initBrowser } from '@renderer/stores/browser'
@@ -187,6 +188,10 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'folders.changed':
       receiveFolders(event.folders, hostId)
+      return
+    case 'agentNetwork.changed':
+      // Only this computer's host sends it; another's would be no business of this window.
+      if (hostId === null) receiveAgentNetwork(event.status)
       return
   }
   receiveArtifactEvent(event, hostId)

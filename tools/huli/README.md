@@ -167,6 +167,51 @@ npm i --no-save --no-package-lock --prefix tools/huli/brand @resvg/resvg-js shar
 node tools/huli/brand/render.mjs ..\ref\kite-preview.png   # the optional sheet of every icon
 ```
 
+### Agent network
+
+Each agent can reach the network through a node of the user's proxy subscriptions (机场订阅)
+instead of the system's network, which may be a Clash or Karing TUN. The agent host runs mihomo
+(`tools/install/mihomo.mjs`, GPL-3.0, a separate program) with one `mixed` listener on 127.0.0.1
+per agent that uses a node, and gives that agent only its listener in `HTTP_PROXY`, `HTTPS_PROXY`
+and `ALL_PROXY`, with loopback, the private ranges and Tailscale in `NO_PROXY`. Kite's own traffic
+keeps Advanced › Proxy.
+
+It fails closed: every group starts on REJECT, lists it and falls back on it (an empty group
+would fall back to DIRECT), the rules reject everything, and the host picks each group's node
+through the API; a node that left its subscription leaves its group on REJECT. While mihomo is
+starting, stopped or crashed (it is restarted on the same ports) the listener refuses
+connections. Nodes and their DNS (DoH by address) are bound to the physical interface of the
+default route, found with the system's tools and checked every minute, or named in Settings.
+Only programs that follow the proxy variables are held to the node; one that ignores them still
+goes out on the system's network.
+
+Huli's own files:
+
+- `src/shared/agent-network.ts`: the settings' part (on, default node, each agent's choice, the
+  interface), the status and node types, `NODE_NO_PROXY`.
+- `src/agent-host/node-proxy/`: `config.ts` (the configuration, pure, + `config.test.ts`),
+  `api.ts` (mihomo's REST API on 127.0.0.1 with a random secret), `interface.ts`, `files.ts`
+  (`agent-network/subscriptions.json`, which alone holds the links, and
+  `state/agent-network.json`, the listener ports and the running mihomo, to stop one a crash
+  left), `service.ts` (the process, its restarts, the picks), `validate.ts` and
+  `network.test.ts`.
+- `src/renderer/src/features/settings/agent-network-section.tsx`, `agent-network-rows.tsx`,
+  `src/renderer/src/stores/agent-network.ts`: Settings › Agent network and the agent page's
+  Network exit row; `network.*` in `locales/*/settings.json`.
+
+Subscription links carry tokens: they never go into settings.json, a status, an event or a log
+(each link and its parts are log secrets), and the `agentNetwork.*` methods are refused to paired
+devices (`src/shared/remote/allow-list.ts`), whose ports never hear `agentNetwork.changed`.
+
+Hooks into upstream files: `src/shared/settings.ts` and `src/main/settings-schema.ts` (the
+`agentNetwork` section, a client's own like `computerUse`), `src/shared/agent-host.ts`,
+`host-request-limits.ts`, `host-control.ts` (`mihomoPath`), `src/agent-host/host.ts`, `start.ts`,
+`validate.ts`, `rpc.ts` (`sendToWindows`), `shell-env.ts` (`applyNodeProxy`), `agents.ts`
+(`networkChanged`: an idle agent's process stops so its next start takes the new variables),
+`src/main/computer-use.ts`, `agent-host.ts`, and in the renderer `bootstrap.ts`,
+`settings-page.tsx`, `web-sections.ts`, `agents-section.tsx` and `stores/view.ts`. The phone app
+does not show it.
+
 ## Tests
 
 `pnpm test` passes on Linux, as CI runs it, and on Windows. Tests of what Huli changes read the

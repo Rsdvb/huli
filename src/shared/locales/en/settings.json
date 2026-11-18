@@ -18,7 +18,8 @@
     "memory": "Memory",
     "hosts": "Hosts",
     "devices": "Mobile devices",
-    "computer-use": "Computer use"
+    "computer-use": "Computer use",
+    "agent-network": "Agent network"
   },
   "page": {
     "title": "Settings",
@@ -1186,7 +1187,8 @@
     "hosts": "Other computers running Kettu that this one connects to. Their sessions show up in your sidebar.",
     "hostsWeb": "The computer this page connects to. Its sessions, projects and agents stay on it; here is only how this browser reaches it.",
     "devices": "Simulators and phones agents may use without asking.",
-    "computer-use": "Lets agents read and drive the desktop apps of this computer, one app and one session at a time."
+    "computer-use": "Lets agents read and drive the desktop apps of this computer, one app and one session at a time.",
+    "agent-network": "Each agent’s traffic through a node of your proxy subscriptions, and never around it."
   },
   "archived": {
     "description": "{{project}} · archived {{when}}",
@@ -2043,6 +2045,96 @@
       "loading": "Reading…",
       "notFound": "Not on this host now",
       "remove": "Remove"
+    }
+  },
+  "network": {
+    "groups": {
+      "main": "Agent network",
+      "subscriptions": "Subscriptions",
+      "default": "Default node",
+      "agents": "Agents"
+    },
+    "enabled": {
+      "name": "Route agents through nodes",
+      "description": "Agents reach the network only through their node. When the node or mihomo is down they have no network rather than going out another way. Loopback, your LAN and Tailscale stay direct. Kettu’s own traffic keeps Advanced › Proxy.",
+      "keywords": "proxy node subscription airport clash mihomo vpn tun network exit agent"
+    },
+    "status": {
+      "name": "Status",
+      "off": "Off",
+      "starting": "Starting",
+      "running": "Running",
+      "error": "Not running",
+      "version": "mihomo {{version}}"
+    },
+    "problem": {
+      "missing": "This build carries no mihomo, so agents that use a node have no network. In a development checkout, run pnpm fetch:mihomo.",
+      "interface": "No physical network interface was found. Agents that use a node have no network until one is, or until you name one below.",
+      "start": "mihomo did not start, so agents that use a node have no network. Kettu tries again.",
+      "exited": "mihomo stopped, so agents that use a node have no network until it runs again. Kettu restarts it."
+    },
+    "interface": {
+      "name": "Network interface",
+      "description": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. Leave it empty to use the one found.",
+      "placeholder": "Such as Ethernet, Wi-Fi or en0",
+      "invalid": "Enter an interface name without #",
+      "keywords": "interface adapter nic ethernet wifi tun bypass",
+      "descriptionFound": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. Leave it empty to use the one found: {{name}}.",
+      "descriptionNone": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. None was found, so name one here."
+    },
+    "subscriptions": {
+      "add": "Add subscription",
+      "refreshAll": "Refresh all",
+      "refresh": "Refresh",
+      "rename": "Rename",
+      "remove": "Remove",
+      "emptyTitle": "No subscriptions",
+      "emptyHint": "Add your provider’s subscription link. The link stays on this computer.",
+      "nodes_one": "{{count}} node",
+      "nodes_other": "{{count}} nodes",
+      "notRead": "Not read yet",
+      "updated": "updated {{time}}",
+      "usage": "{{used}} of {{total}} used",
+      "expires": "expires {{date}}",
+      "removeTitle": "Remove {{name}}?",
+      "removeBody": "Its nodes go with it. Agents that use one of them have no network until you pick another.",
+      "keywords": "subscription airport provider link nodes refresh"
+    },
+    "add": {
+      "title": "Add subscription",
+      "name": "Name",
+      "url": "Subscription link",
+      "urlHint": "Kept by this computer’s agent host alone: never in the settings, the logs or on paired devices.",
+      "save": "Add",
+      "invalidUrl": "Enter an http or https link.",
+      "invalidName": "Use 1 to 40 characters, without |."
+    },
+    "rename": {
+      "title": "Rename subscription",
+      "save": "Save"
+    },
+    "default": {
+      "name": "Default node",
+      "description": "Agents that follow the default go through this node.",
+      "none": "None: no network",
+      "test": "Test latency",
+      "noNodes": "No nodes yet",
+      "notRunning": "Nodes show while the agent network runs.",
+      "keywords": "default node latency ping speed test"
+    },
+    "delay": {
+      "ms": "{{ms}} ms",
+      "timeout": "Timed out"
+    },
+    "choice": {
+      "name": "Network exit",
+      "description": "How this agent reaches the network. A move between a node and the system network applies when the agent next starts.",
+      "follow": "Follow the default",
+      "followNamed": "Follow the default ({{node}})",
+      "system": "System network",
+      "gone": "{{node}} (gone)",
+      "off": "Agent network is off, so every agent uses the system network.",
+      "keywords": "network exit node proxy system"
     }
   }
 }
