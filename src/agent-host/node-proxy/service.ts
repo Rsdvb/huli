@@ -515,7 +515,9 @@ export class NodeProxy {
       while (next < wanted.length) {
         const ref = wanted[next++]!
         const name = this.fullName(ref)
-        const delay = name ? await api.delay(name, TEST_URL, LATENCY_TIMEOUT_MS) : null
+        const delay = name
+          ? await api.delay(providerName(ref.subscription), name, TEST_URL, LATENCY_TIMEOUT_MS)
+          : null
         results.push({ ...ref, delay })
       }
     }

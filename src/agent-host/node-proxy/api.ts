@@ -168,13 +168,22 @@ export class MihomoApi {
     await this.call('PUT', `/providers/proxies/${encodeURIComponent(name)}`, undefined, 60_000)
   }
 
-  /** The node's round trip to `url` in ms; null when it did not answer in time. */
-  async delay(name: string, url: string, timeoutMs: number): Promise<number | null> {
+  /**
+   * The round trip to `url` in ms of a node of `provider`; null when it did not answer in time.
+   * Asked through its provider, since `/proxies` knows only the nodes the configuration lists.
+   */
+  async delay(
+    provider: string,
+    name: string,
+    url: string,
+    timeoutMs: number,
+  ): Promise<number | null> {
     const query = `url=${encodeURIComponent(url)}&timeout=${timeoutMs}`
+    const node = `${encodeURIComponent(provider)}/${encodeURIComponent(name)}`
     try {
       const result = await this.call(
         'GET',
-        `/proxies/${encodeURIComponent(name)}/delay?${query}`,
+        `/providers/proxies/${node}/healthcheck?${query}`,
         undefined,
         timeoutMs + 5_000,
       )
