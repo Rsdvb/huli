@@ -2135,6 +2135,17 @@
       "gone": "{{node}} (gone)",
       "off": "Agent network is off, so every agent uses the system network.",
       "keywords": "network exit node proxy system"
+    },
+    "exit": {
+      "node": "Node exit {{ip}} ({{country}})",
+      "nodeIpOnly": "Node exit {{ip}}",
+      "nodeUnreachable": "Node exit: can’t connect",
+      "system": "System network exit {{ip}} ({{country}})",
+      "systemIpOnly": "System network exit {{ip}}",
+      "systemUnreachable": "System network exit: can’t connect",
+      "unsupported": "Can’t check the exit: the system proxy isn’t an HTTP proxy",
+      "unchecked": "Exit not checked yet",
+      "check": "Check exit IP"
     }
   }
 }

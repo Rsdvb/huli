@@ -5,6 +5,7 @@
 import type { ThumbnailPage } from '../artifacts'
 import type { HostToMain } from '../host-control'
 import type { AppInfo, RemotePairingEvent } from '../ipc'
+import type { AgentNetworkChoice, NodeRef } from '../agent-network'
 import type { MarketKeysPatch, MarketKeyState } from '../marketplace'
 import {
   DEFAULT_SETTINGS,
@@ -200,6 +201,16 @@ export interface HostAdminContract {
   /** A shell on the host; the host checks it is a file it may run. */
   'settings.setShellPath': { params: { path: string }; result: HostSettingsPart }
   /**
+   * Huli: the agent network's default node, and one agent's choice (null: follow the default).
+   * A device sees the network through `agentNetwork.deviceStatus` and changes only these two;
+   * its subscriptions, switch and interface stay the computer's.
+   */
+  'settings.setDefaultNode': { params: { node: NodeRef | null }; result: null }
+  'settings.setAgentNetwork': {
+    params: { agentId: AgentId; choice: AgentNetworkChoice | null }
+    result: null
+  }
+  /**
    * Fills or clears inputs of a server in the host's `marketplace.mcp`, as `marketplace.setKeys`
    * of the window does; answers which inputs are set, never their values.
    */
@@ -297,6 +308,8 @@ const METHODS: Record<HostAdminMethod, true> = {
   'settings.removeAgent': true,
   'settings.setAgentBinary': true,
   'settings.setShellPath': true,
+  'settings.setDefaultNode': true,
+  'settings.setAgentNetwork': true,
   'marketplace.setKeys': true,
   'marketplace.setAgentEnv': true,
   'remote.status': true,

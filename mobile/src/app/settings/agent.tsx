@@ -27,6 +27,13 @@ import { Sheet, type SheetItem } from '../../components/Sheet'
 import { useHost } from '../../host'
 import { currentLimits, harnessVersion, percent, readiness, stateText } from '../../manage/agents'
 import {
+  agentChoice,
+  agentExit,
+  choiceText,
+  exitText,
+  useNetworkStatus,
+} from '../../manage/network'
+import {
   Button,
   call,
   Code,
@@ -621,6 +628,8 @@ function AgentBody({ status }: { status: AgentStatus }) {
 
       {takesClaudeSettings(id) ? <ClaudeSettingsGroup agentId={id} /> : null}
 
+      <NetworkGroup agentId={id} />
+
       <ListGroup footer="它的会话会留着，但不能再继续。新会话的模式和标志颜色在电脑上的纸鸢里设置。">
         <ListRow
           title="移除 Agent…"
@@ -630,6 +639,34 @@ function AgentBody({ status }: { status: AgentStatus }) {
         />
       </ListGroup>
     </ManagePage>
+  )
+}
+
+/** 网络出口: the node the agent goes through, and where its traffic last left from. */
+function NetworkGroup({ agentId }: { agentId: AgentId }) {
+  const read = useNetworkStatus()
+  const status = read.value
+  // A computer without the agent network (the daemon, an older app) has nothing to pick here.
+  if (!status?.available) return null
+  const exit = exitText(agentExit(status, agentId))
+  return (
+    <ListGroup
+      footer={
+        status.enabled
+          ? '在节点和系统网络之间切换，要等它下次启动才生效。'
+          : 'Agent 网络在电脑上已关闭，所有 Agent 都用系统网络。'
+      }
+    >
+      <ListRow
+        title="网络出口"
+        subtitle={exit ?? undefined}
+        value={status.enabled ? choiceText(status, agentChoice(status, agentId)) : '系统网络'}
+        chevron
+        onPress={() =>
+          router.push({ pathname: '/settings/network-node', params: { target: agentId } })
+        }
+      />
+    </ListGroup>
   )
 }
 

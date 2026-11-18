@@ -2106,6 +2106,17 @@
       "gone": "{{node}}（已不存在）",
       "off": "智能体网络已关闭，所有智能体都用系统网络。",
       "keywords": "网络 出口 节点 代理 系统"
+    },
+    "exit": {
+      "node": "节点出口 {{ip}}（{{country}}）",
+      "nodeIpOnly": "节点出口 {{ip}}",
+      "nodeUnreachable": "节点出口：无法连接",
+      "system": "系统网络出口 {{ip}}（{{country}}）",
+      "systemIpOnly": "系统网络出口 {{ip}}",
+      "systemUnreachable": "系统网络出口：无法连接",
+      "unsupported": "无法检测出口：系统代理不是 HTTP 代理",
+      "unchecked": "尚未检测出口",
+      "check": "检测出口 IP"
     }
   }
 }

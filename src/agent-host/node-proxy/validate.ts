@@ -2,6 +2,7 @@
 // fresh params object with only the known fields, or throws `invalid_params`.
 
 import type { HostMethod } from '@shared/agent-host'
+import { isAgentId } from '@shared/agents'
 import {
   isNodeName,
   isSubscriptionName,
@@ -54,6 +55,15 @@ function nodeRef(value: unknown, at: string): NodeRef {
   return { subscription: o.subscription, node: o.node }
 }
 
+function latencyParams(params: unknown): { nodes: NodeRef[] | null } {
+  const o = record(params, ['nodes'])
+  if (o.nodes === null || o.nodes === undefined) return { nodes: null }
+  if (!Array.isArray(o.nodes) || o.nodes.length > MAX_LATENCY_NODES) {
+    throw invalidParams(`nodes must be null or at most ${MAX_LATENCY_NODES} nodes`)
+  }
+  return { nodes: o.nodes.map((item: unknown, index) => nodeRef(item, `nodes[${index}]`)) }
+}
+
 export const networkValidators: Pick<Validators, NetworkMethod> = {
   'agentNetwork.status': none,
   'agentNetwork.nodes': none,
@@ -74,12 +84,15 @@ export const networkValidators: Pick<Validators, NetworkMethod> = {
     const o = record(params, ['id'])
     return { id: o.id === null || o.id === undefined ? null : subscriptionId(o.id) }
   },
-  'agentNetwork.testLatency': (params) => {
-    const o = record(params, ['nodes'])
-    if (o.nodes === null || o.nodes === undefined) return { nodes: null }
-    if (!Array.isArray(o.nodes) || o.nodes.length > MAX_LATENCY_NODES) {
-      throw invalidParams(`nodes must be null or at most ${MAX_LATENCY_NODES} nodes`)
+  'agentNetwork.testLatency': latencyParams,
+  'agentNetwork.deviceStatus': none,
+  'agentNetwork.deviceLatency': latencyParams,
+  'agentNetwork.exitIp': (params) => {
+    const o = record(params, ['agentId', 'fresh'])
+    if (!isAgentId(o.agentId)) throw invalidParams('agentId must be an agent id')
+    if (o.fresh !== undefined && typeof o.fresh !== 'boolean') {
+      throw invalidParams('fresh must be a boolean')
     }
-    return { nodes: o.nodes.map((item: unknown, index) => nodeRef(item, `nodes[${index}]`)) }
+    return { agentId: o.agentId, ...(o.fresh === undefined ? {} : { fresh: o.fresh }) }
   },
 }

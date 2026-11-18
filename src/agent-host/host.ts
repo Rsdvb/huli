@@ -1136,6 +1136,11 @@ export class AgentHost {
           })
         }
       },
+      systemProxy: (agentId) => {
+        const read = (name: string) =>
+          this.env.get(name, agentId) ?? this.env.get(name.toLowerCase(), agentId) ?? null
+        return { proxy: read('HTTPS_PROXY') ?? read('ALL_PROXY'), noProxy: read('NO_PROXY') }
+      },
       ...(options.detectInterface ? { detect: options.detectInterface } : {}),
     })
     this.env.setNodeRoutes((agentId) => this.nodeProxy.portFor(agentId))
@@ -3157,7 +3162,7 @@ export class AgentHost {
       },
       'kettuImport.scan': () => this.kettuImport.scan(),
       'kettuImport.run': ({ sessionIds }) => this.kettuImport.run(sessionIds),
-      // A device never gets here: the allow-list refuses these methods to every device's port.
+      // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),
       'agentNetwork.renameSubscription': ({ id, name }) =>
@@ -3166,6 +3171,12 @@ export class AgentHost {
       'agentNetwork.refresh': ({ id }) => this.nodeProxy.refresh(id),
       'agentNetwork.nodes': async () => ({ nodes: await this.nodeProxy.nodes() }),
       'agentNetwork.testLatency': async ({ nodes }) => ({
+        results: await this.nodeProxy.testLatency(nodes),
+      }),
+      'agentNetwork.exitIp': ({ agentId, fresh }) => this.nodeProxy.exitIp(agentId, fresh),
+      // These two a device may call: they carry no subscription's address.
+      'agentNetwork.deviceStatus': () => this.nodeProxy.deviceStatus(),
+      'agentNetwork.deviceLatency': async ({ nodes }) => ({
         results: await this.nodeProxy.testLatency(nodes),
       }),
       'folders.list': () => this.sessionFolders.list(),

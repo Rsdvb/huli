@@ -4,7 +4,8 @@
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import type { AgentNetworkStatus, NodeRef, NodeView } from '@shared/agent-network'
+import type { AgentNetworkStatus, ExitIp, NodeRef, NodeView } from '@shared/agent-network'
+import type { AgentId } from '@shared/thread'
 import { errorMessage, hostAt } from '@renderer/lib/host'
 import { isWeb } from '@renderer/lib/platform'
 
@@ -16,6 +17,8 @@ interface AgentNetworkState {
   /** The latest test's round trip by node key; null when it did not answer. */
   delays: Record<string, number | null>
   testing: boolean
+  /** The agents whose exit is being checked now. */
+  checkingExit: Partial<Record<AgentId, boolean>>
 }
 
 export const useAgentNetworkStore = create<AgentNetworkState>()(() => ({
@@ -24,6 +27,7 @@ export const useAgentNetworkStore = create<AgentNetworkState>()(() => ({
   nodes: null,
   delays: {},
   testing: false,
+  checkingExit: {},
 }))
 
 /** A node's key in `delays` and in a select's values. */
@@ -73,6 +77,30 @@ export async function testLatency(nodes: NodeRef[] | null): Promise<void> {
     useAgentNetworkStore.setState({ delays })
   } finally {
     useAgentNetworkStore.setState({ testing: false })
+  }
+}
+
+/** The agent's latest exit check, if it had one. */
+export function useExitIp(agentId: AgentId): ExitIp | null {
+  return useAgentNetworkStore(
+    (s) => s.status?.exits.find((exit) => exit.agentId === agentId) ?? null,
+  )
+}
+
+/** Checks where the agent's traffic leaves from now; the answer lands in the status. */
+export async function checkExit(agentId: AgentId): Promise<void> {
+  const set = (on: boolean) =>
+    useAgentNetworkStore.setState((s) => ({ checkingExit: { ...s.checkingExit, [agentId]: on } }))
+  set(true)
+  try {
+    const exit = await hostAt(null, 'agentNetwork.exitIp', { agentId, fresh: true })
+    const status = useAgentNetworkStore.getState().status
+    if (status) {
+      const exits = [...status.exits.filter((e) => e.agentId !== agentId), exit]
+      useAgentNetworkStore.setState({ status: { ...status, exits } })
+    }
+  } finally {
+    set(false)
   }
 }
 

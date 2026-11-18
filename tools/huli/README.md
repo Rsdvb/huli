@@ -185,6 +185,13 @@ default route, found with the system's tools and checked every minute, or named 
 Only programs that follow the proxy variables are held to the node; one that ignores them still
 goes out on the system's network.
 
+The exit check (`agentNetwork.exitIp`, `exit-ip.ts`) proves the path: the agent host fetches
+`https://www.cloudflare.com/cdn-cgi/trace` through the agent's own listener with HTTP CONNECT
+(or, for an agent on the system's network, through its HTTP proxy variable or directly) and
+reads `ip=` and `loc=`. A check stands a minute, runs again after the agent's node changes, and
+shows 无法连接 when the listener refuses the tunnel, which is the fail-closed case. A SOCKS or
+HTTPS system proxy is reported as unsupported rather than gone around.
+
 Huli's own files:
 
 - `src/shared/agent-network.ts`: the settings' part (on, default node, each agent's choice, the
@@ -193,15 +200,24 @@ Huli's own files:
   `api.ts` (mihomo's REST API on 127.0.0.1 with a random secret), `interface.ts`, `files.ts`
   (`agent-network/subscriptions.json`, which alone holds the links, and
   `state/agent-network.json`, the listener ports and the running mihomo, to stop one a crash
-  left), `service.ts` (the process, its restarts, the picks), `validate.ts` and
-  `network.test.ts`.
+  left), `service.ts` (the process, its restarts, the picks, the exits), `exit-ip.ts` (the
+  trace request through a listener), `validate.ts` and `network.test.ts`.
 - `src/renderer/src/features/settings/agent-network-section.tsx`, `agent-network-rows.tsx`,
   `src/renderer/src/stores/agent-network.ts`: Settings › Agent network and the agent page's
   Network exit row; `network.*` in `locales/*/settings.json`.
 
 Subscription links carry tokens: they never go into settings.json, a status, an event or a log
 (each link and its parts are log secrets), and the `agentNetwork.*` methods are refused to paired
-devices (`src/shared/remote/allow-list.ts`), whose ports never hear `agentNetwork.changed`.
+devices (`src/shared/remote/allow-list.ts`), whose ports never hear `agentNetwork.changed`, but
+for two device-safe ones: `agentNetwork.deviceStatus` (on, state, problem, interface name,
+subscriptions as id, name, node count and traffic, nodes as subscription id, name and latency, the
+default node, each agent's choice and the exits; `network.test.ts` checks no link, host or token
+is in it) and `agentNetwork.deviceLatency`. A device changes the default node and an agent's
+choice through the admin calls `settings.setDefaultNode` and `settings.setAgentNetwork`
+(`src/shared/remote/host-admin.ts`, `src/main/host-admin.ts`, `withDefaultNode` and
+`withAgentNetworkChoice` in `settings-schema.ts`); the generic `settings.update` still refuses the
+section, so its switch and interface stay the computer's, as adding, removing and refreshing
+subscriptions do.
 
 Hooks into upstream files: `src/shared/settings.ts` and `src/main/settings-schema.ts` (the
 `agentNetwork` section, a client's own like `computerUse`), `src/shared/agent-host.ts`,
@@ -210,7 +226,9 @@ Hooks into upstream files: `src/shared/settings.ts` and `src/main/settings-schem
 (`networkChanged`: an idle agent's process stops so its next start takes the new variables),
 `src/main/computer-use.ts`, `agent-host.ts`, and in the renderer `bootstrap.ts`,
 `settings-page.tsx`, `web-sections.ts`, `agents-section.tsx` and `stores/view.ts`. The phone app
-does not show it.
+shows it in `mobile/src/app/settings/network.tsx` (设置 › Agent 网络), `network-node.tsx` (the
+node picker with latencies), the 网络出口 group of `settings/agent.tsx`, and
+`mobile/src/manage/network.ts`.
 
 ## Tests
 

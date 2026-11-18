@@ -13,6 +13,8 @@ import { SetButton } from './controls'
 import { english, type GroupDef, type RowDef, type SectionDef } from './model'
 import {
   DefaultNodeControl,
+  ExitCheckAction,
+  ExitLine,
   InterfaceField,
   NetworkChoiceSelect,
   NetworkState,
@@ -167,7 +169,13 @@ export function useAgentNetworkSection(): SectionDef {
       name: agent.name,
       keywords: t('network.choice.keywords'),
       group: agentGroup,
-      render: () => <NetworkChoiceSelect agentId={agent.id} label={agent.name} />,
+      rich: <ExitLine agentId={agent.id} />,
+      render: () => (
+        <>
+          <ExitCheckAction agentId={agent.id} />
+          <NetworkChoiceSelect agentId={agent.id} label={agent.name} />
+        </>
+      ),
     })),
   ]
   return {

@@ -16,10 +16,12 @@ import {
   isSubscriptionName,
   MAX_SUBSCRIPTIONS,
   type AgentNetworkAgent,
+  type AgentNetworkDeviceStatus,
   type AgentNetworkProblem,
   type AgentNetworkSettings,
   type AgentNetworkState,
   type AgentNetworkStatus,
+  type ExitIp,
   type LatencyResult,
   type NodeRef,
   type NodeView,
@@ -50,6 +52,7 @@ import {
   type StoredSubscription,
   type SubscriptionsFile,
 } from './files'
+import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
 import { detectInterface } from './interface'
 
 /** How often the interface is read again and the groups' nodes checked, while on. */
@@ -64,6 +67,8 @@ const LATENCY_TIMEOUT_MS = 5_000
 /** When the subscriptions are read again after a start, for those mihomo was still reading. */
 const SETTLE_MS = [2_000, 8_000, 20_000]
 const LATENCY_PARALLEL = 8
+/** How long an exit check stands before a request for it checks again. */
+const EXIT_FRESH_MS = 60_000
 const PORT_MIN = 20_000
 const PORT_SPAN = 40_000
 
@@ -83,6 +88,10 @@ export interface NodeProxyDeps {
   /** The proxy variables these agents start with changed. */
   routesChanged(agentIds: AgentId[]): void
   detect?: (platform: Platform) => Promise<string | null>
+  /** The proxy variables an agent on the system's network starts with. */
+  systemProxy?: (agentId: AgentId) => { proxy: string | null; noProxy: string | null }
+  /** Fetches the trace page; tests replace it. */
+  trace?: (hop: ProxyHop | null) => Promise<string>
 }
 
 interface Running {
@@ -155,6 +164,8 @@ export class NodeProxy {
   private detected: string | null = null
   private inUse: string | null = null
   private providers = new Map<string, ProviderState>()
+  private exits = new Map<AgentId, ExitIp>()
+  private checking = new Map<AgentId, Promise<ExitIp>>()
   private queue: Promise<void> = Promise.resolve()
   private timer: ReturnType<typeof setInterval> | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
@@ -224,6 +235,72 @@ export class NodeProxy {
     await this.ensurePorts()
     if (moved.length > 0) this.deps.routesChanged(moved)
     this.reconcile()
+    const changed = agentIds.filter((id) => exitKey(before, id) !== exitKey(after, id))
+    if (changed.length === 0) return
+    for (const id of changed) this.exits.delete(id)
+    this.emit()
+    // Once mihomo has the new choice, see where those agents leave from now.
+    void this.queue.then(() => {
+      const settings = this.deps.settings()
+      for (const id of changed.filter((id) => agentRoute(settings, id) !== null)) {
+        void this.exitIp(id, true).catch(() => {})
+      }
+    })
+  }
+
+  /**
+   * Where the agent's traffic leaves from, by a request sent its way: through its listener while
+   * it uses a node, so a node that is down, or mihomo stopped, shows no address and never the
+   * system's. A check younger than a minute stands unless `fresh`.
+   */
+  async exitIp(agentId: AgentId, fresh = false): Promise<ExitIp> {
+    if (!this.deps.agentIds().includes(agentId)) throw notFound(`No agent ${agentId}`)
+    const via = this.portFor(agentId) === null ? 'system' : 'node'
+    const known = this.exits.get(agentId)
+    if (!fresh && known && known.via === via && Date.now() - known.checkedAt < EXIT_FRESH_MS) {
+      return known
+    }
+    const running = this.checking.get(agentId)
+    if (running) return running
+    const check = this.checkExit(agentId).finally(() => this.checking.delete(agentId))
+    this.checking.set(agentId, check)
+    return check
+  }
+
+  private async checkExit(agentId: AgentId): Promise<ExitIp> {
+    const port = this.portFor(agentId)
+    let hop: ProxyHop | null | 'unsupported'
+    if (port !== null) hop = { host: '127.0.0.1', port, auth: null }
+    else {
+      const system = this.deps.systemProxy?.(agentId) ?? { proxy: null, noProxy: null }
+      hop = bypassesProxy(system.noProxy) ? null : proxyHop(system.proxy)
+    }
+    const result: ExitIp = {
+      agentId,
+      via: port === null ? 'system' : 'node',
+      ip: null,
+      country: null,
+      failure: null,
+      checkedAt: Date.now(),
+    }
+    if (hop === 'unsupported') result.failure = 'unsupported'
+    else {
+      try {
+        const trace = parseTrace(await (this.deps.trace ?? fetchTrace)(hop))
+        if (trace) Object.assign(result, trace)
+        else result.failure = 'unreachable'
+      } catch {
+        result.failure = 'unreachable'
+      }
+    }
+    result.checkedAt = Date.now()
+    // A change of the agent's way while this ran makes the answer stale: keep it out.
+    const now = this.portFor(agentId) === null ? 'system' : 'node'
+    if (now === result.via) {
+      this.exits.set(agentId, result)
+      this.emit()
+    }
+    return result
   }
 
   status(): AgentNetworkStatus {
@@ -256,7 +333,47 @@ export class NodeProxy {
         }
       }),
       agents,
+      exits: this.currentExits(),
     }
+  }
+
+  /**
+   * What a paired device may see: no subscription's address or host, no mihomo message, only
+   * names, counts, choices and exits. The phone shows and switches nodes from it.
+   */
+  async deviceStatus(): Promise<AgentNetworkDeviceStatus> {
+    const settings = this.deps.settings()
+    const nodes = await this.nodes().catch(() => [])
+    return {
+      available: this.available,
+      enabled: settings.enabled,
+      state: this.state,
+      problem: this.problem,
+      interface: this.inUse,
+      subscriptions: this.subscriptions.map((s) => {
+        const provider = this.providers.get(s.id)
+        return {
+          id: s.id,
+          name: s.name,
+          nodes: provider?.nodes ?? null,
+          usage: provider?.usage ?? null,
+        }
+      }),
+      nodes: nodes.map(({ subscription, node, delay }) => ({ subscription, node, delay })),
+      defaultNode: settings.defaultNode,
+      agents: this.deps.agentIds().map((agentId) => ({
+        agentId,
+        choice: settings.agents[agentId] ?? 'default',
+      })),
+      exits: this.currentExits(),
+    }
+  }
+
+  private currentExits(): ExitIp[] {
+    const ids = new Set(this.deps.agentIds())
+    return [...this.exits.values()]
+      .filter((exit) => ids.has(exit.agentId))
+      .sort((a, b) => a.agentId.localeCompare(b.agentId))
   }
 
   async nodes(): Promise<NodeView[]> {
@@ -741,6 +858,10 @@ export class NodeProxy {
     this.problem = problem
     this.detail = detail
     if (state === 'off') this.version = null
+    // What the agents on nodes saw went through a mihomo that is gone now.
+    if (state !== 'running') {
+      for (const [id, exit] of this.exits) if (exit.via === 'node') this.exits.delete(id)
+    }
     this.emit()
   }
 
@@ -751,6 +872,14 @@ export class NodeProxy {
     this.sent = json
     this.deps.changed(status)
   }
+}
+
+/** What an agent's exit depends on: the system's network, or the node it ends up on. */
+function exitKey(settings: AgentNetworkSettings, agentId: AgentId): string {
+  const route = agentRoute(settings, agentId)
+  if (route === null) return 'system'
+  const node = route === 'default' ? settings.defaultNode : route
+  return node ? `node:${node.subscription}:${node.node}` : 'node:none'
 }
 
 function lastLines(text: string): string {

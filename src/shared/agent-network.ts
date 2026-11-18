@@ -182,6 +182,25 @@ export interface AgentNetworkAgent {
   node: NodeRef | null
 }
 
+/**
+ * Where an agent's traffic leaves for the internet, as a request sent the agent's way saw it:
+ * through its own listener while it uses a node, else as the system's network sends it.
+ */
+export interface ExitIp {
+  agentId: AgentId
+  via: 'node' | 'system'
+  /** The public address; null when the request did not get through. */
+  ip: string | null
+  /** The ISO 3166 code of the address's country or region, such as JP; null when unknown. */
+  country: string | null
+  /**
+   * Why there is no address: nothing answered (for an agent on a node, it has no network now),
+   * or the system's proxy is of a kind the check cannot speak, such as SOCKS.
+   */
+  failure: 'unreachable' | 'unsupported' | null
+  checkedAt: number
+}
+
 export interface AgentNetworkStatus {
   /** Whether this host has mihomo; a build without it, or the daemon, has none. */
   available: boolean
@@ -196,6 +215,33 @@ export interface AgentNetworkStatus {
   subscriptions: SubscriptionView[]
   /** The agents that go through a node. */
   agents: AgentNetworkAgent[]
+  /** The latest exit check of each agent that had one, on a node or not. */
+  exits: ExitIp[]
+}
+
+/**
+ * The agent network as a paired device sees it: names, counts, choices and exits, and never a
+ * subscription's address, host or token, nor what mihomo said.
+ */
+export interface AgentNetworkDeviceStatus {
+  available: boolean
+  enabled: boolean
+  state: AgentNetworkState
+  problem: AgentNetworkProblem | null
+  /** The network interface nodes dial out on now. */
+  interface: string | null
+  subscriptions: {
+    id: string
+    name: string
+    nodes: number | null
+    usage: SubscriptionUsage | null
+  }[]
+  /** Empty while the network is not running. */
+  nodes: { subscription: string; node: string; delay: number | null }[]
+  defaultNode: NodeRef | null
+  /** Every agent of the host, with `default` for one that follows the default node. */
+  agents: { agentId: AgentId; choice: AgentNetworkChoice | 'default' }[]
+  exits: ExitIp[]
 }
 
 export interface LatencyResult extends NodeRef {

@@ -1,4 +1,6 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -11,11 +13,19 @@ import {
 } from '@shared/agent-network'
 import { createRedactor } from '@shared/log/redact'
 import { forbiddenToDevices } from '@shared/remote/allow-list'
+import { isHostAdminMethod, splitSettingsPatch } from '@shared/remote/host-admin'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { AgentId } from '@shared/thread'
-import { hostSettings, validateSettingsPatch, mergeSettings } from '../../main/settings-schema'
+import {
+  hostSettings,
+  mergeSettings,
+  validateSettingsPatch,
+  withAgentNetworkChoice,
+  withDefaultNode,
+} from '../../main/settings-schema'
 import { applyNodeProxy, EnvironmentService } from '../shell-env'
 import { createValidators } from '../validate'
+import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
 import { networkStateFile, subscriptionSecrets, subscriptionsFile } from './files'
 import { NodeProxy } from './service'
 
@@ -29,11 +39,76 @@ function rejects(run: () => unknown): void {
   expect(run).toThrow(expect.objectContaining({ code: 'invalid_params' }))
 }
 
+/** The agent network's requests a paired device may make: they carry no subscription's address. */
+const DEVICE_SAFE = ['agentNetwork.deviceStatus', 'agentNetwork.deviceLatency']
+
 describe('the agent network requests', () => {
-  it('are refused to every paired device', () => {
+  it('are refused to every paired device, but for the device-safe ones', () => {
+    for (const method of [
+      'agentNetwork.status',
+      'agentNetwork.addSubscription',
+      'agentNetwork.renameSubscription',
+      'agentNetwork.removeSubscription',
+      'agentNetwork.refresh',
+      'agentNetwork.nodes',
+      'agentNetwork.testLatency',
+      'agentNetwork.exitIp',
+    ]) {
+      expect(HOST_METHODS).toContain(method)
+      expect(forbiddenToDevices(method, {})).toBe(true)
+    }
+    // A method added later is the windows' alone unless it is listed here on purpose.
     const network = HOST_METHODS.filter((method) => method.startsWith('agentNetwork.'))
-    expect(network.length).toBeGreaterThan(0)
-    for (const method of network) expect(forbiddenToDevices(method, {})).toBe(true)
+    for (const method of network) {
+      expect(forbiddenToDevices(method, {})).toBe(!DEVICE_SAFE.includes(method))
+    }
+    for (const method of DEVICE_SAFE) expect(HOST_METHODS).toContain(method)
+  })
+
+  it('let a device pick nodes only through the two narrow admin calls', () => {
+    expect(isHostAdminMethod('settings.setDefaultNode')).toBe(true)
+    expect(isHostAdminMethod('settings.setAgentNetwork')).toBe(true)
+    // The generic settings call still treats the whole section as the computer's own.
+    expect(splitSettingsPatch({ agentNetwork: { enabled: true } }).host).toBeNull()
+    expect(
+      splitSettingsPatch({
+        agentNetwork: { defaultNode: { subscription: 'abcdef012345', node: 'JP' } },
+      }).host,
+    ).toBeNull()
+
+    const ref = { subscription: 'abcdef012345', node: '香港 01' }
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    expect(withDefaultNode(settings, ref).agentNetwork.defaultNode).toEqual(ref)
+    expect(withDefaultNode(settings, null).agentNetwork.defaultNode).toBeNull()
+    const chosen = withAgentNetworkChoice(
+      withAgentNetworkChoice(settings, 'codex', 'system'),
+      'claude-code',
+      ref,
+    )
+    expect(chosen.agentNetwork.agents).toEqual({ codex: 'system', 'claude-code': ref })
+    expect(withAgentNetworkChoice(chosen, 'codex', null).agentNetwork.agents).toEqual({
+      'claude-code': ref,
+    })
+    // Only a node reference goes in: no address, no extra field, nothing else switched.
+    for (const node of [
+      URL_WITH_TOKEN,
+      { ...ref, url: URL_WITH_TOKEN },
+      { subscription: '../x', node: 'a' },
+      { subscription: 'abcdef012345', node: '' },
+      'system',
+    ]) {
+      expect(() => withDefaultNode(settings, node)).toThrow()
+    }
+    for (const [agentId, choice] of [
+      ['codex', 'direct'],
+      ['codex', { ...ref, url: URL_WITH_TOKEN }],
+      ['codex', URL_WITH_TOKEN],
+      ['../codex', 'system'],
+      [7, 'system'],
+    ] as const) {
+      expect(() => withAgentNetworkChoice(settings, agentId, choice)).toThrow()
+    }
+    expect(withDefaultNode(settings, ref).agentNetwork.enabled).toBe(settings.agentNetwork.enabled)
   })
 
   it('take only the known fields', () => {
@@ -84,6 +159,80 @@ describe('the agent network requests', () => {
         nodes: Array.from({ length: 501 }, () => ({ subscription: 'abcdef012345', node: 'a' })),
       }),
     )
+  })
+
+  it('check an exit only for an agent id', () => {
+    const exitIp = validators['agentNetwork.exitIp']
+    expect(exitIp({ agentId: 'codex' })).toEqual({ agentId: 'codex' })
+    expect(exitIp({ agentId: 'codex', fresh: true })).toEqual({ agentId: 'codex', fresh: true })
+    for (const params of [
+      {},
+      { agentId: '../codex' },
+      { agentId: 7 },
+      { agentId: 'codex', fresh: 'yes' },
+      { agentId: 'codex', port: 7890 },
+      { agentId: 'codex', url: 'http://evil.example' },
+    ]) {
+      rejects(() => exitIp(params))
+    }
+  })
+})
+
+describe('the exit check', () => {
+  it('reads the address and country of a trace page', () => {
+    const page = 'fl=123f\nh=www.cloudflare.com\nip=203.0.113.7\nts=1.2\nloc=JP\ntls=TLSv1.3\n'
+    expect(parseTrace(page)).toEqual({ ip: '203.0.113.7', country: 'JP' })
+    expect(parseTrace('ip=2001:db8::1\r\nloc=us\r\n')).toEqual({
+      ip: '2001:db8::1',
+      country: 'US',
+    })
+    expect(parseTrace('ip=198.51.100.2\nloc=XX')).toEqual({ ip: '198.51.100.2', country: null })
+    expect(parseTrace('ip=198.51.100.2\nloc=T1')).toEqual({ ip: '198.51.100.2', country: null })
+    expect(parseTrace('ip=198.51.100.2')).toEqual({ ip: '198.51.100.2', country: null })
+    // Only the first ip line counts, and it must be an address.
+    expect(parseTrace('ip=198.51.100.2\nip=192.0.2.1')).toEqual({
+      ip: '198.51.100.2',
+      country: null,
+    })
+    for (const page of ['', '<html>blocked</html>', 'ip=not-an-ip\nloc=JP', 'ip=<script>']) {
+      expect(parseTrace(page)).toBeNull()
+    }
+  })
+
+  it('speaks only to HTTP proxies, with their credentials', () => {
+    expect(proxyHop(null)).toBeNull()
+    expect(proxyHop('  ')).toBeNull()
+    expect(proxyHop('http://127.0.0.1:7890')).toEqual({ host: '127.0.0.1', port: 7890, auth: null })
+    expect(proxyHop('corp:3128')).toEqual({ host: 'corp', port: 3128, auth: null })
+    expect(proxyHop('http://u%40x:p%3Aw@[::1]:8080')).toEqual({
+      host: '::1',
+      port: 8080,
+      auth: 'u@x:p:w',
+    })
+    for (const value of ['socks5://127.0.0.1:7891', 'https://proxy:443', 'http://']) {
+      expect(proxyHop(value)).toBe('unsupported')
+    }
+    expect(bypassesProxy('localhost,.cloudflare.com')).toBe(true)
+    expect(bypassesProxy('*')).toBe(true)
+    expect(bypassesProxy('cloudflare.com:443')).toBe(true)
+    expect(bypassesProxy('localhost,127.0.0.1,example.com')).toBe(false)
+    expect(bypassesProxy('flare.com')).toBe(false)
+  })
+
+  it('fails when the listener refuses the tunnel, as mihomo does for REJECT', async () => {
+    const proxy = createServer()
+    proxy.on('connect', (_request, socket) => {
+      socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+    })
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+    const { port } = proxy.address() as AddressInfo
+    try {
+      await expect(fetchTrace({ host: '127.0.0.1', port, auth: null }, 3_000)).rejects.toThrow(
+        /502/,
+      )
+    } finally {
+      proxy.close()
+    }
   })
 })
 
@@ -199,7 +348,10 @@ describe('NodeProxy', () => {
     folders.length = 0
   })
 
-  async function proxy(settings: AgentNetworkSettings) {
+  async function proxy(
+    settings: AgentNetworkSettings,
+    extra: Partial<ConstructorParameters<typeof NodeProxy>[0]> = {},
+  ) {
     const dir = await mkdtemp(path.join(tmpdir(), 'kite-network-'))
     folders.push(dir)
     const events: AgentNetworkStatus[] = []
@@ -216,6 +368,7 @@ describe('NodeProxy', () => {
       changed: (status) => events.push(status),
       routesChanged: () => {},
       detect: async () => 'eth0',
+      ...extra,
     })
     await service.load()
     return { dir, service, events, log }
@@ -244,6 +397,66 @@ describe('NodeProxy', () => {
     await service.shutdown()
   })
 
+  it('shows a device names, counts, choices and exits, and never an address or token', async () => {
+    const settings: AgentNetworkSettings = {
+      ...DEFAULT_AGENT_NETWORK,
+      enabled: true,
+      agents: { codex: 'system' },
+    }
+    const { service } = await proxy(settings, {
+      systemProxy: () => ({ proxy: null, noProxy: null }),
+      trace: async () => 'ip=198.51.100.9\nloc=DE\n',
+    })
+    service.start()
+    const first = await service.addSubscription('Airport', URL_WITH_TOKEN)
+    await service.addSubscription('Other', PATH_TOKEN_URL)
+    settings.defaultNode = { subscription: first.id, node: 'JP 01' }
+    settings.agents = { codex: 'system', 'claude-code': { subscription: first.id, node: 'US' } }
+    await service.exitIp('codex' as AgentId)
+    await service.exitIp('claude-code' as AgentId)
+
+    const status = await service.deviceStatus()
+    const json = JSON.stringify(status)
+    for (const secret of [
+      TOKEN,
+      URL_WITH_TOKEN,
+      PATH_TOKEN_URL,
+      'sub.example.net',
+      'airport.example.org',
+      '/api/v1',
+      'https://',
+      'token=',
+    ]) {
+      expect(json).not.toContain(secret)
+    }
+    expect(Object.keys(status).sort()).toEqual([
+      'agents',
+      'available',
+      'defaultNode',
+      'enabled',
+      'exits',
+      'interface',
+      'nodes',
+      'problem',
+      'state',
+      'subscriptions',
+    ])
+    for (const sub of status.subscriptions) {
+      expect(Object.keys(sub).sort()).toEqual(['id', 'name', 'nodes', 'usage'])
+    }
+    expect(status.subscriptions.map((s) => s.name)).toEqual(['Airport', 'Other'])
+    expect(status.defaultNode).toEqual({ subscription: first.id, node: 'JP 01' })
+    expect(status.agents).toEqual([
+      { agentId: 'claude-code', choice: { subscription: first.id, node: 'US' } },
+      { agentId: 'codex', choice: 'system' },
+    ])
+    expect(status.exits.map((e) => [e.agentId, e.via, e.ip])).toEqual([
+      ['claude-code', 'node', '198.51.100.9'],
+      ['codex', 'system', '198.51.100.9'],
+    ])
+    await service.shutdown()
+  })
+
   it('fails closed without mihomo: agents on a node still get only their listener', async () => {
     const { service } = await proxy({
       ...DEFAULT_AGENT_NETWORK,
@@ -256,6 +469,54 @@ describe('NodeProxy', () => {
     expect(status).toMatchObject({ available: false, state: 'error', problem: 'missing' })
     expect(service.portFor('claude-code' as AgentId)).toEqual(expect.any(Number))
     expect(service.portFor('codex' as AgentId)).toBeNull()
+    await service.shutdown()
+  })
+
+  it('checks an agent on a node only through its listener, and fails closed', async () => {
+    const hops: (ProxyHop | null)[] = []
+    const { service } = await proxy(
+      { ...DEFAULT_AGENT_NETWORK, enabled: true, agents: { codex: 'system' } },
+      {
+        systemProxy: () => ({ proxy: 'http://corp:8080', noProxy: null }),
+        trace: async (hop) => {
+          hops.push(hop)
+          if (hop?.host === '127.0.0.1') throw new Error('connect ECONNREFUSED')
+          return 'ip=198.51.100.9\nloc=DE\n'
+        },
+      },
+    )
+    service.start()
+    const listener = service.portFor('claude-code' as AgentId)
+    const onNode = await service.exitIp('claude-code' as AgentId)
+    expect(hops[0]).toEqual({ host: '127.0.0.1', port: listener, auth: null })
+    expect(onNode).toMatchObject({ via: 'node', ip: null, country: null, failure: 'unreachable' })
+    const onSystem = await service.exitIp('codex' as AgentId)
+    expect(hops[1]).toEqual({ host: 'corp', port: 8080, auth: null })
+    expect(onSystem).toMatchObject({ via: 'system', ip: '198.51.100.9', country: 'DE' })
+    // A recent check stands; a fresh one goes out again.
+    await service.exitIp('codex' as AgentId)
+    expect(hops).toHaveLength(2)
+    await service.exitIp('codex' as AgentId, true)
+    expect(hops).toHaveLength(3)
+    await expect(service.exitIp('nobody' as AgentId)).rejects.toThrow()
+    await service.shutdown()
+  })
+
+  it('reports a system proxy it cannot speak instead of going around it', async () => {
+    let traced = false
+    const { service } = await proxy(DEFAULT_AGENT_NETWORK, {
+      systemProxy: () => ({ proxy: 'socks5://127.0.0.1:7891', noProxy: null }),
+      trace: async () => {
+        traced = true
+        return 'ip=198.51.100.9'
+      },
+    })
+    expect(await service.exitIp('codex' as AgentId)).toMatchObject({
+      via: 'system',
+      ip: null,
+      failure: 'unsupported',
+    })
+    expect(traced).toBe(false)
     await service.shutdown()
   })
 

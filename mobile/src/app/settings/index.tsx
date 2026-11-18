@@ -359,6 +359,13 @@ export default function Settings() {
             chevron
             onPress={() => router.push('/settings/projects')}
           />
+          <ListRow
+            title="Agent 网络"
+            icon="globe"
+            plainIcon
+            chevron
+            onPress={() => router.push('/settings/network')}
+          />
         </ListGroup>
 
         <ListGroup header="权限与数据">

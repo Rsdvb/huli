@@ -7,8 +7,10 @@ import type { HostMethod } from '../agent-host'
 // host checks is one.
 const MAIN_ONLY: ReadonlySet<string> = new Set<HostMethod>(['media.open'])
 
-// Huli: the agents' network is this computer's alone. Its subscriptions' addresses carry tokens
-// and its nodes are the owner's, so a device can neither see nor change them.
+// Huli: the agents' network is this computer's to set up. Its subscriptions' addresses carry
+// tokens, so a device never gets these, which carry their hosts and mihomo's messages or change
+// the subscriptions. A device has `agentNetwork.deviceStatus` and `agentNetwork.deviceLatency`
+// instead, which carry names, counts, choices and exits only.
 const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'agentNetwork.status',
   'agentNetwork.addSubscription',
@@ -17,6 +19,7 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'agentNetwork.refresh',
   'agentNetwork.nodes',
   'agentNetwork.testLatency',
+  'agentNetwork.exitIp',
 ])
 
 function sourceHas(params: unknown, key: string): boolean {
