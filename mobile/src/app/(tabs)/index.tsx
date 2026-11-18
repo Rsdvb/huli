@@ -654,6 +654,31 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     }
     const f = group.folder
     if (group.kind === 'folder' && f) {
+      // Up and down among the folders shown beside it: the pinned ones, or the others.
+      const beside = (foldersOf.get(group.computer) ?? []).filter((x) => x.pinned === f.pinned)
+      const at = beside.findIndex((x) => x.id === f.id)
+      const order: MenuNode[] = [
+        ...(at > 0
+          ? [
+              {
+                key: 'up',
+                label: '上移',
+                icon: 'arrow.up' as const,
+                onPress: () => folderActions.shift(beside, f, -1, link),
+              },
+            ]
+          : []),
+        ...(at >= 0 && at < beside.length - 1
+          ? [
+              {
+                key: 'down',
+                label: '下移',
+                icon: 'arrow.down' as const,
+                onPress: () => folderActions.shift(beside, f, 1, link),
+              },
+            ]
+          : []),
+      ]
       return joinGroups([
         [
           {
@@ -670,6 +695,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
           },
           fold,
         ],
+        order,
         [
           {
             key: 'delete',

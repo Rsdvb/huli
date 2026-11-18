@@ -25,8 +25,30 @@ export interface FolderActions {
   toggleCollapsed(folder: SessionFolder, link?: HostLink | null): void
   /** Into the folder, or out of every folder with null. */
   move(sessionIds: string[], folderId: string | null, link?: HostLink | null): Promise<boolean>
+  /** One place up (-1) or down (1) among `folders`, the computer's in their order. */
+  shift(
+    folders: readonly SessionFolder[],
+    folder: SessionFolder,
+    by: -1 | 1,
+    link?: HostLink | null,
+  ): void
   /** The dialog naming a folder; put it anywhere in the screen. */
   element: ReactNode
+}
+
+/** The folders' ids with one moved a place up or down; null when it cannot move that way. */
+export function shiftedOrder(
+  folders: readonly SessionFolder[],
+  folderId: string,
+  by: -1 | 1,
+): string[] | null {
+  const ids = folders.map((f) => f.id)
+  const at = ids.indexOf(folderId)
+  const to = at + by
+  if (at < 0 || to < 0 || to >= ids.length) return null
+  ids.splice(at, 1)
+  ids.splice(to, 0, folderId)
+  return ids
 }
 
 type Naming =
@@ -37,11 +59,22 @@ export function useFolderActions(): FolderActions {
   const active = useMaybeLink()
   const [naming, setNaming] = useState<Naming | null>(null)
 
-  const linkOf = (link: HostLink | null | undefined) => link ?? active
+  // No link given: the active computer's. A null link is another computer's that is down.
+  const linkOf = (link: HostLink | null | undefined) => (link === undefined ? active : link)
 
   const fail = (title: string) => (error: unknown) => {
     haptic.warning()
     Alert.alert(title, errorText(error))
+  }
+
+  /** The link to use, or null after saying the computer cannot be reached. */
+  const reach = (link: HostLink | null | undefined): HostLink | null => {
+    const to = linkOf(link)
+    if (!to) {
+      haptic.warning()
+      Alert.alert('现在连不上这台电脑', '连上之后再整理它的文件夹。')
+    }
+    return to
   }
 
   const move = async (
@@ -49,8 +82,9 @@ export function useFolderActions(): FolderActions {
     folderId: string | null,
     link?: HostLink | null,
   ): Promise<boolean> => {
-    const to = linkOf(link)
-    if (!to || sessionIds.length === 0) return false
+    if (sessionIds.length === 0) return false
+    const to = reach(link)
+    if (!to) return false
     try {
       await to.request('folders.move', { sessionIds, folderId })
       haptic.success()
@@ -63,15 +97,15 @@ export function useFolderActions(): FolderActions {
 
   return {
     create: (sessionIds = [], link) => {
-      const to = linkOf(link)
+      const to = reach(link)
       if (to) setNaming({ kind: 'create', sessionIds, link: to })
     },
     rename: (folder, link) => {
-      const to = linkOf(link)
+      const to = reach(link)
       if (to) setNaming({ kind: 'rename', folder, link: to })
     },
     remove: (folder, link) => {
-      const to = linkOf(link)
+      const to = reach(link)
       if (!to) return
       haptic.warning()
       Alert.alert(`删除文件夹「${folder.name}」？`, '其中的会话会回到未分组，不会被删除。', [
@@ -87,16 +121,24 @@ export function useFolderActions(): FolderActions {
       ])
     },
     togglePin: (folder, link) =>
-      void linkOf(link)
+      void reach(link)
         ?.request('folders.update', { folderId: folder.id, pinned: !folder.pinned })
         .then(() => haptic.success(), fail(folder.pinned ? '没能取消置顶' : '没能置顶')),
     toggleCollapsed: (folder, link) => {
       haptic.select()
-      void linkOf(link)
+      void reach(link)
         ?.request('folders.update', { folderId: folder.id, collapsed: !folder.collapsed })
         .catch(fail('没能收起'))
     },
     move,
+    shift: (folders, folder, by, link) => {
+      const order = shiftedOrder(folders, folder.id, by)
+      if (!order) return
+      haptic.select()
+      void reach(link)
+        ?.request('folders.reorder', { folderIds: order })
+        .catch(fail('没能移动文件夹'))
+    },
     element: (
       <RenameDialog
         visible={naming !== null}
