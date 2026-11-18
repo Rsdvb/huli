@@ -72,7 +72,8 @@
           "androidMultiIntentFilters": ["*/*"]
         }
       ],
-      "expo-image"
+      "expo-image",
+      "expo-web-browser"
     ]
   }
 }

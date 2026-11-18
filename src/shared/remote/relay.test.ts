@@ -118,6 +118,21 @@ describe('the relay protocol', () => {
     })
   })
 
+  it('says when a registered host takes no pairing requests, and nothing when it does', () => {
+    const key = new Uint8Array(32).fill(1)
+    const quiet = hostProfile(key, 'Studio', 'darwin', false)!
+    expect(quiet.pairable).toBe(false)
+    expect(hostProfile(key, 'Studio', 'darwin', true)).not.toHaveProperty('pairable')
+    const parse = (profile: unknown) =>
+      parseHostToRelay(JSON.stringify({ type: 'profile', profile }))
+    expect(parse(quiet)).toEqual({ type: 'profile', profile: quiet })
+    expect(parse({ ...quiet, pairable: true })).toEqual({
+      type: 'profile',
+      profile: hostProfile(key, 'Studio', 'darwin'),
+    })
+    expect(parse({ ...quiet, pairable: 'no' })).toBeNull()
+  })
+
   it('lists the main relay first, then the other regions', () => {
     const info = parseRelayInfo(vectors.info.answer)!
     expect(info.features).toEqual(['hosts'])

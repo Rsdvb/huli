@@ -35,7 +35,8 @@ Code (kept small so upstream merges stay clean):
 | File                                                                                                                                     | Change                                                                                                                                                                                                                                                                               |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `src/agent-host/agents.ts`                                                                                                               | `READ_ANTIGRAVITY_LIMITS = false`: never runs `agy -p /usage`, `/credits` or a hidden ACP session by itself to read Antigravity's limits; only a refresh the user presses (`agents.refreshLimits` with `ask: true`) runs `/usage` and `/credits` once                                |
-| `src/shared/settings.ts`                                                                                                                 | defaults: cloud off, relay on (Huli Cloud's, used only with the cloud on and signed in), not discoverable                                                                                                                                                                            |
+| `src/shared/settings.ts`                                                                                                                 | defaults: cloud off, relay on (Huli Cloud's, used only with the cloud on and signed in), discoverable (the account's phones and browsers may ask to be added; the owner allows each)                                                                                                 |
+| `src/remote-host/start.ts`, `src/shared/remote/relay.ts`                                                                                 | signed in to the relay, the host always sends its profile, so Huli Cloud registers it as the account's computer; `pairable: false` in it while it is not discoverable                                                                                                                |
 | `src/main/update-keys.json`, `src/main/update-sources.ts`, `src/shared/updates.ts`, `src/daemon/update.ts`                               | updates come from Huli's own channel on Huli Cloud's host, signed with Huli's own release keys (kept off the repository)                                                                                                                                                             |
 | `src/shared/account-api.ts`, `src/shared/remote/push.ts`                                                                                 | the account service and push gateway are Huli Cloud, `https://huli.132-145-200-0.sslip.io` (see `cloud/`)                                                                                                                                                                            |
 | `src/shared/kettu-hosts.ts`                                                                                                              | Huli Cloud's host counts as one of the services the cloud switch governs                                                                                                                                                                                                             |
@@ -216,6 +217,27 @@ signed in, Huli Cloud's relay from any network, which the hosted web client at
 - The phone (`mobile/src/relay.ts`) falls back to the relay when no direct address answers, with
   the token `relayTokens()` is given by the phone's Huli Cloud sign-in.
 - `tools/huli/deploy-cloud.ps1` builds the service and the hosted web client and installs both.
+
+## Account and computers
+
+Huli Cloud keeps a registry of the account's computers (`cloud/src/store.ts`); `cloud/README.md`
+describes it, the pairing without a code and its threat model.
+
+- `src/shared/huli-cloud.ts`: the account API beyond Kettu's (`GET /api/v1/account/devices`,
+  `POST /api/v1/account/devices/revoke`), its types and parsers, and `HOST_CLIENTS`, the sign-ins
+  that may put a host on the relay.
+- `src/shared/huli-signin.ts` (+ `.test.ts`): the phone's sign-in (PKCE, the vault, refresh
+  rotation, sign out), apart from the phone's APIs; `mobile/src/cloud.ts` gives it the Keychain and
+  ASWebAuthenticationSession and hands the relay its tokens.
+- `src/shared/remote/pair-account.ts`: the device side of Kettu's discovery for the phone and the
+  hosted web client; `src/remote-host/account-pairing.test.ts` checks that a computer adds a device
+  only with both yeses, and that a device refuses a welcome before its user's.
+- Desktop: `src/main/huli-account.ts` (+ `.test.ts`, the IPC calls `account:devices` and
+  `account:revoke-device`), `src/renderer/src/stores/account-devices.ts`,
+  `features/settings/account-devices.tsx`, `locales/*/huliAccount.json`.
+- Phone: `mobile/src/app/settings/account.tsx`, `mobile/src/app/pair-computer.tsx`,
+  `mobile/src/components/AccountComputers.tsx`. Hosted web client:
+  `src/renderer/src/web/hosted/account-pairing.tsx`.
 
 ## Workflows
 

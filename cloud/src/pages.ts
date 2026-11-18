@@ -1,7 +1,7 @@
 // The web pages: sign-in, consent, device codes and the device list. Plain HTML forms, no script.
 
-import type { ClientInfo } from '@shared/account-api'
-import type { Family } from './store'
+import type { HuliClientInfo } from '@shared/huli-cloud'
+import type { Computer, Family } from './store'
 
 export const STYLE = `
 :root{color-scheme:light dark;--fg:#1d1d1f;--muted:#6e6e73;--bg:#f5f5f7;--card:#fff;--line:#d2d2d7;--accent:#e2611f;--danger:#c0392b}
@@ -11,6 +11,8 @@ body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Micr
 main{max-width:420px;margin:8vh auto;padding:0 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px}
 h1{font-size:20px;margin:0 0 4px}
+h2{font-size:17px;margin:20px 0 4px}
+.gap{margin-top:20px}
 p{margin:8px 0}
 .muted{color:var(--muted);font-size:13px}
 label{display:block;margin:14px 0 4px;font-size:13px;color:var(--muted)}
@@ -49,10 +51,12 @@ function page(title: string, body: string): string {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escape(title)} · ${SERVICE_NAME}</title><link rel="icon" type="image/svg+xml" href="${ICON}"><link rel="stylesheet" href="/static/style.css"></head><body><main><div class="brand"><img class="dot" src="${ICON}" alt="">${SERVICE_NAME}</div><div class="card">${body}</div></main></body></html>`
 }
 
-export function describeClient(info: ClientInfo | null): string {
+export function describeClient(info: HuliClientInfo | null): string {
   if (!info) return '未知设备'
   const kind =
-    { desktop: '纸鸢桌面端', daemon: '纸鸢命令行', web: '网页版' }[info.kind] ?? info.kind
+    { desktop: '纸鸢桌面端', daemon: '纸鸢命令行', web: '网页版', mobile: '纸鸢手机端' }[
+      info.kind
+    ] ?? info.kind
   return `${kind} · ${info.name}（${info.os} ${info.arch}${info.version ? ` · ${info.version}` : ''}）`
 }
 
@@ -116,7 +120,12 @@ export function messagePage(title: string, text: string): string {
   return page(title, `<h1>${escape(title)}</h1><p>${escape(text)}</p>`)
 }
 
-export function devicesPage(input: { csrf: string; families: Family[]; email: string }): string {
+export function devicesPage(input: {
+  csrf: string
+  families: Family[]
+  computers: (Computer & { online: boolean })[]
+  email: string
+}): string {
   const time = (ms: number) => new Date(ms).toLocaleString('zh-CN', { hour12: false })
   const rows = input.families
     .map(
@@ -124,10 +133,19 @@ export function devicesPage(input: { csrf: string; families: Family[]; email: st
         `<tr><td>${escape(describeClient(f.info))}<br><span class="muted">登录于 ${time(f.createdAt)} · 最近使用 ${time(f.lastUsedAt)}</span></td><td><form method="post" action="/account/devices/revoke">${hidden('csrf', input.csrf)}${hidden('family', f.id)}<button class="danger">退出</button></form></td></tr>`,
     )
     .join('')
+  const computers = input.computers
+    .map(
+      (c) =>
+        `<tr><td>${escape(c.name ?? '未命名的电脑')}<br><span class="muted">${c.online ? '在线' : `最近在线 ${time(c.lastSeen)}`} · 中转 id ${escape(c.id.slice(0, 8))}</span></td></tr>`,
+    )
+    .join('')
   return page(
     '已登录的设备',
     `<h1>已登录的设备</h1><p class="muted">${escape(input.email)}</p>
 ${rows ? `<table>${rows}</table>` : '<p class="muted">没有已登录的设备。</p>'}
+<h2>电脑</h2><p class="muted">登录了这个账号、开着远程访问和中转的电脑。让一台退出，在上面退出它的登录。</p>
+${computers ? `<table>${computers}</table>` : '<p class="muted">还没有电脑。</p>'}
+<p class="muted gap">改密码和两步验证：在服务器上运行 <b>huli-cloud passwd</b> 或 <b>huli-cloud totp</b>（见服务端的说明）。</p>
 <form method="post" action="/account/signout">${hidden('csrf', input.csrf)}<div class="row"><button>退出网页登录</button></div></form>`,
   )
 }

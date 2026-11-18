@@ -191,6 +191,8 @@ const api: KettuApi = {
     signIn: () => invoke('account:sign-in'),
     cancelSignIn: () => invoke('account:cancel-sign-in'),
     signOut: () => invoke('account:sign-out'),
+    devices: () => invoke('account:devices'),
+    revokeDevice: (target) => invoke('account:revoke-device', target),
     onChanged: onAccountChanged,
   },
   sharing: {

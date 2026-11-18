@@ -98,7 +98,8 @@ async function init(force: boolean): Promise<void> {
     totpLastStep: step,
     recovery: recovery.map(sha256Hex),
   })
-  for (const family of store.families()) store.revokeFamily(family.id)
+  // Every sign-in of the account before, and its computers with them.
+  store.revokeAll()
   showRecovery(recovery)
   console.log('账号已建好。')
 }

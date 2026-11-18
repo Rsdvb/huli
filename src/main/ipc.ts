@@ -82,6 +82,7 @@ import { saveCapture } from './device-captures'
 import type { DeviceHost } from './device-host'
 import { exportThemeFile, installThemeFile, revealThemeFile } from './theme-dialogs'
 import type { ThemeStore } from './themes'
+import type { HuliAccountDevices } from './huli-account'
 import type { Updater } from './updater'
 import { isComputerOverlay, isOverlay, isPanel } from './window'
 
@@ -91,6 +92,8 @@ const actionLog = createLogger('action')
 export interface IpcDeps {
   settings: SettingsStore
   account: Account
+  /** Huli: the account's devices and computers on Huli Cloud. */
+  accountDevices: HuliAccountDevices
   agentFolders: AgentFolders
   themes: ThemeStore
   avatars: Avatars
@@ -453,6 +456,7 @@ export function launchToInteractive(): number | null {
 export function registerIpcHandlers({
   settings,
   account,
+  accountDevices,
   agentFolders,
   themes,
   avatars,
@@ -729,6 +733,9 @@ export function registerIpcHandlers({
     return account.status()
   })
   handle('account:sign-out', 0, () => account.signOut())
+  // The target is checked in HuliAccountDevices before any request.
+  handle('account:devices', 0, () => accountDevices.list())
+  handle('account:revoke-device', 1, (_, target) => accountDevices.revoke(target))
 
   handle('sharing:status', 0, () => sharing.status())
   handle('sharing:refresh', 0, () => sharing.refresh())

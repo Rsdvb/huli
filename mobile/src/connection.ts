@@ -7,15 +7,22 @@ import * as Device from 'expo-device'
 import { generateKeyPair, importKeyPair, type KeyPair } from '@shared/remote/noise'
 import { hello, HostLink, type LinkRoute } from '@shared/remote/link'
 import { pair, type Paired, type PairProgress } from '@shared/remote/pair'
+import {
+  pairWithAccountHost,
+  type AccountPairFailure,
+  type AccountPairing,
+  type AccountPairProgress,
+} from '@shared/remote/pair-account'
 import { decodePairing, parsePairingLink, type PairingPayload } from '@shared/remote/pairing'
 import type { DirectAddress } from '@shared/remote/protocol'
-import type { HostRelay } from '@shared/remote/relay'
+import { RELAY_URL, type HostRelay } from '@shared/remote/relay'
 import type { Transport } from '@shared/remote/transport'
 import { webSocketTransport } from '@shared/remote/websocket-transport'
-import { afterGrace, dialRelayTo } from './relay'
+import { afterGrace, dialRelayTo, RelayUnavailable } from './relay'
 import {
   computerIdOf,
   fromBase64,
+  fromBase64Url,
   loadDeviceKey,
   saveDeviceKey,
   toBase64,
@@ -237,6 +244,65 @@ export async function pairWith(
       ...((welcome.relay ?? payload.relay) ? { relay: welcome.relay ?? payload.relay } : {}),
     },
   }
+}
+
+/** Why the relay did not join a computer, as a pairing request with it says. */
+function relayFailure(error: unknown): AccountPairFailure | null {
+  if (!(error instanceof RelayUnavailable)) return null
+  switch (error.reason) {
+    case 'offline':
+      return 'host_offline'
+    case 'forbidden':
+    case 'signed_out':
+      return 'wrong_account'
+    default:
+      return 'unreachable'
+  }
+}
+
+/**
+ * Asks a computer of the phone's Huli Cloud account to add it, through the relay alone, to the key
+ * the account lists for it; the computer's owner allows it there and the phone's user compares the
+ * code. Saved like a computer paired by its code once it welcomes the phone.
+ */
+export async function pairWithAccount(
+  computer: { id: string; key: string },
+  progress: (state: AccountPairProgress) => void,
+): Promise<{
+  pairing: AccountPairing
+  finished: Promise<{ paired: Paired; host: SavedHost; key: KeyPair } | null>
+}> {
+  const key = await deviceKey()
+  const hostKey = fromBase64Url(computer.key)
+  const listed: HostRelay = { id: computer.id, urls: [RELAY_URL] }
+  const pairing = pairWithAccountHost(
+    {
+      dial: () => dialRelayTo(listed),
+      hostKey,
+      key,
+      client: CLIENT,
+      device: { name: Device.deviceName ?? 'iPhone', model: Device.modelName ?? 'iPhone' },
+      dialFailure: relayFailure,
+    },
+    progress,
+  )
+  const finished = pairing.result.then((paired) => {
+    if (!paired) return null
+    const { welcome } = paired
+    const saved = toBase64(hostKey)
+    const host: SavedHost = {
+      id: computerIdOf(saved),
+      hostKey: saved,
+      name: welcome.host.name,
+      deviceName: welcome.device.name,
+      addresses: welcome.addresses,
+      platform: welcome.host.platform,
+      lastSeen: Date.now(),
+      relay: welcome.relay ?? listed,
+    }
+    return { paired, host, key }
+  })
+  return { pairing, finished }
 }
 
 const routeKey = (address: DirectAddress) => `${address.host}:${address.port}`

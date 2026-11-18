@@ -1,4 +1,4 @@
-// Settings: the computer's Huli Cloud account, this iPhone (its name there, notifications, the app
+// Settings: the computer's Huli Cloud account, this iPhone's own (账号), this iPhone (its name there, notifications, the app
 // lock), appearance, the paired computer and how the phone reaches it, and about.
 
 import { useEffect, useState } from 'react'
@@ -14,6 +14,7 @@ import { RenameDialog } from '../../components/RenameDialog'
 import { Sheet } from '../../components/Sheet'
 import { useUpdateRows } from '../../components/UpdateRows'
 import { APP_VERSION, currentAddress, routeKind } from '../../connection'
+import { useCloudStatus } from '../../cloud'
 import { useHost } from '../../host'
 import { computerName } from '../../store'
 import { ROUTE_NAMES } from '../../linkInfo'
@@ -78,6 +79,7 @@ export default function Settings() {
   const insets = useSafeAreaInsets()
   const push = usePushStatus()
   const account = useAccount(push)
+  const cloud = useCloudStatus()
   const biometry = useBiometryName()
   const liveAllowed = useLiveAllowed()
   const updateRows = useUpdateRows()
@@ -160,6 +162,17 @@ export default function Settings() {
             <Text style={[typeScale.footnote, { color: c.textSecondary }]}>{accountCard.body}</Text>
           </View>
         </View>
+
+        <ListGroup header="账号">
+          <ListRow
+            title="Huli Cloud 账号"
+            icon="person"
+            plainIcon
+            value={cloud.state === 'signed-in' ? cloud.account.email : '未登录'}
+            chevron
+            onPress={() => router.push('/settings/account')}
+          />
+        </ListGroup>
 
         <ListGroup
           header="这台 iPhone"

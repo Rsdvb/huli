@@ -5,6 +5,8 @@ import { createServer, type Server } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { parseRegionPayload, parseSignedRegionList } from '@shared/remote/relay-regions'
 import { decodeRelayBytes } from '@shared/remote/relay'
+import { ACCOUNT_DEVICES_PATH, ACCOUNT_REVOKE_PATH } from '@shared/huli-cloud'
+import { AccountDevicesApi } from './account'
 import type { ApnsSender } from './apns'
 import { Auth } from './auth'
 import type { Config } from './config'
@@ -55,6 +57,7 @@ export function makeServer(
     origin: config.origin,
     trustProxy: config.trustProxy,
     webOrigin,
+    online: (id) => relay.online(id),
     ...options,
   })
   const push = new PushGateway({
@@ -71,12 +74,30 @@ export function makeServer(
     regionId: regionIdOf(regions, config.origin),
     regions,
     tokens,
+    registry: {
+      register: (id, family, signKey) => store.registerComputer(id, family, signKey) !== null,
+      profile: (id, profile) => store.setComputerProfile(id, profile),
+      seen: (id, left) => store.computerSeen(id, left),
+      owner: (id) => {
+        const computer = store.computer(id)
+        return computer && { account: computer.account, family: computer.family }
+      },
+    },
     trustProxy: config.trustProxy,
     ...(options.relayLimits ? { limits: options.relayLimits } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.log ? { log: options.log } : {}),
   })
   const log = options.log ?? ((line: string) => console.warn(line))
+  const devices = new AccountDevicesApi({
+    store,
+    auth,
+    online: (id) => relay.online(id),
+    revoked: () => relay.checkHosts(),
+    now: options.now ?? Date.now,
+    secure,
+    log,
+  })
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', config.origin)
@@ -129,6 +150,10 @@ export function makeServer(
           if (!family) return
           return sendJson(response, secure, 200, tokens.issue(family.id))
         }
+        case `GET ${ACCOUNT_DEVICES_PATH}`:
+          return devices.list(request, response)
+        case `POST ${ACCOUNT_REVOKE_PATH}`:
+          return await devices.revoke(request, response)
         case 'GET /device':
           return auth.devicePage(request, response, url)
         case 'POST /device':

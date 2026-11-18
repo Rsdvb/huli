@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { AlertCircleIcon, CancelCircleIcon, Shield01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
@@ -19,6 +19,8 @@ export interface HostedPairing {
   onSwitchAccount(): void
   /** Back to the host shown before, when there is one. */
   onBack: (() => void) | null
+  /** Huli: the account's computers to pair with without a code, under the link's field. */
+  computers?: ReactNode
 }
 
 /**
@@ -175,6 +177,8 @@ export function PairingView({
             </div>
           </form>
         )}
+
+        {!busy && hosted?.computers}
 
         {hosted && (
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-secondary">

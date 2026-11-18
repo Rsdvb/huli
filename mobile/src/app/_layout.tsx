@@ -5,6 +5,7 @@ import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
+import { startCloud } from '../cloud'
 import { OutboxBridge } from '../components/OutboxBridge'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
@@ -46,6 +47,7 @@ export default function Layout() {
   const { c, scheme } = useTokens()
   useEffect(() => watchUpdates(), [])
   useEffect(() => watchMemory(), [])
+  useEffect(() => startCloud(), [])
   return (
     // The keyboard's frames reach the screens on the UI thread, so the views that make room for it
     // move with it without a layout pass per frame. Gestures (home's drag onto a folder) need the
@@ -74,6 +76,7 @@ export default function Layout() {
                   options={{ headerShown: false, presentation: 'modal' }}
                 />
                 <Stack.Screen name="settings/index" options={{ headerShown: false }} />
+                <Stack.Screen name="settings/account" options={{ headerShown: false }} />
                 <Stack.Screen name="settings/computers" options={{ headerShown: false }} />
                 <Stack.Screen name="settings/computer" options={{ headerShown: false }} />
                 <Stack.Screen name="settings/lock" options={{ headerShown: false }} />
@@ -95,6 +98,10 @@ export default function Layout() {
                 <Stack.Screen name="workflow/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="search" options={{ headerShown: false, animation: 'fade' }} />
                 <Stack.Screen name="pair" options={{ headerShown: false, presentation: 'modal' }} />
+                <Stack.Screen
+                  name="pair-computer"
+                  options={{ headerShown: false, presentation: 'modal' }}
+                />
               </Stack>
             </ShellProvider>
             <PushBridge />

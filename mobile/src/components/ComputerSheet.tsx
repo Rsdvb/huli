@@ -1,11 +1,13 @@
 // The paired computers, from the top bar's computer mark: which one the app shows, whether each
 // can be reached, and switching, renaming, adding and unpairing. Settings › 已配对的电脑 uses the
-// same rows and actions.
+// same rows and actions. Below them, 全部电脑: every computer of the phone's Huli Cloud account, the
+// ones it is not paired with yet marked 未配对.
 
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { currentAddress, probe, routeKind } from '../connection'
+import { AccountComputers } from './AccountComputers'
 import { useComputers } from '../host'
 import { linkStatusOf, platformOf, ROUTE_NAMES, type LinkTone } from '../linkInfo'
 import { ago } from '../sessions'
@@ -308,6 +310,7 @@ export function ComputerSheet(props: { visible: boolean; onClose(): void }) {
             </View>
           ))}
         </View>
+        <AccountComputers header="全部电脑" before={props.onClose} />
         <ListGroup>
           {!connected ? (
             <ListRow

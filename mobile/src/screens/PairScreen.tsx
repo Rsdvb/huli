@@ -1,5 +1,6 @@
 // Pairing: scan the code the computer shows in Settings › Remote access, or paste its link; the
-// owner then allows the phone on the computer.
+// owner then allows the phone on the computer. Or sign in to Huli Cloud and pick a computer of the
+// account, which the owner allows the same way, comparing a code instead of scanning one.
 
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -19,6 +20,8 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import type { KeyPair } from '@shared/remote/noise'
 import type { Paired, PairFailure } from '@shared/remote/pair'
 import type { PairingPayload } from '@shared/remote/pairing'
+import { SIGN_IN_FAILURES, signIn, useCloudStatus } from '../cloud'
+import { AccountComputers } from '../components/AccountComputers'
 import { pairWith, parseScanned } from '../connection'
 import { offerPairing, onPairing, takePairing } from '../pairLink'
 import type { SavedHost } from '../store'
@@ -264,6 +267,7 @@ export function PairScreen(props: {
                   <Text style={[typeScale.callout, { color: c.tint }]}>改用配对链接</Text>
                 </Press>
               )}
+              <AccountOption />
             </>
           )}
         </ScrollView>
@@ -272,8 +276,53 @@ export function PairScreen(props: {
   )
 }
 
+/** Pairing through the phone's Huli Cloud account: signing in, then the account's computers. */
+function AccountOption() {
+  const { c } = useTokens()
+  const cloud = useCloudStatus()
+  const [error, setError] = useState<string | null>(null)
+  if (cloud.state === 'signed-in') {
+    return (
+      <AccountComputers
+        header="Kite Cloud 账号里的电脑"
+        footer="点一台电脑，在电脑上核对数字并同意，就配对好了。"
+        unpairedOnly
+      />
+    )
+  }
+  const start = async () => {
+    setError(null)
+    const result = await signIn()
+    if (result === 'signed-in' || result === 'cancelled') return
+    haptic.warning()
+    setError(SIGN_IN_FAILURES[result])
+  }
+  return (
+    <View style={styles.paste}>
+      {error ? <Text style={[typeScale.footnote, { color: c.danger }]}>{error}</Text> : null}
+      <Press
+        disabled={cloud.state === 'signing-in'}
+        onPress={() => void start()}
+        accessibilityRole="button"
+        style={[styles.secondary, styles.row, { backgroundColor: c.fillStrong }]}
+      >
+        {cloud.state === 'signing-in' ? (
+          <ActivityIndicator color={c.textSecondary} />
+        ) : (
+          <Icon name="person" size={18} color={c.text} />
+        )}
+        <Text style={[typeScale.headline, { color: c.text }]}>用 Kite Cloud 账号登录</Text>
+      </Press>
+      <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
+        登录后，账号里的电脑会列在这里，不用扫码；不在同一个网络也能经中转连接。
+      </Text>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  row: { flexDirection: 'row', gap: space.sm },
   center: { textAlign: 'center' },
   page: { paddingHorizontal: space.xl + 4, paddingTop: space.xxxl, gap: space.lg },
   appIcon: { width: 72, height: 72, borderRadius: 18, marginBottom: space.sm },
