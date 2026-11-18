@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -15,6 +15,7 @@ import {
   type KettuImportDeps,
 } from './kettu-import'
 import { newArtifactId } from './artifacts/ids'
+import type { ArtifactCaller } from './kettu-import-artifacts'
 import { formatEntry } from './memory/entry-file'
 import { MemoryService } from './memory/service'
 import { projectsFile, sessionsFile, type ProjectRecord, type SessionRecord } from './storage'
@@ -367,6 +368,42 @@ describe('KettuImport', () => {
     expect(await snapshot(kettu)).toEqual(before)
     expect(await readdir(copies)).toEqual([])
     await threads.close()
+  })
+
+  it("removes the copy of Kettu's database when reading it fails", async () => {
+    await writeKettu(fixture(), [])
+    await writeFile(path.join(kettu, 'state', 'threads.db'), 'not a database')
+    const threads = {
+      artifact: async () => {
+        throw new Error('broken')
+      },
+    } as ArtifactCaller
+    const scan = await setup({ threads }).importer.scan()
+    expect(scan.artifacts).toEqual({ found: 0, importable: 0, error: 'unreadable' })
+    expect(await readdir(copies)).toEqual([])
+  })
+
+  it('removes copies an earlier host left behind, and only those', async () => {
+    await writeKettu(fixture(), [])
+    const twoHoursAgo = (Date.now() - 2 * 60 * 60 * 1000) / 1000
+    for (const name of [
+      'huli-kettu-Ab12Cd',
+      'huli-kettu-Ef34Gh',
+      'huli-kettu-data',
+      'other-Ij56Kl',
+    ]) {
+      await mkdir(path.join(copies, name))
+      await writeFile(path.join(copies, name, 'threads.db'), 'copy')
+    }
+    for (const name of ['huli-kettu-Ab12Cd', 'huli-kettu-data', 'other-Ij56Kl']) {
+      await utimes(path.join(copies, name), twoHoursAgo, twoHoursAgo)
+    }
+    await setup().importer.scan()
+    expect((await readdir(copies)).sort()).toEqual([
+      'huli-kettu-Ef34Gh',
+      'huli-kettu-data',
+      'other-Ij56Kl',
+    ])
   })
 
   it('runs one import at a time', async () => {

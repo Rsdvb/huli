@@ -61,11 +61,12 @@ copies Kettu's whole thread database (some 300 MB); the dialog looks each time i
 Huli's own files:
 
 - `src/agent-host/kettu-import.ts` (+ `.test.ts`): finds Kettu's data folder (`%APPDATA%\Kettu`,
-  `~/Library/Application Support/Kettu`, `$XDG_CONFIG_HOME` or `~/.config/Kettu`;
-  `HULI_KETTU_DATA` points elsewhere), copies `state/sessions.json` and `state/projects.json` into a
-  temporary folder and reads the copies with the index's own parsers. It never writes there, and
-  reads nothing when that folder is Huli's own (a build named Kettu). Each chosen session is
-  imported through `importSession`, as the sidebar's Import sessions does, so Huli resumes the
+  `~/Library/Application Support/Kettu`, `$XDG_CONFIG_HOME` or `~/.config/Kettu`; `HULI_KETTU_DATA`
+  points elsewhere), copies `state/sessions.json` and `state/projects.json` into a temporary folder
+  (`huli-kettu-*`, removed after each look; one an hour old that a host stopped during a look left
+  behind goes with the next look) and reads the copies with the index's own parsers. It never writes
+  there, and reads nothing when that folder is Huli's own (a build named Kettu). Each chosen session
+  is imported through `importSession`, as the sidebar's Import sessions does, so Huli resumes the
   agent's own session; one another program has open (Kettu itself) comes over as a fork. Subagent
   sessions are not imported: the parent's history brings them back under it when it is opened.
   Sessions in a Kettu worktree or Kettu's scratch folder, for an agent Huli lacks, or in a folder

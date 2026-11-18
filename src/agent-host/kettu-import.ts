@@ -5,7 +5,7 @@
 // artifacts come through kettu-import-memory.ts and kettu-import-artifacts.ts. Huli's own; see
 // tools/huli/README.md.
 
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { SessionSummary } from '@shared/agent-host'
@@ -221,6 +221,8 @@ export class KettuImport {
   private readonly isDirectory: (folder: string) => Promise<boolean>
   /** The artifacts last read, while Kettu's database is as it was then. */
   private artifactsRead: { signature: string; read: KettuArtifactsRead } | null = null
+  /** Whether copies an earlier host left behind were looked for. */
+  private swept = false
 
   constructor(private readonly deps: KettuImportDeps) {
     this.isDirectory = deps.isDirectory ?? isDirectory
@@ -256,8 +258,13 @@ export class KettuImport {
     return pathKey(path.resolve(source), platform) === pathKey(path.resolve(ownData), platform)
   }
 
-  private tempFolder(): Promise<string> {
-    return mkdtemp(path.join(this.deps.tempDir ?? os.tmpdir(), 'huli-kettu-'))
+  private async tempFolder(): Promise<string> {
+    const parent = this.deps.tempDir ?? os.tmpdir()
+    if (!this.swept) {
+      this.swept = true
+      await removeStaleCopies(parent, Date.now() - STALE_COPY_MS)
+    }
+    return mkdtemp(path.join(parent, COPY_PREFIX))
   }
 
   /** Kettu's memory, from copies of its files. */
@@ -627,6 +634,32 @@ export class KettuImport {
     }
     return [...projects.values()]
   }
+}
+
+/** The temporary folders the copies of Kettu's files are made in, named as `mkdtemp` names them. */
+const COPY_PREFIX = 'huli-kettu-'
+const COPY_FOLDER = /^huli-kettu-[A-Za-z0-9]{6}$/
+
+/** How old a folder of copies is before it counts as left behind; a look takes seconds. */
+const STALE_COPY_MS = 60 * 60 * 1000
+
+/**
+ * Removes the folders of copies a host left behind when it stopped during a look, as on a crash
+ * while it copied Kettu's database, which a look's own cleanup never got to.
+ */
+async function removeStaleCopies(parent: string, before: number): Promise<void> {
+  const names = await readdir(parent).catch(() => [])
+  await Promise.all(
+    names
+      .filter((name) => COPY_FOLDER.test(name))
+      .map(async (name) => {
+        const folder = path.join(parent, name)
+        const info = await lstat(folder).catch(() => null)
+        if (info?.isDirectory() && info.mtimeMs < before) {
+          await rm(folder, { recursive: true, force: true }).catch(() => {})
+        }
+      }),
+  )
 }
 
 /** A copy of one of Kettu's state files in `temp`, read back; null when Kettu has none. */
