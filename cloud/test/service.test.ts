@@ -2,7 +2,7 @@
 // a change on either side that breaks the other fails here.
 
 import { mkdtempSync, rmSync } from 'node:fs'
-import type { AddressInfo } from 'node:net'
+import { connect, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -148,6 +148,23 @@ async function failure(promise: Promise<unknown>): Promise<string> {
   }
   throw new Error('It did not fail')
 }
+
+/** The status line's code for a request sent as written, path and all. */
+async function rawStatus(target: string): Promise<number> {
+  const { port } = parts.server.address() as AddressInfo
+  const socket = connect(port, '127.0.0.1')
+  socket.write(`GET ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`)
+  let text = ''
+  for await (const chunk of socket) text += String(chunk)
+  return Number(/^HTTP\/1\.1 (\d{3})/.exec(text)?.[1] ?? 0)
+}
+
+describe('requests', () => {
+  it('answers 400 to a path no URL parses, and keeps serving', async () => {
+    for (const target of ['//', '///', '//[']) expect(await rawStatus(target)).toBe(400)
+    expect((await fetch(new URL('/healthz', base))).status).toBe(200)
+  })
+})
 
 describe('browser sign-in', () => {
   it('signs a desktop client in and answers /me', async () => {

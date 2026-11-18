@@ -7,6 +7,7 @@ import { Writable } from 'node:stream'
 import { renderUnicodeCompact } from 'uqr'
 import { Apns } from './apns'
 import { loadConfig } from './config'
+import { errorTrace } from './http'
 import {
   checkTotp,
   hashPassword,
@@ -129,6 +130,11 @@ function signOutAll(): void {
 }
 
 function serve(): void {
+  // A promise some path forgot to handle is logged, not the end of the service; its message is
+  // left out, as it may quote a token.
+  process.on('unhandledRejection', (reason) => {
+    console.error(`huli-cloud: unhandled rejection: ${errorTrace(reason)}`)
+  })
   const config = loadConfig()
   const apns = config.apns ? new Apns(config.apns) : null
   const { server, relay } = makeServer(config, apns ? { send: apns.send, topic: apns.topic } : null)

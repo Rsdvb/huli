@@ -5,6 +5,19 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 export class TooBig extends Error {}
 
+/**
+ * Where an error came from, for the log: its name and stack frames, never its message, which may
+ * quote what a request carried, such as a token.
+ */
+export function errorTrace(error: unknown): string {
+  if (!(error instanceof Error)) return typeof error
+  const frames = (error.stack ?? '')
+    .split('\n')
+    .filter((line) => /^\s+at /.test(line))
+    .join('\n')
+  return frames ? `${error.name}\n${frames}` : error.name
+}
+
 export async function readBody(request: IncomingMessage, limit: number): Promise<Buffer> {
   const declared = Number(request.headers['content-length'] ?? '0')
   if (declared > limit) throw new TooBig()
