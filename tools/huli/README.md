@@ -107,6 +107,61 @@ Hooks into upstream files, one or two lines each:
 - `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (the progress
   event), `features/settings/section-defs.tsx` (the row).
 
+### Import from agents
+
+Brings every past session of Claude Code, Codex or an ACP agent on this computer over, across all
+the folders it ran in, instead of a project at a time with the sidebar's Import sessions: Settings ›
+General › Import from agents. Nothing is listed until its dialog opens; the agents' own files are
+only read.
+
+Huli's own files:
+
+- `src/agent-host/agent-history.ts` (+ `.test.ts`): `agentHistory.list`. Claude Code's
+  transcripts are read here, under its config folder's `projects/` (`CLAUDE_CONFIG_DIR` or the
+  folder chosen for the agent): only each project folder's own `<uuid>.jsonl`, never
+  `<session>/subagents/`, and of each only the first and last 64 KB, 16 at a time, kept by path,
+  size and time so a second look reads only what changed. A session's folder is the `cwd` it
+  recorded (a `relocated` one's new folder), never the lossy folder name; a copy Claude Code left
+  in another folder when it moved a session is listed once, from the folder that fits. Its title
+  is its custom title, else its AI title, else its first prompt. Codex's threads and an ACP
+  agent's sessions come from the agent (`listAllSessions`: `thread/list` or `session/list` without
+  a `cwd`), since Codex keeps most rollouts zstd-compressed and indexes them itself. Sidechains,
+  subagents' threads and sessions without a message are counted and left out; one whose id a
+  session here has (`agentSessionIds`) is marked imported, one whose folder is gone missing.
+  What was listed keeps its title and times for `sessions.import`, which imports each as the
+  sidebar does (adding its project if needed). A window's alone (`WINDOW_ONLY`): it names every
+  folder an agent ran in, which a paired device otherwise learns only by naming a folder.
+- `src/agent-host/memory/codex-import.ts` (+ `.test.ts`): Codex's own memory for the memory
+  import beside Claude Code's (`memory.importScan`, `memory.import`). Only the curated files of
+  `$CODEX_HOME/memories`: each `# Task Group:` of MEMORY.md (without its lists of rollout files),
+  placed by the folder its `applies_to` names when that is a project here, else global; and the
+  profile, preferences and tips of memory_summary.md, global. `raw_memories.md`,
+  `rollout_summaries/` (what those were made from), `extensions/` (notes already merged into them)
+  and `skills/` are not memory. `memories_v2` is read only when `memories` has neither file. A
+  re-run brings nothing new, as an entry whose title and body memory holds is skipped.
+- `src/shared/agent-history.ts`: the listing's types.
+- `src/renderer/src/features/agent-history/`: the dialog (agents as tabs, sessions by folder with
+  search and the quick picks Last 30 days, All and None; three imports at a time with progress,
+  Stop and a summary that offers the memory import and the latest session), its model and the
+  Settings row.
+- `src/shared/locales/*/agentHistory.json`: its copy.
+
+Hooks into upstream files, one or two lines each:
+
+- `src/agent-host/connection.ts` (`ListedEverywhere`, the optional `listAllSessions`), its
+  implementations in `codex/connection.ts` and `acp/connection.ts`.
+- `src/agent-host/sessions.ts` (`agentSessionIds`), `src/agent-host/host.ts` (the handler, and
+  `sessions.import` taking over a listed session's title and times through `keptFor`; the Codex
+  agents for memory).
+- `src/agent-host/memory/service.ts` (`codexAgents`, Codex's sources in `importScan` and
+  `import`), `src/shared/memory.ts` and `memory.import` (a source's `project` may be null: global
+  memory), `features/settings/memory-rows.tsx` (a tick per source, its entries' titles, a source of
+  global memory, and `MemoryImportDialog` for the summary).
+- `src/shared/agent-host.ts`, `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`,
+  `src/shared/remote/allow-list.ts`, `src/shared/i18next.d.ts`,
+  `features/settings/section-defs.tsx` (the row), `locales/*/settings.json`
+  (`memory.import.sourceGlobal`).
+
 ### Session folders
 
 Folders the user makes to organize sessions, kept by the agent host so every window and paired

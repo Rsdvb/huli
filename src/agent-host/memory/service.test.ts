@@ -471,3 +471,135 @@ describe('MemoryService import', () => {
     expect(long!.body).toContain('the whole text is in')
   })
 })
+
+describe('MemoryService import of Codex memory', () => {
+  const CODEX = 'codex' as AgentId
+  let codexHome: string
+
+  function codexService(): MemoryService {
+    return new MemoryService({
+      root,
+      log: () => {},
+      projects: () => projects,
+      claudeAgents: () => [],
+      codexAgents: () => [{ agentId: CODEX, name: 'Codex', home: codexHome }],
+      now: () => now,
+    })
+  }
+
+  beforeEach(async () => {
+    codexHome = path.join(dir, 'codex')
+    await mkdir(path.join(codexHome, 'memories'), { recursive: true })
+    await writeFile(
+      path.join(codexHome, 'memories', 'MEMORY.md'),
+      [
+        '# Task Group: Shop release',
+        '',
+        'scope: Releasing the shop.',
+        `applies_to: cwd=${project}; reuse_rule=recheck versions`,
+        '',
+        '## Task 1: Release, success',
+        '',
+        '### rollout_summary_files',
+        '',
+        '- rollout_summaries/x.md (cwd=/x, thread_id=1)',
+        '',
+        '### keywords',
+        '',
+        '- release, tag',
+        '',
+        '## Reusable knowledge',
+        '',
+        '- Tag before you push.',
+        '',
+        '# Task Group: Somewhere else',
+        '',
+        'scope: A folder Kettu does not know.',
+        'applies_to: cwd=/nowhere/else; reuse_rule=none',
+        '',
+        '## Reusable knowledge',
+        '',
+        '- Elsewhere.',
+        '',
+      ].join('\n'),
+    )
+    await writeFile(
+      path.join(codexHome, 'memories', 'memory_summary.md'),
+      [
+        'v1',
+        '## User Profile',
+        'Works on Windows.',
+        '## General Tips',
+        'No durable tips are supported by the available sources.',
+        "## What's in Memory",
+        '### /x',
+        '- an index',
+      ].join('\n'),
+    )
+  })
+
+  it('puts an entry in the project it names when Kettu has it, else in global memory', async () => {
+    const memory = codexService()
+    const scan = await memory.importScan()
+    expect(scan.sources).toEqual([
+      expect.objectContaining({
+        agentId: CODEX,
+        project: null,
+        projectName: null,
+        entries: [
+          expect.objectContaining({ title: 'User Profile (Codex)', aboutUser: true }),
+          expect.objectContaining({ title: 'Somewhere else', aboutUser: false }),
+        ],
+      }),
+      expect.objectContaining({
+        project,
+        projectName: 'Shop',
+        entries: [
+          expect.objectContaining({ title: 'Shop release', description: 'Releasing the shop.' }),
+        ],
+      }),
+    ])
+    const result = await memory.import(
+      scan.sources.map((source) => ({ agentId: source.agentId, project: source.project })),
+      [],
+    )
+    expect(result).toEqual({ imported: 3, skipped: 0, global: 2 })
+    const shop = await memory.list(scopeOf())
+    expect(shop).toHaveLength(1)
+    expect(shop[0]!.body).toContain('Tag before you push.')
+    expect(shop[0]!.body).toContain('applies_to:')
+    expect(shop[0]!.body).not.toContain('rollout_summaries/')
+    expect(shop[0]!.source).toEqual({ agentId: CODEX, sessionId: null })
+    expect((await memory.list(GLOBAL)).map((entry) => entry.title).sort()).toEqual([
+      'Somewhere else',
+      'User Profile (Codex)',
+    ])
+  })
+
+  it('brings nothing new when run again, and leaves Codex’s files as they were', async () => {
+    const file = path.join(codexHome, 'memories', 'MEMORY.md')
+    const before = await readFile(file, 'utf8')
+    const memory = codexService()
+    const sources = [
+      { agentId: CODEX, project: null },
+      { agentId: CODEX, project },
+    ]
+    expect((await memory.import(sources, [])).imported).toBe(3)
+    expect((await memory.importScan()).sources).toEqual([])
+    expect(await memory.import(sources, [])).toEqual({ imported: 0, skipped: 3, global: 0 })
+    expect(await readFile(file, 'utf8')).toBe(before)
+  })
+
+  it('imports only the chosen sources, and refuses an unknown project', async () => {
+    const memory = codexService()
+    expect(await memory.import([{ agentId: CODEX, project }], [])).toEqual({
+      imported: 1,
+      skipped: 0,
+      global: 0,
+    })
+    expect(await memory.list(GLOBAL)).toEqual([])
+    expect(
+      await code(memory.import([{ agentId: CODEX, project: path.join(dir, 'other') }], [])),
+    ).toBe('not_found')
+  })
+})

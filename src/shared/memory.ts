@@ -80,12 +80,15 @@ export interface MemoryImportEntry {
   aboutUser: boolean
 }
 
-/** One agent's own memory of one project. */
+/**
+ * One agent's own memory of one project. Huli: null for Codex's entries that name no project
+ * Kettu has, which go to global memory.
+ */
 export interface MemoryImportSource {
   agentId: AgentId
   agentName: string
-  project: string
-  projectName: string
+  project: string | null
+  projectName: string | null
   entries: MemoryImportEntry[]
 }
 

@@ -23,6 +23,9 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'agentNetwork.testLatency',
   'agentNetwork.exitIp',
   'agentNetwork.interfaces',
+  // Huli: every folder an agent ever ran in, with its sessions' titles; a device lists a folder's
+  // only when it names one, and the import that uses this is in the desktop's Settings alone.
+  'agentHistory.list',
 ])
 
 function sourceHas(params: unknown, key: string): boolean {
