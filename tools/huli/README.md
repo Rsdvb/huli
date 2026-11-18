@@ -185,6 +185,13 @@ default route, found with the system's tools and checked every minute, or named 
 Only programs that follow the proxy variables are held to the node; one that ignores them still
 goes out on the system's network.
 
+The exit check (`agentNetwork.exitIp`, `exit-ip.ts`) proves the path: the agent host fetches
+`https://www.cloudflare.com/cdn-cgi/trace` through the agent's own listener with HTTP CONNECT
+(or, for an agent on the system's network, through its HTTP proxy variable or directly) and
+reads `ip=` and `loc=`. A check stands a minute, runs again after the agent's node changes, and
+shows 无法连接 when the listener refuses the tunnel, which is the fail-closed case. A SOCKS or
+HTTPS system proxy is reported as unsupported rather than gone around.
+
 Huli's own files:
 
 - `src/shared/agent-network.ts`: the settings' part (on, default node, each agent's choice, the
@@ -193,8 +200,8 @@ Huli's own files:
   `api.ts` (mihomo's REST API on 127.0.0.1 with a random secret), `interface.ts`, `files.ts`
   (`agent-network/subscriptions.json`, which alone holds the links, and
   `state/agent-network.json`, the listener ports and the running mihomo, to stop one a crash
-  left), `service.ts` (the process, its restarts, the picks), `validate.ts` and
-  `network.test.ts`.
+  left), `service.ts` (the process, its restarts, the picks, the exits), `exit-ip.ts` (the
+  trace request through a listener), `validate.ts` and `network.test.ts`.
 - `src/renderer/src/features/settings/agent-network-section.tsx`, `agent-network-rows.tsx`,
   `src/renderer/src/stores/agent-network.ts`: Settings › Agent network and the agent page's
   Network exit row; `network.*` in `locales/*/settings.json`.

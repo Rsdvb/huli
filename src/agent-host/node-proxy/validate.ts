@@ -2,6 +2,7 @@
 // fresh params object with only the known fields, or throws `invalid_params`.
 
 import type { HostMethod } from '@shared/agent-host'
+import { isAgentId } from '@shared/agents'
 import {
   isNodeName,
   isSubscriptionName,
@@ -81,5 +82,13 @@ export const networkValidators: Pick<Validators, NetworkMethod> = {
       throw invalidParams(`nodes must be null or at most ${MAX_LATENCY_NODES} nodes`)
     }
     return { nodes: o.nodes.map((item: unknown, index) => nodeRef(item, `nodes[${index}]`)) }
+  },
+  'agentNetwork.exitIp': (params) => {
+    const o = record(params, ['agentId', 'fresh'])
+    if (!isAgentId(o.agentId)) throw invalidParams('agentId must be an agent id')
+    if (o.fresh !== undefined && typeof o.fresh !== 'boolean') {
+      throw invalidParams('fresh must be a boolean')
+    }
+    return { agentId: o.agentId, ...(o.fresh === undefined ? {} : { fresh: o.fresh }) }
   },
 }

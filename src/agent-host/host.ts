@@ -1136,6 +1136,11 @@ export class AgentHost {
           })
         }
       },
+      systemProxy: (agentId) => {
+        const read = (name: string) =>
+          this.env.get(name, agentId) ?? this.env.get(name.toLowerCase(), agentId) ?? null
+        return { proxy: read('HTTPS_PROXY') ?? read('ALL_PROXY'), noProxy: read('NO_PROXY') }
+      },
       ...(options.detectInterface ? { detect: options.detectInterface } : {}),
     })
     this.env.setNodeRoutes((agentId) => this.nodeProxy.portFor(agentId))
@@ -3165,6 +3170,7 @@ export class AgentHost {
       'agentNetwork.testLatency': async ({ nodes }) => ({
         results: await this.nodeProxy.testLatency(nodes),
       }),
+      'agentNetwork.exitIp': ({ agentId, fresh }) => this.nodeProxy.exitIp(agentId, fresh),
       'folders.list': () => this.sessionFolders.list(),
       'folders.create': ({ name, sessionIds }) => this.sessionFolders.create(name, sessionIds),
       'folders.rename': ({ folderId, name }) => this.sessionFolders.rename(folderId, name),

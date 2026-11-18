@@ -17,7 +17,7 @@ import type {
   BrowserOriginDecision,
 } from './browser'
 import type { ComputerAppDecision } from './computer-use'
-import type { AgentNetworkStatus, LatencyResult, NodeRef, NodeView } from './agent-network'
+import type { AgentNetworkStatus, ExitIp, LatencyResult, NodeRef, NodeView } from './agent-network'
 import type { ControlOutcome } from './control'
 import type { ContextBreakdown } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
@@ -1748,6 +1748,10 @@ export interface HostContract {
     params: { nodes: NodeRef[] | null }
     result: { results: LatencyResult[] }
   }
+  // Where the agent's traffic leaves from, by a request sent its way (its node's listener, or the
+  // system's network); a check under a minute old answers unless `fresh`. Every window hears it
+  // in `agentNetwork.changed` too.
+  'agentNetwork.exitIp': { params: { agentId: AgentId; fresh?: boolean }; result: ExitIp }
   // Huli: the user's folders of sessions, in the user's order; every port hears `folders.changed`.
   'folders.list': { params: void; result: SessionFolder[] }
   // A new folder, last in the order, holding `sessionIds` (taken out of any other folder).
@@ -2059,6 +2063,7 @@ export const HOST_METHODS = [
   'agentNetwork.refresh',
   'agentNetwork.nodes',
   'agentNetwork.testLatency',
+  'agentNetwork.exitIp',
   'folders.list',
   'folders.create',
   'folders.rename',

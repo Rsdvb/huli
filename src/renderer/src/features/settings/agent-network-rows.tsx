@@ -2,7 +2,7 @@
 // show and change this computer's agent network only. Huli's own; see tools/huli/README.md.
 
 import { useState, type FormEvent } from 'react'
-import { Delete02Icon, Edit02Icon, RefreshIcon } from '@hugeicons/core-free-icons'
+import { Delete02Icon, Edit02Icon, Globe02Icon, RefreshIcon } from '@hugeicons/core-free-icons'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import {
@@ -11,6 +11,7 @@ import {
   isSubscriptionName,
   cleanSubscriptionName,
   type AgentNetworkStatus,
+  type ExitIp,
   type NodeView,
   type SubscriptionView,
 } from '@shared/agent-network'
@@ -30,11 +31,13 @@ import { errorMessage, hostAt } from '@renderer/lib/host'
 import { mediumAgo } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
 import {
+  checkExit,
   nodeKey,
   nodeOfKey,
   testLatency,
   useAgentNetwork,
   useAgentNetworkStore,
+  useExitIp,
 } from '@renderer/stores/agent-network'
 import { useSettingsStore } from '@renderer/stores/settings'
 import {
@@ -527,6 +530,46 @@ export function NetworkChoiceSelect({ agentId, label }: { agentId: AgentId; labe
   )
 }
 
+/** A country or region's name in the interface's language, from its ISO code. */
+function regionName(code: string): string {
+  try {
+    return new Intl.DisplayNames([i18n.language], { type: 'region' }).of(code) ?? code
+  } catch {
+    return code
+  }
+}
+
+function exitText(exit: ExitIp | null, t: TFunction<'settings'>): string {
+  if (!exit) return t('network.exit.unchecked')
+  if (exit.failure === 'unsupported') return t('network.exit.unsupported')
+  const via = exit.via === 'node' ? 'node' : 'system'
+  if (!exit.ip) return t(`network.exit.${via}Unreachable`)
+  return exit.country
+    ? t(`network.exit.${via}`, { ip: exit.ip, country: regionName(exit.country) })
+    : t(`network.exit.${via}IpOnly`, { ip: exit.ip })
+}
+
+/** Where the agent's traffic last left from, or that it could not get out. */
+export function ExitLine({ agentId }: { agentId: AgentId }) {
+  const { t } = useTranslation('settings')
+  const exit = useExitIp(agentId)
+  return <span className={exit && !exit.ip ? 'text-danger' : undefined}>{exitText(exit, t)}</span>
+}
+
+/** Checks the agent's exit now, through its own listener while it uses a node. */
+export function ExitCheckAction({ agentId }: { agentId: AgentId }) {
+  const { t } = useTranslation('settings')
+  const busy = useAgentNetworkStore((s) => s.checkingExit[agentId] === true)
+  return (
+    <IconAction
+      label={t('network.exit.check')}
+      icon={Globe02Icon}
+      busy={busy}
+      onClick={() => void checkExit(agentId).catch(() => {})}
+    />
+  )
+}
+
 /** The Network exit row of an agent's page, on this computer only. */
 export function NetworkChoiceRow({ agentId }: { agentId: AgentId }) {
   const { t } = useTranslation('settings')
@@ -535,7 +578,21 @@ export function NetworkChoiceRow({ agentId }: { agentId: AgentId }) {
   const name = t('network.choice.name')
   return (
     <RowShell>
-      <RowLine text={<RowText name={name} description={t('network.choice.description')} />}>
+      <RowLine
+        text={
+          <RowText
+            name={name}
+            description={
+              <>
+                {t('network.choice.description')}
+                <br />
+                <ExitLine agentId={agentId} />
+              </>
+            }
+          />
+        }
+      >
+        <ExitCheckAction agentId={agentId} />
         <NetworkChoiceSelect agentId={agentId} label={name} />
       </RowLine>
       {!enabled && (

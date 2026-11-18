@@ -300,6 +300,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'agentNetwork.refresh': AGENT_MS,
   'agentNetwork.nodes': HOST_MS,
   'agentNetwork.testLatency': AGENT_MS,
+  'agentNetwork.exitIp': AGENT_MS,
   'folders.list': HOST_MS,
   'folders.create': HOST_MS,
   'folders.rename': HOST_MS,
