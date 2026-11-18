@@ -2092,7 +2092,8 @@
       "main": "Agent network",
       "subscriptions": "Subscriptions",
       "default": "Default node",
-      "agents": "Agents"
+      "agents": "Agents",
+      "interfaces": "This computer's interfaces"
     },
     "enabled": {
       "name": "Route agents through nodes",
@@ -2173,13 +2174,17 @@
     },
     "choice": {
       "name": "Network exit",
-      "description": "How this agent reaches the network. A move between a node and the system network applies when the agent next starts.",
+      "description": "How this agent reaches the network. A move to or from the system network applies when the agent next starts.",
       "follow": "Follow the default",
       "followNamed": "Follow the default ({{node}})",
       "system": "System network",
       "gone": "{{node}} (gone)",
       "off": "Agent network is off, so every agent uses the system network.",
-      "keywords": "network exit node proxy system"
+      "keywords": "network exit node proxy system interface adapter tun",
+      "pickInterface": "Choose an interface…",
+      "interface": "Interface: {{name}}",
+      "interfaceDown": "Interface: {{name}} (disconnected)",
+      "interfaceGone": "Interface: {{name}} (gone)"
     },
     "exit": {
       "node": "Node exit {{ip}} ({{country}})",
@@ -2190,7 +2195,10 @@
       "systemUnreachable": "System network exit: can’t connect",
       "unsupported": "Can’t check the exit: the system proxy isn’t an HTTP proxy",
       "unchecked": "Exit not checked yet",
-      "check": "Check exit IP"
+      "check": "Check exit IP",
+      "interface": "Interface exit {{ip}} ({{country}})",
+      "interfaceIpOnly": "Interface exit {{ip}}",
+      "interfaceUnreachable": "Interface exit: can’t connect"
     },
     "import": {
       "title": "Import a subscription file",
@@ -2199,6 +2207,20 @@
       "hint": "Clash YAML, or node links one per line or in base64, up to 10 MB. Kept on this computer and never refreshed; import it again to update it.",
       "tooLarge": "The file is larger than 10 MB.",
       "save": "Import"
+    },
+    "interfaces": {
+      "title": "Choose an interface",
+      "body": "{{agent}}'s traffic and name lookups leave only through the interface you choose, such as a proxy client's TUN or Wi-Fi. While it is disconnected or gone, the agent has no network rather than another way out.",
+      "up": "Connected",
+      "down": "Disconnected",
+      "tunnel": "TUN / VPN",
+      "loading": "Reading the interfaces…",
+      "empty": "No network interface was found.",
+      "save": "Use this interface",
+      "refresh": "Read the interfaces again",
+      "bound": "Used by {{agents}}",
+      "description": "An agent set to an interface sends its traffic only through it, and has no network while it is disconnected or gone.",
+      "keywords": "interface adapter nic tun vpn wifi ethernet bind"
     }
   }
 }

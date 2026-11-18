@@ -2063,7 +2063,8 @@
       "main": "智能体网络",
       "subscriptions": "订阅",
       "default": "默认节点",
-      "agents": "智能体"
+      "agents": "智能体",
+      "interfaces": "电脑的网卡"
     },
     "enabled": {
       "name": "让智能体走节点",
@@ -2144,13 +2145,17 @@
     },
     "choice": {
       "name": "网络出口",
-      "description": "这个智能体怎样联网。在节点和系统网络之间切换，要等它下次启动才生效。",
+      "description": "这个智能体怎样联网。切换到系统网络或从系统网络切出，要等它下次启动才生效。",
       "follow": "跟随默认",
       "followNamed": "跟随默认（{{node}}）",
       "system": "系统网络",
       "gone": "{{node}}（已不存在）",
       "off": "智能体网络已关闭，所有智能体都用系统网络。",
-      "keywords": "网络 出口 节点 代理 系统"
+      "keywords": "网络 出口 节点 代理 系统 网卡 适配器 tun",
+      "pickInterface": "选择网卡…",
+      "interface": "网卡：{{name}}",
+      "interfaceDown": "网卡：{{name}}（未连接）",
+      "interfaceGone": "网卡：{{name}}（已不存在）"
     },
     "exit": {
       "node": "节点出口 {{ip}}（{{country}}）",
@@ -2161,7 +2166,10 @@
       "systemUnreachable": "系统网络出口：无法连接",
       "unsupported": "无法检测出口：系统代理不是 HTTP 代理",
       "unchecked": "尚未检测出口",
-      "check": "检测出口 IP"
+      "check": "检测出口 IP",
+      "interface": "网卡出口 {{ip}}（{{country}}）",
+      "interfaceIpOnly": "网卡出口 {{ip}}",
+      "interfaceUnreachable": "网卡出口：无法连接"
     },
     "import": {
       "title": "从文件导入订阅",
@@ -2170,6 +2178,20 @@
       "hint": "Clash YAML，或 base64 / 逐行的节点链接，最大 10 MB。只保存在这台电脑上，不会自动更新，可随时重新导入。",
       "tooLarge": "文件超过 10 MB。",
       "save": "导入"
+    },
+    "interfaces": {
+      "title": "选择网卡",
+      "body": "{{agent}} 的流量和域名解析只从选定的网卡出去，比如代理客户端的 TUN 或 WLAN。网卡断开或不存在时，它就没有网络，不会改走别的网卡。",
+      "up": "已连接",
+      "down": "未连接",
+      "tunnel": "TUN / VPN",
+      "loading": "正在读取网卡…",
+      "empty": "没有找到网卡。",
+      "save": "使用这块网卡",
+      "refresh": "重新读取网卡",
+      "bound": "{{agents}} 在用",
+      "description": "设为某块网卡的智能体只从这块网卡联网，网卡断开或不存在时就没有网络。",
+      "keywords": "网卡 适配器 tun vpn wlan 以太网 绑定"
     }
   }
 }
