@@ -81,6 +81,8 @@ interface Tab {
   asking: boolean
   /** Restarts the pending navigation's time limit, which a site's wait extends. */
   restartWait: (() => void) | null
+  /** Whether its page's file choosers go to the agent's tools rather than a system dialog. */
+  intercepting: boolean
 }
 
 interface Browser {
@@ -637,6 +639,7 @@ export class BrowserViews {
       pending: null,
       asking: false,
       restartWait: null,
+      intercepting: false,
     }
     this.tabs.set(tab.id, tab)
     browser.strip.add(tab.id, how)
@@ -854,6 +857,7 @@ export class BrowserViews {
         })
     tab.view = view
     tab.released = false
+    tab.intercepting = false
     window.contentView.addChildView(view)
     this.place(tab)
     this.setVisible(tab, this.isShown(tab))
@@ -1117,6 +1121,7 @@ export class BrowserViews {
       if (mouse.type === 'mouseDown') this.held(tab, this.toOverlay(tab, mouse))
     })
     this.silenceDialogs(tab.id, contents)
+    this.interceptChoosers(tab)
     contents.once('destroyed', () => {
       // The view drops its contents once they are destroyed, so it is compared itself.
       if (tab.view !== view) return
@@ -1175,6 +1180,25 @@ export class BrowserViews {
       this.deps.dialogOpened?.(tabId, type ?? 'alert', accepted)
     })
     void debuggerSession.sendCommand('Page.enable').catch(() => {})
+  }
+
+  /**
+   * While the agent holds its tab, a file chooser there comes from the agent's own click: the page
+   * reports it over the DevTools protocol instead of opening the system's dialog, which would sit
+   * modal over the whole window mid-turn with nobody to answer it. Any other time, including after
+   * Take over and while the agent asks the user for a step, Chromium shows the dialog itself.
+   */
+  private interceptChoosers(tab: Tab): void {
+    const contents = this.contentsOf(tab)
+    if (!contents || !contents.debugger.isAttached()) return
+    const on =
+      this.browsers.get(tab.sessionId)?.strip.agent === tab.id &&
+      this.deps.control?.(tab.sessionId)?.kind === 'agent'
+    if (tab.intercepting === on) return
+    tab.intercepting = on
+    void contents.debugger
+      .sendCommand('Page.setInterceptFileChooserDialog', { enabled: on })
+      .catch(() => {})
   }
 
   /**
@@ -1367,6 +1391,8 @@ export class BrowserViews {
   }
 
   private emit(browser: Browser): void {
+    // Who holds which tab may have changed with whatever is reported.
+    for (const tab of this.tabsOf(browser)) this.interceptChoosers(tab)
     const tabs: BrowserTab[] = this.tabsOf(browser).map((tab) => ({
       id: tab.id,
       url: this.urlOf(tab),

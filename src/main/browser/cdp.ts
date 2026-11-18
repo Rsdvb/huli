@@ -29,6 +29,11 @@ export const MAX_VALUE_BYTES = 64 * 1024
 
 const POLL_MS = 50
 
+/** What an action that opened a file chooser adds to its result. */
+const CHOOSER_OPENED =
+  'It opened a file chooser, which the browser does not show while you use the page. To pick ' +
+  'files, ask the user with browser_ask_user to choose them.'
+
 /** A refused call, with the code an agent reads and text that says what to do. */
 export class ToolFailure extends Error {
   constructor(
@@ -114,6 +119,18 @@ interface PageState {
   /** The HTTP status of the main document, as the network saw it. */
   status: number | null
   frameId: string | null
+  /** The file chooser the agent's last action opened, which waits for files; null when none. */
+  chooser: FileChooser | null
+}
+
+interface FileChooser {
+  /** The file input's backend node id. */
+  backend: number
+  multiple: boolean
+  /** The document it opened in; one from an earlier document is gone. */
+  nav: number
+  /** Not yet reported to the agent. */
+  fresh: boolean
 }
 
 // Accessibility node, as Accessibility.getFullAXTree reports it.
@@ -525,6 +542,7 @@ export class BrowserCdp {
       injecting: 0,
       status: null,
       frameId: null,
+      chooser: null,
     }
     this.pages.set(tabId, page)
     for (const method of [
@@ -868,6 +886,19 @@ export class BrowserCdp {
         page.nav += 1
         page.snapshot = null
         page.status = null
+        page.chooser = null
+        break
+      }
+      case 'Page.fileChooserOpened': {
+        // Reported only while views.ts intercepts choosers, that is while the agent holds the tab.
+        const backend = params.backendNodeId
+        if (typeof backend !== 'number') break
+        page.chooser = {
+          backend,
+          multiple: params.mode === 'selectMultiple',
+          nav: page.nav,
+          fresh: true,
+        }
         break
       }
       default:
@@ -973,6 +1004,8 @@ export class BrowserCdp {
     const url = contents.getURL()
     const title = contents.getTitle()
     const dialogs = page.dialogs.splice(0)
+    const chooser = page.chooser?.fresh ? [CHOOSER_OPENED] : []
+    if (page.chooser) page.chooser.fresh = false
     // A popup that closed itself is gone; its opener is the agent's tab again.
     const opened = !switched
       ? []
@@ -980,7 +1013,7 @@ export class BrowserCdp {
         ? ['It opened a new tab, which is now your current tab.']
         : ['The page closed itself, and the tab that opened it is your current tab again.']
     return {
-      text: [text, ...dialogs, ...opened].join(' '),
+      text: [text, ...dialogs, ...chooser, ...opened].join(' '),
       value: { url, title, snapshot: outline },
     }
   }
