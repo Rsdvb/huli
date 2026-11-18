@@ -1,0 +1,73 @@
+{
+  "thisComputer": {
+    "name": "This computer on the account",
+    "description": "The account's phones and browsers list it, and may ask to be added.",
+    "registered": "Registered · relay id {{id}}",
+    "online": "On the relay now",
+    "pairable": "Phones and browsers of the account can ask to be added; you allow each here.",
+    "notPairable": "It takes no requests: turn on Let devices of the account find this computer in Remote access.",
+    "notRegistered": "Not registered yet: turn on Remote access and the relay, and it registers by itself.",
+    "keywords": "registry register relay account computer pairing"
+  },
+  "computers": {
+    "name": "The account's computers",
+    "description": "Computers signed in to the account with Remote access and the relay on.",
+    "empty": "No computers yet",
+    "emptyHint": "A computer shows here once it signs in with Remote access and the relay on.",
+    "online": "Online",
+    "lastSeen": "Last online {{when}}",
+    "thisOne": "This computer",
+    "unnamed": "Unnamed computer",
+    "keywords": "computers hosts relay registry last seen online"
+  },
+  "devices": {
+    "name": "Signed-in devices",
+    "description": "Phones, browsers and computers signed in to the account.",
+    "thisOne": "This one",
+    "lastUsed": "Last used {{when}}",
+    "signOut": "Sign out",
+    "signOutLabel": "Sign {{name}} out",
+    "others": "Sign out all others",
+    "othersTitle": "Sign out every other device?",
+    "othersBody": "Every phone, browser and computer but this one has to sign in again, and computers leave the relay.",
+    "kinds": {
+      "desktop": "Desktop app",
+      "daemon": "Command line",
+      "web": "Web",
+      "mobile": "Phone",
+      "other": "Other"
+    },
+    "keywords": "devices sign out revoke phones browsers sessions"
+  },
+  "pairing": {
+    "title": "Computers of your account",
+    "hint": "Pick one, then allow this browser on that computer and check that both show the same digits.",
+    "connect": "Connect",
+    "connectLabel": "Connect to {{name}}",
+    "none": "No computer of the account takes requests now.",
+    "connecting": "Asking the computer through Huli Cloud…",
+    "compare": "{{name}} shows Add this device? Check that it shows these digits, then click Add there.",
+    "same": "The digits match",
+    "differ": "They differ",
+    "waiting": "Waiting for Add on the computer…",
+    "failed": {
+      "void": "The computer ended the request. Try again.",
+      "rejected": "The computer refused this browser.",
+      "busy": "The computer is asked about another device. Try again shortly.",
+      "cooling_down": "The computer refused too many requests and takes none for ten minutes.",
+      "update_client": "This page is too old for the computer's Huli. Reload it.",
+      "update_host": "The computer's Huli is too old. Update it first.",
+      "refused": "The computer took no request: it does not let devices of the account find it, or the key listed is not its own.",
+      "host_offline": "The computer is offline.",
+      "wrong_account": "The computer is not on this account.",
+      "unreachable": "Huli Cloud's relay could not be reached.",
+      "cancelled": "Cancelled."
+    }
+  },
+  "state": {
+    "loading": "Reading the account…",
+    "unavailable": "Huli Cloud could not be reached.",
+    "retry": "Try again",
+    "failed": "Could not sign it out: {{reason}}"
+  }
+}

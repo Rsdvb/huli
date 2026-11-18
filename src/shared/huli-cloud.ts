@@ -84,6 +84,17 @@ export interface AccountDevices {
   computers: AccountComputer[]
 }
 
+/** What the desktop app's Settings › Account gets of them. */
+export type AccountDevicesResult =
+  | { state: 'ok'; devices: AccountDevices }
+  /** Not signed in, or the cloud is off. */
+  | { state: 'signed_out' }
+  /** The cloud could not be reached. */
+  | { state: 'unavailable' }
+
+/** One device of the account to sign out, or every other. */
+export type RevokeTarget = { device: string } | { others: true }
+
 /** The most devices the list carries. */
 const MAX_DEVICES = 256
 const MAX_TEXT = 100
@@ -201,7 +212,7 @@ export class HuliCloudApi {
    * Signs out one of the account's devices, or every one but the asking one; a computer's leaves
    * the relay within a minute. How many were signed out.
    */
-  async revoke(accessToken: string, which: { device: string } | { others: true }): Promise<number> {
+  async revoke(accessToken: string, which: RevokeTarget): Promise<number> {
     const form: Record<string, string> =
       'device' in which ? { device: which.device } : { others: '1' }
     const body = await this.request(
@@ -227,13 +238,17 @@ export class HuliCloudApi {
       throw new AccountNetworkError(`Could not reach ${this.base}: ${(error as Error).message}`)
     }
     const text = await response.text().catch(() => '')
-    let body: unknown = null
+    let body: unknown
     try {
       body = text ? JSON.parse(text) : null
     } catch {
-      throw unexpected(path)
+      // A proxy's page in place of the service's answer.
+      body = undefined
     }
-    if (response.ok) return body
+    if (response.ok) {
+      if (body === undefined) throw unexpected(path)
+      return body
+    }
     const error = record(body)
     const code = typeof error?.error === 'string' ? error.error : 'server_error'
     const message = typeof error?.error_description === 'string' ? error.error_description : code

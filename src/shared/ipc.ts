@@ -1,4 +1,5 @@
 import type { AccountStatus } from './account'
+import type { AccountDevicesResult, RevokeTarget } from './huli-cloud'
 import type { AgentsApi, HostMethod } from './agent-host'
 import type { ArtifactImportKind, ArtifactImportResult, ThumbnailPage } from './artifacts'
 import type { SelectMessage } from './artifact-runtime/page-messages'
@@ -350,6 +351,9 @@ export interface IpcInvokeContract {
   'account:sign-in': { args: []; result: AccountStatus }
   'account:cancel-sign-in': { args: []; result: AccountStatus }
   'account:sign-out': { args: []; result: AccountStatus }
+  // Huli: the account's devices and computers on Huli Cloud, and signing one or every other out.
+  'account:devices': { args: []; result: AccountDevicesResult }
+  'account:revoke-device': { args: [target: RevokeTarget]; result: number }
   'sharing:status': { args: []; result: SharingStatus }
   'sharing:refresh': { args: []; result: SharingStatus }
   // `accountId`: the account the user chose, or null to use the one the token reaches.
@@ -670,6 +674,10 @@ export interface KettuApi {
      */
     signOutAndClear?(): Promise<void>
     onChanged(listener: (status: AccountStatus) => void): () => void
+    /** Huli: the account's devices and computers; absent where Huli Cloud is not the service. */
+    devices?(): Promise<AccountDevicesResult>
+    /** Huli: signs out one of the account's devices, or every other; how many were. */
+    revokeDevice?(target: RevokeTarget): Promise<number>
   }
   /** Publishing artifacts online; main holds the account's token and makes every request. */
   sharing: {

@@ -1,0 +1,73 @@
+{
+  "thisComputer": {
+    "name": "这台电脑在账号里",
+    "description": "账号下的手机和浏览器能看到它，并请求连接。",
+    "registered": "已登记 · 中转 id {{id}}",
+    "online": "正连着中转",
+    "pairable": "账号下的手机和浏览器可以请求连接，每一台都要你在这里同意。",
+    "notPairable": "它不接受请求：在「远程访问」里打开「让账号下的设备找到这台电脑」。",
+    "notRegistered": "还没登记：打开「远程访问」和中转后，它会自己登记。",
+    "keywords": "登记 注册 中转 账号 电脑 配对"
+  },
+  "computers": {
+    "name": "账号里的电脑",
+    "description": "登录了这个账号、开着远程访问和中转的电脑。",
+    "empty": "还没有电脑",
+    "emptyHint": "电脑登录账号、开着远程访问和中转后会出现在这里。",
+    "online": "在线",
+    "lastSeen": "最近在线 {{when}}",
+    "thisOne": "这台电脑",
+    "unnamed": "未命名的电脑",
+    "keywords": "电脑 主机 中转 登记 最近在线"
+  },
+  "devices": {
+    "name": "已登录的设备",
+    "description": "登录了这个账号的手机、浏览器和电脑。",
+    "thisOne": "这台",
+    "lastUsed": "最近使用 {{when}}",
+    "signOut": "退出登录",
+    "signOutLabel": "让 {{name}} 退出登录",
+    "others": "让其他设备都退出登录",
+    "othersTitle": "让其他设备都退出登录？",
+    "othersBody": "除了这台，账号下的手机、浏览器和电脑都要重新登录，电脑会离开中转。",
+    "kinds": {
+      "desktop": "桌面端",
+      "daemon": "命令行",
+      "web": "网页版",
+      "mobile": "手机",
+      "other": "其他"
+    },
+    "keywords": "设备 退出 踢出 手机 浏览器 登录"
+  },
+  "pairing": {
+    "title": "账号里的电脑",
+    "hint": "选一台，在那台电脑上同意这个浏览器，并核对两边的数字一样。",
+    "connect": "连接",
+    "connectLabel": "连接 {{name}}",
+    "none": "账号里现在没有接受请求的电脑。",
+    "connecting": "正在通过 Huli Cloud 联系电脑…",
+    "compare": "{{name}} 上会弹出「要添加这台设备吗？」。核对那里显示的数字和这里一样，再在电脑上点「添加」。",
+    "same": "数字一致",
+    "differ": "不一致",
+    "waiting": "等电脑上点「添加」…",
+    "failed": {
+      "void": "电脑结束了这次请求，请再试一次。",
+      "rejected": "电脑上拒绝了这个浏览器。",
+      "busy": "电脑正在处理另一台设备的请求，稍后再试。",
+      "cooling_down": "电脑上的请求被拒绝太多次，十分钟内不再接受。",
+      "update_client": "这个页面版本太旧，请刷新。",
+      "update_host": "电脑上的 Huli 版本太旧，请先更新。",
+      "refused": "电脑没有接受请求：它没开「让账号下的设备找到这台电脑」，或者账号里记的不是它的密钥。",
+      "host_offline": "电脑现在不在线。",
+      "wrong_account": "这台电脑不在这个账号下。",
+      "unreachable": "连不上 Huli Cloud 的中转。",
+      "cancelled": "已取消。"
+    }
+  },
+  "state": {
+    "loading": "正在读取账号…",
+    "unavailable": "连不上 Huli Cloud。",
+    "retry": "重试",
+    "failed": "没能让它退出：{{reason}}"
+  }
+}
