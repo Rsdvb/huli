@@ -229,6 +229,17 @@ export class FakeAppServer {
       data: this.history.get(params.threadId as string) ?? [],
       nextCursor: null,
     }))
+    // As Codex does: the history keeps what came before the turn, and the thread says so after.
+    this.on('thread/revert', (params, server) => {
+      const threadId = params.threadId as string
+      const items = this.history.get(threadId) ?? []
+      const at = items.findIndex((entry) => entry.turnId === params.beforeTurnId)
+      if (at === -1)
+        throw new FakeRpcError(-32600, `turn not found: ${String(params.beforeTurnId)}`)
+      this.history.set(threadId, items.slice(0, at))
+      setTimeout(() => server.notify('thread/reverted', { threadId }), 0)
+      return { thread: threadResponse(threadId).thread }
+    })
     this.on('thread/list', () => ({ data: [], nextCursor: null }))
     this.on('thread/unsubscribe', () => ({ status: 'unsubscribed' }))
     this.on('thread/delete', () => ({}))

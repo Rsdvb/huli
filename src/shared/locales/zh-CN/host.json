@@ -30,6 +30,10 @@
     "cannotFork": "{{agent}} 不支持分叉会话",
     "cannotForkAt": "{{agent}} 只能从最新一条回复分叉",
     "noForkPoint": "无法从这条回复分叉",
+    "cannotRevert": "{{agent}} 不支持撤销一轮",
+    "noRevertPoint": "这条消息开始的不是可以撤销的一轮",
+    "revertNotLatest": "只能撤销最近一轮，而这一轮之后已经有了新的一轮",
+    "revertEarlierAgent": "这一轮是另一个 Agent 做的，不能在这里撤销",
     "forkTitle": "{{title}}（分叉）",
     "forkTitleNumbered": "{{title}}（分叉 {{n}}）",
     "alreadyInSession": "这个会话已经属于 Kettu 里的一个会话",
@@ -51,6 +55,7 @@
     "subagent": {
       "noPrompt": "子 Agent 会话从父会话接收指令",
       "noFork": "子 Agent 会话不能分叉",
+      "noRevert": "子 Agent 会话不能撤销某一轮",
       "noCancel": "该 Agent 不允许取消这个子 Agent",
       "noConfig": "子 Agent 会话不能单独配置",
       "closesWithParent": "子 Agent 会话随父会话一起关闭",
@@ -421,6 +426,8 @@
     "signInNeeded": "请在终端里运行 `codex login` 登录 Codex",
     "turnFailed": "这一轮失败了",
     "noForkPoint": "Codex 在它的历史里找不到这条回复",
+    "noRevertPoint": "Codex 在它的历史里找不到这一轮",
+    "revertOlderThread": "只有较新版本的 Codex 开始的会话才能撤销一轮",
     "option": {
       "mode": "模式",
       "modeDescription": "这个会话的授权和沙箱预设",

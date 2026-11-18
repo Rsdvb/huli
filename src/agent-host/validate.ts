@@ -1760,6 +1760,10 @@ export function createValidators(platform: Platform): Validators {
         ...(o.worktree === undefined ? {} : { worktree: o.worktree }),
       }
     },
+    'sessions.revert': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ACP_ID_CHARS) }
+    },
     'worktrees.inspect': session,
     'worktrees.remove': (params) => {
       const o = fields(params)

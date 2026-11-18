@@ -35,6 +35,7 @@ import {
   type PermissionAnswer,
   type PromptBlock,
   type PromptResult,
+  type RevertPoint,
   type SessionOptions,
   type SessionSetup,
   type SessionTarget,
@@ -178,6 +179,8 @@ const QUIET = new Set([
   'item/commandExecution/terminalInteraction',
   'remoteControl/status/changed',
   'turn/moderationMetadata',
+  // Kettu's own `thread/revert` answers first, and the host takes the turns out then.
+  'thread/reverted',
 ])
 
 // Opted out of at `initialize`, so they never cross the pipe.
@@ -554,6 +557,7 @@ export class CodexConnection implements AgentConnection {
         deleteSession: true,
         forkSession: true,
         forkAtMessage: true,
+        revertTurns: true,
         // app-server names no thread by itself; Codex's own clients write the titles.
         ownTitles: null,
         logout: this.launch !== null,
@@ -884,6 +888,28 @@ export class CodexConnection implements AgentConnection {
     const byText = same[point.occurrence - 1]
     if (byText) return byText.turnId
     throw new AgentRequestError('agent_error', t('codex.noForkPoint'))
+  }
+
+  /**
+   * `thread/revert` before the first turn `point` takes out. Codex leaves the files as they are,
+   * and reverts only a thread with paginated history, which a thread an older Codex started lacks.
+   */
+  async revertTurns(sessionId: string, point: RevertPoint): Promise<void> {
+    const record = this.thread(sessionId)
+    if (record.prompting || record.running || record.command) {
+      throw new AgentRequestError('agent_error', 'A turn is running in this session')
+    }
+    const beforeTurnId = revertedTurn(await this.items(sessionId), point)
+    // Nothing of the turns reached Codex's history, such as a turn that failed before it began.
+    if (beforeTurnId === null) return
+    try {
+      await this.call('thread/revert', { threadId: sessionId, beforeTurnId })
+    } catch (error) {
+      if (error instanceof AgentRequestError && /paginated/i.test(error.message)) {
+        throw new AgentRequestError('agent_error', t('codex.revertOlderThread'), error.code)
+      }
+      throw error
+    }
   }
 
   /**
@@ -2000,4 +2026,27 @@ function listedTitle(thread: Thread): string | null {
     if (collapsed !== '') return collapsed
   }
   return null
+}
+
+/**
+ * The turn a revert at `point` starts at: that of the first removed item Codex has, else the one
+ * after the turn of the latest kept item it has. Null when no turn of Codex's comes after the kept
+ * ones; throws when Codex has none of the kept items, as then nothing tells where to cut.
+ */
+export function revertedTurn(
+  entries: readonly { turnId: string; item: { id: string } }[],
+  point: RevertPoint,
+): string | null {
+  const turnOf = new Map(entries.map((entry) => [entry.item.id, entry.turnId]))
+  for (const id of point.removed) {
+    const turnId = turnOf.get(id)
+    if (turnId !== undefined) return turnId
+  }
+  const turns = [...new Set(entries.map((entry) => entry.turnId))]
+  if (point.kept.length === 0) return turns[0] ?? null
+  for (const id of point.kept) {
+    const turnId = turnOf.get(id)
+    if (turnId !== undefined) return turns[turns.indexOf(turnId) + 1] ?? null
+  }
+  throw new AgentRequestError('agent_error', t('codex.noRevertPoint'))
 }

@@ -2675,6 +2675,7 @@ export class AgentHost {
       'sessions.sideAgents': ({ sessionId }) => ({ agents: sessions.sideAgents(sessionId) }),
       'sessions.fork': ({ sessionId, entryId, worktree }) =>
         sessions.fork(sessionId, entryId, worktree),
+      'sessions.revert': ({ sessionId, entryId }) => sessions.revert(sessionId, entryId),
       'worktrees.inspect': ({ sessionId }) =>
         this.gitCall(() => sessions.inspectWorktree(sessionId)),
       'worktrees.remove': ({ sessionId, branch, expected }) =>

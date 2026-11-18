@@ -8,6 +8,7 @@ import {
   type QuestionAnswer,
   type SessionStatus,
   type StopReason,
+  type ThreadEntry,
   type ToolContent,
   type ToolEntry,
   type ToolKind,
@@ -397,6 +398,30 @@ export function forkEntry(
   if (last === undefined || !agent?.forkSession) return null
   if (reply.latest) return last
   return agent.forkAtMessage && entryMessageId(last) !== null ? last : null
+}
+
+/**
+ * The user's message that starts the turn of the reply ending at `lastId`, when that turn is the
+ * thread's latest, which Undo takes out; null otherwise.
+ */
+export function latestTurnStart(
+  state: { order: readonly string[]; byId: Readonly<Record<string, ThreadEntry>> },
+  lastId: string,
+): string | null {
+  let after = true
+  for (let i = state.order.length - 1; i >= 0; i--) {
+    const id = state.order[i]!
+    if (id === lastId) after = false
+    const entry = state.byId[id]
+    if (entry?.kind !== 'user' || entry.steered) continue
+    return after ? null : id
+  }
+  return null
+}
+
+/** Whether Undo cannot run in this session status: only a session between turns takes it. */
+export function revertBlocked(status: SessionStatus): boolean {
+  return status !== 'ready' && status !== 'closed'
 }
 
 /** Whether a reply's Fork cannot start in this session status. A running turn does not stop it. */
