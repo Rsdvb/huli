@@ -4,7 +4,16 @@
 // inline code that name a file of the session's folder open it. A reply still streaming ends in a
 // blinking caret. A sent prompt's mentions and links read as chips.
 
-import { memo, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import {
+  memo,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import {
   Linking,
   Pressable,
@@ -17,6 +26,7 @@ import {
 import { Image } from 'expo-image'
 import { cacheFor } from '../ui/memory'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
+import { textKey, useDisclosure } from '../ui/session/disclosure'
 import { copyText, showMenu } from '../ui/session/feedback'
 import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
 import { highlight } from '../ui/session/highlight'
@@ -244,7 +254,7 @@ function fenceFileName(language: string, meta: string): string | null {
 function CodeBlock(props: { lang: string; meta: string; text: string; look: Look }) {
   const { c, s } = props.look.t
   const [copied, setCopied] = useState(false)
-  const [folded, setFolded] = useState(true)
+  const [folded, setFolded] = useDisclosure(`code-folded:${textKey(props.text)}`, true)
   const colon = props.lang.indexOf(':')
   const language = colon > 0 ? props.lang.slice(0, colon) : props.lang
   const file = fenceFileName(props.lang, props.meta)
@@ -255,7 +265,14 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
   const shown =
     foldable && folded ? lines.slice(0, FOLDED_LINES).join('\n') : props.text.replace(/\n$/, '')
   const shownCount = foldable && folded ? FOLDED_LINES : lines.length
-  const tokens = useMemo(() => highlight(shown, language), [shown, language])
+  // Colored once the list is idle: a block that mounts as the conversation scrolls draws plain
+  // text first, and its colors follow in a render that waits for a quiet moment.
+  const colored = useDeferredValue(shown, null)
+  const highlighted = useMemo(
+    () => (colored === null ? null : highlight(colored, language)),
+    [colored, language],
+  )
+  const tokens = colored === shown ? highlighted : null
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), 1600)
