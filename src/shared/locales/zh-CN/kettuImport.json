@@ -4,7 +4,6 @@
     "name": "从 Kettu 导入",
     "description": "把这台电脑上官方 Kettu 里的会话、记忆和 Artifacts 搬过来，标题、项目、置顶和归档状态都会保留。只读取 Kettu 的数据。",
     "keywords": "kettu 导入 迁移 搬家 会话 项目 记忆 artifacts",
-    "looking": "正在查找 Kettu 的数据…",
     "notFound": "这台电脑上没有 Kettu 的数据。",
     "found": "Kettu 里有 {{found}}",
     "foundSome": "Kettu 里有 {{found}}，已导入 {{count}} 个会话",
@@ -97,11 +96,5 @@
       "notShared": "Kettu 的分享链接属于 Kettu 账号，没有导入。",
       "failed_other": "{{count}} 个 Artifacts 导入失败："
     }
-  },
-  "offer": {
-    "text_other": "发现 Kettu 里有 {{count}} 个会话，要导入吗？",
-    "extras": "发现 Kettu 里有{{found}}，要导入吗？",
-    "detail": "把 Kettu 的会话、记忆和 Artifacts 搬过来。只读取 Kettu 的数据。",
-    "action": "导入"
   }
 }

@@ -1,36 +1,24 @@
-// Huli: the ways into an import from Kettu: a row in Settings > General, and an offer over the
-// sidebar's account row while this computer has no session yet. Huli's own; see
+// Huli: the way into an import from Kettu, a row in Settings > General. Nothing looks for Kettu's
+// data until the import is opened, as a look copies Kettu's whole thread database. Huli's own; see
 // tools/huli/README.md.
 
-import { useEffect, useState } from 'react'
-import { Download04Icon } from '@hugeicons/core-free-icons'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Glyph } from '@renderer/features/shell/glyph'
-import { Button } from '@renderer/components/ui/button'
-import { NoticeCard } from '@renderer/features/updates/update-notice'
 import { SetButton } from '@renderer/features/settings/controls'
-import { readJson, writeJson } from '@renderer/lib/storage'
-import { hostOfSession, listedOrigin, useSessionsStore } from '@renderer/stores/sessions'
-import { useFoundText, useNewExtrasText } from './found-text'
+import { useFoundText } from './found-text'
 import { KettuImportDialog } from './kettu-import-dialog'
-import { scanKettu, useKettuImportStore } from './store'
+import { useKettuImportStore } from './store'
 
-/** Whether the offer was answered on this device, by Import or by closing it. */
-const OFFERED_KEY = 'huli.kettu-import.offered'
-
-/** Settings > General's row's line: the description, then what the last look found. */
+/** Settings > General's row's line: the description, then what the last look found, if any. */
 export function KettuImportStatus() {
   const { t } = useTranslation('kettuImport')
   const scan = useKettuImportStore((s) => s.scan)
   const scanError = useKettuImportStore((s) => s.scanError)
   const found = useFoundText(scan)
-  useEffect(() => {
-    void scanKettu()
-  }, [])
   const status = scanError
     ? t('error.scan', { error: scanError })
     : !scan
-      ? t('row.looking')
+      ? null
       : !scan.found
         ? t('row.notFound')
         : scan.error
@@ -43,82 +31,24 @@ export function KettuImportStatus() {
   return (
     <>
       {t('row.description')}
-      <br />
-      {status}
+      {status && (
+        <>
+          <br />
+          {status}
+        </>
+      )}
     </>
   )
 }
 
-/** The row's button, which opens the choice of sessions once Kettu's were found. */
+/** The row's button, which opens the import; the dialog looks for Kettu's data as it opens. */
 export function KettuImportButton() {
   const { t } = useTranslation('kettuImport')
-  const scan = useKettuImportStore((s) => s.scan)
   const [open, setOpen] = useState(false)
   return (
     <>
-      <SetButton disabled={!scan?.found || scan.error !== null} onClick={() => setOpen(true)}>
-        {t('row.choose')}
-      </SetButton>
+      <SetButton onClick={() => setOpen(true)}>{t('row.choose')}</SetButton>
       {open && <KettuImportDialog open={open} onOpenChange={setOpen} />}
-    </>
-  )
-}
-
-/**
- * Once, while this computer has no session of its own: Kettu's sessions, or its memory and
- * artifacts, were found, to import.
- * Closing it or opening the import answers it for good on this device.
- */
-export function KettuImportOffer({ blocked }: { blocked: boolean }) {
-  const { t } = useTranslation('kettuImport')
-  const [answered, setAnswered] = useState(() => readJson(OFFERED_KEY, false))
-  const [open, setOpen] = useState(false)
-  const loaded = useSessionsStore((s) => s.loaded)
-  const empty = useSessionsStore(
-    (s) =>
-      !Object.values(s.byId).some(
-        (x) => listedOrigin(x) && !x.archivedAt && hostOfSession(x) === null,
-      ),
-  )
-  const scan = useKettuImportStore((s) => (s.scan?.found && !s.scan.error ? s.scan : null))
-  const importable = scan?.counts.importable ?? 0
-  const extras = useNewExtrasText(scan)
-  const asking = loaded && empty && !answered
-  useEffect(() => {
-    if (asking) void scanKettu()
-  }, [asking])
-  const answer = () => {
-    writeJson(OFFERED_KEY, true)
-    setAnswered(true)
-  }
-  const label =
-    importable > 0 ? t('offer.text', { count: importable }) : t('offer.extras', { found: extras })
-  return (
-    <>
-      {asking && !blocked && (importable > 0 || extras !== '') && (
-        <NoticeCard
-          icon={<Glyph icon={Download04Icon} size={14} />}
-          text={label}
-          label={label}
-          detail={t('offer.detail')}
-          onOpen={() => setOpen(true)}
-          action={
-            <Button variant="outline" size="xs" onClick={() => setOpen(true)}>
-              {t('offer.action')}
-            </Button>
-          }
-          onDismiss={answer}
-        />
-      )}
-      {open && (
-        <KettuImportDialog
-          open={open}
-          onOpenChange={(next) => {
-            setOpen(next)
-            if (!next) answer()
-          }}
-        />
-      )}
     </>
   )
 }

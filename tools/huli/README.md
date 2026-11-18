@@ -55,17 +55,18 @@ Code (kept small so upstream merges stay clean):
 ### Import from Kettu
 
 Brings an official Kettu's sessions, memory and artifacts on the same computer over: Settings ›
-General › Import from Kettu, and a one-time offer over the sidebar's account row while there is
-no session yet.
+General › Import from Kettu. Nothing looks for Kettu's data until its dialog opens, since a look
+copies Kettu's whole thread database (some 300 MB); the dialog looks each time it opens.
 
 Huli's own files:
 
 - `src/agent-host/kettu-import.ts` (+ `.test.ts`): finds Kettu's data folder (`%APPDATA%\Kettu`,
-  `~/Library/Application Support/Kettu`, `$XDG_CONFIG_HOME` or `~/.config/Kettu`;
-  `HULI_KETTU_DATA` points elsewhere), copies `state/sessions.json` and `state/projects.json` into a
-  temporary folder and reads the copies with the index's own parsers. It never writes there, and
-  reads nothing when that folder is Huli's own (a build named Kettu). Each chosen session is
-  imported through `importSession`, as the sidebar's Import sessions does, so Huli resumes the
+  `~/Library/Application Support/Kettu`, `$XDG_CONFIG_HOME` or `~/.config/Kettu`; `HULI_KETTU_DATA`
+  points elsewhere), copies `state/sessions.json` and `state/projects.json` into a temporary folder
+  (`huli-kettu-*`, removed after each look; one an hour old that a host stopped during a look left
+  behind goes with the next look) and reads the copies with the index's own parsers. It never writes
+  there, and reads nothing when that folder is Huli's own (a build named Kettu). Each chosen session
+  is imported through `importSession`, as the sidebar's Import sessions does, so Huli resumes the
   agent's own session; one another program has open (Kettu itself) comes over as a fork. Subagent
   sessions are not imported: the parent's history brings them back under it when it is opened.
   Sessions in a Kettu worktree or Kettu's scratch folder, for an agent Huli lacks, or in a folder
@@ -91,8 +92,8 @@ Huli's own files:
   Recently deleted, its scratch folders and `published-artifacts.json` (sharing links of Kettu's
   account) stay behind; thumbnails are drawn anew.
 - `src/shared/kettu-import.ts`: the scan's and the run's types.
-- `src/renderer/src/features/kettu-import/`: the store, the dialog, the Settings row
-  (`settings-row.tsx`) and the sidebar offer.
+- `src/renderer/src/features/kettu-import/`: the store, the dialog and the Settings row
+  (`settings-row.tsx`).
 - `src/shared/locales/*/kettuImport.json`: its copy, which the rebrand leaves whole (`KEEP_FILES`).
 
 Hooks into upstream files, one or two lines each:
@@ -104,8 +105,7 @@ Hooks into upstream files, one or two lines each:
 - `src/shared/agent-host.ts` (`kettuImport.scan`, `kettuImport.run`, the `kettuImport.progress`
   event), `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`, `src/agent-host/host.ts`.
 - `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (the progress
-  event), `features/settings/section-defs.tsx` (the row), `features/sidebar/app-sidebar.tsx` (the
-  offer).
+  event), `features/settings/section-defs.tsx` (the row).
 
 ### Session folders
 

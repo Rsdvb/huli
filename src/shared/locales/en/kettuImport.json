@@ -4,7 +4,6 @@
     "name": "Import from Kettu",
     "description": "Bring the sessions, memory and artifacts of the official Kettu app on this computer here, with their titles, projects, pins and archives. Kettu's data is only read.",
     "keywords": "kettu import migrate move sessions projects memory artifacts",
-    "looking": "Looking for Kettu's data…",
     "notFound": "No Kettu data on this computer.",
     "found": "{{found}} in Kettu",
     "foundSome": "{{found}} in Kettu, {{count}} sessions imported",
@@ -124,12 +123,5 @@
       "failed_one": "{{count}} artifact could not be imported:",
       "failed_other": "{{count}} artifacts could not be imported:"
     }
-  },
-  "offer": {
-    "text_one": "Kettu has {{count}} session. Import it?",
-    "text_other": "Kettu has {{count}} sessions. Import them?",
-    "extras": "Kettu has {{found}}. Import them?",
-    "detail": "Brings Kettu's sessions, memory and artifacts here. Kettu's data is only read.",
-    "action": "Import"
   }
 }
