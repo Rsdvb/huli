@@ -3,8 +3,8 @@ import { ArrowTurnDownIcon, Undo02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { StopReason, UserContent } from '@shared/thread'
-import { forkSession } from '@renderer/app/actions'
+import { turnText, type StopReason, type UserContent } from '@shared/thread'
+import { forkSession, putBackUndone } from '@renderer/app/actions'
 import { MessageActions } from '@renderer/components/affect/message-actions'
 import { ForkIcon } from '@renderer/components/fork-icon'
 import {
@@ -208,8 +208,12 @@ export const ReplyFooter = memo(
       if (turnStart === null) return
       setReverting(true)
       setError(null)
+      // Read before the turn's entries leave the thread.
+      const state = useThreadsStore.getState().replicas[sessionId]?.state
+      const text = state ? turnText(state, turnStart) : ''
       try {
         await host('sessions.revert', { sessionId, entryId: turnStart })
+        putBackUndone(sessionId, text)
       } catch (e) {
         setError(errorMessage(e))
       } finally {

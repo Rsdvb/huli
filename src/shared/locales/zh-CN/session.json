@@ -380,6 +380,8 @@
     "revertTitle": "撤销最近一轮？",
     "revertBody": "你的上一条消息和这条回复会从对话里移除，Agent 也会忘掉它们。这一轮改过的文件保持原样。",
     "revertConfirm": "撤销这一轮",
+    "revertDraftKept": "输入框里已有草稿，撤销的消息没有放回去",
+    "copyMessage": "复制消息",
     "label": "回复操作"
   },
   "changes": {
