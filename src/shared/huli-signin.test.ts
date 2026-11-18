@@ -28,9 +28,11 @@ function setup(now = { t: 1_000_000 }) {
   }
   const api = {
     base: BASE,
-    exchangeCode: vi.fn(async (_: { code: string; verifier: string }) => tokens()),
-    refresh: vi.fn(async (_client: string, _token: string) => tokens()),
-    revoke: vi.fn(async (_client: string, _token: string) => {}),
+    exchangeCode: vi.fn<(input: { code: string; verifier: string }) => Promise<TokenSet>>(
+      async () => tokens(),
+    ),
+    refresh: vi.fn<(client: string, token: string) => Promise<TokenSet>>(async () => tokens()),
+    revoke: vi.fn<(client: string, token: string) => Promise<void>>(async () => {}),
     me: vi.fn(async () => ME),
     relayToken: vi.fn(async (token: string) => ({
       token: `relay-for-${token}`,
