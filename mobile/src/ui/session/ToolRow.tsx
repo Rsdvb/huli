@@ -14,6 +14,7 @@ import { Markdown } from '../../components/Markdown'
 import { handDiff } from '../../diff'
 import { Clamp } from './Clamp'
 import { useSessionRows } from './context'
+import { useDisclosure } from './disclosure'
 import { plainText } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
@@ -270,12 +271,13 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
   const { c } = useSessionTokens()
   const { entry } = props
   const status = stepStatus(entry)
-  const [open, setOpen] = useState(false)
-  // A call that fails while shown opens, as the desktop's card does.
-  const [was, setWas] = useState(status)
-  if (was !== status) {
-    setWas(status)
-    if (status === 'error' && !open) setOpen(true)
+  const [open, setOpen] = useDisclosure(`tool:${entry.id}`)
+  // A call that fails while shown opens, as the desktop's card does; a row the list hands another
+  // call starts over.
+  const [was, setWas] = useState({ id: entry.id, status })
+  if (was.id !== entry.id || was.status !== status) {
+    setWas({ id: entry.id, status })
+    if (was.id === entry.id && status === 'error' && !open) setOpen(true)
   }
   const label = toolLabel(entry, root, entry.status === 'completed')
   const time = toolTime(sessionId, entry.id)
@@ -396,7 +398,7 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
           if (read) {
             return (
               <StepSection key={i} label="内容" copy={fenceBody(read)}>
-                <Clamp maxHeight={320} more="显示全部">
+                <Clamp maxHeight={320} more="显示全部" id={`result:${entry.id}:${i}`}>
                   <Markdown markdown={read} size="compact" />
                 </Clamp>
               </StepSection>
@@ -405,7 +407,7 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
           const raw = fenceBody(part.markdown)
           return (
             <StepSection key={i} label="结果" copy={raw}>
-              <Clamp maxHeight={240} more="显示全部">
+              <Clamp maxHeight={240} more="显示全部" id={`result:${entry.id}:${i}`}>
                 <Text style={[styles.raw, { color: c.text }]}>{raw}</Text>
               </Clamp>
             </StepSection>
@@ -476,7 +478,7 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
 }) {
   const { c } = useSessionTokens()
   const { entry } = props
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(`thought:${entry.id}`)
   const has = entry.markdown.trim() !== ''
   const line = (
     <StepLine
@@ -500,7 +502,7 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
   return (
     <StepCard open={open && has} line={line}>
       <StepSection label="思考" copy={plainText(entry.markdown)} mono={false}>
-        <Clamp maxHeight={240} more="显示全部">
+        <Clamp maxHeight={240} more="显示全部" id={`thought-text:${entry.id}`}>
           <Markdown
             markdown={entry.markdown}
             streaming={entry.streaming}

@@ -1,0 +1,42 @@
+# Shoots the developer's long thread in the LIST list engine as it reads older pages of 40 entries
+# at the top: o1 as the drag reaches the top, o2 a moment later once the page is in. Both should
+# show the same rows in the same place, with only the spinner gone.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevThread: entries=2000&page=40&label=older-${LIST}
+- extendedWaitUntil:
+    visible:
+      id: frame-meter
+    timeout: 20000
+- repeat:
+    times: 3
+    commands:
+      - swipe:
+          start: 50%, 22%
+          end: 50%, 92%
+          duration: 40
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+    duration: 700
+- takeScreenshot: o1-${LIST}
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 1500
+    optional: true
+- takeScreenshot: o2-${LIST}
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+    duration: 700
+- takeScreenshot: o3-${LIST}
+- extendedWaitUntil:
+    visible: 'NEVER_THERE'
+    timeout: 1500
+    optional: true
+- takeScreenshot: o4-${LIST}

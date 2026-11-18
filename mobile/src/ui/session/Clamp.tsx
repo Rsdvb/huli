@@ -3,11 +3,19 @@
 
 import { useState, type ReactNode } from 'react'
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native'
+import { useDisclosure } from './disclosure'
 import { useSessionTokens } from './palette'
 import { gentle } from './Press'
 
 // Past the height by less than this, the content shows whole: a button would hide too little.
 const SLACK = 24
+
+/**
+ * The heights content with an id was measured at, so a row the list mounts again is cut at once
+ * rather than drawn whole for a frame and then cut, which would move the rows around it.
+ */
+const heights = new Map<string, number>()
+const HEIGHTS_KEPT = 2000
 
 export function Clamp(props: {
   maxHeight: number
@@ -18,14 +26,33 @@ export function Clamp(props: {
   align?: 'start' | 'end'
   /** The button's color; the tint by default. */
   color?: string
+  /** What the content is, in its conversation: whether it is open is kept under it. */
+  id?: string
 }) {
   const { c } = useSessionTokens()
-  const [height, setHeight] = useState(0)
-  const [open, setOpen] = useState(false)
+  const { id } = props
+  const [measured, setMeasured] = useState(() => ({
+    id,
+    height: id !== undefined ? (heights.get(id) ?? 0) : 0,
+  }))
+  const [ownOpen, setOwnOpen] = useState(false)
+  const [keptOpen, setKeptOpen] = useDisclosure(`clamp:${id ?? ''}`)
+  const open = id !== undefined ? keptOpen : ownOpen
+  const setOpen = id !== undefined ? setKeptOpen : setOwnOpen
+  // A view the list hands to other content starts from what that content was measured at.
+  const height =
+    measured.id === id ? measured.height : id !== undefined ? (heights.get(id) ?? 0) : 0
   const cut = height > props.maxHeight + SLACK
   const onLayout = (event: LayoutChangeEvent) => {
     const next = Math.round(event.nativeEvent.layout.height)
-    setHeight((was) => (Math.abs(was - next) < 1 ? was : next))
+    if (id !== undefined) {
+      heights.delete(id)
+      heights.set(id, next)
+      if (heights.size > HEIGHTS_KEPT) heights.delete(heights.keys().next().value!)
+    }
+    setMeasured((was) =>
+      was.id === id && Math.abs(was.height - next) < 1 ? was : { id, height: next },
+    )
   }
   return (
     <View>

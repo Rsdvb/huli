@@ -7,6 +7,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { startCloud } from '../cloud'
 import { OutboxBridge } from '../components/OutboxBridge'
+import { launchedLongThread, LongThreadScreen } from '../dev/LongThreadScreen'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
 import { LinkBridge } from '../links'
@@ -43,11 +44,25 @@ const MANAGE_PAGES = [
   'usage',
 ] as const
 
+// Launched to measure the conversation list (dev/LongThreadScreen.tsx): that screen, and no other.
+const longThread = launchedLongThread()
+
 export default function Layout() {
   const { c, scheme } = useTokens()
   useEffect(() => watchUpdates(), [])
   useEffect(() => watchMemory(), [])
   useEffect(() => startCloud(), [])
+  if (longThread) {
+    return (
+      <KeyboardProvider>
+        <SafeAreaProvider>
+          <HostProvider>
+            <LongThreadScreen options={longThread} />
+          </HostProvider>
+        </SafeAreaProvider>
+      </KeyboardProvider>
+    )
+  }
   return (
     // The keyboard's frames reach the screens on the UI thread, so the views that make room for it
     // move with it without a layout pass per frame. Gestures (home's drag onto a folder) need the

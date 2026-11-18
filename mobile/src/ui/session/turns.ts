@@ -236,7 +236,7 @@ const sameEntries = (x: readonly ThreadEntry[], y: readonly ThreadEntry[]) =>
   x.length === y.length && x.every((entry, i) => entry === y[i])
 
 /**
- * `threadRows` for one screen, newest first, as the conversation's inverted list takes them. A
+ * `threadRows` for one screen, oldest first, as the conversation's list takes them. A
  * turn whose entries are the same objects as last time keeps its rows, so a token appended to the
  * reply being written rebuilds only the latest turn's; and every row that draws the same as
  * before keeps its object, so the list and its rows compare by reference. While nothing changed,
@@ -256,7 +256,7 @@ export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
       for (const row of turn.rows) rows.push(row)
     }
     turns = kept
-    shown = keepRows(shown, markLatest(rows, live).reverse())
+    shown = keepRows(shown, markLatest(rows, live))
     return shown
   }
 }

@@ -54,6 +54,8 @@ export const UserMessage = memo(function UserMessage(props: {
   steered?: boolean
   device?: FromDevice
   from?: FromSession
+  /** The message's entry, under which whether it is shown whole is kept. */
+  id?: string
 }) {
   const { content } = props
   const { c, s } = useSessionTokens()
@@ -187,7 +189,11 @@ export const UserMessage = memo(function UserMessage(props: {
               {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
               style={[styles.bubble, { backgroundColor: s.bubble }]}
             >
-              <Clamp maxHeight={COLLAPSED_HEIGHT} align="end">
+              <Clamp
+                maxHeight={COLLAPSED_HEIGHT}
+                align="end"
+                {...(props.id !== undefined ? { id: `user:${props.id}` } : {})}
+              >
                 <Markdown markdown={body} chips={chips} head={head} />
               </Clamp>
             </PressScale>

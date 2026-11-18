@@ -2,11 +2,13 @@
 // it carried, its work folded into runs of quiet lines that open, an answered request as one line,
 // a plan's answer, the turn's changes and footer, and the host's own records as small notes.
 
-import { memo, useState } from 'react'
+import { memo, useRef } from 'react'
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { openArtifact } from '../artifacts'
+import { countRender } from '../ui/renders'
 import { useSessionRows } from '../ui/session/context'
+import { useDisclosure } from '../ui/session/disclosure'
 import { ContextMenu } from '../ui/ContextMenu'
 import { joinGroups, type MenuNode } from '../ui/menu'
 import { copyText, plainText } from '../ui/session/feedback'
@@ -174,7 +176,7 @@ function Note(props: {
 /** A compaction divides the thread: rules on both sides of its words, which open the summary. */
 function Compaction(props: { entry: Of<'compaction'> }) {
   const { c } = useSessionTokens()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(`compaction:${props.entry.id}`)
   const busy = props.entry.status === 'in_progress'
   const text =
     props.entry.status === 'failed'
@@ -227,6 +229,7 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
       if (entry.approval) return null
       return (
         <UserMessage
+          id={entry.id}
           content={entry.content}
           {...(entry.at !== undefined ? { at: entry.at } : {})}
           {...(entry.steered ? { steered: true } : {})}
@@ -345,6 +348,11 @@ const SPACING: Partial<Record<ThreadEntry['kind'], [number, number]>> = {
 export const ThreadRow = memo(
   function ThreadRow(props: { row: Row }) {
     const { row } = props
+    // A mount as the row scrolls into view, or a redraw of one already shown: only its own
+    // change, such as the reply being written, should redraw it.
+    const shown = useRef<string | null>(null)
+    countRender(shown.current === row.key ? 'ThreadRow redraw' : 'ThreadRow mount')
+    shown.current = row.key
     if (row.type === 'changes') {
       return (
         <View style={{ paddingTop: 8, paddingBottom: 4 }}>

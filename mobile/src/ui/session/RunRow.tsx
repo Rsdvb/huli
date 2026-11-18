@@ -4,12 +4,13 @@
 // the line ends with the latest thought's heading. Tapped, it opens to a line per step. A lone step
 // shows as its own line.
 
-import { memo, useState } from 'react'
+import { memo } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry } from '@shared/thread'
 import { MemoryEntry } from '../../components/entries/AccessEntries'
 import { E } from '../../components/entries/kit'
 import { useSessionRows } from './context'
+import { useDisclosure } from './disclosure'
 import { G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useSessionTokens } from './palette'
 import { gentle } from './Press'
@@ -51,7 +52,7 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
   const { c } = useSessionTokens()
   const { sessionId } = useSessionRows()
   const { entries, latest } = props
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(`run:${entries[0]!.id}`)
   if (entries.length === 1) return <Step entry={entries[0]!} />
 
   const steps = entries.map(stepOf).filter((step): step is RunStep => step !== null)
