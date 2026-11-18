@@ -4,8 +4,10 @@
 // variables, so while mihomo is stopped, starting, restarting or crashed, or its node is missing
 // or down, that agent's requests are refused or rejected, never sent another way. Kite downloads
 // the subscriptions itself, the way its own requests go, and hands mihomo their nodes as files.
-// Agents bound to a network interface go through a mihomo of that interface's own, started and
-// stopped with the nodes' one; see `interfaceConfig`. Huli's own; see tools/huli/README.md.
+// Every agent's listener is in the nodes' mihomo; an agent bound to a network interface leaves it
+// through a hop to a mihomo of its own bound to that interface, which alone starts and stops as
+// the agent's binding changes, so the nodes' mihomo and its connections never notice; see
+// `interfaceConfig`. Huli's own; see tools/huli/README.md.
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -41,6 +43,7 @@ import { MihomoApi } from './api'
 import {
   agentGroup,
   DEFAULT_GROUP,
+  hopName,
   INTERFACE_PROXY,
   interfaceConfig,
   mihomoConfig,
@@ -66,10 +69,19 @@ import {
   type SubscriptionsFile,
 } from './files'
 import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
-import { detectInterface, listInterfaces } from './interface'
+import {
+  detectInterface,
+  InterfaceWatch,
+  listInterfaces,
+  loopbackInterface,
+  presentInterfaces,
+  type InterfaceChange,
+} from './interface'
 
 /** How often the interface is read again and the groups' nodes checked, while on. */
 const CHECK_MS = 60_000
+/** How often the interfaces agents are bound to are looked at, while some are. */
+const WATCH_MS = 2_500
 /** How long mihomo has to answer its API after it starts. */
 const START_MS = 20_000
 const MIN_RESTART_MS = 2_000
@@ -110,6 +122,8 @@ export interface NodeProxyDeps {
   detect?: (platform: Platform) => Promise<string | null>
   /** Lists the computer's network interfaces; tests replace it. */
   listInterfaces?: (platform: Platform) => Promise<NetworkInterfaceView[]>
+  /** The names of the interfaces up now, read cheaply and often; tests replace it. */
+  presentInterfaces?: () => Iterable<string>
   /** The proxy variables an agent on the system's network starts with. */
   systemProxy?: (agentId: AgentId) => { proxy: string | null; noProxy: string | null }
   /** Fetches the trace page; tests replace it. */
@@ -134,18 +148,26 @@ interface Unit {
   record: ChildRecord | null
 }
 
-/** The mihomo of the agents bound to one interface. */
+/** The mihomo that binds one agent to one interface, behind the agent's hop. */
 interface Side extends Unit {
+  agentId: AgentId
   networkInterface: string
-  agents: AgentId[]
+  /** The port its listener takes, which the agent's hop leads to. */
+  port: number
+  /** Its home's number under `interfaces/`. */
+  slot: number
+  startedAt: number
+  /** Its API answered, so its listener is up. */
+  ready: boolean
+  /** Set when the host stops it on purpose, so its exit is no crash. */
+  stopping: boolean
 }
 
-/** The nodes' mihomo, with the interfaces' ones, which start, stop and fail together. */
+/** The nodes' mihomo, which holds every agent's listener. */
 interface Running extends Unit {
-  sides: Side[]
   config: string
   startedAt: number
-  /** Set when the host stops them on purpose, or one crashed, so an exit is no crash. */
+  /** Set when the host stops it on purpose, or it crashed, so an exit is no crash. */
   stopping: boolean
 }
 
@@ -210,8 +232,16 @@ export class NodeProxy {
   private closed = false
   /** The running mihomo as the state file keeps it. */
   private record: NetworkStateFile['running'] = null
-  /** The interfaces' mihomo processes as the state file keeps them. */
-  private sideRecords: ChildRecord[] = []
+  /** The mihomo of each agent bound to an interface. */
+  private sides = new Map<AgentId, Side>()
+  /** The port each agent's hop leads to, as the nodes' mihomo was started with it. */
+  private hopPorts: Partial<Record<AgentId, number>> = {}
+  /** What the hops sign in to the interfaces' mihomo with; one for the host's life. */
+  private readonly hopPassword = randomBytes(24).toString('hex')
+  /** How often each agent's interface mihomo failed in a row, and when it may start again. */
+  private sideFailures = new Map<AgentId, { count: number; retryAt: number }>()
+  private sideTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly watcher: InterfaceWatch
   /** The computer's interfaces as last read; null until read. */
   private interfaceList: NetworkInterfaceView[] | null = null
   private interfacesAt = 0
@@ -219,7 +249,14 @@ export class NodeProxy {
   /** Ends when the processes of a run that crashed have all ended. */
   private dying: Promise<void> = Promise.resolve()
 
-  constructor(private readonly deps: NodeProxyDeps) {}
+  constructor(private readonly deps: NodeProxyDeps) {
+    addLogSecret(this.hopPassword)
+    this.watcher = new InterfaceWatch({
+      read: deps.presentInterfaces ?? presentInterfaces,
+      intervalMs: WATCH_MS,
+      changed: (change) => this.interfacesChanged(change),
+    })
+  }
 
   private get folder(): string {
     return networkFolder(this.deps.userDataPath)
@@ -247,7 +284,6 @@ export class NodeProxy {
       await this.stopLeftover(left)
     }
     this.record = null
-    this.sideRecords = []
     this.saveState()
     await this.ensurePorts()
   }
@@ -461,15 +497,20 @@ export class NodeProxy {
     return this.readingInterfaces
   }
 
-  /** Whether the interface may carry an agent's traffic: listed and up, or not known yet. */
+  /**
+   * Whether the interface may carry an agent's traffic: up at the watcher's last read, else, while
+   * it cannot read, listed and up, or not known yet, when the bound dial itself still fails closed.
+   */
   private usable(name: string): boolean {
+    const watched = this.watcher.usable(name)
+    if (watched !== null) return watched
     if (this.interfaceList === null) return true
     return this.interfaceList.some((item) => item.name === name && item.up)
   }
 
   /** Which of the bound interfaces are usable now, to tell when the picks must change. */
   private usableKey(): string {
-    return (this.running?.sides ?? [])
+    return [...this.sides.values()]
       .map((side) => `${side.networkInterface}:${this.usable(side.networkInterface)}`)
       .join('\n')
   }
@@ -621,8 +662,10 @@ export class NodeProxy {
     this.closed = true
     if (this.timer) clearInterval(this.timer)
     if (this.restartTimer) clearTimeout(this.restartTimer)
+    if (this.sideTimer) clearTimeout(this.sideTimer)
+    this.watcher.stop()
     await this.queue.catch(() => {})
-    await this.stopChild()
+    await this.stopAll()
     await this.dying
     await Promise.all([this.deps.state.flush(), this.deps.subscriptions.flush()])
   }
@@ -637,7 +680,7 @@ export class NodeProxy {
         const said = this.masked((error as Error).message)
         this.deps.log('error', `Agent network: ${said}`)
         // Whatever failed, no mihomo half set up stays, and the start is tried again.
-        await this.stopChild().catch(() => {})
+        await this.stopAll().catch(() => {})
         if (this.closed || !this.deps.settings().enabled) return
         this.setState('error', 'start', said)
         this.restartLater(0)
@@ -654,9 +697,54 @@ export class NodeProxy {
       this.reconcile()
       return
     }
-    // An interface that went away or down puts its agents on REJECT, and back once it is up.
-    if (this.running?.sides.length) await this.interfaces().catch(() => {})
+    // The watcher sees an interface go and come back within seconds; only while it cannot read
+    // does the full list, read here, tell.
+    const blind = [...this.sides.values()].some(
+      (side) => this.watcher.usable(side.networkInterface) === null,
+    )
+    if (blind) await this.interfaces().catch(() => {})
     await this.refreshInfo()
+  }
+
+  /**
+   * A bound interface went or came back. Its agents are cut off at once, outside the queue, which
+   * may be busy starting a mihomo; one that comes back has its agents' mihomo started anew, since
+   * mihomo looks interfaces up through a table it keeps for 20 seconds, which would still lack it
+   * or name its old index, and then picked again.
+   */
+  private interfacesChanged(change: InterfaceChange): void {
+    if (this.closed) return
+    for (const name of change.gone) this.deps.log('info', `Agent network: ${name} is gone or down`)
+    for (const name of change.back) this.deps.log('info', `Agent network: ${name} is back`)
+    for (const side of this.sides.values()) {
+      if (change.gone.includes(side.networkInterface)) void this.cutOff(side.agentId)
+    }
+    this.queue = this.queue
+      .then(async () => {
+        for (const side of [...this.sides.values()]) {
+          if (change.back.includes(side.networkInterface)) await this.stopSide(side)
+        }
+        if (!this.running || this.state !== 'running' || this.closed) return
+        await this.applySides()
+        await this.applySelections()
+        this.emit()
+      })
+      .catch((error: unknown) => {
+        this.deps.log('warn', `Agent network: ${this.masked((error as Error).message)}`)
+      })
+    // The windows' list, with descriptions and states, needs the full read; only on a change.
+    void this.interfaces().catch(() => {})
+  }
+
+  /** Puts the agent's groups on REJECT now, in the nodes' mihomo and in its interface's. */
+  private async cutOff(agentId: AgentId): Promise<void> {
+    const group = agentGroup(agentId)
+    const side = this.sides.get(agentId)
+    await Promise.all(
+      [this.running, side].map((unit) =>
+        unit ? unit.api.select(group, 'REJECT').catch(() => {}) : undefined,
+      ),
+    )
   }
 
   /** Reads the subscriptions' state again and picks the groups' nodes, which may have come. */
@@ -684,12 +772,12 @@ export class NodeProxy {
     if (this.closed) return
     const settings = this.deps.settings()
     if (!settings.enabled) {
-      await this.stopChild()
+      await this.stopAll()
       this.setState('off', null, null)
       return
     }
     if (!this.available) {
-      await this.stopChild()
+      await this.stopAll()
       this.setState('error', 'missing', null)
       return
     }
@@ -697,40 +785,43 @@ export class NodeProxy {
     if (this.detected === null) await this.detect()
     const networkInterface = settings.interface ?? this.detected
     if (!networkInterface) {
-      await this.stopChild()
+      await this.stopAll()
       this.inUse = null
       this.setState('error', 'interface', null)
       return
     }
-    const agents = this.usingAgents()
-    if (this.split(agents).bound.length > 0 && this.interfaceList === null) {
-      await this.interfaces().catch(() => {})
+    const bound = this.bound()
+    this.watcher.watch(bound.values())
+    if (bound.size > 0 && this.interfaceList === null) void this.interfaces().catch(() => {})
+    const agents = this.listenerAgents()
+    await this.ensureHopPorts(agents)
+    const config = this.mainKey(networkInterface, agents)
+    if (!this.running || this.running.config !== config || this.state !== 'running') {
+      await this.stopMain()
+      if (!(await this.startMain(networkInterface, agents))) return
     }
-    const config = this.configText(networkInterface, agents)
-    if (this.running && this.running.config === config && this.state === 'running') {
-      await this.applySelections()
-      this.emit()
-      return
-    }
-    await this.stopChild()
-    await this.startChild(networkInterface, agents)
+    await this.applySides()
+    await this.applySelections()
+    this.emit()
   }
 
-  /** The agents on a node, and those bound to each interface, by the interface's name. */
-  private split(agents: AgentId[]): { nodes: AgentId[]; bound: [string, AgentId[]][] } {
+  /** Each agent bound to an interface, with the interface's name. */
+  private bound(): Map<AgentId, string> {
     const settings = this.deps.settings()
-    const nodes: AgentId[] = []
-    const bound = new Map<string, AgentId[]>()
-    for (const agentId of agents) {
+    const out = new Map<AgentId, string>()
+    for (const agentId of this.listenerAgents()) {
       const name = routeInterface(agentRoute(settings, agentId))
-      if (name === null) nodes.push(agentId)
-      else bound.set(name, [...(bound.get(name) ?? []), agentId])
+      if (name !== null) out.set(agentId, name)
     }
-    return { nodes, bound: [...bound].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)) }
+    return out
   }
 
-  private listenersOf(agents: AgentId[]): { agentId: AgentId; port: number }[] {
-    return agents.map((agentId) => ({ agentId, port: this.ports[agentId]! }))
+  private listenersOf(agents: AgentId[]) {
+    return agents.map((agentId) => ({
+      agentId,
+      port: this.ports[agentId]!,
+      hopPort: this.hopPorts[agentId] ?? 0,
+    }))
   }
 
   private mainText(
@@ -746,33 +837,15 @@ export class NodeProxy {
         networkInterface,
         subscriptions: this.subscriptions.map(({ id, name }) => ({ id, name })),
         agents: this.listenersOf(agents),
+        hopPassword: this.hopPassword,
+        loopbackInterface: loopbackInterface(this.deps.platform),
       }),
     )
   }
 
-  private sideText(
-    networkInterface: string,
-    agents: AgentId[],
-    controllerPort: number,
-    secret: string,
-  ): string {
-    return serializeConfig(
-      interfaceConfig({
-        controllerPort,
-        secret,
-        networkInterface,
-        agents: this.listenersOf(agents),
-      }),
-    )
-  }
-
-  /** The configurations without their controllers, to tell whether a change needs new ones. */
-  private configText(networkInterface: string, agents: AgentId[]): string {
-    const { nodes, bound } = this.split(agents)
-    return [
-      this.mainText(networkInterface, nodes, 0, ''),
-      ...bound.map(([name, ids]) => this.sideText(name, ids, 0, '')),
-    ].join('\n')
+  /** The nodes' configuration without its controller, to tell whether a change needs a new one. */
+  private mainKey(networkInterface: string, agents: AgentId[]): string {
+    return this.mainText(networkInterface, agents, 0, '')
   }
 
   /** Starts one mihomo in `home` with the configuration `text` gives for its controller. */
@@ -820,23 +893,21 @@ export class NodeProxy {
     }
   }
 
-  /** One of the run's processes ended on its own: the others go too, and all start again. */
-  private unitExited(running: Running, unit: Unit): void {
+  /** The nodes' mihomo ended on its own: it starts again; the interfaces' ones stay. */
+  private mainExited(running: Running): void {
     if (running.stopping || this.closed) return
     running.stopping = true
     if (this.running === running) this.running = null
-    for (const each of [running, ...running.sides]) each.child.kill()
-    this.dying = Promise.all([running, ...running.sides].map((each) => each.exited)).then(() => {})
     this.record = null
-    this.sideRecords = []
     this.saveState()
-    const said = this.masked(lastLines(unit.tail()))
+    const said = this.masked(lastLines(running.tail()))
     this.deps.log('error', `Agent network: mihomo stopped: ${said}`)
     this.setState('error', 'exited', said || null)
     this.restartLater(Date.now() - running.startedAt)
   }
 
-  private async startChild(networkInterface: string, agents: AgentId[]): Promise<void> {
+  /** Starts the nodes' mihomo; false when it did not come up, and a start again is planned. */
+  private async startMain(networkInterface: string, agents: AgentId[]): Promise<boolean> {
     if (this.restartTimer) clearTimeout(this.restartTimer)
     this.restartTimer = null
     this.inUse = networkInterface
@@ -844,58 +915,35 @@ export class NodeProxy {
     // What a run that crashed left must be gone before its listeners' ports are taken again.
     await this.dying
     await this.freeListenerPorts(agents)
-    const { nodes, bound } = this.split(agents)
+    await this.freeHopPorts(agents)
     const home = path.join(this.folder, 'mihomo')
     await mkdir(path.join(home, 'providers'), { recursive: true })
     const main = await this.spawnUnit(home, (port, secret) =>
-      this.mainText(networkInterface, nodes, port, secret),
+      this.mainText(networkInterface, agents, port, secret),
     )
     const running: Running = {
       ...main,
-      sides: [],
-      config: this.configText(networkInterface, agents),
+      config: this.mainKey(networkInterface, agents),
       startedAt: Date.now(),
       stopping: false,
     }
     this.running = running
     this.record = main.record
-    this.sideRecords = []
+    this.dying = main.exited
     this.saveState()
-    void main.exited.then(() => this.unitExited(running, main))
-    // Each in a home of its own: mihomo locks the cache file in its home.
-    for (const [index, [name, ids]] of bound.entries()) {
-      if (this.running !== running) return
-      const sideHome = path.join(home, 'interfaces', String(index))
-      await mkdir(sideHome, { recursive: true })
-      const unit = await this.spawnUnit(sideHome, (port, secret) =>
-        this.sideText(name, ids, port, secret),
-      )
-      const side: Side = { ...unit, networkInterface: name, agents: ids }
-      running.sides.push(side)
-      if (side.record) this.sideRecords.push(side.record)
-      this.saveState()
-      void side.exited.then(() => this.unitExited(running, side))
-    }
-    const versions = await Promise.all(
-      [running, ...running.sides].map((unit) => this.waitForApi(running, unit)),
-    )
-    const failed = [running, ...running.sides].find((_, index) => !versions[index])
-    if (failed) {
-      const said = this.masked(lastLines(failed.tail()))
+    void main.exited.then(() => this.mainExited(running))
+    const version = await this.waitForApi(main, () => this.running === running)
+    if (!version) {
+      const said = this.masked(lastLines(main.tail()))
       this.deps.log('error', `Agent network: mihomo did not start: ${said}`)
-      await this.stopChild()
+      await this.stopMain()
       this.setState('error', 'start', said || null)
       this.restartLater(0)
-      return
+      return false
     }
-    const version = versions[0]!
     this.version = version
     this.deps.log('info', `Agent network: mihomo ${version} runs on ${networkInterface}`)
-    for (const side of running.sides) {
-      this.deps.log('info', `Agent network: a mihomo binds agents to ${side.networkInterface}`)
-    }
     this.readProviders(await running.api.providers().catch(() => null))
-    await this.applySelections()
     this.setState('running', null, null)
     // A subscription mihomo had not read yet comes in its own time; look again soon after.
     for (const ms of SETTLE_MS) {
@@ -903,16 +951,17 @@ export class NodeProxy {
         if (this.running === running) void this.refreshInfo()
       }, ms).unref?.()
     }
+    return true
   }
 
-  private async waitForApi(running: Running, unit: Unit): Promise<string | null> {
+  private async waitForApi(unit: Unit, current: () => boolean): Promise<string | null> {
     const until = Date.now() + START_MS
     let gone = false
     void unit.exited.then(() => (gone = true))
-    while (Date.now() < until && !gone && this.running === running) {
+    while (Date.now() < until && !gone && current()) {
       const version = await unit.api.version().catch(() => null)
       if (version) return version
-      await new Promise((resolve) => setTimeout(resolve, 250))
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
     return null
   }
@@ -930,21 +979,136 @@ export class NodeProxy {
     this.restartTimer.unref?.()
   }
 
-  private async stopChild(): Promise<void> {
+  /** Ends a mihomo, killed hard if it takes more than 3 seconds. */
+  private async endUnit(unit: Unit): Promise<void> {
+    unit.child.kill()
+    const killed = setTimeout(() => unit.child.kill('SIGKILL'), 3_000)
+    await unit.exited
+    clearTimeout(killed)
+  }
+
+  private async stopMain(): Promise<void> {
     const running = this.running
     if (!running) return
     running.stopping = true
-    const units: Unit[] = [running, ...running.sides]
-    for (const unit of units) unit.child.kill()
-    const killed = setTimeout(() => {
-      for (const unit of units) unit.child.kill('SIGKILL')
-    }, 3_000)
-    await Promise.all(units.map((unit) => unit.exited))
-    clearTimeout(killed)
+    await this.endUnit(running)
     if (this.running === running) this.running = null
     this.record = null
-    this.sideRecords = []
     this.saveState()
+  }
+
+  private async stopAll(): Promise<void> {
+    this.watcher.watch([])
+    await Promise.all([this.stopMain(), ...[...this.sides.values()].map((s) => this.stopSide(s))])
+  }
+
+  // The interfaces' mihomo processes, one for each bound agent.
+
+  /**
+   * Starts the mihomo of each agent newly bound to an interface and stops that of each agent
+   * unbound or moved to another, the nodes' mihomo and the other agents' untouched.
+   */
+  private async applySides(): Promise<void> {
+    const bound = this.bound()
+    for (const side of [...this.sides.values()]) {
+      if (bound.get(side.agentId) !== side.networkInterface) await this.stopSide(side)
+    }
+    for (const [agentId, name] of bound) {
+      if (this.sides.has(agentId) || !this.running || this.closed) continue
+      if ((this.sideFailures.get(agentId)?.retryAt ?? 0) > Date.now()) continue
+      await this.startSide(agentId, name)
+    }
+  }
+
+  private async startSide(agentId: AgentId, networkInterface: string): Promise<void> {
+    const port = this.hopPorts[agentId]
+    if (port === undefined) return
+    if ((await freePort(port)) === null) {
+      // Another program took the port the hop leads to: the nodes' mihomo starts again with a new
+      // one, since the hop must never lead to a listener that is not this host's.
+      this.deps.log('warn', `Agent network: port ${port} is taken; ${agentId}'s hop moves`)
+      delete this.hopPorts[agentId]
+      this.reconcile()
+      return
+    }
+    const taken = new Set([...this.sides.values()].map((s) => s.slot))
+    let slot = 0
+    while (taken.has(slot)) slot++
+    const home = path.join(this.folder, 'mihomo', 'interfaces', String(slot))
+    // Each in a home of its own: mihomo locks the cache file in its home.
+    await mkdir(home, { recursive: true })
+    const unit = await this.spawnUnit(home, (controllerPort, secret) =>
+      serializeConfig(
+        interfaceConfig({
+          controllerPort,
+          secret,
+          networkInterface,
+          agentId,
+          port,
+          hopPassword: this.hopPassword,
+        }),
+      ),
+    )
+    const side: Side = {
+      ...unit,
+      agentId,
+      networkInterface,
+      port,
+      slot,
+      startedAt: Date.now(),
+      ready: false,
+      stopping: false,
+    }
+    this.sides.set(agentId, side)
+    this.saveState()
+    void side.exited.then(() => this.sideExited(side))
+    if (!(await this.waitForApi(side, () => this.sides.get(agentId) === side))) {
+      const said = this.masked(lastLines(side.tail()))
+      this.deps.log('error', `Agent network: ${agentId}'s mihomo did not start: ${said}`)
+      await this.stopSide(side)
+      this.sideFailed(agentId)
+      return
+    }
+    side.ready = true
+    this.deps.log('info', `Agent network: ${agentId} goes out through ${networkInterface} alone`)
+  }
+
+  /** Stops the agent's interface mihomo, its groups put on REJECT first. */
+  private async stopSide(side: Side): Promise<void> {
+    side.stopping = true
+    side.ready = false
+    await this.cutOff(side.agentId)
+    await this.endUnit(side)
+    if (this.sides.get(side.agentId) === side) this.sides.delete(side.agentId)
+    this.saveState()
+  }
+
+  /** An interface's mihomo ended on its own: its agent is cut off, and it starts again later. */
+  private sideExited(side: Side): void {
+    if (side.stopping || this.closed) return
+    side.stopping = true
+    side.ready = false
+    if (this.sides.get(side.agentId) === side) this.sides.delete(side.agentId)
+    this.saveState()
+    void this.running?.api.select(agentGroup(side.agentId), 'REJECT').catch(() => {})
+    const said = this.masked(lastLines(side.tail()))
+    this.deps.log('error', `Agent network: ${side.agentId}'s mihomo stopped: ${said}`)
+    if (Date.now() - side.startedAt >= HEALTHY_MS) this.sideFailures.delete(side.agentId)
+    this.sideFailed(side.agentId)
+  }
+
+  /** Tries the agent's interface mihomo again later, each time later, up to a minute. */
+  private sideFailed(agentId: AgentId): void {
+    const count = this.sideFailures.get(agentId)?.count ?? 0
+    const delay = Math.min(MIN_RESTART_MS * 2 ** count, MAX_RESTART_MS)
+    this.sideFailures.set(agentId, { count: count + 1, retryAt: Date.now() + delay })
+    if (this.closed) return
+    if (this.sideTimer) clearTimeout(this.sideTimer)
+    this.sideTimer = setTimeout(() => {
+      this.sideTimer = null
+      this.reconcile()
+    }, delay)
+    this.sideTimer.unref?.()
   }
 
   /** A mihomo a host before this one left running, known by the secret it was given. */
@@ -964,18 +1128,42 @@ export class NodeProxy {
     removeLogSecret(left.secret)
   }
 
-  /** Every agent that uses a node has a port that was free when checked. */
+  /**
+   * Every agent has a port that was free when checked while the network is on: the nodes'
+   * mihomo holds a listener for each, whatever its choice, so a change of choice never changes it.
+   */
   private async ensurePorts(): Promise<void> {
+    if (!this.deps.settings().enabled) return
     let changed = false
-    const settings = this.deps.settings()
     for (const agentId of this.deps.agentIds()) {
-      if (agentRoute(settings, agentId) === null || this.ports[agentId] !== undefined) continue
+      if (this.ports[agentId] !== undefined) continue
       const port = await freePort()
       if (port === null) continue
       this.ports[agentId] = port
       changed = true
     }
     if (changed) this.saveState()
+  }
+
+  /** Gives every agent a port for its hop, so binding it later never changes the nodes' mihomo. */
+  private async ensureHopPorts(agents: AgentId[]): Promise<void> {
+    for (const agentId of agents) {
+      if (this.hopPorts[agentId] !== undefined) continue
+      const listeners = new Set(Object.values(this.ports) as number[])
+      let port = await freePort()
+      while (port !== null && listeners.has(port)) port = await freePort()
+      if (port !== null) this.hopPorts[agentId] = port
+    }
+  }
+
+  /** Moves a hop whose port another program took, unless it is this host's interface mihomo. */
+  private async freeHopPorts(agents: AgentId[]): Promise<void> {
+    for (const agentId of agents) {
+      const port = this.hopPorts[agentId]
+      if (port === undefined || this.sides.get(agentId)?.port === port) continue
+      if ((await freePort(port)) === null) delete this.hopPorts[agentId]
+    }
+    await this.ensureHopPorts(agents)
   }
 
   /** Moves a listener whose port another program took; its agent starts again with the new one. */
@@ -999,16 +1187,21 @@ export class NodeProxy {
   /** The agents of the host that use a node or an interface, each with a port. */
   private usingAgents(): AgentId[] {
     const settings = this.deps.settings()
-    if (!settings.enabled) return []
+    return this.listenerAgents().filter((id) => agentRoute(settings, id) !== null)
+  }
+
+  /** The agents with a listener in the nodes' mihomo: every agent with a port, while on. */
+  private listenerAgents(): AgentId[] {
+    if (!this.deps.settings().enabled) return []
     return this.deps
       .agentIds()
-      .filter((id) => agentRoute(settings, id) !== null && this.ports[id] !== undefined)
+      .filter((id) => this.ports[id] !== undefined)
       .sort()
   }
 
   /**
-   * Picks each group's node, and each bound agent's interface; a node that is gone, or an
-   * interface that is gone or down, leaves its group on REJECT.
+   * Picks each group's way out: a node, or the hop to the agent's interface mihomo while it runs
+   * and the interface is up, else REJECT; an agent on the system's network never uses its group.
    */
   private async applySelections(): Promise<void> {
     const running = this.running
@@ -1027,21 +1220,28 @@ export class NodeProxy {
         })
       }
     }
+    // The interfaces' groups first, so a hop picked below leads to a way out already.
+    for (const side of [...this.sides.values()]) {
+      if (!side.ready) continue
+      const pickSide = await picker(side).catch(() => null)
+      const wanted = this.usable(side.networkInterface) ? INTERFACE_PROXY : 'REJECT'
+      await pickSide?.(agentGroup(side.agentId), wanted)
+    }
     const pick = await picker(running)
     const defaultName = settings.defaultNode ? this.fullName(settings.defaultNode) : null
     await pick(DEFAULT_GROUP, defaultName ?? 'REJECT')
-    for (const agentId of this.split(this.usingAgents()).nodes) {
+    for (const agentId of this.listenerAgents()) {
       const route = agentRoute(settings, agentId)
-      const wanted =
-        route === 'default' || route === null
-          ? DEFAULT_GROUP
-          : (this.fullName(route as NodeRef) ?? 'REJECT')
+      const bound = routeInterface(route)
+      const side = this.sides.get(agentId)
+      let wanted: string
+      if (route === null) wanted = 'REJECT'
+      else if (bound !== null) {
+        const ready = side?.ready && side.networkInterface === bound && this.usable(bound)
+        wanted = ready ? hopName(agentId) : 'REJECT'
+      } else if (route === 'default') wanted = DEFAULT_GROUP
+      else wanted = this.fullName(route as NodeRef) ?? 'REJECT'
       await pick(agentGroup(agentId), wanted)
-    }
-    for (const side of running.sides) {
-      const pickSide = await picker(side)
-      const wanted = this.usable(side.networkInterface) ? INTERFACE_PROXY : 'REJECT'
-      for (const agentId of side.agents) await pickSide(agentGroup(agentId), wanted)
     }
   }
 
@@ -1242,7 +1442,7 @@ export class NodeProxy {
       version: 1,
       ports: this.ports,
       running: this.record,
-      sides: this.sideRecords,
+      sides: [...this.sides.values()].flatMap((side) => (side.record ? [side.record] : [])),
       subscriptions: this.records,
     })
   }

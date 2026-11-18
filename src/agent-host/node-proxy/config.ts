@@ -9,23 +9,33 @@
 // their traffic nor their names go through a TUN another program set up. Keys checked against
 // mihomo v1.19.34's source.
 //
-// An agent bound to one network interface goes through a mihomo of its interface's own, made by
-// `interfaceConfig`: its group holds REJECT and a `direct` proxy with `interface-name`, which
-// binds every socket to that interface (IP_UNICAST_IF on Windows, IP_BOUND_IF on macOS,
-// SO_BINDTODEVICE on Linux) and fails, never falls back, when the interface is gone ("interface
-// not found") or down (unreachable). A direct proxy resolves names with the process-wide
-// `direct-nameserver`, so one mihomo can bind the names of one interface only; hence one each.
-// Its DNS is plain UDP bound to the interface: a TUN's DNS hijack answers it, with a fake IP when
-// it runs fake-ip, so the TUN maps the connection back to the name and routes it by its rules.
+// Every agent of the host has its listener here, whatever its choice, and its group holds, beside
+// REJECT, the default group and the nodes, a hop: a SOCKS5 proxy on 127.0.0.1 to a mihomo of the
+// agent's own that is bound to one network interface, made by `interfaceConfig`. Binding an agent
+// to an interface, or moving it to another, so starts or stops that mihomo alone and picks its
+// group through the API; this one, its listeners and their connections stay as they are. The hop
+// says which interface by nothing: the mihomo behind its port does, and the host picks the hop
+// only while that mihomo answers and the interface is there.
+//
+// That mihomo's group holds REJECT and a `direct` proxy with `interface-name`, which binds every
+// socket to the interface (IP_UNICAST_IF on Windows, IP_BOUND_IF on macOS, SO_BINDTODEVICE on
+// Linux) and fails, never falls back, when the interface is gone ("interface not found") or down
+// (unreachable). A direct proxy resolves names with the process-wide `direct-nameserver`, so one
+// mihomo binds the names of one interface only. Its DNS is plain UDP bound to the interface: a
+// TUN's DNS hijack answers it, with a fake IP when it runs fake-ip, so the TUN maps the connection
+// back to the name and routes it by its rules. Its one listener takes only the hop's user.
 
 import type { AgentId } from '@shared/thread'
 
 /** The group every agent that follows the default goes through, and where the default is picked. */
 export const DEFAULT_GROUP = 'KITE-DEFAULT'
 const AGENT_GROUP_PREFIX = 'KITE-AGENT-'
+const HOP_PREFIX = 'KITE-HOP-'
 const PROVIDER_PREFIX = 'kite-sub-'
 /** The `direct` proxy bound to the interface, in a mihomo of an interface. */
 export const INTERFACE_PROXY = 'KITE-INTERFACE'
+/** The user the hops sign in to an interface's mihomo with; the password is the host's secret. */
+export const HOP_USER = 'kite'
 
 /** The address mihomo's health checks and latency tests ask for. */
 export const TEST_URL = 'https://www.gstatic.com/generate_204'
@@ -53,8 +63,16 @@ export interface ConfigInput {
   /** The physical network interface the nodes and DNS go out on. */
   networkInterface: string
   subscriptions: readonly ConfigSubscription[]
-  /** Each agent that goes through a node, with its listener's port. */
-  agents: ReadonlyArray<{ agentId: AgentId; port: number }>
+  /** Every agent of the host, with its listener's port and the port of its interface's mihomo. */
+  agents: ReadonlyArray<{ agentId: AgentId; port: number; hopPort: number }>
+  /** The password the hops sign in with. */
+  hopPassword: string
+  /**
+   * The loopback interface the hops are bound to. mihomo binds no socket to 127.0.0.1, but on
+   * Windows and macOS it looks the interface up first, so the physical one would fail the hops
+   * while it is gone, which takes nothing from an agent bound to another.
+   */
+  loopbackInterface: string
 }
 
 export function providerName(subscriptionId: string): string {
@@ -68,6 +86,11 @@ export function subscriptionOfProvider(name: string): string | null {
 
 export function agentGroup(agentId: AgentId): string {
   return `${AGENT_GROUP_PREFIX}${agentId}`
+}
+
+/** The proxy in the agent's group that leads to its interface's mihomo. */
+export function hopName(agentId: AgentId): string {
+  return `${HOP_PREFIX}${agentId}`
 }
 
 /** What mihomo puts before every node name of a subscription, so names stay apart. */
@@ -129,6 +152,19 @@ function listeners(agents: ConfigInput['agents']) {
   }))
 }
 
+function hops(input: ConfigInput) {
+  return input.agents.map(({ agentId, hopPort }) => ({
+    name: hopName(agentId),
+    type: 'socks5',
+    server: '127.0.0.1',
+    port: hopPort,
+    username: HOP_USER,
+    password: input.hopPassword,
+    udp: false,
+    'interface-name': input.loopbackInterface,
+  }))
+}
+
 /** mihomo's configuration as an object; written as JSON, which YAML reads as it is. */
 export function mihomoConfig(input: ConfigInput): Record<string, unknown> {
   const providers = input.subscriptions.map((s) => providerName(s.id))
@@ -165,12 +201,13 @@ export function mihomoConfig(input: ConfigInput): Record<string, unknown> {
         },
       ]),
     ),
+    proxies: hops(input),
     'proxy-groups': [
       { name: DEFAULT_GROUP, ...GROUP, proxies: ['REJECT'], ...use },
       ...input.agents.map(({ agentId }) => ({
         name: agentGroup(agentId),
         ...GROUP,
-        proxies: ['REJECT', DEFAULT_GROUP],
+        proxies: ['REJECT', DEFAULT_GROUP, hopName(agentId)],
         ...use,
       })),
     ],
@@ -182,15 +219,20 @@ export function mihomoConfig(input: ConfigInput): Record<string, unknown> {
 export interface InterfaceConfigInput {
   controllerPort: number
   secret: string
-  /** The interface these agents' traffic and names leave through, and no other. */
+  /** The interface the agent's traffic and names leave through, and no other. */
   networkInterface: string
-  agents: ConfigInput['agents']
+  agentId: AgentId
+  /** The port the agent's hop in the nodes' mihomo leads to. */
+  port: number
+  /** The password the hop signs in with. */
+  hopPassword: string
 }
 
 /**
- * The configuration of the mihomo for the agents bound to one interface. Each agent's group holds
- * REJECT first, which it stays on until the host picks the interface's `direct` proxy, and that
- * proxy alone; the global DIRECT is in no group, and anything that reached the rules is rejected.
+ * The configuration of the mihomo that binds one agent to one interface. Its one listener, on
+ * 127.0.0.1, takes only the hop's user; the agent's group holds REJECT first, which it stays on
+ * until the host picks the interface's `direct` proxy, and that proxy alone; the global DIRECT is
+ * in no group, and anything that reached the rules is rejected.
  */
 export function interfaceConfig(input: InterfaceConfigInput): Record<string, unknown> {
   const dns = udpDns(input.networkInterface)
@@ -205,13 +247,23 @@ export function interfaceConfig(input: InterfaceConfigInput): Record<string, unk
       'direct-nameserver': dns,
       'respect-rules': false,
     },
+    // No address skips the sign-in, loopback included.
+    'skip-auth-prefixes': [],
     proxies: [{ name: INTERFACE_PROXY, type: 'direct', 'interface-name': input.networkInterface }],
-    'proxy-groups': input.agents.map(({ agentId }) => ({
-      name: agentGroup(agentId),
-      ...GROUP,
-      proxies: ['REJECT', INTERFACE_PROXY],
-    })),
-    listeners: listeners(input.agents),
+    'proxy-groups': [
+      { name: agentGroup(input.agentId), ...GROUP, proxies: ['REJECT', INTERFACE_PROXY] },
+    ],
+    listeners: [
+      {
+        name: `kite-hop-${input.agentId}`,
+        type: 'socks',
+        listen: '127.0.0.1',
+        port: input.port,
+        udp: false,
+        users: [{ username: HOP_USER, password: input.hopPassword }],
+        proxy: agentGroup(input.agentId),
+      },
+    ],
     rules: ['MATCH,REJECT'],
   }
 }
