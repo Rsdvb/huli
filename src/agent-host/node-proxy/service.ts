@@ -2,12 +2,13 @@
 // picks each group's node through its API, and gives each agent that uses a node the port of its
 // own listener. It fails closed: an agent that uses a node gets only its listener in its proxy
 // variables, so while mihomo is stopped, starting, restarting or crashed, or its node is missing
-// or down, that agent's requests are refused or rejected, never sent another way. Huli's own; see
-// tools/huli/README.md.
+// or down, that agent's requests are refused or rejected, never sent another way. Kite downloads
+// the subscriptions itself, the way its own requests go, and hands mihomo their nodes as files.
+// Huli's own; see tools/huli/README.md.
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { access, constants, mkdir, writeFile } from 'node:fs/promises'
+import { access, constants, mkdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import {
@@ -26,6 +27,7 @@ import {
   type NodeRef,
   type NodeView,
   type SubscriptionUsage,
+  type SubscriptionView,
 } from '@shared/agent-network'
 import { addLogSecret, removeLogSecret, redactLogText } from '@shared/log/process-log'
 import type { Platform } from '@shared/platform'
@@ -43,13 +45,19 @@ import {
   subscriptionOfProvider,
   TEST_URL,
 } from './config'
+import { parseUserinfo, readSubscription } from './content'
+import { downloadSubscription, routeFor, type Downloaded, type ProxyVariables } from './download'
 import {
+  EMPTY_RECORD,
   isSubscriptionUrl,
   networkFolder,
+  providerFile,
   subscriptionHost,
   subscriptionSecrets,
+  writeFileAtomic,
   type NetworkStateFile,
   type StoredSubscription,
+  type SubscriptionRecord,
   type SubscriptionsFile,
 } from './files'
 import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
@@ -69,6 +77,11 @@ const SETTLE_MS = [2_000, 8_000, 20_000]
 const LATENCY_PARALLEL = 8
 /** How long an exit check stands before a request for it checks again. */
 const EXIT_FRESH_MS = 60_000
+/** How often a subscription from a link is downloaded again. */
+const REFRESH_MS = 12 * 60 * 60 * 1000
+/** How soon a download that failed is tried again, without a request for it. */
+const RETRY_MS = 30 * 60 * 1000
+const NO_PROXY_VARIABLES: ProxyVariables = { http: null, https: null, all: null, noProxy: null }
 const PORT_MIN = 20_000
 const PORT_SPAN = 40_000
 
@@ -92,6 +105,10 @@ export interface NodeProxyDeps {
   systemProxy?: (agentId: AgentId) => { proxy: string | null; noProxy: string | null }
   /** Fetches the trace page; tests replace it. */
   trace?: (hop: ProxyHop | null) => Promise<string>
+  /** The proxy variables of Kite's own requests, which the subscriptions are downloaded through. */
+  ownProxy?: () => ProxyVariables
+  /** Downloads a subscription; tests replace it. */
+  download?: (url: string) => Promise<Downloaded>
 }
 
 interface Running {
@@ -102,12 +119,6 @@ interface Running {
   /** Set when the host stops it on purpose, so its exit is no crash. */
   stopping: boolean
   exited: Promise<void>
-}
-
-interface ProviderState {
-  nodes: number
-  updatedAt: number | null
-  usage: SubscriptionUsage | null
 }
 
 /** A port on 127.0.0.1 that nothing listens on now; 0 asks the system for one. */
@@ -145,13 +156,6 @@ function mihomoEnv(platform: Platform): NodeJS.ProcessEnv {
   return env
 }
 
-function parseTime(value: string | null): number | null {
-  if (!value) return null
-  const time = Date.parse(value)
-  // mihomo writes the zero time for a provider it never read.
-  return Number.isFinite(time) && time > 0 ? time : null
-}
-
 export class NodeProxy {
   private subscriptions: StoredSubscription[] = []
   private ports: Partial<Record<AgentId, number>> = {}
@@ -163,7 +167,11 @@ export class NodeProxy {
   private available = false
   private detected: string | null = null
   private inUse: string | null = null
-  private providers = new Map<string, ProviderState>()
+  /** The nodes mihomo read of each subscription. */
+  private mihomoNodes = new Map<string, number>()
+  private records: Record<string, SubscriptionRecord> = {}
+  /** The downloads under way, by subscription. */
+  private updating = new Map<string, Promise<void>>()
   private exits = new Map<AgentId, ExitIp>()
   private checking = new Map<AgentId, Promise<ExitIp>>()
   private queue: Promise<void> = Promise.resolve()
@@ -187,8 +195,12 @@ export class NodeProxy {
       this.deps.state.load(),
     ])
     this.subscriptions = subscriptions.subscriptions
-    for (const s of this.subscriptions) this.addSecrets(s.url)
+    for (const s of this.subscriptions) if (s.url !== null) this.addSecrets(s.url)
     this.ports = state.ports
+    for (const s of this.subscriptions) {
+      const record = state.subscriptions[s.id]
+      if (record) this.records[s.id] = record
+    }
     this.available =
       this.deps.mihomoPath !== null &&
       (await access(this.deps.mihomoPath, constants.X_OK).then(
@@ -204,6 +216,7 @@ export class NodeProxy {
     this.timer = setInterval(() => void this.check(), CHECK_MS)
     this.timer.unref?.()
     this.reconcile()
+    if (this.deps.settings().enabled) this.refreshDue()
   }
 
   /** The port of the agent's listener while it uses a node; null for the system's network. */
@@ -321,17 +334,7 @@ export class NodeProxy {
       detail: this.detail,
       version: this.version,
       interface: { inUse: this.inUse, detected: this.detected, override: settings.interface },
-      subscriptions: this.subscriptions.map((s) => {
-        const provider = this.providers.get(s.id)
-        return {
-          id: s.id,
-          name: s.name,
-          host: subscriptionHost(s.url),
-          nodes: provider?.nodes ?? null,
-          updatedAt: provider?.updatedAt ?? null,
-          usage: provider?.usage ?? null,
-        }
-      }),
+      subscriptions: this.subscriptions.map((s) => this.view(s)),
       agents,
       exits: this.currentExits(),
     }
@@ -351,13 +354,8 @@ export class NodeProxy {
       problem: this.problem,
       interface: this.inUse,
       subscriptions: this.subscriptions.map((s) => {
-        const provider = this.providers.get(s.id)
-        return {
-          id: s.id,
-          name: s.name,
-          nodes: provider?.nodes ?? null,
-          usage: provider?.usage ?? null,
-        }
+        const { id, name, nodes, usage } = this.view(s)
+        return { id, name, nodes, usage }
       }),
       nodes: nodes.map(({ subscription, node, delay }) => ({ subscription, node, delay })),
       defaultNode: settings.defaultNode,
@@ -366,6 +364,21 @@ export class NodeProxy {
         choice: settings.agents[agentId] ?? 'default',
       })),
       exits: this.currentExits(),
+    }
+  }
+
+  private view(s: StoredSubscription): SubscriptionView {
+    const record = this.records[s.id] ?? EMPTY_RECORD
+    return {
+      id: s.id,
+      name: s.name,
+      source: s.url === null ? 'file' : 'url',
+      host: s.url === null ? null : subscriptionHost(s.url),
+      nodes: this.mihomoNodes.get(s.id) ?? record.nodes,
+      updatedAt: record.updatedAt,
+      usage: record.usage,
+      error: record.error,
+      failedAt: record.failedAt,
     }
   }
 
@@ -399,18 +412,50 @@ export class NodeProxy {
       .sort((a, b) => (order.get(a.subscription) ?? 0) - (order.get(b.subscription) ?? 0))
   }
 
+  /** Adds a subscription from a link once its first download gave nodes, which mihomo then reads. */
   async addSubscription(name: string, url: string): Promise<{ id: string }> {
-    const clean = this.checkedName(name, null)
+    this.checkedName(name, null)
     if (!isSubscriptionUrl(url)) throw invalidParams('url must be an http or https address')
-    if (this.subscriptions.length >= MAX_SUBSCRIPTIONS) {
-      throw new HostError('conflict', `There are ${MAX_SUBSCRIPTIONS} subscriptions already`)
-    }
+    this.checkRoom()
     const id = randomBytes(6).toString('hex')
     this.addSecrets(url)
-    this.subscriptions = [...this.subscriptions, { id, name: clean, url, addedAt: Date.now() }]
-    await this.saveSubscriptions()
-    this.reconcile()
+    try {
+      let record: SubscriptionRecord
+      try {
+        record = await this.download(id, url)
+      } catch (error) {
+        const said = this.masked((error as Error).message)
+        throw new HostError('unavailable', `Could not download the subscription: ${said}`)
+      }
+      await this.addStored({ id, name, url, addedAt: Date.now() }, record)
+    } catch (error) {
+      this.dropSecrets(url)
+      throw error
+    }
     return { id }
+  }
+
+  /** Adds a subscription from a file's content, Clash YAML or a list of node links. */
+  async importSubscription(name: string, content: string): Promise<{ id: string }> {
+    this.checkedName(name, null)
+    this.checkRoom()
+    const id = randomBytes(6).toString('hex')
+    const record = await this.writeNodes(id, content, null, true)
+    await this.addStored({ id, name, url: null, addedAt: Date.now() }, record)
+    return { id }
+  }
+
+  /** Replaces the nodes of a subscription imported from a file. */
+  async reimportSubscription(id: string, content: string): Promise<void> {
+    const sub = this.find(id)
+    if (sub.url !== null) {
+      throw new HostError('conflict', 'This subscription comes from a link: refresh it instead')
+    }
+    const record = await this.writeNodes(id, content, null, true)
+    if (!this.subscriptions.some((s) => s.id === id)) return
+    this.records[id] = record
+    this.saveState()
+    await this.reload(id)
   }
 
   async renameSubscription(id: string, name: string): Promise<void> {
@@ -425,29 +470,37 @@ export class NodeProxy {
   async removeSubscription(id: string): Promise<void> {
     const sub = this.find(id)
     this.subscriptions = this.subscriptions.filter((s) => s.id !== id)
-    this.providers.delete(id)
+    this.mihomoNodes.delete(id)
+    delete this.records[id]
     await this.saveSubscriptions()
+    this.saveState()
     this.reconcile()
     await this.queue
-    for (const secret of subscriptionSecrets(sub.url)) {
-      if (!this.subscriptions.some((s) => s.url.includes(secret))) removeLogSecret(secret)
-    }
+    await rm(providerFile(this.deps.userDataPath, id), { force: true }).catch(() => {})
+    if (sub.url !== null) this.dropSecrets(sub.url)
   }
 
-  /** Reads one subscription again, or every one with null. */
+  /**
+   * Downloads one subscription from a link again, or every one with null, and has mihomo read it
+   * again. A download that fails keeps the nodes the last one gave.
+   */
   async refresh(id: string | null): Promise<void> {
-    const ids = id === null ? this.subscriptions.map((s) => s.id) : [this.find(id).id]
-    const api = this.liveApi()
+    const subs = id === null ? this.subscriptions.filter((s) => s.url !== null) : [this.find(id)]
+    if (subs.some((s) => s.url === null)) {
+      throw new HostError(
+        'conflict',
+        'This subscription comes from a file: import it again instead',
+      )
+    }
     const failed: string[] = []
     await Promise.all(
-      ids.map((subId) =>
-        api.updateProvider(providerName(subId)).catch((error: unknown) => {
-          failed.push(this.masked((error as Error).message))
+      subs.map((sub) =>
+        this.update(sub).catch((error: unknown) => {
+          const said = (error as Error).message
+          failed.push(subs.length > 1 ? `${sub.name}: ${said}` : said)
         }),
       ),
     )
-    this.readProviders(await api.providers().catch(() => null))
-    await this.applySelections()
     this.emit()
     if (failed.length > 0) throw new HostError('unavailable', failed.join('; '))
   }
@@ -498,6 +551,7 @@ export class NodeProxy {
 
   private async check(): Promise<void> {
     if (!this.deps.settings().enabled || this.closed) return
+    this.refreshDue()
     const before = this.detected
     await this.detect()
     if (this.detected !== before && this.deps.settings().interface === null) {
@@ -574,7 +628,7 @@ export class NodeProxy {
         controllerPort,
         secret,
         networkInterface,
-        subscriptions: this.subscriptions,
+        subscriptions: this.subscriptions.map(({ id, name }) => ({ id, name })),
         agents: agents.map((agentId) => ({ agentId, port: this.ports[agentId]! })),
       }),
     )
@@ -593,7 +647,7 @@ export class NodeProxy {
     const home = path.join(this.folder, 'mihomo')
     await mkdir(path.join(home, 'providers'), { recursive: true })
     const configFile = path.join(home, 'config.yaml')
-    // The configuration holds the subscriptions' addresses: readable by the user alone.
+    // The configuration holds the API's secret: readable by the user alone.
     await writeFile(configFile, this.configText(networkInterface, agents, controllerPort, secret), {
       mode: 0o600,
     })
@@ -791,12 +845,132 @@ export class NodeProxy {
     for (const provider of providers) {
       const id = subscriptionOfProvider(provider.name)
       if (!id) continue
-      this.providers.set(id, {
-        nodes: provider.proxies.length,
-        updatedAt: parseTime(provider.updatedAt),
-        usage: provider.usage,
-      })
+      this.mihomoNodes.set(id, provider.proxies.length)
     }
+  }
+
+  // Subscriptions' nodes.
+
+  /** Downloads every subscription from a link whose nodes are older than the interval. */
+  private refreshDue(): void {
+    const now = Date.now()
+    for (const sub of this.subscriptions) {
+      if (sub.url === null || this.updating.has(sub.id)) continue
+      const record = this.records[sub.id] ?? EMPTY_RECORD
+      const stale = record.updatedAt === null || now - record.updatedAt >= REFRESH_MS
+      const failedLately =
+        record.failedAt !== null &&
+        record.failedAt > (record.updatedAt ?? 0) &&
+        now - record.failedAt < RETRY_MS
+      if (stale && !failedLately) void this.update(sub).catch(() => {})
+    }
+  }
+
+  /** Downloads the subscription again, once at a time, and has mihomo read it. */
+  private update(sub: StoredSubscription): Promise<void> {
+    const running = this.updating.get(sub.id)
+    if (running) return running
+    const job = this.runUpdate(sub).finally(() => this.updating.delete(sub.id))
+    this.updating.set(sub.id, job)
+    return job
+  }
+
+  private async runUpdate(sub: StoredSubscription): Promise<void> {
+    let record: SubscriptionRecord
+    try {
+      record = await this.download(sub.id, sub.url!)
+    } catch (error) {
+      const said = this.masked((error as Error).message)
+      this.deps.log('warn', `Agent network: could not download ${sub.name}: ${said}`)
+      if (this.subscriptions.some((s) => s.id === sub.id)) {
+        const last = this.records[sub.id] ?? EMPTY_RECORD
+        this.records[sub.id] = { ...last, error: said, failedAt: Date.now() }
+        this.saveState()
+        this.emit()
+      }
+      throw new Error(said, { cause: error })
+    }
+    if (!this.subscriptions.some((s) => s.id === sub.id)) {
+      // Removed while it downloaded.
+      await rm(providerFile(this.deps.userDataPath, sub.id), { force: true }).catch(() => {})
+      return
+    }
+    this.records[sub.id] = record
+    this.saveState()
+    await this.reload(sub.id)
+  }
+
+  /** Downloads the subscription the way Kite's own requests go, and writes its nodes. */
+  private async download(id: string, url: string): Promise<SubscriptionRecord> {
+    const download =
+      this.deps.download ??
+      ((address: string) =>
+        downloadSubscription(address, {
+          route: routeFor(this.deps.ownProxy?.() ?? NO_PROXY_VARIABLES),
+        }))
+    const fetched = await download(url)
+    const text = fetched.body.toString('utf8')
+    return this.writeNodes(id, text, parseUserinfo(fetched.userinfo), false)
+  }
+
+  /**
+   * Writes the subscription's nodes for mihomo, whole, once they are known to hold one; else
+   * throws and leaves the file as it was. An import's content is the caller's, so its fault is
+   * invalid params.
+   */
+  private async writeNodes(
+    id: string,
+    text: string,
+    usage: SubscriptionUsage | null,
+    imported: boolean,
+  ): Promise<SubscriptionRecord> {
+    let content: ReturnType<typeof readSubscription>
+    try {
+      content = readSubscription(text)
+    } catch (error) {
+      if (imported) throw invalidParams((error as Error).message)
+      throw error
+    }
+    try {
+      await writeFileAtomic(providerFile(this.deps.userDataPath, id), content.data)
+    } catch (error) {
+      throw new HostError('internal', `Could not save the nodes: ${(error as Error).message}`)
+    }
+    return { updatedAt: Date.now(), usage, nodes: content.nodes, error: null, failedAt: null }
+  }
+
+  /** Keeps a new subscription whose nodes are written, and starts mihomo again with it. */
+  private async addStored(sub: StoredSubscription, record: SubscriptionRecord): Promise<void> {
+    try {
+      // Again: another subscription may have come while this one downloaded.
+      const name = this.checkedName(sub.name, null)
+      this.checkRoom()
+      this.subscriptions = [...this.subscriptions, { ...sub, name }]
+      this.records[sub.id] = record
+      await this.saveSubscriptions()
+    } catch (error) {
+      this.subscriptions = this.subscriptions.filter((s) => s.id !== sub.id)
+      delete this.records[sub.id]
+      await rm(providerFile(this.deps.userDataPath, sub.id), { force: true }).catch(() => {})
+      throw error
+    }
+    this.saveState()
+    this.reconcile()
+  }
+
+  /** Has a running mihomo read the subscription's file again, and picks the groups' nodes anew. */
+  private async reload(id: string): Promise<void> {
+    const running = this.running
+    if (running && this.state === 'running') {
+      await running.api.updateProvider(providerName(id)).catch((error: unknown) => {
+        const said = this.masked((error as Error).message)
+        this.deps.log('warn', `Agent network: mihomo could not read ${providerName(id)}: ${said}`)
+      })
+      this.readProviders(await running.api.providers().catch(() => null))
+      // A node the new list lacks leaves its groups on REJECT.
+      await this.applySelections().catch(() => {})
+    }
+    this.emit()
   }
 
   // Helpers.
@@ -830,8 +1004,21 @@ export class NodeProxy {
     return clean
   }
 
+  private checkRoom(): void {
+    if (this.subscriptions.length >= MAX_SUBSCRIPTIONS) {
+      throw new HostError('conflict', `There are ${MAX_SUBSCRIPTIONS} subscriptions already`)
+    }
+  }
+
   private addSecrets(url: string): void {
     for (const secret of subscriptionSecrets(url)) addLogSecret(secret)
+  }
+
+  /** Forgets the address's secrets, but those another subscription's address still holds. */
+  private dropSecrets(url: string): void {
+    for (const secret of subscriptionSecrets(url)) {
+      if (!this.subscriptions.some((s) => s.url?.includes(secret))) removeLogSecret(secret)
+    }
   }
 
   private masked(text: string): string {
@@ -846,7 +1033,12 @@ export class NodeProxy {
   }
 
   private saveState(): void {
-    this.deps.state.save({ version: 1, ports: this.ports, running: this.record })
+    this.deps.state.save({
+      version: 1,
+      ports: this.ports,
+      running: this.record,
+      subscriptions: this.records,
+    })
   }
 
   private setState(

@@ -185,6 +185,25 @@ default route, found with the system's tools and checked every minute, or named 
 Only programs that follow the proxy variables are held to the node; one that ignores them still
 goes out on the system's network.
 
+Subscriptions are downloaded by Kite, not mihomo (`download.ts`): the way Kite's own requests go,
+through Advanced › Proxy or the environment's `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY` (HTTP,
+HTTPS or SOCKS5, honouring `NO_PROXY`), else directly, which a Clash or Karing TUN still catches,
+since many providers cannot be reached in China without a proxy. The list of nodes says nothing
+about who uses them; the agents' traffic still goes only through the nodes on the physical
+interface. The request sends `User-Agent: clash.meta mihomo/<pinned version>` so providers answer
+with Clash YAML, follows at most 5 redirects and only to http(s), takes at most 10 MiB and 30 s,
+and reads `subscription-userinfo` for the traffic and expiry. `content.ts` refuses content without
+a node, keeps YAML as it came and writes a list of node links back as standard base64 (mihomo's
+v2ray parser takes no URL-safe or wrapped base64), and the result goes atomically to
+`agent-network/mihomo/providers/<id>.yaml` (0600). mihomo reads it as a `file` provider (with
+the interface override, the name prefix and the health check) and is told to read it again with
+`PUT /providers/proxies/<name>`; it never downloads anything, so no provider or rule names DIRECT.
+A subscription is added only once its first download gave nodes; Kite downloads each again every
+12 hours while the network is on (30 minutes after a failure) and on 更新. A failed download keeps
+the last nodes and shows why and when, beside when it last succeeded. A subscription can also be
+imported from a file (`agentNetwork.importSubscription`, `reimportSubscription`): stored the same
+way with no link, never refreshed, imported again with 重新导入.
+
 The exit check (`agentNetwork.exitIp`, `exit-ip.ts`) proves the path: the agent host fetches
 `https://www.cloudflare.com/cdn-cgi/trace` through the agent's own listener with HTTP CONNECT
 (or, for an agent on the system's network, through its HTTP proxy variable or directly) and
@@ -199,9 +218,11 @@ Huli's own files:
 - `src/agent-host/node-proxy/`: `config.ts` (the configuration, pure, + `config.test.ts`),
   `api.ts` (mihomo's REST API on 127.0.0.1 with a random secret), `interface.ts`, `files.ts`
   (`agent-network/subscriptions.json`, which alone holds the links, and
-  `state/agent-network.json`, the listener ports and the running mihomo, to stop one a crash
-  left), `service.ts` (the process, its restarts, the picks, the exits), `exit-ip.ts` (the
-  trace request through a listener), `validate.ts` and `network.test.ts`.
+  `state/agent-network.json`, the listener ports, the running mihomo, to stop one a crash
+  left, and each subscription's last download), `download.ts` and `content.ts` (the download
+  and what it may hold), `service.ts` (the process, its restarts, the picks, the downloads, the
+  exits), `exit-ip.ts` (the trace request through a listener), `validate.ts`,
+  `network.test.ts` and `subscription.test.ts`.
 - `src/renderer/src/features/settings/agent-network-section.tsx`, `agent-network-rows.tsx`,
   `src/renderer/src/stores/agent-network.ts`: Settings › Agent network and the agent page's
   Network exit row; `network.*` in `locales/*/settings.json`.

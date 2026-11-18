@@ -41,6 +41,8 @@ export const SUBSCRIPTION_ID = /^[a-f0-9]{12}$/
 export const SUBSCRIPTION_NAME_CHARS = 40
 export const SUBSCRIPTION_URL_CHARS = 4_096
 export const MAX_SUBSCRIPTIONS = 32
+/** The most a subscription may hold, downloaded or imported from a file. */
+export const MAX_SUBSCRIPTION_BYTES = 10 * 1024 * 1024
 export const NODE_NAME_CHARS = 256
 export const INTERFACE_NAME_CHARS = 128
 /** The most nodes one latency test takes. */
@@ -159,12 +161,18 @@ export interface SubscriptionUsage {
 export interface SubscriptionView {
   id: string
   name: string
-  /** The address's host name alone; the rest of it may carry a token. */
-  host: string
-  /** Null until mihomo has read it. */
+  /** Downloaded from a link and refreshed, or imported from a file and never refreshed. */
+  source: 'url' | 'file'
+  /** The address's host name alone, the rest of it may carry a token; null for a file. */
+  host: string | null
+  /** As mihomo read it, else as Kite counted it; null when neither has. */
   nodes: number | null
+  /** When it was last downloaded or imported. */
   updatedAt: number | null
   usage: SubscriptionUsage | null
+  /** Why the last download failed, masked, while no later one succeeded; the nodes stay. */
+  error: string | null
+  failedAt: number | null
 }
 
 export interface NodeView extends NodeRef {

@@ -13,6 +13,7 @@ import {
 } from '@shared/agent-network'
 import { invalidParams } from '../errors'
 import type { Validators } from '../rpc'
+import { subscriptionTextProblem } from './content'
 import { isSubscriptionUrl } from './files'
 
 type NetworkMethod = Extract<HostMethod, `agentNetwork.${string}`>
@@ -46,6 +47,13 @@ function name(value: unknown): string {
   return clean
 }
 
+/** A file's text, which the host reads as a subscription; never quoted back. */
+function content(value: unknown): string {
+  const problem = subscriptionTextProblem(value)
+  if (problem) throw invalidParams(problem)
+  return value as string
+}
+
 function nodeRef(value: unknown, at: string): NodeRef {
   const o = record(value, ['subscription', 'node'])
   if (typeof o.subscription !== 'string' || !SUBSCRIPTION_ID.test(o.subscription)) {
@@ -72,6 +80,14 @@ export const networkValidators: Pick<Validators, NetworkMethod> = {
     // The address itself is never quoted back: it may carry the provider's token.
     if (!isSubscriptionUrl(o.url)) throw invalidParams('url must be an http or https address')
     return { name: name(o.name), url: o.url }
+  },
+  'agentNetwork.importSubscription': (params) => {
+    const o = record(params, ['name', 'content'])
+    return { name: name(o.name), content: content(o.content) }
+  },
+  'agentNetwork.reimportSubscription': (params) => {
+    const o = record(params, ['id', 'content'])
+    return { id: subscriptionId(o.id), content: content(o.content) }
   },
   'agentNetwork.renameSubscription': (params) => {
     const o = record(params, ['id', 'name'])

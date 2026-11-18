@@ -1,8 +1,14 @@
 // Huli: the rows of Settings › Agent network, and the Network exit row of an agent's page. They
 // show and change this computer's agent network only. Huli's own; see tools/huli/README.md.
 
-import { useState, type FormEvent } from 'react'
-import { Delete02Icon, Edit02Icon, Globe02Icon, RefreshIcon } from '@hugeicons/core-free-icons'
+import { useRef, useState, type ChangeEvent, type FormEvent, type RefObject } from 'react'
+import {
+  Delete02Icon,
+  Edit02Icon,
+  FileImportIcon,
+  Globe02Icon,
+  RefreshIcon,
+} from '@hugeicons/core-free-icons'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import {
@@ -10,6 +16,8 @@ import {
   isInterfaceName,
   isSubscriptionName,
   cleanSubscriptionName,
+  MAX_SUBSCRIPTION_BYTES,
+  SUBSCRIPTION_NAME_CHARS,
   type AgentNetworkStatus,
   type ExitIp,
   type NodeView,
@@ -27,7 +35,7 @@ import {
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
-import { errorMessage, hostAt } from '@renderer/lib/host'
+import { errorCode, errorMessage, hostAt } from '@renderer/lib/host'
 import { mediumAgo } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
 import {
@@ -60,6 +68,9 @@ import {
   SettingsDialogHeader,
   SettingsField,
 } from './settings-dialog'
+
+/** One empty list, so a selector before the status came returns the same value each time. */
+const NO_SUBSCRIPTIONS: SubscriptionView[] = []
 
 function update(patch: Parameters<ReturnType<typeof useSettingsStore.getState>['update']>[0]) {
   return useSettingsStore.getState().update(patch)
@@ -162,30 +173,77 @@ function usageLine(sub: SubscriptionView, t: TFunction<'settings'>): string | nu
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+/** The text of a file picked to import, refused past the size the host takes. */
+async function readPicked(file: File, t: TFunction<'settings'>): Promise<string> {
+  if (file.size > MAX_SUBSCRIPTION_BYTES) throw new Error(t('network.import.tooLarge'))
+  return file.text()
+}
+
+/** A hidden file input; a click on it shows the system's picker, and `picked` gets the file. */
+function FilePicker({
+  inputRef,
+  picked,
+}: {
+  inputRef: RefObject<HTMLInputElement | null>
+  picked: (file: File) => void
+}) {
+  const change = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    // Cleared, so picking the same file again still reads it.
+    event.target.value = ''
+    if (file) picked(file)
+  }
+  return (
+    <input
+      ref={inputRef}
+      type="file"
+      accept=".yaml,.yml,.txt,.conf,text/plain,application/x-yaml"
+      hidden
+      onChange={change}
+    />
+  )
+}
+
 export function SubscriptionRow({
   sub,
-  running,
   onRename,
   onRemove,
 }: {
   sub: SubscriptionView
-  running: boolean
   onRename: () => void
   onRemove: () => void
 }) {
   const { t } = useTranslation('settings')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const fromFile = sub.source === 'file'
   const first = [
-    sub.host,
+    sub.host ?? t('network.subscriptions.fromFile'),
     sub.nodes === null
       ? t('network.subscriptions.notRead')
       : t('network.subscriptions.nodes', { count: sub.nodes }),
-    sub.updatedAt ? t('network.subscriptions.updated', { time: mediumAgo(sub.updatedAt) }) : null,
+    sub.updatedAt
+      ? t(fromFile ? 'network.subscriptions.imported' : 'network.subscriptions.updated', {
+          time: mediumAgo(sub.updatedAt),
+        })
+      : null,
   ]
     .filter(Boolean)
     .join(' · ')
   const usage = usageLine(sub, t)
+  const failure =
+    sub.error && sub.failedAt
+      ? t('network.subscriptions.failed', { time: mediumAgo(sub.failedAt), error: sub.error })
+      : null
+  const reimport = (file: File) => {
+    setBusy(true)
+    setError(null)
+    readPicked(file, t)
+      .then((content) => hostAt(null, 'agentNetwork.reimportSubscription', { id: sub.id, content }))
+      .catch((e: unknown) => setError(errorMessage(e)))
+      .finally(() => setBusy(false))
+  }
   return (
     <RowShell>
       <RowLine
@@ -201,25 +259,45 @@ export function SubscriptionRow({
                     {usage}
                   </>
                 )}
+                {failure && (
+                  <>
+                    <br />
+                    <span className="text-danger">{failure}</span>
+                  </>
+                )}
               </>
             }
           />
         }
       >
         <ControlError error={error} />
-        <IconAction
-          label={t('network.subscriptions.refresh')}
-          icon={RefreshIcon}
-          busy={busy}
-          disabled={!running}
-          onClick={() => {
-            setBusy(true)
-            setError(null)
-            hostAt(null, 'agentNetwork.refresh', { id: sub.id })
-              .catch((e: unknown) => setError(errorMessage(e)))
-              .finally(() => setBusy(false))
-          }}
-        />
+        {fromFile ? (
+          <>
+            <FilePicker inputRef={fileInput} picked={reimport} />
+            <IconAction
+              label={t('network.subscriptions.reimport')}
+              icon={FileImportIcon}
+              busy={busy}
+              onClick={() => fileInput.current?.click()}
+            />
+          </>
+        ) : (
+          <IconAction
+            label={t('network.subscriptions.refresh')}
+            icon={RefreshIcon}
+            busy={busy}
+            onClick={() => {
+              setBusy(true)
+              setError(null)
+              // A failed download shows in the row itself, from the status, with its time.
+              hostAt(null, 'agentNetwork.refresh', { id: sub.id })
+                .catch((e: unknown) => {
+                  if (errorCode(e) !== 'unavailable') setError(errorMessage(e))
+                })
+                .finally(() => setBusy(false))
+            }}
+          />
+        )}
         <IconAction
           label={t('network.subscriptions.rename')}
           icon={Edit02Icon}
@@ -236,7 +314,7 @@ export function SubscriptionRow({
   )
 }
 
-export function RefreshAllAction({ disabled }: { disabled: boolean }) {
+export function RefreshAllAction() {
   const { t } = useTranslation('settings')
   const [busy, setBusy] = useState(false)
   return (
@@ -244,7 +322,6 @@ export function RefreshAllAction({ disabled }: { disabled: boolean }) {
       label={t('network.subscriptions.refreshAll')}
       icon={RefreshIcon}
       busy={busy}
-      disabled={disabled}
       onClick={() => {
         setBusy(true)
         hostAt(null, 'agentNetwork.refresh', { id: null })
@@ -255,13 +332,24 @@ export function RefreshAllAction({ disabled }: { disabled: boolean }) {
   )
 }
 
-/** Add, or rename with `sub`: a name, and for a new one its link, which never comes back. */
+/** A file's name without its extension, as a subscription's name. */
+function nameOfFile(file: File): string {
+  const base = cleanSubscriptionName(file.name.replace(/\.[^.]*$/, '').replace(/\|/g, ' '))
+  return base.slice(0, SUBSCRIPTION_NAME_CHARS).trim()
+}
+
+/**
+ * Add from a link or, with `fromFile`, from a file; or rename with `sub`. The link and the
+ * file's content never come back.
+ */
 export function SubscriptionDialog({
   sub,
+  fromFile = false,
   open,
   onOpenChange,
 }: {
   sub: SubscriptionView | null
+  fromFile?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -269,19 +357,27 @@ export function SubscriptionDialog({
   // The parent keys the dialog by what it edits, so each opening starts afresh.
   const [name, setName] = useState(sub?.name ?? '')
   const [url, setUrl] = useState('')
+  const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   const clean = cleanSubscriptionName(name)
   const nameOk = isSubscriptionName(clean)
-  const urlOk = sub !== null || /^https?:\/\/[^\s/]+\S*$/i.test(url.trim())
+  const adding = sub === null
+  const urlOk = !adding || fromFile || /^https?:\/\/[^\s/]+\S*$/i.test(url.trim())
+  const fileTooLarge = file !== null && file.size > MAX_SUBSCRIPTION_BYTES
+  const sourceOk = !adding || (fromFile ? file !== null && !fileTooLarge : url.trim() !== '')
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!nameOk || !urlOk || busy) return
+    if (!nameOk || !urlOk || !sourceOk || busy) return
     setBusy(true)
     setError(null)
     try {
       if (sub) await hostAt(null, 'agentNetwork.renameSubscription', { id: sub.id, name: clean })
-      else await hostAt(null, 'agentNetwork.addSubscription', { name: clean, url: url.trim() })
+      else if (fromFile && file) {
+        const content = await readPicked(file, t)
+        await hostAt(null, 'agentNetwork.importSubscription', { name: clean, content })
+      } else await hostAt(null, 'agentNetwork.addSubscription', { name: clean, url: url.trim() })
       onOpenChange(false)
     } catch (e) {
       setError(errorMessage(e))
@@ -294,7 +390,15 @@ export function SubscriptionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <SettingsDialogContent className="sm:max-w-120">
         <form className="contents" onSubmit={(event) => void submit(event)}>
-          <SettingsDialogHeader title={t(sub ? 'network.rename.title' : 'network.add.title')} />
+          <SettingsDialogHeader
+            title={t(
+              sub
+                ? 'network.rename.title'
+                : fromFile
+                  ? 'network.import.title'
+                  : 'network.add.title',
+            )}
+          />
           <SettingsDialogBody>
             <SettingsField
               label={t('network.add.name')}
@@ -312,7 +416,36 @@ export function SubscriptionDialog({
                 onChange={(event) => setName(event.target.value)}
               />
             </SettingsField>
-            {!sub && (
+            {adding && fromFile && (
+              <SettingsField
+                label={t('network.import.file')}
+                hint={
+                  error ? (
+                    <span className="kettu-sd__error">{error}</span>
+                  ) : fileTooLarge ? (
+                    <span className="kettu-sd__error">{t('network.import.tooLarge')}</span>
+                  ) : (
+                    t('network.import.hint')
+                  )
+                }
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <FilePicker
+                    inputRef={fileInput}
+                    picked={(picked) => {
+                      setFile(picked)
+                      setError(null)
+                      if (name.trim() === '') setName(nameOfFile(picked))
+                    }}
+                  />
+                  <SetButton type="button" onClick={() => fileInput.current?.click()}>
+                    {t('network.import.choose')}
+                  </SetButton>
+                  {file && <span className="k-fact truncate">{file.name}</span>}
+                </div>
+              </SettingsField>
+            )}
+            {adding && !fromFile && (
               <SettingsField
                 label={t('network.add.url')}
                 htmlFor="network-sub-url"
@@ -349,9 +482,11 @@ export function SubscriptionDialog({
               variant="primary"
               type="submit"
               loading={busy}
-              disabled={!nameOk || !urlOk || (!sub && url.trim() === '')}
+              disabled={!nameOk || !urlOk || !sourceOk}
             >
-              {t(sub ? 'network.rename.save' : 'network.add.save')}
+              {t(
+                sub ? 'network.rename.save' : fromFile ? 'network.import.save' : 'network.add.save',
+              )}
             </SetButton>
           </SettingsDialogFooter>
         </form>
@@ -442,7 +577,7 @@ function nodeLabel(ref: { subscription: string; node: string }, subs: Subscripti
 export function DefaultNodeControl({ label }: { label: string }) {
   const { t } = useTranslation('settings')
   const chosen = useSettingsStore((s) => s.settings.agentNetwork.defaultNode)
-  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? [])
+  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? NO_SUBSCRIPTIONS)
   const running = useAgentNetworkStore((s) => s.status?.state === 'running')
   const testing = useAgentNetworkStore((s) => s.testing)
   const options = useNodeOptions()
@@ -487,7 +622,7 @@ export function DefaultNodeControl({ label }: { label: string }) {
 export function NetworkChoiceSelect({ agentId, label }: { agentId: AgentId; label: string }) {
   const { t } = useTranslation('settings')
   const network = useSettingsStore((s) => s.settings.agentNetwork)
-  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? [])
+  const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? NO_SUBSCRIPTIONS)
   const options = useNodeOptions()
   const [error, setError] = useState<string | null>(null)
   const choice = network.agents[agentId]

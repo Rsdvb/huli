@@ -1742,12 +1742,20 @@ export interface HostContract {
   'kettuImport.run': { params: { sessionIds: string[] }; result: KettuImportResult }
   // Huli: the agents' network through the user's proxy subscriptions, for this computer's windows
   // alone: a paired device may call none of these, and `agentNetwork.changed` reaches no device.
-  // A subscription's address goes in with `addSubscription` and never comes out.
+  // A subscription's address goes in with `addSubscription` and never comes out; the host
+  // downloads it before it adds it.
   'agentNetwork.status': { params: void; result: AgentNetworkStatus }
   'agentNetwork.addSubscription': { params: { name: string; url: string }; result: { id: string } }
+  // A subscription from a file's text, Clash YAML or a list of node links, at most 10 MiB; it is
+  // never refreshed, only imported again.
+  'agentNetwork.importSubscription': {
+    params: { name: string; content: string }
+    result: { id: string }
+  }
+  'agentNetwork.reimportSubscription': { params: { id: string; content: string }; result: void }
   'agentNetwork.renameSubscription': { params: { id: string; name: string }; result: void }
   'agentNetwork.removeSubscription': { params: { id: string }; result: void }
-  // Reads one subscription again, or every one with `id` null.
+  // Downloads one subscription from a link again, or every one with `id` null.
   'agentNetwork.refresh': { params: { id: string | null }; result: void }
   'agentNetwork.nodes': { params: void; result: { nodes: NodeView[] } }
   // Tests the nodes named, or every node with `nodes` null.
@@ -2075,6 +2083,8 @@ export const HOST_METHODS = [
   'kettuImport.run',
   'agentNetwork.status',
   'agentNetwork.addSubscription',
+  'agentNetwork.importSubscription',
+  'agentNetwork.reimportSubscription',
   'agentNetwork.renameSubscription',
   'agentNetwork.removeSubscription',
   'agentNetwork.refresh',

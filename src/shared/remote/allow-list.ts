@@ -14,6 +14,8 @@ const MAIN_ONLY: ReadonlySet<string> = new Set<HostMethod>(['media.open'])
 const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'agentNetwork.status',
   'agentNetwork.addSubscription',
+  'agentNetwork.importSubscription',
+  'agentNetwork.reimportSubscription',
   'agentNetwork.renameSubscription',
   'agentNetwork.removeSubscription',
   'agentNetwork.refresh',

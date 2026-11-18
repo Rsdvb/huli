@@ -295,6 +295,8 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'kettuImport.run': NONE,
   'agentNetwork.status': HOST_MS,
   'agentNetwork.addSubscription': AGENT_MS,
+  'agentNetwork.importSubscription': AGENT_MS,
+  'agentNetwork.reimportSubscription': AGENT_MS,
   'agentNetwork.renameSubscription': AGENT_MS,
   'agentNetwork.removeSubscription': AGENT_MS,
   'agentNetwork.refresh': AGENT_MS,

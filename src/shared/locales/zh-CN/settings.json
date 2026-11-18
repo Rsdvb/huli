@@ -2080,7 +2080,7 @@
       "rename": "重命名",
       "remove": "移除",
       "emptyTitle": "还没有订阅",
-      "emptyHint": "添加机场的订阅链接。链接只留在这台电脑上。",
+      "emptyHint": "添加机场的订阅链接，或导入订阅文件。它们只留在这台电脑上。",
       "nodes_one": "{{count}} 个节点",
       "nodes_other": "{{count}} 个节点",
       "notRead": "尚未读取",
@@ -2089,13 +2089,18 @@
       "expires": "{{date}}到期",
       "removeTitle": "移除「{{name}}」？",
       "removeBody": "它的节点会一并移除。用其中某个节点的智能体，在你另选之前都无法联网。",
-      "keywords": "订阅 机场 链接 节点 更新"
+      "keywords": "订阅 机场 链接 节点 更新",
+      "importFile": "从文件导入",
+      "reimport": "重新导入",
+      "fromFile": "本地文件",
+      "imported": "{{time}}导入",
+      "failed": "更新失败（{{time}}）：{{error}}"
     },
     "add": {
       "title": "添加订阅",
       "name": "名称",
       "url": "订阅链接",
-      "urlHint": "只由这台电脑的智能体主机保存：不进设置、不进日志，也不给配对的设备。",
+      "urlHint": "添加时先经 Kettu 自身的网络（「高级 › 代理」）下载一次，之后每 12 小时更新。链接只由这台电脑的智能体主机保存：不进设置、不进日志，也不给配对的设备。",
       "save": "添加",
       "invalidUrl": "请输入 http 或 https 链接。",
       "invalidName": "请用 1 到 40 个字符，不含 |。"
@@ -2137,6 +2142,14 @@
       "unsupported": "无法检测出口：系统代理不是 HTTP 代理",
       "unchecked": "尚未检测出口",
       "check": "检测出口 IP"
+    },
+    "import": {
+      "title": "从文件导入订阅",
+      "file": "文件",
+      "choose": "选择文件…",
+      "hint": "Clash YAML，或 base64 / 逐行的节点链接，最大 10 MB。只保存在这台电脑上，不会自动更新，可随时重新导入。",
+      "tooLarge": "文件超过 10 MB。",
+      "save": "导入"
     }
   }
 }
