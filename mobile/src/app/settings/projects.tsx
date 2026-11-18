@@ -42,7 +42,7 @@ export default function ProjectsSettings() {
   return (
     <ManagePage
       title="项目"
-      intro="电脑上 Huli 里的项目。移除项目不会动它的文件夹。"
+      intro="电脑上纸鸢里的项目。移除项目不会动它的文件夹。"
       onRefresh={() => host.refresh()}
       overlay={<AddProjectSheet visible={adding} onClose={() => setAdding(false)} />}
     >

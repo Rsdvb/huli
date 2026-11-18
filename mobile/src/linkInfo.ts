@@ -56,7 +56,7 @@ export function linkProblem(state: LinkState): string | null {
       return state.reason === 'update_client'
         ? '这个 App 版本太旧，请更新。'
         : state.reason === 'update_host'
-          ? '电脑上的 Huli 版本太旧，请先更新电脑端。'
+          ? '电脑上的纸鸢版本太旧，请先更新电脑端。'
           : '这台手机已被电脑移除。'
   }
 }

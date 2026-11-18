@@ -44,7 +44,7 @@ const OWN_TOOLS: Record<string, string> = {
   read_memory: '读取记忆',
   update_memory: '更新记忆',
   forget_memory: '忘记记忆',
-  read_kettu_guide: '读取 Huli 指南',
+  read_kettu_guide: '读取纸鸢指南',
   report_problem: '报告问题',
   // Browser
   browser_navigate: '浏览器打开网页',
@@ -136,7 +136,7 @@ export function humanize(name: string): string {
 
 /** A server's name as the app shows it: Huli for its own. */
 function serverName(server: string): string {
-  if (server.toLowerCase() === OWN_SERVER) return 'Huli'
+  if (server.toLowerCase() === OWN_SERVER) return '纸鸢'
   return humanize(server)
     .split(' ')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

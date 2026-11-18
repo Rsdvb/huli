@@ -15,6 +15,6 @@ resources/cua-driver/
 # Huli Cloud's bundle
 cloud/dist/
 
-# Huli's icon renderer, installed only when the icon changes
-tools/huli/icon/node_modules/
-tools/huli/icon/package-lock.json
+# Kite's artwork renderer's dependencies, installed only when the artwork changes
+tools/huli/brand/node_modules/
+tools/huli/brand/package-lock.json

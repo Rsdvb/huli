@@ -202,7 +202,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
     }
     const go = await confirm({
       title: `卸载 ${name}？`,
-      message: `Huli 会删除为 ${name} 安装的包，并移除你在这里添加的 Agent；正在运行的回合会停止。它们的会话仍保留、能查看。你自己的程序、登录和配置目录都不动。`,
+      message: `纸鸢会删除为 ${name} 安装的包，并移除你在这里添加的 Agent；正在运行的回合会停止。它们的会话仍保留、能查看。你自己的程序、登录和配置目录都不动。`,
       confirm: '卸载',
     })
     if (go) uninstall(false)
@@ -211,7 +211,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
   const reinstall = async () => {
     const go = await confirm({
       title: `重新安装 ${status.package?.name ?? name}？`,
-      message: '删掉 Huli 装的这一份，重新安装。',
+      message: '删掉 纸鸢装的这一份，重新安装。',
       confirm: '重新安装',
     })
     if (!go) return
@@ -241,7 +241,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
           <Sheet
             visible={uninstalling}
             title={`卸载 ${name}？`}
-            message={`Huli 会删除为 ${name} 安装的包，并移除你在这里添加的 Agent；正在运行的回合会停止。它们的会话仍保留、能查看。你自己的程序、登录和配置目录都不动。\n\n${status.uninstallCommand ?? ''}`}
+            message={`纸鸢会删除为 ${name} 安装的包，并移除你在这里添加的 Agent；正在运行的回合会停止。它们的会话仍保留、能查看。你自己的程序、登录和配置目录都不动。\n\n${status.uninstallCommand ?? ''}`}
             items={[
               { key: 'keep', label: '卸载', destructive: true, onPress: () => uninstall(false) },
               {
@@ -349,7 +349,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
       {status.uninstalled ? (
         <Notice
           tone="info"
-          title="已从 Huli 卸载"
+          title="已从纸鸢卸载"
           actions={
             <Button
               label="安装"
@@ -382,13 +382,13 @@ function HarnessBody({ status }: { status: AgentStatus }) {
 
       {status.package ? (
         <ListGroup
-          header="Huli 装的包"
+          header="纸鸢装的包"
           footer={
             status.package.isSdk
-              ? `Huli 不带 ${name}，只装驱动它的 SDK；更新只在 ${status.package.version.split('.').slice(0, 2).join('.')}.x 之内。`
+              ? `纸鸢不带 ${name}，只装驱动它的 SDK；更新只在 ${status.package.version.split('.').slice(0, 2).join('.')}.x 之内。`
               : harness === 'deepseek'
-                ? `就是 ${name} 本身，Huli 用你的 Node.js 运行它。`
-                : `Huli 经这个适配器运行 ${name}，用你的 Node.js。`
+                ? `就是 ${name} 本身，纸鸢用你的 Node.js 运行它。`
+                : `纸鸢经这个适配器运行 ${name}，用你的 Node.js。`
           }
         >
           <ListRow
@@ -396,8 +396,8 @@ function HarnessBody({ status }: { status: AgentStatus }) {
             subtitle={
               status.package.installed
                 ? status.package.isSdk
-                  ? `${status.package.version} · 装在 Huli 的数据目录，不含 CLI`
-                  : `${status.package.version} · 装在 Huli 的数据目录`
+                  ? `${status.package.version} · 装在纸鸢的数据目录，不含 CLI`
+                  : `${status.package.version} · 装在纸鸢的数据目录`
                 : '首次使用时安装'
             }
           />
@@ -446,7 +446,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
             <ListRow
               key="reinstall"
               title="重新安装"
-              subtitle="删掉 Huli 装的这一份，重新安装。"
+              subtitle="删掉 纸鸢装的这一份，重新安装。"
               icon="refresh"
               plainIcon
               action
@@ -464,7 +464,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
       ) : null}
 
       {installed && !status.uninstalled ? (
-        <ListGroup footer="删除 Huli 为它安装的包；你自己的程序、登录和配置都保留。">
+        <ListGroup footer="删除纸鸢为它安装的包；你自己的程序、登录和配置都保留。">
           <ListRow
             title={`卸载 ${name}…`}
             destructive
@@ -475,7 +475,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
         </ListGroup>
       ) : null}
 
-      <GroupNote>要换用电脑上别处的程序，请在电脑上的 Huli 里选择可执行文件。</GroupNote>
+      <GroupNote>要换用电脑上别处的程序，请在电脑上的纸鸢里选择可执行文件。</GroupNote>
     </ManagePage>
   )
 }
@@ -597,7 +597,7 @@ function TaskNotice(props: {
       >
         <Muted>
           {isOld
-            ? `你的 ${name} ${version ?? ''} 比 Huli 要的旧，更新后才能用。`
+            ? `你的 ${name} ${version ?? ''} 比纸鸢要的旧，更新后才能用。`
             : status.package?.isSdk
               ? `你装的是 ${version ?? ''}。更新按你装 ${name} 的方式运行，Claude Agent SDK 一并换成对应的版本；命令在下面。`
               : `你装的是 ${version ?? ''}。更新按你装 ${name} 的方式运行，命令在下面。`}
@@ -621,7 +621,7 @@ function TaskNotice(props: {
           />
         }
       >
-        {`你的 ${name} ${version ?? ''} 比 Huli 要的旧（至少 ${minimum}）。按你装它的方式更新，装好后再点“重新检测”。`}
+        {`你的 ${name} ${version ?? ''} 比纸鸢要的旧（至少 ${minimum}）。按你装它的方式更新，装好后再点“重新检测”。`}
       </Notice>
     )
   }
@@ -732,7 +732,7 @@ function InstallNotice(props: {
           />
         }
       >
-        {`Huli 会把 ${status.package?.name ?? ''} 装进自己的数据目录，用你的 Node.js 运行。`}
+        {`纸鸢会把 ${status.package?.name ?? ''} 装进自己的数据目录，用你的 Node.js 运行。`}
       </Notice>
     )
   }
@@ -751,8 +751,8 @@ function InstallNotice(props: {
       }
     >
       {status.cli
-        ? `Huli 只用你自己装的 ${status.cli.command}，不带一份。按厂商文档里的一种方式装上它。`
-        : 'Huli 在后台装好它，装完这一页会直接变成已安装的状态。'}
+        ? `纸鸢只用你自己装的 ${status.cli.command}，不带一份。按厂商文档里的一种方式装上它。`
+        : '纸鸢在后台装好它，装完这一页会直接变成已安装的状态。'}
     </Notice>
   )
 }
@@ -783,8 +783,8 @@ function InstallSheet(props: {
       message={
         hasMethods
           ? vendor
-            ? `Huli 不自带 ${name}，用的是你电脑上装的那份。选一种 ${vendor} 文档里的安装方式，Huli 会在后台运行它，装好后重新检测 ${name}。`
-            : `选一种文档里的安装方式，Huli 会在后台运行它，装好后重新检测 ${name}。`
+            ? `纸鸢不自带 ${name}，用的是你电脑上装的那份。选一种 ${vendor} 文档里的安装方式，纸鸢会在后台运行它，装好后重新检测 ${name}。`
+            : `选一种文档里的安装方式，纸鸢会在后台运行它，装好后重新检测 ${name}。`
           : `按下面的要求安装 ${name}，完成后重新加载环境以检测它。`
       }
       onClose={props.onClose}
@@ -840,7 +840,7 @@ function InstallSheet(props: {
           </View>
           <FieldNote>
             {method.id === 'archive'
-              ? 'Huli 会为这台电脑下载并安装这个文件。'
+              ? '纸鸢会为这台电脑下载并安装这个文件。'
               : '也能复制到你自己的终端里运行，装好后回来点“重新加载环境”。'}
           </FieldNote>
         </>
@@ -882,7 +882,7 @@ function VersionGroup(props: { status: AgentStatus; actions: Actions; version: s
         ? '已是最新'
         : null
   const line = !checks
-    ? '由它自己的安装程序更新，不经过 Huli。'
+    ? '由它自己的安装程序更新，不经过纸鸢。'
     : actions.busy('check')
       ? '正在检查…'
       : updating
@@ -954,8 +954,8 @@ function ProgramGroup({ status, version }: { status: AgentStatus; version: strin
             : status.package?.isSdk
               ? '你自己装的，由 SDK 运行。'
               : status.release
-                ? 'Huli 装的，在 Huli 的数据目录里。'
-                : '你自己装的，由 Huli 运行。'
+                ? '纸鸢装的，在纸鸢的数据目录里。'
+                : '你自己装的，由纸鸢运行。'
         }
         value={version ?? undefined}
       />

@@ -219,7 +219,7 @@ export default function Share() {
     }
   }
 
-  const header = <GlassHeader modal title="分享到 Huli" />
+  const header = <GlassHeader modal title="分享到纸鸢" />
 
   if (host.phase === 'loading' || bundle === undefined) {
     return (
@@ -237,7 +237,7 @@ export default function Share() {
   if (host.phase === 'pair' || bundle === null) {
     const [title, detail] =
       host.phase === 'pair'
-        ? ['还没有配对电脑', '先在 Huli 里配对电脑，再来分享。']
+        ? ['还没有配对电脑', '先在纸鸢里配对电脑，再来分享。']
         : ['没有找到要分享的内容', '可能已经发出去了，或者已经过期。请重新分享一次。']
     return (
       <View style={{ flex: 1, backgroundColor: c.bg }}>

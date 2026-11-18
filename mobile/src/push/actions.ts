@@ -136,7 +136,7 @@ function failure(error: unknown): { title: string; body: string } {
   if (error instanceof NoLink) {
     // Answering another computer would mean leaving the one in front, which only the app does.
     if (error.reason === 'other-computer') {
-      return { title: '打开 Huli 处理', body: '这条来自另一台电脑，点开后会切换过去。' }
+      return { title: '打开纸鸢处理', body: '这条来自另一台电脑，点开后会切换过去。' }
     }
     return { title: '没能发送，点开处理', body: '没有连上电脑。' }
   }
@@ -186,7 +186,7 @@ export async function answerFromNotification(
     } finally {
       clearTimeout(timer)
     }
-    const title = !hidden && content.title ? content.title : 'Huli'
+    const title = !hidden && content.title ? content.title : '纸鸢'
     await notice(data, identifier, { title: answer.done, body: title, quiet: true })
   } catch (error) {
     await notice(data, identifier, { ...failure(error), quiet: false })

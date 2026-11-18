@@ -39,7 +39,7 @@ import { ListGroup, ListRow } from '../../ui/ListRow'
 import { space, type as typeScale, useTokens } from '../../ui/tokens'
 
 /** The product's name where the host still says Kettu's. */
-const shown = (title: string) => (title === 'Kettu' ? 'Huli' : title)
+const shown = (title: string) => (title === 'Kettu' ? '纸鸢' : title)
 
 function connectionText(connection: MarketConnection | undefined): string | null {
   if (!connection) return null
@@ -127,7 +127,7 @@ export default function McpSettings() {
     if (s.spec.type === 'http' && s.spec.oauth?.flow === 'browser') {
       fail(
         '无法连接',
-        new Error('这个服务只能在主机自己的浏览器里完成登录，请在那台主机上的 Huli 里连接。'),
+        new Error('这个服务只能在主机自己的浏览器里完成登录，请在那台主机上的纸鸢里连接。'),
       )
       return
     }
@@ -195,7 +195,7 @@ export default function McpSettings() {
   return (
     <ManagePage
       title="MCP 服务器"
-      intro="Huli 自带的服务器，以及你安装的服务器。Agent 自己的服务器也会连接。"
+      intro="纸鸢自带的服务器，以及你安装的服务器。Agent 自己的服务器也会连接。"
       onRefresh={() =>
         Promise.all([status.reload(), connections.reload(), settings.reload(), host.refresh()])
       }
@@ -212,7 +212,7 @@ export default function McpSettings() {
             visible={code !== null}
             onClose={() => setCode(null)}
             title="在服务页面输入这个验证码"
-            message="登录信息由 Huli 保管，这些 Agent 通过 Huli 访问这个服务器。"
+            message="登录信息由纸鸢保管，这些 Agent 通过纸鸢访问这个服务器。"
           >
             {code ? (
               <>
@@ -245,7 +245,7 @@ export default function McpSettings() {
           {server ? (
             <ListGroup
               header="内置"
-              footer="Artifacts、会话和浏览器都通过 Huli 自带的服务器提供给每个 Agent。"
+              footer="Artifacts、会话和浏览器都通过纸鸢自带的服务器提供给每个 Agent。"
             >
               <ListRow
                 title={shown(server.title)}
@@ -282,7 +282,7 @@ export default function McpSettings() {
           {server && !server.running ? (
             <Notice
               tone="error"
-              title="Huli 的服务器没有运行"
+              title="纸鸢的服务器没有运行"
               actions={
                 <Button
                   label="重试"
@@ -310,7 +310,7 @@ export default function McpSettings() {
           ) : null}
 
           {agents.length > 0 ? (
-            <ListGroup header="在各 Agent 中使用 Huli 的工具">
+            <ListGroup header="在各 Agent 中使用纸鸢的工具">
               {agents.map((agent) => (
                 <KettuSwitch
                   key={agent.id}
@@ -336,7 +336,7 @@ export default function McpSettings() {
               )
             ) : kept.length === 0 ? (
               <GroupNote>
-                Huli 还没有保存任何 MCP 服务器。可以在电脑上 Huli 的 Marketplace 里安装。
+                纸鸢还没有保存任何 MCP 服务器。可以在电脑上纸鸢的 Marketplace 里安装。
               </GroupNote>
             ) : (
               <ListGroup>
@@ -369,12 +369,12 @@ export default function McpSettings() {
           {status.value.places.length > 0 ? (
             <ListGroup
               header="Agent 自己的"
-              footer="每个 Agent 自己保存的 MCP 服务器。Huli 只显示它们，要修改请在 Agent 中进行。"
+              footer="每个 Agent 自己保存的 MCP 服务器。纸鸢只显示它们，要修改请在 Agent 中进行。"
             >
               {status.value.places.map((place) => {
                 const path = homeShort(place.path)
                 const note = place.chosen
-                  ? '在 Huli 中选定'
+                  ? '在纸鸢中选定'
                   : place.env
                     ? `由 ${place.env} 设定`
                     : null

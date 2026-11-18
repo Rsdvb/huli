@@ -46,9 +46,9 @@ export function pushStatusText(value: PushStatus): string | null {
     case 'unsupported':
       return '通知：暂不可用'
     case 'off':
-      return '通知：已关闭，可在系统设置中为 Huli 开启'
+      return '通知：已关闭，可在系统设置中为纸鸢开启'
     case 'signed-out':
-      return '通知：电脑未登录 Huli Cloud，暂时收不到'
+      return '通知：电脑未登录 Kite Cloud，暂时收不到'
     case 'on':
       return '通知：已开启'
   }

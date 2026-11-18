@@ -112,8 +112,8 @@ private enum Categories {
 private enum Notice {
   static func generic(_ original: UNNotificationContent) -> UNNotificationContent {
     let content = mutable(original)
-    content.title = "Huli"
-    content.body = "Huli 有新动态"
+    content.title = "纸鸢"
+    content.body = "纸鸢有新动态"
     return content
   }
 
@@ -205,7 +205,7 @@ private enum Notice {
     case "plan-limit":
       return ("套餐额度快用完了", "\(hostName) 上有 Agent 的套餐限额已用到 90% 以上")
     default:
-      return ("Huli", "Huli 有新动态")
+      return ("纸鸢", "纸鸢有新动态")
     }
   }
 

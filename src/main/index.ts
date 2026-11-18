@@ -97,7 +97,7 @@ import { readThemeFolder, readThemeSources, ThemeStore } from './themes'
 import { KettuTray } from './tray'
 import { openTrayTarget, TrayPanel } from './tray-panel'
 import { Updater } from './updater'
-import { devUserDataPath } from './user-data'
+import { devUserDataPath, PACKAGED_DATA_FOLDER } from './user-data'
 import {
   applyVerbose,
   logsFolder,
@@ -147,6 +147,8 @@ const devUserData = devUserDataPath({
 if (devUserData) {
   app.setPath('userData', devUserData)
   log.info(`Development run: data in ${devUserData}`)
+} else if (app.isPackaged && !userDataSwitch.trim()) {
+  app.setPath('userData', join(app.getPath('appData'), PACKAGED_DATA_FOLDER))
 }
 openAppLog(devUserData ?? (userDataSwitch.trim() ? app.getPath('userData') : null), isDebugRun())
 
