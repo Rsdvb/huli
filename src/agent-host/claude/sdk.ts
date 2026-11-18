@@ -179,6 +179,8 @@ export interface QueryOptions {
   includePartialMessages?: boolean
   forwardSubagentText?: boolean
   perTaskStopAffordance?: boolean
+  /** After each turn but the first, a `prompt_suggestion` follows the result. */
+  promptSuggestions?: boolean
   settingSources?: SettingSource[]
   systemPrompt?: { type: 'preset'; preset: 'claude_code'; append?: string }
   /** The built-in tools, by name; an empty list has none. */
@@ -346,6 +348,14 @@ export interface RateLimitEvent {
   session_id: string
 }
 
+/** The prompt Claude Code predicts the user sends next, after a turn's result. */
+export interface PromptSuggestionMessage {
+  type: 'prompt_suggestion'
+  suggestion: string
+  uuid: string
+  session_id: string
+}
+
 export type SdkMessage =
   | AssistantMessage
   | UserMessage
@@ -354,6 +364,7 @@ export type SdkMessage =
   | SystemMessage
   | RateLimitEvent
   | ToolUseSummaryMessage
+  | PromptSuggestionMessage
   | { type: string; subtype?: string; session_id?: string }
 
 export interface ModelInfo {

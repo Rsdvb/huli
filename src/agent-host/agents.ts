@@ -1314,6 +1314,7 @@ export class AgentManager {
         spawn: run.spawn,
         claudeTestEntrypoint: () => this.deps.settings().claudeTestEntrypoint,
         claudeRun: () => this.deps.settings().claudeRuns[slot.id] ?? null,
+        claudePromptSuggestions: () => this.deps.settings().promptSuggestions,
       })
     } catch (error) {
       slot.launched = null

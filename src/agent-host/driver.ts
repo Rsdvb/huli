@@ -80,6 +80,8 @@ export interface HostedContext extends DriverContext {
   claudeTestEntrypoint?(): string | null
   /** The agent's fallback model and budget as the settings hold them now; null for none. */
   claudeRun?(): ClaudeRunSettings | null
+  /** Whether the user's sessions offer Claude Code's predicted next prompt, as the settings say now. */
+  claudePromptSuggestions?(): boolean
 }
 
 export interface HostedDriver extends StoredConfig {

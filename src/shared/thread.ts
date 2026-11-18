@@ -92,7 +92,21 @@ export interface SessionView {
   sideChat?: SideChatView
   /** Ephemeral: a program outside Kettu, such as a terminal, has the agent's session open. */
   heldOutside?: boolean
+  /**
+   * Ephemeral: the prompt the agent predicts the user sends next, offered in the composer until a
+   * prompt goes or another turn starts. Absent for an agent that predicts none.
+   */
+  suggestion?: PromptSuggestion | null
 }
+
+/** A predicted next prompt: one line of plain text, `id` telling one prediction from the next. */
+export interface PromptSuggestion {
+  id: string
+  text: string
+}
+
+/** The longest predicted prompt a session offers; a longer one is cut. */
+export const PROMPT_SUGGESTION_CHARS = 500
 
 /**
  * How a session's side questions are answered: Claude Code's own side question, which sees the

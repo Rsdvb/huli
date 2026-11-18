@@ -12,7 +12,14 @@ import path from 'node:path'
 import type { AgentAccount, ContextBreakdown, PlanLimit } from '@shared/agent-host'
 import { canonicalClaudeModel } from '@shared/agents'
 import type { ClaudeRunSettings } from '@shared/settings'
-import type { ConfigOption, PendingElicitation, TokenTotals, ToolEntry } from '@shared/thread'
+import {
+  PROMPT_SUGGESTION_CHARS,
+  type ConfigOption,
+  type PendingElicitation,
+  type PromptSuggestion,
+  type TokenTotals,
+  type ToolEntry,
+} from '@shared/thread'
 import {
   AgentRequestError,
   optionAnswer,
@@ -106,6 +113,7 @@ import type {
   PermissionMode,
   PermissionResult,
   PostModelSwitchHookInput,
+  PromptSuggestionMessage,
   Query,
   QueryOptions,
   ResultMessage,
@@ -174,6 +182,21 @@ function runLimits(
     ...(fallback !== null && !sameModel ? { fallbackModel: fallback } : {}),
     ...(budget !== null && budgeted ? { maxBudgetUsd: budget } : {}),
   }
+}
+
+/**
+ * A predicted prompt as the composer offers it: one line without control or direction characters,
+ * cut to its cap; null when nothing is left.
+ */
+export function suggestionText(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const text = raw
+    .replace(/[\t\n\v\f\r\u0085\u2028\u2029]+/g, ' ')
+    .replace(/[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, '')
+    .replace(/ {2,}/g, ' ')
+    .trim()
+  if (text === '') return null
+  return [...text].slice(0, PROMPT_SUGGESTION_CHARS).join('').trimEnd()
 }
 
 /** How Claude Code says a request failed for want of a sign-in. */
@@ -301,6 +324,10 @@ interface Session {
   process: ChildProcess | null
   /** That process's Claude Code version, when it says. */
   version: string | undefined
+  /** A turn's result came and no prompt since, so a predicted next prompt may be offered. */
+  suggestable: boolean
+  /** The predicted prompt the session offers, so it is cleared once and only when shown. */
+  suggestion: PromptSuggestion | null
 }
 
 interface Pending {
@@ -949,6 +976,8 @@ export class ClaudeConnection implements AgentConnection {
       quiet: how.quiet === true,
       process: null,
       version: undefined,
+      suggestable: false,
+      suggestion: null,
     }
     const flags: Record<string, unknown> = {}
     // Through the SDK, Claude Code runs the hooks of a folder's own settings without asking.
@@ -1054,6 +1083,10 @@ export class ClaudeConnection implements AgentConnection {
       ...(plugins.length > 0 ? { plugins } : {}),
       ...(Object.keys(flags).length > 0 ? { settings: flags } : {}),
       ...runLimits(this.context.claudeRun?.() ?? null, options, mainModel),
+      // Only for the user's own sessions: Kettu's own never offer a next prompt.
+      ...(!hidden && !how.quiet && this.context.claudePromptSuggestions?.()
+        ? { promptSuggestions: true }
+        : {}),
       extraArgs: { 'replay-user-messages': null },
       ...(hidden ? { persistSession: false } : {}),
       ...(how.from
@@ -1285,7 +1318,12 @@ export class ClaudeConnection implements AgentConnection {
       }
     } else if (message.type === 'result') {
       if (turn) turn.running = true
+      // A result inside a collected turn ends no prompt of the user's.
+      session.suggestable = !turn?.texts
       this.result(session, message as ResultMessage)
+      return
+    } else if (message.type === 'prompt_suggestion') {
+      this.suggested(session, message as PromptSuggestionMessage)
       return
     } else if (message.type === 'stream_event' && turn?.onText) {
       const event = (message as StreamEvent).event
@@ -1359,6 +1397,27 @@ export class ClaudeConnection implements AgentConnection {
     if (!session.states || turn.cancelled || (!aborted && session.mapper.holdsIdleBack())) {
       this.settle(session)
     }
+  }
+
+  /** Claude Code predicted the user's next prompt, which the composer offers until a prompt goes. */
+  private suggested(session: Session, message: PromptSuggestionMessage): void {
+    // One that comes after another prompt went is for a conversation that has moved on.
+    if (!session.suggestable || session.options.hidden) return
+    session.suggestable = false
+    if (!this.context.claudePromptSuggestions?.()) return
+    const text = suggestionText(message.suggestion)
+    if (text === null) return
+    const id = typeof message.uuid === 'string' && message.uuid ? message.uuid : randomUUID()
+    this.offerSuggestion(session, { id, text })
+  }
+
+  private offerSuggestion(session: Session, suggestion: PromptSuggestion | null): void {
+    if (suggestion === null && session.suggestion === null) return
+    session.suggestion = suggestion
+    this.deliver({
+      sessionId: session.id,
+      map: () => ({ patches: [{ op: 'session.update', changes: { suggestion } }], effects: [] }),
+    })
   }
 
   private turnResult(turn: Turn, stopReason: PromptResult['stopReason']): PromptResult {
@@ -1652,6 +1711,8 @@ export class ClaudeConnection implements AgentConnection {
     })
     const text = blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
     this.noteTitle(session, `\n${text}\n`)
+    session.suggestable = false
+    this.offerSuggestion(session, null)
     session.input!.push({
       type: 'user',
       message: { role: 'user', content },
@@ -1686,6 +1747,8 @@ export class ClaudeConnection implements AgentConnection {
    * ended. The host hears of it and its end, so the session shows it running as any turn.
    */
   private agentTurn(session: Session): void {
+    session.suggestable = false
+    this.offerSuggestion(session, null)
     session.turn = newTurn(
       (result) => this.tellTurn(session, { kind: 'agentTurn', phase: 'ended', result }),
       (error) => this.tellTurn(session, { kind: 'agentTurn', phase: 'failed', error }),

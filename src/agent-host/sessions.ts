@@ -6949,6 +6949,7 @@ export class SessionManager {
       background: undefined,
       // Speed is the old agent's model; the new one may not be timed at all.
       speed: undefined,
+      suggestion: undefined,
       // The side chat stays; the new agent answers it its own way.
       ...(live.thread.session.sideChat
         ? { sideChat: { ...live.thread.session.sideChat, route: this.sideRouteOf(agentId) } }
@@ -7544,6 +7545,8 @@ export class SessionManager {
       turnStartUsed: live.thread.session.usage?.used ?? null,
       error: null,
       updatedAt: now,
+      // A predicted prompt is for the conversation before this turn, whichever agent offered it.
+      ...(live.thread.session.suggestion ? { suggestion: null } : {}),
     })
     this.persist(live)
     this.touch(live.id)
