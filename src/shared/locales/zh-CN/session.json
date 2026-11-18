@@ -1318,9 +1318,11 @@
     "suggestNoReset": "{{agent}} 的{{limit}}已用完。",
     "switchTo": "换成 {{agent}}",
     "switchToUsed": "{{agent}} 已用 {{percent}}%",
+    "switchToLeft": "{{agent}} 剩余 {{percent}}%",
     "dismiss": "不用了",
     "continueWith": "换成 {{agent}} 继续",
     "continueHint": "{{agent}} 已用 {{percent}}%，它会读到之前的对话，从刚才停下的地方接着做。",
+    "continueHintLeft": "{{agent}} 剩余 {{percent}}%，它会读到之前的对话，从刚才停下的地方接着做。",
     "continuePrompt": "继续刚才的任务。"
   }
 }

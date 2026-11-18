@@ -11,6 +11,7 @@
   },
   "alert": {
     "near": "{{agent}} · {{limit}}限额已用 {{percent}}%",
+    "nearLeft": "{{agent}} · {{limit}}限额剩余 {{percent}}%",
     "out": "{{agent}} · {{limit}}限额已用完",
     "back": "{{time}} 恢复",
     "noReset": "Agent 没有说何时重置",

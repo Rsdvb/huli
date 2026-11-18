@@ -11,6 +11,7 @@
   },
   "alert": {
     "near": "{{agent}} · {{limit}} limit {{percent}}% used",
+    "nearLeft": "{{agent}} · {{limit}} limit {{percent}}% left",
     "out": "{{agent}} · {{limit}} limit used up",
     "back": "Back {{time}}",
     "noReset": "The agent did not say when it resets",
