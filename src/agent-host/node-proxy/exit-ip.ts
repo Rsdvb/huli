@@ -122,7 +122,9 @@ export async function fetchTrace(
         port: 443,
         path: TRACE_PATH,
         method: 'GET',
-        agent: false,
+        // Node ignores createConnection for a request with an agent, `agent: false` too: the
+        // check would go around the tunnel and show the system's exit as the node's.
+        ...(socket ? {} : { agent: false }),
         signal,
         headers: { Accept: 'text/plain', 'User-Agent': 'Kite' },
         ...(socket

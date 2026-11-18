@@ -234,6 +234,27 @@ describe('the exit check', () => {
       proxy.close()
     }
   })
+
+  it('sends the request through the tunnel, never around it', async () => {
+    const proxy = createServer()
+    let hello: number | null = null
+    proxy.on('connect', (_request, socket) => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      socket.once('data', (data: Buffer) => {
+        // A TLS handshake record: the trace request started inside the tunnel.
+        hello = data[0] ?? null
+        socket.destroy()
+      })
+    })
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+    const { port } = proxy.address() as AddressInfo
+    try {
+      await expect(fetchTrace({ host: '127.0.0.1', port, auth: null }, 3_000)).rejects.toThrow()
+      expect(hello).toBe(0x16)
+    } finally {
+      proxy.close()
+    }
+  })
 })
 
 describe('applyNodeProxy', () => {
