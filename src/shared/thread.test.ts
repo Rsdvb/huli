@@ -113,6 +113,16 @@ describe('applyPatches', () => {
     expect(threadEntries(after).map((e) => e.id)).toEqual(['m:2'])
   })
 
+  it('removes entries, skipping ids it does not hold, and keeps the rest as they were', () => {
+    const before = state()
+    const after = applyPatches(before, [{ op: 'entry.remove', ids: ['m:1', 'gone'] }])
+    expect(after.order).toEqual(['e:1'])
+    expect(after.byId).toEqual({ 'e:1': user })
+    expect(after.byId['e:1']).toBe(before.byId['e:1'])
+    expect(before.order).toEqual(['e:1', 'm:1'])
+    expect(applyPatches(before, [{ op: 'entry.remove', ids: ['gone'] }])).toBe(before)
+  })
+
   it('throws for an unknown entry', () => {
     expect(() =>
       applyPatches(state(), [{ op: 'entry.appendText', id: 'nope', text: 'x' }]),
@@ -162,6 +172,8 @@ describe('applyPatchInPlace', () => {
     { op: 'entry.update', id: 'm:1', changes: { streaming: false } },
     { op: 'entry.add', entry: { ...user, content: [{ type: 'text', text: 'Hi again' }] } },
     { op: 'session.update', changes: { title: 'Greeting' } },
+    { op: 'entry.add', entry: { kind: 'user', id: 'e:3', content: [] } },
+    { op: 'entry.remove', ids: ['e:2', 'gone'] },
   ]
 
   it('ends where applyPatches does', () => {

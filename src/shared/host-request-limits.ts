@@ -128,6 +128,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.sideAgents': HOST_MS,
   'sessions.retry': AGENT_MS,
   'sessions.fork': AGENT_MS,
+  'sessions.revert': AGENT_MS,
   'worktrees.inspect': AGENT_MS,
   'worktrees.remove': NONE,
   'worktrees.retrySetup': NONE,

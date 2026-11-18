@@ -477,6 +477,7 @@ export interface AgentStatus {
     deleteSession: boolean
     forkSession: boolean
     forkAtMessage: boolean // `session/fork` up to a message, through the adapters' fork point
+    revertTurns: boolean // takes the latest turn out of a session's history, as Codex's `thread/revert`
     steering: boolean // `_session/steering` into a running turn
     reports: boolean // plan limits from its own report (`/usage`, `/status`)
     context: boolean // what fills the context from its own report (`/context`)
@@ -1251,6 +1252,9 @@ export interface HostContract {
     params: { sessionId: string; entryId?: string; worktree?: 'new' | 'same' }
     result: SessionSummary
   }
+  // Undoes the latest turn, which `entryId`, the user's message, starts: the agent's history loses
+  // it and the thread its entries. What it changed on disk stays.
+  'sessions.revert': { params: { sessionId: string; entryId: string }; result: void }
   // What removing the session's worktree would lose, and the other sessions still in it.
   'worktrees.inspect': {
     params: { sessionId: string }
@@ -1867,6 +1871,7 @@ export const HOST_METHODS = [
   'sessions.sideAgents',
   'sessions.retry',
   'sessions.fork',
+  'sessions.revert',
   'worktrees.inspect',
   'worktrees.remove',
   'worktrees.retrySetup',

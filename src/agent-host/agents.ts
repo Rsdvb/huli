@@ -4944,6 +4944,7 @@ export class AgentManager {
         deleteSession: capabilities?.deleteSession ?? false,
         forkSession: capabilities?.forkSession ?? false,
         forkAtMessage: capabilities?.forkAtMessage ?? false,
+        revertTurns: capabilities?.revertTurns ?? false,
         steering: capabilities?.steering ?? false,
         reports: this.hasLimits(slot.id) && !consoleSignIn,
         context: this.hasContext(slot.id),

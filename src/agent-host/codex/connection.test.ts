@@ -1582,6 +1582,102 @@ describe('forks', () => {
   })
 })
 
+describe('undoing turns', () => {
+  const items = [
+    {
+      turnId: 'turn-1',
+      item: {
+        type: 'userMessage',
+        id: 'u1',
+        content: [{ type: 'text', text: 'one', text_elements: [] }],
+      },
+    },
+    {
+      turnId: 'turn-1',
+      item: { type: 'agentMessage', id: 'msg_a', text: 'Done', phase: 'final_answer' },
+    },
+    {
+      turnId: 'turn-2',
+      item: {
+        type: 'userMessage',
+        id: 'u2',
+        content: [{ type: 'text', text: 'two', text_elements: [] }],
+      },
+    },
+    { turnId: 'turn-2', item: { type: 'commandExecution', id: 'cmd_b' } },
+    {
+      turnId: 'turn-2',
+      item: { type: 'agentMessage', id: 'msg_b', text: 'Done', phase: 'final_answer' },
+    },
+  ] as const
+
+  async function opened() {
+    const { server, connection, ignored } = await connect()
+    server.history.set('thread-1', [...items] as never)
+    await connection.resumeSession('thread-1', '/project')
+    connection.register('thread-1', threadTarget().target)
+    return { server, connection, ignored }
+  }
+
+  it('reverts before the turn of the first removed item Codex knows', async () => {
+    const { server, connection, ignored } = await opened()
+    expect((await connection.initialize('1.2.3')).capabilities.revertTurns).toBe(true)
+    await connection.revertTurns('thread-1', {
+      removed: ['host-only', 'cmd_b', 'msg_b'],
+      kept: ['msg_a', 'u1'],
+    })
+    expect(server.sent('thread/revert')).toEqual([{ threadId: 'thread-1', beforeTurnId: 'turn-2' }])
+    expect(server.history.get('thread-1')?.map((entry) => entry.item.id)).toEqual(['u1', 'msg_a'])
+    // Codex's own notice of the revert answers a request of Kettu's, which already applied it.
+    await tick()
+    expect(ignored).toEqual([])
+  })
+
+  it('cuts after the last kept item when Codex knows nothing of the turn', async () => {
+    const { server, connection } = await opened()
+    await connection.revertTurns('thread-1', { removed: ['host-only'], kept: ['msg_a'] })
+    expect(server.sent('thread/revert')[0]).toMatchObject({ beforeTurnId: 'turn-2' })
+  })
+
+  it('reverts nothing when no turn of Codex’s comes after the kept items', async () => {
+    const { server, connection } = await opened()
+    await connection.revertTurns('thread-1', { removed: [], kept: ['msg_b', 'msg_a'] })
+    expect(server.sent('thread/revert')).toEqual([])
+  })
+
+  it('takes the whole history when nothing is kept', async () => {
+    const { server, connection } = await opened()
+    await connection.revertTurns('thread-1', { removed: [], kept: [] })
+    expect(server.sent('thread/revert')[0]).toMatchObject({ beforeTurnId: 'turn-1' })
+    expect(server.history.get('thread-1')).toEqual([])
+  })
+
+  it('refuses a cut it cannot place, and a turn that runs', async () => {
+    const { server, connection } = await opened()
+    await expect(
+      connection.revertTurns('thread-1', { removed: ['x'], kept: ['y'] }),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+    const prompt = connection.prompt('thread-1', [{ type: 'text', text: 'three' }])
+    await until(() => server.sent('turn/start').length === 1)
+    await expect(
+      connection.revertTurns('thread-1', { removed: ['msg_b'], kept: [] }),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+    expect(server.sent('thread/revert')).toEqual([])
+    server.notify('turn/completed', { threadId: 'thread-1', turn: turn('turn-1', 'completed') })
+    await prompt
+  })
+
+  it('says so when the thread is too old for Codex to revert', async () => {
+    const { server, connection } = await opened()
+    server.on('thread/revert', () => {
+      throw new FakeRpcError(-32600, 'thread/revert only supports paginated threads')
+    })
+    const failure = connection.revertTurns('thread-1', { removed: ['msg_b'], kept: [] })
+    await expect(failure).rejects.toBeInstanceOf(AgentRequestError)
+    await expect(failure).rejects.not.toThrow(/paginated/)
+  })
+})
+
 describe('a replay', () => {
   it('replays the history with attachments back as Kettu sent them', async () => {
     const { server, connection } = await connect()

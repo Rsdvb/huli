@@ -185,6 +185,7 @@ import {
   type PromptBlock,
   type KettuService,
   type ListedSession,
+  type RevertPoint,
   type SessionMemory,
   type SessionOptions,
   type SessionTarget,
@@ -922,7 +923,7 @@ function waitingProgress(live: Live): { phase: ProgressPhase; step: string | nul
 function changesPlan(thread: ThreadState, patch: Patch): boolean {
   if (patch.op === 'entry.add') return patch.entry.kind === 'plan'
   if (patch.op === 'entry.update') return thread.byId[patch.id]?.kind === 'plan'
-  return patch.op === 'thread.reset'
+  return patch.op === 'thread.reset' || patch.op === 'entry.remove'
 }
 
 /** The ids of what waits: each permission's request id, and the entry id of the others. */
@@ -2641,6 +2642,14 @@ export class SessionManager {
         live.positions.clear()
         live.nextPos = 0
         live.dirty.clear()
+        live.rewrite = true
+        break
+      case 'entry.remove':
+        for (const id of patch.ids) {
+          live.positions.delete(id)
+          live.dirty.delete(id)
+        }
+        // The store keeps no way to drop rows one by one, so the thread is written whole.
         live.rewrite = true
         break
     }
@@ -7614,6 +7623,55 @@ export class SessionManager {
   }
 
   /**
+   * Undoes the latest turn, which the user's message `entryId` starts: the agent takes it out of
+   * the session's history, then the thread drops its entries. Files it changed stay as they are.
+   */
+  async revert(sessionId: string, entryId: string): Promise<void> {
+    if (this.recordOf(sessionId).origin === 'subagent') {
+      throw new HostError('restricted', t('session.subagent.noRevert'))
+    }
+    const live = await this.revive(sessionId)
+    const ready = (): void => {
+      const { status } = live.thread.session
+      if (status !== 'ready' && status !== 'closed') throw busyError(status)
+      if (waitingCount(live) > 0) throw busyError('awaiting_permission')
+    }
+    ready()
+    revertCut(live.thread, entryId)
+    // A turn an agent that had the session before ran is not in this agent's history.
+    if (writerOf(live.thread, entryId, this.firstAgentOf(live.record)) !== live.record.agentId) {
+      throw new HostError('restricted', t('session.revertEarlierAgent'))
+    }
+    try {
+      await this.attachClosed(live)
+    } catch (error) {
+      throw agentError(error)
+    }
+    const runtime = await this.deps.agents.ensureReady(live.record.agentId)
+    const { connection } = runtime
+    if (!runtime.init.capabilities.revertTurns || !connection.revertTurns) {
+      throw new HostError(
+        'agent_unavailable',
+        t('session.cannotRevert', { agent: this.deps.agents.name(live.record.agentId) }),
+      )
+    }
+    // A message sent while the session attached starts a turn after the one to undo.
+    ready()
+    const cut = revertCut(live.thread, entryId)
+    try {
+      await connection.revertTurns(live.record.acpSessionId, cut.point)
+    } catch (error) {
+      throw agentError(error)
+    }
+    if (this.live.get(live.id) !== live) return
+    this.emit(live, [{ op: 'entry.remove', ids: cut.ids }])
+    // The totals keep what the turn spent; the context is read again where the agent reports it.
+    live.contextRevision++
+    this.refreshContext(live)
+    this.touch(live.id)
+  }
+
+  /**
    * A fork that an earlier agent of the source takes on: no fork of its own session, which ended
    * before the reply's turn did, but a session of its own given the conversation up to the reply.
    */
@@ -10888,6 +10946,43 @@ export function forkCut(
       (e) => e.kind === 'agent' && entryMessageId(e.id) !== null && e.markdown === entry.markdown,
     ).length
   return { entries, point: { messageId, text: entry.markdown, occurrence } }
+}
+
+/**
+ * The latest turn, which the user's message `entryId` starts, as a revert takes it out: its
+ * entries, and the point that tells the agent where its history is cut.
+ */
+export function revertCut(
+  thread: Pick<ThreadState, 'order' | 'byId'>,
+  entryId: string,
+): { ids: string[]; point: RevertPoint } {
+  const entry = thread.byId[entryId]
+  if (entry?.kind !== 'user' || entry.steered) {
+    throw new HostError('invalid_params', t('session.noRevertPoint'))
+  }
+  const at = thread.order.indexOf(entryId)
+  const ids = thread.order.slice(at)
+  const later = ids.slice(1).some((id) => {
+    const next = thread.byId[id]
+    return next?.kind === 'user' && !next.steered
+  })
+  if (later) throw new HostError('conflict', t('session.revertNotLatest'))
+  return {
+    ids,
+    point: {
+      removed: agentItemIds(ids),
+      kept: agentItemIds(thread.order.slice(0, at)).reverse(),
+    },
+  }
+}
+
+/** The ids the agent gave the messages and tool calls of these entries, in their order. */
+function agentItemIds(ids: readonly string[]): string[] {
+  return ids.flatMap((id) => {
+    const messageId = entryMessageId(id)
+    if (messageId !== null) return [messageId]
+    return id.startsWith('t:') ? [id.slice(2)] : []
+  })
 }
 
 function turnEndText(stopReason: StopReason): string {

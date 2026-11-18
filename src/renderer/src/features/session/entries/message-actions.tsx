@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { ArrowTurnDownIcon } from '@hugeicons/core-free-icons'
+import { ArrowTurnDownIcon, Undo02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
@@ -7,9 +7,19 @@ import type { StopReason, UserContent } from '@shared/thread'
 import { forkSession } from '@renderer/app/actions'
 import { MessageActions } from '@renderer/components/affect/message-actions'
 import { ForkIcon } from '@renderer/components/fork-icon'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@renderer/components/ui/alert-dialog'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { longAgo, mediumAgo } from '@renderer/lib/format'
-import { errorMessage } from '@renderer/lib/host'
+import { errorMessage, host } from '@renderer/lib/host'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
@@ -18,7 +28,7 @@ import { useThreadsStore } from '@renderer/stores/threads'
 import { useReplyHover } from '../reply-hover'
 import { useEntry, useEntryAnimation } from '../use-thread'
 import { ChangesCard } from './changes-card'
-import { forkBlocked, forkEntry } from './helpers'
+import { forkBlocked, forkEntry, latestTurnStart, revertBlocked } from './helpers'
 import { TurnEndTag } from './turn-end-tag'
 
 function Ago({ at }: { at: number }) {
@@ -101,8 +111,9 @@ export function UserActions({
 
 /**
  * Under a turn's reply: the files the turn changed, how the turn ended when it did not end on its
- * own, then Copy for the turn's messages, Fork where the agent can fork from it and when the reply
- * came. The actions show while the pointer is over the reply.
+ * own, then Copy for the turn's messages, Fork where the agent can fork from it, Undo for the latest
+ * turn where the agent can take it out of its history, and when the reply came. The actions show
+ * while the pointer is over the reply.
  */
 export const ReplyFooter = memo(
   function ReplyFooter({
@@ -140,9 +151,21 @@ export const ReplyFooter = memo(
               projectPath: view.projectPath,
               origin: view.origin,
               blocked: forkBlocked(view.status),
+              revertBlocked: revertBlocked(view.status),
             }
           : null
       }),
+    )
+    // Only the latest reply scans for the message its turn starts at; no other one offers Undo.
+    const turnStart = useThreadsStore((s) => {
+      const state = s.replicas[sessionId]?.state
+      return latest && state ? latestTurnStart(state, lastId) : null
+    })
+    const canRevert = useAgentsStore((s) =>
+      session
+        ? (agentsOn(s, hostOfSession(session)).byId[session.agentId]?.capabilities?.revertTurns ??
+          false)
+        : false,
     )
     const forkAt = useAgentsStore((s) =>
       session
@@ -153,6 +176,8 @@ export const ReplyFooter = memo(
         : null,
     )
     const [forking, setForking] = useState(false)
+    const [confirming, setConfirming] = useState(false)
+    const [reverting, setReverting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const hovered = useReplyHover((s) => s.key === replyKey)
     const labels = useCopyLabels(t('replyFooter.copyReply'))
@@ -179,7 +204,25 @@ export const ReplyFooter = memo(
         setForking(false)
       }
     }
+    const revert = async () => {
+      if (turnStart === null) return
+      setReverting(true)
+      setError(null)
+      try {
+        await host('sessions.revert', { sessionId, entryId: turnStart })
+      } catch (e) {
+        setError(errorMessage(e))
+      } finally {
+        setReverting(false)
+      }
+    }
     const showFork = forkAt !== null && session?.origin === 'user'
+    const showRevert = canRevert && turnStart !== null && session?.origin === 'user'
+    const revertLabel = reverting
+      ? t('replyFooter.reverting')
+      : session?.revertBlocked
+        ? t('replyFooter.revertNotReady')
+        : t('replyFooter.revert')
     const blocked = session?.blocked ?? false
     const forkLabel = forking
       ? t('replyFooter.forking')
@@ -205,7 +248,7 @@ export const ReplyFooter = memo(
         )}
         <div
           className={cn('ks-reply-foot', animation)}
-          data-shown={hovered || forking ? '' : undefined}
+          data-shown={hovered || forking || reverting ? '' : undefined}
         >
           <MessageActions
             quiet={false}
@@ -213,8 +256,8 @@ export const ReplyFooter = memo(
             actions={['copy']}
             label={t('replyFooter.label')}
             labels={labels}
-            extraActions={
-              showFork
+            extraActions={[
+              ...(showFork
                 ? [
                     {
                       key: 'fork',
@@ -225,8 +268,24 @@ export const ReplyFooter = memo(
                       onClick: () => void fork(),
                     },
                   ]
-                : []
-            }
+                : []),
+              ...(showRevert
+                ? [
+                    {
+                      key: 'revert',
+                      tip: revertLabel,
+                      label: revertLabel,
+                      icon: reverting ? (
+                        <Spinner />
+                      ) : (
+                        <HugeiconsIcon icon={Undo02Icon} strokeWidth={1.9} />
+                      ),
+                      disabled: reverting || (session?.revertBlocked ?? false),
+                      onClick: () => setConfirming(true),
+                    },
+                  ]
+                : []),
+            ]}
             after={when}
           />
           {error && (
@@ -235,6 +294,15 @@ export const ReplyFooter = memo(
             </span>
           )}
         </div>
+        {showRevert && (
+          <RevertConfirm
+            open={confirming}
+            onAnswer={(go) => {
+              setConfirming(false)
+              if (go) void revert()
+            }}
+          />
+        )}
       </>
     )
   },
@@ -247,6 +315,27 @@ export const ReplyFooter = memo(
     sameIds(a.agentIds, b.agentIds) &&
     sameIds(a.toolIds, b.toolIds),
 )
+
+/** Asks before Undo takes the latest turn out of the session; the files it changed stay. */
+function RevertConfirm({ open, onAnswer }: { open: boolean; onAnswer: (go: boolean) => void }) {
+  const { t } = useTranslation(['session', 'common'])
+  return (
+    <AlertDialog open={open} onOpenChange={(next) => !next && onAnswer(false)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('replyFooter.revertTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('replyFooter.revertBody')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={() => onAnswer(true)}>
+            {t('replyFooter.revertConfirm')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
 
 const sameIds = (a: string[], b: string[]): boolean =>
   a.length === b.length && a.every((id, i) => id === b[i])

@@ -1326,6 +1326,16 @@ describe('worktree requests', () => {
     rejects(() => posix['sessions.fork']({ sessionId: 's', worktree: 'other' }))
   })
 
+  it('undoes a turn only at the message that starts it', () => {
+    expect(posix['sessions.revert']({ sessionId: 's', entryId: 'e:4', extra: 1 })).toEqual({
+      sessionId: 's',
+      entryId: 'e:4',
+    })
+    rejects(() => posix['sessions.revert']({ sessionId: 's' }))
+    rejects(() => posix['sessions.revert']({ sessionId: 's', entryId: 4 }))
+    rejects(() => posix['sessions.revert']({ sessionId: 's', entryId: 'x'.repeat(1_025) }))
+  })
+
   it('removes a worktree only against the state the user was shown', () => {
     const expected = {
       exists: true,

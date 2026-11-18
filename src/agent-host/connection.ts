@@ -138,6 +138,8 @@ export interface AgentInit {
     forkSession: boolean
     /** A fork up to a message, which only some adapters take, outside ACP. */
     forkAtMessage: boolean
+    /** It has `revertTurns`, which takes the latest turns out of a session's history. */
+    revertTurns?: boolean
     /** How its own session titles arrive, or null when Kettu writes one. */
     ownTitles: OwnTitles | null
     logout: boolean
@@ -232,6 +234,18 @@ export interface ForkPoint {
   messageId: string // the agent message's own id
   text: string // its text, which an agent falls back to when it cannot find the id
   occurrence: number // 1-based, among the agent messages up to it with the same text
+}
+
+/**
+ * Where a revert cuts a session's history, by the ids the agent gave the items Kettu shows: its
+ * messages and tool calls. The agent's history loses every turn from the first of `removed` it
+ * knows, or else every turn after that of the first of `kept` it knows.
+ */
+export interface RevertPoint {
+  /** The items of the turns to take out, oldest first. */
+  removed: string[]
+  /** The items before them, latest first; empty when the cut takes the whole history. */
+  kept: string[]
 }
 
 /**
@@ -443,6 +457,11 @@ export interface AgentConnection {
     options?: SessionOptions,
     point?: ForkPoint,
   ): Promise<OpenedSession>
+  /**
+   * Takes the latest turns out of the session's history, where `point` cuts it, so the model no
+   * longer sees them; what they changed on disk stays. Absent where the agent cannot.
+   */
+  revertTurns?(sessionId: string, point: RevertPoint): Promise<void>
   closeSession(sessionId: string): Promise<void>
   deleteSession(sessionId: string): Promise<void>
   listSessions(

@@ -374,6 +374,12 @@
     "fork": "从这里分叉",
     "forking": "正在分叉…",
     "forkNotReady": "会话就绪后才能分叉",
+    "revert": "撤销这一轮",
+    "reverting": "正在撤销…",
+    "revertNotReady": "这一轮结束后才能撤销",
+    "revertTitle": "撤销最近一轮？",
+    "revertBody": "你的上一条消息和这条回复会从对话里移除，Agent 也会忘掉它们。这一轮改过的文件保持原样。",
+    "revertConfirm": "撤销这一轮",
     "label": "回复操作"
   },
   "changes": {

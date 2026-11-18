@@ -916,6 +916,7 @@ export type Patch =
   | { op: 'entry.update'; id: string; changes: EntryChanges }
   | { op: 'session.update'; changes: Partial<SessionView> }
   | { op: 'thread.reset' } // before a session/load replay
+  | { op: 'entry.remove'; ids: string[] } // a reverted turn's entries; ids it does not hold are skipped
 
 export interface PatchBatch {
   sessionId: string
@@ -1138,6 +1139,15 @@ export function applyPatches(
         byIdCopied = true
         orderCopied = true
         break
+      case 'entry.remove': {
+        const gone = new Set(patch.ids.filter((id) => id in byId))
+        if (gone.size === 0) break
+        const ids = writableById()
+        for (const id of gone) delete ids[id]
+        order = order.filter((id) => !gone.has(id))
+        orderCopied = true
+        break
+      }
     }
   }
 
@@ -1173,6 +1183,15 @@ export function applyPatchInPlace(state: ThreadState, patch: Patch): ThreadState
       return { ...state, session: { ...state.session, ...patch.changes } }
     case 'thread.reset':
       return { session: state.session, order: [], byId: {} }
+    case 'entry.remove': {
+      const gone = new Set(patch.ids.filter((id) => id in state.byId))
+      if (gone.size === 0) return state
+      for (const id of gone) delete state.byId[id]
+      let kept = 0
+      for (const id of state.order) if (!gone.has(id)) state.order[kept++] = id
+      state.order.length = kept
+      return state
+    }
   }
 }
 

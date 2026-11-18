@@ -387,6 +387,12 @@
     "fork": "Fork from here",
     "forking": "Forking…",
     "forkNotReady": "Forks once the session is ready",
+    "revert": "Undo this turn",
+    "reverting": "Undoing…",
+    "revertNotReady": "Undoes once the turn ends",
+    "revertTitle": "Undo the latest turn?",
+    "revertBody": "Your last message and this reply leave the thread, and the agent forgets them. Files the turn changed stay as they are.",
+    "revertConfirm": "Undo turn",
     "label": "Reply actions"
   },
   "changes": {

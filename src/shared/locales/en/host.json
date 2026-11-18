@@ -30,6 +30,10 @@
     "cannotFork": "{{agent}} cannot fork sessions",
     "cannotForkAt": "{{agent}} can fork only from its latest reply",
     "noForkPoint": "This reply cannot be forked from",
+    "cannotRevert": "{{agent}} cannot undo turns",
+    "noRevertPoint": "This message does not start a turn that can be undone",
+    "revertNotLatest": "Only the latest turn can be undone, and another turn came after this one",
+    "revertEarlierAgent": "This turn was another agent's, so it cannot be undone here",
     "forkTitle": "{{title}} (fork)",
     "forkTitleNumbered": "{{title}} (fork {{n}})",
     "alreadyInSession": "This session is already part of a Kettu session",
@@ -51,6 +55,7 @@
     "subagent": {
       "noPrompt": "A subagent session takes its instructions from its parent",
       "noFork": "A subagent session cannot be forked",
+      "noRevert": "A subagent session's turns cannot be undone",
       "noCancel": "The agent does not allow cancelling this subagent",
       "noConfig": "A subagent session cannot be configured",
       "closesWithParent": "A subagent session closes with its parent",
@@ -424,6 +429,8 @@
     "signInNeeded": "Sign in to Codex with `codex login` in a terminal",
     "turnFailed": "The turn failed",
     "noForkPoint": "Codex can't find this reply in its history",
+    "noRevertPoint": "Codex can't find this turn in its history",
+    "revertOlderThread": "Codex can undo turns only in sessions a newer Codex started",
     "option": {
       "mode": "Mode",
       "modeDescription": "Approval and sandboxing preset for the session",
