@@ -222,6 +222,7 @@ const SECTION_FIELDS = {
         ? null
         : `"${path}" must be a valid custom Claude entrypoint label`,
     claudeRuns: isClaudeRuns,
+    promptSuggestions: isBoolean,
   },
   thread: {
     outlineSummaries: isBoolean,
@@ -1619,6 +1620,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
       ? settings.general.claudeTestEntrypointLabel
       : null,
     claudeRuns: structuredClone(settings.general.claudeRuns),
+    promptSuggestions: settings.general.promptSuggestions,
     defaultAgent: settings.general.defaultAgent,
     computerUse: structuredClone(settings.computerUse),
     agentNetwork: structuredClone(settings.agentNetwork),

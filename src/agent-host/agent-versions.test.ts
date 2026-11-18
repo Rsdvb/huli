@@ -127,6 +127,7 @@ async function manager(setup: Setup) {
     downloadService: !setup.noDownloads,
     claudeTestEntrypoint: null,
     claudeRuns: {},
+    promptSuggestions: true,
   }
   const def = setup.def ?? DEF
   const vendor = def.launch.kind === 'package' && !!def.launch.fromVendor

@@ -47,6 +47,7 @@ export interface SettingsFile {
     // By Claude Code agent; an agent without an entry runs with no fallback and no budget.
     // Replaced whole.
     claudeRuns: Partial<Record<AgentId, ClaudeRunSettings>>
+    promptSuggestions: boolean // Claude Code's sessions predict the next prompt for the composer
   }
   thread: {
     outlineSummaries: boolean // a small model titles the outline's messages
@@ -285,6 +286,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     claudeTestEntrypoint: false,
     claudeTestEntrypointLabel: 'huli-test',
     claudeRuns: {},
+    promptSuggestions: true,
   },
   thread: { outlineSummaries: true, confirmLinks: true, openLinksIn: 'browser', alwaysOpenIn: {} },
   appearance: {
@@ -414,6 +416,7 @@ export interface HostSettings {
   sessionTitles: boolean // write a title for a session its agent leaves untitled
   claudeTestEntrypoint: string | null
   claudeRuns: SettingsFile['general']['claudeRuns']
+  promptSuggestions: boolean // Claude Code's sessions predict the user's next prompt
   defaultAgent: AgentId | null // the agent new sessions start with, which answers artifacts' questions
   computerUse: ComputerUseSettings
   agentNetwork: AgentNetworkSettings

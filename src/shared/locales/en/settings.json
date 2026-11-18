@@ -750,6 +750,10 @@
     },
     "claudeSettings": {
       "auto": "Auto",
+      "suggestions": {
+        "name": "Prompt suggestions",
+        "description": "After each reply, Claude Code guesses what you might send next and shows it faintly in the empty input; Tab fills it in. Holds for every Claude Code agent."
+      },
       "testEntrypoint": {
         "name": "Test entrypoint identifier",
         "description": "Sets CLAUDE_CODE_ENTRYPOINT for new local Claude Code sessions in Kite.",

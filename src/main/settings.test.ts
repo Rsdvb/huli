@@ -109,6 +109,29 @@ describe("Claude Code agents' fallback model and budget", () => {
   })
 })
 
+describe('prompt suggestions', () => {
+  it('are on for a file from before them and reach the host', async () => {
+    await save({ version: 1, general: { language: 'en' } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.general.promptSuggestions).toBe(true)
+    expect(hostSettings(settings, 'en').promptSuggestions).toBe(true)
+    const off = mergeSettings(settings, { general: { promptSuggestions: false } })
+    expect(hostSettings(off, 'en').promptSuggestions).toBe(false)
+  })
+
+  it('take only a boolean, kept by the host for a paired device', async () => {
+    await save({ version: 1, general: { promptSuggestions: 'no' } })
+    expect((await SettingsStore.load(dir)).get().general.promptSuggestions).toBe(true)
+    expect(() => validateSettingsPatch({ general: { promptSuggestions: false } })).not.toThrow()
+    for (const value of ['false', 0, null, {}]) {
+      expect(() => validateSettingsPatch({ general: { promptSuggestions: value } })).toThrow()
+    }
+    const split = splitSettingsPatch({ general: { promptSuggestions: false, sendKey: 'enter' } })
+    expect(split.host).toEqual({ general: { promptSuggestions: false } })
+    expect(split.client).toEqual({ general: { sendKey: 'enter' } })
+  })
+})
+
 describe('the first start record on load', () => {
   it('leaves a host without a settings file to run its first start', async () => {
     const store = await SettingsStore.load(dir)
