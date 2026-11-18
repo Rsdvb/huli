@@ -203,6 +203,13 @@ export class PortHub {
     }
   }
 
+  /** To the host's own windows, never to a paired device. */
+  sendToWindows(event: HostEvent): void {
+    for (const [portId, channel] of this.ports) {
+      if (!this.devices.has(portId)) channel.send({ type: 'event', event })
+    }
+  }
+
   send(portIds: Iterable<string>, event: HostEvent): void {
     let bytesOnly: HostEvent | null = null
     for (const portId of portIds) {

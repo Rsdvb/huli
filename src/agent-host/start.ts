@@ -57,6 +57,7 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       settings: message.settings,
       baseEnv: process.env,
       computer: message.computer ?? null,
+      mihomoPath: message.mihomoPath ?? null,
       ...(message.userAgent ? { userAgent: message.userAgent } : {}),
       send,
       git: (deps) => createGitService(deps),

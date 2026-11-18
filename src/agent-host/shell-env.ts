@@ -5,6 +5,7 @@ import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import type { EnvironmentInfo } from '@shared/agent-host'
+import { NODE_NO_PROXY } from '@shared/agent-network'
 import type { NodeRuntime } from '@shared/host-control'
 import { withLongPaths } from '@shared/git'
 import type { Platform } from '@shared/platform'
@@ -95,6 +96,33 @@ export function applyProxy(env: Env, proxy: ProxySettings, platform: Platform): 
     ['HTTPS_PROXY', proxy.url],
   ]
   if (proxy.noProxy.trim() !== '') values.push(['NO_PROXY', proxy.noProxy.trim()])
+  for (const [name, value] of values) {
+    out[name] = value
+    if (platform !== 'win32') out[name.toLowerCase()] = value
+  }
+  return out
+}
+
+const NODE_PROXY_NAMES = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY'] as const
+
+/**
+ * An agent that goes through a node: every proxy variable names its own listener on 127.0.0.1, so
+ * no inherited one, such as a system proxy client's, is left for a program to prefer. Only
+ * loopback, the private ranges and Tailscale go around it.
+ */
+export function applyNodeProxy(env: Env, port: number, platform: Platform): Env {
+  const out = { ...env }
+  for (const name of NODE_PROXY_NAMES) {
+    deleteEnv(out, name, platform)
+    deleteEnv(out, name.toLowerCase(), platform)
+  }
+  const url = `http://127.0.0.1:${port}`
+  const values: [string, string][] = [
+    ['HTTP_PROXY', url],
+    ['HTTPS_PROXY', url],
+    ['ALL_PROXY', url],
+    ['NO_PROXY', NODE_NO_PROXY.join(',')],
+  ]
   for (const [name, value] of values) {
     out[name] = value
     if (platform !== 'win32') out[name.toLowerCase()] = value
@@ -281,6 +309,8 @@ export class EnvironmentService {
   private current: Promise<void> | null = null
   private proxy: ProxySettings = { mode: 'environment' }
   private configFolders: Partial<Record<AgentId, ConfigFolder>> = {}
+  /** The port of an agent's node listener; null while it uses the system's network. */
+  private nodePort: (agentId: AgentId) => number | null = () => null
   private resolvedAt: number | null = null
   private listeners = new Set<(info: EnvironmentInfo) => void>()
   private recoveredListeners = new Set<() => void>()
@@ -338,19 +368,27 @@ export class EnvironmentService {
     this.proxy = proxy
   }
 
+  setNodeRoutes(port: (agentId: AgentId) => number | null): void {
+    this.nodePort = port
+  }
+
   setConfigFolders(folders: Partial<Record<AgentId, ConfigFolder>>): void {
     this.configFolders = folders
   }
 
   /**
    * The environment for agents and git: resolved, without Electron's variables, with the proxy.
-   * An agent's own adds its configuration folder; git, commands and the terminal go without one.
+   * An agent's own adds its configuration folder, and its node's listener in place of the proxy
+   * while it uses one; git, commands and the terminal go without either.
    */
   agentEnv(agentId?: AgentId): Env {
     const { platform } = this.deps
     const base = this.resolved?.env ?? withoutElectronVars(this.deps.baseEnv, platform)
+    const port = agentId ? this.nodePort(agentId) : null
+    const proxied =
+      port === null ? applyProxy(base, this.proxy, platform) : applyNodeProxy(base, port, platform)
     // Worktrees sit a level deeper than their projects, which passes MAX_PATH sooner on Windows.
-    const env = withLongPaths(applyProxy(base, this.proxy, platform), platform)
+    const env = withLongPaths(proxied, platform)
     return agentId ? applyConfigFolder(env, this.configFolders[agentId], platform) : env
   }
 

@@ -17,6 +17,7 @@ import type {
   BrowserOriginDecision,
 } from './browser'
 import type { ComputerAppDecision } from './computer-use'
+import type { AgentNetworkStatus, LatencyResult, NodeRef, NodeView } from './agent-network'
 import type { ControlOutcome } from './control'
 import type { ContextBreakdown } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
@@ -1732,6 +1733,21 @@ export interface HostContract {
   'kettuImport.scan': { params: void; result: KettuImportScan }
   // Imports them by Kettu's ids, telling every port `kettuImport.progress` as it goes.
   'kettuImport.run': { params: { sessionIds: string[] }; result: KettuImportResult }
+  // Huli: the agents' network through the user's proxy subscriptions, for this computer's windows
+  // alone: a paired device may call none of these, and `agentNetwork.changed` reaches no device.
+  // A subscription's address goes in with `addSubscription` and never comes out.
+  'agentNetwork.status': { params: void; result: AgentNetworkStatus }
+  'agentNetwork.addSubscription': { params: { name: string; url: string }; result: { id: string } }
+  'agentNetwork.renameSubscription': { params: { id: string; name: string }; result: void }
+  'agentNetwork.removeSubscription': { params: { id: string }; result: void }
+  // Reads one subscription again, or every one with `id` null.
+  'agentNetwork.refresh': { params: { id: string | null }; result: void }
+  'agentNetwork.nodes': { params: void; result: { nodes: NodeView[] } }
+  // Tests the nodes named, or every node with `nodes` null.
+  'agentNetwork.testLatency': {
+    params: { nodes: NodeRef[] | null }
+    result: { results: LatencyResult[] }
+  }
   // Huli: the user's folders of sessions, in the user's order; every port hears `folders.changed`.
   'folders.list': { params: void; result: SessionFolder[] }
   // A new folder, last in the order, holding `sessionIds` (taken out of any other folder).
@@ -2036,6 +2052,13 @@ export const HOST_METHODS = [
   'computer.declineSetup',
   'kettuImport.scan',
   'kettuImport.run',
+  'agentNetwork.status',
+  'agentNetwork.addSubscription',
+  'agentNetwork.renameSubscription',
+  'agentNetwork.removeSubscription',
+  'agentNetwork.refresh',
+  'agentNetwork.nodes',
+  'agentNetwork.testLatency',
   'folders.list',
   'folders.create',
   'folders.rename',
@@ -2132,6 +2155,8 @@ export type HostEvent =
   | { type: 'kettuImport.progress'; done: number; total: number; title: string | null }
   // Huli: the session folders changed; every one, in the user's order.
   | { type: 'folders.changed'; folders: SessionFolder[] }
+  // Huli: the agents' network changed; to this computer's windows only.
+  | { type: 'agentNetwork.changed'; status: AgentNetworkStatus }
 
 export interface AgentsApi {
   request<M extends HostMethod>(method: M, params: HostParams<M>): Promise<HostResult<M>>

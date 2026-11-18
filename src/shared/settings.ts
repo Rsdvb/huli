@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_NETWORK, type AgentNetworkSettings } from './agent-network'
 import type { ComputerUseSettings } from './computer-use'
 import type { IdleSessionsSettings } from './idle-release'
 import type { LanguageSetting, Locale } from './locale'
@@ -117,6 +118,9 @@ export interface SettingsFile {
   }
   // Agents using this computer's desktop apps; a paired device can neither see nor change it.
   computerUse: ComputerUseSettings
+  // Huli: agents' network through a node of the user's subscriptions; a paired device can neither
+  // see nor change it. The subscriptions' addresses are the agent host's, never in this file.
+  agentNetwork: AgentNetworkSettings
   // Kettu's own services: the account, relay, push, sharing to Kettu and problem reports. Off is
   // the self-hosted mode, in which no process of this computer reaches them.
   cloud: { enabled: boolean }
@@ -267,6 +271,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     discoverable: true,
   },
   computerUse: { enabled: false, allowedApps: [], pauseOnUse: true, stopShortcut: '' },
+  agentNetwork: DEFAULT_AGENT_NETWORK,
   // Personal fork: the self-hosted mode, in which nothing reaches Kettu's services; paired devices
   // connect directly over the network or a VPN such as Tailscale.
   cloud: { enabled: false },
@@ -315,6 +320,7 @@ export interface SettingsPatch {
   privacy?: Partial<SettingsFile['privacy']>
   diagnostics?: Partial<SettingsFile['diagnostics']>
   computerUse?: Partial<SettingsFile['computerUse']> // allowedApps is replaced whole
+  agentNetwork?: Partial<SettingsFile['agentNetwork']> // agents is replaced whole
   cloud?: Partial<SettingsFile['cloud']>
   onboarding?: Partial<OnboardingState>
   usage?: Partial<SettingsFile['usage']>
@@ -347,6 +353,7 @@ export interface HostSettings {
   claudeTestEntrypoint: string | null
   defaultAgent: AgentId | null // the agent new sessions start with, which answers artifacts' questions
   computerUse: ComputerUseSettings
+  agentNetwork: AgentNetworkSettings
   // Kettu's download service may be asked, as for the harness compatibility manifest: off in
   // Local mode and with GitHub only as the download source.
   downloadService: boolean

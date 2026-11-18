@@ -25,6 +25,13 @@ export function computerDriverPath(): string {
   return join(dir, 'cua-driver', file)
 }
 
+/** Huli: mihomo, which the agents' network runs: in the app's resources, or where its fetch puts it. */
+export function mihomoPath(): string {
+  const file = process.platform === 'win32' ? 'mihomo.exe' : 'mihomo'
+  const dir = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources')
+  return join(dir, 'mihomo', file)
+}
+
 /** What the agent host's `host:init` carries for computer use. */
 export function computerHostOptions(): { driverPath: string; selfPid: number; selfIds: string[] } {
   return {

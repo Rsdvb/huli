@@ -11,6 +11,8 @@ dist
 
 # Cua Driver for computer use, fetched by tools/install/cua-driver.mjs
 resources/cua-driver/
+# mihomo for agents' network, fetched by tools/install/mihomo.mjs
+resources/mihomo/
 
 # Huli Cloud's bundle
 cloud/dist/

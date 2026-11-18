@@ -139,6 +139,7 @@ export type SettingsSection =
   | 'browser'
   | 'devices'
   | 'computer-use'
+  | 'agent-network'
   | 'advanced'
   | 'about'
 

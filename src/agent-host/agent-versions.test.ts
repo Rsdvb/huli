@@ -123,6 +123,7 @@ async function manager(setup: Setup) {
     sessionTitles: true,
     defaultAgent: null,
     computerUse: DEFAULT_SETTINGS.computerUse,
+    agentNetwork: DEFAULT_SETTINGS.agentNetwork,
     downloadService: !setup.noDownloads,
     claudeTestEntrypoint: null,
   }

@@ -96,6 +96,7 @@ import {
   SpendGroup,
   UsageGroup,
 } from './agent-parts'
+import { NetworkChoiceRow } from './agent-network-rows'
 import { AgentProviders, ProviderBalances } from './agent-providers'
 import {
   currentLimits,
@@ -1368,6 +1369,8 @@ function ConfigurationGroup({ status }: { status: AgentStatus }) {
         {takesCodebuddySettings(status.id) && (
           <CodebuddySettingsRows key={status.id} status={status} />
         )}
+        {/* Huli: the agent network is this computer's alone. */}
+        {hostId === null && !isWeb && <NetworkChoiceRow agentId={status.id} />}
         {/* The Marketplace shows this computer's servers only. */}
         {hostId === null && (
           <RowFrame

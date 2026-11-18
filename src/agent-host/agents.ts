@@ -4457,6 +4457,17 @@ export class AgentManager {
     await this.credentialsChanged(slot)
   }
 
+  /**
+   * Huli: the agent's proxy variables changed, as it moved between a node and the system's
+   * network. Its shared process stops when no session uses it, so the next start takes the new
+   * ones; a running session keeps its process, and what it started with, until it ends.
+   */
+  async networkChanged(agentId: AgentId): Promise<void> {
+    const slot = this.slots.get(agentId)
+    if (!slot) return
+    if (slot.runtime && this.hooks.liveSessions(slot.id) === 0) await this.stopProcess(slot)
+  }
+
   async agentEnvChanged(agentId: AgentId): Promise<void> {
     const slot = this.registeredSlot(agentId)
     const key = slot.def.keySignIn

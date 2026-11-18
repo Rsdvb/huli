@@ -61,7 +61,7 @@ import threadWorkerPath from '../agent-host/threads/worker?modulePath'
 import usageWorkerPath from '../agent-host/usage/worker?modulePath'
 import { processControl, stopTrees, type ProcessId } from '../agent-host/process-tree'
 import { ContentCache } from './artifacts/content-cache'
-import { computerHostOptions } from './computer-use'
+import { computerHostOptions, mihomoPath } from './computer-use'
 import { GrantRequests } from './grant-requests'
 import type { MarketKeysPush } from './market-keys'
 import { marketCallOf } from './market-api'
@@ -385,6 +385,7 @@ export class AgentHost {
         sessionRouterPath: unpackedPath(sessionRouterPath),
         settings: deps.settings(),
         computer: computerHostOptions(),
+        mihomoPath: mihomoPath(),
         userAgent: updaterUserAgent(app.getVersion(), process.platform, process.arch),
       }),
       startMessages: () => [
