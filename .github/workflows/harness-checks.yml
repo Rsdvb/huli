@@ -18,6 +18,8 @@ concurrency:
 jobs:
   check:
     name: Check new harness versions
+    # Kettu's own checks, which open issues there; a personal build leaves them to Kettu.
+    if: github.repository == 'KettuAI/Kettu'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
