@@ -178,6 +178,16 @@ export interface ListedSession {
   cwd: string
 }
 
+/**
+ * Huli: a session as the agent lists it across every folder, for the import from the agents (see
+ * agent-history.ts). `subagent` marks one another session started; `prompted`, one with a message.
+ */
+export interface ListedEverywhere extends ListedSession {
+  createdAt: string | null
+  subagent: boolean
+  prompted: boolean
+}
+
 export type AgentErrorKind = 'auth_required' | 'agent_error' | 'closed'
 
 /** A request to the agent that failed, in Kettu's terms. */
@@ -470,6 +480,10 @@ export interface AgentConnection {
     cwd: string,
     cursor: string | null,
   ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }>
+  /** Huli: every folder's sessions, where the agent lists them without one. */
+  listAllSessions?(
+    cursor: string | null,
+  ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }>
   /** A copy of a session under a new id, written from the original without opening it. */
   copySession?(sessionId: string, cwd: string): Promise<string>
 

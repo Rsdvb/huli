@@ -2626,7 +2626,8 @@ export function createValidators(platform: Platform): Validators {
           const source = fields(item)
           return {
             agentId: agentId(source),
-            project: absolutePath(source, 'project', platform),
+            // Huli: null for a source of global memory.
+            project: source.project === null ? null : absolutePath(source, 'project', platform),
           }
         }),
         global: global.map((key: unknown) => string({ key }, 'key', ID_CHARS)),
@@ -2641,6 +2642,11 @@ export function createValidators(platform: Platform): Validators {
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
     },
     'kettuImport.scan': none,
+    'agentHistory.list': (params) => {
+      const o = fields(params)
+      const cursor = optionalString(o, 'cursor', TEXT_CHARS)
+      return { agentId: agentId(o), ...(cursor !== undefined ? { cursor } : {}) }
+    },
     'kettuImport.run': (params) => {
       const { sessionIds } = fields(params)
       if (!Array.isArray(sessionIds) || sessionIds.length > KETTU_IMPORT_SESSIONS) {

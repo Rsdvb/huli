@@ -200,6 +200,7 @@ import { LOG_READERS } from './usage/readers'
 import { UsageStore, type UsageWorkerFactory } from './usage/store'
 import { createValidators } from './validate'
 import { KettuImport, kettuDataFolder, kettuImportFile } from './kettu-import'
+import { AgentHistory } from './agent-history'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 
 // The agent menu reads a running agent's options again once they are older than this.
@@ -403,6 +404,7 @@ export class AgentHost {
   readonly sessions: SessionManager
   /** Huli: an official Kettu's sessions, brought over. */
   private readonly kettuImport: KettuImport
+  private readonly agentHistory: AgentHistory
   /** Huli: the user's folders of sessions. */
   private readonly sessionFolders: SessionFolders
   /** Huli: the agents' network through the user's proxy subscriptions. */
@@ -765,6 +767,7 @@ export class AgentHost {
       log,
       projects: () => this.projects.list().map(({ path, name }) => ({ path, name })),
       claudeAgents: () => this.claudeAgents(),
+      codexAgents: () => this.codexAgents(),
     })
     this.memory.onChange(() => this.hub.broadcast({ type: 'memory.changed' }))
     this.workflowLibrary = new WorkflowLibrary({
@@ -1126,6 +1129,12 @@ export class AgentHost {
         this.hub.broadcast({ type: 'kettuImport.progress', done, total, title }),
       log,
     })
+    this.agentHistory = new AgentHistory({
+      platform,
+      agents: this.agents,
+      sessions: this.sessions,
+      log,
+    })
     this.sessionFolders = new SessionFolders({
       file: sessionFoldersFile(options.userDataPath, log),
       isSession: (id) => this.sessions.has(id),
@@ -1400,6 +1409,15 @@ export class AgentHost {
       if (harnessOf(agentId) !== 'claude-code') return []
       const configDir = this.agents.configFolder(agentId)
       return configDir ? [{ agentId, name: this.agents.name(agentId), configDir }] : []
+    })
+  }
+
+  /** Huli: the Codex agents of this host and their homes, for memory's import. */
+  private codexAgents(): { agentId: AgentId; name: string; home: string }[] {
+    return this.agents.ids().flatMap((agentId) => {
+      if (harnessOf(agentId) !== 'codex') return []
+      const home = this.agents.configFolder(agentId)
+      return home ? [{ agentId, name: this.agents.name(agentId), home }] : []
     })
   }
 
@@ -2709,7 +2727,12 @@ export class AgentHost {
       },
       'sessions.prepare': (params, { portId }) => sessions.prepare(params, portId),
       'sessions.discard': ({ sessionId }) => sessions.discard(sessionId),
-      'sessions.import': (params) => sessions.importSession(params),
+      // Huli: one listed by the import from the agents keeps its title and times.
+      'sessions.import': (params) =>
+        sessions.importSession(
+          params,
+          this.agentHistory.keptFor(params.agentId, params.acpSessionId),
+        ),
       'sessions.open': async ({ sessionId }, { device }) =>
         digestsFor(device, await sessions.open(sessionId, imagesFor(device))),
       'sessions.snapshot': async ({ sessionId, from }, { device }) =>
@@ -3174,6 +3197,7 @@ export class AgentHost {
         }
       },
       'kettuImport.scan': () => this.kettuImport.scan(),
+      'agentHistory.list': ({ agentId, cursor }) => this.agentHistory.list(agentId, cursor ?? null),
       'kettuImport.run': ({ sessionIds, memory, artifacts }) =>
         this.kettuImport.run(sessionIds, {
           memory: memory ?? false,

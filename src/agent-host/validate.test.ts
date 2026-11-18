@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { HOST_METHODS } from '@shared/agent-host'
+import { forbiddenToDevices } from '@shared/remote/allow-list'
 import { createValidators, promptContent } from './validate'
 
 const posix = createValidators('darwin')
@@ -1317,6 +1318,35 @@ describe('memory requests', () => {
     )
     rejects(() => posix['memory.import']({ sources, global: [7] }))
     rejects(() => posix['memory.setEnabled']({ enabled: 'yes' }))
+  })
+
+  it('takes a null project as a source of global memory, and nothing else in its place', () => {
+    const sources = [{ agentId: 'codex', project: null }]
+    expect(posix['memory.import']({ sources, global: [] })).toEqual({ sources, global: [] })
+    rejects(() => posix['memory.import']({ sources: [{ agentId: 'codex' }], global: [] }))
+    rejects(() =>
+      posix['memory.import']({ sources: [{ agentId: 'codex', project: 0 }], global: [] }),
+    )
+  })
+})
+
+describe('agentHistory.list', () => {
+  it('takes a known agent and an optional cursor, and nothing else', () => {
+    expect(posix['agentHistory.list']({ agentId: 'claude-code' })).toEqual({
+      agentId: 'claude-code',
+    })
+    expect(
+      posix['agentHistory.list']({ agentId: 'codex', cursor: '500', projectPath: '/x', more: 1 }),
+    ).toEqual({ agentId: 'codex', cursor: '500' })
+    rejects(() => posix['agentHistory.list']({}))
+    rejects(() => posix['agentHistory.list']({ agentId: 'other' }))
+    rejects(() => posix['agentHistory.list']({ agentId: 'codex', cursor: 5 }))
+    rejects(() => posix['agentHistory.list']({ agentId: 'codex', cursor: 'x'.repeat(100_000) }))
+  })
+
+  it('is a window’s alone: a paired device cannot list every folder', () => {
+    expect(forbiddenToDevices('agentHistory.list', { agentId: 'codex' })).toBe(true)
+    expect(forbiddenToDevices('agents.listSessions', { agentId: 'codex' })).toBe(false)
   })
 })
 

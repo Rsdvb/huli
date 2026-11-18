@@ -32,6 +32,7 @@ import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten 
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
 import type { KettuImportResult, KettuImportScan } from './kettu-import'
+import type { AgentHistoryPage } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type {
   CatalogServer,
@@ -1711,9 +1712,10 @@ export interface HostContract {
   // What the agents' own memories hold for projects Kettu knows, not yet imported.
   'memory.importScan': { params: void; result: MemoryImportScan }
   // Copies those sources into their projects' memory; `global` names the entries the user ticked
-  // to go to global memory instead. The originals stay as they are.
+  // to go to global memory instead. The originals stay as they are. Huli: a null project is a
+  // source of global memory, as Codex's entries that name no project here.
   'memory.import': {
-    params: { sources: { agentId: AgentId; project: string }[]; global: string[] }
+    params: { sources: { agentId: AgentId; project: string | null }[]; global: string[] }
     result: MemoryImportResult
   }
   // The label's Stop using: the session stops using the computer for the rest of its turn.
@@ -1747,6 +1749,12 @@ export interface HostContract {
   'kettuImport.run': {
     params: { sessionIds: string[]; memory?: boolean; artifacts?: boolean }
     result: KettuImportResult
+  }
+  // Huli: an agent's past sessions of every folder it ran in, for the import from the agents, which
+  // imports the chosen ones with `sessions.import`. A window's alone: it names every folder.
+  'agentHistory.list': {
+    params: { agentId: AgentId; cursor?: string }
+    result: AgentHistoryPage
   }
   // Huli: the agents' network through the user's proxy subscriptions, for this computer's windows
   // alone: a paired device may call none of these, and `agentNetwork.changed` reaches no device.
@@ -2092,6 +2100,7 @@ export const HOST_METHODS = [
   'computer.declineSetup',
   'kettuImport.scan',
   'kettuImport.run',
+  'agentHistory.list',
   'agentNetwork.status',
   'agentNetwork.addSubscription',
   'agentNetwork.importSubscription',

@@ -1,0 +1,522 @@
+// Huli: the import from the agents, Settings › General › Import from agents. It lists every past
+// session of an agent across all the folders it ran in, so they can be imported with
+// `sessions.import` in one go instead of a project at a time. Claude Code's transcripts are read
+// here, only their heads and tails; Codex's threads and an ACP agent's sessions come from the agent,
+// asked without a folder. Nothing of the agents' is ever written. Huli's own; see
+// tools/huli/README.md.
+
+import type { Dirent } from 'node:fs'
+import { open, readdir, stat } from 'node:fs/promises'
+import path from 'node:path'
+import type { AgentHistoryPage, AgentHistorySession } from '@shared/agent-history'
+import { harnessOf, type AgentId } from '@shared/agents'
+import type { Platform } from '@shared/platform'
+import { agentError, type AgentRuntime } from './agents'
+import type { ListedEverywhere } from './connection'
+import { HostError, invalidParams } from './errors'
+import { t } from './i18n'
+import type { KeptField } from './sessions'
+import type { LogFn, SessionRecord } from './storage'
+
+/** What is read of a transcript's start: its first records name its folder and first prompt. */
+export const HEAD_BYTES = 64 * 1024
+/** And of its end, where Claude Code appends titles, moves and the latest times. */
+export const TAIL_BYTES = 64 * 1024
+/** Transcripts read at once. */
+const READS = 16
+/** Sessions a page of Claude Code's carries. */
+export const CLAUDE_PAGE = 500
+/** The titles and times kept for imports, newest listed last. */
+const KEPT = 20_000
+const TITLE_CHARS = 200
+
+const SESSION_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
+/** Older Claude Code kept a subagent's transcript beside the sessions, named this way. */
+const AGENT_FILE = /^agent-[\w-]+\.jsonl$/i
+
+/** A session as an agent recorded it, before the filters. */
+export interface HistoryItem {
+  sessionId: string
+  title: string | null
+  cwd: string
+  createdAt: number | null
+  updatedAt: number | null
+  /** Another session started it: a Claude Code sidechain, a Codex subagent's thread. */
+  subagent: boolean
+  /** It holds a message from the user. */
+  prompted: boolean
+}
+
+interface Cached {
+  size: number
+  mtimeMs: number
+  item: ClaudeRead | null
+}
+
+/** A Claude Code transcript, and how well the folder it sits in fits the folders it names. */
+interface ClaudeRead extends HistoryItem {
+  /**
+   * 0 when its project folder is that of the folder it was moved to, 1 of the folder it ran in
+   * last, 2 of the one it started in, 3 of none: the lowest is the copy Claude Code resumes.
+   */
+  fit: number
+}
+
+type Json = Record<string, unknown>
+
+function parse(line: string): Json | null {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith('{')) return null
+  try {
+    const value: unknown = JSON.parse(trimmed)
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Json)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
+function time(value: unknown): number | null {
+  if (typeof value !== 'string') return null
+  const at = Date.parse(value)
+  return Number.isFinite(at) ? at : null
+}
+
+/** The words of a prompt, without the reminders and command tags Claude Code wraps around it. */
+function promptText(content: unknown): string | null {
+  let raw: string | null = null
+  if (typeof content === 'string') raw = content
+  else if (Array.isArray(content)) {
+    const parts = content.flatMap((block: unknown) =>
+      typeof block === 'object' &&
+      block !== null &&
+      (block as Json).type === 'text' &&
+      typeof (block as Json).text === 'string'
+        ? [(block as Json).text as string]
+        : [],
+    )
+    raw = parts.length > 0 ? parts.join(' ') : null
+  }
+  if (raw === null) return null
+  const cleaned = raw
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ')
+    .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, ' ')
+    .replace(/<[^>\n]{1,60}>/g, ' ')
+  return titleOf(cleaned)
+}
+
+function titleOf(value: string | null): string | null {
+  const collapsed = value?.replace(/\s+/g, ' ').trim() ?? ''
+  if (collapsed === '') return null
+  const chars = Array.from(collapsed)
+  return chars.length > TITLE_CHARS ? `${chars.slice(0, TITLE_CHARS - 1).join('')}…` : collapsed
+}
+
+/** The name Claude Code gives a folder's project folder; a long one it cuts and hashes. */
+export function claudeFolderName(cwd: string): string {
+  return cwd.replace(/[^A-Za-z0-9]/g, '-')
+}
+
+function sameFolderName(cwd: string, folder: string, platform: Platform): boolean {
+  const encoded = claudeFolderName(cwd)
+  const a = platform === 'win32' ? encoded.toLowerCase() : encoded
+  const b = platform === 'win32' ? folder.toLowerCase() : folder
+  return a === b || (a.length > 200 && b.length >= 200 && b.startsWith(a.slice(0, 200)))
+}
+
+/** `\\?\C:\x` as `C:\x`: Codex records long-path forms on Windows. */
+export function plainPath(value: string): string {
+  if (value.startsWith('\\\\?\\UNC\\')) return `\\\\${value.slice(8)}`
+  if (value.startsWith('\\\\?\\')) return value.slice(4)
+  return value
+}
+
+async function readRange(
+  file: string,
+  size: number,
+): Promise<{ head: string; tail: string | null }> {
+  const handle = await open(file, 'r')
+  try {
+    const headLength = Math.min(size, HEAD_BYTES)
+    const head = Buffer.alloc(headLength)
+    await handle.read(head, 0, headLength, 0)
+    if (size <= HEAD_BYTES) return { head: head.toString('utf8'), tail: null }
+    const start = Math.max(HEAD_BYTES, size - TAIL_BYTES)
+    const tail = Buffer.alloc(size - start)
+    await handle.read(tail, 0, tail.length, start)
+    return { head: head.toString('utf8'), tail: tail.toString('utf8') }
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Reads one transcript's head and tail. Null when it names no folder; a sidechain or one with no
+ * prompt is returned marked, to be counted.
+ */
+export async function readClaudeTranscript(
+  file: string,
+  folder: string,
+  size: number,
+  mtimeMs: number,
+  platform: Platform,
+): Promise<ClaudeRead | null> {
+  const name = path.basename(file)
+  const id = SESSION_FILE.exec(name)?.[1]
+  if (!id) return null
+  const { head, tail } = await readRange(file, size)
+  const headLines = head.split('\n')
+  // The last line of a cut head runs on past it.
+  if (tail !== null) headLines.pop()
+  let sidechain: boolean | null = null
+  let firstCwd: string | null = null
+  let createdAt: number | null = null
+  let prompted = false
+  let firstPrompt: string | null = null
+  for (const line of headLines) {
+    const record = parse(line)
+    if (!record) continue
+    if (sidechain === null && typeof record.isSidechain === 'boolean') {
+      sidechain = record.isSidechain
+    }
+    firstCwd ??= text(record.cwd)
+    createdAt ??= time(record.timestamp)
+    if (record.type === 'user') {
+      prompted = true
+      const message = record.message as Json | undefined
+      if (firstPrompt === null && record.isMeta !== true) firstPrompt = promptText(message?.content)
+    }
+  }
+  // A first prompt larger than the head is cut off, but its record still says what it is.
+  if (!prompted && /"type":"user"/.test(head)) prompted = true
+  if (firstCwd === null) {
+    const match = /"cwd":("(?:[^"\\]|\\.)*")/.exec(head)
+    if (match) firstCwd = text(JSON.parse(match[1]!))
+  }
+  if (sidechain === null) sidechain = /"isSidechain":true/.test(head)
+
+  const tailLines = tail === null ? headLines : tail.split('\n').slice(1)
+  let customTitle: string | null = null
+  let agentName: string | null = null
+  let aiTitle: string | null = null
+  let summary: string | null = null
+  let lastPrompt: string | null = null
+  let relocated: string | null = null
+  let lastCwd: string | null = null
+  let updatedAt: number | null = null
+  for (const line of tailLines) {
+    const record = parse(line)
+    if (!record) continue
+    switch (record.type) {
+      case 'custom-title':
+        customTitle = text(record.customTitle) ?? customTitle
+        break
+      case 'agent-name':
+        agentName = text(record.agentName) ?? agentName
+        break
+      case 'ai-title':
+        aiTitle = text(record.aiTitle) ?? aiTitle
+        break
+      case 'summary':
+        summary = text(record.summary) ?? summary
+        break
+      case 'last-prompt':
+        lastPrompt = text(record.lastPrompt) ?? lastPrompt
+        break
+      case 'relocated':
+        relocated = text(record.relocatedCwd) ?? relocated
+        break
+      case 'user':
+        prompted = true
+        break
+    }
+    lastCwd = text(record.cwd) ?? lastCwd
+    updatedAt = time(record.timestamp) ?? updatedAt
+  }
+
+  // The folder it ran in last; a copy Claude Code left behind when it moved the session names
+  // another folder than the one it sits in.
+  const named = [relocated, lastCwd, firstCwd]
+  const found = named.findIndex((value) => !!value && sameFolderName(value, folder, platform))
+  const fit = found === -1 ? named.length : found
+  const cwd = named[fit] ?? named.find((value) => !!value)
+  if (!cwd) return null
+  return {
+    sessionId: id,
+    title: titleOf(customTitle ?? agentName ?? aiTitle ?? summary ?? firstPrompt ?? lastPrompt),
+    cwd,
+    createdAt,
+    updatedAt: updatedAt ?? (Number.isFinite(mtimeMs) ? Math.round(mtimeMs) : null),
+    subagent: sidechain,
+    prompted,
+    fit,
+  }
+}
+
+async function eachLimited<T>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < items.length) await run(items[next++]!)
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+}
+
+async function entries(folder: string): Promise<Dirent[]> {
+  try {
+    return await readdir(folder, { withFileTypes: true })
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return []
+    throw error
+  }
+}
+
+/**
+ * Every session under Claude Code's `projects` folder, newest first. Only each project folder's
+ * own transcripts are read: subagents' are in `<session>/subagents`, which is never entered. A
+ * session copied to another folder when Claude Code moved it is listed once, from the folder it
+ * names. `cache` keeps what was read by path, size and time, so a second look reads only changes.
+ */
+export async function scanClaudeHistory(
+  configDir: string,
+  platform: Platform,
+  cache: Map<string, Cached>,
+  log: LogFn,
+): Promise<ClaudeScan> {
+  const root = path.join(configDir, 'projects')
+  const files: { file: string; folder: string }[] = []
+  let oldSubagents = 0
+  const folders = (await entries(root)).filter((entry) => entry.isDirectory())
+  await eachLimited(folders, READS, async (entry) => {
+    for (const child of await entries(path.join(root, entry.name)).catch(() => [])) {
+      if (!child.isFile()) continue
+      if (SESSION_FILE.test(child.name)) {
+        files.push({ file: path.join(root, entry.name, child.name), folder: entry.name })
+      } else if (AGENT_FILE.test(child.name)) oldSubagents++
+    }
+  })
+  const seen = new Set<string>()
+  const byId = new Map<string, ClaudeRead>()
+  await eachLimited(files, READS, async ({ file, folder }) => {
+    seen.add(file)
+    try {
+      const info = await stat(file)
+      let item: ClaudeRead | null
+      const cached = cache.get(file)
+      if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
+        item = cached.item
+      } else {
+        item = await readClaudeTranscript(file, folder, info.size, info.mtimeMs, platform)
+        cache.set(file, { size: info.size, mtimeMs: info.mtimeMs, item })
+      }
+      if (!item) return
+      const other = byId.get(item.sessionId)
+      if (
+        !other ||
+        item.fit < other.fit ||
+        (item.fit === other.fit && (item.updatedAt ?? 0) > (other.updatedAt ?? 0))
+      ) {
+        byId.set(item.sessionId, item)
+      }
+    } catch (error) {
+      log('warn', `Could not read Claude Code transcript ${file}: ${(error as Error).message}`)
+    }
+  })
+  for (const file of cache.keys()) if (!seen.has(file)) cache.delete(file)
+  const items = [...byId.values()].map((read): HistoryItem => {
+    const { sessionId, title, cwd, createdAt, updatedAt, subagent, prompted } = read
+    return { sessionId, title, cwd, createdAt, updatedAt, subagent, prompted }
+  })
+  items.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+  return { items, oldSubagents }
+}
+
+export interface ClaudeScan {
+  /** Newest first. */
+  items: HistoryItem[]
+  /** Subagents' transcripts an older Claude Code kept beside the sessions, `agent-*.jsonl`. */
+  oldSubagents: number
+}
+
+/** A session an agent listed across its folders, in the import's terms. */
+export function historyItemOf(listed: ListedEverywhere): HistoryItem {
+  return {
+    sessionId: listed.sessionId,
+    title: titleOf(listed.title),
+    cwd: plainPath(listed.cwd),
+    createdAt: listed.createdAt === null ? null : time(listed.createdAt),
+    updatedAt: listed.updatedAt === null ? null : time(listed.updatedAt),
+    subagent: listed.subagent,
+    prompted: listed.prompted,
+  }
+}
+
+/**
+ * The page the dialog shows: subagents' sessions and ones without a prompt are counted and left
+ * out, and each is marked imported when a session here has its id, and missing when its folder is
+ * gone.
+ */
+export function historyPage(
+  items: readonly HistoryItem[],
+  imported: ReadonlySet<string>,
+  folderGone: ReadonlySet<string>,
+  nextCursor: string | null,
+): AgentHistoryPage {
+  const hidden = { subagents: 0, empty: 0 }
+  const sessions: AgentHistorySession[] = []
+  for (const item of items) {
+    if (item.subagent) hidden.subagents++
+    else if (!item.prompted) hidden.empty++
+    else {
+      sessions.push({
+        acpSessionId: item.sessionId,
+        title: item.title,
+        cwd: item.cwd,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        imported: imported.has(item.sessionId),
+        missing: folderGone.has(item.cwd),
+      })
+    }
+  }
+  return { sessions, nextCursor, hidden }
+}
+
+export interface AgentHistoryDeps {
+  platform: Platform
+  agents: {
+    has(agentId: AgentId): boolean
+    assertEnabled(agentId: AgentId): void
+    name(agentId: AgentId): string
+    /** The agent's own configuration folder, as for Claude Code `CLAUDE_CONFIG_DIR`. */
+    configFolder(agentId: AgentId): string | null
+    ensureReady(agentId: AgentId): Promise<Pick<AgentRuntime, 'connection' | 'init'>>
+  }
+  sessions: { agentSessionIds(agentId: AgentId): Set<string> }
+  isDirectory?(folder: string): Promise<boolean>
+  log: LogFn
+}
+
+type Kept = Partial<Pick<SessionRecord, KeptField>>
+
+export class AgentHistory {
+  private readonly claudeCache = new Map<string, Map<string, Cached>>()
+  /** A Claude Code agent's last scan, which its later pages are cut from. */
+  private readonly scans = new Map<AgentId, ClaudeScan>()
+  private readonly kept = new Map<string, Kept>()
+
+  constructor(private readonly deps: AgentHistoryDeps) {}
+
+  async list(agentId: AgentId, cursor: string | null): Promise<AgentHistoryPage> {
+    const { agents } = this.deps
+    if (!agents.has(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
+    agents.assertEnabled(agentId)
+    let items: HistoryItem[]
+    let nextCursor: string | null
+    let oldSubagents = 0
+    if (harnessOf(agentId) === 'claude-code') {
+      ;({ items, nextCursor, oldSubagents } = await this.claudePage(agentId, cursor))
+    } else {
+      const runtime = await agents.ensureReady(agentId)
+      const connection = runtime.connection
+      if (!runtime.init.capabilities.listSessions || !connection.listAllSessions) {
+        throw new HostError(
+          'agent_unavailable',
+          t('session.cannotList', { agent: agents.name(agentId) }),
+        )
+      }
+      let page
+      try {
+        page = await connection.listAllSessions(cursor)
+      } catch (error) {
+        throw agentError(error)
+      }
+      items = page.sessions.map(historyItemOf)
+      nextCursor = page.nextCursor
+    }
+    const gone = await this.goneFolders(items)
+    const result = historyPage(items, this.deps.sessions.agentSessionIds(agentId), gone, nextCursor)
+    result.hidden.subagents += oldSubagents
+    for (const session of result.sessions) this.keep(agentId, session)
+    return result
+  }
+
+  /**
+   * What an import of a listed session takes over from the listing: its title and times. Nothing
+   * for one this host has not listed.
+   */
+  keptFor(agentId: AgentId, acpSessionId: string): Kept {
+    return this.kept.get(`${agentId}\n${acpSessionId}`) ?? {}
+  }
+
+  private async claudePage(
+    agentId: AgentId,
+    cursor: string | null,
+  ): Promise<{ items: HistoryItem[]; nextCursor: string | null; oldSubagents: number }> {
+    let scan = cursor === null ? undefined : this.scans.get(agentId)
+    if (!scan) {
+      const configDir = this.deps.agents.configFolder(agentId)
+      if (!configDir) {
+        throw new HostError(
+          'agent_unavailable',
+          t('session.cannotList', { agent: this.deps.agents.name(agentId) }),
+        )
+      }
+      let cache = this.claudeCache.get(configDir)
+      if (!cache) {
+        cache = new Map()
+        this.claudeCache.set(configDir, cache)
+      }
+      const started = Date.now()
+      scan = await scanClaudeHistory(configDir, this.deps.platform, cache, this.deps.log)
+      this.deps.log(
+        'info',
+        `Listed ${scan.items.length} Claude Code sessions of every folder in ${Date.now() - started} ms`,
+      )
+      this.scans.set(agentId, scan)
+    }
+    const offset = cursor === null ? 0 : Math.max(0, Number(cursor) || 0)
+    const end = offset + CLAUDE_PAGE
+    return {
+      items: scan.items.slice(offset, end),
+      nextCursor: end < scan.items.length ? String(end) : null,
+      oldSubagents: offset === 0 ? scan.oldSubagents : 0,
+    }
+  }
+
+  private async goneFolders(items: readonly HistoryItem[]): Promise<Set<string>> {
+    const folders = [...new Set(items.filter((item) => item.cwd !== '').map((item) => item.cwd))]
+    const gone = new Set<string>()
+    const isDirectory =
+      this.deps.isDirectory ??
+      ((folder: string) =>
+        stat(folder).then(
+          (info) => info.isDirectory(),
+          () => false,
+        ))
+    await eachLimited(folders, READS, async (folder) => {
+      if (!path.isAbsolute(folder) || !(await isDirectory(folder))) gone.add(folder)
+    })
+    return gone
+  }
+
+  private keep(agentId: AgentId, session: AgentHistorySession): void {
+    const key = `${agentId}\n${session.acpSessionId}`
+    this.kept.delete(key)
+    this.kept.set(key, {
+      ...(session.title ? { title: session.title, titleSource: 'agent' as const } : {}),
+      ...(session.createdAt !== null ? { createdAt: session.createdAt } : {}),
+      ...(session.updatedAt !== null ? { updatedAt: session.updatedAt } : {}),
+    })
+    if (this.kept.size > KEPT) this.kept.delete(this.kept.keys().next().value!)
+  }
+}

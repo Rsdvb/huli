@@ -1309,6 +1309,20 @@ export class SessionManager {
     return false
   }
 
+  /** Huli: the agent's own ids of its sessions here, earlier ones included, for the bulk import. */
+  agentSessionIds(agentId: AgentId): Set<string> {
+    const ids = new Set<string>()
+    const add = (record: SessionRecord): void => {
+      if (record.agentId === agentId && record.acpSessionId) ids.add(record.acpSessionId)
+      for (const item of record.earlier ?? []) {
+        if (item.agentId === agentId) ids.add(item.acpSessionId)
+      }
+    }
+    for (const live of this.live.values()) add(live.record)
+    for (const record of this.records.values()) add(record)
+    return ids
+  }
+
   private recordOf(sessionId: string): SessionRecord {
     const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
     if (!record) throw notFound(`No session ${sessionId}`)

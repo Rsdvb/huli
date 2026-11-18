@@ -1,0 +1,52 @@
+{
+  "row": {
+    "group": "从其他应用迁移",
+    "name": "从各 Agent 导入",
+    "description": "把 Claude Code、Codex 等 Agent 在这台电脑上保存的历史会话一次性搬过来，所有项目一起，标题和时间都会保留。只读取 Agent 自己的文件。",
+    "keywords": "导入 agent claude code codex 会话 历史 迁移 项目 全部",
+    "choose": "选择会话…"
+  },
+  "dialog": {
+    "title": "从各 Agent 导入",
+    "description": "这个 Agent 在这台电脑上的历史会话，按运行时所在的文件夹分组。导入后放在该文件夹的项目下，能接着之前的进度继续。",
+    "agents": "Agent",
+    "noAgents": "这里没有能跨文件夹列出会话的 Agent。",
+    "search": "搜索标题和文件夹",
+    "last30": "最近 30 天",
+    "all": "全部",
+    "none": "不选",
+    "listed_other": "{{count}} 个会话",
+    "projects_other": "{{count}} 个文件夹",
+    "alreadyHere_other": "{{count}} 个已在这里",
+    "hiddenSubagents_other": "略过 {{count}} 个子智能体会话",
+    "hiddenEmpty_other": "略过 {{count}} 个没有消息的会话",
+    "separator": " · ",
+    "listing": "已列出 {{count}} 个…",
+    "noSessions": "{{agent}} 在这台电脑上没有会话。",
+    "noMatch": "没有匹配的会话。",
+    "projectCount": "{{count}}",
+    "toggleProject": "选中 {{project}} 的所有会话",
+    "expand": "展开会话",
+    "collapse": "收起会话",
+    "more_other": "还有 {{count}} 个，搜索可以缩小范围。",
+    "imported": "已导入",
+    "missing": "文件夹已不在",
+    "missingTip": "这个文件夹已经不存在，所以这个会话无法导入。",
+    "import_other": "导入 {{count}} 个会话",
+    "importNone": "导入",
+    "importing": "正在导入 {{done}}/{{total}}…",
+    "importingTitle": "正在导入 {{done}}/{{total}}：{{title}}",
+    "stop": "停止",
+    "close": "关闭",
+    "readOnly": "只读取 Agent 自己的文件。子智能体会在这里打开它的会话时回到会话下面。终端里正开着的 Claude Code 会话不会导入，请先在那边关掉。"
+  },
+  "result": {
+    "imported_other": "已导入 {{count}} 个会话。",
+    "stopped_other": "已停止，{{count}} 个没有导入。",
+    "failed_other": "{{count}} 个失败：",
+    "failure": "{{title}}：{{message}}",
+    "memory": "把它们的记忆也导入…",
+    "memoryHint": "Claude Code 和 Codex 自己关于现已在 Kettu 中的项目的记忆，可以导入 Kettu 的记忆。",
+    "open": "打开最新的会话"
+  }
+}

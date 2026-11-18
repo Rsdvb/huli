@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { Add01Icon, ArrowRight01Icon, Search01Icon, UserIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import type { MemoryEntry, MemoryImportScan, MemoryProject, MemoryScope } from '@shared/memory'
+import type {
+  MemoryEntry,
+  MemoryImportScan,
+  MemoryImportSource,
+  MemoryProject,
+  MemoryScope,
+} from '@shared/memory'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Checkbox } from '@renderer/components/ui/checkbox'
@@ -247,6 +253,38 @@ export function ListFailed({ error, onRetry }: { error: string; onRetry: () => v
 const entryCount = (scan: MemoryImportScan): number =>
   scan.sources.reduce((sum, source) => sum + source.entries.length, 0)
 
+// Huli: names a source among the scan's, for the ticks that choose which to import.
+const sourceKey = (source: MemoryImportSource): string =>
+  `${source.agentId}\n${source.project ?? ''}`
+
+/**
+ * Huli: the import dialog on its own, read as it opens, for the import from the agents' summary,
+ * whose sessions add the projects Claude Code's memory is imported by.
+ */
+export function MemoryImportDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const scan = useImportScan(open)
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <SettingsDialogContent className="sm:max-w-125">
+        {open && (
+          <ImportBody
+            scan={scan.value}
+            error={scan.error}
+            onRetry={scan.retry}
+            onDone={() => onOpenChange(false)}
+          />
+        )}
+      </SettingsDialogContent>
+    </Dialog>
+  )
+}
+
 /** Under the switch while the agents' own memories hold entries not imported yet. */
 export function ImportNotice({ importable }: { importable: number }) {
   const { t } = useTranslation('settings')
@@ -303,9 +341,15 @@ function ImportBody({
   const { t } = useTranslation(['settings', 'common'])
   const { request } = useHostScope()
   const [global, setGlobal] = useState<ReadonlySet<string>>(() => new Set())
+  // Huli: the sources left out, by `sourceKey`; every one starts ticked.
+  const [left, setLeft] = useState<ReadonlySet<string>>(() => new Set())
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
-  const aboutUser = scan?.sources.flatMap((source) => source.entries.filter((e) => e.aboutUser))
+  const chosen = scan?.sources.filter((source) => !left.has(sourceKey(source))) ?? []
+  // A source of global memory has nothing to move there.
+  const aboutUser = chosen
+    .filter((source) => source.project !== null)
+    .flatMap((source) => source.entries.filter((e) => e.aboutUser))
   const total = scan ? entryCount(scan) : 0
 
   const run = async (): Promise<void> => {
@@ -314,11 +358,11 @@ function ImportBody({
     setFailure(null)
     try {
       const result = await request('memory.import', {
-        sources: scan.sources.map((source) => ({
+        sources: chosen.map((source) => ({
           agentId: source.agentId,
           project: source.project,
         })),
-        global: (aboutUser ?? []).filter((entry) => global.has(entry.key)).map((e) => e.key),
+        global: aboutUser.filter((entry) => global.has(entry.key)).map((e) => e.key),
       })
       onDone()
       toast(
@@ -362,15 +406,36 @@ function ImportBody({
             <SettingsField label={t('memory.import.sources')}>
               <ul className="kettu-sd__list">
                 {scan.sources.map((source) => (
-                  <li key={`${source.agentId}\n${source.project}`} className="kettu-sd__row">
+                  <li key={sourceKey(source)} className="kettu-sd__row">
+                    <Checkbox
+                      checked={!left.has(sourceKey(source))}
+                      disabled={busy}
+                      aria-label={source.projectName ?? source.agentName}
+                      onCheckedChange={(on) =>
+                        setLeft((current) => {
+                          const next = new Set(current)
+                          if (on) next.delete(sourceKey(source))
+                          else next.add(sourceKey(source))
+                          return next
+                        })
+                      }
+                    />
                     <AgentMark agent={source.agentId} size={16} />
                     <span className="ui-sg-label">
                       <b>
-                        {t('memory.import.source', {
-                          agent: source.agentName,
-                          project: source.projectName,
-                        })}
+                        {source.projectName === null
+                          ? t('memory.import.sourceGlobal', { agent: source.agentName })
+                          : t('memory.import.source', {
+                              agent: source.agentName,
+                              project: source.projectName,
+                            })}
                       </b>
+                      <small
+                        className="line-clamp-2"
+                        title={source.entries.map((entry) => entry.title).join('\n')}
+                      >
+                        {source.entries.map((entry) => entry.title).join(' · ')}
+                      </small>
                     </span>
                     <span className="k-muted k-num">
                       {t('memory.import.entries', { count: source.entries.length })}
@@ -379,7 +444,7 @@ function ImportBody({
                 ))}
               </ul>
             </SettingsField>
-            {aboutUser && aboutUser.length > 0 && (
+            {aboutUser.length > 0 && (
               <SettingsField
                 label={t('memory.import.aboutYou')}
                 hint={t('memory.import.aboutYouHint')}
@@ -423,7 +488,7 @@ function ImportBody({
           size="md"
           variant="primary"
           loading={busy}
-          disabled={scan === null || total === 0}
+          disabled={scan === null || total === 0 || chosen.length === 0}
           onClick={() => void run()}
         >
           {t('memory.import.import')}

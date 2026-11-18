@@ -6,7 +6,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { longer } from '@shared/artifacts'
-import type { AgentId } from '@shared/agents'
+import { harnessOf, type AgentId } from '@shared/agents'
 import {
   MEMORY_BODY_CHARS,
   MEMORY_DESCRIPTION_CHARS,
@@ -25,7 +25,8 @@ import {
 import type { Platform } from '@shared/platform'
 import { pathKey } from '../paths'
 import { writeFileAtomic, type LogFn } from '../storage'
-import { claudeMemoryDir, readClaudeMemory, type ClaudeMemory } from './claude-import'
+import { claudeMemoryDir, readClaudeMemory } from './claude-import'
+import { readCodexMemory, type CodexMemory } from './codex-import'
 import { formatEntry, newId, normalizeBody, oneLine, parseEntry } from './entry-file'
 import { MemoryError } from './errors'
 import { indexText } from './index-text'
@@ -41,6 +42,8 @@ export interface MemoryServiceDeps {
   projects(): { path: string; name: string }[]
   /** Claude Code agents of this host and their config dirs, for import. */
   claudeAgents(): { agentId: AgentId; name: string; configDir: string }[]
+  /** Huli: Codex agents of this host and their homes (`CODEX_HOME`), for import. */
+  codexAgents?(): { agentId: AgentId; name: string; home: string }[]
   now?(): number
 }
 
@@ -614,7 +617,7 @@ export class MemoryService {
   }
 
   /** The entry as an import writes it, or null with a log line when it would be refused. */
-  private importable(memory: ClaudeMemory): MemoryDraft | null {
+  private importable(memory: { file: string; draft: MemoryDraft }): MemoryDraft | null {
     try {
       return this.clean(memory.draft)
     } catch (error) {
@@ -661,7 +664,54 @@ export class MemoryService {
         })
       }
     }
+    // Huli: Codex keeps one memory for every folder; each entry goes to the project it names when
+    // Kettu has that project, else to global memory.
+    for (const agent of this.deps.codexAgents?.() ?? []) {
+      const real = await realpath(agent.home).catch(() => agent.home)
+      if (read.has(real)) continue
+      read.add(real)
+      const memories = await readCodexMemory(agent.home, this.deps.log)
+      for (const [projectPath, list] of this.byCodexProject(memories)) {
+        const known = projectPath === null ? null : this.knownProject(projectPath)
+        const there = known
+          ? await this.heldContent(known)
+          : new Set((await this.readLayer(this.globalLayer())).map(contentKey))
+        const entries = list.flatMap((memory) => {
+          const draft = this.importable(memory)
+          if (!draft || there.has(contentKey(draft))) return []
+          return [
+            {
+              key: this.importKey(agent.agentId, known?.path ?? '', memory.file),
+              title: draft.title,
+              description: draft.description,
+              aboutUser: memory.aboutUser,
+            },
+          ]
+        })
+        if (entries.length === 0) continue
+        sources.push({
+          agentId: agent.agentId,
+          agentName: agent.name,
+          project: known?.path ?? null,
+          projectName: known?.name ?? null,
+          entries,
+        })
+      }
+    }
     return { sources }
+  }
+
+  /** Huli: Codex's entries by the first project Kettu knows of those each names; null for none. */
+  private byCodexProject(memories: readonly CodexMemory[]): Map<string | null, CodexMemory[]> {
+    const groups = new Map<string | null, CodexMemory[]>()
+    for (const memory of memories) {
+      const known = memory.projects
+        .map((folder) => this.knownProject(folder))
+        .find((project) => project !== null)
+      const key = known?.path ?? null
+      groups.set(key, [...(groups.get(key) ?? []), memory])
+    }
+    return groups
   }
 
   private async importPlan(layer: Layer): Promise<ImportPlan> {
@@ -674,7 +724,7 @@ export class MemoryService {
    * `global`, skipping what is already there. Refuses the whole import when a layer would overflow.
    */
   import(
-    sources: { agentId: AgentId; project: string }[],
+    sources: { agentId: AgentId; project: string | null }[],
     global: string[],
   ): Promise<MemoryImportResult> {
     return this.exclusive(async () => {
@@ -685,8 +735,13 @@ export class MemoryService {
       const done = new Set<string>()
       const result: MemoryImportResult = { imported: 0, skipped: 0, global: 0 }
       for (const source of sources) {
+        // Huli: Codex's memory, one for every folder, by the project each entry names.
+        if (harnessOf(source.agentId) === 'codex') {
+          await this.importCodex(source, toGlobal, globalPlan, plans, done, result)
+          continue
+        }
         const agent = agents.find((candidate) => candidate.agentId === source.agentId)
-        const known = this.knownProject(source.project)
+        const known = source.project === null ? null : this.knownProject(source.project)
         if (!agent || !known) {
           throw new MemoryError('not_found', 'An import source names an unknown agent or project.')
         }
@@ -750,6 +805,53 @@ export class MemoryService {
       if (result.imported > 0) this.changed()
       return result
     })
+  }
+
+  /** Huli: a Codex source of `import`: its agent's entries for that project, or for none. */
+  private async importCodex(
+    source: { agentId: AgentId; project: string | null },
+    toGlobal: ReadonlySet<string>,
+    globalPlan: ImportPlan,
+    plans: Map<string, ImportPlan>,
+    done: Set<string>,
+    result: MemoryImportResult,
+  ): Promise<void> {
+    const agent = this.deps.codexAgents?.().find((item) => item.agentId === source.agentId)
+    const known = source.project === null ? null : this.knownProject(source.project)
+    if (!agent || (source.project !== null && !known)) {
+      throw new MemoryError('not_found', 'An import source names an unknown agent or project.')
+    }
+    const layer = known ? this.projectLayer(known) : this.globalLayer()
+    if (done.has(`${agent.agentId}\u0000${layer.dir}`)) return
+    done.add(`${agent.agentId}\u0000${layer.dir}`)
+    let own = plans.get(layer.dir)
+    if (!own) {
+      own = await this.importPlan(layer)
+      plans.set(layer.dir, own)
+    }
+    const memories = this.byCodexProject(await readCodexMemory(agent.home, this.deps.log))
+    for (const memory of memories.get(known?.path ?? null) ?? []) {
+      const draft = this.importable(memory)
+      if (!draft) continue
+      const content = contentKey(draft)
+      if (own.held.has(content) || globalPlan.held.has(content)) {
+        result.skipped++
+        continue
+      }
+      const into = toGlobal.has(this.importKey(agent.agentId, known?.path ?? '', memory.file))
+        ? globalPlan
+        : own
+      const at = Math.min(memory.modifiedAt, this.now())
+      into.held.add(content)
+      into.adds.push({
+        ...draft,
+        createdAt: at,
+        updatedAt: at,
+        source: { agentId: agent.agentId, sessionId: null },
+      })
+      result.imported++
+      if (into === globalPlan) result.global++
+    }
   }
 
   /**

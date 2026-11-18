@@ -29,6 +29,7 @@ import {
   type ConnectionHooks,
   type ForkPoint,
   type HistoryMessage,
+  type ListedEverywhere,
   type ListedSession,
   type McpServer,
   type OpenedSession,
@@ -1018,6 +1019,17 @@ export class CodexConnection implements AgentConnection {
         })),
       nextCursor: response.nextCursor,
     }
+  }
+
+  /** Huli: every folder's threads, for the import from the agents. */
+  async listAllSessions(
+    cursor: string | null,
+  ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }> {
+    const response = await this.call<ThreadListResponse>('thread/list', {
+      cursor,
+      sourceKinds: LISTED_SOURCES,
+    })
+    return { sessions: response.data.map(listedEverywhere), nextCursor: response.nextCursor }
   }
 
   // Routing.
@@ -2017,6 +2029,19 @@ export class CodexConnection implements AgentConnection {
       { idempotencyKey: randomUUID(), ...(creditId ? { creditId } : {}) },
     )
     return response.outcome
+  }
+}
+
+/** Huli: a thread as the import from the agents lists it; a subagent's or an empty one is marked. */
+export function listedEverywhere(thread: Thread): ListedEverywhere {
+  return {
+    sessionId: thread.id,
+    title: listedTitle(thread),
+    createdAt: new Date(thread.createdAt * 1000).toISOString(),
+    updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+    cwd: thread.cwd,
+    subagent: !!thread.parentThreadId || thread.ephemeral,
+    prompted: thread.preview.trim() !== '',
   }
 }
 

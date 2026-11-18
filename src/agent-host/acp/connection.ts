@@ -36,6 +36,7 @@ import {
   type AuthMethodInfo,
   type ConnectionHooks,
   type ForkPoint,
+  type ListedEverywhere,
   type ListedSession,
   type McpServer,
   type OpenedSession,
@@ -958,6 +959,27 @@ export class AcpConnection implements AgentConnection {
         title: info.title ?? null,
         updatedAt: info.updatedAt ?? null,
         cwd: info.cwd,
+      })),
+      nextCursor: response.nextCursor ?? null,
+    }
+  }
+
+  /** Huli: every folder's sessions, for the import from the agents; ACP makes `cwd` optional. */
+  async listAllSessions(
+    cursor: string | null,
+  ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }> {
+    const response = await this.call(() =>
+      this.connection.agent.request(methods.agent.session.list, cursor ? { cursor } : {}),
+    )
+    return {
+      sessions: response.sessions.map((info) => ({
+        sessionId: info.sessionId,
+        title: info.title ?? null,
+        createdAt: null,
+        updatedAt: info.updatedAt ?? null,
+        cwd: info.cwd,
+        subagent: false,
+        prompted: true,
       })),
       nextCursor: response.nextCursor ?? null,
     }
