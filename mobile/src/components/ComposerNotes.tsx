@@ -1,7 +1,8 @@
 // Notes over a session's composer, as the desktop shows them at the box's top edge: the agent
 // picked to take the session over with the next message (composer/switch-strip.tsx), the prompt
-// cache that expired while a message is being written (composer/cache-notice.tsx), and another
-// agent to pick while the chosen one's plan is used up (composer/quota-strip.tsx).
+// cache that expired while a message is being written (composer/cache-notice.tsx), another
+// agent to pick while the chosen one's plan is used up (composer/quota-strip.tsx), and the prompt
+// the agent predicts comes next, which the desktop shows faint in the empty box.
 
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
 import Reanimated, { FadeIn, FadeOut } from 'react-native-reanimated'
@@ -171,6 +172,45 @@ export function QuotaSuggestion(props: {
   )
 }
 
+/**
+ * The prompt the agent predicts the user sends next, over the empty box between turns: a tap puts
+ * it in the box to edit or send, never sends it.
+ */
+export function PromptSuggestionChip(props: { text: string; onUse(): void; onDismiss(): void }) {
+  const { c, s } = useSessionTokens()
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.chip, { backgroundColor: s.dockCard, borderColor: c.border }]}
+    >
+      <Pressable
+        onPress={() => {
+          haptic.tap()
+          props.onUse()
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`建议：${props.text}`}
+        accessibilityHint="填入输入框，可以先改再发"
+        style={({ pressed }) => [styles.chipText, pressed && { opacity: 0.6 }]}
+      >
+        <Text numberOfLines={2} style={[styles.text, { color: c.textSecondary }]}>
+          {props.text}
+        </Text>
+      </Pressable>
+      <Pressable
+        onPress={props.onDismiss}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel="不用这个建议"
+        style={styles.chipClose}
+      >
+        <Icon icon={G.close} size={12} color={c.textTertiary} weight="semibold" />
+      </Pressable>
+    </Reanimated.View>
+  )
+}
+
 const styles = StyleSheet.create({
   note: {
     borderRadius: 18,
@@ -195,4 +235,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   undoText: { fontSize: 13, fontWeight: '600' },
+  chip: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 12,
+    paddingRight: 4,
+    minHeight: 32,
+  },
+  chipText: { flexShrink: 1, paddingVertical: 6 },
+  chipClose: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
 })

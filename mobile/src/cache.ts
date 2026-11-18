@@ -117,7 +117,8 @@ export function writeThread(computer: string, thread: ThreadState): Promise<void
   return serial(computer, async () => {
     await writeJson(threadFile(computer, sessionId), {
       savedAt: Date.now(),
-      session: thread.session,
+      // A predicted prompt is for the moment it came; the computer sends it again if it holds.
+      session: { ...thread.session, suggestion: undefined },
       entries,
     })
     const ids = [sessionId, ...(await cachedThreadIds(computer)).filter((id) => id !== sessionId)]

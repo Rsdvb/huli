@@ -37,7 +37,12 @@ import {
   SendCancelled,
   type ComposerHandle,
 } from '../../components/Composer'
-import { CacheNotice, QuotaSuggestion, SwitchStrip } from '../../components/ComposerNotes'
+import {
+  CacheNotice,
+  PromptSuggestionChip,
+  QuotaSuggestion,
+  SwitchStrip,
+} from '../../components/ComposerNotes'
 import {
   agentModelsPage,
   agentsPage,
@@ -713,6 +718,16 @@ export default function SessionScreen() {
       : null
   const [keptQuota, setKeptQuota] = useState(false)
   const suggestion = quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null
+  // The agent's predicted next prompt, over the empty box between turns until it is put away.
+  const [promptDismissed, setPromptDismissed] = useState<string | null>(null)
+  const predicted =
+    session?.suggestion &&
+    session.suggestion.id !== promptDismissed &&
+    (status === 'ready' || status === 'closed') &&
+    !pendingSwitch &&
+    !mustSwitch
+      ? session.suggestion
+      : null
   const rejected = useThreadSelector(view, endedOnRejection)
   const shownName = pending?.name ?? agent?.name ?? 'Agent'
   const placeholder = sessionPlaceholder({
@@ -1016,8 +1031,15 @@ export default function SessionScreen() {
           }
           onCountChange={setAttachCount}
           top={(holds) =>
-            pendingSwitch || suggestion || (cacheNoticeShown && holds) ? (
+            pendingSwitch || suggestion || (cacheNoticeShown && holds) || (predicted && !holds) ? (
               <>
+                {predicted && !holds && (
+                  <PromptSuggestionChip
+                    text={predicted.text}
+                    onUse={() => composer.current?.putBack(predicted.text)}
+                    onDismiss={() => setPromptDismissed(predicted.id)}
+                  />
+                )}
                 {suggestion && agent && (
                   <QuotaSuggestion
                     agentName={agent.name}
