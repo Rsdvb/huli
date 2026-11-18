@@ -62,7 +62,18 @@ export interface KettuImportScan {
     importable: number
     imported: number
   }
+  /** Kettu's global and project memory entries: all read, and those not here yet. */
+  memory: { found: number; importable: number }
+  /** Kettu's artifacts outside its Recently deleted: all read, and those not here yet. */
+  artifacts: { found: number; importable: number; error: KettuArtifactsError | null }
 }
+
+/**
+ * Why Kettu's artifacts could not be read. `newer`: its database is from a newer version.
+ * `unreadable`: its database could not be copied or read. `noSpace`: the disk lacks room for the
+ * copy. `unavailable`: this app's own thread database is not open.
+ */
+export type KettuArtifactsError = 'newer' | 'unreadable' | 'noSpace' | 'unavailable'
 
 export interface KettuImportFailure {
   sessionId: string
@@ -77,6 +88,12 @@ export interface KettuImportResult {
   /** Already here, subagents, and those `KettuSkipReason` keeps out. */
   skipped: number
   failed: KettuImportFailure[]
+  /** Null when memory was not asked for, or could not be read (`memoryError`). */
+  memory: KettuMemoryResult | null
+  memoryError: string | null
+  /** Null when artifacts were not asked for, or could not be read (`artifactsError`). */
+  artifacts: KettuArtifactsResult | null
+  artifactsError: KettuArtifactsError | null
 }
 
 /** What bringing Kettu's memory over did. */

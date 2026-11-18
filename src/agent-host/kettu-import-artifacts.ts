@@ -188,6 +188,12 @@ async function signature(files: readonly string[]): Promise<string> {
   return parts.join('|')
 }
 
+/** Changes whenever Kettu's thread database or its log does. */
+export function kettuDatabaseSignature(source: string): Promise<string> {
+  const db = path.join(source, 'state', 'threads.db')
+  return signature([db, `${db}-wal`])
+}
+
 async function copyShared(from: string, to: string): Promise<void> {
   // Node's own open shares the file with Kettu's writes, so this never blocks or locks it.
   await pipeline(createReadStream(from), createWriteStream(to))

@@ -2638,8 +2638,13 @@ export function createValidators(platform: Platform): Validators {
       if (!Array.isArray(sessionIds) || sessionIds.length > KETTU_IMPORT_SESSIONS) {
         throw invalidParams(`sessionIds must be an array of at most ${KETTU_IMPORT_SESSIONS}`)
       }
+      const o = fields(params)
+      const memory = optionalFlag(o, 'memory')
+      const artifacts = optionalFlag(o, 'artifacts')
       return {
         sessionIds: [...new Set(sessionIds.map((id: unknown) => string({ id }, 'id', ID_CHARS)))],
+        ...(memory !== undefined ? { memory } : {}),
+        ...(artifacts !== undefined ? { artifacts } : {}),
       }
     },
     ...folderValidators,
