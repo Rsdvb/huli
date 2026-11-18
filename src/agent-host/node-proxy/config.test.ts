@@ -11,7 +11,6 @@ function config(subscriptions = 2, agents = ['claude-code', 'codex~work']) {
     subscriptions: Array.from({ length: subscriptions }, (_, i) => ({
       id: `${i}`.repeat(12),
       name: `Sub ${i}`,
-      url: `https://example.com/api/v1/client/subscribe?token=secret${i}`,
     })),
     agents: agents.map((agentId, i) => ({ agentId: agentId as never, port: 30000 + i })),
   })
@@ -105,8 +104,23 @@ describe('mihomoConfig', () => {
       'additional-prefix': 'Sub 0 | ',
     })
     expect(first.path).toBe('./providers/000000000000.yaml')
-    expect(first.proxy).toBe('DIRECT')
     expect(config()['interface-name']).toBe('以太网 2')
+  })
+
+  it('reads each subscription from the file Kite wrote, and downloads nothing itself', () => {
+    const c = config()
+    const providers = c['proxy-providers'] as Record<string, Record<string, unknown>>
+    for (const provider of Object.values(providers)) {
+      expect(provider.type).toBe('file')
+      for (const key of ['url', 'proxy', 'interval', 'header', 'dialer-proxy']) {
+        expect(provider).not.toHaveProperty(key)
+      }
+      expect(provider['health-check']).toMatchObject({ enable: true, lazy: true })
+    }
+    // Nothing anywhere names DIRECT, the subscriptions' old way out.
+    for (const each of [c, config(0), config(0, [])]) {
+      expect(JSON.stringify(each)).not.toContain('DIRECT')
+    }
   })
 
   it('resolves through DNS over HTTPS by address, bound to the interface', () => {

@@ -2,10 +2,12 @@
 // fails closed by construction: no listener but the agents' own, each on 127.0.0.1 and bound to a
 // group; every group lists REJECT first, so it rejects until the host picks its node through the
 // API and again when that node leaves its subscription, and its empty fallback, DIRECT unless
-// told otherwise, is REJECT too; no group or rule names DIRECT, which only reads subscriptions;
-// and anything that reached the rules is rejected. Nodes dial out on the physical interface and
-// resolve their servers through DNS over HTTPS bound to it, so neither their traffic nor their
-// names go through a TUN another program set up. Keys checked against mihomo v1.19.34's source.
+// told otherwise, is REJECT too; nothing names DIRECT; and anything that reached the rules is
+// rejected. mihomo downloads nothing: each subscription is a file provider over the nodes Kite
+// downloaded or imported, which Kite has mihomo read again through the API. Nodes dial out on the
+// physical interface and resolve their servers through DNS over HTTPS bound to it, so neither
+// their traffic nor their names go through a TUN another program set up. Keys checked against
+// mihomo v1.19.34's source.
 
 import type { AgentId } from '@shared/thread'
 
@@ -20,15 +22,12 @@ export const TEST_URL = 'https://www.gstatic.com/generate_204'
 /** DNS over HTTPS by address, so no name has to be resolved first; each is bound to the interface. */
 const DOH_SERVERS = ['https://223.5.5.5/dns-query', 'https://1.12.12.12/dns-query']
 
-/** How often a subscription is read again, in seconds. */
-export const SUBSCRIPTION_INTERVAL_S = 12 * 60 * 60
 /** How often a subscription's nodes are tested, in seconds; only while one is in use. */
 const HEALTH_INTERVAL_S = 10 * 60
 
 export interface ConfigSubscription {
   id: string
   name: string
-  url: string
 }
 
 export interface ConfigInput {
@@ -84,7 +83,8 @@ export function mihomoConfig(input: ConfigInput): Record<string, unknown> {
     'find-process-mode': 'off',
     'geo-auto-update': false,
     'geodata-mode': false,
-    // Direct dials, which only reading a subscription makes, leave on the physical interface too.
+    // Nothing dials directly now that mihomo reads no subscription; should anything still, such as
+    // a key a later mihomo adds, it leaves on the physical interface and never through a TUN.
     'interface-name': input.networkInterface,
     'external-controller': `127.0.0.1:${input.controllerPort}`,
     secret: input.secret,
@@ -104,13 +104,8 @@ export function mihomoConfig(input: ConfigInput): Record<string, unknown> {
       input.subscriptions.map((s) => [
         providerName(s.id),
         {
-          type: 'http',
-          url: s.url,
-          // Read straight from the provider on the physical interface; without it the read
-          // would go through the rules, which reject everything.
-          proxy: 'DIRECT',
+          type: 'file',
           path: providerPath(s.id),
-          interval: SUBSCRIPTION_INTERVAL_S,
           'health-check': {
             enable: true,
             url: TEST_URL,

@@ -26,12 +26,21 @@ import {
 import { applyNodeProxy, EnvironmentService } from '../shell-env'
 import { createValidators } from '../validate'
 import { bypassesProxy, fetchTrace, parseTrace, proxyHop, type ProxyHop } from './exit-ip'
-import { networkStateFile, subscriptionSecrets, subscriptionsFile } from './files'
+import type { Downloaded } from './download'
+import { networkStateFile, providerFile, subscriptionSecrets, subscriptionsFile } from './files'
 import { NodeProxy } from './service'
 
 const TOKEN = '8f2c1d9a7b6e5f4a3c2b1d0e9f8a7b6c'
 const URL_WITH_TOKEN = `https://sub.example.net/api/v1/client/subscribe?token=${TOKEN}&flag=meta`
 const PATH_TOKEN_URL = `https://airport.example.org/link/${TOKEN}?clash=1`
+const NODES_YAML =
+  'proxies:\n  - { name: JP 01, type: ss, server: 192.0.2.1, port: 1, password: p }\n'
+const NODE_LINKS = 'trojan://p@192.0.2.2:443#US\nss://YWVzLTEyOC1nY206eA@192.0.2.1:8388#JP'
+const USERINFO = 'upload=10; download=20; total=1000; expire=1767225600'
+
+function served(body: string, userinfo: string | null = USERINFO): Downloaded {
+  return { body: Buffer.from(body), userinfo }
+}
 
 const validators = createValidators('win32')
 
@@ -47,6 +56,8 @@ describe('the agent network requests', () => {
     for (const method of [
       'agentNetwork.status',
       'agentNetwork.addSubscription',
+      'agentNetwork.importSubscription',
+      'agentNetwork.reimportSubscription',
       'agentNetwork.renameSubscription',
       'agentNetwork.removeSubscription',
       'agentNetwork.refresh',
@@ -109,6 +120,34 @@ describe('the agent network requests', () => {
       expect(() => withAgentNetworkChoice(settings, agentId, choice)).toThrow()
     }
     expect(withDefaultNode(settings, ref).agentNetwork.enabled).toBe(settings.agentNetwork.enabled)
+  })
+
+  it('take a file’s text to import only as text of at most 10 MiB, never echoed back', () => {
+    const add = validators['agentNetwork.importSubscription']
+    expect(add({ name: ' Mine ', content: NODES_YAML })).toEqual({
+      name: 'Mine',
+      content: NODES_YAML,
+    })
+    expect(
+      validators['agentNetwork.reimportSubscription']({ id: 'abcdef012345', content: NODE_LINKS }),
+    ).toEqual({ id: 'abcdef012345', content: NODE_LINKS })
+    for (const content of [
+      undefined,
+      42,
+      { text: NODES_YAML },
+      'x'.repeat(10 * 1024 * 1024 + 1),
+      `${NODES_YAML}\u0000`,
+    ]) {
+      rejects(() => add({ name: 'A', content }))
+    }
+    rejects(() => add({ name: 'A', content: NODES_YAML, url: URL_WITH_TOKEN }))
+    rejects(() => add({ name: 'a|b', content: NODES_YAML }))
+    rejects(() => validators['agentNetwork.reimportSubscription']({ id: '../x', content: 'a' }))
+    try {
+      add({ name: 'A', content: `${TOKEN}\u0000` })
+    } catch (error) {
+      expect((error as Error).message).not.toContain(TOKEN)
+    }
   })
 
   it('take only the known fields', () => {
@@ -389,6 +428,7 @@ describe('NodeProxy', () => {
       changed: (status) => events.push(status),
       routesChanged: () => {},
       detect: async () => 'eth0',
+      download: async () => served(NODES_YAML),
       ...extra,
     })
     await service.load()
@@ -415,7 +455,127 @@ describe('NodeProxy', () => {
       () => '',
     )
     expect(state).not.toContain(TOKEN)
+    expect(state).not.toContain('sub.example.net')
+    // The nodes are mihomo's to read, in a file of their own; no address goes with them.
+    const nodes = await readFile(providerFile(dir, status.subscriptions[0]!.id), 'utf8')
+    expect(nodes).toBe(NODES_YAML)
+    expect(status.subscriptions[0]).toMatchObject({
+      source: 'url',
+      nodes: 1,
+      usage: { upload: 10, download: 20, total: 1000, expire: 1767225600000 },
+      error: null,
+    })
     await service.shutdown()
+  })
+
+  it('adds a link only once it downloaded nodes, and keeps the last ones when a refresh fails', async () => {
+    let answer: () => Promise<Downloaded> = async () => served(NODES_YAML)
+    const urls: string[] = []
+    const { dir, service } = await proxy(DEFAULT_AGENT_NETWORK, {
+      download: async (url) => {
+        urls.push(url)
+        return answer()
+      },
+    })
+    answer = async () => {
+      throw new Error(`getaddrinfo ENOTFOUND for ${URL_WITH_TOKEN}`)
+    }
+    const failedAdd = await service.addSubscription('Airport', URL_WITH_TOKEN).catch((e) => e)
+    expect(failedAdd).toMatchObject({ code: 'unavailable' })
+    expect((failedAdd as Error).message).not.toContain(TOKEN)
+    answer = async () => served('<html>please log in</html>')
+    await expect(service.addSubscription('Airport', URL_WITH_TOKEN)).rejects.toThrow(/no nodes/)
+    expect(service.status().subscriptions).toEqual([])
+
+    answer = async () => served(NODES_YAML)
+    const { id } = await service.addSubscription('Airport', URL_WITH_TOKEN)
+    expect(urls.every((url) => url === URL_WITH_TOKEN)).toBe(true)
+    const before = service.status().subscriptions[0]!
+    expect(before.updatedAt).toEqual(expect.any(Number))
+
+    for (const failure of [
+      async () => served('<html>please log in</html>'),
+      async (): Promise<Downloaded> => {
+        throw new Error(`The provider answered 403 at ${URL_WITH_TOKEN}`)
+      },
+    ]) {
+      answer = failure
+      await expect(service.refresh(id)).rejects.toMatchObject({ code: 'unavailable' })
+      expect(await readFile(providerFile(dir, id), 'utf8')).toBe(NODES_YAML)
+      const after = service.status().subscriptions[0]!
+      expect(after).toMatchObject({ nodes: 1, updatedAt: before.updatedAt, usage: before.usage })
+      expect(after.error).toEqual(expect.any(String))
+      expect(after.failedAt).toEqual(expect.any(Number))
+      expect(JSON.stringify(service.status())).not.toContain(TOKEN)
+    }
+    answer = async () => served(NODE_LINKS, null)
+    await service.refresh(null)
+    expect(service.status().subscriptions[0]).toMatchObject({ nodes: 2, error: null, usage: null })
+    await service.shutdown()
+  })
+
+  it('imports a file, never downloads it, and takes it again only by import', async () => {
+    let downloads = 0
+    const { dir, service } = await proxy(DEFAULT_AGENT_NETWORK, {
+      download: async () => {
+        downloads++
+        return served(NODES_YAML)
+      },
+    })
+    const encoded = Buffer.from(NODE_LINKS).toString('base64url')
+    const { id } = await service.importSubscription('Mine', encoded)
+    expect(Buffer.from(await readFile(providerFile(dir, id), 'utf8'), 'base64').toString()).toBe(
+      NODE_LINKS,
+    )
+    expect(service.status().subscriptions[0]).toMatchObject({
+      source: 'file',
+      host: null,
+      nodes: 2,
+      usage: null,
+    })
+    await expect(service.refresh(id)).rejects.toMatchObject({ code: 'conflict' })
+    await service.refresh(null)
+    expect(downloads).toBe(0)
+
+    await service.reimportSubscription(id, NODES_YAML)
+    expect(await readFile(providerFile(dir, id), 'utf8')).toBe(NODES_YAML)
+    expect(service.status().subscriptions[0]!.nodes).toBe(1)
+    await expect(service.reimportSubscription(id, 'proxies: []')).rejects.toMatchObject({
+      code: 'invalid_params',
+    })
+    await expect(service.importSubscription('Other', '<html></html>')).rejects.toMatchObject({
+      code: 'invalid_params',
+    })
+    await expect(service.importSubscription('mine', NODES_YAML)).rejects.toMatchObject({
+      code: 'conflict',
+    })
+    const linked = await service.addSubscription('Linked', URL_WITH_TOKEN)
+    await expect(service.reimportSubscription(linked.id, NODES_YAML)).rejects.toMatchObject({
+      code: 'conflict',
+    })
+
+    // The state survives the host: when, how many, the traffic, and no address.
+    await service.shutdown()
+    const again = new NodeProxy({
+      userDataPath: dir,
+      platform: 'linux',
+      mihomoPath: null,
+      log: () => {},
+      subscriptions: subscriptionsFile(dir, () => {}),
+      state: networkStateFile(dir, () => {}),
+      settings: () => DEFAULT_AGENT_NETWORK,
+      agentIds: () => [],
+      changed: () => {},
+      routesChanged: () => {},
+    })
+    await again.load()
+    expect(again.status().subscriptions.map((s) => [s.name, s.source, s.nodes])).toEqual([
+      ['Mine', 'file', 1],
+      ['Linked', 'url', 1],
+    ])
+    await again.removeSubscription(id)
+    await expect(readFile(providerFile(dir, id), 'utf8')).rejects.toThrow()
+    await again.shutdown()
   })
 
   it('shows a device names, counts, choices and exits, and never an address or token', async () => {
@@ -424,13 +584,23 @@ describe('NodeProxy', () => {
       enabled: true,
       agents: { codex: 'system' },
     }
+    let failing = false
     const { service } = await proxy(settings, {
       systemProxy: () => ({ proxy: null, noProxy: null }),
       trace: async () => 'ip=198.51.100.9\nloc=DE\n',
+      download: async (url) => {
+        if (failing) throw new Error(`Could not reach sub host for ${url}`)
+        return served(NODES_YAML)
+      },
     })
     service.start()
     const first = await service.addSubscription('Airport', URL_WITH_TOKEN)
-    await service.addSubscription('Other', PATH_TOKEN_URL)
+    const other = await service.addSubscription('Other', PATH_TOKEN_URL)
+    await service.importSubscription('From file', NODE_LINKS)
+    // A failed refresh leaves an error in the window's status, never in the device's.
+    failing = true
+    await expect(service.refresh(other.id)).rejects.toThrow()
+    expect(service.status().subscriptions[1]!.error).toEqual(expect.any(String))
     settings.defaultNode = { subscription: first.id, node: 'JP 01' }
     settings.agents = { codex: 'system', 'claude-code': { subscription: first.id, node: 'US' } }
     await service.exitIp('codex' as AgentId)
@@ -447,6 +617,8 @@ describe('NodeProxy', () => {
       '/api/v1',
       'https://',
       'token=',
+      'Could not reach',
+      'trojan://',
     ]) {
       expect(json).not.toContain(secret)
     }
@@ -465,7 +637,8 @@ describe('NodeProxy', () => {
     for (const sub of status.subscriptions) {
       expect(Object.keys(sub).sort()).toEqual(['id', 'name', 'nodes', 'usage'])
     }
-    expect(status.subscriptions.map((s) => s.name)).toEqual(['Airport', 'Other'])
+    expect(status.subscriptions.map((s) => s.name)).toEqual(['Airport', 'Other', 'From file'])
+    expect(status.subscriptions[0]!.usage).toMatchObject({ total: 1000 })
     expect(status.defaultNode).toEqual({ subscription: first.id, node: 'JP 01' })
     expect(status.agents).toEqual([
       { agentId: 'claude-code', choice: { subscription: first.id, node: 'US' } },

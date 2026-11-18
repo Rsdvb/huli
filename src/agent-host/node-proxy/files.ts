@@ -1,12 +1,17 @@
 // The agents' network's files in the host's data folder. Subscriptions hold their addresses, which
 // carry the provider's token: they live in a file of their own, never in the settings, and leave
-// it only for mihomo's configuration. The state file holds what is no secret: the listeners'
-// ports, kept so an agent's proxy variables stay valid across restarts, and the mihomo the host
-// last started, so a host after a crash can stop the one it left running.
+// it only for Kite's own download of them. The nodes they hold, which carry the nodes' passwords,
+// go into mihomo's home, one file each. The state file holds what is no secret: the listeners'
+// ports, kept so an agent's proxy variables stay valid across restarts, the mihomo the host last
+// started, so a host after a crash can stop the one it left running, and each subscription's last
+// download: when, its traffic and expiry, and why it failed.
 
+import { randomBytes } from 'node:crypto'
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   isSubscriptionName,
+  type SubscriptionUsage,
   MAX_SUBSCRIPTIONS,
   SUBSCRIPTION_ID,
   SUBSCRIPTION_URL_CHARS,
@@ -17,8 +22,29 @@ import { JsonFile, type LogFn } from '../storage'
 export interface StoredSubscription {
   id: string
   name: string
-  url: string
+  /** Null for one imported from a file, which is never downloaded again. */
+  url: string | null
   addedAt: number
+}
+
+/** A subscription's last download or import; no secret. */
+export interface SubscriptionRecord {
+  /** When its nodes were last written. */
+  updatedAt: number | null
+  usage: SubscriptionUsage | null
+  /** The nodes Kite counted in it. */
+  nodes: number | null
+  /** Why the last download failed, masked; null once one succeeds. */
+  error: string | null
+  failedAt: number | null
+}
+
+export const EMPTY_RECORD: SubscriptionRecord = {
+  updatedAt: null,
+  usage: null,
+  nodes: null,
+  error: null,
+  failedAt: null,
 }
 
 export interface SubscriptionsFile {
@@ -31,6 +57,7 @@ export interface NetworkStateFile {
   ports: Partial<Record<AgentId, number>>
   /** The mihomo last started: its process and how to reach its API, to stop it after a crash. */
   running: { pid: number; controllerPort: number; secret: string } | null
+  subscriptions: Record<string, SubscriptionRecord>
 }
 
 /** An http(s) address with a host and no spaces; its token, if any, is the provider's business. */
@@ -95,7 +122,7 @@ export function parseSubscriptionsFile(data: Record<string, unknown>): Subscript
     const o = item as Record<string, unknown>
     if (typeof o.id !== 'string' || !SUBSCRIPTION_ID.test(o.id) || seen.has(o.id)) continue
     if (!isSubscriptionName(o.name) || names.has(o.name.toLowerCase())) continue
-    if (!isSubscriptionUrl(o.url)) continue
+    if (o.url !== null && !isSubscriptionUrl(o.url)) continue
     seen.add(o.id)
     names.add(o.name.toLowerCase())
     subscriptions.push({
@@ -134,7 +161,42 @@ export function parseNetworkStateFile(data: Record<string, unknown>): NetworkSta
       running = { pid: o.pid, controllerPort: o.controllerPort, secret: o.secret }
     }
   }
-  return { version: 1, ports, running }
+  const subscriptions: NetworkStateFile['subscriptions'] = {}
+  const records = data.subscriptions
+  if (typeof records === 'object' && records !== null && !Array.isArray(records)) {
+    for (const [id, value] of Object.entries(records).slice(0, MAX_SUBSCRIPTIONS)) {
+      if (SUBSCRIPTION_ID.test(id)) subscriptions[id] = parseRecord(value)
+    }
+  }
+  return { version: 1, ports, running, subscriptions }
+}
+
+function time(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function count(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+function parseRecord(value: unknown): SubscriptionRecord {
+  if (typeof value !== 'object' || value === null) return { ...EMPTY_RECORD }
+  const o = value as Record<string, unknown>
+  let usage: SubscriptionUsage | null = null
+  if (typeof o.usage === 'object' && o.usage !== null) {
+    const u = o.usage as Record<string, unknown>
+    const [upload, download, total] = [count(u.upload), count(u.download), count(u.total)]
+    if (upload !== null && download !== null && total !== null) {
+      usage = { upload, download, total, expire: time(u.expire) }
+    }
+  }
+  return {
+    updatedAt: time(o.updatedAt),
+    usage,
+    nodes: count(o.nodes),
+    error: typeof o.error === 'string' && o.error.length > 0 ? o.error.slice(0, 500) : null,
+    failedAt: time(o.failedAt),
+  }
 }
 
 /** The folder of mihomo's home, its configuration and the subscriptions' node lists. */
@@ -160,8 +222,39 @@ export function networkStateFile(userDataPath: string, log: LogFn): JsonFile<Net
     version: 1,
     migrations: {},
     parse: parseNetworkStateFile,
-    empty: () => ({ version: 1, ports: {}, running: null }),
+    empty: () => ({ version: 1, ports: {}, running: null, subscriptions: {} }),
     log,
     debounceMs: 0,
   })
+}
+
+/** The file of a subscription's nodes, which mihomo's provider reads as `providerPath` names it. */
+export function providerFile(userDataPath: string, subscriptionId: string): string {
+  return path.join(networkFolder(userDataPath), 'mihomo', 'providers', `${subscriptionId}.yaml`)
+}
+
+/**
+ * Writes the file whole or not at all, readable by the user alone: a reader, mihomo or a host
+ * after a crash, sees the old content or the new, never part of either.
+ */
+export async function writeFileAtomic(file: string, data: string): Promise<void> {
+  await mkdir(path.dirname(file), { recursive: true })
+  const temp = `${file}.${randomBytes(6).toString('hex')}.tmp`
+  try {
+    await writeFile(temp, data, { mode: 0o600 })
+    // Windows refuses to replace a file another process has open; mihomo reads it only briefly.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(temp, file)
+        return
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '')) throw error
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
+      }
+    }
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => {})
+    throw error
+  }
 }

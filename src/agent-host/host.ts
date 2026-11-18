@@ -1142,6 +1142,18 @@ export class AgentHost {
           this.env.get(name, agentId) ?? this.env.get(name.toLowerCase(), agentId) ?? null
         return { proxy: read('HTTPS_PROXY') ?? read('ALL_PROXY'), noProxy: read('NO_PROXY') }
       },
+      // Subscriptions download the way Kite's own requests go: Advanced › Proxy, else the
+      // environment's proxy, else directly; never through a node.
+      ownProxy: () => {
+        const read = (name: string) =>
+          this.env.get(name) ?? this.env.get(name.toLowerCase()) ?? null
+        return {
+          http: read('HTTP_PROXY'),
+          https: read('HTTPS_PROXY'),
+          all: read('ALL_PROXY'),
+          noProxy: read('NO_PROXY'),
+        }
+      },
       ...(options.detectInterface ? { detect: options.detectInterface } : {}),
     })
     this.env.setNodeRoutes((agentId) => this.nodeProxy.portFor(agentId))
@@ -3166,6 +3178,10 @@ export class AgentHost {
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),
+      'agentNetwork.importSubscription': ({ name, content }) =>
+        this.nodeProxy.importSubscription(name, content),
+      'agentNetwork.reimportSubscription': ({ id, content }) =>
+        this.nodeProxy.reimportSubscription(id, content),
       'agentNetwork.renameSubscription': ({ id, name }) =>
         this.nodeProxy.renameSubscription(id, name),
       'agentNetwork.removeSubscription': ({ id }) => this.nodeProxy.removeSubscription(id),
