@@ -61,6 +61,8 @@ const MAX_RESTART_MS = 60_000
 /** A run this long counts as healthy, so the next crash restarts it at once again. */
 const HEALTHY_MS = 60_000
 const LATENCY_TIMEOUT_MS = 5_000
+/** When the subscriptions are read again after a start, for those mihomo was still reading. */
+const SETTLE_MS = [2_000, 8_000, 20_000]
 const LATENCY_PARALLEL = 8
 const PORT_MIN = 20_000
 const PORT_SPAN = 40_000
@@ -208,6 +210,11 @@ export class NodeProxy {
     return port
   }
 
+  /** Gives every agent that uses a node a port checked free, before anything asks for one. */
+  portsReady(): Promise<void> {
+    return this.ensurePorts()
+  }
+
   /** The settings or the agents changed: the agents whose proxy variables change, then applies. */
   async settingsChanged(before: AgentNetworkSettings, agentIds: AgentId[]): Promise<void> {
     const after = this.deps.settings()
@@ -257,6 +264,7 @@ export class NodeProxy {
     if (!api || this.state !== 'running') return []
     const providers = await api.providers()
     this.readProviders(providers)
+    this.emit()
     const order = new Map(this.subscriptions.map((s, index) => [s.id, index]))
     return providers
       .flatMap((provider) => {
@@ -380,11 +388,16 @@ export class NodeProxy {
       this.reconcile()
       return
     }
-    if (this.running && this.state === 'running') {
-      this.readProviders(await this.running.api.providers().catch(() => null))
-      await this.applySelections().catch(() => {})
-      this.emit()
-    }
+    await this.refreshInfo()
+  }
+
+  /** Reads the subscriptions' state again and picks the groups' nodes, which may have come. */
+  private async refreshInfo(): Promise<void> {
+    const running = this.running
+    if (!running || this.state !== 'running' || this.closed) return
+    this.readProviders(await running.api.providers().catch(() => null))
+    await this.applySelections().catch(() => {})
+    this.emit()
   }
 
   private async detect(): Promise<void> {
@@ -524,6 +537,12 @@ export class NodeProxy {
     this.readProviders(await running.api.providers().catch(() => null))
     await this.applySelections()
     this.setState('running', null, null)
+    // A subscription mihomo had not read yet comes in its own time; look again soon after.
+    for (const ms of SETTLE_MS) {
+      setTimeout(() => {
+        if (this.running === running) void this.refreshInfo()
+      }, ms).unref?.()
+    }
   }
 
   private async waitForApi(running: Running): Promise<string | null> {
@@ -586,8 +605,9 @@ export class NodeProxy {
   /** Every agent that uses a node has a port that was free when checked. */
   private async ensurePorts(): Promise<void> {
     let changed = false
-    for (const agentId of this.usingAgents()) {
-      if (this.ports[agentId] !== undefined) continue
+    const settings = this.deps.settings()
+    for (const agentId of this.deps.agentIds()) {
+      if (agentRoute(settings, agentId) === null || this.ports[agentId] !== undefined) continue
       const port = await freePort()
       if (port === null) continue
       this.ports[agentId] = port

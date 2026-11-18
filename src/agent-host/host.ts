@@ -1535,6 +1535,8 @@ export class AgentHost {
       void this.skillsChanged(previous.marketplace.skills)
     }
     this.countCommunity(previous.marketplace, next.marketplace)
+    // The agents' listener ports first, so whatever the agents start next already names them.
+    await this.nodeProxy.portsReady()
     const removed = await this.agents.settingsChanged(previous, next)
     await this.nodeProxy.settingsChanged(
       previous.agentNetwork ?? DEFAULT_AGENT_NETWORK,
