@@ -463,6 +463,77 @@ describe('sessions', () => {
     await prompt
   })
 
+  it('offers every speed tier Codex lists for a model and sends the one chosen', async () => {
+    const { server, connection } = await connect()
+    const fast = { id: 'priority', name: 'Fast', description: '2x speed, increased usage' }
+    const ultra = { id: 'ultrafast', name: 'Ultrafast', description: 'The fastest responses.' }
+    server.on('model/list', () => ({
+      data: [
+        {
+          id: 'gpt-6.2-sol',
+          displayName: 'gpt-6.2-sol',
+          description: 'The newest model',
+          supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
+          defaultReasoningEffort: 'medium',
+          additionalSpeedTiers: ['fast', 'ultrafast'],
+          serviceTiers: [fast, ultra],
+          isDefault: true,
+        },
+        {
+          id: 'gpt-6.1-sol',
+          displayName: 'gpt-6.1-sol',
+          description: 'The older model',
+          supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
+          defaultReasoningEffort: 'medium',
+          additionalSpeedTiers: ['fast'],
+          serviceTiers: [fast],
+          isDefault: false,
+        },
+      ],
+      nextCursor: null,
+    }))
+    server.on('thread/start', () => threadResponse('thread-1', { model: 'gpt-6.2-sol' }))
+    const opened = await connection.newSession('/project')
+    const speed = opened.config.find((o) => o.id === 'fast-mode')
+    expect(speed).toMatchObject({ type: 'select', value: 'default' })
+    expect(speed?.choices?.map((c) => [c.value, c.name])).toEqual([
+      ['default', 'Standard'],
+      ['priority', 'Fast'],
+      ['ultrafast', 'Ultrafast'],
+    ])
+    await expect(connection.setConfigOption('thread-1', 'fast-mode', 'warp')).rejects.toMatchObject(
+      { code: -32602 },
+    )
+    const chosen = await connection.setConfigOption('thread-1', 'fast-mode', 'ultrafast')
+    expect(chosen.find((o) => o.id === 'fast-mode')?.value).toBe('ultrafast')
+
+    const { target } = threadTarget()
+    connection.register('thread-1', target)
+    const sendTurn = async (n: number) => {
+      const prompt = connection.prompt('thread-1', [{ type: 'text', text: 'hi' }])
+      await until(() => server.sent('turn/start').length === n)
+      server.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: turn(`turn-${n}`, 'completed'),
+      })
+      await prompt
+      return server.sent('turn/start')[n - 1] as { serviceTier: string }
+    }
+    expect((await sendTurn(1)).serviceTier).toBe('ultrafast')
+
+    // A model without Ultrafast shows the one tier it has as a switch and runs on it.
+    const older = await connection.setConfigOption('thread-1', 'model', 'gpt-6.1-sol')
+    expect(older.find((o) => o.id === 'fast-mode')).toMatchObject({
+      type: 'boolean',
+      value: true,
+      description: '2x speed, increased usage',
+    })
+    expect((await sendTurn(2)).serviceTier).toBe('priority')
+
+    await connection.setConfigOption('thread-1', 'fast-mode', false)
+    expect((await sendTurn(3)).serviceTier).toBe('default')
+  })
+
   it('refuses a value Codex does not have', async () => {
     const { connection } = await connect()
     await connection.newSession('/project')

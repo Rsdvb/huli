@@ -427,7 +427,10 @@
       "effort": "推理强度",
       "effortDescription": "模型用多少推理",
       "fast": "快速模式",
-      "fastDescription": "1.5 倍速度，用量更多"
+      "fastDescription": "1.5 倍速度，用量更多",
+      "speed": "速度",
+      "speedDescription": "Codex 给这个模型开放的速度档，越快用量越多",
+      "speedStandard": "标准"
     },
     "mode": {
       "read-only": {

@@ -430,7 +430,10 @@
       "effort": "Reasoning effort",
       "effortDescription": "How much reasoning effort the model uses",
       "fast": "Fast mode",
-      "fastDescription": "1.5x speed, increased usage"
+      "fastDescription": "1.5x speed, increased usage",
+      "speed": "Speed",
+      "speedDescription": "The speeds Codex offers for this model; faster ones use more",
+      "speedStandard": "Standard"
     },
     "mode": {
       "read-only": {

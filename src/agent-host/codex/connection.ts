@@ -69,10 +69,11 @@ import {
   ConfigValueError,
   DEFAULT_MODE,
   effortFor,
-  fastTier,
   modeFromPolicy,
   modeOf,
   type Settings,
+  STANDARD_TIER,
+  tierFor,
 } from './config'
 import { childThreads, childTurnEffect, ThreadMapper } from './mapper'
 import {
@@ -399,7 +400,7 @@ const UNKNOWN_SETTINGS: Settings = {
   collaboration: 'default',
   model: '',
   effort: null,
-  fast: false,
+  tier: null,
 }
 
 function stopped(stopReason: PromptResult['stopReason']): PromptResult {
@@ -670,7 +671,10 @@ export class CodexConnection implements AgentConnection {
           collaboration: response.collaborationMode?.mode ?? 'default',
           model: modelId,
           effort: effortFor(model, response.reasoningEffort),
-          fast: !!response.serviceTier && response.serviceTier === fastTier(model),
+          tier:
+            response.serviceTier && response.serviceTier !== STANDARD_TIER
+              ? tierFor(model, response.serviceTier)
+              : null,
         }
     const seen = this.threads.get(id)
     const record = threadRecord(id, settings, {
@@ -1424,7 +1428,7 @@ export class CodexConnection implements AgentConnection {
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.effort ? { effort: settings.effort } : {}),
-      serviceTier: settings.fast ? (this.fastTierOf(settings.model) ?? 'default') : 'default',
+      serviceTier: this.tierOf(settings) ?? STANDARD_TIER,
       ...(collaborationMode ? { collaborationMode } : {}),
     }
   }
@@ -1433,8 +1437,10 @@ export class CodexConnection implements AgentConnection {
     return { ...this.settingsParams(record), input }
   }
 
-  private fastTierOf(modelId: string): string | null {
-    return fastTier(this.knownModels.find((model) => model.id === modelId))
+  private tierOf(settings: Settings): string | null {
+    const model = this.knownModels.find((item) => item.id === settings.model)
+    // Without the model list, a tier goes out only when no model is known to lack it.
+    return model ? tierFor(model, settings.tier) : settings.tier
   }
 
   async prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult> {

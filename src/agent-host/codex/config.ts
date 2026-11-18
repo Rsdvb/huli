@@ -18,6 +18,8 @@ export const COLLABORATION_ID = 'collaboration_mode'
 export const MODEL_ID = 'model'
 export const EFFORT_ID = 'reasoning_effort'
 export const FAST_ID = 'fast-mode'
+/** The speed choice for the standard tier, which turns send as `default`. */
+export const STANDARD_TIER = 'default'
 
 export type ModeId = 'read-only' | 'workspace-write' | 'agent' | 'agent-full-access'
 
@@ -91,17 +93,29 @@ export interface Settings {
   collaboration: CollaborationModeKind
   model: string
   effort: string | null
-  fast: boolean
+  /** The service tier chosen, or null for the standard one. */
+  tier: string | null
 }
 
-/** The service tier that makes a model fast, or null for one that has none. */
-export function fastTier(model: Model | undefined): string | null {
-  if (!model) return null
-  const tier = model.serviceTiers?.find(
-    (item) => item.id === 'fast' || item.name.toLowerCase() === 'fast',
-  )
-  if (tier) return tier.id
-  return model.additionalSpeedTiers?.includes('fast') ? 'fast' : null
+type Tier = NonNullable<Model['serviceTiers']>[number]
+
+/**
+ * The faster service tiers a model offers, as Codex lists them, so a tier it adds for some plans,
+ * such as Ultrafast, shows up without a change here. An older Codex names only `fast`.
+ */
+export function speedTiers(model: Model | undefined): Tier[] {
+  if (!model) return []
+  const tiers = (model.serviceTiers ?? []).filter((tier) => tier.id && tier.id !== 'default')
+  if (tiers.length > 0) return tiers
+  return model.additionalSpeedTiers?.includes('fast') ? [{ id: 'fast', name: 'Fast' }] : []
+}
+
+/** The tier a turn on `model` runs with: the one chosen when it has it, else its first faster one. */
+export function tierFor(model: Model | undefined, wanted: string | null): string | null {
+  if (!wanted) return null
+  if (!model) return wanted
+  const tiers = speedTiers(model)
+  return tiers.find((tier) => tier.id === wanted)?.id ?? tiers[0]?.id ?? null
 }
 
 /** A model's name as codex-acp showed it: `gpt-5.6-luna` as `5.6 Luna`. */
@@ -227,14 +241,33 @@ export function buildConfig(settings: Settings, models: readonly Model[]): Confi
       })),
     })
   }
-  if (fastTier(current)) {
+  const tiers = speedTiers(current)
+  const tier = tierFor(current, settings.tier)
+  if (tiers.length === 1) {
     options.push({
       id: FAST_ID,
       name: t('codex.option.fast'),
-      description: t('codex.option.fastDescription'),
+      description: tiers[0]!.description || t('codex.option.fastDescription'),
       category: 'model_config',
       type: 'boolean',
-      value: settings.fast,
+      value: tier !== null,
+    })
+  } else if (tiers.length > 1) {
+    options.push({
+      id: FAST_ID,
+      name: t('codex.option.speed'),
+      description: t('codex.option.speedDescription'),
+      category: 'model_config',
+      type: 'select',
+      value: tier ?? STANDARD_TIER,
+      choices: [
+        { value: STANDARD_TIER, name: t('codex.option.speedStandard') },
+        ...tiers.map((item) => ({
+          value: item.id,
+          name: item.name || item.id,
+          ...(item.description ? { description: item.description } : {}),
+        })),
+      ],
     })
   }
   return options
@@ -275,11 +308,24 @@ export function applyOption(
       if (!supported) throw new ConfigValueError(optionId, value)
       return { ...settings, effort: value as string }
     }
-    case FAST_ID:
+    case FAST_ID: {
       // codex-acp's select took `on` and `off`, which a stored choice may still hold.
-      if (value === true || value === 'on') return { ...settings, fast: true }
-      if (value === false || value === 'off') return { ...settings, fast: false }
-      throw new ConfigValueError(optionId, value)
+      if (value === false || value === 'off' || value === STANDARD_TIER) {
+        return { ...settings, tier: null }
+      }
+      const model = models.find((item) => item.id === settings.model)
+      if (value === true || value === 'on') {
+        return { ...settings, tier: speedTiers(model)[0]?.id ?? 'fast' }
+      }
+      // A tier of another model is kept too: a stored choice outlives the model it was made on,
+      // and a turn falls back to the model's own first tier.
+      const known =
+        typeof value === 'string' &&
+        value !== '' &&
+        (models.length === 0 || models.some((m) => speedTiers(m).some((x) => x.id === value)))
+      if (!known) throw new ConfigValueError(optionId, value)
+      return { ...settings, tier: value as string }
+    }
     default:
       throw new ConfigValueError(optionId, value)
   }
