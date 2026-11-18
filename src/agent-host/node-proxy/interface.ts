@@ -4,6 +4,7 @@
 // the agent host.
 
 import { execFile } from 'node:child_process'
+import { networkInterfaces } from 'node:os'
 import type { NetworkInterfaceView } from '@shared/agent-network'
 import type { Platform } from '@shared/platform'
 
@@ -251,4 +252,114 @@ export async function listInterfaces(platform: Platform): Promise<NetworkInterfa
     run('/sbin/ip', ['-o', 'link', 'show']),
   )
   return parseLinuxLinks(links)
+}
+
+/**
+ * The interfaces that can carry traffic now, cheaply, without a child process: Node's list holds
+ * an interface only while it is up and has an address (libuv skips the rest), named as mihomo
+ * names it: the adapter's friendly name on Windows, the device on macOS and Linux.
+ */
+export function presentInterfaces(): string[] {
+  return Object.keys(networkInterfaces())
+}
+
+/** The loopback interface's name, which mihomo can always look up. */
+export function loopbackInterface(platform: Platform): string {
+  try {
+    for (const [name, addresses] of Object.entries(networkInterfaces())) {
+      if (addresses?.some((a) => a.internal && a.address === '127.0.0.1')) return name
+    }
+  } catch {
+    // The usual name below.
+  }
+  if (platform === 'win32') return 'Loopback Pseudo-Interface 1'
+  return platform === 'darwin' ? 'lo0' : 'lo'
+}
+
+export interface InterfaceChange {
+  /** Watched interfaces that went away or down since the last read. */
+  gone: string[]
+  /** Watched interfaces that came back. */
+  back: string[]
+}
+
+export interface InterfaceWatchOptions {
+  /** The names of the interfaces up now; throws when it cannot tell. */
+  read: () => Iterable<string>
+  intervalMs: number
+  changed: (change: InterfaceChange) => void
+}
+
+/**
+ * Watches the interfaces agents are bound to with a cheap read every few seconds, only while
+ * there are some, and reports each that goes or comes back once, against what the last read that
+ * worked saw of it. While the read fails it knows nothing, and the host falls back on the
+ * system's full list.
+ */
+export class InterfaceWatch {
+  /** Each watched interface as last read: up or not. */
+  private seen = new Map<string, boolean>()
+  private failed = false
+  private timer: ReturnType<typeof setInterval> | null = null
+
+  constructor(private readonly options: InterfaceWatchOptions) {}
+
+  /** Watches these interfaces from now on, a new one read at once; none stops the reads. */
+  watch(names: Iterable<string>): void {
+    const next = new Set(names)
+    for (const name of this.seen.keys()) if (!next.has(name)) this.seen.delete(name)
+    if (next.size === 0) {
+      this.stop()
+      return
+    }
+    const added = [...next].filter((name) => !this.seen.has(name))
+    if (!this.timer) {
+      this.timer = setInterval(() => this.poll(), this.options.intervalMs)
+      this.timer.unref?.()
+    }
+    if (added.length > 0) this.read(added)
+  }
+
+  /** Whether the interface was up at the last read; null when that read failed or none was made. */
+  usable(name: string): boolean | null {
+    return this.failed ? null : (this.seen.get(name) ?? null)
+  }
+
+  /** Reads now and reports what changed among the watched interfaces. */
+  poll(): void {
+    const change: InterfaceChange = { gone: [], back: [] }
+    const present = this.present()
+    if (!present) return
+    for (const [name, was] of this.seen) {
+      const up = present.has(name)
+      if (up === was) continue
+      this.seen.set(name, up)
+      ;(up ? change.back : change.gone).push(name)
+    }
+    if (change.gone.length > 0 || change.back.length > 0) this.options.changed(change)
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer)
+    this.timer = null
+    this.seen.clear()
+    this.failed = false
+  }
+
+  /** Learns the state of newly watched interfaces, which is no change. */
+  private read(names: string[]): void {
+    const present = this.present()
+    for (const name of names) this.seen.set(name, present?.has(name) ?? true)
+  }
+
+  private present(): Set<string> | null {
+    try {
+      const present = new Set(this.options.read())
+      this.failed = false
+      return present
+    } catch {
+      this.failed = true
+      return null
+    }
+  }
 }
