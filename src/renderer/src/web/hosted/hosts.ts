@@ -82,7 +82,10 @@ export interface DialRegions {
   drained(url: string, leave: () => void): void
 }
 
-/** The project's relays among those a host named, the main one included. */
+/**
+ * The main relay alone of those a host named: a name under its domain may point anywhere. The
+ * regions of the host's signed list come ranked from `DialRegions`.
+ */
 export function namedRelays(relay: HostRelay): string[] {
   return [...new Set([...relay.urls, relayUrl])].filter((url) => trustedRelay(url, relayUrl))
 }

@@ -24,6 +24,7 @@ import {
   relayInfoPath,
   relayList,
   relayRefusal,
+  RELAY_URL,
   signInMessage,
   signInText,
   trustedRelay,
@@ -147,11 +148,19 @@ describe('the relay protocol', () => {
     ])
   })
 
-  it('sends the token only to relays under the main relay domain', () => {
+  it('sends the token only to the main relay and the regions of a signed list', () => {
     const main = 'https://relay.kettu.sh'
     expect(trustedRelay('https://relay.kettu.sh', main)).toBe(true)
-    expect(trustedRelay('https://hk.relay.kettu.sh', main)).toBe(true)
-    expect(trustedRelay('https://relay-hk.kettu.sh', main)).toBe(true)
+    expect(trustedRelay('https://relay.kettu.sh/', main)).toBe(true)
+    // A name under the main relay's domain is not enough, whatever a code or a welcome says.
+    expect(trustedRelay('https://hk.relay.kettu.sh', main)).toBe(false)
+    expect(trustedRelay('https://relay-hk.kettu.sh', main)).toBe(false)
+    expect(trustedRelay('https://hk.relay.kettu.sh', main, ['https://hk.relay.kettu.sh'])).toBe(
+      true,
+    )
+    expect(trustedRelay('https://sh.relay.kettu.sh', main, ['https://hk.relay.kettu.sh'])).toBe(
+      false,
+    )
     expect(trustedRelay('http://relay.kettu.sh', main)).toBe(false)
     expect(trustedRelay('https://kettu.sh.example.com', main)).toBe(false)
     expect(trustedRelay('https://evilkettu.sh', main)).toBe(false)
@@ -160,6 +169,15 @@ describe('the relay protocol', () => {
     expect(relayList(main, [{ id: 'x', url: 'https://example.com' }])).toEqual([
       { id: 'main', url: main },
     ])
+  })
+
+  it('refuses a lookalike of the project relay under its wildcard DNS name', () => {
+    // sslip.io resolves a-b-c-d.<anything> to a.b.c.d, so this name can point at anyone.
+    const lookalike = 'https://6-6-6-6.132-145-200-0.sslip.io'
+    expect(trustedRelay(RELAY_URL, RELAY_URL)).toBe(true)
+    expect(trustedRelay(lookalike, RELAY_URL)).toBe(false)
+    expect(trustedRelay('https://huli.132-145-200-0.sslip.io.evil.example', RELAY_URL)).toBe(false)
+    expect(trustedRelay('https://huli.132-145-200-0.sslip.io:8443', RELAY_URL)).toBe(false)
   })
 })
 
