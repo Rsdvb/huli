@@ -642,7 +642,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
   )
 }
 
-/** 网络出口: the node the agent goes through, and where its traffic last left from. */
+/** 网络出口: the node or interface the agent goes through, and where its traffic last left from. */
 function NetworkGroup({ agentId }: { agentId: AgentId }) {
   const read = useNetworkStatus()
   const status = read.value
@@ -653,7 +653,7 @@ function NetworkGroup({ agentId }: { agentId: AgentId }) {
     <ListGroup
       footer={
         status.enabled
-          ? '在节点和系统网络之间切换，要等它下次启动才生效。'
+          ? '切换到系统网络或从系统网络切出，要等它下次启动才生效。'
           : 'Agent 网络在电脑上已关闭，所有 Agent 都用系统网络。'
       }
     >

@@ -42,7 +42,7 @@ export default function AgentNetworkScreen() {
   return (
     <ManagePage
       title="Agent 网络"
-      intro="Agent 可以经由电脑上机场订阅的节点联网，节点不可用时就没有网络，不会从别的路出去。订阅只在电脑上添加和管理，链接不会发到手机。"
+      intro="Agent 可以经由电脑上机场订阅的节点联网，也可以只从电脑的某块网卡联网；节点或网卡不可用时就没有网络，不会从别的路出去。订阅只在电脑上添加和管理，链接不会发到手机。"
       onRefresh={read.reload}
     >
       {status === null ? (
@@ -81,7 +81,7 @@ export default function AgentNetworkScreen() {
 
           <ListGroup
             header="Agent"
-            footer="在节点和系统网络之间切换，要等 Agent 下次启动才生效。出口是电脑经由这个 Agent 的路实际测到的地址。"
+            footer="切换到系统网络或从系统网络切出，要等 Agent 下次启动才生效。出口是电脑经由这个 Agent 的路实际测到的地址。"
           >
             {status.agents.map(({ agentId }) => {
               const exit = exitText(agentExit(status, agentId))
