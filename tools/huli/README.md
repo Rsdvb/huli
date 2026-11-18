@@ -54,8 +54,9 @@ Code (kept small so upstream merges stay clean):
 
 ### Import from Kettu
 
-Brings an official Kettu's sessions on the same computer over: Settings › General › Import from
-Kettu, and a one-time offer over the sidebar's account row while there is no session yet.
+Brings an official Kettu's sessions, memory and artifacts on the same computer over: Settings ›
+General › Import from Kettu, and a one-time offer over the sidebar's account row while there is
+no session yet.
 
 Huli's own files:
 
@@ -68,7 +69,27 @@ Huli's own files:
   agent's own session; one another program has open (Kettu itself) comes over as a fork. Subagent
   sessions are not imported: the parent's history brings them back under it when it is opened.
   Sessions in a Kettu worktree or Kettu's scratch folder, for an agent Huli lacks, or in a folder
-  that is gone are skipped. `state/kettu-import.json` remembers which Kettu session became which.
+  that is gone are skipped. `state/kettu-import.json` remembers which Kettu session became which,
+  and which memory entries and artifacts came over. The scan counts memory and artifacts too, all
+  and not here yet; a run brings them after the sessions when asked (`memory`, `artifacts`), so
+  their sources and authors name the sessions those became.
+- `src/agent-host/kettu-import-memory.ts` (+ `.test.ts`): Kettu's `memory/global` into global
+  memory and each `memory/projects/<folder>` into the same project's, placed by the path in its
+  `project.json` (a project Huli lacks is added if its folder exists). Each file is copied into the
+  temporary folder and read from there, checked for size, UTF-8 and id; `undo/` is not brought.
+  `MemoryService.adopt` (in `memory/service.ts`) writes them with their ids, times and sources,
+  checked as a write is (limits, secrets): one whose title and body the layer holds is skipped,
+  one whose id is taken by other content gets a new id, and one the ledger has as it is now is not
+  brought again even if changed or forgotten here.
+- `src/agent-host/kettu-import-artifacts.ts` (+ `.test.ts`) and `threads/kettu-artifacts.ts`:
+  Kettu's artifact records live in its `state/threads.db`, which is copied with its WAL (again while
+  Kettu wrote during the copy, up to three times) and read in the thread worker (the `readKettu`
+  artifact call). Every record is checked (ids, paths, sizes, types, declarations) and every content
+  file must match its hash. Each artifact comes through the `create` and `write` calls as its
+  versions with their times, notes and authors, under its own id where free, else a new one;
+  one the ledger names that is still here, or whose latest version is here, is skipped. Kettu's
+  Recently deleted, its scratch folders and `published-artifacts.json` (sharing links of Kettu's
+  account) stay behind; thumbnails are drawn anew.
 - `src/shared/kettu-import.ts`: the scan's and the run's types.
 - `src/renderer/src/features/kettu-import/`: the store, the dialog, the Settings row
   (`settings-row.tsx`) and the sidebar offer.
@@ -78,6 +99,8 @@ Hooks into upstream files, one or two lines each:
 
 - `src/agent-host/sessions.ts`: `importSession` takes an optional `kept` (title, times, pin,
   archive) and the `KeptField` type.
+- `src/agent-host/memory/service.ts` (`adopt`), `src/agent-host/artifacts/model.ts` and
+  `threads/service.ts` (the `readKettu` call).
 - `src/shared/agent-host.ts` (`kettuImport.scan`, `kettuImport.run`, the `kettuImport.progress`
   event), `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`, `src/agent-host/host.ts`.
 - `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (the progress
