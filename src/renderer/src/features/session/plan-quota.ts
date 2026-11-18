@@ -35,13 +35,13 @@ export function agentQuota(
 }
 
 /**
- * The agent of `hostId` to suggest in place of `from` while its plan is out: one New session can
- * start whose plan has the most room. Null while the plan has room or runs on extra usage.
+ * The agent of `hostId` to suggest in place of `from` while `wanted`, such as while its plan is
+ * out: one New session can start whose plan has the most room.
  */
 export function useFallback(
   hostId: string | null,
   from: AgentId | null,
-  quota: PlanQuota | null,
+  wanted: boolean,
   now: number,
 ): Fallback | null {
   const readings = usePlanReadings()
@@ -51,7 +51,7 @@ export function useFallback(
       return menuAgents(usableAgents(order, byId))
     }),
   )
-  if (!from || quota?.kind !== 'out') return null
+  if (!from || !wanted) return null
   return fallbackAgent(statuses, from, now, {
     limitsOf: (status) => newestLimits(readings, status),
   })

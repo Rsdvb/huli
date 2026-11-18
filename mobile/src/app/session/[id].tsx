@@ -53,6 +53,7 @@ import {
   cutNoticeOf,
   OutOfCreditStrip,
   outOfCreditOf,
+  planLimitStopOf,
   retryNoticeOf,
 } from '../../components/entries/TurnEnd'
 import {
@@ -403,6 +404,30 @@ export default function SessionScreen() {
     () => (session?.commands ?? []).map((command) => command.name),
     [session?.commands],
   )
+  // After a turn the plan limit stopped, the agent with the most room may carry the task on: it
+  // takes the session over and is asked to go on from the conversation so far.
+  const limitStopped = useThreadSelector(view, planLimitStopOf)
+  const carryTo =
+    limitStopped && agent ? fallbackAgent(usableAgents(agents), agent.id, Date.now()) : null
+  const carryAgent = carryTo?.agentId ?? null
+  const carryName = carryTo?.name ?? ''
+  const carryUsed = carryTo?.usedPercent ?? 0
+  const carryOn = useMemo(
+    () =>
+      carryAgent
+        ? {
+            name: carryName,
+            usedPercent: carryUsed,
+            go: () =>
+              call(link, 'sessions.switchAgent', {
+                sessionId: id,
+                agentId: carryAgent,
+                content: [{ type: 'text' as const, text: '继续刚才的任务。' }],
+              }),
+          }
+        : null,
+    [carryAgent, carryName, carryUsed, link, id],
+  )
   const putCommand = useCallback(
     (name: string) => composer.current?.command(name, commandNames),
     [commandNames],
@@ -415,6 +440,7 @@ export default function SessionScreen() {
       forkAtMessage,
       retryNotice,
       cutNotice,
+      carryOn,
       config: session?.config ?? [],
       commands: commandNames,
       command: putCommand,
@@ -427,6 +453,7 @@ export default function SessionScreen() {
       forkAtMessage,
       retryNotice,
       cutNotice,
+      carryOn,
       session?.config,
       commandNames,
       putCommand,

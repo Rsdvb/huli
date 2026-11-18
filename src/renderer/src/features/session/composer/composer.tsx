@@ -273,7 +273,7 @@ export function Composer({
   // Between turns, a used-up plan suggests an agent with room; picking it waits for the message.
   const clock = useNow()
   const quota = agent && !pending && !mustSwitch ? planQuota(agent, clock, modelLimits) : null
-  const fallback = useFallback(hostId, session.agentId, quota, clock)
+  const fallback = useFallback(hostId, session.agentId, quota?.kind === 'out', clock)
   const [keptQuota, setKeptQuota] = useState(false)
   const suggestion =
     idle && quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null

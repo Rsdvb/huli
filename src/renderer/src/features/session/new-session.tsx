@@ -366,7 +366,7 @@ function DraftComposer({
   const reached = tightest?.state === 'reached' ? tightest : null
   // A used-up plan with another agent to pick in its place; the user may keep this one.
   const quota = status && limits ? planQuota(status, now, limitsForModel(limits, model)) : null
-  const fallback = useFallback(hostId, agentId, quota, now)
+  const fallback = useFallback(hostId, agentId, quota?.kind === 'out', now)
   const [keptAgent, setKeptAgent] = useState<AgentId | null>(null)
   const suggestion =
     quota?.kind === 'out' && fallback && keptAgent !== agentId ? { quota, fallback } : null
