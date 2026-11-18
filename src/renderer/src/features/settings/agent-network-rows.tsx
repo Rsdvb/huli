@@ -18,8 +18,10 @@ import {
   cleanSubscriptionName,
   MAX_SUBSCRIPTION_BYTES,
   SUBSCRIPTION_NAME_CHARS,
+  type AgentNetworkChoice,
   type AgentNetworkStatus,
   type ExitIp,
+  type NetworkInterfaceView,
   type NodeView,
   type SubscriptionView,
 } from '@shared/agent-network'
@@ -35,18 +37,22 @@ import {
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
+import { RadioGroup, RadioGroupTile } from '@renderer/components/ui/radio-group'
 import { errorCode, errorMessage, hostAt } from '@renderer/lib/host'
 import { mediumAgo } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
 import {
   checkExit,
+  loadInterfaces,
   nodeKey,
   nodeOfKey,
   testLatency,
   useAgentNetwork,
   useAgentNetworkStore,
   useExitIp,
+  useLiveInterfaces,
 } from '@renderer/stores/agent-network'
+import { useAgentsStore } from '@renderer/stores/agents'
 import { useSettingsStore } from '@renderer/stores/settings'
 import {
   CONFIRM,
@@ -58,10 +64,11 @@ import {
   SettingSelect,
   SettingSwitch,
 } from './controls'
-import { RowLine, RowShell, RowText } from './rows'
+import { EmptyRow, RowLine, RowShell, RowText } from './rows'
 import {
   DIALOG_FIELD,
   DIALOG_MONO_FIELD,
+  SETTINGS_TILE,
   SettingsDialogBody,
   SettingsDialogContent,
   SettingsDialogFooter,
@@ -618,29 +625,74 @@ export function DefaultNodeControl({ label }: { label: string }) {
   )
 }
 
-/** Follow the default, a node, or the system's network, for one agent. */
+const NO_INTERFACES: NetworkInterfaceView[] = []
+
+/** The computer's interfaces as last read; empty until read. */
+function useInterfaces(): NetworkInterfaceView[] {
+  return useAgentNetworkStore((s) => s.interfaces ?? NO_INTERFACES)
+}
+
+/** An interface an agent is bound to, with its live state: connected, disconnected or gone. */
+function interfaceLabel(
+  name: string,
+  interfaces: NetworkInterfaceView[],
+  t: TFunction<'settings'>,
+): string {
+  const found = interfaces.find((item) => item.name === name)
+  // Until the list is read, the name alone, rather than a state not known yet.
+  if (interfaces.length === 0 || found?.up) return t('network.choice.interface', { name })
+  return t(found ? 'network.choice.interfaceDown' : 'network.choice.interfaceGone', { name })
+}
+
+/** Sets one agent's choice: null follows the default. */
+function setChoice(agentId: AgentId, choice: AgentNetworkChoice | null) {
+  const agents = { ...useSettingsStore.getState().settings.agentNetwork.agents }
+  if (choice === null) delete agents[agentId]
+  else agents[agentId] = choice
+  return update({ agentNetwork: { agents } })
+}
+
+/** Follow the default, a node, one network interface, or the system's network, for one agent. */
 export function NetworkChoiceSelect({ agentId, label }: { agentId: AgentId; label: string }) {
   const { t } = useTranslation('settings')
   const network = useSettingsStore((s) => s.settings.agentNetwork)
   const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? NO_SUBSCRIPTIONS)
+  const interfaces = useInterfaces()
   const options = useNodeOptions()
   const [error, setError] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
   const choice = network.agents[agentId]
+  const bound = typeof choice === 'object' && 'interface' in choice ? choice.interface : null
+  // An agent bound to an interface shows its state live.
+  useLiveInterfaces(bound !== null)
   const value =
-    choice === undefined ? 'default' : choice === 'system' ? 'system' : `node:${nodeKey(choice)}`
-  const all = [
+    choice === undefined
+      ? 'default'
+      : choice === 'system'
+        ? 'system'
+        : 'interface' in choice
+          ? 'interface'
+          : `node:${nodeKey(choice)}`
+  const all: { value: string; label: string; hint?: string }[] = [
     {
       value: 'default',
       label: network.defaultNode
         ? t('network.choice.followNamed', { node: nodeLabel(network.defaultNode, subs) })
         : t('network.choice.follow'),
     },
-    { value: 'system', label: t('network.choice.system') },
     ...options,
   ]
-  if (typeof choice === 'object' && !options.some((o) => o.value === value)) {
-    all.push({ value, label: t('network.choice.gone', { node: nodeLabel(choice, subs) }) })
+  if (typeof choice === 'object' && !('interface' in choice)) {
+    if (!options.some((o) => o.value === value)) {
+      all.push({ value, label: t('network.choice.gone', { node: nodeLabel(choice, subs) }) })
+    }
   }
+  if (bound !== null) {
+    all.push({ value: 'interface', label: interfaceLabel(bound, interfaces, t) })
+  }
+  all.push({ value: 'pick-interface', label: t('network.choice.pickInterface') })
+  all.push({ value: 'system', label: t('network.choice.system') })
+  const agentName = useAgentNetworkName(agentId)
   return (
     <>
       <ControlError error={error} />
@@ -651,17 +703,191 @@ export function NetworkChoiceSelect({ agentId, label }: { agentId: AgentId; labe
         className="w-60"
         onChange={(next) => {
           setError(null)
-          const agents = { ...useSettingsStore.getState().settings.agentNetwork.agents }
-          if (next === 'default') delete agents[agentId]
-          else if (next === 'system') agents[agentId] = 'system'
-          else {
-            const ref = nodeOfKey(next.slice('node:'.length))
-            if (ref) agents[agentId] = ref
+          if (next === 'interface') return
+          if (next === 'pick-interface') {
+            setPicking(true)
+            return
           }
-          update({ agentNetwork: { agents } }).catch((e: unknown) => setError(errorMessage(e)))
+          const ref = next.startsWith('node:') ? nodeOfKey(next.slice('node:'.length)) : null
+          const picked = next === 'default' ? null : next === 'system' ? 'system' : ref
+          if (next.startsWith('node:') && !ref) return
+          setChoice(agentId, picked).catch((e: unknown) => setError(errorMessage(e)))
         }}
       />
+      <InterfaceDialog
+        key={picking ? 'open' : 'closed'}
+        open={picking}
+        agent={agentName}
+        current={bound}
+        onOpenChange={setPicking}
+        onPick={(name) => setChoice(agentId, { interface: name })}
+      />
     </>
+  )
+}
+
+/** The agent's name as Settings shows it, for the dialog's line. */
+function useAgentNetworkName(agentId: AgentId): string {
+  const name = useAgentsStore((s) => s.byId[agentId]?.name)
+  return name ?? agentId
+}
+
+/** A connected or disconnected mark, and a TUN or VPN one, for an interface. */
+function InterfaceMarks({ item }: { item: NetworkInterfaceView }) {
+  const { t } = useTranslation('settings')
+  return (
+    <>
+      <Pill tone={item.up ? 'success' : 'warning'}>
+        {t(item.up ? 'network.interfaces.up' : 'network.interfaces.down')}
+      </Pill>
+      {item.tunnel && <Pill>{t('network.interfaces.tunnel')}</Pill>}
+    </>
+  )
+}
+
+/**
+ * Picks the one interface an agent's traffic leaves through, from the computer's interfaces with
+ * their live state; `onPick` saves it.
+ */
+function InterfaceDialog({
+  open,
+  agent,
+  current,
+  onOpenChange,
+  onPick,
+}: {
+  open: boolean
+  agent: string
+  current: string | null
+  onOpenChange: (open: boolean) => void
+  onPick: (name: string) => Promise<unknown>
+}) {
+  const { t } = useTranslation(['settings', 'common'])
+  const read = useAgentNetworkStore((s) => s.interfaces)
+  const interfaces = read ?? NO_INTERFACES
+  const [chosen, setChosen] = useState<string | null>(current)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useLiveInterfaces(open)
+  // A bound interface that is gone stays listed, so the dialog shows what the agent is set to.
+  const listed =
+    current !== null && read !== null && !interfaces.some((item) => item.name === current)
+      ? [...interfaces, { name: current, description: null, up: false, tunnel: false }]
+      : interfaces
+  const save = async (): Promise<void> => {
+    if (chosen === null || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await onPick(chosen)
+      onOpenChange(false)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <SettingsDialogContent className="sm:max-w-130">
+        <SettingsDialogHeader title={t('network.interfaces.title')}>
+          {t('network.interfaces.body', { agent })}
+        </SettingsDialogHeader>
+        <SettingsDialogBody>
+          {read === null ? (
+            <p className="kettu-sd__text">{t('network.interfaces.loading')}</p>
+          ) : listed.length === 0 ? (
+            <p className="kettu-sd__text">{t('network.interfaces.empty')}</p>
+          ) : (
+            <RadioGroup
+              aria-label={t('network.interfaces.title')}
+              value={chosen}
+              onValueChange={(name) => setChosen(name as string)}
+              className="kettu-sd__choices"
+            >
+              {listed.map((item) => (
+                <RadioGroupTile key={item.name} value={item.name} className={SETTINGS_TILE}>
+                  <span className="ui-sg-label">
+                    <b className="k-row-title">
+                      {item.name}
+                      <InterfaceMarks item={item} />
+                    </b>
+                    {item.description && <small>{item.description}</small>}
+                  </span>
+                </RadioGroupTile>
+              ))}
+            </RadioGroup>
+          )}
+          {error && <span className="kettu-sd__error">{error}</span>}
+        </SettingsDialogBody>
+        <SettingsDialogFooter>
+          <DialogClose render={<SetButton size="md" variant="ghost" />}>
+            {t('common:actions.cancel')}
+          </DialogClose>
+          <SetButton
+            size="md"
+            variant="primary"
+            loading={busy}
+            disabled={chosen === null}
+            onClick={() => void save()}
+          >
+            {t('network.interfaces.save')}
+          </SetButton>
+        </SettingsDialogFooter>
+      </SettingsDialogContent>
+    </Dialog>
+  )
+}
+
+/** One of the computer's interfaces in Settings › Agent network, with the agents bound to it. */
+export function InterfaceRow({ item, agents }: { item: NetworkInterfaceView; agents: string[] }) {
+  const { t } = useTranslation('settings')
+  // Shown, so its state stays live.
+  useLiveInterfaces(true)
+  const lines = [
+    item.description,
+    agents.length > 0 ? t('network.interfaces.bound', { agents: agents.join(', ') }) : null,
+  ].filter(Boolean)
+  return (
+    <RowShell>
+      <RowLine text={<RowText name={item.name} description={lines.join(' · ') || undefined} />}>
+        <InterfaceMarks item={item} />
+      </RowLine>
+    </RowShell>
+  )
+}
+
+/** No interface read yet, or none found; reads them while shown. */
+export function InterfacesEmpty() {
+  const { t } = useTranslation('settings')
+  const read = useAgentNetworkStore((s) => s.interfaces !== null)
+  useLiveInterfaces(true)
+  return (
+    <RowShell>
+      <EmptyRow
+        title={t(read ? 'network.interfaces.empty' : 'network.interfaces.loading')}
+        hint={t('network.interfaces.description')}
+      />
+    </RowShell>
+  )
+}
+
+/** Reads the interfaces again now. */
+export function RefreshInterfacesAction() {
+  const { t } = useTranslation('settings')
+  const [busy, setBusy] = useState(false)
+  return (
+    <IconAction
+      label={t('network.interfaces.refresh')}
+      icon={RefreshIcon}
+      busy={busy}
+      onClick={() => {
+        setBusy(true)
+        loadInterfaces()
+          .catch(() => {})
+          .finally(() => setBusy(false))
+      }}
+    />
   )
 }
 
@@ -677,7 +903,7 @@ function regionName(code: string): string {
 function exitText(exit: ExitIp | null, t: TFunction<'settings'>): string {
   if (!exit) return t('network.exit.unchecked')
   if (exit.failure === 'unsupported') return t('network.exit.unsupported')
-  const via = exit.via === 'node' ? 'node' : 'system'
+  const via = exit.via
   if (!exit.ip) return t(`network.exit.${via}Unreachable`)
   return exit.country
     ? t(`network.exit.${via}`, { ip: exit.ip, country: regionName(exit.country) })

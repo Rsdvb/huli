@@ -1,6 +1,7 @@
 // The computer's agent network as the phone sees it: names, counts, choices and exits from
 // `agentNetwork.deviceStatus`, which never carries a subscription's link. The phone picks the
-// default node and each agent's node; the subscriptions stay the computer's to change.
+// default node and each agent's node or network interface; the subscriptions stay the computer's
+// to change.
 
 import type {
   AgentNetworkChoice,
@@ -51,6 +52,13 @@ export function nodeName(status: NetworkStatus, ref: NodeRef): string {
   return known || status.state !== 'running' ? name : `${name}（已不存在）`
 }
 
+/** An interface an agent is bound to, with its state on the computer. */
+export function interfaceText(status: NetworkStatus, name: string): string {
+  const found = status.interfaces.find((item) => item.name === name)
+  if (status.interfaces.length === 0 || found?.up) return `网卡：${name}`
+  return found ? `网卡：${name}（未连接）` : `网卡：${name}（已不存在）`
+}
+
 export function defaultText(status: NetworkStatus): string {
   return status.defaultNode ? nodeName(status, status.defaultNode) : '无：不联网'
 }
@@ -61,6 +69,7 @@ export function choiceText(status: NetworkStatus, choice: AgentNetworkChoice | '
   if (choice === 'default') {
     return status.defaultNode ? `跟随默认（${nodeName(status, status.defaultNode)}）` : '跟随默认'
   }
+  if ('interface' in choice) return interfaceText(status, choice.interface)
   return nodeName(status, choice)
 }
 
@@ -119,7 +128,7 @@ export function regionName(code: string): string {
 export function exitText(exit: ExitIp | null): string | null {
   if (!exit) return null
   if (exit.failure === 'unsupported') return '无法检测出口：系统代理不是 HTTP 代理'
-  const via = exit.via === 'node' ? '节点出口' : '系统网络出口'
+  const via = { node: '节点出口', interface: '网卡出口', system: '系统网络出口' }[exit.via]
   if (!exit.ip) return `${via}：无法连接`
   return exit.country ? `${via} ${exit.ip}（${regionName(exit.country)}）` : `${via} ${exit.ip}`
 }
@@ -137,7 +146,8 @@ export async function setPick(
   pick: NetworkPick,
 ): Promise<void> {
   if (target === 'default') {
-    const node = pick === null || pick === 'default' || pick === 'system' ? null : pick
+    const node =
+      pick === null || pick === 'default' || pick === 'system' || 'interface' in pick ? null : pick
     await admin(link, 'settings.setDefaultNode', { node })
     return
   }

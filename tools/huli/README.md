@@ -208,6 +208,22 @@ default route, found with the system's tools and checked every minute, or named 
 Only programs that follow the proxy variables are held to the node; one that ignores them still
 goes out on the system's network.
 
+An agent can instead be bound to one network interface (选择网卡), any the computer has, such as a
+proxy client's TUN or Wi-Fi: `{ interface: <name> }` beside `'system'` and a node. Its listener
+stays the same; behind it, the host runs a mihomo of that interface's own (`interfaceConfig`,
+one per interface in use, started, stopped and restarted with the nodes' one, each in
+`agent-network/mihomo/interfaces/<n>/`), whose agent groups hold REJECT first and a `type: direct`
+proxy with `interface-name`, and nothing else; the global DIRECT is in no group. mihomo binds
+that proxy's sockets to the interface (IP_UNICAST_IF on Windows, IP_BOUND_IF on macOS,
+SO_BINDTODEVICE on Linux) and a dial fails when the interface is gone (`interface not found`) or
+down (unreachable), never on another interface; the host also puts a group on REJECT while the
+interface list (`interface.ts`: `Get-NetAdapter`, `ifconfig` with `networksetup`, `ip -o link`,
+read every minute while one is bound and on `agentNetwork.interfaces`) shows it gone or down.
+A direct proxy resolves names with mihomo's process-wide `direct-nameserver`, which is why each
+interface needs its own mihomo: there names go out as plain UDP DNS (223.5.5.5, 119.29.29.29)
+bound to the same interface, which a TUN's DNS hijack answers, with a fake IP in fake-ip mode, so
+the TUN sees the name and routes by its domain rules; DoH would hide the query from it.
+
 Subscriptions are downloaded by Kite, not mihomo (`download.ts`): the way Kite's own requests go,
 through Advanced › Proxy or the environment's `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY` (HTTP,
 HTTPS or SOCKS5, honouring `NO_PROXY`), else directly, which a Clash or Karing TUN still catches,
@@ -253,10 +269,10 @@ Huli's own files:
 Subscription links carry tokens: they never go into settings.json, a status, an event or a log
 (each link and its parts are log secrets), and the `agentNetwork.*` methods are refused to paired
 devices (`src/shared/remote/allow-list.ts`), whose ports never hear `agentNetwork.changed`, but
-for two device-safe ones: `agentNetwork.deviceStatus` (on, state, problem, interface name,
-subscriptions as id, name, node count and traffic, nodes as subscription id, name and latency, the
-default node, each agent's choice and the exits; `network.test.ts` checks no link, host or token
-is in it) and `agentNetwork.deviceLatency`. A device changes the default node and an agent's
+for two device-safe ones: `agentNetwork.deviceStatus` (on, state, problem, interface name, the
+computer's interfaces as name, state and TUN mark, subscriptions as id, name, node count and
+traffic, nodes as subscription id, name and latency, the default node, each agent's choice and
+the exits; `network.test.ts` checks no link, host or token is in it) and `agentNetwork.deviceLatency`. A device changes the default node and an agent's
 choice through the admin calls `settings.setDefaultNode` and `settings.setAgentNetwork`
 (`src/shared/remote/host-admin.ts`, `src/main/host-admin.ts`, `withDefaultNode` and
 `withAgentNetworkChoice` in `settings-schema.ts`); the generic `settings.update` still refuses the

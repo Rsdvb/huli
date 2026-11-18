@@ -14,10 +14,18 @@ export interface NodeRef {
 }
 
 /**
- * An agent's choice: a node of its own, or the system's network (no node, as without this
- * feature). An agent with no entry follows the default node.
+ * A network interface an agent's traffic leaves through and through no other, by the name the
+ * system gives it, such as a proxy client's TUN or Wi-Fi.
  */
-export type AgentNetworkChoice = 'system' | NodeRef
+export interface InterfaceRef {
+  interface: string
+}
+
+/**
+ * An agent's choice: a node of its own, one network interface, or the system's network (no node,
+ * as without this feature). An agent with no entry follows the default node.
+ */
+export type AgentNetworkChoice = 'system' | NodeRef | InterfaceRef
 
 /** The settings' part: no subscription address, only names and choices. */
 export interface AgentNetworkSettings {
@@ -88,6 +96,20 @@ export function isInterfaceName(value: unknown): value is string {
   )
 }
 
+/**
+ * An interface an agent may be bound to: also without `&` or `=`, which would split the fragment
+ * that binds its DNS servers to the interface.
+ */
+export function isBindableInterface(value: unknown): value is string {
+  return isInterfaceName(value) && !/[&=]/.test(value)
+}
+
+export function isInterfaceRef(value: unknown): value is InterfaceRef {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const o = value as Record<string, unknown>
+  return Object.keys(o).length === 1 && isBindableInterface(o.interface)
+}
+
 export function isNodeRef(value: unknown): value is NodeRef {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const o = value as Record<string, unknown>
@@ -100,7 +122,14 @@ export function isNodeRef(value: unknown): value is NodeRef {
 }
 
 export function isAgentNetworkChoice(value: unknown): value is AgentNetworkChoice {
-  return value === 'system' || isNodeRef(value)
+  return value === 'system' || isNodeRef(value) || isInterfaceRef(value)
+}
+
+/** A copy of a valid choice with only its own fields. */
+export function cleanChoice(choice: AgentNetworkChoice): AgentNetworkChoice {
+  if (choice === 'system') return 'system'
+  if ('interface' in choice) return { interface: choice.interface }
+  return { subscription: choice.subscription, node: choice.node }
 }
 
 export function sameNode(a: NodeRef | null, b: NodeRef | null): boolean {
@@ -109,14 +138,14 @@ export function sameNode(a: NodeRef | null, b: NodeRef | null): boolean {
   )
 }
 
+/** The way an agent that has a listener goes: the default node, a node, or one interface. */
+export type AgentRoute = 'default' | NodeRef | InterfaceRef
+
 /**
- * What the agent goes through: null for the system's network, else the node it asked for, or
- * `default` while it follows the default node.
+ * What the agent goes through: null for the system's network, else the node or interface it asked
+ * for, or `default` while it follows the default node.
  */
-export function agentRoute(
-  settings: AgentNetworkSettings,
-  agentId: AgentId,
-): 'default' | NodeRef | null {
+export function agentRoute(settings: AgentNetworkSettings, agentId: AgentId): AgentRoute | null {
   if (!settings.enabled) return null
   const choice = settings.agents[agentId]
   if (choice === 'system') return null
@@ -141,6 +170,24 @@ export const NODE_NO_PROXY = [
   '.ts.net',
   '.local',
 ] as const
+
+/** The interface an agent is bound to, or null for one on a node or the system's network. */
+export function routeInterface(route: AgentRoute | null): string | null {
+  return route !== null && typeof route === 'object' && 'interface' in route
+    ? route.interface
+    : null
+}
+
+/** A network interface of the computer, as the system lists it. */
+export interface NetworkInterfaceView {
+  name: string
+  /** What the system calls the adapter, such as Meta Tunnel or Wi-Fi; null when it says nothing. */
+  description: string | null
+  /** Connected and able to carry traffic now. */
+  up: boolean
+  /** Looks like a TUN or VPN adapter that a proxy client or VPN set up. */
+  tunnel: boolean
+}
 
 export type AgentNetworkState = 'off' | 'starting' | 'running' | 'error'
 
@@ -186,8 +233,10 @@ export interface AgentNetworkAgent {
   agentId: AgentId
   /** Its listener on 127.0.0.1, which its proxy variables name. */
   port: number | null
-  /** The node it asked for; null while it follows the default. */
+  /** The node it asked for; null while it follows the default or is bound to an interface. */
   node: NodeRef | null
+  /** The interface it is bound to; null while it goes through a node. */
+  interface: string | null
 }
 
 /**
@@ -196,13 +245,14 @@ export interface AgentNetworkAgent {
  */
 export interface ExitIp {
   agentId: AgentId
-  via: 'node' | 'system'
+  via: 'node' | 'interface' | 'system'
   /** The public address; null when the request did not get through. */
   ip: string | null
   /** The ISO 3166 code of the address's country or region, such as JP; null when unknown. */
   country: string | null
   /**
-   * Why there is no address: nothing answered (for an agent on a node, it has no network now),
+   * Why there is no address: nothing answered (for an agent on a node or an interface, it has no
+   * network now),
    * or the system's proxy is of a kind the check cannot speak, such as SOCKS.
    */
   failure: 'unreachable' | 'unsupported' | null
@@ -220,8 +270,10 @@ export interface AgentNetworkStatus {
   version: string | null
   /** The interface nodes dial out on now, the one found, and the user's choice. */
   interface: { inUse: string | null; detected: string | null; override: string | null }
+  /** The computer's network interfaces as last read; empty until read. */
+  interfaces: NetworkInterfaceView[]
   subscriptions: SubscriptionView[]
-  /** The agents that go through a node. */
+  /** The agents that go through a node or are bound to an interface. */
   agents: AgentNetworkAgent[]
   /** The latest exit check of each agent that had one, on a node or not. */
   exits: ExitIp[]
@@ -238,6 +290,8 @@ export interface AgentNetworkDeviceStatus {
   problem: AgentNetworkProblem | null
   /** The network interface nodes dial out on now. */
   interface: string | null
+  /** The computer's network interfaces an agent may be bound to: names and states alone. */
+  interfaces: { name: string; up: boolean; tunnel: boolean }[]
   subscriptions: {
     id: string
     name: string

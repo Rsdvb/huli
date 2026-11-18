@@ -22,6 +22,7 @@ import type {
   AgentNetworkStatus,
   ExitIp,
   LatencyResult,
+  NetworkInterfaceView,
   NodeRef,
   NodeView,
 } from './agent-network'
@@ -1774,6 +1775,9 @@ export interface HostContract {
   // system's network); a check under a minute old answers unless `fresh`. Every window hears it
   // in `agentNetwork.changed` too.
   'agentNetwork.exitIp': { params: { agentId: AgentId; fresh?: boolean }; result: ExitIp }
+  // The computer's network interfaces, read again now, which an agent may be bound to; the status
+  // carries the last read too.
+  'agentNetwork.interfaces': { params: void; result: { interfaces: NetworkInterfaceView[] } }
   // Huli: what a paired device may see and do of the agent network, from any window or device:
   // names, counts, choices and exits, never a subscription's address. A device changes the
   // default node and an agent's choice through the admin calls `settings.setDefaultNode` and
@@ -2098,6 +2102,7 @@ export const HOST_METHODS = [
   'agentNetwork.nodes',
   'agentNetwork.testLatency',
   'agentNetwork.exitIp',
+  'agentNetwork.interfaces',
   'agentNetwork.deviceStatus',
   'agentNetwork.deviceLatency',
   'folders.list',

@@ -303,6 +303,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'agentNetwork.nodes': HOST_MS,
   'agentNetwork.testLatency': AGENT_MS,
   'agentNetwork.exitIp': AGENT_MS,
+  'agentNetwork.interfaces': HOST_MS,
   'agentNetwork.deviceStatus': HOST_MS,
   'agentNetwork.deviceLatency': AGENT_MS,
   'folders.list': HOST_MS,

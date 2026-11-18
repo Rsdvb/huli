@@ -27,7 +27,12 @@ import {
   ZOOM_LEVELS,
 } from '@shared/settings'
 import { isComputerApp, isStopShortcut } from '@shared/computer-use'
-import { isAgentNetworkChoice, isInterfaceName, isNodeRef } from '@shared/agent-network'
+import {
+  cleanChoice,
+  isAgentNetworkChoice,
+  isInterfaceName,
+  isNodeRef,
+} from '@shared/agent-network'
 import {
   IDLE_LIMITS,
   IDLE_RELEASE_MODES,
@@ -171,7 +176,7 @@ const isAgentNetworkChoices: Check = (value, path) => {
   for (const [id, choice] of entries) {
     if (!isAgentId(id)) return `"${path}.${id}" is not an agent id`
     if (!isAgentNetworkChoice(choice)) {
-      return `"${path}.${id}" must be "system" or a { subscription, node }`
+      return `"${path}.${id}" must be "system", a { subscription, node } or an { interface }`
     }
   }
   return null
@@ -1217,8 +1222,9 @@ export function withDefaultNode(current: SettingsFile, node: unknown): SettingsF
 }
 
 /**
- * Huli: one agent's network as a paired device picked it: a node, the system's network, or null
- * to follow the default node. The other agents' choices stay as they are.
+ * Huli: one agent's network as a paired device picked it: a node, one network interface, the
+ * system's network, or null to follow the default node. The other agents' choices stay as they
+ * are.
  */
 export function withAgentNetworkChoice(
   current: SettingsFile,
@@ -1227,14 +1233,13 @@ export function withAgentNetworkChoice(
 ): SettingsFile {
   if (!isAgentId(agentId)) throw new SettingsError(`"${String(agentId)}" is not an agent id`)
   if (choice !== null && !isAgentNetworkChoice(choice)) {
-    throw new SettingsError('"choice" must be null, "system" or a { subscription, node }')
+    throw new SettingsError(
+      '"choice" must be null, "system", a { subscription, node } or an { interface }',
+    )
   }
   const next = structuredClone(current)
   if (choice === null) delete next.agentNetwork.agents[agentId]
-  else {
-    next.agentNetwork.agents[agentId] =
-      choice === 'system' ? 'system' : { subscription: choice.subscription, node: choice.node }
-  }
+  else next.agentNetwork.agents[agentId] = cleanChoice(choice)
   return next
 }
 

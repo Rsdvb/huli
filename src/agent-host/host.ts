@@ -3195,6 +3195,7 @@ export class AgentHost {
         results: await this.nodeProxy.testLatency(nodes),
       }),
       'agentNetwork.exitIp': ({ agentId, fresh }) => this.nodeProxy.exitIp(agentId, fresh),
+      'agentNetwork.interfaces': async () => ({ interfaces: await this.nodeProxy.interfaces() }),
       // These two a device may call: they carry no subscription's address.
       'agentNetwork.deviceStatus': () => this.nodeProxy.deviceStatus(),
       'agentNetwork.deviceLatency': async ({ nodes }) => ({

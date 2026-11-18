@@ -4,10 +4,19 @@
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import type { AgentNetworkStatus, ExitIp, NodeRef, NodeView } from '@shared/agent-network'
+import type {
+  AgentNetworkStatus,
+  ExitIp,
+  NetworkInterfaceView,
+  NodeRef,
+  NodeView,
+} from '@shared/agent-network'
 import type { AgentId } from '@shared/thread'
 import { errorMessage, hostAt } from '@renderer/lib/host'
 import { isWeb } from '@renderer/lib/platform'
+
+/** How often the interfaces are read while something shows their state. */
+const INTERFACES_MS = 5_000
 
 interface AgentNetworkState {
   status: AgentNetworkStatus | null
@@ -19,6 +28,8 @@ interface AgentNetworkState {
   testing: boolean
   /** The agents whose exit is being checked now. */
   checkingExit: Partial<Record<AgentId, boolean>>
+  /** The computer's interfaces as last read; null until read. */
+  interfaces: NetworkInterfaceView[] | null
 }
 
 export const useAgentNetworkStore = create<AgentNetworkState>()(() => ({
@@ -28,6 +39,7 @@ export const useAgentNetworkStore = create<AgentNetworkState>()(() => ({
   delays: {},
   testing: false,
   checkingExit: {},
+  interfaces: null,
 }))
 
 /** A node's key in `delays` and in a select's values. */
@@ -43,7 +55,13 @@ export function nodeOfKey(key: string): NodeRef | null {
 
 export function receiveAgentNetwork(status: AgentNetworkStatus): void {
   const before = useAgentNetworkStore.getState().status
-  useAgentNetworkStore.setState({ status, statusError: null })
+  useAgentNetworkStore.setState((s) => ({
+    status,
+    statusError: null,
+    // The status carries the host's last read, which a newer one asked for here may follow.
+    interfaces:
+      status.interfaces.length > 0 || s.interfaces === null ? status.interfaces : s.interfaces,
+  }))
   // The nodes change with the subscriptions and whether mihomo runs.
   const shape = (s: AgentNetworkStatus | null) =>
     s ? JSON.stringify([s.state, s.subscriptions.map((sub) => [sub.id, sub.name, sub.nodes])]) : ''
@@ -111,5 +129,36 @@ export function useAgentNetwork(): void {
     if (isWeb) return
     void loadAgentNetwork()
     void loadNodes()
+    void loadInterfaces().catch(() => {})
   }, [])
+}
+
+/** Reads the computer's interfaces again; the host puts a gone or down one's agents on REJECT. */
+export async function loadInterfaces(): Promise<void> {
+  const { interfaces } = await hostAt(null, 'agentNetwork.interfaces', undefined)
+  useAgentNetworkStore.setState({ interfaces })
+}
+
+let watchers = 0
+let watchTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Keeps the interfaces' state live while `active`, reading them every few seconds; however many
+ * components ask, one read at a time.
+ */
+export function useLiveInterfaces(active: boolean): void {
+  useEffect(() => {
+    if (isWeb || !active) return
+    const read = () => void loadInterfaces().catch(() => {})
+    if (++watchers === 1) {
+      read()
+      watchTimer = setInterval(read, INTERFACES_MS)
+    }
+    return () => {
+      if (--watchers === 0 && watchTimer) {
+        clearInterval(watchTimer)
+        watchTimer = null
+      }
+    }
+  }, [active])
 }

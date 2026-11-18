@@ -16,10 +16,13 @@ import {
   ExitCheckAction,
   ExitLine,
   InterfaceField,
+  InterfaceRow,
+  InterfacesEmpty,
   NetworkChoiceSelect,
   NetworkState,
   NetworkSwitch,
   RefreshAllAction,
+  RefreshInterfacesAction,
   RemoveSubscriptionDialog,
   SubscriptionDialog,
   SubscriptionRow,
@@ -37,7 +40,9 @@ export function useAgentNetworkSection(): SectionDef {
   const status = useAgentNetworkStore((s) => s.status)
   const statusError = useAgentNetworkStore((s) => s.statusError)
   const nodes = useAgentNetworkStore((s) => s.nodes)
+  const interfaces = useAgentNetworkStore((s) => s.interfaces)
   const enabled = useSettingsStore((s) => s.settings.agentNetwork.enabled)
+  const choices = useSettingsStore((s) => s.settings.agentNetwork.agents)
   const order = useAgentsStore((s) => s.order)
   const byId = useAgentsStore((s) => s.byId)
   const agents = usableAgents(order, byId).filter((agent) => !agent.disabled)
@@ -92,6 +97,19 @@ export function useAgentNetworkSection(): SectionDef {
       enabled && !running ? <GroupNote>{t('network.default.notRunning')}</GroupNote> : undefined,
   })
   const agentGroup = group('agents', t('network.groups.agents'), { count: agents.length })
+  const interfaceGroup = group('interfaces', t('network.groups.interfaces'), {
+    count: interfaces?.length,
+    actions: <RefreshInterfacesAction />,
+    note: <GroupNote>{t('network.interfaces.description')}</GroupNote>,
+  })
+  /** The names of the agents bound to the interface. */
+  const boundTo = (name: string) =>
+    agents
+      .filter((agent) => {
+        const choice = choices[agent.id]
+        return typeof choice === 'object' && 'interface' in choice && choice.interface === name
+      })
+      .map((agent) => agent.name)
 
   const rows: RowDef[] = [
     {
@@ -167,6 +185,25 @@ export function useAgentNetworkSection(): SectionDef {
       group: defaults,
       render: () => <DefaultNodeControl label={t('network.default.name')} />,
     },
+    ...(interfaces && interfaces.length > 0
+      ? interfaces.map((item): RowDef => ({
+          id: `interface-${item.name}`,
+          name: item.name,
+          keywords: t('network.interfaces.keywords'),
+          group: interfaceGroup,
+          layout: 'custom',
+          render: () => <InterfaceRow item={item} agents={boundTo(item.name)} />,
+        }))
+      : [
+          {
+            id: 'no-interfaces',
+            name: t('network.groups.interfaces'),
+            keywords: t('network.interfaces.keywords'),
+            group: interfaceGroup,
+            layout: 'custom',
+            render: () => <InterfacesEmpty />,
+          } satisfies RowDef,
+        ]),
     ...agents.map((agent): RowDef => ({
       id: `agent-${agent.id}`,
       name: agent.name,

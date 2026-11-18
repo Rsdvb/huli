@@ -1,13 +1,19 @@
 // The physical network interface of the default route: the one a node must dial out on so its
-// traffic never enters a TUN that a proxy client or VPN set up. Read with the system's own tools,
-// asynchronously, in the agent host.
+// traffic never enters a TUN that a proxy client or VPN set up; and every interface of the
+// computer, which an agent may be bound to. Read with the system's own tools, asynchronously, in
+// the agent host.
 
 import { execFile } from 'node:child_process'
+import type { NetworkInterfaceView } from '@shared/agent-network'
 import type { Platform } from '@shared/platform'
 
 /** Names and descriptions of virtual adapters, whose route is never the physical one. */
 const VIRTUAL =
   /wintun|\btun\b|tun\d|utun|\btap\b|tap-windows|meta|mihomo|clash|karing|sing-?box|tailscale|wireguard|\bwg\d*|zerotier|hyper-v|vethernet|vmware|virtualbox|vbox|loopback|docker|podman|\bbr-|veth|virbr|bridge|awdl|llw|ipsec|ppp|gif\d|stf\d|^lo\d*$|\bnordlynx|openvpn|anyconnect|cisco|fortinet|v2ray|xray|hiddify|nekoray|stash|surge|shadowrocket|loon|quantumult/i
+
+/** Names and descriptions of the adapters a proxy client's TUN or a VPN sets up. */
+const TUNNEL =
+  /wintun|\btun\b|tun\d|utun|\btap\b|tap-windows|tunnel|mihomo|clash|karing|sing-?box|tailscale|wireguard|\bwg\d*\b|zerotier|nordlynx|openvpn|anyconnect|ipsec|\bppp\d*\b|v2ray|xray|hiddify|nekoray|stash|surge/i
 
 export interface RouteCandidate {
   name: string
@@ -74,7 +80,12 @@ export function parseWindowsRoutes(text: string): RouteCandidate[] {
   })
 }
 
+// PowerShell writes in the console's code page unless told otherwise, which garbles a name such
+// as 以太网.
+const UTF8_OUTPUT = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8'
+
 const WINDOWS_SCRIPT = [
+  UTF8_OUTPUT,
   '$ErrorActionPreference = "SilentlyContinue"',
   'Get-NetRoute -AddressFamily IPv4 -DestinationPrefix 0.0.0.0/0 | ForEach-Object {',
   '  $a = Get-NetAdapter -InterfaceIndex $_.ifIndex',
@@ -83,6 +94,111 @@ const WINDOWS_SCRIPT = [
   '    status = [string]$a.Status; metric = [int]$_.RouteMetric + [int]$i.InterfaceMetric } }',
   '} | ConvertTo-Json -Compress',
 ].join('\n')
+
+const WINDOWS_ADAPTERS = [
+  UTF8_OUTPUT,
+  '$ErrorActionPreference = "SilentlyContinue"',
+  '@(Get-NetAdapter | ForEach-Object { [pscustomobject]@{ name = $_.Name;',
+  '  description = $_.InterfaceDescription; status = [string]$_.Status } }) |',
+  '  ConvertTo-Json -Compress',
+].join('\n')
+
+function isTunnel(name: string, description: string | null): boolean {
+  return TUNNEL.test(name) || TUNNEL.test(description ?? '')
+}
+
+/** Each name once, connected ones first, then by name. */
+function byName(list: NetworkInterfaceView[]): NetworkInterfaceView[] {
+  const seen = new Set<string>()
+  const once = list.filter((item) => {
+    if (item.name === '' || seen.has(item.name)) return false
+    seen.add(item.name)
+    return true
+  })
+  // By code point, the same on every computer whatever its locale.
+  return once.sort(
+    (a, b) => Number(b.up) - Number(a.up) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+  )
+}
+
+/** `Get-NetAdapter` rows as JSON: Up is connected; Disconnected, Disabled and the rest are not. */
+export function parseWindowsAdapters(text: string): NetworkInterfaceView[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text.trim() || '[]')
+  } catch {
+    return []
+  }
+  const rows = Array.isArray(parsed) ? parsed : [parsed]
+  return byName(
+    rows.flatMap((row: unknown) => {
+      if (typeof row !== 'object' || row === null) return []
+      const o = row as Record<string, unknown>
+      if (typeof o.name !== 'string') return []
+      const description =
+        typeof o.description === 'string' && o.description !== '' ? o.description : null
+      const up = o.status === 'Up'
+      return [{ name: o.name, description, up, tunnel: isTunnel(o.name, description) }]
+    }),
+  )
+}
+
+/**
+ * `ifconfig` blocks, `en0: flags=8863<UP,BROADCAST,...,RUNNING,...> mtu 1500` and an optional
+ * `status: inactive`, with `networksetup -listallhardwareports`, which names the hardware ports.
+ */
+export function parseMacInterfaces(ifconfig: string, ports = ''): NetworkInterfaceView[] {
+  const names = new Map<string, string>()
+  let port: string | null = null
+  for (const line of ports.split('\n')) {
+    const hardware = /^Hardware Port:\s*(.+)$/.exec(line.trim())
+    const device = /^Device:\s*(\S+)$/.exec(line.trim())
+    if (hardware) port = hardware[1]!
+    else if (device && port) names.set(device[1]!, port)
+  }
+  const blocks: { name: string; flags: string[]; inactive: boolean }[] = []
+  for (const line of ifconfig.split('\n')) {
+    const head = /^([^\s:]+):\s+flags=\d+<([^>]*)>/.exec(line)
+    if (head) blocks.push({ name: head[1]!, flags: head[2]!.split(','), inactive: false })
+    else if (blocks.length > 0 && /^\s+status:\s*inactive/.test(line)) {
+      blocks[blocks.length - 1]!.inactive = true
+    }
+  }
+  return byName(
+    blocks
+      .filter((b) => !b.flags.includes('LOOPBACK') && !/^(gif|stf)\d/.test(b.name))
+      .map((b) => {
+        const description = names.get(b.name) ?? null
+        return {
+          name: b.name,
+          description,
+          up: b.flags.includes('UP') && b.flags.includes('RUNNING') && !b.inactive,
+          tunnel: isTunnel(b.name, description),
+        }
+      }),
+  )
+}
+
+/** `ip -o link show` lines, `3: tun0: <POINTOPOINT,UP,LOWER_UP> mtu 1500 ... link/none`. */
+export function parseLinuxLinks(text: string): NetworkInterfaceView[] {
+  return byName(
+    text.split('\n').flatMap((line) => {
+      const m = /^\d+:\s+([^:@\s]+)(?:@\S+)?:\s+<([^>]*)>/.exec(line)
+      if (!m) return []
+      const flags = m[2]!.split(',')
+      if (flags.includes('LOOPBACK')) return []
+      const name = m[1]!
+      return [
+        {
+          name,
+          description: null,
+          up: flags.includes('UP') && flags.includes('LOWER_UP'),
+          tunnel: isTunnel(name, null) || /\blink\/none\b/.test(line),
+        },
+      ]
+    }),
+  )
+}
 
 function run(file: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -95,20 +211,22 @@ function run(file: string, args: string[]): Promise<string> {
   })
 }
 
+function powershell(script: string): Promise<string> {
+  const root = process.env.SystemRoot ?? 'C:\\Windows'
+  return run(`${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    script,
+  ])
+}
+
 /** The interface of the default route that is no virtual adapter; null when none is found. */
 export async function detectInterface(platform: Platform): Promise<string | null> {
   if (platform === 'win32') {
-    const root = process.env.SystemRoot ?? 'C:\\Windows'
-    const powershell = `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
-    const out = await run(powershell, [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      WINDOWS_SCRIPT,
-    ])
-    return pickInterface(parseWindowsRoutes(out))
+    return pickInterface(parseWindowsRoutes(await powershell(WINDOWS_SCRIPT)))
   }
   if (platform === 'darwin') {
     return pickInterface(parseMacRoutes(await run('/usr/sbin/netstat', ['-rn', '-f', 'inet'])))
@@ -117,4 +235,20 @@ export async function detectInterface(platform: Platform): Promise<string | null
     run('/sbin/ip', ['-4', 'route', 'show', 'default']),
   )
   return pickInterface(parseLinuxRoutes(ip))
+}
+
+/** Every network interface of the computer but loopback, connected ones first. */
+export async function listInterfaces(platform: Platform): Promise<NetworkInterfaceView[]> {
+  if (platform === 'win32') return parseWindowsAdapters(await powershell(WINDOWS_ADAPTERS))
+  if (platform === 'darwin') {
+    const [ifconfig, ports] = await Promise.all([
+      run('/sbin/ifconfig', []),
+      run('/usr/sbin/networksetup', ['-listallhardwareports']).catch(() => ''),
+    ])
+    return parseMacInterfaces(ifconfig, ports)
+  }
+  const links = await run('/usr/sbin/ip', ['-o', 'link', 'show']).catch(() =>
+    run('/sbin/ip', ['-o', 'link', 'show']),
+  )
+  return parseLinuxLinks(links)
 }

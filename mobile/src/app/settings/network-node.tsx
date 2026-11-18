@@ -1,5 +1,6 @@
 // Settings › Agent 网络 › a node picker: the default node (`target` default) or one agent's network,
-// with each node's latency and a test of them all.
+// with each node's latency and a test of them all, and for an agent the computer's network
+// interfaces, one of which it may be bound to.
 
 import { useState } from 'react'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -35,7 +36,21 @@ import { useTokens } from '../../ui/tokens'
 function samePick(a: NetworkPick, b: NetworkPick): boolean {
   if (a === b) return true
   if (a === null || b === null || typeof a === 'string' || typeof b === 'string') return false
+  if ('interface' in a || 'interface' in b) {
+    return 'interface' in a && 'interface' in b && a.interface === b.interface
+  }
   return a.subscription === b.subscription && a.node === b.node
+}
+
+/** The interfaces to offer, with the one the agent is bound to kept even when it is gone. */
+function interfaceRows(status: NetworkStatus, current: NetworkPick) {
+  const bound = current !== null && typeof current === 'object' && 'interface' in current
+  const name = bound ? current.interface : null
+  const list = status.interfaces.map((item) => ({ ...item, gone: false }))
+  if (name !== null && !list.some((item) => item.name === name)) {
+    list.push({ name, up: false, tunnel: false, gone: true })
+  }
+  return list
 }
 
 /** The nodes by subscription, in the computer's order. */
@@ -130,7 +145,7 @@ export default function NetworkNodeScreen() {
               forDefault
                 ? '没有默认节点时，跟随默认的 Agent 没有网络。'
                 : [
-                    '在节点和系统网络之间切换，要等它下次启动才生效。',
+                    '切换到系统网络或从系统网络切出，要等它下次启动才生效。',
                     exit ? `上次检测：${exit}` : null,
                   ]
                     .filter(Boolean)
@@ -161,6 +176,29 @@ export default function NetworkNodeScreen() {
               </>
             )}
           </ListGroup>
+
+          {!forDefault && (
+            <ListGroup
+              header="选择网卡"
+              footer="Agent 的流量和域名解析只从选定的网卡出去，比如代理软件的 TUN 或 WLAN。网卡断开或不存在时它就没有网络，不会改走别的网卡。"
+            >
+              {interfaceRows(status, current).length === 0 ? (
+                <GroupNote>没有读到电脑的网卡。</GroupNote>
+              ) : (
+                interfaceRows(status, current).map((item) => (
+                  <ListRow
+                    key={item.name}
+                    title={item.name}
+                    subtitle={item.tunnel ? 'TUN / VPN' : undefined}
+                    value={item.gone ? '已不存在' : item.up ? '已连接' : '未连接'}
+                    trailing={check(samePick(current, { interface: item.name }))}
+                    disabled={!connected || busy('pick')}
+                    onPress={() => void pick({ interface: item.name })}
+                  />
+                ))
+              )}
+            </ListGroup>
+          )}
 
           {!running ? (
             <GroupNote>Agent 网络在电脑上运行时才列出节点。</GroupNote>

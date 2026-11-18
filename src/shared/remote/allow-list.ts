@@ -22,6 +22,7 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'agentNetwork.nodes',
   'agentNetwork.testLatency',
   'agentNetwork.exitIp',
+  'agentNetwork.interfaces',
 ])
 
 function sourceHas(params: unknown, key: string): boolean {
