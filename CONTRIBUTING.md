@@ -65,6 +65,8 @@ pnpm typecheck
 pnpm test
 ```
 
+After upgrading Codex or the Claude Agent SDK on your computer, run `pnpm capabilities`. It reads the installed `codex`'s app-server schema and the newest SDK in Kite's harness folders (or the one `--sdk <folder>` names), and prints what is new since [`tools/capabilities/snapshot.json`](./tools/capabilities/snapshot.json), such as a method, an option, a model or rate-limit field or a new enum value, then what each offers that Kite's source does not use yet. Once the new items are handled or filed as issues, commit a fresh snapshot with `pnpm capabilities --update`.
+
 ## UI stack
 
 Each concern has exactly one library. Build with these instead of adding an alternative; if one of them really does not fit, open an issue first.
