@@ -1,0 +1,142 @@
+# A live session with the fake agent, end to end: starts one, fills it with replies, tables and a
+# run of tool calls, then keeps a turn running. Its recording shows the keyboard coming and going
+# at the end of the conversation and scrolled up (the keyboard dragged down too), a message queued
+# and sent at once from the queue card, and a run of work opened and closed.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/tables'
+- takeScreenshot: s01-new
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 15000
+    optional: true
+- takeScreenshot: s02-tables
+- tapOn:
+    text: '回复 .*'
+- inputText: '/basic-turn'
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 15000
+    optional: true
+- tapOn:
+    text: '回复 .*'
+- inputText: '/long-turn'
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 10000
+    optional: true
+- hideKeyboard
+- takeScreenshot: s03-running
+# The keyboard at the end of the conversation: up, dragged down by the list, up again, hidden.
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- tapOn:
+    text: '排队一条消息.*'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: s04-keyboard
+- swipe:
+    start: 50%, 35%
+    end: 50%, 85%
+    duration: 900
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: s05-dragged-down
+- tapOn:
+    text: '排队一条消息.*'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- hideKeyboard
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+# Scrolled up, then the keyboard.
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+    duration: 600
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: s06-scrolled-up
+- tapOn:
+    text: '排队一条消息.*'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: s07-scrolled-keyboard
+- hideKeyboard
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: s08-scrolled-hidden
+# A message queued, then sent at once with one tap on the queue card.
+- tapOn: '回到最新'
+  optional: true
+- tapOn:
+    text: '排队一条消息.*'
+- inputText: 'queued note'
+- tapOn: '加入队列'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- hideKeyboard
+- takeScreenshot: s09-queued
+- tapOn:
+    text: '立即发送'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: s10-sent-now
+# A run of work opened and closed.
+- tapOn:
+    text: '.*(运行了|读取了|编辑了).*'
+    index: 0
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: s11-run-open
+- tapOn:
+    text: '.*(运行了|读取了|编辑了).*'
+    index: 0
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: s12-run-closed

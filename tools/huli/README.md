@@ -463,6 +463,14 @@ disables every other workflow after each merge, new ones included.
   `tools/huli/newest-xcode.sh` selects the newest Xcode on the runner first and prints its SDK,
   since App Store Connect only takes builds made with the newest major SDK (ITMS-90725: iOS 27
   from April 2027); if the image has none new enough, move to a newer `macos-*` image.
+- `huli-sim.yml`, only by hand (`gh workflow run huli-sim.yml --ref <branch> -f ref=<branch>`):
+  checks the phone app in an iOS simulator on a `macos-26` runner instead of the owner's Mac.
+  `tools/huli/ios/sim/build.sh` builds the simulator app from `ref`; `run.sh` boots a fresh Pro Max
+  with the Pinyin keyboard, starts this checkout's daemon with the fake agent in a data folder of
+  its own, pairs the app with it alone (`pair.mjs` answers `kettu pair`), and runs the Maestro
+  flows under `tools/huli/ios/sim/flows` (or those named in its `flows` input) while recording the
+  screen. The screenshots, recordings and logs are the run's `huli-sim` artifact, kept for a day.
+  It uses no secrets and never runs on a push or pull request.
 
 Lint covers `mobile/` too, through the root ESLint config: the phone app gets the React hooks
 rules as the renderer does, may `require()` images as Metro needs, and drops props by leaving them

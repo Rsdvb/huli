@@ -1,0 +1,81 @@
+# Runs the phone app against a live computer on GitHub's macOS runner (huli-sim.yml): a fresh
+# simulator, a daemon of this checkout with the fake agent and its own data folder, the app paired
+# with it alone, then each flow under flows/ (or those named in FLOWS) while the screen is
+# recorded. Everything lands in $OUT/results for the run's artifact. Huli's own; see
+# tools/huli/README.md.
+set -euo pipefail
+OUT="${OUT:?}"
+RESULTS="$OUT/results"
+mkdir -p "$RESULTS"
+APP=$(ls -d "$OUT"/dd/Build/Products/Release-iphonesimulator/Huli.app)
+export JAVA_HOME="$HOME/.huli-tools/jdk/Contents/Home"
+export MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
+MAESTRO="$HOME/.huli-tools/maestro/bin/maestro"
+
+# The newest iOS runtime, on the newest Pro Max it offers.
+RUNTIME=$(xcrun simctl list runtimes -j | node -e '
+  const r = JSON.parse(require("fs").readFileSync(0, "utf8")).runtimes
+    .filter((x) => x.platform === "iOS" && x.isAvailable)
+    .sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
+  console.log(r.at(-1).identifier)')
+TYPE=$(xcrun simctl list devicetypes -j | node -e '
+  const t = JSON.parse(require("fs").readFileSync(0, "utf8")).devicetypes
+    .filter((x) => /^iPhone \d+ Pro Max$/.test(x.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+  console.log(t.at(-1).identifier)')
+echo "simulator: $TYPE on $RUNTIME"
+UDID=$(xcrun simctl create huli-sim "$TYPE" "$RUNTIME")
+xcrun simctl boot "$UDID"
+xcrun simctl bootstatus "$UDID" -b > /dev/null
+# The Pinyin keyboard first, whose candidate bar changes the keyboard's height as Chinese users see.
+xcrun simctl spawn "$UDID" defaults write -g AppleKeyboards -array \
+  "zh_Hans-Pinyin@sw=Pinyin;hw=Automatic" "en_US@sw=QWERTY;hw=Automatic"
+xcrun simctl spawn "$UDID" defaults write -g AppleKeyboardsExpanded -int 1
+xcrun simctl install "$UDID" "$APP"
+
+# The computer: this checkout's daemon with the fake agent, in a data folder of its own.
+export KETTU_DAEMON_DATA="$OUT/daemon"
+export KETTU_FAKE_AGENT="$PWD/tools/fake-agent/main.ts"
+export KETTU_DIRECT_PORT=47231
+mkdir -p "$KETTU_DAEMON_DATA"
+node out/daemon/main.cjs run > "$RESULTS/daemon.log" 2>&1 &
+DAEMON=$!
+for _ in $(seq 1 60); do
+  node out/daemon/main.cjs status > /dev/null 2>&1 && break
+  sleep 1
+done
+node out/daemon/main.cjs status
+node tools/huli/ios/sim/pair.mjs "$UDID" | tee "$RESULTS/pair.log"
+sleep 5
+xcrun simctl io "$UDID" screenshot "$RESULTS/paired.png"
+
+failed=0
+for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
+  [ -f "$flow" ] || flow="tools/huli/ios/sim/flows/$flow.yaml"
+  name=$(basename "$flow" .yaml)
+  echo "== $name"
+  xcrun simctl io "$UDID" recordVideo --codec h264 --force "$RESULTS/$name.mp4" > /dev/null 2>&1 &
+  REC=$!
+  sleep 1
+  if ! "$MAESTRO" --device "$UDID" test --test-output-dir "$RESULTS/$name" \
+    -e PROJECT="$OUT/project" "$flow" > "$RESULTS/$name.log" 2>&1; then
+    failed=1
+    tail -15 "$RESULTS/$name.log"
+  fi
+  sleep 1
+  kill -INT "$REC" || true
+  wait "$REC" 2>/dev/null || true
+done
+
+# The same screen in the dark appearance.
+xcrun simctl ui "$UDID" appearance dark
+sleep 2
+xcrun simctl io "$UDID" screenshot "$RESULTS/last-dark.png"
+xcrun simctl ui "$UDID" appearance light
+sleep 2
+xcrun simctl io "$UDID" screenshot "$RESULTS/last-light.png"
+
+kill "$DAEMON" || true
+xcrun simctl shutdown "$UDID" || true
+xcrun simctl delete "$UDID" || true
+exit $failed
