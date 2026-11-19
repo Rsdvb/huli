@@ -178,6 +178,7 @@ const selectConnected = (d: HostData) => d.state.kind === 'connected'
 const selectComputerId = (d: HostData) => activeOf(d)?.id ?? null
 const selectLoaded = (d: HostData) => d.loaded
 const selectDown = (d: HostData) => d.down
+const selectStale = (d: HostData) => d.fromCache || (d.down && d.state.kind !== 'connected')
 
 /** Every session; changes when any does. */
 export function useSessions(): Map<string, SessionSummary> {
@@ -224,6 +225,14 @@ export function useListsLoaded(): boolean {
  */
 export function useLinkDown(): boolean {
   return useHostSelector(selectDown)
+}
+
+/**
+ * The lists may be behind the computer: they are the cache's copy, or the link has been down a
+ * while. What they say runs is then only what ran when last heard of.
+ */
+export function useListsStale(): boolean {
+  return useHostSelector(selectStale)
 }
 
 /** The active computer's id, which the caches are kept under. */
