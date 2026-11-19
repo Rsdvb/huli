@@ -3,6 +3,7 @@
 // that keeps the finished ones in the list.
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
+import { StyleSheet, View } from 'react-native'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { sameItems, useConnected, useHostSelector, useLink, type HostData } from '../host'
@@ -102,5 +103,21 @@ export function SubagentMenu(props: { parentId: string; children: ReactElement }
   }
 
   if (all.length === 0) return props.children
-  return <NativeMenu source={source}>{props.children}</NativeMenu>
+  // The badge sits inside its session's row: claiming the touch keeps the row from opening the
+  // session under the menu, which the tap opens. Padding the label gives it a finger's room, and
+  // the margins take the room back so the row's line keeps its height.
+  return (
+    <View onStartShouldSetResponder={() => true} style={styles.hit}>
+      <NativeMenu source={source}>
+        <View style={styles.pad}>{props.children}</View>
+      </NativeMenu>
+    </View>
+  )
 }
+
+const ROOM = 12
+
+const styles = StyleSheet.create({
+  hit: { marginVertical: -ROOM, marginHorizontal: -ROOM / 2 },
+  pad: { paddingVertical: ROOM, paddingHorizontal: ROOM / 2 },
+})
