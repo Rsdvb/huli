@@ -216,7 +216,7 @@ export function ToBottomButton(props: {
   state: 'running' | 'waiting' | 'idle'
   onPress(): void
 }) {
-  const { c } = useSessionTokens()
+  const { c, s } = useSessionTokens()
   // Liquid Glass under a fading opacity draws nothing, so it popped in whole once the fade ended:
   // there the glass melts in and out on its own, and only the icon on it fades.
   const liquid = useGlassMode() === 'liquid'
@@ -245,9 +245,12 @@ export function ToBottomButton(props: {
       <View>
         {/* Never the system's own button for the chevron: one glass for every state, which can
             melt away. */}
+        {/* Liquid Glass bends the reply under it into a second, ghostly glyph beside the icon; a
+            veil of the page's color keeps what lies under it a soft blur. */}
         <GlassButton
           silent
           size={44}
+          {...(liquid ? { tint: s.veil } : {})}
           dematerialized={!props.visible}
           onPress={props.onPress}
           accessibilityLabel={

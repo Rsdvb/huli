@@ -123,14 +123,18 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
         </View>
         <View style={[styles.stack, { width: 24 + (stack.length - 1) * 10 }]}>
           {stack.map((icon, i) => (
+            // The fill is translucent, so each badge lies on the page's own color: else the one
+            // under it shows through and the stack reads as two icons drawn over each other.
             <View
               key={i}
               style={[
                 styles.badge,
-                { left: i * 10, backgroundColor: c.fill, borderColor: c.bg, zIndex: i },
+                { left: i * 10, backgroundColor: c.bg, borderColor: c.bg, zIndex: i },
               ]}
             >
-              <Icon icon={icon} size={12} color={c.textSecondary} />
+              <View style={[styles.badgeFill, { backgroundColor: c.fill }]}>
+                <Icon icon={icon} size={12} color={c.textSecondary} />
+              </View>
             </View>
           ))}
         </View>
@@ -207,6 +211,10 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 7,
     borderWidth: 1.5,
+  },
+  badgeFill: {
+    flex: 1,
+    borderRadius: 5.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
