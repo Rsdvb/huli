@@ -9,12 +9,20 @@
 // come into view, anchors the view on a row when the rows above it change, and follows the end on
 // its own, so no row is laid out twice nor the list flipped. Rows are not recycled between items:
 // cards keep drafts and open parts in state of their own, which must not pass to another row.
+//
+// The list shows its rows only once it has measured those on screen and placed the end, so a
+// session opened again must not make it measure from guesses: its rows are built by the same
+// builder as last time, so the rows that did not change are the same objects, and Legend List,
+// which keeps the heights it measured by key extractor, row object and width, places them where
+// they were and shows them on the push's first frames. It keeps none for a list given
+// `getItemType`, which it wraps anew on each mount, so rows have no kinds of their own.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
   ActivityIndicator,
   Keyboard,
   StyleSheet,
+  useWindowDimensions,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -37,19 +45,34 @@ const AWAY = 280
 const AWAY_TYPING = 56
 // Points a millisecond a scroll must move to count as a fling.
 const FLING = 1.2
-// A row's height before it is measured, until rows of its kind have been.
+// A row's height before it is measured, until some rows have been.
 const GUESS = 90
 // How far past the screen rows are drawn ahead of a fling.
 const DRAW_AHEAD = 500
 
 const NO_ROWS: Row[] = []
 const selectThread = (thread: ThreadState | null) => thread
-const rowKey = (row: Row) => row.key
 const renderRow = ({ item }: { item: Row }) => <ThreadRow row={item} />
 
-/** A row's kind: the list guesses a row's height from those of its kind measured so far. */
-function rowType(row: Row): string {
-  return row.type === 'entry' ? row.entry.kind : row.type
+/** What a session's list keeps between its visits: the heights Legend List keeps are by `key`. */
+interface ListMemory {
+  build: ReturnType<typeof rowBuilder>
+  key: (row: Row) => string
+}
+
+// As many as the threads the cache keeps in memory (cache.ts).
+const MEMORIES_KEPT = 6
+const memories = new Map<string, ListMemory>()
+
+function listMemory(sessionId: string): ListMemory {
+  const memory = memories.get(sessionId) ?? { build: rowBuilder(), key: (row: Row) => row.key }
+  memories.delete(sessionId)
+  memories.set(sessionId, memory)
+  for (const old of memories.keys()) {
+    if (memories.size <= MEMORIES_KEPT) break
+    memories.delete(old)
+  }
+  return memory
 }
 
 /** How far the conversation is scrolled up from its end. */
@@ -84,12 +107,18 @@ export function Conversation(props: {
   const [away, setAway] = useState(false)
   const [fresh, setFresh] = useState(false)
 
-  const buildRows = useMemo(() => rowBuilder(), [])
+  const memory = useMemo(() => listMemory(id), [id])
   const rows = useMemo(() => {
     if (!thread) return NO_ROWS
     observeTools(id, thread)
-    return buildRows(thread, running)
-  }, [thread, id, running, buildRows])
+    return memory.build(thread, running)
+  }, [thread, id, running, memory])
+  // The list's size before its layout, whose width its kept heights are restored at.
+  const screen = useWindowDimensions()
+  const listSize = useMemo(
+    () => ({ width: screen.width, height: screen.height }),
+    [screen.width, screen.height],
+  )
 
   // New rows while the user reads further up mark the way back down.
   const newest = rows[rows.length - 1]?.key
@@ -164,10 +193,10 @@ export function Conversation(props: {
       <LegendList
         ref={list}
         data={rows}
-        keyExtractor={rowKey}
+        keyExtractor={memory.key}
         renderItem={renderRow}
-        getItemType={rowType}
         estimatedItemSize={GUESS}
+        estimatedListSize={listSize}
         drawDistance={DRAW_AHEAD}
         recycleItems={false}
         // Opens at the newest row, a short thread sitting at the bottom as a chat does.

@@ -2,6 +2,7 @@
 // changed and a footer with its time, its length and what can be done with its reply.
 
 import type { PlanEntry, ThreadEntry, ThreadState, ToolEntry } from '@shared/thread'
+import { writingId } from '@shared/turn-phase'
 import { workflowCardOf } from '../../components/entries/workflowTools'
 import { diffTexts, type Diff } from '../../diff'
 
@@ -25,7 +26,11 @@ export interface FileChange {
 }
 
 export type Row =
-  | { type: 'entry'; key: string; entry: ThreadEntry }
+  /**
+   * `writing` marks the reply the agent is still writing. Its entry's own `streaming` is not
+   * enough: an agent that never ends a message leaves each of its turn's messages streaming.
+   */
+  | { type: 'entry'; key: string; entry: ThreadEntry; writing?: true }
   /**
    * The work between messages, as the desktop folds it: thoughts, tool calls and project memory
    * writes in a row, one line that opens to a line per step. `latest` is the last thing in a
@@ -217,9 +222,20 @@ function turnsOf(thread: ThreadState): ThreadEntry[][] {
   return turns
 }
 
-function markLatest(rows: Row[], live: boolean): Row[] {
+function markLatest(rows: Row[], thread: ThreadState, live: boolean): Row[] {
   const last = rows[rows.length - 1]
   if (live && last?.type === 'run') rows[rows.length - 1] = { ...last, latest: true }
+  const writing = writingId(thread)
+  if (writing !== null) {
+    // The reply being written is among the last rows; only plans and notices may follow it.
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i]!
+      if (row.type === 'entry' && row.key === writing) {
+        rows[i] = { ...row, writing: true }
+        break
+      }
+    }
+  }
   return rows
 }
 
@@ -229,7 +245,7 @@ function markLatest(rows: Row[], live: boolean): Row[] {
  * `live`, the turn still runs and its last run of work is the latest.
  */
 export function threadRows(thread: ThreadState, live = false): Row[] {
-  return markLatest(turnsOf(thread).flatMap(turnRows), live)
+  return markLatest(turnsOf(thread).flatMap(turnRows), thread, live)
 }
 
 const sameEntries = (x: readonly ThreadEntry[], y: readonly ThreadEntry[]) =>
@@ -256,7 +272,7 @@ export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
       for (const row of turn.rows) rows.push(row)
     }
     turns = kept
-    shown = keepRows(shown, markLatest(rows, live))
+    shown = keepRows(shown, markLatest(rows, thread, live))
     return shown
   }
 }
@@ -316,7 +332,10 @@ const list = (x: readonly unknown[], y: readonly unknown[]) =>
 /** Whether two rows draw the same, so a row redraws only when its own data changed. */
 export function sameRow(a: Row, b: Row): boolean {
   if (a.type !== b.type || a.key !== b.key) return false
-  if (a.type === 'entry') return a.entry === (b as typeof a).entry
+  if (a.type === 'entry') {
+    const other = b as typeof a
+    return a.entry === other.entry && a.writing === other.writing
+  }
   if (a.type === 'run') {
     const other = b as typeof a
     return a.latest === other.latest && list(a.entries, other.entries)

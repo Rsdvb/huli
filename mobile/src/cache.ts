@@ -92,8 +92,10 @@ export function writeLists(computer: string, lists: CachedLists): Promise<void> 
 }
 
 // The threads read or saved latest, in memory too, so a session opened again shows its rows on the
-// first frame of the push rather than once its file is read.
+// first frame of the push rather than once its file is read. A saved one keeps as many entries as
+// the screen showed, up to RECENT_ENTRIES, so the conversation opens on the rows it closed on.
 const RECENT_KEPT = 6
+const RECENT_ENTRIES = 1000
 const recent = new Map<string, CachedThread>()
 
 function remember(computer: string, sessionId: string, thread: CachedThread): void {
@@ -116,7 +118,8 @@ export async function readThread(
   sessionId: string,
 ): Promise<CachedThread | null> {
   const copy = await readJson<CachedThread>(threadFile(computer, sessionId))
-  if (copy) remember(computer, sessionId, copy)
+  // The copy in memory is never older than the file, and may hold more.
+  if (copy && !recent.has(`${computer}/${sessionId}`)) remember(computer, sessionId, copy)
   return copy
 }
 
@@ -126,11 +129,11 @@ export async function cachedThreadIds(computer: string): Promise<string[]> {
   return Array.isArray(index?.ids) ? index.ids : []
 }
 
-function newest(thread: ThreadState): ThreadEntry[] {
+function newest(thread: ThreadState, count: number, maxSize = Infinity): ThreadEntry[] {
   const kept: ThreadEntry[] = []
-  for (let i = thread.order.length - 1; i >= 0 && kept.length < ENTRIES_KEPT; i--) {
+  for (let i = thread.order.length - 1; i >= 0 && kept.length < count; i--) {
     const entry = thread.byId[thread.order[i]!]
-    if (entry && JSON.stringify(entry).length <= ENTRY_MAX) kept.push(entry)
+    if (entry && (maxSize === Infinity || JSON.stringify(entry).length <= maxSize)) kept.push(entry)
   }
   return kept.reverse()
 }
@@ -138,13 +141,11 @@ function newest(thread: ThreadState): ThreadEntry[] {
 /** Keeps the thread's newest entries, and forgets the threads opened longest ago. */
 export function writeThread(computer: string, thread: ThreadState): Promise<void> {
   const sessionId = thread.session.id
-  const copy: CachedThread = {
-    savedAt: Date.now(),
-    // A predicted prompt is for the moment it came; the computer sends it again if it holds.
-    session: { ...thread.session, suggestion: undefined },
-    entries: newest(thread),
-  }
-  remember(computer, sessionId, copy)
+  const savedAt = Date.now()
+  // A predicted prompt is for the moment it came; the computer sends it again if it holds.
+  const session = { ...thread.session, suggestion: undefined }
+  const copy: CachedThread = { savedAt, session, entries: newest(thread, ENTRIES_KEPT, ENTRY_MAX) }
+  remember(computer, sessionId, { savedAt, session, entries: newest(thread, RECENT_ENTRIES) })
   return serial(computer, async () => {
     await writeJson(threadFile(computer, sessionId), copy)
     const ids = [sessionId, ...(await cachedThreadIds(computer)).filter((id) => id !== sessionId)]

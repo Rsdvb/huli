@@ -7,6 +7,8 @@ import {
   type TurnPhaseName as SharedPhaseName,
 } from '@shared/turn-phase'
 
+export { writingId } from '@shared/turn-phase'
+
 /**
  * The phase as the desktop says it: the host's, where a wait on questions alone reads as one for
  * your answer rather than your approval. The host's summary keeps `approval` for both, as the
@@ -114,19 +116,4 @@ export function endedOnRejection(state: ThreadState | null | undefined): boolean
     }
   }
   return false
-}
-
-/**
- * The message the agent is still writing, when it is the turn's latest entry; once anything else
- * follows it, it reads as written even before the agent says so.
- */
-export function writingId(state: ThreadState | null | undefined): string | null {
-  if (!state) return null
-  for (let i = state.order.length - 1; i >= 0; i--) {
-    const entry = state.byId[state.order[i]!]
-    // A plan or a notice may land while the message still streams; a subagent's card follows it.
-    if (!entry || entry.kind === 'plan' || entry.kind === 'notice') continue
-    return entry.kind === 'agent' && entry.streaming ? entry.id : null
-  }
-  return null
 }

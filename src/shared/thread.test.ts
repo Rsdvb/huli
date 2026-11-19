@@ -8,6 +8,7 @@ import {
   outOfCreditTurn,
   prependEntries,
   retryableTurn,
+  shareEntries,
   threadEntries,
   threadFromSnapshot,
   UnknownEntryError,
@@ -143,6 +144,49 @@ describe('applyPatches', () => {
       { op: 'entry.appendText', id: 'c:1', text: 'B' },
     ])
     expect(after.byId['c:1']).toMatchObject({ summary: 'AB' })
+  })
+})
+
+describe('shareEntries', () => {
+  // A snapshot read again: equal data in new objects, as JSON makes them.
+  const again = (entries: ThreadEntry[], view = session): ThreadState =>
+    threadFromSnapshot(JSON.parse(JSON.stringify({ session: view, entries, seq: 1 })))
+
+  it('keeps the thread itself when the snapshot holds the same', () => {
+    const before = state()
+    expect(shareEntries(before, again([user, agent]))).toBe(before)
+  })
+
+  it('keeps the entries that did not change and takes the ones that did', () => {
+    const before = state()
+    const grown = { ...agent, markdown: 'Hello', streaming: false } as ThreadEntry
+    const next = shareEntries(before, again([user, grown]))
+    expect(next).not.toBe(before)
+    expect(next.byId['e:1']).toBe(before.byId['e:1'])
+    expect(next.byId['m:1']).toEqual(grown)
+    expect(next.byId['m:1']).not.toBe(before.byId['m:1'])
+  })
+
+  it('takes a new order, new entries and a changed session', () => {
+    const before = state()
+    const reply: ThreadEntry = { ...agent, id: 'm:2', markdown: 'More', streaming: false }
+    const next = shareEntries(
+      before,
+      again([user, agent, reply], { ...session, status: 'running' }),
+    )
+    expect(next.order).toEqual(['e:1', 'm:1', 'm:2'])
+    expect(next.byId['m:1']).toBe(before.byId['m:1'])
+    expect(next.session.status).toBe('running')
+  })
+
+  it('treats a field left out as one set to undefined', () => {
+    const before = state([{ ...agent, at: undefined } as ThreadEntry])
+    expect(shareEntries(before, again([agent]))).toBe(before)
+  })
+
+  it('takes the snapshot whole when there is no thread yet', () => {
+    const next = again([user])
+    expect(shareEntries(null, next)).toBe(next)
   })
 })
 

@@ -11,6 +11,7 @@ import type { HostLink, LinkState } from '@shared/remote/link'
 import {
   applyPatches,
   prependEntries,
+  shareEntries,
   threadFromSnapshot,
   type OlderPage,
   type PatchBatch,
@@ -76,8 +77,9 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const connected = state.kind === 'connected'
 
   // Until the computer sends the thread, the cache's copy from an earlier visit shows, read-only.
+  // The copy in memory is already shown, and the file holds no more than it.
   useEffect(() => {
-    if (!computer) return
+    if (!computer || first) return
     let current = true
     void readThread(computer, sessionId).then((copy) => {
       if (!current || !copy || live.current) return
@@ -88,7 +90,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     return () => {
       current = false
     }
-  }, [computer, sessionId])
+  }, [computer, sessionId, first])
 
   // The thread the computer sent goes to the cache now and then, and when the screen closes.
   const latest = useRef<ThreadState | null>(null)
@@ -160,7 +162,8 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       live.current = true
       cachedRef.current = false
       setCached(false)
-      setThread(next)
+      // The entries the screen shows already keep their objects, so only what changed redraws.
+      setThread((current) => shareEntries(current, next))
       setOlder(snapshot.older)
       setPlan(snapshot.plan ?? null)
       setError(null)

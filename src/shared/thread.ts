@@ -1037,6 +1037,48 @@ export function threadFromSnapshot(snapshot: Omit<SessionSnapshot, 'older' | 'pl
   return { session: snapshot.session, order, byId }
 }
 
+/** Whether two values parsed from JSON hold the same data. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!sameData(a[i], b[i])) return false
+    return true
+  }
+  if (Array.isArray(b)) return false
+  const x = a as Record<string, unknown>
+  const y = b as Record<string, unknown>
+  let count = 0
+  for (const key in x) {
+    if (x[key] === undefined) continue
+    count++
+    if (!sameData(x[key], y[key])) return false
+  }
+  for (const key in y) if (y[key] !== undefined) count--
+  return count === 0
+}
+
+/**
+ * `next`, a thread read whole again, with each entry that holds the same as `before`'s entry of
+ * its id kept as that object, so a view that compares entries by reference redraws only what
+ * changed; `before` itself when nothing did.
+ */
+export function shareEntries(before: ThreadState | null, next: ThreadState): ThreadState {
+  if (!before) return next
+  let changed = before.order.length !== next.order.length || !sameData(before.session, next.session)
+  const byId: Record<string, ThreadEntry> = {}
+  for (let i = 0; i < next.order.length; i++) {
+    const id = next.order[i]!
+    const entry = next.byId[id]!
+    const old = before.byId[id]
+    const kept = old !== undefined && sameData(old, entry) ? old : entry
+    byId[id] = kept
+    if (kept !== old || before.order[i] !== id) changed = true
+  }
+  return changed ? { session: next.session, order: next.order, byId } : before
+}
+
 export function threadEntries(state: ThreadState): ThreadEntry[] {
   return state.order.map((id) => state.byId[id]!)
 }
