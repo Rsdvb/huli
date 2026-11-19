@@ -24,7 +24,12 @@ export interface UpdateStatus {
   dismissed: string | null // the version whose notice was dismissed
 }
 
-export const RELEASES_URL = 'https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996'
+// Huli: the channel's path is kept out of the repository; tools/huli/update-path.mjs fills it in
+// before a build. A build without it, such as `pnpm dev`, has no update channel.
+export const RELEASES_URL = 'https://huli.132-145-200-0.sslip.io/u/__HULI_UPDATE_PATH__'
+
+/** Whether the build was given the channel's path, which is 32 hex characters. */
+export const UPDATE_CHANNEL_READY = /\/u\/[0-9a-f]{32}$/.test(RELEASES_URL)
 
 export function releaseUrl(version: string): string {
   // Huli: the channel serves files only; release notes are on the repository's releases.

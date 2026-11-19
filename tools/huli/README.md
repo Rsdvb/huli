@@ -16,9 +16,9 @@ working:
 - Data: `%APPDATA%\Huli` (and `~/Library/Application Support/Huli`, `~/.config/Huli`), which
   `PACKAGED_DATA_FOLDER` in `src/main/user-data.ts` pins now that the product name is Kite;
   `Huli Dev`; the home folder `~/.huli`.
-- Services: the update channel and Kite Cloud's host (`huli.132-145-200-0.sslip.io`), the server's
-  `huli-cloud` command and `HULI_*` settings, the pairing, relay and push constants, the repository
-  `Rsdvb/huli` and the `huli-*` workflows.
+- Services: the update channel (under a secret path, see Update channel) and Kite Cloud's host
+  (`huli.132-145-200-0.sslip.io`), the server's `huli-cloud` command and `HULI_*` settings, the
+  pairing, relay and push constants, the repository `Rsdvb/huli` and the `huli-*` workflows.
 - The phone app's `expo.name`, which names its Xcode project, scheme and `Huli.app` that
   `tools/huli/ios` builds; the name people see comes from `mobile/plugins/appName.js` and
   `mobile/locales/zh-Hans.json`.
@@ -37,7 +37,7 @@ Code (kept small so upstream merges stay clean):
 | `src/agent-host/agents.ts`                                                                                                               | `READ_ANTIGRAVITY_LIMITS = false`: never runs `agy -p /usage`, `/credits` or a hidden ACP session by itself to read Antigravity's limits; only a refresh the user presses (`agents.refreshLimits` with `ask: true`) runs `/usage` and `/credits` once                                |
 | `src/shared/settings.ts`                                                                                                                 | defaults: cloud off, relay on (Huli Cloud's, used only with the cloud on and signed in), discoverable (the account's phones and browsers may ask to be added; the owner allows each)                                                                                                 |
 | `src/remote-host/start.ts`, `src/shared/remote/relay.ts`                                                                                 | signed in to the relay, the host always sends its profile, so Huli Cloud registers it as the account's computer; `pairable: false` in it while it is not discoverable                                                                                                                |
-| `src/main/update-keys.json`, `src/main/update-sources.ts`, `src/shared/updates.ts`, `src/daemon/update.ts`                               | updates come from Huli's own channel on Huli Cloud's host, signed with Huli's own release keys (kept off the repository)                                                                                                                                                             |
+| `src/main/update-keys.json`, `src/main/update-sources.ts`, `src/shared/updates.ts`, `src/daemon/update.ts`                               | updates come from Huli's own channel on Huli Cloud's host, signed with Huli's own release keys (kept off the repository); its path is a placeholder the build fills in (see Update channel), and a build without it has no updates                                                   |
 | `src/shared/account-api.ts`, `src/shared/remote/push.ts`                                                                                 | the account service and push gateway are Huli Cloud, `https://huli.132-145-200-0.sslip.io` (see `cloud/`)                                                                                                                                                                            |
 | `src/shared/kettu-hosts.ts`                                                                                                              | Huli Cloud's host counts as one of the services the cloud switch governs                                                                                                                                                                                                             |
 | `src/shared/remote/relay.ts`, `relay-regions.ts`                                                                                         | `RELAY_URL` is Huli Cloud too (its relay, one region, Ashburn); `REGION_KEYS` are Huli's own region list keys (`tools/huli/region-list.mjs`, private halves in `~/.huli-keys`)                                                                                                       |
@@ -46,7 +46,7 @@ Code (kept small so upstream merges stay clean):
 | `src/main/user-data.ts`                                                                                                                  | development data folder `Huli Dev`; an installed build's, `Huli` (`PACKAGED_DATA_FOLDER`), which `src/main/index.ts` pins                                                                                                                                                            |
 | `src/main/index.ts`, `src/main/computer-use.ts`                                                                                          | app user model id `local.huli.app`                                                                                                                                                                                                                                                   |
 | `package.json`                                                                                                                           | productName `Kite`, version 0.1.0                                                                                                                                                                                                                                                    |
-| `electron-builder.yml`                                                                                                                   | appId `local.huli.app`, productName `Kite`, `publish` is Huli's update channel (generic)                                                                                                                                                                                             |
+| `electron-builder.yml`                                                                                                                   | appId `local.huli.app`, productName `Kite`, `publish` is Huli's update channel (generic), its path a placeholder as above                                                                                                                                                            |
 | `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts` | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub |
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json`                              | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved                                                                                                                        |
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                    |
@@ -226,6 +226,10 @@ Generated before a build (not hand edits, never committed):
     (`src/renderer/src/assets/kettu-*.svg`) and the first run's pictures
     (`assets/onboarding/fox-*.webp`, now paper kites). The tree keeps Kettu's, so Kettu's own icon
     changes merge cleanly; it warns about a tray image or brand file upstream adds that Kite lacks.
+  - Last it runs `update-path.mjs` (below), unless given `--no-update-path`, as
+    `deploy-cloud.ps1` does: the hosted web client is public, so the path stays out of it.
+- `node tools/huli/update-path.mjs` fills in the update channel's path (see Update channel). The
+  rebrand runs it; the phone builds run it alone, before bundling.
 
 ### Kite's artwork
 
@@ -450,11 +454,64 @@ disables every other workflow after each merge, new ones included.
   differ, and not while a sync is running (the sync starts its own build) nor for a commit whose
   build failed already (run it by hand to retry); otherwise every job is skipped. Versions stay
   `0.<UTC date>.<run number>`, and skipped runs use up run numbers, so they only grow.
+  The macOS app and the iOS app build on GitHub's `macos-26` runners; `tools/huli/restore-apple-keys.sh`
+  first unpacks the `HULI_APPLE_KEYS` secret (the Developer ID and Apple Distribution certificates,
+  the build keychain's password and the App Store Connect key) into `~/.huli-keys`, where
+  `build-ios.sh` and the signed macOS build look for them, and `signing.mjs` refuses to make a new
+  certificate in CI. Setting the `HULI_MAC_RUNNER` variable to `true` moves both jobs back to the
+  owner's Mac, which a public repository must never do: a pull request could run code there.
 
 Lint covers `mobile/` too, through the root ESLint config: the phone app gets the React hooks
 rules as the renderer does, may `require()` images as Metro needs, and drops props by leaving them
 out of a rest spread. `mobile/src/artifact-view/page-runtime.generated.ts` is generated, so
 Prettier skips it.
+
+## Public code, private builds
+
+The repository is public so macOS and iOS can build on GitHub's free runners; the builds are not,
+and once a run ends GitHub offers none of them for download:
+
+- Every `upload-artifact` keeps its files a day at most (`retention-days: 1`), and the `cleanup`
+  job, which waits for every job that uploads or downloads them and runs even when one failed or
+  the run was cancelled, deletes all of the run's artifacts through the REST API. While the run is
+  going, a signed-in GitHub user who finds it could still download them.
+- The release on GitHub is a pre-release with notes only: the Kettu commit merged and the files'
+  SHA-256 sums. It attaches no file, `SHA256SUMS.txt` included. Its tag stays, since the nightly
+  `changes` job compares main with the latest release's.
+- The installers go only to the update channel, whose path the code never holds (see Update
+  channel). The release job takes the channel's URL from the `HULI_CHANNEL_URL` secret, not a
+  variable, so the log masks it.
+- iOS builds go to TestFlight for its internal testers only; there is no public link, and
+  `publish-testflight.mjs`, which put each build on it, is gone.
+- Signing material comes from the `HULI_APPLE_KEYS` secret (above), Android's key from
+  `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD`, and the update files' key from
+  `UPDATE_SIGNING_KEY`; nothing prints them.
+
+## Update channel
+
+The channel lives at `https://huli.132-145-200-0.sslip.io/u/<path>`, where `<path>` is 32 hex
+characters that only the builds know. The code holds the placeholder `__HULI_UPDATE_PATH__` in
+its place, in `electron-builder.yml` (`publish`), `src/daemon/update.ts`,
+`src/main/update-sources.ts` and `src/shared/updates.ts` (whose `RELEASES_URL` the phone reads
+too). `tools/huli/update-path.mjs` fills it in before a build, from the `HULI_UPDATE_PATH`
+environment variable, else from `~/.huli-keys/update-path.txt` (`%USERPROFILE%\.huli-keys` on
+Windows), never printing it. In CI (`GITHUB_ACTIONS=true`) a missing path, one that is not 32
+lowercase hex characters, or a file that no longer holds the placeholder fails the build; a local
+build without it warns and leaves the placeholder.
+
+Every job that builds something that names the channel fills it in: the desktop and macOS jobs
+through the rebrand, and the iOS and Android jobs with `update-path.mjs` alone before
+`expo prebuild`, each with the `HULI_UPDATE_PATH` secret. A build that still holds the placeholder,
+such as `pnpm dev`, has no updates rather than failing: `UPDATE_CHANNEL_READY` in
+`src/shared/updates.ts` turns the desktop updater off (as in development), the phone's update
+check off, and `kettu update` finds no place of its own.
+
+The path the code used to spell out is in the repository's history, so it was rotated when the
+repository went public: the server serves the channel under the new path (`/etc/huli-updates.path`,
+which `cloud/deploy/install.sh` reads), and only that file, the secret and
+`~/.huli-keys/update-path.txt` hold it. Installs from before the rotation still ask the old
+path; unless the server keeps answering there for a while, they need a new build installed once by
+hand. The filled-in files stay in the working tree like the rebrand's output; never commit them.
 
 ## Build
 
@@ -467,4 +524,10 @@ npx -y pnpm@10.11.1 fetch:device-helpers
 npx -y pnpm@10.11.1 dist:win      # dist\Kite-<version>-x64-setup.exe
 ```
 
-The rebrand leaves its output in the working tree; never commit it.
+The rebrand leaves its output in the working tree; never commit it. It fills in the update
+channel's path from `%USERPROFILE%\.huli-keys\update-path.txt` (see Update channel), so that output
+holds the secret path. To put the placeholder back:
+
+```powershell
+git checkout -- electron-builder.yml src/daemon/update.ts src/main/update-sources.ts src/shared/updates.ts
+```

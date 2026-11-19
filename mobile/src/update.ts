@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react'
 import { AppState, Linking, Platform } from 'react-native'
 import * as Application from 'expo-application'
 import * as SecureStore from 'expo-secure-store'
-import { RELEASES_URL } from '@shared/updates'
+import { RELEASES_URL, UPDATE_CHANNEL_READY } from '@shared/updates'
 
 export interface Release {
   version: string
@@ -22,7 +22,8 @@ export interface UpdateSnapshot {
   dismissed: string | null
 }
 
-export const UPDATES_SUPPORTED = Platform.OS === 'android'
+// A build without the channel's path (tools/huli/update-path.mjs) never checks.
+export const UPDATES_SUPPORTED = Platform.OS === 'android' && UPDATE_CHANNEL_READY
 
 const ITEM = 'huli.update'
 const INTERVAL = 6 * 60 * 60 * 1000

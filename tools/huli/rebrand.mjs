@@ -8,6 +8,7 @@
 import { cp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { fillUpdatePath } from './update-path.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** The product's name in code and in every language but Chinese. */
@@ -281,3 +282,13 @@ const a = await artwork()
 console.log(
   `rebrand: ${l} locale files and ${c} code files now say ${NAME} (${ZH_NAME}); ${a} artwork files copied`,
 )
+// The update channel's path (tools/huli/update-path.mjs). A build served to anyone, such as the
+// hosted web client's, passes --no-update-path so the path stays out of it.
+if (!process.argv.includes('--no-update-path')) {
+  try {
+    console.log(`rebrand: update path filled in ${await fillUpdatePath()} files`)
+  } catch (error) {
+    console.error(`rebrand: ${error.message}`)
+    process.exitCode = 1
+  }
+}

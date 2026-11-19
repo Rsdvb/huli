@@ -50,7 +50,7 @@ electronFuses:
 # them itself, and the app reads its own channel (src/main/update-sources.ts).
 publish:
   provider: generic
-  url: https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996/latest/download
+  url: https://huli.132-145-200-0.sslip.io/u/__HULI_UPDATE_PATH__/latest/download
 
 mac:
   category: public.app-category.developer-tools
