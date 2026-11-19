@@ -59,6 +59,14 @@ export class AgentTrees {
     if (this.leftovers.length > 0) this.stopping.add(this.leftovers)
   }
 
+  /** Huli: whether a process is an agent this host started, or one listed in an agent's tree. */
+  owns(pid: number): boolean {
+    for (const { root, members } of this.running.values()) {
+      if (root.pid === pid || members.some((member) => member.pid === pid)) return true
+    }
+    return false
+  }
+
   launched(root: ProcessId): void {
     this.running.set(keyOf(root), { root: { ...root, seenAt: Date.now() }, members: [] })
     this.save()

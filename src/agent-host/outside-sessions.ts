@@ -216,12 +216,14 @@ function alive(pid: number): boolean {
 /**
  * The process outside any SDK host that has the session open, from the files Claude Code's running
  * processes keep in its `sessions` folder, each named for its process id. An SDK host's own, such
- * as Kettu's, is left out: Kettu attaches its own sessions itself.
+ * as Kettu's, is left out: Kettu attaches its own sessions itself. So is one `isOwn` names, as
+ * Kettu's own Claude Code under another entry point than an SDK one.
  */
 export async function findHolder(
   folder: string,
   acpSessionId: string,
   isAlive: (pid: number) => boolean = alive,
+  isOwn: (pid: number, entrypoint: string | null) => boolean = () => false,
 ): Promise<SessionHolder | null> {
   const names = await readdir(folder).catch(() => [])
   for (const name of names) {
@@ -237,6 +239,7 @@ export async function findHolder(
     if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) continue
     const entrypoint = stringOr(entry.entrypoint)
     if (entrypoint?.startsWith('sdk')) continue
+    if (isOwn(pid, entrypoint)) continue
     if (!isAlive(pid)) continue
     return { pid, entrypoint, busy: entry.status === 'busy' }
   }
@@ -248,9 +251,18 @@ export function claudeOutside(deps: {
   home: string
   env(): Promise<Record<string, string | undefined>>
   log(level: 'info' | 'warn' | 'error', message: string): void
+  /**
+   * Huli: the entry point Kettu's own Claude Code runs under when a setting gives it one, which
+   * its environment does not carry.
+   */
+  ownEntrypoint?(): string | null
+  /** Huli: whether a process is one Kettu started for an agent. */
+  ownProcess?(pid: number): boolean
 }): OutsideReader {
   const root = async (configDir: string | null): Promise<string> =>
     projectsFolder(await deps.env(), deps.home, deps.platform, configDir)
+  const own = async (): Promise<string | null> =>
+    deps.ownEntrypoint?.() ?? (await deps.env()).CLAUDE_CODE_ENTRYPOINT ?? null
   return {
     async lastRequest(agentId, projectPath, acpSessionId, configDir) {
       if (harnessOf(agentId) !== 'claude-code') return null
@@ -266,15 +278,21 @@ export function claudeOutside(deps: {
     async holder(agentId, acpSessionId, configDir) {
       if (harnessOf(agentId) !== 'claude-code') return null
       const folder = path.join(path.dirname(await root(configDir)), 'sessions')
-      return findHolder(folder, acpSessionId)
+      const label = await own()
+      return findHolder(
+        folder,
+        acpSessionId,
+        alive,
+        (pid, entrypoint) =>
+          (label !== null && entrypoint === label) || deps.ownProcess?.(pid) === true,
+      )
     },
     async tail(agentId, projectPath, acpSessionId, configDir) {
       if (harnessOf(agentId) !== 'claude-code') return null
       const file = await findClaudeTranscript(await root(configDir), projectPath, acpSessionId)
       if (!file) return null
       try {
-        const own = (await deps.env()).CLAUDE_CODE_ENTRYPOINT ?? null
-        return await readTail(file, own)
+        return await readTail(file, await own())
       } catch (error) {
         deps.log('warn', `Could not read ${file}: ${(error as Error).message}`)
         return null

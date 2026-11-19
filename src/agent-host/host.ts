@@ -1043,6 +1043,9 @@ export class AgentHost {
             return this.env.agentEnv('claude-code')
           },
           log,
+          // Huli: its own Claude Code under a test entry point is no terminal's.
+          ownEntrypoint: () => this.settings.claudeTestEntrypoint,
+          ownProcess: (pid) => this.trees.owns(pid),
         }),
       idleRelease: this.idleRelease,
       diagnostics: this.diagnostics,
