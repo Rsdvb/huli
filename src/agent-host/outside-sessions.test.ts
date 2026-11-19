@@ -239,6 +239,16 @@ describe('findHolder', () => {
     await expect(findHolder(folder, SESSION, (pid) => pid !== 202)).resolves.toBeNull()
   })
 
+  it("leaves out the app's own Claude Code under a test entry point", async () => {
+    await entry(301, { sessionId: SESSION, entrypoint: 'kite-dev', status: 'busy' })
+    await entry(302, { sessionId: SESSION, entrypoint: 'cli', status: 'busy' })
+    const own = (pid: number, entrypoint: string | null): boolean =>
+      entrypoint === 'kite-dev' || pid === 302
+
+    await expect(findHolder(folder, SESSION, () => true, own)).resolves.toBeNull()
+    await expect(findHolder(folder, SESSION, () => true)).resolves.not.toBeNull()
+  })
+
   it('has none when the folder is missing', async () => {
     await expect(findHolder(path.join(folder, 'missing'), SESSION, () => true)).resolves.toBeNull()
   })
