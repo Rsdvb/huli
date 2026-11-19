@@ -14,7 +14,6 @@ import type files from './locales/en/files.json'
 import type git from './locales/en/git.json'
 import type host from './locales/en/host.json'
 import type huliAccount from './locales/en/huliAccount.json'
-import type kettuImport from './locales/en/kettuImport.json'
 import type agentHistory from './locales/en/agentHistory.json'
 import type main from './locales/en/main.json'
 import type marketplace from './locales/en/marketplace.json'
@@ -55,7 +54,6 @@ declare module 'i18next' {
       git: typeof git
       host: typeof host
       huliAccount: typeof huliAccount
-      kettuImport: typeof kettuImport
       agentHistory: typeof agentHistory
       main: typeof main
       marketplace: typeof marketplace

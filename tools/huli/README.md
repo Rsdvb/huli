@@ -52,61 +52,6 @@ Code (kept small so upstream merges stay clean):
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                                                   |
 | `eslint.config.mjs`, `.prettierignore`                                                                                                   | lint and formatting reach the phone app in `mobile/` (see Workflows)                                                                                                                                                                                                                                                |
 
-### Import from Kettu
-
-Brings an official Kettu's sessions, memory and artifacts on the same computer over: Settings ›
-General › Import from Kettu. Nothing looks for Kettu's data until its dialog opens, since a look
-copies Kettu's whole thread database (some 300 MB); the dialog looks each time it opens.
-
-Huli's own files:
-
-- `src/agent-host/kettu-import.ts` (+ `.test.ts`): finds Kettu's data folder (`%APPDATA%\Kettu`,
-  `~/Library/Application Support/Kettu`, `$XDG_CONFIG_HOME` or `~/.config/Kettu`; `HULI_KETTU_DATA`
-  points elsewhere), copies `state/sessions.json` and `state/projects.json` into a temporary folder
-  (`huli-kettu-*`, removed after each look; one an hour old that a host stopped during a look left
-  behind goes with the next look) and reads the copies with the index's own parsers. It never writes
-  there, and reads nothing when that folder is Huli's own (a build named Kettu). Each chosen session
-  is imported through `importSession`, as the sidebar's Import sessions does, so Huli resumes the
-  agent's own session; one another program has open (Kettu itself) comes over as a fork. Subagent
-  sessions are not imported: the parent's history brings them back under it when it is opened.
-  Sessions in a Kettu worktree or Kettu's scratch folder, for an agent Huli lacks, or in a folder
-  that is gone are skipped. `state/kettu-import.json` remembers which Kettu session became which,
-  and which memory entries and artifacts came over. The scan counts memory and artifacts too, all
-  and not here yet; a run brings them after the sessions when asked (`memory`, `artifacts`), so
-  their sources and authors name the sessions those became.
-- `src/agent-host/kettu-import-memory.ts` (+ `.test.ts`): Kettu's `memory/global` into global
-  memory and each `memory/projects/<folder>` into the same project's, placed by the path in its
-  `project.json` (a project Huli lacks is added if its folder exists). Each file is copied into the
-  temporary folder and read from there, checked for size, UTF-8 and id; `undo/` is not brought.
-  `MemoryService.adopt` (in `memory/service.ts`) writes them with their ids, times and sources,
-  checked as a write is (limits, secrets): one whose title and body the layer holds is skipped,
-  one whose id is taken by other content gets a new id, and one the ledger has as it is now is not
-  brought again even if changed or forgotten here.
-- `src/agent-host/kettu-import-artifacts.ts` (+ `.test.ts`) and `threads/kettu-artifacts.ts`:
-  Kettu's artifact records live in its `state/threads.db`, which is copied with its WAL (again while
-  Kettu wrote during the copy, up to three times) and read in the thread worker (the `readKettu`
-  artifact call). Every record is checked (ids, paths, sizes, types, declarations) and every content
-  file must match its hash. Each artifact comes through the `create` and `write` calls as its
-  versions with their times, notes and authors, under its own id where free, else a new one;
-  one the ledger names that is still here, or whose latest version is here, is skipped. Kettu's
-  Recently deleted, its scratch folders and `published-artifacts.json` (sharing links of Kettu's
-  account) stay behind; thumbnails are drawn anew.
-- `src/shared/kettu-import.ts`: the scan's and the run's types.
-- `src/renderer/src/features/kettu-import/`: the store, the dialog and the Settings row
-  (`settings-row.tsx`).
-- `src/shared/locales/*/kettuImport.json`: its copy, which the rebrand leaves whole (`KEEP_FILES`).
-
-Hooks into upstream files, one or two lines each:
-
-- `src/agent-host/sessions.ts`: `importSession` takes an optional `kept` (title, times, pin,
-  archive) and the `KeptField` type.
-- `src/agent-host/memory/service.ts` (`adopt`), `src/agent-host/artifacts/model.ts` and
-  `threads/service.ts` (the `readKettu` call).
-- `src/shared/agent-host.ts` (`kettuImport.scan`, `kettuImport.run`, the `kettuImport.progress`
-  event), `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`, `src/agent-host/host.ts`.
-- `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (the progress
-  event), `features/settings/section-defs.tsx` (the row).
-
 ### Import from agents
 
 Brings every past session of Claude Code, Codex or an ACP agent on this computer over, across all
@@ -150,9 +95,10 @@ Hooks into upstream files, one or two lines each:
 
 - `src/agent-host/connection.ts` (`ListedEverywhere`, the optional `listAllSessions`), its
   implementations in `codex/connection.ts` and `acp/connection.ts`.
-- `src/agent-host/sessions.ts` (`agentSessionIds`), `src/agent-host/host.ts` (the handler, and
-  `sessions.import` taking over a listed session's title and times through `keptFor`; the Codex
-  agents for memory).
+- `src/agent-host/sessions.ts` (`agentSessionIds`; `importSession` takes an optional `kept`, the
+  title, times, pin and archive, and the `KeptField` type), `src/agent-host/host.ts` (the handler,
+  and `sessions.import` taking over a listed session's title and times through `keptFor`; the
+  Codex agents for memory).
 - `src/agent-host/memory/service.ts` (`codexAgents`, Codex's sources in `importScan` and
   `import`), `src/shared/memory.ts` and `memory.import` (a source's `project` may be null: global
   memory), `features/settings/memory-rows.tsx` (a tick per source, its entries' titles, a source of
@@ -207,11 +153,10 @@ Generated before a build (not hand edits, never committed):
   (`ZH_NAME`), dropping the spaces that set a Latin word off from Chinese, and puts Kite's artwork
   in place. Idempotent; the build workflow runs it, and so must a local build (see Build) or a
   `pnpm dev` meant to look like Kite.
-  - Every locale but `star.json` (the prompts to star Kettu's repository) and `kettuImport.json`
-    (the import from an official Kettu) has its values rewritten:
-    the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the attribution and
-    Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder `.kettu/`; and
-    pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
+  - Every locale but `star.json` (the prompts to star Kettu's repository) has its values
+    rewritten: the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the
+    attribution and Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder
+    `.kettu/`; and pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
   - `ZH_APP_NAME` lists the Chinese strings whose `{{name}}` is the app's own (the macOS app menu,
     the quit dialog, the tray's menu), which main fills with `app.name`, Kite: in Chinese they say
     纸鸢. `ADD` adds the keys rebranded code reads: About's title, 纸鸢 Kite in Chinese.

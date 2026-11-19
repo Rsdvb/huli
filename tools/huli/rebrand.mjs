@@ -28,11 +28,8 @@ const CJK = /[\u3000-\u303F\u3400-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/
  */
 const KEEP = ['Based on Kettu', 'based on Kettu', '基于 Kettu', 'Star Kettu']
 
-/**
- * Locale files about Kettu itself, left whole: the prompts to star its repository on GitHub, and
- * the import from an official Kettu, which names that app.
- */
-const KEEP_FILES = new Set(['star.json', 'kettuImport.json'])
+/** Locale files about Kettu itself, left whole: the prompts to star its repository on GitHub. */
+const KEEP_FILES = new Set(['star.json'])
 
 /**
  * Chinese strings whose `{{name}}` is the app's own name, which the main process fills with the
