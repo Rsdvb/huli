@@ -348,10 +348,14 @@ fi
 rm -rf "$nginx_before"
 systemctl reload nginx
 
-# 9. fail2ban: five failed sign-ins in 15 minutes ban the address for an hour.
+# 9. fail2ban: ten failed sign-ins or invite codes in 15 minutes ban the address for an hour. The
+# service itself already stops an address after five failures for one account, and after ten in
+# all; ten here keeps one account's failures from banning another account's user on the same
+# address (a shared NAT).
 cat >/etc/fail2ban/filter.d/huli-cloud.conf <<'EOF'
 [Definition]
 failregex = huli-cloud: login failed from <HOST>$
+            huli-cloud: signup failed from <HOST>$
 journalmatch = _SYSTEMD_UNIT=huli-cloud.service
 EOF
 cat >/etc/fail2ban/jail.d/huli-cloud.conf <<'EOF'
@@ -360,7 +364,7 @@ enabled = true
 backend = systemd
 port = http,https
 filter = huli-cloud
-maxretry = 5
+maxretry = 10
 findtime = 15m
 bantime = 1h
 EOF

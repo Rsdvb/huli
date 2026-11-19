@@ -1,7 +1,7 @@
 // The account's devices and computers over the API, for the phone, the desktop app and the hosted
 // web client: who is signed in, which computers registered on the relay and whether they are
 // online, and signing a device out. Only an access token of the account is taken, never a relay
-// token, and nothing of another account is ever listed.
+// token, and nothing of another account is ever listed or signed out.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
@@ -26,14 +26,14 @@ export interface AccountDevicesOptions {
   log(line: string): void
 }
 
-/** The account's devices and computers as `family` sees them. */
+/** The devices and computers of `family`'s account as `family` sees them. */
 export function accountDevices(
   store: Store,
-  family: string,
+  family: { id: string; account: string },
   online: (id: string) => boolean,
   now: number,
 ): AccountDevices {
-  const devices: AccountDevice[] = store.families().map((f) => ({
+  const devices: AccountDevice[] = store.families(family.account).map((f) => ({
     id: f.id,
     kind: deviceKind(f.clientId),
     name: f.info?.name ?? null,
@@ -41,9 +41,9 @@ export function accountDevices(
     version: f.info?.version ?? null,
     createdAt: f.createdAt,
     lastUsedAt: f.lastUsedAt,
-    current: f.id === family,
+    current: f.id === family.id,
   }))
-  const computers: AccountComputer[] = store.computers().map((c) => {
+  const computers: AccountComputer[] = store.computers(family.account).map((c) => {
     const live = online(c.id)
     return {
       id: c.id,
@@ -57,7 +57,7 @@ export function accountDevices(
       lastSeen: live ? now : c.lastSeen,
       online: live,
       pairable: live && c.pairable && c.key !== null,
-      current: c.family === family,
+      current: c.family === family.id,
     }
   })
   return { devices, computers }
@@ -71,7 +71,7 @@ export class AccountDevicesApi {
     const family = this.options.auth.authorize(request, response)
     if (!family) return
     const { store, online, secure, now } = this.options
-    sendJson(response, secure, 200, accountDevices(store, family.id, online, now()))
+    sendJson(response, secure, 200, accountDevices(store, family, online, now()))
   }
 
   /** POST /api/v1/account/devices/revoke: `device=<id>`, or `others=1` for all but the asker. */
@@ -85,9 +85,11 @@ export class AccountDevicesApi {
     if (!others && !device) {
       return sendError(response, secure, 400, 'invalid_request', 'Name a device, or others.')
     }
+    // Only the asker's own account's devices: another account's id is no such device here.
+    const mine = store.families(family.account)
     const targets = others
-      ? store.families().filter((f) => f.id !== family.id)
-      : store.families().filter((f) => f.id === device)
+      ? mine.filter((f) => f.id !== family.id)
+      : mine.filter((f) => f.id === device)
     if (!others && targets.length === 0) {
       return sendError(response, secure, 404, 'not_found', 'No such device of the account.')
     }

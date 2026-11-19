@@ -143,7 +143,7 @@ export class CloudSession {
   }
 
   /** Signs in through the system's authentication session. */
-  async signIn(): Promise<SignInResult> {
+  async signIn(mode?: 'register'): Promise<SignInResult> {
     if (this.signingIn) return 'cancelled'
     const { env } = this
     const verifier = encodeRelayBytes(env.random(32))
@@ -157,6 +157,8 @@ export class CloudSession {
       code_challenge_method: 'S256',
       state,
       client_info: JSON.stringify({ ...clientInfo({ ...env.info, kind: 'web' }), kind: 'mobile' }),
+      // Huli: the page opens on the invite sign-up, which ends in the same redirect.
+      ...(mode ? { mode } : {}),
     })
       .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
       .join('&')

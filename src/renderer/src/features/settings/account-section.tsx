@@ -78,7 +78,15 @@ export function AccountRow() {
     content = <SignedInRow status={status} onSignOut={act(signOut)} />
   } else if (status.state === 'signing-in') {
     content = <SigningInRow onCancel={act(cancelSignIn)} />
-  } else content = <SignedOutRow status={status} onSignIn={act(signIn)} />
+  } else {
+    content = (
+      <SignedOutRow
+        status={status}
+        onSignIn={act(signIn)}
+        onRegister={act(() => signIn('register'))}
+      />
+    )
+  }
   return <div ref={row}>{content}</div>
 }
 
@@ -116,9 +124,12 @@ const ACCOUNT_TILE = (
 function SignedOutRow({
   status,
   onSignIn,
+  onRegister,
 }: {
   status: Extract<AccountStatus, { state: 'signed-out' }>
   onSignIn: () => void
+  /** Huli: the cloud's invite sign-up, which ends signed in like Sign in. */
+  onRegister: () => void
 }) {
   const { t } = useTranslation('settings')
   const { reason, failure } = status
@@ -136,6 +147,7 @@ function SignedOutRow({
           {t('account.devices.manage')}
         </LinkButton>
       )}
+      <SetButton onClick={onRegister}>{t('account.register')}</SetButton>
       <SetButton variant="primary" data-account-action="" onClick={onSignIn}>
         {t('account.signIn')}
       </SetButton>

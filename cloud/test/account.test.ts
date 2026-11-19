@@ -3,7 +3,7 @@
 // registry; tokens of an account that was replaced reach nothing. Driven by the clients' own code
 // (RelayHost, dialRelay, HuliCloudApi) over real sockets.
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer as createNetServer, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -31,16 +31,7 @@ import { dialRelay } from '@shared/remote/relay-device'
 import { RelayHost } from '@shared/remote/relay-host'
 import { makeServer, type ServerParts } from '../src/server'
 import { MAX_COMPUTERS, Store, type Account } from '../src/store'
-
-const ACCOUNT: Account = {
-  id: 'acct-1',
-  email: 'me@example.com',
-  name: 'Me',
-  password: 'unused',
-  totp: 'unused',
-  totpLastStep: -1,
-  recovery: [],
-}
+import { makeOwner } from './accounts'
 const PHONE: HuliClientInfo = {
   kind: 'mobile',
   name: 'iPhone',
@@ -73,22 +64,23 @@ describe('the registry in the store', () => {
   const now = () => clock
   let store: Store
   let dir: string
+  let owner: Account
 
   beforeEach(() => {
     dir = tempDir()
     store = new Store(dir, now)
-    store.setAccount(ACCOUNT)
+    owner = makeOwner(store)
   })
 
   const familyOf = (token: string) => store.checkAccess(token)!.id
 
   it('registers a computer only under a live sign-in of the account, and keeps it on disk', () => {
     expect(store.registerComputer('a'.repeat(26), 'no-such-family', SIGN_KEY)).toBeNull()
-    const family = familyOf(store.issue(DESKTOP_CLIENT, PC).access_token)
+    const family = familyOf(store.issue(owner.id, DESKTOP_CLIENT, PC)!.access_token)
     const id = 'b'.repeat(26)
     expect(store.registerComputer(id, family, SIGN_KEY)).toMatchObject({
       id,
-      account: ACCOUNT.id,
+      account: owner.id,
       family,
       signKey: SIGN_KEY,
       key: null,
@@ -97,13 +89,13 @@ describe('the registry in the store', () => {
     const key = encodeRelayBytes(new Uint8Array(32).fill(1))
     store.setComputerProfile(id, { key, name: 'Studio', platform: 'win32', pairable: true })
     const again = new Store(dir, now)
-    expect(again.computers()).toEqual([
+    expect(again.computers(owner.id)).toEqual([
       expect.objectContaining({ id, key, name: 'Studio', platform: 'win32', pairable: true }),
     ])
   })
 
   it('starts a computer over when the same id comes with another key', () => {
-    const family = familyOf(store.issue(DESKTOP_CLIENT, PC).access_token)
+    const family = familyOf(store.issue(owner.id, DESKTOP_CLIENT, PC)!.access_token)
     const id = 'c'.repeat(26)
     store.registerComputer(id, family, SIGN_KEY)
     const key = encodeRelayBytes(new Uint8Array(32).fill(1))
@@ -113,16 +105,16 @@ describe('the registry in the store', () => {
   })
 
   it('drops a computer with its sign-in, and when its sign-in lapses', () => {
-    const token = store.issue(DESKTOP_CLIENT, PC)
+    const token = store.issue(owner.id, DESKTOP_CLIENT, PC)!
     const family = familyOf(token.access_token)
     store.registerComputer('d'.repeat(26), family, SIGN_KEY)
     store.revokeToken(token.refresh_token)
-    expect(store.computers()).toEqual([])
+    expect(store.computers(owner.id)).toEqual([])
     expect(store.computer('d'.repeat(26))).toBeNull()
   })
 
   it('keeps at most MAX_COMPUTERS, dropping the one seen longest ago', () => {
-    const family = familyOf(store.issue(DESKTOP_CLIENT, PC).access_token)
+    const family = familyOf(store.issue(owner.id, DESKTOP_CLIENT, PC)!.access_token)
     const ids = Array.from(
       { length: MAX_COMPUTERS + 1 },
       (_, i) => String.fromCharCode(97 + (i % 26)).repeat(20) + String(100000 + i),
@@ -131,51 +123,26 @@ describe('the registry in the store', () => {
       clock += 1000
       store.registerComputer(id, family, SIGN_KEY)
     }
-    const kept = store.computers().map((c) => c.id)
+    const kept = store.computers(owner.id).map((c) => c.id)
     expect(kept).toHaveLength(MAX_COMPUTERS)
     expect(kept).not.toContain(ids[0])
   })
 
-  it('takes nothing of an account that was replaced', () => {
-    const tokens = store.issue(MOBILE_CLIENT, PHONE)
-    const family = familyOf(store.issue(DESKTOP_CLIENT, PC).access_token)
+  it('takes nothing of an owner account `init --force` replaced', () => {
+    const tokens = store.issue(owner.id, MOBILE_CLIENT, PHONE)!
+    const family = familyOf(store.issue(owner.id, DESKTOP_CLIENT, PC)!.access_token)
     store.registerComputer('e'.repeat(26), family, SIGN_KEY)
-    store.setAccount({ ...ACCOUNT, id: 'acct-2' })
+    const next = makeOwner(store)
+    expect(next.id).not.toBe(owner.id)
     expect(store.checkAccess(tokens.access_token)).toBeNull()
     expect(store.refresh(MOBILE_CLIENT, tokens.refresh_token)).toEqual({
       ok: false,
       reason: 'unknown',
     })
-    expect(store.families()).toEqual([])
-    expect(store.computers()).toEqual([])
+    expect(store.families(owner.id)).toEqual([])
+    expect(store.families(next.id)).toEqual([])
+    expect(store.computers(next.id)).toEqual([])
     expect(store.registerComputer('f'.repeat(26), family, SIGN_KEY)).toBeNull()
-  })
-
-  it('reads a file from before the registry, its sign-ins the one account’s', () => {
-    const old = tempDir()
-    writeFileSync(
-      path.join(old, 'state.json'),
-      JSON.stringify({
-        v: 1,
-        account: ACCOUNT,
-        families: [
-          {
-            id: 'fam',
-            clientId: DESKTOP_CLIENT,
-            info: null,
-            createdAt: 1,
-            lastUsedAt: 1,
-            refresh: 'x',
-            refreshExpiresAt: Number.MAX_SAFE_INTEGER,
-            previous: [],
-          },
-        ],
-        access: [],
-      }),
-    )
-    const read = new Store(old, now)
-    expect(read.families()).toEqual([expect.objectContaining({ id: 'fam', account: ACCOUNT.id })])
-    expect(read.computers()).toEqual([])
   })
 })
 
@@ -191,6 +158,7 @@ describe('the account API and the relay with the registry', () => {
   let parts: ServerParts
   let base: string
   let cloud: HuliCloudApi
+  let owner: Account
   const lines: string[] = []
   const hosts: RelayHost[] = []
 
@@ -201,7 +169,7 @@ describe('the account API and the relay with the registry', () => {
       log: (line) => lines.push(line),
       relayLimits: { tokenCheckMs: 200 },
     })
-    parts.store.setAccount(ACCOUNT)
+    owner = makeOwner(parts.store)
     cloud = new HuliCloudApi(base, fetch)
     await new Promise<void>((resolve) => parts.server.listen(port, '127.0.0.1', resolve))
   })
@@ -216,7 +184,7 @@ describe('the account API and the relay with the registry', () => {
   })
 
   const signIn = (client: string, info: HuliClientInfo | null = null) =>
-    parts.store.issue(client, info)
+    parts.store.issue(owner.id, client, info)!
 
   interface TestHost {
     id: string
@@ -391,21 +359,17 @@ describe('the account API and the relay with the registry', () => {
     await expect.poll(state(t), { timeout: 3000 }).not.toBe('connected')
   })
 
-  it('isolates the account that replaced another: its tokens reach none of the old one', async () => {
+  it('isolates the owner account that replaced another: its tokens reach none of the old one', async () => {
     const t = await startHost(signIn(DESKTOP_CLIENT, PC).access_token)
     await expect.poll(state(t)).toBe('connected')
     const oldPhone = signIn(MOBILE_CLIENT, PHONE).access_token
-    parts.store.setAccount({ ...ACCOUNT, id: 'acct-2' })
-    try {
-      const newPhone = signIn(MOBILE_CLIENT, PHONE).access_token
-      expect((await cloud.devices(newPhone)).computers).toEqual([])
-      expect(['forbidden', 'offline']).toContain((await dial(t.id, newPhone)).kind)
-      expect((await dial(t.id, oldPhone)).kind).toBe('forbidden')
-      await expect(cloud.devices(oldPhone)).rejects.toMatchObject({ status: 401 })
-      // The old account's host is taken off as its sign-in no longer holds.
-      await expect.poll(state(t), { timeout: 3000 }).toBe('refused')
-    } finally {
-      parts.store.setAccount(ACCOUNT)
-    }
+    owner = makeOwner(parts.store)
+    const newPhone = signIn(MOBILE_CLIENT, PHONE).access_token
+    expect((await cloud.devices(newPhone)).computers).toEqual([])
+    expect(['forbidden', 'offline']).toContain((await dial(t.id, newPhone)).kind)
+    expect((await dial(t.id, oldPhone)).kind).toBe('forbidden')
+    await expect(cloud.devices(oldPhone)).rejects.toMatchObject({ status: 401 })
+    // The old account's host is taken off as its sign-in no longer holds.
+    await expect.poll(state(t), { timeout: 3000 }).toBe('refused')
   })
 })

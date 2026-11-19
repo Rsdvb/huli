@@ -207,7 +207,7 @@ export class Account {
    * Opens the browser at the sign-in page and resolves once it opened; the browser hands back to
    * the loopback port later, and the status follows.
    */
-  async signIn(): Promise<AccountStatus> {
+  async signIn(mode?: 'register'): Promise<AccountStatus> {
     if (this.signingIn || this.stored || !this.options.cloud()) return this.status()
     const pkce = newPkce()
     const state = newState()
@@ -232,6 +232,8 @@ export class Account {
       code_challenge_method: 'S256',
       state,
       client_info: JSON.stringify(await this.options.clientInfo()),
+      // Huli: the page opens on the invite sign-up, which ends in the same redirect.
+      ...(mode ? { mode } : {}),
     }).toString()
     try {
       await this.options.openBrowser(url.href)

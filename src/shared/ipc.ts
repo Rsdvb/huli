@@ -355,7 +355,8 @@ export interface IpcInvokeContract {
   // Reads the account again, refreshing the tokens when needed.
   'account:check': { args: []; result: AccountStatus }
   // Opens the browser at the sign-in page; the rest follows as `account:changed`.
-  'account:sign-in': { args: []; result: AccountStatus }
+  // Huli: `register` opens the invite sign-up instead, which ends in the same sign-in.
+  'account:sign-in': { args: [mode: 'register' | null]; result: AccountStatus }
   'account:cancel-sign-in': { args: []; result: AccountStatus }
   'account:sign-out': { args: []; result: AccountStatus }
   // Huli: the account's devices and computers on Huli Cloud, and signing one or every other out.
@@ -684,7 +685,7 @@ export interface KettuApi {
     status(): Promise<AccountStatus>
     /** Reads the account again; a sign-in the service ended comes back signed out, saying why. */
     check(): Promise<AccountStatus>
-    signIn(): Promise<AccountStatus>
+    signIn(mode?: 'register'): Promise<AccountStatus>
     cancelSignIn(): Promise<AccountStatus>
     /** Signs out at the service and forgets the sign-in here. */
     signOut(): Promise<AccountStatus>

@@ -290,9 +290,9 @@ function AccountOption() {
       />
     )
   }
-  const start = async () => {
+  const start = async (mode?: 'register') => {
     setError(null)
-    const result = await signIn()
+    const result = await signIn(mode)
     if (result === 'signed-in' || result === 'cancelled') return
     haptic.warning()
     setError(SIGN_IN_FAILURES[result])
@@ -312,6 +312,15 @@ function AccountOption() {
           <Icon name="person" size={18} color={c.text} />
         )}
         <Text style={[typeScale.headline, { color: c.text }]}>用 Kite Cloud 账号登录</Text>
+      </Press>
+      {/* Huli: the cloud's invite sign-up, which ends signed in like the button above. */}
+      <Press
+        disabled={cloud.state === 'signing-in'}
+        onPress={() => void start('register')}
+        accessibilityRole="button"
+        style={styles.linkButton}
+      >
+        <Text style={[typeScale.callout, { color: c.tint }]}>用邀请码注册</Text>
       </Press>
       <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
         登录后，账号里的电脑会列在这里，不用扫码；不在同一个网络也能经中转连接。

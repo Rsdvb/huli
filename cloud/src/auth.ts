@@ -1,9 +1,21 @@
 // Sign-in as Kettu's clients speak it: the browser sign-in with PKCE and a loopback redirect
 // (RFC 6749, 7636, 8252), device codes (RFC 8628), refresh with rotation, revocation (RFC 7009)
-// and /api/v1/me; and the web pages a person signs in to with a password and a one-time code.
+// and /api/v1/me; the web pages a person signs in to with a username, a password and a one-time
+// code; and signing up with an invite code the owner made, inside the same browser sign-in, so
+// that the client that opened it ends up signed in to the new account.
+//
+// Every code, device code and web session names the account it was signed in to, and none is
+// taken once that account is disabled or removed. Failed sign-ins are counted per address and
+// account: five for one account from one address, ten from one address in all. One account's
+// failures never block another's sign-in from elsewhere, and no limit holds for all addresses
+// together, as anyone with a few addresses could use it to lock an account out. Password checks
+// (scrypt, 32 MiB each) run two at a time per account, so a flood aimed at one account leaves the
+// others' room. Invite codes are tried at most five times per address in 15 minutes and thirty
+// times in all in an hour; a code is long enough that this never gets near one.
 
 import { randomInt } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { renderSVG } from 'uqr'
 import { clientInfo, DAEMON_CLIENT, DESKTOP_CLIENT, WEB_CLIENT } from '@shared/account-api'
 import {
   MOBILE_CLIENT,
@@ -30,13 +42,20 @@ import {
   deviceConfirmPage,
   devicePage,
   devicesPage,
+  enrollPage,
   loginPage,
   messagePage,
   printable,
+  recoveryPage,
+  signupPage,
 } from './pages'
 import {
   checkTotp,
+  hashPassword,
+  newRecoveryCodes,
+  newTotpSecret,
   normalizeRecovery,
+  otpauthUri,
   PKCE_CHALLENGE,
   PKCE_VERIFIER,
   pkceChallenge,
@@ -45,7 +64,7 @@ import {
   sha256Hex,
   verifyPassword,
 } from './secrets'
-import type { Store } from './store'
+import { normalizeUsername, type Account, type Store } from './store'
 
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
 const SESSION_COOKIE = 'huli_session'
@@ -60,10 +79,29 @@ const MAX_TICKETS_PER_ADDRESS = 20
 const MAX_TICKETS = 1000
 /** Device sign-ins waiting at once; each address may start only so many an hour besides. */
 const MAX_DEVICE_GRANTS = 1000
-/** Password checks at once: each takes 32 MiB and tens of milliseconds of the thread pool. */
-const MAX_VERIFYING = 2
+/**
+ * Password checks and hashes at once, in all and for one account (or for no account: a username
+ * nobody has, and sign-ups): each takes 32 MiB and tens of milliseconds of the thread pool.
+ */
+const MAX_VERIFYING = 8
+const MAX_VERIFYING_EACH = 2
+/** Sign-ups between their password and their first one-time code, at once; how long each waits. */
+const MAX_ENROLLMENTS = 100
+const ENROLL_MS = 15 * 60 * 1000
+const MAX_ENROLL_TRIES = 5
+export const MIN_PASSWORD = 12
+const MAX_PASSWORD = 1024
 const SWEEP_MS = 60_000
 const USER_CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ'
+/** What attempts that name no account are counted under. */
+const NO_ACCOUNT = '-'
+/**
+ * The hash a password is checked against for a username no account has, or an account waiting for
+ * its reset, so that the answer takes as long as for one that has: scrypt of a random password no
+ * one kept.
+ */
+const NO_PASSWORD =
+  'scrypt$15$8$1$xgVQIS4rwZv3rd9FiVxPwA$mw727ttbzZ69ss3LLCTTkFIDG5qettd1lHUuufDcjEOO-m4I2x0O1h0C-REh3dgtjJeuTTsY1-Ec80UcIvZcLw'
 
 /** Clients that use device codes; those that sign in through the browser are `redirectFor`'s. */
 const DEVICE_CLIENTS = new Set([DAEMON_CLIENT])
@@ -83,7 +121,16 @@ interface AuthorizeParams {
   info: HuliClientInfo | null
 }
 
-interface Code {
+/**
+ * What a code, an approved device code and a web session hold of their account: its id, and its
+ * password's hash as it was then, so that none of them outlives a reset or a password change.
+ */
+interface Grant {
+  account: string
+  credential: string
+}
+
+interface Code extends Grant {
   clientId: string
   redirectUri: string
   challenge: string
@@ -102,17 +149,30 @@ interface DeviceGrant {
   interval: number
   lastPoll: number
   status: 'pending' | 'approved' | 'denied'
+  /** The account that approved it. */
+  grant: Grant | null
 }
 
-interface Session {
+interface Session extends Grant {
   csrf: string
   expiresAt: number
 }
 
-interface LoginFailure {
-  status: 401 | 429
-  message: string
+/** A sign-up between its password and its first one-time code. */
+interface Enrollment {
+  /** The browser sign-in it is part of. */
+  ticket: string
+  invite: string
+  username: string
+  /** The password's hash. */
+  password: string
+  totp: string
+  expiresAt: number
+  tries: number
 }
+
+type LoginResult =
+  { ok: true; account: Account } | { ok: false; status: 401 | 403 | 429; message: string }
 
 export interface AuthOptions {
   store: Store
@@ -122,7 +182,7 @@ export interface AuthOptions {
   webOrigin?: string | null
   /** Whether one of the account's computers is on the relay now, for the account page. */
   online?: (id: string) => boolean
-  /** A device was signed out: its hosts and connections leave the relay now. */
+  /** A device was signed out, or an account reset: its hosts and connections leave the relay now. */
   revoked?: () => void
   now?: () => number
   log?: (line: string) => void
@@ -207,11 +267,17 @@ export class Auth {
   private readonly devices = new Map<string, DeviceGrant>()
   private readonly userCodes = new Map<string, string>()
   private readonly sessions = new Map<string, Session>()
-  // Sign-ins that did not succeed: five per address in 15 minutes. No limit holds for all
-  // addresses together, as anyone with a few addresses could use it to lock the owner out.
+  private readonly enrollments = new Map<string, Enrollment>()
+  /** Failed sign-ins by address and account, and by address alone. */
+  private readonly failedByAccount: Limiter
   private readonly failedByAddress: Limiter
+  /** Invite codes refused, by address and in all. */
+  private readonly signupsByAddress: Limiter
+  private readonly signups: Limiter
   private readonly deviceStarts: Limiter
-  private verifying = 0
+  /** Password checks running, by account (or NO_ACCOUNT), and in all. */
+  private readonly verifying = new Map<string, number>()
+  private verifyingAll = 0
   private readonly sweeper: ReturnType<typeof setInterval>
 
   constructor(private readonly options: AuthOptions) {
@@ -227,7 +293,10 @@ export class Auth {
     this.secure = options.origin.startsWith('https:')
     this.now = options.now ?? Date.now
     this.log = options.log ?? ((line) => console.warn(line))
-    this.failedByAddress = new Limiter(15 * 60 * 1000, 5, this.now)
+    this.failedByAccount = new Limiter(15 * 60 * 1000, 5, this.now)
+    this.failedByAddress = new Limiter(15 * 60 * 1000, 10, this.now)
+    this.signupsByAddress = new Limiter(15 * 60 * 1000, 5, this.now)
+    this.signups = new Limiter(60 * 60 * 1000, 30, this.now)
     this.deviceStarts = new Limiter(60 * 60 * 1000, 30, this.now)
     // On a timer rather than on each request, which anyone may send.
     this.sweeper = setInterval(() => this.sweep(), SWEEP_MS)
@@ -273,6 +342,7 @@ export class Auth {
     for (const [k, v] of this.tickets) if (v.expiresAt <= now) this.tickets.delete(k)
     for (const [k, v] of this.codes) if (v.expiresAt <= now) this.codes.delete(k)
     for (const [k, v] of this.sessions) if (v.expiresAt <= now) this.sessions.delete(k)
+    for (const [k, v] of this.enrollments) if (v.expiresAt <= now) this.enrollments.delete(k)
     for (const [k, v] of this.devices) {
       if (v.expiresAt <= now) {
         this.devices.delete(k)
@@ -281,18 +351,56 @@ export class Auth {
     }
   }
 
+  /** Takes one of the password checks an account (or NO_ACCOUNT) may run at once; false if none. */
+  private takeSlot(bucket: string): boolean {
+    const mine = this.verifying.get(bucket) ?? 0
+    if (this.verifyingAll >= MAX_VERIFYING || mine >= MAX_VERIFYING_EACH) return false
+    this.verifying.set(bucket, mine + 1)
+    this.verifyingAll++
+    return true
+  }
+
+  private releaseSlot(bucket: string): void {
+    const left = (this.verifying.get(bucket) ?? 1) - 1
+    if (left > 0) this.verifying.set(bucket, left)
+    else this.verifying.delete(bucket)
+    this.verifyingAll--
+  }
+
   // ---- Web sessions -------------------------------------------------------------------------
 
-  private session(request: IncomingMessage): Session | null {
+  /** The request's web session and its account, while the session lasts and the account is active. */
+  webSession(request: IncomingMessage): { session: Session; account: Account } | null {
     const id = cookies(request).get(SESSION_COOKIE)
     if (!id) return null
     const session = this.sessions.get(sha256Hex(id))
-    return session && session.expiresAt > this.now() ? session : null
+    if (!session || session.expiresAt <= this.now()) return null
+    const account = this.granted(session)
+    return account ? { session, account } : null
   }
 
-  private startSession(): { cookie: string; session: Session } {
+  /** The account of a grant, while it is active and its password the one the grant was made under. */
+  private granted(grant: Grant): Account | null {
+    const account = this.store.activeAccount(grant.account)
+    return account && account.password === grant.credential ? account : null
+  }
+
+  private grantOf(account: Account): Grant {
+    return { account: account.id, credential: account.password ?? '' }
+  }
+
+  /** Whether a form posted from a page of `session` carries its CSRF token. */
+  csrfOk(form: URLSearchParams, session: Session): boolean {
+    return sameText(form.get('csrf') ?? '', session.csrf)
+  }
+
+  private startSession(account: Account): { cookie: string; session: Session } {
     const id = randomToken()
-    const session = { csrf: randomToken(18), expiresAt: this.now() + SESSION_MS }
+    const session = {
+      csrf: randomToken(18),
+      expiresAt: this.now() + SESSION_MS,
+      ...this.grantOf(account),
+    }
     this.sessions.set(sha256Hex(id), session)
     return { cookie: sessionCookie(SESSION_COOKIE, id, SESSION_MS / 1000, this.secure), session }
   }
@@ -304,58 +412,69 @@ export class Auth {
   }
 
   /**
-   * Checks a password and a one-time or recovery code, counting failures; why it failed and the
-   * status to answer, or null.
+   * Checks a username (empty for the owner), a password and a one-time or recovery code, counting
+   * failures by address and account; the account, or why it failed and the status to answer.
    */
   private async verifyLogin(
     request: IncomingMessage,
+    login: string,
     password: string,
     code: string,
-  ): Promise<LoginFailure | null> {
+  ): Promise<LoginResult> {
     const address = clientAddress(request, this.options.trustProxy)
-    if (this.failedByAddress.blocked(address)) {
+    const found = login.length <= 256 ? this.store.findAccount(login) : null
+    const bucket = found?.id ?? NO_ACCOUNT
+    const key = `${address} ${bucket}`
+    if (this.failedByAddress.blocked(address) || this.failedByAccount.blocked(key)) {
       this.log(`huli-cloud: login blocked from ${address}`)
-      return { status: 401, message: '尝试次数太多，请过一会儿再试。' }
+      return { ok: false, status: 401, message: '尝试次数太多，请过一会儿再试。' }
     }
-    if (this.verifying >= MAX_VERIFYING) {
-      return { status: 429, message: '正在验证别的登录，请过几秒再试。' }
+    if (!this.takeSlot(bucket)) {
+      return { ok: false, status: 429, message: '正在验证别的登录，请过几秒再试。' }
     }
     // Counted before the password is checked, so that requests sent at once cannot all pass the
     // check above while the first wait for scrypt; taken back when the sign-in succeeds.
     this.failedByAddress.hit(address)
-    const account = this.store.account
-    const fail = (): LoginFailure => {
+    this.failedByAccount.hit(key)
+    const fail = (): LoginResult => {
       this.log(`huli-cloud: login failed from ${address}`)
-      return { status: 401, message: '密码或验证码不对。' }
+      return { ok: false, status: 401, message: '用户名、密码或验证码不对。' }
     }
-    const succeed = (): null => {
-      this.failedByAddress.undo(address)
-      return null
-    }
-    if (!account || password.length > 1024 || code.length > 64) return fail()
-    this.verifying++
+    const checked = found?.password ?? null
+    let passwordOk: boolean
     try {
-      if (!(await verifyPassword(password, account.password))) return fail()
+      if (password.length > MAX_PASSWORD || code.length > 64) return fail()
+      passwordOk = await verifyPassword(password, checked ?? NO_PASSWORD)
     } finally {
-      this.verifying--
+      this.releaseSlot(bucket)
+    }
+    // As it is now: its password may have changed, or this code been used, while scrypt ran.
+    const account = found && this.store.account(found.id)
+    if (!account || !passwordOk || account.password !== checked || !account.totp) {
+      return fail()
     }
     const step = checkTotp(account.totp, code.trim(), this.now(), account.totpLastStep)
     if (step !== null) {
-      this.store.updateAccount({ totpLastStep: step })
-      return succeed()
-    }
-    const recovery = sha256Hex(normalizeRecovery(code))
-    if (account.recovery.includes(recovery)) {
-      this.store.updateAccount({ recovery: account.recovery.filter((r) => r !== recovery) })
+      this.store.updateAccount(account.id, { totpLastStep: step })
+    } else {
+      const recovery = sha256Hex(normalizeRecovery(code))
+      if (!account.recovery.includes(recovery)) return fail()
+      this.store.updateAccount(account.id, {
+        recovery: account.recovery.filter((r) => r !== recovery),
+      })
       this.log('huli-cloud: a recovery code was used')
-      return succeed()
     }
-    return fail()
+    this.failedByAddress.undo(address)
+    this.failedByAccount.undo(key)
+    if (account.disabledAt !== null) {
+      return { ok: false, status: 403, message: '这个账号已停用，请联系机主。' }
+    }
+    return { ok: true, account }
   }
 
   // ---- Browser sign-in ----------------------------------------------------------------------
 
-  /** GET /signin/app/ */
+  /** GET /signin/app/; `mode=register` opens on signing up with an invite code. */
   signInPage(request: IncomingMessage, response: ServerResponse, url: URL): void {
     const q = url.searchParams
     if (q.get('done') === '1') {
@@ -401,22 +520,59 @@ export class Auth {
       expiresAt: this.now() + TICKET_MS,
       tries: 0,
     })
-    const session = this.session(request)
+    if (q.get('mode') === 'register') return this.signupForm(response, ticket)
+    const web = this.webSession(request)
     const client = describeClient(params.info)
-    if (session) {
+    if (web) {
       return sendHtml(
         response,
         this.secure,
         200,
-        consentPage({ action: '/signin/app/', fields: { ticket, csrf: session.csrf }, client }),
+        consentPage({
+          action: '/signin/app/',
+          fields: { ticket, csrf: web.session.csrf },
+          client,
+          username: web.account.username,
+        }),
         this.signInHeaders,
       )
     }
+    this.loginForm(response, ticket, params)
+  }
+
+  private loginForm(
+    response: ServerResponse,
+    ticket: string,
+    params: AuthorizeParams,
+    status = 200,
+    failure: { error: string; username: string } | null = null,
+    headers: Record<string, string> = {},
+  ): void {
     sendHtml(
       response,
       this.secure,
-      200,
-      loginPage({ action: '/signin/app/', fields: { ticket }, purpose: `登录 ${client}` }),
+      status,
+      loginPage({
+        action: '/signin/app/',
+        fields: { ticket },
+        purpose: `登录 ${describeClient(params.info)}`,
+        ...(failure ?? {}),
+      }),
+      { ...this.signInHeaders, ...headers },
+    )
+  }
+
+  private signupForm(
+    response: ServerResponse,
+    ticket: string,
+    status = 200,
+    failure: { error: string; username: string } | null = null,
+  ): void {
+    sendHtml(
+      response,
+      this.secure,
+      status,
+      signupPage({ ticket, ...(failure ?? {}) }),
       this.signInHeaders,
     )
   }
@@ -430,59 +586,251 @@ export class Auth {
       return sendHtml(response, this.secure, 400, messagePage('登录已过期', '回到纸鸢重新点登录。'))
     }
     const { params } = ticket
-    if (form.get('action') === 'deny') {
-      this.tickets.delete(ticketId)
-      return redirect(
-        response,
-        this.secure,
-        withQuery(params.redirectUri, { error: 'access_denied', state: params.state }),
-      )
+    switch (form.get('action')) {
+      case 'deny':
+        this.tickets.delete(ticketId)
+        return redirect(
+          response,
+          this.secure,
+          withQuery(params.redirectUri, { error: 'access_denied', state: params.state }),
+        )
+      case 'signup':
+        return this.signupForm(response, ticketId)
+      case 'login':
+        return this.loginForm(response, ticketId, params)
+      case 'switch':
+        return this.loginForm(response, ticketId, params, 200, null, {
+          'set-cookie': this.endSession(request),
+        })
+      case 'signup-submit':
+        return await this.signUp(request, response, ticketId, ticket, form)
+      case 'enroll':
+        return this.enroll(response, ticketId, ticket, form)
     }
     const headers: Record<string, string> = {}
-    const session = this.session(request)
-    if (session) {
-      if (!sameText(form.get('csrf') ?? '', session.csrf)) {
+    let account: Account
+    const web = this.webSession(request)
+    if (web) {
+      if (!this.csrfOk(form, web.session)) {
         return sendHtml(response, this.secure, 403, messagePage('无法登录', '页面已过期，请重试。'))
       }
+      account = web.account
     } else {
-      const failure = await this.verifyLogin(
+      const username = form.get('username') ?? ''
+      const result = await this.verifyLogin(
         request,
+        username,
         form.get('password') ?? '',
         form.get('code') ?? '',
       )
-      if (failure) {
-        if (failure.status !== 429) ticket.tries++
+      if (!result.ok) {
+        if (result.status !== 429) ticket.tries++
         if (ticket.tries >= MAX_TICKET_TRIES) this.tickets.delete(ticketId)
-        return sendHtml(
-          response,
-          this.secure,
-          failure.status,
-          loginPage({
-            action: '/signin/app/',
-            fields: { ticket: ticketId },
-            purpose: `登录 ${describeClient(params.info)}`,
-            error: failure.message,
-          }),
-          this.signInHeaders,
-        )
+        return this.loginForm(response, ticketId, params, result.status, {
+          error: result.message,
+          username: username.slice(0, 256),
+        })
       }
-      headers['set-cookie'] = this.startSession().cookie
+      account = result.account
+      headers['set-cookie'] = this.startSession(account).cookie
     }
     this.tickets.delete(ticketId)
     const code = randomToken()
     this.codes.set(sha256Hex(code), {
+      ...this.grantOf(account),
       clientId: params.clientId,
       redirectUri: params.redirectUri,
       challenge: params.challenge,
       info: params.info,
       expiresAt: this.now() + CODE_MS,
     })
-    this.log(`huli-cloud: signed in ${describeClient(params.info)}`)
+    this.log(`huli-cloud: signed in ${describeClient(params.info)} as ${account.username}`)
     redirect(
       response,
       this.secure,
       withQuery(params.redirectUri, { code, state: params.state }),
       headers,
+    )
+  }
+
+  // ---- Signing up with an invite code -------------------------------------------------------
+
+  /**
+   * The sign-up form posted: an invite code, which is counted against the address and in all
+   * unless it is one that can be used, a username and a password. The invite is not used yet: the
+   * new TOTP secret is shown, and the account is made once a code from it comes back.
+   */
+  private async signUp(
+    request: IncomingMessage,
+    response: ServerResponse,
+    ticketId: string,
+    ticket: Ticket,
+    form: URLSearchParams,
+  ): Promise<void> {
+    const address = clientAddress(request, this.options.trustProxy)
+    const typed = (form.get('username') ?? '').slice(0, 32)
+    const again = (error: string, status = 400) =>
+      this.signupForm(response, ticketId, status, { error, username: typed })
+    if (this.signupsByAddress.blocked(address) || this.signups.blocked(NO_ACCOUNT)) {
+      this.log(`huli-cloud: signup blocked from ${address}`)
+      return again('尝试次数太多，请过一会儿再试。', 429)
+    }
+    this.signupsByAddress.hit(address)
+    this.signups.hit(NO_ACCOUNT)
+    const invite = this.store.openInvite((form.get('invite') ?? '').slice(0, 64))
+    if (!invite) {
+      this.log(`huli-cloud: signup failed from ${address}`)
+      if (++ticket.tries >= MAX_TICKET_TRIES) this.tickets.delete(ticketId)
+      return again('邀请码不对、已经用过或已经过期。', 401)
+    }
+    this.signupsByAddress.undo(address)
+    this.signups.undo(NO_ACCOUNT)
+    ticket.expiresAt = this.now() + TICKET_MS
+    const username = normalizeUsername(typed)
+    if (!username) {
+      return again('用户名要 2 到 32 位：字母、数字或 . _ -，以字母或数字开头。')
+    }
+    if (invite.account !== null) {
+      const target = this.store.account(invite.account)
+      if (target?.username !== username) {
+        return again(`这个邀请码用来重设账号「${target?.username ?? ''}」，用户名要填它。`)
+      }
+    } else if (!this.store.usernameFree(username)) {
+      return again('这个用户名已经有人用了，换一个。')
+    }
+    const password = form.get('password') ?? ''
+    if (password.length < MIN_PASSWORD || password.length > MAX_PASSWORD) {
+      return again(`密码至少 ${MIN_PASSWORD} 位。`)
+    }
+    if (password !== form.get('password2')) return again('两次输入的密码不一样。')
+    if (!this.takeSlot(NO_ACCOUNT)) return again('正在验证别的登录，请过几秒再试。', 429)
+    let hash: string
+    try {
+      hash = await hashPassword(password)
+    } finally {
+      this.releaseSlot(NO_ACCOUNT)
+    }
+    const id = randomToken(18)
+    for (const old of this.enrollments.keys()) {
+      if (this.enrollments.size < MAX_ENROLLMENTS) break
+      this.enrollments.delete(old)
+    }
+    const enrollment: Enrollment = {
+      ticket: ticketId,
+      invite: invite.id,
+      username,
+      password: hash,
+      totp: newTotpSecret(),
+      expiresAt: this.now() + ENROLL_MS,
+      tries: 0,
+    }
+    this.enrollments.set(sha256Hex(id), enrollment)
+    this.enrollForm(response, ticketId, id, enrollment)
+  }
+
+  private enrollForm(
+    response: ServerResponse,
+    ticket: string,
+    id: string,
+    enrollment: Enrollment,
+    error?: string,
+  ): void {
+    const uri = otpauthUri(enrollment.totp, enrollment.username)
+    sendHtml(
+      response,
+      this.secure,
+      error ? 401 : 200,
+      enrollPage({
+        ticket,
+        enrollment: id,
+        username: enrollment.username,
+        qrSvg: renderSVG(uri),
+        uri,
+        secret: enrollment.totp,
+        ...(error ? { error } : {}),
+      }),
+      this.signInHeaders,
+    )
+  }
+
+  /**
+   * The first one-time code from the new secret: the invite is used now, once, and the account
+   * made or reset; its recovery codes are shown once, and the sign-in goes on as the new account.
+   */
+  private enroll(
+    response: ServerResponse,
+    ticketId: string,
+    ticket: Ticket,
+    form: URLSearchParams,
+  ): void {
+    const id = form.get('enrollment') ?? ''
+    const key = sha256Hex(id)
+    const enrollment = this.live(this.enrollments, key)
+    if (!enrollment || enrollment.ticket !== ticketId) {
+      return this.signupForm(response, ticketId, 400, {
+        error: '这次注册已过期，请重新开始。',
+        username: '',
+      })
+    }
+    ticket.expiresAt = this.now() + TICKET_MS
+    const step = checkTotp(enrollment.totp, (form.get('code') ?? '').trim(), this.now(), -1)
+    if (step === null) {
+      if (++enrollment.tries >= MAX_ENROLL_TRIES) {
+        this.enrollments.delete(key)
+        return this.signupForm(response, ticketId, 401, {
+          error: '验证码错了太多次，请重新开始。',
+          username: enrollment.username,
+        })
+      }
+      return this.enrollForm(
+        response,
+        ticketId,
+        id,
+        enrollment,
+        '验证码不对：看验证器里这个账号最新的验证码。',
+      )
+    }
+    this.enrollments.delete(key)
+    const codes = newRecoveryCodes()
+    const result = this.store.redeemInvite(enrollment.invite, enrollment.username, {
+      password: enrollment.password,
+      totp: enrollment.totp,
+      totpLastStep: step,
+      recovery: codes.map((code) => sha256Hex(code)),
+    })
+    if (!result.ok) {
+      const error = {
+        invite: '邀请码刚刚被用掉或撤销了。',
+        username: '这个用户名刚刚被别人用了，换一个。',
+        full: '账号已经满了，请联系机主。',
+      }[result.reason]
+      return this.signupForm(response, ticketId, 409, { error, username: enrollment.username })
+    }
+    const { account, reset } = result
+    this.log(`huli-cloud: ${reset ? 'reset' : 'signed up'} account ${account.username}`)
+    // Whatever was signed in to a reset account is out, on the relay too.
+    if (reset) this.options.revoked?.()
+    if (account.disabledAt !== null) {
+      return sendHtml(
+        response,
+        this.secure,
+        200,
+        messagePage('账号已重设', '这个账号目前停用中，请联系机主。'),
+      )
+    }
+    const { cookie, session } = this.startSession(account)
+    sendHtml(
+      response,
+      this.secure,
+      200,
+      recoveryPage({
+        ticket: ticketId,
+        csrf: session.csrf,
+        username: account.username,
+        codes,
+        reset,
+      }),
+      { ...this.signInHeaders, 'set-cookie': cookie },
     )
   }
 
@@ -513,7 +861,12 @@ export class Auth {
       ) {
         return fail(400, 'invalid_grant', 'The code is not valid.')
       }
-      return sendJson(response, this.secure, 200, this.store.issue(code.clientId, code.info))
+      // Its account may have been disabled, removed or reset within the minute.
+      const tokens = this.granted(code)
+        ? this.store.issue(code.account, code.clientId, code.info)
+        : null
+      if (!tokens) return fail(400, 'invalid_grant', 'The code is not valid.')
+      return sendJson(response, this.secure, 200, tokens)
     }
 
     if (grant === 'refresh_token') {
@@ -544,8 +897,12 @@ export class Auth {
       }
       this.devices.delete(key)
       this.userCodes.delete(device.userCode)
-      if (device.status === 'denied') return fail(400, 'access_denied', 'The sign-in was refused.')
-      return sendJson(response, this.secure, 200, this.store.issue(device.clientId, device.info))
+      const tokens =
+        device.status === 'approved' && device.grant && this.granted(device.grant)
+          ? this.store.issue(device.grant.account, device.clientId, device.info)
+          : null
+      if (!tokens) return fail(400, 'access_denied', 'The sign-in was refused.')
+      return sendJson(response, this.secure, 200, tokens)
     }
 
     fail(400, 'unsupported_grant_type', 'This grant type is not supported.')
@@ -588,6 +945,7 @@ export class Auth {
       interval: DEVICE_INTERVAL_S,
       lastPoll: 0,
       status: 'pending',
+      grant: null,
     })
     this.userCodes.set(userCode, key)
     // No verification_uri_complete: a link with the code in it is what a phishing message sends.
@@ -607,8 +965,8 @@ export class Auth {
 
   /** GET /device: the code is typed in, never taken from the link. */
   devicePage(request: IncomingMessage, response: ServerResponse): void {
-    const session = this.session(request)
-    if (!session) {
+    const web = this.webSession(request)
+    if (!web) {
       return sendHtml(
         response,
         this.secure,
@@ -616,16 +974,17 @@ export class Auth {
         loginPage({ action: '/web/login', fields: { next: '/device' }, purpose: '登录后确认设备' }),
       )
     }
-    sendHtml(response, this.secure, 200, devicePage({ csrf: session.csrf }))
+    sendHtml(response, this.secure, 200, devicePage({ csrf: web.session.csrf }))
   }
 
   /** POST /device */
   async deviceSubmit(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const form = await readForm(request)
-    const session = this.session(request)
-    if (!session || !sameText(form.get('csrf') ?? '', session.csrf)) {
+    const web = this.webSession(request)
+    if (!web || !this.csrfOk(form, web.session)) {
       return redirect(response, this.secure, '/device')
     }
+    const { session, account } = web
     const code = this.normalizeUserCode(form.get('user_code') ?? '')
     const device = this.liveDevice(this.userCodes.get(code))
     if (!device || device.status !== 'pending') {
@@ -649,12 +1008,15 @@ export class Auth {
           client: describeClient(device.info),
           address: device.address,
           startedMsAgo: this.now() - device.startedAt,
+          username: account.username,
         }),
       )
     }
     device.status = action === 'allow' ? 'approved' : 'denied'
-    if (device.status === 'approved')
-      this.log(`huli-cloud: approved ${describeClient(device.info)}`)
+    if (device.status === 'approved') {
+      device.grant = this.grantOf(account)
+      this.log(`huli-cloud: approved ${describeClient(device.info)} as ${account.username}`)
+    }
     sendHtml(
       response,
       this.secure,
@@ -678,31 +1040,36 @@ export class Auth {
   async webLogin(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const form = await readForm(request)
     const next = this.safeNext(form.get('next'))
-    const failure = await this.verifyLogin(
+    const username = form.get('username') ?? ''
+    const result = await this.verifyLogin(
       request,
+      username,
       form.get('password') ?? '',
       form.get('code') ?? '',
     )
-    if (failure) {
+    if (!result.ok) {
       return sendHtml(
         response,
         this.secure,
-        failure.status,
+        result.status,
         loginPage({
           action: '/web/login',
           fields: { next },
           purpose: '登录',
-          error: failure.message,
+          username: username.slice(0, 256),
+          error: result.message,
         }),
       )
     }
-    redirect(response, this.secure, next, { 'set-cookie': this.startSession().cookie })
+    redirect(response, this.secure, next, {
+      'set-cookie': this.startSession(result.account).cookie,
+    })
   }
 
   /** GET /account/ and /account/devices/ */
   accountPage(request: IncomingMessage, response: ServerResponse): void {
-    const session = this.session(request)
-    if (!session) {
+    const web = this.webSession(request)
+    if (!web) {
       return sendHtml(
         response,
         this.secure,
@@ -714,28 +1081,29 @@ export class Auth {
         }),
       )
     }
+    const { session, account } = web
     sendHtml(
       response,
       this.secure,
       200,
       devicesPage({
         csrf: session.csrf,
-        families: this.store.families(),
+        families: this.store.families(account.id),
         computers: this.store
-          .computers()
+          .computers(account.id)
           .map((c) => ({ ...c, online: this.options.online?.(c.id) ?? false })),
-        email: this.store.account?.email ?? '',
+        account,
       }),
     )
   }
 
-  /** POST /account/devices/revoke */
+  /** POST /account/devices/revoke: a device of the session's own account alone. */
   async revokeDevice(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const form = await readForm(request)
-    const session = this.session(request)
-    if (session && sameText(form.get('csrf') ?? '', session.csrf)) {
+    const web = this.webSession(request)
+    if (web && this.csrfOk(form, web.session)) {
       const family = form.get('family') ?? ''
-      if (this.store.families().some((f) => f.id === family)) {
+      if (this.store.families(web.account.id).some((f) => f.id === family)) {
         this.store.revokeFamily(family)
         this.log('huli-cloud: a device was signed out from the web')
         this.options.revoked?.()
@@ -747,9 +1115,9 @@ export class Auth {
   /** POST /account/signout */
   async webSignOut(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const form = await readForm(request)
-    const session = this.session(request)
+    const web = this.webSession(request)
     const headers: Record<string, string> = {}
-    if (session && sameText(form.get('csrf') ?? '', session.csrf)) {
+    if (web && this.csrfOk(form, web.session)) {
       headers['set-cookie'] = this.endSession(request)
     }
     redirect(response, this.secure, '/account/devices/', headers)
@@ -765,7 +1133,7 @@ export class Auth {
     sendJson(response, this.secure, 200, {})
   }
 
-  /** The family behind the request's bearer token, while it is live. */
+  /** The family behind the request's bearer token, while it is live and its account active. */
   accessFamily(request: IncomingMessage): ReturnType<Store['checkAccess']> {
     const token = bearer(request)
     return token ? this.store.checkAccess(token) : null
@@ -781,10 +1149,11 @@ export class Auth {
     return family
   }
 
-  /** GET /api/v1/me */
+  /** GET /api/v1/me: the account the token was signed in to. */
   me(request: IncomingMessage, response: ServerResponse): void {
-    if (!this.authorize(request, response)) return
-    const account = this.store.account
+    const family = this.authorize(request, response)
+    if (!family) return
+    const account = this.store.activeAccount(family.account)
     if (!account) {
       return sendError(response, this.secure, 401, 'unauthorized', 'No account.')
     }

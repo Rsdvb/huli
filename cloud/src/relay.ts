@@ -10,7 +10,9 @@
 //
 // Huli: only a computer's sign-in (the desktop app's or the daemon's) may sign a host in, and each
 // host that does is registered as the account's computer with the key it proved, and its profile;
-// a device reaches only a host registered to its own account under a sign-in still live.
+// a device reaches only a host registered to its own account under a sign-in still live. Each
+// account has room of its own (hosts and signed-in sockets), so one account cannot crowd out
+// another's.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -76,8 +78,15 @@ export interface RelayLimits {
   signInsPerMinute: number
   /** Tokens refused from one address in 15 minutes before it is refused outright. */
   refusalsPer15Minutes: number
-  /** Hosts signed in at once. */
+  /** Hosts signed in at once, in all and of one account. */
   maxHosts: number
+  maxHostsPerAccount: number
+  /**
+   * Signed-in sockets of one account at once: its hosts' control sockets, its devices' sockets and
+   * the accept sockets joined to them. Kept so that the accounts' shares together stay below
+   * `maxSockets`.
+   */
+  maxSocketsPerAccount: number
   /** A control socket that sends nothing for this long is closed; hosts ping every 30 s. */
   hostIdleMs: number
   /** A joined pair that carries nothing either way for this long is closed. */
@@ -102,7 +111,9 @@ export const RELAY_LIMITS: RelayLimits = {
   opensPerMinute: 120,
   signInsPerMinute: 10,
   refusalsPer15Minutes: 20,
-  maxHosts: MAX_LISTED_HOSTS,
+  maxHosts: 4 * MAX_LISTED_HOSTS,
+  maxHostsPerAccount: MAX_LISTED_HOSTS,
+  maxSocketsPerAccount: 160,
   hostIdleMs: 90_000,
   joinedIdleMs: 5 * 60_000,
   pingMs: 30_000,
@@ -139,6 +150,8 @@ interface Host {
 interface Waiting {
   device: WebSocket
   host: string
+  /** The account of the device and the host. */
+  account: string
   timer: ReturnType<typeof setTimeout>
 }
 
@@ -178,6 +191,9 @@ export class Relay {
   private readonly unsigned = new Map<WebSocket, string>()
   /** What each device waiting for or joined to a host connected with. */
   private readonly deviceGrants = new Map<WebSocket, RelayGrant>()
+  /** The account each signed-in socket counts against, and how many each account has. */
+  private readonly socketAccounts = new Map<WebSocket, string>()
+  private readonly perAccount = new Map<string, number>()
   private readonly opens: Limiter
   private readonly signIns: Limiter
   private readonly refusals: Limiter
@@ -485,7 +501,14 @@ export class Relay {
       return false
     }
     const before = this.hosts.get(id)
-    if (!this.signIns.hit(id) || (!before && this.hosts.size >= this.limits.maxHosts)) {
+    let mine = 0
+    for (const host of this.hosts.values()) if (host.grant.account === grant.account) mine++
+    if (
+      !this.signIns.hit(id) ||
+      (!before && this.hosts.size >= this.limits.maxHosts) ||
+      (before?.grant.account !== grant.account && mine >= this.limits.maxHostsPerAccount) ||
+      !this.claim(ws, grant.account)
+    ) {
       this.refuse(ws, RELAY_CLOSE.tooMany)
       return false
     }
@@ -534,13 +557,16 @@ export class Relay {
       if (owner?.account !== grant.account || owner.family !== host.grant.family) {
         return this.refuse(ws, RELAY_CLOSE.offline)
       }
-      if (this.devices(id) >= MAX_DEVICE_CONNECTIONS) return this.refuse(ws, RELAY_CLOSE.tooMany)
+      if (this.devices(id) >= MAX_DEVICE_CONNECTIONS || !this.claim(ws, grant.account)) {
+        return this.refuse(ws, RELAY_CLOSE.tooMany)
+      }
       this.unsigned.delete(ws)
       this.deviceGrants.set(ws, grant)
       const token = newRelayToken()
       this.waiting.set(token, {
         device: ws,
         host: id,
+        account: grant.account,
         timer: setTimeout(() => {
           if (this.waiting.delete(token)) this.refuse(ws, RELAY_CLOSE.offline)
         }, ACCEPT_TIMEOUT_MS),
@@ -557,6 +583,10 @@ export class Relay {
       return this.refuse(ws, RELAY_CLOSE.offline)
     }
     const { device } = waiting
+    if (!this.claim(ws, waiting.account)) {
+      this.refuse(device, RELAY_CLOSE.tooMany)
+      return this.refuse(ws, RELAY_CLOSE.tooMany)
+    }
     this.unsigned.delete(ws)
     this.joined.set(device, ws)
     this.joined.set(ws, device)
@@ -601,6 +631,21 @@ export class Relay {
     })
   }
 
+  /** Counts a socket that signed in against its account; false when the account has no room. */
+  private claim(ws: WebSocket, account: string): boolean {
+    if (this.socketAccounts.has(ws)) return true
+    const count = this.perAccount.get(account) ?? 0
+    if (count >= this.limits.maxSocketsPerAccount) return false
+    this.socketAccounts.set(ws, account)
+    this.perAccount.set(account, count + 1)
+    return true
+  }
+
+  /** Signed-in sockets of an account now; for tests. */
+  accountSockets(account: string): number {
+    return this.perAccount.get(account) ?? 0
+  }
+
   /** Devices waiting for or joined to the host. */
   private devices(id: string): number {
     let count = 0
@@ -610,8 +655,8 @@ export class Relay {
   }
 
   /**
-   * Hosts signed out or with lapsed tokens, and devices signed out: each closes with 4401, a joined
-   * device's host side with it.
+   * Hosts signed out or with lapsed tokens, and devices signed out, of an account disabled or
+   * removed too: each closes with 4401, a joined device's host side with it.
    */
   checkGrants(): void {
     for (const [id, host] of this.hosts) {
@@ -651,6 +696,13 @@ export class Relay {
   private ended(ws: WebSocket, code: number): void {
     this.unsigned.delete(ws)
     this.deviceGrants.delete(ws)
+    const account = this.socketAccounts.get(ws)
+    if (account !== undefined) {
+      this.socketAccounts.delete(ws)
+      const left = (this.perAccount.get(account) ?? 1) - 1
+      if (left > 0) this.perAccount.set(account, left)
+      else this.perAccount.delete(account)
+    }
     const peer = this.peers.get(ws)
     if (peer) {
       this.peers.delete(ws)
