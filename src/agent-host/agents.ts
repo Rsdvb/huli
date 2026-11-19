@@ -126,6 +126,7 @@ import {
   installedFolder,
   installMethodOf,
   installPlans,
+  npmPrefixOf,
   updatePlan,
   type ArchiveEntry,
   type InstallPlan,
@@ -133,6 +134,7 @@ import {
 import {
   detectAgent,
   displayCommand,
+  protocolOf,
   type AgentDefinition,
   type CommandWords,
   type DetectContext,
@@ -328,6 +330,8 @@ export interface AgentManagerDeps extends DriverOverrides {
   appVersion: string
   env: EnvironmentService
   diagnostics: Diagnostics
+  /** Keeps an ACP agent's messages by session, for the Requests pane. */
+  acpMessages?: { add(agentId: AgentId, direction: 'in' | 'out', message: unknown): void }
   launcher: AgentLauncher
   settings(): HostSettings
   /** The folder hidden sessions run in: the reports' and the one that reads the options. */
@@ -1283,6 +1287,47 @@ export class AgentManager {
   }
 
   /**
+   * A hosted agent's user CLI to start a process with: the one it started with while it is there,
+   * else the one detection finds again, so a CLI replaced or moved since needs no restart and
+   * stops none of the sessions that still run. Concurrent starts share one detection.
+   */
+  private currentCli(slot: Slot, spec: LaunchSpec): (started: string) => Promise<string> {
+    let finding: Promise<string> | null = null
+    return async (started) => {
+      if (await isExecutableFile(started, this.deps.platform)) return started
+      finding ??= this.findCliAgain(slot, spec, started).finally(() => (finding = null))
+      return finding
+    }
+  }
+
+  private async findCliAgain(slot: Slot, spec: LaunchSpec, gone: string): Promise<string> {
+    const { h } = slot
+    this.cliVersions.clear()
+    await this.detect(h)
+    const detection = h.detection
+    let reason: string
+    if (detection?.state === 'available') {
+      const found = detection.spec?.cli
+      // A CLI that needs another install of the SDK than the running one cannot be swapped in.
+      if (found && detection.spec?.command === spec.command) {
+        if (found !== gone) {
+          this.deps.diagnostics.event(slot.id, 'cli moved', `${gone} is gone; ${found} runs`)
+        }
+        return found
+      }
+      reason = found
+        ? t('agent.cliRestart', { agent: h.def.name, path: found })
+        : t('agent.notAvailable', { agent: slot.name })
+    } else {
+      reason = detection?.detail ?? t('agent.notAvailable', { agent: slot.name })
+    }
+    throw new AgentRequestError(
+      'agent_error',
+      t('agent.cliGone', { agent: h.def.name, path: gone, reason }),
+    )
+  }
+
+  /**
    * Starts the agent through its protocol's driver: over the stdio of the process the launcher
    * spawns, or as a run in the host whose processes are recorded and stopped as the agent's own.
    */
@@ -1311,7 +1356,10 @@ export class AgentManager {
     try {
       connection = driver.connect({
         ...context,
+        spec,
+        env,
         spawn: run.spawn,
+        currentCli: this.currentCli(slot, spec),
         claudeTestEntrypoint: () => this.deps.settings().claudeTestEntrypoint,
         claudeRun: () => this.deps.settings().claudeRuns[slot.id] ?? null,
         claudePromptSuggestions: () => this.deps.settings().promptSuggestions,
@@ -2805,12 +2853,17 @@ export class AgentManager {
     const mine = this.userProgram(h)
     if (!installs || !mine || !h.cliMethod) return null
     const platform = this.deps.platform
+    const npmPrefix =
+      h.cliMethod === 'npm' && installs.npm
+        ? npmPrefixOf(await realpath(mine.path).catch(() => mine.path), installs.npm, platform)
+        : null
     return updatePlan(installs, h.cliMethod, {
       platform,
       env: this.deps.env.agentEnv(h.def.id),
       npm: this.deps.env.nodeProbe().npmPath,
       isExecutable: (file) => isExecutableFile(file, platform),
       program: mine.path,
+      npmPrefix,
     })
   }
 
@@ -3312,11 +3365,13 @@ export class AgentManager {
   // Sign-in, account and limits.
 
   private connectionHooks(slot: Slot): ConnectionHooks {
-    const { diagnostics } = this.deps
+    const { diagnostics, acpMessages } = this.deps
     const agentId = slot.id
+    const acp = (this.deps.protocols?.[agentId] ?? protocolOf(slot.def)) === 'acp'
     return {
       traffic: (direction, message) => {
         diagnostics.traffic(agentId, direction, message)
+        if (acp) acpMessages?.add(agentId, direction, message)
         for (const run of this.processesOf(slot)) {
           if (run.pid != null) this.deps.trees?.active({ pid: run.pid, startedAt: run.startedAt })
         }
@@ -4185,6 +4240,12 @@ export class AgentManager {
     if (slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
   }
 
+  /** OpenCode's own client for an OpenCode agent, which reads its sessions; null for another. */
+  openCode(agentId: AgentId): OpenCodeClient | null {
+    const slot = this.slots.get(agentId)
+    return slot && harnessOf(agentId) === 'opencode' ? this.openCodeClient(slot) : null
+  }
+
   private openCodeClient(slot: Slot): OpenCodeClient {
     const display = this.display(slot)
     return new OpenCodeClient({
@@ -4988,6 +5049,7 @@ export class AgentManager {
         reports: this.hasLimits(slot.id) && !consoleSignIn,
         context: this.hasContext(slot.id),
         liveContext: this.driver(slot).reads?.context === true,
+        ...(this.driver(slot).reads?.contextEstimates ? { contextEstimates: true } : {}),
         account:
           slot.def.id === 'opencode' ||
           (slot.def.reportsAccount ?? false) ||

@@ -31,7 +31,7 @@ import {
 } from '@shared/agent-host'
 import { LOCALES } from '@shared/locale'
 import { PROMPT_BYTES, promptShare } from '@shared/attachments'
-import { CONTEXT_REFRESH_MS } from '@shared/context'
+import { CONTEXT_REFRESH_MS, type ContextEstimates } from '@shared/context'
 import { firstLine, outlineText } from '@shared/outline'
 import { longEnough, queryWords } from '@shared/search-fold'
 import { turnWork, type TurnWork } from '@shared/turn-phase'
@@ -218,6 +218,12 @@ import { watchSettings, type PreparedRecords, type WatchTarget } from './prepare
 import type { Projects } from './projects'
 import type { LastRequest, OutsideReader } from './outside-sessions'
 import type { CacheTtlReader } from './prompt-cache'
+import type { ModelRequestsReader, RequestsTarget } from './model-requests/reader'
+import type {
+  ModelRequestRaw,
+  ModelRequestsOverview,
+  ModelRequestsPage,
+} from '@shared/model-requests'
 import { missedCache, type IdleRelease } from './idle-release'
 import {
   REPORT_LIMIT,
@@ -498,6 +504,8 @@ export interface SessionManagerDeps {
   }
   /** Reads how long a session's prompt cache lasts from the agent's own transcript. */
   cacheTtl?: CacheTtlReader
+  /** Reads a session's requests to its model from the agent's own record of the session. */
+  modelRequests?: ModelRequestsReader
   /**
    * Reads how a Claude Code session last ran outside Kettu and whether a process there still has
    * it open; without it a session is imported and attached unchecked.
@@ -1188,6 +1196,7 @@ export class SessionManager {
   private progressTimer: ReturnType<typeof setTimeout> | null = null
   /** `/context` reports running, by session id. */
   private readonly contextRuns = new Map<string, Promise<ContextBreakdown | null>>()
+  private readonly contextEstimateRuns = new WeakMap<Live, Promise<ContextEstimates | null>>()
   /** The side question each session is answering, stopped through its controller. */
   private readonly sideRuns = new Map<string, AbortController>()
   /** What the last clear of each session's side chat emptied, for its undo. */
@@ -3096,6 +3105,38 @@ export class SessionManager {
       this.flushPatches(live)
       return { entries: waitingEntries(live) }
     })
+  }
+
+  // The requests to the model, read from the agent's own record when the Requests pane asks; none
+  // of it is kept or logged.
+
+  private requestsTarget(sessionId: string): RequestsTarget {
+    const record = this.recordOf(sessionId)
+    const parent =
+      record.origin === 'subagent' && record.parentId ? this.recordOf(record.parentId) : null
+    return {
+      agentId: record.agentId,
+      cwd: workDir(record),
+      acpSessionId: record.acpSessionId,
+      configDir: record.configDir ?? null,
+      parentAcpSessionId: parent?.acpSessionId ?? null,
+    }
+  }
+
+  async modelRequests(sessionId: string, before: string | null): Promise<ModelRequestsPage | null> {
+    const target = this.requestsTarget(sessionId)
+    return (await this.deps.modelRequests?.page(target, before)) ?? null
+  }
+
+  async modelRequestsOverview(sessionId: string): Promise<ModelRequestsOverview | null> {
+    const target = this.requestsTarget(sessionId)
+    return (await this.deps.modelRequests?.summary(target)) ?? null
+  }
+
+  async modelRequestRaw(sessionId: string, raw: string, full: boolean): Promise<ModelRequestRaw> {
+    const reader = this.deps.modelRequests
+    if (!reader) throw notFound(`Session ${sessionId} has no record of its requests to read`)
+    return reader.raw(this.requestsTarget(sessionId), raw, full)
   }
 
   // The message outline.
@@ -6587,6 +6628,32 @@ export class SessionManager {
     }
   }
 
+  contextEstimates(sessionId: string): Promise<ContextEstimates | null> {
+    const live = this.live.get(sessionId)
+    const connection = live?.connection
+    if (!live || !connection?.readContextEstimates || !this.contextCurrent(live)) {
+      return Promise.resolve(null)
+    }
+    const running = this.contextEstimateRuns.get(live)
+    if (running) return running
+    const { acpSessionId } = live.record
+    const read = connection
+      .readContextEstimates(acpSessionId, workDir(live.record))
+      .then((estimates) =>
+        this.contextCurrent(live) &&
+        live.connection === connection &&
+        live.record.acpSessionId === acpSessionId
+          ? estimates
+          : null,
+      )
+      .catch((error: unknown) => {
+        throw agentError(error)
+      })
+      .finally(() => this.contextEstimateRuns.delete(live))
+    this.contextEstimateRuns.set(live, read)
+    return read
+  }
+
   // Prompt turns.
 
   private titleOf(live: Live): string {
@@ -6964,6 +7031,7 @@ export class SessionManager {
       // Speed is the old agent's model; the new one may not be timed at all.
       speed: undefined,
       suggestion: undefined,
+      lastRequest: undefined,
       // The side chat stays; the new agent answers it its own way.
       ...(live.thread.session.sideChat
         ? { sideChat: { ...live.thread.session.sideChat, route: this.sideRouteOf(agentId) } }
