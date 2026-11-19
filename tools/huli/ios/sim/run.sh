@@ -40,12 +40,17 @@ export KETTU_DIRECT_PORT=47231
 mkdir -p "$KETTU_DAEMON_DATA"
 node out/daemon/main.cjs run > "$RESULTS/daemon.log" 2>&1 &
 DAEMON=$!
-for _ in $(seq 1 60); do
-  node out/daemon/main.cjs status > /dev/null 2>&1 && break
+# Remote access starts a while after the daemon does; a code asked for before then fails.
+for _ in $(seq 1 120); do
+  node out/daemon/main.cjs status 2>/dev/null | grep -Eq '^Remote host: +ready' && break
   sleep 1
 done
 node out/daemon/main.cjs status
-node tools/huli/ios/sim/pair.mjs "$UDID" | tee "$RESULTS/pair.log"
+for attempt in 1 2 3; do
+  node tools/huli/ios/sim/pair.mjs "$UDID" | tee -a "$RESULTS/pair.log" && break
+  [ "$attempt" = 3 ] && exit 1
+  sleep 10
+done
 sleep 5
 xcrun simctl io "$UDID" screenshot "$RESULTS/paired.png"
 
