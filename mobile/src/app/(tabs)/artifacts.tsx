@@ -198,7 +198,19 @@ export default function Artifacts() {
 
   const summary = (
     <View style={styles.summary} accessibilityRole="header">
-      {items && inProject.length === 0 ? (
+      {!items ? (
+        // No count until the computer answers: offline or after a failure the screen says what the
+        // tab holds, and the state below says why it is empty; while it loads, a placeholder.
+        connected && !error ? (
+          <View style={styles.summaryLoading} accessibilityLabel="正在加载">
+            <Skeleton width="62%" height={18} />
+          </View>
+        ) : (
+          <Text style={[typeScale.lead, { color: c.textSecondary }]}>
+            这里是你的 Agent 做的 Artifact。
+          </Text>
+        )
+      ) : inProject.length === 0 ? (
         <Text style={[typeScale.lead, { color: c.textSecondary }]}>
           你的 Agent 还没做过 Artifact。
         </Text>
@@ -217,7 +229,7 @@ export default function Artifacts() {
             </View>
           ) : null}
           <Text style={[typeScale.lead, styles.count, { color: c.text }]}>
-            {items ? inProject.length : '…'} 个 Artifact。
+            {inProject.length} 个 Artifact。
           </Text>
         </View>
       )}
@@ -492,6 +504,8 @@ const styles = StyleSheet.create({
     paddingBottom: space.lg,
   },
   summary: { paddingTop: space.md },
+  // The lead line's height, so the header keeps its size when the sentence replaces it.
+  summaryLoading: { height: typeScale.lead.lineHeight, justifyContent: 'center' },
   kindIcons: {
     flexDirection: 'row',
     alignItems: 'center',
