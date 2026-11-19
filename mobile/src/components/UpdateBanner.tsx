@@ -1,16 +1,18 @@
-// The session list's notice of a newer Android build; closing it hides that version for good.
+// The session list's notice of a newer build on the update channel; closing it hides that version
+// for good.
 
-import { StyleSheet, Text, View } from 'react-native'
+import { Platform, StyleSheet, Text, View } from 'react-native'
 import { Icon } from '../ui/Icon'
 import { IconButton } from '../ui/IconButton'
 import { Press } from '../ui/Press'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
-import { dismissUpdate, openUpdate, UPDATES_SUPPORTED, useUpdate } from '../update'
+import { dismissUpdate, openUpdate, useUpdate, useUpdatesSupported } from '../update'
 
 export function UpdateBanner() {
   const { c } = useTokens()
   const { latest, dismissed } = useUpdate()
-  if (!UPDATES_SUPPORTED || !latest || dismissed === latest.version) return null
+  const supported = useUpdatesSupported()
+  if (!supported || !latest || dismissed === latest.version) return null
 
   return (
     <View style={[styles.banner, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -28,7 +30,9 @@ export function UpdateBanner() {
           <Text style={[typeScale.subhead, { color: c.text }]}>
             纸鸢 {latest.version} 可以更新了
           </Text>
-          <Text style={[typeScale.footnote, { color: c.textSecondary }]}>点按下载新版本</Text>
+          <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+            {Platform.OS === 'ios' ? '点按安装新版本' : '点按下载新版本'}
+          </Text>
         </View>
       </Press>
       <IconButton
