@@ -99,6 +99,15 @@ export default function WorkflowPage() {
         action={{ label: '重试', onPress: () => void load() }}
       />
     )
+  } else if (!entry && !connected) {
+    body = (
+      <EmptyState
+        icon="wifi"
+        title="打不开这个工作流"
+        message="它所在的电脑没有连上，连上后会再显示。"
+        action={{ label: '立即重连', onPress: () => host.retry() }}
+      />
+    )
   } else if (!entry) {
     body = <SkeletonRows count={4} avatar={false} />
   } else {

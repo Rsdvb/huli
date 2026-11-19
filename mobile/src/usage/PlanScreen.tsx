@@ -213,6 +213,7 @@ export default function PlanScreen() {
             pool={pools.length > 1 ? pool.name : null}
             rows={rows ? poolRows(rows, pool, pools) : null}
             error={modelsError}
+            offline={!connected}
             weekly={pool.weekly}
             onRetry={() => void readModels()}
           />
@@ -387,6 +388,8 @@ function Models(props: {
   pool: string | null
   rows: BreakdownRow[] | null
   error: string | null
+  /** The computer is away, so rows not read yet will not come until it is back. */
+  offline: boolean
   weekly: boolean
   onRetry(): void
 }) {
@@ -412,6 +415,10 @@ function Models(props: {
         <ListGroup>
           <ListRow title="没能读取" subtitle={props.error} value="重试" onPress={props.onRetry} />
         </ListGroup>
+      ) : props.rows === null && props.offline ? (
+        <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+          电脑没有连上，连上后会再读取。
+        </Text>
       ) : props.rows === null ? (
         <ActivityIndicator color={c.textTertiary} />
       ) : rows.length === 0 ? (

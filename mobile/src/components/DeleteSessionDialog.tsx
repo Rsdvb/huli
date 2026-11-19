@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, View } from 'react-native'
 import type { SessionSummary } from '@shared/agent-host'
 import { call } from '../git'
-import { useHost } from '../host'
+import { useAgent, useConnected, useMaybeLink, useSessions } from '../host'
 import { LockLayer } from '../lock'
 import { sessionTitle } from '../sessions'
 import {
@@ -35,8 +35,10 @@ export function DeleteSessionDialog(props: {
   onArchive(): void
 }) {
   const { c } = useTokens()
-  const host = useHost()
-  const { link } = host
+  const link = useMaybeLink()
+  const connected = useConnected()
+  const sessions = useSessions()
+  const agent = useAgent(props.summary?.agentId)
   const { summary } = props
   const [stake, setStake] = useState<Stake | null>(null)
   const id = summary?.id ?? null
@@ -44,7 +46,7 @@ export function DeleteSessionDialog(props: {
 
   useEffect(() => {
     setStake(null)
-    if (!props.visible || !id || !link) return
+    if (!props.visible || !id || !link || !connected) return
     let live = true
     void Promise.all([
       folder
@@ -61,13 +63,12 @@ export function DeleteSessionDialog(props: {
     return () => {
       live = false
     }
-  }, [props.visible, id, folder, link])
+  }, [props.visible, id, folder, link, connected])
 
   if (!summary) return null
   const title = sessionTitle(summary)
-  const children = descendantCount(host.sessions, summary.id)
+  const children = descendantCount(sessions, summary.id)
   const worktree = summary.worktree && hasLiveWorktree(summary) ? summary.worktree : null
-  const agent = host.agents.get(summary.agentId)
   const shared = agent?.sharesSignIn ? agent.harnessName : null
   const name = folder ? baseName(folder) : ''
 
@@ -93,7 +94,11 @@ export function DeleteSessionDialog(props: {
       <View style={[styles.backdrop, { backgroundColor: c.scrim }]}>
         <View style={[styles.card, { backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
           <Text style={[typeScale.headline, { color: c.text }]}>删除“{title}”？</Text>
-          {!stake ? (
+          {!stake && !connected ? (
+            <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+              电脑没有连上，连上后才能删除。
+            </Text>
+          ) : !stake ? (
             <View style={styles.loading}>
               <ActivityIndicator color={c.textSecondary} />
             </View>

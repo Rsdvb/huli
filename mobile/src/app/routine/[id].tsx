@@ -112,7 +112,14 @@ export default function RoutinePage() {
     return (
       <Screen>
         <View style={[styles.missing, { paddingTop: header.height + space.xl }]}>
-          {!data && !listError ? (
+          {!data && !listError && !connected ? (
+            <EmptyState
+              icon="wifi"
+              title="打不开这个定时任务"
+              message="它所在的电脑没有连上，连上后会再显示。"
+              action={{ label: '立即重连', onPress: () => host.retry() }}
+            />
+          ) : !data && !listError ? (
             <SkeletonRows count={4} />
           ) : listError && !data ? (
             <EmptyState

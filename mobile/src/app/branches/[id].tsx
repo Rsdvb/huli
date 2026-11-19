@@ -207,14 +207,18 @@ export default function BranchesScreen() {
   }
 
   let body
+  // Away, a read waits for the computer: say so rather than spin.
+  const away = (
+    <StateView text="电脑没有连上，连上后会再显示。" icon={G.wifiOff} retry={host.retry} />
+  )
   if (!summary) {
-    body = connected ? <StateView text="找不到这个会话。" /> : <StateView loading />
+    body = connected ? <StateView text="找不到这个会话。" /> : away
   } else if (!folder) {
     body = <StateView text="这个会话没有项目，没有分支可切换。" />
   } else if (loaded?.error) {
     body = <StateView text={loaded.error} tone="danger" retry={() => setAttempt((n) => n + 1)} />
   } else if (!loaded) {
-    body = <StateView loading />
+    body = connected ? <StateView loading /> : away
   } else {
     body = (
       <FlatList
