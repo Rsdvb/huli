@@ -4,16 +4,18 @@
 
 import { useState, type RefObject } from 'react'
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
-import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
+import Reanimated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
+import { useKeyboardState } from 'react-native-keyboard-controller'
 import type { ConfigOption, QueuedPrompt, SessionView, UserContent } from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
 import { useAgent, useConnected, useMaybeLink } from '../host'
+import { setPrefs, usePrefs } from '../prefs'
 import { errorText } from '../sessions'
 import { haptic } from '../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import type { ViewHandle } from '../ui/session/Popover'
-import { PressScale, RoundButton } from '../ui/session/Press'
+import { gentle, PressScale, RoundButton } from '../ui/session/Press'
 import {
   MODE_ICON,
   modeLook,
@@ -232,6 +234,9 @@ export function ModelChip(props: {
  * The messages queued behind the running turn, numbered in the order they go. Each can go now
  * while a turn runs (into the turn where the agent takes that, else stopping it first, which is
  * asked), come back to the box to edit, attachments and all, or be removed with its attachments.
+ * Its heading folds the list to one line, so a long queue never fills the screen: open or folded
+ * as last chosen, else open for a single message; always folded while the keyboard is up, unless
+ * opened then.
  */
 export function QueueStack(props: {
   sessionId: string
@@ -244,12 +249,31 @@ export function QueueStack(props: {
   const connected = useConnected()
   const agent = useAgent(props.session?.agentId)
   const [busyItem, setBusyItem] = useState<string | null>(null)
+  const chosen = usePrefs().queueOpen
+  const keyboardUp = useKeyboardState((state) => state.isVisible)
+  // Opened or closed while the keyboard is up, for as long as it stays.
+  const [typing, setTyping] = useState<{ open: boolean } | null>(null)
+  const [wasUp, setWasUp] = useState(keyboardUp)
+  if (wasUp !== keyboardUp) {
+    setWasUp(keyboardUp)
+    setTyping(null)
+  }
   const session = props.session
   if (!session || !link || session.queue.length === 0) return null
   const sessionId = props.sessionId
   const running = session.status === 'running' || session.status === 'awaiting_permission'
   const steering = !!agent?.capabilities.steering
   const count = session.queue.length
+  const open = keyboardUp ? (typing?.open ?? false) : (chosen ?? count === 1)
+  const toggle = () => {
+    gentle()
+    if (keyboardUp) setTyping({ open: !open })
+    else setPrefs({ queueOpen: !open })
+  }
+  const first = session.queue[0]!
+  const firstText =
+    promptText(first) || (attachmentCount(first) > 0 ? `${attachmentCount(first)} 个附件` : '')
+  const note = session.queuePaused ? '已暂停' : open ? (running ? '本轮结束后发送' : '') : firstText
 
   const act = (item: QueuedPrompt, work: () => Promise<unknown>, failed: string) => {
     haptic.tap()
@@ -308,21 +332,38 @@ export function QueueStack(props: {
   }
 
   return (
-    <View style={styles.queue} accessibilityLabel={`排队中的消息：${count} 条`}>
+    <Reanimated.View
+      layout={QUEUE_FOLD}
+      style={styles.queue}
+      accessibilityLabel={`排队中的消息：${count} 条`}
+    >
       <View style={styles.queueHead}>
-        <Text style={[styles.queueTitle, { color: c.textSecondary }]}>
-          {count} 条排队
-          <Text style={{ color: c.textTertiary, fontWeight: '400' }}>
-            {session.queuePaused ? ' · 已暂停' : running ? ' · 本轮结束后发送' : ''}
+        <Pressable
+          onPress={toggle}
+          hitSlop={{ top: 8, bottom: 8 }}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={`${count} 条排队`}
+          accessibilityHint={open ? '收起队列' : '展开队列'}
+          style={({ pressed }) => [styles.queueToggle, { opacity: pressed ? 0.6 : 1 }]}
+        >
+          <View style={[styles.chevron, { transform: [{ rotate: open ? '90deg' : '0deg' }] }]}>
+            <Icon icon={G.right} size={11} color={c.textTertiary} weight="semibold" />
+          </View>
+          <Text style={[styles.queueTitle, { color: c.textSecondary }]} numberOfLines={1}>
+            {count} 条排队
+            {note ? (
+              <Text style={{ color: c.textTertiary, fontWeight: '400' }}> · {note}</Text>
+            ) : null}
           </Text>
-        </Text>
+        </Pressable>
         {session.queuePaused && (
           <Pressable onPress={resume} hitSlop={8} disabled={!connected} accessibilityRole="button">
             <Text style={[styles.action, { color: c.accent }]}>继续</Text>
           </Pressable>
         )}
       </View>
-      {session.queue.map((item, index) => {
+      {(open ? session.queue : []).map((item, index) => {
         const text = promptText(item)
         const attachments = attachmentCount(item)
         const disabled = !connected || busyItem !== null
@@ -409,7 +450,7 @@ export function QueueStack(props: {
           </Reanimated.View>
         )
       })}
-    </View>
+    </Reanimated.View>
   )
 }
 
@@ -417,6 +458,8 @@ export function QueueStack(props: {
 const QUEUE_IN = FadeIn.duration(220)
 const QUEUE_OUT = FadeOut.duration(160)
 const QUEUE_MOVE = LinearTransition.springify().dampingRatio(0.84).duration(400)
+// The list folding to its heading and back: a disclosure, so it is short and plain.
+const QUEUE_FOLD = LinearTransition.duration(220).easing(Easing.out(Easing.cubic))
 
 const styles = StyleSheet.create({
   chip: {
@@ -443,6 +486,8 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   queue: { gap: 8 },
   queueHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
+  queueToggle: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 28 },
+  chevron: { width: 12, alignItems: 'center' },
   queueTitle: { flex: 1, fontSize: 13, fontWeight: '600' },
   queued: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 12, gap: 8 },
   queuedHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
