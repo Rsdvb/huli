@@ -2,6 +2,7 @@
 
 import type { LinkState } from '@shared/remote/link'
 import type { DirectAddress } from '@shared/remote/protocol'
+import { routeKind, type CurrentRoute } from './connection'
 
 /** `off`: not connected for a while, the computer likely off or Huli not running there. */
 export type LinkTone = 'ok' | 'busy' | 'down' | 'off'
@@ -62,6 +63,18 @@ export function linkProblem(state: LinkState): string | null {
 }
 
 export const ROUTE_NAMES = { tailscale: 'Tailscale', lan: '局域网', other: '直连' } as const
+
+/** A link's route in words: the kind of address, or 中转 through Kite Cloud's relay. */
+export function routeName(route: CurrentRoute): string {
+  return route.kind === 'relay' ? '中转' : ROUTE_NAMES[routeKind(route.address)]
+}
+
+/** What the 连接 and 地址 groups say of how the phone reaches a computer. */
+export function routesNote(relay: boolean): string {
+  return relay
+    ? '手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个；都连不上时经 Kite Cloud 中转。内容在两端之间端到端加密，中转服务器也看不到。'
+    : '手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个。内容在两端之间端到端加密，不经过任何中转服务器。'
+}
 
 export function hostPort(address: DirectAddress): string {
   return address.host.includes(':')

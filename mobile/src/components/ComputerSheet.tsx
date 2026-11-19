@@ -6,10 +6,10 @@
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import { currentAddress, probe, routeKind } from '../connection'
+import { currentRoute, probe } from '../connection'
 import { AccountComputers } from './AccountComputers'
 import { useComputers } from '../host'
-import { linkStatusOf, platformOf, ROUTE_NAMES, type LinkTone } from '../linkInfo'
+import { linkStatusOf, platformOf, routeName, type LinkTone } from '../linkInfo'
 import { ago } from '../sessions'
 import { computerName, type SavedHost } from '../store'
 import { BottomSheet } from '../ui/BottomSheet'
@@ -64,8 +64,8 @@ export function useComputerLine(reach: Map<string, Reach>): (h: SavedHost) => Co
   return (h) => {
     if (h.id === host.host?.id) {
       const status = linkStatusOf(host.state, host.unreachable)
-      const address = host.state.kind === 'connected' ? currentAddress() : null
-      const route = address ? ` · ${ROUTE_NAMES[routeKind(address)]}` : ''
+      const current = host.state.kind === 'connected' ? currentRoute() : null
+      const route = current ? ` · ${routeName(current)}` : ''
       return { text: `正在使用 · ${status.text}${route}`, tone: status.tone }
     }
     const seen = h.lastSeen ? `上次在线 ${ago(h.lastSeen)}` : '还没连上过'

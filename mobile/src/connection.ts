@@ -79,11 +79,12 @@ export function routeKind(address: DirectAddress): RouteKind {
 // HostLink does not say which route it is on, so each open socket notes when it last heard the
 // computer; the link's own connection is the one heard from most recently. A link to a computer
 // other than the active one (fleet.ts) keeps its sockets in a map of its own, so they never pass
-// for the active link's route nor keep its relay from dialing.
-type Heard = Map<Transport, { address: DirectAddress; at: number }>
+// for the active link's route nor keep its relay from dialing. The relay's socket is noted with no
+// address, so a link on it says so instead of passing for none.
+type Heard = Map<Transport, { address: DirectAddress | null; at: number }>
 const heard: Heard = new Map()
 
-function tracked(address: DirectAddress, transport: Transport, into: Heard): Transport {
+function tracked(address: DirectAddress | null, transport: Transport, into: Heard): Transport {
   const entry = { address, at: 0 }
   into.set(transport, entry)
   transport.onClose(() => into.delete(transport))
@@ -99,7 +100,8 @@ function tracked(address: DirectAddress, transport: Transport, into: Heard): Tra
 
 /** Whether a direct connection is open now, which the relay then leaves alone. */
 function directOpen(into: Heard): boolean {
-  return into.size > 0
+  for (const entry of into.values()) if (entry.address) return true
+  return false
 }
 
 /**
@@ -110,7 +112,7 @@ function relayRoute(relay: HostRelay, addresses: DirectAddress[], into: Heard): 
   return {
     key: 'relay',
     relay: true,
-    dial: afterGrace(() => dialRelayTo(relay), {
+    dial: afterGrace(() => dialRelayTo(relay).then((t) => tracked(null, t, into)), {
       now: usableAddresses(addresses).length === 0,
       direct: () => directOpen(into),
     }),
@@ -141,13 +143,23 @@ function dialAny(
   })
 }
 
-/** The address the computer was last heard on, among the connections still open. */
-export function currentAddress(): DirectAddress | null {
-  let best: { address: DirectAddress; at: number } | null = null
+/** The route a link is on: one of the computer's addresses, or the relay. */
+export type CurrentRoute = { kind: 'direct'; address: DirectAddress } | { kind: 'relay' }
+
+/** The route the computer was last heard on, among the connections still open. */
+export function currentRoute(): CurrentRoute | null {
+  let best: { address: DirectAddress | null; at: number } | null = null
   for (const entry of heard.values()) {
     if (entry.at > 0 && (!best || entry.at > best.at)) best = entry
   }
-  return best?.address ?? null
+  if (!best) return null
+  return best.address ? { kind: 'direct', address: best.address } : { kind: 'relay' }
+}
+
+/** The address the computer was last heard on; null on the relay. */
+export function currentAddress(): DirectAddress | null {
+  const route = currentRoute()
+  return route?.kind === 'direct' ? route.address : null
 }
 
 /** The addresses to try, Tailscale's first, without the IPv6 ones a WebSocket URL cannot name. */
