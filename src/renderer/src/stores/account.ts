@@ -33,8 +33,9 @@ export function checkAccount(): Promise<void> {
   return take(() => window.kettu.account.check(), 'check the account')
 }
 
-export function signIn(): Promise<void> {
-  return take(() => window.kettu.account.signIn(), 'start signing in')
+/** Huli: `register` opens the invite sign-up, which ends signed in the same way. */
+export function signIn(mode?: 'register'): Promise<void> {
+  return take(() => window.kettu.account.signIn(mode), 'start signing in')
 }
 
 export function cancelSignIn(): Promise<void> {

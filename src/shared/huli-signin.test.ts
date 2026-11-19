@@ -118,6 +118,17 @@ describe("the phone's Huli Cloud sign-in", () => {
     expect(await t.session.accessToken()).toBe('access-1')
   })
 
+  it('opens the invite sign-up only in register mode, and signs in the same way', async () => {
+    const t = setup()
+    expect(await t.session.signIn()).toBe('cancelled')
+    t.approve()
+    expect(await t.session.signIn('register')).toBe('signed-in')
+    const [plain, register] = t.opened.map((url) => new URL(url).searchParams)
+    expect(plain!.has('mode')).toBe(false)
+    expect(register!.get('mode')).toBe('register')
+    expect(register!.get('redirect_uri')).toBe(MOBILE_REDIRECT)
+  })
+
   it('takes no code back with another state, or at another address', async () => {
     const t = setup()
     t.answer(() => `${MOBILE_REDIRECT}?code=the-code&state=someone-elses`)

@@ -205,7 +205,7 @@ export class HostedAccount {
   }
 
   /** Goes to the website's sign-in page; the browser comes back to CALLBACK_PATH. */
-  async signIn(back = '/'): Promise<AccountStatus> {
+  async signIn(back = '/', mode?: 'register'): Promise<AccountStatus> {
     const verifier = random(32)
     const state = random(24)
     const pending: Pending = { verifier, state, back: samePage(back) }
@@ -220,6 +220,8 @@ export class HostedAccount {
       client_info: JSON.stringify(
         clientInfo({ kind: 'web', arch: 'unknown', ...this.options.client }),
       ),
+      // Huli: the page opens on the invite sign-up, which ends in the same redirect.
+      ...(mode ? { mode } : {}),
     }).toString()
     this.signingIn = true
     this.emit()

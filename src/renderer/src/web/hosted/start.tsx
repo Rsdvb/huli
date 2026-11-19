@@ -414,7 +414,7 @@ async function showApp(
   const accountApi: KettuApi['account'] = {
     status: async () => account.status(),
     check: () => account.check(),
-    signIn: () => account.signIn('/'),
+    signIn: (mode) => account.signIn('/', mode),
     cancelSignIn: async () => account.status(),
     signOut: async () => {
       const status = await account.signOut()

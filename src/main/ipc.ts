@@ -732,7 +732,10 @@ export function registerIpcHandlers({
 
   handle('account:status', 0, () => account.status())
   handle('account:check', 0, () => account.check())
-  handle('account:sign-in', 0, () => account.signIn())
+  handle('account:sign-in', 1, (_, mode) => {
+    if (mode !== null && mode !== 'register') throw new TypeError('Unknown sign-in mode')
+    return account.signIn(mode === 'register' ? mode : undefined)
+  })
   handle('account:cancel-sign-in', 0, () => {
     account.cancelSignIn()
     return account.status()
