@@ -5291,6 +5291,11 @@ li[data-row-exit='dust'] > * {
   font-size: 11px;
   line-height: 18px;
 }
+/* Huli: the tray names the fullest limit at any level, in the tray's own quiet color below 70%. */
+.kettu-tray-limit[data-level='muted'] {
+  background: none;
+  color: var(--composer-muted);
+}
 
 /* The tray's popovers, in the composer's card. */
 .kettu-pop.kettu-pop {

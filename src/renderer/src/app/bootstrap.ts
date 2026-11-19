@@ -10,6 +10,7 @@ import {
 } from '@renderer/app/actions'
 import { onAppEvent } from '@renderer/app/events'
 import { launchTarget } from '@renderer/app/restore'
+import { followWindowFront } from '@renderer/app/window-front'
 import { restoreDraftAttachments } from '@renderer/features/session/composer/attachments'
 import { allPanes } from '@renderer/features/split/layout'
 import {
@@ -366,6 +367,7 @@ export function bootstrap(): Promise<unknown> {
   // Platform styles, such as the Windows scrollbars, key off these.
   document.documentElement.dataset.platform = platform
   document.documentElement.dataset.client = window.kettu.client
+  followWindowFront()
   const agents = window.kettu.agents
   agents.onEvent((event) => onHostEvent(event))
   agents.onConnection((state) => {

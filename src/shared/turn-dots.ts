@@ -1,7 +1,8 @@
 // The running turn's mark: nine dots that act out what the turn does now, each only changing its
-// opacity on its own offset into the phase's loop. The desktop plays these as CSS animations, whose
-// keyframes in the renderer's globals.css must match KEYFRAMES; the phone plays the same data on
-// its own native driver from the phase it already knows, never in step with the desktop.
+// opacity on its own offset into the phase's loop. The desktop plays KEYFRAMES through the Web
+// Animations API, and its jump button's dots as CSS animations, whose keyframes in the renderer's
+// globals.css must match KEYFRAMES; the phone plays the same data on its own native driver from
+// the phase it already knows, never in step with the desktop.
 
 import type { TurnPhaseName } from './turn-phase'
 

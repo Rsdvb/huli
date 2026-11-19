@@ -63,15 +63,16 @@ const contextTone = (share: number): UsageTone =>
   usageTone({ usedPercent: share * 100, state: 'ok' })
 
 /**
- * The limit to warn about in the control row: a reached one first, then the fullest from 70% used.
- * By the figure, not the `warning` state, which only Claude Code reports: the plans Kettu reads
- * itself, such as Antigravity's, say `ok` until a window runs out.
+ * Huli: the limit the control row names, as the phone's status line does: a reached one first,
+ * then the fullest with a figure, at any level. By the figure, not the `warning` state, which only
+ * Claude Code reports: the plans Kettu reads itself, such as Antigravity's, say `ok` until a
+ * window runs out.
  */
-function warningLimit(limits: PlanLimit[]): PlanLimit | null {
+function trayLimit(limits: PlanLimit[]): PlanLimit | null {
   const reached = limits.find((l) => l.state === 'reached')
   if (reached) return reached
-  const warnings = limits.filter((l) => limitLevel(l) !== 'ok')
-  return warnings.sort((a, b) => (b.usedPercent ?? 0) - (a.usedPercent ?? 0))[0] ?? null
+  const known = limits.filter((l) => l.usedPercent !== null)
+  return known.sort((a, b) => (b.usedPercent ?? 0) - (a.usedPercent ?? 0))[0] ?? null
 }
 
 const RING_TONE = {
@@ -243,11 +244,13 @@ function CachePart({
 /** A usage level's place among the four colors the context ring and the plan bars share. */
 const METER = { low: 'ok', medium: 'mid', high: 'high', critical: 'full' } as const
 
-const LIMIT_METER = { ok: 'mid', warn: 'high', bad: 'full' } as const
+/** The tray limit's color: quiet under 70% used, the warning's from 70%, the danger's used up. */
+const trayLevel = (limit: PlanLimit): 'muted' | 'high' | 'full' =>
+  isUsedUp(limit) ? 'full' : limitLevel(limit) === 'ok' ? 'muted' : 'high'
 
 /**
- * How much of the context is used, as a ring and its percentage, and a plan limit nearing its end
- * before them, on the composer's tray. It opens affectUI's Context Window over what fills the
+ * How much of the context is used, as a ring and its percentage, and the model's fullest plan
+ * limit before them, on the composer's tray. It opens affectUI's Context Window over what fills the
  * context, then the session's tokens and the plan's limits.
  */
 export function ContextButton({
@@ -282,7 +285,7 @@ export function ContextButton({
   usage: SessionUsage | null
   context?: ContextReport
   limits: PlanLimit[]
-  /** Of `limits`, those that hold this session's model back, which the tray warns about. */
+  /** Of `limits`, those that hold this session's model back, whose fullest the tray names. */
   holding: PlanLimit[]
   account: AgentAccount | null
   /** The model's name, for the card's chip. */
@@ -290,8 +293,7 @@ export function ContextButton({
 }) {
   const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
-  // The tray names a limit only from 70% on; below that it stays in the popover.
-  const warning = warningLimit(holding)
+  const limit = trayLimit(holding)
   // An account of another kind has no plan; an unknown one shows the limits the agent reports.
   const subscribed = account ? account.kind === 'account' : limits.length > 0
   const cached = useUsageStore((s) => s.context[sessionId])
@@ -307,7 +309,7 @@ export function ContextButton({
   useEffect(() => {
     if (readNow && key) loadContext(sessionId, key)
   }, [readNow, sessionId, key])
-  if (!usage && !warning) return null
+  if (!usage && !limit) return null
   const share = shown && shown.size > 0 ? shown.used / shown.size : 0
   const tone = contextTone(share)
   const percent = Math.round(share * 100)
@@ -341,7 +343,7 @@ export function ContextButton({
           />
         }
       >
-        {warning && <TrayLimit key={`${warning.window}-${warning.usedPercent}`} limit={warning} />}
+        {limit && <TrayLimit key={`${limit.window}-${limit.usedPercent}`} limit={limit} />}
         {usage && (
           <>
             <MeterRing share={share} level={METER[tone]} />
@@ -416,8 +418,8 @@ export function ContextButton({
 }
 
 /**
- * A plan limit nearing its end on the tray: its short name and figure, and from 80% when it resets,
- * "5h 97% · resets in 2 h"; it re-renders only when that text changes.
+ * The model's fullest plan limit on the tray: its short name and figure, and from 80% when it
+ * resets, "5h 97% · resets in 2 h"; it re-renders only when that text changes.
  */
 function TrayLimit({ limit }: { limit: PlanLimit }) {
   const { t } = useTranslation(['composer', 'common'])
@@ -432,7 +434,7 @@ function TrayLimit({ limit }: { limit: PlanLimit }) {
         ? `${limitPercent(limit, view)}%`
         : null
   return (
-    <span className="kettu-tray-limit" data-level={LIMIT_METER[limitLevel(limit)]}>
+    <span className="kettu-tray-limit" data-level={trayLevel(limit)}>
       {name} {figure}
       {reset && ` · ${reset}`}
     </span>

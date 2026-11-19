@@ -451,8 +451,13 @@ export function AIAnswer({
 
             <div className="ui-ansc__label">
               {mark ?? <AssistantMark />}
-              <span key={label} className={finished ? "ui-ansc__label-text" : "ui-ansc__label-text ui-ansc__shimmer"} data-text={label}>
+              <span key={label} className="ui-ansc__label-text">
                 {label}
+                {!finished && (
+                  <span className="ui-ansc__shimmer" aria-hidden="true">
+                    <span>{label}</span>
+                  </span>
+                )}
               </span>
             </div>
 
@@ -1025,19 +1030,30 @@ a.ui-ansc__source:hover { background: var(--ui-ansc-wash); }
 }
 .ui-ansc__reasons button:hover { color: var(--ui-ansc-ink); background: var(--ui-ansc-fill); }
 
-/* Shimmer over the working label – a darker band runs through the gray text */
-.ui-ansc__shimmer::after {
-  content: attr(data-text);
-  content: attr(data-text) / "";
+/* Shimmer over the working label – a darker band runs through the gray text.
+   Huli: a copy of the label in the shine's color, under a band-shaped mask three labels wide that
+   slides across while the copy slides back as far, so it stays on the label: both are transforms,
+   which the compositor runs; sliding a text-clipped gradient repainted the label every frame. */
+.ui-ansc__shimmer {
   position: absolute;
-  inset: 0;
-  white-space: nowrap;
-  color: transparent;
-  background: linear-gradient(90deg, transparent 38%, var(--ui-ansc-shine) 50%, transparent 62%) 100% 0 / 300% 100% no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
+  top: 0;
+  bottom: 0;
+  left: -200%;
+  width: 300%;
+  -webkit-mask-image: linear-gradient(90deg, transparent 38%, #000 50%, transparent 62%);
+  mask-image: linear-gradient(90deg, transparent 38%, #000 50%, transparent 62%);
   animation: ui-ansc-sweep 1.6s linear infinite;
   pointer-events: none;
+  user-select: none;
+}
+.ui-ansc__shimmer > span {
+  position: absolute;
+  top: 0;
+  left: calc(200% / 3);
+  width: calc(100% / 3);
+  white-space: nowrap;
+  color: var(--ui-ansc-shine);
+  animation: ui-ansc-sweep-back 1.6s linear infinite;
 }
 
 @keyframes ui-ansc-word { from { opacity: 0; filter: blur(3px); } to { opacity: 1; filter: none; } }
@@ -1048,7 +1064,8 @@ a.ui-ansc__source:hover { background: var(--ui-ansc-wash); }
 @keyframes ui-ansc-pulse { 50% { opacity: 0.3; } }
 @keyframes ui-ansc-breathe { 50% { transform: scale(0.86); } }
 @keyframes ui-ansc-twinkle { 0%, 100% { opacity: 1; transform: none; } 50% { opacity: 0.3; transform: scale(0.6) rotate(45deg); } }
-@keyframes ui-ansc-sweep { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+@keyframes ui-ansc-sweep { from { transform: none; } to { transform: translateX(calc(200% / 3)); } }
+@keyframes ui-ansc-sweep-back { from { transform: none; } to { transform: translateX(-200%); } }
 
 /* Narrow (phones) */
 @container (max-width: 480px) {
