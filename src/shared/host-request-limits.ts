@@ -295,8 +295,6 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'computer.handBack': HOST_MS,
   'computer.show': AGENT_MS,
   'computer.declineSetup': HOST_MS,
-  'kettuImport.scan': HOST_MS,
-  'kettuImport.run': NONE,
   'agentHistory.list': AGENT_MS,
   'agentNetwork.status': HOST_MS,
   'agentNetwork.addSubscription': AGENT_MS,

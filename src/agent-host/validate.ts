@@ -17,7 +17,6 @@ import type { BrowserCallAnswer, BrowserOriginAnswer, BrowserOriginDecision } fr
 import { isControlOutcome } from '@shared/control'
 import { isComputerAppDecision } from '@shared/computer-use'
 import { FILE_READ_LIMIT } from '@shared/files'
-import { KETTU_IMPORT_SESSIONS } from '@shared/kettu-import'
 import {
   isMemoryScope,
   MEMORY_BODY_CHARS,
@@ -2667,25 +2666,10 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
     },
-    'kettuImport.scan': none,
     'agentHistory.list': (params) => {
       const o = fields(params)
       const cursor = optionalString(o, 'cursor', TEXT_CHARS)
       return { agentId: agentId(o), ...(cursor !== undefined ? { cursor } : {}) }
-    },
-    'kettuImport.run': (params) => {
-      const { sessionIds } = fields(params)
-      if (!Array.isArray(sessionIds) || sessionIds.length > KETTU_IMPORT_SESSIONS) {
-        throw invalidParams(`sessionIds must be an array of at most ${KETTU_IMPORT_SESSIONS}`)
-      }
-      const o = fields(params)
-      const memory = optionalFlag(o, 'memory')
-      const artifacts = optionalFlag(o, 'artifacts')
-      return {
-        sessionIds: [...new Set(sessionIds.map((id: unknown) => string({ id }, 'id', ID_CHARS)))],
-        ...(memory !== undefined ? { memory } : {}),
-        ...(artifacts !== undefined ? { artifacts } : {}),
-      }
     },
     ...folderValidators,
     ...networkValidators,

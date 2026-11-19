@@ -20,6 +20,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-24.04
+    env:
+      # gh picks a remote named upstream over origin, so after the merge step adds Kettu's it
+      # aimed every issue, workflow disable and run at KettuAI/Kettu, where this token may not.
+      GH_REPO: ${{ github.repository }}
     steps:
       # A token that may push changes to workflow files, which Kettu's merges can carry; without
       # one, GitHub's token is used and such a merge fails to push.

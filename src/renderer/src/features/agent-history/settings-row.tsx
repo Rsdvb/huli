@@ -1,5 +1,5 @@
-// Huli: Settings > General's row for the import from the agents, next to the import from Kettu.
-// Nothing is listed until its dialog opens. Huli's own; see tools/huli/README.md.
+// Huli: Settings > General's row for the import from the agents. Nothing is listed until its
+// dialog opens. Huli's own; see tools/huli/README.md.
 
 import { useTranslation } from 'react-i18next'
 import type { GroupDef, RowDef } from '@renderer/features/settings/model'

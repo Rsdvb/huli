@@ -12,7 +12,6 @@ import { onAppEvent } from '@renderer/app/events'
 import { launchTarget } from '@renderer/app/restore'
 import { restoreDraftAttachments } from '@renderer/features/session/composer/attachments'
 import { allPanes } from '@renderer/features/split/layout'
-import { receiveKettuImportProgress } from '@renderer/features/kettu-import/store'
 import {
   foldersHostOpened,
   loadFolders,
@@ -182,9 +181,6 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'idleRelease.changed':
       useIdleReleaseStore.getState().receive(hostId, event.state)
-      return
-    case 'kettuImport.progress':
-      receiveKettuImportProgress(event, hostId)
       return
     case 'folders.changed':
       receiveFolders(event.folders, hostId)

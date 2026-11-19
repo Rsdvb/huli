@@ -204,7 +204,6 @@ import type { LogReader } from './usage/model'
 import { LOG_READERS } from './usage/readers'
 import { UsageStore, type UsageWorkerFactory } from './usage/store'
 import { createValidators } from './validate'
-import { KettuImport, kettuDataFolder, kettuImportFile } from './kettu-import'
 import { AgentHistory } from './agent-history'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 
@@ -409,8 +408,6 @@ export class AgentHost {
   /** The agent processes and what they leave behind, until seen gone. */
   private readonly trees: AgentTrees
   readonly sessions: SessionManager
-  /** Huli: an official Kettu's sessions, brought over. */
-  private readonly kettuImport: KettuImport
   private readonly agentHistory: AgentHistory
   /** Huli: the user's folders of sessions. */
   private readonly sessionFolders: SessionFolders
@@ -1142,24 +1139,6 @@ export class AgentHost {
         busy: (counts) => options.send({ type: 'host:busy-changed', ...counts }),
         completed: () => void this.star.turnCompleted(),
       },
-    })
-    this.kettuImport = new KettuImport({
-      source: kettuDataFolder(platform, options.homeDir ?? os.homedir(), process.env),
-      ownData: options.userDataPath,
-      platform,
-      ledger: kettuImportFile(options.userDataPath, log),
-      sessions: this.sessions,
-      projects: this.projects,
-      memory: this.memory,
-      threads: this.threads,
-      artifactsChanged: () => {
-        this.hub.broadcast({ type: 'artifacts.changed' })
-        this.options.send({ type: 'host:artifacts-changed' })
-      },
-      hasAgent: (agentId) => this.agents.has(agentId),
-      progress: (done, total, title) =>
-        this.hub.broadcast({ type: 'kettuImport.progress', done, total, title }),
-      log,
     })
     this.agentHistory = new AgentHistory({
       platform,
@@ -3235,13 +3214,7 @@ export class AgentHost {
           throw new HostError('not_found', `No setup waits in ${entryId}`)
         }
       },
-      'kettuImport.scan': () => this.kettuImport.scan(),
       'agentHistory.list': ({ agentId, cursor }) => this.agentHistory.list(agentId, cursor ?? null),
-      'kettuImport.run': ({ sessionIds, memory, artifacts }) =>
-        this.kettuImport.run(sessionIds, {
-          memory: memory ?? false,
-          artifacts: artifacts ?? false,
-        }),
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),

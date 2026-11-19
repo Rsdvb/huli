@@ -19,7 +19,7 @@ Kite 是 [Kettu](https://github.com/KettuAI/Kettu) 的个人分支：把 Claude 
 - **自己的云服务 Kite Cloud**：账号、中转、推送和网页版都跑在自己的服务器上，更新也从自己的渠道下发并验签。
 - **手机端纸鸢**：iOS 和 Android，能看会话、发消息、处理请求，有实时活动和小组件。
 - **Agent 的网络**：导入机场订阅，给每个 Agent 选节点或跟随默认，或者只让它从选定的网卡出去；节点或网卡断了就断网，不会绕路。
-- **从别处搬过来**：从 Kettu 导入会话、记忆和 Artifacts，从各 Agent 批量导入历史会话和 Codex 的记忆。
+- **从别处搬过来**：从各 Agent 批量导入历史会话和 Codex 的记忆。
 - **Codex**：速度档位、额外积分余额和重置卡、按轮撤销。
 - **Claude Code**：输入建议、并发上限、可自定义的入口标识。
 - **浏览器**：Agent 可以在你同意后往网页上传文件。
@@ -44,8 +44,8 @@ Kettu 的名称和标志属于其作者；Kite 与 KettuAI 没有关联。
 
 Kite is a personal fork of [Kettu](https://github.com/KettuAI/Kettu), the desktop GUI for coding agents, with
 its own cloud (accounts, relay, push and a web client), a phone app for iOS and Android, per-agent network
-routing through proxy nodes or a chosen network interface that fails closed, imports from Kettu and from the
-agents' own histories, extra Codex and Claude Code controls, and a signed, self-updating macOS build. Upstream
+routing through proxy nodes or a chosen network interface that fails closed, imports from the agents' own
+histories, extra Codex and Claude Code controls, and a signed, self-updating macOS build. Upstream
 is merged nightly; every difference is marked `Huli:` and listed in [`tools/huli/README.md`](../tools/huli/README.md).
 The code is public; the builds are not: they go only to Kite's own update channel, and the GitHub
 releases carry notes, not files. Licensed under [AGPL-3.0](../LICENSE) with the [additional permission](../LICENSE-EXCEPTION) Kettu grants. Not

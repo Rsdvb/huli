@@ -3,7 +3,6 @@
 import type { CommentAnchor, CommentAuthor, CommentThread } from '@shared/artifact-comments'
 import type { ArtifactSummary } from '@shared/artifacts'
 import type { ArtifactTypeInfo } from '@shared/artifact-types'
-import type { KettuArtifactsRead } from '../threads/kettu-artifacts'
 import type { Declaration } from './runtime/calls'
 
 export interface ArtifactRecord {
@@ -172,8 +171,6 @@ export interface ArtifactCalls {
     params: { id: string; anchors: { threadId: string; anchor: CommentAnchor }[] }
     result: null
   }
-  /** Huli: the artifacts of a copy of an official Kettu's thread database, at `file`. */
-  readKettu: { params: { file: string }; result: KettuArtifactsRead }
 }
 
 export type ArtifactCallName = keyof ArtifactCalls
