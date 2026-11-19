@@ -556,6 +556,11 @@ hand. The filled-in files stay in the working tree like the rebrand's output; ne
 
 ## Phone updates
 
+Since 2026-11-19 the owner's iPhone updates through TestFlight (internal testers get every build;
+turn on automatic updates in TestFlight). The ad-hoc export below is off unless the repository
+variable `HULI_IOS_ADHOC` is `true`; a TestFlight build carries no provisioning profile, so it
+never checks the channel itself.
+
 The phone app hears of its own new builds from the channel (`mobile/src/update.ts`): at start and
 on each return to the foreground, at most every six hours, it reads its platform's `latest.json`,
 and when the build number there (the run number) is above its own it shows a banner on the session

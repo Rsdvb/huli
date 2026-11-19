@@ -272,9 +272,10 @@ jobs:
 
   # The phone app for iOS, on a macOS runner: signed through the App Store Connect API key kept
   # there and uploaded to TestFlight for its internal testers only; no public link, which would let
-  # anyone install it. The same archive is also exported ad hoc for the team's registered devices,
-  # which install it from the update channel. Its failure never holds anything back: without the
-  # ad-hoc build the release goes out as before, and the channel keeps its last one.
+  # anyone install it. Phones update through TestFlight. Only while the HULI_IOS_ADHOC variable is
+  # `true` (or on a dry run) is the same archive also exported ad hoc for the team's registered
+  # devices, which then install it from the update channel. Its failure never holds anything back:
+  # without the ad-hoc build the release goes out as before, and the channel keeps its last one.
   ios:
     name: iOS
     needs: version
@@ -323,13 +324,13 @@ jobs:
           APP_DIR: ${{ github.workspace }}/mobile
           HULI_TOOLS: ${{ github.workspace }}/tools/huli/ios
           OUT: ${{ runner.temp }}/ios
-          ADHOC: '1'
+          ADHOC: ${{ (vars.HULI_IOS_ADHOC == 'true' || inputs.ios_dry_run) && '1' || '0' }}
           UPLOAD: ${{ inputs.ios_dry_run && '0' || '1' }}
       # The ad-hoc build goes on even when the TestFlight upload failed, once its profiles check
       # out; without it the release goes out as before. A dry run fails here instead.
       - name: Check the ad-hoc build
         id: adhoc-check
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (vars.HULI_IOS_ADHOC == 'true' || inputs.ios_dry_run) }}
         continue-on-error: ${{ !inputs.ios_dry_run }}
         working-directory: .
         run: bash tools/huli/ios/check-ipa.sh "$RUNNER_TEMP/ios/adhoc/export/Huli.ipa"
