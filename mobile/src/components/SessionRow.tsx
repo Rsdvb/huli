@@ -224,23 +224,33 @@ export const SessionRow = memo(function SessionRow(props: {
   mark?: { platform: string | undefined; name: string; offline: boolean }
   /** While the list selects: whether this one is chosen. */
   check?: boolean
+  /**
+   * The list is not live (the cache's copy, or the computer away): a running session shows as
+   * last heard of, without a timer or anything that moves, until the computer answers.
+   */
+  stale?: boolean
   onPress(): void
   /** Where the system gives no context menu (Android), the long press opens the session's menu. */
   onLongPress?: () => void
 }) {
   const { c } = useTokens()
   const s = props.session
-  const state = sessionState(s)
+  const known = sessionState(s)
+  const state =
+    known?.kind === 'live' && props.stale ? { kind: 'live' as const, text: '上次在运行' } : known
   const place = s.scratch ? '无项目' : (props.projectName ?? folder(s.projectPath))
   const plan = s.plan && s.plan.total > 0 ? s.plan : null
   const prs = sessionPullRequests(s)
-  const running = s.status === 'running' || s.status === 'starting'
+  const running = !props.stale && (s.status === 'running' || s.status === 'starting')
+  const subagents =
+    props.stale && props.subagents ? { ...props.subagents, running: false } : props.subagents
   const since = running ? (s.turnStartedAt ?? null) : null
   const now = useTick(since !== null, 15_000)
   // A running row says how long its turn has gone; the rest say when they last changed.
   const time = since !== null ? elapsedText(now - since) : listTime(props.time ?? s.updatedAt)
-  // The avatar's badge already says it runs; the meta line keeps only what asks for the user.
-  const stateText = state && state.kind !== 'live' ? state : null
+  // The avatar's badge already says it runs; the meta line keeps only what asks for the user, and
+  // that a run is only as last heard of.
+  const stateText = state && (state.kind !== 'live' || props.stale) ? state : null
 
   const selecting = props.check !== undefined
   const row = (
@@ -272,7 +282,7 @@ export const SessionRow = memo(function SessionRow(props: {
         size={sizes.rowAvatar}
         agentId={s.agentId}
         name={props.agentName}
-        badge={state ? BADGES[state.kind] : null}
+        badge={state ? (state.kind === 'live' && props.stale ? 'stale' : BADGES[state.kind]) : null}
       />
       <View style={styles.body}>
         <View style={styles.titleLine}>
@@ -280,9 +290,9 @@ export const SessionRow = memo(function SessionRow(props: {
           <Text style={[typeScale.rowTitle, styles.title, { color: c.text }]} numberOfLines={1}>
             {sessionTitle(s)}
           </Text>
-          {props.subagents && (running || props.subagents.running) ? (
+          {subagents && (running || subagents.running) ? (
             <SubagentMenu parentId={s.id}>
-              <SubagentBadge subagents={props.subagents} />
+              <SubagentBadge subagents={subagents} />
             </SubagentMenu>
           ) : null}
           {prs.length > 0 ? <PrBadge prs={prs} /> : null}
@@ -332,7 +342,13 @@ export const SessionRow = memo(function SessionRow(props: {
             <Text
               style={[
                 typeScale.footnote,
-                { color: stateColor(c, stateText.kind), fontWeight: '500' },
+                {
+                  color:
+                    props.stale && stateText.kind === 'live'
+                      ? c.textTertiary
+                      : stateColor(c, stateText.kind),
+                  fontWeight: '500',
+                },
               ]}
               numberOfLines={1}
             >

@@ -54,6 +54,7 @@ import {
   useHost,
   useHostActions,
   useHostSelector,
+  useListsStale,
   useMaybeLink,
   useProjects,
   useSessions,
@@ -206,6 +207,8 @@ interface HomeRowProps {
   selected: boolean
   appear: boolean
   connected: boolean
+  /** Its computer's list is not live: a running session shows as last heard of. */
+  stale: boolean
   mark: Mark | undefined
   /** Undefined unless the list selects. */
   check: boolean | undefined
@@ -227,6 +230,7 @@ function sameHomeRow(a: HomeRowProps, b: HomeRowProps): boolean {
     a.selected === b.selected &&
     a.appear === b.appear &&
     a.connected === b.connected &&
+    a.stale === b.stale &&
     a.mark?.name === b.mark?.name &&
     a.mark?.offline === b.mark?.offline &&
     a.mark?.platform === b.mark?.platform &&
@@ -252,6 +256,7 @@ const HomeRow = memo(function HomeRow(props: HomeRowProps) {
       projectName={props.projectName}
       selected={props.selected}
       appear={props.appear}
+      stale={props.stale}
       {...(props.mark ? { mark: props.mark } : {})}
       {...(selecting ? { check: props.check } : {})}
       onPress={() => (selecting ? actions.toggleCheck(placed) : actions.open(placed))}
@@ -397,6 +402,10 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   useFleetLinks(host.computers, active?.id ?? null, allComputers)
   const fleet = useFleet()
   const connected = host.state.kind === 'connected'
+  const stale = useListsStale()
+  /** A computer's lists are not live: the active one's by the link, another's until it connects. */
+  const staleOn = (computer: string) =>
+    computer === activeId ? stale : fleet.get(computer)?.state !== 'connected'
 
   /** The link of a computer other than the active one; undefined for the active one's sessions. */
   const linkFor = useCallback(
@@ -484,7 +493,10 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     live.filter(
       (p) => needsYou(p.session) && !(p.session.task && needingTaskIds.has(p.session.task.taskId)),
     ).length + needingTasks.length
-  const runningNow = live.filter((p) => !needsYou(p.session) && isRunning(p.session))
+  // Only what is known to run now: a list not live says what ran when last heard of.
+  const runningNow = live.filter(
+    (p) => !needsYou(p.session) && isRunning(p.session) && !staleOn(p.computer),
+  )
   const subagents = useMemo(
     () => subagentCounts([...byComputer.values()].flatMap((v) => [...v.sessions.values()])),
     [byComputer],
@@ -1190,6 +1202,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         selected={here && props.selected === s.id}
         appear={fresh.current.has(item.key)}
         connected={here ? connected : fleet.get(p.computer)?.state === 'connected'}
+        stale={staleOn(p.computer)}
         mark={marks.get(p.computer)}
         check={selection ? selection.has(item.key) : undefined}
         folders={foldersOf.get(p.computer) ?? NO_FOLDERS}
@@ -1204,7 +1217,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         <AnimatedFlashList
           ref={list}
           data={items}
-          extraData={[props.selected, selection, marks]}
+          extraData={[props.selected, selection, marks, stale]}
           keyExtractor={itemKey}
           getItemType={itemType}
           renderItem={renderItem}

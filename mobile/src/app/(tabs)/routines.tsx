@@ -20,6 +20,7 @@ import { router } from 'expo-router'
 import type { RoutineView } from '@shared/routines'
 import { DEFAULT_SCHEDULE, DEFAULT_SCOPE } from '@shared/routines'
 import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
+import { ListSyncNote } from '../../components/SyncNote'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { TasksView } from '../../components/tasks/TasksView'
 import { useAgents, useHostActions, useHostState, useMaybeLink, useProjects } from '../../host'
@@ -75,7 +76,7 @@ function Routines(props: { switcher: ReactNode }) {
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
-  const { data, error, load } = useRoutineList()
+  const { data, error, syncedAt, load } = useRoutineList()
   const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
@@ -363,6 +364,7 @@ function Routines(props: { switcher: ReactNode }) {
         }
       >
         {props.switcher}
+        {data ? <ListSyncNote error={error} syncedAt={syncedAt} onRetry={load} /> : null}
         {searching ? (
           <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
             <Icon name="search" size={17} color={c.textSecondary} />

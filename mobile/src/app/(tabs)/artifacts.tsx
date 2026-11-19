@@ -29,12 +29,14 @@ import { ArtifactCard, artifactMenu } from '../../components/ArtifactCard'
 import { ArtifactSheet, confirmDelete } from '../../components/ArtifactSheet'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { Sheet, type SheetItem } from '../../components/Sheet'
+import { ListSyncNote } from '../../components/SyncNote'
 import {
   useAgents,
   useHostActions,
   useHostSelector,
   useHostState,
   useMaybeLink,
+  withinRefreshLimit,
   type HostData,
 } from '../../host'
 import { errorText } from '../../sessions'
@@ -93,6 +95,7 @@ export default function Artifacts() {
   const [items, setItems] = useState<ArtifactSummary[] | null>(null)
   const [deleted, setDeleted] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [syncedAt, setSyncedAt] = useState<number | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [kind, setKind] = useState<ArtifactKind | null>(null)
   const [sort, setSort] = useState<Sort>('updated')
@@ -109,13 +112,16 @@ export default function Artifacts() {
   const load = useCallback(async () => {
     if (!link) return
     try {
-      const [live, gone] = await Promise.all([
-        link.request('artifacts.list', {}) as Promise<ArtifactSummary[]>,
-        link.request('artifacts.list', { deleted: true }) as Promise<ArtifactSummary[]>,
-      ])
+      const [live, gone] = await withinRefreshLimit((signal) =>
+        Promise.all([
+          link.request('artifacts.list', {}, signal) as Promise<ArtifactSummary[]>,
+          link.request('artifacts.list', { deleted: true }, signal) as Promise<ArtifactSummary[]>,
+        ]),
+      )
       setItems(live)
       setDeleted(gone.length)
       setError(null)
+      setSyncedAt(Date.now())
     } catch (failure) {
       setError(errorText(failure))
     }
@@ -198,7 +204,19 @@ export default function Artifacts() {
 
   const summary = (
     <View style={styles.summary} accessibilityRole="header">
-      {items && inProject.length === 0 ? (
+      {!items ? (
+        // No count until the computer answers: offline or after a failure the screen says what the
+        // tab holds, and the state below says why it is empty; while it loads, a placeholder.
+        connected && !error ? (
+          <View style={styles.summaryLoading} accessibilityLabel="正在加载">
+            <Skeleton width="62%" height={18} />
+          </View>
+        ) : (
+          <Text style={[typeScale.lead, { color: c.textSecondary }]}>
+            这里是你的 Agent 做的 Artifact。
+          </Text>
+        )
+      ) : inProject.length === 0 ? (
         <Text style={[typeScale.lead, { color: c.textSecondary }]}>
           你的 Agent 还没做过 Artifact。
         </Text>
@@ -217,10 +235,11 @@ export default function Artifacts() {
             </View>
           ) : null}
           <Text style={[typeScale.lead, styles.count, { color: c.text }]}>
-            {items ? inProject.length : '…'} 个 Artifact。
+            {inProject.length} 个 Artifact。
           </Text>
         </View>
       )}
+      {items ? <ListSyncNote error={error} syncedAt={syncedAt} onRetry={load} /> : null}
     </View>
   )
 
@@ -492,6 +511,8 @@ const styles = StyleSheet.create({
     paddingBottom: space.lg,
   },
   summary: { paddingTop: space.md },
+  // The lead line's height, so the header keeps its size when the sentence replaces it.
+  summaryLoading: { height: typeScale.lead.lineHeight, justifyContent: 'center' },
   kindIcons: {
     flexDirection: 'row',
     alignItems: 'center',

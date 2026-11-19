@@ -223,9 +223,16 @@ export function StatusLine(props: {
             color={props.worktree ? c.tint : c.textTertiary}
           />
           {props.branch === 'loading' ? (
-            <Text style={[styles.text, { color: c.textTertiary }]}>正在读取…</Text>
+            // An ellipsis rather than words: the line is full on every phone, and the branch is the
+            // last thing to give room to while it is still unknown.
+            <Text style={[styles.text, { color: c.textTertiary }]} numberOfLines={1}>
+              …
+            </Text>
           ) : (
-            <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+            <Text
+              style={[styles.text, styles.shrink, { color: c.textSecondary }]}
+              numberOfLines={1}
+            >
               {props.branch}
             </Text>
           )}

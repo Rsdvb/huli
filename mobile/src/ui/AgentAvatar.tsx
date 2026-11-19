@@ -1,6 +1,6 @@
 // An agent in a round avatar: its harness's mark on a quiet disc, or its initial when the phone has
 // no mark for it. A dot on the edge tells a running session (breathing), one that waits for the
-// user, or one that failed.
+// user, or one that failed; a still grey one, a session that was running when last heard of.
 
 import { useEffect, useRef } from 'react'
 import { Animated, StyleSheet, Text, View } from 'react-native'
@@ -9,7 +9,7 @@ import { markFor } from './agent-marks'
 import { useReduceMotion } from './Press'
 import { size as sizes, useTokens } from './tokens'
 
-export type AvatarBadge = 'live' | 'waiting' | 'error' | 'unread' | null
+export type AvatarBadge = 'live' | 'stale' | 'waiting' | 'error' | 'unread' | null
 
 export function AgentAvatar(props: {
   agentId: string
@@ -133,6 +133,7 @@ function Dot(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
   const halo = useRef(new Animated.Value(0)).current
   const color = {
     live: c.success,
+    stale: c.textTertiary,
     waiting: c.warning,
     error: c.danger,
     unread: c.tint,
