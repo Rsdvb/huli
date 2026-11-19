@@ -1,9 +1,14 @@
 // A session's sub-agents, opened from the count on its row as the desktop's badge opens its card:
-// each one with its tool calls and how long it has run or ran, opening its session, and a switch
-// that keeps the finished ones in the list.
+// each one with whether it runs, or how long it ran, opening its session, and a switch that keeps
+// the finished ones in the list. More than a menu holds open the sub-sessions screen instead.
+//
+// The system's menu is rebuilt whole whenever what it shows changes, even while it is open: its
+// rows then drew over each other and its scroll went back to the top. So it shows only what
+// changes when a sub-agent starts or ends, never a clock or a running count of tool calls; the
+// screen shows those.
 
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { useCallback, useMemo, type ReactElement } from 'react'
+import { Pressable, StyleSheet, View } from 'react-native'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { sameItems, useConnected, useHostSelector, useLink, type HostData } from '../host'
@@ -14,16 +19,8 @@ import { NativeMenu } from '../ui/session/NativeMenu'
 import type { MenuEntry, MenuSource } from '../ui/session/Popover'
 import { listedSubagents, subagentRunning, useSubagentDigests } from '../ui/session/subagents'
 
-/** Re-renders each second while `on`, for the running ones' clocks. */
-function useSecond(on: boolean): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!on) return
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [on])
-  return now
-}
+// More rows than this scroll in a menu, which is not made for that: the screen lists them.
+const MENU_MOST = 8
 
 export function SubagentMenu(props: { parentId: string; children: ReactElement }) {
   const link = useLink()
@@ -44,20 +41,18 @@ export function SubagentMenu(props: { parentId: string; children: ReactElement }
     () => listedSubagents(all, showFinishedSubagents),
     [all, showFinishedSubagents],
   )
-  const digestOf = useSubagentDigests(link, listed, connected)
+  const many = listed.length > MENU_MOST
+  const digestOf = useSubagentDigests(link, many ? [] : listed, connected)
   const running = listed.filter(subagentRunning).length
-  const now = useSecond(running > 0)
 
   const row = (child: SessionSummary): MenuEntry => {
-    const digest = digestOf(child.id)
     const live = subagentRunning(child)
-    const elapsed = live
-      ? now - (child.turnStartedAt ?? child.createdAt)
-      : (digest?.durationMs ?? null)
+    // A finished one's time is read once and stays; a running one's would tick.
+    const ran = live ? null : (digestOf(child.id)?.durationMs ?? null)
     const failed = child.attention === 'error' || child.status === 'failed'
     const meta = [
-      live ? (digest?.tools != null ? `${digest.tools} 个工具` : null) : failed ? '失败' : '已完成',
-      elapsed !== null ? spanText(Math.max(0, elapsed)) : null,
+      live ? '运行中' : failed ? '失败' : '已完成',
+      ran !== null ? spanText(Math.max(0, ran)) : null,
     ]
       .filter(Boolean)
       .join(' · ')
@@ -103,6 +98,18 @@ export function SubagentMenu(props: { parentId: string; children: ReactElement }
   }
 
   if (all.length === 0) return props.children
+  if (many) {
+    return (
+      <Pressable
+        onPress={() => router.push({ pathname: '/subagents/[id]', params: { id: props.parentId } })}
+        accessibilityRole="button"
+        accessibilityLabel={`${listed.length} 个子 Agent${running > 0 ? `，${running} 个运行中` : ''}`}
+        style={styles.hit}
+      >
+        <View style={styles.pad}>{props.children}</View>
+      </Pressable>
+    )
+  }
   // The badge sits inside its session's row: claiming the touch keeps the row from opening the
   // session under the menu, which the tap opens. Padding the label gives it a finger's room, and
   // the margins take the room back so the row's line keeps its height.
