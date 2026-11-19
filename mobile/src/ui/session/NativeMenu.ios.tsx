@@ -210,11 +210,16 @@ export function NativeMenu(props: {
   source: MenuSource | null
   children: ReactElement
   disabled?: boolean
+  /** The edge the control keeps still while its label changes width: its end in a row's end. */
+  align?: 'leading' | 'trailing'
 }) {
   const page = props.source?.pages(props.source.root)
   if (!props.source || !page || props.disabled) return props.children
   return (
-    <Host matchContents>
+    // React Native lays the control out and moves it with the keyboard; a hosting controller that
+    // kept the safe area would also lift its content out of the keyboard's way, on SwiftUI's own
+    // animation, so the label drifted off its row and the menu morphed out of the wrong place.
+    <Host matchContents ignoreSafeArea="all" {...(props.align ? { alignment: props.align } : {})}>
       {/* In the order given, opening up or down: the system's default turns a menu that opens
           upward around, which pushed the model menu's models to its far end. */}
       <Menu
