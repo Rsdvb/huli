@@ -155,8 +155,36 @@ export function mcpTool(title: string): { server: string; tool: string } | null 
   return match ? { server: match[1]!, tool: match[2]! } : null
 }
 
-/** A call's title as it reads: an MCP tool's server and name made readable, any other as it is. */
+// Claude Code's own tools the host gives no title of their own, which reach the phone as their bare
+// names.
+const CLAUDE_TOOLS: Record<string, string> = {
+  SendMessage: '给 Agent 发消息',
+  TeamCreate: '创建 Agent 团队',
+  TeamDelete: '解散 Agent 团队',
+  TaskOutput: '读取后台任务输出',
+  BashOutput: '读取后台任务输出',
+  TaskStop: '停止后台任务',
+  KillShell: '停止后台任务',
+  KillBash: '停止后台任务',
+  Monitor: '监视后台任务',
+  ToolSearch: '查找工具',
+  ListMcpResourcesTool: '列出 MCP 资源',
+  ReadMcpResourceTool: '读取 MCP 资源',
+  ScheduleWakeup: '定时唤醒',
+  CronCreate: '创建定时任务',
+  CronDelete: '删除定时任务',
+  CronList: '列出定时任务',
+  EnterWorktree: '进入工作树',
+  ExitWorktree: '离开工作树',
+}
+
+/**
+ * A call's title as it reads: an MCP tool's server and name made readable, a bare Claude Code tool
+ * name in words, any other as it is.
+ */
 export function toolTitle(title: string): string {
+  const bare = title.trim()
+  if (Object.hasOwn(CLAUDE_TOOLS, bare)) return CLAUDE_TOOLS[bare]!
   const named = mcpTool(title)
   if (!named) return title
   const own = named.server.toLowerCase() === OWN_SERVER
