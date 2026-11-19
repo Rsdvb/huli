@@ -2858,6 +2858,13 @@ li[data-row-exit='dust'] > * {
   scrollbar-gutter: stable;
   container: ui-as-main / inline-size;
 }
+/* Huli: a toast stays over the panel's foot, which sits 56px above the window's; the page scrolls
+   on past its last row by what the toast covers, so no row has to stay under it. */
+.kettu-settings .kettu-settings__page::after {
+  content: '';
+  display: block;
+  height: max(0px, calc(var(--toast-room, 0px) - 56px));
+}
 .kettu-settings .kettu-settings__close {
   position: sticky;
   top: 12px;

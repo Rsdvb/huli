@@ -1,4 +1,4 @@
-import { useEffect, useId, useSyncExternalStore } from 'react'
+import { useEffect, useId, useRef, useSyncExternalStore } from 'react'
 import { Alert02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
@@ -210,16 +210,36 @@ export function Toaster() {
   const { t } = useTranslation('common')
   const id = useId()
   const shown = useSyncExternalStore(subscribe, anyOpen)
+  const layer = useRef<HTMLDivElement>(null)
   // A toast can cover the browser pane's native view, as a menu can.
   useEffect(() => {
     useOverlayStore.getState().set(id, shown)
     return () => useOverlayStore.getState().set(id, false)
   }, [id, shown])
+  // Huli: how far up from the window's foot the stack reaches, as `--toast-room` on the root, so
+  // a screen it stays over, such as Settings, can scroll its last rows clear of it.
+  useEffect(() => {
+    const list = layer.current?.querySelector('.ui-ts__list')
+    if (!list) return
+    const root = document.documentElement
+    const observer = new ResizeObserver(() => {
+      const box = list.getBoundingClientRect()
+      if (box.height > 0) root.style.setProperty('--toast-room', `${innerHeight - box.top}px`)
+      else root.style.removeProperty('--toast-room')
+    })
+    observer.observe(list)
+    return () => {
+      observer.disconnect()
+      root.style.removeProperty('--toast-room')
+    }
+  }, [])
   return (
-    <AffectToaster
-      position="bottom-center"
-      label={t('toasts.region')}
-      closeLabel={t('actions.dismiss')}
-    />
+    <div ref={layer} className="contents">
+      <AffectToaster
+        position="bottom-center"
+        label={t('toasts.region')}
+        closeLabel={t('actions.dismiss')}
+      />
+    </div>
   )
 }
