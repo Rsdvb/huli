@@ -30,6 +30,7 @@ import { SectionHeader } from '../../ui/SectionHeader'
 import { Skeleton } from '../../ui/Skeleton'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../shell'
+import { ListSyncNote } from '../SyncNote'
 import { TaskRow } from './TaskRow'
 
 type Section = 'waiting' | 'running' | 'done' | 'dropped'
@@ -63,7 +64,7 @@ export function TasksView(props: { switcher: ReactNode }) {
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const list = useRef<FlashListRef<Item>>(null)
-  const { tasks, views, loaded, error, reload } = useTaskList()
+  const { tasks, views, loaded, error, syncedAt, reload } = useTaskList()
   const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
@@ -166,6 +167,9 @@ export function TasksView(props: { switcher: ReactNode }) {
   const top = (
     <View style={styles.top}>
       {props.switcher}
+      {tasks.length > 0 ? (
+        <ListSyncNote error={error} syncedAt={syncedAt} onRetry={reload} />
+      ) : null}
       {searching ? (
         <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
           <Icon name="search" size={17} color={c.textSecondary} />

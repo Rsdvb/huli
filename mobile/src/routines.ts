@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Alert } from 'react-native'
 import type { HostEvent, RoutineList } from '@shared/agent-host'
 import type { PermissionScope, RoutineView, RunStatus, Schedule } from '@shared/routines'
-import { useHostState, useMaybeLink } from './host'
+import { useHostState, useMaybeLink, withinRefreshLimit } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
 import type { IconName } from './ui/Icon'
@@ -213,6 +213,8 @@ export function confirmDeleteRoutine(
 export interface RoutinesData {
   data: RoutineList | null
   error: string | null
+  /** When the list was last read from the computer; null before. */
+  syncedAt: number | null
   load(): Promise<void>
 }
 
@@ -222,13 +224,18 @@ export function useRoutineList(): RoutinesData {
   const state = useHostState()
   const [data, setData] = useState<RoutineList | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [syncedAt, setSyncedAt] = useState<number | null>(null)
   const connected = state.kind === 'connected'
 
   const load = useCallback(async () => {
     if (!link) return
     try {
-      setData((await link.request('routines.list', undefined)) as RoutineList)
+      const list = await withinRefreshLimit(
+        (signal) => link.request('routines.list', undefined, signal) as Promise<RoutineList>,
+      )
+      setData(list)
       setError(null)
+      setSyncedAt(Date.now())
     } catch (failure) {
       setError(errorText(failure))
     }
@@ -264,5 +271,5 @@ export function useRoutineList(): RoutinesData {
     })
   }, [link])
 
-  return { data, error, load }
+  return { data, error, syncedAt, load }
 }

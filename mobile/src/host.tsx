@@ -404,6 +404,22 @@ const DOWN_AFTER = 600
  */
 const REFRESH_LIMIT = 15_000
 
+/**
+ * Runs a read of a list with a signal that aborts after REFRESH_LIMIT, so whatever waits on it, such
+ * as a pull-to-refresh spinner, always settles. A read cut off by the limit fails in words.
+ */
+export async function withinRefreshLimit<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const limit = new AbortController()
+  const timer = setTimeout(() => limit.abort(), REFRESH_LIMIT)
+  try {
+    return await read(limit.signal)
+  } catch (error) {
+    throw limit.signal.aborted ? new Error('电脑没有及时回应。') : error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 const selectReady = (d: HostData) => d.ready
 const selectStateKind = (d: HostData) => d.state.kind
 
@@ -494,16 +510,16 @@ export function HostProvider(props: { children: ReactNode }) {
     const link = getHost().ready?.link
     if (!link) return
     const mine = generation.current
-    const limit = new AbortController()
-    const timer = setTimeout(() => limit.abort(), REFRESH_LIMIT)
     setHost({ syncFailed: false })
     try {
-      const [list, agentList, projectList, folderList] = await Promise.all([
-        link.request('sessions.list', {}, limit.signal) as Promise<SessionSummary[]>,
-        link.request('agents.list', undefined, limit.signal) as Promise<AgentStatus[]>,
-        link.request('projects.list', undefined, limit.signal) as Promise<Project[]>,
-        readFolders(link, limit.signal),
-      ])
+      const [list, agentList, projectList, folderList] = await withinRefreshLimit((signal) =>
+        Promise.all([
+          link.request('sessions.list', {}, signal) as Promise<SessionSummary[]>,
+          link.request('agents.list', undefined, signal) as Promise<AgentStatus[]>,
+          link.request('projects.list', undefined, signal) as Promise<Project[]>,
+          readFolders(link, signal),
+        ]),
+      )
       if (mine !== generation.current) return
       fresh.current = true
       setHost((d) => ({
@@ -519,8 +535,6 @@ export function HostProvider(props: { children: ReactNode }) {
     } catch (error) {
       if (mine === generation.current) setHost({ syncFailed: true })
       throw error
-    } finally {
-      clearTimeout(timer)
     }
   }, [])
 

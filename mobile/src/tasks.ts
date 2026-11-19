@@ -21,7 +21,7 @@ import {
   type Workflow,
 } from '@shared/workflow'
 import { call } from './git'
-import { useConnected, useMaybeLink } from './host'
+import { useConnected, useMaybeLink, withinRefreshLimit } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
 
@@ -271,6 +271,8 @@ interface Snapshot {
   views: ReadonlyMap<string, TaskView>
   loaded: boolean
   error: string | null
+  /** When the list was last read from the computer; null before. */
+  syncedAt: number | null
 }
 
 interface Store {
@@ -282,7 +284,13 @@ interface Store {
 
 const stores = new WeakMap<HostLink, Store>()
 
-const EMPTY: Snapshot = { summaries: new Map(), views: new Map(), loaded: false, error: null }
+const EMPTY: Snapshot = {
+  summaries: new Map(),
+  views: new Map(),
+  loaded: false,
+  error: null,
+  syncedAt: null,
+}
 
 function publish(store: Store, change: Partial<Snapshot>): void {
   store.snapshot = { ...store.snapshot, ...change }
@@ -306,7 +314,7 @@ function drop(store: Store, taskId: string): void {
 
 function readList(store: Store): Promise<void> {
   if (store.reading) return store.reading
-  store.reading = call(store.link, 'tasks.list', undefined)
+  store.reading = withinRefreshLimit((signal) => call(store.link, 'tasks.list', undefined, signal))
     .then(
       (list) => {
         // A view read before keeps its detail; the list's summary is newer for the rest.
@@ -320,6 +328,7 @@ function readList(store: Store): Promise<void> {
           views,
           loaded: true,
           error: null,
+          syncedAt: Date.now(),
         })
       },
       (failure: unknown) => publish(store, { loaded: true, error: errorText(failure) }),
@@ -375,6 +384,7 @@ export interface TaskList {
   views: ReadonlyMap<string, TaskView>
   loaded: boolean
   error: string | null
+  syncedAt: number | null
   reload(): Promise<void>
 }
 
@@ -388,7 +398,14 @@ export function useTaskList(): TaskList {
     [snapshot.summaries],
   )
   const reload = useCallback(() => (store ? readList(store) : Promise.resolve()), [store])
-  return { tasks, views: snapshot.views, loaded: snapshot.loaded, error: snapshot.error, reload }
+  return {
+    tasks,
+    views: snapshot.views,
+    loaded: snapshot.loaded,
+    error: snapshot.error,
+    syncedAt: snapshot.syncedAt,
+    reload,
+  }
 }
 
 export interface TaskData {

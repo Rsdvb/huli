@@ -29,12 +29,14 @@ import { ArtifactCard, artifactMenu } from '../../components/ArtifactCard'
 import { ArtifactSheet, confirmDelete } from '../../components/ArtifactSheet'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { Sheet, type SheetItem } from '../../components/Sheet'
+import { ListSyncNote } from '../../components/SyncNote'
 import {
   useAgents,
   useHostActions,
   useHostSelector,
   useHostState,
   useMaybeLink,
+  withinRefreshLimit,
   type HostData,
 } from '../../host'
 import { errorText } from '../../sessions'
@@ -93,6 +95,7 @@ export default function Artifacts() {
   const [items, setItems] = useState<ArtifactSummary[] | null>(null)
   const [deleted, setDeleted] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [syncedAt, setSyncedAt] = useState<number | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [kind, setKind] = useState<ArtifactKind | null>(null)
   const [sort, setSort] = useState<Sort>('updated')
@@ -109,13 +112,16 @@ export default function Artifacts() {
   const load = useCallback(async () => {
     if (!link) return
     try {
-      const [live, gone] = await Promise.all([
-        link.request('artifacts.list', {}) as Promise<ArtifactSummary[]>,
-        link.request('artifacts.list', { deleted: true }) as Promise<ArtifactSummary[]>,
-      ])
+      const [live, gone] = await withinRefreshLimit((signal) =>
+        Promise.all([
+          link.request('artifacts.list', {}, signal) as Promise<ArtifactSummary[]>,
+          link.request('artifacts.list', { deleted: true }, signal) as Promise<ArtifactSummary[]>,
+        ]),
+      )
       setItems(live)
       setDeleted(gone.length)
       setError(null)
+      setSyncedAt(Date.now())
     } catch (failure) {
       setError(errorText(failure))
     }
@@ -233,6 +239,7 @@ export default function Artifacts() {
           </Text>
         </View>
       )}
+      {items ? <ListSyncNote error={error} syncedAt={syncedAt} onRetry={load} /> : null}
     </View>
   )
 

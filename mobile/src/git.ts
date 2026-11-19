@@ -18,8 +18,9 @@ export function call<M extends HostMethod>(
   link: HostLink,
   method: M,
   params: HostParams<M>,
+  signal?: AbortSignal,
 ): Promise<DeviceResult<M>> {
-  return link.request(method, params) as Promise<DeviceResult<M>>
+  return link.request(method, params, signal) as Promise<DeviceResult<M>>
 }
 
 export function errorText(error: unknown, fallback: string): string {
