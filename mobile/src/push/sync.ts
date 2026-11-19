@@ -66,20 +66,43 @@ export function usePushStatus(): PushStatus {
 
 /** The target each link was last given, so a reconnect sends it again only when it changed. */
 const sent = new WeakMap<HostLink, string>()
-const syncing = new WeakSet<HostLink>()
+/** The sync running on each link, and the one queued after it. */
+const running = new WeakMap<HostLink, Promise<string | null>>()
+const queued = new WeakMap<HostLink, Promise<string | null>>()
 
 /**
  * Registers this phone with the computer on `link`. Each paired computer is synced while it is the
  * active one, and keeps the registration after; resolves with the id its notifications carry.
+ * Asked while a sync runs, as when a switch flips during one, it runs once more after it with the
+ * choices as they are then, so the latest always reaches the computer; callers meanwhile share it.
  */
-export async function syncPush(link: HostLink): Promise<string | null> {
-  if (syncing.has(link)) return null
-  syncing.add(link)
-  try {
-    return await syncOnce(link)
-  } finally {
-    syncing.delete(link)
+export function syncPush(link: HostLink): Promise<string | null> {
+  const next = queued.get(link)
+  if (next) return next
+  const current = running.get(link)
+  if (current) {
+    const after = current
+      .catch(() => null)
+      .then(() => {
+        queued.delete(link)
+        return syncPush(link)
+      })
+    queued.set(link, after)
+    return after
   }
+  const run = syncOnce(link).finally(() => running.delete(link))
+  running.set(link, run)
+  return run
+}
+
+/**
+ * After a notification switch changed (通知中隐藏内容, 额度提醒): the extension keeps quiet at
+ * once, connected or not, and a connected computer hears the choices now; one that is away hears
+ * them when it next syncs. Rejects with what failed, for the switch to say.
+ */
+export async function pushChoicesChanged(link: HostLink | null): Promise<void> {
+  await platform.setQuiet(getPrefs().hidePreviews)
+  if (link?.state.kind === 'connected') await syncPush(link)
 }
 
 async function syncOnce(link: HostLink): Promise<string | null> {

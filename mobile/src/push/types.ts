@@ -29,4 +29,6 @@ export interface PushPlatform {
   share(keys: PushKeys): Promise<void>
   /** Removes one host's key, by its id. */
   unshare(host: string): Promise<void>
+  /** Sets whether the extension shows only each notification's kind, for every host it keeps. */
+  setQuiet(quiet: boolean): Promise<void>
 }

@@ -20,7 +20,8 @@ import { routeName, routesNote } from '../../linkInfo'
 import { LIVE_SUPPORTED, useLiveAllowed } from '../../live/activities'
 import { authenticate, useBiometryName } from '../../lock'
 import { setPrefs, usePrefs, type ThemePref } from '../../prefs'
-import { syncPush, usePushStatus, type PushStatus } from '../../push/sync'
+import { pushChoicesChanged, usePushStatus, type PushStatus } from '../../push/sync'
+import { errorText } from '../../sessions'
 import { useRoutineList } from '../../routines'
 import { haptic } from '../../ui/haptics'
 import { HuliIcon } from '../../ui/HuliMark'
@@ -208,7 +209,9 @@ export default function Settings() {
                 onValueChange={(on) => {
                   haptic.select()
                   setPrefs({ limitAlerts: on })
-                  if (host.link) void syncPush(host.link).catch(() => {})
+                  void pushChoicesChanged(host.link).catch((failure: unknown) =>
+                    Alert.alert('没能更新额度提醒', errorText(failure)),
+                  )
                 }}
                 trackColor={{ true: c.success }}
                 accessibilityLabel="额度提醒"
