@@ -1073,6 +1073,13 @@
   transition: flex-grow var(--duration-slow) var(--ease-out-quart);
 }
 
+/* Huli: a streamed word's reveal (markdown-impl.tsx) leaves nothing behind once it ends; its last
+   frame is the word's own style. Streamdown fills both ways, which kept a finished filter and
+   opacity on every word of the live chunk, hundreds of effects that each frame composited. */
+.markdown-chunk [data-sd-animate] {
+  animation-fill-mode: backwards;
+}
+
 /* Agent prose, rendered by Streamdown, set to the thread's measurements. These rules are not in a layer, so they win over the utility
    classes Streamdown puts on each element. Sizes are in em of the prose size, so Text size
    scales them; the spec's pixel values are those of the default 15 px. */

@@ -2080,9 +2080,22 @@ export class HostClient {
   /** Starts a connection to each known host, and watches the network for a change. */
   start(): void {
     for (const host of this.options.hosts.list()) this.linkFor(host.id).start()
+    this.watchNetwork()
+  }
+
+  /**
+   * Huli: watches the network only while a host is linked, since nothing else wakes on a change,
+   * and listing the interfaces takes milliseconds on Windows.
+   */
+  private watchNetwork(): void {
     const every =
       this.options.networkCheckMs === undefined ? NETWORK_CHECK_MS : this.options.networkCheckMs
-    if (every === null || this.networkTimer) return
+    if (this.stopped || every === null || this.links.size === 0) {
+      if (this.networkTimer) clearInterval(this.networkTimer)
+      this.networkTimer = null
+      return
+    }
+    if (this.networkTimer) return
     this.network = networkPrint()
     this.networkTimer = setInterval(() => {
       const network = networkPrint()
@@ -2294,6 +2307,7 @@ export class HostClient {
   async remove(id: string): Promise<boolean> {
     this.links.get(id)?.close()
     this.links.delete(id)
+    this.watchNetwork()
     const removed = await this.options.hosts.remove(id)
     if (removed) this.options.changed()
     return removed
@@ -2345,6 +2359,7 @@ export class HostClient {
     if (!link) {
       link = new HostLink(this, id)
       this.links.set(id, link)
+      this.watchNetwork()
     }
     return link
   }
