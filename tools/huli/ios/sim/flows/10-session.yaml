@@ -2,6 +2,7 @@
 # run of tool calls, then keeps a turn running. Its recording shows the keyboard coming and going
 # at the end of the conversation and scrolled up (the keyboard dragged down too), a message queued
 # and sent at once from the queue card, and a run of work opened and closed.
+# The composer reads to Maestro as 「给 <agent> 发消息」 and then its placeholder.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -25,19 +26,19 @@ appId: io.github.rsdvb.huli
 # The session opens once the agent has started, which on a fresh runner takes a while.
 - extendedWaitUntil:
     visible:
-      text: '回复 .*'
+      text: '给 .* 发消息 回复.*'
     timeout: 120000
 - takeScreenshot: s02-tables
 - tapOn:
-    text: '回复 .*'
+    text: '给 .* 发消息.*'
 - inputText: '/basic-turn'
 - tapOn: '发送'
 - extendedWaitUntil:
     visible:
-      text: '回复 .*'
+      text: '给 .* 发消息 回复.*'
     timeout: 60000
 - tapOn:
-    text: '回复 .*'
+    text: '给 .* 发消息.*'
 - inputText: '/long-turn'
 - tapOn: '发送'
 - extendedWaitUntil:
@@ -52,7 +53,7 @@ appId: io.github.rsdvb.huli
     timeout: 1500
     optional: true
 - tapOn:
-    text: '排队一条消息.*'
+    text: '给 .* 发消息.*'
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2000
@@ -68,7 +69,7 @@ appId: io.github.rsdvb.huli
     optional: true
 - takeScreenshot: s05-dragged-down
 - tapOn:
-    text: '排队一条消息.*'
+    text: '给 .* 发消息.*'
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2000
@@ -89,7 +90,7 @@ appId: io.github.rsdvb.huli
     optional: true
 - takeScreenshot: s06-scrolled-up
 - tapOn:
-    text: '排队一条消息.*'
+    text: '给 .* 发消息.*'
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2000
@@ -103,10 +104,10 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: s08-scrolled-hidden
 # A message queued, then sent at once with one tap on the queue card.
 - tapOn:
-    text: '回到最新'
+    text: '.*回到最新'
     optional: true
 - tapOn:
-    text: '排队一条消息.*'
+    text: '给 .* 发消息.*'
 - inputText: 'queued note'
 - tapOn: '加入队列'
 - extendedWaitUntil:
