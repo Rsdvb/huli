@@ -5,6 +5,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'react-native'
 import { useIsFocused } from 'expo-router'
+import {
+  CELLS,
+  KEYFRAMES,
+  PATTERNS,
+  turnDotPattern,
+  type DotKeyframes,
+  type TurnDot,
+  type TurnDotPatternName,
+} from '@shared/turn-dots'
 import { G, Icon } from './icons'
 import { compactCount, durationText } from './work'
 import { GlassButton, useGlassMode } from '../Glass'
@@ -46,38 +55,135 @@ const dotOf = (size: number) => {
   return { width: side, height: side, borderRadius: side / 2 }
 }
 
+// The ease-in-out CSS timing function, cubic-bezier(0.42, 0, 0.58, 1), at x.
+function easeInOut(x: number): number {
+  const at = (t: number, a: number, b: number) =>
+    3 * a * t * (1 - t) ** 2 + 3 * b * t ** 2 * (1 - t) + t ** 3
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2
+    if (at(mid, 0.42, 0.58) < x) lo = mid
+    else hi = mid
+  }
+  return at((lo + hi) / 2, 0, 1)
+}
+
+// An eased segment is drawn as this many straight ones, which the native driver interpolates.
+const EASED_STEPS = 6
+const STILL_OPACITY = 0.22
+
+/** A dot's opacity `q` of the way through its keyframes' loop. */
+function opacityAt(name: DotKeyframes, q: number, eased: boolean): number {
+  const stops = KEYFRAMES[name]
+  for (let i = 1; i < stops.length; i++) {
+    const [o1, a1] = stops[i]!
+    if (q > o1 && i < stops.length - 1) continue
+    const [o0, a0] = stops[i - 1]!
+    const f = o1 > o0 ? Math.min(1, Math.max(0, (q - o0) / (o1 - o0))) : 1
+    return a0 + (a1 - a0) * (eased ? easeInOut(f) : f)
+  }
+  return stops[0]![1]
+}
+
 /**
- * A three by three grid of dots a wave of light runs across while the agent works, on the native
- * driver; it rests while its screen is covered by another, and holds still under Reduce Motion.
+ * One dot's opacity along the loop's single value, from 0 to 1, as the native driver interpolates
+ * it: its keyframes started `at` into the loop, as the desktop's negative CSS delay starts them.
  */
-export function WorkingDots(props: { color: string; size?: number }) {
-  const wave = useRef(new Animated.Value(0)).current
+function dotRanges(dot: TurnDot, eased: boolean): { inputRange: number[]; outputRange: number[] } {
+  const name = dot.keyframes
+  if (!name) return { inputRange: [0, 1], outputRange: [STILL_OPACITY, STILL_OPACITY] }
+  const qs = new Set<number>()
+  const stops = KEYFRAMES[name]
+  for (let i = 0; i < stops.length; i++) {
+    qs.add(stops[i]![0])
+    if (eased && i > 0) {
+      const from = stops[i - 1]![0]
+      const to = stops[i]![0]
+      for (let k = 1; k < EASED_STEPS; k++) qs.add(from + ((to - from) * k) / EASED_STEPS)
+    }
+  }
+  // The loop's value v plays the dot's keyframes at q = v - at, wrapped; at v = at the dot's loop
+  // ends and starts again, so the end comes first there.
+  // Rounded, so a stop that wraps lands exactly where the next loop starts.
+  const round = (v: number) => Math.round(v * 1e6) / 1e6
+  const points = [...qs].map((q) => {
+    const wrapped = round(q + dot.at) > 1
+    const v = round(wrapped ? q + dot.at - 1 : q + dot.at)
+    return { v, wrapped, value: opacityAt(name, q, eased) }
+  })
+  if (dot.at > 0) {
+    const edge = opacityAt(name, 1 - dot.at, eased)
+    points.push({ v: 0, wrapped: true, value: edge }, { v: 1, wrapped: false, value: edge })
+  }
+  points.sort((a, b) => a.v - b.v || Number(b.wrapped) - Number(a.wrapped))
+  const inputRange: number[] = []
+  const outputRange: number[] = []
+  for (const point of points) {
+    const last = inputRange[inputRange.length - 1]
+    inputRange.push(last !== undefined && point.v <= last ? Math.min(1, last + 1e-4) : point.v)
+    outputRange.push(point.value)
+  }
+  return { inputRange, outputRange }
+}
+
+const DOT_RANGES = new Map<TurnDotPatternName, { inputRange: number[]; outputRange: number[] }[]>()
+
+function patternRanges(name: TurnDotPatternName) {
+  let ranges = DOT_RANGES.get(name)
+  if (!ranges) {
+    const pattern = PATTERNS[name]
+    ranges = CELLS.map(([x, y]) => dotRanges(pattern.dot(x, y), pattern.easing === 'ease-in-out'))
+    DOT_RANGES.set(name, ranges)
+  }
+  return ranges
+}
+
+/**
+ * The running turn's mark: three by three dots acting out what the turn does now, the desktop's
+ * patterns (@shared/turn-dots) played here from the phase this phone knows, never in step with the
+ * desktop. A new phase starts its pattern afresh. The loop runs on the native driver, rests while
+ * its screen is covered by another, and holds its first frame under Reduce Motion.
+ */
+export function WorkingDots(props: { color: string; size?: number; phase?: string | null }) {
+  const pattern = turnDotPattern(props.phase)
+  return <TurnDots key={pattern} pattern={pattern} color={props.color} size={props.size} />
+}
+
+function TurnDots(props: {
+  pattern: TurnDotPatternName
+  color: string
+  size?: number | undefined
+}) {
+  const loop = useRef(new Animated.Value(0)).current
   const [still, setStill] = useState(false)
   const focused = useIsFocused()
+  const { ms } = PATTERNS[props.pattern]
   useEffect(() => {
     if (!focused) return
-    let loop: Animated.CompositeAnimation | null = null
+    let running: Animated.CompositeAnimation | null = null
     let live = true
     void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
       if (!live) return
       if (reduce) return setStill(true)
-      // From the start of the wave, as a loop stopped midway would repeat only its rest.
-      wave.setValue(0)
-      loop = Animated.loop(
-        Animated.timing(wave, {
+      // From the start of the loop, as a loop stopped midway would repeat only its rest.
+      loop.setValue(0)
+      running = Animated.loop(
+        Animated.timing(loop, {
           toValue: 1,
-          duration: 1400,
+          duration: ms,
           easing: Easing.linear,
           useNativeDriver: true,
         }),
       )
-      loop.start()
+      running.start()
     })
     return () => {
       live = false
-      loop?.stop()
+      running?.stop()
     }
-  }, [wave, focused])
+  }, [loop, focused, ms])
+  const ranges = patternRanges(props.pattern)
   return (
     <View
       style={[
@@ -87,27 +193,19 @@ export function WorkingDots(props: { color: string; size?: number }) {
       accessibilityElementsHidden
       importantForAccessibility="no"
     >
-      {Array.from({ length: 9 }, (_, i) => {
-        const at = 0.05 + (((i % 3) + Math.floor(i / 3)) / 4) * 0.5
-        return (
-          <Animated.View
-            key={i}
-            style={[
-              styles.dot,
-              props.size ? dotOf(props.size) : null,
-              {
-                backgroundColor: props.color,
-                opacity: still
-                  ? 0.7
-                  : wave.interpolate({
-                      inputRange: [0, at, at + 0.2, at + 0.4, 1],
-                      outputRange: [0.25, 0.25, 1, 0.25, 0.25],
-                    }),
-              },
-            ]}
-          />
-        )
-      })}
+      {ranges.map((range, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            styles.dot,
+            props.size ? dotOf(props.size) : null,
+            {
+              backgroundColor: props.color,
+              opacity: still ? range.outputRange[0]! : loop.interpolate(range),
+            },
+          ]}
+        />
+      ))}
     </View>
   )
 }
@@ -122,6 +220,8 @@ export function WorkingRow(props: {
   label: string
   tokens: number | null
   waiting: boolean
+  /** What the turn does now (TurnPhaseName), which the dots act out. */
+  phase?: string | null
 }) {
   const { c } = useSessionTokens()
   const pulse = usePulse()
@@ -159,7 +259,7 @@ export function WorkingRow(props: {
           />
         </View>
       ) : (
-        <WorkingDots color={c.accent} />
+        <WorkingDots color={c.accent} phase={props.phase} />
       )}
       {/* Time · what it does · tokens, as the desktop orders them: only the middle one gives way. */}
       <Animated.View style={[styles.line, { opacity: props.waiting ? 1 : pulse }]}>
@@ -214,9 +314,11 @@ export function ToBottomButton(props: {
   visible: boolean
   fresh: boolean
   state: 'running' | 'waiting' | 'idle'
+  /** While it runs, what the turn does now, which its dots act out. */
+  phase?: string | null
   onPress(): void
 }) {
-  const { c } = useSessionTokens()
+  const { c, s } = useSessionTokens()
   // Liquid Glass under a fading opacity draws nothing, so it popped in whole once the fade ended:
   // there the glass melts in and out on its own, and only the icon on it fades.
   const liquid = useGlassMode() === 'liquid'
@@ -245,9 +347,12 @@ export function ToBottomButton(props: {
       <View>
         {/* Never the system's own button for the chevron: one glass for every state, which can
             melt away. */}
+        {/* Liquid Glass bends the reply under it into a second, ghostly glyph beside the icon; a
+            veil of the page's color keeps what lies under it a soft blur. */}
         <GlassButton
           silent
           size={44}
+          {...(liquid ? { tint: s.veil } : {})}
           dematerialized={!props.visible}
           onPress={props.onPress}
           accessibilityLabel={
@@ -262,7 +367,7 @@ export function ToBottomButton(props: {
         >
           <Animated.View style={liquid ? { opacity: shown } : null}>
             {props.state === 'running' ? (
-              <WorkingDots color={c.accent} size={16} />
+              <WorkingDots color={c.accent} size={16} phase={props.phase} />
             ) : props.state === 'waiting' ? (
               <AttentionMark />
             ) : (

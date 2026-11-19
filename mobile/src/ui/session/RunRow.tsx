@@ -5,7 +5,7 @@
 // shows as its own line.
 
 import { memo } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry } from '@shared/thread'
 import { MemoryEntry } from '../../components/entries/AccessEntries'
 import { E } from '../../components/entries/kit'
@@ -14,7 +14,7 @@ import { useDisclosure } from './disclosure'
 import { G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useSessionTokens } from './palette'
 import { gentle } from './Press'
-import { LiveTime, ThoughtRow, ToolRow } from './ToolRow'
+import { LiveTime, ThoughtRow, ToolRow, useOpenFade } from './ToolRow'
 import {
   diffStats,
   formatMs,
@@ -53,6 +53,7 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
   const { sessionId } = useSessionRows()
   const { entries, latest } = props
   const [open, setOpen] = useDisclosure(`run:${entries[0]!.id}`)
+  const shown = useOpenFade(open)
   if (entries.length === 1) return <Step entry={entries[0]!} />
 
   const steps = entries.map(stepOf).filter((step): step is RunStep => step !== null)
@@ -123,14 +124,18 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
         </View>
         <View style={[styles.stack, { width: 24 + (stack.length - 1) * 10 }]}>
           {stack.map((icon, i) => (
+            // The fill is translucent, so each badge lies on the page's own color: else the one
+            // under it shows through and the stack reads as two icons drawn over each other.
             <View
               key={i}
               style={[
                 styles.badge,
-                { left: i * 10, backgroundColor: c.fill, borderColor: c.bg, zIndex: i },
+                { left: i * 10, backgroundColor: c.bg, borderColor: c.bg, zIndex: i },
               ]}
             >
-              <Icon icon={icon} size={12} color={c.textSecondary} />
+              <View style={[styles.badgeFill, { backgroundColor: c.fill }]}>
+                <Icon icon={icon} size={12} color={c.textSecondary} />
+              </View>
             </View>
           ))}
         </View>
@@ -150,7 +155,7 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
         ) : null}
       </Pressable>
       {open && (
-        <View style={styles.steps}>
+        <Animated.View style={[styles.steps, { opacity: shown }]}>
           {entries.map((entry, i) => (
             <TimelineStep
               key={entry.id}
@@ -159,7 +164,7 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
               last={i === entries.length - 1}
             />
           ))}
-        </View>
+        </Animated.View>
       )}
     </View>
   )
@@ -207,6 +212,10 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 7,
     borderWidth: 1.5,
+  },
+  badgeFill: {
+    flex: 1,
+    borderRadius: 5.5,
     alignItems: 'center',
     justifyContent: 'center',
   },

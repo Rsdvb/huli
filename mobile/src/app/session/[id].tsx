@@ -7,8 +7,19 @@
 // rings open the plan's usage and what fills the context.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { KeyboardAvoidingView, KeyboardGestureArea } from 'react-native-keyboard-controller'
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native'
+import { useSharedValue } from 'react-native-reanimated'
+import { KeyboardGestureArea, KeyboardStickyView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
@@ -196,6 +207,19 @@ export default function SessionScreen() {
   const { c } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const headerHeight = useHeaderHeight()
+  const window = useWindowDimensions()
+  const overlap = keyboardOverlap(insets.bottom)
+  // The dock's height: the conversation's end inset, and room under what shows without one.
+  const dock = useSharedValue(0)
+  const [dockHeight, setDockHeight] = useState(0)
+  const onDockLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const height = event.nativeEvent.layout.height
+      dock.value = height
+      setDockHeight(height)
+    },
+    [dock],
+  )
   const hostState = useHostState()
   const lists = useHostSelector(pickLists, sameFields)
   const agents = useAgents()
@@ -633,6 +657,7 @@ export default function SessionScreen() {
           label={workingText}
           tokens={added}
           waiting={waitingYou || handBack || turn.asked !== null}
+          phase={turn.phase}
         />
       </View>
     ) : undefined
@@ -883,7 +908,11 @@ export default function SessionScreen() {
   const outbox = useMemo(() => <OutboxRows sessionId={id} onWithdraw={withdraw} />, [id, withdraw])
   let body
   if (view.error) {
-    body = <StateView text={view.error} tone="danger" />
+    body = (
+      <View style={{ flex: 1, paddingBottom: dockHeight }}>
+        <StateView text={view.error} tone="danger" />
+      </View>
+    )
   } else if (!hasThread && hasOutbox && !connected) {
     // Nothing of the conversation kept on the phone: what waits to go shows alone.
     body = (
@@ -893,15 +922,21 @@ export default function SessionScreen() {
           {
             paddingTop:
               headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0),
+            paddingBottom: dockHeight + 12,
           },
         ]}
+        automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive"
       >
         {outbox}
       </ScrollView>
     )
   } else if (!hasThread) {
-    body = <StateView loading />
+    body = (
+      <View style={{ flex: 1, paddingBottom: dockHeight }}>
+        <StateView loading />
+      </View>
+    )
   } else {
     body = (
       <Conversation
@@ -914,6 +949,9 @@ export default function SessionScreen() {
         paddingTop={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0)}
         scrolling={scrolling}
         waiting={running && (waitingYou || handBack || turn.asked !== null)}
+        phase={turn.phase}
+        dock={dock}
+        keyboardOverlap={overlap}
       />
     )
     // The rows' file references open the folder's files.
@@ -925,230 +963,68 @@ export default function SessionScreen() {
   return (
     <SessionRows.Provider value={context}>
       {pane ? null : <Stack.Screen options={{ headerShown: false }} />}
-      {/* Moved up with the keyboard on the UI thread, and laid out again once it settles, so the
-          conversation is not laid out on each frame of the keyboard's animation. */}
-      <KeyboardAvoidingView
-        style={[styles.root, { backgroundColor: c.bg }]}
-        behavior="translate-with-padding"
-        automaticOffset
-        keyboardVerticalOffset={-keyboardOverlap(insets.bottom)}
-      >
+      <View style={[styles.root, { backgroundColor: c.bg }]}>
         <KeyboardGestureArea interpolator="ios" style={{ flex: 1 }}>
           {body}
         </KeyboardGestureArea>
 
-        {(requests.length > 0 ||
-          handBack ||
-          credit !== null ||
-          childWaiting ||
-          worktreeWaits ||
-          (session?.queue.length ?? 0) > 0) && (
-          <ScrollView
-            style={styles.waiting}
-            contentContainerStyle={styles.waitingContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            {worktreeWaits && summary?.worktree ? (
-              <WorktreeLine sessionId={id} worktree={summary.worktree} />
-            ) : null}
-            <HandBackCard sessionId={id} session={session} />
-            {requests.map((entry) => (
-              <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
-            ))}
-            {credit && (
-              <OutOfCreditStrip
-                sessionId={id}
-                notice={credit}
-                config={session?.config ?? []}
-                onSwitchModel={
-                  connected
-                    ? () =>
-                        menu.open('model', modelAnchor, {
-                          placement: 'above',
-                          align: 'end',
-                          width: 300,
-                        })
-                    : null
-                }
-              />
-            )}
-            <WaitingChildren sessionId={id} />
-            <QueueStack
-              sessionId={id}
-              session={session}
-              onEdit={(content) => composer.current?.restore(content)}
-            />
-          </ScrollView>
-        )}
-
-        {summary?.origin === 'subagent' && (
-          <SubagentBar
-            summary={summary}
-            session={session}
-            agentName={agent?.name ?? 'Agent'}
-            bottomInset={insets.bottom}
-            context={
-              share !== null
-                ? {
-                    share,
-                    color: toneColor(usageTone({ usedPercent: share * 100, state: 'ok' }), c),
-                    approximate: !!session?.context?.error,
-                    onPress: () => {
-                      haptic.tap()
-                      setContextOpen(true)
-                    },
-                  }
-                : null
-            }
-            onOpenParent={openSession}
-          />
-        )}
-        <Composer
-          key={id}
-          hidden={summary?.origin === 'subagent'}
-          ref={composer}
-          draft={id}
-          agentName={shownName}
-          placeholder={placeholder}
-          onSend={send}
-          {...(pendingSwitch ? {} : { onQueue: queue })}
-          onSendNow={sendNow}
-          steering={steering}
-          failTitle={pendingSwitch ? '没能换 Agent' : '没有发出去'}
-          blocked={unsendable}
-          addBlocked={starting ? `等 ${shownName} 启动后再添加` : null}
-          commands={session?.commands ?? []}
-          folder={changes.folder}
-          usedFiles={touched}
-          sessionId={id}
-          takes={
-            (pending ?? agent)?.capabilities.prompt
-              ? {
-                  images: !!(pending ?? agent)!.capabilities.prompt!.image,
-                  text: !!(pending ?? agent)!.capabilities.prompt!.embeddedContext,
-                }
-              : null
-          }
-          onCountChange={setAttachCount}
-          top={(holds) =>
-            pendingSwitch || suggestion || (cacheNoticeShown && holds) || (predicted && !holds) ? (
-              <>
-                {predicted && !holds && (
-                  <PromptSuggestionChip
-                    text={predicted.text}
-                    onUse={() => composer.current?.putBack(predicted.text)}
-                    onDismiss={() => setPromptDismissed(predicted.id)}
-                  />
-                )}
-                {suggestion && agent && (
-                  <QuotaSuggestion
-                    agentName={agent.name}
-                    quota={suggestion.quota}
-                    fallback={suggestion.fallback}
-                    onSwitch={() => {
-                      const next = agents.get(suggestion.fallback.agentId)
-                      if (next) chooseAgent(next, null)
-                    }}
-                    onDismiss={() => setKeptQuota(true)}
-                  />
-                )}
-                {cacheNoticeShown && holds && (
-                  <CacheNotice
-                    estimate={cacheExpiry.estimate}
-                    used={reread}
-                    onDismiss={() => setNoticeClosedFor(cacheExpiry.lastRequestAt)}
-                  />
-                )}
-                {pendingSwitch && (
-                  <SwitchStrip
-                    agentName={shownName}
-                    config={pendingConfig ?? []}
-                    summarize={pendingSwitch.summarize}
-                    onSummarize={(on) => updatePendingSwitch(id, { summarize: on })}
-                    onUndo={() => setPendingSwitch(id, null)}
-                  />
-                )}
-              </>
-            ) : undefined
-          }
-          bottomInset={insets.bottom}
-          running={running}
-          onStop={stop}
-          onAttach={(anchor) => menu.open('attach', anchor, { placement: 'above', align: 'start' })}
-          attachMenu={(anchor) => ({
-            root: 'attach',
-            pages,
-            popover: {
-              pages: ['mention'],
-              open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
-            },
-          })}
-          left={
-            <NativeMenu source={{ root: 'mode', pages }} disabled={!connected}>
-              <ModeButton
-                mode={
-                  shownMode
-                    ? { ...shownMode, look: modeLook(String(shownMode.option.value)) }
-                    : null
-                }
-                busy={config.setting !== null && config.setting === config.mode?.option.id}
-                disabled={!connected || config.setting !== null || starting}
-                anchor={modeAnchor}
-                onPress={() =>
-                  menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
-                }
-              />
-            </NativeMenu>
-          }
-          right={
-            !starting && (shownModel || shownEffort || switchable || mustSwitch) ? (
-              <NativeMenu source={{ root: 'model', pages }} disabled={!connected} align="trailing">
-                <ModelChip
-                  agentId={pending?.id ?? agentId}
-                  harness={pending?.harnessId ?? config.harness}
-                  model={
-                    shownModel?.name ??
-                    (shownModel
-                      ? null
-                      : (pending?.name ?? (mustSwitch ? '选择 Agent' : (agent?.name ?? null))))
-                  }
-                  effort={shownEffort?.name ?? null}
-                  pending={pending && !shownModel ? pending.name : null}
-                  busy={
-                    !pendingSwitch &&
-                    config.setting !== null &&
-                    (config.setting === config.model?.option.id ||
-                      config.setting === config.effort?.option.id)
-                  }
-                  disabled={!connected}
-                  anchor={modelAnchor}
-                  onPress={() =>
-                    menu.open('model', modelAnchor, {
-                      placement: 'above',
-                      align: 'end',
-                      width: 340,
-                    })
+        {/* The dock floats over the conversation's end and rides the keyboard frame by frame on
+            the UI thread; nothing under it is laid out again as the keyboard comes and goes. */}
+        <KeyboardStickyView
+          offset={{ closed: 0, opened: overlap }}
+          style={[styles.dock, { backgroundColor: c.bg }]}
+          onLayout={onDockLayout}
+        >
+          {(requests.length > 0 ||
+            handBack ||
+            credit !== null ||
+            childWaiting ||
+            worktreeWaits ||
+            (session?.queue.length ?? 0) > 0) && (
+            <ScrollView
+              style={[styles.waiting, { maxHeight: window.height * 0.55 }]}
+              contentContainerStyle={styles.waitingContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {worktreeWaits && summary?.worktree ? (
+                <WorktreeLine sessionId={id} worktree={summary.worktree} />
+              ) : null}
+              <HandBackCard sessionId={id} session={session} />
+              {requests.map((entry) => (
+                <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
+              ))}
+              {credit && (
+                <OutOfCreditStrip
+                  sessionId={id}
+                  notice={credit}
+                  config={session?.config ?? []}
+                  onSwitchModel={
+                    connected
+                      ? () =>
+                          menu.open('model', modelAnchor, {
+                            placement: 'above',
+                            align: 'end',
+                            width: 300,
+                          })
+                      : null
                   }
                 />
-              </NativeMenu>
-            ) : null
-          }
-          footer={
-            <StatusLine
-              hostName={computer.name}
-              platform={computer.platform}
-              state={hostState}
-              folder={project}
-              path={changes.folder}
-              changed={changes.count}
-              branch={changes.branch}
-              worktree={changes.worktree}
-              {...(changes.folder && changes.repo !== false ? { onFolderPress: changes.open } : {})}
-              limits={limitsForModel(agent?.limits ?? [], config.model?.option)}
-              onLimitPress={() => {
-                haptic.tap()
-                setUsageOpen(true)
-              }}
+              )}
+              <WaitingChildren sessionId={id} />
+              <QueueStack
+                sessionId={id}
+                session={session}
+                onEdit={(content) => composer.current?.restore(content)}
+              />
+            </ScrollView>
+          )}
+
+          {summary?.origin === 'subagent' && (
+            <SubagentBar
+              summary={summary}
+              session={session}
+              agentName={agent?.name ?? 'Agent'}
+              bottomInset={insets.bottom}
               context={
                 share !== null
                   ? {
@@ -1162,21 +1038,195 @@ export default function SessionScreen() {
                     }
                   : null
               }
-              cache={
-                cacheExpiry && !running
-                  ? {
-                      expiry: cacheExpiry,
-                      onPress: () => {
-                        haptic.tap()
-                        setContextOpen(true)
-                      },
-                    }
-                  : null
-              }
+              onOpenParent={openSession}
             />
-          }
-        />
-      </KeyboardAvoidingView>
+          )}
+          <Composer
+            key={id}
+            hidden={summary?.origin === 'subagent'}
+            ref={composer}
+            draft={id}
+            agentName={shownName}
+            placeholder={placeholder}
+            onSend={send}
+            {...(pendingSwitch ? {} : { onQueue: queue })}
+            onSendNow={sendNow}
+            steering={steering}
+            failTitle={pendingSwitch ? '没能换 Agent' : '没有发出去'}
+            blocked={unsendable}
+            addBlocked={starting ? `等 ${shownName} 启动后再添加` : null}
+            commands={session?.commands ?? []}
+            folder={changes.folder}
+            usedFiles={touched}
+            sessionId={id}
+            takes={
+              (pending ?? agent)?.capabilities.prompt
+                ? {
+                    images: !!(pending ?? agent)!.capabilities.prompt!.image,
+                    text: !!(pending ?? agent)!.capabilities.prompt!.embeddedContext,
+                  }
+                : null
+            }
+            onCountChange={setAttachCount}
+            top={(holds) =>
+              pendingSwitch ||
+              suggestion ||
+              (cacheNoticeShown && holds) ||
+              (predicted && !holds) ? (
+                <>
+                  {predicted && !holds && (
+                    <PromptSuggestionChip
+                      text={predicted.text}
+                      onUse={() => composer.current?.putBack(predicted.text)}
+                      onDismiss={() => setPromptDismissed(predicted.id)}
+                    />
+                  )}
+                  {suggestion && agent && (
+                    <QuotaSuggestion
+                      agentName={agent.name}
+                      quota={suggestion.quota}
+                      fallback={suggestion.fallback}
+                      onSwitch={() => {
+                        const next = agents.get(suggestion.fallback.agentId)
+                        if (next) chooseAgent(next, null)
+                      }}
+                      onDismiss={() => setKeptQuota(true)}
+                    />
+                  )}
+                  {cacheNoticeShown && holds && (
+                    <CacheNotice
+                      estimate={cacheExpiry.estimate}
+                      used={reread}
+                      onDismiss={() => setNoticeClosedFor(cacheExpiry.lastRequestAt)}
+                    />
+                  )}
+                  {pendingSwitch && (
+                    <SwitchStrip
+                      agentName={shownName}
+                      config={pendingConfig ?? []}
+                      summarize={pendingSwitch.summarize}
+                      onSummarize={(on) => updatePendingSwitch(id, { summarize: on })}
+                      onUndo={() => setPendingSwitch(id, null)}
+                    />
+                  )}
+                </>
+              ) : undefined
+            }
+            bottomInset={insets.bottom}
+            running={running}
+            onStop={stop}
+            onAttach={(anchor) =>
+              menu.open('attach', anchor, { placement: 'above', align: 'start' })
+            }
+            attachMenu={(anchor) => ({
+              root: 'attach',
+              pages,
+              popover: {
+                pages: ['mention'],
+                open: (page) => menu.open(page, anchor, { placement: 'above', align: 'start' }),
+              },
+            })}
+            left={
+              <NativeMenu source={{ root: 'mode', pages }} disabled={!connected}>
+                <ModeButton
+                  mode={
+                    shownMode
+                      ? { ...shownMode, look: modeLook(String(shownMode.option.value)) }
+                      : null
+                  }
+                  busy={config.setting !== null && config.setting === config.mode?.option.id}
+                  disabled={!connected || config.setting !== null || starting}
+                  anchor={modeAnchor}
+                  onPress={() =>
+                    menu.open('mode', modeAnchor, { placement: 'above', align: 'start' })
+                  }
+                />
+              </NativeMenu>
+            }
+            right={
+              !starting && (shownModel || shownEffort || switchable || mustSwitch) ? (
+                <NativeMenu
+                  source={{ root: 'model', pages }}
+                  disabled={!connected}
+                  align="trailing"
+                >
+                  <ModelChip
+                    agentId={pending?.id ?? agentId}
+                    harness={pending?.harnessId ?? config.harness}
+                    model={
+                      shownModel?.name ??
+                      (shownModel
+                        ? null
+                        : (pending?.name ?? (mustSwitch ? '选择 Agent' : (agent?.name ?? null))))
+                    }
+                    effort={shownEffort?.name ?? null}
+                    pending={pending && !shownModel ? pending.name : null}
+                    busy={
+                      !pendingSwitch &&
+                      config.setting !== null &&
+                      (config.setting === config.model?.option.id ||
+                        config.setting === config.effort?.option.id)
+                    }
+                    disabled={!connected}
+                    anchor={modelAnchor}
+                    onPress={() =>
+                      menu.open('model', modelAnchor, {
+                        placement: 'above',
+                        align: 'end',
+                        width: 340,
+                      })
+                    }
+                  />
+                </NativeMenu>
+              ) : null
+            }
+            footer={
+              <StatusLine
+                hostName={computer.name}
+                platform={computer.platform}
+                state={hostState}
+                folder={project}
+                path={changes.folder}
+                changed={changes.count}
+                branch={changes.branch}
+                worktree={changes.worktree}
+                {...(changes.folder && changes.repo !== false
+                  ? { onFolderPress: changes.open }
+                  : {})}
+                limits={limitsForModel(agent?.limits ?? [], config.model?.option)}
+                onLimitPress={() => {
+                  haptic.tap()
+                  setUsageOpen(true)
+                }}
+                context={
+                  share !== null
+                    ? {
+                        share,
+                        color: toneColor(usageTone({ usedPercent: share * 100, state: 'ok' }), c),
+                        approximate: !!session?.context?.error,
+                        onPress: () => {
+                          haptic.tap()
+                          setContextOpen(true)
+                        },
+                      }
+                    : null
+                }
+                cache={
+                  cacheExpiry && !running
+                    ? {
+                        expiry: cacheExpiry,
+                        onPress: () => {
+                          haptic.tap()
+                          setContextOpen(true)
+                        },
+                      }
+                    : null
+                }
+              />
+            }
+          />
+        </KeyboardStickyView>
+      </View>
 
       <GlassHeader
         floating
@@ -1277,7 +1327,8 @@ export default function SessionScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   working: { paddingTop: 2, paddingBottom: 4 },
-  waiting: { maxHeight: '55%', flexGrow: 0 },
+  waiting: { flexGrow: 0 },
+  dock: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   waitingContent: { paddingHorizontal: 10, paddingTop: 8, gap: 10 },
   banner: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
   outboxOnly: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 18, paddingBottom: 12 },

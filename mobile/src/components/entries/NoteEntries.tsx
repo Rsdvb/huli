@@ -2,7 +2,7 @@
 // session over, the user taking a surface over and handing it back, a message from another session,
 // and a session or sub-agent this one started, with whether it waits for the user.
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { harnessOf, type ThreadEntry } from '@shared/thread'
@@ -10,6 +10,7 @@ import { useAgent, useConnected, useLink, useSession } from '../../host'
 import { sessionTitle } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { WorkingDots } from '../../ui/session/Working'
+import { useSecond } from '../../ui/session/now'
 import { gentle } from '../../ui/session/Press'
 import { spanText } from '../../ui/session/format'
 import { G, Icon } from '../../ui/session/icons'
@@ -159,11 +160,7 @@ export function SubSessionStart(props: { sessionId: string }) {
 
 /** How long a running sub-agent has run, ticking each second. */
 function Elapsed(props: { since: number; color: string }) {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useSecond()
   return (
     <Text style={[styles.small, { color: props.color, fontVariant: ['tabular-nums'] }]}>
       {durationText(Math.max(0, now - props.since))}
@@ -241,7 +238,7 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
             ) : failed ? (
               <Icon icon={G.failed} size={12} color={c.danger} />
             ) : running ? (
-              <WorkingDots color={c.accent} size={11} />
+              <WorkingDots color={c.accent} size={11} phase={child?.working?.phase} />
             ) : child && !cancelled ? (
               <Icon icon={G.check} size={12} color={c.success} weight="semibold" />
             ) : null}
