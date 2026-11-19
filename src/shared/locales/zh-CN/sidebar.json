@@ -235,8 +235,33 @@
     "cacheLeft_other": "缓存还剩 {{count}} 分钟",
     "fork": "分叉一份"
   },
+  "waiting": {
+    "title_other": "{{count}} 个等你处理",
+    "label_other": "{{count}} 个等你处理，前往{{where}}",
+    "here": "这个会话",
+    "subagent": "子 Agent「{{title}}」",
+    "subSession": "子会话「{{title}}」",
+    "requests_other": "{{count}} 个请求",
+    "more_other": "还有 {{count}} 处",
+    "go": "点击前往",
+    "separator": " · ",
+    "kind": {
+      "permission": "授权",
+      "command": "运行命令的授权",
+      "edit": "修改文件的授权",
+      "question": "提问",
+      "plan": "计划待批准",
+      "form": "MCP 表单",
+      "site": "访问新网站",
+      "device": "使用设备",
+      "app": "首次使用应用",
+      "setup": "设置",
+      "step": "需要你在页面上操作",
+      "publish": "确认发布"
+    }
+  },
   "indicator": {
-    "waiting_other": "等待你处理，{{count}} 个授权请求",
+    "waiting_other": "等待你处理，{{count}} 个请求",
     "error": "错误",
     "running": "运行中",
     "starting": "正在启动",
@@ -364,6 +389,7 @@
     "tools_other": "{{count}} 个工具",
     "done": "完成",
     "failed": "失败",
+    "waiting": "有子 Agent 在等你处理",
     "showFinished": "显示已结束的子 Agent"
   },
   "worktree": {

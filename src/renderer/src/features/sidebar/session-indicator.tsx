@@ -6,6 +6,7 @@ import { Glyph } from '@renderer/features/shell/glyph'
 import { cn } from '@renderer/lib/utils'
 import { CacheRing } from './cache-status'
 import type { RowStatus } from './row-status'
+import { WaitingCount } from './waiting-mark'
 
 /**
  * One status per row, by priority: waiting for you, error, running (the turn's nine dots),
@@ -15,23 +16,24 @@ import type { RowStatus } from './row-status'
 export function SessionIndicator({
   status,
   expiring,
+  waitingApart = false,
   className,
 }: {
   status: RowStatus
   /** The session's prompt cache, in its last minutes. */
   expiring: KnownExpiry | null
+  /** The row shows its wait as a button of its own over this slot, which then stays empty. */
+  waitingApart?: boolean
   className?: string
 }) {
   const { t } = useTranslation('sidebar')
 
   let mark = null
   if (status.waiting > 0) {
-    mark = (
-      <span
-        role="img"
-        aria-label={t('indicator.waiting', { count: status.waiting })}
-        className="size-2 rounded-full bg-attention-dot shadow-[0_0_0_3px_var(--attention-halo)]"
-      />
+    mark = waitingApart ? null : (
+      <span role="img" aria-label={t('indicator.waiting', { count: status.waiting })}>
+        <WaitingCount count={status.waiting} />
+      </span>
     )
   } else if (status.failed) {
     mark = (
