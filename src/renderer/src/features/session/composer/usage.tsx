@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import { ArrowRight01Icon, Timer02Icon } from '@hugeicons/core-free-icons'
 import { Trans, useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type { AgentAccount, ContextList, PlanLimit } from '@shared/agent-host'
 import {
   CONTEXT_REFRESH_MS,
@@ -393,8 +394,12 @@ export function ContextButton({
               closed={closed}
             />
           )}
-          {shown && <SessionLine usage={shown} />}
-          <LastRequestLine sessionId={sessionId} />
+          {/* Huli: the session's and the last request's figures as one section, their names in one
+              column, as the plan's limits below are laid out. */}
+          <div className="kettu-ctx__stats">
+            {shown && <SessionLine usage={shown} />}
+            <LastRequestLine sessionId={sessionId} />
+          </div>
           {readsModelRequests(agentId) && (
             <button
               type="button"
@@ -497,6 +502,25 @@ function parseTokens(text: string): number {
   return Number.isFinite(n) ? n * (unit === 'k' ? 1e3 : unit === 'm' ? 1e6 : 1) : 0
 }
 
+/** Huli: the parts Claude Code names in its context's breakdown, by their lowercase names. */
+const PART_NAMES = {
+  messages: 'messages',
+  'memory files': 'memoryFiles',
+  'system tools': 'systemTools',
+  'mcp tools': 'mcpTools',
+  'system prompt': 'systemPrompt',
+  skills: 'skills',
+  'mcp server instructions': 'mcpInstructions',
+  'autocompact buffer': 'autocompactBuffer',
+  'free space': 'freeSpace',
+} as const
+
+/** Huli: a part's name in the app's language, or as the agent wrote it when it is not one of those. */
+function partName(t: TFunction<'composer'>, name: string): string {
+  const key = PART_NAMES[name.toLowerCase() as keyof typeof PART_NAMES]
+  return key ? t(`usage.context.parts.${key}`) : name
+}
+
 function ContextPart({
   sessionId,
   agentId,
@@ -543,7 +567,7 @@ function ContextPart({
           const bare = SKILLS.test(row.name)
           return {
             id: row.name,
-            label: row.name,
+            label: partName(t, row.name),
             tokens: row.tokens,
             locked: true,
             ...(row.part.kind === 'buffer'
@@ -628,16 +652,17 @@ function SessionLine({ usage }: { usage: SessionUsage }) {
   if (!totals && !usage.cost) return null
   const input = totals ? totals.input + (totals.cacheRead ?? 0) + (totals.cacheWrite ?? 0) : 0
   const hit = totals && totals.cacheRead !== null && input > 0 ? totals.cacheRead / input : null
-  const parts = [
-    totals && t('usage.context.tokens', { tokens: tokens(totals.total) }),
-    hit !== null && t('usage.context.cached', { percent: `${Math.round(hit * 100)}%` }),
-    usage.cost && `≈ ${money(usage.cost.amount, usage.cost.currency)}`,
-  ].filter(Boolean)
+  const cost = usage.cost && `≈ ${money(usage.cost.amount, usage.cost.currency)}`
+  // Huli: the amount first, the cache and the cost under it, each on a line that never wraps.
   const line = (
-    <div className="kettu-ctx__session">
-      <span>{t('usage.context.session')}</span>
-      <span className="tabular">{parts.join(' · ')}</span>
-    </div>
+    <Stat
+      label={t('usage.context.session')}
+      main={totals ? t('usage.context.tokens', { tokens: tokens(totals.total) }) : cost}
+      more={[
+        hit !== null && t('usage.context.cached', { percent: `${Math.round(hit * 100)}%` }),
+        totals && cost,
+      ]}
+    />
   )
   if (!totals) return line
   return (
@@ -761,6 +786,7 @@ function ListPart({
   list: ContextList
   summary?: string
 }) {
+  const { t } = useTranslation('composer')
   const empty = list.items.length === 0
   return (
     <Collapsible>
@@ -776,7 +802,7 @@ function ListPart({
             empty && 'invisible',
           )}
         />
-        <span className="min-w-0 flex-1 truncate text-left">{list.name}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{partName(t, list.name)}</span>
         <span className="text-tertiary tabular">{summary}</span>
       </CollapsibleTrigger>
       <CollapsibleContent className={PANEL}>
@@ -950,19 +976,47 @@ function LastRequestLine({ sessionId }: { sessionId: string }) {
   if (!last) return null
   const input = (last.input ?? 0) + (last.cacheRead ?? 0) + (last.cacheWrite ?? 0)
   const hit = last.cacheRead !== null && input > 0 ? last.cacheRead / input : null
-  const line =
-    last.output === null
-      ? t('usage.lastRequest.running')
-      : t('usage.lastRequest.line', {
-          input: tokens(input),
-          output: tokens(last.output),
-          hit: hit === null ? '—' : `${Math.round(hit * 100)}%`,
-        })
+  const done = last.output !== null
+  // Huli: in and out first, the cache under them, as the session's line has it.
   return (
-    <div className="kettu-ctx__session">
-      <span>{t('usage.lastRequest.title')}</span>
-      <span className="tabular" title={clockTime(last.at)}>
-        {line}
+    <Stat
+      label={t('usage.lastRequest.title')}
+      main={
+        done
+          ? t('usage.lastRequest.io', { input: tokens(input), output: tokens(last.output ?? 0) })
+          : t('usage.lastRequest.running')
+      }
+      more={[
+        done && hit !== null && t('usage.context.cached', { percent: `${Math.round(hit * 100)}%` }),
+      ]}
+      title={clockTime(last.at)}
+    />
+  )
+}
+
+/**
+ * Huli: a row of the figures under the context: its name in the section's first column, then its
+ * amount, and what else it has quieter under it, every line on one line.
+ */
+function Stat({
+  label,
+  main,
+  more,
+  title,
+  ...props
+}: {
+  label: string
+  main: ReactNode
+  more: (string | false | null | undefined)[]
+  title?: string
+} & ComponentProps<'div'>) {
+  const rest = more.filter(Boolean)
+  return (
+    <div {...props} className="kettu-ctx__stat">
+      <span className="kettu-ctx__stat-label">{label}</span>
+      <span className="kettu-ctx__stat-value tabular" title={title}>
+        <span>{main}</span>
+        {rest.length > 0 && <span className="kettu-ctx__stat-more">{rest.join(' · ')}</span>}
       </span>
     </div>
   )

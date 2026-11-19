@@ -104,7 +104,18 @@
       "ofUsed": "上下文已用",
       "tokens": "{{tokens}} tokens",
       "cacheHit": "缓存命中",
-      "cached": "缓存命中 {{percent}}"
+      "cached": "缓存命中 {{percent}}",
+      "parts": {
+        "messages": "消息",
+        "memoryFiles": "记忆文件",
+        "systemTools": "系统工具",
+        "mcpTools": "MCP 工具",
+        "systemPrompt": "系统提示",
+        "skills": "技能",
+        "mcpInstructions": "MCP 服务器说明",
+        "autocompactBuffer": "自动压缩预留",
+        "freeSpace": "空闲"
+      }
     },
     "breakdown": {
       "loading": "正在读取上下文明细",
@@ -187,6 +198,7 @@
     "lastRequest": {
       "title": "上次请求",
       "line": "输入 {{input}} · 输出 {{output}} · 缓存命中 {{hit}}",
+      "io": "输入 {{input}} · 输出 {{output}}",
       "running": "进行中"
     },
     "everyRequest": "每次请求"

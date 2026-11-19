@@ -5474,6 +5474,44 @@ li[data-row-exit='dust'] > * {
 .kettu-ctx__session > :last-child {
   color: var(--composer-text);
 }
+/* Huli: the session's and the last request's figures, as the plan's limits are spaced: the names
+   in a column of their own that never wraps, each value an amount with a quieter line under it. */
+.kettu-ctx__stats {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 16px;
+  padding: 10px 14px 12px;
+  border-top: 0.5px solid var(--composer-line);
+}
+.kettu-ctx__stats:empty {
+  display: none;
+}
+.kettu-ctx__stat {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+}
+.kettu-ctx__stat-label {
+  white-space: nowrap;
+  color: var(--composer-ink);
+}
+.kettu-ctx__stat-value {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--composer-ink);
+}
+.kettu-ctx__stat-value > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kettu-ctx__stat-value > .kettu-ctx__stat-more {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--composer-muted);
+}
 .kettu-ctx__link {
   width: 100%;
   text-align: left;
