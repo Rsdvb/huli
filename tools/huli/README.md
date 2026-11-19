@@ -191,6 +191,26 @@ stays `Huli Dev` (or `KETTU_USER_DATA`). It never fills in the update channel's 
 has no updates, as before. A spelling upstream changed shows as a Vite warning,
 `… no longer holds …`, as the rebrand's does.
 
+### Testing without disturbing the owner
+
+Agents that run the app to check a change do so on the owner's own computer. Start such a copy with
+`KITE_TEST_WINDOW=background` beside its own data folder and debugging port, for instance in
+PowerShell:
+
+```powershell
+$env:KITE_TEST_WINDOW = 'background'; $env:KETTU_USER_DATA = "$env:TEMP\kite-test-1"; $env:REMOTE_DEBUGGING_PORT = '9333'; npx -y pnpm@10.11.1 dev
+```
+
+Its main window then shows without taking the focus, past the right edge of every display and out
+of the taskbar, and every later show (a second launch, the quit dialog) leaves the focus alone too.
+It has no tray icon and shows no notifications (Settings' test notification still does). The page
+still paints at the display's full rate, so CDP's `Page.captureScreenshot` and `capturePage` see
+it as on a screen; measured on Windows, a minimized or never-shown window instead paints only when
+captured and throttles its animation frames, so it is not used. An installed build ignores the
+variable. Stop the copy by ending its process tree (`taskkill /PID <electron-vite's node> /T /F`);
+it saves no window position. `src/main/test-window.ts` holds it; hooks in `src/main/window.ts`
+(the place and `keepInBackground`), `src/main/index.ts` (no tray) and `src/main/notifications.ts`.
+
 ### Kite's artwork
 
 `tools/huli/brand/` holds the masters, SVG on a 1024 grid: `kite-light.svg` (the icon, white kite

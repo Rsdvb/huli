@@ -6,6 +6,7 @@ import type { SettingsFile } from '@shared/settings'
 import { sendCommand } from './events'
 import { t } from './i18n'
 import { createLogger } from './log'
+import { testInBackground } from './test-window'
 
 const log = createLogger('notifications')
 
@@ -31,7 +32,8 @@ export function notifyAttention(
   }
   if (!settings.notifications[ATTENTION_SETTING[message.kind]]) return
   if (BrowserWindow.getFocusedWindow()) return
-  if (!Notification.isSupported()) return
+  // Huli: an agent's test copy, never focused, would notify the owner of every turn.
+  if (!Notification.isSupported() || testInBackground()) return
 
   const { key, command } = target
   const answer = message.kind === 'permission' ? validAnswer(message.allowOnce) : null
@@ -102,7 +104,7 @@ export function notifyDiscovery(
     }
     return
   }
-  if (BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return
+  if (BrowserWindow.getFocusedWindow() || !Notification.isSupported() || testInBackground()) return
   discovery?.notification.close()
   const notification = new Notification({
     title: t('notifications.discoveryTitle'),

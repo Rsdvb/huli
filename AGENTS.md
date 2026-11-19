@@ -125,6 +125,8 @@ Kettu drives agents that run shell commands, so these are not negotiable:
 
 `pnpm dev` keeps its data in a folder of its own, `Kettu Dev`, so it never touches the installed app's sessions and can run beside it. To run several worktrees at once, give each its own folder and debugging port, such as `KETTU_USER_DATA=/tmp/kettu-feature-x REMOTE_DEBUGGING_PORT=9223 pnpm dev` (set the variables as your shell does on Windows). Electron's `--user-data-dir` is not needed.
 
+Huli: an agent that runs the app to check its work also sets `KITE_TEST_WINDOW=background`, so the copy keeps off the owner's screens, focus, tray and notifications while CDP screenshots still work; see `tools/huli/README.md` (Testing without disturbing the owner).
+
 ## Definition of done
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck` and `pnpm test` pass. Also run `pnpm build` when you touch config, the main process or the preload.
