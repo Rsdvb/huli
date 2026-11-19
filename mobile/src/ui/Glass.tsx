@@ -109,6 +109,10 @@ export function Glass(props: GlassProps) {
   const { c, scheme } = useTokens()
   const mode = useGlassMode()
   const reduce = useReducedMotion()
+  // Glass that mounts melted away starts so, rather than melting away as it first draws.
+  const [initial] = useState(props.dematerialized)
+  const [changed, setChanged] = useState(false)
+  if (!changed && props.dematerialized !== initial) setChanged(true)
   const shape = props.shape ?? 'rounded'
   const fixed = heightOf(props.style)
   const [measured, setMeasured] = useState<number | null>(null)
@@ -141,7 +145,7 @@ export function Glass(props: GlassProps) {
             ? (props.variant ?? 'regular')
             : {
                 style: props.dematerialized ? 'none' : (props.variant ?? 'regular'),
-                animate: !reduce,
+                animate: changed && !reduce,
                 animationDuration: 0.25,
               }
         }
