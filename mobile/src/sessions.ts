@@ -2,7 +2,9 @@ import type { SessionSummary } from '@shared/agent-host'
 import type { Theme } from './theme'
 
 export function needsYou(s: SessionSummary): boolean {
-  return s.status === 'awaiting_permission' || s.permissionCount > 0 || s.attention === 'permission'
+  // Huli: open requests only, as the desktop counts them. Claude Code's status can stay
+  // `awaiting_permission` after a sub-agent's request is withdrawn, with nothing left to answer.
+  return s.permissionCount > 0 || s.attention === 'permission'
 }
 
 /**
