@@ -39,6 +39,9 @@ export function PermissionCard(props: { entry: ToolEntry; sessionId: string; lin
   return <QuestionCard {...props} />
 }
 
+// A command shows this many lines until shown whole.
+const COMMAND_LINES = 12
+
 const ACTION: Record<ToolEntry['toolKind'], string> = {
   read: '读取文件',
   edit: '编辑文件',
@@ -101,6 +104,7 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
   const [noteFor, setNoteFor] = useState<PermissionOption | null>(null)
   const [note, setNote] = useState('')
   const [allShown, setAllShown] = useState(false)
+  const [commandShown, setCommandShown] = useState(false)
   const permission = entry.permission!
   const answers = answersOf(permission.options)
   const label = toolLabel(entry, root)
@@ -277,10 +281,26 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
       )}
       {command ? (
         <View style={[styles.command, { backgroundColor: s.code, borderColor: s.codeBorder }]}>
-          <Text selectable style={[styles.mono, { color: c.text }]} numberOfLines={12}>
+          <Text
+            selectable
+            style={[styles.mono, { color: c.text }]}
+            {...(commandShown ? {} : { numberOfLines: COMMAND_LINES })}
+          >
             <Text style={{ color: c.textTertiary }}>$ </Text>
             {command}
           </Text>
+          {command.split(/\r?\n/).length > COMMAND_LINES || command.length > COMMAND_LINES * 40 ? (
+            <Pressable
+              onPress={() => setCommandShown((v) => !v)}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: commandShown }}
+            >
+              <Text style={[styles.more, { color: c.tint, marginTop: 6 }]}>
+                {commandShown ? '收起' : '展开完整命令'}
+              </Text>
+            </Pressable>
+          ) : null}
           {root && (previewsCommand(command) || entry.toolKind === 'execute') ? (
             <Text style={[styles.cwd, { color: c.textTertiary }]} numberOfLines={1}>
               {baseName(root)}

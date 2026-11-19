@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
   AccessibilityInfo,
   Animated,
+  Dimensions,
   Easing,
   Pressable,
   StyleSheet,
@@ -19,6 +20,7 @@ import Svg, { Circle, Path } from 'react-native-svg'
 import type { ConfigOption, PlanEntry, ToolEntry } from '@shared/thread'
 import { useConnected, useLink } from '../../host'
 import { useSelector, type Store } from '../../select'
+import { BottomSheet } from '../../ui/BottomSheet'
 import { GlassCapsule } from '../../ui/Glass'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import type { MenuPage, ViewHandle } from '../../ui/session/Popover'
@@ -113,10 +115,18 @@ function planDiff(previous: string, next: string): PlanLine[] {
   return out
 }
 
-/** The plan's text, cut short when long, with a quiet button that copies it. */
-function PlanBody(props: { markdown: string; clamp?: boolean }) {
+// The plan in the card that waits for an answer, over the dock's buttons, which must stay in view.
+const PLAN_PEEK = 150
+
+/**
+ * The plan's text, cut short when long, with a quiet button that copies it. `peek` shows its start
+ * only, with the whole of it in a sheet, for the card whose buttons must stay in view.
+ */
+function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) {
   const { c } = useSessionTokens()
   const [copied, setCopied] = useState(false)
+  const [height, setHeight] = useState(0)
+  const [sheet, setSheet] = useState(false)
   const copy = () =>
     void copyText(props.markdown).then(() => {
       setCopied(true)
@@ -138,7 +148,34 @@ function PlanBody(props: { markdown: string; clamp?: boolean }) {
           color={copied ? c.success : c.textTertiary}
         />
       </Pressable>
-      {props.clamp === false ? (
+      {props.peek ? (
+        <>
+          <View style={{ maxHeight: PLAN_PEEK, overflow: 'hidden' }}>
+            <View onLayout={(event) => setHeight(event.nativeEvent.layout.height)}>{body}</View>
+          </View>
+          {height > PLAN_PEEK && (
+            <Pressable
+              onPress={() => {
+                gentle()
+                setSheet(true)
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              style={styles.peekMore}
+            >
+              <Text style={[styles.peekMoreText, { color: c.tint }]}>查看完整计划</Text>
+            </Pressable>
+          )}
+          <BottomSheet
+            visible={sheet}
+            onClose={() => setSheet(false)}
+            title="计划"
+            maxHeight={Dimensions.get('window').height * 0.8}
+          >
+            {body}
+          </BottomSheet>
+        </>
+      ) : props.clamp === false ? (
         body
       ) : (
         <Clamp maxHeight={320} more="显示完整计划">
@@ -260,7 +297,7 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
         {view === 'changes' && plan.previous ? (
           <PlanChanges previous={plan.previous} markdown={plan.markdown} />
         ) : (
-          <PlanBody markdown={plan.markdown} />
+          <PlanBody markdown={plan.markdown} peek />
         )}
         {(modes.length > 0 || choices.length > 1) && (
           <View style={{ gap: 6 }}>
@@ -731,6 +768,8 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, fontWeight: '600' },
   description: { fontSize: 14, lineHeight: 20, marginTop: 6 },
   planBody: { borderRadius: 12, padding: 12, paddingRight: 34 },
+  peekMore: { paddingTop: 8 },
+  peekMoreText: { fontSize: 13, fontWeight: '600' },
   copy: { position: 'absolute', top: 10, right: 10, zIndex: 1 },
   small: { fontSize: 13, lineHeight: 18 },
   diffLine: {
