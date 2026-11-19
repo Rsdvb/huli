@@ -1,5 +1,6 @@
-// The tab bar's new-session item. A native tab bar item can only select a tab, so this tab shows
-// nothing of its own: chosen, it goes back to the tab that was showing and opens New session.
+// The tab bar's new-session item, which the tab bar never selects: its press opens New session
+// (the tabs' layout). Reached any other way, it goes back to the tab that was showing and opens
+// New session, as it shows nothing of its own.
 
 import { useCallback } from 'react'
 import { View } from 'react-native'
