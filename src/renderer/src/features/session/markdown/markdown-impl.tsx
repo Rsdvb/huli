@@ -344,13 +344,16 @@ function MarkdownImpl({
 }
 
 /**
- * affectUI's answer: streamed words rise out of a soft blur. A short stagger and backlog keep the
- * words up with an agent's pace; Streamdown's 40 ms per word falls behind any real stream. Its
- * 4 ms floor per word is patched out, so text that arrives at once all starts within the backlog
- * instead of leaving the rest blank for seconds (each CJK character is a word).
+ * affectUI's answer: streamed words fade in. A short stagger and backlog keep the words up with an
+ * agent's pace; Streamdown's 40 ms per word falls behind any real stream. Its 4 ms floor per word
+ * is patched out, so text that arrives at once all starts within the backlog instead of leaving
+ * the rest blank for seconds (each CJK character is a word).
+ *
+ * Huli: opacity alone, which the compositor runs; the blur this had beside it cannot be
+ * composited, so every word in its reveal repainted the reply on the main thread each frame.
  */
 const REVEAL = {
-  animation: 'blurIn',
+  animation: 'fadeIn',
   duration: 420,
   easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
   sep: 'word',

@@ -1081,8 +1081,8 @@
 }
 
 /* Huli: a streamed word's reveal (markdown-impl.tsx) leaves nothing behind once it ends; its last
-   frame is the word's own style. Streamdown fills both ways, which kept a finished filter and
-   opacity on every word of the live chunk, hundreds of effects that each frame composited. */
+   frame is the word's own style. Streamdown fills both ways, which kept a finished opacity on
+   every word of the live chunk, hundreds of effects that each frame composited. */
 .markdown-chunk [data-sd-animate] {
   animation-fill-mode: backwards;
 }
