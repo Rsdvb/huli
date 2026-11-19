@@ -7,7 +7,8 @@
 
 import { useMemo } from 'react'
 import { Platform, Settings, StyleSheet, TextInput, View } from 'react-native'
-import { KeyboardAvoidingView, KeyboardGestureArea } from 'react-native-keyboard-controller'
+import { KeyboardGestureArea, KeyboardStickyView } from 'react-native-keyboard-controller'
+import { useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Conversation } from '../components/Conversation'
 import { keyboardOverlap } from '../components/Composer'
@@ -73,14 +74,11 @@ export function LongThreadScreen(props: { options: LongThreadOptions }) {
   const since = useMemo(() => Date.now(), [])
   const read = useThreadSelector(view, (thread) => thread?.order.length ?? 0)
   const thread = useThreadSelector(view, (value) => (params.bench === '1' ? value : null))
+  const dock = useSharedValue(0)
+  const overlap = keyboardOverlap(insets.bottom)
   return (
     <SessionRows.Provider value={ROWS}>
-      <KeyboardAvoidingView
-        style={[styles.root, { backgroundColor: c.bg }]}
-        behavior="translate-with-padding"
-        automaticOffset
-        keyboardVerticalOffset={-keyboardOverlap(insets.bottom)}
-      >
+      <View style={[styles.root, { backgroundColor: c.bg }]}>
         <KeyboardGestureArea interpolator="ios" style={styles.root}>
           <Conversation
             view={view}
@@ -95,9 +93,13 @@ export function LongThreadScreen(props: { options: LongThreadOptions }) {
             }
             fromParent={false}
             paddingTop={headerHeight + 12}
+            dock={dock}
+            keyboardOverlap={overlap}
           />
         </KeyboardGestureArea>
-        <View
+        <KeyboardStickyView
+          offset={{ closed: 0, opened: overlap }}
+          onLayout={(event) => (dock.value = event.nativeEvent.layout.height)}
           style={[
             styles.composer,
             { paddingBottom: insets.bottom + 8, borderTopColor: c.border, backgroundColor: c.bg },
@@ -109,8 +111,8 @@ export function LongThreadScreen(props: { options: LongThreadOptions }) {
             style={[styles.input, { color: c.text, backgroundColor: c.fill }]}
             multiline
           />
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardStickyView>
+      </View>
       <GlassHeader
         floating
         title="Long thread"
@@ -125,6 +127,14 @@ export function LongThreadScreen(props: { options: LongThreadOptions }) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   working: { paddingTop: 2, paddingBottom: 4 },
-  composer: { paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  composer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   input: { minHeight: 40, borderRadius: 20, paddingHorizontal: 14, paddingTop: 10, fontSize: 16 },
 })
