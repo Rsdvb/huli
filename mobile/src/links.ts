@@ -25,7 +25,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { router, useRootNavigationState } from 'expo-router'
 import { ARTIFACT_ID } from '@shared/artifacts'
 import { loadDrafts, NEW_SESSION_DRAFT, readDraft, writeDraft } from './drafts'
-import { useHost } from './host'
+import { sameFields, useHostActions, useHostSelector, type HostData } from './host'
 import { useLockState } from './lock'
 import { setTasksTabView } from './tasks'
 import type { SavedHost } from './store'
@@ -226,14 +226,19 @@ function navigate(target: LinkTarget, computer: string | null): void {
 }
 
 /** Opens waiting links once the app is ready, unlocked and on the computer they name. */
+const pick = (d: HostData) => ({
+  phase: d.phase,
+  activeId: d.computers.hosts.find((h) => h.id === d.computers.active)?.id ?? null,
+  computers: d.computers.hosts,
+})
+
 export function LinkBridge() {
-  const host = useHost()
+  const { switchTo } = useHostActions()
+  const { phase, activeId, computers } = useHostSelector(pick, sameFields)
   const lock = useLockState()
   const navigation = useRootNavigationState()
   const link = useSyncExternalStore(subscribe, () => pending)
   const mounted = !!navigation?.key
-  const activeId = host.host?.id ?? null
-  const { phase, computers, switchTo } = host
 
   useEffect(() => {
     if (!link || !mounted || phase !== 'ready' || lock.locked || lock.covered) return

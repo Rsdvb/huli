@@ -190,6 +190,13 @@ export function useSession(id: string | null | undefined): SessionSummary | unde
   return useHostSelector(useCallback((d: HostData) => (id ? d.sessions.get(id) : undefined), [id]))
 }
 
+const selectHasSessions = (d: HostData) => d.sessions.size > 0
+
+/** Whether the lists hold any session, without following each one's changes. */
+export function useHasSessions(): boolean {
+  return useHostSelector(selectHasSessions)
+}
+
 export function useAgents(): Map<string, AgentStatus> {
   return useHostSelector(selectAgents)
 }

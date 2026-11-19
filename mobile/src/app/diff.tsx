@@ -8,7 +8,7 @@ import { Stack, useLocalSearchParams } from 'expo-router'
 import { DiffView } from '../components/DiffView'
 import { diffTexts, handedDiff, type Diff } from '../diff'
 import { call, errorText, sessionFolder, useChanges } from '../git'
-import { useHost, useLink } from '../host'
+import { useConnected, useHasSessions, useLink, useSession } from '../host'
 import { baseName, dirName, relativePath } from '../ui/session/format'
 import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
@@ -32,17 +32,17 @@ export default function DiffScreen() {
     ref?: string
   }>()
   const { c, s } = useSessionTokens()
-  const host = useHost()
+  const hasSessions = useHasSessions()
   const link = useLink()
   const handed = params.key ? handedDiff(params.key) : null
   const path = handed?.path ?? params.path ?? ''
-  const summary = params.id ? host.sessions.get(params.id) : undefined
+  const summary = useSession(params.id)
   const folder = !handed && summary && !summary.scratch ? sessionFolder(summary) : null
   const changes = useChanges(link, folder)
   const updatedAt = changes.status?.updatedAt ?? 0
   // Waits for the folder's first status, which would otherwise read the file a second time.
   const ready = changes.status !== null || changes.error !== null
-  const connected = host.state.kind === 'connected'
+  const connected = useConnected()
   const oldPath = params.oldPath || null
   const ref = params.ref || null
   const [shown, setShown] = useState<Shown | null>(null)
@@ -89,7 +89,7 @@ export default function DiffScreen() {
     ? !handed && '这个改动已经不在了，请回到对话里再点开。'
     : !path
       ? '没有指定文件。'
-      : connected && host.sessions.size > 0 && !summary
+      : connected && hasSessions && !summary
         ? '找不到这个会话。'
         : summary?.scratch
           ? '这个会话没有项目。'

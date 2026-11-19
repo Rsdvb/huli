@@ -8,7 +8,7 @@ import type { ArtifactSummary } from '@shared/artifacts'
 import { openArtifact } from '../../artifacts'
 import { formatBytes } from '../../attachments'
 import { call, errorText } from '../../git'
-import { useHost, useLink } from '../../host'
+import { useLink, useSession } from '../../host'
 import { listTime, sessionTitle } from '../../sessions'
 import { GlassHeader } from '../../ui/session/GlassHeader'
 import { G, Icon } from '../../ui/session/icons'
@@ -24,7 +24,7 @@ function kindText(artifact: ArtifactSummary): string {
 export default function SessionArtifacts() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { c, s } = useSessionTokens()
-  const host = useHost()
+  const summary = useSession(id)
   const link = useLink()
   const [list, setList] = useState<ArtifactSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -94,7 +94,7 @@ export default function SessionArtifacts() {
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <GlassHeader title="Artifacts" subtitle={sessionTitle(host.sessions.get(id))} />
+      <GlassHeader title="Artifacts" subtitle={sessionTitle(summary)} />
       {body}
     </View>
   )

@@ -9,7 +9,7 @@ import { useEffect } from 'react'
 import { AppState } from 'react-native'
 import { usePathname } from 'expo-router'
 import { HuliSystem } from '../../modules/huli-system'
-import { useHost } from '../host'
+import { sameFields, useHostSelector, type HostData } from '../host'
 import { openLink, parseLink } from '../links'
 import { prefsLoaded, usePref } from '../prefs'
 import { folder, sessionTitle } from '../sessions'
@@ -31,13 +31,26 @@ function sessionIn(pathname: string): string | null {
   }
 }
 
+/** What Spotlight and the open session's activity need: not the link's state, which changes often. */
+const pick = (d: HostData) => ({
+  phase: d.phase,
+  hostId: d.computers.hosts.find((h) => h.id === d.computers.active)?.id ?? null,
+  computers: d.computers.hosts,
+  sessions: d.sessions,
+  agents: d.agents,
+  projects: d.projects,
+  loaded: d.loaded,
+})
+
 export function SystemBridge() {
-  const { phase, host, computers, sessions, agents, projects, loaded } = useHost()
+  const { phase, hostId, computers, sessions, agents, projects, loaded } = useHostSelector(
+    pick,
+    sameFields,
+  )
   const hidePreviews = usePref('hidePreviews')
   const pathname = usePathname()
   const ready = prefsLoaded()
   const hidden = hidePreviews
-  const hostId = host?.id ?? null
   const computerIds = computers.map((c) => c.id).join('\n')
 
   useEffect(() => {

@@ -7,7 +7,7 @@ import { Stack, useLocalSearchParams } from 'expo-router'
 import type { DeviceFileContent } from '@shared/files'
 import { formatBytes } from '../attachments'
 import { call, errorText, sessionFolder } from '../git'
-import { useHost, useLink } from '../host'
+import { useLink, useSession } from '../host'
 import { ContextMenu } from '../ui/ContextMenu'
 import { copyText } from '../ui/session/feedback'
 import { baseName, dirName } from '../ui/session/format'
@@ -21,9 +21,8 @@ import { StateView } from '../ui/session/StateView'
 export default function FileScreen() {
   const { id, path, line } = useLocalSearchParams<{ id: string; path: string; line?: string }>()
   const { c, s } = useSessionTokens()
-  const host = useHost()
   const link = useLink()
-  const summary = host.sessions.get(id)
+  const summary = useSession(id)
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const [content, setContent] = useState<DeviceFileContent | null>(null)
   const [error, setError] = useState<string | null>(null)

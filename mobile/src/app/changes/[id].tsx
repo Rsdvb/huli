@@ -35,7 +35,7 @@ import {
 import { useGitSteps } from '../../components/git/useGitSteps'
 import { WorktreeCard } from '../../components/git/WorktreeCard'
 import { sessionFolder, useChanges, useCurrentPr, useGitRunning, useGitTools } from '../../git'
-import { useHost, useLink } from '../../host'
+import { useConnected, useHasSessions, useLink, useSession } from '../../host'
 import { joinGroups, type MenuNode } from '../../ui/menu'
 import { baseName } from '../../ui/session/format'
 import { GI } from '../../ui/session/gitIcons'
@@ -49,13 +49,13 @@ import { Counts } from '../../ui/session/TurnChanges'
 export default function ChangesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { c } = useSessionTokens()
-  const host = useHost()
+  const hasSessions = useHasSessions()
   const link = useLink()
-  const summary = host.sessions.get(id)
+  const summary = useSession(id)
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const changes = useChanges(link, folder)
   const { status, files, error } = changes
-  const connected = host.state.kind === 'connected'
+  const connected = useConnected()
   const tools = useGitTools(link, connected)
   const gh = tools?.gh.state ?? null
   const current = useCurrentPr(link, status?.repo ? status : null)
@@ -132,12 +132,7 @@ export default function ChangesScreen() {
 
   let body: ReactElement
   if (!summary) {
-    body =
-      connected && host.sessions.size > 0 ? (
-        <StateView text="找不到这个会话。" />
-      ) : (
-        <StateView loading />
-      )
+    body = connected && hasSessions ? <StateView text="找不到这个会话。" /> : <StateView loading />
   } else if (summary.scratch) {
     body = <StateView text="这个会话没有项目，没有可看的改动。" />
   } else if (!status || !files) {
