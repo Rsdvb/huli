@@ -16,16 +16,21 @@ let seen = ''
 let launched = false
 let added = false
 let named = false
+// Nothing of what it prints goes to the log, which a public repository shows: it holds the code
+// and the computer's addresses.
 child.stdout.on('data', (chunk) => {
   const text = chunk.toString()
-  process.stdout.write(text)
   seen += text
   const link = /\S+\/pair#\S+/.exec(seen)?.[0]
   if (link && !launched) {
     launched = true
-    execFileSync('xcrun', ['simctl', 'terminate', udid, 'io.github.rsdvb.huli'], {
-      stdio: 'ignore',
-    })
+    try {
+      execFileSync('xcrun', ['simctl', 'terminate', udid, 'io.github.rsdvb.huli'], {
+        stdio: 'ignore',
+      })
+    } catch {
+      // Not running yet.
+    }
     execFileSync('xcrun', [
       'simctl',
       'launch',
@@ -53,5 +58,6 @@ const timer = setTimeout(() => {
 }, 180_000)
 child.on('exit', (code) => {
   clearTimeout(timer)
+  console.log(code === 0 ? 'Paired.' : `kettu pair ended with ${code}`)
   process.exit(code ?? 1)
 })
