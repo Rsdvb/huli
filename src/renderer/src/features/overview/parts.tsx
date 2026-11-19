@@ -13,7 +13,7 @@ import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { TurnDots } from '@renderer/features/session/turn-dots'
 import { TaskRing } from '@renderer/features/tasks/task-ring'
-import { runningFor, shortAgo } from '@renderer/lib/format'
+import { mediumAgo, runningFor } from '@renderer/lib/format'
 import { useNow, useSeconds } from '@renderer/lib/use-now'
 import { openArtifact } from '@renderer/stores/view'
 import type { OverviewRow, OverviewStep, StepLook } from './model'
@@ -49,8 +49,9 @@ function Running({ since }: { since: number }) {
   return <>{runningFor(useSeconds() - since)}</>
 }
 
+// Huli: "3 min ago" rather than "3 min", which in Chinese reads as a length of time.
 function Ago({ at }: { at: number }) {
-  return <>{shortAgo(at, useNow())}</>
+  return <>{mediumAgo(at, useNow())}</>
 }
 
 export function StepMark({ look }: { look: StepLook }) {
@@ -70,7 +71,15 @@ export function StepMark({ look }: { look: StepLook }) {
 /** Every step as a tag on one line; only the step in front is filled and never cut. */
 export function StepTags({ steps }: { steps: OverviewStep[] | null }) {
   const { t } = useTranslation('overview')
-  if (!steps) return <span className="k-ov-noplan">{t('noPlan')}</span>
+  // Huli: a dash, as "No plan" on row after row was most of the column; it is read out still.
+  if (!steps) {
+    return (
+      <span className="k-ov-noplan">
+        <span aria-hidden>–</span>
+        <span className="sr-only">{t('noPlan')}</span>
+      </span>
+    )
+  }
   return (
     <span className="k-ov-tags">
       {steps.map((step) => (

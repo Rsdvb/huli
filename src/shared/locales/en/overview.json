@@ -1,5 +1,6 @@
 {
   "title": "Overview",
+  "description_zero": "Nothing waits for you right now",
   "description_one": "{{count}} task or session has something for you to see",
   "description_other": "{{count}} tasks and sessions have something for you to see",
   "separator": " · ",
