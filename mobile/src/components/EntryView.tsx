@@ -52,12 +52,12 @@ import { UserMessage } from './UserMessage'
 
 type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
-function Reply(props: { entry: Of<'agent'> }) {
-  const { entry } = props
+function Reply(props: { entry: Of<'agent'>; writing: boolean }) {
+  const { entry, writing } = props
   const { fork, forkAtMessage } = useSessionRows()
-  // A reply still streaming has no menu yet; its text is not done.
+  // A reply still being written has no menu yet; its text is not done.
   const menu: MenuNode[] =
-    entry.markdown && !entry.streaming
+    entry.markdown && !writing
       ? joinGroups([
           [
             {
@@ -91,14 +91,14 @@ function Reply(props: { entry: Of<'agent'> }) {
             : [],
         ])
       : []
-  if (!entry.markdown && !entry.streaming && entry.attachments.length === 0) return null
+  if (!entry.markdown && !writing && entry.attachments.length === 0) return null
   return (
     <View style={{ gap: 8 }}>
-      {entry.markdown || entry.streaming ? (
+      {entry.markdown || writing ? (
         <ContextMenu items={menu}>
           {(longPress) => (
             <Pressable onLongPress={longPress} delayLongPress={400}>
-              <Markdown markdown={entry.markdown} streaming={entry.streaming} />
+              <Markdown markdown={entry.markdown} streaming={writing} />
             </Pressable>
           )}
         </ContextMenu>
@@ -219,7 +219,11 @@ function Compaction(props: { entry: Of<'compaction'> }) {
   )
 }
 
-export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) {
+export const EntryView = memo(function EntryView(props: {
+  entry: ThreadEntry
+  /** The reply the agent is still writing, which alone ends in a caret. */
+  writing?: boolean
+}) {
   const { entry } = props
   const { sessionId } = useSessionRows()
   // The host's own requests: a line while their card waits above the composer, then the answer.
@@ -238,7 +242,7 @@ export const EntryView = memo(function EntryView(props: { entry: ThreadEntry }) 
         />
       )
     case 'agent':
-      return <Reply entry={entry} />
+      return <Reply entry={entry} writing={!!props.writing} />
     case 'thought':
       return <ThoughtRow entry={entry} />
     case 'tool': {
@@ -378,17 +382,14 @@ export const ThreadRow = memo(
     if (
       (entry.kind === 'user' && entry.approval) ||
       entry.kind === 'plan' ||
-      (entry.kind === 'agent' &&
-        !entry.markdown &&
-        !entry.streaming &&
-        entry.attachments.length === 0)
+      (entry.kind === 'agent' && !entry.markdown && !row.writing && entry.attachments.length === 0)
     ) {
       return null
     }
     const [top, bottom] = SPACING[entry.kind] ?? [3, 3]
     return (
       <View style={{ paddingTop: top, paddingBottom: bottom }}>
-        <EntryView entry={entry} />
+        <EntryView entry={entry} writing={!!row.writing} />
       </View>
     )
   },

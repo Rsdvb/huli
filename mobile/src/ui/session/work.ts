@@ -6,6 +6,8 @@
 
 import type { ThreadEntry, ThreadState, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
 import { turnDoing, type TurnDoing, type TurnPhaseName } from '@shared/turn-phase'
+
+export { writingId } from '@shared/turn-phase'
 import { diffTexts } from '../../diff'
 import { baseName, relativePath } from './format'
 import { toolTitle } from './toolNames'
@@ -553,17 +555,6 @@ export function askedText(state: ThreadState | null): string | null {
       return entry.outcome === null ? (ASKS[entry.step] ?? ASKS.other!) : null
     }
     if (entry?.kind === 'user') return null
-  }
-  return null
-}
-
-/** The message the agent is still writing, when it is the turn's latest entry. */
-export function writingId(state: ThreadState | null): string | null {
-  if (!state) return null
-  for (let i = state.order.length - 1; i >= 0; i--) {
-    const entry = state.byId[state.order[i]!]
-    if (!entry || entry.kind === 'plan' || entry.kind === 'notice') continue
-    return entry.kind === 'agent' && entry.streaming ? entry.id : null
   }
   return null
 }

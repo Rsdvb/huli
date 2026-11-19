@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionView, ThreadEntry, ThreadState, ToolEntry } from './thread'
-import { thoughtHeading, turnDoing, turnWork } from './turn-phase'
+import { thoughtHeading, turnDoing, turnWork, writingId } from './turn-phase'
 
 function thread(entries: ThreadEntry[], status: SessionView['status'] = 'running'): ThreadState {
   return {
@@ -119,5 +119,22 @@ describe('thoughtHeading', () => {
     expect(thoughtHeading('**Planning')).toBeNull()
     expect(thoughtHeading('**Planning** the next step')).toBeNull()
     expect(thoughtHeading('__Planning__')).toBe('Planning')
+  })
+})
+
+describe('writingId', () => {
+  const reply = (id: string, streaming: boolean) =>
+    ({ kind: 'agent', id, markdown: id, attachments: [], streaming }) as ThreadEntry
+
+  it('is only the latest message, though earlier ones of the turn still stream', () => {
+    const state = thread([user, reply('a1', true), tool('t1', {}), reply('a2', true)])
+    expect(writingId(state)).toBe('a2')
+  })
+
+  it('looks past a plan or a notice, but not past other work', () => {
+    const plan = { kind: 'plan', id: 'p', entries: [] } as unknown as ThreadEntry
+    expect(writingId(thread([user, reply('a1', true), plan]))).toBe('a1')
+    expect(writingId(thread([user, reply('a1', true), tool('t1', {})]))).toBeNull()
+    expect(writingId(thread([user, reply('a1', false)]))).toBeNull()
   })
 })

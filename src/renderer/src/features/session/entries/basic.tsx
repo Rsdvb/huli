@@ -170,7 +170,7 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
         <SessionIdContext value={sessionId}>
           <EntryIdContext value={entryId}>
             <ReplyContext value={sessionId}>
-              <Markdown markdown={entry.markdown} streaming={entry.streaming} />
+              <Markdown markdown={entry.markdown} streaming={writing} />
             </ReplyContext>
           </EntryIdContext>
         </SessionIdContext>
