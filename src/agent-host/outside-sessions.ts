@@ -7,8 +7,9 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
 import { canonicalClaudeModel } from '@shared/agents'
-import { harnessOf, type AgentId } from '@shared/thread'
-import { cacheTtlOfLine, findClaudeTranscript, scanBackwards } from './prompt-cache'
+import { harnessOf, type AgentId, type OutsideKind } from '@shared/thread'
+import { claudeCopies, syncClaudeTranscript, type SyncResult } from './claude-copies'
+import { cacheTtlOfLine, scanBackwards } from './prompt-cache'
 import { projectsFolder } from './usage/readers/claude'
 
 /** The last request of a session's main thread, as its transcript records it. */
@@ -61,6 +62,23 @@ export interface OutsideReader {
     acpSessionId: string,
     configDir: string | null,
   ): Promise<TranscriptTail | null>
+  /**
+   * Huli: brings a copy of the transcript that another folder carried on into the session's own
+   * folder, where a resume reads it; a fork is left alone.
+   */
+  sync?(
+    agentId: AgentId,
+    projectPath: string,
+    acpSessionId: string,
+    configDir: string | null,
+  ): Promise<SyncResult>
+  /** Huli: whether another folder has a copy that goes further, or one that went another way. */
+  copies?(
+    agentId: AgentId,
+    projectPath: string,
+    acpSessionId: string,
+    configDir: string | null,
+  ): Promise<'newer' | 'fork' | null>
 }
 
 // Requests of the main thread; titles, summaries and subagents have sources of their own.
@@ -203,6 +221,13 @@ export async function readTail(
   return found
 }
 
+/** Huli: what a holder is, by the entry point its Claude Code runs under. */
+export function outsideKind(holder: SessionHolder | null): OutsideKind | null {
+  if (!holder) return null
+  if (holder.entrypoint === 'claude-desktop') return 'desktop'
+  return holder.entrypoint === 'cli' || holder.entrypoint === null ? 'terminal' : 'other'
+}
+
 /** Whether a process runs, as far as signal 0 can tell; one of another user's runs too. */
 function alive(pid: number): boolean {
   try {
@@ -266,7 +291,7 @@ export function claudeOutside(deps: {
   return {
     async lastRequest(agentId, projectPath, acpSessionId, configDir) {
       if (harnessOf(agentId) !== 'claude-code') return null
-      const file = await findClaudeTranscript(await root(configDir), projectPath, acpSessionId)
+      const file = (await claudeCopies(await root(configDir), projectPath, acpSessionId))?.current
       if (!file) return null
       try {
         return await readLastRequest(file)
@@ -289,14 +314,26 @@ export function claudeOutside(deps: {
     },
     async tail(agentId, projectPath, acpSessionId, configDir) {
       if (harnessOf(agentId) !== 'claude-code') return null
-      const file = await findClaudeTranscript(await root(configDir), projectPath, acpSessionId)
+      const copies = await claudeCopies(await root(configDir), projectPath, acpSessionId)
+      const file = copies?.current
       if (!file) return null
       try {
-        return await readTail(file, await own())
+        const tail = await readTail(file, await own())
+        // Huli: a copy another folder carried on was written by a program outside Kettu.
+        return tail && copies.moved ? { ...tail, outside: true } : tail
       } catch (error) {
         deps.log('warn', `Could not read ${file}: ${(error as Error).message}`)
         return null
       }
+    },
+    async sync(agentId, projectPath, acpSessionId, configDir) {
+      if (harnessOf(agentId) !== 'claude-code') return 'unchanged'
+      return syncClaudeTranscript(await root(configDir), projectPath, acpSessionId)
+    },
+    async copies(agentId, projectPath, acpSessionId, configDir) {
+      if (harnessOf(agentId) !== 'claude-code') return null
+      const copies = await claudeCopies(await root(configDir), projectPath, acpSessionId)
+      return copies?.moved ? 'newer' : copies?.forks.length ? 'fork' : null
     },
   }
 }

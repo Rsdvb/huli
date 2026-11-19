@@ -57,6 +57,12 @@ export type SessionStatus =
   | 'failed' // could not start or recover; needs user action
   | 'closed'
 
+/**
+ * Huli: what outside Kettu has a Claude Code session open: the Claude desktop app, a terminal, or
+ * another program.
+ */
+export type OutsideKind = 'desktop' | 'terminal' | 'other'
+
 export interface SessionView {
   id: string // Kettu id; ACP ids are only unique per agent
   agentId: AgentId
@@ -93,8 +99,13 @@ export interface SessionView {
   lastRequest?: LastRequest
   /** Questions asked beside the session, never part of its conversation. Absent for subagents. */
   sideChat?: SideChatView
-  /** Ephemeral: a program outside Kettu, such as a terminal, has the agent's session open. */
+  /**
+   * Ephemeral: a program outside Kettu, such as a terminal, has the agent's session open and is
+   * at work in it.
+   */
   heldOutside?: boolean
+  /** Huli: ephemeral: what outside Kettu has the agent's session open, at work or idle. */
+  openOutside?: OutsideKind | null
   /**
    * Ephemeral: the prompt the agent predicts the user sends next, offered in the composer until a
    * prompt goes or another turn starts. Absent for an agent that predicts none.

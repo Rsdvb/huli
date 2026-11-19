@@ -106,7 +106,7 @@ describe('importing a session from a terminal', () => {
       asked.push(id)
       return last
     },
-    holder: async () => (held ? { pid: 42, entrypoint: 'cli', busy: false } : null),
+    holder: async () => (held ? { pid: 42, entrypoint: 'cli', busy: true } : null),
     tail: async () => null,
   })
 

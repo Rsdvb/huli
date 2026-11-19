@@ -38,6 +38,8 @@
     "forkTitleNumbered": "{{title}} (fork {{n}})",
     "alreadyInSession": "This session is already part of a Kettu session",
     "heldOutside": "This session is still open in a terminal. Exit it there with /exit and try again, or fork a copy to carry on in Kettu.",
+    "heldOutsideDesktop": "This session is replying in the Claude desktop app. Try again once it is done, or fork a copy to carry on in Kettu.",
+    "heldOutsideOther": "This session is at work in another Claude Code. Try again once it is done, or fork a copy to carry on in Kettu.",
     "cannotList": "{{agent}} cannot list its sessions",
     "configBetweenTurns": "{{option}} changes between turns",
     "ultracodeDescription": "Dynamic workflows for substantial tasks",

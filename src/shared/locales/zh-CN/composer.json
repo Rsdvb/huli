@@ -71,7 +71,16 @@
     "stopConfirm": "停止并切换"
   },
   "heldOutside": {
-    "strip": "这个会话正开在终端里。在那边输入 /exit 退出后，它的对话会同步到这里。"
+    "strip": "这个会话正开在终端里。在那边输入 /exit 退出后，它的对话会同步到这里。",
+    "desktop": "这个会话在 Claude 桌面版里开着。那边的新对话会同步到这里。",
+    "desktopBusy": "这个会话正在 Claude 桌面版里回复。回复完后会同步到这里。",
+    "other": "这个会话在另一个 Claude Code 里开着。那边的新对话会同步到这里。",
+    "otherBusy": "这个会话正在另一个 Claude Code 里运行。运行完后会同步到这里。",
+    "confirmTitle": "在这里继续？",
+    "confirmDesktop": "这个会话还在 Claude 桌面版里开着。在这里继续后，别同时在那边发消息。",
+    "confirmTerminal": "这个会话还开在终端里。在这里继续后，别同时在那边发消息。",
+    "confirmOther": "这个会话还在另一个 Claude Code 里开着。在这里继续后，别同时在那边发消息。",
+    "confirm": "在这里继续"
   },
   "outOfCredit": {
     "modelTitle": "{{model}} 余额不足",

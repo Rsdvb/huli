@@ -120,6 +120,7 @@ import {
   type TokenTotals,
   type ToolEntry,
   type UserContent,
+  type OutsideKind,
 } from '@shared/thread'
 import {
   agentEntryBefore,
@@ -216,7 +217,12 @@ import { isPlanLimitStop } from './plan-limit-stop'
 import { planRevision } from './plan-revision'
 import { watchSettings, type PreparedRecords, type WatchTarget } from './prepared'
 import type { Projects } from './projects'
-import type { LastRequest, OutsideReader } from './outside-sessions'
+import {
+  outsideKind,
+  type LastRequest,
+  type OutsideReader,
+  type SessionHolder,
+} from './outside-sessions'
 import type { CacheTtlReader } from './prompt-cache'
 import type { ModelRequestsReader, RequestsTarget } from './model-requests/reader'
 import type {
@@ -1209,6 +1215,8 @@ export class SessionManager {
   private readonly listed = new Map<string, { title: string | null; updatedAt: string | null }>()
   /** Sessions being brought back from their stored threads, by id. */
   private readonly reviving = new Map<string, Promise<Live>>()
+  /** Huli: sessions whose transcript another folder's copy just replaced, until a replay reads it. */
+  private readonly broughtIn = new Set<string>()
   /** Idle sessions being let go, by id. */
   private readonly releasing = new Map<string, Promise<void>>()
   /** A look at the idle limit is due once the current work is done. */
@@ -4313,7 +4321,14 @@ export class SessionManager {
     if (!record) return
     const live = this.live.get(sessionId)
     const held = live?.thread.session.heldOutside === true
-    const holding = await this.heldBy(record)
+    // Huli: only a holder at work keeps the session; an idle one, such as the Claude desktop app
+    // with the session's tab open, lets what it wrote come in and Kettu go on after a confirmation.
+    const holder = await this.holderOf(record)
+    const holding = holder?.busy === true
+    const by = outsideKind(holder)
+    if (live && (live.thread.session.openOutside ?? null) !== by) {
+      this.update(live, { openOutside: by })
+    }
     if (holding && !held) {
       if (live?.connection && this.holdReason(live) === null) {
         // Its Claude Code holds a copy of the conversation the other program is about to change.
@@ -4328,7 +4343,7 @@ export class SessionManager {
     }
     if (holding) return
     if (live && held) this.update(live, { heldOutside: false })
-    if (!entered && !held) return
+    if (!entered && !held && !holder) return
     if (!(await this.writtenOutside(record))) return
     if (!live) {
       await this.revive(sessionId)
@@ -5433,7 +5448,9 @@ export class SessionManager {
     if (this.live.has(sessionId) || !this.has(sessionId)) return this.open(sessionId, images)
     if (page) {
       // A program outside Kettu holds the session or wrote to it: it comes back through its revive.
-      if ((await this.outsideState(record)) === 'current') return this.storedSnapshot(record, page)
+      // Huli: so does one an idle program has open, which the composer names.
+      const outside = await this.outsideState(record)
+      if (outside.state === 'current' && !outside.by) return this.storedSnapshot(record, page)
       await this.revive(sessionId)
       return this.snapshot(sessionId, undefined, images)
     }
@@ -5540,6 +5557,7 @@ export class SessionManager {
     }
     try {
       await this.refuseHeld(live.record.agentId, acpSessionId, live.record.configDir ?? null)
+      await this.syncOutside(live.record)
     } catch (error) {
       throw this.failStart(live, error, { action: useLoad ? 'load' : 'resume' })
     }
@@ -6216,7 +6234,7 @@ export class SessionManager {
       await this.runOpening(live)
       return live
     }
-    const outside = await this.outsideState(record)
+    const { state: outside, by } = await this.outsideState(record)
     tree.forEach((item, i) => {
       const stored = threads[i]
       if (stored && !this.live.has(item.id) && this.records.has(item.id)) {
@@ -6224,6 +6242,7 @@ export class SessionManager {
       }
     })
     const live = this.live.get(sessionId)!
+    if (by) this.update(live, { openOutside: by })
     if (outside === 'held') {
       this.update(live, { heldOutside: true })
     } else if (outside === 'written') {
@@ -6243,18 +6262,18 @@ export class SessionManager {
     )
   }
 
-  /** Whether a program outside Kettu has the session open, such as a terminal. */
-  private async heldBy(record: SessionRecord): Promise<boolean> {
-    if (!this.sharedOutside(record)) return false
-    const holder = await this.deps
+  /** The program outside Kettu that has the session open, such as a terminal. */
+  private async holderOf(record: SessionRecord): Promise<SessionHolder | null> {
+    if (!this.sharedOutside(record)) return null
+    return this.deps
       .outside!.holder(record.agentId, record.acpSessionId, record.configDir ?? null)
       .catch(() => null)
-    return holder !== null
   }
 
   /** Whether a program outside Kettu wrote to the session since its thread last took that. */
   private async writtenOutside(record: SessionRecord): Promise<boolean> {
     if (!this.sharedOutside(record)) return false
+    if (this.broughtIn.has(record.id)) return true
     const tail = await this.deps
       .outside!.tail(record.agentId, workDir(record), record.acpSessionId, record.configDir ?? null)
       .catch(() => null)
@@ -6262,13 +6281,54 @@ export class SessionManager {
   }
 
   /**
-   * Where a Claude Code session stands against a program outside Kettu: `held` while one has it
-   * open, `written` once one wrote what the stored thread lacks, else `current`. A held session is
-   * not read, since its writer is not done.
+   * Where a Claude Code session stands against a program outside Kettu: `held` while one that has
+   * it open is at work, `written` once one wrote what the stored thread lacks, else `current`. A
+   * held session is not read, since its writer is not done.
    */
-  private async outsideState(record: SessionRecord): Promise<'held' | 'written' | 'current'> {
-    if (await this.heldBy(record)) return 'held'
-    return (await this.writtenOutside(record)) ? 'written' : 'current'
+  private async outsideState(record: SessionRecord): Promise<{
+    state: 'held' | 'written' | 'current'
+    by: OutsideKind | null
+  }> {
+    const holder = await this.holderOf(record)
+    const by = outsideKind(holder)
+    if (holder?.busy) return { state: 'held', by }
+    return { state: (await this.writtenOutside(record)) ? 'written' : 'current', by }
+  }
+
+  /**
+   * Huli: brings in the copy of the transcript another folder carried on, as the Claude desktop
+   * app does when it resumes a session in its scratch folder, before Claude Code resumes it here.
+   */
+  private async syncOutside(record: SessionRecord): Promise<void> {
+    const reader = this.deps.outside
+    if (!reader?.sync || !this.sharedOutside(record)) return
+    // The copy of one at work elsewhere is still being written.
+    if ((await this.holderOf(record))?.busy) return
+    const result = await reader
+      .sync(record.agentId, workDir(record), record.acpSessionId, record.configDir ?? null)
+      .catch((error: unknown) => {
+        this.deps.diagnostics.log(
+          'warn',
+          `Could not bring in the transcript of session ${record.id}: ${(error as Error).message}`,
+        )
+        return 'unchanged' as const
+      })
+    if (result !== 'synced') return
+    this.broughtIn.add(record.id)
+    this.deps.diagnostics.log(
+      'info',
+      `Brought in the transcript of session ${record.id} that another folder carried on`,
+    )
+  }
+
+  /** Huli: how another folder's copy of a session's transcript stands against its own. */
+  async outsideCopy(agentId: AgentId, acpSessionId: string): Promise<'newer' | 'fork' | null> {
+    const reader = this.deps.outside
+    const record = this.findByAcp(agentId, acpSessionId)
+    if (!reader?.copies || !record || !this.sharedOutside(record)) return null
+    return reader
+      .copies(record.agentId, workDir(record), record.acpSessionId, record.configDir ?? null)
+      .catch(() => null)
   }
 
   /** Keeps the last message an outside program wrote that the thread now holds, after a replay. */
@@ -6277,6 +6337,7 @@ export class SessionManager {
     const tail = await this.deps.outside
       .tail(record.agentId, workDir(record), record.acpSessionId, record.configDir ?? null)
       .catch(() => null)
+    this.broughtIn.delete(record.id)
     if (!tail?.outside || tail.uuid === record.outsideTail) return
     record.outsideTail = tail.uuid
     this.saveIndex()
@@ -6350,6 +6411,7 @@ export class SessionManager {
     // session attaches waits for it instead of being dropped.
     if (record.acpSessionId !== '') connection.reopen(record.acpSessionId)
     await this.refuseHeld(record.agentId, record.acpSessionId, record.configDir ?? null)
+    await this.syncOutside(record)
     let config: ConfigOption[]
     let version: string | undefined
     let resumed = false
@@ -10855,7 +10917,7 @@ export class SessionManager {
         ])
         states.set(id, {
           cache: last ? { lastRequestAt: last.at, ttl: last.ttl } : null,
-          held: holder !== null,
+          held: holder?.busy === true,
           last,
         })
       }),
@@ -10886,9 +10948,15 @@ export class SessionManager {
     if (!this.deps.agents.has(params.agentId))
       throw invalidParams(`Unknown agent ${params.agentId}`)
     this.deps.agents.assertEnabled(params.agentId)
-    const projectPath = await this.deps.projects.resolveDirectory(params.projectPath)
     const existing = this.findByAcp(params.agentId, params.acpSessionId)
-    if (existing && !params.fork) return this.summary(existing.id)
+    if (existing && !params.fork) {
+      // Huli: importing one that is here already brings in what another folder carried on.
+      // A live one does so through its reload, once its own Claude Code is not at work.
+      if (this.live.has(existing.id)) await this.followOutside(existing.id, true)
+      else await this.syncOutside(existing)
+      return this.summary(existing.id)
+    }
+    const projectPath = await this.deps.projects.resolveDirectory(params.projectPath)
     if (this.takenEarlier(params.agentId, params.acpSessionId) && !params.fork) {
       throw new HostError('busy', t('session.alreadyInSession'))
     }
@@ -10951,8 +11019,9 @@ export class SessionManager {
   }
 
   /**
-   * Refuses a Claude Code session that a process outside Kettu, as in a terminal, has open: two
-   * processes writing one transcript tangle it.
+   * Refuses a Claude Code session that a process outside Kettu, as in a terminal, is at work in:
+   * two processes writing one transcript tangle it. Huli: an idle one lets it go on here, which
+   * the composer confirms first.
    */
   private async refuseHeld(
     agentId: AgentId,
@@ -10963,7 +11032,18 @@ export class SessionManager {
     const holder = await this.deps.outside
       .holder(agentId, acpSessionId, configDir)
       .catch(() => null)
-    if (holder) throw new HostError('busy', t('session.heldOutside'))
+    if (!holder?.busy) return
+    const by = outsideKind(holder)
+    throw new HostError(
+      'busy',
+      t(
+        by === 'desktop'
+          ? 'session.heldOutsideDesktop'
+          : by === 'other'
+            ? 'session.heldOutsideOther'
+            : 'session.heldOutside',
+      ),
+    )
   }
 
   // Git.
