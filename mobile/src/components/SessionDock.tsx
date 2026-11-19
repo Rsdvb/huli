@@ -283,19 +283,14 @@ export function QueueStack(props: {
       .finally(() => setBusyItem(null))
   }
 
-  const sendNow = (item: QueuedPrompt) => {
-    const go = () =>
-      act(
-        item,
-        () => link.request('sessions.sendNow', { sessionId, itemId: item.id }),
-        '没能立即发送',
-      )
-    if (steering) return go()
-    Alert.alert('立即发送？', '停止本轮，接着发送这条消息', [
-      { text: '取消', style: 'cancel' },
-      { text: '停止并发送', style: 'destructive', onPress: go },
-    ])
-  }
+  // One tap sends, as the desktop's queue does: the button says what it does, and its hint that
+  // the turn stops first, so a second confirmation only made it take two taps.
+  const sendNow = (item: QueuedPrompt) =>
+    act(
+      item,
+      () => link.request('sessions.sendNow', { sessionId, itemId: item.id }),
+      '没能立即发送',
+    )
 
   const edit = (item: QueuedPrompt) =>
     act(

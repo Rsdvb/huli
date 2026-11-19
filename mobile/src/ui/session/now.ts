@@ -32,5 +32,8 @@ function ticker(every: number): () => number {
 
 export const useMinute = ticker(30_000)
 
+/** The time to the second, for the clocks of what runs, such as a running sub-agent's. */
+export const useSecond = ticker(1000)
+
 /** The time to a tenth of a second, while a step that runs shows it. */
 export const useTenth = ticker(100)

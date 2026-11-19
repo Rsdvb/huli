@@ -459,6 +459,15 @@ disables every other workflow after each merge, new ones included.
   outage: `gh workflow run huli-monitor.yml -R Rsdvb/huli -f rehearse=true`, which reports a
   made-up failure that the next run closes.
 
+- `huli-sim.yml`, only by hand (`gh workflow run huli-sim.yml --ref <branch> -f ref=<branch>`):
+  checks the phone app in an iOS simulator on a `macos-26` runner instead of the owner's Mac.
+  `tools/huli/ios/sim/build.sh` builds the simulator app from `ref`; `run.sh` boots a fresh Pro Max
+  with the Pinyin keyboard, starts this checkout's daemon with the fake agent in a data folder of
+  its own, pairs the app with it alone (`pair.mjs` answers `kettu pair`), and runs the Maestro
+  flows under `tools/huli/ios/sim/flows` (or those named in its `flows` input) while recording the
+  screen. The screenshots, recordings and logs are the run's `huli-sim` artifact, kept for a day.
+  It uses no secrets and never runs on a push or pull request.
+
 The monitor's alerts are GitHub's notifications: the owner keeps this repository watched
 (Watching, or Custom with Issues) and email notifications on in GitHub's settings, or a new issue
 or comment reaches no inbox. The workflows that open issues (`huli-monitor.yml`, `huli-sync.yml`)

@@ -946,13 +946,9 @@ export function Composer(props: ComposerProps) {
     }
   }
 
+  // The menu's item already says the turn stops first, so it sends without asking again.
   const sendNow = () => {
-    if (!canSend) return
-    if (props.steering) return void send(true)
-    Alert.alert('立即发送？', '停止本轮，接着发送这条消息', [
-      { text: '取消', style: 'cancel' },
-      { text: '停止并发送', style: 'destructive', onPress: () => void send(true) },
-    ])
+    if (canSend) void send(true)
   }
 
   const holdQueue = () => {

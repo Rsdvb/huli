@@ -1,7 +1,7 @@
 // A control that opens the system's own menu on iOS: UIMenu through SwiftUI's Menu, with its glass,
 // its morph out of the control, its haptics and its submenus. The menu is built from the same
 // pages our popover shows (Popover.tsx), so a screen describes a menu once: rows become buttons,
-// rows with a check become selectable items, switches toggles, a page a row leads to a submenu,
+// rows with a check buttons with a checkmark, switches toggles, a page a row leads to a submenu,
 // and the effort's levels a segmented row. What a menu cannot hold (an agent's mark, a usage
 // ring) is left out or said in words. Elsewhere the control keeps opening our popover.
 
@@ -53,8 +53,33 @@ function Row(props: { row: MenuRow; source: MenuSource; depth: number }) {
     )
   }
   const subtitle = [row.subtitle, row.detail].filter(Boolean).join(' · ')
-  if (row.toggle !== undefined || row.checked !== undefined) {
-    const on = row.toggle ?? row.checked ?? false
+  // A switch only: a SwiftUI Toggle flips itself on a tap, so a choice drawn as one showed the
+  // tapped row as chosen even when the choice did not change or failed to. A choice is a button
+  // with a check, which shows what the screen says is chosen and nothing else.
+  if (row.checked !== undefined && row.toggle === undefined) {
+    const mark = row.checked ? 'checkmark' : sf
+    if (subtitle) {
+      return (
+        <Button {...(mods ? { modifiers: mods } : {})} onPress={() => row.onPress?.()}>
+          {[
+            ...(mark ? [<Image key="icon" systemName={mark} />] : []),
+            <Text key="title">{row.label}</Text>,
+            <Text key="subtitle">{subtitle}</Text>,
+          ]}
+        </Button>
+      )
+    }
+    return (
+      <Button
+        label={row.label}
+        {...(mark ? { systemImage: mark } : {})}
+        {...(mods ? { modifiers: mods } : {})}
+        onPress={() => row.onPress?.()}
+      />
+    )
+  }
+  if (row.toggle !== undefined) {
+    const on = row.toggle
     if (subtitle) {
       // Two texts read in a menu as the item's title and its subtitle.
       return (

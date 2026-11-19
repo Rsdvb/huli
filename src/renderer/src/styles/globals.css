@@ -894,8 +894,9 @@
 }
 
 /* The running turn's dots (features/session/turn-dots.tsx): each runs one of these on its own
-   delay into the phase's loop, so phases differ only in which dot lights when. Huli: the jump
-   button's dots run them as CSS; TurnDots runs the same keyframes from turn-dot-patterns.ts. */
+   delay into the phase's loop, so phases differ only in which dot lights when. The phone plays
+   the same stops from KEYFRAMES in src/shared/turn-dots.ts, so change both together. Huli: only
+   the jump button's dots run these; TurnDots plays KEYFRAMES through the Web Animations API. */
 [data-turn-dots] > svg {
   opacity: 0.22;
 }

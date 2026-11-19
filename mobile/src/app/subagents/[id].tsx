@@ -1,9 +1,10 @@
 // A session's sub-sessions: those its agent started and those started from it, running first,
 // each with how it is doing, what it was for, the start of its last reply and how long it took.
-// The + starts a new sub-session of the same agent in the same folder.
+// The + starts a new sub-session of the same agent in the same folder. A long list, such as a
+// session's many sub-agents that its row's badge opens here, gets a search field.
 
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, SectionList, StyleSheet, Text, View } from 'react-native'
+import { Alert, SectionList, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { SessionOutputs, SessionSummary } from '@shared/agent-host'
 import { call } from '../../git'
@@ -23,6 +24,8 @@ const running = (s: SessionSummary) =>
 
 // Read the replies of this many at most, newest first, so a long list does not flood the link.
 const READ_REPLIES = 30
+// More sub-sessions than this get a search field.
+const SEARCH_FROM = 12
 
 export default function SubagentsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -33,6 +36,7 @@ export default function SubagentsScreen() {
   const [outputs, setOutputs] = useState<Record<string, SessionOutputs>>({})
   const [now, setNow] = useState(Date.now())
   const [creating, setCreating] = useState(false)
+  const [query, setQuery] = useState('')
 
   const children = useMemo(
     () =>
@@ -41,8 +45,15 @@ export default function SubagentsScreen() {
         .sort((a, b) => b.createdAt - a.createdAt),
     [host.sessions, id],
   )
-  const live = children.filter(running)
-  const done = children.filter((s) => !running(s))
+  const searchable = children.length > SEARCH_FROM
+  const words = searchable ? query.trim().toLowerCase() : ''
+  const shown = words
+    ? children.filter((s) =>
+        [sessionTitle(s), s.description ?? ''].some((text) => text.toLowerCase().includes(words)),
+      )
+    : children
+  const live = shown.filter(running)
+  const done = shown.filter((s) => !running(s))
   const anyRunning = live.length > 0
 
   useEffect(() => {
@@ -118,7 +129,32 @@ export default function SubagentsScreen() {
           sections={sections}
           keyExtractor={(s) => s.id}
           stickySectionHeadersEnabled={false}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 32 }}
+          {...(searchable
+            ? {
+                ListHeaderComponent: (
+                  <TextInput
+                    value={query}
+                    onChangeText={setQuery}
+                    placeholder={`搜索 ${children.length} 个子会话`}
+                    placeholderTextColor={c.textTertiary}
+                    clearButtonMode="while-editing"
+                    autoCorrect={false}
+                    returnKeyType="search"
+                    style={[styles.search, { color: c.text, backgroundColor: c.fill }]}
+                  />
+                ),
+              }
+            : {})}
+          {...(words
+            ? {
+                ListEmptyComponent: (
+                  <Text style={[styles.none, { color: c.textSecondary }]}>没有符合的子会话</Text>
+                ),
+              }
+            : {})}
           renderSectionHeader={({ section }) => (
             <Text style={[styles.section, { color: c.textSecondary }]}>
               {section.title}
@@ -205,6 +241,8 @@ function ChildRow(props: {
 
 const styles = StyleSheet.create({
   section: { fontSize: 15, fontWeight: '500', paddingTop: 18, paddingBottom: 6 },
+  search: { height: 38, borderRadius: 10, paddingHorizontal: 12, fontSize: 16, marginTop: 8 },
+  none: { fontSize: 15, paddingTop: 24, textAlign: 'center' },
   row: { flexDirection: 'row', gap: 12, paddingVertical: 10 },
   titleRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
   title: { flex: 1, fontSize: 16, lineHeight: 21, fontWeight: '600' },

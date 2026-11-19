@@ -4,7 +4,7 @@
 // tightest window is used, which opens the plan's usage, how long the prompt cache has left, and how
 // full the context is, both of which open what fills it.
 
-import type { RefObject } from 'react'
+import { useState, type RefObject } from 'react'
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Svg, { Circle } from 'react-native-svg'
 import type { PlanLimit } from '@shared/agent-host'
@@ -135,6 +135,14 @@ export function StatusLine(props: {
   const out = !!limit && isExhausted(limit, now)
   const percent = out ? 100 : Math.round(limit?.usedPercent ?? 0)
   const reset = limit ? inlineReset(limit, now) : null
+  // The limit's reset time goes first when the line runs short: it shows only while it has its
+  // whole width, and comes back once the room it needs is spare again.
+  const [resetWidth, setResetWidth] = useState(0)
+  const [spare, setSpare] = useState(0)
+  const [resetShown, setResetShown] = useState(true)
+  const suffix = reset ? ` · ${reset}` : ''
+  const showReset = !!suffix && (resetShown || spare >= resetWidth + 4)
+  if (showReset !== resetShown && suffix && resetWidth > 0) setResetShown(showReset)
   const connection =
     props.state.kind === 'connected'
       ? '已连接'
@@ -205,7 +213,7 @@ export function StatusLine(props: {
           </View>
         </>
       )}
-      <View style={{ flex: 1 }} />
+      <View style={styles.spacer} onLayout={(event) => setSpare(event.nativeEvent.layout.width)} />
       {props.branch !== undefined && props.branch !== null && (
         <View
           style={styles.branch}
@@ -266,12 +274,39 @@ export function StatusLine(props: {
               {windowShort(limit)}已用完 · {reset ?? backText(limit.resetsAt, now)}
             </Text>
           ) : (
-            <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
-              <Text style={{ color: c.textTertiary }}>{windowShort(limit)} </Text>
-              <Text style={{ color: limitTextColor(limit, c, c.textSecondary) }}>
-                {percent}%{reset ? ` · ${reset}` : ''}
+            <>
+              <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+                <Text style={{ color: c.textTertiary }}>{windowShort(limit)} </Text>
+                <Text style={{ color: limitTextColor(limit, c, c.textSecondary) }}>{percent}%</Text>
               </Text>
-            </Text>
+              {suffix ? (
+                <Text
+                  style={[styles.text, styles.measure]}
+                  onLayout={(event) => setResetWidth(event.nativeEvent.layout.width)}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                >
+                  {suffix}
+                </Text>
+              ) : null}
+              {suffix && resetShown ? (
+                <Text
+                  style={[
+                    styles.text,
+                    styles.reset,
+                    { color: limitTextColor(limit, c, c.textSecondary) },
+                  ]}
+                  numberOfLines={1}
+                  onLayout={(event) => {
+                    if (resetWidth > 0 && event.nativeEvent.layout.width < resetWidth - 0.5) {
+                      setResetShown(false)
+                    }
+                  }}
+                >
+                  {suffix}
+                </Text>
+              ) : null}
+            </>
           )}
         </Pressable>
       )}
@@ -282,7 +317,7 @@ export function StatusLine(props: {
           hitSlop={10}
           accessibilityRole="button"
           accessibilityLabel={`上下文已用 ${Math.round(props.context.share * 100)}%，查看构成`}
-          style={({ pressed }) => [styles.limit, { opacity: pressed ? 0.55 : 1 }]}
+          style={({ pressed }) => [styles.chip, { opacity: pressed ? 0.55 : 1 }]}
         >
           <PieRing share={props.context.share} color={props.context.color} />
           <Text style={[styles.text, { color: c.textSecondary }]}>
@@ -310,7 +345,7 @@ function CacheChip(props: { expiry: KnownExpiry; onPress(): void }) {
       accessibilityLabel={`Prompt cache：${
         phase === 'expired' ? (expiry.estimate ? '可能已过期' : '已过期') : `剩余 ${time}`
       }`}
-      style={({ pressed }) => [styles.limit, { opacity: pressed ? 0.55 : 1 }]}
+      style={({ pressed }) => [styles.chip, { opacity: pressed ? 0.55 : 1 }]}
     >
       <Icon
         icon={G.timer}
@@ -334,7 +369,8 @@ const styles = StyleSheet.create({
     paddingBottom: 3,
     minHeight: 30,
   },
-  host: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
+  // Each part clips what it cannot fit rather than run under the next one.
+  host: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1, overflow: 'hidden' },
   dot: {
     position: 'absolute',
     top: -3,
@@ -349,11 +385,16 @@ const styles = StyleSheet.create({
   shrink: { flexShrink: 1 },
   // Shrinking with the computer's longer name, a short folder name would be cut to nothing.
   folderName: { minWidth: 24 },
-  folderBox: { flexShrink: 1 },
+  folderBox: { flexShrink: 1, overflow: 'hidden' },
   folder: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
   badge: { borderRadius: 999, paddingHorizontal: 6, minWidth: 18, alignItems: 'center' },
   badgeText: { fontSize: 11, lineHeight: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  limit: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  limit: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, overflow: 'hidden' },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  spacer: { flexGrow: 1, flexShrink: 0 },
+  // Gives way first, so the names keep their room while the reset time can go.
+  reset: { flexShrink: 1000, marginLeft: -5 },
+  measure: { position: 'absolute', opacity: 0, left: 0, top: 0 },
   out: { borderRadius: 999, paddingLeft: 4, paddingRight: 8, paddingVertical: 2, flexShrink: 1 },
   outText: { fontWeight: '600', flexShrink: 1 },
   branch: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, maxWidth: 190 },

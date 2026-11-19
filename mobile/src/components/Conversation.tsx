@@ -16,6 +16,12 @@
 // which keeps the heights it measured by key extractor, row object and width, places them where
 // they were and shows them on the push's first frames. It keeps none for a list given
 // `getItemType`, which it wraps anew on each mount, so rows have no kinds of their own.
+//
+// The keyboard never lays the list out again: the list fills the screen behind the composer's dock,
+// and the keyboard and the dock only add to its inset at the end, while the content is lifted by
+// the keyboard's own height on each of its frames, on the UI thread (KeyboardAwareLegendList, over
+// keyboard-controller's chat scroll view). So the rows, the dock and the keyboard move as one, and
+// nothing settles a frame later once the keyboard stops.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
@@ -27,7 +33,10 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native'
-import { LegendList, type LegendListRef } from '@legendapp/list/react-native'
+import { KeyboardAwareLegendList } from '@legendapp/list/keyboard'
+import type { LegendListRef } from '@legendapp/list/react-native'
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
+import Reanimated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated'
 import type { ThreadState } from '@shared/thread'
 import type { WritableStore } from '../select'
 import { useThreadSelector, type ThreadView } from '../thread'
@@ -75,10 +84,10 @@ function listMemory(sessionId: string): ListMemory {
   return memory
 }
 
-/** How far the conversation is scrolled up from its end. */
+/** How far the conversation is scrolled up from its end, which the dock and keyboard inset. */
 function distanceFromEnd(event: NativeSyntheticEvent<NativeScrollEvent>): number {
-  const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-  return contentSize.height - layoutMeasurement.height - contentOffset.y
+  const { contentInset, contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+  return contentSize.height + contentInset.bottom - layoutMeasurement.height - contentOffset.y
 }
 
 export function Conversation(props: {
@@ -98,6 +107,12 @@ export function Conversation(props: {
   scrolling?: WritableStore<boolean>
   /** The turn waits for the user, which the way back to the newest message shows. */
   waiting?: boolean
+  /** What the running turn does now, which the way back's dots act out. */
+  phase?: string | null
+  /** The height of the dock over the list's end: the composer and what stands above it. */
+  dock: SharedValue<number>
+  /** How much of the dock's bottom room the keyboard covers once it is up (keyboardOverlap). */
+  keyboardOverlap: number
 }) {
   countRender('Conversation')
   const { c } = useSessionTokens()
@@ -183,6 +198,20 @@ export function Conversation(props: {
     void list.current?.scrollToEnd({ animated: true })
   }, [])
 
+  // The way back down floats over the dock, and rises with it and the keyboard on the UI thread.
+  const keyboard = useReanimatedKeyboardAnimation()
+  const { dock, keyboardOverlap } = props
+  const overDock = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY: -(
+          dock.value +
+          Math.max(0, -keyboard.height.value - keyboardOverlap * keyboard.progress.value)
+        ),
+      },
+    ],
+  }))
+
   const contentStyle = useMemo(
     () => [styles.content, { paddingTop: props.paddingTop }],
     [props.paddingTop],
@@ -190,8 +219,10 @@ export function Conversation(props: {
 
   return (
     <>
-      <LegendList
+      <KeyboardAwareLegendList
         ref={list}
+        contentInsetEndAdjustment={dock}
+        keyboardOffset={keyboardOverlap}
         data={rows}
         keyExtractor={memory.key}
         renderItem={renderRow}
@@ -236,12 +267,15 @@ export function Conversation(props: {
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      <ToBottomButton
-        visible={away}
-        fresh={fresh}
-        state={props.waiting ? 'waiting' : running ? 'running' : 'idle'}
-        onPress={toBottom}
-      />
+      <Reanimated.View pointerEvents="box-none" style={[styles.overDock, overDock]}>
+        <ToBottomButton
+          visible={away}
+          fresh={fresh}
+          state={props.waiting ? 'waiting' : running ? 'running' : 'idle'}
+          phase={props.phase ?? null}
+          onPress={toBottom}
+        />
+      </Reanimated.View>
     </>
   )
 }
@@ -250,4 +284,6 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 18, paddingBottom: 12 },
   older: { paddingVertical: 14, alignItems: 'center' },
   end: { height: 4 },
+  // Tall enough to hold the button, whose touches a zero-height box would not reach.
+  overDock: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 72 },
 })

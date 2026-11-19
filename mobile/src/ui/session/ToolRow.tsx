@@ -4,8 +4,16 @@
 // while it waits. Tapped, it opens to its command and output, its result or the file it read, and
 // its edits, each opening to its diff.
 
-import { memo, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
@@ -19,6 +27,7 @@ import { plainText } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useTenth } from './now'
+import { useReducedMotion } from '../motion'
 import { MONO, useSessionTokens } from './palette'
 import { gentle } from './Press'
 import { Counts } from './TurnChanges'
@@ -219,11 +228,7 @@ export function StepLine(props: {
       accessibilityRole={props.onToggle ? 'button' : undefined}
       accessibilityState={props.onToggle ? { expanded: props.open } : undefined}
       accessibilityLabel={[props.name, props.summary].filter(Boolean).join(' ')}
-      style={({ pressed }) => [
-        styles.line,
-        props.open && styles.lineOpen,
-        { opacity: pressed ? 0.6 : 1 },
-      ]}
+      style={({ pressed }) => [styles.line, { opacity: pressed ? 0.6 : 1 }]}
     >
       <View style={[styles.badge, { backgroundColor: c.fill, borderColor: c.border }]}>
         <Icon icon={props.icon} size={13} color={c.textSecondary} />
@@ -249,14 +254,45 @@ export function StepLine(props: {
   )
 }
 
-/** An opened step: a rounded card its line heads, over its sections. */
+/**
+ * The opacity of what a disclosure opens: it fades in when opened here, but not when a row that
+ * was open mounts again as it scrolls back into view, nor under Reduce Motion.
+ */
+export function useOpenFade(open: boolean): Animated.Value {
+  const reduce = useReducedMotion()
+  const shown = useRef(new Animated.Value(1)).current
+  const was = useRef(open)
+  useLayoutEffect(() => {
+    if (open && !was.current && !reduce) {
+      shown.setValue(0)
+      Animated.timing(shown, { toValue: 1, duration: 180, useNativeDriver: true }).start()
+    }
+    was.current = open
+  }, [open, reduce, shown])
+  return shown
+}
+
+/**
+ * A step that opens into a rounded card its line heads, over its sections. Closed or open the line
+ * keeps its view and its place: the card reaches out around it rather than pushing it in, and what
+ * opens fades in under it, so only the rows below move.
+ */
 export function StepCard(props: { open: boolean; line: ReactNode; children?: ReactNode }) {
   const { c } = useSessionTokens()
-  if (!props.open) return <>{props.line}</>
+  const shown = useOpenFade(props.open)
   return (
-    <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+    <View
+      style={[
+        styles.card,
+        props.open
+          ? { backgroundColor: c.surface, borderColor: c.border, marginBottom: 4 }
+          : styles.cardClosed,
+      ]}
+    >
       {props.line}
-      {props.children}
+      {props.open ? (
+        <Animated.View style={{ opacity: shown }}>{props.children}</Animated.View>
+      ) : null}
     </View>
   )
 }
@@ -516,8 +552,13 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
 })
 
 const styles = StyleSheet.create({
-  line: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 34 },
-  lineOpen: { paddingHorizontal: 10 },
+  line: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
   badge: {
     width: 24,
     height: 24,
@@ -541,13 +582,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     overflow: 'hidden',
   },
+  // Reaching out by the line's padding, so the line sits where it does closed.
   card: {
     borderRadius: 14,
     borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-    marginBottom: 4,
+    marginHorizontal: -10,
+    paddingHorizontal: 0,
   },
+  cardClosed: { borderColor: 'transparent' },
   lead: { paddingHorizontal: 12, paddingBottom: 10 },
   description: { fontSize: 13, lineHeight: 18 },
   raw: { fontFamily: MONO, fontSize: 13, lineHeight: 19 },
