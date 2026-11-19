@@ -306,6 +306,7 @@ export async function scanClaudeHistory(
   })
   const seen = new Set<string>()
   const byId = new Map<string, ClaudeRead>()
+  const copies = new Map<string, number>()
   await eachLimited(files, READS, async ({ file, folder }) => {
     seen.add(file)
     try {
@@ -319,6 +320,7 @@ export async function scanClaudeHistory(
         cache.set(file, { size: info.size, mtimeMs: info.mtimeMs, item })
       }
       if (!item) return
+      copies.set(item.sessionId, (copies.get(item.sessionId) ?? 0) + 1)
       const other = byId.get(item.sessionId)
       if (
         !other ||
@@ -337,7 +339,8 @@ export async function scanClaudeHistory(
     return { sessionId, title, cwd, createdAt, updatedAt, subagent, prompted }
   })
   items.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-  return { items, oldSubagents }
+  const copied = new Set([...copies].filter(([, count]) => count > 1).map(([id]) => id))
+  return { items, oldSubagents, copied }
 }
 
 export interface ClaudeScan {
@@ -345,6 +348,8 @@ export interface ClaudeScan {
   items: HistoryItem[]
   /** Subagents' transcripts an older Claude Code kept beside the sessions, `agent-*.jsonl`. */
   oldSubagents: number
+  /** Huli: the sessions with a transcript in more than one project folder. */
+  copied: ReadonlySet<string>
 }
 
 /** A session an agent listed across its folders, in the import's terms. */
@@ -401,7 +406,11 @@ export interface AgentHistoryDeps {
     configFolder(agentId: AgentId): string | null
     ensureReady(agentId: AgentId): Promise<Pick<AgentRuntime, 'connection' | 'init'>>
   }
-  sessions: { agentSessionIds(agentId: AgentId): Set<string> }
+  sessions: {
+    agentSessionIds(agentId: AgentId): Set<string>
+    /** Huli: how another folder's copy of an imported session's transcript stands to its own. */
+    outsideCopy?(agentId: AgentId, acpSessionId: string): Promise<'newer' | 'fork' | null>
+  }
   isDirectory?(folder: string): Promise<boolean>
   log: LogFn
 }
@@ -423,8 +432,9 @@ export class AgentHistory {
     let items: HistoryItem[]
     let nextCursor: string | null
     let oldSubagents = 0
+    let copied: ReadonlySet<string> = new Set()
     if (harnessOf(agentId) === 'claude-code') {
-      ;({ items, nextCursor, oldSubagents } = await this.claudePage(agentId, cursor))
+      ;({ items, nextCursor, oldSubagents, copied } = await this.claudePage(agentId, cursor))
     } else {
       const runtime = await agents.ensureReady(agentId)
       const connection = runtime.connection
@@ -447,6 +457,14 @@ export class AgentHistory {
     const result = historyPage(items, this.deps.sessions.agentSessionIds(agentId), gone, nextCursor)
     result.hidden.subagents += oldSubagents
     for (const session of result.sessions) this.keep(agentId, session)
+    const outsideCopy = this.deps.sessions.outsideCopy?.bind(this.deps.sessions)
+    if (outsideCopy) {
+      const twice = result.sessions.filter((s) => s.imported && copied.has(s.acpSessionId))
+      await eachLimited(twice, READS, async (session) => {
+        const state = await outsideCopy(agentId, session.acpSessionId).catch(() => null)
+        if (state) session.outside = state
+      })
+    }
     return result
   }
 
@@ -461,7 +479,12 @@ export class AgentHistory {
   private async claudePage(
     agentId: AgentId,
     cursor: string | null,
-  ): Promise<{ items: HistoryItem[]; nextCursor: string | null; oldSubagents: number }> {
+  ): Promise<{
+    items: HistoryItem[]
+    nextCursor: string | null
+    oldSubagents: number
+    copied: ReadonlySet<string>
+  }> {
     let scan = cursor === null ? undefined : this.scans.get(agentId)
     if (!scan) {
       const configDir = this.deps.agents.configFolder(agentId)
@@ -490,6 +513,7 @@ export class AgentHistory {
       items: scan.items.slice(offset, end),
       nextCursor: end < scan.items.length ? String(end) : null,
       oldSubagents: offset === 0 ? scan.oldSubagents : 0,
+      copied: scan.copied,
     }
   }
 

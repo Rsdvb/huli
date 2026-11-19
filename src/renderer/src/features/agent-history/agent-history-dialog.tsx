@@ -12,6 +12,7 @@ import { harnessOf, type AgentId } from '@shared/agents'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
+import { toast } from '@renderer/components/ui/toast'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import {
   Dialog,
@@ -197,7 +198,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
         [agentId]: {
           ...current,
           sessions: current.sessions.map((s) =>
-            s.acpSessionId === acpSessionId ? { ...s, imported: true } : s,
+            s.acpSessionId === acpSessionId ? { ...s, imported: true, outside: undefined } : s,
           ),
         },
       }
@@ -224,6 +225,8 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
             agentId,
             projectPath: session.cwd,
             acpSessionId: session.acpSessionId,
+            // Huli: a fork another folder carried on comes in as a copy of its own.
+            ...(session.imported && session.outside === 'fork' ? { fork: true } : {}),
           })
           useSessionsStore.getState().upsert(summary)
           result.imported.push(summary)
@@ -564,8 +567,27 @@ function SessionRow({
 }) {
   const { t } = useTranslation(['agentHistory', 'common'])
   const can = selectable(session)
+  // Huli: an imported session another folder carried on is brought in again by its import.
+  const [sync, setSync] = useState<'idle' | 'running' | 'done'>('idle')
+  const newer = session.imported && session.outside === 'newer' && sync !== 'done'
+  const runSync = async (): Promise<void> => {
+    setSync('running')
+    try {
+      const summary = await host('sessions.import', {
+        agentId,
+        projectPath: session.cwd,
+        acpSessionId: session.acpSessionId,
+      })
+      useSessionsStore.getState().upsert(summary)
+      setSync('done')
+    } catch (error) {
+      setSync('idle')
+      toast(errorMessage(error), undefined, { tone: 'warning' })
+    }
+  }
   const meta = [
     session.imported ? t('dialog.imported') : session.missing ? t('dialog.missing') : null,
+    newer ? t('dialog.newer') : session.outside === 'fork' ? t('dialog.fork') : null,
     session.updatedAt ? mediumAgo(session.updatedAt) : null,
   ]
     .filter(Boolean)
@@ -592,6 +614,19 @@ function SessionRow({
           {session.title ?? t('common:untitledSession')}
         </span>
         <span className="text-meta whitespace-nowrap text-tertiary tabular">{meta}</span>
+        {newer && (
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={locked || sync === 'running'}
+            onClick={(event) => {
+              event.preventDefault()
+              void runSync()
+            }}
+          >
+            {t('dialog.sync')}
+          </Button>
+        )}
       </label>
     </li>
   )

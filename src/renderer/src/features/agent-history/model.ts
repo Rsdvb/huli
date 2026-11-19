@@ -37,9 +37,12 @@ export function sessionKey(agentId: AgentId, acpSessionId: string): string {
   return `${agentId}\n${acpSessionId}`
 }
 
-/** One that may be chosen: not imported yet, and its folder still there. */
+/**
+ * One that may be chosen: not imported yet, or Huli: a fork of an imported one that another folder
+ * carried on, and its folder still there.
+ */
 export function selectable(session: AgentHistorySession): boolean {
-  return !session.imported && !session.missing
+  return (!session.imported || session.outside === 'fork') && !session.missing
 }
 
 export function matches(session: AgentHistorySession, query: string): boolean {

@@ -1,8 +1,9 @@
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { findHolder, readLastRequest, readTail } from './outside-sessions'
+import { claudeOutside, findHolder, readLastRequest, readTail } from './outside-sessions'
+import { claudeProjectFolder } from './prompt-cache'
 
 const SESSION = '2fe6b9a7-d648-4721-8783-29cfccf98185'
 const HOUR = 60 * 60_000
@@ -251,5 +252,60 @@ describe('findHolder', () => {
 
   it('has none when the folder is missing', async () => {
     await expect(findHolder(path.join(folder, 'missing'), SESSION, () => true)).resolves.toBeNull()
+  })
+})
+
+// Huli: the Claude desktop app resumed an imported session in a scratch folder, so the
+// conversation went on in a copy under that folder's project folder.
+describe('claudeOutside with a session continued in another folder', () => {
+  let config: string
+  let cwd: string
+
+  beforeEach(async () => {
+    config = await realpath(await mkdtemp(path.join(os.tmpdir(), 'kettu-moved-')))
+    cwd = path.join(config, 'work')
+    await mkdir(cwd)
+  })
+
+  afterEach(async () => {
+    await rm(config, { recursive: true, force: true })
+  })
+
+  const message = (type: 'user' | 'assistant', uuid: string, parentUuid: string | null): string =>
+    line({
+      type,
+      uuid,
+      parentUuid,
+      entrypoint: 'claude-desktop',
+      timestamp: new Date().toISOString(),
+    })
+
+  async function transcript(folder: string, lines: string[]): Promise<void> {
+    await mkdir(path.join(config, 'projects', folder), { recursive: true })
+    await writeFile(
+      path.join(config, 'projects', folder, `${SESSION}.jsonl`),
+      lines.join('\n') + '\n',
+    )
+  }
+
+  it('reads the last message from the copy that carries the conversation on', async () => {
+    const before = [message('user', 'u1', null), message('assistant', 'a1', 'u1')]
+    await transcript(claudeProjectFolder(cwd), before)
+    await transcript('scratch', [
+      ...before,
+      message('user', 'u2', 'a1'),
+      message('assistant', 'a2', 'u2'),
+    ])
+    const reader = claudeOutside({
+      platform: process.platform === 'win32' ? 'win32' : 'linux',
+      home: config,
+      env: async () => ({}),
+      log: () => {},
+    })
+
+    await expect(reader.tail('claude-code', cwd, SESSION, config)).resolves.toEqual({
+      uuid: 'a2',
+      outside: true,
+    })
   })
 })

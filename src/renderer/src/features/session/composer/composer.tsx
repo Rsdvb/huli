@@ -54,7 +54,8 @@ import { levelsOf, type SelectOption } from './levels'
 import { shownChoice } from './model-list'
 import { ModelMenu } from './model-menu'
 import { nextChoice, nextMode } from './modes'
-import { HeldStrip } from './held-strip'
+import { HeldStrip, OutsideConfirm } from './held-strip'
+import { outsideConfirmed } from './outside-confirmed'
 import { OutOfCreditStrip } from './out-of-credit-strip'
 import { useAddMenu } from './add-menu'
 import { PromptBox } from './prompt-box'
@@ -188,6 +189,8 @@ export function Composer({
   const awaiting = status === 'awaiting_permission'
   // A terminal that has the session open writes to it, so nothing is sent until it lets go.
   const heldOutside = session.heldOutside === true
+  // Huli: one that has it open but idle lets a message go after a confirmation.
+  const openOutside = session.openOutside ?? null
   // A closed session attaches to its agent as the message goes.
   const idle = (status === 'ready' || status === 'closed') && !heldOutside
   const folder = useSessionFolder(sessionId) ?? session.projectPath
@@ -345,8 +348,13 @@ export function Composer({
 
   // Both go through the host's queue, which sends at once when the session is free; a message
   // that hands the session to another agent goes as that agent's first turn.
+  const [outsideAsk, setOutsideAsk] = useState<{ canSend: boolean; canQueue: boolean } | null>(null)
   const send = (now = { canSend, canQueue }) => {
     if (askBeside()) return
+    if (openOutside && !heldOutside && now.canSend && !outsideConfirmed(sessionId)) {
+      setOutsideAsk(now)
+      return
+    }
     if (pending && now.canSend) handOver()
     else if (now.canSend || now.canQueue) queue(false, now.canSend)
   }
@@ -677,7 +685,9 @@ export function Composer({
                   )}
                 </AnimatePresence>
                 <AnimatePresence initial={false}>
-                  {heldOutside && <HeldStrip key="held" />}
+                  {(heldOutside || openOutside) && (
+                    <HeldStrip key="held" by={openOutside ?? 'terminal'} busy={heldOutside} />
+                  )}
                 </AnimatePresence>
                 <AnimatePresence initial={false}>
                   {suggestion && !outOfCredit && (
@@ -820,6 +830,15 @@ export function Composer({
         onAnswer={(go) => {
           setSwitchWork(null)
           if (go) switchNow()
+        }}
+      />
+      <OutsideConfirm
+        sessionId={sessionId}
+        by={outsideAsk ? openOutside : null}
+        onAnswer={(go) => {
+          const now = outsideAsk
+          setOutsideAsk(null)
+          if (go && now) send(now)
         }}
       />
     </div>

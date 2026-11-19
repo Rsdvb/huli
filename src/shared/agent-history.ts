@@ -15,6 +15,12 @@ export interface AgentHistorySession {
   imported: boolean
   /** Its folder is gone, so it cannot be imported. */
   missing: boolean
+  /**
+   * For an imported Claude Code session, what another folder's copy of its transcript holds:
+   * `newer`, the conversation carried on past this one, which importing it again brings in;
+   * `fork`, a conversation that went another way, which imports as a copy of its own.
+   */
+  outside?: 'newer' | 'fork'
 }
 
 export interface AgentHistoryPage {

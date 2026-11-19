@@ -71,7 +71,16 @@
     "stopConfirm": "Stop and switch"
   },
   "heldOutside": {
-    "strip": "This session is open in a terminal. Exit it there with /exit, and its conversation shows up here."
+    "strip": "This session is open in a terminal. Exit it there with /exit, and its conversation shows up here.",
+    "desktop": "This session is open in the Claude desktop app. What it adds there shows up here.",
+    "desktopBusy": "This session is replying in the Claude desktop app. Once it is done, the reply shows up here.",
+    "other": "This session is open in another Claude Code. What it adds there shows up here.",
+    "otherBusy": "This session is at work in another Claude Code. Once it is done, its conversation shows up here.",
+    "confirmTitle": "Carry on here?",
+    "confirmDesktop": "This session is still open in the Claude desktop app. Once you carry on here, don't send messages there at the same time.",
+    "confirmTerminal": "This session is still open in a terminal. Once you carry on here, don't send messages there at the same time.",
+    "confirmOther": "This session is still open in another Claude Code. Once you carry on here, don't send messages there at the same time.",
+    "confirm": "Carry on here"
   },
   "outOfCredit": {
     "modelTitle": "{{model}} is out of credit",
