@@ -135,10 +135,40 @@ jobs:
       - run: node tools/install/cua-driver.mjs
       - name: Fetch mihomo
         run: node tools/install/mihomo.mjs
+      # With the Developer ID certificate kept on the Mac, the app is signed and notarized and
+      # installs its updates itself, from the zip Squirrel.Mac takes; without it, it stays an
+      # unsigned build whose updates link to the disk image.
+      - name: Signing
+        run: |
+          keys="$HOME/.huli-keys"
+          if [ -f "$keys/mac-developer-id.p12" ] && [ -f "$keys/mac-developer-id.pass" ]; then
+            pass="$(cat "$keys/mac-developer-id.pass")"
+            echo "::add-mask::$pass"
+            {
+              echo "MAIN_VITE_UPDATE_MODE=install"
+              echo "HULI_MAC_CONFIG=electron-builder.mac-signed.yml"
+              echo "CSC_LINK=$keys/mac-developer-id.p12"
+              echo "CSC_KEY_PASSWORD=$pass"
+              echo "APPLE_API_KEY=$keys/AuthKey_Y945SS5C89.p8"
+              echo "APPLE_API_KEY_ID=Y945SS5C89"
+              echo "APPLE_API_ISSUER=87f439b2-db97-4066-b695-34ff182c5842"
+            } >> "$GITHUB_ENV"
+            echo 'Signing with the Developer ID'
+          else
+            echo "HULI_MAC_CONFIG=electron-builder.yml" >> "$GITHUB_ENV"
+            echo 'No Developer ID here: an unsigned build'
+          fi
       - run: pnpm build
       - run: node tools/install/device-helpers.mjs
+      # The Mac's network drops connections now and then; a failed package is tried twice more.
       - name: Package
-        run: pnpm exec electron-builder --mac --arm64 --publish never
+        run: |
+          for attempt in 1 2 3; do
+            pnpm exec electron-builder --mac --arm64 --publish never --config "$HULI_MAC_CONFIG" && exit 0
+            echo "Packaging failed (attempt $attempt)"
+            sleep 20
+          done
+          exit 1
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v7
@@ -146,6 +176,8 @@ jobs:
           name: huli-macos
           path: |
             dist/*.dmg
+            dist/*-mac.zip
+            dist/*-mac.zip.blockmap
             dist/latest*.yml
           if-no-files-found: error
 
@@ -291,7 +323,7 @@ jobs:
         run: |
           mkdir release
           find artifacts -type f \( -name '*-setup.exe' -o -name '*-setup.exe.blockmap' \
-            -o -name '*.AppImage' -o -name '*.dmg' -o -name 'latest*.yml' \
+            -o -name '*.AppImage' -o -name '*.dmg' -o -name '*-mac.zip' -o -name '*-mac.zip.blockmap'             -o -name 'latest*.yml' \
             -o -name 'huli-cloud.mjs' -o -name 'install.sh' -o -name '*.apk' \) -exec cp {} release/ \;
           node tools/workflow/sign-update-files.mjs release/latest*.yml
           (cd release && sha256sum * > SHA256SUMS.txt)
@@ -314,7 +346,7 @@ jobs:
           ssh="ssh -i $HOME/.ssh/huli_upload -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
           host=huli-upload@132.145.200.0
           mkdir channel
-          cp release/*-setup.exe* release/*.AppImage release/*.dmg release/latest*.yml* channel/ 2>/dev/null || true
+          cp release/*-setup.exe* release/*.AppImage release/*.dmg release/*-mac.zip* release/latest*.yml* channel/ 2>/dev/null || true
           rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" channel/ "$host:download/v$VERSION/"
           rsync -rt --mkpath --chmod=D755,F644 -e "$ssh" release/latest*.yml "$host:latest/download/"
           # The phone's download link stays the same from version to version.
