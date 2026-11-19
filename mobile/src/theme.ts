@@ -1,5 +1,5 @@
 import { useColorScheme } from 'react-native'
-import { usePrefs } from './prefs'
+import { usePref } from './prefs'
 
 export interface Theme {
   bg: string
@@ -42,6 +42,6 @@ const dark: Theme = {
 
 export function useTheme(): Theme {
   const system = useColorScheme()
-  const { theme } = usePrefs()
+  const theme = usePref('theme')
   return (theme === 'system' ? system : theme) === 'dark' ? dark : light
 }

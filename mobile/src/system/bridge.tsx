@@ -11,7 +11,7 @@ import { usePathname } from 'expo-router'
 import { HuliSystem } from '../../modules/huli-system'
 import { useHost } from '../host'
 import { openLink, parseLink } from '../links'
-import { prefsLoaded, usePrefs } from '../prefs'
+import { prefsLoaded, usePref } from '../prefs'
 import { folder, sessionTitle } from '../sessions'
 import { syncSpotlight } from './spotlight'
 
@@ -33,10 +33,10 @@ function sessionIn(pathname: string): string | null {
 
 export function SystemBridge() {
   const { phase, host, computers, sessions, agents, projects, loaded } = useHost()
-  const prefs = usePrefs()
+  const hidePreviews = usePref('hidePreviews')
   const pathname = usePathname()
   const ready = prefsLoaded()
-  const hidden = prefs.hidePreviews
+  const hidden = hidePreviews
   const hostId = host?.id ?? null
   const computerIds = computers.map((c) => c.id).join('\n')
 

@@ -18,7 +18,7 @@ import {
   useSessions,
   type HostData,
 } from '../host'
-import { usePrefs } from '../prefs'
+import { usePref } from '../prefs'
 import { syncPush } from '../push/sync'
 import { needsYou } from '../sessions'
 import {
@@ -44,13 +44,14 @@ export function LiveBridge() {
   const host = useActiveHost()
   const loaded = useListsLoaded()
   const { refresh } = useHostActions()
-  const prefs = usePrefs()
+  const hidePreviews = usePref('hidePreviews')
+  const liveActivities = usePref('liveActivities')
   const [foreground, setForeground] = useState(AppState.currentState === 'active')
   const [changes, setChanges] = useState(0)
   /** When the session list was last read in this stay in front; null while it may be old. */
   const freshAt = useRef<number | null>(null)
   const connected = useConnected()
-  const enabled = LIVE_SUPPORTED && prefs.liveActivities && liveSnapshot().enabled
+  const enabled = LIVE_SUPPORTED && liveActivities && liveSnapshot().enabled
   const hostName = host?.name ?? null
 
   useEffect(() => {
@@ -106,16 +107,16 @@ export function LiveBridge() {
           hostId: host?.id,
           sessions,
           agents,
-          hidden: prefs.hidePreviews,
+          hidden: hidePreviews,
         }),
       1000,
     )
     return () => clearTimeout(timer)
-  }, [phase, loaded, hostName, host?.id, sessions, agents, prefs.hidePreviews])
+  }, [phase, loaded, hostName, host?.id, sessions, agents, hidePreviews])
 
   useEffect(() => {
     if (!LIVE_SUPPORTED) return
-    const base = { sessions, agents, hostName, link, foreground, hidden: prefs.hidePreviews }
+    const base = { sessions, agents, hostName, link, foreground, hidden: hidePreviews }
     if (phase === 'pair' || !enabled) {
       syncLocal({ ...base, enabled: false })
       return
@@ -136,7 +137,7 @@ export function LiveBridge() {
     agents,
     hostName,
     link,
-    prefs.hidePreviews,
+    hidePreviews,
     changes,
   ])
 
