@@ -894,8 +894,9 @@
 }
 
 /* The running turn's dots (features/session/turn-dots.tsx): each runs one of these on its own
-   delay into the phase's loop, so phases differ only in which dot lights when. */
-[data-turn-dots] circle {
+   delay into the phase's loop, so phases differ only in which dot lights when. Huli: the jump
+   button's dots run them as CSS; TurnDots runs the same keyframes from turn-dot-patterns.ts. */
+[data-turn-dots] > svg {
   opacity: 0.22;
 }
 @keyframes turn-dot-trail {
@@ -996,10 +997,6 @@
   [data-sd-animate-marker]::marker {
     animation: none !important;
   }
-  /* Held, not removed: each dot keeps the frame its delay starts it on. */
-  [data-turn-dots] circle {
-    animation-play-state: paused !important;
-  }
   /* The jump button's dots hold their frame and change at once; it neither nudges nor shakes. */
   [data-jump-dots] circle {
     animation-play-state: paused !important;
@@ -1036,9 +1033,6 @@
   & [data-sd-animate-marker]::marker {
     animation: none !important;
   }
-  & [data-turn-dots] circle {
-    animation-play-state: paused !important;
-  }
   & [data-jump-dots] circle {
     animation-play-state: paused !important;
     transition-duration: 0s !important;
@@ -1049,6 +1043,19 @@
   }
   & [data-slot='collapsible-content'] {
     transition-duration: 0s !important;
+  }
+}
+
+/* Huli: while the window is hidden or another window has the focus (app/window-front.ts), the
+   running marks' loops hold their frame and pick up from it when the window comes back. */
+:root[data-window-away] {
+  & [data-jump-dots] circle,
+  & .ui-ansc__shimmer,
+  & .ui-ansc__shimmer > span,
+  & .ui-tcc__glint,
+  & .ui-tcc__glint > span,
+  & .ks-answer .markdown-chunk ::after {
+    animation-play-state: paused !important;
   }
 }
 

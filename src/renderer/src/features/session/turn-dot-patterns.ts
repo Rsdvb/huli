@@ -64,7 +64,10 @@ const PATTERNS = {
   },
 } satisfies Record<string, Pattern>
 
-export const BY_PHASE: Record<RunningPhase, keyof typeof PATTERNS> = {
+/** A loop the dots act out; phases share them. */
+export type TurnDotPattern = keyof typeof PATTERNS
+
+export const BY_PHASE: Record<RunningPhase, TurnDotPattern> = {
   thinking: 'think',
   execute: 'chase',
   read: 'read',
@@ -78,6 +81,82 @@ export const BY_PHASE: Record<RunningPhase, keyof typeof PATTERNS> = {
 
 /** The grid's cells by row, as [x, y]. */
 export const CELLS = [0, 1, 2].flatMap((y) => [0, 1, 2].map((x) => [x, y] as const))
+
+/**
+ * Huli: the keyframes of globals.css's turn-dot-* animations, which the jump button's dots run as
+ * CSS animations, for TurnDots to run through the Web Animations API; keep the two in step.
+ */
+const KEYFRAMES: Record<string, [offset: number, opacity: number][]> = {
+  'turn-dot-trail': [
+    [0, 1],
+    [0.4, 0.22],
+    [1, 0.22],
+  ],
+  'turn-dot-twinkle': [
+    [0, 0.22],
+    [0.15, 1],
+    [0.3, 0.22],
+    [1, 0.22],
+  ],
+  'turn-dot-swap': [
+    [0, 0.22],
+    [0.5, 1],
+    [1, 0.22],
+  ],
+  'turn-dot-sweep-edge': [
+    [0, 1],
+    [0.125, 0.74],
+    [0.25, 0.22],
+    [0.75, 0.22],
+    [0.875, 0.74],
+    [1, 1],
+  ],
+  'turn-dot-sweep-mid': [
+    [0, 0.22],
+    [0.125, 0.36],
+    [0.25, 1],
+    [0.375, 0.36],
+    [0.5, 0.22],
+    [0.625, 0.36],
+    [0.75, 1],
+    [0.875, 0.36],
+    [1, 0.22],
+  ],
+  'turn-dot-fill': [
+    [0, 1],
+    [0.55, 1],
+    [0.62, 0.22],
+    [1, 0.22],
+  ],
+}
+
+/** A dot's loop for Element.animate(). */
+export interface DotLoop {
+  keyframes: Keyframe[]
+  timing: KeyframeAnimationOptions
+}
+
+/**
+ * Each cell's loop for the phase, in CELLS order, or null for a still dot. As with CSS, the easing
+ * applies between each pair of keyframes, and a negative delay starts the dot partway into the
+ * loop, so every dot is in step at once.
+ */
+export function turnDotLoops(name: TurnDotPattern): (DotLoop | null)[] {
+  const pattern: Pattern = PATTERNS[name]
+  return CELLS.map(([x, y]) => {
+    const dot = pattern.dot(x, y)
+    if (!dot.name) return null
+    const frames = KEYFRAMES[dot.name] ?? []
+    return {
+      keyframes: frames.map(([offset, opacity]) => ({ offset, opacity, easing: pattern.easing })),
+      timing: {
+        duration: pattern.ms,
+        delay: Math.round((dot.at - 1) * pattern.ms),
+        iterations: Infinity,
+      },
+    }
+  })
+}
 
 /** Each cell's style for the phase, in CELLS order: its animation, or none for a still dot. */
 export function turnDotStyles(phase: RunningPhase): (CSSProperties | undefined)[] {
