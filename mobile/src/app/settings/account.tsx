@@ -46,6 +46,7 @@ export default function AccountSettings() {
   const { list, reload } = useAccountDevices()
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [registering, setRegistering] = useState(false)
 
   const run = async (key: string, work: () => Promise<unknown>, failed: string) => {
     setBusy(key)
@@ -60,9 +61,10 @@ export default function AccountSettings() {
     }
   }
 
-  const startSignIn = async () => {
+  const startSignIn = async (mode?: 'register') => {
     setError(null)
-    const result = await signIn()
+    setRegistering(mode === 'register')
+    const result = await signIn(mode)
     if (result === 'signed-in') haptic.success()
     else if (result !== 'cancelled') {
       haptic.warning()
@@ -71,6 +73,7 @@ export default function AccountSettings() {
   }
 
   if (cloud.state !== 'signed-in') {
+    const signingIn = cloud.state === 'signing-in'
     return (
       <ManagePage title="账号">
         <View style={[styles.hero, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -86,11 +89,20 @@ export default function AccountSettings() {
         </View>
         {error ? <GroupNote tone="error">{error}</GroupNote> : null}
         <Button
-          label={cloud.state === 'signing-in' ? '正在登录…' : '登录 Kite Cloud'}
+          label={signingIn && !registering ? '正在登录…' : '登录 Kite Cloud'}
           tone="primary"
           wide
-          busy={cloud.state === 'signing-in'}
+          busy={signingIn && !registering}
+          disabled={signingIn}
           onPress={() => void startSignIn()}
+        />
+        {/* Huli: the cloud's invite sign-up, which ends signed in like the button above. */}
+        <Button
+          label="用邀请码注册"
+          wide
+          busy={signingIn && registering}
+          disabled={signingIn}
+          onPress={() => void startSignIn('register')}
         />
         <Text style={[typeScale.footnote, styles.note, { color: c.textTertiary }]}>
           登录在系统的登录页里完成，纸鸢看不到你的密码。登录凭据只存在这台 iPhone

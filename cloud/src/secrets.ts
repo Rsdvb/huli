@@ -155,6 +155,27 @@ export function normalizeRecovery(code: string): string {
   return code.trim().toLowerCase()
 }
 
+const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+const INVITE_LENGTH = 16
+
+/**
+ * A new invite code: 16 characters of 31 (about 79 bits), in groups of four, without the letters
+ * and digits that read alike. Only its hash is kept.
+ */
+export function newInviteCode(): string {
+  let code = ''
+  for (let i = 0; i < INVITE_LENGTH; i++) code += INVITE_ALPHABET[randomInt(INVITE_ALPHABET.length)]
+  return code.match(/.{4}/g)!.join('-')
+}
+
+/** An invite code as typed, in the form its hash is taken of; null for one that cannot be one. */
+export function normalizeInvite(code: string): string | null {
+  const clean = code.toUpperCase().replace(/[\s-]/g, '')
+  if (clean.length !== INVITE_LENGTH) return null
+  for (const char of clean) if (!INVITE_ALPHABET.includes(char)) return null
+  return clean
+}
+
 /** RFC 7636 S256: base64url of the verifier's SHA-256. */
 export function pkceChallenge(verifier: string): string {
   return createHash('sha256').update(verifier).digest('base64url')

@@ -200,7 +200,7 @@ const api: KettuApi = {
   account: {
     status: () => invoke('account:status'),
     check: () => invoke('account:check'),
-    signIn: () => invoke('account:sign-in'),
+    signIn: (mode) => invoke('account:sign-in', mode ?? null),
     cancelSignIn: () => invoke('account:cancel-sign-in'),
     signOut: () => invoke('account:sign-out'),
     devices: () => invoke('account:devices'),

@@ -1,0 +1,68 @@
+# Huli: runs the phone app in an iOS simulator against a live computer, on GitHub's macOS runner
+# and only when started by hand: builds the simulator app from `ref`, starts this checkout's daemon
+# with the fake agent, pairs the app with it alone, runs the Maestro flows under
+# tools/huli/ios/sim/flows while recording the screen, and keeps the screenshots, recordings and
+# logs for a day. It uses no secrets. See tools/huli/ios/sim/run.sh.
+name: Huli simulator
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build
+        required: true
+        default: main
+      flows:
+        description: Flows to run, by name and space-separated; empty runs them all
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: huli-sim-${{ inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    name: Simulator
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - name: Choose the output folder
+        run: echo "OUT=$RUNNER_TEMP/sim" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Use the newest Xcode
+        run: bash tools/huli/newest-xcode.sh
+      - name: Install the phone app's packages
+        working-directory: mobile
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - name: Generate the iOS project
+        working-directory: mobile
+        run: CI=1 npx expo prebuild --platform ios --no-install --clean
+      - name: Build for the simulator
+        run: bash tools/huli/ios/sim/build.sh
+      - name: Build the daemon
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec vite build -c vite.daemon.config.mts
+      - name: Install Maestro
+        run: bash tools/huli/ios/install-maestro.sh
+      - name: Run the flows
+        run: bash tools/huli/ios/sim/run.sh
+        env:
+          FLOWS: ${{ inputs.flows }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: huli-sim
+          retention-days: 1
+          path: ${{ runner.temp }}/sim/results
+          if-no-files-found: warn

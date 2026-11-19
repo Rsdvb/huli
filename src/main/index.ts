@@ -94,6 +94,7 @@ import { effectiveDirect, hostSettings, reachesHost, terminalSettings } from './
 import { hasPendingFrame, isRevoked, watchSubframes } from './subframes'
 import { DeviceHost } from './device-host'
 import { TerminalHost } from './terminal-host'
+import { testInBackground } from './test-window'
 import { ThemeCatalog } from './theme-catalog'
 import { readThemeFolder, readThemeSources, ThemeStore } from './themes'
 import { KettuTray } from './tray'
@@ -307,7 +308,8 @@ async function start(): Promise<void> {
         }
       : {}),
   })
-  tray.start()
+  // Huli: an agent's test copy puts no icon beside the owner's (test-window.ts).
+  if (!testInBackground()) tray.start()
   if (trayPanel) registerTrayIpc(trayPanel)
 
   const mediaGrants = new MediaGrants()

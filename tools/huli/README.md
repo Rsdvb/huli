@@ -52,61 +52,6 @@ Code (kept small so upstream merges stay clean):
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                                                   |
 | `eslint.config.mjs`, `.prettierignore`                                                                                                   | lint and formatting reach the phone app in `mobile/` (see Workflows)                                                                                                                                                                                                                                                |
 
-### Import from Kettu
-
-Brings an official Kettu's sessions, memory and artifacts on the same computer over: Settings ›
-General › Import from Kettu. Nothing looks for Kettu's data until its dialog opens, since a look
-copies Kettu's whole thread database (some 300 MB); the dialog looks each time it opens.
-
-Huli's own files:
-
-- `src/agent-host/kettu-import.ts` (+ `.test.ts`): finds Kettu's data folder (`%APPDATA%\Kettu`,
-  `~/Library/Application Support/Kettu`, `$XDG_CONFIG_HOME` or `~/.config/Kettu`; `HULI_KETTU_DATA`
-  points elsewhere), copies `state/sessions.json` and `state/projects.json` into a temporary folder
-  (`huli-kettu-*`, removed after each look; one an hour old that a host stopped during a look left
-  behind goes with the next look) and reads the copies with the index's own parsers. It never writes
-  there, and reads nothing when that folder is Huli's own (a build named Kettu). Each chosen session
-  is imported through `importSession`, as the sidebar's Import sessions does, so Huli resumes the
-  agent's own session; one another program has open (Kettu itself) comes over as a fork. Subagent
-  sessions are not imported: the parent's history brings them back under it when it is opened.
-  Sessions in a Kettu worktree or Kettu's scratch folder, for an agent Huli lacks, or in a folder
-  that is gone are skipped. `state/kettu-import.json` remembers which Kettu session became which,
-  and which memory entries and artifacts came over. The scan counts memory and artifacts too, all
-  and not here yet; a run brings them after the sessions when asked (`memory`, `artifacts`), so
-  their sources and authors name the sessions those became.
-- `src/agent-host/kettu-import-memory.ts` (+ `.test.ts`): Kettu's `memory/global` into global
-  memory and each `memory/projects/<folder>` into the same project's, placed by the path in its
-  `project.json` (a project Huli lacks is added if its folder exists). Each file is copied into the
-  temporary folder and read from there, checked for size, UTF-8 and id; `undo/` is not brought.
-  `MemoryService.adopt` (in `memory/service.ts`) writes them with their ids, times and sources,
-  checked as a write is (limits, secrets): one whose title and body the layer holds is skipped,
-  one whose id is taken by other content gets a new id, and one the ledger has as it is now is not
-  brought again even if changed or forgotten here.
-- `src/agent-host/kettu-import-artifacts.ts` (+ `.test.ts`) and `threads/kettu-artifacts.ts`:
-  Kettu's artifact records live in its `state/threads.db`, which is copied with its WAL (again while
-  Kettu wrote during the copy, up to three times) and read in the thread worker (the `readKettu`
-  artifact call). Every record is checked (ids, paths, sizes, types, declarations) and every content
-  file must match its hash. Each artifact comes through the `create` and `write` calls as its
-  versions with their times, notes and authors, under its own id where free, else a new one;
-  one the ledger names that is still here, or whose latest version is here, is skipped. Kettu's
-  Recently deleted, its scratch folders and `published-artifacts.json` (sharing links of Kettu's
-  account) stay behind; thumbnails are drawn anew.
-- `src/shared/kettu-import.ts`: the scan's and the run's types.
-- `src/renderer/src/features/kettu-import/`: the store, the dialog and the Settings row
-  (`settings-row.tsx`).
-- `src/shared/locales/*/kettuImport.json`: its copy, which the rebrand leaves whole (`KEEP_FILES`).
-
-Hooks into upstream files, one or two lines each:
-
-- `src/agent-host/sessions.ts`: `importSession` takes an optional `kept` (title, times, pin,
-  archive) and the `KeptField` type.
-- `src/agent-host/memory/service.ts` (`adopt`), `src/agent-host/artifacts/model.ts` and
-  `threads/service.ts` (the `readKettu` call).
-- `src/shared/agent-host.ts` (`kettuImport.scan`, `kettuImport.run`, the `kettuImport.progress`
-  event), `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`, `src/agent-host/host.ts`.
-- `src/shared/i18next.d.ts` (the namespace), `src/renderer/src/app/bootstrap.ts` (the progress
-  event), `features/settings/section-defs.tsx` (the row).
-
 ### Import from agents
 
 Brings every past session of Claude Code, Codex or an ACP agent on this computer over, across all
@@ -150,9 +95,10 @@ Hooks into upstream files, one or two lines each:
 
 - `src/agent-host/connection.ts` (`ListedEverywhere`, the optional `listAllSessions`), its
   implementations in `codex/connection.ts` and `acp/connection.ts`.
-- `src/agent-host/sessions.ts` (`agentSessionIds`), `src/agent-host/host.ts` (the handler, and
-  `sessions.import` taking over a listed session's title and times through `keptFor`; the Codex
-  agents for memory).
+- `src/agent-host/sessions.ts` (`agentSessionIds`; `importSession` takes an optional `kept`, the
+  title, times, pin and archive, and the `KeptField` type), `src/agent-host/host.ts` (the handler,
+  and `sessions.import` taking over a listed session's title and times through `keptFor`; the
+  Codex agents for memory).
 - `src/agent-host/memory/service.ts` (`codexAgents`, Codex's sources in `importScan` and
   `import`), `src/shared/memory.ts` and `memory.import` (a source's `project` may be null: global
   memory), `features/settings/memory-rows.tsx` (a tick per source, its entries' titles, a source of
@@ -205,13 +151,13 @@ Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy
   (`ZH_NAME`), dropping the spaces that set a Latin word off from Chinese, and puts Kite's artwork
-  in place. Idempotent; the build workflow runs it, and so must a local build (see Build) or a
-  `pnpm dev` meant to look like Kite.
-  - Every locale but `star.json` (the prompts to star Kettu's repository) and `kettuImport.json`
-    (the import from an official Kettu) has its values rewritten:
-    the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the attribution and
-    Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder `.kettu/`; and
-    pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
+  in place. Idempotent; the build workflow runs it, and so must a local build (see Build).
+  `pnpm dev` needs none (see Kite in development). What it swaps in text, and how, is in
+  `brand-text.mjs`; the script reads and writes the files.
+  - Every locale but `star.json` (the prompts to star Kettu's repository) has its values
+    rewritten: the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the
+    attribution and Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder
+    `.kettu/`; and pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
   - `ZH_APP_NAME` lists the Chinese strings whose `{{name}}` is the app's own (the macOS app menu,
     the quit dialog, the tray's menu), which main fills with `app.name`, Kite: in Chinese they say
     纸鸢. `ADD` adds the keys rebranded code reads: About's title, 纸鸢 Kite in Chinese.
@@ -230,6 +176,40 @@ Generated before a build (not hand edits, never committed):
     `deploy-cloud.ps1` does: the hosted web client is public, so the path stays out of it.
 - `node tools/huli/update-path.mjs` fills in the update channel's path (see Update channel). The
   rebrand runs it; the phone builds run it alone, before bundling.
+
+### Kite in development
+
+`pnpm dev` runs the tree as committed, yet looks like Kite: `tools/huli/dev-brand.mjs`, a Vite
+plugin in `electron.vite.config.ts`'s main and renderer builds that applies only in development
+mode (`electron-vite dev`), makes the rebrand's swaps from the same tables in `brand-text.mjs` as
+each file loads. Locale files get `brandLocale`, the files `CODE` lists get their swaps (the HTML
+pages through `transformIndexHtml`), and an import of Kettu's artwork that Kite has its own of in
+`ARTWORK` resolves to Kite's. The window's icon (`build/icon.png`) and the tray's images
+(`resources/tray`), which an unpackaged run reads from the tree, point at Kite's in `ARTWORK`. The
+name in the taskbar and the tray's tooltip is `app.name`, the `productName` Kite; the data folder
+stays `Huli Dev` (or `KETTU_USER_DATA`). It never fills in the update channel's path, so a dev run
+has no updates, as before. A spelling upstream changed shows as a Vite warning,
+`… no longer holds …`, as the rebrand's does.
+
+### Testing without disturbing the owner
+
+Agents that run the app to check a change do so on the owner's own computer. Start such a copy with
+`KITE_TEST_WINDOW=background` beside its own data folder and debugging port, for instance in
+PowerShell:
+
+```powershell
+$env:KITE_TEST_WINDOW = 'background'; $env:KETTU_USER_DATA = "$env:TEMP\kite-test-1"; $env:REMOTE_DEBUGGING_PORT = '9333'; npx -y pnpm@10.11.1 dev
+```
+
+Its main window then shows without taking the focus, past the right edge of every display and out
+of the taskbar, and every later show (a second launch, the quit dialog) leaves the focus alone too.
+It has no tray icon and shows no notifications (Settings' test notification still does). The page
+still paints at the display's full rate, so CDP's `Page.captureScreenshot` and `capturePage` see
+it as on a screen; measured on Windows, a minimized or never-shown window instead paints only when
+captured and throttles its animation frames, so it is not used. An installed build ignores the
+variable. Stop the copy by ending its process tree (`taskkill /PID <electron-vite's node> /T /F`);
+it saves no window position. `src/main/test-window.ts` holds it; hooks in `src/main/window.ts`
+(the place and `keepInBackground`), `src/main/index.ts` (no tray) and `src/main/notifications.ts`.
 
 ### Kite's artwork
 
@@ -463,6 +443,28 @@ disables every other workflow after each merge, new ones included.
   `tools/huli/newest-xcode.sh` selects the newest Xcode on the runner first and prints its SDK,
   since App Store Connect only takes builds made with the newest major SDK (ITMS-90725: iOS 27
   from April 2027); if the image has none new enough, move to a newer `macos-*` image.
+- `huli-monitor.yml`, every half hour (at :07 and :37) and by hand: checks from outside that Kite
+  Cloud answers `/healthz` with `ok`, the relay's `/v1` gives its info, the web client's page and
+  its script load, and the update channel's `latest/download/latest.yml` (under the
+  `HULI_CHANNEL_URL` secret, never printed, nor named in the issue) answers with a `version:`.
+  Each request gives up after 30 s; a check that fails is tried twice more a minute apart, so a
+  blip raises nothing. One still failing opens an issue, `Kite 服务异常：<what>`, labelled
+  `monitor` and mentioning the owner; while it is open the monitor comments only when what fails
+  changes, and the first run that finds everything healthy closes it with a comment. Closing it by
+  hand while something still fails gets a new one on the next run. The run itself fails only when
+  the monitor could not report, which GitHub mails as a failed run. To try the issue without an
+  outage: `gh workflow run huli-monitor.yml -R Rsdvb/huli -f rehearse=true`, which reports a
+  made-up failure that the next run closes.
+
+The monitor's alerts are GitHub's notifications: the owner keeps this repository watched
+(Watching, or Custom with Issues) and email notifications on in GitHub's settings, or a new issue
+or comment reaches no inbox. The workflows that open issues (`huli-monitor.yml`, `huli-sync.yml`)
+set `GH_REPO`, so gh never takes the repository from a git remote: `huli-sync.yml` adds Kettu's as
+`upstream`, which gh prefers over `origin`, and its issues used to go to KettuAI/Kettu and fail.
+GitHub disables the scheduled workflows of a public repository after 60 days without activity in
+it; the nightly sync's merges normally keep it active, but should upstream go quiet and nothing be
+pushed for that long, the schedules stop until re-enabled under Actions or with
+`gh workflow enable <file> -R Rsdvb/huli` for each `huli-*` workflow that has one.
 
 Lint covers `mobile/` too, through the root ESLint config: the phone app gets the React hooks
 rules as the renderer does, may `require()` images as Metro needs, and drops props by leaving them
@@ -494,7 +496,9 @@ and once a run ends GitHub offers none of them for download:
   channel). The release job takes the channel's URL from the `HULI_CHANNEL_URL` secret, not a
   variable, so the log masks it.
 - iOS builds go to TestFlight for its internal testers only; there is no public link, and
-  `publish-testflight.mjs`, which put each build on it, is gone.
+  `publish-testflight.mjs`, which put each build on it, is gone. The same build, signed ad hoc,
+  goes to the update channel, where only the team's registered devices can install it (see Phone
+  updates).
 - Signing material comes from the `HULI_APPLE_KEYS` secret (above), Android's key from
   `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD`, and the update files' key from
   `UPDATE_SIGNING_KEY`; nothing prints them. The artifacts' key, `HULI_ARTIFACT_KEY`, is random
@@ -537,6 +541,58 @@ which `cloud/deploy/install.sh` reads), and only that file, the secret and
 `~/.huli-keys/update-path.txt` hold it. Installs from before the rotation still ask the old
 path; unless the server keeps answering there for a while, they need a new build installed once by
 hand. The filled-in files stay in the working tree like the rebrand's output; never commit them.
+
+## Phone updates
+
+The phone app hears of its own new builds from the channel (`mobile/src/update.ts`): at start and
+on each return to the foreground, at most every six hours, it reads its platform's `latest.json`,
+and when the build number there (the run number) is above its own it shows a banner on the session
+list and the newest version in Settings › About, which also checks by hand.
+
+- Android: `android/latest.json` (`version`, `versionCode`, `url`, `size`, `sha256`) names
+  `android/Huli.apk`. The browser downloads it, and Android installs it over the app only when
+  Huli's key signed it.
+- iOS: TestFlight cannot reach the owner's iPhone (external review answers 422, internal
+  invitations never arrive), so the `ios` job also exports its archive ad hoc.
+  `tools/huli/ios/export-adhoc.sh`, which `build-ios.sh` runs with `ADHOC=1` after the App Store
+  export and before the upload, has `signing.mjs` (`SIGNING=adhoc`) give every target (the app,
+  widgets, notification service and share extension) an `IOS_APP_ADHOC` profile named
+  `Huli Ad Hoc <bundle id>`, of the same Apple Distribution certificate and listing every enabled
+  iOS device of the team, then exports with method `release-testing` (Xcode's name for ad hoc).
+  A profile is kept from build to build while it is active, has that certificate, lists exactly
+  the enabled devices and ends a month or more away (or with the certificate); otherwise it is
+  deleted and made again. In this mode `signing.mjs` asks App Store Connect each thing once and
+  never again, and a build that keeps its profiles makes three calls (certificates, devices,
+  ad-hoc profiles). `check-ipa.sh` then checks that the app and every extension in the IPA carry
+  an ad-hoc profile (devices listed, no debugger), printing counts and dates but no UDID, since
+  the logs are public. The job seals `Huli-<version>.ipa` even when the TestFlight upload failed;
+  when the ad-hoc part fails a warning says so, and the release goes out without it while the
+  channel keeps its last iOS build. The release job, which waits for the iOS job whatever its
+  result, puts the IPA and its `manifest.plist` (itms-services: the IPA's URL, bundle id
+  `io.github.rsdvb.huli`, the version, title 纸鸢) into `download/v<version>/`, a copy of that
+  manifest into `ios/manifest.plist`, and last `ios/latest.json` (`version`, `build`, `manifest`).
+  `cloud/deploy/install.sh` serves `.plist` as `text/xml` and `.ipa` as bytes, as Apple asks.
+- `huli-build.yml` run by hand with `ios_dry_run`, on a branch too
+  (`gh workflow run huli-build.yml --ref <branch> -f ios_dry_run=true`), runs the iOS job alone:
+  it signs (making or replacing profiles as a build does), archives, exports both ways and fails
+  when `check-ipa.sh` does, but uploads nothing to TestFlight, keeps no artifact and publishes no
+  release.
+- On the iPhone only a build that carries a device profile checks: expo-application's
+  `getIosApplicationReleaseTypeAsync()` reads its `embedded.mobileprovision` and says ad hoc or
+  development, while TestFlight's and the App Store's carry none and leave updates to them. The
+  update opens `itms-services://?action=download-manifest&url=<manifest>`; iOS asks, then installs
+  the build over the app and keeps its data.
+- Only the devices a profile lists can install the build. To add an iPhone, register its UDID with
+  the team (developer.apple.com › Devices, or `install-dev.sh`, which registers the phone it
+  installs on); the next build finds the device list changed and makes new profiles, and from that
+  build on the iPhone can install it.
+- The first install, or one over a development build (whose build number, a date, stays above
+  every run number, so it never hears of one): in Safari on the iPhone, open
+  `itms-services://?action=download-manifest&url=<channel>/ios/manifest.plist`, with the channel's
+  URL from `HULI_CHANNEL_URL`.
+- An ad-hoc build stops opening once its profile expires: a year after the profile was made, or
+  when the distribution certificate expires if that is sooner. Installing a newer build renews it;
+  after a new certificate every phone needs a build signed with it.
 
 ## Build
 

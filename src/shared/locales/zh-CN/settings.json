@@ -375,6 +375,7 @@
     "description": "未登录。登录会打开浏览器。",
     "keywords": "账号 登录 退出登录 注销 kettu 云服务 个人资料 邮箱",
     "signIn": "登录",
+    "register": "注册账号",
     "signOut": "退出登录",
     "cancel": "取消",
     "manage": "管理账号",

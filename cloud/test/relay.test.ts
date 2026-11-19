@@ -31,6 +31,8 @@ import { RelayHost } from '@shared/remote/relay-host'
 import { REGION_KEYS, verifyRegionList } from '@shared/remote/relay-regions'
 import { pkceChallenge, randomToken } from '../src/secrets'
 import { makeServer, regionIdOf, type ServerParts } from '../src/server'
+import type { Account } from '../src/store'
+import { makeOwner } from './accounts'
 
 const INFO: ClientInfo = {
   kind: 'desktop',
@@ -48,6 +50,7 @@ const SIGNED = readFileSync(
 let parts: ServerParts
 let base: string
 let dir: string
+let owner: Account
 const lines: string[] = []
 
 async function freePort(): Promise<number> {
@@ -67,15 +70,7 @@ beforeAll(async () => {
     null,
     { log: (line) => lines.push(line), relayLimits: { tokenCheckMs: 200 } },
   )
-  parts.store.setAccount({
-    id: 'acct-1',
-    email: 'me@example.com',
-    name: 'Me',
-    password: 'unused',
-    totp: 'unused',
-    totpLastStep: -1,
-    recovery: [],
-  })
+  owner = makeOwner(parts.store)
   await new Promise<void>((resolve) => parts.server.listen(port, '127.0.0.1', resolve))
 })
 
@@ -87,7 +82,7 @@ afterAll(() => {
 
 /** A signed-in client's access token, and the family behind it. */
 function signedIn(): string {
-  return parts.store.issue('kettu-desktop', INFO).access_token
+  return parts.store.issue(owner.id, 'kettu-desktop', INFO)!.access_token
 }
 
 function openSocket(url: string): WebSocket {
@@ -339,6 +334,7 @@ describe('sockets not signed in', () => {
   let small: ServerParts
   let origin: string
   let smallDir: string
+  let smallOwner: Account
 
   beforeAll(async () => {
     smallDir = mkdtempSync(path.join(tmpdir(), 'huli-relay-small-'))
@@ -348,7 +344,7 @@ describe('sockets not signed in', () => {
       log: () => {},
       relayLimits: { maxUnsignedSockets: 3, maxUnsignedSocketsPerAddress: 2 },
     })
-    small.store.setAccount(parts.store.account!)
+    smallOwner = makeOwner(small.store)
     await new Promise<void>((resolve) => small.server.listen(port, '127.0.0.1', resolve))
   })
 
@@ -374,7 +370,7 @@ describe('sockets not signed in', () => {
       changed: () => {},
       log: () => {},
     })
-    signedHost.setToken(small.store.issue('kettu-desktop', INFO).access_token)
+    signedHost.setToken(small.store.issue(smallOwner.id, 'kettu-desktop', INFO)!.access_token)
     signedHost.start()
     await expect.poll(() => signedHost.status[0]?.connection.state).toBe('connected')
     const opened: InstanceType<typeof Ws>[] = []

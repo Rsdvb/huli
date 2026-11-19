@@ -32,7 +32,6 @@ import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
-import { UPDATES_SUPPORTED } from '../../update'
 
 const THEME_TEXT: Record<ThemePref, string> = { system: '跟随系统', light: '浅色', dark: '深色' }
 
@@ -413,7 +412,7 @@ export default function Settings() {
             plainIcon
             value={build ? `${version} (${build})` : version}
           />
-          {UPDATES_SUPPORTED ? updateRows : null}
+          {updateRows}
           <ListRow
             title="GitHub"
             icon="code"

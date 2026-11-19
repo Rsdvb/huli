@@ -31,7 +31,6 @@ import type { ContextBreakdown, ContextEstimates } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
-import type { KettuImportResult, KettuImportScan } from './kettu-import'
 import type { AgentHistoryPage } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type {
@@ -1763,14 +1762,6 @@ export interface HostContract {
     params: { sessionId: string; entryId: string }
     result: void
   }
-  // Huli: an official Kettu's sessions, memory and artifacts on this computer, read from copies.
-  'kettuImport.scan': { params: void; result: KettuImportScan }
-  // Imports the sessions by Kettu's ids, and its memory and artifacts when asked, telling every
-  // port `kettuImport.progress` as it goes.
-  'kettuImport.run': {
-    params: { sessionIds: string[]; memory?: boolean; artifacts?: boolean }
-    result: KettuImportResult
-  }
   // Huli: an agent's past sessions of every folder it ran in, for the import from the agents, which
   // imports the chosen ones with `sessions.import`. A window's alone: it names every folder.
   'agentHistory.list': {
@@ -2123,8 +2114,6 @@ export const HOST_METHODS = [
   'computer.handBack',
   'computer.show',
   'computer.declineSetup',
-  'kettuImport.scan',
-  'kettuImport.run',
   'agentHistory.list',
   'agentNetwork.status',
   'agentNetwork.addSubscription',
@@ -2231,8 +2220,6 @@ export type HostEvent =
   | { type: 'browser.turnEnded'; sessionId: string }
   // To that port: Done or Skip on the card of the step the agent asked for on the page.
   | { type: 'browser.askAnswered'; sessionId: string; outcome: ControlOutcome }
-  // Huli: a `kettuImport.run` came to its `done`th session of `total`, whose title is `title`.
-  | { type: 'kettuImport.progress'; done: number; total: number; title: string | null }
   // Huli: the session folders changed; every one, in the user's order.
   | { type: 'folders.changed'; folders: SessionFolder[] }
   // Huli: the agents' network changed; to this computer's windows only.

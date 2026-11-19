@@ -99,8 +99,9 @@ export function useCloudStatus(): CloudStatus {
   return useSyncExternalStore(subscribe, () => status)
 }
 
-export function signIn(): Promise<SignInResult> {
-  return session.signIn()
+/** Huli: `register` signs up with an invite code first, then signs in the same way. */
+export function signIn(mode?: 'register'): Promise<SignInResult> {
+  return session.signIn(mode)
 }
 
 export function signOut(): Promise<void> {

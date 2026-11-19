@@ -56,6 +56,18 @@ xcodebuild -exportArchive -archivePath "$OUT/Huli.xcarchive" -exportOptionsPlist
   || { grep -iE "error" "$OUT/export.log" | sort -u | head -30; tail -15 "$OUT/export.log"; exit 1; }
 ls -l "$OUT/export"
 
+# The same archive for the registered devices too, which install it from the update channel. It is
+# optional: without it the App Store build still uploads, and the channel keeps its last iOS build.
+if [ "${ADHOC:-0}" = 1 ]; then
+  echo "== ad-hoc export"
+  ARCHIVE="$OUT/Huli.xcarchive" OUT="$OUT/adhoc" bash "$HULI_TOOLS/export-adhoc.sh" $BUNDLES \
+    || echo "::warning::The ad-hoc export failed; the update channel keeps its last iOS build"
+fi
+
+if [ "${UPLOAD:-1}" = 0 ]; then
+  echo "== no upload (UPLOAD=0)"
+  exit 0
+fi
 echo "== upload"
 mkdir -p ~/.appstoreconnect/private_keys
 ln -sf "$HOME/.huli-keys/AuthKey_$KEY_ID.p8" ~/.appstoreconnect/private_keys/

@@ -49,6 +49,7 @@ let base: string
 let api: AccountApi
 let dir: string
 let secret: string
+let ownerId: string
 const lines: string[] = []
 const sent: ApnsMessage[] = []
 let apnsAnswer: ApnsResult = { ok: true }
@@ -69,15 +70,17 @@ beforeAll(async () => {
     { now, log: (line) => lines.push(line) },
   )
   secret = newTotpSecret()
-  parts.store.setAccount({
-    id: 'acct-1',
+  ownerId = parts.store.setOwner({
+    username: 'owner',
     email: 'me@example.com',
     name: 'Me',
-    password: await hashPassword(PASSWORD),
-    totp: secret,
-    totpLastStep: -1,
-    recovery: [sha256Hex('aaaaa-bbbbb')],
-  })
+    credentials: {
+      password: await hashPassword(PASSWORD),
+      totp: secret,
+      totpLastStep: -1,
+      recovery: [sha256Hex('aaaaa-bbbbb')],
+    },
+  }).id
   await new Promise<void>((resolve) => parts.server.listen(0, '127.0.0.1', resolve))
   base = `http://127.0.0.1:${(parts.server.address() as AddressInfo).port}`
   api = new AccountApi(base, fetch, now)
@@ -172,7 +175,7 @@ describe('browser sign-in', () => {
     const { access } = await signIn()
     const me = await api.me(access)
     expect(me.account).toEqual({
-      id: 'acct-1',
+      id: ownerId,
       email: 'me@example.com',
       name: 'Me',
       avatarUrl: null,
@@ -353,7 +356,7 @@ describe('device codes', () => {
     expect(family.info?.os).toBe('linux')
     const logged = lines.flatMap((line) => line.split(/[\r\n]/)).flatMap((l) => l.split(separator))
     expect(logged.filter((line) => line.includes('192.0.2.66'))).toEqual([
-      'huli-cloud: approved 纸鸢命令行 · PC huli-cloud: login failed from 192.0.2.66  x（linux x64 · 0.1.0）',
+      'huli-cloud: approved 纸鸢命令行 · PC huli-cloud: login failed from 192.0.2.66  x（linux x64 · 0.1.0） as owner',
     ])
   })
 })
@@ -398,7 +401,13 @@ describe('limits by address, behind the proxy', () => {
       now,
       log: (line) => proxiedLines.push(line),
     })
-    proxied.store.setAccount({ ...parts.store.account!, totpLastStep: -1 })
+    const owner = parts.store.owner()!
+    proxied.store.setOwner({
+      username: owner.username,
+      email: owner.email,
+      name: owner.name,
+      credentials: { password: owner.password!, totp: owner.totp!, totpLastStep: -1, recovery: [] },
+    })
     await new Promise<void>((resolve) => proxied.server.listen(0, '127.0.0.1', resolve))
     origin = `http://127.0.0.1:${(proxied.server.address() as AddressInfo).port}`
   })
@@ -560,7 +569,7 @@ describe('push gateway', () => {
       return push(access, body())
     }
     for (const client of ['huli-mobile', 'kettu-web']) {
-      const phone = parts.store.issue(client, null).access_token
+      const phone = parts.store.issue(ownerId, client, null)!.access_token
       expect((await pushNew(phone, alert)).status).toBe(401)
     }
     const { access } = await signIn()

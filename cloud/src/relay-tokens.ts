@@ -1,7 +1,8 @@
 // The tokens the relay takes: a signed-in client's access token, or a relay token made from one on
 // POST /api/v1/relay/token. A relay token can do nothing but reach the relay, lapses within the
 // hour, and is signed with a key of the service's own (HMAC-SHA256), so it outlives a restart and
-// needs nothing stored; it is taken only while the client it was made for is still signed in.
+// needs nothing stored; it is taken only while the client it was made for is still signed in and
+// its account active, and grants that account alone.
 
 import { createHmac, randomBytes } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -56,12 +57,11 @@ export class RelayTokens {
 
   /** What a relay token or an access token grants, or null for one the relay must refuse. */
   check(token: string): RelayGrant | null {
-    const account = this.store.account?.id
-    if (!account || token.length > 4096) return null
+    if (token.length > 4096) return null
     if (!token.startsWith(PREFIX)) {
       const entry = this.store.accessEntry(token)
-      if (!entry || entry.family.account !== account) return null
-      const { id, clientId } = entry.family
+      if (!entry) return null
+      const { id, clientId, account } = entry.family
       return { account, family: id, client: clientId, expiresAt: entry.expiresAt }
     }
     const [body, mac, extra] = token.slice(PREFIX.length).split('.')
@@ -70,10 +70,11 @@ export class RelayTokens {
     const expiresAt = Number(expires)
     if (!family || !FAMILY.test(family) || !Number.isSafeInteger(expiresAt)) return null
     if (expiresAt <= this.now()) return null
-    // The family is looked up again, so a relay token outlives neither its sign-in nor its account.
+    // The family is looked up again, so a relay token outlives neither its sign-in nor its
+    // account's being active, and stands for that family's account alone.
     const owner = this.store.family(family)
-    if (!owner || owner.account !== account) return null
-    return { account, family, client: owner.clientId, expiresAt }
+    if (!owner) return null
+    return { account: owner.account, family, client: owner.clientId, expiresAt }
   }
 
   /** Whether a grant taken before still holds: its client signed in, its token not long lapsed. */
@@ -82,14 +83,11 @@ export class RelayTokens {
   }
 
   /**
-   * Whether the client of a grant taken before is still signed in to the account, however old the
-   * token: a joined device has no way to send a newer one.
+   * Whether the client of a grant taken before is still signed in to its account, and the account
+   * still active, however old the token: a joined device has no way to send a newer one.
    */
   signedIn(grant: RelayGrant): boolean {
-    return (
-      this.store.account?.id === grant.account &&
-      this.store.family(grant.family)?.account === grant.account
-    )
+    return this.store.family(grant.family)?.account === grant.account
   }
 
   private mac(body: string): string {

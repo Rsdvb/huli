@@ -174,15 +174,21 @@ if [ -s /etc/huli-updates.path ]; then
   cat >/etc/cron.d/huli-updates-prune <<'EOF'
 17 4 * * * root ls -1dt /var/www/huli-updates/download/v* 2>/dev/null | tail -n +6 | xargs -r rm -rf
 EOF
-  # A phone's browser needs the APK's own type to offer installing it.
+  # A phone's browser needs the APK's own type to offer installing it, and an iPhone's installer
+  # takes the itms-services manifest as XML (Apple names text/xml) and the IPA as bytes. Nothing
+  # here is a page: the sandbox keeps a document a stolen upload key put here from running script
+  # on the service's origin.
   updates_location="
     location ^~ /u/$segment/ {
         alias /var/www/huli-updates/;
         types {
             application/vnd.android.package-archive apk;
             application/json json;
+            application/octet-stream ipa;
+            text/xml plist;
         }
         add_header Cache-Control no-cache;
+        add_header Content-Security-Policy sandbox;
     }"
 fi
 
@@ -342,10 +348,14 @@ fi
 rm -rf "$nginx_before"
 systemctl reload nginx
 
-# 9. fail2ban: five failed sign-ins in 15 minutes ban the address for an hour.
+# 9. fail2ban: ten failed sign-ins or invite codes in 15 minutes ban the address for an hour. The
+# service itself already stops an address after five failures for one account, and after ten in
+# all; ten here keeps one account's failures from banning another account's user on the same
+# address (a shared NAT).
 cat >/etc/fail2ban/filter.d/huli-cloud.conf <<'EOF'
 [Definition]
 failregex = huli-cloud: login failed from <HOST>$
+            huli-cloud: signup failed from <HOST>$
 journalmatch = _SYSTEMD_UNIT=huli-cloud.service
 EOF
 cat >/etc/fail2ban/jail.d/huli-cloud.conf <<'EOF'
@@ -354,7 +364,7 @@ enabled = true
 backend = systemd
 port = http,https
 filter = huli-cloud
-maxretry = 5
+maxretry = 10
 findtime = 15m
 bantime = 1h
 EOF

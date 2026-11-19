@@ -376,6 +376,7 @@
     "description": "Not signed in. Signing in opens your browser.",
     "keywords": "account sign in log in login sign out log out kettu cloud profile email",
     "signIn": "Sign in",
+    "register": "Register",
     "signOut": "Sign out",
     "cancel": "Cancel",
     "manage": "Manage account",

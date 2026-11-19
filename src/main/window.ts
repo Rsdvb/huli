@@ -9,6 +9,7 @@ import { JsonFileWriter, readJsonFile } from './json-file'
 import { createLogger } from './log'
 import type { StartMode } from './login-item'
 import { loadRenderer, rendererPage } from './renderer'
+import { backgroundPlace, keepInBackground, testInBackground } from './test-window'
 import { windowColors, type WindowColors } from './themes'
 import { parseWindowState, placeWindow, type SavedWindowState } from './window-bounds'
 import { titleBarHeight, trafficLightPosition } from './window-controls'
@@ -222,9 +223,12 @@ export function createMainWindow(start: StartMode = 'window'): BrowserWindow {
   const placement = options.state.placement()
   // On macOS the Dock carries the icon, set once in index.ts.
   const icon = isMac ? null : devIcon()
+  // Huli: an agent's test copy keeps its window off the displays (test-window.ts).
+  const background = testInBackground()
 
   const window = new BrowserWindow({
     ...placement.bounds,
+    ...(background ? backgroundPlace() : {}),
     minWidth: MIN_SIZE.width,
     minHeight: MIN_SIZE.height,
     show: false,
@@ -251,7 +255,8 @@ export function createMainWindow(start: StartMode = 'window'): BrowserWindow {
     },
   })
 
-  options.state.track(window)
+  if (background) keepInBackground(window)
+  else options.state.track(window)
   // Set on every load: webPreferences.zoomFactor would come back on a reload after the user
   // chose 100%. Set here, it applies before the page's first script runs.
   window.webContents.on('did-navigate', () => window.webContents.setZoomFactor(zoom))
