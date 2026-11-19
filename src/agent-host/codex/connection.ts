@@ -11,6 +11,7 @@ import type {
   ResetCreditOutcome,
   ResetCredits,
 } from '@shared/agent-host'
+import type { ContextEstimates } from '@shared/context'
 import type { Platform } from '@shared/platform'
 import type { ConfigOption, PermissionOption, SideChatStep, TokenTotals } from '@shared/thread'
 import {
@@ -83,6 +84,7 @@ import {
   STANDARD_TIER,
   tierFor,
 } from './config'
+import { estimateMcpServers, estimateSkills } from './context'
 import { childThreads, childTurnEffect, ThreadMapper } from './mapper'
 import {
   errorDetail,
@@ -156,6 +158,8 @@ const GOAL_CONTINUATION = 'Continue working toward the active goal.'
 const IMPLEMENT_PLAN = 'Implement the plan.'
 const PLAN_OPTION = { implement: 'implement', keepPlanning: 'keep_planning' } as const
 const MCP_STARTUP_TIMEOUT_MS = 30_000
+// A thread opened after this long reads the models again, in the background.
+const MODELS_REREAD_MS = 60_000
 
 /** The kinds of thread `thread/list` names, as codex-acp listed them; subagents are left out. */
 const LISTED_SOURCES = ['cli', 'vscode', 'exec', 'appServer', 'unknown']
@@ -406,9 +410,6 @@ function threadRecord(
   }
 }
 
-/** How long a list of Codex's models is used before it is read again. */
-const MODELS_MS = 10 * 60_000
-
 const UNKNOWN_SETTINGS: Settings = {
   mode: DEFAULT_MODE,
   collaboration: 'default',
@@ -434,12 +435,10 @@ export class CodexConnection implements AgentConnection {
   /** Subagent threads, to the thread each runs under. */
   private readonly parents = new Map<string, string>()
   private extras: { balances: ProviderBalance[]; resetCredits: ResetCredits | null } | null = null
-  private models: Promise<Model[]> | null = null
-  /** When the models were last listed; an older list is read again behind the one in use. */
-  private modelsAt = 0
-  private modelsRefresh: Promise<void> | null = null
-  /** The models once listed, which each turn's service tier is read from. */
+  /** The models as last listed, which each turn's service tier is read from. */
   private knownModels: Model[] = []
+  private modelsReadAt: number | null = null
+  private modelsRead: Promise<Model[]> | null = null
   private initialized = false
   /** The skill folders last set on app-server, as JSON. */
   private skillRoots: string | null = null
@@ -651,46 +650,45 @@ export class CodexConnection implements AgentConnection {
 
   // Sessions.
 
-  /**
-   * Codex's models, listed once and read again in the background once the list is older than
-   * `MODELS_MS`: a plan can gain a model or a speed tier while app-server runs, and only a new
-   * read shows it.
-   */
+  /** The models Codex lists, as last read; the first call reads them. */
   private listModels(): Promise<Model[]> {
-    if (this.models && !this.modelsRefresh && Date.now() - this.modelsAt > MODELS_MS) {
-      this.modelsRefresh = this.readModels()
-        .then((models) => {
-          this.models = Promise.resolve(models)
-        })
-        .catch((error: unknown) => {
-          this.hooks.log('warn', `Could not list Codex's models again: ${(error as Error).message}`)
-        })
-        .finally(() => {
-          this.modelsRefresh = null
-        })
-    }
-    this.models ??= this.readModels().catch((error: unknown) => {
-      this.models = null
-      this.hooks.log('warn', `Could not list Codex's models: ${(error as Error).message}`)
-      return []
-    })
-    return this.models
+    return this.modelsReadAt === null ? this.readModels() : Promise.resolve(this.knownModels)
   }
 
-  private async readModels(): Promise<Model[]> {
-    this.modelsAt = Date.now()
-    const models: Model[] = []
-    let cursor: string | null = null
-    do {
-      const page: ModelListResponse = await this.call<ModelListResponse>('model/list', {
-        cursor,
-        limit: null,
+  /**
+   * Reads the models Codex lists. It takes seconds when Codex cannot reach its server, so only a
+   * read for the agent's options waits for it. A failed read keeps the last list.
+   */
+  private readModels(): Promise<Model[]> {
+    this.modelsRead ??= (async () => {
+      const models: Model[] = []
+      let cursor: string | null = null
+      do {
+        const page: ModelListResponse = await this.call<ModelListResponse>('model/list', {
+          cursor,
+          limit: null,
+        })
+        models.push(...page.data)
+        cursor = page.nextCursor
+      } while (cursor)
+      this.knownModels = models
+      this.modelsReadAt = Date.now()
+      return models
+    })()
+      .catch((error: unknown) => {
+        this.hooks.log('warn', `Could not list Codex's models: ${(error as Error).message}`)
+        return this.knownModels
       })
-      models.push(...page.data)
-      cursor = page.nextCursor
-    } while (cursor)
-    this.knownModels = models
-    return models
+      .finally(() => {
+        this.modelsRead = null
+      })
+    return this.modelsRead
+  }
+
+  /** Reads the models again in the background once the list held is old, for the next thread. */
+  private rereadModels(): void {
+    if (this.modelsReadAt === null || Date.now() - this.modelsReadAt < MODELS_REREAD_MS) return
+    void this.readModels()
   }
 
   private async record(
@@ -701,6 +699,7 @@ export class CodexConnection implements AgentConnection {
     base?: Settings,
   ): Promise<ThreadRecord> {
     const models = await this.listModels()
+    this.rereadModels()
     const modelId = base?.model ?? response.model
     const model = models.find((item) => item.id === modelId)
     const settings: Settings = base
@@ -735,6 +734,8 @@ export class CodexConnection implements AgentConnection {
 
   async newSession(cwd: string, options: SessionOptions = {}): Promise<OpenedSession> {
     await this.requireSignIn()
+    // A read of the agent's options has nobody waiting on it, so it lists what Codex offers now.
+    if (options.hidden === 'options') await this.readModels()
     const mode = modeOf(DEFAULT_MODE)!
     const hidden = options.hidden !== undefined
     await this.setSkillRoots(options.skillRoots)
@@ -1667,7 +1668,7 @@ export class CodexConnection implements AgentConnection {
     if (!record || record.hidden || record.cwd === null || this.parents.has(threadId)) return
     let skills: SkillMetadata[] = []
     try {
-      skills = await this.skills(record)
+      skills = await this.skills(record.cwd)
     } catch (error) {
       if (this.isClosed) return
       this.hooks.log('warn', `Could not list Codex's skills: ${(error as Error).message}`)
@@ -1680,12 +1681,23 @@ export class CodexConnection implements AgentConnection {
     target.apply({ patches: [{ op: 'session.update', changes: { commands } }], effects: [] })
   }
 
-  private async skills(record: ThreadRecord): Promise<SkillMetadata[]> {
+  private async skills(cwd: string | null): Promise<SkillMetadata[]> {
     const response = await this.call<SkillsListResponse>(
       'skills/list',
-      record.cwd === null ? {} : { cwds: [record.cwd] },
+      cwd === null ? {} : { cwds: [cwd] },
     )
     return response.data.flatMap((entry) => entry.skills)
+  }
+
+  async readContextEstimates(sessionId: string, cwd: string): Promise<ContextEstimates> {
+    const [skills, mcpServers] = await Promise.allSettled([
+      this.skills(cwd).then(estimateSkills),
+      this.mcpPages(sessionId).then(estimateMcpServers),
+    ])
+    return {
+      skills: skills.status === 'fulfilled' ? skills.value : null,
+      mcpServers: mcpServers.status === 'fulfilled' ? mcpServers.value : null,
+    }
   }
 
   private runCommand(record: ThreadRecord, { name, rest }: ParsedCommand): Promise<PromptResult> {
@@ -1723,7 +1735,7 @@ export class CodexConnection implements AgentConnection {
       case 'status':
         return this.answer(record, () => this.statusAnswer(record))
       case 'skills':
-        return this.answer(record, async () => skillsMessage(await this.skills(record)))
+        return this.answer(record, async () => skillsMessage(await this.skills(record.cwd)))
       case 'mcp':
         return this.answer(record, (signal) => this.mcpAnswer(record, rest, signal))
     }

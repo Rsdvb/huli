@@ -130,9 +130,7 @@ afterEach(async () => {
 async function setup(
   env: Record<string, string> = {},
   spec: Partial<LaunchSpec> = {},
-  claudeTestEntrypoint?: () => string | null,
-  claudeRun?: () => ClaudeRunSettings | null,
-  claudePromptSuggestions?: () => boolean,
+  extra: Partial<HostedContext> = {},
 ) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-sdk-'))
   dirs.push(dir)
@@ -161,15 +159,13 @@ async function setup(
       ...spec,
     },
     env: { PATH: '/usr/bin', HOME: '/home/ada', ...env },
-    ...(claudeTestEntrypoint ? { claudeTestEntrypoint } : {}),
-    ...(claudeRun ? { claudeRun } : {}),
-    ...(claudePromptSuggestions ? { claudePromptSuggestions } : {}),
     spawn: (options) => {
       spawned.push(options)
       const child = new FakeChild()
       children.push(child)
       return child as never
     },
+    ...extra,
   }
   const driver = claudeSdkDriver(async (file) => {
     loaded.push(file)
@@ -359,7 +355,7 @@ describe('the Claude Agent SDK driver', () => {
     const { connection, spawned } = await setup(
       { CLAUDE_CODE_ENTRYPOINT: 'sdk-ts' },
       {},
-      () => entrypoint,
+      { claudeTestEntrypoint: () => entrypoint },
     )
     await connection.newSession('/repo', {})
     entrypoint = 'kite_lab-42'
@@ -375,7 +371,7 @@ describe('the Claude Agent SDK driver', () => {
 
   it('passes the fallback model, and the budget to routine runs unless it holds for all', async () => {
     let run: ClaudeRunSettings | null = null
-    const { sdk, connection } = await setup({}, {}, undefined, () => run)
+    const { sdk, connection } = await setup({}, {}, { claudeRun: () => run })
     const limits = () => {
       const { fallbackModel, maxBudgetUsd } = sdk.last.options
       return { fallbackModel, maxBudgetUsd }
@@ -401,11 +397,44 @@ describe('the Claude Agent SDK driver', () => {
     const { sdk, connection } = await setup(
       { ANTHROPIC_MODEL: 'claude-sonnet-5-5-20260301' },
       {},
-      undefined,
-      () => ({ fallbackModel: 'claude-sonnet-5-5', budgetUsd: null, budgetAllSessions: false }),
+      {
+        claudeRun: () => ({
+          fallbackModel: 'claude-sonnet-5-5',
+          budgetUsd: null,
+          budgetAllSessions: false,
+        }),
+      },
     )
     await connection.newSession('/repo', {})
     expect(sdk.last.options).not.toHaveProperty('fallbackModel')
+  })
+
+  it('starts Claude Code from the CLI the host finds again once the first one is gone', async () => {
+    const asked: string[] = []
+    const { sdk, connection, spawned } = await setup(
+      {},
+      {},
+      {
+        currentCli: async (started) => {
+          asked.push(started)
+          return '/opt/homebrew/bin/claude'
+        },
+      },
+    )
+    await connection.newSession('/repo', {})
+    expect(asked).toEqual(['/opt/claude/bin/claude'])
+    expect(sdk.last.options.pathToClaudeCodeExecutable).toBe('/opt/homebrew/bin/claude')
+    expect(spawned.at(-1)?.command).toBe('/opt/homebrew/bin/claude')
+    // The next start asks about the CLI it now runs.
+    await connection.newSession('/repo', {})
+    expect(asked).toEqual(['/opt/claude/bin/claude', '/opt/homebrew/bin/claude'])
+  })
+
+  it('fails a start with why when no CLI is found again, before the SDK runs', async () => {
+    const gone = new AgentRequestError('agent_error', '/opt/claude/bin/claude is gone.')
+    const { sdk, connection } = await setup({}, {}, { currentCli: () => Promise.reject(gone) })
+    await expect(connection.newSession('/repo', {})).rejects.toBe(gone)
+    expect(sdk.queries).toEqual([])
   })
 
   it("appends Kettu's memory to the system prompt and turns Claude Code's own memory off", async () => {
@@ -816,6 +845,44 @@ describe('a turn', () => {
     expect(s.sdk.last.inputs[0]!.message.content).toEqual([{ type: 'text', text: 'Hi' }])
   })
 
+  it('takes the latest request input from its response when its start counts none', async () => {
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit(
+        stream(query, {
+          type: 'message_start',
+          message: {
+            id: 'msg_1',
+            usage: { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          },
+        }),
+        assistant(query, 'msg_1', [{ type: 'text', text: 'a.txt' }], {
+          message: {
+            id: 'msg_1',
+            model: 'claude-opus-5',
+            content: [{ type: 'text', text: 'a.txt' }],
+            usage: {
+              input_tokens: 12,
+              cache_read_input_tokens: 900,
+              cache_creation_input_tokens: 40,
+              output_tokens: 7,
+            },
+          },
+        }),
+        stream(query, { type: 'message_delta', usage: { output_tokens: 7 } }),
+        stream(query, { type: 'message_stop' }),
+      )
+      query.finish()
+    }
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }])
+    expect(target.thread.session.lastRequest).toMatchObject({
+      input: 12,
+      cacheRead: 900,
+      cacheWrite: 40,
+      output: 7,
+    })
+  })
+
   it('says what each main-thread request read from the prompt cache and wrote to it', async () => {
     s.sdk.script = (query) => {
       query.running()
@@ -950,6 +1017,15 @@ describe('a turn', () => {
         recent: [{ rate: 100, approx: false }],
         turn: { since: 9_000, tokens: 200, ms: 2_000, requests: 1, approx: 0 },
         session: { tokens: 200, ms: 2_000, requests: 1, approx: 0 },
+      })
+      // The latest request, from when it went out to its end.
+      expect(target.thread.session.lastRequest).toEqual({
+        at: 9_000,
+        input: null,
+        cacheRead: null,
+        cacheWrite: null,
+        output: 200,
+        ms: 3_000,
       })
 
       await at(15_000, toolResult)
@@ -3878,7 +3954,7 @@ describe("Claude Code's predicted next prompt", () => {
 
   it("asks for it only while the setting is on, and only in the user's own sessions", async () => {
     let on = false
-    const { sdk, connection } = await setup({}, {}, undefined, undefined, () => on)
+    const { sdk, connection } = await setup({}, {}, { claudePromptSuggestions: () => on })
     await connection.newSession('/repo', {})
     expect(sdk.last.options).not.toHaveProperty('promptSuggestions')
     on = true
@@ -3891,7 +3967,7 @@ describe("Claude Code's predicted next prompt", () => {
   })
 
   it('offers the one after a turn as one clean line, and clears it on the next prompt', async () => {
-    const s = await setup({}, {}, undefined, undefined, () => true)
+    const s = await setup({}, {}, { claudePromptSuggestions: () => true })
     const target = new Target()
     const { sessionId } = await s.connection.newSession('/repo')
     s.connection.register(sessionId, target)
@@ -3918,7 +3994,7 @@ describe("Claude Code's predicted next prompt", () => {
 
   it('cuts a long one, and drops an empty one or one the setting turned off since', async () => {
     let on = true
-    const s = await setup({}, {}, undefined, undefined, () => on)
+    const s = await setup({}, {}, { claudePromptSuggestions: () => on })
     const target = new Target()
     const { sessionId } = await s.connection.newSession('/repo')
     s.connection.register(sessionId, target)
@@ -3945,7 +4021,7 @@ describe("Claude Code's predicted next prompt", () => {
   })
 
   it('drops one for a conversation that moved on, and clears one when the agent starts a turn', async () => {
-    const s = await setup({}, {}, undefined, undefined, () => true)
+    const s = await setup({}, {}, { claudePromptSuggestions: () => true })
     const target = new Target()
     const { sessionId } = await s.connection.newSession('/repo')
     s.connection.register(sessionId, target)

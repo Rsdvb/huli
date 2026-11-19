@@ -3,12 +3,13 @@
 // limits and sign-in.
 
 import os from 'node:os'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAccount } from '@shared/agent-host'
 import {
   applyPatches,
   threadEntries,
   threadFromSnapshot,
+  type ConfigOption,
   type SideChatStep,
   type ThreadEntry,
   type ThreadState,
@@ -240,6 +241,73 @@ describe('the handshake', () => {
   })
 })
 
+describe('context estimates', () => {
+  it('estimates enabled skills and the tool catalogs of the thread’s MCP servers', async () => {
+    const { server, connection } = await connect()
+    server.skills = [
+      { name: 'build', description: '构建', path: '/repo/build/SKILL.md', enabled: true },
+      { name: 'hidden', description: 'Unused', path: '/repo/hidden/SKILL.md', enabled: false },
+    ]
+    const connected = { runtimeStatus: 'connected', toolsError: null, authStatus: 'unsupported' }
+    server.on('mcpServerStatus/list', ({ cursor }) =>
+      cursor === null
+        ? {
+            nextCursor: 'next',
+            data: [
+              {
+                ...connected,
+                name: 'files',
+                tools: {
+                  mcp__files__read: {
+                    name: 'read',
+                    description: 'Read a file',
+                    inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+                    _meta: { annotation: 'Only for clients' },
+                  },
+                },
+              },
+            ],
+          }
+        : {
+            nextCursor: null,
+            data: [
+              { ...connected, name: 'empty', tools: {} },
+              { ...connected, name: 'disabled', runtimeStatus: 'disabled', tools: {} },
+              { ...connected, name: 'offline', toolsError: 'Discovery failed', tools: {} },
+            ],
+          },
+    )
+    const { sessionId } = await connection.newSession('/repo')
+
+    expect(await connection.readContextEstimates(sessionId, '/repo')).toEqual({
+      skills: [{ name: 'build', tokens: 12 }],
+      mcpServers: [
+        { name: 'files', tokens: 32 },
+        { name: 'empty', tokens: 0 },
+        { name: 'offline', tokens: null },
+      ],
+    })
+    expect(server.sent('skills/list').at(-1)).toEqual({ cwds: ['/repo'] })
+    expect(server.sent('mcpServerStatus/list')).toEqual([
+      { cursor: null, detail: 'toolsAndAuthOnly', threadId: sessionId },
+      { cursor: 'next', detail: 'toolsAndAuthOnly', threadId: sessionId },
+    ])
+    expect(server.sent('turn/start')).toEqual([])
+  })
+
+  it('keeps the skill estimate when the thread’s MCP catalog is unavailable', async () => {
+    const { server, connection } = await connect()
+    server.on('mcpServerStatus/list', () => {
+      throw new FakeRpcError(-32002, 'Thread not loaded')
+    })
+    expect(await connection.readContextEstimates('thread-1', '/repo')).toEqual({
+      skills: [],
+      mcpServers: null,
+    })
+    expect(server.sent('mcpServerStatus/list')).toHaveLength(1)
+  })
+})
+
 describe('sessions', () => {
   it('starts a thread with the default mode, trusting the folder and passing Kettu’s MCP server', async () => {
     const { server, connection } = await connect()
@@ -290,6 +358,60 @@ describe('sessions', () => {
       'agent',
       'agent-full-access',
     ])
+  })
+
+  describe('models Codex lists while it runs', () => {
+    const nova = { ...FAKE_MODELS[1]!, id: 'gpt-6.2-nova', displayName: 'gpt-6.2-nova' }
+    const modelOption = (config: ConfigOption[]) => config.find((o) => o.id === 'model')
+    const valuesOf = (config: ConfigOption[]) => modelOption(config)?.choices?.map((c) => c.value)
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('lists a model added since in a read of the options, and takes a pick of it', async () => {
+      const { server, connection } = await connect()
+      const listed = [...FAKE_MODELS]
+      server.on('model/list', () => ({ data: listed, nextCursor: null }))
+      const first = await connection.newSession('/project')
+      expect(valuesOf(first.config)).toEqual(['gpt-6.1-sol', 'gpt-5.6-luna'])
+      listed.push(nova)
+      const read = await connection.newSession('/project', { hidden: 'options' })
+      expect(valuesOf(read.config)).toContain('gpt-6.2-nova')
+      const picked = await connection.setConfigOption(first.sessionId, 'model', 'gpt-6.2-nova')
+      expect(modelOption(picked)?.value).toBe('gpt-6.2-nova')
+    })
+
+    it('keeps the models it listed when a read of the options fails', async () => {
+      const { server, connection } = await connect()
+      const first = await connection.newSession('/project')
+      server.on('model/list', () => {
+        throw new FakeRpcError(-32603, 'offline')
+      })
+      const read = await connection.newSession('/project', { hidden: 'options' })
+      expect(valuesOf(read.config)).toEqual(valuesOf(first.config))
+    })
+
+    it('opens a thread without waiting for the list, and lists the new models after it', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      const { server, connection } = await connect()
+      const first = await connection.newSession('/project')
+      let release = () => {}
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      server.on('model/list', async () => {
+        await gate
+        return { data: [...FAKE_MODELS, nova], nextCursor: null }
+      })
+      vi.setSystemTime(Date.now() + 61_000)
+      const second = await connection.newSession('/project')
+      expect(valuesOf(second.config)).toEqual(valuesOf(first.config))
+      expect(server.sent('model/list')).toHaveLength(2)
+      release()
+      await vi.waitFor(async () => {
+        const next = await connection.newSession('/project')
+        expect(valuesOf(next.config)).toContain('gpt-6.2-nova')
+      })
+    })
   })
 
   it('hands Kettu’s memory over as developer instructions and turns Codex’s own memories off', async () => {
@@ -537,28 +659,6 @@ describe('sessions', () => {
 
     await connection.setConfigOption('thread-1', 'fast-mode', false)
     expect((await sendTurn(3)).serviceTier).toBe('default')
-  })
-
-  it('lists Codex’s models again once the list is ten minutes old', async () => {
-    const { server, connection } = await connect()
-    const first = await connection.newSession('/project')
-    const ids = (config: typeof first.config) =>
-      config.find((o) => o.id === 'model')?.choices?.map((c) => c.value)
-    expect(ids(first.config)).toEqual(['gpt-6.1-sol', 'gpt-5.6-luna'])
-    const newer = { ...FAKE_MODELS[0]!, id: 'gpt-6.2-sol', displayName: 'gpt-6.2-sol' }
-    server.on('model/list', () => ({ data: [newer, ...FAKE_MODELS], nextCursor: null }))
-    expect(ids((await connection.newSession('/project')).config)).not.toContain('gpt-6.2-sol')
-    const now = Date.now()
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 11 * 60_000)
-    try {
-      // The old list serves while the new one is read, which the next session then has.
-      await connection.newSession('/project')
-      await until(() => server.sent('model/list').length === 2)
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      expect(ids((await connection.newSession('/project')).config)).toContain('gpt-6.2-sol')
-    } finally {
-      clock.mockRestore()
-    }
   })
 
   it('refuses a value Codex does not have', async () => {
