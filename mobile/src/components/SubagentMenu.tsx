@@ -92,9 +92,9 @@ export function SubagentMenu(props: { parentId: string; children: ReactElement }
               {
                 key: 'finished',
                 label: '显示已结束的子 Agent',
-                toggle: true,
-                checked: showFinishedSubagents,
-                keepOpen: true,
+                // `toggle` is the switch's state, not a flag: set to true, it read as on whatever
+                // the setting was.
+                toggle: showFinishedSubagents,
                 onPress: () => setPrefs({ showFinishedSubagents: !showFinishedSubagents }),
               },
             ],
