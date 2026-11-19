@@ -458,7 +458,7 @@ function PopoverView(props: {
   return (
     <View
       ref={root}
-      style={StyleSheet.absoluteFill}
+      style={[StyleSheet.absoluteFill, styles.layer]}
       onLayout={() =>
         root.current?.measureInWindow((x, y, w, h) => setOrigin({ x, y, width: w, height: h }))
       }
@@ -683,6 +683,9 @@ function Row(props: { row: MenuRow; onPush(page: string): void; onClose(): void 
 }
 
 const styles = StyleSheet.create({
+  // Above what floats over the screen beside it, as the plan pill, the session chips and the
+  // header, whose own z-indexes would otherwise lift them over the menu and its scrim.
+  layer: { zIndex: 100 },
   // The shadow is on a view of its own, since the panel's clip would cut it off.
   menu: {
     position: 'absolute',
