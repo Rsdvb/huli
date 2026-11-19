@@ -11,20 +11,17 @@ import { useCallback, useMemo, type ReactElement } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
-import { sameItems, useConnected, useHostSelector, useLink, type HostData } from '../host'
+import { sameItems, useHostSelector, type HostData } from '../host'
 import { setPrefs, usePrefs } from '../prefs'
 import { sessionTitle } from '../sessions'
-import { spanText } from '../ui/session/format'
 import { NativeMenu } from '../ui/session/NativeMenu'
 import type { MenuEntry, MenuSource } from '../ui/session/Popover'
-import { listedSubagents, subagentRunning, useSubagentDigests } from '../ui/session/subagents'
+import { listedSubagents, subagentRunning } from '../ui/session/subagents'
 
 // More rows than this scroll in a menu, which is not made for that: the screen lists them.
 const MENU_MOST = 8
 
 export function SubagentMenu(props: { parentId: string; children: ReactElement }) {
-  const link = useLink()
-  const connected = useConnected()
   const { showFinishedSubagents } = usePrefs()
   // Its own sub-agents only, so another session's change passes the row's badge by.
   const all = useHostSelector(
@@ -42,20 +39,13 @@ export function SubagentMenu(props: { parentId: string; children: ReactElement }
     [all, showFinishedSubagents],
   )
   const many = listed.length > MENU_MOST
-  const digestOf = useSubagentDigests(link, many ? [] : listed, connected)
   const running = listed.filter(subagentRunning).length
 
+  // Read from the summaries alone: the row reads no sub-agent's thread while its menu is closed,
+  // which it cannot tell from open. The sub-sessions screen reads their times when it shows.
   const row = (child: SessionSummary): MenuEntry => {
-    const live = subagentRunning(child)
-    // A finished one's time is read once and stays; a running one's would tick.
-    const ran = live ? null : (digestOf(child.id)?.durationMs ?? null)
     const failed = child.attention === 'error' || child.status === 'failed'
-    const meta = [
-      live ? '运行中' : failed ? '失败' : '已完成',
-      ran !== null ? spanText(Math.max(0, ran)) : null,
-    ]
-      .filter(Boolean)
-      .join(' · ')
+    const meta = subagentRunning(child) ? '运行中' : failed ? '失败' : '已完成'
     const subtitle =
       child.permissionCount > 0
         ? ['需要授权', child.description].filter(Boolean).join(' · ')
