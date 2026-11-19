@@ -11,22 +11,21 @@ const WEEK = 7 * DAY
 // their output re-renders on a language change through its own `useTranslation()`.
 const formatters = new Map<string, ReturnType<typeof makeFormatters>>()
 
+// Chinese names the part of the day, 凌晨 2:40, where a 24-hour 2:40 is easily misread.
+function dayClockOptions(locale: string): Intl.DateTimeFormatOptions {
+  return locale.startsWith('zh')
+    ? { hour: 'numeric', minute: '2-digit', hourCycle: 'h12', dayPeriod: 'short' }
+    : { hour: 'numeric', minute: '2-digit' }
+}
+
 function makeFormatters(locale: string) {
   return {
-    weekdayClock: new Intl.DateTimeFormat(locale, {
-      weekday: 'short',
-      hour: 'numeric',
-      minute: '2-digit',
-    }),
+    // Huli: with the part of the day in Chinese, as `dayClock`, so a reset later in the week reads
+    // like one today rather than on a 24-hour clock.
+    weekdayClock: new Intl.DateTimeFormat(locale, { weekday: 'short', ...dayClockOptions(locale) }),
     monthDay: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
     clock: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }),
-    // Chinese names the part of the day, 凌晨 2:40, where a 24-hour 2:40 is easily misread.
-    dayClock: new Intl.DateTimeFormat(
-      locale,
-      locale.startsWith('zh')
-        ? { hour: 'numeric', minute: '2-digit', hourCycle: 'h12', dayPeriod: 'short' }
-        : { hour: 'numeric', minute: '2-digit' },
-    ),
+    dayClock: new Intl.DateTimeFormat(locale, dayClockOptions(locale)),
     full: new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }),
     compact: new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }),
     integer: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
@@ -93,7 +92,7 @@ export function resetTime(at: number, now = Date.now()): string {
   const day = (t: number): number => new Date(t).setHours(0, 0, 0, 0)
   // Rounded, since a day across a DST change is not 24 hours.
   const days = Math.round((day(at) - day(now)) / DAY)
-  if (days === 0) return format().clock.format(at)
+  if (days === 0) return format().dayClock.format(at)
   return days > 0 && days <= 6 ? format().weekdayClock.format(at) : format().monthDay.format(at)
 }
 
