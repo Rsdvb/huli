@@ -1,27 +1,45 @@
 // The HTTP server: routes, the security headers of every answer, and nothing else. The relay's
-// WebSockets come in as upgrades of the same server.
+// WebSockets come in as upgrades of the same server; the owner's commands on the server come in
+// over the admin socket in the data folder.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { Server as NetServer } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { parseRegionPayload, parseSignedRegionList } from '@shared/remote/relay-regions'
 import { decodeRelayBytes } from '@shared/remote/relay'
 import { ACCOUNT_DEVICES_PATH, ACCOUNT_REVOKE_PATH } from '@shared/huli-cloud'
 import { AccountDevicesApi } from './account'
+import { adminSocketPath, listenAdmin, runAdmin, type AdminContext } from './admin'
 import type { ApnsSender } from './apns'
 import { Auth } from './auth'
 import type { Config } from './config'
 import { errorTrace, sendError, sendHtml, sendJson, TooBig } from './http'
+import { OwnerPage } from './owner'
 import { messagePage, SERVICE_NAME, STYLE } from './pages'
 import { PushGateway } from './push'
 import { Relay, type RelayLimits } from './relay'
 import { loadRelayTokenKey, RelayTokens } from './relay-tokens'
 import { Store } from './store'
 
+/** The paths the pages' forms post to, with the session cookie or to start one. */
+const PAGE_FORMS = new Set([
+  '/signin/app/',
+  '/web/login',
+  '/device',
+  '/account/devices/revoke',
+  '/account/signout',
+  '/account/admin/',
+])
+
 export interface ServerParts {
   server: Server
   store: Store
   auth: Auth
   relay: Relay
+  /** What the owner's commands change the accounts through. */
+  admin: AdminContext
+  /** The admin socket's listener; null when the options asked for none. */
+  adminServer: NetServer | null
 }
 
 /** The id the signed list gives the region at `origin`, the relay's own; `main` without one. */
@@ -46,6 +64,8 @@ export function makeServer(
     log?: (line: string) => void
     store?: Store
     relayLimits?: Partial<RelayLimits>
+    /** Where the owner's commands reach the service; null for nowhere. */
+    adminSocket?: string | null
   } = {},
 ): ServerParts {
   const secure = config.origin.startsWith('https:')
@@ -100,6 +120,10 @@ export function makeServer(
     secure,
     log,
   })
+  // Whatever an owner's change ended (an account disabled, removed or reset, its devices signed
+  // out) is checked against at once: its hosts and devices leave the relay now.
+  const admin: AdminContext = { store, kicked: () => relay.checkGrants() }
+  const owner = new OwnerPage({ auth, admin, secure })
 
   const handle = async (
     request: IncomingMessage,
@@ -108,6 +132,23 @@ export function makeServer(
     route: string,
   ): Promise<unknown> => {
     if (url.pathname.startsWith('/v1') && relay.http(request, response, url.pathname)) return
+    // A form of these pages posted from another site is refused where the browser says so: it
+    // could sign the browser in to an account someone else chose (one they just signed up), for
+    // the next sign-in to hand the user's app to.
+    const site = request.headers['sec-fetch-site']
+    if (
+      request.method === 'POST' &&
+      PAGE_FORMS.has(url.pathname) &&
+      site &&
+      site !== 'same-origin'
+    ) {
+      return sendHtml(
+        response,
+        secure,
+        403,
+        messagePage('无法提交', '这个表单不是从本站的页面提交的。'),
+      )
+    }
     // The hosted web client calls the API from its own origin, with bearer tokens, never cookies.
     if (url.pathname.startsWith('/api/') && webOrigin && request.headers.origin === webOrigin) {
       response.setHeader('access-control-allow-origin', webOrigin)
@@ -168,6 +209,10 @@ export function makeServer(
         return await auth.revokeDevice(request, response)
       case 'POST /account/signout':
         return await auth.webSignOut(request, response)
+      case 'GET /account/admin/':
+        return owner.page(request, response)
+      case 'POST /account/admin/':
+        return await owner.submit(request, response)
       case 'POST /v1/push':
         return await push.handle(request, response)
       case 'POST /api/v1/reports':
@@ -213,11 +258,17 @@ export function makeServer(
       socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
     }
   })
+  const socketPath =
+    options.adminSocket === undefined ? adminSocketPath(config.dataDir) : options.adminSocket
+  const adminServer = socketPath
+    ? listenAdmin(socketPath, (request) => runAdmin(admin, request), log)
+    : null
   server.on('close', () => {
     relay.close()
     auth.close()
+    adminServer?.close()
   })
   server.headersTimeout = 15_000
   server.requestTimeout = 30_000
-  return { server, store, auth, relay }
+  return { server, store, auth, relay, admin, adminServer }
 }

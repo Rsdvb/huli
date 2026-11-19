@@ -4,6 +4,10 @@
 // registry, the time and that the request is new, then hands the sealed content to Apple. It never
 // sees what a notification says.
 //
+// Each account's pushes stay its own: an APNs target (a phone's or a Live Activity's token) belongs
+// to the first account whose computer pushed to it and Apple took it, and another account's pushes
+// to it are refused; the limits are per computer, per account and per address.
+//
 // The APNs payloads below are Huli's own contract with its iOS app:
 //   alert:        aps.alert (a placeholder the Notification Service Extension replaces after it
 //                 opens `sealed`), aps.mutable-content = 1, collapse id = the request's collapse
@@ -51,8 +55,8 @@ const PLACEHOLDER = { title: '纸鸢', body: '有新动态' }
 
 export interface PushGatewayOptions {
   auth: Auth
-  /** The computer registry the relay keeps. */
-  store: Pick<Store, 'computer' | 'computers'>
+  /** The computer registry the relay keeps, and which account each push target is. */
+  store: Pick<Store, 'computer' | 'computers' | 'pushAccount' | 'bindPush' | 'dropPush'>
   origin: string
   trustProxy: boolean
   /** Null while no APNs key is set up: every push answers `apns`. */
@@ -188,7 +192,7 @@ export class PushGateway {
       if (owner.family !== family.id || owner.signKey !== encodeRelayBytes(key)) {
         return this.refuse(response, 'unauthorized')
       }
-    } else if (store.computers().some((computer) => computer.family === family.id)) {
+    } else if (store.computers(family.account).some((computer) => computer.family === family.id)) {
       return this.refuse(response, 'unauthorized')
     }
     const parsed = parsePushRequest(body)
@@ -197,14 +201,25 @@ export class PushGateway {
       return this.refuse(response, 'unauthorized')
     }
     if (this.replayed(signatureHeader as string)) return this.refuse(response, 'unauthorized')
-    if (!this.perHost.hit(id) || !this.perAccount.hit('account')) {
+    // Another account's phone is not this computer's to reach, whatever token it was given.
+    const target = `${parsed.environment}:${parsed.token}`
+    const bound = store.pushAccount(target)
+    if (bound !== null && bound !== family.account) {
+      this.log("huli-cloud: a push to another account's device was refused")
+      return this.refuse(response, 'unauthorized')
+    }
+    if (!this.perHost.hit(id) || !this.perAccount.hit(family.account)) {
       return this.refuse(response, 'too_many')
     }
     const apns = this.options.apns
     if (!apns) return this.refuse(response, 'apns')
     const result = await apns.send(apnsMessage(parsed, apns.topic, this.now()))
-    if (result.ok) return sendJson(response, this.options.origin.startsWith('https:'), 200, {})
+    if (result.ok) {
+      store.bindPush(target, family.account)
+      return sendJson(response, this.options.origin.startsWith('https:'), 200, {})
+    }
     this.log(`huli-cloud: APNs refused a push: ${result.status} ${result.reason}`)
+    if (result.gone) store.dropPush(target, family.account)
     this.refuse(response, result.gone ? 'unregistered' : 'apns')
   }
 }
