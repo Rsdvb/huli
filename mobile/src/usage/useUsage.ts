@@ -50,11 +50,36 @@ export function choiceKey(choice: RangeChoice, scope: UsageScope): string {
   return `${scope}:${choice.kind}:${choice.step}`
 }
 
+/** How long a run of usage.changed events gathers before the figures are read again. */
+const CHANGED_AFTER = 2000
+
+/** Whether two reads show the same: then the screen keeps the last and its charts. */
+function sameRead(a: UsageRead | null, b: UsageRead): boolean {
+  return (
+    !!a &&
+    a.key === b.key &&
+    a.scope === b.scope &&
+    a.today === b.today &&
+    a.range.from === b.range.from &&
+    a.range.to === b.range.to &&
+    a.clock.from === b.clock.from &&
+    a.clock.to === b.clock.to &&
+    a.starts.length === b.starts.length &&
+    JSON.stringify(a.status) === JSON.stringify(b.status) &&
+    JSON.stringify(a.summary) === JSON.stringify(b.summary)
+  )
+}
+
+/**
+ * The figures for `choice`, read while connected. `focused` is whether the screen shows: the year
+ * of data is read again on a change only then, else once it shows again.
+ */
 export function useUsage(
   link: HostLink | null,
   connected: boolean,
   choice: RangeChoice,
   wanted: UsageScope,
+  focused = true,
 ) {
   const [read, setRead] = useState<UsageRead | null>(null)
   const [hours, setHours] = useState<HoursRead | null>(null)
@@ -131,7 +156,7 @@ export function useUsage(
           continue
         }
         const readKey = choiceKey(chosen, wanted)
-        setRead({
+        const next: UsageRead = {
           key: readKey,
           choice: chosen,
           scope,
@@ -141,7 +166,8 @@ export function useUsage(
           clock,
           summary,
           status,
-        })
+        }
+        setRead((current) => (sameRead(current, next) ? current : next))
         setError(null)
         if (oneDay(range)) void readHours(range, scope, readKey, ticket)
         else {
@@ -163,16 +189,44 @@ export function useUsage(
     if (link && connected) void load()
   }, [key, link, connected, load])
 
+  // A change while the screen is hidden waits for it to show; shown, a run of changes reads once.
+  const stale = useRef(false)
+  const shown = useRef(focused)
+  shown.current = focused
   useEffect(() => {
     if (!link) return
-    return link.onHostEvent((raw: unknown) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = link.onHostEvent((raw: unknown) => {
       const event = raw as HostEvent
-      if (event.type === 'usage.changed') void load()
+      if (event.type === 'usage.changed') {
+        if (!shown.current) {
+          stale.current = true
+          return
+        }
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          timer = null
+          void load()
+        }, CHANGED_AFTER)
+      }
       if (event.type === 'usage.status') {
-        setRead((current) => (current ? { ...current, status: event.status } : current))
+        setRead((current) =>
+          current && JSON.stringify(current.status) !== JSON.stringify(event.status)
+            ? { ...current, status: event.status }
+            : current,
+        )
       }
     })
+    return () => {
+      if (timer) clearTimeout(timer)
+      off()
+    }
   }, [link, load])
+  useEffect(() => {
+    if (!focused || !stale.current || !connected) return
+    stale.current = false
+    void load()
+  }, [focused, connected, load])
 
   /** Asks the computer to read the agents' logs again, then the figures. */
   const sync = useCallback(async () => {
