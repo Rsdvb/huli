@@ -3,7 +3,7 @@
 // Its content stays React Native's. BottomSheet.tsx is Android's.
 
 import type { ReactNode } from 'react'
-import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { BottomSheet as SwiftSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui'
 import { preferredColorScheme, presentationDragIndicator } from '@expo/ui/swift-ui/modifiers'
 import { LockLayer } from '../lock'
@@ -24,7 +24,8 @@ export function BottomSheet(props: {
   solid?: boolean
 }) {
   const { c, scheme } = useTokens()
-  const window = Dimensions.get('window')
+  // The height follows rotation and Split View; the width is the sheet's own, below.
+  const window = useWindowDimensions()
   return (
     <Host style={styles.host} colorScheme={scheme}>
       <SwiftSheet
@@ -35,14 +36,10 @@ export function BottomSheet(props: {
         fitToContents
       >
         <Group modifiers={[presentationDragIndicator('visible'), preferredColorScheme(scheme)]}>
-          <RNHostView matchContents>
-            <View
-              style={[
-                styles.sheet,
-                { width: window.width },
-                props.solid && { backgroundColor: c.surface },
-              ]}
-            >
+          {/* The sheet's width, which on iPad is a form's rather than the window's; the height
+              the content's. */}
+          <RNHostView matchContents={{ vertical: true }}>
+            <View style={[styles.sheet, props.solid && { backgroundColor: c.surface }]}>
               {props.title || props.message ? (
                 <View style={styles.head}>
                   {props.title ? (
