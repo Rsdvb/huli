@@ -275,9 +275,21 @@ export class PushSender {
         }
         const sealed = await seal(state)
         if (!sealed) return null
-        if (job.action !== 'start') return { type: 'liveactivity', event: job.action, sealed }
+        if (job.action === 'end') return { type: 'liveactivity', event: 'end', sealed }
+        const stale = job.staleS
+        if (job.action === 'update') {
+          return {
+            type: 'liveactivity',
+            event: 'update',
+            sealed,
+            stale,
+            ...(job.low ? { low: true as const } : {}),
+          }
+        }
         const attributes = await seal({ ...base, kind: 'activity' })
-        return attributes ? { type: 'liveactivity', event: 'start', sealed, attributes } : null
+        return attributes
+          ? { type: 'liveactivity', event: 'start', sealed, attributes, stale }
+          : null
       }
       case 'progress': {
         const { title, step, plan, ...rest } = job.state

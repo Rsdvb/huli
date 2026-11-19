@@ -256,3 +256,66 @@ describe("a turn's Live Activity started by push", () => {
     expect(t.progressJobs()).toHaveLength(1)
   })
 })
+
+describe('the Live Activity of what waits', () => {
+  const OLD = 'e5'.repeat(32)
+  const NEW = 'f6'.repeat(32)
+
+  function waits(t: ReturnType<typeof setup>, sessions: Record<string, string[]>): void {
+    t.notifier.setWaiting(sessions)
+    t.advance(1_000)
+  }
+  const activityJobs = (t: ReturnType<typeof setup>) =>
+    t.jobs.filter((job): job is Extract<PushJob, { type: 'activity' }> => job.type === 'activity')
+
+  it('goes stale by itself, since one started by push cannot be ended before its token comes', () => {
+    const t = setup({ activity: { start: START } })
+    waits(t, { s1: ['r1'] })
+    expect(activityJobs(t)).toMatchObject([{ action: 'start', count: 1, staleS: 300 }])
+    // Answered at the computer: no token reaches the activity, so it is left to go stale.
+    waits(t, {})
+    expect(activityJobs(t)).toHaveLength(1)
+  })
+
+  it('reaches only the activity it started, never an earlier one the target still names', () => {
+    const t = setup({ activity: { start: START, update: OLD } })
+    waits(t, { s1: ['r1'] })
+    expect(activityJobs(t)).toMatchObject([{ action: 'start', count: 1 }])
+    // The target's token is the earlier activity's: the new one's count cannot go to it.
+    waits(t, { s1: ['r1', 'r2'] })
+    expect(activityJobs(t)).toHaveLength(1)
+
+    // The device hands over the new activity's token, which then hears what changed.
+    t.push.target!.activity = { start: START, update: NEW }
+    t.notifier.deviceChanged()
+    t.advance(1_000)
+    expect(activityJobs(t).at(-1)).toMatchObject({ action: 'update', count: 2 })
+    waits(t, {})
+    expect(activityJobs(t).at(-1)).toMatchObject({ action: 'end', count: 0 })
+  })
+
+  it('starts another once the device ended the one it had', () => {
+    const t = setup({ activity: { start: START } })
+    waits(t, { s1: ['r1'] })
+    t.push.target!.activity = { start: START, update: NEW }
+    t.notifier.deviceChanged()
+    t.advance(1_000)
+    // The app, in front with nothing waiting, ended it and took its token back.
+    t.push.target!.activity = { start: START }
+    t.notifier.deviceChanged()
+    waits(t, { s1: ['r1', 'r2'] })
+    expect(activityJobs(t).map((job) => job.action)).toEqual(['start', 'start'])
+  })
+
+  it('renews one that did not change before it goes stale, at the low priority', () => {
+    const t = setup({ activity: { start: START } })
+    waits(t, { s1: ['r1'] })
+    t.push.target!.activity = { start: START, update: NEW }
+    t.notifier.deviceChanged()
+    t.advance(4 * 60_000)
+    expect(activityJobs(t)).toMatchObject([
+      { action: 'start' },
+      { action: 'update', count: 1, low: true, staleS: 300 },
+    ])
+  })
+})
