@@ -15,7 +15,7 @@ import { Glyph } from '@renderer/features/shell/glyph'
 import { duration } from '@renderer/lib/format'
 import { isMac } from '@renderer/lib/platform'
 import { sessionTitle } from '@renderer/stores/sessions'
-import { setShowFinishedSubagents, useViewStore } from '@renderer/stores/view'
+import { openSession, setShowFinishedSubagents, useViewStore } from '@renderer/stores/view'
 import { SessionMenuItems } from './session-menu'
 import { runSessionMenuAccelerator } from './session-menu-model'
 import { listedSubagents } from './subagents'
@@ -25,7 +25,8 @@ const nothing = () => {}
 
 /**
  * A session's sub-agents on its row: a count with a spinner while any runs, and on hover the list,
- * each jumping to its block in the session's thread. Finished ones show only when chosen.
+ * each jumping to its block in the session's thread, or to its own page while it waits for you.
+ * Finished ones show only when chosen.
  */
 export function SubagentBadge({
   parent,
@@ -78,7 +79,14 @@ export function SubagentBadge({
           running > 0 && <RingSpinner aria-hidden className="size-[9px] border-[1.25px]" />
         )}
       </HoverCardTrigger>
-      <HoverCardContent side="bottom" align="center" sideOffset={12} className="w-[300px] p-[5px]">
+      <HoverCardContent
+        side="bottom"
+        align="center"
+        sideOffset={12}
+        className="w-[300px] p-[5px]"
+        // Huli: an item's own menu, not the row's as well, which holds this list in React's tree.
+        onContextMenu={(event) => event.stopPropagation()}
+      >
         <div className="flex items-center px-2 pt-1.5 pb-1">
           <span className="flex-1 text-small font-medium text-tertiary">
             {t('subagents.title')}
@@ -123,7 +131,12 @@ function SubagentItem({ parent, child }: { parent: SessionSummary; child: Sessio
         render={
           <button
             type="button"
-            onClick={() => revealSubagent(parent.id, child.id)}
+            // Huli: one that waits for you opens on its own page, where its request is answered.
+            onClick={() =>
+              waiting
+                ? openSession(child.id, child.projectPath)
+                : revealSubagent(parent.id, child.id)
+            }
             className="flex min-h-10 w-full items-center gap-[9px] rounded-lg px-2 py-[5px] text-left outline-none hover:bg-selected focus-ring data-popup-open:bg-selected"
           />
         }

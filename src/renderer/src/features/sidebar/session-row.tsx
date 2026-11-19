@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react'
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -71,6 +71,14 @@ import { WaitingMark } from './waiting-mark'
 export const ROW_PAD = 6
 export const INDENT_PAD = 30
 export const NESTED_STEP = 22
+
+/**
+ * Huli: whether an event happened on the row itself. The popups of its marks (the sub-agents', a
+ * pull request's) are portaled out of it but are still its children in React's tree, so their
+ * clicks reached the row too: a pick in the sub-agents' list then also opened the parent session.
+ */
+const fromRow = (event: SyntheticEvent<HTMLElement>): boolean =>
+  event.currentTarget.contains(event.target as Node)
 
 export const SessionRow = memo(function SessionRow({
   node,
@@ -228,9 +236,13 @@ export const SessionRow = memo(function SessionRow({
       aria-current={current ? 'page' : undefined}
       aria-expanded={hasChildren ? expanded : undefined}
       data-multi-selected={marked ? '' : undefined}
-      onClick={(event) => pick(event) || openSession(summary.id, summary.projectPath)}
-      onDoubleClick={rename.start}
+      onClick={(event) => {
+        if (!fromRow(event)) return
+        if (!pick(event)) openSession(summary.id, summary.projectPath)
+      }}
+      onDoubleClick={(event) => fromRow(event) && rename.start()}
       onKeyDown={(event) => {
+        if (!fromRow(event)) return
         if (event.key === 'Escape') {
           // Esc that lets go of picked rows stops here, before it reaches the session.
           if (useSessionSelection.getState().ids.length > 0) event.preventDefault()
