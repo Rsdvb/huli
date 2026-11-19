@@ -151,8 +151,9 @@ Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy
   (`ZH_NAME`), dropping the spaces that set a Latin word off from Chinese, and puts Kite's artwork
-  in place. Idempotent; the build workflow runs it, and so must a local build (see Build) or a
-  `pnpm dev` meant to look like Kite.
+  in place. Idempotent; the build workflow runs it, and so must a local build (see Build).
+  `pnpm dev` needs none (see Kite in development). What it swaps in text, and how, is in
+  `brand-text.mjs`; the script reads and writes the files.
   - Every locale but `star.json` (the prompts to star Kettu's repository) has its values
     rewritten: the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the
     attribution and Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder
@@ -175,6 +176,20 @@ Generated before a build (not hand edits, never committed):
     `deploy-cloud.ps1` does: the hosted web client is public, so the path stays out of it.
 - `node tools/huli/update-path.mjs` fills in the update channel's path (see Update channel). The
   rebrand runs it; the phone builds run it alone, before bundling.
+
+### Kite in development
+
+`pnpm dev` runs the tree as committed, yet looks like Kite: `tools/huli/dev-brand.mjs`, a Vite
+plugin in `electron.vite.config.ts`'s main and renderer builds that applies only in development
+mode (`electron-vite dev`), makes the rebrand's swaps from the same tables in `brand-text.mjs` as
+each file loads. Locale files get `brandLocale`, the files `CODE` lists get their swaps (the HTML
+pages through `transformIndexHtml`), and an import of Kettu's artwork that Kite has its own of in
+`ARTWORK` resolves to Kite's. The window's icon (`build/icon.png`) and the tray's images
+(`resources/tray`), which an unpackaged run reads from the tree, point at Kite's in `ARTWORK`. The
+name in the taskbar and the tray's tooltip is `app.name`, the `productName` Kite; the data folder
+stays `Huli Dev` (or `KETTU_USER_DATA`). It never fills in the update channel's path, so a dev run
+has no updates, as before. A spelling upstream changed shows as a Vite warning,
+`… no longer holds …`, as the rebrand's does.
 
 ### Kite's artwork
 

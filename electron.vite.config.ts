@@ -5,16 +5,19 @@ import tailwindcss from '@tailwindcss/vite'
 import { cn } from 'cn/vite'
 import { pageRuntime } from './tools/build/page-runtime'
 import { thirdPartyNotices } from './tools/build/third-party-notices'
+import { devBrand } from './tools/huli/dev-brand.mjs'
 
 const sharedAlias = { '@shared': resolve('src/shared') }
 const notices = thirdPartyNotices(resolve('.'))
 const runtime = (): ReturnType<typeof pageRuntime> =>
   pageRuntime(resolve('src/shared/artifact-runtime/runtime.ts'))
+// Huli: Kite's name and artwork in `pnpm dev`; a release build runs tools/huli/rebrand.mjs.
+const brand = (): ReturnType<typeof devBrand> => devBrand(resolve('.'))
 
 export default defineConfig({
   main: {
     resolve: { alias: sharedAlias },
-    plugins: [notices(), runtime()],
+    plugins: [notices(), runtime(), brand()],
   },
   preload: {
     resolve: { alias: sharedAlias },
@@ -48,6 +51,7 @@ export default defineConfig({
       cn({ full: true, out: 'src/lib/cn-tables.ts' }),
       notices(),
       runtime(),
+      brand(),
     ],
     build: {
       minify: true,
