@@ -7,7 +7,7 @@ import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'rea
 import { useIsFocused } from 'expo-router'
 import { G, Icon } from './icons'
 import { compactCount, durationText } from './work'
-import { GlassButton } from '../Glass'
+import { GlassButton, useGlassMode } from '../Glass'
 import { useSessionTokens } from './palette'
 
 function usePulse(): Animated.Value {
@@ -217,6 +217,9 @@ export function ToBottomButton(props: {
   onPress(): void
 }) {
   const { c } = useSessionTokens()
+  // Liquid Glass under a fading opacity draws nothing, so it popped in whole once the fade ended:
+  // there the glass melts in and out on its own, and only the icon on it fades.
+  const liquid = useGlassMode() === 'liquid'
   const shown = useRef(new Animated.Value(0)).current
   useEffect(() => {
     Animated.timing(shown, {
@@ -232,7 +235,7 @@ export function ToBottomButton(props: {
       style={[
         styles.toBottom,
         {
-          opacity: shown,
+          opacity: liquid ? 1 : shown,
           transform: [
             { translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
           ],
@@ -240,10 +243,12 @@ export function ToBottomButton(props: {
       ]}
     >
       <View>
+        {/* Never the system's own button for the chevron: one glass for every state, which can
+            melt away. */}
         <GlassButton
           silent
           size={44}
-          {...(props.state === 'idle' ? { systemImage: G.toBottom.sf } : {})}
+          dematerialized={!props.visible}
           onPress={props.onPress}
           accessibilityLabel={
             props.state === 'waiting'
@@ -255,18 +260,24 @@ export function ToBottomButton(props: {
                   : '回到最新'
           }
         >
-          {props.state === 'running' ? (
-            <WorkingDots color={c.accent} size={16} />
-          ) : props.state === 'waiting' ? (
-            <AttentionMark />
-          ) : (
-            <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
-          )}
+          <Animated.View style={liquid ? { opacity: shown } : null}>
+            {props.state === 'running' ? (
+              <WorkingDots color={c.accent} size={16} />
+            ) : props.state === 'waiting' ? (
+              <AttentionMark />
+            ) : (
+              <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+            )}
+          </Animated.View>
         </GlassButton>
         {props.fresh && props.state === 'idle' && (
-          <View
+          <Animated.View
             pointerEvents="none"
-            style={[styles.fresh, { backgroundColor: c.tint, borderColor: c.bg }]}
+            style={[
+              styles.fresh,
+              { backgroundColor: c.tint, borderColor: c.bg },
+              liquid ? { opacity: shown } : null,
+            ]}
           />
         )}
       </View>
