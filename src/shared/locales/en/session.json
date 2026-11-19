@@ -723,7 +723,8 @@
       "compacting": "Compacting context",
       "approval": "Waiting for your approval",
       "question": "Waiting for your answer",
-      "working": "Working"
+      "working": "Working",
+      "subagent": "A sub-agent is waiting for you"
     },
     "doing": {
       "thinking": "Thinking: {{detail}}",

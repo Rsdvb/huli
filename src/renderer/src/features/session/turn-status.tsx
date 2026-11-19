@@ -1,9 +1,11 @@
 import { memo, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
+import type { SessionSummary } from '@shared/agent-host'
 import { duration, tokens } from '@renderer/lib/format'
 import { useBrowserStore } from '@renderer/stores/browser'
 import { deviceInUse, useDevicesStore } from '@renderer/stores/devices'
+import { useSessionsStore } from '@renderer/stores/sessions'
 import { terminalInUse, useTerminalsStore } from '@renderer/stores/terminals'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { TurnDots } from './turn-dots'
@@ -25,6 +27,22 @@ function doingKey(phase: TurnPhaseName, count: number, quoted: boolean) {
     default:
       return 'thinking'
   }
+}
+
+/** Huli: whether a sub-agent of the session's, at any depth, waits for your approval. */
+function subagentWaits(byId: Record<string, SessionSummary>, sessionId: string): boolean {
+  for (const s of Object.values(byId)) {
+    if (s.origin !== 'subagent' || (s.permissionCount === 0 && s.attention !== 'permission')) {
+      continue
+    }
+    // Up through its parent sub-agents to the session; a chain that loops ends at the limit.
+    let at: SessionSummary | undefined = s
+    for (let depth = 0; at?.origin === 'subagent' && at.parentId && depth < 16; depth++) {
+      if (at.parentId === sessionId) return true
+      at = byId[at.parentId]
+    }
+  }
+  return false
 }
 
 /** The time since `since` in whole seconds, ticking on its own so nothing around it re-renders. */
@@ -99,6 +117,7 @@ export const TurnStatus = memo(function TurnStatus({
     const used = terminalInUse(s, sessionId)
     return used?.control.kind === 'you' ? used.name : null
   })
+  const subagentWaiting = useSessionsStore((s) => subagentWaits(s.byId, sessionId))
   if (writing) return null
   const separator = <i aria-hidden>·</i>
   const app = computer?.app ?? null
@@ -106,13 +125,18 @@ export const TurnStatus = memo(function TurnStatus({
   const appUsed = !!app && !appHeld && !QUIET_PHASES.has(phase)
   // The device or terminal the user holds, which the turn waits for.
   const holding = device.state === 'you' ? device.name : terminal
+  // Huli: the turn waits on a sub-agent that waits for you, so it says so rather than working;
+  // its own requests and a page it acts on come first.
+  const subagentHolds =
+    subagentWaiting && phase !== 'approval' && phase !== 'question' && page === null
   const waiting =
     phase === 'approval' ||
     phase === 'question' ||
     asked !== null ||
     page === 'you' ||
     appHeld ||
-    holding !== null
+    holding !== null ||
+    subagentHolds
   const text = asked
     ? t(`control:status.asks.${asked}`)
     : page === 'you'
@@ -121,15 +145,17 @@ export const TurnStatus = memo(function TurnStatus({
         ? t('control:status.you.app', { target: app ?? t('control:held.computer') })
         : holding !== null
           ? t('control:status.you.app', { target: holding })
-          : page === 'using'
-            ? t('control:status.using.browser')
-            : appUsed
-              ? t('control:status.using.app', { target: app })
-              : device.state === 'using'
-                ? t('control:status.using.app', { target: device.name })
-                : detail === null
-                  ? t(`thread.phase.${phase}`, { count })
-                  : t(`thread.doing.${doingKey(phase, count, quoted)}`, { count, detail })
+          : subagentHolds
+            ? t('thread.phase.subagent')
+            : page === 'using'
+              ? t('control:status.using.browser')
+              : appUsed
+                ? t('control:status.using.app', { target: app })
+                : device.state === 'using'
+                  ? t('control:status.using.app', { target: device.name })
+                  : detail === null
+                    ? t(`thread.phase.${phase}`, { count })
+                    : t(`thread.doing.${doingKey(phase, count, quoted)}`, { count, detail })
   return (
     <div role="status" className="ks-status" data-after-sent={afterSent ? '' : undefined}>
       {waiting ? <span aria-hidden className="ks-status__attn" /> : <TurnDots phase={phase} />}
@@ -146,7 +172,15 @@ export const TurnStatus = memo(function TurnStatus({
         key={
           asked ??
           page ??
-          (appHeld ? 'app-held' : holding !== null ? 'held' : appUsed ? 'app' : device.state) ??
+          (appHeld
+            ? 'app-held'
+            : holding !== null
+              ? 'held'
+              : subagentHolds
+                ? 'subagent'
+                : appUsed
+                  ? 'app'
+                  : device.state) ??
           phase
         }
         title={text}
