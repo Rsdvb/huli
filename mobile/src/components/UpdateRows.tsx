@@ -1,10 +1,12 @@
-// Settings › About on Android: the newest build, its download, and checking by hand. Returned as
-// rows so the group draws its separators between them.
+// Settings › About for a build that updates from the channel: the newest build, its download (its
+// install on iOS), and checking by hand. Returned as rows so the group draws its separators between
+// them; none for a build that updates elsewhere.
 
 import { useState, type ReactElement } from 'react'
+import { Platform } from 'react-native'
 import { haptic } from '../ui/haptics'
 import { ListRow } from '../ui/ListRow'
-import { checkForUpdate, openUpdate, useUpdate } from '../update'
+import { checkForUpdate, openUpdate, useUpdate, useUpdatesSupported } from '../update'
 
 type Check = 'idle' | 'checking' | 'latest' | 'available' | 'failed'
 
@@ -18,7 +20,9 @@ const CHECK_TEXT: Record<Check, string> = {
 
 export function useUpdateRows(): ReactElement[] {
   const { latest } = useUpdate()
+  const supported = useUpdatesSupported()
   const [check, setCheck] = useState<Check>('idle')
+  if (!supported) return []
 
   const checkNow = () => {
     haptic.tap()
@@ -35,7 +39,7 @@ export function useUpdateRows(): ReactElement[] {
           <ListRow key="latest" title="最新版本" value={latest.version} />,
           <ListRow
             key="download"
-            title="下载新版本"
+            title={Platform.OS === 'ios' ? '安装新版本' : '下载新版本'}
             icon="download"
             action
             onPress={() => openUpdate(latest)}

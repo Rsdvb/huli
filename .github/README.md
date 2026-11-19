@@ -29,7 +29,7 @@ Kite 是 [Kettu](https://github.com/KettuAI/Kettu) 的个人分支：把 Claude 
 
 见 [`tools/huli/README.md`](../tools/huli/README.md)。各平台由 GitHub Actions 构建（`huli-build.yml`），
 每晚的 `huli-sync.yml` 合并官方 Kettu 的 main。代码公开，安装包不公开：构建只发到自己的更新渠道，
-GitHub 上的 Release 只有说明、没有附件，iOS 只在 TestFlight 内部测试。
+GitHub 上的 Release 只有说明、没有附件。iOS 在 TestFlight 内部测试，也以 Ad Hoc 签名发到更新渠道，只有登记过的设备能装。
 
 ## 许可证
 
