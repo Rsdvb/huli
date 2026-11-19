@@ -1,8 +1,9 @@
 name: Huli build
 
-# Builds Huli for Windows and Linux on GitHub's runners, macOS on the owner's Mac once the
-# HULI_MAC_RUNNER variable is `true`, and Huli Cloud's bundle; then puts them all on a pre-release
-# of this private repository. The version is 0.<UTC date>.<run number>.
+# Builds Huli for Windows, Linux, macOS, iOS and Android on GitHub's runners (macOS and iOS on the
+# owner's Mac instead while the HULI_MAC_RUNNER variable is `true`, which a public repository must
+# never set) and Huli Cloud's bundle; then puts them on Huli's update channel. The version is
+# 0.<UTC date>.<run number>.
 #
 # It runs by hand, after huli-sync.yml merges Kettu's main, and every night; a night's run builds
 # only when main has commits the latest release lacks, and skips every job otherwise.
@@ -121,14 +122,20 @@ jobs:
   mac:
     name: macOS arm64
     needs: version
-    if: vars.HULI_MAC_RUNNER == 'true'
-    runs-on: [self-hosted, macOS, huli]
+    # GitHub's own macOS runner, or the owner's Mac while HULI_MAC_RUNNER is `true`. The owner's
+    # Mac must never serve a public repository: a pull request could run code on it.
+    runs-on: ${{ vars.HULI_MAC_RUNNER == 'true' && fromJSON('["self-hosted","macOS","huli"]') || 'macos-26' }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Restore the Apple keys
+        if: runner.environment == 'github-hosted'
+        env:
+          APPLE_KEYS: ${{ secrets.HULI_APPLE_KEYS }}
+        run: bash tools/huli/restore-apple-keys.sh
       - run: pnpm install --frozen-lockfile
       - run: npm pkg set "version=${{ needs.version.outputs.version }}"
       - run: node tools/huli/rebrand.mjs
@@ -210,18 +217,27 @@ jobs:
             cloud/deploy/install.sh
           if-no-files-found: error
 
-  # The phone app for iOS, on the owner's Mac: signed through the App Store Connect API key kept
+  # The phone app for iOS, on a macOS runner: signed through the App Store Connect API key kept
   # there, uploaded to TestFlight and put on its public link. Its failure never holds anything back.
   ios:
     name: iOS
     needs: version
-    if: vars.HULI_MAC_RUNNER == 'true'
-    runs-on: [self-hosted, macOS, huli]
+    # As the macOS build: GitHub's runner, or the owner's Mac while HULI_MAC_RUNNER is `true`.
+    runs-on: ${{ vars.HULI_MAC_RUNNER == 'true' && fromJSON('["self-hosted","macOS","huli"]') || 'macos-26' }}
     defaults:
       run:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Restore the Apple keys
+        if: runner.environment == 'github-hosted'
+        working-directory: .
+        env:
+          APPLE_KEYS: ${{ secrets.HULI_APPLE_KEYS }}
+        run: bash tools/huli/restore-apple-keys.sh
       - run: npm ci --legacy-peer-deps --no-audit --no-fund
       - run: npx tsc --noEmit
       - name: Set the version

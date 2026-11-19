@@ -107,6 +107,11 @@ if (existsSync(p12)) {
   const serial = readFileSync(`${KEYS}/ios-${KIND}.serial`, 'utf8').trim()
   cert = certs.find((c) => c.attributes.serialNumber === serial) ?? null
 }
+if (!cert && process.env.GITHUB_ACTIONS === 'true') {
+  // A runner starts empty: making a certificate there would leave one more on the account with
+  // every build, and Apple allows only a few. Its .p12 comes from HULI_APPLE_KEYS instead.
+  throw new Error(`No ${KIND} certificate matches ios-${KIND}.serial; refusing to make one in CI`)
+}
 if (!cert) {
   const key = `${KEYS}/ios-${KIND}.key`
   sh('openssl', ['genrsa', '-out', key, '2048'])

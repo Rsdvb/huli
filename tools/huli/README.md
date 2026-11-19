@@ -450,6 +450,12 @@ disables every other workflow after each merge, new ones included.
   differ, and not while a sync is running (the sync starts its own build) nor for a commit whose
   build failed already (run it by hand to retry); otherwise every job is skipped. Versions stay
   `0.<UTC date>.<run number>`, and skipped runs use up run numbers, so they only grow.
+  The macOS app and the iOS app build on GitHub's `macos-26` runners; `tools/huli/restore-apple-keys.sh`
+  first unpacks the `HULI_APPLE_KEYS` secret (the Developer ID and Apple Distribution certificates,
+  the build keychain's password and the App Store Connect key) into `~/.huli-keys`, where
+  `build-ios.sh` and the signed macOS build look for them, and `signing.mjs` refuses to make a new
+  certificate in CI. Setting the `HULI_MAC_RUNNER` variable to `true` moves both jobs back to the
+  owner's Mac, which a public repository must never do: a pull request could run code there.
 
 Lint covers `mobile/` too, through the root ESLint config: the phone app gets the React hooks
 rules as the renderer does, may `require()` images as Metro needs, and drops props by leaving them
