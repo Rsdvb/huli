@@ -7,9 +7,11 @@ name: Huli build
 #
 # The repository is public but its builds are not: they go only to the update channel, whose path
 # comes from the HULI_UPDATE_PATH secret (tools/huli/update-path.mjs fills it into the code) and
-# whose URL from HULI_CHANNEL_URL. Artifacts only carry the files from job to job: each is kept a
-# day at most and the cleanup job deletes them all once the run ends, failed or not. The release
-# on GitHub is a tag with notes and no files, and iOS goes to TestFlight's internal testers only.
+# whose URL from HULI_CHANNEL_URL. Artifacts only carry the files from job to job, sealed with the
+# HULI_ARTIFACT_KEY secret (tools/huli/seal-artifacts.mjs) so a signed-in user who downloads one
+# while the run goes on gets nothing: each is kept a day at most and the cleanup job deletes them
+# all once the run ends, failed or not. The release on GitHub is a tag with notes and no files,
+# and iOS goes to TestFlight's internal testers only.
 #
 # It runs by hand, after huli-sync.yml merges Kettu's main, and every night; a night's run builds
 # only when main has commits the latest release lacks, and skips every job otherwise.
@@ -74,6 +76,15 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      # Every job seals its files with this key; a run without it stops here, before building.
+      - name: Check the artifact key
+        env:
+          HULI_ARTIFACT_KEY: ${{ secrets.HULI_ARTIFACT_KEY }}
+        run: |
+          if [ -z "$HULI_ARTIFACT_KEY" ]; then
+            echo '::error::The HULI_ARTIFACT_KEY secret is not set; see tools/huli/README.md.'
+            exit 1
+          fi
       - id: version
         run: echo "version=0.$(date -u +%Y%m%d).${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
@@ -117,15 +128,19 @@ jobs:
         run: pnpm exec electron-builder ${{ matrix.target }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Sealed before upload: the repository is public (see tools/huli/README.md).
+      - name: Seal the files
+        shell: bash
+        env:
+          HULI_ARTIFACT_KEY: ${{ secrets.HULI_ARTIFACT_KEY }}
+        run: node tools/huli/seal-artifacts.mjs seal "sealed/huli-${{ matrix.os }}.sealed" 'dist/*-setup.exe' 'dist/*-setup.exe.blockmap' 'dist/*.AppImage' 'dist/latest*.yml'
       - uses: actions/upload-artifact@v7
         with:
           name: huli-${{ matrix.os }}
           retention-days: 1
-          path: |
-            dist/*-setup.exe
-            dist/*-setup.exe.blockmap
-            dist/*.AppImage
-            dist/latest*.yml
+          # Sealed bytes do not compress.
+          compression-level: 0
+          path: sealed/huli-${{ matrix.os }}.sealed
           if-no-files-found: error
 
   mac:
@@ -196,15 +211,19 @@ jobs:
           exit 1
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Sealed before upload: the repository is public (see tools/huli/README.md).
+      - name: Seal the files
+        shell: bash
+        env:
+          HULI_ARTIFACT_KEY: ${{ secrets.HULI_ARTIFACT_KEY }}
+        run: node tools/huli/seal-artifacts.mjs seal "sealed/huli-macos.sealed" 'dist/*.dmg' 'dist/*-mac.zip' 'dist/*-mac.zip.blockmap' 'dist/latest*.yml'
       - uses: actions/upload-artifact@v7
         with:
           name: huli-macos
           retention-days: 1
-          path: |
-            dist/*.dmg
-            dist/*-mac.zip
-            dist/*-mac.zip.blockmap
-            dist/latest*.yml
+          # Sealed bytes do not compress.
+          compression-level: 0
+          path: sealed/huli-macos.sealed
           if-no-files-found: error
 
   cloud:
@@ -222,13 +241,19 @@ jobs:
       - run: pnpm exec tsc -p cloud/tsconfig.json
       - run: pnpm exec vitest run cloud/test
       - run: pnpm exec vite build -c vite.cloud.config.mts
+      # Sealed before upload: the repository is public (see tools/huli/README.md).
+      - name: Seal the files
+        shell: bash
+        env:
+          HULI_ARTIFACT_KEY: ${{ secrets.HULI_ARTIFACT_KEY }}
+        run: node tools/huli/seal-artifacts.mjs seal "sealed/huli-cloud.sealed" 'cloud/dist/huli-cloud.mjs' 'cloud/deploy/install.sh'
       - uses: actions/upload-artifact@v7
         with:
           name: huli-cloud
           retention-days: 1
-          path: |
-            cloud/dist/huli-cloud.mjs
-            cloud/deploy/install.sh
+          # Sealed bytes do not compress.
+          compression-level: 0
+          path: sealed/huli-cloud.sealed
           if-no-files-found: error
 
   # The phone app for iOS, on a macOS runner: signed through the App Store Connect API key kept
@@ -334,11 +359,20 @@ jobs:
             --ks-pass env:KEYSTORE_PASSWORD --out "out/Huli-$VERSION.apk" out/aligned.apk
           rm -f "$RUNNER_TEMP/huli.p12" out/aligned.apk
           "$tools/apksigner" verify --print-certs "out/Huli-$VERSION.apk" | grep -i sha-256
+      # Sealed before upload: the repository is public (see tools/huli/README.md).
+      - name: Seal the files
+        shell: bash
+        working-directory: .
+        env:
+          HULI_ARTIFACT_KEY: ${{ secrets.HULI_ARTIFACT_KEY }}
+        run: node tools/huli/seal-artifacts.mjs seal "sealed/huli-android.sealed" 'mobile/out/*.apk'
       - uses: actions/upload-artifact@v7
         with:
           name: huli-android
           retention-days: 1
-          path: mobile/out/*.apk
+          # Sealed bytes do not compress.
+          compression-level: 0
+          path: sealed/huli-android.sealed
           if-no-files-found: error
 
   release:
@@ -354,6 +388,7 @@ jobs:
         with:
           sparse-checkout: |
             tools/workflow
+            tools/huli/seal-artifacts.mjs
             src/main/update-keys.json
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v7
@@ -363,6 +398,21 @@ jobs:
         with:
           path: artifacts
           pattern: huli-*
+      # Each job's files come sealed (tools/huli/seal-artifacts.mjs); each opens beside its bundle.
+      - name: Open the sealed artifacts
+        env:
+          HULI_ARTIFACT_KEY: ${{ secrets.HULI_ARTIFACT_KEY }}
+        run: |
+          shopt -s nullglob
+          bundles=(artifacts/*/*.sealed)
+          if [ "${#bundles[@]}" = 0 ]; then
+            echo '::error::No sealed artifact was downloaded.'
+            exit 1
+          fi
+          for bundle in "${bundles[@]}"; do
+            node tools/huli/seal-artifacts.mjs open "$bundle" "$(dirname "$bundle")/files"
+            rm "$bundle"
+          done
       - name: Gather and sign
         run: |
           mkdir release

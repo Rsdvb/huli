@@ -1,11 +1,13 @@
 import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+import { CHANNEL_ONLY, RELEASES_URL } from '@shared/updates'
 import {
   BUILT_IN_SOURCES,
   GITHUB_SOURCE,
   parseSourceList,
   RELEASE_KEYS,
   SOURCES_KEYS,
+  sourceChoiceFor,
   verifySourceList,
   verifyUpdateFile,
   withGitHubLast,
@@ -246,5 +248,17 @@ describe('the source list', () => {
     expect(verifySourceList(envelope, 0, [sources.raw]).ok).toBe(true)
     expect(verifySourceList(envelope, 0, [stranger.raw]).ok).toBe(false)
     expect(verifySourceList(null, 0, [sources.raw]).ok).toBe(false)
+  })
+})
+
+// Huli: Kite's builds are only on its own channel, so no setting may send a check elsewhere.
+describe.runIf(CHANNEL_ONLY)('the source Kite updates from', () => {
+  it('is its own channel alone, with the cloud on or off and whatever was chosen', () => {
+    expect(GITHUB_SOURCE.url).toBe(RELEASES_URL)
+    expect(URL.parse(GITHUB_SOURCE.url)?.hostname).not.toMatch(/(^|\.)github(usercontent)?\.com$/)
+    for (const cloud of [true, false]) {
+      expect(sourceChoiceFor(cloud, 'auto')).toBe('github')
+      expect(sourceChoiceFor(cloud, 'github')).toBe('github')
+    }
   })
 })
