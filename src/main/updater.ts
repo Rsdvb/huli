@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { app } from 'electron'
 import type { AppUpdater, CancellationToken, ProgressInfo, UpdateFileInfo } from 'electron-updater'
 import type { SettingsFile } from '@shared/settings'
-import type { UpdateStatus } from '@shared/updates'
+import { UPDATE_CHANNEL_READY, type UpdateStatus } from '@shared/updates'
 import type { AppStateStore } from './app-state'
 import { loadAutoUpdater } from './auto-updater'
 import { broadcast } from './events'
@@ -103,7 +103,8 @@ export class Updater {
     const { lastRunVersion, dismissedUpdate, updateAfterMove } = deps.appState.get()
     this.mode = updateMode(process.platform, import.meta.env.MAIN_VITE_UPDATE_MODE)
     this.status = {
-      state: offReason(app.isPackaged, process.platform, process.env) ?? {
+      // Huli: a build without the channel's path updates as a development build does: never.
+      state: offReason(app.isPackaged && UPDATE_CHANNEL_READY, process.platform, process.env) ?? {
         kind: 'idle',
         checkedAt: null,
       },

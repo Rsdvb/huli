@@ -28,7 +28,8 @@ Kite 是 [Kettu](https://github.com/KettuAI/Kettu) 的个人分支：把 Claude 
 ## 构建
 
 见 [`tools/huli/README.md`](../tools/huli/README.md)。各平台由 GitHub Actions 构建（`huli-build.yml`），
-每晚的 `huli-sync.yml` 合并官方 Kettu 的 main。
+每晚的 `huli-sync.yml` 合并官方 Kettu 的 main。代码公开，安装包不公开：构建只发到自己的更新渠道，
+GitHub 上的 Release 只有说明、没有附件，iOS 只在 TestFlight 内部测试。
 
 ## 许可证
 
@@ -46,5 +47,6 @@ its own cloud (accounts, relay, push and a web client), a phone app for iOS and 
 routing through proxy nodes or a chosen network interface that fails closed, imports from Kettu and from the
 agents' own histories, extra Codex and Claude Code controls, and a signed, self-updating macOS build. Upstream
 is merged nightly; every difference is marked `Huli:` and listed in [`tools/huli/README.md`](../tools/huli/README.md).
-Licensed under [AGPL-3.0](../LICENSE) with the [additional permission](../LICENSE-EXCEPTION) Kettu grants. Not
+The code is public; the builds are not: they go only to Kite's own update channel, and the GitHub
+releases carry notes, not files. Licensed under [AGPL-3.0](../LICENSE) with the [additional permission](../LICENSE-EXCEPTION) Kettu grants. Not
 affiliated with KettuAI.

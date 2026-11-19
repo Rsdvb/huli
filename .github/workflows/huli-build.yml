@@ -5,6 +5,12 @@ name: Huli build
 # never set) and Huli Cloud's bundle; then puts them on Huli's update channel. The version is
 # 0.<UTC date>.<run number>.
 #
+# The repository is public but its builds are not: they go only to the update channel, whose path
+# comes from the HULI_UPDATE_PATH secret (tools/huli/update-path.mjs fills it into the code) and
+# whose URL from HULI_CHANNEL_URL. Artifacts only carry the files from job to job: each is kept a
+# day at most and the cleanup job deletes them all once the run ends, failed or not. The release
+# on GitHub is a tag with notes and no files, and iOS goes to TestFlight's internal testers only.
+#
 # It runs by hand, after huli-sync.yml merges Kettu's main, and every night; a night's run builds
 # only when main has commits the latest release lacks, and skips every job otherwise.
 on:
@@ -98,6 +104,8 @@ jobs:
         run: npm pkg set "version=${{ needs.version.outputs.version }}"
       - name: Rebrand
         run: node tools/huli/rebrand.mjs
+        env:
+          HULI_UPDATE_PATH: ${{ secrets.HULI_UPDATE_PATH }}
       - name: Fetch Cua Driver
         run: node tools/install/cua-driver.mjs
       - name: Fetch mihomo
@@ -112,6 +120,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: huli-${{ matrix.os }}
+          retention-days: 1
           path: |
             dist/*-setup.exe
             dist/*-setup.exe.blockmap
@@ -138,7 +147,10 @@ jobs:
         run: bash tools/huli/restore-apple-keys.sh
       - run: pnpm install --frozen-lockfile
       - run: npm pkg set "version=${{ needs.version.outputs.version }}"
-      - run: node tools/huli/rebrand.mjs
+      - name: Rebrand
+        run: node tools/huli/rebrand.mjs
+        env:
+          HULI_UPDATE_PATH: ${{ secrets.HULI_UPDATE_PATH }}
       - run: node tools/install/cua-driver.mjs
       - name: Fetch mihomo
         run: node tools/install/mihomo.mjs
@@ -187,6 +199,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: huli-macos
+          retention-days: 1
           path: |
             dist/*.dmg
             dist/*-mac.zip
@@ -212,13 +225,15 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: huli-cloud
+          retention-days: 1
           path: |
             cloud/dist/huli-cloud.mjs
             cloud/deploy/install.sh
           if-no-files-found: error
 
   # The phone app for iOS, on a macOS runner: signed through the App Store Connect API key kept
-  # there, uploaded to TestFlight and put on its public link. Its failure never holds anything back.
+  # there and uploaded to TestFlight for its internal testers only; no public link, which would let
+  # anyone install it. Its failure never holds anything back.
   ios:
     name: iOS
     needs: version
@@ -250,6 +265,12 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
           RUN: ${{ github.run_number }}
+      # The bundle takes the update channel from src/shared/updates.ts.
+      - name: Fill in the update path
+        working-directory: .
+        run: node tools/huli/update-path.mjs
+        env:
+          HULI_UPDATE_PATH: ${{ secrets.HULI_UPDATE_PATH }}
       - run: CI=1 npx expo prebuild --platform ios --no-install --clean
       - name: Build, sign and upload
         run: bash ../tools/huli/ios/build-ios.sh
@@ -257,13 +278,6 @@ jobs:
           APP_DIR: ${{ github.workspace }}/mobile
           HULI_TOOLS: ${{ github.workspace }}/tools/huli/ios
           OUT: ${{ runner.temp }}/ios
-      # Beta review often refuses a fresh build with "try again later"; the upload itself stands.
-      - name: Put it on TestFlight's public link
-        continue-on-error: true
-        run: node ../tools/huli/ios/publish-testflight.mjs "$RUN" "纸鸢 $VERSION 自动构建，包含电脑端和官方 Kettu 的最新改动。"
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          RUN: ${{ github.run_number }}
 
   # The phone app for Android, signed with Huli's own key (kept off the repository) and installed
   # straight from Huli's update channel. Its failure never holds the desktop release back.
@@ -295,6 +309,13 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
           RUN: ${{ github.run_number }}
+      # The bundle takes the update channel from src/shared/updates.ts; without it the app never
+      # hears of an update.
+      - name: Fill in the update path
+        working-directory: .
+        run: node tools/huli/update-path.mjs
+        env:
+          HULI_UPDATE_PATH: ${{ secrets.HULI_UPDATE_PATH }}
       - run: CI=1 npx expo prebuild --platform android --no-install
       - name: Build
         working-directory: mobile/android
@@ -316,6 +337,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: huli-android
+          retention-days: 1
           path: mobile/out/*.apk
           if-no-files-found: error
 
@@ -348,7 +370,8 @@ jobs:
             -o -name '*.AppImage' -o -name '*.dmg' -o -name '*-mac.zip' -o -name '*-mac.zip.blockmap'             -o -name 'latest*.yml' \
             -o -name 'huli-cloud.mjs' -o -name 'install.sh' -o -name '*.apk' \) -exec cp {} release/ \;
           node tools/workflow/sign-update-files.mjs release/latest*.yml
-          (cd release && sha256sum * > SHA256SUMS.txt)
+          # Beside release/, not in it: the sums go into the release's notes, never as a file.
+          (cd release && sha256sum *) > SHA256SUMS.txt
           ls -l release
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
@@ -360,7 +383,8 @@ jobs:
           KNOWN_HOSTS: ${{ secrets.HULI_UPLOAD_KNOWN_HOSTS }}
           VERSION: ${{ needs.version.outputs.version }}
           RUN: ${{ github.run_number }}
-          CHANNEL: ${{ vars.HULI_CHANNEL_URL }}
+          # A secret, which the log masks: it holds the channel's path.
+          CHANNEL: ${{ secrets.HULI_CHANNEL_URL }}
         run: |
           install -d -m 700 ~/.ssh
           (umask 077 && printf '%s\n' "$KEY" > ~/.ssh/huli_upload)
@@ -383,12 +407,40 @@ jobs:
             rsync -t --mkpath --chmod=F644 -e "$ssh" latest-android.json "$host:android/latest.json"
           done
           rm -f ~/.ssh/huli_upload
+      # Notes and a tag only, never the files: the repository is public and the builds are not.
+      # The tag stays, since the changes job compares main with the latest release's.
       - name: Publish a pre-release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          gh release create "v$VERSION" release/* --prerelease --target "$GITHUB_SHA" \
-            --title "Kite $VERSION" \
-            --notes "Kettu $(git ls-remote https://github.com/KettuAI/Kettu.git refs/heads/main | cut -c1-8) 合并后的自动编译。"
+          {
+            echo "Kettu $(git ls-remote https://github.com/KettuAI/Kettu.git refs/heads/main | cut -c1-8) 合并后的自动编译。安装包只在更新渠道上。"
+            echo
+            echo '```'
+            cat SHA256SUMS.txt
+            echo '```'
+          } > notes.md
+          gh release create "v$VERSION" --prerelease --target "$GITHUB_SHA" \
+            --title "Kite $VERSION" --notes-file notes.md
+
+  # Deletes every artifact of this run once the jobs that upload and download them are done, even
+  # when one failed, so the public repository never offers a build for download.
+  cleanup:
+    name: Delete the artifacts
+    needs: [changes, desktop, mac, cloud, android, release]
+    if: always() && needs.changes.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[].id')"
+          for id in $ids; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          done
+          echo "Deleted $(printf '%s\n' $ids | grep -c .) artifacts"

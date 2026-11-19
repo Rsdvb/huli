@@ -6,8 +6,9 @@ import path from 'node:path'
 
 /** Names the one place to download releases from, laid out as GitHub's, as for install.sh. */
 export const RELEASES_ENV = 'KETTU_RELEASES_URL'
-export const DOWNLOADS = 'https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996'
-export const RELEASES = 'https://huli.132-145-200-0.sslip.io/u/cf1d6239149f673d93bdb114e62f8996'
+// Huli: the path is filled in before a build (tools/huli/update-path.mjs).
+export const DOWNLOADS = 'https://huli.132-145-200-0.sslip.io/u/__HULI_UPDATE_PATH__'
+export const RELEASES = 'https://huli.132-145-200-0.sslip.io/u/__HULI_UPDATE_PATH__'
 
 // The latest release's redirect and its install script are small; a place this slow is down.
 const REQUEST_TIMEOUT_MS = 20_000
@@ -15,7 +16,9 @@ const REQUEST_TIMEOUT_MS = 20_000
 /** Kettu's download service and then GitHub, or only the place `pinned` names. */
 export function releaseSources(pinned: string | undefined): string[] {
   const one = pinned?.trim()
-  return one ? [one] : [DOWNLOADS, RELEASES]
+  if (one) return [one]
+  // Huli: a build without the channel's path has no place of its own.
+  return [DOWNLOADS, RELEASES].filter((url) => /\/u\/[0-9a-f]{32}$/.test(url))
 }
 
 /** What `kettu update`'s requests say they are, which tells the service an update from a download. */

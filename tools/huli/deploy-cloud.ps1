@@ -45,7 +45,8 @@ try {
   Push-Location $work
   try {
     $env:VITE_CONFIG_NATIVE_IGNORE_WARNING = 'true'
-    Invoke-Checked 'rebrand' { node tools/huli/rebrand.mjs }
+    # The hosted web client is public, so the update channel's path stays out of it.
+    Invoke-Checked 'rebrand' { node tools/huli/rebrand.mjs --no-update-path }
     Invoke-Checked 'cloud build' { npx.cmd vite build -c vite.cloud.config.mts }
     Invoke-Checked 'web build' { npx.cmd vite build -c vite.web.config.mts --mode hosted }
   } finally {
