@@ -12,6 +12,7 @@ import { sessionProxy } from './proxy'
 import type { SettingsSection } from './settings-schema'
 import {
   GITHUB_SOURCE,
+  sourceChoiceFor,
   SourceRun,
   SourcesFailed,
   updaterUserAgent,
@@ -254,7 +255,8 @@ export class Updater {
   /** GitHub only, as chosen or because Kettu's services are off on this computer. */
   private sourceChoice(): SourceChoice {
     const { cloud, updates } = this.deps.settings()
-    return cloud.enabled ? updates.source : 'github'
+    // Huli: through sourceChoiceFor, which holds Kite on its own channel alone.
+    return sourceChoiceFor(cloud.enabled, updates.source)
   }
 
   /**

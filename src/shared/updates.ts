@@ -31,6 +31,13 @@ export const RELEASES_URL = 'https://huli.132-145-200-0.sslip.io/u/__HULI_UPDATE
 /** Whether the build was given the channel's path, which is 32 hex characters. */
 export const UPDATE_CHANNEL_READY = /\/u\/[0-9a-f]{32}$/.test(RELEASES_URL)
 
+/**
+ * Huli: the channel is the one place updates come from, with the cloud on or off and whatever
+ * download source an older settings file chose; its builds are on no GitHub release. It serves no
+ * source list, so a check asks it alone, as upstream's GitHub only does with `RELEASES_URL`.
+ */
+export const CHANNEL_ONLY = true
+
 export function releaseUrl(version: string): string {
   // Huli: the channel serves files only; release notes are on the repository's releases.
   return `https://github.com/Rsdvb/huli/releases/tag/v${version}`

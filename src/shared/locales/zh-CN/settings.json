@@ -118,7 +118,7 @@
       "items": {
         "updates": {
           "name": "更新和主题",
-          "source": "GitHub"
+          "source": "Kettu 的更新渠道和 GitHub"
         },
         "installs": {
           "name": "Agent 和 Marketplace 的安装",
@@ -1147,9 +1147,9 @@
       "movesFirst": "Kettu 无法在当前位置更新，「更新」会先把它移到“应用程序”文件夹。",
       "moving": "正在把 Kettu 移到“应用程序”…",
       "failed": "无法检查更新",
-      "githubUnreachable": "连不上 GitHub",
-      "githubUnreachableDetail": "现在只从 GitHub 检查更新。把下载来源改回「自动」，就能同时使用 Kettu 的下载服务。",
-      "githubUnreachableLocal": "本地模式下只从 GitHub 检查更新。",
+      "githubUnreachable": "连不上 Kettu 的更新渠道",
+      "githubUnreachableDetail": "更新只来自 Kettu 自己的更新渠道。检查网络后再试一次。",
+      "githubUnreachableLocal": "本地模式下也只从 Kettu 自己的更新渠道检查更新。检查网络后再试一次。",
       "moveFailed": "无法把 Kettu 移到“应用程序”",
       "offDevelopment": "开发版本中不提供更新",
       "offPackageManager": "更新由你的包管理器安装",
@@ -1177,12 +1177,12 @@
     },
     "source": {
       "name": "下载来源",
-      "keywords": "下载 来源 线路 镜像 下载服务 download source mirror github service update",
+      "keywords": "下载 来源 更新渠道 download source update channel",
       "auto": "自动",
-      "github": "仅 GitHub",
-      "autoDetail": "按最快的线路下载，连不上时退回 GitHub。下载服务会记录版本、系统、地区和 IP，用来统计下载量。",
-      "githubDetail": "只从 GitHub 检查和下载，不连 Kettu 的下载服务。连不上 GitHub 时收不到更新。",
-      "local": "本地模式下只从 GitHub 检查和下载更新，不连 Kettu 的服务。"
+      "github": "仅更新渠道",
+      "autoDetail": "从 Kettu 自己的更新渠道检查和下载。",
+      "githubDetail": "只从 Kettu 自己的更新渠道检查和下载。连不上时收不到更新。",
+      "local": "本地模式下仍从 Kettu 自己的更新渠道检查和下载更新，不连 Kettu 云服务的其他部分。"
     },
     "github": {
       "name": "GitHub",

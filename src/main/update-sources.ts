@@ -3,7 +3,7 @@
 // update file, which the app checks whichever source served it.
 
 import { createPublicKey, verify, type KeyObject } from 'node:crypto'
-import { RELEASES_URL } from '@shared/updates'
+import { CHANNEL_ONLY, RELEASES_URL } from '@shared/updates'
 import KEYS from './update-keys.json'
 
 /** Kettu's download service, laid out as GitHub's releases. */
@@ -32,7 +32,16 @@ export interface SignedSourceList {
 /** Automatic tries the list's sources in order; GitHub only never reaches the download service. */
 export type SourceChoice = 'auto' | 'github'
 
-export const GITHUB_SOURCE: UpdateSource = { id: 'github', url: RELEASES_URL }
+// Huli: RELEASES_URL is Kite's own channel, so this names the channel, never GitHub's releases.
+export const GITHUB_SOURCE: UpdateSource = { id: 'channel', url: RELEASES_URL }
+
+/**
+ * What a check uses: GitHub only while Kettu's services are off, else the stored choice. Huli: Kite
+ * always asks its own channel alone (`CHANNEL_ONLY`), which `GITHUB_SOURCE` names.
+ */
+export function sourceChoiceFor(cloud: boolean, chosen: SourceChoice): SourceChoice {
+  return CHANNEL_ONLY || !cloud ? 'github' : chosen
+}
 
 export const BUILT_IN_SOURCES: SourceList = {
   serial: 0,

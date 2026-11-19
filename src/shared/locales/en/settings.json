@@ -119,7 +119,7 @@
       "items": {
         "updates": {
           "name": "Updates and themes",
-          "source": "GitHub"
+          "source": "Kettu’s update channel and GitHub"
         },
         "installs": {
           "name": "Agent and Marketplace installs",
@@ -1158,9 +1158,9 @@
       "movesFirst": "Kettu can’t update where it is, so Update moves it to Applications first.",
       "moving": "Moving Kettu to Applications…",
       "failed": "Couldn’t check for updates",
-      "githubUnreachable": "Couldn’t reach GitHub",
-      "githubUnreachableDetail": "Updates come only from GitHub now. Set Download source to Automatic to use Kettu’s download service too.",
-      "githubUnreachableLocal": "In Local mode, updates come only from GitHub.",
+      "githubUnreachable": "Couldn’t reach Kettu’s update channel",
+      "githubUnreachableDetail": "Updates come only from Kettu’s own update channel. Check your network, then try again.",
+      "githubUnreachableLocal": "Updates come only from Kettu’s own update channel, in Local mode too. Check your network, then try again.",
       "moveFailed": "Couldn’t move Kettu to Applications",
       "offDevelopment": "Updates are off in development builds",
       "offPackageManager": "Updates are installed by your package manager",
@@ -1188,12 +1188,12 @@
     },
     "source": {
       "name": "Download source",
-      "keywords": "download source mirror github service update",
+      "keywords": "download source update channel",
       "auto": "Automatic",
-      "github": "GitHub only",
-      "autoDetail": "Downloads from the fastest source and falls back to GitHub. Kettu’s download service records the version, system, region and IP address to count downloads.",
-      "githubDetail": "Checks and downloads from GitHub only, without Kettu’s download service. Updates stop if GitHub can’t be reached.",
-      "local": "In Local mode, updates come only from GitHub and Kettu’s services are never contacted."
+      "github": "Update channel only",
+      "autoDetail": "Checks and downloads from Kettu’s own update channel.",
+      "githubDetail": "Checks and downloads from Kettu’s own update channel only. Updates stop if it can’t be reached.",
+      "local": "In Local mode, updates still come from Kettu’s own update channel; nothing else of Kettu cloud is contacted."
     },
     "github": {
       "name": "GitHub",
