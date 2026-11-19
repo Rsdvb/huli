@@ -1,0 +1,239 @@
+name: Huli monitor
+
+# Every half hour: checks Kite Cloud, its relay, the hosted web client and the update channel's
+# latest.yml from outside. A check that fails is tried twice more a minute apart, so a blip raises
+# nothing; one still failing opens an issue labelled `monitor` (or comments on the open one when
+# what fails changed), which GitHub mails to the owner, and the first run that finds everything
+# healthy again closes it with a comment. The job fails only when the monitor itself could not
+# report, which GitHub mails as a failed run. See tools/huli/README.md (Monitor).
+on:
+  schedule:
+    - cron: '7,37 * * * *' # off the hour, when GitHub delays scheduled runs the most
+  workflow_dispatch:
+    inputs:
+      rehearse:
+        description: Report a made-up failure, to try the issue; the next run closes it
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: huli-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # No checkout: gh takes the repository from here, never from a git remote.
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      CLOUD: https://huli.132-145-200-0.sslip.io
+      WEB: https://app.huli.132-145-200-0.sslip.io
+    steps:
+      - name: Check the services
+        id: check
+        env:
+          # A secret, which the log masks: it holds the channel's path. Never print it, and never
+          # put it or anything curl says about it in the issue, which is public.
+          CHANNEL: ${{ secrets.HULI_CHANNEL_URL }}
+          REHEARSE: ${{ inputs.rehearse && 'true' || 'false' }}
+        run: |
+          set -uo pipefail
+          body="$RUNNER_TEMP/body"
+
+          # GET $1 into $body; sets status (000 when no answer), curl_exit and curl_error.
+          fetch() {
+            local out
+            out="$(curl --silent --proto '=https' --connect-timeout 10 --max-time 30 \
+              --user-agent huli-monitor --output "$body" \
+              --write-out '%{http_code} %{errormsg}' "$1")"
+            curl_exit=$?
+            status="${out%% *}"
+            curl_error="${out#* }"
+          }
+
+          # Why a fetch failed, in the issue's words; $1 is whether curl's own message may be shown.
+          failure() {
+            if [ "$curl_exit" -ne 0 ]; then
+              case "$curl_exit" in
+                6) reason='域名解析失败' ;;
+                7) reason='连不上服务器' ;;
+                28) reason='超时' ;;
+                35 | 51 | 58 | 60) reason='TLS 或证书有问题' ;;
+                *) reason='请求失败' ;;
+              esac
+              reason="$reason（curl $curl_exit）"
+              if [ "$1" = show ] && [ -n "$curl_error" ]; then reason="$reason：$curl_error"; fi
+            else
+              reason="HTTP $status"
+            fi
+          }
+
+          check_cloud() {
+            fetch "$CLOUD/healthz"
+            if [ "$curl_exit" -ne 0 ] || [ "$status" != 200 ]; then failure show; return 1; fi
+            if [ "$(tr -d '\r\n' < "$body")" != ok ]; then reason='/healthz 没有回答 ok'; return 1; fi
+          }
+
+          check_relay() {
+            fetch "$CLOUD/v1"
+            if [ "$curl_exit" -ne 0 ] || [ "$status" != 200 ]; then failure show; return 1; fi
+            if ! jq -e '(.relay | type == "string") and (.protocol | type == "number")' \
+              "$body" > /dev/null 2>&1; then
+              reason='/v1 的回答不是中转站信息'
+              return 1
+            fi
+          }
+
+          # The page, and the script it loads, so a deploy that lost its assets counts as down.
+          check_web() {
+            fetch "$WEB/"
+            if [ "$curl_exit" -ne 0 ] || [ "$status" != 200 ]; then failure show; return 1; fi
+            if ! grep -q 'id="root"' "$body"; then reason='首页不是网页版'; return 1; fi
+            local script
+            script="$(grep -o 'src="/assets/[^"]*\.js"' "$body" | head -n 1 | cut -d'"' -f2)"
+            if [ -z "$script" ]; then reason='首页没有引用脚本'; return 1; fi
+            fetch "$WEB$script"
+            if [ "$curl_exit" -ne 0 ] || [ "$status" != 200 ]; then
+              failure show
+              reason="脚本 $script：$reason"
+              return 1
+            fi
+          }
+
+          check_channel() {
+            if [ -z "${CHANNEL:-}" ]; then reason='没有设置 HULI_CHANNEL_URL'; return 1; fi
+            fetch "${CHANNEL%/}/latest/download/latest.yml"
+            if [ "$curl_exit" -ne 0 ] || [ "$status" != 200 ]; then failure hide; return 1; fi
+            local version
+            version="$(sed -n "s/^version:[[:space:]]*['\"]\{0,1\}\([0-9][0-9A-Za-z.+-]*\).*/\1/p" \
+              "$body" | head -n 1)"
+            if [ -z "$version" ]; then reason='latest.yml 里没有 version'; return 1; fi
+            echo "latest.yml names version $version"
+          }
+
+          check_rehearsal() {
+            reason='手动运行时选了 rehearse，不是真的故障'
+            return 1
+          }
+
+          names=(cloud relay web channel)
+          declare -A label=([cloud]='Kite Cloud' [relay]='中转' [web]='网页版' [channel]='更新渠道'
+            [rehearsal]='演练')
+          declare -A where=([cloud]="$CLOUD/healthz" [relay]="$CLOUD/v1" [web]="$WEB/"
+            [channel]='latest/download/latest.yml' [rehearsal]='')
+          declare -A reasons=()
+          if [ "$REHEARSE" = true ]; then names+=(rehearsal); fi
+
+          pending=("${names[@]}")
+          for attempt in 1 2 3; do
+            failing=()
+            for name in "${pending[@]}"; do
+              reason=''
+              if "check_$name"; then
+                echo "ok: ${label[$name]}"
+                unset "reasons[$name]"
+              else
+                echo "::warning::${label[$name]}: $reason (attempt $attempt of 3)"
+                reasons[$name]="$reason"
+                failing+=("$name")
+              fi
+            done
+            pending=("${failing[@]}")
+            if [ "${#pending[@]}" -eq 0 ] || [ "$attempt" -eq 3 ]; then break; fi
+            sleep 60
+          done
+
+          if [ "${#pending[@]}" -eq 0 ]; then
+            echo 'result=healthy' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          what=''
+          for name in "${pending[@]}"; do what="${what:+$what、}${label[$name]}"; done
+          {
+            echo 'result=failing'
+            echo "what=$what"
+            echo "state=$(IFS=,; echo "${pending[*]}")"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo '三次检查（每次间隔一分钟）都没通过：'
+            echo
+            for name in "${pending[@]}"; do
+              echo "- **${label[$name]}**${where[$name]:+（${where[$name]}）}：${reasons[$name]}"
+            done
+          } > "$RUNNER_TEMP/failures.md"
+
+      - name: Open, update or close the issue
+        if: steps.check.outputs.result == 'healthy' || steps.check.outputs.result == 'failing'
+        env:
+          RESULT: ${{ steps.check.outputs.result }}
+          WHAT: ${{ steps.check.outputs.what }}
+          STATE: ${{ steps.check.outputs.state }}
+          OWNER: ${{ github.repository_owner }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title_prefix='Kite 服务异常'
+          when="$(date -u '+%F %H:%M UTC')（北京时间 $(TZ=Asia/Shanghai date '+%H:%M')）"
+
+          # The open issue this monitor keeps: by its label, else by its title should the label
+          # have been missing when it was opened.
+          issue="$(gh issue list --state open --label monitor --limit 1 \
+            --json number --jq '.[0].number // empty')"
+          if [ -z "$issue" ]; then
+            issue="$(gh issue list --state open --limit 100 --json number,title \
+              --jq "[.[] | select(.title | startswith(\"$title_prefix\"))][0].number // empty")"
+          fi
+
+          if [ "$RESULT" = healthy ]; then
+            if [ -n "$issue" ]; then
+              gh issue close "$issue" --comment "$(printf '全部恢复正常：%s\n\n运行记录：%s\n' \
+                "$when" "$RUN_URL")"
+              echo "Closed #$issue: every service is healthy again."
+            else
+              echo 'Every service is healthy.'
+            fi
+            exit 0
+          fi
+
+          report="$RUNNER_TEMP/report.md"
+          {
+            echo "<!-- huli-monitor-state: $STATE -->"
+            cat "$RUNNER_TEMP/failures.md"
+            echo
+            echo "时间：$when"
+            echo
+            echo "运行记录：$RUN_URL"
+          } > "$report"
+
+          if [ -z "$issue" ]; then
+            {
+              echo
+              echo "全部恢复后监控会自动关掉这个 issue。@$OWNER"
+            } >> "$report"
+            if ! gh label create monitor --color B60205 \
+              --description 'Opened and closed by huli-monitor.yml' --force; then
+              echo '::warning::Could not create the monitor label; opening the issue without it.'
+            fi
+            if ! gh issue create --title "$title_prefix：$WHAT" --body-file "$report" \
+              --label monitor; then
+              gh issue create --title "$title_prefix：$WHAT" --body-file "$report"
+            fi
+            exit 0
+          fi
+
+          # Already open: speak again only when what fails changed, not every half hour.
+          last="$(gh issue view "$issue" --json body,comments --jq '[.body, .comments[].body]
+            | map(capture("<!-- huli-monitor-state: (?<s>[^ ]*) -->").s? // empty) | last // ""')"
+          if [ "$last" = "$STATE" ]; then
+            echo "#$issue already reports what still fails ($STATE)."
+            exit 0
+          fi
+          gh issue edit "$issue" --title "$title_prefix：$WHAT"
+          gh issue comment "$issue" --body-file "$report"
+          echo "Updated #$issue: now $STATE."

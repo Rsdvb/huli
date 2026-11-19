@@ -408,6 +408,28 @@ disables every other workflow after each merge, new ones included.
   `tools/huli/newest-xcode.sh` selects the newest Xcode on the runner first and prints its SDK,
   since App Store Connect only takes builds made with the newest major SDK (ITMS-90725: iOS 27
   from April 2027); if the image has none new enough, move to a newer `macos-*` image.
+- `huli-monitor.yml`, every half hour (at :07 and :37) and by hand: checks from outside that Kite
+  Cloud answers `/healthz` with `ok`, the relay's `/v1` gives its info, the web client's page and
+  its script load, and the update channel's `latest/download/latest.yml` (under the
+  `HULI_CHANNEL_URL` secret, never printed, nor named in the issue) answers with a `version:`.
+  Each request gives up after 30 s; a check that fails is tried twice more a minute apart, so a
+  blip raises nothing. One still failing opens an issue, `Kite 服务异常：<what>`, labelled
+  `monitor` and mentioning the owner; while it is open the monitor comments only when what fails
+  changes, and the first run that finds everything healthy closes it with a comment. Closing it by
+  hand while something still fails gets a new one on the next run. The run itself fails only when
+  the monitor could not report, which GitHub mails as a failed run. To try the issue without an
+  outage: `gh workflow run huli-monitor.yml -R Rsdvb/huli -f rehearse=true`, which reports a
+  made-up failure that the next run closes.
+
+The monitor's alerts are GitHub's notifications: the owner keeps this repository watched
+(Watching, or Custom with Issues) and email notifications on in GitHub's settings, or a new issue
+or comment reaches no inbox. The workflows that open issues (`huli-monitor.yml`, `huli-sync.yml`)
+set `GH_REPO`, so gh never takes the repository from a git remote: `huli-sync.yml` adds Kettu's as
+`upstream`, which gh prefers over `origin`, and its issues used to go to KettuAI/Kettu and fail.
+GitHub disables the scheduled workflows of a public repository after 60 days without activity in
+it; the nightly sync's merges normally keep it active, but should upstream go quiet and nothing be
+pushed for that long, the schedules stop until re-enabled under Actions or with
+`gh workflow enable <file> -R Rsdvb/huli` for each `huli-*` workflow that has one.
 
 Lint covers `mobile/` too, through the root ESLint config: the phone app gets the React hooks
 rules as the renderer does, may `require()` images as Metro needs, and drops props by leaving them
