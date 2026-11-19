@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'react-native'
+import { useIsFocused } from 'expo-router'
 import { G, Icon } from './icons'
 import { compactCount, durationText } from './work'
 import { GlassButton } from '../Glass'
@@ -45,16 +46,23 @@ const dotOf = (size: number) => {
   return { width: side, height: side, borderRadius: side / 2 }
 }
 
-/** A three by three grid of dots a wave of light runs across while the agent works. */
+/**
+ * A three by three grid of dots a wave of light runs across while the agent works, on the native
+ * driver; it rests while its screen is covered by another, and holds still under Reduce Motion.
+ */
 export function WorkingDots(props: { color: string; size?: number }) {
   const wave = useRef(new Animated.Value(0)).current
   const [still, setStill] = useState(false)
+  const focused = useIsFocused()
   useEffect(() => {
+    if (!focused) return
     let loop: Animated.CompositeAnimation | null = null
     let live = true
     void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
       if (!live) return
       if (reduce) return setStill(true)
+      // From the start of the wave, as a loop stopped midway would repeat only its rest.
+      wave.setValue(0)
       loop = Animated.loop(
         Animated.timing(wave, {
           toValue: 1,
@@ -69,7 +77,7 @@ export function WorkingDots(props: { color: string; size?: number }) {
       live = false
       loop?.stop()
     }
-  }, [wave])
+  }, [wave, focused])
   return (
     <View
       style={[
