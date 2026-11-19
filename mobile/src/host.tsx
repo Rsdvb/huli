@@ -415,13 +415,20 @@ const REFRESH_LIMIT = 15_000
 
 /**
  * Runs a read of a list with a signal that aborts after REFRESH_LIMIT, so whatever waits on it, such
- * as a pull-to-refresh spinner, always settles. A read cut off by the limit fails in words.
+ * as a pull-to-refresh spinner, always settles, even when the read does not pass the signal on. A
+ * read cut off by the limit fails in words.
  */
 export async function withinRefreshLimit<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const limit = new AbortController()
-  const timer = setTimeout(() => limit.abort(), REFRESH_LIMIT)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      limit.abort()
+      reject(new Error('电脑没有及时回应。'))
+    }, REFRESH_LIMIT)
+  })
   try {
-    return await read(limit.signal)
+    return await Promise.race([read(limit.signal), expired])
   } catch (error) {
     throw limit.signal.aborted ? new Error('电脑没有及时回应。') : error
   } finally {

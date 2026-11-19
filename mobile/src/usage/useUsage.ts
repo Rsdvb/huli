@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { HostEvent } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import type { UsageScope, UsageStatus, UsageSummary } from '@shared/usage'
+import { withinRefreshLimit } from '../host'
 import { errorText } from '../sessions'
 import {
   addDays,
@@ -73,12 +74,13 @@ export function useUsage(
       setHoursError(null)
       try {
         const starts = hourStarts(range)
-        const summary = (await link.request('usage.summary', {
-          dayStarts: starts,
-          from: range.from,
-          to: range.to,
-          scope,
-        })) as UsageSummary
+        const summary = (await withinRefreshLimit((signal) =>
+          link.request(
+            'usage.summary',
+            { dayStarts: starts, from: range.from, to: range.to, scope },
+            signal,
+          ),
+        )) as UsageSummary
         if (ticket === asked.current) setHours({ key: readKey, starts, summary })
       } catch (failure) {
         if (ticket === asked.current) setHoursError(errorText(failure))
@@ -93,7 +95,10 @@ export function useUsage(
     const chosen = choiceRef.current
     setLoading(true)
     try {
-      const status = (await link.request('usage.status', undefined)) as UsageStatus
+      // A read waits for a dropped link to come back; the limit makes it fail, so a pull settles.
+      const status = (await withinRefreshLimit((signal) =>
+        link.request('usage.status', undefined, signal),
+      )) as UsageStatus
       const scope: UsageScope = status.fromComputer ? wanted : 'kettu'
       const today = dayOf(Date.now())
       const heat = heatmapRange(today, FIRST_DAY)
@@ -107,13 +112,19 @@ export function useUsage(
           to: Math.max(range.to, heat.to),
         })
         const clock = oneDay(range) ? { from: addDays(range.to, -CLOCK_DAYS), to: range.to } : range
-        const summary = (await link.request('usage.summary', {
-          dayStarts: starts,
-          from: range.from,
-          to: range.to,
-          scope,
-          clock: { ...clock, zones: clockZones(clock.from, clock.to) },
-        })) as UsageSummary
+        const summary = (await withinRefreshLimit((signal) =>
+          link.request(
+            'usage.summary',
+            {
+              dayStarts: starts,
+              from: range.from,
+              to: range.to,
+              scope,
+              clock: { ...clock, zones: clockZones(clock.from, clock.to) },
+            },
+            signal,
+          ),
+        )) as UsageSummary
         if (ticket !== asked.current) return
         if (pass === 0 && rangeOf(chosen, today, summary.first).from !== range.from) {
           first = summary.first

@@ -24,7 +24,8 @@ import type { HostAdminEvent, HostSettingsPart } from '@shared/remote/host-admin
 import type { HostLink } from '@shared/remote/link'
 import type { SettingsPatch } from '@shared/settings'
 import { admin } from '../admin'
-import { useHost } from '../host'
+import { useHost, useHostActions, withinRefreshLimit } from '../host'
+import { ListSyncNote } from '../components/SyncNote'
 import { errorText } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
 import { EmptyState } from '../ui/EmptyState'
@@ -68,7 +69,7 @@ export interface Read<T> {
  */
 export function useRead<T>(
   key: string | null,
-  read: (link: HostLink) => Promise<T>,
+  read: (link: HostLink, signal: AbortSignal) => Promise<T>,
   events: readonly string[] = [],
 ): Read<T> {
   const host = useHost()
@@ -87,7 +88,8 @@ export function useRead<T>(
     const asked = current.current
     if (!link || asked === null) return
     try {
-      const value = await reader.current(link)
+      // A read waits for a dropped link to come back; the limit makes it fail instead.
+      const value = await withinRefreshLimit((signal) => reader.current(link, signal))
       if (current.current === asked) setState({ key: asked, value, error: null })
     } catch (failure) {
       if (current.current !== asked) return
@@ -242,6 +244,26 @@ export function ManagePage(props: {
   const insets = useSafeAreaInsets()
   const [refreshing, setRefreshing] = useState(false)
   const { onRefresh } = props
+  const connected = useConnected()
+  const { retry } = useHostActions()
+  // A pull that failed, timed out or ran while the computer was away, as home says it.
+  const [failure, setFailure] = useState<string | null>(null)
+  const live = useRef(connected)
+  live.current = connected
+  useEffect(() => {
+    if (connected) setFailure(null)
+  }, [connected])
+  const pull = async () => {
+    if (!onRefresh) return
+    if (!live.current) retry()
+    try {
+      await withinRefreshLimit(() => onRefresh())
+      setFailure(live.current ? null : '电脑没有连上。')
+    } catch (error) {
+      setFailure(errorText(error))
+      throw error
+    }
+  }
   return (
     <Screen readable>
       <Animated.ScrollView
@@ -261,7 +283,7 @@ export function ManagePage(props: {
               progressViewOffset={header.height}
               onRefresh={() => {
                 setRefreshing(true)
-                void onRefresh()
+                void pull()
                   .catch(() => {})
                   .finally(() => setRefreshing(false))
               }}
@@ -269,6 +291,7 @@ export function ManagePage(props: {
           ) : undefined
         }
       >
+        <ListSyncNote error={failure} syncedAt={null} onRetry={pull} />
         {props.intro ? (
           <Text style={[typeScale.footnote, styles.intro, { color: c.textSecondary }]}>
             {props.intro}

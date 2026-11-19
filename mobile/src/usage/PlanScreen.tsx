@@ -8,7 +8,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, PlanLimit } from '@shared/agent-host'
 import type { UsageStatus, UsageSummary } from '@shared/usage'
-import { useActiveHost, useAgents, useHostState, useMaybeLink } from '../host'
+import { useActiveHost, useAgents, useHostState, useMaybeLink, withinRefreshLimit } from '../host'
 import { ManagePage } from '../manage/kit'
 import { clockOf, errorText } from '../sessions'
 import { ConcentricRings } from '../ui/charts'
@@ -118,7 +118,9 @@ export default function PlanScreen() {
     setRefreshing(true)
     setError(null)
     try {
-      await link.request('agents.refreshLimits', { agentId: agent.id, force: true, ask: true })
+      await withinRefreshLimit((signal) =>
+        link.request('agents.refreshLimits', { agentId: agent.id, force: true, ask: true }, signal),
+      )
     } catch (failure) {
       setError(errorText(failure))
     } finally {
@@ -134,19 +136,27 @@ export default function PlanScreen() {
     if (!link || !agentId || !starts) return
     setModelsError(null)
     try {
-      const status = (await link.request('usage.status', undefined)) as UsageStatus
+      const status = (await withinRefreshLimit((signal) =>
+        link.request('usage.status', undefined, signal),
+      )) as UsageStatus
       const to = Date.now()
       const read = await Promise.all(
         starts
           .split(',')
           .map(Number)
           .map(async (from) => {
-            const summary = (await link.request('usage.summary', {
-              dayStarts: [from, to],
-              from,
-              to,
-              scope: status.fromComputer ? 'computer' : 'kettu',
-            })) as UsageSummary
+            const summary = (await withinRefreshLimit((signal) =>
+              link.request(
+                'usage.summary',
+                {
+                  dayStarts: [from, to],
+                  from,
+                  to,
+                  scope: status.fromComputer ? 'computer' : 'kettu',
+                },
+                signal,
+              ),
+            )) as UsageSummary
             return [from, modelRows(summary, agentId)] as const
           }),
       )
