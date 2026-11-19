@@ -1,10 +1,12 @@
 // The home-screen widget's snapshot (plugins/widgets/HuliSessionsWidget.swift reads it): how many
 // sessions run and wait on the paired computer, and the latest of them with their state. Only
 // titles and states, and no titles while the user hides what notifications say. The module writes
-// it to the App Group and reloads the widget; it is written again only when it changed. Siri,
+// it to the App Group and reloads the widget; it is written again only when what it shows changed,
+// at most every few seconds. Siri,
 // Shortcuts and the Control Center controls read it too (plugins/widgets/HuliOpenIntents.swift):
 // the sessions they offer to open, on the computer `hostId` names (SavedHost.id).
 
+import { AppState } from 'react-native'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import { HuliLive } from '../../modules/huli-live'
 import { needsYou, sessionTitle } from '../sessions'
@@ -33,7 +35,33 @@ export interface WidgetInput {
   hidden: boolean
 }
 
-let written: string | null = null
+/** The least time between two writes: each reloads the widget, and the system budgets reloads. */
+const WRITE_EVERY = 5000
+
+/** What the widget shows, as last written or waiting to be. */
+let shown: string | null = null
+let queued: object | null = null
+let lastWrite = 0
+let timer: ReturnType<typeof setTimeout> | null = null
+
+function flush(): void {
+  if (timer) clearTimeout(timer)
+  timer = null
+  const snapshot = queued
+  queued = null
+  if (!snapshot || !HuliLive) return
+  lastWrite = Date.now()
+  try {
+    HuliLive.setWidgetSnapshot(JSON.stringify({ ...snapshot, at: lastWrite }))
+  } catch {
+    shown = null
+  }
+}
+
+// A change still waiting goes out before the app may be suspended.
+AppState.addEventListener('change', (next) => {
+  if (next !== 'active' && queued) flush()
+})
 
 export function writeWidget(input: WidgetInput): void {
   if (!HuliLive) return
@@ -64,12 +92,17 @@ export function writeWidget(input: WidgetInput): void {
     waiting: input.paired ? waiting : 0,
     sessions: input.paired ? latest : [],
   }
-  const text = JSON.stringify(snapshot)
-  if (text === written) return
-  written = text
-  try {
-    HuliLive.setWidgetSnapshot(JSON.stringify({ ...snapshot, at: Date.now() }))
-  } catch {
-    written = null
-  }
+  // A row's time only orders the rows, and changes every second a session runs: it is written,
+  // since the widget reads it, but a change of it alone is no change.
+  const text = JSON.stringify({
+    ...snapshot,
+    sessions: snapshot.sessions.map(({ at, ...row }) => row),
+  })
+  if (text === shown) return
+  shown = text
+  queued = snapshot
+  if (timer) return
+  const wait = lastWrite + WRITE_EVERY - Date.now()
+  if (wait <= 0) flush()
+  else timer = setTimeout(flush, wait)
 }
