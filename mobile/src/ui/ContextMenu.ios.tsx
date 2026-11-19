@@ -14,7 +14,6 @@ import {
   RNHostView,
   Section,
   Text,
-  Toggle,
 } from '@expo/ui/swift-ui'
 import { disabled as disabledModifier } from '@expo/ui/swift-ui/modifiers'
 import { menuGroups, type MenuItem, type MenuNode } from './menu'
@@ -36,30 +35,27 @@ function Item(props: { item: MenuItem; depth: number }) {
       </Menu>
     )
   }
-  if (item.checked !== undefined && item.subtitle) {
-    // Two texts read in a menu as the item's title and its subtitle.
-    return (
-      <Toggle
-        isOn={item.checked}
-        {...(mods ? { modifiers: mods } : {})}
-        onIsOnChange={() => item.onPress?.()}
-      >
-        {[
-          ...(item.icon ? [<Image key="icon" systemName={item.icon} />] : []),
-          <Text key="title">{item.label}</Text>,
-          <Text key="subtitle">{item.subtitle}</Text>,
-        ]}
-      </Toggle>
-    )
-  }
   if (item.checked !== undefined) {
+    // A button with a check, not a SwiftUI Toggle, which flips itself on a tap and so showed the
+    // tapped item as chosen whatever the screen made of it.
+    const mark = item.checked ? 'checkmark' : item.icon
+    if (item.subtitle) {
+      return (
+        <Button {...(mods ? { modifiers: mods } : {})} onPress={() => item.onPress?.()}>
+          {[
+            ...(mark ? [<Image key="icon" systemName={mark} />] : []),
+            <Text key="title">{item.label}</Text>,
+            <Text key="subtitle">{item.subtitle}</Text>,
+          ]}
+        </Button>
+      )
+    }
     return (
-      <Toggle
-        isOn={item.checked}
+      <Button
         label={item.label}
-        {...icon}
+        {...(mark ? { systemImage: mark } : {})}
         {...(mods ? { modifiers: mods } : {})}
-        onIsOnChange={() => item.onPress?.()}
+        onPress={() => item.onPress?.()}
       />
     )
   }
