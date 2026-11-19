@@ -57,6 +57,10 @@ import { AgentsStage, BrowserStage, CloudDiagram, FoxStage, NoAgentsStage } from
 
 type Choice = 'account' | 'self-hosted'
 
+// Huli: the same count either way; going without an account skips the sign-in's step instead of
+// taking it off the count, which changed under the user as they chose.
+const STEPS = 4
+
 // --duration-slow and --ease-out-quart, as the launch cover fades.
 const SLOW = 0.3
 const LEAVE_DELAY = 0.14
@@ -90,7 +94,7 @@ export default function Onboarding() {
     save({ onboarding: { step: next } })
   }
   const finish = () => save({ onboarding: { done: true } })
-  const count = choice === 'self-hosted' ? 3 : 4
+  const count = STEPS
   const present = useIsPresent()
 
   return (
@@ -276,7 +280,7 @@ function Choose({
           />
         </div>
         <div className="kob-card__in">
-          <Steps at={2} count={self ? 3 : 4} />
+          <Steps at={2} count={STEPS} />
           <h1 className="kob-title">{t('choose.title')}</h1>
           <p className="kob-lead">{t('choose.lead')}</p>
           <RadioGroup
