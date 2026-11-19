@@ -42,6 +42,7 @@ import {
   type UsageTone,
 } from '@renderer/features/sidebar/plan-usage'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
+import { useShortWindow } from '@renderer/hooks/use-short-window'
 import { clockTime, countdown, fullTime, limitLabel, money, tokens } from '@renderer/lib/format'
 import { errorMessage, host, sessionHost } from '@renderer/lib/host'
 import { isUsedUp, limitLevel, limitPercent, shownPercent } from '@renderer/lib/plan-limit'
@@ -61,23 +62,15 @@ const HOUR = 60 * MINUTE
 const contextTone = (share: number): UsageTone =>
   usageTone({ usedPercent: share * 100, state: 'ok' })
 
-const SHORT_WINDOW = {
-  five_hour: 'usage.shortWindow.five_hour',
-  seven_day: 'usage.shortWindow.seven_day',
-  seven_day_opus: 'usage.shortWindow.seven_day_opus',
-  seven_day_sonnet: 'usage.shortWindow.seven_day_sonnet',
-  monthly: 'usage.shortWindow.monthly',
-  annual: 'usage.shortWindow.annual',
-} as const
-
-const isShortWindow = (name: string): name is keyof typeof SHORT_WINDOW =>
-  Object.hasOwn(SHORT_WINDOW, name)
-
-/** The limit to warn about in the control row: a reached one first, then the fullest warning. */
+/**
+ * The limit to warn about in the control row: a reached one first, then the fullest from 70% used.
+ * By the figure, not the `warning` state, which only Claude Code reports: the plans Kettu reads
+ * itself, such as Antigravity's, say `ok` until a window runs out.
+ */
 function warningLimit(limits: PlanLimit[]): PlanLimit | null {
   const reached = limits.find((l) => l.state === 'reached')
   if (reached) return reached
-  const warnings = limits.filter((l) => l.state === 'warning')
+  const warnings = limits.filter((l) => limitLevel(l) !== 'ok')
   return warnings.sort((a, b) => (b.usedPercent ?? 0) - (a.usedPercent ?? 0))[0] ?? null
 }
 
@@ -298,8 +291,7 @@ export function ContextButton({
   const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
   // The tray names a limit only from 70% on; below that it stays in the popover.
-  const nearest = warningLimit(holding)
-  const warning = nearest && limitLevel(nearest) !== 'ok' ? nearest : null
+  const warning = warningLimit(holding)
   // An account of another kind has no plan; an unknown one shows the limits the agent reports.
   const subscribed = account ? account.kind === 'account' : limits.length > 0
   const cached = useUsageStore((s) => s.context[sessionId])
@@ -430,8 +422,9 @@ export function ContextButton({
 function TrayLimit({ limit }: { limit: PlanLimit }) {
   const { t } = useTranslation(['composer', 'common'])
   const view = useLimitView()
+  const shortName = useShortWindow()
   const reset = useClock((now) => inlineReset(limit, now))
-  const name = isShortWindow(limit.window) ? t(SHORT_WINDOW[limit.window]) : limitLabel(limit)
+  const name = shortName(limit)
   const figure =
     reset && isUsedUp(limit)
       ? t('common:planInline.out')

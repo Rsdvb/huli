@@ -1,6 +1,7 @@
 import type { PlanLimit } from '@shared/agent-host'
 import { currentLocale, i18n } from './i18n'
 import { hostPath } from './host-paths'
+import { groupName } from './plan-limit'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -184,11 +185,15 @@ export function limitLabel(limit: Pick<PlanLimit, 'window' | 'label'>): string {
   const key = `planWindow.${limit.window}`
   if (i18n.exists(key)) return i18n.t(key as 'planWindow.five_hour')
   // Claude Code names a weekly limit per model, "Weekly · Fable", and Antigravity both its
-  // windows per model group, "5-hour · Gemini Models", in English.
+  // windows per model group, "5-hour · Gemini Models", in English; a group reads as the tray's
+  // and the account cards' do, "Claude 和 GPT".
+  const and = i18n.t('tasks:and')
   const weekly = /^Weekly · (.+)$/.exec(limit.label)
-  if (weekly) return i18n.t('planWindow.weeklyOf', { model: weekly[1] })
+  if (weekly) return i18n.t('planWindow.weeklyOf', { model: groupName(weekly[1]!, and) })
   const fiveHour = /^5-hour · (.+)$/.exec(limit.label)
-  return fiveHour ? i18n.t('planWindow.fiveHourOf', { model: fiveHour[1] }) : limit.label
+  return fiveHour
+    ? i18n.t('planWindow.fiveHourOf', { model: groupName(fiveHour[1]!, and) })
+    : limit.label
 }
 
 /**
