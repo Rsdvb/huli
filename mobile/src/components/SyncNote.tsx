@@ -1,6 +1,7 @@
 // A quiet line while what a list shows is not live: connecting, or the cache's copy, and when it
-// was last in step with the computer, with a way to try again once the computer seems away.
-// Nothing while the computer is connected and has answered.
+// was last in step with the computer, with a way to try again once the computer seems away or
+// did not answer. Nothing while the computer is connected and has answered. A spinner shows only
+// while something is under way, never for a sync that already failed.
 
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { sameFields, useHostActions, useHostSelector, type HostData } from '../host'
@@ -23,19 +24,29 @@ const pick = (d: HostData) => ({
   unreachable: d.unreachable,
   syncedAt: d.syncedAt,
   down: d.down,
+  syncFailed: d.syncFailed,
 })
 
 export function SyncNote() {
   const { c } = useTokens()
   const host = useHostSelector(pick, sameFields)
-  const { retry } = useHostActions()
+  const { retry, refresh } = useHostActions()
+  const live = host.state.kind === 'connected'
   // A link down only a moment, as on coming back to the front, says nothing yet.
-  const connected = host.state.kind === 'connected' || !host.down
+  const connected = live || !host.down
   if (connected && !host.fromCache) return null
   const away = !connected && host.unreachable
-  const state = connected ? '正在同步…' : away ? '未连接' : (linkProblem(host.state) ?? '')
+  // Connected, yet the lists are still the cache's: the computer did not answer them in time.
+  const failed = live && host.syncFailed
+  const state = live
+    ? failed
+      ? '没能同步'
+      : '正在同步…'
+    : away
+      ? '未连接'
+      : (linkProblem(host.state) ?? '')
   const since = host.syncedAt ? `上次同步 ${when(host.syncedAt)}` : null
-  const canRetry = away && host.state.kind !== 'stopped'
+  const canRetry = failed || (away && host.state.kind !== 'stopped')
   const queued = !connected && host.state.kind !== 'stopped' ? '发出的消息会在连上后送达' : null
   return (
     <View
@@ -45,7 +56,7 @@ export function SyncNote() {
       accessibilityLabel={[state, since, queued].filter(Boolean).join('，')}
     >
       <View style={styles.mark}>
-        {away ? (
+        {away || failed ? (
           <View style={[styles.dot, { backgroundColor: c.textTertiary }]} />
         ) : (
           <ActivityIndicator size="small" color={c.textTertiary} />
@@ -68,11 +79,12 @@ export function SyncNote() {
         <Press
           onPress={() => {
             haptic.tap()
-            retry()
+            if (failed) void refresh().catch(() => {})
+            else retry()
           }}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="重试连接"
+          accessibilityLabel={failed ? '重试同步' : '重试连接'}
         >
           <Text style={[typeScale.footnote, { color: c.tint, fontWeight: '600' }]}>重试</Text>
         </Press>

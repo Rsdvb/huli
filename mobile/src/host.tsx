@@ -67,6 +67,8 @@ export interface HostData {
   unreachable: boolean
   /** The link has not been up for DOWN_AFTER, so what says it is down may show. */
   down: boolean
+  /** The last refresh of the lists failed or timed out; while `fromCache`, they are still old. */
+  syncFailed: boolean
 }
 
 export interface HostActions {
@@ -80,6 +82,7 @@ export interface HostActions {
   switchTo(id: string): void
   /** The name this phone shows for a computer; null goes back to the computer's own. */
   rename(id: string, label: string | null): void
+  /** Reads the lists again; settles within REFRESH_LIMIT, connected or not. */
   refresh(): Promise<void>
   /** The computer took a new name for this phone; kept until its next welcome says so too. */
   renamedDevice(name: string): void
@@ -131,6 +134,7 @@ const store = createStore<HostData>({
   syncedAt: null,
   unreachable: false,
   down: false,
+  syncFailed: false,
 })
 const subscribe = store.subscribe
 
@@ -380,8 +384,8 @@ function timeout(ms: number): Promise<void> {
 }
 
 /** A computer's folders of sessions; none from a computer older than folders, or on a failure. */
-export function readFolders(link: HostLink): Promise<SessionFolder[]> {
-  return (link.request('folders.list', undefined) as Promise<SessionFolder[]>).then(
+export function readFolders(link: HostLink, signal?: AbortSignal): Promise<SessionFolder[]> {
+  return (link.request('folders.list', undefined, signal) as Promise<SessionFolder[]>).then(
     (list) => (Array.isArray(list) ? list : []),
     () => [],
   )
@@ -392,6 +396,13 @@ export const UNREACHABLE_AFTER = 8000
 
 /** How long the link may be down before the app says it reconnects. */
 const DOWN_AFTER = 600
+
+/**
+ * How long a refresh of the lists may take. A request waits for the link to come back rather than
+ * failing, so without a limit a refresh made while the computer is away never settles, and a
+ * pull-to-refresh spinner waiting on it stays on the home screen until the app is killed.
+ */
+const REFRESH_LIMIT = 15_000
 
 const selectReady = (d: HostData) => d.ready
 const selectStateKind = (d: HostData) => d.state.kind
@@ -436,6 +447,7 @@ export function HostProvider(props: { children: ReactNode }) {
       loaded: false,
       fromCache: false,
       syncedAt: null,
+      syncFailed: false,
     })
   }, [])
 
@@ -482,23 +494,34 @@ export function HostProvider(props: { children: ReactNode }) {
     const link = getHost().ready?.link
     if (!link) return
     const mine = generation.current
-    const [list, agentList, projectList, folderList] = await Promise.all([
-      link.request('sessions.list', {}) as Promise<SessionSummary[]>,
-      link.request('agents.list', undefined) as Promise<AgentStatus[]>,
-      link.request('projects.list', undefined) as Promise<Project[]>,
-      readFolders(link),
-    ])
-    if (mine !== generation.current) return
-    fresh.current = true
-    setHost((d) => ({
-      sessions: reconcile(d.sessions, list),
-      agents: reconcile(d.agents, agentList),
-      projects: same(d.projects, projectList) ? d.projects : projectList,
-      folders: same(d.folders, folderList) ? d.folders : folderList,
-      loaded: true,
-      fromCache: false,
-      syncedAt: Date.now(),
-    }))
+    const limit = new AbortController()
+    const timer = setTimeout(() => limit.abort(), REFRESH_LIMIT)
+    setHost({ syncFailed: false })
+    try {
+      const [list, agentList, projectList, folderList] = await Promise.all([
+        link.request('sessions.list', {}, limit.signal) as Promise<SessionSummary[]>,
+        link.request('agents.list', undefined, limit.signal) as Promise<AgentStatus[]>,
+        link.request('projects.list', undefined, limit.signal) as Promise<Project[]>,
+        readFolders(link, limit.signal),
+      ])
+      if (mine !== generation.current) return
+      fresh.current = true
+      setHost((d) => ({
+        sessions: reconcile(d.sessions, list),
+        agents: reconcile(d.agents, agentList),
+        projects: same(d.projects, projectList) ? d.projects : projectList,
+        folders: same(d.folders, folderList) ? d.folders : folderList,
+        loaded: true,
+        fromCache: false,
+        syncedAt: Date.now(),
+        syncFailed: false,
+      }))
+    } catch (error) {
+      if (mine === generation.current) setHost({ syncFailed: true })
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
   }, [])
 
   /** Forgets a computer here: its push keys, its cache, its place in the list. */
