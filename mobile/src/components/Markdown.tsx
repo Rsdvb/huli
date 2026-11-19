@@ -24,6 +24,7 @@ import {
   type TextStyle,
 } from 'react-native'
 import { Image } from 'expo-image'
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { cacheFor } from '../ui/memory'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { textKey, useDisclosure } from '../ui/session/disclosure'
@@ -424,6 +425,35 @@ function columnWidth(texts: string[]): number {
   return Math.min(260, Math.max(64, longest * 7.6 + 24))
 }
 
+/** How wide the soft edge is that says a wide table goes on past the box. */
+const TABLE_FADE = 24
+
+/** A soft edge of the page's color over a table's side, toward the cells cut off there. */
+function TableFade(props: { side: 'left' | 'right'; color: string }) {
+  const id = `table-fade-${props.side}`
+  return (
+    <Svg
+      pointerEvents="none"
+      width={TABLE_FADE}
+      height="100%"
+      style={[styles.tableFade, props.side === 'left' ? { left: 0 } : { right: 0 }]}
+    >
+      <Defs>
+        <LinearGradient id={id} x1="0" y1="0" x2="1" y2="0">
+          <Stop offset="0" stopColor={props.color} stopOpacity={props.side === 'left' ? 1 : 0} />
+          <Stop offset="1" stopColor={props.color} stopOpacity={props.side === 'left' ? 0 : 1} />
+        </LinearGradient>
+      </Defs>
+      <Rect width="100%" height="100%" fill={`url(#${id})`} />
+    </Svg>
+  )
+}
+
+/**
+ * A table in its rounded box, whose edges always show: a narrow one fills the width, its columns
+ * shared out by their contents; a wider one keeps each column wide enough for its cells and
+ * scrolls sideways inside the box, with a soft edge on the side that has more.
+ */
 function Table(props: { block: Extract<Block, { kind: 'table' }>; look: Look }) {
   const { block, look } = props
   const { c } = look.t
@@ -432,8 +462,14 @@ function Table(props: { block: Extract<Block, { kind: 'table' }>; look: Look }) 
     [block],
   )
   const numeric = useMemo(() => numericColumns(block), [block])
+  const [box, setBox] = useState(0)
+  const [content, setContent] = useState(0)
+  const [edges, setEdges] = useState({ start: true, end: false })
+  const scrolls = box > 0 && content > box + 1
   const cellStyle = (col: number): TextStyle => ({
-    width: widths[col],
+    flexBasis: widths[col],
+    flexGrow: widths[col],
+    flexShrink: 0,
     textAlign: block.align[col] ?? (numeric.has(col) ? 'right' : 'left'),
     fontVariant: numeric.has(col) ? ['tabular-nums'] : [],
     fontSize: 14,
@@ -442,33 +478,53 @@ function Table(props: { block: Extract<Block, { kind: 'table' }>; look: Look }) 
     paddingVertical: 8,
   })
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-      <View style={[styles.table, { borderColor: c.border }]}>
-        <View style={[styles.tableRow, { backgroundColor: c.fill }]}>
-          {block.head.map((cell, col) => (
-            <Para
-              key={col}
-              text={cell}
-              look={look}
-              style={{ ...cellStyle(col), fontWeight: '600' }}
-            />
-          ))}
-        </View>
-        {block.rows.map((row, r) => (
-          <View
-            key={r}
-            style={[
-              styles.tableRow,
-              { borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth },
-            ]}
-          >
-            {block.head.map((_, col) => (
-              <Para key={col} text={row[col] ?? ''} look={look} style={cellStyle(col)} />
+    <View
+      style={[styles.table, { borderColor: c.border }]}
+      onLayout={(event) => setBox(event.nativeEvent.layout.width)}
+    >
+      <ScrollView
+        horizontal
+        bounces={scrolls}
+        showsHorizontalScrollIndicator={scrolls}
+        contentContainerStyle={styles.tableContent}
+        onContentSizeChange={(width) => setContent(width)}
+        scrollEventThrottle={32}
+        onScroll={(event) => {
+          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+          const start = contentOffset.x <= 1
+          const end = contentOffset.x + layoutMeasurement.width >= contentSize.width - 1
+          setEdges((was) => (was.start === start && was.end === end ? was : { start, end }))
+        }}
+      >
+        <View style={styles.tableContent}>
+          <View style={[styles.tableRow, { backgroundColor: c.fill }]}>
+            {block.head.map((cell, col) => (
+              <Para
+                key={col}
+                text={cell}
+                look={look}
+                style={{ ...cellStyle(col), fontWeight: '600' }}
+              />
             ))}
           </View>
-        ))}
-      </View>
-    </ScrollView>
+          {block.rows.map((row, r) => (
+            <View
+              key={r}
+              style={[
+                styles.tableRow,
+                { borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth },
+              ]}
+            >
+              {block.head.map((_, col) => (
+                <Para key={col} text={row[col] ?? ''} look={look} style={cellStyle(col)} />
+              ))}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+      {scrolls && !edges.start && <TableFade side="left" color={c.bg} />}
+      {scrolls && !edges.end && <TableFade side="right" color={c.bg} />}
+    </View>
   )
 }
 
@@ -817,5 +873,7 @@ const styles = StyleSheet.create({
   quote: { borderLeftWidth: 3, paddingLeft: 12, borderRadius: 1 },
   item: { flexDirection: 'row' },
   table: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, overflow: 'hidden' },
+  tableContent: { flexGrow: 1 },
+  tableFade: { position: 'absolute', top: 0, bottom: 0 },
   tableRow: { flexDirection: 'row' },
 })
