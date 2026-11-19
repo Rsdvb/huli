@@ -18,7 +18,7 @@
     "listed_other": "{{count}} 个会话",
     "projects_other": "{{count}} 个文件夹",
     "alreadyHere_other": "{{count}} 个已在这里",
-    "hiddenSubagents_other": "略过 {{count}} 个子智能体会话",
+    "hiddenSubagents_other": "略过 {{count}} 个子 Agent 会话",
     "hiddenEmpty_other": "略过 {{count}} 个没有消息的会话",
     "separator": " · ",
     "listing": "已列出 {{count}} 个…",
@@ -38,7 +38,7 @@
     "importingTitle": "正在导入 {{done}}/{{total}}：{{title}}",
     "stop": "停止",
     "close": "关闭",
-    "readOnly": "只读取 Agent 自己的文件。子智能体会在这里打开它的会话时回到会话下面。终端里正开着的 Claude Code 会话不会导入，请先在那边关掉。"
+    "readOnly": "只读取 Agent 自己的文件。子 Agent 会在这里打开它的会话时回到会话下面。终端里正开着的 Claude Code 会话不会导入，请先在那边关掉。"
   },
   "result": {
     "imported_other": "已导入 {{count}} 个会话。",
