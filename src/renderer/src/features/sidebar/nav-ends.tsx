@@ -9,7 +9,7 @@ import { TurnDots } from '@renderer/features/session/turn-dots'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { dayOf } from '@renderer/features/usage/model'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
-import { limitLabel, tokens } from '@renderer/lib/format'
+import { exactCount, limitLabel, tokens } from '@renderer/lib/format'
 import { LIMIT_TEXT, limitLevel, limitPercent } from '@renderer/lib/plan-limit'
 import { accountAgents, type AccountAgent } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
@@ -61,11 +61,15 @@ export function TodayTokens() {
   useEffect(() => void loadToday(), [day])
   // Quiet until there is something to count.
   if (!today) return null
+  // Huli: the bare figure says what it counts on hover, in full, as the cost beside it does.
   return (
-    <span className={ROW_END}>
-      <span aria-hidden>{tokens(today)}</span>
-      <span className="sr-only">{t('nav.today', { tokens: tokens(today) })}</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger render={<span className={ROW_END} />} delay={700}>
+        <span aria-hidden>{tokens(today)}</span>
+        <span className="sr-only">{t('nav.today', { tokens: tokens(today) })}</span>
+      </TooltipTrigger>
+      <TooltipContent>{t('nav.today', { tokens: exactCount(today) })}</TooltipContent>
+    </Tooltip>
   )
 }
 
