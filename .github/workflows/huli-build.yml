@@ -164,9 +164,9 @@ jobs:
             pass="$(cat "$keys/mac-developer-id.pass")"
             echo "::add-mask::$pass"
             # electron-builder 26 takes the config's empty identity as a name to look for, so the
-            # certificate's own name is given instead.
+            # certificate's own name is given instead, without the prefix it adds itself.
             identity="$(openssl x509 -in "$keys/mac-developer-id.pem" -noout -subject \
-              | sed -n 's/.*CN *= *\([^/,]*\).*/\1/p')"
+              | sed -n 's/.*CN *= *Developer ID Application: *\([^/,]*\).*/\1/p')"
             {
               echo "HULI_MAC_IDENTITY=$identity"
               echo "MAIN_VITE_UPDATE_MODE=install"
