@@ -80,6 +80,7 @@ xcrun simctl ui "$UDID" appearance light
 sleep 2
 xcrun simctl io "$UDID" screenshot "$RESULTS/last-light.png"
 
+cp -R "$KETTU_DAEMON_DATA/logs" "$RESULTS/daemon-logs" 2>/dev/null || true
 kill "$DAEMON" || true
 xcrun simctl shutdown "$UDID" || true
 xcrun simctl delete "$UDID" || true

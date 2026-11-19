@@ -22,19 +22,20 @@ appId: io.github.rsdvb.huli
     text: '选一个项目，或者直接说你要什么。'
     optional: true
 - tapOn: '发送'
+# The session opens once the agent has started, which on a fresh runner takes a while.
 - extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 15000
-    optional: true
+    visible:
+      text: '回复 .*'
+    timeout: 120000
 - takeScreenshot: s02-tables
 - tapOn:
     text: '回复 .*'
 - inputText: '/basic-turn'
 - tapOn: '发送'
 - extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 15000
-    optional: true
+    visible:
+      text: '回复 .*'
+    timeout: 60000
 - tapOn:
     text: '回复 .*'
 - inputText: '/long-turn'
