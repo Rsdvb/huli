@@ -220,6 +220,45 @@ describe('sending a push', () => {
     })
   })
 
+  it('gives the activity of what waits a stale date, and ends it at once', async () => {
+    const START = 'c3'.repeat(32)
+    const UPDATE = 'e5'.repeat(32)
+    const target = {
+      apns: { token: DEVICE_TOKEN, environment: 'sandbox' as const },
+      activity: { start: START, update: UPDATE },
+    }
+    const waiting = (
+      action: 'start' | 'update' | 'end',
+      low: boolean,
+    ): Extract<PushJob, { type: 'activity' }> => ({
+      deviceId: 'phone',
+      subject: 'activity',
+      type: 'activity',
+      action,
+      count: 1,
+      sessionId: 's1',
+      title: 'Fix the login form',
+      staleS: 300,
+      low,
+    })
+    const t = await setup([200, 200, 200], { target })
+    t.sender.send(waiting('start', false))
+    await expect.poll(() => t.requests.length).toBe(1)
+    t.sender.send(waiting('update', true))
+    await expect.poll(() => t.requests.length).toBe(2)
+    t.sender.send(waiting('end', false))
+    await t.finished
+    const [start, update, end] = t.requests.map((request) => parsePushRequest(request.body)!)
+    expect(start).toMatchObject({ token: START, push: { event: 'start', stale: 300 } })
+    expect(update).toMatchObject({
+      token: UPDATE,
+      push: { event: 'update', stale: 300, low: true },
+    })
+    expect(end).toMatchObject({ token: UPDATE, push: { event: 'end' } })
+    expect(end!.push).not.toHaveProperty('stale')
+    expect(end!.push).not.toHaveProperty('dismiss')
+  })
+
   it('tries again after the gateway or the network fails, and logs nothing of the push', async () => {
     const t = await setup([502, new TypeError('fetch failed'), 200])
     t.sender.send(job)

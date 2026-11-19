@@ -64,6 +64,10 @@ export type PushJob = {
       count: number
       sessionId: string | null
       title: string | null
+      /** How long the state stays fresh, in seconds. */
+      staleS: number
+      /** A renewal that may wait for a good moment. */
+      low: boolean
     }
   | {
       type: 'progress'
@@ -132,6 +136,14 @@ export const PROGRESS_SUBJECT = 'progress'
 
 const MERGE_MS = 1000
 
+/**
+ * How long the state of the activity of what waits stays fresh, and when one that did not change
+ * is sent again. The host ends it only once the device handed its token over, so one it started
+ * while the app was away says, once stale, that it may be old rather than that a request waits.
+ */
+const WAITING_STALE_S = 5 * 60
+const WAITING_RENEW_MS = 4 * 60_000
+
 /** Phases that need the user, which reach the activity at once. */
 const NEEDS_YOU: ReadonlySet<ProgressPhase> = new Set(['approval', 'question'])
 /** The turns a device remembers having had an activity for, so a push starts none again. */
@@ -163,10 +175,18 @@ interface Told {
   requestId: string | undefined
 }
 
+/** A device's activity of what waits, as the host keeps it. */
 interface Activity {
-  running: boolean
+  /** Its token, once the device handed it over; null until then. */
+  token: string | null
+  /** The token the device's target named when the host started it: an earlier activity's. */
+  before: string | null
+  /** What it showed last, and when that was sent. */
   count: number
   sessionId: string | null
+  sentAt: number
+  startedAt: number
+  timer: NodeJS.Timeout | null
 }
 
 /** A kind about an agent rather than a session. */
@@ -379,7 +399,7 @@ export class Notifier {
   /** A device was removed: nothing more goes to it. */
   forget(deviceId: string): void {
     this.told.delete(deviceId)
-    this.activities.delete(deviceId)
+    this.dropActivity(deviceId)
     const timer = this.activityTimers.get(deviceId)
     if (timer) clearTimeout(timer)
     this.activityTimers.delete(deviceId)
@@ -402,6 +422,10 @@ export class Notifier {
     this.queued.clear()
     for (const timer of this.activityTimers.values()) clearTimeout(timer)
     this.activityTimers.clear()
+    for (const state of this.activities.values()) {
+      if (state.timer) clearTimeout(state.timer)
+    }
+    this.activities.clear()
     for (const state of this.progressActivities.values()) {
       if (state.timer) clearTimeout(state.timer)
     }
@@ -492,8 +516,8 @@ export class Notifier {
   }
 
   private updateActivity(deviceId: string): void {
+    if (this.stopped) return
     const device = this.options.devices().find((entry) => entry.id === deviceId)
-    const state = this.activities.get(deviceId) ?? { running: false, count: 0, sessionId: null }
     const target = device?.push.target
     const tokens = target?.activity
     const choices = device?.push.choices
@@ -507,7 +531,19 @@ export class Notifier {
       latest = this.order.findLast((sessionId) => !choices.muted.includes(sessionId)) ?? null
     }
     const title = latest ? (this.open.get(latest)?.title ?? null) : null
-    const send = (action: 'start' | 'update' | 'end'): void =>
+    const now = this.now()
+    // The update token is the one of the activity the device runs, once the app saw it: the one
+    // its target named when the host started this one was an earlier activity's.
+    const given = tokens?.update ?? null
+    let state = this.activities.get(deviceId)
+    if (state && state.token === null && given !== null && given !== state.before) {
+      state.token = given
+    } else if (state && state.token !== null && given !== state.token) {
+      // The device ended it, or the user removed it.
+      this.dropActivity(deviceId)
+      state = undefined
+    }
+    const send = (action: 'start' | 'update' | 'end', low = false): void =>
       this.options.send({
         deviceId,
         subject: ACTIVITY_SUBJECT,
@@ -516,25 +552,65 @@ export class Notifier {
         count,
         sessionId: latest,
         title,
+        staleS: WAITING_STALE_S,
+        low,
       })
     if (count > 0) {
-      if (!state.running) {
+      if (!state) {
         if (!tokens?.start || this.held(choices!)) return
         // An activity that follows a turn says what waits too.
         if (this.progressActivities.has(deviceId)) return
         send('start')
-      } else {
-        if (count === state.count && latest === state.sessionId) return
-        // The activity's own token comes from the device after it starts; the update waits for it.
-        if (!tokens?.update) return
-        send('update')
+        this.activities.set(deviceId, {
+          token: null,
+          before: given,
+          count,
+          sessionId: latest,
+          sentAt: now,
+          startedAt: now,
+          timer: null,
+        })
+        return
       }
-      this.activities.set(deviceId, { running: true, count, sessionId: latest })
+      if (state.token === null) {
+        // Nothing reaches it before its token comes; one whose token never came is let go.
+        if (now - state.startedAt > this.timing.tokenWaitMs) this.dropActivity(deviceId)
+        return
+      }
+      const changed = count !== state.count || latest !== state.sessionId
+      if (!changed && now < state.sentAt + WAITING_RENEW_MS) {
+        this.activityLater(deviceId, state)
+        return
+      }
+      send('update', !changed)
+      state.count = count
+      state.sessionId = latest
+      state.sentAt = now
+      this.activityLater(deviceId, state)
       return
     }
-    if (!state.running) return
-    // Without the activity's own token it cannot be ended by push; the app ends it when it opens.
-    if (tokens?.update) send('end')
+    if (!state) return
+    // Without its token it cannot be ended by push: it goes stale, and the app ends it when it opens.
+    if (state.token !== null) send('end')
+    this.dropActivity(deviceId)
+  }
+
+  /** Looks at the device's activity of what waits again when it is due to be renewed. */
+  private activityLater(deviceId: string, state: Activity): void {
+    if (state.timer) return
+    state.timer = setTimeout(
+      () => {
+        state.timer = null
+        if (this.activities.get(deviceId) === state) this.updateActivity(deviceId)
+      },
+      Math.max(0, state.sentAt + WAITING_RENEW_MS - this.now()),
+    )
+    state.timer.unref?.()
+  }
+
+  private dropActivity(deviceId: string): void {
+    const state = this.activities.get(deviceId)
+    if (state?.timer) clearTimeout(state.timer)
     this.activities.delete(deviceId)
   }
 
@@ -685,7 +761,7 @@ export class Notifier {
     const { choices, target } = device.push
     if (!choices.liveProgress || !target?.activity?.start || this.held(choices)) return
     // The activity of what waits shows the user already.
-    if (this.activities.get(device.id)?.running) return
+    if (this.activities.has(device.id)) return
     if (this.progressTurns.get(device.id)?.has(turn)) return
     // A turn that started in front of the device was the device's to follow, or to decline.
     const since = this.awaySince.get(device.id) ?? 0
