@@ -156,8 +156,11 @@ Generated before a build (not hand edits, never committed):
   `brand-text.mjs`; the script reads and writes the files.
   - Every locale but `star.json` (the prompts to star Kettu's repository) has its values
     rewritten: the word Kettu, except in `KettuAI/Kettu` and in the phrases `KEEP` lists (the
-    attribution and Star Kettu); Kettu's service copy (`COPY`), `kettu.sh` and the home folder
-    `.kettu/`; and pairing-link placeholders (`LINKS`), which are swapped even though they are URLs.
+    attribution and Star Kettu); first, where the copy names Kettu's service after the app (its
+    account, relay, cloud and published pages), Kite Cloud in both languages (`SERVICE`), so 纸鸢
+    and Kite name only the app; Kettu's service copy (`COPY`), `kettu.sh`, the home folder
+    `.kettu/` and the phone app's platforms (Android too); and pairing-link placeholders
+    (`LINKS`), which are swapped even though they are URLs.
   - `ZH_APP_NAME` lists the Chinese strings whose `{{name}}` is the app's own (the macOS app menu,
     the quit dialog, the tray's menu), which main fills with `app.name`, Kite: in Chinese they say
     纸鸢. `ADD` adds the keys rebranded code reads: About's title, 纸鸢 Kite in Chinese.

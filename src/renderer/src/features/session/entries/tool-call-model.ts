@@ -20,6 +20,7 @@ import type { IconSvgElement } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import type { ThreadEntry, ToolEntry, ToolKind } from '@shared/thread'
 import type { ToolCallLabels, ToolCallStatus } from '@renderer/components/affect/tool-call-card'
+import { shortDuration } from '@renderer/lib/format'
 import { toolMedia } from '../media/named'
 import { toolTime } from '../tool-times'
 import { toolLabel } from './helpers'
@@ -138,6 +139,12 @@ export function useToolCallLabels(): Partial<ToolCallLabels> {
         t(`toolCall.announce.${status}`, { name }),
       copy: (what: string) => t('toolCall.copy', { what: what.toLowerCase() }),
       copied: t('toolCall.copied'),
+      // Huli: in the language's own units, as the turn's other times are; a running call's in
+      // whole seconds, as its timer ticks.
+      time: (ms: number, live: boolean) =>
+        ms < 1000
+          ? t('time.underSecond', { ns: 'common' })
+          : shortDuration(live ? ms - (ms % 1000) : ms),
     }),
     [t],
   )

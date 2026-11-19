@@ -1,5 +1,6 @@
 {
   "title": "总览",
+  "description_zero": "现在没有需要你看的内容",
   "description_other": "{{count}} 个任务和会话有需要你看的内容",
   "separator": " · ",
   "noPlan": "没有 Plan",
@@ -12,9 +13,9 @@
   "subSessions_other": "{{count}} 个子会话",
   "views": {
     "label": "视图",
-    "inbox": "Inbox",
-    "flow": "Flow",
-    "timeline": "Timeline"
+    "inbox": "收件箱",
+    "flow": "流程",
+    "timeline": "时间线"
   },
   "groupBy": {
     "label": "分组",

@@ -254,16 +254,48 @@ function Swap({ id, children, glide = false }: { id: string; children: ReactNode
     const timer = window.setTimeout(() => setOut(null), 260);
     return () => window.clearTimeout(timer);
   }, [out]);
-  // The new line's own width, read before paint; the box then glides there from the old one
+  // The new line's own width, read before paint; the box then glides there from the old one.
+  // Huli: and lets go of it once there, so the box follows its text again: a width read once,
+  // before the interface's font had loaded, cut the name short for good ("Opus 5...").
+  const boxRef = useRef<HTMLSpanElement>(null);
   const inRef = useRef<HTMLSpanElement>(null);
+  const outRef = useRef<HTMLSpanElement>(null);
   const [width, setWidth] = useState<number | null>(null);
+  const widthNow = useRef<number | null>(null);
+  widthNow.current = width;
+  const mounted = useRef(false);
   useLayoutEffect(() => {
-    if (glide && inRef.current) setWidth(inRef.current.scrollWidth);
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    const box = boxRef.current;
+    const to = inRef.current?.scrollWidth;
+    if (!glide || !box || to === undefined) return;
+    const from = widthNow.current ?? outRef.current?.scrollWidth;
+    if (from === undefined || reduced() || Math.abs(from - to) < 1) {
+      setWidth(null);
+      return;
+    }
+    // From the text's own width, which no transition starts from, to a number it can glide from
+    if (widthNow.current === null) {
+      box.style.width = `${from}px`;
+      void box.offsetWidth;
+    }
+    setWidth(to);
   }, [glide, id]);
   return (
-    <span className="ui-mdpc__swap" data-glide={glide ? "" : undefined} style={glide && width !== null ? { width } : undefined}>
+    <span
+      ref={boxRef}
+      className="ui-mdpc__swap"
+      data-glide={glide ? "" : undefined}
+      style={glide && width !== null ? { width } : undefined}
+      onTransitionEnd={(e) => {
+        if (e.target === e.currentTarget && e.propertyName === "width") setWidth(null);
+      }}
+    >
       {out && (
-        <span key={`out-${out.id}`} className="ui-mdpc__swap-item" data-out="" aria-hidden="true">
+        <span key={`out-${out.id}`} ref={outRef} className="ui-mdpc__swap-item" data-out="" aria-hidden="true">
           {out.node}
         </span>
       )}

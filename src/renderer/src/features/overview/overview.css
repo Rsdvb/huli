@@ -3,7 +3,8 @@
 
 .k-ov {
   --ov-done: var(--thread-done);
-  --ov-run: var(--thread-fox);
+  /* Huli: running in the calm blue of what goes on, not the orange beside the stopped red */
+  --ov-run: var(--primary-foreground);
   --ov-you: var(--warning);
   --ov-err: var(--danger);
   position: relative;

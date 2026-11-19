@@ -104,7 +104,18 @@
       "ofUsed": "of context used",
       "tokens": "{{tokens}} tokens",
       "cacheHit": "Cache hit",
-      "cached": "{{percent}} cached"
+      "cached": "{{percent}} cached",
+      "parts": {
+        "messages": "Messages",
+        "memoryFiles": "Memory files",
+        "systemTools": "System tools",
+        "mcpTools": "MCP tools",
+        "systemPrompt": "System prompt",
+        "skills": "Skills",
+        "mcpInstructions": "MCP server instructions",
+        "autocompactBuffer": "Autocompact buffer",
+        "freeSpace": "Free space"
+      }
     },
     "breakdown": {
       "loading": "Reading what fills the context",
@@ -194,6 +205,7 @@
     "lastRequest": {
       "title": "Last request",
       "line": "{{input}} in · {{output}} out · {{hit}} cached",
+      "io": "{{input}} in · {{output}} out",
       "running": "running"
     },
     "everyRequest": "Every request"

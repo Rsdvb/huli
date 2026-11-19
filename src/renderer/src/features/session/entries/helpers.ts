@@ -13,7 +13,7 @@ import {
   type ToolEntry,
   type ToolKind,
 } from '@shared/thread'
-import { basename, duration, relativePath } from '@renderer/lib/format'
+import { basename, duration, shownPath } from '@renderer/lib/format'
 import { errorCode, host } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
 import { nameHints } from '../project-names'
@@ -57,7 +57,7 @@ export function toolLabel(
   if (fileKind && location) {
     return {
       verb: i18n.t(`${verbs}.${fileKind}`),
-      target: relativePath(location, projectPath),
+      target: shownPath(location, projectPath),
       kind: 'path',
     }
   }

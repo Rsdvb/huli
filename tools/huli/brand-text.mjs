@@ -90,19 +90,77 @@ export const CODE = {
 }
 
 /**
+ * Kettu's service where its copy names it after the app, swapped before the name, in the order
+ * applied: the account, the relay, the cloud and the published pages are Kite Cloud's, while the
+ * app stays Kite (ZH_NAME). A pattern is replaced as `String.replace` does. The Marketplace, the
+ * problem reports and the app itself keep the app's name.
+ */
+const SERVICE = [
+  // The cloud switch's note: Kite Cloud is its owner's own, not a free service.
+  [
+    'The services Kettu runs, with a free Kettu account',
+    `${CLOUD}'s services, with your own account`,
+  ],
+  ['Kettu 运行的服务，用一个免费的 Kettu 账号', `${CLOUD} 的服务，用你自己的账号`],
+  // The first run's notes on the relay, which Kite Cloud runs.
+  ['even from Kettu', `even from ${CLOUD}`],
+  ['Kettu passes your sessions along', `${CLOUD} passes your sessions along`],
+  ['Kettu 也看不到', `${CLOUD} 也看不到`],
+  ['Kettu 只转交加密后的会话', `${CLOUD} 只转交加密后的会话`],
+  // The Account page's line, which would name Kite Cloud twice.
+  [', for Kettu’s cloud services', ''],
+  ['，用于 Kettu 的云服务', ''],
+  ['Kettu account', `${CLOUD} account`],
+  ['Kettu 账号', `${CLOUD} 账号`],
+  ['Kettu relay', `${CLOUD} relay`],
+  ['Kettu 中继', `${CLOUD} 中继`],
+  ['Kettu cloud', CLOUD],
+  ['Kettu 云端存储', `${CLOUD} 存储`],
+  ['Kettu 云服务', CLOUD],
+  ['Kettu 的云服务', CLOUD],
+  [/Kettu[’']s (?:cloud services|services|servers)\b/g, CLOUD],
+  [/(经过|不连) Kettu 的服务器/g, `$1 ${CLOUD}`],
+  [/(开着|打开) Kettu 的服务(?!器)/g, `$1 ${CLOUD}`],
+  [/\b(Sign|signed) in to Kettu\b/g, `$1 in to ${CLOUD}`],
+  ['登录 Kettu', `登录 ${CLOUD}`],
+  // Where artifacts publish.
+  [/\b(publish(?:es|ed|ing)?\b[^.]*? to|sharing to|on) Kettu\b(?! Marketplace)/gi, `$1 ${CLOUD}`],
+  [/发布到 Kettu(?! 的 Marketplace)/g, `发布到 ${CLOUD}`],
+  ['在 Kettu 上用新标签页', `在 ${CLOUD} 上用新标签页`],
+  ['放在 Kettu 上的', `放在 ${CLOUD} 上的`],
+]
+
+/**
  * Copy about Kettu's own service, in the order applied: the account is Kite Cloud, signed in to
  * with a password and a one-time code, and run by its owner. URLs, as placeholders, stay.
  */
 const COPY = [
   ['用邮箱、GitHub、Google 或 Apple 登录，账号免费。', `用你自己的 ${CLOUD} 账号登录。`],
   ["Use email, GitHub, Google or Apple. It's free.", `Sign in with your own ${CLOUD} account.`],
-  ['如需帮助，请联系 hello@kettu.sh。', '在服务器上用 huli-cloud 命令处理。'],
-  ['Contact hello@kettu.sh for help.', 'Fix it on the server with the huli-cloud command.'],
+  ['如需帮助，请联系 hello@kettu.sh。', `请联系 ${CLOUD} 的管理员。`],
+  ['Contact hello@kettu.sh for help.', `Ask the admin of ${CLOUD} for help.`],
   ['www.kettu.sh', CLOUD],
   ['kettu.sh', CLOUD],
   // The home folder, as `KETTU_HOME_FOLDER` in src/shared/storage.ts names it.
   ['.kettu/', '.huli/'],
+  // Kite's phone app runs on Android too, and pairs as Kettu's iOS app does.
+  ['iPhone、iPad 或另一台电脑', 'iPhone、iPad、Android 手机或另一台电脑'],
+  [
+    'an iPhone, an iPad or another computer',
+    'an iPhone, an iPad, an Android phone or another computer',
+  ],
+  ['iPhone 或 iPad 上的', 'iPhone、iPad 或 Android 手机上的'],
+  ['on an iPhone or iPad', 'on an iPhone, iPad or Android phone'],
+  ['iOS 应用', '手机应用'],
+  ['iOS app', 'Phone app'],
 ]
+
+const HAN = '[\\u3400-\\u9FFF\\uF900-\\uFAFF]'
+/** Chinese copy sets CLOUD off from Han characters with a space, as it does any Latin word. */
+const spaceCloud = (text) =>
+  text
+    .replace(new RegExp(`(${HAN})(?=${CLOUD})`, 'g'), '$1 ')
+    .replace(new RegExp(`(${CLOUD})(?=${HAN})`, 'g'), '$1 ')
 
 /** Links shown as examples, swapped even where the text is a URL: a pairing link's address. */
 const LINKS = [['https://kettu.sh/pair#', 'https://huli.invalid/pair#']]
@@ -114,7 +172,12 @@ const LINKS = [['https://kettu.sh/pair#', 'https://huli.invalid/pair#']]
  */
 export const ARTWORK = 'tools/huli/brand/assets/desktop'
 
-const swapAll = (text, pairs) => pairs.reduce((out, [from, to]) => out.split(from).join(to), text)
+const swapAll = (text, pairs) =>
+  pairs.reduce(
+    (out, [from, to]) =>
+      from instanceof RegExp ? out.replace(from, to) : out.split(from).join(to),
+    text,
+  )
 
 function swapName(text, zh) {
   const kept = []
@@ -123,6 +186,7 @@ function swapName(text, zh) {
     out = out.split(phrase).join(`\uE000${kept.length}\uE000`)
     kept.push(phrase)
   }
+  out = swapAll(out, SERVICE)
   out = out.replace(WORD, (match, before, after, offset, whole) => {
     if (!zh) return `${before}${NAME}${after}`
     // The Chinese name sits in Chinese without the spaces a Latin word takes, but keeps them
@@ -141,7 +205,10 @@ function swapCopy(text) {
 }
 
 function swapValues(value, zh) {
-  if (typeof value === 'string') return swapCopy(swapName(value, zh))
+  if (typeof value === 'string') {
+    const out = swapCopy(swapName(value, zh))
+    return zh ? spaceCloud(out) : out
+  }
   if (Array.isArray(value)) return value.map((v) => swapValues(v, zh))
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, swapValues(v, zh)]))

@@ -5,6 +5,7 @@ import {
   FileEditIcon,
   Tick02Icon,
   TickDouble02Icon,
+  UnavailableIcon,
 } from '@hugeicons/core-free-icons'
 import { Trans, useTranslation } from 'react-i18next'
 import {
@@ -24,7 +25,7 @@ import {
   type PermissionScope,
 } from '@renderer/components/affect/permission-request'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
-import { basename, relativePath } from '@renderer/lib/format'
+import { basename, shownPath } from '@renderer/lib/format'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
 import { useRoutinesStore } from '@renderer/stores/routines'
@@ -127,7 +128,7 @@ function previewOf(
     const counts = stats(content)
     items.push({
       id: `diff:${i}`,
-      label: relativePath(content.path, projectPath),
+      label: shownPath(content.path, projectPath),
       icon: <Icon icon={FileEditIcon} size={14} />,
       meta: counts && (
         <span className="tabular">
@@ -143,7 +144,7 @@ function previewOf(
       seen.add(location.path)
       items.push({
         id: `path:${i}`,
-        label: relativePath(location.path, projectPath),
+        label: shownPath(location.path, projectPath),
         icon: <Icon icon={entry.toolKind === 'edit' ? FileEditIcon : File01Icon} size={14} />,
       })
     })
@@ -226,6 +227,17 @@ export function PermissionEntry({
     if (!option) return undefined
     const name = plainName(option.name)
     return name === allowWords(s) ? option.description : name
+  }
+  // Huli: an answer of its own, such as a lasting denial beside Deny, reads in the app's language
+  // when its kind says all it does, as the allows do, and keeps the agent's words on hover.
+  const otherWords = (option: PermissionOption): string => {
+    const alike = (permission?.options ?? []).filter((o) => o.kind === option.kind).length
+    if (alike === 1 && option.kind === 'reject_always') return t('permission.card.rejectAlways')
+    return plainName(option.name)
+  }
+  const otherNote = (option: PermissionOption): string | undefined => {
+    const name = plainName(option.name)
+    return name === otherWords(option) ? option.description : name
   }
 
   const labels: Partial<PermissionLabels> = {
@@ -355,11 +367,13 @@ export function PermissionEntry({
               key={option.id}
               type="button"
               className="ui-prc__btn ks-permission__other"
+              data-reject={isAllow(option) ? undefined : ''}
               disabled={busy}
-              title={option.description}
+              title={otherNote(option)}
               onClick={() => void respond(option)}
             >
-              {plainName(option.name)}
+              {!isAllow(option) && <Icon icon={UnavailableIcon} size={14} />}
+              {otherWords(option)}
             </button>
           ))}
           trailingActions={rest.map((s) => (

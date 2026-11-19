@@ -632,6 +632,8 @@ export function ChatComposer({
                 ))}
               </div>
 
+              {/* Huli: only with voice input, so a composer without it holds no untranslated controls */}
+              {voice && (
               <div className="ui-ccc__group ui-ccc__group--end ui-ccc__group--voice" inert={!recording}>
                 <span className="ui-ccc__trace" aria-hidden="true">
                   {trace.map((level, i) => (
@@ -645,6 +647,7 @@ export function ChatComposer({
                   <TickIcon />
                 </button>
               </div>
+              )}
             </div>
           </div>
         </div>

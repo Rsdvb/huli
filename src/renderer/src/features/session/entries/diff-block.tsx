@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { ToolContent } from '@shared/thread'
-import { relativePath } from '@renderer/lib/format'
+import { shownPath } from '@renderer/lib/format'
 import { Clamp } from '../clamp'
 import { Diff } from '../markdown'
 
@@ -19,7 +19,7 @@ export function DiffBlock({
     >
       <Clamp maxHeight={480} more={t('tool.showFullDiff')} buttonClassName="mx-2 my-1">
         <Diff
-          path={relativePath(diff.path, projectPath)}
+          path={shownPath(diff.path, projectPath)}
           oldText={diff.oldText}
           newText={diff.newText}
         />

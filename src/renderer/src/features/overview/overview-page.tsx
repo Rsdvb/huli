@@ -47,7 +47,10 @@ export default function OverviewPage() {
         <header className="k-ov__head">
           <span>
             <h1 className="ui-as-page-title">{t('title')}</h1>
-            <p className="ui-as-page-sub">{t('description', { count: rows.length })}</p>
+            {/* Huli: what is for you, as the sidebar counts it; running rows are not. */}
+            <p className="ui-as-page-sub">
+              {t('description', { count: counts.ready + counts.you })}
+            </p>
           </span>
           <span className="k-ov__tools app-region-no-drag">
             {prefs.view === 'flow' && (

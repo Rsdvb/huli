@@ -19,7 +19,7 @@
     "hosts": "主机",
     "devices": "移动设备",
     "computer-use": "Computer use",
-    "agent-network": "智能体网络"
+    "agent-network": "Agent 网络"
   },
   "page": {
     "title": "设置",
@@ -1220,7 +1220,7 @@
     "hostsWeb": "这个页面连着的电脑。会话、项目和 Agent 都在那台电脑上，这里只管这个浏览器怎么连它。",
     "devices": "Agent 不用先问就能使用的模拟器和手机。",
     "computer-use": "让 Agent 读取并操作这台电脑上的桌面应用，同一时间只用一个应用、只给一个会话。",
-    "agent-network": "让每个智能体的流量经由你的机场订阅里的节点出去，绝不绕开它。"
+    "agent-network": "让每个 Agent 的流量经由你的机场订阅里的节点出去，绝不绕开它。"
   },
   "archived": {
     "description": "{{project}} · {{when}}归档",
@@ -2149,16 +2149,16 @@
   },
   "network": {
     "groups": {
-      "main": "智能体网络",
+      "main": "Agent 网络",
       "subscriptions": "订阅",
       "default": "默认节点",
-      "agents": "智能体",
+      "agents": "Agent",
       "interfaces": "电脑的网卡"
     },
     "enabled": {
-      "name": "让智能体走节点",
-      "description": "智能体只能经由它的节点联网。节点或 mihomo 不可用时，它就没有网络，而不会从别的路出去。本机回环、局域网和 Tailscale 仍然直连。Kettu 自身的流量仍按「高级 › 代理」。",
-      "keywords": "代理 节点 订阅 机场 clash mihomo vpn tun 网络 出口 智能体"
+      "name": "让 Agent 走节点",
+      "description": "Agent 只能经由它的节点联网。节点或 mihomo 不可用时，它就没有网络，而不会从别的路出去。本机回环、局域网和 Tailscale 仍然直连。Kettu 自身的流量仍按「高级 › 代理」。",
+      "keywords": "代理 节点 订阅 机场 clash mihomo vpn tun 网络 出口 Agent 智能体"
     },
     "status": {
       "name": "状态",
@@ -2169,10 +2169,10 @@
       "version": "mihomo {{version}}"
     },
     "problem": {
-      "missing": "这个版本没有带 mihomo，用节点的智能体都无法联网。在开发环境里运行 pnpm fetch:mihomo。",
-      "interface": "没有找到物理网卡。在找到之前，或在下面指定一个之前，用节点的智能体都无法联网。",
-      "start": "mihomo 没能启动，用节点的智能体都无法联网。Kettu 会再试。",
-      "exited": "mihomo 已停止，在它重新运行之前，用节点的智能体都无法联网。Kettu 会重启它。"
+      "missing": "这个版本没有带 mihomo，用节点的 Agent 都无法联网。在开发环境里运行 pnpm fetch:mihomo。",
+      "interface": "没有找到物理网卡。在找到之前，或在下面指定一个之前，用节点的 Agent 都无法联网。",
+      "start": "mihomo 没能启动，用节点的 Agent 都无法联网。Kettu 会再试。",
+      "exited": "mihomo 已停止，在它重新运行之前，用节点的 Agent 都无法联网。Kettu 会重启它。"
     },
     "interface": {
       "name": "网卡",
@@ -2198,7 +2198,7 @@
       "usage": "已用 {{used}} / {{total}}",
       "expires": "{{date}}到期",
       "removeTitle": "移除「{{name}}」？",
-      "removeBody": "它的节点会一并移除。用其中某个节点的智能体，在你另选之前都无法联网。",
+      "removeBody": "它的节点会一并移除。用其中某个节点的 Agent，在你另选之前都无法联网。",
       "keywords": "订阅 机场 链接 节点 更新",
       "importFile": "从文件导入",
       "reimport": "重新导入",
@@ -2210,7 +2210,7 @@
       "title": "添加订阅",
       "name": "名称",
       "url": "订阅链接",
-      "urlHint": "添加时先经 Kettu 自身的网络（「高级 › 代理」）下载一次，之后每 12 小时更新。链接只由这台电脑的智能体主机保存：不进设置、不进日志，也不给配对的设备。",
+      "urlHint": "添加时先经 Kettu 自身的网络（「高级 › 代理」）下载一次，之后每 12 小时更新。链接只由这台电脑的 Agent 主机保存：不进设置、不进日志，也不给配对的设备。",
       "save": "添加",
       "invalidUrl": "请输入 http 或 https 链接。",
       "invalidName": "请用 1 到 40 个字符，不含 |。"
@@ -2221,11 +2221,11 @@
     },
     "default": {
       "name": "默认节点",
-      "description": "跟随默认的智能体经由这个节点联网。",
+      "description": "跟随默认的 Agent 经由这个节点联网。",
       "none": "无：不联网",
       "test": "测速",
       "noNodes": "还没有节点",
-      "notRunning": "智能体网络运行时才列出节点。",
+      "notRunning": "Agent 网络运行时才列出节点。",
       "keywords": "默认 节点 延迟 测速"
     },
     "delay": {
@@ -2234,12 +2234,12 @@
     },
     "choice": {
       "name": "网络出口",
-      "description": "这个智能体怎样联网。切换到系统网络或从系统网络切出，要等它下次启动才生效。",
+      "description": "这个 Agent 怎样联网。切换到系统网络或从系统网络切出，要等它下次启动才生效。",
       "follow": "跟随默认",
       "followNamed": "跟随默认（{{node}}）",
       "system": "系统网络",
       "gone": "{{node}}（已不存在）",
-      "off": "智能体网络已关闭，所有智能体都用系统网络。",
+      "off": "Agent 网络已关闭，所有 Agent 都用系统网络。",
       "keywords": "网络 出口 节点 代理 系统 网卡 适配器 tun",
       "pickInterface": "选择网卡…",
       "interface": "网卡：{{name}}",
@@ -2279,7 +2279,7 @@
       "save": "使用这块网卡",
       "refresh": "重新读取网卡",
       "bound": "{{agents}} 在用",
-      "description": "设为某块网卡的智能体只从这块网卡联网，网卡断开或不存在时就没有网络。",
+      "description": "设为某块网卡的 Agent 只从这块网卡联网，网卡断开或不存在时就没有网络。",
       "keywords": "网卡 适配器 tun vpn wlan 以太网 绑定"
     }
   }

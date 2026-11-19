@@ -217,6 +217,7 @@ function Workbench() {
           menu: t('nav.label'),
           resize: t('nav.resize'),
           account: t('account.signedOut'),
+          openSidebar: t('topBar.showSidebar', { ns: 'shell' }),
         }}
       >
         {MAIN_FRAME}

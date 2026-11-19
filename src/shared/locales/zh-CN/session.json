@@ -99,6 +99,7 @@
       "allowOnce": "允许一次",
       "allowAlways": "始终允许",
       "deny": "拒绝",
+      "rejectAlways": "始终拒绝",
       "touches": "涉及的内容",
       "more": "还有 {{count}} 项",
       "showLess": "收起",
@@ -579,7 +580,7 @@
     },
     "pickup": {
       "title": "接着上次继续",
-      "waiting": "等待你批准",
+      "waiting": "等待你的授权",
       "working": "进行中",
       "failed": "出错停止",
       "signIn": "等待登录",
@@ -697,7 +698,8 @@
       "compacting": "正在压缩上下文",
       "approval": "等待你的授权",
       "question": "等待你的回答",
-      "working": "处理中"
+      "working": "处理中",
+      "subagent": "子 Agent 在等你处理"
     },
     "doing": {
       "thinking": "正在思考：{{detail}}",

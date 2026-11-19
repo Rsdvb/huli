@@ -28,7 +28,9 @@ function useTicks(now: number): { at: number; left: string }[] {
 /** The same rows with their steps laid on the last two hours; the right edge is now. */
 export function TimelineTable({ children }: { children: ReactNode }) {
   const { t } = useTranslation('overview')
-  const ticks = useTicks(useNow())
+  const now = useNow()
+  // Huli: a tick's time only with room before "Now" at the right edge, which it ran into.
+  const ticks = useTicks(now).filter((tick) => now - tick.at >= TICK / 2)
   return (
     <div className="ui-sg-card k-ov-table">
       <div aria-hidden className="k-ov-tlr k-ov-th">

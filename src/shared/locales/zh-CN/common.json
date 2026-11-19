@@ -25,6 +25,7 @@
     "daysAgo_other": "{{count}} 天前",
     "seconds": "{{s}} 秒",
     "secondsShort": "{{s}} 秒",
+    "underSecond": "<1 秒",
     "minutesSeconds": "{{m}} 分 {{s}} 秒",
     "minutesSecondsShort": "{{m}} 分 {{s}} 秒",
     "minutesLeft": "{{m}} 分钟",
