@@ -473,7 +473,7 @@ export default function NewSession() {
             }
             right={
               agent ? (
-                <NativeMenu source={{ root: 'model', pages }}>
+                <NativeMenu source={{ root: 'model', pages }} align="trailing">
                   <ModelChip
                     agentId={agent.id}
                     harness={agent.harnessId}

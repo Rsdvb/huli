@@ -74,6 +74,12 @@ export interface GlassProps {
   interactive?: boolean
   /** 'clear' lets more of the content through, for glass over media. */
   variant?: 'regular' | 'clear'
+  /**
+   * Liquid Glass melts away, on its own animation, while the view stays laid out: glass under a
+   * fading opacity draws nothing, so a view that comes and goes over content dematerializes
+   * instead. The fallbacks ignore it, and their owner fades them.
+   */
+  dematerialized?: boolean
   /** A soft drop shadow where the glass is drawn by the app, as Liquid Glass casts its own. */
   elevated?: boolean
   /** No hairline edge on the fallbacks, for glass that sits flush, as a header's. */
@@ -102,6 +108,11 @@ function heightOf(style: StyleProp<ViewStyle>): number | null {
 export function Glass(props: GlassProps) {
   const { c, scheme } = useTokens()
   const mode = useGlassMode()
+  const reduce = useReducedMotion()
+  // Glass that mounts melted away starts so, rather than melting away as it first draws.
+  const [initial] = useState(props.dematerialized)
+  const [changed, setChanged] = useState(false)
+  if (!changed && props.dematerialized !== initial) setChanged(true)
   const shape = props.shape ?? 'rounded'
   const fixed = heightOf(props.style)
   const [measured, setMeasured] = useState<number | null>(null)
@@ -129,7 +140,15 @@ export function Glass(props: GlassProps) {
     return (
       <GlassView
         {...common}
-        glassEffectStyle={props.variant ?? 'regular'}
+        glassEffectStyle={
+          props.dematerialized === undefined
+            ? (props.variant ?? 'regular')
+            : {
+                style: props.dematerialized ? 'none' : (props.variant ?? 'regular'),
+                animate: changed && !reduce,
+                animationDuration: 0.25,
+              }
+        }
         isInteractive={!!props.interactive}
         colorScheme={scheme}
         {...(props.tint ? { tintColor: props.tint } : {})}
@@ -274,6 +293,8 @@ export interface GlassButtonProps extends Omit<PressableProps, 'style' | 'childr
   systemImage?: SFSymbol
   /** The symbol's color in the system's button; its label color by default. */
   symbolColor?: ColorValue
+  /** The glass melts away, as `Glass`'s `dematerialized`; the owner fades the children. */
+  dematerialized?: boolean
   children?: ReactNode
   ref?: Ref<ComponentRef<typeof View>>
 }
@@ -293,6 +314,7 @@ export function GlassButton(props: GlassButtonProps) {
     silent,
     systemImage,
     symbolColor,
+    dematerialized,
     children,
     disabled,
     onPress,
@@ -360,6 +382,7 @@ export function GlassButton(props: GlassButtonProps) {
             shape={capsule ? 'capsule' : 'circle'}
             interactive={!disabled}
             elevated={elevated}
+            {...(dematerialized !== undefined ? { dematerialized } : {})}
             {...(tint ? { tint } : {})}
             style={[
               styles.center,

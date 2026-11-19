@@ -4,9 +4,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'react-native'
+import { useIsFocused } from 'expo-router'
 import { G, Icon } from './icons'
 import { compactCount, durationText } from './work'
-import { GlassButton } from '../Glass'
+import { GlassButton, useGlassMode } from '../Glass'
 import { useSessionTokens } from './palette'
 
 function usePulse(): Animated.Value {
@@ -45,16 +46,23 @@ const dotOf = (size: number) => {
   return { width: side, height: side, borderRadius: side / 2 }
 }
 
-/** A three by three grid of dots a wave of light runs across while the agent works. */
+/**
+ * A three by three grid of dots a wave of light runs across while the agent works, on the native
+ * driver; it rests while its screen is covered by another, and holds still under Reduce Motion.
+ */
 export function WorkingDots(props: { color: string; size?: number }) {
   const wave = useRef(new Animated.Value(0)).current
   const [still, setStill] = useState(false)
+  const focused = useIsFocused()
   useEffect(() => {
+    if (!focused) return
     let loop: Animated.CompositeAnimation | null = null
     let live = true
     void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
       if (!live) return
       if (reduce) return setStill(true)
+      // From the start of the wave, as a loop stopped midway would repeat only its rest.
+      wave.setValue(0)
       loop = Animated.loop(
         Animated.timing(wave, {
           toValue: 1,
@@ -69,7 +77,7 @@ export function WorkingDots(props: { color: string; size?: number }) {
       live = false
       loop?.stop()
     }
-  }, [wave])
+  }, [wave, focused])
   return (
     <View
       style={[
@@ -209,6 +217,9 @@ export function ToBottomButton(props: {
   onPress(): void
 }) {
   const { c } = useSessionTokens()
+  // Liquid Glass under a fading opacity draws nothing, so it popped in whole once the fade ended:
+  // there the glass melts in and out on its own, and only the icon on it fades.
+  const liquid = useGlassMode() === 'liquid'
   const shown = useRef(new Animated.Value(0)).current
   useEffect(() => {
     Animated.timing(shown, {
@@ -224,7 +235,7 @@ export function ToBottomButton(props: {
       style={[
         styles.toBottom,
         {
-          opacity: shown,
+          opacity: liquid ? 1 : shown,
           transform: [
             { translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
           ],
@@ -232,10 +243,12 @@ export function ToBottomButton(props: {
       ]}
     >
       <View>
+        {/* Never the system's own button for the chevron: one glass for every state, which can
+            melt away. */}
         <GlassButton
           silent
           size={44}
-          {...(props.state === 'idle' ? { systemImage: G.toBottom.sf } : {})}
+          dematerialized={!props.visible}
           onPress={props.onPress}
           accessibilityLabel={
             props.state === 'waiting'
@@ -247,18 +260,24 @@ export function ToBottomButton(props: {
                   : '回到最新'
           }
         >
-          {props.state === 'running' ? (
-            <WorkingDots color={c.accent} size={16} />
-          ) : props.state === 'waiting' ? (
-            <AttentionMark />
-          ) : (
-            <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
-          )}
+          <Animated.View style={liquid ? { opacity: shown } : null}>
+            {props.state === 'running' ? (
+              <WorkingDots color={c.accent} size={16} />
+            ) : props.state === 'waiting' ? (
+              <AttentionMark />
+            ) : (
+              <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
+            )}
+          </Animated.View>
         </GlassButton>
         {props.fresh && props.state === 'idle' && (
-          <View
+          <Animated.View
             pointerEvents="none"
-            style={[styles.fresh, { backgroundColor: c.tint, borderColor: c.bg }]}
+            style={[
+              styles.fresh,
+              { backgroundColor: c.tint, borderColor: c.bg },
+              liquid ? { opacity: shown } : null,
+            ]}
           />
         )}
       </View>

@@ -151,7 +151,7 @@ export function TapMenu(props: {
 }) {
   if (props.disabled || props.items.length === 0) return props.children(undefined)
   return (
-    <Host matchContents>
+    <Host matchContents ignoreSafeArea="all">
       <Menu
         label={
           <RNHostView matchContents>

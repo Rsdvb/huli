@@ -11,6 +11,7 @@ export function NativeMenu(props: {
   source: MenuSource | null
   children: ReactElement
   disabled?: boolean
+  align?: 'leading' | 'trailing'
 }) {
   return props.children
 }

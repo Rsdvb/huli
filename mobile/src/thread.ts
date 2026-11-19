@@ -19,7 +19,7 @@ import {
   type ThreadEntry,
   type ThreadState,
 } from '@shared/thread'
-import { readThread, writeThread } from './cache'
+import { readThread, recentThread, writeThread } from './cache'
 import { useComputerId } from './host'
 import { createStore, useSelector, type Store } from './select'
 
@@ -49,10 +49,17 @@ const APPLY_EVERY = 50
 
 export function useThread(link: HostLink, sessionId: string, state: LinkState): ThreadView {
   const computer = useComputerId()
-  const store = useMemo(() => createStore<ThreadState | null>(null), [])
+  // A copy still in memory shows on the first frame; the file's, a moment later.
+  const [first] = useState(() => {
+    const copy = computer ? recentThread(computer, sessionId) : null
+    return copy
+      ? threadFromSnapshot({ session: copy.session, entries: copy.entries, seq: -1 })
+      : null
+  })
+  const store = useMemo(() => createStore<ThreadState | null>(first), [first])
   const setThread = store.set
-  const [cached, setCached] = useState(false)
-  const cachedRef = useRef(false)
+  const [cached, setCached] = useState(first !== null)
+  const cachedRef = useRef(first !== null)
   const [error, setError] = useState<string | null>(null)
   const [older, setOlder] = useState<number | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)

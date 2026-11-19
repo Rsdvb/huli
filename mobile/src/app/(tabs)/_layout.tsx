@@ -8,6 +8,7 @@
 // Material's bottom navigation.
 
 import { View } from 'react-native'
+import { router } from 'expo-router'
 import { NativeTabs } from 'expo-router/native-tabs'
 import { SessionRowSkeleton } from '../../components/SessionRow'
 import {
@@ -86,11 +87,18 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Icon sf="chart.bar.fill" md="bar_chart" />
         <NativeTabs.Trigger.Label>用量</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      {/* Not a page: choosing it opens New session over the tab that was showing. */}
+      {/* Not a page: the tab bar never selects it, and its press opens New session over the tab
+          that is showing. Selected, it had to switch back to that tab from JS while the native
+          tab bar settled, which now and then lost the switch and left its empty page showing. */}
       <NativeTabs.Trigger
         name="compose"
         prominent
-        disabled={!canCompose}
+        disabled
+        listeners={{
+          tabPress: () => {
+            if (canCompose) router.push('/new')
+          },
+        }}
         accessibilityLabel="新会话"
         contentStyle={{ backgroundColor: c.bg }}
       >

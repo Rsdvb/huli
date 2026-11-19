@@ -86,7 +86,7 @@ export default function Layout() {
                 }}
               >
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="session/[id]" options={{ title: '' }} />
+                <Stack.Screen name="session/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="new" options={{ headerShown: false }} />
                 <Stack.Screen
                   name="share"

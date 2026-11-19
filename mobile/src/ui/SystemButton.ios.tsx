@@ -29,8 +29,10 @@ export function SystemButton(props: {
   onPress(): void
 }) {
   const side = Math.max(16, props.size - PADDING * 2)
+  // React Native places the button, keyboard and safe area included; a hosting controller that
+  // kept the safe area would shift it again, as the send button in the composer.
   return (
-    <Host matchContents>
+    <Host matchContents ignoreSafeArea="all">
       <Button
         onPress={props.onPress}
         modifiers={[

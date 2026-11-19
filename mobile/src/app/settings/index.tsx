@@ -165,7 +165,7 @@ export default function Settings() {
 
         <ListGroup header="账号">
           <ListRow
-            title="Huli Cloud 账号"
+            title="Kite Cloud 账号"
             icon="person"
             plainIcon
             value={cloud.state === 'signed-in' ? cloud.account.email : '未登录'}

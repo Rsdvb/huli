@@ -35,6 +35,11 @@ export interface Prefs {
   homeShowArchived: boolean
   /** Home: the project groups shown closed, by key. */
   homeCollapsed: string[]
+  /**
+   * A session's queued messages shown open or folded to their count, as last chosen; null until
+   * then, when a single one shows open and more fold.
+   */
+  queueOpen: boolean | null
 }
 
 export type HomeScope = 'all' | 'one'
@@ -55,6 +60,7 @@ const DEFAULTS: Prefs = {
   homeGrouping: 'project',
   homeShowArchived: false,
   homeCollapsed: [],
+  queueOpen: null,
 }
 
 const ITEM = 'huli.prefs'
@@ -89,6 +95,7 @@ function parse(text: string | null): Prefs {
             .filter((key): key is string => typeof key === 'string')
             .slice(0, COLLAPSED_KEPT)
         : [],
+      queueOpen: typeof raw.queueOpen === 'boolean' ? raw.queueOpen : null,
     }
   } catch {
     return DEFAULTS

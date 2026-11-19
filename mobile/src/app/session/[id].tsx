@@ -1102,7 +1102,7 @@ export default function SessionScreen() {
           }
           right={
             !starting && (shownModel || shownEffort || switchable || mustSwitch) ? (
-              <NativeMenu source={{ root: 'model', pages }} disabled={!connected}>
+              <NativeMenu source={{ root: 'model', pages }} disabled={!connected} align="trailing">
                 <ModelChip
                   agentId={pending?.id ?? agentId}
                   harness={pending?.harnessId ?? config.harness}
