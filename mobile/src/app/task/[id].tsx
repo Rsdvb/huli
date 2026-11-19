@@ -24,7 +24,7 @@ import { Sheet, type SheetItem } from '../../components/Sheet'
 import { NeedCards, PinSheet } from '../../components/tasks/NeedCards'
 import { useRequest } from '../../components/tasks/parts'
 import { StepTimeline } from '../../components/tasks/StepTimeline'
-import { useHost } from '../../host'
+import { useConnected, useHostActions, useMaybeLink, useProjects, useSession } from '../../host'
 import { clockOf, folder, sessionTitle } from '../../sessions'
 import {
   confirmCancel,
@@ -54,7 +54,7 @@ import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 
 export default function TaskPage() {
   const { c } = useTokens()
-  const host = useHost()
+  const { retry } = useHostActions()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -63,8 +63,8 @@ export default function TaskPage() {
   const [more, setMore] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [pinning, setPinning] = useState<string | null>(null)
-  const connected = host.state.kind === 'connected'
-  const link = host.link
+  const connected = useConnected()
+  const link = useMaybeLink()
 
   // Shown, it counts as read, as on the desktop.
   const unread = summary?.unread === true
@@ -101,7 +101,7 @@ export default function TaskPage() {
           icon="wifi"
           title="打不开这条需求"
           message="它所在的电脑没有连上，连上后会再显示。"
-          action={{ label: '立即重连', onPress: () => host.retry() }}
+          action={{ label: '立即重连', onPress: () => retry() }}
         />
       )
     } else {
@@ -172,7 +172,7 @@ export default function TaskPage() {
               progressViewOffset={header.height}
               onRefresh={() => {
                 setRefreshing(true)
-                host.retry()
+                retry()
                 void reload().finally(() => setRefreshing(false))
               }}
             />
@@ -232,12 +232,12 @@ export default function TaskPage() {
 function Head(props: { task: TaskSummary; view: TaskView }) {
   const { task, view } = props
   const { c } = useTokens()
-  const host = useHost()
+  const projects = useProjects()
   const running = task.status === 'running'
   const now = useTick(running)
   const progress = progressText(task)
   const project =
-    host.projects.find((p) => p.path === task.projectPath)?.name ?? folder(task.projectPath)
+    projects.find((p) => p.path === task.projectPath)?.name ?? folder(task.projectPath)
   const state = running
     ? task.error
       ? { text: '卡住了', color: c.danger, icon: 'failed' as IconName }
@@ -296,8 +296,7 @@ function Head(props: { task: TaskSummary; view: TaskView }) {
 function Asked(props: { view: TaskView }) {
   const { view } = props
   const { c } = useTokens()
-  const host = useHost()
-  const from = view.from ? host.sessions.get(view.from.sessionId) : undefined
+  const from = useSession(view.from?.sessionId)
   const workflow = workflowTitle(view, view)
   const line = from
     ? `从“${sessionTitle(from)}”开始 · ${workflow} · ${clockOf(view.createdAt)}`
@@ -336,15 +335,16 @@ function Asked(props: { view: TaskView }) {
 function Notes(props: { view: TaskView }) {
   const { view } = props
   const { c } = useTokens()
-  const host = useHost()
+  const current = useMaybeLink()
+  const connected = useConnected()
   const [text, setText] = useState('')
   const request = useRequest()
   const ended = view.status !== 'running'
-  const off = ended || !host.link || host.state.kind !== 'connected'
+  const off = ended || !current || !connected
   const send = () => {
     const note = text.trim()
-    if (!note || off || !host.link) return
-    const link = host.link
+    if (!note || off || !current) return
+    const link = current
     void request
       .run('note', () => taskRequest(link, 'tasks.note', { taskId: view.id, text: note }))
       .then((sent) => {

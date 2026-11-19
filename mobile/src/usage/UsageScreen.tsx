@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { router, useLocalSearchParams } from 'expo-router'
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, LimitsReason, PlanLimit } from '@shared/agent-host'
 import type { UsageScope } from '@shared/usage'
 import { TopBar, useScrollTopOnTabPress } from '../components/shell'
@@ -205,7 +205,8 @@ export default function UsageScreen() {
     setAgent(params.agent)
     scroll.current?.scrollTo({ y: 0, animated: false })
   }, [params.agent, params.at])
-  const usage = useUsage(link, connected, choice, wanted)
+  const focused = useIsFocused()
+  const usage = useUsage(link, connected, choice, wanted, focused)
   const { read } = usage
   const hostName = host?.name ?? '电脑'
 

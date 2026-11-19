@@ -63,6 +63,7 @@ import {
 import { linkProblem, linkStatusOf, platformOf } from '../../linkInfo'
 import { openLink } from '../../links'
 import { setPrefs, usePrefs } from '../../prefs'
+import { useMuted } from '../../push/muted'
 import {
   errorText,
   folder as folderName,
@@ -246,6 +247,9 @@ const HomeRow = memo(function HomeRow(props: HomeRowProps) {
   const { c } = useTokens()
   const { placed, actions } = props
   const s = placed.session
+  // The menu offers 静音通知 or 取消静音 from the phone's muted list, which the row's props do not
+  // carry, so the row follows that list itself.
+  useMuted(s.id)
   const selecting = props.check !== undefined
   const row = (longPress: (() => void) | undefined) => (
     <SessionRow

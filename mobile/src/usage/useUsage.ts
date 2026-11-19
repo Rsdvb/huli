@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { HostEvent } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import type { UsageScope, UsageStatus, UsageSummary } from '@shared/usage'
+import { withinRefreshLimit } from '../host'
 import { errorText } from '../sessions'
 import {
   addDays,
@@ -49,11 +50,36 @@ export function choiceKey(choice: RangeChoice, scope: UsageScope): string {
   return `${scope}:${choice.kind}:${choice.step}`
 }
 
+/** How long a run of usage.changed events gathers before the figures are read again. */
+const CHANGED_AFTER = 2000
+
+/** Whether two reads show the same: then the screen keeps the last and its charts. */
+function sameRead(a: UsageRead | null, b: UsageRead): boolean {
+  return (
+    !!a &&
+    a.key === b.key &&
+    a.scope === b.scope &&
+    a.today === b.today &&
+    a.range.from === b.range.from &&
+    a.range.to === b.range.to &&
+    a.clock.from === b.clock.from &&
+    a.clock.to === b.clock.to &&
+    a.starts.length === b.starts.length &&
+    JSON.stringify(a.status) === JSON.stringify(b.status) &&
+    JSON.stringify(a.summary) === JSON.stringify(b.summary)
+  )
+}
+
+/**
+ * The figures for `choice`, read while connected. `focused` is whether the screen shows: the year
+ * of data is read again on a change only then, else once it shows again.
+ */
 export function useUsage(
   link: HostLink | null,
   connected: boolean,
   choice: RangeChoice,
   wanted: UsageScope,
+  focused = true,
 ) {
   const [read, setRead] = useState<UsageRead | null>(null)
   const [hours, setHours] = useState<HoursRead | null>(null)
@@ -73,12 +99,13 @@ export function useUsage(
       setHoursError(null)
       try {
         const starts = hourStarts(range)
-        const summary = (await link.request('usage.summary', {
-          dayStarts: starts,
-          from: range.from,
-          to: range.to,
-          scope,
-        })) as UsageSummary
+        const summary = (await withinRefreshLimit((signal) =>
+          link.request(
+            'usage.summary',
+            { dayStarts: starts, from: range.from, to: range.to, scope },
+            signal,
+          ),
+        )) as UsageSummary
         if (ticket === asked.current) setHours({ key: readKey, starts, summary })
       } catch (failure) {
         if (ticket === asked.current) setHoursError(errorText(failure))
@@ -93,7 +120,10 @@ export function useUsage(
     const chosen = choiceRef.current
     setLoading(true)
     try {
-      const status = (await link.request('usage.status', undefined)) as UsageStatus
+      // A read waits for a dropped link to come back; the limit makes it fail, so a pull settles.
+      const status = (await withinRefreshLimit((signal) =>
+        link.request('usage.status', undefined, signal),
+      )) as UsageStatus
       const scope: UsageScope = status.fromComputer ? wanted : 'kettu'
       const today = dayOf(Date.now())
       const heat = heatmapRange(today, FIRST_DAY)
@@ -107,20 +137,26 @@ export function useUsage(
           to: Math.max(range.to, heat.to),
         })
         const clock = oneDay(range) ? { from: addDays(range.to, -CLOCK_DAYS), to: range.to } : range
-        const summary = (await link.request('usage.summary', {
-          dayStarts: starts,
-          from: range.from,
-          to: range.to,
-          scope,
-          clock: { ...clock, zones: clockZones(clock.from, clock.to) },
-        })) as UsageSummary
+        const summary = (await withinRefreshLimit((signal) =>
+          link.request(
+            'usage.summary',
+            {
+              dayStarts: starts,
+              from: range.from,
+              to: range.to,
+              scope,
+              clock: { ...clock, zones: clockZones(clock.from, clock.to) },
+            },
+            signal,
+          ),
+        )) as UsageSummary
         if (ticket !== asked.current) return
         if (pass === 0 && rangeOf(chosen, today, summary.first).from !== range.from) {
           first = summary.first
           continue
         }
         const readKey = choiceKey(chosen, wanted)
-        setRead({
+        const next: UsageRead = {
           key: readKey,
           choice: chosen,
           scope,
@@ -130,7 +166,8 @@ export function useUsage(
           clock,
           summary,
           status,
-        })
+        }
+        setRead((current) => (sameRead(current, next) ? current : next))
         setError(null)
         if (oneDay(range)) void readHours(range, scope, readKey, ticket)
         else {
@@ -152,16 +189,44 @@ export function useUsage(
     if (link && connected) void load()
   }, [key, link, connected, load])
 
+  // A change while the screen is hidden waits for it to show; shown, a run of changes reads once.
+  const stale = useRef(false)
+  const shown = useRef(focused)
+  shown.current = focused
   useEffect(() => {
     if (!link) return
-    return link.onHostEvent((raw: unknown) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = link.onHostEvent((raw: unknown) => {
       const event = raw as HostEvent
-      if (event.type === 'usage.changed') void load()
+      if (event.type === 'usage.changed') {
+        if (!shown.current) {
+          stale.current = true
+          return
+        }
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          timer = null
+          void load()
+        }, CHANGED_AFTER)
+      }
       if (event.type === 'usage.status') {
-        setRead((current) => (current ? { ...current, status: event.status } : current))
+        setRead((current) =>
+          current && JSON.stringify(current.status) !== JSON.stringify(event.status)
+            ? { ...current, status: event.status }
+            : current,
+        )
       }
     })
+    return () => {
+      if (timer) clearTimeout(timer)
+      off()
+    }
   }, [link, load])
+  useEffect(() => {
+    if (!focused || !stale.current || !connected) return
+    stale.current = false
+    void load()
+  }, [focused, connected, load])
 
   /** Asks the computer to read the agents' logs again, then the figures. */
   const sync = useCallback(async () => {

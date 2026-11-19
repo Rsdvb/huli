@@ -14,7 +14,7 @@ import {
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { matchFiles, useProjectFiles } from '../../files'
 import { sessionFolder } from '../../git'
-import { useHost, useLink } from '../../host'
+import { useLink, useSession } from '../../host'
 import { baseName } from '../../ui/session/format'
 import { GlassHeader } from '../../ui/session/GlassHeader'
 import { FileMark, G, Icon, TOOL_ICONS } from '../../ui/session/icons'
@@ -51,9 +51,8 @@ function listing(paths: readonly string[], folders: readonly string[], dir: stri
 export default function FilesScreen() {
   const { id, dir = '' } = useLocalSearchParams<{ id: string; dir?: string }>()
   const { c, s } = useSessionTokens()
-  const host = useHost()
   const link = useLink()
-  const summary = host.sessions.get(id)
+  const summary = useSession(id)
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const files = useProjectFiles(link, folder, true)
   const [query, setQuery] = useState('')

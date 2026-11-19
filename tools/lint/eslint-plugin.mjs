@@ -1,5 +1,6 @@
 // @ts-check
-// Local ESLint plugin: keeps color literals out of the renderer's strings and templates.
+// Local ESLint plugin: keeps color literals out of the renderer's strings and templates, and
+// (Huli) the upstream product's name out of the phone app's text.
 import { colorLiteralMessage, findColorLiterals } from './color-literals.mjs'
 
 /** @type {import('eslint').Rule.RuleModule} */
@@ -45,6 +46,51 @@ const noColorLiterals = {
   },
 }
 
-export const rules = { 'no-color-literals': noColorLiterals }
+/**
+ * Huli: the phone app is 纸鸢 and its account service Kite Cloud, so no text it shows may say
+ * Kettu. Strings compared against what the host sends are code, not text, and attribution that
+ * must name the upstream (the license, the source link) disables the rule where it stands.
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const noUpstreamName = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Disallow the upstream product name in user-facing text' },
+    schema: [],
+    messages: { name: 'Say 纸鸢 (or Kite Cloud for the account service), not Kettu.' },
+  },
+  create(context) {
+    const NAME = /Kettu/
+
+    /** @param {import('eslint').Rule.Node} node */
+    function comparedOrImported(node) {
+      const parent = node.parent
+      if (!parent) return false
+      if (parent.type === 'BinaryExpression') return true
+      if (parent.type === 'SwitchCase' && parent.test === node) return true
+      return parent.type === 'ImportDeclaration' || parent.type === 'ExportAllDeclaration'
+    }
+
+    return {
+      Literal(node) {
+        if (typeof node.value !== 'string' || !NAME.test(node.value)) return
+        if (comparedOrImported(node)) return
+        context.report({ node, messageId: 'name' })
+      },
+      TemplateElement(node) {
+        if (NAME.test(node.value.raw)) context.report({ node, messageId: 'name' })
+      },
+      /** @param {any} node */
+      JSXText(node) {
+        if (NAME.test(node.value)) context.report({ node, messageId: 'name' })
+      },
+    }
+  },
+}
+
+export const rules = {
+  'no-color-literals': noColorLiterals,
+  'no-upstream-name': noUpstreamName,
+}
 
 export default { meta: { name: 'kettu' }, rules }

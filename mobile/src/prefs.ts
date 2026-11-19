@@ -3,7 +3,7 @@
 // is shown. Read once at start; every screen subscribes.
 
 import { useSyncExternalStore } from 'react'
-import { Appearance } from 'react-native'
+import { Appearance, AppState } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
 
 export type ThemePref = 'system' | 'light' | 'dark'
@@ -135,11 +135,29 @@ export function prefsLoaded(): boolean {
   return loaded
 }
 
+/** How long changes gather before they are written; a run of them makes one write. */
+const SAVE_AFTER = 400
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+function saveNow(): void {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
+  void SecureStore.setItemAsync(ITEM, JSON.stringify(prefs), OPTIONS).catch(() => {})
+}
+
+// What is still to be written goes before the app may be suspended.
+AppState.addEventListener('change', (next) => {
+  if (next !== 'active' && saveTimer) saveNow()
+})
+
 export function setPrefs(change: Partial<Prefs>): void {
+  const keys = Object.keys(change) as (keyof Prefs)[]
+  if (keys.every((key) => Object.is(change[key], prefs[key]))) return
   const next = { ...prefs, ...change }
   if (change.theme !== undefined && change.theme !== prefs.theme) applyTheme(change.theme)
   publish(next)
-  void SecureStore.setItemAsync(ITEM, JSON.stringify(next), OPTIONS).catch(() => {})
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveNow, SAVE_AFTER)
 }
 
 export function subscribePrefs(listener: () => void): () => void {
@@ -147,6 +165,12 @@ export function subscribePrefs(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
+/** Every preference; re-renders on any change. Prefer usePref for one. */
 export function usePrefs(): Prefs {
   return useSyncExternalStore(subscribePrefs, () => prefs)
+}
+
+/** One preference; re-renders only when it changes. */
+export function usePref<K extends keyof Prefs>(key: K): Prefs[K] {
+  return useSyncExternalStore(subscribePrefs, () => prefs[key])
 }

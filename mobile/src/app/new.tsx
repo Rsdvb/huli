@@ -39,7 +39,17 @@ import { PlanUsageSheet } from '../components/PlanUsageSheet'
 import { QuotaSuggestion } from '../components/ComposerNotes'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
-import { useComputerId, useHost, useLink } from '../host'
+import {
+  sameFields,
+  useAgents,
+  useComputerId,
+  useHostSelector,
+  useHostState,
+  useLink,
+  useListsLoaded,
+  useSession,
+  type HostData,
+} from '../host'
 import { onCreated, queueMessage, withdrawItem, type OutboxMessage } from '../outbox'
 import { folder, greeting, listTime, sessionTitle } from '../sessions'
 import { HuliIcon } from '../ui/HuliMark'
@@ -54,7 +64,11 @@ import { StatusLine } from '../ui/session/StatusLine'
 
 export default function NewSession() {
   const { c, s } = useSessionTokens()
-  const host = useHost()
+  // Narrow reads: the sessions change with every streamed turn, which must not redraw the composer.
+  const agentMap = useAgents()
+  const state = useHostState()
+  const loaded = useListsLoaded()
+  const projects = useHostSelector(selectRecent, sameRecent)
   const link = useLink()
   const computer = useComputer()
   const insets = useSafeAreaInsets()
@@ -64,28 +78,24 @@ export default function NewSession() {
   const modeAnchor = useRef<ViewHandle>(null)
   const modelAnchor = useRef<ViewHandle>(null)
   const folderAnchor = useRef<ViewHandle>(null)
-  const options = useAgentOptions(link, host.state.kind === 'connected')
+  const options = useAgentOptions(link, state.kind === 'connected')
 
-  const agents = useMemo(() => usableAgents(host.agents), [host.agents])
-  const projects = useMemo(
-    () => recentProjects(host.projects, host.sessions),
-    [host.projects, host.sessions],
-  )
+  const agents = useMemo(() => usableAgents(agentMap), [agentMap])
 
   const [chosenAgent, setChosenAgent] = useState<string | null>(null)
   // 新建子会话 opens this screen under its parent, in the parent's project and with its agent.
   const parentId = useLocalSearchParams<{ parent?: string }>().parent
-  const parent = parentId ? host.sessions.get(parentId) : undefined
+  const parent = useSession(parentId)
   const startable = agents.filter(canStart)
   const agentId =
     chosenAgent ??
-    (parent && host.agents.has(parent.agentId) ? parent.agentId : null) ??
+    (parent && agentMap.has(parent.agentId) ? parent.agentId : null) ??
     startable.find((a) => a.isDefault)?.id ??
     startable[0]?.id ??
     agents.find((a) => a.isDefault)?.id ??
     agents[0]?.id ??
     null
-  const agent = agentId ? host.agents.get(agentId) : undefined
+  const agent = agentId ? agentMap.get(agentId) : undefined
   const [chosenProject, setChosenProject] = useState<string | null | undefined>(undefined)
   const projectPath = parent
     ? parent.scratch
@@ -98,7 +108,7 @@ export default function NewSession() {
   const [picks, setPicks] = useState<Record<string, string | boolean>>({})
   const [usageOpen, setUsageOpen] = useState(false)
   const [attachCount, setAttachCount] = useState(0)
-  const connected = host.state.kind === 'connected'
+  const connected = state.kind === 'connected'
 
   // The chosen agent's plan, for the status line's ring; only one already running is asked, so
   // that none starts just for the read.
@@ -142,7 +152,7 @@ export default function NewSession() {
   const need = agent ? agentNeed(agent) : null
   const unsendable =
     agents.length === 0
-      ? host.loaded
+      ? loaded
         ? '没有可用的 Agent，先添加或启用一个再开始。'
         : null
       : !agent
@@ -419,7 +429,7 @@ export default function NewSession() {
               <>
                 <PendingSessions
                   {...(parentId ? { parentId } : {})}
-                  agentName={(id) => host.agents.get(id)?.name ?? 'Agent'}
+                  agentName={(id) => agentMap.get(id)?.name ?? 'Agent'}
                   onWithdraw={withdraw}
                 />
                 {agent && quota?.kind === 'out' && fallback && keptAgent !== agentId ? (
@@ -428,7 +438,7 @@ export default function NewSession() {
                     quota={quota}
                     fallback={fallback}
                     onSwitch={() => {
-                      const next = host.agents.get(fallback.agentId)
+                      const next = agentMap.get(fallback.agentId)
                       if (next) chooseAgent(next, null)
                     }}
                     onDismiss={() => setKeptAgent(agentId)}
@@ -497,7 +507,7 @@ export default function NewSession() {
               <StatusLine
                 hostName={computer.name}
                 platform={computer.platform}
-                state={host.state}
+                state={state}
                 folder={project ? project.name : projectPath ? folder(projectPath) : '无项目'}
                 path={projectPath}
                 folderPicker={!parent}
@@ -534,6 +544,10 @@ interface RecentProject {
   at: number
   count: number
 }
+
+const selectRecent = (d: HostData) => recentProjects(d.projects, d.sessions)
+const sameRecent = (a: RecentProject[], b: RecentProject[]) =>
+  a.length === b.length && a.every((row, i) => sameFields(row, b[i]!))
 
 // The host's project list alone can miss folders its sessions are in (the home tab lists by
 // session), so the sessions' folders are merged in and named as the host names them when it does.

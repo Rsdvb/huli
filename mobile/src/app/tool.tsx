@@ -8,7 +8,8 @@ import { Stack, useLocalSearchParams } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { call, errorText, sessionFolder } from '../git'
-import { useHost, useLink } from '../host'
+import { PictureStrip, pictureOf, type Picture } from '../components/Pictures'
+import { useLink, useSession } from '../host'
 import { SessionRows } from '../ui/session/context'
 import { copyText } from '../ui/session/feedback'
 import { GlassHeader } from '../ui/session/GlassHeader'
@@ -18,7 +19,9 @@ import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
 import { StateView } from '../ui/session/StateView'
 import { answerText, EditLine, target, VERBS } from '../ui/session/ToolRow'
+import { toolTitle } from '../ui/session/toolNames'
 import { toolEdits } from '../ui/session/turns'
+import { fenceBody, numberedRead } from '../ui/session/work'
 
 // What a phone shows of one block of output; past it, the rest is copied rather than drawn.
 const SHOWN_CHARS = 60_000
@@ -89,9 +92,8 @@ function Block(props: { label: string; text: string; tone?: 'plain' | 'muted' })
 export default function ToolScreen() {
   const { sessionId, entryId } = useLocalSearchParams<{ sessionId: string; entryId: string }>()
   const { c } = useSessionTokens()
-  const host = useHost()
   const link = useLink()
-  const summary = host.sessions.get(sessionId)
+  const summary = useSession(sessionId)
   const root = summary && !summary.scratch ? sessionFolder(summary) : null
   const [entry, setEntry] = useState<ThreadEntry | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -129,9 +131,18 @@ export default function ToolScreen() {
     body = <StateView text="这不是一次工具调用。" />
   } else {
     const edits = toolEdits(tool)
+    // What it returned as plain text: inside its fence, and a file read without the numbers
+    // Claude Code puts before each line, so a copy is the file's own text.
     const outputs = tool.content.flatMap((part) =>
-      part.type === 'markdown' && part.markdown.trim() ? [part.markdown] : [],
+      part.type === 'markdown' && part.markdown.trim()
+        ? [fenceBody(numberedRead(part.markdown, undefined) ?? part.markdown)]
+        : [],
     )
+    const pictures = tool.content.flatMap((part): Picture[] => {
+      const picture = part.type === 'ref' ? pictureOf(part.ref) : null
+      return picture ? [picture] : []
+    })
+    const titled = toolTitle(tool.title)
     const answer = answerText(tool)
     const shell = tool.toolKind === 'execute'
     const running = tool.status === 'pending' || tool.status === 'in_progress'
@@ -163,8 +174,8 @@ export default function ToolScreen() {
         {tool.description ? (
           <Text style={[styles.description, { color: c.text }]}>{tool.description}</Text>
         ) : null}
-        {tool.title && tool.title !== target(tool, root) ? (
-          <Text style={[styles.description, { color: c.textSecondary }]}>{tool.title}</Text>
+        {titled && titled !== target(tool, root) ? (
+          <Text style={[styles.description, { color: c.textSecondary }]}>{titled}</Text>
         ) : null}
         {tool.rawInput ? (
           <Block
@@ -180,6 +191,12 @@ export default function ToolScreen() {
             tone="muted"
           />
         ))}
+        {pictures.length > 0 && (
+          <View style={{ gap: 6 }}>
+            <Text style={[styles.label, { color: c.textSecondary }]}>图片</Text>
+            <PictureStrip pictures={pictures} align="start" />
+          </View>
+        )}
         {edits.length > 0 && (
           <View style={{ gap: 6 }}>
             <Text style={[styles.label, { color: c.textSecondary }]}>改动的文件</Text>
@@ -188,9 +205,11 @@ export default function ToolScreen() {
             ))}
           </View>
         )}
-        {!tool.rawInput && outputs.length === 0 && edits.length === 0 && !running && (
-          <Text style={[styles.description, { color: c.textTertiary }]}>没有输出</Text>
-        )}
+        {!tool.rawInput &&
+          outputs.length === 0 &&
+          pictures.length === 0 &&
+          edits.length === 0 &&
+          !running && <Text style={[styles.description, { color: c.textTertiary }]}>没有输出</Text>}
       </ScrollView>
     )
   }

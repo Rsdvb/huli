@@ -28,7 +28,7 @@ type Entry = Extract<ThreadEntry, { kind: 'market_publish' }>
 const KIND = { skill: 'Skill', plugin: '插件', 'mcp-server': 'MCP 服务器', workflow: '工作流' }
 const VISIBILITY = { public: '所有人', private: '只有我', unlisted: '已下架' }
 const VISIBILITY_HINT = {
-  public: '列进 Marketplace，登录 Kettu 的人都能看到。',
+  public: '列进 Marketplace，登录 Kite Cloud 的人都能看到。',
   private: '不列出，只有登录你账号的电脑能装。',
 }
 const ADDS_GROUP: Record<string, string> = {
@@ -80,7 +80,7 @@ function outcomeText(entry: Entry): { text: string; done: boolean; busy: boolean
     case 'ended':
       return { text: '这一轮先结束了', done: false, busy: false }
     case 'interrupted':
-      return { text: 'Marketplace 回复之前 Kettu 停止了', done: false, busy: false }
+      return { text: 'Marketplace 回复之前纸鸢停止了', done: false, busy: false }
     default:
       return { text: '没有及时回答', done: false, busy: false }
   }
@@ -181,10 +181,10 @@ function PublishCard(props: { entry: Entry; sessionId: string }) {
   }
 
   const title = unlist
-    ? `把 ${entry.item.name} 从 Kettu 的 Marketplace 下架？`
+    ? `把 ${entry.item.name} 从 Marketplace 下架？`
     : newVersion
       ? `发布 ${entry.item.name} 的 ${entry.version ?? ''}？`
-      : '发布到 Kettu 的 Marketplace？'
+      : '发布到 Marketplace？'
   const body = unlist
     ? '它会从 Marketplace 里去掉。已经装了的人照常能用，也照常收到新版本。'
     : newVersion && entry.installs > 0

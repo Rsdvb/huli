@@ -47,6 +47,16 @@ const SAVE_EVERY = 5000
  * small batches, and each one applied alone would copy the thread and redraw the conversation.
  */
 const APPLY_EVERY = 50
+/**
+ * How long the requests' read waits, so a stream of batches that may change them reads them once
+ * rather than once a batch.
+ */
+const REQUESTS_AFTER = 250
+
+/** Whether two answers of what waits hold the same entries, so the screen keeps its own. */
+function sameEntries(a: readonly ThreadEntry[], b: readonly ThreadEntry[]): boolean {
+  return a.length === b.length && a.every((e, i) => JSON.stringify(e) === JSON.stringify(b[i]))
+}
 
 export function useThread(link: HostLink, sessionId: string, state: LinkState): ThreadView {
   const computer = useComputerId()
@@ -119,11 +129,25 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     [computer],
   )
 
+  const requestsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reloadRequests = useCallback(() => {
-    void (link.request('sessions.requests', { sessionId }) as Promise<{ entries: ThreadEntry[] }>)
-      .then((answer) => setRequests(answer.entries))
-      .catch(() => {})
+    if (requestsTimer.current) return
+    requestsTimer.current = setTimeout(() => {
+      requestsTimer.current = null
+      void (link.request('sessions.requests', { sessionId }) as Promise<{ entries: ThreadEntry[] }>)
+        .then((answer) =>
+          setRequests((was) => (sameEntries(was, answer.entries) ? was : answer.entries)),
+        )
+        .catch(() => {})
+    }, REQUESTS_AFTER)
   }, [link, sessionId])
+  useEffect(
+    () => () => {
+      if (requestsTimer.current) clearTimeout(requestsTimer.current)
+      requestsTimer.current = null
+    },
+    [link, sessionId],
+  )
 
   const applyQueued = useCallback(() => {
     applyTimer.current = null

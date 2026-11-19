@@ -9,7 +9,7 @@ import { KEY_ONLY_ADDED_HARNESSES, MULTI_AGENT_HARNESSES, type CodebuddySite } f
 import { AGENT_NAME_CHARS, type SettingsPatch } from '@shared/settings'
 import type { AgentId, HarnessId } from '@shared/thread'
 import { admin } from '../../admin'
-import { useHost } from '../../host'
+import { useAgents, useHostActions, useListsLoaded, useMaybeLink } from '../../host'
 import {
   addableHarnesses,
   awaitsPackage,
@@ -50,33 +50,36 @@ import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 const JUST_CHECKED_MS = 60_000
 
 export default function Agents() {
-  const host = useHost()
+  const agentMap = useAgents()
+  const link = useMaybeLink()
+  const loaded = useListsLoaded()
+  const { refresh: refreshLists } = useHostActions()
   const connected = useConnected()
   const { busy, run } = useActions()
   const [listError, setListError] = useState<string | null>(null)
   const [checkedAt, setCheckedAt] = useState<number | null>(null)
   const [adding, setAdding] = useState(false)
-  const statuses = useMemo(() => [...host.agents.values()], [host.agents])
+  const statuses = useMemo(() => [...agentMap.values()], [agentMap])
   const environment = useRead(
     connected ? 'agents-environment' : null,
     (link) => call(link, 'agents.environment', undefined),
     ['environment.changed'],
   )
 
-  const latest = useRef({ refresh: host.refresh, setEnvironment: environment.set })
-  latest.current = { refresh: host.refresh, setEnvironment: environment.set }
+  const latest = useRef({ refresh: refreshLists, setEnvironment: environment.set })
+  latest.current = { refresh: refreshLists, setEnvironment: environment.set }
   useEffect(() => {
-    if (!host.link) return
-    return host.link.onHostEvent((raw) => {
+    if (!link) return
+    return link.onHostEvent((raw) => {
       const event = raw as HostEvent
       if (event.type === 'agent.removed') void latest.current.refresh().catch(() => {})
       if (event.type === 'environment.changed') latest.current.setEnvironment(() => event.info)
     })
-  }, [host.link])
+  }, [link])
 
   const refresh = async () => {
     try {
-      await Promise.all([host.refresh(), environment.reload()])
+      await Promise.all([refreshLists(), environment.reload()])
       setListError(null)
     } catch (failure) {
       setListError(errorText(failure))
@@ -84,7 +87,7 @@ export default function Agents() {
   }
 
   const list: Read<AgentStatus[]> = {
-    value: host.loaded ? statuses : null,
+    value: loaded ? statuses : null,
     error: listError,
     reload: refresh,
     set: () => {},
@@ -94,7 +97,8 @@ export default function Agents() {
   const harnesses = harnessStatuses(statuses)
   const installed = harnesses.filter(harnessInstalled)
   const missing = harnesses.filter((h) => !installed.includes(h))
-  const addable = addableHarnesses(statuses, MULTI_AGENT_HARNESSES)
+  // The sheet resets when this changes, so it keeps its reference while the agents do.
+  const addable = useMemo(() => addableHarnesses(statuses, MULTI_AGENT_HARNESSES), [statuses])
   const updates = harnesses.filter((h) => h.update || h.cli?.update).length
   const lastAt = Math.max(0, ...harnesses.map((h) => h.updateCheckedAt ?? 0)) || null
   const checkable = harnesses.some((h) => h.package || h.updateCheckedAt !== null || h.cli)
@@ -113,10 +117,10 @@ export default function Agents() {
     void run(
       'check',
       async () => {
-        if (!host.link) return
-        await call(host.link, 'agents.checkUpdates', undefined)
+        if (!link) return
+        await call(link, 'agents.checkUpdates', undefined)
         setCheckedAt(Date.now())
-        await host.refresh()
+        await refreshLists()
       },
       '无法检查更新',
     )
@@ -125,9 +129,9 @@ export default function Agents() {
     void run(
       'environment',
       async () => {
-        if (!host.link) return
-        await call(host.link, 'agents.reloadEnvironment', undefined)
-        await Promise.all([host.refresh(), environment.reload()])
+        if (!link) return
+        await call(link, 'agents.reloadEnvironment', undefined)
+        await Promise.all([refreshLists(), environment.reload()])
       },
       '没能重新加载环境',
     )
@@ -319,7 +323,7 @@ function HarnessRow({ status, statuses }: { status: AgentStatus; statuses: Agent
 
 /** Resolves once the computer lists the agent, which follows the settings change that added it. */
 async function waitListed(
-  link: NonNullable<ReturnType<typeof useHost>['link']>,
+  link: NonNullable<ReturnType<typeof useMaybeLink>>,
   id: AgentId,
 ): Promise<void> {
   const until = Date.now() + 10_000
@@ -345,7 +349,8 @@ function AddAgentSheet(props: {
   onAdded(id: AgentId): void
 }) {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useMaybeLink()
+  const { refresh: refreshLists } = useHostActions()
   const [harness, setHarness] = useState<HarnessId | null>(null)
   const [name, setName] = useState('')
   const [folder, setFolder] = useState<Folder>('default')
@@ -353,8 +358,13 @@ function AddAgentSheet(props: {
   const [site, setSite] = useState<CodebuddySite>('international')
   const [key, setKey] = useState({ key: '', baseUrl: '', model: '' })
 
+  // Starts over only as the sheet opens: the harnesses can change while it is up, and what the
+  // user typed must survive that.
+  const wasVisible = useRef(false)
   useEffect(() => {
-    if (!props.visible) return
+    const opened = props.visible && !wasVisible.current
+    wasVisible.current = props.visible
+    if (!opened) return
     setHarness(props.harnesses[0]?.harnessId ?? null)
     setName('')
     setFolder('default')
@@ -381,7 +391,6 @@ function AddAgentSheet(props: {
     (useDefault || mode === 'terminal' || key.key.trim().length > 0)
 
   const submit = async () => {
-    const link = host.link
     if (!link || !chosen) throw new Error('电脑没有连上。')
     const id = useDefault
       ? chosen.harnessId
@@ -409,7 +418,7 @@ function AddAgentSheet(props: {
         ...(providers && key.model.trim() ? { model: key.model.trim() } : {}),
       })
     }
-    await host.refresh().catch(() => {})
+    await refreshLists().catch(() => {})
     props.onAdded(id)
   }
 

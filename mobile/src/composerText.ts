@@ -137,7 +137,20 @@ export interface MentionQuery {
   query: string
 }
 
-/** The `@word` the caret is in, where the `@` starts a word and no mention holds it. */
+/**
+ * Whether a sign at `at` starts a word: at the start, after a space, or after text that has no
+ * spaces, such as Chinese. Not after an ASCII character, so `a@b` stays text. Matches the
+ * desktop composer's `startsWord`.
+ */
+function startsWord(text: string, at: number): boolean {
+  if (at === 0) return true
+  return /\s/.test(text[at - 1]!) || text.charCodeAt(at - 1) > 0x7f
+}
+
+/**
+ * The `@word` the caret is in, where the `@` (or a full-width `＠`, which Chinese keyboards type)
+ * starts a word and no mention holds it.
+ */
 export function mentionAt(
   text: string,
   caret: number | null,
@@ -145,8 +158,8 @@ export function mentionAt(
 ): MentionQuery | null {
   if (caret === null || caret > text.length) return null
   for (let at = caret - 1; at >= 0 && !/\s/.test(text[at]!); at--) {
-    if (text[at] !== '@') continue
-    if (at > 0 && !/\s/.test(text[at - 1]!)) return null
+    if (text[at] !== '@' && text[at] !== '＠') continue
+    if (!startsWord(text, at)) return null
     if (mentions.some((m) => at >= m.from && at < m.to)) return null
     let end = caret
     while (end < text.length && !/\s/.test(text[end]!)) end++

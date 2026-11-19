@@ -5,16 +5,15 @@ import { useEffect, useState } from 'react'
 import { Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
-import type { DirectAddress } from '@shared/remote/protocol'
 import {
   lineColor,
   useComputerActions,
   useComputerLine,
   useReach,
 } from '../../components/ComputerSheet'
-import { currentAddress, routeKind, usableAddresses } from '../../connection'
+import { currentRoute, routeKind, usableAddresses, type CurrentRoute } from '../../connection'
 import { useHost } from '../../host'
-import { hostPort, osName, platformOf, ROUTE_NAMES } from '../../linkInfo'
+import { hostPort, osName, platformOf, ROUTE_NAMES, routesNote } from '../../linkInfo'
 import { ago } from '../../sessions'
 import { computerName } from '../../store'
 import { EmptyState } from '../../ui/EmptyState'
@@ -38,14 +37,14 @@ export default function Computer() {
   const reach = useReach(!active)
   const line = useComputerLine(reach)
   const actions = useComputerActions()
-  const [address, setAddress] = useState<DirectAddress | null>(() => currentAddress())
+  const [route, setRoute] = useState<CurrentRoute | null>(() => currentRoute())
   const welcome = active && host.state.kind === 'connected' ? host.state.welcome : null
   const connected = welcome !== null
 
   useEffect(() => {
     if (!active) return
-    setAddress(currentAddress())
-    const timer = setInterval(() => setAddress(currentAddress()), 2000)
+    setRoute(currentRoute())
+    const timer = setInterval(() => setRoute(currentRoute()), 2000)
     return () => clearInterval(timer)
   }, [active, host.state])
 
@@ -67,7 +66,7 @@ export default function Computer() {
   const status = line(computer)
   const platform = platformOf(computer, welcome?.host.platform)
   const addresses = usableAddresses(computer.addresses)
-  const current = connected && address ? hostPort(address) : null
+  const current = connected && route?.kind === 'direct' ? hostPort(route.address) : null
   const busy = actions.busy.has(computer.id)
 
   return (
@@ -115,10 +114,7 @@ export default function Computer() {
           ) : null}
         </ListGroup>
 
-        <ListGroup
-          header="地址"
-          footer="手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个。内容在两端之间端到端加密，不经过任何中转服务器。"
-        >
+        <ListGroup header="地址" footer={routesNote(!!computer.relay)}>
           {addresses.length === 0 ? (
             <ListRow title="电脑没有给出地址" />
           ) : (
@@ -138,6 +134,18 @@ export default function Computer() {
               )
             })
           )}
+          {computer.relay ? (
+            <ListRow
+              key="relay"
+              title="中转"
+              subtitle="Kite Cloud"
+              trailing={
+                connected && route?.kind === 'relay' ? (
+                  <Text style={[typeScale.footnote, { color: c.success }]}>当前线路</Text>
+                ) : undefined
+              }
+            />
+          ) : null}
         </ListGroup>
 
         <ListGroup>

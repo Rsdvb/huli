@@ -6,7 +6,7 @@ import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View }
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { TerminalInfo } from '@shared/terminal-host'
 import { errorText } from '../../git'
-import { useHost, useLink } from '../../host'
+import { useHostState, useLink, useSession } from '../../host'
 import { sessionTitle } from '../../sessions'
 import { sessionTerminals, terminalTail, useTerminalAllowed } from '../../terminals'
 import { copyText } from '../../ui/session/feedback'
@@ -25,20 +25,29 @@ interface Shown {
 export default function TerminalsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { c } = useSessionTokens()
-  const host = useHost()
+  const state = useHostState()
   const link = useLink()
-  const allowed = useTerminalAllowed(link, host.state)
-  const summary = host.sessions.get(id)
+  const allowed = useTerminalAllowed(link, state)
+  const summary = useSession(id)
+  // The summary changes with every turn the session streams; the terminals only with its folder.
+  const projectPath = summary?.projectPath
   const [list, setList] = useState<Shown[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
-    if (!summary || !allowed) return
+    if (projectPath === undefined || !allowed) return
     setError(null)
     try {
-      const found = await sessionTerminals(link, summary.projectPath, id)
-      setList(found.map((info) => ({ info, tail: null, error: null })))
+      const found = await sessionTerminals(link, projectPath, id)
+      // A terminal read before keeps its output until the new one comes, rather than a spinner.
+      setList((was) =>
+        found.map((info) => ({
+          info,
+          tail: was?.find((t) => t.info.id === info.id)?.tail ?? null,
+          error: null,
+        })),
+      )
       await Promise.all(
         found.map(async (info) => {
           let next: Partial<Shown>
@@ -53,7 +62,7 @@ export default function TerminalsScreen() {
     } catch (failed) {
       setError(errorText(failed, '没能读取终端。'))
     }
-  }, [link, summary, allowed, id])
+  }, [link, projectPath, allowed, id])
 
   useEffect(() => {
     void load()

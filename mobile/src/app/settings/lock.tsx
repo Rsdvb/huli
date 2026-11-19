@@ -3,10 +3,11 @@
 
 import { Alert, Animated, Switch } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useHost } from '../../host'
+import { useMaybeLink } from '../../host'
 import { authenticate, useBiometryName } from '../../lock'
 import { LOCK_DELAYS, setPrefs, usePrefs, type LockDelay } from '../../prefs'
-import { syncPush } from '../../push/sync'
+import { pushChoicesChanged } from '../../push/sync'
+import { errorText } from '../../sessions'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
@@ -25,7 +26,7 @@ const DELAY_TEXT: Record<LockDelay, string> = {
 
 export default function LockSettings() {
   const { c } = useTokens()
-  const host = useHost()
+  const link = useMaybeLink()
   const prefs = usePrefs()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
@@ -104,7 +105,9 @@ export default function LockSettings() {
                 onValueChange={(on) => {
                   haptic.select()
                   setPrefs({ hidePreviews: on })
-                  if (host.link) void syncPush(host.link).catch(() => {})
+                  void pushChoicesChanged(link).catch((failure: unknown) =>
+                    Alert.alert('没能更新通知设置', errorText(failure)),
+                  )
                 }}
                 trackColor={{ true: c.success }}
                 accessibilityLabel="通知中隐藏内容"

@@ -7,21 +7,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as Application from 'expo-application'
 import Constants from 'expo-constants'
 import { router } from 'expo-router'
-import type { DirectAddress } from '@shared/remote/protocol'
 import { GITHUB_URL, PRIVACY_URL } from '../../about'
 import { admin } from '../../admin'
 import { RenameDialog } from '../../components/RenameDialog'
 import { Sheet } from '../../components/Sheet'
 import { useUpdateRows } from '../../components/UpdateRows'
-import { APP_VERSION, currentAddress, routeKind } from '../../connection'
+import { APP_VERSION, currentRoute, type CurrentRoute } from '../../connection'
 import { useCloudStatus } from '../../cloud'
 import { useHost } from '../../host'
 import { computerName } from '../../store'
-import { ROUTE_NAMES } from '../../linkInfo'
+import { routeName, routesNote } from '../../linkInfo'
 import { LIVE_SUPPORTED, useLiveAllowed } from '../../live/activities'
 import { authenticate, useBiometryName } from '../../lock'
 import { setPrefs, usePrefs, type ThemePref } from '../../prefs'
-import { syncPush, usePushStatus, type PushStatus } from '../../push/sync'
+import { pushChoicesChanged, usePushStatus, type PushStatus } from '../../push/sync'
+import { errorText } from '../../sessions'
 import { useRoutineList } from '../../routines'
 import { haptic } from '../../ui/haptics'
 import { HuliIcon } from '../../ui/HuliMark'
@@ -83,7 +83,7 @@ export default function Settings() {
   const liveAllowed = useLiveAllowed()
   const updateRows = useUpdateRows()
   const routines = useRoutineList()
-  const [address, setAddress] = useState<DirectAddress | null>(() => currentAddress())
+  const [current, setCurrent] = useState<CurrentRoute | null>(() => currentRoute())
   const [sheet, setSheet] = useState<'theme' | 'language' | null>(null)
   const [renaming, setRenaming] = useState(false)
   const connected = host.state.kind === 'connected'
@@ -91,8 +91,8 @@ export default function Settings() {
 
   // The route can change under a kept link, as when the phone leaves the Wi-Fi.
   useEffect(() => {
-    setAddress(currentAddress())
-    const timer = setInterval(() => setAddress(currentAddress()), 2000)
+    setCurrent(currentRoute())
+    const timer = setInterval(() => setCurrent(currentRoute()), 2000)
     return () => clearInterval(timer)
   }, [host.state])
 
@@ -129,7 +129,7 @@ export default function Settings() {
     return { title: '纸鸢', body: '在 iPhone 上看你电脑上的 Agent 在做什么，随时接着聊。' }
   })()
 
-  const route = connected && address ? ROUTE_NAMES[routeKind(address)] : '未连接'
+  const route = connected ? (current ? routeName(current) : '已连接') : '未连接'
 
   return (
     <Screen readable>
@@ -209,7 +209,9 @@ export default function Settings() {
                 onValueChange={(on) => {
                   haptic.select()
                   setPrefs({ limitAlerts: on })
-                  if (host.link) void syncPush(host.link).catch(() => {})
+                  void pushChoicesChanged(host.link).catch((failure: unknown) =>
+                    Alert.alert('没能更新额度提醒', errorText(failure)),
+                  )
                 }}
                 trackColor={{ true: c.success }}
                 accessibilityLabel="额度提醒"
@@ -391,10 +393,7 @@ export default function Settings() {
           />
         </ListGroup>
 
-        <ListGroup
-          header="连接"
-          footer="手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个。电脑与这台 iPhone 之间的一切内容都经过端到端加密。"
-        >
+        <ListGroup header="连接" footer={routesNote(!!host.host?.relay)}>
           <ListRow
             title="线路"
             icon="network"
@@ -443,6 +442,7 @@ export default function Settings() {
           style={styles.footer}
         >
           <Text style={[typeScale.caption, { color: c.textTertiary }]}>
+            {/* eslint-disable-next-line kettu/no-upstream-name -- the license's attribution */}
             纸鸢 {version} · 基于 Kettu，AGPL-3.0
           </Text>
         </Press>

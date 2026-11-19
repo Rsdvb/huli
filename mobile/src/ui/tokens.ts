@@ -1,8 +1,9 @@
 // The phone app's design tokens: one palette per scheme, and the shared radii, spacing and type
 // scale. Screens and components take every color and size from here, never a literal.
 
+import { useMemo } from 'react'
 import { Platform, useColorScheme } from 'react-native'
-import { usePrefs } from '../prefs'
+import { usePref } from '../prefs'
 
 export interface Palette {
   /** The screen behind everything, and the glow at its top. */
@@ -213,9 +214,10 @@ export interface Tokens {
   c: Palette
 }
 
+/** The palette for the theme; nearly every view reads it, so only the theme re-renders them. */
 export function useTokens(): Tokens {
   const system = useColorScheme()
-  const { theme } = usePrefs()
+  const theme = usePref('theme')
   const scheme = theme === 'system' ? (system === 'light' ? 'light' : 'dark') : theme
-  return { scheme, c: scheme === 'dark' ? dark : light }
+  return useMemo(() => ({ scheme, c: scheme === 'dark' ? dark : light }), [scheme])
 }

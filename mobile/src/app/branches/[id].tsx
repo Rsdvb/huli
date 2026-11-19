@@ -17,7 +17,7 @@ import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { BranchInfo, BranchList } from '@shared/git'
 import { call, errorText, runGit, sessionFolder, useChanges } from '../../git'
 import { branchLabel, failureNote, isBranchName, recentBranches, sameFolder } from '../../gitRules'
-import { useHost, useLink } from '../../host'
+import { getHost, useConnected, useHostActions, useLink, useSession } from '../../host'
 import { ago } from '../../sessions'
 import { haptic } from '../../ui/haptics'
 import { showNotice } from '../../ui/NoticeBar'
@@ -37,9 +37,9 @@ type Loaded = { list: BranchList; error: null } | { list: null; error: string } 
 export default function BranchesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { c, s } = useSessionTokens()
-  const host = useHost()
+  const { retry } = useHostActions()
   const link = useLink()
-  const summary = host.sessions.get(id)
+  const summary = useSession(id)
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const { status } = useChanges(link, folder)
   const [loaded, setLoaded] = useState<Loaded>(null)
@@ -47,7 +47,7 @@ export default function BranchesScreen() {
   const [busy, setBusy] = useState<string | null>(null)
   const [failure, setFailure] = useState<{ text: string; log: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
-  const connected = host.state.kind === 'connected'
+  const connected = useConnected()
 
   useEffect(() => {
     if (!folder || !connected) return
@@ -113,7 +113,7 @@ export default function BranchesScreen() {
 
   const openWorktree = (branch: BranchInfo) => {
     const where = branch.worktree!
-    const session = [...host.sessions.values()]
+    const session = [...getHost().sessions.values()]
       .filter(
         (x) =>
           x.archivedAt === null && x.origin !== 'subagent' && sameFolder(sessionFolder(x), where),
@@ -207,14 +207,16 @@ export default function BranchesScreen() {
   }
 
   let body
+  // Away, a read waits for the computer: say so rather than spin.
+  const away = <StateView text="电脑没有连上，连上后会再显示。" icon={G.wifiOff} retry={retry} />
   if (!summary) {
-    body = connected ? <StateView text="找不到这个会话。" /> : <StateView loading />
+    body = connected ? <StateView text="找不到这个会话。" /> : away
   } else if (!folder) {
     body = <StateView text="这个会话没有项目，没有分支可切换。" />
   } else if (loaded?.error) {
     body = <StateView text={loaded.error} tone="danger" retry={() => setAttempt((n) => n + 1)} />
   } else if (!loaded) {
-    body = <StateView loading />
+    body = connected ? <StateView loading /> : away
   } else {
     body = (
       <FlatList

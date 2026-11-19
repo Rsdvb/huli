@@ -88,7 +88,7 @@ const UNUSABLE_TEXT: Record<
   harness: (agent) => `${agent} 不能做步骤，只有 Claude Code 和 Codex 能做。`,
   model: (agent) => `${agent} 不再列出固定时选的模型。`,
   effort: (agent) => `${agent} 不再提供固定时选的推理强度。`,
-  no_kettu: (agent) => `${agent} 没有 Kettu 的工具，步骤要用它上报。`,
+  no_kettu: (agent) => `${agent} 没有纸鸢的工具，步骤要用它上报。`,
   not_ready: (agent) => `${agent} 还没准备好。`,
 }
 
@@ -233,6 +233,7 @@ export function sourceText(entry: WireWorkflowEntry): string {
     case 'user':
       return '由你编写'
     case LEGACY_OFFICIAL:
+      // eslint-disable-next-line kettu/no-upstream-name -- the upstream's own listings, as the desktop names them
       return 'Kettu'
     default:
       return '社区'

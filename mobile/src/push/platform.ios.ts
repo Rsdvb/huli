@@ -196,6 +196,19 @@ export const platform: PushPlatform = {
     await SecureStore.setItemAsync(KEYS_ITEM, JSON.stringify(keys), sharedOptions())
   },
 
+  async setQuiet(quiet) {
+    let options: SecureStore.SecureStoreOptions
+    try {
+      options = sharedOptions()
+    } catch {
+      // A build without the shared keychain group: the extension keeps no keys to show text with.
+      return
+    }
+    const before = await loadShared()
+    if (!before || before.quiet === quiet) return
+    await SecureStore.setItemAsync(KEYS_ITEM, JSON.stringify({ ...before, quiet }), options)
+  },
+
   async unshare(hostId) {
     const before = await loadShared().catch(() => null)
     if (!before) return

@@ -508,8 +508,8 @@ const NOT_SUBMITTED: Record<ReportSubmitFailure, string> = {
   too_large: '报告太大了，提交不了。换个短一点的时间范围或少带几项，或者存到本地附进 issue。',
   rate_limited: '今天提交的报告太多了。先存到本地附进 issue，或者明天再提交。',
   unauthorized: '登录已失效，重新登录后再提交。',
-  signed_out: '这台主机没有登录 Kettu 账号。先为它登录，或者存到本地。',
-  network: '连不上 Kettu。检查一下网络，再提交一次。',
+  signed_out: '这台电脑没有登录 Kite Cloud 账号。先为它登录，或者存到本地。',
+  network: '连不上 Kite Cloud。检查一下网络，再提交一次。',
   failed: '报告没能提交。存到本地附进 issue 吧。',
 }
 
@@ -561,18 +561,18 @@ export function ProblemReportEntry(props: {
       entryId={entry.id}
       waiting={outcome === null}
       icon={E.report}
-      title={wants(agent, '把问题报告发给 Kettu')}
+      title={wants(agent, '把问题报告发给纸鸢')}
       target={entry.title}
       body={entry.error ? `${entry.details}\n\n${entry.error}` : entry.details}
       list={{
         title: '一起带上',
-        items: ['Kettu 的版本和你的系统', '最近 1 小时的日志和操作记录', '这个会话和 Agent'],
+        items: ['纸鸢的版本和你的系统', '最近 1 小时的日志和操作记录', '这个会话和 Agent'],
       }}
       actions={[
         { key: 'skip', label: '不提交', run: () => answer({ kind: 'skipped' }) },
         {
           key: 'send',
-          label: '提交给 Kettu',
+          label: '提交给纸鸢',
           tone: 'primary',
           run: () =>
             send().catch((error: unknown) => {
@@ -633,7 +633,7 @@ export function ComputerSetupEntry(props: {
       waiting={waiting}
       icon={E.computer}
       title={`要在「${computer.name}」上完成设置`}
-      body={`开关和系统权限只能在那台电脑的 Kettu 里打开。设置好后，${agent} 会自动继续。`}
+      body={`开关和系统权限只能在那台电脑的纸鸢里打开。设置好后，${agent} 会自动继续。`}
       list={{
         title: `第 ${index + 1} 步，共 ${entry.steps.length} 步`,
         items: entry.steps.map((s) => `${entry.done.includes(s) ? '✓ ' : ''}${SETUP_STEP[s]}`),

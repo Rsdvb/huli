@@ -24,7 +24,8 @@ import type { HostAdminEvent, HostSettingsPart } from '@shared/remote/host-admin
 import type { HostLink } from '@shared/remote/link'
 import type { SettingsPatch } from '@shared/settings'
 import { admin } from '../admin'
-import { useHost } from '../host'
+import { useConnected, useHostActions, useMaybeLink, withinRefreshLimit } from '../host'
+import { ListSyncNote } from '../components/SyncNote'
 import { errorText } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
 import { EmptyState } from '../ui/EmptyState'
@@ -68,12 +69,11 @@ export interface Read<T> {
  */
 export function useRead<T>(
   key: string | null,
-  read: (link: HostLink) => Promise<T>,
+  read: (link: HostLink, signal: AbortSignal) => Promise<T>,
   events: readonly string[] = [],
 ): Read<T> {
-  const host = useHost()
-  const link = host.link
-  const connected = host.state.kind === 'connected'
+  const link = useMaybeLink()
+  const connected = useConnected()
   const [state, setState] = useState<{ key: string | null; value: T | null; error: string | null }>(
     { key: null, value: null, error: null },
   )
@@ -87,7 +87,8 @@ export function useRead<T>(
     const asked = current.current
     if (!link || asked === null) return
     try {
-      const value = await reader.current(link)
+      // A read waits for a dropped link to come back; the limit makes it fail instead.
+      const value = await withinRefreshLimit((signal) => reader.current(link, signal))
       if (current.current === asked) setState({ key: asked, value, error: null })
     } catch (failure) {
       if (current.current !== asked) return
@@ -121,13 +122,18 @@ export function useRead<T>(
     }
   }, [link, key, eventList, reload])
 
+  // The same function while the key holds, so an effect that takes it does not run again.
+  const set = useCallback(
+    (change: (value: T) => T) =>
+      setState((s) => (s.key === key && s.value !== null ? { ...s, value: change(s.value) } : s)),
+    [key],
+  )
   const mine = key !== null && state.key === key
   return {
     value: mine ? state.value : null,
     error: mine ? state.error : null,
     reload,
-    set: (change) =>
-      setState((s) => (s.key === key && s.value !== null ? { ...s, value: change(s.value) } : s)),
+    set,
   }
 }
 
@@ -135,29 +141,27 @@ export function useRead<T>(
 export function useHostSettings(): Read<HostSettingsPart> & {
   update(patch: SettingsPatch): Promise<void>
 } {
-  const host = useHost()
+  const link = useMaybeLink()
   const read = useRead('host-settings', (link) => admin(link, 'settings.get'), [])
   const { set } = read
   useEffect(() => {
-    if (!host.link) return
-    return host.link.onAdminEvent((event) => {
+    if (!link) return
+    return link.onAdminEvent((event) => {
       if (event.type === 'settings.changed') set(() => event.settings)
     })
-  }, [host.link, set])
+  }, [link, set])
   return {
     ...read,
     update: async (patch) => {
-      if (!host.link) throw new Error('电脑没有连上。')
-      const next = await admin(host.link, 'settings.update', { patch })
+      if (!link) throw new Error('电脑没有连上。')
+      const next = await admin(link, 'settings.update', { patch })
       set(() => next)
     },
   }
 }
 
 /** Whether the computer is connected now. */
-export function useConnected(): boolean {
-  return useHost().state.kind === 'connected'
-}
+export { useConnected }
 
 /**
  * Runs actions by key, marking each busy while it runs: a failure warns and shows why under
@@ -242,6 +246,26 @@ export function ManagePage(props: {
   const insets = useSafeAreaInsets()
   const [refreshing, setRefreshing] = useState(false)
   const { onRefresh } = props
+  const connected = useConnected()
+  const { retry } = useHostActions()
+  // A pull that failed, timed out or ran while the computer was away, as home says it.
+  const [failure, setFailure] = useState<string | null>(null)
+  const live = useRef(connected)
+  live.current = connected
+  useEffect(() => {
+    if (connected) setFailure(null)
+  }, [connected])
+  const pull = async () => {
+    if (!onRefresh) return
+    if (!live.current) retry()
+    try {
+      await withinRefreshLimit(() => onRefresh())
+      setFailure(live.current ? null : '电脑没有连上。')
+    } catch (error) {
+      setFailure(errorText(error))
+      throw error
+    }
+  }
   return (
     <Screen readable>
       <Animated.ScrollView
@@ -261,7 +285,7 @@ export function ManagePage(props: {
               progressViewOffset={header.height}
               onRefresh={() => {
                 setRefreshing(true)
-                void onRefresh()
+                void pull()
                   .catch(() => {})
                   .finally(() => setRefreshing(false))
               }}
@@ -269,6 +293,7 @@ export function ManagePage(props: {
           ) : undefined
         }
       >
+        <ListSyncNote error={failure} syncedAt={null} onRetry={pull} />
         {props.intro ? (
           <Text style={[typeScale.footnote, styles.intro, { color: c.textSecondary }]}>
             {props.intro}

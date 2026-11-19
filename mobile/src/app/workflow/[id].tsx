@@ -99,6 +99,15 @@ export default function WorkflowPage() {
         action={{ label: '重试', onPress: () => void load() }}
       />
     )
+  } else if (!entry && !connected) {
+    body = (
+      <EmptyState
+        icon="wifi"
+        title="打不开这个工作流"
+        message="它所在的电脑没有连上，连上后会再显示。"
+        action={{ label: '立即重连', onPress: () => host.retry() }}
+      />
+    )
   } else if (!entry) {
     body = <SkeletonRows count={4} avatar={false} />
   } else {
@@ -237,12 +246,12 @@ function Approval(props: {
       : origin?.kind === 'agent'
         ? `${host.agents.get(origin.agentId)?.name ?? origin.agentId} 在一个会话里用 create_workflow 写了它。 ${check}`
         : origin?.kind === 'community'
-          ? `从 Kettu 的 Marketplace 添加，发布者 ${origin.handle}，版本 ${origin.version}。 ${check}`
+          ? `从 Marketplace 添加，发布者 ${origin.handle}，版本 ${origin.version}。 ${check}`
           : origin?.kind === 'github'
             ? `从 GitHub 上的 ${/github\.com\/([^/]+\/[^/]+)/i.exec(origin.url)?.[1] ?? 'GitHub'} 添加。 ${check}`
             : origin?.kind === 'file'
               ? `从 ${origin.name} 添加。 ${check}`
-              : `放进这台主机工作流文件夹的一个文件。 ${check}`
+              : `放进这台电脑工作流文件夹的一个文件。 ${check}`
 
   const approve = () => {
     if (!host.link) return
@@ -319,7 +328,7 @@ function StepCard(props: { workflow: Workflow; index: number }) {
       <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
         {[
           index === 0 && step.by === 'agent' ? '第一步：你开始时选的 Agent' : null,
-          step.by === 'you' ? '你的步骤：Kettu 会问你，等你回答' : null,
+          step.by === 'you' ? '你的步骤：纸鸢会问你，等你回答' : null,
           step.reviewOf.length > 0
             ? `审查 ${step.reviewOf.map((id) => stepTitle(workflow, id)).join('、')}；不能是同一个 Agent 加同一个模型`
             : null,

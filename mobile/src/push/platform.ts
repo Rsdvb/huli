@@ -10,4 +10,5 @@ export const platform: PushPlatform = {
   onTargetChange: () => () => {},
   share: async () => {},
   unshare: async () => {},
+  setQuiet: async () => {},
 }
