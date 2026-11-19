@@ -653,9 +653,7 @@ function Details(props: { answer: string }) {
   return (
     <>
       <Pressable onPress={() => setOpen((v) => !v)} hitSlop={6} style={styles.details}>
-        <Text style={[styles.meta, { color: c.textTertiary }]}>
-          {open ? '收起' : 'Kettu 的回复'}
-        </Text>
+        <Text style={[styles.meta, { color: c.textTertiary }]}>{open ? '收起' : '纸鸢的回复'}</Text>
         <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}>
           <Icon icon={G.down} size={11} color={c.textTertiary} />
         </View>

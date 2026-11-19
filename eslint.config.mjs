@@ -100,6 +100,14 @@ export default defineConfig([
     },
   },
   {
+    // Huli: the phone says 纸鸢, never Kettu. The license page and the source link name the
+    // upstream on purpose.
+    files: ['mobile/src/**/*.{ts,tsx}'],
+    ignores: ['mobile/src/about.ts', 'mobile/src/app/settings/licenses.tsx'],
+    plugins: { kettu },
+    rules: { 'kettu/no-upstream-name': 'error' },
+  },
+  {
     // shadcn/ui components export their variant helpers next to the component.
     files: ['src/renderer/src/components/ui/**/*.tsx'],
     rules: { 'react-refresh/only-export-components': 'off' },

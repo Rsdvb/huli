@@ -443,6 +443,7 @@ export default function Settings() {
           style={styles.footer}
         >
           <Text style={[typeScale.caption, { color: c.textTertiary }]}>
+            {/* eslint-disable-next-line kettu/no-upstream-name -- the license's attribution */}
             纸鸢 {version} · 基于 Kettu，AGPL-3.0
           </Text>
         </Press>

@@ -322,7 +322,7 @@ function LinkCard(props: {
       target={request.url}
       mono
       sender={sender}
-      footnote="在浏览器中打开。你在那里填的内容 Kettu 看不到。"
+      footnote="在浏览器中打开。你在那里填的内容纸鸢看不到。"
       actions={[
         ...(decline ? [{ key: 'decline', label: '拒绝', run: () => respond(decline.id) }] : []),
         ...(accept
