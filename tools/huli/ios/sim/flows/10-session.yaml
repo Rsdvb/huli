@@ -101,8 +101,9 @@ appId: io.github.rsdvb.huli
     optional: true
 - takeScreenshot: s08-scrolled-hidden
 # A message queued, then sent at once with one tap on the queue card.
-- tapOn: '回到最新'
-  optional: true
+- tapOn:
+    text: '回到最新'
+    optional: true
 - tapOn:
     text: '排队一条消息.*'
 - inputText: 'queued note'
