@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { PlanLimit } from '@shared/agent-host'
 import { limitsForModel } from '@shared/plan-limits'
 import type { ConfigOption } from '@shared/thread'
 import {
@@ -231,6 +232,47 @@ describe('Google Antigravity plan limits', () => {
     expect(windows('gpt-oss-120b-medium')).toHaveLength(2)
     // A model no group lists is held back by every window.
     expect(windows('gemini-4-preview')).toHaveLength(4)
+  })
+
+  it('tells a group’s windows by their names when agy lists no models', () => {
+    const limit = (window: string): PlanLimit => ({
+      window,
+      label: window,
+      usedPercent: 10,
+      resetsAt: null,
+      state: 'ok',
+      observedAt: NOW,
+    })
+    const limits = [
+      'seven_day_gemini_models',
+      'five_hour_gemini_models',
+      'seven_day_claude_and_gpt_models',
+      'five_hour_claude_and_gpt_models',
+    ].map(limit)
+    const model = (value: string, gpt = true): ConfigOption => ({
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      value,
+      choices: [
+        { value: 'gemini-4-neon', name: 'Gemini 4 Neon' },
+        { value: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)' },
+        { value: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+        ...(gpt ? [{ value: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' }] : []),
+      ],
+    })
+    const windows = (value: string, gpt?: boolean) =>
+      limitsForModel(limits, model(value, gpt)).map((l) => l.window)
+    const gemini = ['seven_day_gemini_models', 'five_hour_gemini_models']
+    const others = ['seven_day_claude_and_gpt_models', 'five_hour_claude_and_gpt_models']
+    expect(windows('gemini-4-neon')).toEqual(gemini)
+    expect(windows('gemini-pro-orchestrator-neon')).toEqual(gemini)
+    expect(windows('claude-opus-5-5')).toEqual(others)
+    expect(windows('gpt-oss-120b-medium')).toEqual(others)
+    // A menu without GPT still tells the group by its Claude models.
+    expect(windows('claude-opus-5-5', false)).toEqual(others)
+    expect(windows('gemini-4-neon', false)).toEqual(gemini)
   })
 
   it('runs agy only on a Google sign-in, since a signed-out agy opens a browser to sign in', () => {
