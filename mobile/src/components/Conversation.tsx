@@ -107,6 +107,8 @@ export function Conversation(props: {
   scrolling?: WritableStore<boolean>
   /** The turn waits for the user, which the way back to the newest message shows. */
   waiting?: boolean
+  /** What the running turn does now, which the way back's dots act out. */
+  phase?: string | null
   /** The height of the dock over the list's end: the composer and what stands above it. */
   dock: SharedValue<number>
   /** How much of the dock's bottom room the keyboard covers once it is up (keyboardOverlap). */
@@ -270,6 +272,7 @@ export function Conversation(props: {
           visible={away}
           fresh={fresh}
           state={props.waiting ? 'waiting' : running ? 'running' : 'idle'}
+          phase={props.phase ?? null}
           onPress={toBottom}
         />
       </Reanimated.View>

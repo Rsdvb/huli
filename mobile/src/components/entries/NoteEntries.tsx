@@ -241,7 +241,7 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
             ) : failed ? (
               <Icon icon={G.failed} size={12} color={c.danger} />
             ) : running ? (
-              <WorkingDots color={c.accent} size={11} />
+              <WorkingDots color={c.accent} size={11} phase={child?.working?.phase} />
             ) : child && !cancelled ? (
               <Icon icon={G.check} size={12} color={c.success} weight="semibold" />
             ) : null}

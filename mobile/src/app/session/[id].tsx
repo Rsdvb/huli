@@ -657,6 +657,7 @@ export default function SessionScreen() {
           label={workingText}
           tokens={added}
           waiting={waitingYou || handBack || turn.asked !== null}
+          phase={turn.phase}
         />
       </View>
     ) : undefined
@@ -948,6 +949,7 @@ export default function SessionScreen() {
         paddingTop={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0)}
         scrolling={scrolling}
         waiting={running && (waitingYou || handBack || turn.asked !== null)}
+        phase={turn.phase}
         dock={dock}
         keyboardOverlap={overlap}
       />
