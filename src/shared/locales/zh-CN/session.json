@@ -580,7 +580,7 @@
     },
     "pickup": {
       "title": "接着上次继续",
-      "waiting": "等待你批准",
+      "waiting": "等待你的授权",
       "working": "进行中",
       "failed": "出错停止",
       "signIn": "等待登录",
