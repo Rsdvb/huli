@@ -460,6 +460,9 @@ disables every other workflow after each merge, new ones included.
   `build-ios.sh` and the signed macOS build look for them, and `signing.mjs` refuses to make a new
   certificate in CI. Setting the `HULI_MAC_RUNNER` variable to `true` moves both jobs back to the
   owner's Mac, which a public repository must never do: a pull request could run code there.
+  `tools/huli/newest-xcode.sh` selects the newest Xcode on the runner first and prints its SDK,
+  since App Store Connect only takes builds made with the newest major SDK (ITMS-90725: iOS 27
+  from April 2027); if the image has none new enough, move to a newer `macos-*` image.
 
 Lint covers `mobile/` too, through the root ESLint config: the phone app gets the React hooks
 rules as the renderer does, may `require()` images as Metro needs, and drops props by leaving them

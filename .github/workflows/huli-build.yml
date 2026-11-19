@@ -155,6 +155,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Use the newest Xcode
+        if: runner.environment == 'github-hosted'
+        run: bash tools/huli/newest-xcode.sh
       - name: Restore the Apple keys
         if: runner.environment == 'github-hosted'
         env:
@@ -272,6 +275,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Use the newest Xcode
+        if: runner.environment == 'github-hosted'
+        working-directory: .
+        run: bash tools/huli/newest-xcode.sh
       - name: Restore the Apple keys
         if: runner.environment == 'github-hosted'
         working-directory: .
