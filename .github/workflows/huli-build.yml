@@ -144,7 +144,12 @@ jobs:
           if [ -f "$keys/mac-developer-id.p12" ] && [ -f "$keys/mac-developer-id.pass" ]; then
             pass="$(cat "$keys/mac-developer-id.pass")"
             echo "::add-mask::$pass"
+            # electron-builder 26 takes the config's empty identity as a name to look for, so the
+            # certificate's own name is given instead.
+            identity="$(openssl x509 -in "$keys/mac-developer-id.pem" -noout -subject \
+              | sed -n 's/.*CN *= *\([^/,]*\).*/\1/p')"
             {
+              echo "HULI_MAC_IDENTITY=$identity"
               echo "MAIN_VITE_UPDATE_MODE=install"
               echo "HULI_MAC_CONFIG=electron-builder.mac-signed.yml"
               echo "CSC_LINK=$keys/mac-developer-id.p12"
@@ -164,7 +169,8 @@ jobs:
       - name: Package
         run: |
           for attempt in 1 2 3; do
-            pnpm exec electron-builder --mac --arm64 --publish never --config "$HULI_MAC_CONFIG" && exit 0
+            pnpm exec electron-builder --mac --arm64 --publish never --config "$HULI_MAC_CONFIG" \
+              ${HULI_MAC_IDENTITY:+"-c.mac.identity=$HULI_MAC_IDENTITY"} && exit 0
             echo "Packaging failed (attempt $attempt)"
             sleep 20
           done
