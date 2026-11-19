@@ -1,6 +1,9 @@
 // Prepares manual App Store signing through the App Store Connect API: an Apple Distribution
 // certificate whose key lives in the build keychain, and an App Store profile per bundle id.
-// Usage: node signing.mjs <keychain> <keychain password file> <bundle id>...
+// SIGNING=development makes a build for the registered devices instead, with the Apple Development
+// certificate; SIGNING=adhoc makes ad-hoc profiles of the distribution certificate, with which
+// export-adhoc.sh exports the App Store build's archive for the registered devices.
+// Usage: [SIGNING=development|adhoc] node signing.mjs <keychain> <keychain password file> <bundle id>...
 import { execFileSync } from 'node:child_process'
 import { createPrivateKey, sign } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -12,6 +15,11 @@ const HOME = homedir()
 const KEYS = `${HOME}/.huli-keys`
 const [keychain, passFile, ...bundles] = process.argv.slice(2)
 const kpass = readFileSync(passFile, 'utf8').trim()
+const DEV = process.env.SIGNING === 'development'
+const ADHOC = process.env.SIGNING === 'adhoc'
+// The ad-hoc build is optional: a call that fails ends it, and the build goes on without it,
+// rather than asking Apple again.
+const TRIES = ADHOC ? 1 : 4
 
 function token() {
   const key = createPrivateKey(readFileSync(`${KEYS}/AuthKey_${KEY_ID}.p8`))
@@ -31,7 +39,7 @@ async function api(method, path, body) {
     })
     const text = await res.text()
     if (res.ok) return text ? JSON.parse(text) : null
-    if (res.status < 500 || attempt >= 4)
+    if (res.status < 500 || attempt >= TRIES)
       throw new Error(`${method} ${path}: ${res.status} ${text}`)
     await new Promise((resolve) => setTimeout(resolve, attempt * 5000))
   }
@@ -40,8 +48,6 @@ async function api(method, path, body) {
 const sh = (cmd, args, input) => execFileSync(cmd, args, { input, encoding: 'utf8' })
 
 // 1. The distribution certificate, reused while its key is in the keychain.
-// SIGNING=development makes a build for the registered devices instead of the App Store's.
-const DEV = process.env.SIGNING === 'development'
 const KIND = DEV ? 'development' : 'distribution'
 const CERT_TYPE = DEV ? 'DEVELOPMENT' : 'DISTRIBUTION'
 const IDENTITY = DEV ? 'Apple Development' : 'Apple Distribution'
@@ -49,7 +55,8 @@ const p12 = `${KEYS}/ios-${KIND}.p12`
 const OUT_FILE = `${process.env.OUT ?? `${HOME}/huli/out`}/signing.json`
 const PROFILES_DIR = `${HOME}/Library/MobileDevice/Provisioning Profiles`
 const profileName = (identifier) =>
-  DEV ? `Huli Development ${identifier}` : `Huli App Store ${identifier}`
+  `Huli ${DEV ? 'Development' : ADHOC ? 'Ad Hoc' : 'App Store'} ${identifier}`
+const DAY = 24 * 60 * 60 * 1000
 
 // While Apple's API is down, the certificate already in the keychain and the profiles made last
 // time still sign: the newest unexpired profile of each name is used as it is.
@@ -112,6 +119,8 @@ if (!cert && process.env.GITHUB_ACTIONS === 'true') {
   // every build, and Apple allows only a few. Its .p12 comes from HULI_APPLE_KEYS instead.
   throw new Error(`No ${KIND} certificate matches ios-${KIND}.serial; refusing to make one in CI`)
 }
+// The ad-hoc export follows the App Store signing of the same build, which made any certificate.
+if (!cert && ADHOC) throw new Error(`No ${KIND} certificate matches ios-${KIND}.serial`)
 if (!cert) {
   const key = `${KEYS}/ios-${KIND}.key`
   sh('openssl', ['genrsa', '-out', key, '2048'])
@@ -187,36 +196,74 @@ const listed = sh('security', ['find-identity', '-v', '-p', 'codesigning', keych
 if (!listed.toUpperCase().includes(sha1))
   throw new Error(`no ${IDENTITY} identity ${sha1} in the keychain`)
 
-// 2. A fresh App Store profile per bundle id, installed where Xcode looks.
+// 2. A profile per bundle id, installed where Xcode looks: a fresh one each time, except that an
+// ad-hoc one is kept while it still fits (see fits()).
 const dir = PROFILES_DIR
 mkdirSync(dir, { recursive: true })
 const out = { identity: sha1, signing: sha1, profiles: {} }
-// A development profile lists the devices it installs on: every enabled iPhone the team has.
-const devices = DEV
-  ? (await api('GET', '/v1/devices?filter[platform]=IOS&filter[status]=ENABLED&limit=100')).data
+// A development or ad-hoc profile lists the devices it installs on: every enabled iPhone the team
+// has, so a device registered since the last build gets new profiles.
+const devices =
+  DEV || ADHOC
+    ? (await api('GET', '/v1/devices?filter[platform]=IOS&filter[status]=ENABLED&limit=100')).data
+    : []
+if ((DEV || ADHOC) && devices.length === 0) throw new Error('no iOS device is registered')
+// Every ad-hoc profile, with its certificates and devices, in one call.
+const adhoc = ADHOC
+  ? (
+      await api(
+        'GET',
+        '/v1/profiles?filter[profileType]=IOS_APP_ADHOC&include=certificates,devices&limit=200&limit[certificates]=50&limit[devices]=50',
+      )
+    ).data
   : []
-if (DEV && devices.length === 0) throw new Error('no iOS device is registered')
+// An installed ad-hoc build stops opening when its profile expires: a year after it was made, or
+// with the certificate if that comes first. One that ends within a month is replaced, unless a new
+// one could last no longer, the certificate itself ending by then.
+const certEnds = Date.parse(cert.attributes.expirationDate)
+function fits(profile) {
+  const ids = (key) => (profile.relationships?.[key]?.data ?? []).map((d) => d.id)
+  const listed = new Set(ids('devices'))
+  const ends = Date.parse(profile.attributes.expirationDate)
+  return (
+    profile.attributes.profileState === 'ACTIVE' &&
+    ends >= Math.min(Date.now() + 30 * DAY, certEnds) - DAY &&
+    ids('certificates').includes(cert.id) &&
+    listed.size === devices.length &&
+    devices.every((d) => listed.has(d.id))
+  )
+}
 for (const identifier of bundles) {
-  const ids = (await api('GET', `/v1/bundleIds?filter[identifier]=${identifier}&limit=50`)).data
-  const bundle = ids.find((b) => b.attributes.identifier === identifier)
-  if (!bundle) throw new Error(`bundle id ${identifier} is not registered`)
   const name = profileName(identifier)
-  const old = (await api('GET', `/v1/profiles?filter[name]=${encodeURIComponent(name)}&limit=50`))
-    .data
-  for (const p of old) await api('DELETE', `/v1/profiles/${p.id}`)
-  const profile = (
-    await api('POST', '/v1/profiles', {
-      data: {
-        type: 'profiles',
-        attributes: { name, profileType: DEV ? 'IOS_APP_DEVELOPMENT' : 'IOS_APP_STORE' },
-        relationships: {
-          bundleId: { data: { type: 'bundleIds', id: bundle.id } },
-          certificates: { data: [{ type: 'certificates', id: cert.id }] },
-          ...(DEV && { devices: { data: devices.map((d) => ({ type: 'devices', id: d.id })) } }),
+  let profile = adhoc.find((p) => p.attributes.name === name && fits(p))
+  if (profile) {
+    console.log(`kept ${name}`)
+  } else {
+    const ids = (await api('GET', `/v1/bundleIds?filter[identifier]=${identifier}&limit=50`)).data
+    const bundle = ids.find((b) => b.attributes.identifier === identifier)
+    if (!bundle) throw new Error(`bundle id ${identifier} is not registered`)
+    const old = ADHOC
+      ? adhoc.filter((p) => p.attributes.name === name)
+      : (await api('GET', `/v1/profiles?filter[name]=${encodeURIComponent(name)}&limit=50`)).data
+    for (const p of old) await api('DELETE', `/v1/profiles/${p.id}`)
+    const profileType = DEV ? 'IOS_APP_DEVELOPMENT' : ADHOC ? 'IOS_APP_ADHOC' : 'IOS_APP_STORE'
+    profile = (
+      await api('POST', '/v1/profiles', {
+        data: {
+          type: 'profiles',
+          attributes: { name, profileType },
+          relationships: {
+            bundleId: { data: { type: 'bundleIds', id: bundle.id } },
+            certificates: { data: [{ type: 'certificates', id: cert.id }] },
+            ...(devices.length > 0 && {
+              devices: { data: devices.map((d) => ({ type: 'devices', id: d.id })) },
+            }),
+          },
         },
-      },
-    })
-  ).data
+      })
+    ).data
+    if (ADHOC) console.log(`made ${name}`)
+  }
   writeFileSync(
     `${dir}/${profile.attributes.uuid}.mobileprovision`,
     Buffer.from(profile.attributes.profileContent, 'base64'),

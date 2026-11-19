@@ -10,13 +10,21 @@ name: Huli build
 # whose URL from HULI_CHANNEL_URL. Artifacts only carry the files from job to job, sealed with the
 # HULI_ARTIFACT_KEY secret (tools/huli/seal-artifacts.mjs) so a signed-in user who downloads one
 # while the run goes on gets nothing: each is kept a day at most and the cleanup job deletes them
-# all once the run ends, failed or not. The release on GitHub is a tag with notes and no files,
-# and iOS goes to TestFlight's internal testers only.
+# all once the run ends, failed or not. The release on GitHub is a tag with notes and no files.
+# iOS goes to TestFlight's internal testers, and signed ad hoc to the update channel, where only
+# the team's registered devices can install it.
 #
 # It runs by hand, after huli-sync.yml merges Kettu's main, and every night; a night's run builds
 # only when main has commits the latest release lacks, and skips every job otherwise.
 on:
   workflow_dispatch:
+    inputs:
+      # Tries the iOS signing and both exports on a branch: no other job, no TestFlight upload, no
+      # artifact and no release.
+      ios_dry_run:
+        description: Build and export iOS only (App Store and ad hoc); upload and publish nothing
+        type: boolean
+        default: false
   schedule:
     - cron: '41 19 * * *' # 03:41 in Beijing, after huli-sync.yml's 03:23
 
@@ -91,6 +99,7 @@ jobs:
   desktop:
     name: ${{ matrix.name }}
     needs: version
+    if: ${{ !inputs.ios_dry_run }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +155,7 @@ jobs:
   mac:
     name: macOS arm64
     needs: version
+    if: ${{ !inputs.ios_dry_run }}
     # GitHub's own macOS runner, or the owner's Mac while HULI_MAC_RUNNER is `true`. The owner's
     # Mac must never serve a public repository: a pull request could run code on it.
     runs-on: ${{ vars.HULI_MAC_RUNNER == 'true' && fromJSON('["self-hosted","macOS","huli"]') || 'macos-26' }}
@@ -232,6 +242,7 @@ jobs:
   cloud:
     name: Huli Cloud
     needs: version
+    if: ${{ !inputs.ios_dry_run }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -261,7 +272,9 @@ jobs:
 
   # The phone app for iOS, on a macOS runner: signed through the App Store Connect API key kept
   # there and uploaded to TestFlight for its internal testers only; no public link, which would let
-  # anyone install it. Its failure never holds anything back.
+  # anyone install it. The same archive is also exported ad hoc for the team's registered devices,
+  # which install it from the update channel. Its failure never holds anything back: without the
+  # ad-hoc build the release goes out as before, and the channel keeps its last one.
   ios:
     name: iOS
     needs: version
@@ -310,12 +323,46 @@ jobs:
           APP_DIR: ${{ github.workspace }}/mobile
           HULI_TOOLS: ${{ github.workspace }}/tools/huli/ios
           OUT: ${{ runner.temp }}/ios
+          ADHOC: '1'
+          UPLOAD: ${{ inputs.ios_dry_run && '0' || '1' }}
+      # The ad-hoc build goes on even when the TestFlight upload failed, once its profiles check
+      # out; without it the release goes out as before. A dry run fails here instead.
+      - name: Check the ad-hoc build
+        id: adhoc-check
+        if: ${{ !cancelled() }}
+        continue-on-error: ${{ !inputs.ios_dry_run }}
+        working-directory: .
+        run: bash tools/huli/ios/check-ipa.sh "$RUNNER_TEMP/ios/adhoc/export/Huli.ipa"
+      # Sealed before upload: the repository is public (see tools/huli/README.md).
+      - name: Seal the ad-hoc build
+        id: adhoc
+        if: ${{ !cancelled() && !inputs.ios_dry_run && steps.adhoc-check.outcome == 'success' }}
+        shell: bash
+        working-directory: .
+        env:
+          HULI_ARTIFACT_KEY: ${{ secrets.HULI_ARTIFACT_KEY }}
+          IPA: ${{ runner.temp }}/ios/adhoc/export/Huli.ipa
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          rm -rf ios-adhoc && mkdir ios-adhoc
+          cp "$IPA" "ios-adhoc/Huli-$VERSION.ipa"
+          node tools/huli/seal-artifacts.mjs seal sealed/huli-ios.sealed 'ios-adhoc/*.ipa'
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.adhoc.outcome == 'success' }}
+        with:
+          name: huli-ios
+          retention-days: 1
+          # Sealed bytes do not compress.
+          compression-level: 0
+          path: sealed/huli-ios.sealed
+          if-no-files-found: error
 
   # The phone app for Android, signed with Huli's own key (kept off the repository) and installed
   # straight from Huli's update channel. Its failure never holds the desktop release back.
   android:
     name: Android
     needs: version
+    if: ${{ !inputs.ios_dry_run }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -383,9 +430,10 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [version, desktop, mac, cloud, android]
+    needs: [version, desktop, mac, cloud, ios, android]
     if: >-
-      always() && needs.desktop.result == 'success' && needs.cloud.result == 'success' &&
+      always() && !inputs.ios_dry_run && needs.desktop.result == 'success' &&
+      needs.cloud.result == 'success' &&
       (needs.mac.result == 'success' || needs.mac.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
@@ -425,7 +473,8 @@ jobs:
           mkdir release
           find artifacts -type f \( -name '*-setup.exe' -o -name '*-setup.exe.blockmap' \
             -o -name '*.AppImage' -o -name '*.dmg' -o -name '*-mac.zip' -o -name '*-mac.zip.blockmap'             -o -name 'latest*.yml' \
-            -o -name 'huli-cloud.mjs' -o -name 'install.sh' -o -name '*.apk' \) -exec cp {} release/ \;
+            -o -name 'huli-cloud.mjs' -o -name 'install.sh' -o -name '*.apk' -o -name '*.ipa' \) \
+            -exec cp {} release/ \;
           node tools/workflow/sign-update-files.mjs release/latest*.yml
           # Beside release/, not in it: the sums go into the release's notes, never as a file.
           (cd release && sha256sum *) > SHA256SUMS.txt
@@ -463,6 +512,25 @@ jobs:
               > latest-android.json
             rsync -t --mkpath --chmod=F644 -e "$ssh" latest-android.json "$host:android/latest.json"
           done
+          # The iOS build for the registered devices, installed through an itms-services link to its
+          # manifest. The IPA and its manifest stay in the version's folder; ios/ holds a copy of the
+          # newest manifest, a link that stays the same for a first install, and latest.json last.
+          for ipa in release/*.ipa; do
+            [ -e "$ipa" ] || continue
+            name="$(basename "$ipa")"
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict><key>items</key><array><dict>' \
+              "<key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>$CHANNEL/download/v$VERSION/$name</string></dict></array>" \
+              "<key>metadata</key><dict><key>bundle-identifier</key><string>io.github.rsdvb.huli</string><key>bundle-version</key><string>$VERSION</string><key>kind</key><string>software</string><key>title</key><string>纸鸢</string></dict>" \
+              '</dict></array></dict></plist>' > manifest.plist
+            rsync -t --mkpath --chmod=F644 -e "$ssh" "$ipa" manifest.plist "$host:download/v$VERSION/"
+            rsync -t --mkpath --chmod=F644 -e "$ssh" manifest.plist "$host:ios/"
+            printf '{"version":"%s","build":%s,"manifest":"%s/download/v%s/manifest.plist"}\n' \
+              "$VERSION" "$RUN" "$CHANNEL" "$VERSION" > latest-ios.json
+            rsync -t --mkpath --chmod=F644 -e "$ssh" latest-ios.json "$host:ios/latest.json"
+          done
           rm -f ~/.ssh/huli_upload
       # Notes and a tag only, never the files: the repository is public and the builds are not.
       # The tag stays, since the changes job compares main with the latest release's.
@@ -486,7 +554,7 @@ jobs:
   # when one failed, so the public repository never offers a build for download.
   cleanup:
     name: Delete the artifacts
-    needs: [changes, desktop, mac, cloud, android, release]
+    needs: [changes, desktop, mac, cloud, ios, android, release]
     if: always() && needs.changes.outputs.build == 'true'
     runs-on: ubuntu-24.04
     permissions:

@@ -494,7 +494,9 @@ and once a run ends GitHub offers none of them for download:
   channel). The release job takes the channel's URL from the `HULI_CHANNEL_URL` secret, not a
   variable, so the log masks it.
 - iOS builds go to TestFlight for its internal testers only; there is no public link, and
-  `publish-testflight.mjs`, which put each build on it, is gone.
+  `publish-testflight.mjs`, which put each build on it, is gone. The same build, signed ad hoc,
+  goes to the update channel, where only the team's registered devices can install it (see Phone
+  updates).
 - Signing material comes from the `HULI_APPLE_KEYS` secret (above), Android's key from
   `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD`, and the update files' key from
   `UPDATE_SIGNING_KEY`; nothing prints them. The artifacts' key, `HULI_ARTIFACT_KEY`, is random
@@ -537,6 +539,58 @@ which `cloud/deploy/install.sh` reads), and only that file, the secret and
 `~/.huli-keys/update-path.txt` hold it. Installs from before the rotation still ask the old
 path; unless the server keeps answering there for a while, they need a new build installed once by
 hand. The filled-in files stay in the working tree like the rebrand's output; never commit them.
+
+## Phone updates
+
+The phone app hears of its own new builds from the channel (`mobile/src/update.ts`): at start and
+on each return to the foreground, at most every six hours, it reads its platform's `latest.json`,
+and when the build number there (the run number) is above its own it shows a banner on the session
+list and the newest version in Settings › About, which also checks by hand.
+
+- Android: `android/latest.json` (`version`, `versionCode`, `url`, `size`, `sha256`) names
+  `android/Huli.apk`. The browser downloads it, and Android installs it over the app only when
+  Huli's key signed it.
+- iOS: TestFlight cannot reach the owner's iPhone (external review answers 422, internal
+  invitations never arrive), so the `ios` job also exports its archive ad hoc.
+  `tools/huli/ios/export-adhoc.sh`, which `build-ios.sh` runs with `ADHOC=1` after the App Store
+  export and before the upload, has `signing.mjs` (`SIGNING=adhoc`) give every target (the app,
+  widgets, notification service and share extension) an `IOS_APP_ADHOC` profile named
+  `Huli Ad Hoc <bundle id>`, of the same Apple Distribution certificate and listing every enabled
+  iOS device of the team, then exports with method `release-testing` (Xcode's name for ad hoc).
+  A profile is kept from build to build while it is active, has that certificate, lists exactly
+  the enabled devices and ends a month or more away (or with the certificate); otherwise it is
+  deleted and made again. In this mode `signing.mjs` asks App Store Connect each thing once and
+  never again, and a build that keeps its profiles makes three calls (certificates, devices,
+  ad-hoc profiles). `check-ipa.sh` then checks that the app and every extension in the IPA carry
+  an ad-hoc profile (devices listed, no debugger), printing counts and dates but no UDID, since
+  the logs are public. The job seals `Huli-<version>.ipa` even when the TestFlight upload failed;
+  when the ad-hoc part fails a warning says so, and the release goes out without it while the
+  channel keeps its last iOS build. The release job, which waits for the iOS job whatever its
+  result, puts the IPA and its `manifest.plist` (itms-services: the IPA's URL, bundle id
+  `io.github.rsdvb.huli`, the version, title 纸鸢) into `download/v<version>/`, a copy of that
+  manifest into `ios/manifest.plist`, and last `ios/latest.json` (`version`, `build`, `manifest`).
+  `cloud/deploy/install.sh` serves `.plist` as `text/xml` and `.ipa` as bytes, as Apple asks.
+- `huli-build.yml` run by hand with `ios_dry_run`, on a branch too
+  (`gh workflow run huli-build.yml --ref <branch> -f ios_dry_run=true`), runs the iOS job alone:
+  it signs (making or replacing profiles as a build does), archives, exports both ways and fails
+  when `check-ipa.sh` does, but uploads nothing to TestFlight, keeps no artifact and publishes no
+  release.
+- On the iPhone only a build that carries a device profile checks: expo-application's
+  `getIosApplicationReleaseTypeAsync()` reads its `embedded.mobileprovision` and says ad hoc or
+  development, while TestFlight's and the App Store's carry none and leave updates to them. The
+  update opens `itms-services://?action=download-manifest&url=<manifest>`; iOS asks, then installs
+  the build over the app and keeps its data.
+- Only the devices a profile lists can install the build. To add an iPhone, register its UDID with
+  the team (developer.apple.com › Devices, or `install-dev.sh`, which registers the phone it
+  installs on); the next build finds the device list changed and makes new profiles, and from that
+  build on the iPhone can install it.
+- The first install, or one over a development build (whose build number, a date, stays above
+  every run number, so it never hears of one): in Safari on the iPhone, open
+  `itms-services://?action=download-manifest&url=<channel>/ios/manifest.plist`, with the channel's
+  URL from `HULI_CHANNEL_URL`.
+- An ad-hoc build stops opening once its profile expires: a year after the profile was made, or
+  when the distribution certificate expires if that is sooner. Installing a newer build renews it;
+  after a new certificate every phone needs a build signed with it.
 
 ## Build
 
