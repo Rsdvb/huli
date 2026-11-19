@@ -46,6 +46,8 @@ export type ToolCallLabels = {
   used: (count: number) => string;
   usingTools: string;
   failedCount: (count: number) => string;
+  /** Huli: a duration, live while the call runs */
+  time: (ms: number, live: boolean) => string;
 };
 
 const LABELS: ToolCallLabels = {
@@ -72,6 +74,7 @@ const LABELS: ToolCallLabels = {
   used: (count) => `Used ${count.toLocaleString("en-US")} ${count === 1 ? "tool" : "tools"}`,
   usingTools: "Using tools…",
   failedCount: (count) => `${count} failed`,
+  time: (ms, live) => formatMs(ms, live),
 };
 
 export type ToolCallCardProps = {
@@ -259,7 +262,7 @@ export function ToolCallCard({
           {status === "error" && <ErrorIcon />}
           {status === "cancelled" && <CancelIcon />}
           <span className="ui-tcc__time">
-            {status === "error" ? L.failed : status === "cancelled" ? L.cancelled : ms != null ? formatMs(ms, status === "running") : null}
+            {status === "error" ? L.failed : status === "cancelled" ? L.cancelled : ms != null ? L.time(ms, status === "running") : null}
           </span>
         </span>
         {chevron === "after" && <Chevron />}
@@ -395,7 +398,7 @@ export function ToolCallGroup({
             {running && <Glint>{title}</Glint>}
           </span>
           {!running && failed > 0 && <span className="ui-tcc-group__failed">· {L.failedCount(failed)}</span>}
-          {ms != null && <span className="ui-tcc-group__time">· {formatMs(ms, running)}</span>}
+          {ms != null && <span className="ui-tcc-group__time">· {L.time(ms, running)}</span>}
         </span>
         {chevron === "after" && <Chevron />}
       </button>
@@ -592,6 +595,21 @@ function WrenchIcon() {
 
 /* ---------- Helpers ---------- */
 
+// Huli: one timer for every running call, once a second, rather than one per card ten times a second
+const tickers = new Set<() => void>();
+let ticking = 0;
+function onTick(tick: () => void) {
+  tickers.add(tick);
+  if (!ticking) ticking = window.setInterval(() => tickers.forEach((t) => t()), 1000);
+  return () => {
+    tickers.delete(tick);
+    if (!tickers.size) {
+      window.clearInterval(ticking);
+      ticking = 0;
+    }
+  };
+}
+
 /** Live ms while running, the final value after. accumulate = add up several running stretches. */
 function useStopwatch(running: boolean, startedAt: number | undefined, accumulate: boolean) {
   const start = useRef<number | null>(null);
@@ -610,15 +628,15 @@ function useStopwatch(running: boolean, startedAt: number | undefined, accumulat
     start.current = startedAt ?? Date.now();
     const tick = () => setMs(base.current + Date.now() - (start.current ?? Date.now()));
     tick();
-    const t = window.setInterval(tick, 100);
-    return () => window.clearInterval(t);
+    return onTick(tick);
   }, [running, startedAt, accumulate]);
   return ms;
 }
 
-/** 0.4s, 12.3s, 2m 05s, 3h 12m, 2d 4h – the live timer always shows tenths below a minute */
+/** 0.4s, 12s, 2m 05s, 3h 12m, 2d 4h – the live timer counts whole seconds, as it ticks once a second */
 function formatMs(ms: number, live: boolean) {
   if (!live && ms < 1000) return `${Math.max(1, Math.round(ms))}ms`;
+  if (live && ms < 60_000) return `${Math.floor(ms / 1000)}s`;
   if (ms < 60_000) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`;
   const s = Math.floor(ms / 1000);
   if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;

@@ -26,6 +26,7 @@
     "daysAgo_other": "{{count}} days ago",
     "seconds": "{{s}} s",
     "secondsShort": "{{s}}s",
+    "underSecond": "<1s",
     "minutesSeconds": "{{m}} m {{s}} s",
     "minutesSecondsShort": "{{m}}m {{s}}s",
     "minutesLeft": "{{m}} min",
