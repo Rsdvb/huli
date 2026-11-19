@@ -25,7 +25,7 @@ import {
   type PermissionScope,
 } from '@renderer/components/affect/permission-request'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
-import { basename, relativePath } from '@renderer/lib/format'
+import { basename, shownPath } from '@renderer/lib/format'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
 import { useRoutinesStore } from '@renderer/stores/routines'
@@ -128,7 +128,7 @@ function previewOf(
     const counts = stats(content)
     items.push({
       id: `diff:${i}`,
-      label: relativePath(content.path, projectPath),
+      label: shownPath(content.path, projectPath),
       icon: <Icon icon={FileEditIcon} size={14} />,
       meta: counts && (
         <span className="tabular">
@@ -144,7 +144,7 @@ function previewOf(
       seen.add(location.path)
       items.push({
         id: `path:${i}`,
-        label: relativePath(location.path, projectPath),
+        label: shownPath(location.path, projectPath),
         icon: <Icon icon={entry.toolKind === 'edit' ? FileEditIcon : File01Icon} size={14} />,
       })
     })

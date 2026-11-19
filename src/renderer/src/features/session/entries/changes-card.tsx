@@ -10,7 +10,7 @@ import {
   CollapsibleTrigger,
 } from '@renderer/components/ui/collapsible'
 import { FileTypeIcon } from '@renderer/features/files/file-type-icon'
-import { relativePath } from '@renderer/lib/format'
+import { relativePath, shownPath } from '@renderer/lib/format'
 import { cn } from '@renderer/lib/utils'
 import { openDiff } from '@renderer/stores/files'
 import { openGitDialog, useGitStore } from '@renderer/stores/git'
@@ -165,7 +165,7 @@ function ChangeRow({
   counting: boolean
 }) {
   const stats = useDiffStats(change.diffs)
-  const shown = relativePath(change.path, projectPath)
+  const shown = shownPath(change.path, projectPath)
   const cut = shown.lastIndexOf('/') + 1
   return (
     <Collapsible>

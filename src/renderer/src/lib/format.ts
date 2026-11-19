@@ -331,3 +331,11 @@ export function relativePath(path: string, projectPath: string): string {
     return path.slice(root.length + 1)
   return path
 }
+
+/**
+ * Huli: a path as the thread shows it, as `relativePath` with forward slashes on every system, so
+ * a turn's files read alike whichever separator the agent reported them with.
+ */
+export function shownPath(path: string, projectPath: string): string {
+  return relativePath(path, projectPath).replace(/\\/g, '/')
+}
