@@ -62,6 +62,7 @@ import { WorktreeRowMark } from '@renderer/features/session/worktree/worktree-ta
 import { PrBadge } from './pr-badge'
 import { SubagentBadge } from './subagent-badge'
 import { useRenaming } from './use-renaming'
+import { WaitingMark } from './waiting-mark'
 
 /**
  * A row's padding before its mark, as App Shell's chat rows: a session in a project's folder lines
@@ -155,6 +156,8 @@ export const SessionRow = memo(function SessionRow({
   const expiring = cache?.state === 'ending' ? cache.cache : null
   // Collapsed, a parent speaks for its sub-sessions: their count and the loudest status.
   const status = rowStatus(node, hasChildren && !expanded)
+  // What waits gets a button of its own in the row's tools, over the status slot.
+  const waiting = !away && status.waiting > 0
   const title = sessionTitle(summary)
 
   // Mod-click and Shift-click pick rows for a menu that acts on all of them; a plain click opens
@@ -285,7 +288,14 @@ export const SessionRow = memo(function SessionRow({
           {hostName}
         </span>
       )}
-      {!away && <SessionIndicator status={status} expiring={expiring} className="kettu-row-end" />}
+      {!away && (
+        <SessionIndicator
+          status={status}
+          expiring={expiring}
+          waitingApart={waiting}
+          className="kettu-row-end"
+        />
+      )}
     </button>
   )
 
@@ -397,18 +407,23 @@ export const SessionRow = memo(function SessionRow({
                   {menuItems}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <button
-                type="button"
-                // One stop per row for the keyboard: pinning is also in the More menu.
-                tabIndex={-1}
-                aria-label={pinned ? t('row.unpin') : t('row.pin')}
-                aria-pressed={pinned}
-                title={pinned ? t('row.unpin') : t('row.pin')}
-                onClick={() => void pinSession(summary.id, !pinned)}
-                className="ui-as-chat-row__tool ui-as-chat-row__pin"
-              >
-                <Glyph icon={pinned ? PinOffIcon : PinIcon} size={14} />
-              </button>
+              {waiting ? (
+                // Pinning is also in the More menu, so the wait takes the pin's place.
+                <WaitingMark rootId={summary.id} count={status.waiting} />
+              ) : (
+                <button
+                  type="button"
+                  // One stop per row for the keyboard: pinning is also in the More menu.
+                  tabIndex={-1}
+                  aria-label={pinned ? t('row.unpin') : t('row.pin')}
+                  aria-pressed={pinned}
+                  title={pinned ? t('row.unpin') : t('row.pin')}
+                  onClick={() => void pinSession(summary.id, !pinned)}
+                  className="ui-as-chat-row__tool ui-as-chat-row__pin"
+                >
+                  <Glyph icon={pinned ? PinOffIcon : PinIcon} size={14} />
+                </button>
+              )}
             </span>
           </>
         )}

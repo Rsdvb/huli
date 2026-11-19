@@ -253,6 +253,35 @@
     "cacheLeft_other": "Cache {{count}} min left",
     "fork": "Fork a copy"
   },
+  "waiting": {
+    "title_one": "{{count}} waiting for you",
+    "title_other": "{{count}} waiting for you",
+    "label_one": "{{count}} waiting for you. Go to: {{where}}",
+    "label_other": "{{count}} waiting for you. Go to: {{where}}",
+    "here": "This session",
+    "subagent": "Sub-agent “{{title}}”",
+    "subSession": "Sub-session “{{title}}”",
+    "requests_one": "{{count}} request",
+    "requests_other": "{{count}} requests",
+    "more_one": "And {{count}} more place",
+    "more_other": "And {{count}} more places",
+    "go": "Click to go there",
+    "separator": " · ",
+    "kind": {
+      "permission": "A permission",
+      "command": "Permission to run a command",
+      "edit": "Permission to change files",
+      "question": "A question",
+      "plan": "A plan to approve",
+      "form": "An MCP form",
+      "site": "A new site",
+      "device": "A device",
+      "app": "First use of an app",
+      "setup": "A setup",
+      "step": "A step on the page",
+      "publish": "A publish to confirm"
+    }
+  },
   "indicator": {
     "waiting_one": "Waiting for you, {{count}} request",
     "waiting_other": "Waiting for you, {{count}} requests",
@@ -397,6 +426,7 @@
     "tools_other": "{{count}} tools",
     "done": "Done",
     "failed": "Failed",
+    "waiting": "one waits for you",
     "showFinished": "Show finished sub-agents"
   },
   "worktree": {

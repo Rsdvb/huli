@@ -19,6 +19,7 @@ import { setShowFinishedSubagents, useViewStore } from '@renderer/stores/view'
 import { SessionMenuItems } from './session-menu'
 import { runSessionMenuAccelerator } from './session-menu-model'
 import { listedSubagents } from './subagents'
+import { WaitingCount } from './waiting-mark'
 
 const nothing = () => {}
 
@@ -41,10 +42,17 @@ export function SubagentBadge({
   const listed = listedSubagents(subagents, showFinished)
   if (listed.length === 0) return null
   const running = listed.filter(subagentRunning).length
+  // One that waits for the user is not working, so the badge holds still and takes the fox color.
+  const waiting = listed.some((child) => child.permissionCount > 0)
   const count = running || listed.length
-  const label = running
-    ? t('subagents.running', { count: running })
-    : t('subagents.count', { count: listed.length })
+  const label = [
+    running
+      ? t('subagents.running', { count: running })
+      : t('subagents.count', { count: listed.length }),
+    waiting ? t('subagents.waiting') : null,
+  ]
+    .filter(Boolean)
+    .join(t('waiting.separator'))
 
   return (
     <HoverCard>
@@ -64,7 +72,11 @@ export function SubagentBadge({
       >
         <Glyph icon={BotIcon} size={11} className="size-[11px]! text-tertiary" />
         {count}
-        {running > 0 && <RingSpinner aria-hidden className="size-[9px] border-[1.25px]" />}
+        {waiting ? (
+          <span aria-hidden className="mx-px size-1.5 rounded-full bg-attention-dot" />
+        ) : (
+          running > 0 && <RingSpinner aria-hidden className="size-[9px] border-[1.25px]" />
+        )}
       </HoverCardTrigger>
       <HoverCardContent side="bottom" align="center" sideOffset={12} className="w-[300px] p-[5px]">
         <div className="flex items-center px-2 pt-1.5 pb-1">
@@ -130,11 +142,9 @@ function SubagentItem({ parent, child }: { parent: SessionSummary; child: Sessio
         </span>
         <span className="grid w-4 shrink-0 place-items-center">
           {waiting ? (
-            <span
-              role="img"
-              aria-label={t('indicator.waiting', { count: child.permissionCount })}
-              className="size-2 rounded-full bg-attention-dot shadow-[0_0_0_3px_var(--attention-halo)]"
-            />
+            <span role="img" aria-label={t('indicator.waiting', { count: child.permissionCount })}>
+              <WaitingCount count={child.permissionCount} />
+            </span>
           ) : failed ? (
             <span role="img" aria-label={t('indicator.error')} className="grid text-danger">
               <Glyph icon={Alert02Icon} size={14} />
