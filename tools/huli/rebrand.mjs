@@ -77,8 +77,9 @@ const CODE = {
   'src/renderer/src/features/marketplace/installed.tsx': ["matchesText(['Kettu']"],
   'src/renderer/src/features/marketplace/published-keys.ts': ["return 'Kettu'"],
   'src/renderer/src/features/session/entries/computer-setup-entry.tsx': ['label="Kettu"'],
-  'src/renderer/src/features/updates/update-review.tsx': ["item.kind === 'app' ? 'Kettu'"],
-  'src/renderer/src/features/updates/update-card.tsx': ["{ name: 'Kettu',"],
+  'src/renderer/src/features/updates/update-review.tsx': ['name="Kettu"'],
+  'src/renderer/src/features/updates/update-card.tsx': ["name: 'Kettu',"],
+  'src/renderer/src/features/updates/card-model.ts': ["item.kind === 'app' ? 'Kettu'"],
   'src/renderer/src/features/account/account-menu.tsx': ['label: `Kettu ${info.version}'],
   // The first run's pictures: the account's site in a browser's address bar, and the web app.
   'src/renderer/src/features/onboarding/stage.tsx': [
