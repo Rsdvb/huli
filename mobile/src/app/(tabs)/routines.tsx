@@ -7,7 +7,6 @@ import { useMemo, useRef, useState, type ComponentRef, type ReactNode } from 're
 import {
   Alert,
   Animated,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -44,6 +43,7 @@ import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { Skeleton } from '../../ui/Skeleton'
@@ -74,10 +74,13 @@ function Routines(props: { switcher: ReactNode }) {
   const projects = useProjects()
   const shell = useShell()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(async () => {
+    retry()
+    await load()
+  }, header)
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
   const { data, error, syncedAt, load } = useRoutineList()
-  const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [seed, setSeed] = useState<EditorSeed | null>(null)
@@ -350,18 +353,7 @@ function Routines(props: { switcher: ReactNode }) {
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
           gap: space.md,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              retry()
-              void load().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         {props.switcher}
         {data ? <ListSyncNote error={error} syncedAt={syncedAt} onRetry={load} /> : null}

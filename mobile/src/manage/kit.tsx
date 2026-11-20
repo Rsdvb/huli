@@ -8,7 +8,6 @@ import {
   Alert,
   Animated,
   Platform,
-  RefreshControl,
   StyleSheet,
   Switch,
   Text,
@@ -36,6 +35,7 @@ import { NavBar } from '../ui/NavBar'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
 import { useCollapsingHeader } from '../ui/ScrollHeader'
+import { usePullRefresh } from '../ui/PullRefresh'
 import { Skeleton } from '../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
@@ -244,7 +244,6 @@ export function ManagePage(props: {
   const { c } = useTokens()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
-  const [refreshing, setRefreshing] = useState(false)
   const { onRefresh } = props
   const connected = useConnected()
   const { retry } = useHostActions()
@@ -266,6 +265,7 @@ export function ManagePage(props: {
       throw error
     }
   }
+  const refreshControl = usePullRefresh(onRefresh ? pull : undefined, header)
   return (
     <Screen readable>
       <Animated.ScrollView
@@ -277,21 +277,7 @@ export function ManagePage(props: {
           paddingBottom: insets.bottom + space.xxxl,
           gap: space.xxl,
         }}
-        refreshControl={
-          onRefresh ? (
-            <RefreshControl
-              refreshing={refreshing}
-              tintColor={c.textSecondary}
-              progressViewOffset={header.height}
-              onRefresh={() => {
-                setRefreshing(true)
-                void pull()
-                  .catch(() => {})
-                  .finally(() => setRefreshing(false))
-              }}
-            />
-          ) : undefined
-        }
+        refreshControl={refreshControl}
       >
         <ListSyncNote error={failure} syncedAt={null} onRetry={pull} />
         {props.intro ? (

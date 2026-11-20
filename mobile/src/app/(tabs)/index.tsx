@@ -9,7 +9,7 @@
 // opens beside it, in the session screen itself.
 
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Platform, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { Alert, Platform, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
@@ -47,6 +47,7 @@ import {
   type Placed,
 } from '../../homeList'
 import {
+  getHost,
   sameFields,
   useActiveHost,
   useAgents,
@@ -92,6 +93,7 @@ import { FloatingHeader, useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { haptic } from '../../ui/haptics'
 import { Pill } from '../../ui/Pill'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import {
   radius,
@@ -397,7 +399,6 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const list = useRef<FlashListRef<HomeItem>>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [selection, setSelection] = useState<ReadonlySet<string> | null>(null)
   const activeId = active?.id ?? ''
@@ -423,6 +424,13 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     return computer ? linkFor(computer) : undefined
   })
   const folderActions = useFolderActions()
+  // Away, the pull tries the computer again and the sync line says how that goes; connected, it
+  // reads the lists again.
+  const pull = usePullRefresh(async () => {
+    retry()
+    if (allComputers) wakeFleet()
+    if (getHost().state.kind === 'connected') await refresh()
+  }, header)
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
     header,
@@ -1231,21 +1239,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
             paddingTop: header.contentTop,
             paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + (selecting ? SELECT_BAR : 0),
           }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              tintColor={c.textSecondary}
-              progressViewOffset={header.height}
-              onRefresh={() => {
-                setRefreshing(true)
-                retry()
-                if (allComputers) wakeFleet()
-                void refresh()
-                  .catch(() => {})
-                  .finally(() => setRefreshing(false))
-              }}
-            />
-          }
+          refreshControl={pull}
           ListHeaderComponent={top}
           ListEmptyComponent={empty()}
           ListFooterComponent={footer ?? undefined}

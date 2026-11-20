@@ -3,7 +3,7 @@
 // A task opens its page.
 
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
+import { StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { TaskSummary } from '@shared/workflow'
@@ -26,6 +26,7 @@ import type { MenuNode } from '../../ui/menu'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { Skeleton } from '../../ui/Skeleton'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
@@ -62,10 +63,13 @@ export function TasksView(props: { switcher: ReactNode }) {
   const projects = useProjects()
   const shell = useShell()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(async () => {
+    retry()
+    await reload()
+  }, header)
   const insets = useSafeAreaInsets()
   const list = useRef<FlashListRef<Item>>(null)
   const { tasks, views, loaded, error, syncedAt, reload } = useTaskList()
-  const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const connected = state.kind === 'connected'
@@ -346,18 +350,7 @@ export function TasksView(props: { switcher: ReactNode }) {
           paddingTop: header.contentTop + space.md,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              retry()
-              void reload().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
         ListHeaderComponent={top}
         ListEmptyComponent={empty()}
       />

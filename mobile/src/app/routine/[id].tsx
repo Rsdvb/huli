@@ -2,16 +2,7 @@
 // works), its prompt, its runs (each opens its session), editing and deleting it.
 
 import { useCallback, useEffect, useState } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  RefreshControl,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native'
+import { ActivityIndicator, Alert, Animated, StyleSheet, Switch, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { RoutineView, RunPage, RunSwitch, RunView } from '@shared/routines'
@@ -40,6 +31,7 @@ import { Pill } from '../../ui/Pill'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { SkeletonRows } from '../../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
@@ -55,6 +47,7 @@ export default function RoutinePage() {
   const { c } = useTokens()
   const host = useHost()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(() => Promise.all([loadList(), loadRuns()]), header)
   const insets = useSafeAreaInsets()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { data, error: listError, load: loadList } = useRoutineList()
@@ -63,7 +56,6 @@ export default function RoutinePage() {
   const [older, setOlder] = useState<number | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
   const [more, setMore] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [seed, setSeed] = useState<EditorSeed | null>(null)
   const connected = host.state.kind === 'connected'
@@ -277,17 +269,7 @@ export default function RoutinePage() {
           paddingBottom: insets.bottom + space.xxxl,
           gap: space.xl,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              void Promise.all([loadList(), loadRuns()]).finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         <View style={styles.titlePad}>
           <LargeTitle title={routine.name} subtitle={stateLine(routine)} />

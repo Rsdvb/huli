@@ -3,7 +3,7 @@
 // computer read it, and Approve names that very file, as the desktop's Marketplace page does.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Animated, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
@@ -28,6 +28,7 @@ import { NavBar } from '../../ui/NavBar'
 import { Pill } from '../../ui/Pill'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { Clamp } from '../../ui/session/Clamp'
 import { MONO } from '../../ui/session/palette'
@@ -43,12 +44,12 @@ export default function WorkflowPage() {
   const { c } = useTokens()
   const host = useHost()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(() => load(), header)
   const insets = useSafeAreaInsets()
   const { id } = useLocalSearchParams<{ id: string }>()
   const [read, setRead] = useState<Read | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [gone, setGone] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const connected = host.state.kind === 'connected'
   const link = host.link
 
@@ -198,17 +199,7 @@ export default function WorkflowPage() {
           paddingBottom: insets.bottom + space.xxxl,
           gap: space.lg,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              void load().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         {body}
       </Animated.ScrollView>

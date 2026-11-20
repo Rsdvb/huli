@@ -4,15 +4,7 @@
 // token composition, as the computer counts them.
 
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
-import {
-  ActivityIndicator,
-  Animated,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { ActivityIndicator, Animated, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useIsFocused, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, LimitsReason, PlanLimit } from '@shared/agent-host'
@@ -32,6 +24,7 @@ import { Pill } from '../ui/Pill'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
 import { useCollapsingHeader } from '../ui/ScrollHeader'
+import { usePullRefresh } from '../ui/PullRefresh'
 import { SectionHeader } from '../ui/SectionHeader'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { Skeleton } from '../ui/Skeleton'
@@ -183,6 +176,7 @@ export default function UsageScreen() {
   const state = useHostState()
   const host = useActiveHost()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(() => usage.sync(), header)
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
   const [choice, setChoice] = useState<RangeChoice>({ kind: 'day', step: 0 })
@@ -191,7 +185,6 @@ export default function UsageScreen() {
   const [agent, setAgent] = useState<AgentFilter>('all')
   const [metric, setMetric] = useState<Metric>('tokens')
   const [picking, setPicking] = useState(false)
-  const [pulled, setPulled] = useState(false)
   const [refreshing, setRefreshing] = useState<Set<string>>(new Set())
   const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
   const [hour, setHour] = useState<number | null>(null)
@@ -796,17 +789,7 @@ export default function UsageScreen() {
           paddingHorizontal: space.xl,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={pulled}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setPulled(true)
-              void usage.sync().finally(() => setPulled(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         {body()}
       </Animated.ScrollView>

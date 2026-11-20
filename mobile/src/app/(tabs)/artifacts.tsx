@@ -4,15 +4,7 @@
 // Recently deleted sits at the end.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Animated,
-  FlatList,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { Animated, FlatList, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
@@ -46,6 +38,7 @@ import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { Skeleton } from '../../ui/Skeleton'
 import {
   FONT_SCALE,
@@ -90,13 +83,16 @@ export default function Artifacts() {
   const sessionAgents = useHostSelector(pickSessionAgents, sameAgentIds)
   const shell = useShell()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(async () => {
+    retry()
+    await load()
+  }, header)
   const insets = useSafeAreaInsets()
   const list = useRef<FlatList<Row>>(null)
   const [items, setItems] = useState<ArtifactSummary[] | null>(null)
   const [deleted, setDeleted] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [syncedAt, setSyncedAt] = useState<number | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [kind, setKind] = useState<ArtifactKind | null>(null)
   const [sort, setSort] = useState<Sort>('updated')
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -462,18 +458,7 @@ export default function Artifacts() {
           paddingTop: header.contentTop,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              retry()
-              void load().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
         ListHeaderComponent={
           <View style={styles.top}>
             {summary}
