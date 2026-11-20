@@ -1235,6 +1235,10 @@ export default function SessionScreen() {
 
       <GlassHeader
         floating
+        below={
+          (chips ? CHIPS_HEIGHT : 0) +
+          (pinned && hasThread ? PLAN_PILL_ROOM + (linkDown ? 42 : 0) : 0)
+        }
         title={title}
         subtitle={[agent?.name, project].filter(Boolean).join(' · ')}
         titleAnchor={titleAnchor}

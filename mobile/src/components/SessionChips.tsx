@@ -182,7 +182,8 @@ export function SessionChips(props: {
 }
 
 const styles = StyleSheet.create({
-  dock: { position: 'absolute', left: 0, right: 0, zIndex: 9 },
+  // Over the header's scroll edge, which reaches under the chips.
+  dock: { position: 'absolute', left: 0, right: 0, zIndex: 11 },
   row: { paddingHorizontal: 12, gap: 6, paddingVertical: 4 },
   chip: { paddingHorizontal: 11, gap: 5, maxWidth: 220 },
   text: { fontSize: 13, fontWeight: '500', flexShrink: 1 },

@@ -21,7 +21,8 @@ import type { ConfigOption, PlanEntry, ToolEntry } from '@shared/thread'
 import { useConnected, useLink } from '../../host'
 import { useSelector, type Store } from '../../select'
 import { BottomSheet } from '../../ui/BottomSheet'
-import { GlassCapsule } from '../../ui/Glass'
+import { GlassCapsule, useGlassMode } from '../../ui/Glass'
+import { useReducedMotion } from '../../ui/motion'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import type { MenuPage, ViewHandle } from '../../ui/session/Popover'
 import { Clamp } from '../../ui/session/Clamp'
@@ -612,7 +613,10 @@ export const PLAN_PILL_ROOM = 44
 /**
  * The session's plan, floating under the header as a glass capsule: its ring, or a turning ring
  * while the step runs, the step it is on and which of how many. Tapped, it opens the step list
- * (`planPage`). It fades while the conversation is flung, so it never sits over text being read.
+ * (`planPage`). It steps aside while the conversation is flung, so it never sits over text being
+ * read: Liquid Glass melts away and back on its own (glass under a fading opacity draws nothing,
+ * and once faded out it stayed clear, leaving the step's words over the reply's), while its
+ * content and the other glass fade; with Reduce Motion it only fades.
  */
 export function PlanPill(props: {
   items: PlanItems
@@ -624,6 +628,8 @@ export function PlanPill(props: {
   onPress(): void
 }) {
   const { c } = useSessionTokens()
+  const liquid = useGlassMode() === 'liquid'
+  const reduce = useReducedMotion()
   const { items } = props
   const { index, text } = currentStep(items)
   const working = props.running && items[index]?.status === 'in_progress'
@@ -637,21 +643,19 @@ export function PlanPill(props: {
       useNativeDriver: true,
     }).start()
   }, [hidden, shown])
+  const moves = reduce
+    ? []
+    : [
+        { translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) },
+        { scale: shown.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
+      ]
   return (
     <Animated.View
       pointerEvents={hidden ? 'none' : 'box-none'}
       style={[
         styles.pillDock,
-        {
-          top: props.top,
-          opacity: shown,
-          transform: [
-            {
-              translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }),
-            },
-            { scale: shown.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
-          ],
-        },
+        { top: props.top, transform: moves },
+        liquid ? null : { opacity: shown },
       ]}
     >
       <View ref={props.anchor} collapsable={false} style={styles.pillAnchor}>
@@ -663,14 +667,22 @@ export function PlanPill(props: {
           accessibilityHint="显示计划的全部步骤"
           outerStyle={styles.pillOuter}
         >
-          <GlassCapsule interactive elevated height={34} style={styles.planPill}>
-            {working ? <PlanSpinner /> : <PlanRing items={items} />}
-            <Text style={[styles.pillText, { color: c.text }]} numberOfLines={1}>
-              {text ?? '都已完成'}
-            </Text>
-            <Text style={[styles.pillCount, { color: c.textTertiary }]}>
-              {index + 1}/{items.length}
-            </Text>
+          <GlassCapsule
+            interactive
+            elevated
+            height={34}
+            style={styles.planPill}
+            {...(liquid ? { dematerialized: hidden } : {})}
+          >
+            <Animated.View style={[styles.pillContent, liquid ? { opacity: shown } : null]}>
+              {working ? <PlanSpinner /> : <PlanRing items={items} />}
+              <Text style={[styles.pillText, { color: c.text }]} numberOfLines={1}>
+                {text ?? '都已完成'}
+              </Text>
+              <Text style={[styles.pillCount, { color: c.textTertiary }]}>
+                {index + 1}/{items.length}
+              </Text>
+            </Animated.View>
           </GlassCapsule>
         </PressScale>
       </View>
@@ -826,11 +838,13 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     paddingHorizontal: 48,
-    zIndex: 9,
+    // Over the header's scroll edge, which reaches under it.
+    zIndex: 11,
   },
   pillAnchor: { maxWidth: '100%' },
   pillOuter: { maxWidth: '100%' },
-  planPill: { gap: 8, paddingHorizontal: 12, maxWidth: '100%' },
+  planPill: { paddingHorizontal: 12, maxWidth: '100%' },
+  pillContent: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   pillText: { flexShrink: 1, fontSize: 14, fontWeight: '500' },
   pillCount: { fontSize: 13, fontVariant: ['tabular-nums'] },
   steps: { paddingHorizontal: 8, paddingVertical: 4, gap: 2 },
