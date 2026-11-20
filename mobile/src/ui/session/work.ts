@@ -9,7 +9,7 @@ import { turnDoing, type TurnDoing, type TurnPhaseName } from '@shared/turn-phas
 
 export { writingId } from '@shared/turn-phase'
 import { diffTexts } from '../../diff'
-import { baseName, relativePath } from './format'
+import { baseName, durationText, relativePath } from './format'
 import { toolTitle } from './toolNames'
 
 type FileKind = 'read' | 'edit' | 'delete' | 'move'
@@ -367,24 +367,11 @@ export function diffStats(diffs: readonly Diff[]): { insertions: number; deletio
 
 // ---- Times and counts ----
 
-/** "12 秒", "1 分 3 秒", "1 小时 5 分", as the desktop's durations read in Chinese. */
-export function durationText(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
-  if (s < 60) return `${s} 秒`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m} 分 ${s % 60} 秒`
-  return `${Math.floor(m / 60)} 小时 ${m % 60} 分`
-}
+export { durationText }
 
-/** 0.4s, 12.3s, 2m 05s, 3h 12m: a step's time; a live one always shows tenths below a minute. */
-export function formatMs(ms: number, live: boolean): string {
-  if (!live && ms < 1000) return `${Math.max(1, Math.round(ms))}ms`
-  if (ms < 60_000) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`
-  const s = Math.floor(ms / 1000)
-  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
-  const h = Math.floor(s / 3600)
-  if (h < 24) return `${h}h ${String(Math.floor(s / 60) % 60).padStart(2, '0')}m`
-  return `${Math.floor(h / 24)}d ${h % 24}h`
+/** A step's time, as every duration reads: 「0.4 秒」「12.3 秒」「2 分 5 秒」. */
+export function formatMs(ms: number): string {
+  return durationText(Math.max(ms, 100), true)
 }
 
 /** A count as Chinese shortens it: "980", "4.1万", "1.2亿". */
@@ -428,6 +415,12 @@ interface Seen {
 
 const bySession = new Map<string, { state: ThreadState; tools: Map<string, Seen> }>()
 
+// The times of calls that finished while their session was shown, kept when it is left, so they
+// show again on its next visit. A call still running then is let go: it ended out of sight, so
+// its time is not known. The sessions left longest ago go first.
+const left = new Map<string, Map<string, Seen>>()
+const LEFT_KEPT = 20
+
 // Statuses change near the thread's end, so a patch is read no further back.
 const LOOKBACK = 64
 
@@ -438,7 +431,8 @@ const isRunning = (entry: ToolEntry) =>
 export function observeTools(sessionId: string, state: ThreadState): void {
   const known = bySession.get(sessionId)
   if (known?.state === state) return
-  const tools = known?.tools ?? new Map<string, Seen>()
+  const tools = known?.tools ?? left.get(sessionId) ?? new Map<string, Seen>()
+  left.delete(sessionId)
   const { order, byId } = state
   const from = known ? Math.max(0, order.length - LOOKBACK) : 0
   const now = Date.now()
@@ -448,7 +442,7 @@ export function observeTools(sessionId: string, state: ThreadState): void {
     const seen = tools.get(entry.id)
     const running = isRunning(entry)
     if (!known) {
-      tools.set(entry.id, { running })
+      if (!seen) tools.set(entry.id, { running })
       continue
     }
     if (!seen) {
@@ -463,9 +457,22 @@ export function observeTools(sessionId: string, state: ThreadState): void {
   bySession.set(sessionId, { state, tools })
 }
 
-/** Forgets a session the phone no longer shows, so it starts over as if loaded first. */
+/**
+ * Leaves a session the phone no longer shows: it starts over as if loaded first, keeping the
+ * times of the calls it saw finish.
+ */
 export function forgetTools(sessionId: string): void {
+  const known = bySession.get(sessionId)
   bySession.delete(sessionId)
+  if (!known) return
+  const finished = new Map<string, Seen>()
+  for (const [id, seen] of known.tools) {
+    if (seen.start !== undefined && seen.end !== undefined) finished.set(id, seen)
+  }
+  if (finished.size === 0) return
+  left.delete(sessionId)
+  left.set(sessionId, finished)
+  if (left.size > LEFT_KEPT) left.delete(left.keys().next().value!)
 }
 
 /** When a tool call started and how long it took, as far as this phone saw it. */

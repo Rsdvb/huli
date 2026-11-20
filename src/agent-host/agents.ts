@@ -102,6 +102,16 @@ import {
   type SpawnedAgent,
   type StopTimings,
 } from './agent-process'
+import type {
+  AgentResetCategory,
+  AgentResetItem,
+  AgentResetPreview,
+  AgentResetResult,
+} from '@shared/agent-reset'
+import { outsideClaudeProcesses } from './agent-reset/outside'
+import { resetPlan, type ResetPlan } from './agent-reset/plan'
+import { applyReset, keptNames, resetLog, resolvePlan } from './agent-reset/reset'
+import { systemSecretStore, type SecretStore } from './agent-reset/secrets'
 import type { AgentTrees } from './agent-trees'
 import { decideUpdate, fetchLatest, type LatestOptions } from './agent-updates'
 import {
@@ -392,6 +402,8 @@ export interface AgentManagerDeps extends DriverOverrides {
   /** The environment the agent's own process starts with, from the one it would have. */
   launchEnv?(agentId: AgentId, env: Env): Env
   envKeyIsSet?(agentId: AgentId, variable: string): boolean
+  /** Huli: the credential store a reset checks and clears; the system's by default. */
+  secretStore?: SecretStore
 }
 
 /** An install that was stopped on purpose, which leaves the agent as it was rather than failed. */
@@ -534,6 +546,9 @@ class Slot {
   signInFile: string | null = null
   /** It refused its account as one of its `movedAccounts`, until a sign-in or session succeeds. */
   accountRefused = false
+  /** Huli: a reset of its environment runs; past its sign-out, `hold` keeps the agent stopped. */
+  resetting = false
+  resetHold = false
   idleTimer: ReturnType<typeof setTimeout> | null = null
   progressTimer: ReturnType<typeof setTimeout> | null = null
   lastStatus = ''
@@ -1059,6 +1074,9 @@ export class AgentManager {
     // A session keeps its agent, which may have been removed since.
     const slot = this.registeredSlot(agentId)
     this.assertEnabled(agentId)
+    if (slot.resetHold) {
+      throw new HostError('busy', t('agent.resetting', { agent: slot.name }))
+    }
     const { h } = slot
     await this.detectAll()
     if (slot.stopping) await slot.stopping
@@ -4610,6 +4628,176 @@ export class AgentManager {
     slot.answeredSignIn = null
     this.emit(slot)
     void this.readSignInMethod(slot)
+  }
+
+  // Huli: resetting the agent's environment, back to what a fresh install finds, its history and
+  // settings kept. The plan of what goes is in agent-reset/plan.ts.
+
+  private resetPlanOf(slot: Slot): Promise<ResetPlan> {
+    const { platform } = this.deps
+    const env = this.deps.env.agentEnv(slot.id)
+    return resetPlan(slot.def.id, {
+      platform,
+      home: os.homedir(),
+      getEnv: (name) => getEnv(env, name, platform),
+      chosen: this.chosenFolder(slot),
+    })
+  }
+
+  private secretStore(): SecretStore {
+    return this.deps.secretStore ?? systemSecretStore(this.deps.platform)
+  }
+
+  /**
+   * The agent's own sign-out a reset runs first, as its command reads; null where Kite has none
+   * to run, or only by installing or starting what cannot start.
+   */
+  private resetLogout(slot: Slot): string | null {
+    if (slot.def.id === 'codex') return this.userProgram(slot.h) ? 'codex logout' : null
+    const detection = slot.h.detection
+    const startable = detection?.state === 'available' && detection.spec !== null
+    if (this.isDisabled(slot.id) || !(this.running(slot) || startable)) return null
+    if (slot.def.id === 'claude-code') return 'claude auth logout'
+    return (slot.init ?? slot.initRecord)?.capabilities?.logout ? 'logout' : null
+  }
+
+  /** The API key Kite handed the harness, in the file it went to; Codex's is in its auth.json. */
+  private resetApiKey(slot: Slot): AgentResetItem | null {
+    if (!slot.apiKey) return null
+    const file =
+      slot.def.id === 'claude-code' || slot.def.id === 'codebuddy'
+        ? this.settingsFile(slot)
+        : slot.def.id === 'deepseek'
+          ? this.dshFolder(slot)
+          : null
+    return file ? { category: 'credentials', kind: 'api-key', path: file, bytes: null } : null
+  }
+
+  /**
+   * What a reset would remove on this computer now, for Settings to list; `kiteKeys` names the
+   * keys Kite keeps for the agent, which the window clears. Reads names and sizes, never contents.
+   */
+  async resetPreview(
+    agentId: AgentId,
+    kiteKeys: readonly string[],
+  ): Promise<Omit<AgentResetPreview, 'busy'>> {
+    const slot = this.registeredSlot(agentId)
+    await this.detectAll()
+    const { platform } = this.deps
+    const plan = await this.resetPlanOf(slot)
+    const logout = this.resetLogout(slot)
+    const apiKey = this.resetApiKey(slot)
+    const resolved = await resolvePlan(plan, this.secretStore(), platform, (message) =>
+      this.deps.diagnostics.log('warn', message),
+    )
+    const items: AgentResetItem[] = [
+      ...(logout
+        ? [{ category: 'credentials', kind: 'logout', path: logout, bytes: null } as const]
+        : []),
+      ...(apiKey ? [apiKey] : []),
+      ...kiteKeys.map((name): AgentResetItem => ({
+        category: 'credentials',
+        kind: 'kite-key',
+        path: name,
+        bytes: null,
+      })),
+      ...resolved.map(({ item }) => item),
+    ]
+    const ownLabel = this.deps.settings().claudeTestEntrypoint
+    const outside =
+      slot.def.id === 'claude-code' && plan.folder
+        ? await outsideClaudeProcesses(
+            plan.folder,
+            (pid, entrypoint) =>
+              (ownLabel !== null && entrypoint === ownLabel) || this.deps.trees?.owns(pid) === true,
+          )
+        : 0
+    return {
+      folder: plan.folder,
+      home: os.homedir(),
+      known: plan.known,
+      items,
+      kept: await keptNames(plan, platform, os.homedir()),
+      outside,
+      shared: plan.shared,
+    }
+  }
+
+  /**
+   * Resets the agent's environment in `categories`: its own sign-out first, then, with every
+   * session of it let go (`release`) and its process stopped, the files, keys and store entries
+   * of the plan. Each failure is reported with its item and the rest goes on. Only paths and key
+   * names are logged.
+   */
+  async reset(
+    agentId: AgentId,
+    categories: readonly AgentResetCategory[],
+    release: () => Promise<void>,
+  ): Promise<AgentResetResult> {
+    const slot = this.registeredSlot(agentId)
+    if (slot.resetting) throw new HostError('busy', t('agent.resetting', { agent: slot.name }))
+    slot.resetting = true
+    const wanted = new Set(categories)
+    const result: AgentResetResult = { removed: [], failed: [] }
+    const { platform } = this.deps
+    try {
+      await this.detectAll()
+      const plan = await this.resetPlanOf(slot)
+      const store = this.secretStore()
+      const logout = wanted.has('credentials') ? this.resetLogout(slot) : null
+      if (logout) {
+        const item: AgentResetItem = {
+          category: 'credentials',
+          kind: 'logout',
+          path: logout,
+          bytes: null,
+        }
+        try {
+          if (slot.def.id === 'codex') await this.runCodexLogin(slot, ['logout'])
+          else await this.logout(agentId)
+          result.removed.push(item)
+        } catch (error) {
+          result.failed.push({ item, error: (error as Error).message })
+        }
+      }
+      slot.resetHold = true
+      await release()
+      await this.stopProcess(slot)
+      const resolved = await resolvePlan(plan, store, platform, (message) =>
+        this.deps.diagnostics.log('warn', message),
+      )
+      const applied = await applyReset(
+        resolved.filter(({ item }) => wanted.has(item.category)),
+        plan,
+        store,
+        platform,
+      )
+      result.removed.push(...applied.removed)
+      result.failed.push(...applied.failed)
+      const apiKey = wanted.has('credentials') ? this.resetApiKey(slot) : null
+      if (apiKey) {
+        try {
+          if (slot.def.id === 'claude-code') await clearClaudeKey(apiKey.path)
+          else if (slot.def.id === 'codebuddy') await clearCodebuddyKey(apiKey.path)
+          else await clearDshKey(apiKey.path)
+          slot.apiKey = false
+          result.removed.push(apiKey)
+        } catch (error) {
+          result.failed.push({ item: apiKey, error: (error as Error).message })
+        }
+      }
+      // Codex keeps the key Kite handed it in the auth.json the reset removed.
+      const codexAuth = result.failed.some(({ item }) => item.path.endsWith('auth.json'))
+      if (slot.def.id === 'codex' && wanted.has('credentials') && !codexAuth) slot.apiKey = false
+      this.deps.diagnostics.log('info', `Reset ${slot.name}: ${resetLog(result)}`)
+      return result
+    } finally {
+      slot.resetting = false
+      slot.resetHold = false
+      if (wanted.has('credentials')) slot.signInMethod = null
+      await this.credentialsChanged(slot)
+      void this.readSignInMethod(slot)
+    }
   }
 
   // Status.

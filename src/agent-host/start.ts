@@ -12,6 +12,7 @@ import type { HostToMain, MainToHost } from '@shared/host-control'
 import type { ControlChannel, PortChannel } from '@shared/port-channel'
 import type { FromPort } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
+import { recordedSecretStore } from './agent-reset/secrets'
 import { createGitService } from './git'
 import { AgentHost } from './host'
 import { nodeThreadWorker } from './threads/store'
@@ -66,6 +67,11 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       send,
       git: (deps) => createGitService(deps),
       mirrorTraffic: !message.isPackaged && process.env.KETTU_ACP_LOG === '1',
+      // Huli: a copy an agent runs to test a change resets no real keychain or Credential Manager
+      // entry, only names in a file of its own (tools/huli/README.md, Agent reset).
+      ...(!message.isPackaged && process.env.KITE_TEST_WINDOW === 'background'
+        ? { secretStore: recordedSecretStore(join(message.userDataPath, 'test-secrets.json')) }
+        : {}),
       threadWorker: (data) =>
         nodeThreadWorker(new Worker(message.threadWorkerPath, { workerData: data })),
       usageWorker: (file) =>

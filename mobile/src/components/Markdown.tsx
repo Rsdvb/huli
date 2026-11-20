@@ -30,12 +30,28 @@ import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { textKey, useDisclosure } from '../ui/session/disclosure'
 import { ContextMenu } from '../ui/ContextMenu'
 import { copyText } from '../ui/session/feedback'
-import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
+import {
+  knownFileRef,
+  openFile,
+  parseFileRef,
+  useFileRefs,
+  type FileRefsContext,
+} from '../ui/session/fileRefs'
+import { showNotice } from '../ui/NoticeBar'
 import { highlight } from '../ui/session/highlight'
+import { useReducedMotion } from '../ui/motion'
 import { G, Icon } from '../ui/session/icons'
-import { keepBlocks, parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
+import {
+  keepBlocks,
+  parseBlocks,
+  inline,
+  streamBlocks,
+  type Block,
+  type Inline,
+  type Settled,
+} from '../ui/session/markdown'
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
-import { gentle, PressScale } from '../ui/session/Press'
+import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
 
 export type MarkdownSize = 'body' | 'compact'
@@ -70,16 +86,33 @@ const FOLDED_LINES = 7
 
 const SCHEME = /^[a-z][a-z\d+.-]*:/i
 
-/** Opens a link: a file of the session's folder on the file screen, a web address in the browser. */
+/**
+ * Opens a link: a file of the session's folder on the file screen, a web address in the browser.
+ * A link that looks tappable never does nothing: one that leads nowhere the phone can go says so.
+ */
 function openLink(href: string, refs: FileRefsContext | null) {
-  const local = href !== '' && !href.startsWith('#') && (!SCHEME.test(href) || /^file:/i.test(href))
+  if (href === '' || href.startsWith('#')) return
+  const local = !SCHEME.test(href) || /^file:/i.test(href)
   if (local || /^[a-z]:[\\/]/i.test(href)) {
-    const ref = knownFileRef(href, refs)
+    // A file of the folder opens even before the folder's list came, which may never come.
+    const ref = knownFileRef(href, refs) ?? (refs?.root ? parseFileRef(href, refs.root) : null)
     if (ref && refs) openFile(refs.sessionId, ref.path, ref.line)
+    else showNotice({ text: '这个文件不在会话的文件夹里，请在电脑上查看' })
     return
   }
-  if (/^(https?:|mailto:)/i.test(href)) void Linking.openURL(href).catch(() => {})
+  void Linking.openURL(href).catch(() => showNotice({ text: '手机上打不开这个链接' }))
 }
+
+/**
+ * A run with a background, padded and spaced so that a line never ends in a space of its own: iOS
+ * draws a space a line ends in out to the line's end, so code that wrapped left an empty block of
+ * its tint at the end of the line before. Its spaces are non-breaking, each after a zero-width
+ * space where the line may break, and a zero-width space before it lets the line break there too.
+ */
+function tinted(text: string): string {
+  return `\u00A0${text.replace(/ /g, '\u200B\u00A0')}\u00A0`
+}
+const BREAK = '\u200B'
 
 /** A chip's words: a file's name and lines, a folder with its slash, a link's host and path. */
 function chipWords(chip: Chip): string {
@@ -100,7 +133,7 @@ function ChipRuns(props: { text: string; look: Look }): ReactNode {
   const out: ReactNode[] = []
   let at = 0
   for (const chip of found) {
-    if (chip.from > at) out.push(props.text.slice(at, chip.from))
+    out.push(`${props.text.slice(at, chip.from)}${BREAK}`)
     out.push(
       <Text
         key={chip.from}
@@ -109,7 +142,9 @@ function ChipRuns(props: { text: string; look: Look }): ReactNode {
         accessibilityLabel={props.text.slice(chip.from, chip.to)}
         style={{ color: c.tint, backgroundColor: s.inlineCode, fontWeight: '500' }}
       >
-        {` ${chip.kind === 'link' ? '' : chip.kind === 'folder' ? '▸ ' : '@'}${chipWords(chip)} `}
+        {tinted(
+          `${chip.kind === 'link' ? '' : chip.kind === 'folder' ? '▸ ' : '@'}${chipWords(chip)}`,
+        )}
       </Text>,
     )
     at = chip.to
@@ -119,11 +154,14 @@ function ChipRuns(props: { text: string; look: Look }): ReactNode {
 }
 
 function Caret(props: { color: string }) {
+  const reduce = useReducedMotion()
   const [on, setOn] = useState(true)
   useEffect(() => {
+    // Under Reduce Motion it stands still, as the system's own caret does.
+    if (reduce) return setOn(true)
     const timer = setInterval(() => setOn((v) => !v), 530)
     return () => clearInterval(timer)
-  }, [])
+  }, [reduce])
   return <Text style={{ color: on ? props.color : 'transparent' }}> ▍</Text>
 }
 
@@ -139,7 +177,8 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
         const ref = knownFileRef(node.v, look.refs)
         if (ref && look.refs) {
           const refs = look.refs
-          return (
+          return [
+            BREAK,
             <Text
               key={i}
               onPress={() => openFile(refs.sessionId, ref.path, ref.line)}
@@ -151,11 +190,12 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
                 color: c.tint,
               }}
             >
-              {` ${node.v} `}
-            </Text>
-          )
+              {tinted(node.v)}
+            </Text>,
+          ]
         }
-        return (
+        return [
+          BREAK,
           <Text
             key={i}
             // In Huli's orange on its soft tint, as Kettu sets inline code: plain text on gray read
@@ -167,9 +207,9 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
               color: c.accent,
             }}
           >
-            {` ${node.v} `}
-          </Text>
-        )
+            {tinted(node.v)}
+          </Text>,
+        ]
       }
       case 'strong':
         return (
@@ -281,7 +321,7 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
     return () => clearTimeout(timer)
   }, [copied])
   const copy = () => {
-    void copyText(props.text).then(() => setCopied(true))
+    void copyText(props.text, null).then(setCopied)
   }
   const refs = props.look.refs
   const fileRef = file ? knownFileRef(file, refs) : null
@@ -372,7 +412,6 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
       {foldable && (
         <Pressable
           onPress={() => {
-            gentle()
             setFolded((v) => !v)
           }}
           accessibilityRole="button"
@@ -775,8 +814,13 @@ function useThrottled(text: string, every: number): string {
 function useBlocks(markdown: string, streaming: boolean): Block[] {
   const shown = useThrottled(markdown, streaming ? STREAM_PARSE_EVERY : 0)
   const before = useRef<Block[]>([])
+  const settled = useRef<Settled | null>(null)
   return useMemo(() => {
-    const blocks = keepBlocks(before.current, streaming ? parseBlocks(shown) : parseKept(shown))
+    const blocks = keepBlocks(
+      before.current,
+      streaming ? streamBlocks(shown, settled) : parseKept(shown),
+    )
+    if (!streaming) settled.current = null
     before.current = blocks
     return blocks
   }, [shown, streaming])

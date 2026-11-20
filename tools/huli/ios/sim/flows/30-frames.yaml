@@ -1,0 +1,150 @@
+# Frame timing of the session screen, with the developer's frame meter (huliDev, FrameMeter.tsx):
+# a real session filled with a run of tool calls and a long reply, measured while a long reply
+# streams in at its end, then while a long turn works and the list is flung up and down; then the
+# developer's made-up long thread of 2,000 entries, still and flung, while it streams. Each count,
+# with the renders of the counted components, lands in huli-frames.json, which run.sh keeps.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/tool-storm --count 120 --pace 30'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 180000
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/chinese'
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 60000
+# A long reply streaming in at the end, the list left alone.
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/long-stream --size 80k --rate 60'
+- tapOn: '发送'
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- tapOn:
+    id: frame-meter
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 8000
+    optional: true
+- tapOn:
+    id: frame-meter
+- takeScreenshot: f01-session-streaming
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 60000
+    optional: true
+# A long turn working while the list is flung up and down.
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/long-turn'
+- tapOn: '发送'
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- tapOn:
+    id: frame-meter
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          start: 50%, 22%
+          end: 50%, 80%
+          duration: 60
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1000
+    optional: true
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          start: 50%, 80%
+          end: 50%, 22%
+          duration: 60
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- tapOn:
+    id: frame-meter
+- takeScreenshot: f02-session-working-flung
+# The made-up long thread, streaming: still, then flung.
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevThread: entries=2000&stream=1&label=long-stream-still
+- extendedWaitUntil:
+    visible:
+      id: frame-meter
+    timeout: 30000
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- tapOn:
+    id: frame-meter
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 6000
+    optional: true
+- tapOn:
+    id: frame-meter
+- takeScreenshot: f03-long-thread-still
+- tapOn:
+    id: frame-meter
+- repeat:
+    times: 10
+    commands:
+      - swipe:
+          start: 50%, 22%
+          end: 50%, 92%
+          duration: 40
+- repeat:
+    times: 10
+    commands:
+      - swipe:
+          start: 50%, 92%
+          end: 50%, 22%
+          duration: 40
+- tapOn:
+    id: frame-meter
+- takeScreenshot: f04-long-thread-flung

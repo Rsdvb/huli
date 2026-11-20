@@ -254,12 +254,12 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     const { levels, shown } = levelsOf(effort, modelKey(control.config))
     if (levels.length > 0) {
       const hint = locked ? BETWEEN_TURNS : EFFORT_HINT
-      entries.push({ kind: 'divider', key: 'effort-rule', title: '思考强度' })
+      entries.push({ kind: 'divider', key: 'effort-rule', title: '推理强度' })
       entries.push({
         kind: 'custom',
         key: 'effort',
         picker: {
-          label: '思考强度',
+          label: '推理强度',
           options: levels.map((l) => ({ key: l.value, label: optionName(l.name) })),
           value: shown ?? '',
           onChange: (value) => control.set(effort, value),
@@ -270,7 +270,7 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
           <View
             style={[styles.effort, locked && { opacity: 0.4 }]}
             pointerEvents={locked ? 'none' : 'auto'}
-            accessibilityLabel="思考强度"
+            accessibilityLabel="推理强度"
             accessibilityHint={hint}
           >
             <SegmentedControl
@@ -341,6 +341,8 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
   entries.push({
     kind: 'custom',
     key: 'usage',
+    // A system menu cannot draw the ring: the line is a row there, opening the same usage.
+    row: { key: 'usage', label: footer, icon: G.timer, onPress: onUsage },
     node: (
       <Pressable
         onPress={onUsage}
@@ -638,6 +640,9 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
         label: agent.name,
         lead: <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={20} />,
         ...(subtitle ? { subtitle } : {}),
+        ...(!need && (usedUp || (left !== null && limit))
+          ? { belowText: usedUp ?? `剩余 ${left}%` }
+          : {}),
         below:
           !need && usedUp ? (
             <Text
@@ -660,8 +665,9 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
               <Text style={[styles.leftText, { color: c.textSecondary }]}>剩余 {left}%</Text>
             </View>
           ) : undefined,
+        // An agent that leads to its models has no check of its own, so the current one says so.
         ...(need === null && models > 1
-          ? { page: `agent:${agent.id}` }
+          ? { page: `agent:${agent.id}`, ...(agent.id === props.current ? { detail: '当前' } : {}) }
           : { checked: agent.id === props.current }),
         disabled: need !== null,
         onPress: () => props.onChoose(agent, null),

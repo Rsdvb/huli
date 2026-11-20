@@ -243,6 +243,8 @@
     "closeSessionsFirst": "请先关闭使用 {{agent}} 的会话",
     "stillRunning": "{{agent}} 未能停止，仍在运行，请等它退出后再试",
     "noLogout": "{{agent}} 不支持退出登录",
+    "resetting": "正在重置 {{agent}} 的环境，完成后再试",
+    "resetBusy_other": "这个 Agent 有 {{count}} 个会话正在运行，先停下或等它们做完再重置",
     "keyInSettings": "{{method}} 要在设置 › 智能体里 {{agent}} 的页面上填写",
     "signInOnComputer": "{{agent}} 在它所在的电脑上打开浏览器登录，请到那台电脑上登录。",
     "signInCancelled": "{{agent}} 的登录已取消。",

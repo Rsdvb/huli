@@ -1176,6 +1176,58 @@
       "title": "退出 {{name}} 的登录？",
       "body": "{{name}} 和 Antigravity 应用、CLI 共用一份登录，它们也会一起退出。",
       "confirm": "退出登录"
+    },
+    "resetEnv": {
+      "name": "重置环境",
+      "description": "退出登录，删掉它在本机生成的标识和缓存。会话记录和设置都留着。",
+      "keywords": "重置 清理 退出登录 凭据 缓存 标识 userID installation_id reset",
+      "button": "重置环境…",
+      "title": "重置 {{name}} 的环境",
+      "lead": "让它回到刚装好时的样子。开始前，Kettu 会先停掉它空闲的会话和进程。",
+      "failed": "读不到要清理的内容",
+      "total": "共 {{size}}",
+      "done": "完成",
+      "confirm": "重置",
+      "checkAgain": "再检查",
+      "busy_other": "{{count}} 个会话正在运行，先停下或等它们做完",
+      "untitled": "未命名会话",
+      "outside_other": "官方 Claude Code 正开着（{{count}} 个）",
+      "outsideHint": "它可能把删掉的文件写回去，请先关掉它。",
+      "sharedApp": "{{harness}} 应用也用这份登录，它也会退出登录。",
+      "sharedProgram": "你自己运行的 {{harness}} 也用这个文件夹，会一起被重置。",
+      "credentials": {
+        "name": "退出登录和凭据",
+        "hint": "登录令牌、OAuth 文件、API key，包括 Kettu 替它存的。"
+      },
+      "identifiers": {
+        "name": "本机标识",
+        "hint": "它在这台电脑上生成的匿名 ID，下次启动会重新生成。"
+      },
+      "caches": {
+        "name": "缓存和临时文件",
+        "hint": "功能开关缓存、遥测队列、日志、Shell 快照、临时文件夹。"
+      },
+      "unknown": "Kettu 不清楚 {{name}} 把这些放在哪，不会动。",
+      "unknownCredentials": "其余凭据 Kettu 不清楚 {{name}} 放在哪，只会用它自己的退出登录。",
+      "nothing": "这台电脑上没有。",
+      "kept": "会话记录和设置会保留。",
+      "keptNamed": "保留会话记录和设置：{{names}}",
+      "separator": "、",
+      "keys": "{{file}}：{{keys}}",
+      "files_other": "{{folder}}（{{count}} 个文件）",
+      "unreadable": "{{file}}（不是有效的 JSON，不会改）",
+      "store": {
+        "keychain": "钥匙串：{{name}}",
+        "credential-manager": "凭据管理器：{{name}}",
+        "secret-service": "系统密钥环：{{name}}"
+      },
+      "logout": "运行 {{command}}",
+      "logoutAgent": "用它自己的退出登录",
+      "apiKey": "Kettu 交给它的 API key（{{file}}）",
+      "kiteKey": "Kettu 保存的 {{name}}",
+      "partly": "删掉了 {{count}} 项，{{failed}} 项没删掉",
+      "finished_other": "已重置，删掉了 {{count}} 项。",
+      "afterHint": "下次启动时它会重新生成需要的文件。需要的话再登录一次。"
     }
   },
   "about": {

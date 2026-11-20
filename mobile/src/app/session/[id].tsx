@@ -19,7 +19,12 @@ import {
   type LayoutChangeEvent,
 } from 'react-native'
 import { useSharedValue } from 'react-native-reanimated'
-import { KeyboardGestureArea, KeyboardStickyView } from 'react-native-keyboard-controller'
+import { hideNotice, showNotice } from '../../ui/NoticeBar'
+import {
+  KeyboardGestureArea,
+  KeyboardStickyView,
+  useKeyboardState,
+} from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
@@ -30,6 +35,7 @@ import {
   turnText,
   type ThreadEntry,
   type ThreadState,
+  type ToolEntry,
   type UserContent,
 } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
@@ -69,7 +75,13 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { Conversation } from '../../components/Conversation'
-import { PLAN_PILL_ROOM, PlanPill, pinnedPlan, planPage } from '../../components/entries/PlanCards'
+import {
+  PLAN_PILL_ROOM,
+  PlanApprovalCard,
+  PlanPill,
+  pinnedPlan,
+  planPage,
+} from '../../components/entries/PlanCards'
 import { createStore } from '../../select'
 import {
   cutNoticeOf,
@@ -92,6 +104,10 @@ import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionCh
 import { sessionMenuPages } from '../../components/SessionMenu'
 import { useSessionPane } from '../../components/SessionPane'
 import {
+  HeldStrip,
+  heldConfirmText,
+  LimitPauseStrip,
+  StallStrip,
   ModeButton,
   ModelChip,
   QueueStack,
@@ -110,11 +126,11 @@ import {
   useHostState,
   useLink,
   useLinkDown,
-  useSession,
   type HostData,
 } from '../../host'
 import { setMuted, useMuted } from '../../push/muted'
-import { errorText, folder } from '../../sessions'
+import { folder, sessionTitle } from '../../sessions'
+import { hostErrorText } from '../../hostErrors'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
 import { useThread, useThreadSelector } from '../../thread'
 import { useComputer } from '../../ui/session/computer'
@@ -138,7 +154,7 @@ import { OutboxRows, useHasOutbox } from '../../components/OutboxRows'
 import { queueMessage, withdrawItem, type OutboxMessage } from '../../outbox'
 import { useSessionTokens } from '../../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../../ui/session/Popover'
-import { RoundButton } from '../../ui/session/Press'
+import { PressScale, RoundButton } from '../../ui/session/Press'
 import { Icon } from '../../ui/session/Icon'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
@@ -153,8 +169,30 @@ import {
   writingId,
 } from '../../ui/session/work'
 import { WorkingRow } from '../../ui/session/Working'
+import { devMode } from '../../dev/devMode'
+import { FrameMeter } from '../../dev/FrameMeter'
 
 const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
+
+/**
+ * Two summaries of the session that draw the screen alike: the computer sends one with each change
+ * while a turn runs, a new time and what the turn does now each time, which the screen shows from
+ * the thread instead. Drawn again for each of those, the whole screen and its composer redrew a
+ * few times a second.
+ */
+function sameSummary(a: SessionSummary | undefined, b: SessionSummary | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  for (const key in a) {
+    if (key === 'updatedAt' || key === 'working') continue
+    if (a[key as keyof SessionSummary] !== b[key as keyof SessionSummary]) return false
+  }
+  for (const key in b) if (!(key in a)) return false
+  return true
+}
+
+// The developer's frame meter over the real screen, for the simulator flows that measure it.
+const DEV = devMode()
 
 // What the screen reads of the thread, each apart, so a token appended to a reply changes none.
 const selectSession = (thread: ThreadState | null) => thread?.session
@@ -165,15 +203,45 @@ const selectTurn = (thread: ThreadState | null) => ({
   writing: writingId(thread) !== null,
 })
 
+// These read the whole thread, on every patch the screen applies while a turn streams, so what
+// they work out of an entry is kept by the entry, which a patch replaces only when it changes.
+const folds = new WeakMap<ThreadEntry, boolean>()
+const foldsKept = (entry: ThreadEntry): boolean => {
+  let known = folds.get(entry)
+  if (known === undefined) folds.set(entry, (known = foldsIntoRun(entry)))
+  return known
+}
+
 /** The thread's own cards that wait for the user, as rows of their own, oldest first. */
 function threadWaits(thread: ThreadState | null): ThreadEntry[] {
   if (!thread) return []
   const out: ThreadEntry[] = []
   for (const id of thread.order) {
     const entry = thread.byId[id]
-    if (entry && !foldsIntoRun(entry) && waitsForUser(entry)) out.push(entry)
+    if (entry && !foldsKept(entry) && waitsForUser(entry)) out.push(entry)
   }
   return out
+}
+
+const touchedBy = new WeakMap<ThreadEntry, { root: string; paths: string[] }>()
+
+/** The files under `root` a tool row read or edited. */
+function touchedOf(entry: ThreadEntry, root: string): string[] {
+  const known = touchedBy.get(entry)
+  if (known?.root === root) return known.paths
+  const paths: string[] = []
+  if (
+    entry.kind === 'tool' &&
+    (entry.toolKind === 'read' || entry.toolKind === 'edit') &&
+    !foldsKept(entry)
+  ) {
+    for (const location of entry.locations) {
+      const inside = relativePath(location.path, root)
+      if (inside !== location.path) paths.push(inside.replace(/\\/g, '/'))
+    }
+  }
+  touchedBy.set(entry, { root, paths })
+  return paths
 }
 
 /** The files under `root` that the thread's own tool rows read or edited, newest first. */
@@ -182,15 +250,28 @@ function touchedFiles(thread: ThreadState | null, root: string | null): string[]
   const seen = new Set<string>()
   for (let i = thread.order.length - 1; i >= 0; i--) {
     const entry = thread.byId[thread.order[i]!]
-    if (entry?.kind !== 'tool' || foldsIntoRun(entry)) continue
-    if (entry.toolKind !== 'read' && entry.toolKind !== 'edit') continue
-    for (const location of entry.locations) {
-      const inside = relativePath(location.path, root)
-      if (inside !== location.path) seen.add(inside.replace(/\\/g, '/'))
-    }
+    if (entry?.kind !== 'tool') continue
+    for (const path of touchedOf(entry, root)) seen.add(path)
   }
   return [...seen]
 }
+
+/** A plan that waits for approval: its card stands below the others, its buttons in view. */
+const isPlanAsk = (entry: ThreadEntry): entry is ToolEntry =>
+  entry.kind === 'tool' && !!entry.permission?.plan && !entry.permission.elicitation
+
+const pickKeyboard = (state: { isVisible: boolean; height: number }) =>
+  state.isVisible ? state.height : 0
+
+// The sessions whose user agreed to go on here while a program outside has them open, once each.
+const outsideAgreed = new Set<string>()
+
+// When, after the screen settles, the folder's files are read, and how long they are kept.
+const FILES_AFTER = 1500
+const FILES_KEPT = 10 * 60_000
+
+// How long Stop waits for the turn to end before it can be asked again.
+const STOP_WAIT = 15_000
 
 const live = (status: string | undefined) =>
   status === 'running' || status === 'awaiting_permission' || status === 'starting'
@@ -228,7 +309,10 @@ export default function SessionScreen() {
   const view = useThread(link, id, hostState)
   const changes = useSessionChanges(id)
   const actions = useSessionActions('session', () => (pane ? pane.close() : router.back()))
-  const summary = useSession(id)
+  const summary = useHostSelector(
+    useCallback((d: HostData) => d.sessions.get(id), [id]),
+    sameSummary,
+  )
   const session = useThreadSelector(view, selectSession)
   const hasThread = useThreadSelector(view, selectHasThread)
   const config = useSessionConfig(id, session)
@@ -296,8 +380,15 @@ export default function SessionScreen() {
 
   useEffect(() => () => forgetTools(id), [id])
 
-  // The folder's files, for the references in replies and prompts that open them.
-  const projectFiles = useProjectFiles(link, changes.folder, connected)
+  // The folder's files, for the references in replies and prompts that open them. A project
+  // lists up to 50,000, read only once the screen has opened and settled, and kept ten minutes
+  // for the next session in the folder, as only whether a file is there matters here.
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(true), FILES_AFTER)
+    return () => clearTimeout(timer)
+  }, [])
+  const projectFiles = useProjectFiles(link, changes.folder, connected && settled, FILES_KEPT)
   const known = useMemo(
     () => (projectFiles.list ? new Set(projectFiles.list.paths) : null),
     [projectFiles.list],
@@ -322,6 +413,8 @@ export default function SessionScreen() {
     for (const entry of waits) seen.set(entry.id, entry)
     return [...seen.values()]
   }, [view.requests, waits])
+  const plansWaiting = requests.filter(isPlanAsk)
+  const othersWaiting = plansWaiting.length > 0 ? requests.filter((e) => !isPlanAsk(e)) : requests
   const credit = useThreadSelector(view, outOfCreditOf)
   const retryNotice = useThreadSelector(view, retryNoticeOf)
   const cutNotice = useThreadSelector(view, cutNoticeOf)
@@ -333,7 +426,10 @@ export default function SessionScreen() {
   const handBack = session?.computer?.control === 'you'
   // A worktree that is not ready says so above the composer, as the desktop's does.
   const worktreeWaits = !!summary?.worktree && summary.worktree.state !== 'ready'
-  const parentKnown = !!useSession(summary?.parentId)
+  const parentId = summary?.parentId ?? null
+  const parentKnown = useHostSelector(
+    useCallback((d: HostData) => parentId !== null && d.sessions.has(parentId), [parentId]),
+  )
   const chips = hasChips(summary, parentKnown)
 
   // The files of the folder the session's tools read or edited, newest first.
@@ -346,16 +442,27 @@ export default function SessionScreen() {
     sameItems,
   )
 
-  const children = useHostSelector(
-    useCallback((d: HostData) => [...d.sessions.values()].filter((s) => s.parentId === id), [id]),
-    sameItems,
+  // Counted only: the sub-sessions' own summaries change with each of their turns' steps.
+  const { count: childCount, running: childrenRunning } = useHostSelector(
+    useCallback(
+      (d: HostData) => {
+        let count = 0
+        let running = 0
+        for (const s of d.sessions.values()) {
+          if (s.parentId !== id) continue
+          count++
+          if (live(s.status)) running++
+        }
+        return { count, running }
+      },
+      [id],
+    ),
+    sameFields,
   )
-  const childrenRunning = children.filter((s) => live(s.status)).length
 
-  // What the ⋯ menu counts is read as it opens, and again as the session changes. A system menu
-  // is built before it opens, so there it is read all along: once the session's changes pause
-  // rather than on each of them, which while it streams would be many a second.
-  const moreOpen = NATIVE_MENUS || menu.openId === 'more-menu'
+  // What the ⋯ menu counts is read as it opens, and again as the session changes while it is
+  // open, once those changes pause. It is always our popover, so nothing is read while it is shut.
+  const moreOpen = menu.openId === 'more-menu'
   const countsRead = useRef(false)
   const projectPath = summary?.projectPath ?? null
   useEffect(() => {
@@ -389,14 +496,30 @@ export default function SessionScreen() {
     }
   }, [moreOpen, connected, link, id, terminalAllowed, projectPath, summary])
 
+  // Stop asks once: the button turns until the turn ends, rather than cancel it again with each
+  // tap while the agent winds down.
+  const [stopping, setStopping] = useState(false)
+  useEffect(() => {
+    if (!running) setStopping(false)
+  }, [running])
+  useEffect(() => {
+    if (!stopping) return
+    // An agent that never ends its turn leaves Stop to be asked again.
+    const timer = setTimeout(() => setStopping(false), STOP_WAIT)
+    return () => clearTimeout(timer)
+  }, [stopping])
   const stop = () => {
-    void link.request('sessions.cancel', { sessionId: id }).catch((error: { message?: string }) => {
-      Alert.alert('没能停止', error.message ?? '')
+    if (stopping) return
+    setStopping(true)
+    link.request('sessions.cancel', { sessionId: id }).catch((error: unknown) => {
+      setStopping(false)
+      Alert.alert('没能停止', hostErrorText(error))
     })
   }
 
   const forkAtMessage = !!agent?.capabilities.forkAtMessage
   const canFork = forkAtMessage || !!agent?.capabilities.forkSession
+  const forking = useRef(false)
   const fork = useCallback(
     (entryId: string | null, worktree?: 'same') => {
       const atMessage = forkAtMessage && entryId !== null
@@ -410,6 +533,10 @@ export default function SessionScreen() {
           {
             text: '分叉',
             onPress: () => {
+              if (forking.current) return
+              forking.current = true
+              // Forking copies the session on the computer, which takes a moment.
+              showNotice({ text: '正在分叉…' })
               link
                 .request('sessions.fork', {
                   sessionId: id,
@@ -418,11 +545,18 @@ export default function SessionScreen() {
                 })
                 .then((made) => {
                   haptic.success()
+                  hideNotice()
                   const madeId = (made as SessionSummary).id
                   if (pane) pane.open(madeId)
                   else router.push(`/session/${madeId}`)
                 })
-                .catch((error: unknown) => Alert.alert('没能分叉', errorText(error)))
+                .catch((error: unknown) => {
+                  hideNotice()
+                  Alert.alert('没能分叉', hostErrorText(error))
+                })
+                .finally(() => {
+                  forking.current = false
+                })
             },
           },
         ],
@@ -453,14 +587,20 @@ export default function SessionScreen() {
     try {
       await link.request('sessions.revert', { sessionId: id, entryId: revertStart })
       haptic.success()
-      if (text.trim() && !composer.current?.putBack(text)) {
+      const back = !!text.trim() && !!composer.current?.putBack(text)
+      if (!text.trim() || back) {
+        showNotice({
+          text: back ? '已撤销这一轮，消息放回了输入框' : '已撤销这一轮',
+          tone: 'success',
+        })
+      } else {
         Alert.alert('输入框里已有草稿', '撤销的消息没有放回去。', [
           { text: '复制消息', onPress: () => void copyText(text) },
           { text: '好', style: 'cancel' },
         ])
       }
     } catch (error) {
-      Alert.alert('没能撤销', errorText(error))
+      Alert.alert('没能撤销', hostErrorText(error))
     } finally {
       setReverting(false)
     }
@@ -469,8 +609,10 @@ export default function SessionScreen() {
   const undoBlocked = reverting || (status !== 'ready' && status !== 'closed')
   const undo = useMemo(
     () =>
-      undoEnd === null ? null : { end: undoEnd, blocked: undoBlocked, run: () => void revert() },
-    [undoEnd, undoBlocked, revert],
+      undoEnd === null
+        ? null
+        : { end: undoEnd, blocked: undoBlocked, busy: reverting, run: () => void revert() },
+    [undoEnd, undoBlocked, reverting, revert],
   )
 
   // New session opens under this one, in its project, as the desktop's 新建子会话 does.
@@ -540,7 +682,8 @@ export default function SessionScreen() {
     ],
   )
 
-  const title = session?.title ?? summary?.title ?? '会话'
+  // Named as the session list names it: an untitled one is 新会话 there and here.
+  const title = sessionTitle({ title: session?.title ?? summary?.title ?? null })
   const project = summary ? (summary.scratch ? '无项目' : folder(summary.projectPath)) : null
 
   /** Asks before a switch stops background work the session's own agent runs. */
@@ -563,6 +706,21 @@ export default function SessionScreen() {
   // A message that hands the session to another agent goes as that agent's first turn; any other
   // goes through the host's queue, which sends at once when the session is free.
   const send = async (content: UserContent[]) => {
+    if (openOutside && !heldOutside && !outsideAgreed.has(id)) {
+      const go = await new Promise<boolean>((resolve) =>
+        Alert.alert(
+          '在这里继续？',
+          heldConfirmText(openOutside),
+          [
+            { text: '取消', style: 'cancel', onPress: () => resolve(false) },
+            { text: '在这里继续', onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        ),
+      )
+      if (!go) throw new SendCancelled()
+      outsideAgreed.add(id)
+    }
     if (pendingSwitch) {
       if (!(await confirmSwitch(pending?.name ?? 'Agent'))) throw new SendCancelled()
       // Read again: the switch may have changed while the user was asked.
@@ -608,7 +766,7 @@ export default function SessionScreen() {
     // Once queued, a failed send-now leaves the message in the queue, not lost.
     link
       .request('sessions.sendNow', { sessionId: id, itemId })
-      .catch((error: unknown) => Alert.alert('没能立即发送', errorText(error)))
+      .catch((error: unknown) => Alert.alert('没能立即发送', hostErrorText(error)))
   }
 
   // Picking the session's own agent undoes a switch; another's model makes it the pending one.
@@ -766,9 +924,24 @@ export default function SessionScreen() {
     reached,
     rejected,
   })
+  // A program outside that has the session open and at work writes to it, so nothing goes from
+  // here until it is done; one that has it open but idle lets a message go once the user agrees.
+  const heldOutside = session?.heldOutside === true
+  // The supervisor's: a turn its plan limit stopped waits to go on by itself, and a running turn
+  // that has said nothing for a while may be stuck. The thread's view says so first, the
+  // summary where the thread is not read yet.
+  const limitPause = session ? (session.limitPause ?? null) : (summary?.limitPause ?? null)
+  const stall = session ? (session.stall ?? null) : (summary?.stall ?? null)
+  const openOutside = session?.openOutside ?? null
   // Why Send does nothing now, for the line over the text.
   const unsendable =
-    mustSwitch && !pendingSwitch ? '先选择 Agent' : starting ? `等 ${shownName} 启动后再发送` : null
+    mustSwitch && !pendingSwitch
+      ? '先选择 Agent'
+      : starting
+        ? `等 ${shownName} 启动后再发送`
+        : heldOutside
+          ? '等那边运行完再发送'
+          : null
 
   const titlePages = summary
     ? sessionMenuPages({
@@ -838,8 +1011,8 @@ export default function SessionScreen() {
           detail:
             childrenRunning > 0
               ? `${childrenRunning} 个运行中`
-              : children.length > 0
-                ? `${children.length} 个`
+              : childCount > 0
+                ? `${childCount} 个`
                 : '没有',
           onPress: () => router.push({ pathname: '/subagents/[id]', params: { id } }),
         },
@@ -907,10 +1080,12 @@ export default function SessionScreen() {
 
   const outbox = useMemo(() => <OutboxRows sessionId={id} onWithdraw={withdraw} />, [id, withdraw])
   let body
-  if (view.error) {
+  if (view.error && !hasThread) {
+    // A read that failed with nothing kept to show: why, and a way to try again, which it also
+    // does by itself a while later.
     body = (
       <View style={{ flex: 1, paddingBottom: dockHeight }}>
-        <StateView text={view.error} tone="danger" />
+        <StateView text={view.error} tone="danger" retry={view.retry} />
       </View>
     )
   } else if (!hasThread && hasOutbox && !connected) {
@@ -932,9 +1107,21 @@ export default function SessionScreen() {
       </ScrollView>
     )
   } else if (!hasThread) {
+    // Away from the computer with nothing kept of it, it says so rather than spin until it is back.
     body = (
       <View style={{ flex: 1, paddingBottom: dockHeight }}>
-        <StateView loading />
+        {connected || !view.cacheRead ? (
+          <StateView loading />
+        ) : (
+          <StateView
+            icon={G.wifiOff}
+            text={
+              hostState.kind === 'reconnecting'
+                ? '正在重新连接电脑，连上后就能打开这个会话。'
+                : '和电脑断开了。手机上没有这个会话的记录，连上电脑后才能打开。'
+            }
+          />
+        )}
       </View>
     )
   } else {
@@ -975,14 +1162,17 @@ export default function SessionScreen() {
           style={[styles.dock, { backgroundColor: c.bg }]}
           onLayout={onDockLayout}
         >
-          {(requests.length > 0 ||
+          {(othersWaiting.length > 0 ||
             handBack ||
             credit !== null ||
             childWaiting ||
             worktreeWaits ||
             (session?.queue.length ?? 0) > 0) && (
             <ScrollView
-              style={[styles.waiting, { maxHeight: window.height * 0.55 }]}
+              style={[
+                styles.waiting,
+                { maxHeight: window.height * (plansWaiting.length > 0 ? 0.2 : 0.55) },
+              ]}
               contentContainerStyle={styles.waitingContent}
               keyboardShouldPersistTaps="handled"
             >
@@ -990,7 +1180,7 @@ export default function SessionScreen() {
                 <WorktreeLine sessionId={id} worktree={summary.worktree} />
               ) : null}
               <HandBackCard sessionId={id} session={session} />
-              {requests.map((entry) => (
+              {othersWaiting.map((entry) => (
                 <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
               ))}
               {credit && (
@@ -1018,6 +1208,8 @@ export default function SessionScreen() {
               />
             </ScrollView>
           )}
+
+          {plansWaiting.length > 0 && <PinnedPlans entries={plansWaiting} sessionId={id} />}
 
           {summary?.origin === 'subagent' && (
             <SubagentBar
@@ -1070,10 +1262,19 @@ export default function SessionScreen() {
             onCountChange={setAttachCount}
             top={(holds) =>
               pendingSwitch ||
+              limitPause ||
+              stall ||
+              heldOutside ||
+              openOutside ||
               suggestion ||
               (cacheNoticeShown && holds) ||
               (predicted && !holds) ? (
                 <>
+                  {limitPause ? <LimitPauseStrip sessionId={id} pause={limitPause} /> : null}
+                  {stall ? <StallStrip sessionId={id} stall={stall} /> : null}
+                  {heldOutside || openOutside ? (
+                    <HeldStrip by={openOutside ?? 'terminal'} busy={heldOutside} />
+                  ) : null}
                   {predicted && !holds && (
                     <PromptSuggestionChip
                       text={predicted.text}
@@ -1115,6 +1316,7 @@ export default function SessionScreen() {
             bottomInset={insets.bottom}
             running={running}
             onStop={stop}
+            stopping={stopping}
             onAttach={(anchor) =>
               menu.open('attach', anchor, { placement: 'above', align: 'start' })
             }
@@ -1127,7 +1329,12 @@ export default function SessionScreen() {
               },
             })}
             left={
-              <NativeMenu source={{ root: 'mode', pages }} disabled={!connected}>
+              // The button and its menu are disabled alike: it looked disabled while setting
+              // an option or starting, and still opened.
+              <NativeMenu
+                source={{ root: 'mode', pages }}
+                disabled={!connected || config.setting !== null || starting}
+              >
                 <ModeButton
                   mode={
                     shownMode
@@ -1230,6 +1437,10 @@ export default function SessionScreen() {
 
       <GlassHeader
         floating
+        below={
+          (chips ? CHIPS_HEIGHT : 0) +
+          (pinned && hasThread ? PLAN_PILL_ROOM + (linkDown ? 42 : 0) : 0)
+        }
         title={title}
         subtitle={[agent?.name, project].filter(Boolean).join(' · ')}
         titleAnchor={titleAnchor}
@@ -1248,24 +1459,22 @@ export default function SessionScreen() {
           <View ref={moreAnchor} collapsable={false}>
             {/* Our popover, not the system's menu: a system menu cannot hold each row's count on
                 its right, as 文件 1 and 改动 没有改动 read in Kettu. */}
-            <NativeMenu source={{ root: 'more-menu', pages }} disabled>
-              <RoundButton
-                tone="glass"
-                size={44}
-                systemImage={G.more.sf}
-                onPress={() =>
-                  menu.open('more-menu', moreAnchor, {
-                    placement: 'below',
-                    align: 'end',
-                    width: 290,
-                  })
-                }
-                disabled={!summary}
-                accessibilityLabel="文件、改动、产物、终端和子会话"
-              >
-                <Icon icon={G.more} size={18} color={c.text} weight="bold" />
-              </RoundButton>
-            </NativeMenu>
+            <RoundButton
+              tone="glass"
+              size={44}
+              systemImage={G.more.sf}
+              onPress={() =>
+                menu.open('more-menu', moreAnchor, {
+                  placement: 'below',
+                  align: 'end',
+                  width: 290,
+                })
+              }
+              disabled={!summary}
+              accessibilityLabel="文件、改动、产物、终端和子会话"
+            >
+              <Icon icon={G.more} size={18} color={c.text} weight="bold" />
+            </RoundButton>
           </View>
         }
       />
@@ -1284,7 +1493,25 @@ export default function SessionScreen() {
           }
         />
       ) : null}
-      {linkDown && hasThread && (
+      {hasThread && view.error && !linkDown ? (
+        <View style={[styles.banner, { top: headerHeight + 8 + (chips ? CHIPS_HEIGHT : 0) }]}>
+          <PressScale
+            onPress={view.retry}
+            accessibilityRole="button"
+            accessibilityLabel={`${view.error}，重试`}
+            accessibilityLiveRegion="polite"
+          >
+            <GlassCapsule height={34} elevated style={styles.bannerPill}>
+              <Icon icon={G.warning} size={14} color={c.warning} />
+              <Text style={[styles.bannerText, { color: c.textSecondary }]} numberOfLines={1}>
+                没能读到最新内容
+              </Text>
+              <Text style={[styles.bannerText, { color: c.tint }]}>重试</Text>
+            </GlassCapsule>
+          </PressScale>
+        </View>
+      ) : null}
+      {linkDown && (hasThread || hasOutbox) && (
         <View
           pointerEvents="none"
           style={[styles.banner, { top: headerHeight + 8 + (chips ? CHIPS_HEIGHT : 0) }]}
@@ -1320,8 +1547,24 @@ export default function SessionScreen() {
       />
       {actions.element}
       {menu.render(pages)}
+      {DEV ? <FrameMeter label="session" top={headerHeight + 4} /> : null}
     </SessionRows.Provider>
   )
+}
+
+/**
+ * Plans that wait for approval, under the other cards and outside their scroll: a plan card is
+ * long, and its buttons must stay in view on a short phone, with the keyboard up for its note.
+ */
+function PinnedPlans(props: { entries: ToolEntry[]; sessionId: string }) {
+  const window = useWindowDimensions()
+  const keyboard = useKeyboardState(pickKeyboard)
+  const room = (window.height - keyboard) * 0.55
+  return props.entries.map((entry) => (
+    <View key={entry.id} style={styles.pinnedCard}>
+      <PlanApprovalCard entry={entry} sessionId={props.sessionId} maxHeight={room} />
+    </View>
+  ))
 }
 
 const styles = StyleSheet.create({
@@ -1330,6 +1573,7 @@ const styles = StyleSheet.create({
   waiting: { flexGrow: 0 },
   dock: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   waitingContent: { paddingHorizontal: 10, paddingTop: 8, gap: 10 },
+  pinnedCard: { paddingHorizontal: 10, paddingTop: 8 },
   banner: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
   outboxOnly: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 18, paddingBottom: 12 },
   bannerPill: { gap: 8 },

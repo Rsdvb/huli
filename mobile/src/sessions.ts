@@ -105,7 +105,12 @@ export function sessionState(s: SessionSummary): { kind: SessionState; text: str
     }
   }
   if (s.status === 'failed' || s.attention === 'error') return { kind: 'error', text: '出错' }
+  // The supervisor's: a running turn that may be stuck, and one its plan limit paused.
+  if (s.stall && (s.status === 'running' || s.status === 'awaiting_permission')) {
+    return { kind: 'waiting', text: '可能卡住了' }
+  }
   if (s.status === 'running' || s.status === 'starting') return { kind: 'live', text: '运行中' }
+  if (s.limitPause) return { kind: 'auth', text: '额度恢复后自动继续' }
   if (s.status === 'auth_required') return { kind: 'auth', text: '需要登录' }
   if (s.attention === 'unread') return { kind: 'unread', text: '有新回复' }
   return null

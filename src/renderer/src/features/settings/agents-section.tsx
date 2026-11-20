@@ -98,6 +98,7 @@ import {
   UsageGroup,
 } from './agent-parts'
 import { NetworkChoiceRow } from './agent-network-rows'
+import { ResetRow } from './agent-reset'
 import { AgentProviders, ProviderBalances } from './agent-providers'
 import {
   currentLimits,
@@ -1487,6 +1488,8 @@ function DangerGroup({ status }: { status: AgentStatus }) {
     <section className="k-group">
       <RowGroup>
         {status.color && <ColorRow status={status} />}
+        {/* Huli: back to what a fresh install finds, its history and settings kept. */}
+        <ResetRow status={status} />
         <RowFrame
           text={
             <RowText name={t('agents.remove.name')} description={t('agents.remove.description')} />

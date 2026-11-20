@@ -172,6 +172,7 @@ import { ProjectHooksAnswers } from './project-hooks'
 import { ProjectMcpAnswers } from './project-mcp'
 import { Projects } from './projects'
 import { claudeOutside, type OutsideReader } from './outside-sessions'
+import type { SecretStore } from './agent-reset/secrets'
 import { claudeCacheTtl, type CacheTtlReader } from './prompt-cache'
 import { claudeModelRequests } from './model-requests/claude'
 import { clineModelRequests } from './model-requests/cline'
@@ -346,6 +347,8 @@ export interface HostOptions {
   cacheTtl?: CacheTtlReader
   /** Reads Claude Code sessions run outside Kettu; tests pass their own. */
   outside?: OutsideReader
+  /** Huli: the credential store an agent's reset checks and clears; the system's by default. */
+  secretStore?: SecretStore
   /** The desktop app's computer use; the daemon has none. */
   computer?: ComputerHostOptions | null
   /** Huli: the `mihomo` program the desktop app ships for the agents' network; the daemon has none. */
@@ -1013,6 +1016,7 @@ export class AgentHost {
       }),
       envKeyIsSet: (agentId, variable) =>
         typeof this.agentEnvKeys[agentId]?.[variable] === 'string',
+      ...(options.secretStore ? { secretStore: options.secretStore } : {}),
     })
     const routineHooks: RoutineSessionHooksRef = { current: null }
     const taskHooks: TaskSessionHooksRef = { current: null }
@@ -2892,6 +2896,17 @@ export class AgentHost {
       'agents.updateCli': ({ agentId }) => agents.updateCli(agentId),
       'agents.setApiKey': ({ agentId, ...input }) => agents.setApiKey(agentId, input),
       'agents.clearApiKey': ({ agentId }) => agents.clearApiKey(agentId),
+      'agents.resetPreview': async ({ agentId }) => ({
+        ...(await agents.resetPreview(agentId, Object.keys(this.agentEnvKeys[agentId] ?? {}))),
+        busy: sessions.busyWith(agentId),
+      }),
+      'agents.reset': async ({ agentId, categories }) => {
+        const busy = sessions.busyWith(agentId)
+        if (busy.length > 0) {
+          throw new HostError('busy', t('agent.resetBusy', { count: busy.length }), { busy })
+        }
+        return agents.reset(agentId, categories, () => sessions.releaseAgent(agentId))
+      },
       'agents.install': ({ agentId, method }) => agents.install(agentId, method),
       'agents.uninstall': ({ agentId, removeProgram }) =>
         agents.uninstall(agentId, removeProgram === true),
