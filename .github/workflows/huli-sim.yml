@@ -2,7 +2,8 @@
 # and only when started by hand: builds the simulator app from `ref`, starts this checkout's daemon
 # with the fake agent, pairs the app with it alone, runs the Maestro flows under
 # tools/huli/ios/sim/flows while recording the screen, and keeps the screenshots, recordings and
-# logs for a day. It uses no secrets. See tools/huli/ios/sim/run.sh.
+# logs for a day. It uses no secrets. See tools/huli/ios/sim/run.sh. With platform android it
+# measures the app on an Android emulator instead (tools/huli/android/run.sh).
 name: Huli simulator
 
 on:
@@ -16,17 +17,27 @@ on:
         description: Flows to run, by name and space-separated; empty runs them all
         required: false
         default: ''
+      app_ref:
+        description: Commit whose phone app to build instead of ref's, to measure an older app
+        required: false
+        default: ''
+      platform:
+        description: Where to run them; android only measures what the app costs at rest
+        type: choice
+        options: [ios, android]
+        default: ios
 
 permissions:
   contents: read
 
 concurrency:
-  group: huli-sim-${{ inputs.ref }}
+  group: huli-sim-${{ inputs.platform }}-${{ inputs.ref }}-${{ inputs.app_ref }}
   cancel-in-progress: true
 
 jobs:
   simulator:
     name: Simulator
+    if: inputs.platform != 'android'
     runs-on: macos-26
     timeout-minutes: 120
     steps:
@@ -35,6 +46,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+      - name: Take the phone app from app_ref
+        if: inputs.app_ref != ''
+        env:
+          APP_REF: ${{ inputs.app_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$APP_REF"
+          git checkout FETCH_HEAD -- mobile
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -65,4 +83,83 @@ jobs:
           name: huli-sim
           retention-days: 1
           path: ${{ runner.temp }}/sim/results
+          if-no-files-found: warn
+
+  # The same measure on an Android emulator: a release build for x86_64 against the fake agent's
+  # daemon, sampled with adb (tools/huli/android/run.sh).
+  emulator:
+    name: Android emulator
+    if: inputs.platform == 'android'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Choose the output folder
+        run: echo "OUT=$RUNNER_TEMP/emu" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Take the phone app from app_ref
+        if: inputs.app_ref != ''
+        env:
+          APP_REF: ${{ inputs.app_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$APP_REF"
+          git checkout FETCH_HEAD -- mobile
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Let the emulator use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"'             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install the phone app's packages
+        working-directory: mobile
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+      # The app reaches the daemon over plain ws:// on the runner's address, which a release build
+      # refuses as cleartext; the measure lets it, and changes nothing else of the app.
+      - name: Generate the Android project
+        working-directory: mobile
+        run: |
+          CI=1 npx expo prebuild --platform android --no-install --clean
+          manifest=android/app/src/main/AndroidManifest.xml
+          if grep -q 'usesCleartextTraffic' "$manifest"; then
+            sed -i 's/android:usesCleartextTraffic="[a-z]*"/android:usesCleartextTraffic="true"/' "$manifest"
+          else
+            sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$manifest"
+          fi
+          grep -o 'usesCleartextTraffic="[a-z]*"' "$manifest"
+      - name: Build for the emulator
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=x86_64
+      - name: Build the daemon
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec vite build -c vite.daemon.config.mts
+      - name: Install Maestro
+        run: |
+          mkdir -p "$HOME/.huli-tools"
+          curl -fsSL -o "$RUNNER_TEMP/maestro.zip"             https://github.com/mobile-dev-inc/maestro/releases/latest/download/maestro.zip
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$HOME/.huli-tools"
+          "$HOME/.huli-tools/maestro/bin/maestro" --version
+      - name: Run the measure
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tools/huli/android/run.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: huli-emu
+          retention-days: 1
+          path: ${{ runner.temp }}/emu/results
           if-no-files-found: warn
