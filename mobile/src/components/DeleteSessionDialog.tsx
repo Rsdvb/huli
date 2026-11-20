@@ -69,7 +69,9 @@ export function DeleteSessionDialog(props: {
   const title = sessionTitle(summary)
   const children = descendantCount(sessions, summary.id)
   const worktree = summary.worktree && hasLiveWorktree(summary) ? summary.worktree : null
-  const shared = agent?.sharesSignIn ? agent.harnessName : null
+  // An agent whose own copy goes with it, else one whose copy stays in its vendor's app.
+  const removes = agent ? (agent.deletesCopy ?? agent.capabilities.deleteSession) : false
+  const shared = !removes && agent?.sharesSignIn ? agent.harnessName : null
   const name = folder ? baseName(folder) : ''
 
   let stakeLine: string | null = null
@@ -86,6 +88,9 @@ export function DeleteSessionDialog(props: {
     (children > 0
       ? `对话、历史记录及其 ${children} 个子会话将无法恢复。归档会保留它们。`
       : '对话及其历史记录将无法恢复。归档会保留两者。') +
+    (removes && agent
+      ? ` 也会从 ${agent.harnessName} 自己的本地历史里删除，官方客户端和应用里不会再显示。`
+      : '') +
     (shared ? ` ${shared} 自己保留的那份，纸鸢删不掉。` : '')
   const canArchive = summary.parentId === null && summary.archivedAt === null
 

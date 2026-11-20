@@ -70,7 +70,7 @@ import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
 import { basename, tokens } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
-import { i18n } from '@renderer/lib/i18n'
+import { currentLocale, i18n } from '@renderer/lib/i18n'
 import { fileManagerName, formatShortcut, isMac, isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
@@ -1173,13 +1173,23 @@ export function DeleteSessionDialog({
       s.worktree && hasLiveWorktree(s) ? [[s.worktree.path, s.worktree.branch] as const] : [],
     ),
   )
-  // An agent that shares its history with its vendor's app keeps its own copy there.
-  const sharedWith = useAgentsStore(
-    (s) =>
-      targets
-        .map((target) => agentsOn(s, hostOfSession(target)).byId[target.agentId])
-        .find((status) => status?.sharesSignIn)?.harnessName ?? null,
+  // Huli: the agents whose own copy goes with it, and those that share their history with their
+  // vendor's app and keep a copy there that Kite cannot delete; each a line of names.
+  const copies = useAgentsStore(
+    useShallow((s) => {
+      const removed = new Set<string>()
+      const kept = new Set<string>()
+      for (const target of targets) {
+        const status = agentsOn(s, hostOfSession(target)).byId[target.agentId]
+        if (!status) continue
+        if (status.deletesCopy ?? status.capabilities.deleteSession) removed.add(status.harnessName)
+        else if (status.sharesSignIn) kept.add(status.harnessName)
+      }
+      return { removed: [...removed].join('\n'), kept: [...kept].join('\n') }
+    }),
   )
+  const names = (lines: string): string =>
+    new Intl.ListFormat(currentLocale(), { type: 'conjunction' }).format(lines.split('\n'))
   // Archive keeps what it archives; a sub-session goes with its parent.
   const canArchive = targets.length > 0 && targets.every((s) => s.parentId === null)
   const remove = async () => {
@@ -1253,7 +1263,12 @@ export function DeleteSessionDialog({
             : several
               ? t('row.deleteBodyCount')
               : t('row.deleteBody')}
-          {sharedWith && ` ${t('row.deleteKeepsAppCopy', { agent: sharedWith })}`}
+          {copies.removed &&
+            ` ${t('row.deleteRemovesAgentCopy', {
+              agent: names(copies.removed),
+              count: targets.length,
+            })}`}
+          {copies.kept && ` ${t('row.deleteKeepsAppCopy', { agent: names(copies.kept) })}`}
         </AlertDialogDescription>
         <AlertDialogFooter className="pt-1">
           {canArchive && (

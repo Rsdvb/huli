@@ -424,6 +424,11 @@ export interface AgentStatus {
   /** Its sign-in and session history are shared with the vendor's own apps (Antigravity). */
   sharesSignIn?: boolean
   /**
+   * Huli: deleting a session deletes it from the agent's own history too, through the agent or by
+   * removing what it keeps on disk. Absent on older hosts.
+   */
+  deletesCopy?: boolean
+  /**
    * Accounts its vendor moved to another harness: that harness, who this one is still for, and
    * whether the agent refused its signed-in account as one of them (Gemini CLI to Antigravity).
    */
