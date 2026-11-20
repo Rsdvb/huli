@@ -41,8 +41,11 @@ flow() {
   return 1
 }
 
-# About 2.5 KB a second, so the reply is short while Maestro still reads the screen.
-flow "$DIR/start.yaml" start -e "PROMPT=/long-stream perflong --size $SIZE --rate 25" || exit 0
+# About 2.5 KB a second, so the reply is short while Maestro still reads the screen. The first flow
+# meets Maestro's driver starting on a loaded runner, which once hung it on its first tap; it gets
+# a second try.
+PROMPT="PROMPT=/long-stream perflong --size $SIZE --rate 25"
+flow "$DIR/start.yaml" start -e "$PROMPT" || flow "$DIR/start.yaml" start-again -e "$PROMPT" || exit 0
 flow "$DIR/home.yaml" home -e SHOT=r01-home-streaming
 started=$(date +%s)
 bytes=$(node -e 'const s = process.argv[1]; console.log(parseFloat(s) * (/k$/i.test(s) ? 1024 : 1))' "$SIZE")
