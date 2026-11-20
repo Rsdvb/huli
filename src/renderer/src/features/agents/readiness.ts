@@ -8,7 +8,8 @@ export type AgentReadiness =
   | { kind: 'installing' }
   | { kind: 'starting' }
   | { kind: 'failed'; message: string }
-  | { kind: 'missing'; message: string; action: string; url: string | null }
+  // `node`: Node.js is missing or too old, which Kite's own install fixes (`NodeInstallAction`).
+  | { kind: 'missing'; message: string; action: string; url: string | null; node?: true }
 
 /**
  * The oldest version the user's program must be, when it is on the machine but older than Kettu
@@ -42,7 +43,8 @@ export function readiness(status: AgentStatus): AgentReadiness {
         kind: 'missing',
         message: status.detail ?? i18n.t('agents:readiness.needsNode'),
         action: i18n.t('agents:readiness.installNode'),
-        url: status.installUrl,
+        url: i18n.t('agents:node.manualUrl'),
+        node: true,
       }
     case 'installing':
       return { kind: 'installing' }

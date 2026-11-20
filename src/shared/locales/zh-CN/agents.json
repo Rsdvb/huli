@@ -3,7 +3,7 @@
     "notFound": "未在 PATH 中找到。",
     "howToInstall": "安装方法",
     "needsNode": "需要 Node.js 22 或更高版本。",
-    "installNode": "安装 Node.js",
+    "installNode": "一键安装 Node.js",
     "couldNotStart": "无法启动。",
     "outdated": "版本比 Kettu 要的旧，更新后才能用。",
     "update": "更新方法"
@@ -16,5 +16,26 @@
     "failed": "失败",
     "notAvailable": "不可用",
     "needsUpdate": "需要更新"
+  },
+  "node": {
+    "title": "需要 Node.js",
+    "install": "一键安装 Node.js",
+    "retry": "重试",
+    "manual": "手动安装",
+    "manualUrl": "https://nodejs.org/zh-cn/download",
+    "stop": "停止安装",
+    "dismiss": "关闭",
+    "phase": {
+      "checking": "正在查找最新版…",
+      "downloading": "正在下载 Node.js {{version}}",
+      "verifying": "正在校验…",
+      "extracting": "正在解压…",
+      "removing": "正在移除…"
+    },
+    "failed": "Node.js 安装失败：{{error}}",
+    "removeFailed": "Node.js 移除失败：{{error}}",
+    "done": "已安装 Node.js {{version}}",
+    "upToDate": "Node.js {{version}} 已是最新",
+    "hint": "装在纸鸢自己的文件夹里，不需要管理员权限，不改系统设置。"
   }
 }

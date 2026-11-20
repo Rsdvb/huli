@@ -16,5 +16,26 @@
     "failed": "Failed",
     "notAvailable": "Not available",
     "needsUpdate": "Needs update"
+  },
+  "node": {
+    "title": "Needs Node.js",
+    "install": "Install Node.js",
+    "retry": "Try again",
+    "manual": "Install it yourself",
+    "manualUrl": "https://nodejs.org/en/download",
+    "stop": "Stop the install",
+    "dismiss": "Dismiss",
+    "phase": {
+      "checking": "Finding the latest version…",
+      "downloading": "Downloading Node.js {{version}}",
+      "verifying": "Checking the download…",
+      "extracting": "Unpacking…",
+      "removing": "Removing…"
+    },
+    "failed": "Node.js could not be installed: {{error}}",
+    "removeFailed": "Node.js could not be removed: {{error}}",
+    "done": "Node.js {{version}} is installed",
+    "upToDate": "Node.js {{version}} is the latest",
+    "hint": "It goes in Kite’s own folder: no administrator rights, nothing on your system changes."
   }
 }

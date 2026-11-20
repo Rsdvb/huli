@@ -17,6 +17,7 @@ import type {
   AgentInstallMethod,
   AgentStatus,
   AgentTask,
+  NodeRuntimeInfo,
   VersionMoveReason,
 } from '@shared/agent-host'
 import type { HarnessId } from '@shared/thread'
@@ -42,6 +43,8 @@ import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { RadioGroup, RadioGroupTile } from '@renderer/components/ui/radio-group'
 import { toast } from '@renderer/components/ui/toast'
+import { NodeInstallAction } from '@renderer/features/agents/node-install'
+import { needsNode, useNodeRuntime } from '@renderer/features/agents/node-runtime'
 import {
   cliOutdated,
   listedInstalled,
@@ -319,12 +322,15 @@ export function InstallDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { useAgentsStore, useSettingsStore } = useHostScope()
-  const { t } = useTranslation(['settings', 'common'])
+  const { t } = useTranslation(['settings', 'common', 'agents'])
   const [picked, setPicked] = useState<AgentInstallMethod['id'] | undefined>(undefined)
   const method = installMethod(status, picked)
   const vendor = VENDORS[status.harnessId]
   const [check, checking, error] = useAction()
   const hasMethods = status.installMethods.length > 0
+  // Huli: Node.js is what is missing, which Kite installs itself.
+  const node = useNodeRuntime()
+  const nodeFix = needsNode(status) && !!node?.installable
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <SettingsDialogContent className="sm:max-w-125">
@@ -374,6 +380,12 @@ export function InstallDialog({
             <p className="kettu-sd__text" data-selectable="">
               {status.detail}
             </p>
+          )}
+          {nodeFix && (
+            <>
+              <NodeInstallAction />
+              <span className="kettu-sd__hint">{t('agents:node.hint')}</span>
+            </>
           )}
           {method && (
             <SettingsField
@@ -439,7 +451,7 @@ export function InstallDialog({
           ) : (
             <SetButton
               size="md"
-              variant="primary"
+              variant={nodeFix ? 'secondary' : 'primary'}
               loading={checking}
               onClick={() => check(() => useAgentsStore.getState().reloadEnvironment())}
             >
@@ -1326,6 +1338,7 @@ function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKin
     )
   }
   if (task?.state === 'failed') return <FailedTaskNotice status={status} task={task} />
+  if (needsNode(status)) return <NodeNotice status={status} />
   if (kind === 'package') {
     // The SDK installs itself on first use beside the user's CLI; nothing waits on the user.
     if (status.package?.isSdk) return null
@@ -1376,6 +1389,26 @@ function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKin
         ? t('harnesses.install.cliBody', { name, command: status.cli.command })
         : t('agents.install.body')}
       <InstallDialog status={status} open={open} onOpenChange={setOpen} />
+    </Notice>
+  )
+}
+
+/** Two sentences as one line: no space after a Chinese full stop. */
+function joinSentences(first: string, second: string): string {
+  return /[。！？]$/.test(first) ? `${first}${second}` : `${first} ${second}`
+}
+
+/** Huli: Node.js is missing or too old: Kite installs its own, or the user installs it by hand. */
+function NodeNotice({ status }: { status: AgentStatus }) {
+  const { t } = useTranslation('agents')
+  return (
+    <Notice
+      variant="info"
+      icon={<Icon icon={Download04Icon} size={16} />}
+      title={t('node.title')}
+      more={<NodeInstallAction />}
+    >
+      {joinSentences(status.detail ?? t('readiness.needsNode'), t('node.hint'))}
     </Notice>
   )
 }
@@ -1591,6 +1624,91 @@ export function EnvironmentFooter() {
           {error}
         </p>
       )}
+      {environment?.node && <NodeRuntimeLines node={environment.node} />}
+    </div>
+  )
+}
+
+/** What the line says of the Node.js agents run on. */
+function nodeLine(t: SettingsT, node: NodeRuntimeInfo): string {
+  const required = node.required?.replace(/^>=\s*/, '') ?? ''
+  if (node.using === 'kite' && node.kite) {
+    return t('agents.environment.node.usingKite', { version: node.kite.version })
+  }
+  const system = node.system
+  if (!system) return t('agents.environment.node.none')
+  if (!system.version) return t('agents.environment.node.systemUnknown')
+  if (!system.suitable) {
+    return t('agents.environment.node.systemOld', { version: system.version, required })
+  }
+  return t('agents.environment.node.usingSystem', { version: system.version })
+}
+
+/**
+ * Huli: the Node.js agents run on, the user's or Kite's own, with its version; Kite's own installed
+ * where the user's is missing or too old, updated, removed, or chosen over the user's.
+ */
+function NodeRuntimeLines({ node }: { node: NodeRuntimeInfo }) {
+  const { request } = useHostScope()
+  const { t } = useTranslation(['settings', 'agents'])
+  const [act, busy, error] = useAction()
+  const [choosing, setChoosing] = useState(false)
+  const kite = node.kite
+  const lacking = node.using === null || (node.using === 'system' && !node.system?.suitable)
+  const running = node.task?.state === 'running'
+  return (
+    <div className="mt-1.5 flex flex-col gap-2" data-setting-row="node">
+      <p className="ui-sg-hint" data-selectable="">
+        {nodeLine(t, node)}
+        {kite &&
+          node.using !== 'kite' &&
+          ` ${t('agents.environment.node.kiteIdle', { version: kite.version })}`}
+      </p>
+      {kite ? (
+        <>
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <NodeInstallAction
+              label={t('agents.environment.node.update')}
+              variant="secondary"
+              manual={false}
+            />
+            {!running && (
+              <SetButton
+                variant="ghost"
+                loading={busy}
+                onClick={() => act(() => request('environment.removeNode', undefined))}
+              >
+                {t('agents.environment.node.remove')}
+              </SetButton>
+            )}
+          </span>
+          <span className="flex min-w-0 items-center gap-2.5">
+            <SettingSwitch
+              label={t('agents.environment.node.preferKite')}
+              checked={node.choice === 'kite'}
+              disabled={choosing}
+              onChange={(on) => {
+                setChoosing(true)
+                act(() =>
+                  request('environment.setNodeChoice', { choice: on ? 'kite' : 'auto' }).finally(
+                    () => setChoosing(false),
+                  ),
+                )
+              }}
+            />
+            <span className="ui-sg-label">
+              <b className="k-row-title">{t('agents.environment.node.preferKite')}</b>
+              <small>{t('agents.environment.node.preferKiteHint')}</small>
+            </span>
+          </span>
+        </>
+      ) : (
+        lacking && <NodeInstallAction />
+      )}
+      {lacking && !kite && node.installable && (
+        <p className="ui-sg-hint">{t('agents:node.hint')}</p>
+      )}
+      <ControlError error={error} wrap />
     </div>
   )
 }

@@ -745,7 +745,19 @@
       "inherited": "Inherited from how Kettu was started.",
       "fallback": "Using a fallback PATH.",
       "reload": "Reload environment",
-      "keywords": "PATH shell node npm environment variables"
+      "keywords": "PATH shell node npm environment variables",
+      "node": {
+        "usingSystem": "Agents use your Node.js {{version}}.",
+        "usingKite": "Agents use Kite’s Node.js {{version}}.",
+        "none": "Node.js was not found, and some agents need it.",
+        "systemOld": "Your Node.js {{version}} is older than some agents need ({{required}} or later).",
+        "systemUnknown": "Your Node.js does not run.",
+        "kiteIdle": "Kite’s Node.js {{version}} is installed, used only while yours is too old.",
+        "update": "Update",
+        "remove": "Remove",
+        "preferKite": "Always use Kite’s Node.js",
+        "preferKiteHint": "When off, your own Node.js is used while it is new enough."
+      }
     },
     "cli": {
       "notFound": "No {{command}} found on PATH.",
