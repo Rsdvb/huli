@@ -650,7 +650,13 @@
       "reconnecting": "重新连接中（{{attempt}}/{{max}}）…",
       "reconnectingPlain": "重新连接中…",
       "reconnected_other": "重试 {{count}} 次后已重新连接",
-      "reconnectFailed_other": "重试 {{count}} 次后仍未连上"
+      "reconnectFailed_other": "重试 {{count}} 次后仍未连上",
+      "config": "Codex 配置：{{summary}}",
+      "worldWritable": "这台电脑上任何人都能写入的文件夹",
+      "worldWritableScan": "Codex 没能检查这台电脑上哪些文件夹任何人都能写入",
+      "andMore_other": "还有 {{count}} 个",
+      "mcpFailed": "MCP 服务器 {{name}} 没能启动",
+      "mcpNeedsAuth": "MCP 服务器 {{name}} 需要重新登录"
     },
     "command": {
       "plan": {

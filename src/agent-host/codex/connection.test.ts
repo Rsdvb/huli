@@ -2050,6 +2050,56 @@ describe('side questions', () => {
   })
 })
 
+describe('warnings about Codex itself', () => {
+  it('shows each once in every session, those from before it opened too', async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    server.notify('configWarning', {
+      summary: 'Unknown key "modle"',
+      details: 'Did you mean "model"?',
+      path: '/home/ada/.codex/config.toml',
+      range: null,
+    })
+    const t = threadTarget()
+    connection.register('thread-1', t.target)
+    server.notify('configWarning', {
+      summary: 'Unknown key "modle"',
+      details: 'Did you mean "model"?',
+      path: '/home/ada/.codex/config.toml',
+      range: null,
+    })
+    server.notify('windows/worldWritableWarning', {
+      samplePaths: ['C:/Shared'],
+      extraCount: 2,
+      failedScan: false,
+    })
+    server.notify('mcpServer/startupStatus/updated', {
+      name: 'github',
+      status: 'failed',
+      error: 'spawn gh-mcp ENOENT',
+      failureReason: null,
+      threadId: 'thread-1',
+    })
+    await until(() => t.entries().length >= 3)
+    expect(t.entries()).toMatchObject([
+      {
+        kind: 'notice',
+        severity: 'warning',
+        title: 'Codex config: Unknown key "modle"',
+        description: ['Did you mean "model"?', '/home/ada/.codex/config.toml'].join(
+          String.fromCharCode(10),
+        ),
+      },
+      { kind: 'notice', title: 'Folders anyone on this computer can write to' },
+      {
+        kind: 'notice',
+        title: 'MCP server github could not start',
+        description: 'spawn gh-mcp ENOENT',
+      },
+    ])
+  })
+})
+
 describe('limits and subagents', () => {
   it('reads the credits balance and the reset credits beside the windows', async () => {
     const { server, connection } = await connect()
