@@ -449,6 +449,34 @@
         "name": "完全访问",
         "description": "从不询问。请在沙箱或 worktree 里使用"
       }
+    },
+    "tool": {
+      "terminal": "终端",
+      "file": "文件",
+      "read": "读取 {{path}}{{range}}",
+      "lines": "（第 {{from}}–{{to}} 行）",
+      "fromLine": "（从第 {{line}} 行起）",
+      "write": "写入",
+      "writePath": "写入 {{path}}",
+      "edit": "编辑",
+      "editPath": "编辑 {{path}}",
+      "editNotebook": "编辑笔记本",
+      "find": "查找文件",
+      "findPattern": "查找 {{pattern}}",
+      "findPath": "在 {{path}} 里查找文件",
+      "findIn": "在 {{path}} 里查找 {{pattern}}",
+      "fetch": "获取网页",
+      "fetchUrl": "获取 {{url}}",
+      "webSearch": "网页搜索",
+      "searchQuery": "搜索“{{query}}”",
+      "task": "任务",
+      "approvePlan": "批准计划",
+      "plan": "计划",
+      "exitedPlan": "已退出计划模式",
+      "question": "问题",
+      "loadSkill": "加载技能",
+      "loadSkillNamed": "加载技能：{{skill}}",
+      "tool": "工具"
     }
   },
   "codex": {

@@ -796,7 +796,9 @@ export class ClaudeMapper {
       status,
       ...(content ? { content } : {}),
       ...(own ? { structured: own } : {}),
-      ...(name === 'ExitPlanMode' && status === 'completed' ? { title: 'Exited Plan Mode' } : {}),
+      ...(name === 'ExitPlanMode' && status === 'completed'
+        ? { title: t('claude.tool.exitedPlan') }
+        : {}),
     }
     out.patches.push({ op: 'entry.update', id, changes })
     toolEffects(out, block.tool_use_id, id, entry.status, { ...entry, ...changes })

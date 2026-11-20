@@ -452,6 +452,34 @@
         "name": "Full access",
         "description": "Never asks. Use it in a sandbox or a worktree"
       }
+    },
+    "tool": {
+      "terminal": "Terminal",
+      "file": "File",
+      "read": "Read {{path}}{{range}}",
+      "lines": " ({{from}} - {{to}})",
+      "fromLine": " (from line {{line}})",
+      "write": "Write",
+      "writePath": "Write {{path}}",
+      "edit": "Edit",
+      "editPath": "Edit {{path}}",
+      "editNotebook": "Edit notebook",
+      "find": "Find files",
+      "findPattern": "Find {{pattern}}",
+      "findPath": "Find files in {{path}}",
+      "findIn": "Find {{pattern}} in {{path}}",
+      "fetch": "Fetch",
+      "fetchUrl": "Fetch {{url}}",
+      "webSearch": "Web search",
+      "searchQuery": "Search \"{{query}}\"",
+      "task": "Task",
+      "approvePlan": "Approve plan",
+      "plan": "Plan",
+      "exitedPlan": "Exited plan mode",
+      "question": "Question",
+      "loadSkill": "Load skill",
+      "loadSkillNamed": "Load skill: {{skill}}",
+      "tool": "Tool"
     }
   },
   "codex": {

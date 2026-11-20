@@ -3,6 +3,7 @@
 
 import path from 'node:path'
 import type { ContentRef, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
+import { t } from '../i18n'
 import { toLf } from '../session-updates'
 import type { ContentBlock, ToolResultBlock } from './sdk'
 
@@ -111,23 +112,27 @@ export function toolView(name: string, raw: unknown, cwd: string): ToolView {
   switch (name) {
     case 'Bash':
     case 'PowerShell':
-      return view(text(input.command) ?? 'Terminal', 'execute')
+      return view(text(input.command) ?? t('claude.tool.terminal'), 'execute')
     case 'Read': {
       const offset = typeof input.offset === 'number' ? input.offset : null
       const limit = typeof input.limit === 'number' && input.limit > 0 ? input.limit : null
       const range =
         limit !== null
-          ? ` (${offset ?? 1} - ${(offset ?? 1) + limit - 1})`
+          ? t('claude.tool.lines', { from: offset ?? 1, to: (offset ?? 1) + limit - 1 })
           : offset
-            ? ` (from line ${offset})`
+            ? t('claude.tool.fromLine', { line: offset })
             : ''
-      return view(`Read ${file ? displayPath(file, cwd) : 'File'}${range}`, 'read', {
+      const shown = file ? displayPath(file, cwd) : t('claude.tool.file')
+      return view(t('claude.tool.read', { path: shown, range }), 'read', {
         locations: file ? [{ path: file, line: offset ?? 1 }] : [],
       })
     }
     case 'Write': {
       const content = text(input.content) ?? text(input.file_text) ?? ''
-      return view(file ? `Write ${displayPath(file, cwd)}` : 'Write', 'edit', {
+      const title = file
+        ? t('claude.tool.writePath', { path: displayPath(file, cwd) })
+        : t('claude.tool.write')
+      return view(title, 'edit', {
         locations: file ? [{ path: file }] : [],
         content: file ? [{ type: 'diff', path: file, oldText: null, newText: toLf(content) }] : [],
       })
@@ -135,54 +140,79 @@ export function toolView(name: string, raw: unknown, cwd: string): ToolView {
     case 'Edit': {
       const oldText = typeof input.old_string === 'string' ? toLf(input.old_string) : ''
       const newText = typeof input.new_string === 'string' ? toLf(input.new_string) : ''
-      return view(file ? `Edit ${displayPath(file, cwd)}` : 'Edit', 'edit', {
+      const title = file
+        ? t('claude.tool.editPath', { path: displayPath(file, cwd) })
+        : t('claude.tool.edit')
+      return view(title, 'edit', {
         locations: file ? [{ path: file }] : [],
         content: file ? [{ type: 'diff', path: file, oldText, newText }] : [],
       })
     }
     case 'NotebookEdit': {
       const notebook = text(input.notebook_path)
-      return view(notebook ? `Edit ${displayPath(notebook, cwd)}` : 'Edit notebook', 'edit', {
+      const title = notebook
+        ? t('claude.tool.editPath', { path: displayPath(notebook, cwd) })
+        : t('claude.tool.editNotebook')
+      return view(title, 'edit', {
         locations: notebook ? [{ path: notebook }] : [],
       })
     }
     case 'Glob': {
-      let label = 'Find'
-      if (text(input.path)) label += ` \`${String(input.path)}\``
-      if (text(input.pattern)) label += ` \`${String(input.pattern)}\``
-      return view(label, 'search', {
-        locations: text(input.path) ? [{ path: String(input.path) }] : [],
+      const pattern = text(input.pattern)
+      const where = text(input.path)
+      const title =
+        pattern && where
+          ? t('claude.tool.findIn', { pattern, path: where })
+          : pattern
+            ? t('claude.tool.findPattern', { pattern })
+            : where
+              ? t('claude.tool.findPath', { path: where })
+              : t('claude.tool.find')
+      return view(title, 'search', {
+        locations: where ? [{ path: where }] : [],
       })
     }
     case 'Grep':
       return view(grepTitle(input), 'search')
-    case 'WebFetch':
-      return view(text(input.url) ? `Fetch ${String(input.url)}` : 'Fetch', 'fetch', {
+    case 'WebFetch': {
+      const url = text(input.url)
+      return view(url ? t('claude.tool.fetchUrl', { url }) : t('claude.tool.fetch'), 'fetch', {
         content: text(input.prompt) ? [markdown(String(input.prompt))] : [],
       })
-    case 'WebSearch':
-      return view(text(input.query) ? `Search "${String(input.query)}"` : 'Web search', 'fetch')
+    }
+    case 'WebSearch': {
+      const query = text(input.query)
+      return view(
+        query ? t('claude.tool.searchQuery', { query }) : t('claude.tool.webSearch'),
+        'fetch',
+      )
+    }
     case 'Agent':
     case 'Task':
-      return view(text(input.description) ?? 'Task', 'think', {
+      return view(text(input.description) ?? t('claude.tool.task'), 'think', {
         content: text(input.prompt) ? [markdown(String(input.prompt))] : [],
       })
     case 'ExitPlanMode':
-      return view('Approve Plan', 'switch_mode', {
+      return view(t('claude.tool.approvePlan'), 'switch_mode', {
         content: text(input.plan) ? [markdown(String(input.plan))] : [],
       })
     case 'EnterPlanMode':
-      return view('Plan', 'switch_mode')
+      return view(t('claude.tool.plan'), 'switch_mode')
     case 'AskUserQuestion': {
       const first = askedQuestions(input)?.[0]
       return first
         ? view(first.header || first.question, 'other', { question: first.question })
-        : view('Question', 'other')
+        : view(t('claude.tool.question'), 'other')
     }
-    case 'Skill':
-      return view(text(input.skill) ? `Load skill: ${String(input.skill)}` : 'Load skill', 'other')
+    case 'Skill': {
+      const skill = text(input.skill)
+      return view(
+        skill ? t('claude.tool.loadSkillNamed', { skill }) : t('claude.tool.loadSkill'),
+        'other',
+      )
+    }
     default:
-      return view(name || 'Tool', 'other')
+      return view(name || t('claude.tool.tool'), 'other')
   }
 }
 
