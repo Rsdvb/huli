@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import { Download01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
@@ -14,10 +14,61 @@ import { numericColumns, proseColumns, tableSize } from './table-columns'
 
 type Overflow = { left: boolean; right: boolean }
 
+const NO_OVERFLOW: Overflow = { left: false, right: false }
+
+/** What each watched box, or the table in it, measures when it is resized. */
+const measures = new WeakMap<Element, () => void>()
+/** Each watched box's table. */
+const tables = new WeakMap<Element, Element | null>()
+let sizes: ResizeObserver | null = null
+let nearView: IntersectionObserver | null = null
+
+// The observers' callbacks are the module's own, so they close over no box: a callback made where
+// a box was in scope kept the first table's whole reply alive for as long as the window was open.
+function resized(entries: ResizeObserverEntry[]): void {
+  for (const entry of entries) measures.get(entry.target)?.()
+}
+
+function nearViewChanged(entries: IntersectionObserverEntry[]): void {
+  for (const { target, isIntersecting } of entries) {
+    // A report queued before the table went: watching it now would keep its whole tree.
+    if (!tables.has(target)) continue
+    for (const el of [target, tables.get(target)]) {
+      if (!el) continue
+      if (isIntersecting) sizes?.observe(el)
+      else sizes?.unobserve(el)
+    }
+  }
+}
+
+/**
+ * Measures `box` while it is near the view, after layout. A reply's tables were each measured as
+ * they mounted, which forced a layout of the whole thread per table: 0.4 s for a reply of 195
+ * tables. One pair of observers serves every table: a box near the view is watched for size
+ * changes, which also reports its size once, after the frame's own layout, when watching starts.
+ */
+function watchOverflow(box: HTMLElement, measure: () => void): () => void {
+  sizes ??= new ResizeObserver(resized)
+  nearView ??= new IntersectionObserver(nearViewChanged, { rootMargin: '50% 0px' })
+  const table = box.firstElementChild
+  measures.set(box, measure)
+  tables.set(box, table)
+  if (table) measures.set(table, measure)
+  nearView.observe(box)
+  return () => {
+    nearView?.unobserve(box)
+    sizes?.unobserve(box)
+    if (table) sizes?.unobserve(table)
+    measures.delete(box)
+    tables.delete(box)
+    if (table) measures.delete(table)
+  }
+}
+
 /** Which sides of a scrolled box hide content, so they fade. */
 function useOverflow(ref: React.RefObject<HTMLElement | null>): Overflow {
-  const [overflow, setOverflow] = useState<Overflow>({ left: false, right: false })
-  useLayoutEffect(() => {
+  const [overflow, setOverflow] = useState<Overflow>(NO_OVERFLOW)
+  useEffect(() => {
     const el = ref.current
     if (!el) return
     const measure = () => {
@@ -25,13 +76,10 @@ function useOverflow(ref: React.RefObject<HTMLElement | null>): Overflow {
       const next = { left: el.scrollLeft > 1, right: el.scrollLeft < max - 1 }
       setOverflow((o) => (o.left === next.left && o.right === next.right ? o : next))
     }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    if (el.firstElementChild) observer.observe(el.firstElementChild)
+    const unwatch = watchOverflow(el, measure)
     el.addEventListener('scroll', measure, { passive: true })
     return () => {
-      observer.disconnect()
+      unwatch()
       el.removeEventListener('scroll', measure)
     }
   }, [ref])
