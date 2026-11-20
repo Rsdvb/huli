@@ -153,7 +153,7 @@
       "cancelled": "Cancelled",
       "max_tokens": "Stopped at the token limit",
       "max_turn_requests": "Stopped at the request limit",
-      "refusal": "The agent refused"
+      "refusal": "The model declined to continue"
     },
     "wantsToRun": "Wants to run {{command}}",
     "wantsToEdit": "Wants to edit {{target}}",

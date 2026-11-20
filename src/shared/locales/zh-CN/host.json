@@ -152,7 +152,7 @@
       "cancelled": "已取消",
       "max_tokens": "已达到 token 上限而停止",
       "max_turn_requests": "已达到请求次数上限而停止",
-      "refusal": "Agent 拒绝了请求"
+      "refusal": "模型拒绝继续"
     },
     "wantsToRun": "想运行 {{command}}",
     "wantsToEdit": "想修改 {{target}}",
