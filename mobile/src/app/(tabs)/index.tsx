@@ -487,12 +487,17 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     }
     return out
   }, [byComputer])
-  placedOf.current = new Map(placedAll.map((p) => [p.session.id, p.computer]))
+  const placedMap = useMemo(
+    () => new Map(placedAll.map((p) => [p.session.id, p.computer])),
+    [placedAll],
+  )
+  placedOf.current = placedMap
 
   // The archived page lists the active computer's, so the count is of those alone.
-  const archivedCount = placedAll.filter(
-    (p) => p.computer === activeId && p.session.archivedAt !== null,
-  ).length
+  const archivedCount = useMemo(
+    () => placedAll.filter((p) => p.computer === activeId && p.session.archivedAt !== null).length,
+    [placedAll, activeId],
+  )
   const listed = useMemo(
     () =>
       placedAll.filter(
@@ -1144,20 +1149,54 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   // mounts again as it scrolls do not.
   const seen = useRef<Set<string> | null>(null)
   const fresh = useRef(new Set<string>())
-  const ids = items.flatMap((item) => (item.kind === 'session' ? [item.key] : []))
-  if (seen.current === null) {
-    if (ids.length > 0) seen.current = new Set(ids)
-  } else {
-    for (const sid of ids) {
-      if (!seen.current.has(sid)) {
-        seen.current.add(sid)
-        fresh.current.add(sid)
+  // Looked over only when the list changed, not on every render of the screen.
+  const seenItems = useRef<HomeItem[] | null>(null)
+  if (seenItems.current !== items) {
+    seenItems.current = items
+    const ids = items.flatMap((item) => (item.kind === 'session' ? [item.key] : []))
+    if (seen.current === null) {
+      if (ids.length > 0) seen.current = new Set(ids)
+    } else {
+      for (const sid of ids) {
+        if (!seen.current.has(sid)) {
+          seen.current.add(sid)
+          fresh.current.add(sid)
+        }
       }
     }
   }
   useEffect(() => {
     fresh.current.clear()
   })
+
+  // What the rows show beside `items`. A new array each render told the list its rows had changed
+  // every time the screen drew; this one changes only with what it holds.
+  const extraData = useMemo(
+    () => [
+      props.selected,
+      selection,
+      marks,
+      stale,
+      fleet,
+      connected,
+      agents,
+      taskViews,
+      taskTitles,
+      subagents,
+    ],
+    [
+      props.selected,
+      selection,
+      marks,
+      stale,
+      fleet,
+      connected,
+      agents,
+      taskViews,
+      taskTitles,
+      subagents,
+    ],
+  )
 
   const renderItem = ({ item }: { item: HomeItem }) => {
     if (item.kind === 'section') {
@@ -1259,7 +1298,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         <AnimatedFlashList
           ref={list}
           data={items}
-          extraData={[props.selected, selection, marks, stale]}
+          extraData={extraData}
           keyExtractor={itemKey}
           getItemType={itemType}
           renderItem={renderItem}
