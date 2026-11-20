@@ -153,8 +153,13 @@ import {
   writingId,
 } from '../../ui/session/work'
 import { WorkingRow } from '../../ui/session/Working'
+import { devMode } from '../../dev/devMode'
+import { FrameMeter } from '../../dev/FrameMeter'
 
 const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
+
+// The developer's frame meter over the real screen, for the simulator flows that measure it.
+const DEV = devMode()
 
 // What the screen reads of the thread, each apart, so a token appended to a reply changes none.
 const selectSession = (thread: ThreadState | null) => thread?.session
@@ -1320,6 +1325,7 @@ export default function SessionScreen() {
       />
       {actions.element}
       {menu.render(pages)}
+      {DEV ? <FrameMeter label="session" top={headerHeight + 4} /> : null}
     </SessionRows.Provider>
   )
 }

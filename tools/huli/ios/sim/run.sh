@@ -72,6 +72,10 @@ for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
   wait "$REC" 2>/dev/null || true
 done
 
+# What the developer's frame meter counted in the flows that ran it (FrameMeter.tsx).
+DATA=$(xcrun simctl get_app_container "$UDID" io.github.rsdvb.huli data 2>/dev/null || true)
+[ -n "$DATA" ] && cp "$DATA/Documents/huli-frames.json" "$RESULTS/" 2>/dev/null || true
+
 # The same screen in the dark appearance.
 xcrun simctl ui "$UDID" appearance dark
 sleep 2
