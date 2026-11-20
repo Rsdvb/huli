@@ -24,6 +24,7 @@ export const VENDORS: Partial<Record<HarnessId, string>> = {
   muse: 'Meta',
   codewhale: 'Codewhale',
   deepseek: 'DeepSeek',
+  doubao: '字节跳动',
 }
 
 export const METHOD_NAMES: Record<AgentInstallMethod['id'], string> = {

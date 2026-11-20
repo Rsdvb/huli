@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"10000000000018888"}
+{"type":"assistant","session_id":"10000000000018888","message":{"id":"10000000000019998:tool_use:6cfa5484-ead1-44be-8887-bb4fb2af5a26","role":"assistant","content":[{"type":"tool_use","id":"6cfa5484-ead1-44be-8887-bb4fb2af5a26","name":"Bash","input":{"command":"Start-Sleep -Seconds 25; Set-Content late.txt late","description":"Sleep 25 seconds then write late.txt","sandbox_permissions":"use_default","timeout":60000},"input_status":"available"}]}}

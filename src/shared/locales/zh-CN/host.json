@@ -345,13 +345,15 @@
       "archive": "请在「设置 › Harness」中安装。",
       "fakeAgent": "Fake agent 运行仓库中的 tools/fake-agent/main.ts。",
       "claudeCode": "请在「设置 › Harness」中安装 Claude Code，或在那里选择它的程序。",
-      "codex": "请在「设置 › Harness」中安装 Codex，或在那里选择它的程序。"
+      "codex": "请在「设置 › Harness」中安装 Codex，或在那里选择它的程序。",
+      "doubao": "请用「安装」按钮安装豆包 CLI，或运行 `npm install -g --allow-scripts=@bytedance/doubao-cli @bytedance/doubao-cli`。"
     },
     "cliMissing": "{{agent}} 运行你自己的 {{command}}，但在 PATH 中找不到它。请在「设置 › Harness」中安装。",
     "cliUnsupported": "{{agent}} 找到的 {{path}} 不经 Shell 无法运行。",
     "cliFailed": "{{agent}} 无法读取它的程序的版本：{{reason}}",
     "cliOutdated": "{{agent}} 需要 {{command}} {{required}} 或更高版本，当前安装的是 {{installed}}。请在「设置 › Harness」中更新。",
-    "uninstalled": "{{agent}} 已卸载。要再次使用，请重新安装。"
+    "uninstalled": "{{agent}} 已卸载。要再次使用，请重新安装。",
+    "doubaoInstallNotice": "npm 会运行豆包 CLI 的安装脚本，下载它的程序（约 100 MB）。豆包 CLI 用豆包账号免费使用，只支持 Windows x64、Apple 芯片的 macOS 和 Linux x64。"
   },
   "environment": {
     "inherited": "Kettu 启动后对 PATH 的修改要在重启后才生效。",
@@ -1171,5 +1173,54 @@
   "report": {
     "draftNoAgent": "没有可用来起草描述的智能体",
     "draftFailed": "{{agent}} 没能起草描述：{{reason}}"
+  },
+  "doubao": {
+    "name": "豆包",
+    "unsupported": "豆包 CLI 只支持 Windows x64、Apple 芯片的 macOS 和 Linux x64。",
+    "failed": "豆包 CLI 没能完成这一轮。",
+    "exited": "豆包 CLI 退出，代码 {{code}}。",
+    "emptyPrompt": "消息是空的。",
+    "promptTooLong": "消息超过了豆包 CLI 能接收的 1 MB。",
+    "signInNeeded": "豆包需要你登录。",
+    "auth": {
+      "qr": "用豆包 App 扫码",
+      "qrDescription": "显示一个二维码：用手机上的豆包 App 扫码，并在手机上确认。",
+      "cancelled": "已取消登录。"
+    },
+    "account": {
+      "plan": "免费"
+    },
+    "mode": {
+      "name": "模式",
+      "askAlways": "沙箱",
+      "askAlwaysDescription": "在沙箱里运行，只能改项目里的文件；越出沙箱的操作会被拒绝，因为 Kettu 无法回答豆包的确认。",
+      "askRisky": "拒绝风险操作",
+      "askRiskyDescription": "不用沙箱，能改任何文件；豆包认为有风险的操作（如删除文件）会被拒绝，因为 Kettu 无法回答它的确认。",
+      "alwaysAllow": "完全访问",
+      "alwaysAllowDescription": "不用沙箱，所有操作都直接运行，不做确认。"
+    },
+    "model": "模型",
+    "effort": {
+      "name": "推理强度",
+      "none": "关",
+      "minimal": "最低",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "xhigh": "很高",
+      "max": "最高"
+    },
+    "tool": {
+      "outputTooLong": "输出太长，豆包 CLI 没有传过来。"
+    },
+    "notice": {
+      "denied_other": "豆包拒绝了 {{count}} 个需要你确认的操作",
+      "deniedHint": "Kettu 无法回答豆包 CLI 的确认，所以它自己拒绝了。要允许这类操作，请给这个会话换一个更宽的模式。",
+      "deniedReason": "豆包 CLI 请求确认，Kettu 无法回答。"
+    },
+    "queue": {
+      "title_other": "豆包同一时间只能运行一个会话，前面还有 {{count}} 个",
+      "description": "前面的会话结束后，这条消息会自动发出。"
+    }
   }
 }

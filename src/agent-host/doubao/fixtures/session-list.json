@@ -1,0 +1,36 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "result": {
+    "type": "session_list",
+    "count": 4,
+    "sessions": [
+      {
+        "session_id": "10000000000021108",
+        "title": "豆包",
+        "updated_at": "2026-08-28T12:48:48+08:00"
+      },
+      {
+        "session_id": "10000000000022220",
+        "title": "PowerShell命令执行结果说明",
+        "updated_at": "2026-11-21T02:21:46+08:00",
+        "cwd": "C:\\work\\kite-doubao-2"
+      },
+      {
+        "session_id": "10000000000023332",
+        "title": "PowerShell命令执行结果说明",
+        "updated_at": "2026-11-21T02:21:44+08:00",
+        "cwd": "C:\\work\\kite-doubao"
+      },
+      {
+        "session_id": "10000000000024442",
+        "title": "PowerShell命令执行结果说明",
+        "updated_at": "2026-11-21T02:20:21+08:00",
+        "cwd": "C:\\work\\kite-doubao-2"
+      }
+    ],
+    "next_cursor": "eyJza2lwIjo0fQ",
+    "has_more": true
+  }
+}

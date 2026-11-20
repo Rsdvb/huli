@@ -6,7 +6,11 @@ import path from 'node:path'
 import type { AgentConfigItem, AgentDetails } from '@shared/agent-host'
 import type { Platform } from '@shared/platform'
 import type { AgentId, HarnessId } from '@shared/thread'
+import { dataFolder } from './doubao/program'
 import type { LogFn } from './storage'
+
+/** The variables Doubao CLI finds its data folder by. */
+const DATA_VARIABLES = ['LOCALAPPDATA', 'XDG_DATA_HOME', 'HOME']
 
 /** One configuration entry; `candidates` are the paths the agent tries, first choice first. */
 export interface ConfigLocation {
@@ -549,6 +553,21 @@ export function configLocations(
     case 'minion':
       // It keeps its data under MINION_ROOT, else ~/.minion, which Settings does not show.
       return []
+    case 'doubao':
+      // Its program, sign-in and logs live in its data folder, which no variable moves.
+      return [
+        {
+          id: 'folder',
+          candidates: [
+            dataFolder(
+              Object.fromEntries(DATA_VARIABLES.map((name) => [name, getEnv(name)])),
+              platform,
+              home,
+            ),
+          ],
+          env: null,
+        },
+      ]
     case 'fake-agent':
       return []
   }

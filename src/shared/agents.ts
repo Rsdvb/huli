@@ -50,6 +50,7 @@ export type HarnessId =
   | 'vtcode'
   | 'fast-agent'
   | 'minion'
+  | 'doubao'
   | 'fake-agent'
 
 export const HARNESS_IDS: readonly HarnessId[] = [
@@ -101,6 +102,7 @@ export const HARNESS_IDS: readonly HarnessId[] = [
   'vtcode',
   'fast-agent',
   'minion',
+  'doubao',
   'fake-agent',
 ]
 
@@ -144,6 +146,7 @@ export const USER_PROGRAM_HARNESSES: readonly HarnessId[] = [
   'muse',
   'codewhale',
   'antigravity',
+  'doubao',
 ]
 
 /**
@@ -202,6 +205,8 @@ export const FULL_ACCESS_MODES: readonly string[] = [
   'agent-full-access',
   'danger-full-access',
   ANTIGRAVITY_FULL_ACCESS,
+  // Doubao CLI's `--permission-mode always_allow`.
+  'always_allow',
 ]
 
 export function isFullAccessMode(value: string | undefined): boolean {

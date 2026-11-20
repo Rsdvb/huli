@@ -445,6 +445,7 @@ export const AGENT_NAMES: Record<HarnessId, string> = {
   vtcode: 'VT Code',
   'fast-agent': 'fast-agent',
   minion: 'Minion Code',
+  doubao: 'Doubao',
   'fake-agent': 'Fake agent',
 }
 

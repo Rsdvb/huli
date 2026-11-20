@@ -65,8 +65,16 @@ export interface AdapterCli {
    * is also the oldest that SDK runs.
    */
   pinsVersion: boolean
-  /** The file that runs without a shell, or null when there is none. */
-  resolve(found: string, platform: Platform, files: CliFiles): Promise<ResolvedCli | null>
+  /**
+   * The file that runs without a shell, or null when there is none. `env` is the agent's, for a
+   * CLI whose launcher finds its program by a variable.
+   */
+  resolve(
+    found: string,
+    platform: Platform,
+    files: CliFiles,
+    env?: Env,
+  ): Promise<ResolvedCli | null>
   /** The oldest CLI the SDK installed in `dir` runs, or null when it names none. */
   minimum?(dir: string, adapterPackage: string, files: CliFiles): Promise<string | null>
   /** The oldest version that runs, for a harness that runs the CLI itself. */
@@ -320,7 +328,7 @@ export async function findInstalledCli(
     if (found) break
   }
   if (!found) return null
-  const resolved = await cli.resolve(found, ctx.platform, ctx.files)
+  const resolved = await cli.resolve(found, ctx.platform, ctx.files, ctx.env)
   if (!resolved) {
     return {
       installed: { path: found, version: null, variable: null, problem: { kind: 'unsupported' } },

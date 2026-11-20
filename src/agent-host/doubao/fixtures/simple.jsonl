@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"10000000000001112"}
+{"type":"stream_event","session_id":"10000000000001112","message_id":"10000000000002222","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1+1 等于"}}}
+{"type":"stream_event","session_id":"10000000000001112","message_id":"10000000000002222","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" 2。"}}}
+{"type":"assistant","session_id":"10000000000001112","message":{"id":"10000000000002222","role":"assistant","content":[{"type":"text","text":"1+1 等于 2。"}]}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"10000000000001112","result":{"type":"text","content":"1+1 等于 2。"},"log_id":"LOGID","message_id":"10000000000002222","tool_calls_truncated":false}

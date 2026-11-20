@@ -26,6 +26,10 @@ interface Mark {
   Body(props: { ink: MarkInk }): ReactNode
 }
 
+// Doubao: a neutral placeholder, a kidney bean, as the desktop's marks/doubao.tsx draws it.
+const DOUBAO =
+  'M12.6 3.2c4.4.2 7.8 3.6 7.6 8.1-.2 4.7-4.3 8.8-9.1 9.4-3.6.4-6.6-1.8-6.9-4.9-.2-1.9.8-3.3 2.3-4 1.3-.6 1.7-1.6 1.2-2.9-.9-2.5.9-5.8 4.9-5.7Z'
+
 function useSvgId(): string {
   return `m${useId().replace(/[^a-zA-Z0-9]/g, '')}`
 }
@@ -256,6 +260,7 @@ const MARKS: Record<string, Mark> = {
     Body: () => <Path fill={brand.dimcode} d={DIMCODE} />,
   },
   antigravity: { viewBox: '0 0 16 16', Body: () => <AntigravityBody /> },
+  doubao: { viewBox: '0 0 24 24', Body: ({ ink }) => <Path fill={ink.text} d={DOUBAO} /> },
 }
 
 /** The harness an agent belongs to: an added agent's id is its harness's, then `~` and its own. */
