@@ -2810,6 +2810,7 @@ export class AgentHost {
       'sessions.limitPause': ({ sessionId, action }) =>
         sessions.limitPauseAction(sessionId, action),
       'sessions.setAutoResume': ({ sessionId, on }) => sessions.setAutoResume(sessionId, on),
+      'sessions.stall': ({ sessionId, action }) => sessions.stallAction(sessionId, action),
       'sessions.blob': ({ sessionId, hash }) => sessions.blob(sessionId, hash),
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
         sessions.setConfigOption(sessionId, optionId, value),

@@ -301,10 +301,10 @@ export type PushEvent =
     }
   | { kind: 'turn-ended' | 'error' | 'routine-ended'; sessionId: string }
   /**
-   * Huli: a turn its plan limit stopped goes on by itself. A device from before it was added
-   * shows its title and body, and opens the session.
+   * Huli: a turn its plan limit stopped goes on, or a running turn looks stuck. A device from
+   * before they were added shows their title and body, and opens the session.
    */
-  | { kind: 'limit-resumed'; sessionId: string }
+  | { kind: 'limit-resumed' | 'stalled'; sessionId: string }
   /** An agent's routines paused near a plan limit; it opens the Routines page. */
   | { kind: 'routine-paused'; agentId: string }
   /**

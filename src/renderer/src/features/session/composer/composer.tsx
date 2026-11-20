@@ -66,6 +66,7 @@ import { SwitchConfirm } from './switch-confirm'
 import { SwitchStrip } from './switch-strip'
 import { QuotaStrip } from './quota-strip'
 import { LimitPauseStrip } from './limit-pause-strip'
+import { StallStrip } from './stall-strip'
 import { useFallback } from '../plan-quota'
 import { SpeedButton } from './speed'
 import { CacheButton, ContextButton } from './usage'
@@ -691,6 +692,14 @@ export function Composer({
                       key="limit-pause"
                       sessionId={sessionId}
                       pause={session.limitPause}
+                      now={clock}
+                    />
+                  )}
+                  {session.stall && (
+                    <StallStrip
+                      key="stall"
+                      sessionId={sessionId}
+                      stall={session.stall}
                       now={clock}
                     />
                   )}

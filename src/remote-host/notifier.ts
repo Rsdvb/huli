@@ -33,6 +33,7 @@ export type AttentionKind =
   | 'routine-paused'
   | 'plan-limit'
   | 'limit-resumed'
+  | 'stalled'
 
 /** What the agent host says needs the user, as the remote host hears it from its parent. */
 export interface Attention {
@@ -221,6 +222,8 @@ function wants(choices: NotificationChoices, kind: AttentionKind): boolean {
     case 'limit-resumed':
       // A device's choices stored before the switch was added read it from the defaults.
       return choices.limits
+    case 'stalled':
+      return choices.errors
   }
 }
 

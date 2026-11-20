@@ -177,7 +177,12 @@
       "resend": "Sending the stopped message again.",
       "continue": "Asking the agent to carry on."
     },
-    "notHere": "Only a session you started goes on by itself after a plan limit."
+    "notHere": "Only a session you started goes on by itself after a plan limit.",
+    "stalled": "May be stuck: {{title}}",
+    "stalledSilent_one": "No output for {{count}} minute.",
+    "stalledSilent_other": "No output for {{count}} minutes.",
+    "stalledRetrying_one": "Still retrying, with no output for {{count}} minute.",
+    "stalledRetrying_other": "Still retrying, with no output for {{count}} minutes."
   },
   "routines": {
     "busy": "This routine already has a run working",

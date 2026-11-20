@@ -97,6 +97,14 @@
     "inMoment": "马上",
     "now": "立即重试"
   },
+  "stall": {
+    "title": "可能卡住了",
+    "silent_other": "已经 {{count}} 分钟没有输出",
+    "retrying_other": "一直在重试，已经 {{count}} 分钟没有输出",
+    "stop": "停止",
+    "retry": "重试",
+    "wait": "继续等"
+  },
   "usage": {
     "title": "用量",
     "contextPercent": "上下文已使用 {{percent}}%",

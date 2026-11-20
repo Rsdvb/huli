@@ -609,6 +609,7 @@
       "waiting": "Waiting for your approval",
       "working": "Working",
       "failed": "Stopped with an error",
+      "stalled": "May be stuck",
       "paused": "Goes on when the plan resets at {{time}}",
       "pausedUnknown": "Goes on when the plan resets",
       "signIn": "Waiting for sign-in",

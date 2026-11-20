@@ -98,6 +98,16 @@
     "inMoment": "in a moment",
     "now": "Retry now"
   },
+  "stall": {
+    "title": "This turn may be stuck",
+    "silent_one": "No output for {{count}} minute",
+    "silent_other": "No output for {{count}} minutes",
+    "retrying_one": "Still retrying, with no output for {{count}} minute",
+    "retrying_other": "Still retrying, with no output for {{count}} minutes",
+    "stop": "Stop",
+    "retry": "Retry",
+    "wait": "Keep waiting"
+  },
   "usage": {
     "title": "Usage",
     "contextPercent": "Context {{percent}}% used",

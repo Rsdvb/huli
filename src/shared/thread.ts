@@ -32,7 +32,7 @@ import type {
 } from './market-publish'
 import type { MemoryAction, MemoryDraft, MemoryLayer, MemoryWriteStatus } from './memory'
 import type { RoutineRef } from './routines'
-import type { LimitPause } from './supervisor'
+import type { LimitPause, Stall } from './supervisor'
 
 export {
   AUTO_AGENT_HARNESSES,
@@ -117,6 +117,8 @@ export interface SessionView {
    * absent from older hosts.
    */
   limitPause?: LimitPause | null
+  /** Huli: ephemeral: its running turn has said nothing for a while and may be stuck. */
+  stall?: Stall | null
 }
 
 /** A predicted next prompt: one line of plain text, `id` telling one prediction from the next. */

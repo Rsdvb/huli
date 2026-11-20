@@ -66,7 +66,12 @@ import {
   type StepPick,
 } from '@shared/workflow'
 import type { ClockRequest, ClockZone } from '@shared/usage'
-import { LIMIT_PAUSE_ACTIONS, type LimitPauseAction } from '@shared/supervisor'
+import {
+  LIMIT_PAUSE_ACTIONS,
+  STALL_ACTIONS,
+  type LimitPauseAction,
+  type StallAction,
+} from '@shared/supervisor'
 import {
   isPermissionScope,
   isSchedule,
@@ -1885,6 +1890,13 @@ export function createValidators(platform: Platform): Validators {
     'sessions.setAutoResume': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), on: flag(o, 'on') }
+    },
+    'sessions.stall': (params) => {
+      const o = fields(params)
+      if (!(STALL_ACTIONS as readonly unknown[]).includes(o.action)) {
+        throw invalidParams(`action must be one of ${STALL_ACTIONS.join(', ')}`)
+      }
+      return { sessionId: sessionId(o), action: o.action as StallAction }
     },
     'sessions.blob': (params) => {
       const o = fields(params)

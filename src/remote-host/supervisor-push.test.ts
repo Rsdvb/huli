@@ -21,11 +21,11 @@ function setup(choices: Partial<NotificationChoices> = {}, showing = false) {
   return { notifier, jobs }
 }
 
-const attention = (kind: 'limit-resumed'): Attention => ({
+const attention = (kind: 'stalled' | 'limit-resumed'): Attention => ({
   kind,
   sessionId: 's1',
-  title: 'The plan is back, going on: Fix the parser',
-  body: 'Sending the stopped message again.',
+  title: kind === 'stalled' ? 'May be stuck: Fix the parser' : 'The plan is back: Fix the parser',
+  body: 'No output for 10 minutes.',
   inFront: false,
   devices: [],
 })
@@ -38,8 +38,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-it('pushes a turn that went on after its plan limit, opening the session', () => {
-  for (const kind of ['limit-resumed'] as const) {
+it('pushes a stuck turn and a turn that went on after its plan limit, opening the session', () => {
+  for (const kind of ['stalled', 'limit-resumed'] as const) {
     const { notifier, jobs } = setup()
     notifier.attention(attention(kind))
     vi.advanceTimersByTime(10)
@@ -49,14 +49,15 @@ it('pushes a turn that went on after its plan limit, opening the session', () =>
   }
 })
 
-it("follows the device's choices: limits for one that went on", () => {
-  const quiet = setup({ limits: false })
+it("follows the device's choices: problems for a stuck turn, limits for one that went on", () => {
+  const quiet = setup({ errors: false, limits: false })
+  quiet.notifier.attention(attention('stalled'))
   quiet.notifier.attention(attention('limit-resumed'))
   vi.advanceTimersByTime(10)
   expect(quiet.jobs.filter((job) => job.type === 'alert')).toEqual([])
 
   const shown = setup({}, true)
-  shown.notifier.attention(attention('limit-resumed'))
+  shown.notifier.attention(attention('stalled'))
   vi.advanceTimersByTime(10)
   expect(shown.jobs.filter((job) => job.type === 'alert')).toEqual([])
 })

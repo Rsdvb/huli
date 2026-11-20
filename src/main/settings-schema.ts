@@ -51,7 +51,7 @@ import {
 import { addressKey, isPort, MAX_OWN_ADDRESSES, parseDirectAddress } from '@shared/remote/address'
 import type { DirectAddress } from '@shared/remote/protocol'
 import { DEVICE_NAME_CHARS, isDeviceName } from '@shared/remote/device'
-import { RESUME_TEXT_CHARS } from '@shared/supervisor'
+import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { THEME_ID } from '@shared/themes'
 import { isAbsolutePath } from '../agent-host/paths'
 import {
@@ -280,6 +280,7 @@ const SECTION_FIELDS = {
   supervisor: {
     resumeAfterLimit: isBoolean,
     resumeText: isResumeText,
+    stallMinutes: oneOf(...STALL_MINUTES),
   },
   computerUse: {
     enabled: isBoolean,

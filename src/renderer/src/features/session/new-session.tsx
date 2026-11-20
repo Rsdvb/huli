@@ -951,6 +951,12 @@ function PickupStatus({ session, now }: { session: SessionSummary; now: number }
           {t('newSession.pickup.working')}
         </span>
       )
+    case 'stalled':
+      return (
+        <span className="kettu-pickup__status" data-status="waiting">
+          {t('newSession.pickup.stalled')}
+        </span>
+      )
     case 'paused':
       return (
         <span className="kettu-pickup__status" data-status="waiting">

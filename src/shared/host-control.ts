@@ -317,8 +317,8 @@ export type HostToMain =
   | {
       type: 'host:attention'
       sessionId: string
-      // Huli: `limit-resumed`, a turn its plan limit stopped goes on by itself.
-      kind: 'permission' | 'turn-ended' | 'error' | 'routine-ended' | 'limit-resumed'
+      // Huli: `limit-resumed`, a turn its plan limit stopped goes on; `stalled`, a turn looks stuck.
+      kind: 'permission' | 'turn-ended' | 'error' | 'routine-ended' | 'limit-resumed' | 'stalled'
       title: string
       body: string
       // A request the notification may allow once itself, without opening the session.

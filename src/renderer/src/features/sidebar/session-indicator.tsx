@@ -1,4 +1,4 @@
-import { Alert02Icon, Clock01Icon } from '@hugeicons/core-free-icons'
+import { Alert02Icon, Clock01Icon, HourglassIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { KnownExpiry } from '@shared/prompt-cache'
 import { TurnDots } from '@renderer/features/session/turn-dots'
@@ -9,9 +9,10 @@ import type { RowStatus } from './row-status'
 import { WaitingCount } from './waiting-mark'
 
 /**
- * One status per row, by priority: waiting for you, paused at the plan limit, error, running (the
- * turn's nine dots), starting, prompt cache expiring, unread (App Shell's blue dot). Its 16 px
- * slot stays when there is none, so a status appearing never moves the title.
+ * One status per row, by priority: waiting for you, a turn that may be stuck, paused at the plan
+ * limit, error, running (the turn's nine dots), starting, prompt cache expiring, unread (App
+ * Shell's blue dot). Its 16 px slot stays when there is none, so a status appearing never moves
+ * the title.
  */
 export function SessionIndicator({
   status,
@@ -33,6 +34,12 @@ export function SessionIndicator({
     mark = waitingApart ? null : (
       <span role="img" aria-label={t('indicator.waiting', { count: status.waiting })}>
         <WaitingCount count={status.waiting} />
+      </span>
+    )
+  } else if (status.stalled) {
+    mark = (
+      <span role="img" aria-label={t('indicator.stalled')} className="grid text-warning">
+        <Glyph icon={HourglassIcon} size={14} />
       </span>
     )
   } else if (status.paused) {

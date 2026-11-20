@@ -61,6 +61,8 @@ import {
   DEFAULT_SUPERVISOR,
   type LimitPause,
   type LimitPauseAction,
+  type Stall,
+  type StallAction,
   type SupervisorSettings,
 } from '@shared/supervisor'
 import {
@@ -232,6 +234,7 @@ import {
   type ResumeKind,
 } from './limit-resume'
 import { resetTime } from './limit-text'
+import { agentOutput, retrying, StallWatch } from './stall-watch'
 import { planRevision } from './plan-revision'
 import { watchSettings, type PreparedRecords, type WatchTarget } from './prepared'
 import type { Projects } from './projects'
@@ -413,7 +416,7 @@ export interface SessionEvents {
   /** `request`: what waits, for a permission, with the answers a notification may give itself. */
   attention(
     sessionId: string,
-    kind: 'permission' | 'turn-ended' | 'error' | 'limit-resumed',
+    kind: 'permission' | 'turn-ended' | 'error' | 'limit-resumed' | 'stalled',
     title: string,
     body: string,
     request?: AttentionRequest,
@@ -1277,10 +1280,23 @@ export class SessionManager {
   private readonly limitTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** Huli: the checks of a pause that went on, kept should the plan stop the session again. */
   private readonly limitChecks = new Map<string, number>()
+  /** Huli: turns stopped to go on again, as Retry on a stuck turn asks: their message, if any. */
+  private readonly stallRetries = new Map<
+    string,
+    { entryId: string | null; content: UserContent[] }
+  >()
+  /** Huli: running turns that have said nothing for a while. */
+  private readonly stalls: StallWatch
 
   constructor(private readonly deps: SessionManagerDeps) {
     this.timings = { ...SESSION_TIMINGS, ...deps.timings }
     this.now = deps.now ?? Date.now
+    this.stalls = new StallWatch({
+      now: () => this.now(),
+      thresholdMs: () => this.supervisor().stallMinutes * 60_000,
+      state: (sessionId) => this.stallState(sessionId),
+      changed: (sessionId, stall) => this.stallChanged(sessionId, stall),
+    })
     deps.agents.hooks = {
       liveSessions: (agentId) => this.connectedCount(agentId),
       agentExited: (agentId) => this.agentExited(agentId),
@@ -1543,6 +1559,7 @@ export class SessionManager {
       working: live ? workOf(live) : null,
       limitPause: record.limitPause ?? null,
       autoResume: this.autoResumes(record),
+      stall: this.stalls.stallOf(record.id),
       ...(record.worktree ? { worktree: this.worktreeSummary(record.worktree) } : {}),
       ...(record.agentWorktree ? { agentWorktree: { ...record.agentWorktree } } : {}),
       ...(live?.prepared
@@ -2745,7 +2762,12 @@ export class SessionManager {
   private update(live: Live, changes: Partial<SessionView>): void {
     if (changes.error) live.errorSeen = this.inFront(live.id)
     this.emit(live, [{ op: 'session.update', changes }])
-    if ('status' in changes) this.refreshRelease(live)
+    if ('status' in changes) {
+      this.refreshRelease(live)
+      // A wait for the user's answer, the turn's own or a subagent's, holds the stuck-turn watch.
+      const root = this.rootOf(live)
+      if (root) this.stalls.waitChanged(root.id)
+    }
     // New session shows a prepared session through its summary, not its patches.
     if (live.prepared && ('config' in changes || 'status' in changes)) this.touch(live.id)
   }
@@ -3918,6 +3940,11 @@ export class SessionManager {
 
   private applyOutput(live: Live, output: MapperOutput): void {
     if (live.closing) return
+    if (!live.replaying && agentOutput(output, live.thread)) {
+      // A subagent's work is its parent turn's.
+      const root = this.rootOf(live)
+      if (root) this.stalls.output(root.id)
+    }
     if (output.patches.length > 0) this.emit(live, output.patches)
     // A compacted context lost what went ahead of a prompt, so the next prompt sends it again.
     if (
@@ -7721,6 +7748,7 @@ export class SessionManager {
     live.failure = null
     // Whatever started this turn, a message of the user's or the plan's reset, takes over.
     if (live.record.limitPause) this.setLimitPause(live.record, null)
+    this.stalls.turnStarted(live.id)
     this.update(live, {
       status: 'running',
       turnStartedAt: now,
@@ -8249,6 +8277,9 @@ export class SessionManager {
     this.reportTurn(live, turn, stopReason)
     this.closeOpenEntries(live)
     this.clearPermissions(live, 'cancelled', true)
+    this.stalls.turnEnded(live.id)
+    // Retry on a stuck turn stopped it to go on again, once the turn has finished ending.
+    if (this.stallRetries.has(live.id)) queueMicrotask(() => this.retryStalled(live))
     const byAgent = live.archiveAfterTurn
     if (byAgent !== null) {
       live.archiveAfterTurn = null
@@ -9021,11 +9052,88 @@ export class SessionManager {
     else this.saveRecord(sessionId)
   }
 
-  /** The settings changed: pauses the settings no longer allow are dropped. */
+  /**
+   * The settings changed: pauses the settings no longer allow are dropped, and running turns are
+   * timed by the new silence.
+   */
   supervisorChanged(): void {
     for (const record of [...this.records.values()]) {
       if (record.limitPause && !this.autoResumes(record)) this.setLimitPause(record, null)
     }
+    this.stalls.settingsChanged()
+  }
+
+  // Huli: stuck turns. A running turn that has said nothing for a while is flagged, once per
+  // stretch of silence, until output comes again.
+
+  private stallState(
+    sessionId: string,
+  ): { running: boolean; waiting: boolean; retrying: boolean } | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const { status } = live.thread.session
+    const running = live.turn !== null && (status === 'running' || status === 'awaiting_permission')
+    const waiting =
+      status === 'awaiting_permission' ||
+      waitingCount(live) > 0 ||
+      this.workingSubagents(live).some((item) => item.waiting)
+    return { running, waiting, retrying: retrying(live.thread) }
+  }
+
+  private stallChanged(sessionId: string, stall: Stall | null): void {
+    const live = this.live.get(sessionId)
+    if (!live) return
+    this.update(live, { stall })
+    this.touch(sessionId)
+    if (!stall) return
+    const minutes = Math.max(1, Math.round((this.now() - stall.since) / 60_000))
+    this.deps.events.attention(
+      sessionId,
+      'stalled',
+      t('supervisor.stalled', { title: this.titleOf(live) }),
+      t(stall.reason === 'retrying' ? 'supervisor.stalledRetrying' : 'supervisor.stalledSilent', {
+        count: minutes,
+      }),
+    )
+  }
+
+  /** Stop, Retry or Keep waiting on a turn that looks stuck. */
+  async stallAction(sessionId: string, action: StallAction): Promise<void> {
+    this.assertRegistered(sessionId)
+    const live = this.live.get(sessionId)
+    const turn = live?.turn
+    if (!live || !turn || turn.ended) return
+    if (action === 'wait') {
+      this.stalls.snooze(sessionId)
+      return
+    }
+    if (action === 'retry') {
+      this.stallRetries.set(sessionId, { entryId: turn.entryId, content: turn.content })
+    }
+    try {
+      await this.cancel(sessionId)
+    } catch (error) {
+      this.stallRetries.delete(sessionId)
+      throw error
+    }
+  }
+
+  /**
+   * A turn Retry stopped has ended: the session goes on with its queue, its message again when the
+   * turn did nothing, or by asking the agent to carry on.
+   */
+  private retryStalled(live: Live): void {
+    const message = this.stallRetries.get(live.id)
+    this.stallRetries.delete(live.id)
+    if (!message || this.live.get(live.id) !== live || live.closing) return
+    if (!canSend(live.thread.session.status) || this.waitsForWorktree(live)) return
+    const kind: ResumeKind =
+      live.thread.session.queue.length > 0
+        ? 'queue'
+        : message.entryId !== null && agentAddedNothing(live.thread, message.entryId)
+          ? 'resend'
+          : 'continue'
+    this.goOn(live, kind, message)
   }
 
   async cancel(sessionId: string): Promise<void> {
@@ -11059,6 +11167,8 @@ export class SessionManager {
     if (limitTimer) clearTimeout(limitTimer)
     this.limitTimers.delete(sessionId)
     this.limitChecks.delete(sessionId)
+    this.stallRetries.delete(sessionId)
+    this.stalls.turnEnded(sessionId)
     if (record?.origin === 'routine') this.deps.routine?.current?.sessionGone(sessionId)
     if (record?.origin === 'task') this.deps.task?.current?.sessionGone(sessionId)
     if (known) this.deps.events.removed(sessionId, portIds)
@@ -11487,6 +11597,7 @@ export class SessionManager {
     for (const timer of this.cacheReads.values()) clearTimeout(timer)
     for (const timer of this.limitTimers.values()) clearTimeout(timer)
     this.limitTimers.clear()
+    this.stalls.stop()
     if (this.followTimer) clearInterval(this.followTimer)
     this.followTimer = null
     this.stopped = true

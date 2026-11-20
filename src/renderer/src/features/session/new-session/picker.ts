@@ -104,15 +104,20 @@ export function pickupSessions(
     .slice(0, count)
 }
 
-export type PickupState = 'waiting' | 'working' | 'paused' | 'failed' | 'signIn' | 'finished'
+export type PickupState =
+  'waiting' | 'stalled' | 'working' | 'paused' | 'failed' | 'signIn' | 'finished'
 
 /** What a session to pick up is doing, as its row says it. */
 export function pickupState(
-  session: Pick<SessionSummary, 'status' | 'attention' | 'permissionCount' | 'limitPause'>,
+  session: Pick<
+    SessionSummary,
+    'status' | 'attention' | 'permissionCount' | 'limitPause' | 'stall'
+  >,
 ): PickupState {
   if (session.status === 'awaiting_permission' || session.permissionCount > 0) return 'waiting'
+  // Huli: a turn that may be stuck, and one paused until its plan resets.
+  if (session.stall) return 'stalled'
   if (session.status === 'running' || session.status === 'starting') return 'working'
-  // Huli: a turn its plan limit stopped, paused until the plan resets.
   if (session.limitPause) return 'paused'
   if (session.status === 'failed' || session.attention === 'error') return 'failed'
   if (session.status === 'auth_required') return 'signIn'

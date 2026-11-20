@@ -88,6 +88,13 @@
       "keywords": "继续 恢复 额度 消息 continue resume",
       "placeholder": "继续"
     },
+    "stallMinutes": {
+      "name": "提醒可能卡住的会话",
+      "description": "正在运行的一轮这么久没有任何输出时标出来，并通知手机一次。等你回答时不算。",
+      "keywords": "卡住 卡死 没有输出 超时 重试 stuck stall",
+      "off": "不提醒",
+      "after_other": "{{count}} 分钟后"
+    },
     "background": {
       "name": "在后台运行",
       "descriptionMac": "关闭窗口后，会话和例程在菜单栏中继续运行。",

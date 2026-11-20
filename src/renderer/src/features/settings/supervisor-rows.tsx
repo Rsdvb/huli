@@ -1,12 +1,12 @@
 // Huli: Settings > General's choices for keeping an eye on sessions: going on by itself after a
-// plan limit resets, and what it sends then.
+// plan limit resets, what it sends then, and how long a silent turn runs before it is flagged.
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DEFAULT_SETTINGS } from '@shared/settings'
-import { RESUME_TEXT_CHARS, type SupervisorSettings } from '@shared/supervisor'
+import { RESUME_TEXT_CHARS, STALL_MINUTES, type SupervisorSettings } from '@shared/supervisor'
 import { useHostScope } from '@renderer/stores/host-scope'
-import { ControlError, SetInput, SettingSwitch } from './controls'
+import { ControlError, SetInput, SettingSelect, SettingSwitch } from './controls'
 import { useApply } from './use-apply'
 
 function useSupervisor(): SupervisorSettings {
@@ -59,6 +59,32 @@ export function ResumeText({ label }: { label: string }) {
             event.preventDefault()
             save()
           }
+        }}
+      />
+    </>
+  )
+}
+
+export function StallMinutesChoice({ label }: { label: string }) {
+  const { t } = useTranslation('settings')
+  const { stallMinutes } = useSupervisor()
+  const [apply, error] = useApply()
+  return (
+    <>
+      <ControlError error={error} />
+      <SettingSelect
+        label={label}
+        value={String(stallMinutes)}
+        options={STALL_MINUTES.map((minutes) => ({
+          value: String(minutes),
+          label:
+            minutes === 0
+              ? t('general.stallMinutes.off')
+              : t('general.stallMinutes.after', { count: minutes }),
+        }))}
+        onChange={(next) => {
+          const minutes = STALL_MINUTES.find((value) => String(value) === next)
+          if (minutes !== undefined) apply({ supervisor: { stallMinutes: minutes } })
         }}
       />
     </>

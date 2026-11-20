@@ -175,7 +175,10 @@
       "resend": "正在重新发送被打断的消息。",
       "continue": "正在让 Agent 接着做。"
     },
-    "notHere": "只有你自己开始的会话能在额度恢复后自动继续。"
+    "notHere": "只有你自己开始的会话能在额度恢复后自动继续。",
+    "stalled": "可能卡住了：{{title}}",
+    "stalledSilent_other": "已经 {{count}} 分钟没有输出了。",
+    "stalledRetrying_other": "一直在重试，已经 {{count}} 分钟没有输出了。"
   },
   "routines": {
     "busy": "此例程已经有一个运行正在工作",

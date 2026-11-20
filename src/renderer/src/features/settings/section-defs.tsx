@@ -52,7 +52,7 @@ import { openAgentSettings, openHarnessSettings, openSettingsItem } from '@rende
 import { useAgentHistoryRow } from '@renderer/features/agent-history/settings-row'
 import { AboutHero, AutomaticUpdates, NoUpdates, UpdateRow } from './about-section'
 import { useIdleSessionRows } from './idle-sessions'
-import { ResumeAfterLimit, ResumeText } from './supervisor-rows'
+import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
 import { useWorkflowRows } from './workflow-settings'
 import {
   AgentListItem,
@@ -282,6 +282,15 @@ export function useGeneralSection(): SectionDef {
         keywords: t('general.resumeText.keywords'),
         group: sessions,
         render: () => <ResumeText label={t('general.resumeText.name')} />,
+      },
+      {
+        id: 'stall-minutes',
+        name: t('general.stallMinutes.name'),
+        english: en('general.stallMinutes.name'),
+        description: t('general.stallMinutes.description'),
+        keywords: t('general.stallMinutes.keywords'),
+        group: sessions,
+        render: () => <StallMinutesChoice label={t('general.stallMinutes.name')} />,
       },
       {
         id: 'background',
