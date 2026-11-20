@@ -6,10 +6,15 @@
 // subagent and task tools, `generate_image`, `schedule` and `finish`.
 
 import type * as acp from '@agentclientprotocol/sdk/unstable'
-import { fenced } from '../codex/mapper'
 import type { McpServer } from '../connection'
 import { t } from '../i18n'
-import { descriptionLine, toLf, type MapperContext, type TurnScope } from '../session-updates'
+import {
+  descriptionLine,
+  fenced,
+  toLf,
+  type MapperContext,
+  type TurnScope,
+} from '../session-updates'
 
 const RESULT = /^Created At: [^\n]*\nCompleted At: [^\n]*\nCommand exited with code (-?\d+)\.\n\n/
 const OUTPUT = 'Command output:\n'

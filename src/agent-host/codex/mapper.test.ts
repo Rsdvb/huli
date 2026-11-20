@@ -5,7 +5,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { applyPatches, threadEntries, threadFromSnapshot, type ThreadState } from '@shared/thread'
 import { newTurnScope, type MapperContext, type MapperEffect } from '../session-updates'
-import { commandFacts, diffHunks, fenced, stripShellPrefix, ThreadMapper } from './mapper'
+import { fenced } from '../session-updates'
+import { commandFacts, diffHunks, stripShellPrefix, ThreadMapper } from './mapper'
 
 function run(
   notifications: [string, unknown, number?][],

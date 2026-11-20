@@ -22,6 +22,7 @@ import { SERVICE_NAME } from '../service-name'
 import { workflowToolStructured } from '../workflow/tools'
 import {
   addEntry,
+  fenced,
   firstUserMessage,
   messageEntryId,
   rawInputText,
@@ -64,14 +65,6 @@ export function stripShellPrefix(command: string): string {
   return inner.length > 1 && inner.startsWith("'") && inner.endsWith("'")
     ? inner.slice(1, -1)
     : inner
-}
-
-/** `text` as one fenced block, with a fence longer than any it holds. */
-export function fenced(text: string): string {
-  let longest = 2
-  for (const match of text.matchAll(/^\s*(`{3,})/gm)) longest = Math.max(longest, match[1]!.length)
-  const fence = '`'.repeat(longest + 1)
-  return `${fence}\n${text.replace(/\n$/, '')}\n${fence}`
 }
 
 function cut(text: string): string {
