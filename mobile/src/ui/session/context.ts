@@ -77,9 +77,5 @@ export function useSessionRows<S extends object>(
   select?: (rows: SessionRowsContext) => S,
 ): S | SessionRowsContext {
   const store = useContext(Rows)
-  return useSelector<SessionRowsContext, S | SessionRowsContext>(
-    store,
-    select ?? whole,
-    sameFields,
-  )
+  return useSelector<SessionRowsContext, S | SessionRowsContext>(store, select ?? whole, sameFields)
 }
