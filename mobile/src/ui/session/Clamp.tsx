@@ -9,6 +9,9 @@ import { useSessionTokens } from './palette'
 // Past the height by less than this, the content shows whole: a button would hide too little.
 const SLACK = 24
 
+/** The most of a text a closed clamp lays out: more could never show above its button. */
+const CLAMPED_CHARS = 4000
+
 /**
  * The heights content with an id was measured at, so a row the list mounts again is cut at once
  * rather than drawn whole for a frame and then cut, which would move the rows around it.
@@ -42,6 +45,9 @@ export function Clamp(props: {
   const height =
     measured.id === id ? measured.height : id !== undefined ? (heights.get(id) ?? 0) : 0
   const cut = height > props.maxHeight + SLACK
+  // Until its height is known it is held to the clamp's: drawn whole for a frame and then cut,
+  // it moved everything under it.
+  const held = !open && (cut || height === 0)
   const onLayout = (event: LayoutChangeEvent) => {
     const next = Math.round(event.nativeEvent.layout.height)
     if (id !== undefined) {
@@ -55,7 +61,7 @@ export function Clamp(props: {
   }
   return (
     <View>
-      <View style={cut && !open ? { maxHeight: props.maxHeight, overflow: 'hidden' } : null}>
+      <View style={held ? { maxHeight: props.maxHeight, overflow: 'hidden' } : null}>
         <View onLayout={onLayout}>{props.children}</View>
       </View>
       {cut && (
@@ -75,6 +81,19 @@ export function Clamp(props: {
       )}
     </View>
   )
+}
+
+/** Whether the content with this id is shown whole, as its Clamp keeps it. */
+export function useClampOpen(id: string): boolean {
+  return useDisclosure(`clamp:${id}`)[0]
+}
+
+/**
+ * A long text cut to what a closed clamp can show, so the rest is not read and laid out behind it,
+ * which for a long message or a file's whole content held the screen up.
+ */
+export function clampedText(text: string, open: boolean): string {
+  return open || text.length <= CLAMPED_CHARS ? text : text.slice(0, CLAMPED_CHARS)
 }
 
 const styles = StyleSheet.create({
