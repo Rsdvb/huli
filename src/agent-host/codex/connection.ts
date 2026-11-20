@@ -182,7 +182,34 @@ const QUIET = new Set([
   'turn/moderationMetadata',
   // Kettu's own `thread/revert` answers first, and the host takes the turns out then.
   'thread/reverted',
+  // Huli: Codex 0.170's, for features Kite does not use.
+  'thread/section/changed',
+  'thread/attachment/updated',
+  'thread/prediction/updated',
+  'thread/queue/changed',
+  'project/changed',
+  'thread/project/updated',
+  'thread/environment/connected',
+  'thread/environment/disconnected',
+  'command/exec/outputDelta',
+  'mcpServer/oauthLogin/completed',
+  'mcpServer/event/stream/notification',
+  'account/gatewayOAuth/changed',
+  'account/login/completed',
+  'app/list/updated',
+  'fs/changed',
+  'model/verification',
+  'model/safetyBuffering/updated',
+  'modelProvider/authRecoveryStarted',
+  'modelProvider/authRecoveryCompleted',
+  'windowsSandbox/setupCompleted',
 ])
+
+/** Huli: families of Codex 0.170's notifications for features Kite does not use. */
+const QUIET_FAMILIES = ['thread/realtime/', 'process/', 'fuzzyFileSearch/', 'externalAgentConfig/']
+
+const quiet = (method: string): boolean =>
+  QUIET.has(method) || QUIET_FAMILIES.some((family) => method.startsWith(family))
 
 /** Huli: how many warnings about Codex itself the connection keeps to show in new sessions. */
 const NOTICES_KEPT = 50
@@ -1297,7 +1324,7 @@ export class CodexConnection implements AgentConnection {
     }
     const threadId = typeof p.threadId === 'string' ? p.threadId : null
     if (!threadId) {
-      if (!QUIET.has(method)) this.hooks.ignored(null, `notification ${method}`)
+      if (!quiet(method)) this.hooks.ignored(null, `notification ${method}`)
       return
     }
     switch (method) {
@@ -1323,7 +1350,7 @@ export class CodexConnection implements AgentConnection {
         break
       }
     }
-    if (!QUIET.has(method)) this.deliver(threadId, { method, params })
+    if (!quiet(method)) this.deliver(threadId, { method, params })
     if (method === 'item/started' || method === 'item/completed') {
       const item = p.item as ThreadItem
       if (isAsyncQuestion(item)) void this.askAsync(threadId, item)

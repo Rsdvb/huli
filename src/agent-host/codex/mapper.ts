@@ -217,6 +217,44 @@ function webSearchFacts(item: Item<'webSearch'>): Pick<ToolEntry, 'title' | 'too
   }
 }
 
+/**
+ * Huli: what a web search found, as links, and the queries it ran beside the one its title names;
+ * Codex sends results only from its standalone search, as opaque JSON.
+ */
+function webSearchContent(item: Item<'webSearch'>): ToolContent[] {
+  const lines: string[] = []
+  const queries = item.action?.type === 'search' ? (item.action.queries ?? []) : []
+  for (const query of queries) if (query && query !== item.query) lines.push(`- ${query}`)
+  const links = (item.results ?? []).flatMap((result) => {
+    const value = (typeof result === 'object' && result !== null ? result : {}) as Record<
+      string,
+      unknown
+    >
+    const url = typeof value.url === 'string' ? value.url : null
+    if (!url) return []
+    const title = typeof value.title === 'string' && value.title.trim() !== '' ? value.title : url
+    return [`- [${title.replace(/[[\]]/g, '')}](${url})`]
+  })
+  const parts = [
+    ...(lines.length > 0 ? [[t('codex.tool.searchedFor'), lines.join('\n')].join('\n\n')] : []),
+    ...(links.length > 0 ? [links.join('\n')] : []),
+  ]
+  return parts.length > 0 ? [{ type: 'markdown', markdown: parts.join('\n\n') }] : []
+}
+
+/** Huli: why an image was not made, as Codex names it. */
+function imageFailure(failure: { type: string; resetsAt?: number | null }): ToolContent {
+  const markdown =
+    failure.type === 'usageLimitExceeded'
+      ? typeof failure.resetsAt === 'number'
+        ? t('codex.tool.imageLimitUntil', {
+            time: new Date(failure.resetsAt * 1000).toLocaleString(currentLocale()),
+          })
+        : t('codex.tool.imageLimit')
+      : failure.type
+  return { type: 'markdown', markdown }
+}
+
 function agentToolTitle(tool: string): string {
   const key = `codex.tool.agent.${tool}`
   return hasMessage(key) ? t(key as 'codex.tool.agent.spawnAgent') : tool
@@ -511,6 +549,16 @@ export class ThreadMapper {
         break
       case 'turn/plan/updated':
         this.plan(ctx, out, p.plan as TurnPlanStep[])
+        // Huli: why the plan changed, in the agent's words, when it says.
+        if (typeof p.explanation === 'string' && p.explanation.trim() !== '') {
+          addEntry(ctx, out, {
+            kind: 'notice',
+            id: ctx.nextId(),
+            severity: 'info',
+            title: t('codex.notice.planChanged'),
+            description: p.explanation.trim(),
+          })
+        }
         break
       case 'thread/tokenUsage/updated':
         this.usage(ctx, out, p.tokenUsage as ThreadTokenUsage)
@@ -527,6 +575,16 @@ export class ThreadMapper {
             from: p.fromModel as string,
             to: p.toModel as string,
           }),
+          // Huli: why Codex switched, which it names.
+          ...(typeof p.reason === 'string' && p.reason !== ''
+            ? {
+                description: hasMessage(`codex.notice.rerouteReason.${p.reason}`)
+                  ? t(
+                      `codex.notice.rerouteReason.${p.reason}` as 'codex.notice.rerouteReason.highRiskCyberActivity',
+                    )
+                  : p.reason,
+              }
+            : {}),
         })
         break
       case 'item/autoApprovalReview/started':
@@ -827,12 +885,15 @@ export class ThreadMapper {
       case 'subAgentActivity':
         out.effects.push({ kind: 'subagent', sessionId: item.agentThreadId, canCancel: true })
         break
-      case 'webSearch':
+      case 'webSearch': {
+        const found = done ? webSearchContent(item) : []
         this.tool(ctx, out, item.id, {
           ...webSearchFacts(item),
           status: done ? 'completed' : 'in_progress',
+          ...(found.length > 0 ? { content: found } : {}),
         })
         break
+      }
       case 'imageView':
         this.tool(ctx, out, item.id, {
           title: t('codex.tool.viewImage', { path: item.path }),
@@ -848,6 +909,7 @@ export class ThreadMapper {
           status: done ? toolStatus(item.status) : 'in_progress',
           ...(item.revisedPrompt ? { description: oneLine(item.revisedPrompt) } : {}),
           ...(done && item.savedPath ? { locations: [{ path: item.savedPath }] } : {}),
+          ...(done && item.failure ? { content: [imageFailure(item.failure)] } : {}),
         })
         break
       case 'contextCompaction':
@@ -870,9 +932,23 @@ export class ThreadMapper {
         break
       }
       case 'enteredReviewMode':
-      case 'exitedReviewMode':
-        // The review's findings follow as an agent message of their own.
+      case 'exitedReviewMode': {
+        // Huli: where a review starts and ends; its findings follow as an agent message.
+        const id = `n:review:${item.id}`
+        if (!done || ctx.thread.byId[id]) break
+        const what = item.review?.trim()
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id,
+          severity: 'info',
+          title:
+            item.type === 'enteredReviewMode'
+              ? t('codex.review.entered')
+              : t('codex.review.exited'),
+          ...(item.type === 'enteredReviewMode' && what ? { description: what } : {}),
+        })
         break
+      }
       default:
         out.effects.push({
           kind: 'ignored',

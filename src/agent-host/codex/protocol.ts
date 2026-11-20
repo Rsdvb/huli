@@ -337,7 +337,14 @@ export type ThreadItem = ItemTimes &
         agentThreadId: string
         agentPath: string
       }
-    | { type: 'webSearch'; id: string; query: string; action: WebSearchAction | null }
+    | {
+        type: 'webSearch'
+        id: string
+        query: string
+        action: WebSearchAction | null
+        /** Since Codex 0.170: what a standalone search found, as opaque JSON. */
+        results?: JsonValue[] | null
+      }
     | { type: 'imageView'; id: string; path: string }
     | {
         type: 'imageGeneration'
@@ -346,6 +353,8 @@ export type ThreadItem = ItemTimes &
         revisedPrompt: string | null
         result?: string
         savedPath?: string
+        /** Since Codex 0.170: why no image was made. */
+        failure?: { type: string; limitId?: string; resetsAt?: number | null } | null
       }
     | { type: 'enteredReviewMode'; id: string; review: string }
     | { type: 'exitedReviewMode'; id: string; review: string }

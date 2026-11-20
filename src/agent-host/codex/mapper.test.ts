@@ -376,6 +376,67 @@ describe('sub-agent calls', () => {
   })
 })
 
+describe("Codex 0.170's details", () => {
+  it('marks a review, and keeps search results, a plan change, a reroute and an image failure', () => {
+    const nl = String.fromCharCode(10)
+    const { entries, unknown } = run([
+      completed({ type: 'enteredReviewMode', id: 'rv', review: 'uncommitted changes' }),
+      completed({
+        type: 'webSearch',
+        id: 'w',
+        query: 'vitest',
+        action: { type: 'search', query: 'vitest', queries: ['vitest', 'vitest config'] },
+        results: [{ url: 'https://vitest.dev', title: 'Vitest' }],
+      }),
+      [
+        'turn/plan/updated',
+        { ...at, explanation: 'Found the cause', plan: [{ step: 'Fix', status: 'inProgress' }] },
+      ],
+      ['model/rerouted', { ...at, fromModel: 'a', toModel: 'b', reason: 'highRiskCyberActivity' }],
+      completed({
+        type: 'imageGeneration',
+        id: 'img',
+        status: 'failed',
+        revisedPrompt: null,
+        failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: null },
+      }),
+      completed({ type: 'exitedReviewMode', id: 'rv2', review: 'done' }),
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      { kind: 'notice', title: 'Review started', description: 'uncommitted changes' },
+      {
+        kind: 'tool',
+        content: [
+          {
+            type: 'markdown',
+            markdown: [
+              'Also searched for:',
+              '',
+              '- vitest config',
+              '',
+              '- [Vitest](https://vitest.dev)',
+            ].join(nl),
+          },
+        ],
+      },
+      { kind: 'plan' },
+      { kind: 'notice', title: 'The plan changed', description: 'Found the cause' },
+      {
+        kind: 'notice',
+        title: 'Codex switched from a to b',
+        description: 'The request looked like high-risk cybersecurity activity.',
+      },
+      {
+        kind: 'tool',
+        status: 'failed',
+        content: [{ type: 'markdown', markdown: 'The image usage limit is reached.' }],
+      },
+      { kind: 'notice', title: 'Review finished' },
+    ])
+  })
+})
+
 describe('hooks', () => {
   const hook = (
     status: string,

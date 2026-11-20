@@ -650,7 +650,10 @@
         "followupTask": "Give subagent a follow-up task",
         "interruptAgent": "Interrupt subagent",
         "listAgents": "List subagents"
-      }
+      },
+      "searchedFor": "Also searched for:",
+      "imageLimit": "The image usage limit is reached.",
+      "imageLimitUntil": "The image usage limit is reached until {{time}}."
     },
     "notice": {
       "rerouted": "Codex switched from {{from}} to {{to}}",
@@ -666,7 +669,11 @@
       "andMore_one": "and {{count}} more",
       "andMore_other": "and {{count}} more",
       "mcpFailed": "MCP server {{name}} could not start",
-      "mcpNeedsAuth": "MCP server {{name}} needs you to sign in again"
+      "mcpNeedsAuth": "MCP server {{name}} needs you to sign in again",
+      "planChanged": "The plan changed",
+      "rerouteReason": {
+        "highRiskCyberActivity": "The request looked like high-risk cybersecurity activity."
+      }
     },
     "command": {
       "plan": {
@@ -762,7 +769,9 @@
     "review": {
       "strict": "Automatic review now asks for a strict review",
       "warning": "Automatic review warning",
-      "action": "Action under review"
+      "action": "Action under review",
+      "entered": "Review started",
+      "exited": "Review finished"
     },
     "agent": {
       "model": "Runs on {{model}}",

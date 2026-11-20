@@ -643,7 +643,10 @@
         "followupTask": "给子 Agent 追加任务",
         "interruptAgent": "打断子 Agent",
         "listAgents": "列出子 Agent"
-      }
+      },
+      "searchedFor": "还搜索了：",
+      "imageLimit": "图片生成已达用量上限。",
+      "imageLimitUntil": "图片生成已达用量上限，{{time}} 恢复。"
     },
     "notice": {
       "rerouted": "Codex 从 {{from}} 换到了 {{to}}",
@@ -656,7 +659,11 @@
       "worldWritableScan": "Codex 没能检查这台电脑上哪些文件夹任何人都能写入",
       "andMore_other": "还有 {{count}} 个",
       "mcpFailed": "MCP 服务器 {{name}} 没能启动",
-      "mcpNeedsAuth": "MCP 服务器 {{name}} 需要重新登录"
+      "mcpNeedsAuth": "MCP 服务器 {{name}} 需要重新登录",
+      "planChanged": "计划有变",
+      "rerouteReason": {
+        "highRiskCyberActivity": "请求看起来涉及高风险的网络安全活动。"
+      }
     },
     "command": {
       "plan": {
@@ -751,7 +758,9 @@
     "review": {
       "strict": "自动审查现在要求严格审查",
       "warning": "自动审查提醒",
-      "action": "待审查的操作"
+      "action": "待审查的操作",
+      "entered": "开始审查",
+      "exited": "审查结束"
     },
     "agent": {
       "model": "使用 {{model}}",
