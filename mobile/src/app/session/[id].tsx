@@ -185,15 +185,45 @@ const selectTurn = (thread: ThreadState | null) => ({
   writing: writingId(thread) !== null,
 })
 
+// These read the whole thread, on every patch the screen applies while a turn streams, so what
+// they work out of an entry is kept by the entry, which a patch replaces only when it changes.
+const folds = new WeakMap<ThreadEntry, boolean>()
+const foldsKept = (entry: ThreadEntry): boolean => {
+  let known = folds.get(entry)
+  if (known === undefined) folds.set(entry, (known = foldsIntoRun(entry)))
+  return known
+}
+
 /** The thread's own cards that wait for the user, as rows of their own, oldest first. */
 function threadWaits(thread: ThreadState | null): ThreadEntry[] {
   if (!thread) return []
   const out: ThreadEntry[] = []
   for (const id of thread.order) {
     const entry = thread.byId[id]
-    if (entry && !foldsIntoRun(entry) && waitsForUser(entry)) out.push(entry)
+    if (entry && !foldsKept(entry) && waitsForUser(entry)) out.push(entry)
   }
   return out
+}
+
+const touchedBy = new WeakMap<ThreadEntry, { root: string; paths: string[] }>()
+
+/** The files under `root` a tool row read or edited. */
+function touchedOf(entry: ThreadEntry, root: string): string[] {
+  const known = touchedBy.get(entry)
+  if (known?.root === root) return known.paths
+  const paths: string[] = []
+  if (
+    entry.kind === 'tool' &&
+    (entry.toolKind === 'read' || entry.toolKind === 'edit') &&
+    !foldsKept(entry)
+  ) {
+    for (const location of entry.locations) {
+      const inside = relativePath(location.path, root)
+      if (inside !== location.path) paths.push(inside.replace(/\\/g, '/'))
+    }
+  }
+  touchedBy.set(entry, { root, paths })
+  return paths
 }
 
 /** The files under `root` that the thread's own tool rows read or edited, newest first. */
@@ -202,12 +232,8 @@ function touchedFiles(thread: ThreadState | null, root: string | null): string[]
   const seen = new Set<string>()
   for (let i = thread.order.length - 1; i >= 0; i--) {
     const entry = thread.byId[thread.order[i]!]
-    if (entry?.kind !== 'tool' || foldsIntoRun(entry)) continue
-    if (entry.toolKind !== 'read' && entry.toolKind !== 'edit') continue
-    for (const location of entry.locations) {
-      const inside = relativePath(location.path, root)
-      if (inside !== location.path) seen.add(inside.replace(/\\/g, '/'))
-    }
+    if (entry?.kind !== 'tool') continue
+    for (const path of touchedOf(entry, root)) seen.add(path)
   }
   return [...seen]
 }
