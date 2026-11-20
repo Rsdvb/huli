@@ -313,6 +313,15 @@ export class ThreadMapper {
       case 'item/commandExecution/outputDelta':
         this.appendOutput(ctx, out, p.itemId as string, p.delta as string)
         break
+      case 'item/commandExecution/terminalInteraction':
+        // Huli: what Codex typed into a running command shows in its output, as a terminal echoes it.
+        if (typeof p.stdin === 'string' && p.stdin !== '') {
+          const printed = this.outputs.get(p.itemId as string) ?? ''
+          const start = printed === '' || printed.endsWith('\n') ? '' : '\n'
+          const typed = p.stdin.replace(/\n$/, '')
+          this.appendOutput(ctx, out, p.itemId as string, `${start}› ${typed}\n`)
+        }
+        break
       case 'item/fileChange/patchUpdated':
         this.updateTool(ctx, out, p.itemId as string, {
           content: fileChangeContent(p.changes as FileUpdateChange[]),

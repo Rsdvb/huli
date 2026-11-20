@@ -1045,6 +1045,45 @@ describe('approvals', () => {
     })
   })
 
+  it('asks about input for a running command on a card of its own, not as the command again', async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    const t = threadTarget((request) => ({ optionId: request.options[0]!.id }))
+    connection.register('thread-1', t.target)
+    server.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        type: 'commandExecution',
+        id: 'exec-2',
+        command: 'python3 ask.py',
+        cwd: '/project',
+        status: 'inProgress',
+        commandActions: [{ type: 'unknown', command: 'python3 ask.py' }],
+        aggregatedOutput: null,
+        exitCode: null,
+      },
+    })
+    await until(() => t.entry('t:exec-2') !== undefined)
+    const { answer } = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'exec-2',
+      approvalId: 'stdin-1',
+      kind: 'writeStdin',
+      reason: null,
+      availableDecisions: ['accept', 'decline', 'cancel'],
+    })
+    expect(await answer).toEqual({ decision: 'accept' })
+    expect(t.requests[0]!.request.toolEntryId).toBe('t:exec-2:writeStdin:stdin-1')
+    expect(t.entry('t:exec-2')).toMatchObject({ status: 'in_progress', permission: null })
+    expect(t.entry('t:exec-2:writeStdin:stdin-1')).toMatchObject({
+      title: 'Type into the running command',
+      status: 'completed',
+      description: 'Codex wants to send input to a command that is running.',
+    })
+  })
+
   it('offers the usual decisions when the request lists none, and cancels an unanswered one', async () => {
     const { server, connection } = await connect()
     await connection.newSession('/project')

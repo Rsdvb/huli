@@ -583,6 +583,13 @@ export interface CommandExecutionRequestApprovalParams {
   proposedExecpolicyAmendment?: string[] | null
   proposedNetworkPolicyAmendments?: NetworkPolicyAmendment[] | null
   availableDecisions?: CommandExecutionApprovalDecision[] | null
+  /**
+   * Since Codex 0.170: a command, input for a command that runs already (`writeStdin`), or a
+   * checkpoint that asks the user again (`humanCommand`); `command` when absent.
+   */
+  kind?: 'command' | 'writeStdin' | 'humanCommand' | null
+  /** Tells apart the callbacks of one item, such as each input sent to its command. */
+  approvalId?: string | null
 }
 
 export type FileChangeApprovalDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel'

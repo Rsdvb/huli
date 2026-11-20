@@ -616,7 +616,10 @@
         "project_roots": "the project's folders",
         "tmpdir": "the temporary folder",
         "slash_tmp": "/tmp"
-      }
+      },
+      "stdinTitle": "Type into the running command",
+      "writeStdinReason": "Codex wants to send input to a command that is running.",
+      "humanCommandReason": "This command needs your approval each time it runs."
     },
     "tool": {
       "readFile": "Read file '{{path}}'",

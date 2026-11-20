@@ -234,6 +234,31 @@ describe('commands', () => {
     expect(markdown.length).toBeLessThan(70 * 1024)
   })
 
+  it('shows what Codex typed into a running command in its output', () => {
+    const item = {
+      type: 'commandExecution',
+      id: 'x',
+      command: 'python3 ask.py',
+      cwd: '/p',
+      status: 'inProgress',
+      commandActions: [{ type: 'unknown', command: 'python3 ask.py' }],
+      aggregatedOutput: null,
+      exitCode: null,
+    }
+    const { entries, unknown } = run([
+      started(item),
+      ['item/commandExecution/outputDelta', { ...at, itemId: 'x', delta: 'Name? ' }],
+      [
+        'item/commandExecution/terminalInteraction',
+        { ...at, itemId: 'x', processId: 'p', stdin: 'Ada\n' },
+      ],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries[0]).toMatchObject({
+      content: [{ type: 'markdown', markdown: '```\nName? \n› Ada\n```' }],
+    })
+  })
+
   it('keeps the exit code a command ended with', () => {
     const item = {
       type: 'commandExecution',

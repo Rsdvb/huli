@@ -181,7 +181,6 @@ const QUIET = new Set([
   'thread/goal/cleared',
   'item/fileChange/outputDelta',
   'item/mcpToolCall/progress',
-  'item/commandExecution/terminalInteraction',
   'remoteControl/status/changed',
   'turn/moderationMetadata',
   // Kettu's own `thread/revert` answers first, and the host takes the turns out then.
