@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 import { cn } from 'cn'
-import { holdLoops } from '@renderer/app/window-front'
+import { stepLoops } from '@renderer/app/window-front'
 import { BY_PHASE, CELLS, turnDotLoops, type RunningPhase } from './turn-dot-patterns'
 
 /**
@@ -10,10 +10,11 @@ import { BY_PHASE, CELLS, turnDotLoops, type RunningPhase } from './turn-dot-pat
  * `still` stops the loop, as when the mark has faded out.
  *
  * Huli: each dot is an SVG of its own over the whole box, drawing its circle where the single SVG
- * did, so the mark rasterizes to the same pixels at any scale, and its loop runs through the Web
- * Animations API. Both keep it off the main thread: a circle's opacity inside one SVG repainted
- * the mark every frame of the display, and a CSS animation still woke the main thread at every
- * turn of its loop, for the `animationiteration` event React listens for.
+ * did, so the mark rasterizes to the same pixels at any scale. Its loop runs through the Web
+ * Animations API, held paused and stepped a few times a second with every other loop of the
+ * window (app/window-front.ts), so the mark draws a few frames a second, not one per frame of the
+ * display; a CSS animation also woke the main thread at every turn of its loop, for the
+ * `animationiteration` event React listens for.
  */
 export function TurnDots({
   phase,
@@ -34,7 +35,7 @@ export function TurnDots({
       const dot = box.children[i]
       if (loop && dot) animations.push(dot.animate(loop.keyframes, loop.timing))
     })
-    const release = holdLoops(animations)
+    const release = stepLoops(animations, box)
     return () => {
       release()
       for (const animation of animations) animation.cancel()
