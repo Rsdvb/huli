@@ -300,6 +300,11 @@ export type PushEvent =
       question?: PushQuestion
     }
   | { kind: 'turn-ended' | 'error' | 'routine-ended'; sessionId: string }
+  /**
+   * Huli: a turn its plan limit stopped goes on by itself. A device from before it was added
+   * shows its title and body, and opens the session.
+   */
+  | { kind: 'limit-resumed'; sessionId: string }
   /** An agent's routines paused near a plan limit; it opens the Routines page. */
   | { kind: 'routine-paused'; agentId: string }
   /**

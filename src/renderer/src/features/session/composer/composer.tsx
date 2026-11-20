@@ -65,6 +65,7 @@ import { SessionPlace } from './session-place'
 import { SwitchConfirm } from './switch-confirm'
 import { SwitchStrip } from './switch-strip'
 import { QuotaStrip } from './quota-strip'
+import { LimitPauseStrip } from './limit-pause-strip'
 import { useFallback } from '../plan-quota'
 import { SpeedButton } from './speed'
 import { CacheButton, ContextButton } from './usage'
@@ -681,6 +682,16 @@ export function Composer({
                       notice={outOfCredit}
                       config={config}
                       onSwitchModel={() => setModelMenuOpen(true)}
+                    />
+                  )}
+                </AnimatePresence>
+                <AnimatePresence initial={false}>
+                  {session.limitPause && (
+                    <LimitPauseStrip
+                      key="limit-pause"
+                      sessionId={sessionId}
+                      pause={session.limitPause}
+                      now={clock}
                     />
                   )}
                 </AnimatePresence>

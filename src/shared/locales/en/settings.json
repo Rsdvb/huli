@@ -78,6 +78,17 @@
       "description": "A small model names each session once. Uses a little of the agent’s plan.",
       "keywords": "title name session model credits"
     },
+    "resumeAfterLimit": {
+      "name": "Go on when a plan limit resets",
+      "description": "A turn stopped at the agent's plan limit goes on by itself a minute after the plan resets. Each session's menu can turn it off for that session.",
+      "keywords": "limit quota usage reset resume continue pause"
+    },
+    "resumeText": {
+      "name": "Message to go on with",
+      "description": "Sent when the stopped turn had done some work; a turn that did nothing sends its message again.",
+      "keywords": "continue resume limit message",
+      "placeholder": "Continue"
+    },
     "background": {
       "name": "Run in the background",
       "descriptionMac": "Keeps sessions and routines running in the menu bar after you close the window.",

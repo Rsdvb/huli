@@ -8,6 +8,8 @@ export interface RowStatus {
   running: boolean
   starting: boolean
   unread: boolean
+  /** Huli: stopped at its plan limit, to go on by itself once the plan resets. */
+  paused?: boolean
 }
 
 const failed = (node: SessionNode): boolean =>
@@ -24,6 +26,7 @@ export function rowStatus(node: SessionNode, rolledUp: boolean): RowStatus {
     running: node.own.running,
     starting: node.summary.status === 'starting',
     unread: node.summary.attention === 'unread',
+    paused: Boolean(node.summary.limitPause),
   }
   if (!rolledUp || node.children.length === 0) return own
   return {
@@ -32,5 +35,6 @@ export function rowStatus(node: SessionNode, rolledUp: boolean): RowStatus {
     running: node.running,
     starting: own.starting,
     unread: own.unread || node.children.some((child) => child.summary.attention === 'unread'),
+    paused: own.paused,
   }
 }

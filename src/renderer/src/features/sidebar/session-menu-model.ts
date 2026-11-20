@@ -10,6 +10,7 @@ export type SessionMenuItem =
   | 'pin'
   | 'unread'
   | 'rename'
+  | 'autoResume'
   | 'fork'
   | 'forkSame'
   | 'newSubSession'
@@ -113,6 +114,8 @@ export function sessionMenuGroups(
     ...(topLevel ? (['archive'] as const) : []),
     'delete',
   ]
+  // Huli: a session of the user's own goes on by itself after a plan limit, or not.
+  const own: SessionMenuItem[] = summary.origin === 'user' ? ['autoResume'] : []
   const state: SessionMenuItem[] = running
     ? ['stop']
     : status === 'failed' || status === 'auth_required'
@@ -123,6 +126,7 @@ export function sessionMenuGroups(
       ? [
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
+          own,
           ['openInEditor', 'showInFolder', 'openTerminal'],
           ['copyResume', 'copySessionId'],
           ending,
@@ -130,6 +134,7 @@ export function sessionMenuGroups(
       : [
           state,
           topLevel ? ['pin', 'unread', 'rename'] : ['unread', 'rename'],
+          own,
           [...forks, 'newSubSession'],
           [
             ...(shown ? [] : (['openInSplit'] as const)),

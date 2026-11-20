@@ -56,6 +56,13 @@ import type { Platform } from '@shared/platform'
 import type { PortDevice } from '@shared/remote/device'
 import type { PermissionScope } from '@shared/routines'
 import type { HostSettings } from '@shared/settings'
+import type { PlanQuota } from '@shared/plan-quota'
+import {
+  DEFAULT_SUPERVISOR,
+  type LimitPause,
+  type LimitPauseAction,
+  type SupervisorSettings,
+} from '@shared/supervisor'
 import {
   MEMORY_PROPOSALS_WAITING,
   type MemoryAction,
@@ -213,7 +220,18 @@ import type { ProjectHooksAnswers } from './project-hooks'
 import type { ProjectMcpAnswers } from './project-mcp'
 import { REPORTS_PER_DAY, type ReportDraft } from './report-tool'
 import { isOutOfCredit } from './out-of-credit'
-import { isPlanLimitStop } from './plan-limit-stop'
+import {
+  isLimitStop,
+  LIMIT_RESUME_TIMINGS,
+  limitPause,
+  resetOf,
+  resumeKind,
+  sessionQuota,
+  stillOut,
+  type LimitResumeTimings,
+  type ResumeKind,
+} from './limit-resume'
+import { resetTime } from './limit-text'
 import { planRevision } from './plan-revision'
 import { watchSettings, type PreparedRecords, type WatchTarget } from './prepared'
 import type { Projects } from './projects'
@@ -356,6 +374,8 @@ export interface SessionTimings {
   /** The free direct context reader's polling interval and activity coalescing window. */
   contextRefreshMs: number
   contextDebounceMs: number
+  /** Huli: when a session its plan limit stopped goes on, and how often it looks again. */
+  limitResume: LimitResumeTimings
 }
 
 /** The longest a thread's write waits after writes that failed. */
@@ -373,6 +393,7 @@ export const SESSION_TIMINGS: SessionTimings = {
   listedTitleRetryMs: 10_000,
   contextRefreshMs: CONTEXT_REFRESH_MS,
   contextDebounceMs: 500,
+  limitResume: LIMIT_RESUME_TIMINGS,
 }
 
 export interface SessionEvents {
@@ -392,7 +413,7 @@ export interface SessionEvents {
   /** `request`: what waits, for a permission, with the answers a notification may give itself. */
   attention(
     sessionId: string,
-    kind: 'permission' | 'turn-ended' | 'error',
+    kind: 'permission' | 'turn-ended' | 'error' | 'limit-resumed',
     title: string,
     body: string,
     request?: AttentionRequest,
@@ -816,6 +837,8 @@ const CACHE_TTL_MS = 5 * MINUTE
 const OUTSIDE_WINDOW_MS = 60 * MINUTE
 /** How often a shown Claude Code session is looked at for a program outside Kettu holding it. */
 const FOLLOW_MS = 3_000
+/** Huli: the longest wait a timer holds, about 24 days. */
+const MAX_TIMER_MS = 2 ** 31 - 1
 
 /** When the session's prompt cache expires, from its main thread's latest request, if any. */
 function cacheExpiresAt(live: Live): number | null {
@@ -1250,6 +1273,10 @@ export class SessionManager {
   /** Each window's prepared sessions, by port. */
   private readonly preparedSlots = new Map<string, PreparedSlot>()
   private emptyRemoval: Promise<void> | null = null
+  /** Huli: when each session paused at its plan limit goes on or looks again, by id. */
+  private readonly limitTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Huli: the checks of a pause that went on, kept should the plan stop the session again. */
+  private readonly limitChecks = new Map<string, number>()
 
   constructor(private readonly deps: SessionManagerDeps) {
     this.timings = { ...SESSION_TIMINGS, ...deps.timings }
@@ -1273,6 +1300,12 @@ export class SessionManager {
       this.atLaunch.add(record.id)
     }
     this.emptySessionsRemovedAt = file.emptySessionsRemovedAt ?? null
+    // A pause whose time passed while the host was down goes on once the host has settled.
+    const settledAt = this.now() + this.timings.limitResume.startupMs
+    for (const record of file.sessions) {
+      if (record.limitPause)
+        this.armLimit(record.id, Math.max(record.limitPause.resumeAt, settledAt))
+    }
     this.returned = (await this.deps.returned.load()).messages
     await this.deps.projectMcp?.load()
     await this.deps.projectHooks?.load()
@@ -1508,6 +1541,8 @@ export class SessionManager {
       plan: live ? planProgress(live.thread) : null,
       turnStartedAt: live?.thread.session.turnStartedAt ?? null,
       working: live ? workOf(live) : null,
+      limitPause: record.limitPause ?? null,
+      autoResume: this.autoResumes(record),
       ...(record.worktree ? { worktree: this.worktreeSummary(record.worktree) } : {}),
       ...(record.agentWorktree ? { agentWorktree: { ...record.agentWorktree } } : {}),
       ...(live?.prepared
@@ -3375,6 +3410,7 @@ export class SessionManager {
       queue: record.queue ?? [],
       // A queue from before a close or a restart waits until the user resumes it.
       queuePaused: (record.queue?.length ?? 0) > 0,
+      limitPause: record.limitPause ?? null,
       ...(record.origin === 'subagent'
         ? {}
         : {
@@ -7683,6 +7719,8 @@ export class SessionManager {
       portId === null ? null : { portId, device: this.deps.portDevice?.(portId) ?? null }
     live.scope = newTurnScope()
     live.failure = null
+    // Whatever started this turn, a message of the user's or the plan's reset, takes over.
+    if (live.record.limitPause) this.setLimitPause(live.record, null)
     this.update(live, {
       status: 'running',
       turnStartedAt: now,
@@ -8335,6 +8373,7 @@ export class SessionManager {
         changed > 0 ? t('attention.withChanges', { text, count: changed }) : text,
       )
     }
+    if (stopReason === 'end_turn') this.limitChecks.delete(live.id)
     if (stopReason === 'end_turn' || chosen) this.drainQueue(live, chosen)
     else this.pauseQueue(live)
     this.followAgentTurn(live)
@@ -8543,8 +8582,15 @@ export class SessionManager {
       return
     }
     const authRequired = mapped.code === 'auth_required'
+    const quota = this.recordQuota(live.record)
+    const planLimit = isLimitStop(mapped, quota)
+    // Huli: a turn the plan's limit stopped goes on by itself once the plan resets, which sends
+    // its message again when it did nothing, so the message stays in the thread for that.
+    const pauses = planLimit && !turn.cancelRequested && this.autoResumes(live.record)
+    if (!pauses) this.limitChecks.delete(live.id)
     // Sign-in and credit have Retry, which sends the message again.
     const givenBack =
+      !pauses &&
       !authRequired &&
       !isOutOfCredit(mapped) &&
       !turn.cancelRequested &&
@@ -8580,9 +8626,7 @@ export class SessionManager {
                     // A turn of a message has Retry, which sends it again; the agent's own has none.
                     ...(turn.byAgent ? {} : { cause: 'turn_failed' as const }),
                     // The thread offers to go on with an agent whose plan has room.
-                    ...(!turn.byAgent && isPlanLimitStop(mapped)
-                      ? { planLimit: true as const }
-                      : {}),
+                    ...(!turn.byAgent && planLimit ? { planLimit: true as const } : {}),
                   }),
           after: agentEntryBefore(live.thread),
         },
@@ -8619,6 +8663,7 @@ export class SessionManager {
       })
     }
     this.pauseQueue(live)
+    const pause = pauses ? this.pauseAtLimit(live, resetOf(mapped.message, quota, now)) : null
     this.persist(live)
     this.touch(live.id)
     if (givenBack) this.giveBack(live, turn)
@@ -8628,10 +8673,15 @@ export class SessionManager {
         error: mapped,
         usage: null,
         turn,
-        planLimit: isPlanLimitStop(mapped),
+        planLimit,
       }) || this.reportStep(live)
     if (!routineTurn) {
-      this.deps.events.attention(live.id, 'error', this.titleOf(live), mapped.message)
+      this.deps.events.attention(
+        live.id,
+        'error',
+        this.titleOf(live),
+        pause ? this.pausedText(pause, mapped.message) : mapped.message,
+      )
     }
     this.followAgentTurn(live)
     this.checkpoint(live)
@@ -8673,6 +8723,309 @@ export class SessionManager {
     this.reportRun(live, { stopReason: null, error: failure, usage: null, turn })
     this.persist(live)
     this.checkpoint(live)
+  }
+
+  // Huli: plan limits. A turn its agent's plan limit stopped goes on by itself once the plan
+  // resets, unless the session or the settings say otherwise. The pause lives in the session's
+  // record, so it outlasts a restart; a message the user sends meanwhile takes over from it.
+
+  private supervisor(): SupervisorSettings {
+    return this.deps.settings().supervisor ?? DEFAULT_SUPERVISOR
+  }
+
+  /**
+   * Whether the session goes on by itself after a plan limit: its own choice, else the settings'.
+   * A subagent goes on with its parent, and a routine's run and a workflow's step follow theirs.
+   */
+  private autoResumes(record: SessionRecord): boolean {
+    if (record.origin !== 'user') return false
+    return record.autoResume ?? this.supervisor().resumeAfterLimit
+  }
+
+  /** What the session sends to go on after work it did. */
+  private resumeText(): string {
+    return this.supervisor().resumeText.trim() || t('supervisor.continueText')
+  }
+
+  /**
+   * The session's model menu, for the windows that hold that model back: its own while it is
+   * live, else its agent's last known menu at the model it last used.
+   */
+  private modelConfig(record: SessionRecord): ConfigOption[] {
+    const config = this.live.get(record.id)?.thread.session.config ?? []
+    if (config.some((option) => option.category === 'model' && option.choices?.length)) {
+      return config
+    }
+    const known = this.deps.options
+      ?.get(record.agentId)
+      ?.config.find((option) => option.category === 'model')
+    return known && record.model !== undefined ? [{ ...known, value: record.model }] : config
+  }
+
+  /** Where the agent's plan stands for the session's model now. */
+  private recordQuota(record: SessionRecord): PlanQuota {
+    if (!this.deps.agents.has(record.agentId)) return { kind: 'unknown' }
+    try {
+      const status = this.deps.agents.status(record.agentId)
+      return sessionQuota(status, this.modelConfig(record), this.now())
+    } catch {
+      return { kind: 'unknown' }
+    }
+  }
+
+  /** When the other paused sessions go on, which a new pause keeps apart from. */
+  private pauseTimes(except: string): number[] {
+    const times: number[] = []
+    for (const record of this.records.values()) {
+      if (record.id !== except && record.limitPause) times.push(record.limitPause.resumeAt)
+    }
+    return times
+  }
+
+  /** Pauses a session its plan limit just stopped, until the plan comes back at `resetsAt`. */
+  private pauseAtLimit(live: Live, resetsAt: number | null): LimitPause {
+    const now = this.now()
+    // A session that went on and was stopped again waits longer when the reset is not known.
+    const checks = this.limitChecks.get(live.id) ?? 0
+    this.limitChecks.delete(live.id)
+    const pause = limitPause(
+      { since: now, resetsAt, checks, taken: this.pauseTimes(live.id) },
+      now,
+      this.timings.limitResume,
+    )
+    this.setLimitPause(live.record, pause)
+    // Codex sends its windows apart from the error, so the reset may be one read away.
+    if (pause.resetsAt === null) void this.readReset(live.id)
+    return pause
+  }
+
+  /** The failure's line in a notification, with when the session goes on. */
+  private pausedText(pause: LimitPause, message: string): string {
+    const time = resetTime(pause.resumeAt, this.now())
+    return pause.resetsAt === null
+      ? t('supervisor.pausedUnknown', { message, time })
+      : t('supervisor.paused', { message, time })
+  }
+
+  /** Sets or drops the session's pause, with its timer, its view and its summary. */
+  private setLimitPause(record: SessionRecord, pause: LimitPause | null): void {
+    const timer = this.limitTimers.get(record.id)
+    if (timer) clearTimeout(timer)
+    this.limitTimers.delete(record.id)
+    if (!pause && !record.limitPause) return
+    if (pause) record.limitPause = pause
+    else delete record.limitPause
+    const live = this.live.get(record.id)
+    if (live) this.update(live, { limitPause: pause })
+    this.saveRecord(record.id)
+    if (pause) this.armLimit(record.id, pause.resumeAt)
+  }
+
+  private armLimit(sessionId: string, at: number): void {
+    const before = this.limitTimers.get(sessionId)
+    if (before) clearTimeout(before)
+    this.limitTimers.delete(sessionId)
+    if (this.stopped) return
+    // A timer holds at most about 24 days; one further off is looked at again then.
+    const delay = Math.min(Math.max(0, at - this.now()), MAX_TIMER_MS)
+    const timer = setTimeout(() => {
+      this.limitTimers.delete(sessionId)
+      void this.limitDue(sessionId).catch((error: unknown) => {
+        this.deps.diagnostics.log(
+          'warn',
+          `${sessionId}: could not go on after the plan limit: ${(error as Error).message}`,
+        )
+      })
+    }, delay)
+    timer.unref?.()
+    this.limitTimers.set(sessionId, timer)
+  }
+
+  /** The record of a session in the index or in memory; undefined for one that is gone. */
+  private anyRecord(sessionId: string): SessionRecord | undefined {
+    return this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+  }
+
+  /** A pause whose reset was not known: a read of the limits may now say when it is. */
+  private async readReset(sessionId: string): Promise<void> {
+    const record = this.anyRecord(sessionId)
+    const pause = record?.limitPause
+    if (!record || !pause || !this.deps.agents.hasLimits(record.agentId)) return
+    await this.deps.agents.refreshLimits(record.agentId, { force: true }).catch(() => {})
+    if (record.limitPause !== pause) return
+    const now = this.now()
+    const out = stillOut(this.recordQuota(record), now)
+    if (out?.resetsAt == null) return
+    this.setLimitPause(
+      record,
+      limitPause(
+        {
+          since: pause.since,
+          resetsAt: out.resetsAt,
+          checks: pause.checks,
+          taken: this.pauseTimes(sessionId),
+        },
+        now,
+        this.timings.limitResume,
+      ),
+    )
+  }
+
+  /**
+   * The pause's time came: the limits are read again, and a plan still used up waits on, until a
+   * later reset or a longer while; otherwise the session goes on.
+   */
+  private async limitDue(sessionId: string): Promise<void> {
+    const record = this.anyRecord(sessionId)
+    const pause = record?.limitPause
+    if (!record || !pause || this.stopped) return
+    if (this.now() < pause.resumeAt) return this.armLimit(sessionId, pause.resumeAt)
+    if (
+      !this.autoResumes(record) ||
+      this.isArchived(record) ||
+      !this.deps.agents.has(record.agentId) ||
+      this.deps.agents.isDisabled(record.agentId)
+    ) {
+      this.setLimitPause(record, null)
+      return
+    }
+    // The agent reports its windows only now and then; a read says how they stand now.
+    if (this.deps.agents.hasLimits(record.agentId)) {
+      await this.deps.agents.refreshLimits(record.agentId, { force: true }).catch(() => {})
+    }
+    if (record.limitPause !== pause || this.stopped) return
+    const now = this.now()
+    const out = stillOut(this.recordQuota(record), now)
+    if (out) {
+      this.setLimitPause(
+        record,
+        limitPause(
+          {
+            since: pause.since,
+            resetsAt: out.resetsAt,
+            checks: pause.checks + 1,
+            taken: this.pauseTimes(sessionId),
+          },
+          now,
+          this.timings.limitResume,
+        ),
+      )
+      return
+    }
+    await this.resumeFromLimit(sessionId)
+  }
+
+  /** Goes on with a paused session now: its queue, its stopped message again, or a nudge. */
+  private async resumeFromLimit(sessionId: string): Promise<void> {
+    const record = this.anyRecord(sessionId)
+    const pause = record?.limitPause
+    if (!record || !pause) return
+    const later = (): void => {
+      const now = this.now()
+      this.setLimitPause(
+        record,
+        limitPause(
+          {
+            since: pause.since,
+            resetsAt: null,
+            checks: pause.checks + 1,
+            taken: this.pauseTimes(sessionId),
+          },
+          now,
+          this.timings.limitResume,
+        ),
+      )
+    }
+    let live: Live
+    try {
+      live = await this.revive(sessionId)
+    } catch (error) {
+      this.deps.diagnostics.log(
+        'warn',
+        `${sessionId}: could not open to go on after the plan limit: ${(error as Error).message}`,
+      )
+      if (record.limitPause === pause) later()
+      return
+    }
+    if (live.record.limitPause !== pause) return
+    const { status } = live.thread.session
+    if (status === 'running' || status === 'awaiting_permission') {
+      // A turn runs already, as one the user started: it goes on in its place.
+      this.setLimitPause(live.record, null)
+      return
+    }
+    if (!canSend(status) || this.waitsForWorktree(live)) {
+      later()
+      return
+    }
+    this.setLimitPause(live.record, null)
+    this.limitChecks.set(live.id, pause.checks + 1)
+    const kind = resumeKind(live.thread)
+    const failed = retryableTurn(live.thread)
+    this.goOn(
+      live,
+      kind,
+      failed ? { entryId: failed.prompt.id, content: failed.prompt.content } : null,
+    )
+    this.deps.events.attention(
+      live.id,
+      'limit-resumed',
+      t('supervisor.resumed', { title: this.titleOf(live) }),
+      t(`supervisor.resumedBody.${kind}`),
+    )
+  }
+
+  /**
+   * Goes on with a free session: sends the prompts queued behind it, its stopped message again
+   * under its own entry, or asks the agent to carry on.
+   */
+  private goOn(
+    live: Live,
+    kind: ResumeKind,
+    message: { entryId: string | null; content: UserContent[] } | null,
+  ): void {
+    live.used = true
+    if (kind === 'queue') {
+      this.update(live, { queuePaused: false })
+      this.drainQueue(live)
+      this.persist(live)
+      this.touch(live.id)
+      return
+    }
+    if (kind === 'resend' && message) {
+      this.startTurn(live, message.content, this.now(), message.entryId)
+      return
+    }
+    this.sendPrompt(live, [{ type: 'text', text: this.resumeText() }])
+  }
+
+  /** The strip's Cancel, which keeps the session stopped, and Retry now, which goes on at once. */
+  async limitPauseAction(sessionId: string, action: LimitPauseAction): Promise<void> {
+    const record = this.recordOf(sessionId)
+    if (!record.limitPause) return
+    if (action === 'cancel') {
+      this.setLimitPause(record, null)
+      return
+    }
+    this.assertRegistered(sessionId)
+    this.refuseIfCannotSend(sessionId)
+    await this.resumeFromLimit(sessionId)
+  }
+
+  /** The session's own choice of going on after a plan limit; off drops a pause it has. */
+  setAutoResume(sessionId: string, on: boolean): void {
+    const record = this.recordOf(sessionId)
+    if (record.origin !== 'user') throw new HostError('restricted', t('supervisor.notHere'))
+    record.autoResume = on
+    if (!on && record.limitPause) this.setLimitPause(record, null)
+    else this.saveRecord(sessionId)
+  }
+
+  /** The settings changed: pauses the settings no longer allow are dropped. */
+  supervisorChanged(): void {
+    for (const record of [...this.records.values()]) {
+      if (record.limitPause && !this.autoResumes(record)) this.setLimitPause(record, null)
+    }
   }
 
   async cancel(sessionId: string): Promise<void> {
@@ -10702,6 +11055,10 @@ export class SessionManager {
     this.watchers.delete(sessionId)
     this.seqs.delete(sessionId)
     this.idleReleased.delete(sessionId)
+    const limitTimer = this.limitTimers.get(sessionId)
+    if (limitTimer) clearTimeout(limitTimer)
+    this.limitTimers.delete(sessionId)
+    this.limitChecks.delete(sessionId)
     if (record?.origin === 'routine') this.deps.routine?.current?.sessionGone(sessionId)
     if (record?.origin === 'task') this.deps.task?.current?.sessionGone(sessionId)
     if (known) this.deps.events.removed(sessionId, portIds)
@@ -11128,6 +11485,8 @@ export class SessionManager {
       this.checkpoint(live, { final: true })
     }
     for (const timer of this.cacheReads.values()) clearTimeout(timer)
+    for (const timer of this.limitTimers.values()) clearTimeout(timer)
+    this.limitTimers.clear()
     if (this.followTimer) clearInterval(this.followTimer)
     this.followTimer = null
     this.stopped = true

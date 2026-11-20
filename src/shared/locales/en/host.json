@@ -167,6 +167,18 @@
     "marketPublish": "Wants to publish {{name}} to the Kettu Marketplace",
     "marketUnlist": "Wants to unlist {{name}} from the Kettu Marketplace"
   },
+  "supervisor": {
+    "continueText": "Continue",
+    "paused": "{{message}}\nGoes on by itself at {{time}}, once the plan resets.",
+    "pausedUnknown": "{{message}}\nWhen the plan resets is not known: it looks again at {{time}} and goes on once it can.",
+    "resumed": "The plan is back, going on: {{title}}",
+    "resumedBody": {
+      "queue": "Sending the queued messages.",
+      "resend": "Sending the stopped message again.",
+      "continue": "Asking the agent to carry on."
+    },
+    "notHere": "Only a session you started goes on by itself after a plan limit."
+  },
   "routines": {
     "busy": "This routine already has a run working",
     "stopping": "Kettu is stopping",

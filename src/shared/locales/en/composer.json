@@ -88,6 +88,16 @@
     "stripNoModel": "The model provider's balance ran out. Top up to keep going.",
     "switchModel": "Switch model"
   },
+  "limitPause": {
+    "at": "The plan is back at {{time}}; this session goes on by itself then",
+    "unknown": "When the plan is back is not known; it looks again at {{time}}",
+    "goesOn": "Going on {{wait}}",
+    "checking": "Goes on by itself once the plan has room · next look {{wait}}",
+    "inMinutes_one": "in {{count}} minute",
+    "inMinutes_other": "in {{count}} minutes",
+    "inMoment": "in a moment",
+    "now": "Retry now"
+  },
   "usage": {
     "title": "Usage",
     "contextPercent": "Context {{percent}}% used",

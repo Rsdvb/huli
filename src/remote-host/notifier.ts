@@ -26,7 +26,13 @@ import type {
 } from '@shared/remote/push'
 
 export type AttentionKind =
-  'permission' | 'turn-ended' | 'error' | 'routine-ended' | 'routine-paused' | 'plan-limit'
+  | 'permission'
+  | 'turn-ended'
+  | 'error'
+  | 'routine-ended'
+  | 'routine-paused'
+  | 'plan-limit'
+  | 'limit-resumed'
 
 /** What the agent host says needs the user, as the remote host hears it from its parent. */
 export interface Attention {
@@ -212,6 +218,7 @@ function wants(choices: NotificationChoices, kind: AttentionKind): boolean {
     case 'routine-paused':
       return choices.routines
     case 'plan-limit':
+    case 'limit-resumed':
       // A device's choices stored before the switch was added read it from the defaults.
       return choices.limits
   }

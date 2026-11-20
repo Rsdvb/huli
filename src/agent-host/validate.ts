@@ -66,6 +66,7 @@ import {
   type StepPick,
 } from '@shared/workflow'
 import type { ClockRequest, ClockZone } from '@shared/usage'
+import { LIMIT_PAUSE_ACTIONS, type LimitPauseAction } from '@shared/supervisor'
 import {
   isPermissionScope,
   isSchedule,
@@ -1874,6 +1875,17 @@ export function createValidators(platform: Platform): Validators {
     'sessions.steer': queueItem,
     'sessions.sendNow': queueItem,
     'sessions.resumeQueue': session,
+    'sessions.limitPause': (params) => {
+      const o = fields(params)
+      if (!(LIMIT_PAUSE_ACTIONS as readonly unknown[]).includes(o.action)) {
+        throw invalidParams(`action must be one of ${LIMIT_PAUSE_ACTIONS.join(', ')}`)
+      }
+      return { sessionId: sessionId(o), action: o.action as LimitPauseAction }
+    },
+    'sessions.setAutoResume': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), on: flag(o, 'on') }
+    },
     'sessions.blob': (params) => {
       const o = fields(params)
       const hash = string(o, 'hash', 64)

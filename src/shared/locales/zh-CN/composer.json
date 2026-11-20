@@ -88,6 +88,15 @@
     "stripNoModel": "模型服务商的余额已用完。充值后继续。",
     "switchModel": "切换模型"
   },
+  "limitPause": {
+    "at": "额度 {{time}} 恢复后自动继续",
+    "unknown": "额度恢复时间未知，{{time}} 再查一次",
+    "goesOn": "{{wait}}继续",
+    "checking": "额度有空余后自动继续 · {{wait}}再查",
+    "inMinutes_other": "{{count}} 分钟后",
+    "inMoment": "马上",
+    "now": "立即重试"
+  },
   "usage": {
     "title": "用量",
     "contextPercent": "上下文已使用 {{percent}}%",
