@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { ArtifactSummary } from '@shared/artifacts'
-import { openArtifact } from '../../artifacts'
+import { artifactKind, KIND_TEXT, openArtifact } from '../../artifacts'
 import { formatBytes } from '../../attachments'
 import { call, errorText } from '../../git'
 import { useLink, useSession } from '../../host'
@@ -16,9 +16,10 @@ import { useSessionTokens } from '../../ui/session/palette'
 import { PressScale } from '../../ui/session/Press'
 import { StateView } from '../../ui/session/StateView'
 
+/** What it is, as the Artifacts tab names it, with its pages when it has more than one. */
 function kindText(artifact: ArtifactSummary): string {
-  if (artifact.canvas || artifact.pages > 1) return `画布 · ${artifact.pages} 页`
-  return artifact.files > 1 ? `${artifact.files} 个文件` : '页面'
+  const kind = KIND_TEXT[artifactKind(artifact)]
+  return artifact.pages > 1 ? `${kind} · ${artifact.pages} 页` : kind
 }
 
 export default function SessionArtifacts() {
@@ -75,7 +76,7 @@ export default function SessionArtifacts() {
                 {item.title}
               </Text>
               <Text style={[styles.meta, { color: c.textSecondary }]} numberOfLines={1}>
-                {[item.type, kindText(item), `第 ${item.version} 版`, formatBytes(item.size)]
+                {[kindText(item), `第 ${item.version} 版`, formatBytes(item.size)]
                   .filter(Boolean)
                   .join(' · ')}
               </Text>
