@@ -41,7 +41,15 @@ import { showNotice } from '../ui/NoticeBar'
 import { highlight } from '../ui/session/highlight'
 import { useReducedMotion } from '../ui/motion'
 import { G, Icon } from '../ui/session/icons'
-import { keepBlocks, parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
+import {
+  keepBlocks,
+  parseBlocks,
+  inline,
+  streamBlocks,
+  type Block,
+  type Inline,
+  type Settled,
+} from '../ui/session/markdown'
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
@@ -806,8 +814,13 @@ function useThrottled(text: string, every: number): string {
 function useBlocks(markdown: string, streaming: boolean): Block[] {
   const shown = useThrottled(markdown, streaming ? STREAM_PARSE_EVERY : 0)
   const before = useRef<Block[]>([])
+  const settled = useRef<Settled | null>(null)
   return useMemo(() => {
-    const blocks = keepBlocks(before.current, streaming ? parseBlocks(shown) : parseKept(shown))
+    const blocks = keepBlocks(
+      before.current,
+      streaming ? streamBlocks(shown, settled) : parseKept(shown),
+    )
+    if (!streaming) settled.current = null
     before.current = blocks
     return blocks
   }, [shown, streaming])
