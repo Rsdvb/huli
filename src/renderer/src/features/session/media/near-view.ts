@@ -4,20 +4,36 @@ import { useEffect, useState, type RefObject } from 'react'
 const MARGIN = '100% 0px'
 
 const watched = new Map<Element, () => void>()
-const observers = new Map<Element | null, IntersectionObserver>()
+/**
+ * One observer per scroller while something in it is watched. The observer holds its root, and a
+ * root kept after its thread closed held that thread's whole detached DOM: every thread with media
+ * opened once stayed in memory.
+ */
+const observers = new Map<Element | null, { observer: IntersectionObserver; users: number }>()
 
-function observerFor(root: Element | null): IntersectionObserver {
-  let observer = observers.get(root)
-  if (!observer) {
-    observer = new IntersectionObserver(
+function acquire(root: Element | null): IntersectionObserver {
+  let held = observers.get(root)
+  if (!held) {
+    const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) if (entry.isIntersecting) watched.get(entry.target)?.()
       },
       { root, rootMargin: MARGIN },
     )
-    observers.set(root, observer)
+    held = { observer, users: 0 }
+    observers.set(root, held)
   }
-  return observer
+  held.users++
+  return held.observer
+}
+
+function release(root: Element | null, element: Element): void {
+  const held = observers.get(root)
+  if (!held) return
+  held.observer.unobserve(element)
+  if (--held.users > 0) return
+  held.observer.disconnect()
+  observers.delete(root)
 }
 
 /**
@@ -35,12 +51,12 @@ export function useNearView(
     const element = ref.current
     if (!element || !enabled || near) return
     const root = element.closest(scroller)
-    const observer = observerFor(root)
+    const observer = acquire(root)
     watched.set(element, () => setNear(true))
     observer.observe(element)
     return () => {
       watched.delete(element)
-      observer.unobserve(element)
+      release(root, element)
     }
   }, [ref, enabled, near, scroller])
   return near
