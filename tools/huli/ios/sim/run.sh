@@ -35,22 +35,28 @@ xcrun simctl install "$UDID" "$APP"
 
 # The computer: this checkout's daemon with the fake agent, in a data folder of its own.
 export KETTU_DAEMON_DATA="$OUT/daemon"
-export KETTU_FAKE_AGENT="$PWD/tools/fake-agent/main.ts"
 export KETTU_DIRECT_PORT=47231
-# The fake agent's first start reads and compiles its modules, which on a loaded runner outlasted the
-# 30 s the host gives an agent to start, so the session flows had no agent and failed. Runs of it
-# first (it ends with its closed input), with Node's compile cache kept for the daemon's own starts,
-# leave only the quick part.
+# The fake agent bundled into one file. Started from its TypeScript, each start stripped the types
+# of its modules and resolved its packages anew, which while the simulator and Maestro's driver
+# loaded the runner outlasted the 30 s the host gives an agent to answer `initialize`: the first
+# session failed, and with its prompt left in the new-session box, every session flow after it.
+node tools/huli/ios/sim/bundle-fake-agent.mjs "$OUT/fake-agent"
+export KETTU_FAKE_AGENT="$OUT/fake-agent/fake-agent.mjs"
+# A run of it first (it ends with its closed input), with Node's compile cache kept for the
+# daemon's own starts, leaves only the quick part.
 export NODE_COMPILE_CACHE="$OUT/node-compile-cache"
 mkdir -p "$NODE_COMPILE_CACHE"
-for warm in 1 2; do
-  started=$(date +%s)
-  node "$KETTU_FAKE_AGENT" < /dev/null > /dev/null 2>&1 || true
-  echo "fake agent warm-up $warm: $(($(date +%s) - started)) s"
-done
+started=$(date +%s)
+node "$KETTU_FAKE_AGENT" < /dev/null > /dev/null 2>&1 || true
+echo "fake agent warm-up: $(($(date +%s) - started)) s"
 mkdir -p "$KETTU_DAEMON_DATA"
 node out/daemon/main.cjs run > "$RESULTS/daemon.log" 2>&1 &
 DAEMON=$!
+# What loads the runner while the flows run, every 5 s, to tell a slow start from a stuck one.
+while kill -0 "$DAEMON" 2> /dev/null; do
+  { date -u +%T; ps -Ao pcpu=,rss=,etime=,comm= -r | head -6 || true; } >> "$RESULTS/load.log"
+  sleep 5
+done &
 # Remote access starts a while after the daemon does; a code asked for before then fails.
 for _ in $(seq 1 120); do
   node out/daemon/main.cjs status 2>/dev/null | grep -Eq '^Remote host: +ready' && break
@@ -67,6 +73,12 @@ xcrun simctl io "$UDID" screenshot "$RESULTS/paired.png"
 
 failed=0
 for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
+  # What the app costs at rest, sampled without a recording, which would load the runner.
+  if [ "$flow" = measure ]; then
+    echo "== measure"
+    UDID="$UDID" MAESTRO="$MAESTRO" RESULTS="$RESULTS" bash tools/huli/ios/sim/measure.sh
+    continue
+  fi
   [ -f "$flow" ] || flow="tools/huli/ios/sim/flows/$flow.yaml"
   name=$(basename "$flow" .yaml)
   echo "== $name"

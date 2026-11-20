@@ -33,17 +33,22 @@ export function createStore<T>(initial: T): WritableStore<T> {
   }
 }
 
+const noSubscribe = () => () => {}
+
 /**
  * Part of `store`: re-renders only when `select`'s answer changes by `equal` (reference by
- * default). A new answer equal to the last keeps the last's reference.
+ * default). A new answer equal to the last keeps the last's reference. While `paused` it keeps
+ * its last answer and hears no change, as for a screen covered by another; it catches up after.
  */
 export function useSelector<T, S>(
   store: Store<T>,
   select: (value: T) => S,
   equal: (a: S, b: S) => boolean = Object.is,
+  paused = false,
 ): S {
   const memo = useRef<{ value: T; select: (value: T) => S; selected: S } | null>(null)
   const read = () => {
+    if (paused && memo.current) return memo.current.selected
     const value = store.get()
     const was = memo.current
     if (was && Object.is(was.value, value) && was.select === select) return was.selected
@@ -52,7 +57,7 @@ export function useSelector<T, S>(
     memo.current = { value, select, selected }
     return selected
   }
-  return useSyncExternalStore(store.subscribe, read, read)
+  return useSyncExternalStore(paused ? noSubscribe : store.subscribe, read, read)
 }
 
 /** Arrays equal item by item, by reference. */

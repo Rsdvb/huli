@@ -7,7 +7,7 @@ import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
 import { router } from 'expo-router'
-import { GlassCapsule, ScrollEdge, useGlassMode } from '../Glass'
+import { GlassCapsule, ScrollEdge, useFloatingControls, useGlassMode } from '../Glass'
 import { useSessionPane } from '../../components/SessionPane'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
@@ -54,14 +54,16 @@ export function GlassHeader(props: {
   const { c, scheme } = useSessionTokens()
   const insets = useSafeAreaInsets()
   const mode = useGlassMode()
+  const floating = useFloatingControls()
   // A system menu sizes its label by the label's content, so the title is held to a width of its own.
   const titleWidth = useWindowDimensions().width - 150
   // In the iPad split's pane there is nothing to go back to; the button empties the pane.
   const pane = useSessionPane()
   const top = props.modal && Platform.OS === 'ios' ? 8 : insets.top
   // With Liquid Glass the bar itself goes, as iOS 26's do: its controls float as glass of their
-  // own over a soft fade at the scroll edge. Otherwise the whole bar is frosted.
-  const liquid = props.floating && mode === 'liquid'
+  // own over a soft fade at the scroll edge, or as solid surfaces where glass is drawn solid.
+  // Otherwise the whole bar is frosted.
+  const liquid = props.floating && floating
   const blur = props.floating && mode === 'blur'
   const titleContent = (pressed: boolean) => (
     <View

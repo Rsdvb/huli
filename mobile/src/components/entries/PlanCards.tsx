@@ -6,7 +6,6 @@
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
-  AccessibilityInfo,
   Animated,
   Dimensions,
   Easing,
@@ -17,6 +16,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated'
 import Svg, { Circle, Path } from 'react-native-svg'
 import type { ConfigOption, PlanEntry, ToolEntry } from '@shared/thread'
 import { useConnected, useLink } from '../../host'
@@ -25,6 +25,7 @@ import { BottomSheet } from '../../ui/BottomSheet'
 import { GlassCapsule, useGlassMode } from '../../ui/Glass'
 import { useReducedMotion } from '../../ui/motion'
 import { SegmentedControl } from '../../ui/SegmentedControl'
+import { useSteps } from '../../ui/steps'
 import type { MenuPage, ViewHandle } from '../../ui/session/Popover'
 import { Clamp } from '../../ui/session/Clamp'
 import { useSessionRows } from '../../ui/session/context'
@@ -548,43 +549,22 @@ function PlanRing(props: { items: PlanEntry['items']; size?: number }) {
   )
 }
 
-/** A ring that turns, for the step being worked on now. Still under Reduce Motion. */
+/**
+ * A ring that turns, for the step being worked on now: an eighth of a turn a step on the step
+ * clock. Still under Reduce Motion.
+ */
 function PlanSpinner(props: { size?: number }) {
   const { c } = useSessionTokens()
-  const turn = useRef(new Animated.Value(0)).current
-  useEffect(() => {
-    let loop: Animated.CompositeAnimation | null = null
-    let live = true
-    void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
-      if (!live || reduce) return
-      loop = Animated.loop(
-        Animated.timing(turn, {
-          toValue: 1,
-          duration: 900,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      )
-      loop.start()
-    })
-    return () => {
-      live = false
-      loop?.stop()
-    }
-  }, [turn])
+  const steps = useSteps()
+  const turn = useAnimatedStyle(
+    () => ({ transform: [{ rotate: `${steps ? (steps.value % 8) * 45 : 0}deg` }] }),
+    [steps],
+  )
   const size = props.size ?? 16
   const r = 6
   const around = 2 * Math.PI * r
   return (
-    <Animated.View
-      style={{
-        width: size,
-        height: size,
-        transform: [
-          { rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) },
-        ],
-      }}
-    >
+    <Reanimated.View style={[{ width: size, height: size }, turn]}>
       <Svg width={size} height={size} viewBox="0 0 16 16">
         <Circle cx={8} cy={8} r={r} stroke={c.track} strokeWidth={2} fill="none" />
         <Circle
@@ -598,7 +578,7 @@ function PlanSpinner(props: { size?: number }) {
           fill="none"
         />
       </Svg>
-    </Animated.View>
+    </Reanimated.View>
   )
 }
 

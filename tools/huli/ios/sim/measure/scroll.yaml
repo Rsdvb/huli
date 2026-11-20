@@ -1,0 +1,18 @@
+# measure.sh: the open conversation flung up and down for about 20 seconds, while it is sampled,
+# without reading the app's view tree between the swipes.
+appId: io.github.rsdvb.huli
+---
+- repeat:
+    times: 8
+    commands:
+      - swipe:
+          start: 50%, 30%
+          end: 50%, 75%
+          duration: 500
+          waitToSettleTimeoutMs: 300
+      - swipe:
+          start: 50%, 75%
+          end: 50%, 30%
+          duration: 500
+          waitToSettleTimeoutMs: 300
+- takeScreenshot: ${SHOT}

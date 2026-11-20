@@ -1,0 +1,4 @@
+# measure.sh: the app sent to the background with the home button.
+appId: io.github.rsdvb.huli
+---
+- pressKey: home

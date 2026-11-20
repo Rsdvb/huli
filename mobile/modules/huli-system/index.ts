@@ -1,6 +1,7 @@
 // The HuliSystem native module (ios/HuliSystemModule.swift): the links Siri, Shortcuts, the Control
-// Center controls, Spotlight and Handoff leave for the app, the sessions in Spotlight and the open
-// session's activity. iOS only; elsewhere, and in a build without it, `HuliSystem` is null.
+// Center controls, Spotlight and Handoff leave for the app, the sessions in Spotlight, the open
+// session's activity, and Low Power Mode. iOS only; elsewhere, and in a build without it,
+// `HuliSystem` is null.
 
 import { Platform } from 'react-native'
 import { requireOptionalNativeModule, type NativeModule } from 'expo'
@@ -24,7 +25,10 @@ export interface CurrentSession {
   project?: string
 }
 
-declare class HuliSystemModule extends NativeModule<{ onOpenURL: () => void }> {
+declare class HuliSystemModule extends NativeModule<{
+  onOpenURL: () => void
+  onLowPowerMode: (event: { on: boolean }) => void
+}> {
   /** The huli:// link waiting for the app, taken so it opens once; null when none waits. */
   takeOpenURL(): string | null
   /** Puts a computer's sessions in place of what Spotlight held for it (`IndexedSession[]`). */
@@ -34,6 +38,8 @@ declare class HuliSystemModule extends NativeModule<{ onOpenURL: () => void }> {
   removeAllSessions(): Promise<void>
   /** A `CurrentSession` as JSON, or an empty string for none. */
   setCurrentSession(json: string): Promise<void>
+  /** Whether Low Power Mode is on; "onLowPowerMode" tells when it changes. */
+  isLowPowerMode(): boolean
 }
 
 export const HuliSystem: HuliSystemModule | null =

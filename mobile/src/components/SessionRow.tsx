@@ -1,8 +1,8 @@
 // One session in a list: its agent's avatar, its title, the project it is in and how it is doing,
 // and when it last changed. Swipes and long-press come from the list that holds it.
 
-import { memo, useEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { memo } from 'react'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import Reanimated, { FadeInDown } from 'react-native-reanimated'
 import Svg, { Circle } from 'react-native-svg'
@@ -18,6 +18,8 @@ import { OsIcon } from '../ui/OsIcon'
 import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
 import { Skeleton } from '../ui/Skeleton'
+import { Spinner } from '../ui/StepMarks'
+import { useQuarterMinute, useSecond } from '../ui/session/now'
 import {
   motion,
   radius,
@@ -84,16 +86,20 @@ export function elapsedText(ms: number): string {
   return h % 24 ? `${d} 天 ${h % 24} 小时` : `${d} 天`
 }
 
-/** Re-renders every `everyMs` while `on`, for a clock that counts up. */
-function useTick(on: boolean, everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!on) return
-    setNow(Date.now())
-    const id = setInterval(() => setNow(Date.now()), everyMs)
-    return () => clearInterval(id)
-  }, [on, everyMs])
-  return now
+/**
+ * How long a running turn has gone, on the screen's shared clocks: each second through its first
+ * minute, then every 15 seconds. Only this text redraws as it ticks, not the row.
+ */
+function RunningTime(props: { since: number }) {
+  const { c } = useTokens()
+  const seconds = useSecond(Date.now() - props.since < 60_000)
+  const minutes = useQuarterMinute()
+  const now = Math.max(seconds, minutes)
+  return (
+    <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>
+      {elapsedText(now - props.since)}
+    </Text>
+  )
 }
 
 /** The plan's progress as a small ring and done/total, as the desktop's row shows it. */
@@ -147,9 +153,7 @@ function SubagentBadge(props: { subagents: SubagentCount }) {
     >
       <Bot size={11} color={c.tint} strokeWidth={2.2} />
       <Text style={[styles.subagentText, { color: c.tint }]}>{count}</Text>
-      {running && (
-        <ActivityIndicator size="small" color={c.textTertiary} style={styles.subagentSpin} />
-      )}
+      {running && <Spinner size={11} color={c.textTertiary} style={styles.subagentSpin} />}
     </View>
   )
 }
@@ -247,11 +251,6 @@ export const SessionRow = memo(function SessionRow(props: {
   const subagents =
     props.stale && props.subagents ? { ...props.subagents, running: false } : props.subagents
   const since = running ? (s.turnStartedAt ?? null) : null
-  // Seconds count each second through the first minute; minutes and hours need less.
-  const counting = since !== null && Date.now() - since < 60_000
-  const now = useTick(since !== null, counting ? 1000 : 15_000)
-  // A running row says how long its turn has gone; the rest say when they last changed.
-  const time = since !== null ? elapsedText(now - since) : listTime(props.time ?? s.updatedAt)
   // The avatar's badge already says it runs; the meta line keeps only what asks for the user, and
   // that a run is only as last heard of.
   const stateText = state && (state.kind !== 'live' || props.stale) ? state : null
@@ -302,7 +301,14 @@ export const SessionRow = memo(function SessionRow(props: {
           {prs.length > 0 ? <PrBadge prs={prs} /> : null}
           <View style={{ flex: 1 }} />
           {plan && running && !props.snippet ? <PlanRing plan={plan} /> : null}
-          <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>{time}</Text>
+          {/* A running row says how long its turn has gone; the rest say when they last changed. */}
+          {since !== null ? (
+            <RunningTime since={since} />
+          ) : (
+            <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>
+              {listTime(props.time ?? s.updatedAt)}
+            </Text>
+          )}
         </View>
         {props.snippet ? (
           <Text style={[typeScale.footnote, { color: c.textSecondary }]} numberOfLines={2}>
@@ -459,7 +465,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   subagentText: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  subagentSpin: { transform: [{ scale: 0.55 }], width: 12, height: 12, marginLeft: -1 },
+  subagentSpin: { marginLeft: -1 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.xs + 2 },
   prs: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 2 },
   prCount: { fontSize: 12, fontVariant: ['tabular-nums'] },

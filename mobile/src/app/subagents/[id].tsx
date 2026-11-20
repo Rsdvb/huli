@@ -13,6 +13,7 @@ import { errorText, sessionTitle } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { haptic, plainText } from '../../ui/session/feedback'
 import { spanText } from '../../ui/session/format'
+import { useSecond } from '../../ui/session/now'
 import { GlassHeader } from '../../ui/session/GlassHeader'
 import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
@@ -36,7 +37,6 @@ export default function SubagentsScreen() {
   const link = useLink()
   const parent = sessions.get(id)
   const [outputs, setOutputs] = useState<Record<string, SessionOutputs>>({})
-  const [now, setNow] = useState(Date.now())
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useState('')
 
@@ -56,13 +56,6 @@ export default function SubagentsScreen() {
     : children
   const live = shown.filter(running)
   const done = shown.filter((s) => !running(s))
-  const anyRunning = live.length > 0
-
-  useEffect(() => {
-    if (!anyRunning) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [anyRunning])
 
   // Each child's reply is read once it has ended a turn, and again when it ends another.
   const stamps = children
@@ -175,7 +168,6 @@ export default function SubagentsScreen() {
             <ChildRow
               child={item}
               outputs={outputs[item.id]}
-              now={now}
               agentName={agents.get(item.agentId)?.name}
             />
           )}
@@ -188,19 +180,19 @@ export default function SubagentsScreen() {
 function ChildRow(props: {
   child: SessionSummary
   outputs: SessionOutputs | undefined
-  now: number
   agentName: string | undefined
 }) {
   const { c } = useSessionTokens()
   const { child, outputs } = props
   const isRunning = running(child)
+  const now = useSecond(isRunning)
   const failed = child.status === 'failed' || child.attention === 'error'
   const waiting = child.status === 'awaiting_permission' || child.permissionCount > 0
   const since = child.turnStartedAt ?? outputs?.turnStartedAt ?? null
   const length = isRunning
     ? since !== null
-      ? props.now - since
-      : props.now - child.createdAt
+      ? now - since
+      : now - child.createdAt
     : (outputs?.turnMs ?? null)
   const reply = outputs?.reply ? plainText(outputs.reply).replace(/\s+/g, ' ') : null
   const state = waiting

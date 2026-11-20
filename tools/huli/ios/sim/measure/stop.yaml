@@ -1,0 +1,9 @@
+# measure.sh: the open session's turn stopped, waiting until it has ended.
+appId: io.github.rsdvb.huli
+---
+- tapOn: '停止这一轮'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 30000
+    optional: true

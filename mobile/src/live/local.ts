@@ -24,6 +24,13 @@ const LINGER_S = 15 * 60
 /** How long an activity just started may be missing from the module's snapshot. */
 const SETTLE_MS = 10_000
 const MAX_TEXT = 120
+/**
+ * The least time between two updates while only what the turn does changes, as the computer spaces
+ * its own: another phase every 10 s at most, another detail of the same every 20 s. What needs the
+ * user, another session or count, and the app going away reach the activity at once.
+ */
+const PHASE_GAP_MS = 10_000
+const DETAIL_GAP_MS = 20_000
 
 /** As HuliLiveActivity.swift's LivePhase names them. */
 type Phase =
@@ -91,6 +98,10 @@ interface Tracked {
   turn: string
   json: string
   at: number
+  /** The state last shown, when this app run set it. */
+  state?: LocalState
+  /** The app went away since, and the computer keeps the activity. */
+  left?: boolean
 }
 
 let tracked: Tracked | null = null
@@ -102,6 +113,19 @@ const firstSeen = new Map<string, number>()
 const details = new Map<string, { phase: Phase; doing: string | null }>()
 let latest: LocalInput | null = null
 let looping = false
+/** The latest input, and the timer that brings a held change in once its gap is over. */
+let last: LocalInput | null = null
+let held: ReturnType<typeof setTimeout> | null = null
+
+const ASKS: ReadonlySet<Phase> = new Set(['approval', 'question', 'waiting'])
+
+/** How long after the last update `next` may follow `shown`: 0 for a change that cannot wait. */
+function gapBetween(shown: LocalState | undefined, next: LocalState, foreground: boolean): number {
+  if (!shown || !foreground || shown.sessionId !== next.sessionId) return 0
+  if (shown.running !== next.running || shown.waiting !== next.waiting) return 0
+  if (ASKS.has(shown.phase) || ASKS.has(next.phase)) return 0
+  return shown.phase !== next.phase ? PHASE_GAP_MS : DETAIL_GAP_MS
+}
 
 /** Brings the app's own activity in step with the input; calls in a burst coalesce. */
 export function syncLocal(input: LocalInput): void {
@@ -250,6 +274,7 @@ setProgressSource(() => {
 async function reconcile(input: LocalInput): Promise<void> {
   const live = HuliLive
   if (!live) return
+  last = input
   const snapshot = liveSnapshot()
   const locals = [
     ...snapshot.activities.filter((a) => a.local && (a.state === 'active' || a.state === 'stale')),
@@ -301,20 +326,34 @@ async function reconcile(input: LocalInput): Promise<void> {
         startOf(b) - startOf(a),
     )[0]
 
-  // Away, a computer that follows turns keeps the activity; the app sets it right when it is back.
-  if (tracked && !input.foreground && computerFollows()) return
+  // Away, a computer that follows turns keeps the activity, from the state the app left it in: the
+  // app brings in what it held back once, on its way out, and sets it right when it is back.
+  const away = tracked !== null && !input.foreground && computerFollows()
+  if (away && (tracked!.left || !focus)) return
+  if (tracked && !away) tracked.left = false
 
   if (focus) {
-    const json = JSON.stringify({ local: await stateOf(focus, input, counts) })
+    const state = await stateOf(focus, input, counts)
+    const json = JSON.stringify({ local: state })
     const now = Date.now()
     if (tracked) {
-      if (json === tracked.json && now - tracked.at < RENEW_MS) return
+      if (away) tracked.left = true
+      if (json === tracked.json && (away || now - tracked.at < RENEW_MS)) return
+      // A turn at work changes what it does every few seconds; the activity follows a step behind.
+      const due = tracked.at + gapBetween(tracked.state, state, input.foreground)
+      if (json !== tracked.json && now < due) {
+        held ??= setTimeout(() => {
+          held = null
+          if (last) syncLocal(last)
+        }, due - now)
+        return
+      }
       await live.update(tracked.id, json, STALE_S)
-      tracked = { ...tracked, sessionId: focus.id, turn: turnOf(focus), json, at: now }
+      tracked = { ...tracked, sessionId: focus.id, turn: turnOf(focus), json, at: now, state }
     } else if (input.foreground) {
       const attributes = JSON.stringify(input.hostName ? { hostName: input.hostName } : {})
       const id = await live.start(attributes, json, STALE_S)
-      tracked = { id, sessionId: focus.id, turn: turnOf(focus), json, at: now }
+      tracked = { id, sessionId: focus.id, turn: turnOf(focus), json, at: now, state }
     }
     return
   }

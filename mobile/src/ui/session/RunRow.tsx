@@ -5,7 +5,7 @@
 // shows as its own line.
 
 import { memo } from 'react'
-import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry } from '@shared/thread'
 import { MemoryEntry } from '../../components/entries/AccessEntries'
 import { E } from '../../components/entries/kit'
@@ -15,6 +15,7 @@ import { G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useSessionTokens } from './palette'
 import { useOpenFade } from './Press'
 import { LiveTime, ThoughtRow, ToolRow } from './ToolRow'
+import { Spinner } from '../StepMarks'
 import {
   diffStats,
   formatMs,
@@ -146,7 +147,7 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
         )}
         {summary.running ? (
           <View style={styles.mark}>
-            <ActivityIndicator size="small" color={c.textTertiary} style={styles.spinner} />
+            <Spinner size={14} color={c.textTertiary} style={styles.spinner} />
             {since !== undefined && <LiveTime since={since - total} color={c.textTertiary} />}
           </View>
         ) : known && total > 0 ? (
@@ -221,7 +222,7 @@ const styles = StyleSheet.create({
   label: { flex: 1, fontSize: 14, lineHeight: 19, fontWeight: '500' },
   meta: { fontSize: 12, fontVariant: ['tabular-nums'] },
   mark: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  spinner: { transform: [{ scale: 0.7 }], width: 16, height: 16 },
+  spinner: { margin: 1 },
   chevron: { width: 14, alignItems: 'center' },
   steps: { marginTop: 2 },
   timelineStep: { flexDirection: 'row' },

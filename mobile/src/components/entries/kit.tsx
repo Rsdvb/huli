@@ -25,6 +25,7 @@ import { ALREADY_ANSWERED } from '@shared/agent-host'
 import type { FromDevice } from '@shared/thread'
 import { useActiveHost, useHostState } from '../../host'
 import { hostErrorText } from '../../hostErrors'
+import { Spinner } from '../../ui/StepMarks'
 import { haptic } from '../../ui/session/feedback'
 import { clockTime } from '../../ui/session/format'
 import { G, Icon, type IconSpec } from '../../ui/session/icons'
@@ -370,7 +371,7 @@ export function QuietLine(props: {
       >
         <View style={{ height: 19, justifyContent: 'center' }}>
           {tone === 'busy' ? (
-            <ActivityIndicator size="small" color={c.textTertiary} style={styles.spinner} />
+            <Spinner size={14} color={c.textTertiary} />
           ) : (
             <Icon icon={props.icon} size={14} color={color} />
           )}
@@ -489,7 +490,6 @@ const styles = StyleSheet.create({
   quiet: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 28 },
   quietMain: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, flexShrink: 1 },
   quietText: { fontSize: 14, lineHeight: 19, flexShrink: 1 },
-  spinner: { transform: [{ scale: 0.7 }] },
   waitingLine: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
   lineBadge: {
     width: 24,

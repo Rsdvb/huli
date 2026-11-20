@@ -1,0 +1,12 @@
+# measure.sh: the app launched afresh and left on the sessions tab.
+appId: io.github.rsdvb.huli
+---
+- runFlow:
+    file: launch.yaml
+    env:
+      GLASS: ${GLASS}
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: ${SHOT}

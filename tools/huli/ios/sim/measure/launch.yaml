@@ -1,0 +1,16 @@
+# measure.sh: the app launched afresh on the sessions tab, with GLASS as its -huliGlass argument.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliGlass: ${GLASS}
+- tapOn:
+    text: '(允许|Allow)'
+    optional: true
+- tapOn: '会话'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
