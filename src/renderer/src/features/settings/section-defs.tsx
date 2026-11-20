@@ -48,7 +48,12 @@ import { loadHosts, useHostsStore } from '@renderer/stores/hosts'
 import { useWebHostStore } from '@renderer/stores/web-host'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { useUpdatesStore } from '@renderer/stores/updates'
-import { openAgentSettings, openHarnessSettings, openSettingsItem } from '@renderer/stores/view'
+import {
+  openAgentSettings,
+  openHarnessSettings,
+  openSettings,
+  openSettingsItem,
+} from '@renderer/stores/view'
 import { useAgentHistoryRow } from '@renderer/features/agent-history/settings-row'
 import { AboutHero, AutomaticUpdates, NoUpdates, UpdateRow } from './about-section'
 import { useIdleSessionRows } from './idle-sessions'
@@ -161,6 +166,7 @@ import { useAllowedSites } from './allowed-sites'
 import { ThemeTiles } from './theme-section'
 import { ClearRecord, FromComputer, LogRow, SidebarEnd, SyncLogs } from './usage-section'
 import { StorageRow } from './storage-rows'
+import { OpenBackupSettings } from './backup-rows'
 import { BrowserNameField, ForgetHost, OtherWebHosts, WebHostRow } from './web-host-section'
 
 // The sections of the Settings page as data, so search and the match counts read the same rows
@@ -1195,6 +1201,21 @@ export function useAdvancedSection(): SectionDef {
         layout: 'block' as const,
         render: (text: ReactNode) => <StorageRow text={text} />,
       },
+      // Huli: the daily backup, this computer's, on a page of its own beside the storage.
+      ...(isWeb || hostId !== null
+        ? []
+        : [
+            {
+              id: 'backup',
+              name: t('advanced.backup.name'),
+              english: en('advanced.backup.name'),
+              description: t('advanced.backup.description'),
+              keywords: t('backup.enabled.keywords'),
+              group: data,
+              render: () => <OpenBackupSettings />,
+              open: () => openSettings('backup'),
+            },
+          ]),
       {
         id: 'remove-sessions',
         name: t('advanced.removeSessions.name'),

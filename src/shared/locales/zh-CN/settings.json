@@ -692,6 +692,11 @@
       "network": "网络",
       "data": "诊断与数据",
       "danger": "危险操作"
+    },
+    "backup": {
+      "name": "备份",
+      "description": "每天把 Kettu 的数据在这台电脑上备份一份，也可以从备份恢复。",
+      "open": "备份设置…"
     }
   },
   "agents": {

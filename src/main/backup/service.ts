@@ -27,6 +27,8 @@ export const DEFAULT_FOLDER_NAME = 'Kite 备份'
 const START_DELAY_MS = 5 * 60 * 1000
 /** How long a backup waits while the agent host moves its data, before it looks again. */
 const MIGRATION_RETRY_MS = 10 * 60 * 1000
+/** The longest a scheduled backup waits for a migration to end. */
+const MAX_MIGRATION_WAIT_MS = 24 * 60 * 60 * 1000
 /** The longest the timer sleeps before it looks at the clock again, as after a clock change. */
 const RECHECK_MS = 60 * 60 * 1000
 
@@ -67,6 +69,8 @@ export class BackupService {
   private readonly startedAt = Date.now()
   private readonly picks = new PickedBackups()
   private loaded: Promise<void> | null = null
+  /** When the scheduled backup began to wait for a migration. */
+  private waitingSince: number | null = null
 
   constructor(private readonly deps: BackupServiceDeps) {
     this.writer = new JsonFileWriter(join(deps.dataDir, STATE_FILE), log)
@@ -155,18 +159,27 @@ export class BackupService {
     this.changed()
   }
 
-  /** The scheduled run, held while the agent host moves its data. */
+  /**
+   * The scheduled run, held while the agent host moves its data. A move that never ends holds
+   * it a day at most: the copy is consistent mid-move too, only larger.
+   */
   private async due(): Promise<void> {
     this.timer = null
     if (this.running) return
-    if (this.deps.migrating()) {
+    const now = Date.now()
+    if (this.deps.migrating() && now - (this.waitingSince ?? now) < MAX_MIGRATION_WAIT_MS) {
+      this.waitingSince ??= now
       log.info('A data migration is running; the backup waits')
-      this.next = Date.now() + MIGRATION_RETRY_MS
+      this.next = now + MIGRATION_RETRY_MS
       this.timer = setTimeout(() => void this.due(), MIGRATION_RETRY_MS)
       this.timer.unref?.()
       this.changed()
       return
     }
+    if (this.waitingSince !== null && this.deps.migrating()) {
+      log.warn('A data migration has run for a day; backing up anyway')
+    }
+    this.waitingSince = null
     await this.run()
     this.schedule()
   }

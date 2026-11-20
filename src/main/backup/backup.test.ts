@@ -6,6 +6,9 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { ThreadEntry } from '@shared/thread'
+import { SCHEMA_VERSION as THREAD_SCHEMA, ThreadDb } from '../../agent-host/threads/db'
+import { INLINE_MEDIA_LIMIT } from '../../agent-host/threads/model'
 import {
   buildManifest,
   checkEntries,
@@ -526,6 +529,49 @@ describe('a backup and its restore', () => {
     expect(await readFile(path.join(data, 'settings.json'), 'utf8')).toBe('{"version":1}')
     expect(existsSync(dest)).toBe(false)
     expect((await readdir(data)).filter((name) => name.startsWith('.restore'))).toEqual([])
+  })
+
+  it('keeps the thread database and its media files together, back as the app reads them', async () => {
+    // The real thread database, its pictures in files under state/thread-media/.
+    const file = path.join(data, 'state', 'threads.db')
+    await rm(file, { force: true })
+    const bytes = Buffer.alloc(INLINE_MEDIA_LIMIT, 7)
+    const hash = sha(bytes)
+    const db = ThreadDb.open(file, () => {})
+    const entry: ThreadEntry = {
+      kind: 'user',
+      id: 'u',
+      content: [
+        {
+          type: 'ref',
+          ref: { kind: 'image', mimeType: 'image/png', data: bytes.toString('base64') },
+        },
+      ],
+    }
+    db.write('s1', {
+      head: { agentId: 'claude-code', acpSessionId: 'a' },
+      entries: [{ pos: 0, entry }],
+    })
+    let done
+    try {
+      done = await runBackup({ ...job, dataDir: data, destDir: dest, tempDir: dir })
+    } finally {
+      db.close()
+    }
+    const { manifest } = await inspectBackup(done.path)
+    expect(manifest.schemas['state/threads.db']).toBe(THREAD_SCHEMA)
+    const media = manifest.files.find((f) => f.path.startsWith('state/thread-media/'))
+    expect(media?.sha256).toBe(hash)
+
+    // Gone from the data folder, the database and its media come back whole.
+    await rm(path.join(data, 'state'), { recursive: true, force: true })
+    await restoreBackup({ file: done.path, dataDir: data, safety: { ...job, destDir: dest } })
+    const reopened = ThreadDb.open(file, () => {})
+    try {
+      expect(reopened.blob('s1', hash)?.data).toEqual(new Uint8Array(bytes))
+    } finally {
+      reopened.close()
+    }
   })
 
   it('refuses a zip that is not a Kite backup', async () => {

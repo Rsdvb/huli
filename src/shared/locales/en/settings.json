@@ -700,6 +700,11 @@
       "network": "Network",
       "data": "Diagnostics and data",
       "danger": "Danger zone"
+    },
+    "backup": {
+      "name": "Backup",
+      "description": "A copy of Kettu’s data each day on this computer, and restoring one.",
+      "open": "Backup settings…"
     }
   },
   "agents": {

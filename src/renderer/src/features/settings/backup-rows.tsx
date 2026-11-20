@@ -27,6 +27,7 @@ import { fullTime, mediumAgo, storageBytes } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { useBackupStore } from '@renderer/stores/backup'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { openSettings } from '@renderer/stores/view'
 import {
   CONFIRM,
   ControlError,
@@ -294,4 +295,10 @@ export function BackupNotices() {
       )}
     </div>
   )
+}
+
+/** Advanced › Data's way to the Backup page, beside the storage the backup keeps. */
+export function OpenBackupSettings() {
+  const { t } = useTranslation('settings')
+  return <SetButton onClick={() => openSettings('backup')}>{t('advanced.backup.open')}</SetButton>
 }

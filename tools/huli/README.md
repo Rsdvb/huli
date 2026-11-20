@@ -189,16 +189,19 @@ and is not part of it.
   A restore leaves all of those as they are, so pairings and the sign-in carry on.
 - A backup runs in a utility process of its own below normal priority (`worker.ts`). The databases
   are copied with SQLite's `VACUUM INTO`, a consistent copy of a database the agent host has open;
-  the content folders they name are copied before them and topped up after. The zip
+  the content folders they name (`state/thread-media/`, `artifacts/content/`) are copied before
+  them and topped up after, so every file a copy names is in the zip; one no copy names does no
+  harm. The zip
   (`zip.ts`, streamed, zip64 past 4 GiB) is written as `Kite-backup-<local time>.zip.partial` and
-  renamed once whole, with `manifest.json`: the app's version, when, and each file's size and
-  SHA-256. Then the oldest `Kite-backup-*.zip` past the count go; nothing else in the folder is
+  renamed once whole, with `manifest.json`: the app's version, when, each database's schema
+  version, and each file's size and SHA-256. Then the oldest `Kite-backup-*.zip` past the count go; nothing else in the folder is
   touched.
 - Main keeps the schedule (`service.ts`, `schedule.ts`) and the last runs in `backup-state.json`
   (never in a backup). A day whose time passed while the computer was off or Kite was closed is
   made up once, five minutes after the next start; while the agent host starts or reports
-  `host:migrating` (its thread database opening at a new schema, or a longer move of its data that
-  sends it), a backup waits ten minutes and looks again. The default folder is
+  `host:migrating` (`src/agent-host/migration-watch.ts`: its thread database opening at a new
+  schema, then schema 9's pictures moving out into files), a backup waits ten minutes and looks
+  again, a day at most, since the copy is consistent mid-move too. The default folder is
   `Documents\Kite 备份`; a development run uses `<data folder> backups` beside its own data folder.
   The folder and the file to restore come from main's dialogs; the page sends only a token.
 - Restore (`restore.ts`) runs between stopping the hosts and starting again, through the quit
@@ -206,13 +209,15 @@ and is not part of it.
   checks every file of the backup against its manifest's SHA-256 while unpacking it beside the
   data, saves the data in place as `Kite-before-restore-<time>.zip` in the backup folder (never
   pruned), then swaps what the backup covers by renames, moving everything back if one fails. The
-  databases' journals, the search index and thumbnails go, to be rebuilt.
+  databases' journals, the search index and thumbnails go, to be rebuilt. Every file is in place,
+  the media with the database that names them, before the app starts and opens the database.
 - Settings: `backup` in `src/shared/settings.ts` (on, 03:00, 7 kept, the default folder), checked in
   `settings-schema.ts`; the folder is set only through the dialog (`setBackupFolder`), and a patch
   may only clear it. IPC: `backup:*` in `src/shared/ipc.ts`, `registerBackupIpc` in
   `src/main/ipc.ts`, `backup` in the preload. Page: `features/settings/backup-section.tsx`,
-  `backup-rows.tsx`, `stores/backup.ts`. Tests: `src/main/backup/backup.test.ts`,
-  `src/main/settings.test.ts`.
+  `backup-rows.tsx`, `stores/backup.ts`; Advanced › Data has a row beside Storage that opens it.
+  Tests: `src/main/backup/backup.test.ts`,
+  `src/main/settings.test.ts`, `src/agent-host/migration-watch.test.ts`.
 
 ### Session export
 

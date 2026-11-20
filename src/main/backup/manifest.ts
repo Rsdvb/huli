@@ -2,7 +2,7 @@
 // with its size and SHA-256, which a restore checks before it touches the data folder.
 
 import { isEntryName, type ZipEntry } from './zip'
-import { partOf, type Part } from './plan'
+import { DATABASES, partOf, type Part } from './plan'
 
 export const MANIFEST_NAME = 'manifest.json'
 export const MANIFEST_FORMAT = 'kite-backup'
@@ -30,6 +30,8 @@ export interface Manifest {
   platform: string
   /** What was left out and why, for whoever reads the file. */
   leftOut: string[]
+  /** Each database copied, by its path, at the schema version it had, as SQLite's user_version. */
+  schemas: Record<string, number>
   files: ManifestFile[]
 }
 
@@ -38,6 +40,7 @@ export function buildManifest(input: {
   created: Date
   platform: string
   leftOut: readonly string[]
+  schemas?: Readonly<Record<string, number>>
   files: readonly ManifestFile[]
 }): Manifest {
   return {
@@ -47,6 +50,7 @@ export function buildManifest(input: {
     created: input.created.toISOString(),
     platform: input.platform,
     leftOut: [...input.leftOut],
+    schemas: { ...input.schemas },
     files: [...input.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
   }
 }
@@ -80,6 +84,12 @@ export function parseManifest(raw: unknown): Manifest | string {
   const leftOut = Array.isArray(raw.leftOut)
     ? raw.leftOut.filter((line): line is string => typeof line === 'string').slice(0, 100)
     : []
+  const schemas: Record<string, number> = {}
+  if (isRecord(raw.schemas)) {
+    for (const [path, version] of Object.entries(raw.schemas)) {
+      if (DATABASES.includes(path) && isSize(version)) schemas[path] = version
+    }
+  }
   if (!Array.isArray(raw.files) || raw.files.length > MAX_FILES) {
     return 'The manifest lists no files'
   }
@@ -108,6 +118,7 @@ export function parseManifest(raw: unknown): Manifest | string {
     created: raw.created,
     platform: raw.platform,
     leftOut,
+    schemas,
     files,
   }
 }

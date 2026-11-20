@@ -138,16 +138,24 @@ export async function listKept(dataDir: string): Promise<Found[]> {
   return [...found.values()]
 }
 
-/** A consistent copy of the database at `source` in `target`; false when there is none. */
-function copyDatabase(source: string, target: string): boolean {
+/**
+ * A consistent copy of the database at `source` in `target`, and the schema version it is at;
+ * null when there is none.
+ */
+function copyDatabase(source: string, target: string): number | null {
   // Opening a database that is not there would make an empty one.
-  if (!existsSync(source)) return false
+  if (!existsSync(source)) return null
   const db = new DatabaseSync(source, { timeout: 30_000 })
   try {
     db.prepare('VACUUM INTO ?').run(target)
-    return true
   } finally {
     db.close()
+  }
+  const copy = new DatabaseSync(target, { readOnly: true })
+  try {
+    return Number(copy.prepare('PRAGMA user_version').get()?.user_version ?? 0)
+  } finally {
+    copy.close()
   }
 }
 
@@ -253,11 +261,14 @@ export async function runBackup(job: BackupJob): Promise<BackupDone> {
     for (const file of content) await add(file)
 
     await mkdir(scratch, { recursive: true })
+    const schemas: Record<string, number> = {}
     for (const database of DATABASES) {
       const file = kept.find((found) => found.path === database)
       if (!file) continue
       const copy = path.join(scratch, path.basename(database))
-      if (!copyDatabase(path.join(job.dataDir, database), copy)) continue
+      const schema = copyDatabase(path.join(job.dataDir, database), copy)
+      if (schema === null) continue
+      schemas[database] = schema
       const info = await stat(copy)
       await add({ ...file, size: info.size }, copy)
       await rm(copy, { force: true })
@@ -279,6 +290,7 @@ export async function runBackup(job: BackupJob): Promise<BackupDone> {
       created: started,
       platform: job.platform,
       leftOut: LEFT_OUT,
+      schemas,
       files,
     })
     await writer.addBuffer(MANIFEST_NAME, Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`), {
