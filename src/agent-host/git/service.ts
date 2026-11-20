@@ -66,6 +66,9 @@ const UNREADABLE_RETRY_MS = 10 * 60_000
 const BACKGROUND_FETCH_INTERVAL_MS = 5 * 60_000
 // A tool call that never ended, such as one of a crashed agent, stops blocking attribution.
 const STALE_CALL_MS = 30 * 60_000
+// Tool calls that end in a burst share a refresh at most this often: each refresh runs git three
+// times or more, and on Windows starting a process costs the host about 15 ms of CPU.
+const TOOL_REFRESH_MS = 1000
 const EMPTY_BRANCH_PULL_REQUESTS: ReadonlyMap<string, BranchPullRequest> = new Map()
 
 /** The key a project is stored under: absolute, normalized, and case-folded on Windows. */
@@ -100,6 +103,12 @@ interface ProjectState {
   status: GitStatus | null
   seq: number
   refresher: { request(): Promise<Snapshot> }
+  /** When the latest refresh started, which paces the ones that tool calls ask for. */
+  refreshedAt: number
+  /** The refresh that tool calls which ended soon after the latest one wait for. */
+  toolRefresh: { snapshot: Promise<Snapshot>; start(): void } | null
+  /** The latest ended tool call's handling, which the next one's waits for to keep their order. */
+  toolEnds: Promise<void>
   retainers: Set<string>
   watcher: GitDirWatch | null
   watcherGitDir: string | null
@@ -268,6 +277,9 @@ export function createGitService(
         status: null,
         seq: 0,
         refresher: createCoalescer(() => track(runRefresh(created))),
+        refreshedAt: Number.NEGATIVE_INFINITY,
+        toolRefresh: null,
+        toolEnds: Promise.resolve(),
         retainers: new Set(),
         watcher: null,
         watcherGitDir: null,
@@ -323,6 +335,7 @@ export function createGitService(
   }
 
   async function runRefresh(state: ProjectState): Promise<Snapshot> {
+    state.refreshedAt = now()
     let next: GitStatus
     try {
       next = await readStatus({ projectPath: state.projectPath, exec, cache: state.cache, now })
@@ -362,6 +375,32 @@ export function createGitService(
 
   function refreshInBackground(state: ProjectState): void {
     background(requestRefresh(state))
+  }
+
+  /**
+   * A refresh that starts after a tool call ended: at once, or, within `TOOL_REFRESH_MS` of the
+   * latest, once that much has passed, shared by every call that ends meanwhile.
+   */
+  function requestToolRefresh(state: ProjectState): Promise<Snapshot> {
+    if (state.toolRefresh) return state.toolRefresh.snapshot
+    const wait = state.refreshedAt + TOOL_REFRESH_MS - now()
+    if (wait <= 0) return requestRefresh(state)
+    let resolve!: (snapshot: Snapshot) => void
+    let reject!: (error: unknown) => void
+    const snapshot = new Promise<Snapshot>((yes, no) => {
+      resolve = yes
+      reject = no
+    })
+    const timer = setTimeout(() => start(), wait)
+    timer.unref()
+    const start = (): void => {
+      if (state.toolRefresh?.snapshot !== snapshot) return
+      clearTimeout(timer)
+      state.toolRefresh = null
+      requestRefresh(state).then(resolve, reject)
+    }
+    state.toolRefresh = { snapshot, start }
+    return snapshot
   }
 
   // Watching
@@ -807,22 +846,28 @@ export function createGitService(
     }
   }
 
-  async function handleToolEnd(
+  /**
+   * Reports what a tool call that ended changed, once `previous`, the call that ended before it,
+   * has, so calls that share a refresh report in the order they ended.
+   */
+  async function reportToolEnd(
     state: ProjectState,
     call: ToolCall | undefined,
     sessionId: string,
     output: string,
-  ): Promise<void> {
-    const knownNoPullRequest =
-      state.pullRequest?.value === null ? state.pullRequest.branch : undefined
-    const after = await requestRefresh(state)
-    if (disposed || !call?.before || call.contested) return
+    previous: Promise<void>,
+  ): Promise<{ after: Snapshot; fresh: GitEventDraft[] } | null> {
+    const after = await requestToolRefresh(state)
+    await previous
+    if (disposed || !call?.before || call.contested) return null
 
     // Parallel calls of one session share the baseline so a change is reported once.
     const prior = state.baseline
-    const before = prior && prior.seq > call.before.seq ? prior : call.before
+    const latest = prior && prior.seq > call.before.seq ? prior : call.before
     if (!prior || after.seq > prior.seq) state.baseline = after
-    if (after.seq <= before.seq) return
+    // A refresh that an earlier call of the same burst compared already still shows a pull
+    // request in this call's output.
+    const before = after.seq > latest.seq ? latest : after
 
     let newCommits: Awaited<ReturnType<typeof listNewCommits>> = []
     const to = after.status.head.oid
@@ -853,8 +898,16 @@ export function createGitService(
       return true
     })
     if (fresh.length > 0 && !disposed) sessionEvents.emit(sessionId, fresh)
+    return { after, fresh }
+  }
 
-    // A pull request opened some other way shows up only once gh has been asked.
+  /** A pull request opened some other way shows up only once gh has been asked. */
+  async function reportOpenedPullRequest(
+    state: ProjectState,
+    sessionId: string,
+    knownNoPullRequest: string | null | undefined,
+    { after, fresh }: { after: Snapshot; fresh: GitEventDraft[] },
+  ): Promise<void> {
     const branch = after.status.head.branch
     if (branch !== null && knownNoPullRequest === branch && fresh.some((e) => e.event === 'push')) {
       await requestPoll(state, true)
@@ -1207,7 +1260,18 @@ export function createGitService(
       const call = state.calls.get(key)
       state.calls.delete(key)
       if (!canChangeRepository(toolKind)) return
-      void track(handleToolEnd(state, call, sessionId, output)).catch((error: unknown) =>
+      const knownNoPullRequest =
+        state.pullRequest?.value === null ? state.pullRequest.branch : undefined
+      const reported = track(reportToolEnd(state, call, sessionId, output, state.toolEnds))
+      state.toolEnds = reported.then(
+        () => undefined,
+        () => undefined,
+      )
+      const handled = reported.then(
+        (report) =>
+          report && track(reportOpenedPullRequest(state, sessionId, knownNoPullRequest, report)),
+      )
+      void handled.catch((error: unknown) =>
         log(
           'error',
           `Could not handle the end of a tool call in ${projectPath}: ${messageOf(error)}`,
@@ -1221,7 +1285,8 @@ export function createGitService(
       for (const [key, call] of state.calls) {
         if (call.sessionId === sessionId) state.calls.delete(key)
       }
-      refreshInBackground(state)
+      if (state.toolRefresh) state.toolRefresh.start()
+      else refreshInBackground(state)
     },
 
     onChanged: changed.on,
@@ -1241,6 +1306,7 @@ export function createGitService(
         stopLive(state)
       }
       runner.killAll()
+      for (const state of projects.values()) state.toolRefresh?.start()
       await Promise.allSettled([...pending])
     },
   }

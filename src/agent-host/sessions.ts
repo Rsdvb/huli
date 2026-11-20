@@ -823,6 +823,10 @@ interface Live {
   contextOwed: boolean
   contextRevision: number
   contextFailures: number
+  /** Counts the patches that can change which plan is the latest, or its steps. */
+  planRevision: number
+  /** The latest plan entry as found in `order` at `revision`; null before a look. */
+  planFound: { order: readonly string[]; revision: number; id: string | null } | null
   contextReadAt: number
   /** The agent that asked for this session to be archived once its running turn ends. */
   archiveAfterTurn: string | null
@@ -912,21 +916,38 @@ function waitingEntries(live: Live): ThreadEntry[] {
     })
 }
 
-/** The latest plan's progress; null without a plan, or for one without steps. */
-function planProgress({ order, byId }: ThreadState): PlanProgress | null {
-  for (let i = order.length - 1; i >= 0; i--) {
-    const entry = byId[order[i]!]
-    if (entry?.kind !== 'plan') continue
-    const { items } = entry
-    if (items.length === 0) return null
-    const index = items.findIndex((item) => item.status === 'in_progress')
-    return {
-      done: items.filter((item) => item.status === 'completed').length,
-      total: items.length,
-      current: index === -1 ? null : { index, text: firstLine(items[index]!.content) },
+/**
+ * The latest plan's progress; null without a plan, or for one without steps. The plan found last
+ * is kept until a patch that can change it, since every update of a turn reads it.
+ */
+function planProgress(live: Live): PlanProgress | null {
+  const { order, byId } = live.thread
+  const found = live.planFound
+  let id: string | null = null
+  if (
+    found?.order === order &&
+    found.revision === live.planRevision &&
+    (found.id === null || byId[found.id]?.kind === 'plan')
+  ) {
+    id = found.id
+  } else {
+    for (let i = order.length - 1; i >= 0; i--) {
+      if (byId[order[i]!]?.kind !== 'plan') continue
+      id = order[i]!
+      break
     }
+    live.planFound = { order, revision: live.planRevision, id }
   }
-  return null
+  const entry = id === null ? undefined : byId[id]
+  if (entry?.kind !== 'plan') return null
+  const { items } = entry
+  if (items.length === 0) return null
+  const index = items.findIndex((item) => item.status === 'in_progress')
+  return {
+    done: items.filter((item) => item.status === 'completed').length,
+    total: items.length,
+    current: index === -1 ? null : { index, text: firstLine(items[index]!.content) },
+  }
 }
 
 /** The longest step title a summary carries. */
@@ -1240,7 +1261,7 @@ export class SessionManager {
   >()
   private readonly lastSummaries = new Map<string, string>()
   /** What each session's summary last said its turn does, and the summary that will say it anew. */
-  private readonly workKeys = new Map<string, string>()
+  private readonly workShown = new Map<string, TurnWork>()
   private readonly workTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** The sessions at work as last sent, and the send that waits to follow a change. */
   private progressSent: Record<string, SessionProgress> = {}
@@ -1608,9 +1629,9 @@ export class SessionManager {
       pinnedAt: record.pinnedAt ?? null,
       archivedAt: record.archivedAt ?? null,
       acpSessionId: record.acpSessionId || null,
-      plan: live ? planProgress(live.thread) : null,
+      plan: live ? planProgress(live) : null,
       turnStartedAt: live?.thread.session.turnStartedAt ?? null,
-      working: live ? workOf(live) : null,
+      working: live ? this.shownWork(live) : null,
       limitPause: record.limitPause ?? null,
       autoResume: this.autoResumes(record),
       stall: this.stalls.stallOf(record.id),
@@ -1701,13 +1722,12 @@ export class SessionManager {
   /** Sends the summary to every port if it changed, after the session's pending patches. */
   private touch(sessionId: string): void {
     if (!this.has(sessionId)) {
-      this.workKeys.delete(sessionId)
+      this.workShown.delete(sessionId)
       return
     }
     const summary = this.summary(sessionId)
-    const key = workKey(summary.working)
-    if (key) this.workKeys.set(sessionId, key)
-    else this.workKeys.delete(sessionId)
+    if (summary.working) this.workShown.set(sessionId, summary.working)
+    else this.workShown.delete(sessionId)
     const json = JSON.stringify(summary)
     if (this.lastSummaries.get(sessionId) === json) return
     const live = this.live.get(sessionId)
@@ -1817,7 +1837,7 @@ export class SessionManager {
       phase = PROGRESS_PHASES[work.phase]
       step = progressText(work.step)
     }
-    const plan = planProgress(live.thread)
+    const plan = planProgress(live)
     return {
       title: progressText(record.customTitle ?? session.title ?? record.title),
       agent: this.deps.agents.name(record.agentId) || null,
@@ -1857,12 +1877,22 @@ export class SessionManager {
     if (!live.replaying) this.watchWork(live)
   }
 
+  /**
+   * What the summary says the running turn does: what it said last while the turn runs on, so a
+   * change waits for `watchWork`; the turn's start and end show at once.
+   */
+  private shownWork(live: Live): TurnWork | null {
+    const work = workOf(live)
+    return work && (this.workShown.get(live.id) ?? work)
+  }
+
   /** A change of what the running turn does reaches the summary, at most every `WORK_MS`. */
   private watchWork(live: Live): void {
     if (this.workTimers.has(live.id)) return
-    if (workKey(workOf(live)) === (this.workKeys.get(live.id) ?? '')) return
+    if (workKey(workOf(live)) === workKey(this.workShown.get(live.id))) return
     const timer = setTimeout(() => {
       this.workTimers.delete(live.id)
+      this.workShown.delete(live.id)
       this.touch(live.id)
     }, WORK_MS)
     timer.unref?.()
@@ -1879,6 +1909,7 @@ export class SessionManager {
       this.deps.diagnostics.log('error', `Session ${live.id}: ${error.message}`)
       return false
     }
+    if (changesPlan(live.thread, patch)) live.planRevision++
     this.track(live, patch)
     live.queue.push(patch)
     return true
@@ -3869,6 +3900,8 @@ export class SessionManager {
       contextOwed: false,
       contextRevision: 0,
       contextFailures: 0,
+      planRevision: 0,
+      planFound: null,
       contextReadAt: 0,
       archiveAfterTurn: null,
       sendNext: false,
