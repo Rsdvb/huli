@@ -66,6 +66,8 @@ const DRAW_AHEAD = 500
 
 const NO_ROWS: Row[] = []
 const DEV = devMode()
+// A reply the simulator scripts time apart, in characters.
+const LONG_REPLY = 50_000
 const selectThread = (thread: ThreadState | null) => thread
 const renderRow = ({ item }: { item: Row }) => <ThreadRow row={item} />
 
@@ -223,19 +225,26 @@ export function Conversation(props: {
   }))
 
   // For the simulator scripts: how long the list took from its mount to show its rows, which it
-  // does once it has placed the end of the thread.
+  // does once it has placed the end of the thread, and to lay out the first row of a long reply,
+  // which may come later than a thread read from the cache.
   const mountedAt = useRef(Date.now())
   const rowCount = useRef(0)
   rowCount.current = rows.length
-  const onLoad = useCallback(() => {
+  const keep = useCallback((label: string) => {
     const at = Date.now()
-    keepResult({
-      label: 'conversation-shown',
-      ms: at - mountedAt.current,
-      rows: rowCount.current,
-      at,
-    })
+    keepResult({ label, ms: at - mountedAt.current, rows: rowCount.current, at })
   }, [])
+  const onLoad = useCallback(() => keep('conversation-shown'), [keep])
+  const longDrawn = useRef(false)
+  const onItemSizeChanged = useCallback(
+    ({ itemData }: { itemData: Row }) => {
+      const entry = itemData.type === 'reply' || itemData.type === 'entry' ? itemData.entry : null
+      if (longDrawn.current || entry?.kind !== 'agent' || entry.markdown.length < LONG_REPLY) return
+      longDrawn.current = true
+      keep('long-reply-drawn')
+    },
+    [keep],
+  )
 
   const contentStyle = useMemo(
     () => [styles.content, { paddingTop: props.paddingTop }],
@@ -263,7 +272,7 @@ export function Conversation(props: {
         maintainScrollAtEndThreshold={0.1}
         // Anywhere else, the rows on screen stay put as pages come in above or rows change.
         maintainVisibleContentPosition
-        {...(DEV ? { onLoad } : {})}
+        {...(DEV ? { onLoad, onItemSizeChanged } : {})}
         onStartReached={view.loadOlder}
         onStartReachedThreshold={0.6}
         onScroll={onScroll}

@@ -6,7 +6,9 @@ appId: io.github.rsdvb.huli
     arguments:
       huliNoAsk: 'YES'
       huliDev: 'YES'
-- tapOn: '会话'
+- tapOn:
+    text: '会话.*'
+    optional: true
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 3000
