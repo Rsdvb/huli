@@ -16,10 +16,13 @@ import { titleBarHeight, trafficLightPosition } from './window-controls'
 
 const log = createLogger('window')
 
-// Windows and Linux: must match --bg-sidebar in the renderer's tokens.css, or the window flashes
-// on load. On macOS the window is clear over the system's sidebar material, which the page tints.
+// Must match --bg-sidebar in the renderer's tokens.css, or the window flashes on load.
+//
+// Huli: the macOS window is opaque too. It was clear over the system's sidebar material, but the
+// page paints its desk fully opaque over it in every theme, so the material never showed; macOS
+// still blended the window over a blur of what lies behind it at every frame Kite drew, and
+// redrew that blur whenever what lies behind changed.
 const BACKGROUND_COLOR = { light: '#f8f8f8', dark: '#0e0e10' }
-const CLEAR = '#00000000'
 
 // The symbols of the Windows and Linux window controls: --text-primary of each theme.
 const SYMBOL_COLOR = { light: '#10161e', dark: '#e8ecf1' }
@@ -117,7 +120,7 @@ function colors(): WindowColors {
 }
 
 export function backgroundColor(): string {
-  return process.platform === 'darwin' ? CLEAR : colors().background
+  return colors().background
 }
 
 function titleBarOverlay(): { color: string; symbolColor: string; height: number } {
@@ -239,9 +242,6 @@ export function createMainWindow(start: StartMode = 'window'): BrowserWindow {
     ...(isMac
       ? {
           trafficLightPosition: trafficLightPosition(zoom),
-          vibrancy: 'sidebar',
-          // Grays out with the window when another one is active, as the system's sidebars do.
-          visualEffectState: 'followWindow',
         }
       : { titleBarOverlay: titleBarOverlay() }),
     webPreferences: {
