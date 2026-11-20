@@ -11,6 +11,7 @@ import {
   Dimensions,
   Easing,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -224,7 +225,15 @@ function PlanChanges(props: { previous: string; markdown: string }) {
  * A plan waiting for the user: the plan, the mode it builds in, and a note for keeping on
  * planning. 开始构建 builds; 继续计划 sends it back, with the note when there is one.
  */
-export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string }) {
+export function PlanApprovalCard(props: {
+  entry: ToolEntry
+  sessionId: string
+  /**
+   * The most the card may take: past it, the plan and its choices scroll between the card's head
+   * and its buttons, which stay in view however short the phone.
+   */
+  maxHeight?: number
+}) {
   const { entry, sessionId } = props
   const { c, s } = useSessionTokens()
   const link = useLink()
@@ -268,6 +277,7 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
       style={[
         styles.card,
         { backgroundColor: s.dockCard, borderColor: c.borderStrong, shadowColor: c.shadow },
+        props.maxHeight !== undefined ? { maxHeight: props.maxHeight } : null,
       ]}
     >
       <View style={styles.head}>
@@ -279,83 +289,93 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
         </Text>
         <Text style={[styles.label, { color: c.warning }]}>等你回答</Text>
       </View>
-      <Text style={[styles.description, { color: c.textSecondary }]}>
-        {modes.length > 0
-          ? `${agent} 已完成计划。开始构建，或附上意见继续计划。`
-          : `${agent} 已完成计划。按它实施，或附上意见继续计划。`}
-      </Text>
-      <View style={{ gap: 10, marginTop: 12 }}>
-        {plan.previous ? (
-          <SegmentedControl<'plan' | 'changes'>
-            segments={[
-              { key: 'plan', label: '计划' },
-              { key: 'changes', label: '改动' },
-            ]}
-            value={view}
-            onChange={setView}
-          />
-        ) : null}
-        {view === 'changes' && plan.previous ? (
-          <PlanChanges previous={plan.previous} markdown={plan.markdown} />
-        ) : (
-          <PlanBody markdown={plan.markdown} peek />
-        )}
-        {(modes.length > 0 || choices.length > 1) && (
-          <View style={{ gap: 6 }}>
-            <Text style={[styles.small, { color: c.textSecondary, fontWeight: '600' }]}>
-              {modes.length > 0 ? '开始构建，使用' : '按这个计划实施吗？'}
-            </Text>
-            {picks.length <= 3 ? (
-              <SegmentedControl
-                segments={picks.map((o) => ({ key: o.id, label: o.name.replace(/`/g, '') }))}
-                value={chosen}
-                onChange={setChosen}
-              />
-            ) : (
-              <View style={styles.choices}>
-                {picks.map((o) => {
-                  const on = o.id === chosen
-                  return (
-                    <PressScale
-                      key={o.id}
-                      scale={0.97}
-                      onPress={() => {
-                        haptic.pick()
-                        setChosen(o.id)
-                      }}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: on }}
-                      style={[
-                        styles.choice,
-                        {
-                          borderColor: on ? c.accent : c.border,
-                          backgroundColor: on ? s.accentSoft : c.fill,
-                        },
-                      ]}
-                    >
-                      <Text style={[styles.choiceText, { color: c.text }]}>
-                        {o.name.replace(/`/g, '')}
-                      </Text>
-                    </PressScale>
-                  )
-                })}
-              </View>
-            )}
-          </View>
-        )}
-        {keepOption?.note && (
-          <TextInput
-            value={note}
-            onChangeText={setNote}
-            placeholder={`继续计划，告诉 ${agent} 要改什么…`}
-            placeholderTextColor={c.textTertiary}
-            selectionColor={c.accent}
-            multiline
-            accessibilityLabel={keepOption.name}
-            style={[styles.note, { color: c.text, borderColor: c.border, backgroundColor: c.fill }]}
-          />
-        )}
-      </View>
+      <ScrollView
+        style={styles.planScroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <Text style={[styles.description, { color: c.textSecondary }]}>
+          {modes.length > 0
+            ? `${agent} 已完成计划。开始构建，或附上意见继续计划。`
+            : `${agent} 已完成计划。按它实施，或附上意见继续计划。`}
+        </Text>
+        <View style={{ gap: 10, marginTop: 12 }}>
+          {plan.previous ? (
+            <SegmentedControl<'plan' | 'changes'>
+              segments={[
+                { key: 'plan', label: '计划' },
+                { key: 'changes', label: '改动' },
+              ]}
+              value={view}
+              onChange={setView}
+            />
+          ) : null}
+          {view === 'changes' && plan.previous ? (
+            <PlanChanges previous={plan.previous} markdown={plan.markdown} />
+          ) : (
+            <PlanBody markdown={plan.markdown} peek />
+          )}
+          {(modes.length > 0 || choices.length > 1) && (
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.small, { color: c.textSecondary, fontWeight: '600' }]}>
+                {modes.length > 0 ? '开始构建，使用' : '按这个计划实施吗？'}
+              </Text>
+              {picks.length <= 3 ? (
+                <SegmentedControl
+                  segments={picks.map((o) => ({ key: o.id, label: o.name.replace(/`/g, '') }))}
+                  value={chosen}
+                  onChange={setChosen}
+                />
+              ) : (
+                <View style={styles.choices}>
+                  {picks.map((o) => {
+                    const on = o.id === chosen
+                    return (
+                      <PressScale
+                        key={o.id}
+                        scale={0.97}
+                        onPress={() => {
+                          haptic.pick()
+                          setChosen(o.id)
+                        }}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: on }}
+                        style={[
+                          styles.choice,
+                          {
+                            borderColor: on ? c.accent : c.border,
+                            backgroundColor: on ? s.accentSoft : c.fill,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.choiceText, { color: c.text }]}>
+                          {o.name.replace(/`/g, '')}
+                        </Text>
+                      </PressScale>
+                    )
+                  })}
+                </View>
+              )}
+            </View>
+          )}
+          {keepOption?.note && (
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder={`继续计划，告诉 ${agent} 要改什么…`}
+              placeholderTextColor={c.textTertiary}
+              selectionColor={c.accent}
+              multiline
+              accessibilityLabel={keepOption.name}
+              style={[
+                styles.note,
+                { color: c.text, borderColor: c.border, backgroundColor: c.fill },
+              ]}
+            />
+          )}
+        </View>
+      </ScrollView>
       <View style={styles.row}>
         <CardButton
           label={note.trim() ? '发送意见' : '继续计划'}
@@ -791,6 +811,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     overflow: 'hidden',
   },
+  planScroll: { flexGrow: 0, flexShrink: 1 },
   choices: { gap: 8 },
   choice: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   choiceText: { fontSize: 15 },

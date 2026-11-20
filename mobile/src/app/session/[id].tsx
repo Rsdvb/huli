@@ -19,7 +19,11 @@ import {
   type LayoutChangeEvent,
 } from 'react-native'
 import { useSharedValue } from 'react-native-reanimated'
-import { KeyboardGestureArea, KeyboardStickyView } from 'react-native-keyboard-controller'
+import {
+  KeyboardGestureArea,
+  KeyboardStickyView,
+  useKeyboardState,
+} from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
@@ -30,6 +34,7 @@ import {
   turnText,
   type ThreadEntry,
   type ThreadState,
+  type ToolEntry,
   type UserContent,
 } from '@shared/thread'
 import { useAgentOptions } from '../../agentOptions'
@@ -69,7 +74,13 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { Conversation } from '../../components/Conversation'
-import { PLAN_PILL_ROOM, PlanPill, pinnedPlan, planPage } from '../../components/entries/PlanCards'
+import {
+  PLAN_PILL_ROOM,
+  PlanApprovalCard,
+  PlanPill,
+  pinnedPlan,
+  planPage,
+} from '../../components/entries/PlanCards'
 import { createStore } from '../../select'
 import {
   cutNoticeOf,
@@ -196,6 +207,13 @@ function touchedFiles(thread: ThreadState | null, root: string | null): string[]
   }
   return [...seen]
 }
+
+/** A plan that waits for approval: its card stands below the others, its buttons in view. */
+const isPlanAsk = (entry: ThreadEntry): entry is ToolEntry =>
+  entry.kind === 'tool' && !!entry.permission?.plan && !entry.permission.elicitation
+
+const pickKeyboard = (state: { isVisible: boolean; height: number }) =>
+  state.isVisible ? state.height : 0
 
 const live = (status: string | undefined) =>
   status === 'running' || status === 'awaiting_permission' || status === 'starting'
@@ -327,6 +345,8 @@ export default function SessionScreen() {
     for (const entry of waits) seen.set(entry.id, entry)
     return [...seen.values()]
   }, [view.requests, waits])
+  const plansWaiting = requests.filter(isPlanAsk)
+  const othersWaiting = plansWaiting.length > 0 ? requests.filter((e) => !isPlanAsk(e)) : requests
   const credit = useThreadSelector(view, outOfCreditOf)
   const retryNotice = useThreadSelector(view, retryNoticeOf)
   const cutNotice = useThreadSelector(view, cutNoticeOf)
@@ -980,14 +1000,17 @@ export default function SessionScreen() {
           style={[styles.dock, { backgroundColor: c.bg }]}
           onLayout={onDockLayout}
         >
-          {(requests.length > 0 ||
+          {(othersWaiting.length > 0 ||
             handBack ||
             credit !== null ||
             childWaiting ||
             worktreeWaits ||
             (session?.queue.length ?? 0) > 0) && (
             <ScrollView
-              style={[styles.waiting, { maxHeight: window.height * 0.55 }]}
+              style={[
+                styles.waiting,
+                { maxHeight: window.height * (plansWaiting.length > 0 ? 0.2 : 0.55) },
+              ]}
               contentContainerStyle={styles.waitingContent}
               keyboardShouldPersistTaps="handled"
             >
@@ -995,7 +1018,7 @@ export default function SessionScreen() {
                 <WorktreeLine sessionId={id} worktree={summary.worktree} />
               ) : null}
               <HandBackCard sessionId={id} session={session} />
-              {requests.map((entry) => (
+              {othersWaiting.map((entry) => (
                 <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
               ))}
               {credit && (
@@ -1023,6 +1046,8 @@ export default function SessionScreen() {
               />
             </ScrollView>
           )}
+
+          {plansWaiting.length > 0 && <PinnedPlans entries={plansWaiting} sessionId={id} />}
 
           {summary?.origin === 'subagent' && (
             <SubagentBar
@@ -1334,12 +1359,28 @@ export default function SessionScreen() {
   )
 }
 
+/**
+ * Plans that wait for approval, under the other cards and outside their scroll: a plan card is
+ * long, and its buttons must stay in view on a short phone, with the keyboard up for its note.
+ */
+function PinnedPlans(props: { entries: ToolEntry[]; sessionId: string }) {
+  const window = useWindowDimensions()
+  const keyboard = useKeyboardState(pickKeyboard)
+  const room = (window.height - keyboard) * 0.55
+  return props.entries.map((entry) => (
+    <View key={entry.id} style={styles.pinnedCard}>
+      <PlanApprovalCard entry={entry} sessionId={props.sessionId} maxHeight={room} />
+    </View>
+  ))
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   working: { paddingTop: 2, paddingBottom: 4 },
   waiting: { flexGrow: 0 },
   dock: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   waitingContent: { paddingHorizontal: 10, paddingTop: 8, gap: 10 },
+  pinnedCard: { paddingHorizontal: 10, paddingTop: 8 },
   banner: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
   outboxOnly: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 18, paddingBottom: 12 },
   bannerPill: { gap: 8 },
