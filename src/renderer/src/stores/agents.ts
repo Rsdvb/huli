@@ -279,6 +279,8 @@ function without<T>(
 interface StartedSignIn {
   token: number
   page: string | null
+  /** Huli: the picture to scan the agent showed, as a data URL, while it waits for the scan. */
+  image: string | null
   cancelled: boolean
 }
 
@@ -318,7 +320,7 @@ export async function signInAgent(
 ): Promise<boolean> {
   const key = signInKey(hostId, agentId)
   const token = ++signInToken
-  setStarted(key, () => ({ token, page: null, cancelled: false }))
+  setStarted(key, () => ({ token, page: null, image: null, cancelled: false }))
   try {
     await hostAt(hostId, 'agents.authenticate', { agentId, methodId })
     return true
@@ -345,6 +347,27 @@ export function receiveSignInLink(hostId: string | null, agentId: AgentId, url: 
   if (!current || current.cancelled || (protocol !== 'https:' && protocol !== 'http:')) return
   setStarted(key, () => ({ ...current, page: url }))
   openSignInPage(url)
+}
+
+/** Huli: `agents.signInImage`: the picture to scan, if this window asked for the sign-in. */
+export function receiveSignInImage(
+  hostId: string | null,
+  agentId: AgentId,
+  image: { mimeType: 'image/png'; data: string } | null,
+): void {
+  const key = signInKey(hostId, agentId)
+  const current = useStartedSignIns.getState().started[key]
+  if (!current || current.cancelled) return
+  const url = image && image.mimeType === 'image/png' ? `data:image/png;base64,${image.data}` : null
+  setStarted(key, () => ({ ...current, image: url }))
+}
+
+/** Huli: the picture the agent's sign-in this window started shows to scan; else null. */
+export function useSignInImage(hostId: string | null, agentId: AgentId): string | null {
+  return useStartedSignIns((state) => {
+    const started = state.started[signInKey(hostId, agentId)]
+    return started && !started.cancelled ? started.image : null
+  })
 }
 
 /** Opens a sign-in page in a new tab of the browser, the system's on the desktop. */

@@ -2896,6 +2896,8 @@ export class AgentHost {
           device: ctx.device !== null,
           openLink: (url) =>
             this.hub.send([ctx.portId], { type: 'agents.signInLink', agentId, url }),
+          showImage: (image) =>
+            this.hub.send([ctx.portId], { type: 'agents.signInImage', agentId, image }),
         }),
       'agents.cancelSignIn': ({ agentId }) => agents.cancelSignIn(agentId),
       'agents.logout': ({ agentId }) => agents.logout(agentId),

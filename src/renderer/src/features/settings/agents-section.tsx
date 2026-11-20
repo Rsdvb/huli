@@ -71,6 +71,7 @@ import {
   cancelAgentSignIn,
   signInAgent,
   usePlanReadings,
+  useSignInImage,
   useSignInPage,
   type AgentsStoreHook,
 } from '@renderer/stores/agents'
@@ -941,6 +942,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
   const providerMode = status.providers !== undefined
   const terminalSignIn = status.authMethods.find((m) => m.type === 'terminal' && m.command)
   const signInPage = useSignInPage(hostId, status.id)
+  const signInImage = useSignInImage(hostId, status.id)
 
   const actions = (
     <>
@@ -992,6 +994,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
               status={status}
               busy={busy}
               page={signInPage}
+              image={signInImage}
               remote={isWeb || hostId !== null}
               {...(hostId === null && {
                 onTerminal: (command: string) => signInTerminal(status, command),

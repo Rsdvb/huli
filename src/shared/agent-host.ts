@@ -2276,6 +2276,13 @@ export type HostEvent =
   | { type: 'agent.options'; options: AgentOptions }
   // To the port whose `agents.authenticate` runs: the agent's sign-in page, for its device to open.
   | { type: 'agents.signInLink'; agentId: AgentId; url: string }
+  // Huli: to the same port, a picture its user scans to sign in, such as Doubao's QR code, as
+  // base64; null once the sign-in no longer waits for it.
+  | {
+      type: 'agents.signInImage'
+      agentId: AgentId
+      image: { mimeType: 'image/png'; data: string } | null
+    }
   // A plan window crossed 90% or ran out, said once per account, window and reset period.
   | { type: 'agents.limitAlert'; alert: PlanAlert }
   | { type: 'projects.changed'; projects: Project[] }

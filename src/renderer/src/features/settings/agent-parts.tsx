@@ -98,6 +98,7 @@ export function SignInNotice({
   status,
   busy,
   page,
+  image = null,
   remote,
   onTerminal,
   onAuthenticate,
@@ -107,6 +108,8 @@ export function SignInNotice({
   busy: boolean
   /** The sign-in page this window opened, while the agent waits for it. */
   page: string | null
+  /** Huli: the picture to scan the sign-in this window started shows, as a data URL. */
+  image?: string | null
   /** This window is a device of the agent's host, which sees no browser the agent opens there. */
   remote: boolean
   onTerminal?: (command: string) => void
@@ -114,6 +117,30 @@ export function SignInNotice({
   onCancel: () => void
 }) {
   const { t } = useTranslation(['settings', 'session', 'common'])
+  if (image !== null) {
+    return (
+      <Notice
+        variant="info"
+        icon={<Spin />}
+        title={t('session:signIn.scanTitle')}
+        action={
+          <SetButton variant="ghost" onClick={onCancel}>
+            {t('common:actions.cancel')}
+          </SetButton>
+        }
+        more={
+          <img
+            src={image}
+            alt={t('session:signIn.scanAlt')}
+            className="size-44 rounded-lg [image-rendering:pixelated]"
+            draggable={false}
+          />
+        }
+      >
+        {t('session:signIn.scanHint', { agent: status.name })}
+      </Notice>
+    )
+  }
   if (page !== null) {
     return (
       <Notice

@@ -817,7 +817,10 @@
     "pageOpen": "Waiting for the browser",
     "pageOpenHint": "The sign-in page for {{agent}} opened in this device's browser. Finish signing in there.",
     "openPageAgain": "Open the page again",
-    "onComputer": "This opens a browser on the computer {{agent}} runs on, so sign in there, then retry."
+    "onComputer": "This opens a browser on the computer {{agent}} runs on, so sign in there, then retry.",
+    "scanTitle": "Scan to sign in",
+    "scanHint": "Scan this QR code with the {{agent}} app on your phone, then confirm there.",
+    "scanAlt": "Sign-in QR code"
   },
   "takeover": {
     "title": "{{agent}} took over",
