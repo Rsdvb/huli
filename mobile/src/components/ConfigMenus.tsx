@@ -341,6 +341,8 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
   entries.push({
     kind: 'custom',
     key: 'usage',
+    // A system menu cannot draw the ring: the line is a row there, opening the same usage.
+    row: { key: 'usage', label: footer, icon: G.timer, onPress: onUsage },
     node: (
       <Pressable
         onPress={onUsage}
@@ -638,6 +640,9 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
         label: agent.name,
         lead: <AgentGlyph agentId={agent.id} harness={agent.harnessId} size={20} />,
         ...(subtitle ? { subtitle } : {}),
+        ...(!need && (usedUp || (left !== null && limit))
+          ? { belowText: usedUp ?? `剩余 ${left}%` }
+          : {}),
         below:
           !need && usedUp ? (
             <Text
