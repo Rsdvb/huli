@@ -30,6 +30,7 @@ import { Sheet, type SheetItem } from '../components/Sheet'
 import { useHost } from '../host'
 import { whenText } from '../routines'
 import { errorText, sessionTitle } from '../sessions'
+import { useWhenShown } from '../ui/focus'
 import { haptic } from '../ui/haptics'
 import { Skeleton } from '../ui/Skeleton'
 import { GlassHeader, goBack, useHeaderHeight } from '../ui/session/GlassHeader'
@@ -181,6 +182,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     [toastOpacity],
   )
 
+  // Under another screen, a new version or a changed list is read once the viewer shows again.
+  const reloadShown = useWhenShown(() => setAttempt((n) => n + 1))
+  const summaryShown = useWhenShown(() => loadSummary())
   // Watching makes this phone one of its viewers, and brings its new versions and who edits it.
   useEffect(() => {
     if (!link || !connected) return
@@ -191,19 +195,19 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
         setLatest((v) => Math.max(v ?? 0, event.version))
         if (pinned === null) {
           announce.current = true
-          setAttempt((n) => n + 1)
+          reloadShown()
         } else say(`有新版本 v${event.version}`)
       } else if (event.type === 'artifacts.activity' && event.id === id) {
         setEditors(event.sessions.filter((s) => s.editing).map((s) => s.sessionId))
       } else if (event.type === 'artifacts.changed') {
-        loadSummary()
+        summaryShown()
       }
     })
     return () => {
       off()
       void link.request('artifacts.unwatch', { id }).catch(() => {})
     }
-  }, [link, connected, id, pinned, say, loadSummary])
+  }, [link, connected, id, pinned, say, reloadShown, summaryShown])
 
   // The note that the latest is now shown, once the new version is in.
   useEffect(() => {

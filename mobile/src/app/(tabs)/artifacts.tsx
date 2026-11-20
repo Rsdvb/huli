@@ -39,6 +39,7 @@ import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { useWhenShown } from '../../ui/focus'
 import { usePullRefresh } from '../../ui/PullRefresh'
 import { Skeleton } from '../../ui/Skeleton'
 import {
@@ -134,13 +135,15 @@ function ArtifactsTab() {
     if (connected) void load()
   }, [connected, load])
 
+  // A change made while another tab shows is read once this one shows again.
+  const loadShown = useWhenShown(() => void load())
   useEffect(() => {
     if (!link) return
     return link.onHostEvent((raw: unknown) => {
       const event = raw as HostEvent
-      if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') void load()
+      if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') loadShown()
     })
-  }, [link, load])
+  }, [link, loadShown])
 
   const agentOf = useCallback(
     (a: ArtifactSummary) => sessionAgents.get(a.sessionId) ?? null,

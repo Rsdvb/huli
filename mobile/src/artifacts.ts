@@ -1,8 +1,10 @@
 // Artifacts as the phone shows them: their kinds (the desktop's, from
 // src/renderer/src/features/artifacts/model.ts), and their previews, which the computer's desktop
-// app captures (`artifacts.thumbnail`) and the phone asks for a few at a time as cards appear.
+// app captures (`artifacts.thumbnail`) and the phone asks for a few at a time as cards appear. A
+// preview is kept on disk by artifact and version, so the next start draws it without asking.
 
 import { useEffect, useSyncExternalStore } from 'react'
+import { Directory, File, Paths } from 'expo-file-system'
 import { router } from 'expo-router'
 import type { ArtifactSummary, ThumbnailPage } from '@shared/artifacts'
 import { THUMBNAIL_PAGES } from '@shared/artifacts'
@@ -81,6 +83,44 @@ function keyOf(a: Pick<ArtifactSummary, 'id' | 'version'>): string {
   return `${a.id}:${a.version}`
 }
 
+/** The previews kept between starts, in the cache the system may clear when it needs room. */
+const shelf = new Directory(Paths.cache, 'artifact-previews')
+
+function shelved(a: Pick<ArtifactSummary, 'id' | 'version'>): File {
+  return new File(shelf, `${a.id}@${a.version}.png`)
+}
+
+/** A preview kept from before, or null. */
+function fromShelf(a: Pick<ArtifactSummary, 'id' | 'version'>): Thumbnail | null {
+  try {
+    const file = shelved(a)
+    return file.exists ? { state: 'ready', uri: file.uri } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Keeps a preview the computer sent as a data URL, in place of the artifact's older versions, and
+ * gives the kept file's URI; the data URL itself when it cannot be kept.
+ */
+async function shelve(a: ArtifactSummary, uri: string): Promise<string> {
+  const data = /^data:image\/[a-z+]+;base64,(.+)$/.exec(uri)
+  if (!data) return uri
+  try {
+    if (!shelf.exists) shelf.create({ intermediates: true, idempotent: true })
+    for (const entry of shelf.list()) {
+      if (entry instanceof File && entry.name.startsWith(`${a.id}@`)) entry.delete()
+    }
+    const file = shelved(a)
+    file.create({ overwrite: true })
+    await file.write(data[1]!, { encoding: 'base64' })
+    return file.uri
+  } catch {
+    return uri
+  }
+}
+
 function settle(key: string, thumbnail: Thumbnail): void {
   made.delete(key)
   made.set(key, thumbnail)
@@ -137,6 +177,11 @@ function pump(): void {
     if (!next) return
     asking++
     render(next.link, next.artifact)
+      .then(async (thumbnail) =>
+        thumbnail.state === 'ready'
+          ? { state: 'ready' as const, uri: await shelve(next.artifact, thumbnail.uri) }
+          : thumbnail,
+      )
       .catch(() => NONE)
       .then((thumbnail) => settle(next.key, thumbnail))
       .finally(() => {
@@ -156,7 +201,11 @@ export function useThumbnail(link: HostLink | null, a: ArtifactSummary): Thumbna
   const key = keyOf(a)
   const thumbnail = useSyncExternalStore(subscribe, () => made.get(key) ?? LOADING)
   useEffect(() => {
-    if (!link || made.has(key) || waiting.some((w) => w.key === key)) return
+    if (made.has(key) || waiting.some((w) => w.key === key)) return
+    // A kept preview shows at once, and away from the computer too.
+    const kept = fromShelf(a)
+    if (kept) return settle(key, kept)
+    if (!link) return
     waiting.push({ key, artifact: a, link })
     pump()
     return () => {
@@ -166,5 +215,5 @@ export function useThumbnail(link: HostLink | null, a: ArtifactSummary): Thumbna
     // The key names the version; the rest of the summary does not change what renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, link])
-  return link ? thumbnail : NONE
+  return link || thumbnail.state === 'ready' ? thumbnail : NONE
 }
