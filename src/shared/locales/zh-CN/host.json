@@ -779,6 +779,29 @@
       "seconds_other": "{{count}} 秒",
       "minutes_other": "{{count}} 分钟",
       "hours": "{{hours}} 小时 {{minutes}} 分钟"
+    },
+    "hook": {
+      "blocked": "{{event}} Hook 拦下了这一步",
+      "stopped": "{{event}} Hook 停止了这一轮",
+      "failed": "{{event}} Hook 出错",
+      "warned": "{{event}} Hook 提醒",
+      "prompt": "Hook 向对话追加了内容",
+      "event": {
+        "preModelRequest": "请求前",
+        "postModelRequest": "请求后",
+        "preToolUse": "工具调用前",
+        "permissionRequest": "授权请求",
+        "postToolUse": "工具调用后",
+        "preCompact": "压缩前",
+        "postCompact": "压缩后",
+        "sessionStart": "会话开始",
+        "sessionEnd": "会话结束",
+        "userPromptSubmit": "提交消息",
+        "subagentStart": "子 Agent 启动",
+        "subagentStop": "子 Agent 结束",
+        "stop": "停止",
+        "interrupt": "打断"
+      }
     }
   },
   "dsh": {

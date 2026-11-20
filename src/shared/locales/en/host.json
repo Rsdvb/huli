@@ -792,6 +792,29 @@
       "minutes_one": "{{count}} minute",
       "minutes_other": "{{count}} minutes",
       "hours": "{{hours}} h {{minutes}} min"
+    },
+    "hook": {
+      "blocked": "A {{event}} hook blocked it",
+      "stopped": "A {{event}} hook stopped the turn",
+      "failed": "A {{event}} hook failed",
+      "warned": "A {{event}} hook warns",
+      "prompt": "A hook added to the conversation",
+      "event": {
+        "preModelRequest": "before-request",
+        "postModelRequest": "after-request",
+        "preToolUse": "before-tool",
+        "permissionRequest": "permission",
+        "postToolUse": "after-tool",
+        "preCompact": "before-compaction",
+        "postCompact": "after-compaction",
+        "sessionStart": "session-start",
+        "sessionEnd": "session-end",
+        "userPromptSubmit": "prompt-submit",
+        "subagentStart": "subagent-start",
+        "subagentStop": "subagent-stop",
+        "stop": "stop",
+        "interrupt": "interrupt"
+      }
     }
   },
   "dsh": {

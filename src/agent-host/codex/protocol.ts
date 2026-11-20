@@ -350,7 +350,7 @@ export type ThreadItem = ItemTimes &
     | { type: 'enteredReviewMode'; id: string; review: string }
     | { type: 'exitedReviewMode'; id: string; review: string }
     | { type: 'contextCompaction'; id: string }
-    | { type: 'hookPrompt'; id: string }
+    | { type: 'hookPrompt'; id: string; fragments?: { hookRunId: string; text: string }[] }
     | { type: 'functionCallOutput'; id: string }
     | { type: 'sleep'; id: string }
   )

@@ -269,6 +269,18 @@ function dynamicContent(item: Item<'dynamicToolCall'>): ToolContent[] {
   )
 }
 
+/** Huli: one run of a hook, as Codex reports it once it ended. */
+interface HookRun {
+  id: string
+  eventName: string
+  status: 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
+  statusMessage?: string | null
+  entries?: { kind: string; text: string }[]
+}
+
+/** Huli: what a hook's output says to the user, rather than to the model. */
+const HOOK_SAYS: ReadonlySet<string> = new Set(['warning', 'stop', 'error', 'feedback'])
+
 /** Huli: a `/goal` as Codex reports it. */
 interface ThreadGoal {
   objective: string
@@ -521,6 +533,11 @@ export class ThreadMapper {
       case 'item/autoApprovalReview/completed':
         this.review(ctx, out, p, method.endsWith('completed'))
         break
+      case 'hook/started':
+        break
+      case 'hook/completed':
+        this.hookRun(ctx, out, p.run as HookRun | undefined)
+        break
       case 'thread/goal/updated':
         this.goalUpdated(ctx, out, p.goal as ThreadGoal | undefined)
         break
@@ -672,6 +689,32 @@ export class ThreadMapper {
     upsertNotice(ctx, out, this.goal.id, severity, title, description)
   }
 
+  /**
+   * Huli: a hook that blocked or stopped what it ran on, failed, or warned: a notice with what it
+   * said. One that ran and said nothing for the user shows nothing.
+   */
+  private hookRun(ctx: MapperContext, out: MapperOutput, run: HookRun | undefined): void {
+    if (!run) return
+    const said = (run.entries ?? []).filter(
+      (entry) => HOOK_SAYS.has(entry.kind) && entry.text.trim() !== '',
+    )
+    const outcome = run.status === 'completed' ? (said.length > 0 ? 'warned' : null) : run.status
+    if (outcome === null || outcome === 'running') return
+    const eventKey = `codex.hook.event.${run.eventName}`
+    const event = hasMessage(eventKey) ? t(eventKey as 'codex.hook.event.stop') : run.eventName
+    const description = [run.statusMessage?.trim(), ...said.map((entry) => entry.text.trim())]
+      .filter((part, i, all): part is string => !!part && all.indexOf(part) === i)
+      .join('\n')
+    upsertNotice(
+      ctx,
+      out,
+      `n:hook:${run.id}`,
+      outcome === 'failed' ? 'error' : 'warning',
+      t(`codex.hook.${outcome}` as 'codex.hook.blocked', { event }),
+      description || undefined,
+    )
+  }
+
   /** One item of the thread's history, as `session/load` replays one. */
   replay(item: ThreadItem, ctx: MapperContext): MapperOutput {
     const out = output()
@@ -810,6 +853,22 @@ export class ThreadMapper {
       case 'contextCompaction':
         this.compaction(ctx, out, item.id, done)
         break
+      case 'hookPrompt': {
+        // Huli: what a hook added to the conversation, as a prompt of its own.
+        const text = (item.fragments ?? [])
+          .map((fragment) => fragment.text.trim())
+          .filter(Boolean)
+          .join('\n\n')
+        if (text === '' || ctx.thread.byId[`n:hook:${item.id}`]) break
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: `n:hook:${item.id}`,
+          severity: 'info',
+          title: t('codex.hook.prompt'),
+          description: text,
+        })
+        break
+      }
       case 'enteredReviewMode':
       case 'exitedReviewMode':
         // The review's findings follow as an agent message of their own.

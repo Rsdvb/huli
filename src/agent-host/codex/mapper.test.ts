@@ -376,6 +376,68 @@ describe('sub-agent calls', () => {
   })
 })
 
+describe('hooks', () => {
+  const hook = (
+    status: string,
+    entries: { kind: string; text: string }[],
+    statusMessage: string | null = null,
+  ): [string, unknown] => [
+    'hook/completed',
+    {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      run: {
+        id: `h-${status}`,
+        eventName: 'preToolUse',
+        status,
+        statusMessage,
+        entries,
+        displayOrder: 0,
+        executionMode: 'sync',
+        handlerType: 'command',
+        scope: 'turn',
+        sourcePath: '/p/.codex/hooks.toml',
+        startedAt: 1,
+      },
+    },
+  ]
+
+  it('shows a hook that blocked, failed or warned, with what it said, and none that only ran', () => {
+    const { entries, unknown } = run([
+      ['hook/started', { threadId: 'thread-1', turnId: 'turn-1', run: {} }],
+      hook('completed', [{ kind: 'context', text: 'for the model only' }]),
+      hook('blocked', [{ kind: 'feedback', text: 'No writes outside src/' }], 'Denied by policy'),
+      hook('failed', [{ kind: 'error', text: 'exit 2' }]),
+      completed({
+        type: 'hookPrompt',
+        id: 'hp-1',
+        fragments: [{ hookRunId: 'h', text: 'Run the tests too.' }],
+      }),
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      {
+        kind: 'notice',
+        severity: 'warning',
+        title: 'A before-tool hook blocked it',
+        description: ['Denied by policy', 'No writes outside src/'].join(String.fromCharCode(10)),
+      },
+      {
+        kind: 'notice',
+        severity: 'error',
+        title: 'A before-tool hook failed',
+        description: 'exit 2',
+      },
+      {
+        kind: 'notice',
+        id: 'n:hook:hp-1',
+        title: 'A hook added to the conversation',
+        description: 'Run the tests too.',
+      },
+    ])
+  })
+})
+
 describe('the goal', () => {
   const goal = (status: string, tokensUsed: number, timeUsedSeconds: number): [string, unknown] => [
     'thread/goal/updated',
