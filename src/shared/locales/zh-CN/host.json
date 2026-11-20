@@ -324,7 +324,7 @@
     "geminiAudience": "Gemini CLI 供 Gemini Code Assist Standard 和 Enterprise、Code Assist for GitHub 以及付费的 Gemini API 或 Vertex AI key 使用。自 2026 年 6 月 18 日起，Google 把个人 Google 账号（免费版和 Google AI Pro、Ultra）转到了 Google Antigravity。",
     "hermesInstallNotice": "官方安装程序会修改你的 Shell 配置文件，将 ~/.local/bin 加入 PATH。安装包含 ACP，会跳过浏览器和 computer-use 组件。",
     "hint": {
-      "node": "请从 nodejs.org 安装 Node.js，然后在设置中点击「重新加载环境」。",
+      "node": "在设置 › Harness 里一键安装 Node.js，或从 nodejs.org 手动安装后重新加载环境。",
       "uv": "请从 docs.astral.sh/uv 安装 uv，然后在设置中点击「重新加载环境」。",
       "opencode": "请安装 OpenCode，或在「设置 › Harness」中选择它的程序。",
       "pi": "请用 `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` 或 pi.dev 上的安装程序安装 pi。",
@@ -1171,5 +1171,19 @@
   "report": {
     "draftNoAgent": "没有可用来起草描述的智能体",
     "draftFailed": "{{agent}} 没能起草描述：{{reason}}"
+  },
+  "nodeRuntime": {
+    "busy": "正在安装或移除纸鸢的 Node.js，请等它完成。",
+    "unsupported": "nodejs.org 没有适合这台电脑的 Node.js，请手动安装。",
+    "stopped": "已停止安装 Node.js。",
+    "unreachable": "连不上 nodejs.org，也连不上国内镜像（{{reason}}）。请检查网络，或设置 › 高级里的代理。",
+    "noRelease": "nodejs.org 上没有适合这台电脑的 Node.js {{required}} LTS 版本。",
+    "noChecksum": "SHASUMS256.txt 里没有 {{file}}，无法校验。",
+    "stalled": "下载卡住了",
+    "downloadFailed": "Node.js 下载失败：{{reason}}",
+    "hashMismatch": "{{file}} 和 SHASUMS256.txt 里的 SHA-256 对不上，已删除，没有安装。",
+    "extractFailed": "Node.js 压缩包解压失败：{{reason}}",
+    "doesNotRun": "Node.js {{version}} 已解压，但在这台电脑上运行不了。",
+    "inUse": "还有 Agent 在用纸鸢的 Node.js。先停止它的会话，再试一次。"
   }
 }

@@ -200,6 +200,15 @@ import { WorktreeManager } from './worktrees/manager'
 import { ComputerDriver, probePermissions } from './computer/driver'
 import { networkStateFile, subscriptionsFile } from './node-proxy/files'
 import { NodeProxy, type NodeProxyDeps } from './node-proxy/service'
+import { routeFor, type ProxyVariables } from './node-proxy/download'
+import { strictestRequirement } from './node-runtime/release'
+import {
+  isMusl,
+  nodeRuntimeFile,
+  nodeRuntimesFolder,
+  NodeRuntimeService,
+} from './node-runtime/service'
+import { httpTransport } from './node-runtime/transport'
 import { ComputerUse } from './computer/service'
 import { SessionFiles } from './session-files'
 import { SessionManager, type SessionTimings } from './sessions'
@@ -453,6 +462,8 @@ export class AgentHost {
   private readonly sessionFolders: SessionFolders
   /** Huli: the agents' network through the user's proxy subscriptions. */
   private readonly nodeProxy: NodeProxy
+  /** Huli: Kite's own Node.js, for agents when the user's own is missing or too old. */
+  private readonly nodeRuntime: NodeRuntimeService
   /** When idle Claude Code sessions let their agent go, by the setting and the system's memory. */
   private readonly idleRelease: IdleRelease
   /** The saved routines and the lifecycle of their runs. */
@@ -1293,19 +1304,26 @@ export class AgentHost {
       },
       // Subscriptions download the way Kite's own requests go: Advanced › Proxy, else the
       // environment's proxy, else directly; never through a node.
-      ownProxy: () => {
-        const read = (name: string) =>
-          this.env.get(name) ?? this.env.get(name.toLowerCase()) ?? null
-        return {
-          http: read('HTTP_PROXY'),
-          https: read('HTTPS_PROXY'),
-          all: read('ALL_PROXY'),
-          noProxy: read('NO_PROXY'),
-        }
-      },
+      ownProxy: () => this.ownProxy(),
       ...(options.detectInterface ? { detect: options.detectInterface } : {}),
     })
     this.env.setNodeRoutes((agentId) => this.nodeProxy.portFor(agentId))
+    const nodeRequired = strictestRequirement(catalog.map((def) => def.requiresNode))
+    this.nodeRuntime = new NodeRuntimeService({
+      root: nodeRuntimesFolder(options.userDataPath),
+      file: nodeRuntimeFile(options.userDataPath, log),
+      platform,
+      arch: process.arch,
+      musl: () => platform === 'linux' && isMusl(),
+      required: nodeRequired,
+      // The way Kite's own requests go, as subscriptions download: never through a node.
+      transport: httpTransport(() => routeFor(this.ownProxy())),
+      log,
+      apply: (setup) => this.nodeSetupChanged(setup),
+      changed: () => this.env.notify(),
+    })
+    this.env.setInstallStatus(() => this.nodeRuntime.status())
+    void this.env.setNodeSetup({ required: nodeRequired })
     this.routines = new RoutinesManager({
       userDataPath: options.userDataPath,
       file: routinesFile(options.userDataPath, log),
@@ -1492,6 +1510,13 @@ export class AgentHost {
       host.workflowLibrary.load(),
       host.sessionFolders.load(),
       host.nodeProxy.load(),
+      // Before the first detection, so agents start on Kite's own Node.js when they should.
+      host.nodeRuntime
+        .load()
+        .then((setup) => host.env.setNodeSetup(setup))
+        .catch((error: unknown) =>
+          writeLog('warn', 'host', `Kite's Node.js: ${(error as Error).message}`),
+        ),
     ])
     // After the sessions, whose step sessions it messages when it resumes.
     await host.tasks.load()
@@ -2766,6 +2791,7 @@ export class AgentHost {
         this.marketBundles.flush(),
         this.publishDrafts.flush(),
         this.sessionFolders.flush(),
+        this.nodeRuntime.flush(),
         this.copies.flush(),
         this.threads?.close(),
         this.usage.close(),
@@ -2775,6 +2801,40 @@ export class AgentHost {
       this.options.send({ type: 'host:stopped' })
     })()
     return this.stopping
+  }
+
+  /** The proxy variables of Kite's own requests: Advanced › Proxy, else the environment's. */
+  private ownProxy(): ProxyVariables {
+    const read = (name: string) => this.env.get(name) ?? this.env.get(name.toLowerCase()) ?? null
+    return {
+      http: read('HTTP_PROXY'),
+      https: read('HTTPS_PROXY'),
+      all: read('ALL_PROXY'),
+      noProxy: read('NO_PROXY'),
+    }
+  }
+
+  /**
+   * Huli: Kite's own Node.js or the choice changed. When the node agents run on changed, every
+   * agent is detected again, so one that lacked Node.js can install or start without a restart,
+   * and an idle agent's process stops, as after a network change, so its next start runs on it.
+   */
+  private async nodeSetupChanged(setup: Parameters<EnvironmentService['setNodeSetup']>[0]) {
+    const before = this.env.nodeProbe()
+    await this.env.setNodeSetup(setup)
+    const after = this.env.nodeProbe()
+    if (before.nodePath === after.nodePath && before.nodeVersion === after.nodeVersion) return
+    await this.agents.redetect()
+    await Promise.all(
+      this.agents.ids().map((agentId) =>
+        this.agents.networkChanged(agentId).catch((error: unknown) => {
+          this.diagnostics.log(
+            'warn',
+            `Could not restart ${agentId} for its Node.js: ${(error as Error).message}`,
+          )
+        }),
+      ),
+    )
   }
 
   async collectDiagnostics(): Promise<DiagnosticsBundle> {
@@ -2891,6 +2951,13 @@ export class AgentHost {
         return agents.userPrograms()
       },
       'agents.environment': () => this.env.info(),
+      'environment.installNode': async () => {
+        const { install, installed, source } = await this.nodeRuntime.install()
+        return { version: install.version, installed, source }
+      },
+      'environment.cancelNodeInstall': () => this.nodeRuntime.cancel(),
+      'environment.removeNode': () => this.nodeRuntime.remove(),
+      'environment.setNodeChoice': ({ choice }) => this.nodeRuntime.setChoice(choice),
       'agents.authenticate': ({ agentId, methodId }, ctx) =>
         agents.authenticate(agentId, methodId, {
           device: ctx.device !== null,
