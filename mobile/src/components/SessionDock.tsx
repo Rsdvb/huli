@@ -427,6 +427,7 @@ export function ModelChip(props: {
         scale={0.96}
         onPress={props.onPress}
         disabled={props.disabled}
+        hitSlop={{ top: 2, bottom: 2 }}
         accessibilityRole="button"
         accessibilityLabel={
           props.pending

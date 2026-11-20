@@ -258,6 +258,8 @@ function ArtifactsTab() {
       }}
       accessibilityRole="tab"
       accessibilityState={{ selected: on }}
+      // 38pt tall, its touch reaches the 44pt the system asks for.
+      hitSlop={{ top: 3, bottom: 3 }}
       style={[
         styles.chip,
         { backgroundColor: on ? c.fillStrong : 'transparent', borderColor: c.borderStrong },
