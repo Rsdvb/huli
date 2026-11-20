@@ -135,13 +135,17 @@ export function StatusLine(props: {
   const out = !!limit && isExhausted(limit, now)
   const percent = out ? 100 : Math.round(limit?.usedPercent ?? 0)
   const reset = limit ? inlineReset(limit, now) : null
-  // The limit's reset time goes first when the line runs short: it shows only while it has its
-  // whole width, and comes back once the room it needs is spare again.
+  // When the line runs short the limit's reset time goes first, then the computer's and the
+  // folder's names give way; the limit itself never does, as a cut 88% reads as 88. The reset
+  // time stays while the line has room to spare, which it has none of once a name is cut, and
+  // comes back once the room it needs is spare again.
   const [resetWidth, setResetWidth] = useState(0)
-  const [spare, setSpare] = useState(0)
+  const [spare, setSpare] = useState<number | null>(null)
   const [resetShown, setResetShown] = useState(true)
   const suffix = reset ? ` · ${reset}` : ''
-  const showReset = !!suffix && (resetShown || spare >= resetWidth + 4)
+  const showReset =
+    !!suffix &&
+    (resetShown ? spare === null || spare >= 0.5 : spare !== null && spare >= resetWidth + 4)
   if (showReset !== resetShown && suffix && resetWidth > 0) setResetShown(showReset)
   const connection =
     props.state.kind === 'connected'
@@ -297,11 +301,6 @@ export function StatusLine(props: {
                     { color: limitTextColor(limit, c, c.textSecondary) },
                   ]}
                   numberOfLines={1}
-                  onLayout={(event) => {
-                    if (resetWidth > 0 && event.nativeEvent.layout.width < resetWidth - 0.5) {
-                      setResetShown(false)
-                    }
-                  }}
                 >
                   {suffix}
                 </Text>
@@ -389,13 +388,20 @@ const styles = StyleSheet.create({
   folder: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
   badge: { borderRadius: 999, paddingHorizontal: 6, minWidth: 18, alignItems: 'center' },
   badgeText: { fontSize: 11, lineHeight: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  limit: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, overflow: 'hidden' },
+  limit: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   spacer: { flexGrow: 1, flexShrink: 0 },
-  // Gives way first, so the names keep their room while the reset time can go.
-  reset: { flexShrink: 1000, marginLeft: -5 },
+  reset: { marginLeft: -5 },
   measure: { position: 'absolute', opacity: 0, left: 0, top: 0 },
-  out: { borderRadius: 999, paddingLeft: 4, paddingRight: 8, paddingVertical: 2, flexShrink: 1 },
+  // A used-up limit's words are long; they end in its reset time, which may be cut.
+  out: {
+    borderRadius: 999,
+    paddingLeft: 4,
+    paddingRight: 8,
+    paddingVertical: 2,
+    flexShrink: 1,
+    overflow: 'hidden',
+  },
   outText: { fontWeight: '600', flexShrink: 1 },
   branch: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, maxWidth: 190 },
   mark: { borderRadius: 999, paddingHorizontal: 5 },
