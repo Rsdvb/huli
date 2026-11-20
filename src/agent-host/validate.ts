@@ -17,6 +17,7 @@ import type { BrowserCallAnswer, BrowserOriginAnswer, BrowserOriginDecision } fr
 import { isControlOutcome } from '@shared/control'
 import { isComputerAppDecision } from '@shared/computer-use'
 import { FILE_READ_LIMIT } from '@shared/files'
+import { IMAGE_CLEAR_DAYS } from '@shared/data-usage'
 import {
   isMemoryScope,
   MEMORY_BODY_CHARS,
@@ -2212,6 +2213,18 @@ export function createValidators(platform: Platform): Validators {
     'usage.sync': none,
     'usage.reimport': agent,
     'usage.clearRecord': none,
+    'storage.usage': none,
+    'storage.clearImages': (params) => {
+      const o = fields(params)
+      if (o.scope !== 'archived' && o.scope !== 'older') {
+        throw invalidParams('scope must be archived or older')
+      }
+      const days = count(o, 'days')
+      if (!(IMAGE_CLEAR_DAYS as readonly number[]).includes(days)) {
+        throw invalidParams(`days must be one of ${IMAGE_CLEAR_DAYS.join(', ')}`)
+      }
+      return { scope: o.scope, days, dryRun: flag(o, 'dryRun') }
+    },
     'attachments.add': (params) => {
       const o = fields(params)
       const source = fields(o.source)

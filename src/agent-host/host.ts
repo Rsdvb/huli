@@ -156,6 +156,7 @@ import { AcpMessages, acpModelRequests } from './model-requests/acp-messages'
 import { IdleRelease } from './idle-release'
 import { PortHub, type Handlers, type RequestContext } from './rpc'
 import { Attachments, toArrayBuffer } from './attachments'
+import { storageUsage } from './data-usage'
 import { RoutinesManager, type RoutineTimings } from './routines/manager'
 import { TaskEngine, type TaskSessionHooksRef, type WrittenDocument } from './workflow/engine'
 import type { WorkflowSettings, TaskSummary } from '@shared/workflow'
@@ -3014,6 +3015,13 @@ export class AgentHost {
       'usage.sync': () => this.usage.sync(),
       'usage.reimport': ({ agentId }) => this.usage.reimport(agentId),
       'usage.clearRecord': () => this.usage.clearRecord(),
+      'storage.usage': () => storageUsage(this.options.userDataPath, logFolder()),
+      'storage.clearImages': async ({ scope, days, dryRun }) => {
+        const before = scope === 'older' ? Date.now() - days * 24 * 60 * 60 * 1000 : null
+        const sessionIds = sessions.imageClearTargets(scope === 'archived', before)
+        if (!this.threads || sessionIds.length === 0) return { sessions: 0, images: 0, bytes: 0 }
+        return this.threads.clearImages(sessionIds, dryRun)
+      },
       'artifacts.list': async ({ deleted }) =>
         (await artifacts.list({ deleted: deleted ?? false })).map((artifact) => ({
           ...artifact,

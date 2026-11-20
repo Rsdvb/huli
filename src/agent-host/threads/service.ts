@@ -7,6 +7,7 @@ import { Indexer, type IndexerOptions } from '../search/indexer'
 import { IndexReads } from '../search/reads'
 import { ThreadDb, ThreadDbError } from './db'
 import type { ThreadReply, ThreadRequest, ThreadWorkerData } from './protocol'
+import { MediaUpkeep, type UpkeepOptions } from './upkeep'
 
 /**
  * Opens the database at `file`, reports how with a `ready` reply, and returns the handler that
@@ -17,7 +18,8 @@ export function startThreadService(
   reply: (message: ThreadReply) => void,
   now?: () => number,
   indexing?: IndexerOptions,
-): (request: ThreadRequest) => void {
+  upkeepOptions?: UpkeepOptions,
+): ((request: ThreadRequest) => void) & { upkeep: MediaUpkeep | null } {
   const log = (level: 'info' | 'warn' | 'error', message: string): void =>
     reply({ type: 'log', level, message })
   let db: ThreadDb | null = null
@@ -44,8 +46,14 @@ export function startThreadService(
       log('error', `Search is unavailable, its index did not open: ${(error as Error).message}`)
     }
   }
+  // The writer keeps the media in step; a reader only reads them.
+  const upkeep =
+    db && !reader ? new MediaUpkeep(db, file, log, now ?? Date.now, upkeepOptions) : null
+  upkeep?.start()
   let recoveries = db?.recoveries ?? 0
-  return (request) => {
+  const handle = (request: ThreadRequest): void => {
+    upkeep?.requested()
+    if (request.op === 'close') upkeep?.stop()
     if (!db) {
       reply({
         type: 'error',
@@ -73,6 +81,7 @@ export function startThreadService(
       reply({ type: 'recovered' })
     }
   }
+  return Object.assign(handle, { upkeep })
 }
 
 function run(
@@ -102,6 +111,10 @@ function run(
       return null
     case 'blob':
       return db.blob(request.sessionId, request.hash)
+    case 'mediaTotals':
+      return db.mediaTotals()
+    case 'clearImages':
+      return db.clearImages(request.sessionIds, request.dryRun)
     case 'mentions':
       return db.mentions(request.sessionId, request.text)
     case 'outline':

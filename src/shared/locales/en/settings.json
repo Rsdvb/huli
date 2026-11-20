@@ -654,6 +654,36 @@
       "show": "Show in {{name}}",
       "copy": "Copy path"
     },
+    "storage": {
+      "name": "Storage",
+      "description": "What the data folder holds.",
+      "keywords": "disk space size images screenshots pictures clean clear free",
+      "parts": {
+        "threads": "Conversations",
+        "media": "Images and media",
+        "attachments": "Attachments",
+        "artifacts": "Artifacts",
+        "logs": "Logs",
+        "usage": "Usage records"
+      },
+      "total": "{{size}} in all",
+      "clean": "Clean up…",
+      "dialogTitle": "Clear images from sessions?",
+      "dialogDescription": "The images go from Kettu’s copy of the conversations; the agents keep their own transcripts. This can’t be undone.",
+      "scope": "Sessions",
+      "archived": "Archived",
+      "older_one": "Idle {{count}} day",
+      "older_other": "Idle {{count}} days",
+      "counting": "Counting…",
+      "nothing": "No images to clear.",
+      "images_one": "{{count}} image",
+      "images_other": "{{count}} images",
+      "sessions_one": "{{count}} session",
+      "sessions_other": "{{count}} sessions",
+      "preview": "{{images}} from {{sessions}}, about {{size}}.",
+      "confirm": "Clear images",
+      "cleared": "Cleared {{images}}, {{size}} freed"
+    },
     "removeSessions": {
       "name": "Remove all sessions from Kettu",
       "description": "Clears the list. Agents keep their own transcripts.",

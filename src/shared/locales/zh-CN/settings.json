@@ -650,6 +650,33 @@
       "show": "在{{name}}中显示",
       "copy": "复制路径"
     },
+    "storage": {
+      "name": "存储",
+      "description": "数据文件夹里存了什么。",
+      "keywords": "磁盘 空间 大小 图片 截图 清理 释放 disk space size images clean clear",
+      "parts": {
+        "threads": "对话记录",
+        "media": "图片与媒体",
+        "attachments": "附件",
+        "artifacts": "Artifact",
+        "logs": "日志",
+        "usage": "用量记录"
+      },
+      "total": "共 {{size}}",
+      "clean": "清理…",
+      "dialogTitle": "清理会话中的图片？",
+      "dialogDescription": "图片会从 Kettu 保存的对话中移除，Agent 自己的对话记录不受影响。此操作无法撤销。",
+      "scope": "会话",
+      "archived": "已归档",
+      "older_other": "{{count}} 天未活动",
+      "counting": "正在计算…",
+      "nothing": "没有可清理的图片。",
+      "images_other": "{{count}} 张图片",
+      "sessions_other": "{{count}} 个会话",
+      "preview": "{{sessions}}中的{{images}}，约 {{size}}。",
+      "confirm": "清理图片",
+      "cleared": "已清理{{images}}，释放 {{size}}"
+    },
     "removeSessions": {
       "name": "从 Kettu 中移除所有会话",
       "description": "清空列表。Agent 自己的对话记录会保留。",

@@ -160,6 +160,7 @@ import {
 import { useAllowedSites } from './allowed-sites'
 import { ThemeTiles } from './theme-section'
 import { ClearRecord, FromComputer, LogRow, SidebarEnd, SyncLogs } from './usage-section'
+import { StorageRow } from './storage-rows'
 import { BrowserNameField, ForgetHost, OtherWebHosts, WebHostRow } from './web-host-section'
 
 // The sections of the Settings page as data, so search and the match counts read the same rows
@@ -1183,6 +1184,16 @@ export function useAdvancedSection(): SectionDef {
         rich: <DataFolderText />,
         group: data,
         render: () => <DataFolderActions />,
+      },
+      {
+        id: 'storage',
+        name: t('advanced.storage.name'),
+        english: en('advanced.storage.name'),
+        description: t('advanced.storage.description'),
+        keywords: t('advanced.storage.keywords'),
+        group: data,
+        layout: 'block' as const,
+        render: (text: ReactNode) => <StorageRow text={text} />,
       },
       {
         id: 'remove-sessions',

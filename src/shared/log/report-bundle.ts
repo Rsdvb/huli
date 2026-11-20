@@ -5,7 +5,6 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import JSZip from 'jszip'
 import type { DiagnosticsBundle, SessionSummary } from '../agent-host'
 import type { DeviceReport } from '../remote/host-admin'
 import {
@@ -245,6 +244,8 @@ export function reportListing(files: Map<string, ReportContent>): ReportFileInfo
 }
 
 export async function zipReport(files: Map<string, ReportContent>): Promise<Uint8Array> {
+  // Loaded only for a report, as the zip library and its deflate are a large share of main.
+  const { default: JSZip } = await import('jszip')
   const zip = new JSZip()
   for (const [name, content] of files) zip.file(name, content)
   return zip.generateAsync({
