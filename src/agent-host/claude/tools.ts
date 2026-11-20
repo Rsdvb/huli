@@ -4,6 +4,7 @@
 import path from 'node:path'
 import type { ContentRef, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
 import { t } from '../i18n'
+import { resultMarkdown } from '../result-text'
 import { toLf } from '../session-updates'
 import type { ContentBlock, ToolResultBlock } from './sdk'
 
@@ -322,8 +323,11 @@ export function resultContent(
       }
       return [...(body ? [markdown(body)] : []), ...images]
     }
-    default:
-      return [...(body ? [markdown(body)] : []), ...images]
+    default: {
+      // An MCP tool's JSON, a listing of files or a search's lines show as written.
+      const shown = resultMarkdown(body)
+      return [...(shown ? [markdown(shown)] : []), ...images]
+    }
   }
 }
 

@@ -18,6 +18,7 @@ import { planMarkdown, planRevision } from '../plan-revision'
 import { isRowlessCall, isRowWhenFailed } from '../plan-tool'
 import { ANSWERS_OPTION } from '../question-answers'
 import { parseReplayedText } from '../replayed-content'
+import { resultMarkdown } from '../result-text'
 import { SERVICE_NAME } from '../service-name'
 import { workflowToolStructured } from '../workflow/tools'
 import {
@@ -208,7 +209,7 @@ function mcpContent(item: Item<'mcpToolCall'>): ToolContent[] {
     if (typeof block !== 'object' || block === null || Array.isArray(block)) continue
     const value = block as Record<string, unknown>
     if (value.type === 'text' && typeof value.text === 'string') {
-      content.push({ type: 'markdown', markdown: value.text })
+      content.push({ type: 'markdown', markdown: resultMarkdown(toLf(value.text)) })
     } else if (
       value.type === 'image' &&
       typeof value.data === 'string' &&
@@ -225,7 +226,9 @@ function mcpContent(item: Item<'mcpToolCall'>): ToolContent[] {
 
 function dynamicContent(item: Item<'dynamicToolCall'>): ToolContent[] {
   return (item.contentItems ?? []).flatMap((part): ToolContent[] =>
-    part.type === 'inputText' ? [{ type: 'markdown', markdown: part.text }] : [],
+    part.type === 'inputText'
+      ? [{ type: 'markdown', markdown: resultMarkdown(toLf(part.text)) }]
+      : [],
   )
 }
 
