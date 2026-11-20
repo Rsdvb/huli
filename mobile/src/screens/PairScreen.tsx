@@ -115,7 +115,7 @@ export function PairScreen(props: {
     if (!granted) {
       setStep({
         kind: 'start',
-        error: '没有相机权限。可以到「设置 › 纸鸢」里打开，或者粘贴配对链接。',
+        error: '没有相机权限。可以在系统设置里允许纸鸢使用相机，或者粘贴配对链接。',
       })
       return
     }

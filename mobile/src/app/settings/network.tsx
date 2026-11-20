@@ -56,7 +56,7 @@ export default function AgentNetworkScreen() {
             </Notice>
           ) : !status.enabled ? (
             <Notice tone="info" title="Agent 网络在电脑上已关闭">
-              所有 Agent 都用系统网络。在电脑的「设置 › 智能体网络」里打开。
+              所有 Agent 都用系统网络。在电脑的「设置 › Agent 网络」里打开。
             </Notice>
           ) : status.problem ? (
             <Notice tone="error" title="Agent 网络未运行">

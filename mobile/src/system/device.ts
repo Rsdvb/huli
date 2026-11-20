@@ -3,6 +3,7 @@
 // trash, as its own system names it.
 
 import { Platform } from 'react-native'
+import * as Device from 'expo-device'
 
 const ios = Platform.OS === 'ios'
 const tablet = Platform.OS === 'ios' && Platform.isPad
@@ -15,6 +16,13 @@ export const THIS_DEVICE = ios ? `这台 ${DEVICE}` : `这台${DEVICE}`
 
 /** 「在 iPhone 上」「在手机上」. */
 export const ON_DEVICE = ios ? `在 ${DEVICE} 上` : `在${DEVICE}上`
+
+/** The phone's system and its version, as a computer lists the device: 「iOS 26.1」「Android 16」. */
+export const SYSTEM_VERSION =
+  `${ios ? (tablet ? 'iPadOS' : 'iOS') : 'Android'} ${Device.osVersion ?? ''}`.trim()
+
+/** What the phone calls itself until it is named: its own name, else its model, else 「手机」. */
+export const DEVICE_NAME = Device.deviceName ?? Device.modelName ?? DEVICE
 
 /** Where the phone keeps its sign-ins: 「钥匙串」, or Android's key store. */
 export const KEYCHAIN = ios ? '钥匙串' : '系统密钥库'

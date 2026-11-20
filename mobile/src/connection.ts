@@ -30,6 +30,7 @@ import {
   toBase64,
   type SavedHost,
 } from './store'
+import { DEVICE, DEVICE_NAME, SYSTEM_VERSION } from './system/device'
 
 /** This build's version, which the release run gives the phone and the desktop alike. */
 export const APP_VERSION =
@@ -38,7 +39,7 @@ export const APP_VERSION =
 const CLIENT = {
   kind: 'ios',
   version: APP_VERSION,
-  platform: `iOS ${Device.osVersion ?? ''}`.trim(),
+  platform: SYSTEM_VERSION,
 }
 
 /** This phone's key, made on first use and kept in the Keychain. */
@@ -239,7 +240,7 @@ export async function pairWith(
       payload,
       key,
       client: CLIENT,
-      device: { name: Device.deviceName ?? 'iPhone', model: Device.modelName ?? 'iPhone' },
+      device: { name: DEVICE_NAME, model: Device.modelName ?? DEVICE },
     },
     progress,
   )
@@ -297,7 +298,7 @@ export async function pairWithAccount(
       hostKey,
       key,
       client: CLIENT,
-      device: { name: Device.deviceName ?? 'iPhone', model: Device.modelName ?? 'iPhone' },
+      device: { name: DEVICE_NAME, model: Device.modelName ?? DEVICE },
       dialFailure: relayFailure,
     },
     progress,
