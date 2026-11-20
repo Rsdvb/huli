@@ -39,7 +39,7 @@ function iconOf(entry: ThreadEntry): IconSpec | null {
 
 /** A step of a run: a tool call, a thought or a project memory write. */
 export const Step = memo(function Step(props: { entry: ThreadEntry }) {
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   const { entry } = props
   if (entry.kind === 'tool') return <ToolRow entry={entry} />
   if (entry.kind === 'thought') return <ThoughtRow entry={entry} />
@@ -50,7 +50,7 @@ export const Step = memo(function Step(props: { entry: ThreadEntry }) {
 
 export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; latest: boolean }) {
   const { c } = useSessionTokens()
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   const { entries, latest } = props
   const [open, setOpen] = useDisclosure(`run:${entries[0]!.id}`)
   const shown = useOpenFade(open)

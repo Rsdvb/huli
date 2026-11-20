@@ -131,7 +131,7 @@ function FileRow(props: { change: FileChange; root: string | null; first: boolea
 
 export const TurnChanges = memo(function TurnChanges(props: { tools: ToolEntry[] }) {
   const { c, s } = useSessionTokens()
-  const { root } = useSessionRows()
+  const { root } = useSessionRows((r) => ({ root: r.root }))
   const changes = useMemo(() => fileChanges(props.tools), [props.tools])
   if (changes.length === 0) return null
   const insertions = changes.reduce((n, ch) => n + ch.insertions, 0)

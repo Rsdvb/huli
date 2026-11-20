@@ -303,7 +303,7 @@ function hasBody(entry: ToolEntry, label: ToolLabel): boolean {
 }
 
 export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: string }) {
-  const { root, sessionId } = useSessionRows()
+  const { root, sessionId } = useSessionRows((r) => ({ root: r.root, sessionId: r.sessionId }))
   const { c } = useSessionTokens()
   const { entry } = props
   const status = stepStatus(entry)
@@ -409,7 +409,7 @@ function DiffPreview(props: { edit: FileEdit; root: string | null }) {
  */
 function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
   const { c, s } = useSessionTokens()
-  const { root, sessionId } = useSessionRows()
+  const { root, sessionId } = useSessionRows((r) => ({ root: r.root, sessionId: r.sessionId }))
   const { entry, label } = props
   const command = label.kind === 'command' ? label.target : null
   const output = command ? commandOutput(entry.content) : null

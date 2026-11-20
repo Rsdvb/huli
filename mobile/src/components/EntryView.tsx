@@ -56,7 +56,10 @@ const NO_MENU: MenuNode[] = []
 
 function Reply(props: { entry: Of<'agent'>; writing: boolean }) {
   const { entry, writing } = props
-  const { fork, forkAtMessage } = useSessionRows()
+  const { fork, forkAtMessage } = useSessionRows((r) => ({
+    fork: r.fork,
+    forkAtMessage: r.forkAtMessage,
+  }))
   // A reply still being written has no menu yet; its text is not done. Built once per text, so
   // a redraw of the row hands the system's menu the same items.
   const markdown = entry.markdown
@@ -122,7 +125,7 @@ function Reply(props: { entry: Of<'agent'>; writing: boolean }) {
  */
 function AnsweredTool(props: { entry: ToolEntry }) {
   const { entry } = props
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   const agent = useAgentName(sessionId)
   const words = answerWords(entry, agent)
   if (!words) return <ToolRow entry={entry} />
@@ -233,7 +236,7 @@ export const EntryView = memo(function EntryView(props: {
   writing?: boolean
 }) {
   const { entry } = props
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   // The host's own requests: a line while their card waits above the composer, then the answer.
   const request = { sessionId, place: 'thread' as const }
   switch (entry.kind) {

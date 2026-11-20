@@ -427,7 +427,7 @@ export function PlanWaitingLine(props: { entry: ToolEntry }) {
 export function PlanSettled(props: { entry: ToolEntry }) {
   const { entry } = props
   const { c } = useSessionTokens()
-  const { config } = useSessionRows()
+  const { config } = useSessionRows((r) => ({ config: r.config }))
   const [open, setOpen] = useState(false)
   const result = entry.permissionResult
   const markdown = planMarkdown(entry)

@@ -59,7 +59,12 @@ export function outOfCreditOf(thread: ThreadState | null): Notice | null {
 export function NoticeEntry(props: { entry: Notice }) {
   const { entry } = props
   const { c, s } = useSessionTokens()
-  const { sessionId, retryNotice, cutNotice, carryOn } = useSessionRows()
+  const { sessionId, retryNotice, cutNotice, carryOn } = useSessionRows((r) => ({
+    sessionId: r.sessionId,
+    retryNotice: r.retryNotice,
+    cutNotice: r.cutNotice,
+    carryOn: r.carryOn,
+  }))
   const link = useLink()
   const sender = useSender()
   const [open, setOpen] = useState(false)

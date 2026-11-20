@@ -59,7 +59,11 @@ export const UserMessage = memo(function UserMessage(props: {
 }) {
   const { content } = props
   const { c, s } = useSessionTokens()
-  const { sessionId, commands, command } = useSessionRows()
+  const { sessionId, commands, command } = useSessionRows((r) => ({
+    sessionId: r.sessionId,
+    commands: r.commands,
+    command: r.command,
+  }))
   const refs = useFileRefs()
   const text = textOf(content)
   const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
