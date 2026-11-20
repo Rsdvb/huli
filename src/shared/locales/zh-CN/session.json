@@ -72,6 +72,18 @@
       "mode": "被权限模式拒绝",
       "rule": "被权限规则拒绝",
       "hook": "被 Hook 拒绝"
+    },
+    "review": {
+      "approved": "自动审查已批准",
+      "approvedRisk": "自动审查已批准 · {{risk}}",
+      "reviewing": "自动审查中…",
+      "reviewingRisk": "自动审查中… · {{risk}}",
+      "risk": {
+        "low": "低风险",
+        "medium": "中等风险",
+        "high": "高风险",
+        "critical": "极高风险"
+      }
     }
   },
   "permission": {
@@ -987,7 +999,8 @@
       "changes": "更改",
       "input": "输入",
       "prompt": "提示词",
-      "denied": "拒绝原因"
+      "denied": "拒绝原因",
+      "review": "自动审查"
     },
     "exitCode": "退出码 {{code}}",
     "earlierLines_other": "前面 {{count}} 行",

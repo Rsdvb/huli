@@ -9,6 +9,7 @@ import type {
   TokenTotals,
   ToolContent,
   ToolEntry,
+  ToolReview,
   UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
@@ -250,6 +251,69 @@ function dynamicContent(item: Item<'dynamicToolCall'>): ToolContent[] {
   )
 }
 
+/** Huli: an action Codex's auto-review looks at, as its notifications describe it. */
+type ReviewAction =
+  | { type: 'command'; command: string; cwd: string }
+  | { type: 'execve'; program: string; argv: string[]; cwd: string }
+  | { type: 'writeStdin'; stdin: string }
+  | { type: 'applyPatch'; files: string[]; cwd: string }
+  | { type: 'networkAccess'; host: string; protocol: string; target: string }
+  | { type: 'mcpToolCall'; server: string; toolName: string; toolTitle?: string | null }
+  | { type: 'requestPermissions'; reason?: string | null }
+  | { type?: undefined }
+
+const REVIEW_STATUS: Record<string, ToolReview['status']> = {
+  inProgress: 'reviewing',
+  approved: 'approved',
+  denied: 'denied',
+  timedOut: 'timed_out',
+  aborted: 'aborted',
+}
+
+const REVIEW_RISKS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'critical'])
+
+/** Huli: the row of an action an auto-review looks at before Codex has an item for it. */
+function reviewFacts(action: ReviewAction): ToolChanges {
+  switch (action.type) {
+    case 'command':
+      return commandFacts(action.command, action.cwd, null)
+    case 'execve': {
+      const command = [action.program, ...action.argv.slice(1)].join(' ')
+      return { title: command, toolKind: 'execute', rawInput: command }
+    }
+    case 'writeStdin':
+      return {
+        title: t('codex.approval.stdinTitle'),
+        toolKind: 'other',
+        ...(action.stdin ? { rawInput: action.stdin } : {}),
+      }
+    case 'applyPatch':
+      return {
+        title: t('codex.tool.editFiles'),
+        toolKind: 'edit',
+        locations: action.files.map((file) => ({ path: absolute(action.cwd, file) })),
+      }
+    case 'networkAccess':
+      return {
+        title: t('codex.approval.networkTitle', { protocol: action.protocol, host: action.host }),
+        toolKind: 'fetch',
+      }
+    case 'mcpToolCall':
+      return {
+        title: t('codex.tool.mcp', { server: action.server, tool: action.toolName }),
+        toolKind: 'other',
+      }
+    case 'requestPermissions':
+      return {
+        title: t('codex.approval.permissionsTitle'),
+        toolKind: 'other',
+        ...(action.reason ? { description: action.reason } : {}),
+      }
+    default:
+      return { title: t('codex.review.action'), toolKind: 'other' }
+  }
+}
+
 /** The thread ids of the subagents an item names. */
 export function childThreads(item: ThreadItem): string[] {
   if (item.type === 'collabAgentToolCall') return item.receiverThreadIds
@@ -348,6 +412,27 @@ export class ThreadMapper {
           }),
         })
         break
+      case 'item/autoApprovalReview/started':
+      case 'item/autoApprovalReview/completed':
+        this.review(ctx, out, p, method.endsWith('completed'))
+        break
+      case 'autoApprovalReview/strictReviewRequired':
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: ctx.nextId(),
+          severity: 'warning',
+          title: t('codex.review.strict'),
+        })
+        break
+      case 'guardianWarning':
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: ctx.nextId(),
+          severity: 'warning',
+          title: t('codex.review.warning'),
+          ...(typeof p.message === 'string' && p.message !== '' ? { description: p.message } : {}),
+        })
+        break
       case 'warning':
         addEntry(ctx, out, {
           kind: 'notice',
@@ -360,6 +445,53 @@ export class ThreadMapper {
         return null
     }
     return out
+  }
+
+  /**
+   * Huli: Codex's auto-review of an action before it runs, shown on the row of the call it reviews,
+   * which it adds when the call has none yet. A denied call is denied by the review, with its
+   * rationale; an action that starts no item of its own ends with the review.
+   */
+  private review(
+    ctx: MapperContext,
+    out: MapperOutput,
+    p: Record<string, unknown>,
+    done: boolean,
+  ): void {
+    const review = (p.review ?? {}) as {
+      status?: string
+      riskLevel?: string | null
+      rationale?: string | null
+    }
+    const action = (p.action ?? {}) as ReviewAction
+    const target =
+      typeof p.targetItemId === 'string' && p.targetItemId !== '' ? p.targetItemId : null
+    const itemId = target ?? `review:${String(p.reviewId ?? ctx.nextId())}`
+    const status = REVIEW_STATUS[review.status ?? ''] ?? (done ? 'aborted' : 'reviewing')
+    const risk = REVIEW_RISKS.has(review.riskLevel ?? '')
+      ? (review.riskLevel as ToolReview['risk'])
+      : null
+    const verdict: ToolReview = { status, risk, rationale: review.rationale?.trim() || null }
+    const existing = ctx.thread.byId[`t:${itemId}`]
+    const ownItem =
+      target !== null && action.type !== 'networkAccess' && action.type !== 'requestPermissions'
+    this.tool(ctx, out, itemId, {
+      ...(existing?.kind === 'tool' ? {} : { ...reviewFacts(action), status: 'pending' as const }),
+      review: verdict,
+      ...(status === 'denied' || status === 'timed_out'
+        ? {
+            status: 'cancelled' as const,
+            denied: {
+              by: 'review' as const,
+              ...(verdict.rationale ? { reason: verdict.rationale } : {}),
+            },
+          }
+        : status === 'aborted'
+          ? { status: 'cancelled' as const }
+          : status === 'approved' && !ownItem
+            ? { status: 'completed' as const }
+            : {}),
+    })
   }
 
   /** One item of the thread's history, as `session/load` replays one. */
@@ -818,6 +950,7 @@ export class ThreadMapper {
       ...(changes.elicitation !== undefined ? { elicitation: changes.elicitation } : {}),
       ...(changes.structured !== undefined ? { structured: changes.structured } : {}),
       ...(changes.denied !== undefined ? { denied: changes.denied } : {}),
+      ...(changes.review !== undefined ? { review: changes.review } : {}),
       ...(changes.exitCode !== undefined ? { exitCode: changes.exitCode } : {}),
     }
     addEntry(ctx, out, entry)

@@ -66,6 +66,13 @@ export const ToolBody = memo(function ToolBody({
           </p>
         </ToolCallSection>
       )}
+      {entry.review?.rationale && !entry.denied?.reason && (
+        <ToolCallSection label={t('toolCall.section.review')} labels={labels}>
+          <p data-selectable="" className="ks-tool-prompt">
+            {entry.review.rationale}
+          </p>
+        </ToolCallSection>
+      )}
       {fields && <ToolInput fields={fields} raw={entry.rawInput ?? ''} />}
       {command && (
         <ContextMenu>

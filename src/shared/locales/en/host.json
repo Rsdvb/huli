@@ -743,6 +743,11 @@
       "stillStarting": "Some MCP servers are still starting. Run `/mcp` again later to see their status.",
       "unknownError": "unknown MCP startup error",
       "unnamed": "(unnamed)"
+    },
+    "review": {
+      "strict": "Automatic review now asks for a strict review",
+      "warning": "Automatic review warning",
+      "action": "Action under review"
     }
   },
   "dsh": {

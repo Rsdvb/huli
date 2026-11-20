@@ -276,6 +276,80 @@ describe('commands', () => {
   })
 })
 
+describe('auto-review', () => {
+  const action = { type: 'command', command: 'rm -rf build', cwd: '/p', source: 'shell' }
+  const review = (status: string, extra: Record<string, unknown> = {}): [string, unknown] => [
+    status === 'inProgress'
+      ? 'item/autoApprovalReview/started'
+      : 'item/autoApprovalReview/completed',
+    {
+      ...at,
+      reviewId: 'r1',
+      targetItemId: 'cmd-1',
+      startedAtMs: 1,
+      action,
+      review: { status, riskLevel: 'high', rationale: null, ...extra },
+    },
+  ]
+
+  it('shows the review on the row of the call it looks at, and a denial as no failure', () => {
+    const { entries, unknown } = run([
+      review('inProgress'),
+      review('denied', { rationale: 'Deletes the build outside the task' }),
+      completed({
+        type: 'commandExecution',
+        id: 'cmd-1',
+        command: 'rm -rf build',
+        cwd: '/p',
+        status: 'declined',
+        commandActions: [{ type: 'unknown', command: 'rm -rf build' }],
+        aggregatedOutput: null,
+        exitCode: null,
+      }),
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      id: 't:cmd-1',
+      title: 'rm -rf build',
+      toolKind: 'execute',
+      status: 'cancelled',
+      review: { status: 'denied', risk: 'high', rationale: 'Deletes the build outside the task' },
+      denied: { by: 'review', reason: 'Deletes the build outside the task' },
+    })
+  })
+
+  it('leaves an approved call to run, and ends one that starts no item with its review', () => {
+    const { entries } = run([
+      review('approved', { riskLevel: 'low' }),
+      [
+        'item/autoApprovalReview/completed',
+        {
+          ...at,
+          reviewId: 'r2',
+          targetItemId: null,
+          startedAtMs: 1,
+          action: {
+            type: 'networkAccess',
+            host: 'pypi.org',
+            port: 443,
+            protocol: 'https',
+            target: 'x',
+          },
+          review: { status: 'approved', riskLevel: 'low', rationale: null },
+        },
+      ],
+      ['guardianWarning', { threadId: 'thread-1', message: 'Too many denied actions' }],
+    ])
+    expect(entries).toMatchObject([
+      { id: 't:cmd-1', status: 'pending', review: { status: 'approved', risk: 'low' } },
+      { id: 't:review:r2', status: 'completed', toolKind: 'fetch' },
+      { kind: 'notice', severity: 'warning', description: 'Too many denied actions' },
+    ])
+    expect(entries[0]).not.toHaveProperty('denied')
+  })
+})
+
 describe('diffs', () => {
   it('reads each hunk of a unified diff as its old and new text', () => {
     expect(

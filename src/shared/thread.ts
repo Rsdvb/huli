@@ -821,6 +821,15 @@ export interface ToolEntry {
   denied?: ToolDenial
   /** Huli: the exit code a command ended with, when the agent reports one apart from its output. */
   exitCode?: number
+  /** Huli: the agent's automatic review of the call before it ran, such as Codex's auto-review. */
+  review?: ToolReview
+}
+
+/** Huli: what an agent's automatic review made of a call: its verdict, the risk it saw, and why. */
+export interface ToolReview {
+  status: 'reviewing' | 'approved' | 'denied' | 'timed_out' | 'aborted'
+  risk: 'low' | 'medium' | 'high' | 'critical' | null
+  rationale: string | null
 }
 
 /**

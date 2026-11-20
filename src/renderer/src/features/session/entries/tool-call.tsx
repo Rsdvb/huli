@@ -80,6 +80,16 @@ export function StepCard({
     // Huli: a denied call reads Denied, not Cancelled, and says what denied it.
     const denial = entry.denied
     if (note === undefined && denial && denial.by !== 'user') note = t(`tool.deniedBy.${denial.by}`)
+    const review = entry.review
+    if (
+      note === undefined &&
+      review &&
+      (review.status === 'approved' || review.status === 'reviewing')
+    ) {
+      note = review.risk
+        ? t(`tool.review.${review.status}Risk`, { risk: t(`tool.review.risk.${review.risk}`) })
+        : t(`tool.review.${review.status}`)
+    }
     const cardLabels = denial ? { ...labels, cancelled: t('status.denied') } : labels
     return (
       <ToolCallCard

@@ -119,6 +119,7 @@ export function toolHasBody(entry: ToolEntry, projectPath: string): boolean {
     (!!command && (command.length > 60 || command.includes('\n'))) ||
     (!command && !!entry.description) ||
     !!entry.denied?.reason ||
+    !!entry.review?.rationale ||
     toolInputFields(entry) !== null
   )
 }
