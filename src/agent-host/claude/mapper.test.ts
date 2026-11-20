@@ -95,6 +95,16 @@ class Run {
   }
 }
 
+const system = (subtype: string, fields: Record<string, unknown> = {}) => ({
+  type: 'system',
+  subtype,
+  uuid: `u-${subtype}`,
+  session_id: SESSION,
+  ...fields,
+})
+
+const notices = (run: Run) => run.entries().filter((entry) => entry.kind === 'notice')
+
 const toolCall = (id: string, name: string, input: Record<string, unknown>) => ({
   type: 'assistant',
   message: {
@@ -115,6 +125,49 @@ const toolResult = (id: string, content: unknown, extra: Record<string, unknown>
   },
   parent_tool_use_id: null,
   session_id: SESSION,
+})
+
+describe('a retried request', () => {
+  const retry = (attempt: number, fields: Record<string, unknown> = {}) =>
+    system('api_retry', {
+      attempt,
+      max_retries: 10,
+      retry_delay_ms: 1_000,
+      error_status: 529,
+      error: 'overloaded',
+      uuid: `u-retry-${attempt}`,
+      ...fields,
+    })
+
+  it('shows one notice that counts the attempts, then says the request went through', () => {
+    const run = new Run().feed(retry(1), retry(2))
+    expect(notices(run)).toMatchObject([
+      { severity: 'warning', title: 'Retrying (2/10) · service overloaded' },
+    ])
+    run.feed({
+      type: 'stream_event',
+      event: { type: 'message_start', message: { id: 'msg-1' } },
+      parent_tool_use_id: null,
+      session_id: SESSION,
+    })
+    expect(notices(run)).toMatchObject([
+      { severity: 'info', title: 'Went through after 2 retries · service overloaded' },
+    ])
+  })
+
+  it('says when the turn ended still failing, and names a connection error', () => {
+    const run = new Run().feed(retry(3, { error: 'unknown', error_status: null }))
+    for (const delivery of run.mapper.retryEnded(false)) {
+      run.thread = applyPatches(run.thread, delivery.map(run.context()).patches)
+    }
+    expect(notices(run)).toMatchObject([
+      { severity: 'warning', title: 'Still failing after 3 retries · connection failed' },
+    ])
+  })
+
+  it("leaves a subagent's retries to it", () => {
+    expect(notices(new Run().feed(retry(1, { agent_id: 'task-1' })))).toEqual([])
+  })
 })
 
 describe('a call that did not run', () => {

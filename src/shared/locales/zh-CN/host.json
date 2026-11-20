@@ -477,6 +477,25 @@
       "loadSkill": "加载技能",
       "loadSkillNamed": "加载技能：{{skill}}",
       "tool": "工具"
+    },
+    "notice": {
+      "retrying": "正在重试（{{attempt}}/{{max}}）· {{reason}}",
+      "retried": "重试 {{count}} 次后已恢复 · {{reason}}",
+      "retryFailed": "重试 {{count}} 次后仍然失败 · {{reason}}"
+    },
+    "retryReason": {
+      "overloaded": "服务繁忙",
+      "rate_limit": "请求太频繁",
+      "server_error": "服务出错",
+      "authentication_failed": "登录失效",
+      "billing_error": "账单问题",
+      "invalid_request": "请求被拒",
+      "model_not_found": "找不到模型",
+      "max_output_tokens": "回复太长",
+      "cloud_credential_error": "云服务凭据出错",
+      "noResponse": "没有响应",
+      "connection": "连接失败",
+      "status": "HTTP {{status}}"
     }
   },
   "codex": {

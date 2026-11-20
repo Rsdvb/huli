@@ -480,6 +480,25 @@
       "loadSkill": "Load skill",
       "loadSkillNamed": "Load skill: {{skill}}",
       "tool": "Tool"
+    },
+    "notice": {
+      "retrying": "Retrying ({{attempt}}/{{max}}) · {{reason}}",
+      "retried": "Went through after {{count}} retries · {{reason}}",
+      "retryFailed": "Still failing after {{count}} retries · {{reason}}"
+    },
+    "retryReason": {
+      "overloaded": "service overloaded",
+      "rate_limit": "rate limited",
+      "server_error": "server error",
+      "authentication_failed": "sign-in failed",
+      "billing_error": "billing problem",
+      "invalid_request": "request rejected",
+      "model_not_found": "model not found",
+      "max_output_tokens": "reply too long",
+      "cloud_credential_error": "cloud credentials failed",
+      "noResponse": "no response",
+      "connection": "connection failed",
+      "status": "HTTP {{status}}"
     }
   },
   "codex": {

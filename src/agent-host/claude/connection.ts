@@ -1255,6 +1255,7 @@ export class ClaudeConnection implements AgentConnection {
       session.stale = true
       for (const delivery of session.mapper.endAll('error')) this.deliver(delivery)
       for (const delivery of session.mapper.endBackground()) this.deliver(delivery)
+      for (const delivery of session.mapper.retryEnded(false)) this.deliver(delivery)
       this.scheduled(session, 0)
     }
     const turn = session.turn
@@ -1358,6 +1359,8 @@ export class ClaudeConnection implements AgentConnection {
 
   private result(session: Session, result: ResultMessage): void {
     const turn = session.turn
+    // A request still retried when its turn ends never went through.
+    for (const delivery of session.mapper.retryEnded(false)) this.deliver(delivery)
     const totals = result.modelUsage ?? {}
     // The first result after a resume carries the history's totals, so only its own usage counts.
     const spent =

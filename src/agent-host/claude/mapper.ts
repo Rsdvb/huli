@@ -12,7 +12,7 @@ import type {
   UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
-import { t } from '../i18n'
+import { hasMessage, t } from '../i18n'
 import {
   appendContent,
   attachmentCount,
@@ -224,6 +224,8 @@ export class ClaudeMapper {
   private lastSentAt: number | null = null
   /** The main thread's request streaming now, timed for its speed. */
   private timing: RequestTiming | null = null
+  /** Huli: the request Claude Code retries now, and the notice that says so. */
+  private retry: { id: string; attempts: number; reason: string } | null = null
 
   constructor(
     /** The session's own id, Claude Code's. */
@@ -327,7 +329,10 @@ export class ClaudeMapper {
         }
         const usage = event.message?.usage
         const sentAt = this.lastSentAt
-        return [{ sessionId, map: (ctx) => this.request(ctx, usage, sentAt) }]
+        return [
+          ...this.retryEnded(true),
+          { sessionId, map: (ctx) => this.request(ctx, usage, sentAt) },
+        ]
       }
       case 'content_block_start': {
         const block = event.content_block
@@ -1025,7 +1030,7 @@ export class ClaudeMapper {
       case 'api_retry':
         // The request goes out again, so its first token is timed from the retry.
         this.lastSentAt = Date.now()
-        return []
+        return this.retrying(message)
       case 'init':
       case 'session_state_changed':
       case 'hook_started':
@@ -1105,6 +1110,47 @@ export class ClaudeMapper {
       default:
         return null
     }
+  }
+
+  /**
+   * Huli: Claude Code retries a request that failed: one notice says so while it does, counting the
+   * attempts, and then whether the request went through.
+   */
+  private retrying(message: SystemMessage): Delivery[] {
+    if (message.agent_id || message.parent_tool_use_id) return []
+    const attempt = typeof message.attempt === 'number' ? message.attempt : 1
+    const max = typeof message.max_retries === 'number' ? message.max_retries : attempt
+    const reason = retryReason(message)
+    const retry = (this.retry ??= {
+      id: `n:retry:${String(message.uuid ?? Date.now())}`,
+      attempts: 0,
+      reason,
+    })
+    retry.attempts = attempt
+    retry.reason = reason
+    const title = t('claude.notice.retrying', { attempt, max, reason })
+    return [noticeDelivery(this.sessionId, retry.id, 'warning', title)]
+  }
+
+  /**
+   * Huli: the retried request went through, as its stream starts, or the turn ended without it:
+   * the retry's notice says how it went.
+   */
+  retryEnded(through: boolean): Delivery[] {
+    const retry = this.retry
+    if (!retry) return []
+    this.retry = null
+    const params = { count: retry.attempts, reason: retry.reason }
+    return [
+      through
+        ? noticeDelivery(this.sessionId, retry.id, 'info', t('claude.notice.retried', params))
+        : noticeDelivery(
+            this.sessionId,
+            retry.id,
+            'warning',
+            t('claude.notice.retryFailed', params),
+          ),
+    ]
   }
 
   private taskStarted(message: SystemMessage): Delivery[] {
@@ -1525,6 +1571,41 @@ export class ClaudeMapper {
       }
     }
     return deliveries.filter((delivery) => delivery.sessionId === this.sessionId)
+  }
+}
+
+/** Huli: why a request is retried, in words: the error Claude Code names, or its HTTP status. */
+function retryReason(message: SystemMessage): string {
+  if (message.no_response) return t('claude.retryReason.noResponse')
+  const error = typeof message.error === 'string' ? message.error : 'unknown'
+  const key = `claude.retryReason.${error}`
+  if (error !== 'unknown' && hasMessage(key)) return t(key as 'claude.retryReason.overloaded')
+  const status = typeof message.error_status === 'number' ? message.error_status : null
+  return status === null
+    ? t('claude.retryReason.connection')
+    : t('claude.retryReason.status', { status })
+}
+
+/** Huli: adds a notice of Kite's own, or changes it once it shows. */
+function noticeDelivery(
+  sessionId: string,
+  id: string,
+  severity: 'info' | 'warning' | 'error',
+  title: string,
+  description?: string,
+): Delivery {
+  return {
+    sessionId,
+    map: (ctx) => {
+      const out = output()
+      const changes = { severity, title, ...(description !== undefined ? { description } : {}) }
+      if (ctx.thread.byId[id]?.kind === 'notice') {
+        out.patches.push({ op: 'entry.update', id, changes })
+      } else {
+        addEntry(ctx, out, { kind: 'notice', id, ...changes })
+      }
+      return out
+    },
   }
 }
 
