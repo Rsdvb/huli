@@ -28,6 +28,7 @@ import {
   clearSearches,
   forgetSearch,
   isScope,
+  longEnough,
   matches,
   rememberSearch,
   SCOPES,
@@ -153,7 +154,7 @@ export default function Search() {
     (text: string) => {
       const asked = text.trim()
       const askedWords = wordsOf(asked)
-      if (asked.length < 2) {
+      if (!longEnough(askedWords)) {
         setContent(null)
         return
       }
@@ -281,7 +282,7 @@ export default function Search() {
     }
     if (all || scope === 'content') {
       if (!contentCurrent) {
-        if (query.trim().length >= 2) {
+        if (longEnough(words)) {
           if (!all) out.push({ kind: 'header', key: 'h-content', title: '对话内容' })
           out.push({
             kind: 'note',
@@ -292,7 +293,10 @@ export default function Search() {
             label: '搜索对话内容',
             action: () => runContent(query),
           })
-        } else if (!all) {
+        } else if (!all || query.trim()) {
+          // The computer searches what was said by two characters or more; say so rather than
+          // stay silent after one.
+          if (all) out.push({ kind: 'header', key: 'h-content', title: '对话内容' })
           out.push({ kind: 'note', key: 'n-short', text: '至少输入两个字再搜索对话内容。' })
         }
       } else if (content.state === 'loading') {
