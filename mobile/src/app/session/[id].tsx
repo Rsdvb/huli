@@ -104,6 +104,8 @@ import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionCh
 import { sessionMenuPages } from '../../components/SessionMenu'
 import { useSessionPane } from '../../components/SessionPane'
 import {
+  HeldStrip,
+  heldConfirmText,
   ModeButton,
   ModelChip,
   QueueStack,
@@ -216,6 +218,9 @@ const isPlanAsk = (entry: ThreadEntry): entry is ToolEntry =>
 
 const pickKeyboard = (state: { isVisible: boolean; height: number }) =>
   state.isVisible ? state.height : 0
+
+// The sessions whose user agreed to go on here while a program outside has them open, once each.
+const outsideAgreed = new Set<string>()
 
 // How long Stop waits for the turn to end before it can be asked again.
 const STOP_WAIT = 15_000
@@ -628,6 +633,21 @@ export default function SessionScreen() {
   // A message that hands the session to another agent goes as that agent's first turn; any other
   // goes through the host's queue, which sends at once when the session is free.
   const send = async (content: UserContent[]) => {
+    if (openOutside && !heldOutside && !outsideAgreed.has(id)) {
+      const go = await new Promise<boolean>((resolve) =>
+        Alert.alert(
+          '在这里继续？',
+          heldConfirmText(openOutside),
+          [
+            { text: '取消', style: 'cancel', onPress: () => resolve(false) },
+            { text: '在这里继续', onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        ),
+      )
+      if (!go) throw new SendCancelled()
+      outsideAgreed.add(id)
+    }
     if (pendingSwitch) {
       if (!(await confirmSwitch(pending?.name ?? 'Agent'))) throw new SendCancelled()
       // Read again: the switch may have changed while the user was asked.
@@ -831,9 +851,19 @@ export default function SessionScreen() {
     reached,
     rejected,
   })
+  // A program outside that has the session open and at work writes to it, so nothing goes from
+  // here until it is done; one that has it open but idle lets a message go once the user agrees.
+  const heldOutside = session?.heldOutside === true
+  const openOutside = session?.openOutside ?? null
   // Why Send does nothing now, for the line over the text.
   const unsendable =
-    mustSwitch && !pendingSwitch ? '先选择 Agent' : starting ? `等 ${shownName} 启动后再发送` : null
+    mustSwitch && !pendingSwitch
+      ? '先选择 Agent'
+      : starting
+        ? `等 ${shownName} 启动后再发送`
+        : heldOutside
+          ? '等那边运行完再发送'
+          : null
 
   const titlePages = summary
     ? sessionMenuPages({
@@ -1154,10 +1184,15 @@ export default function SessionScreen() {
             onCountChange={setAttachCount}
             top={(holds) =>
               pendingSwitch ||
+              heldOutside ||
+              openOutside ||
               suggestion ||
               (cacheNoticeShown && holds) ||
               (predicted && !holds) ? (
                 <>
+                  {heldOutside || openOutside ? (
+                    <HeldStrip by={openOutside ?? 'terminal'} busy={heldOutside} />
+                  ) : null}
                   {predicted && !holds && (
                     <PromptSuggestionChip
                       text={predicted.text}
