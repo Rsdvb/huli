@@ -26,9 +26,11 @@ export interface PrepareTarget {
   parentId: string | null
 }
 
-// It goes this long after New session leaves the front, and after this long untouched in front.
+// It goes this long after New session leaves the front, and after this long untouched in front:
+// Claude Code's process for it holds some 240 MB working set and 550 MB private, so a window left
+// on New session gives it back soon, and the next keystroke or visit opens another.
 const LEFT_MS = 60_000
-const IDLE_MS = 30 * 60_000
+const IDLE_MS = 3 * 60_000
 // Opening the agent menu replaces one older than this, since a provider's list can change.
 export const STALE_MS = 5 * 60_000
 

@@ -354,6 +354,8 @@ export type HostToMain =
   | ({ type: 'host:busy-changed' } & BusyCounts) // for the tray's state line
   // Whether any routine run is starting or running, for keeping the computer from idle sleep.
   | { type: 'host:routines-working'; working: boolean }
+  // Huli: whether the host is moving its stored data to a new format, which the backup waits out.
+  | { type: 'host:migrating'; running: boolean }
   | { type: 'host:busy'; requestId: number; sessions: BusySession[] }
   | { type: 'host:report'; requestId: number; result: ReportBuildResult }
   | { type: 'host:granted'; requestId: number }

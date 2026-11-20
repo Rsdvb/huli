@@ -19,7 +19,8 @@
     "hosts": "Hosts",
     "devices": "Mobile devices",
     "computer-use": "Computer use",
-    "agent-network": "Agent network"
+    "agent-network": "Agent network",
+    "backup": "Backup"
   },
   "page": {
     "title": "Settings",
@@ -654,6 +655,36 @@
       "show": "Show in {{name}}",
       "copy": "Copy path"
     },
+    "storage": {
+      "name": "Storage",
+      "description": "What the data folder holds.",
+      "keywords": "disk space size images screenshots pictures clean clear free",
+      "parts": {
+        "threads": "Conversations",
+        "media": "Images and media",
+        "attachments": "Attachments",
+        "artifacts": "Artifacts",
+        "logs": "Logs",
+        "usage": "Usage records"
+      },
+      "total": "{{size}} in all",
+      "clean": "Clean up…",
+      "dialogTitle": "Clear images from sessions?",
+      "dialogDescription": "The images go from Kettu’s copy of the conversations; the agents keep their own transcripts. This can’t be undone.",
+      "scope": "Sessions",
+      "archived": "Archived",
+      "older_one": "Idle {{count}} day",
+      "older_other": "Idle {{count}} days",
+      "counting": "Counting…",
+      "nothing": "No images to clear.",
+      "images_one": "{{count}} image",
+      "images_other": "{{count}} images",
+      "sessions_one": "{{count}} session",
+      "sessions_other": "{{count}} sessions",
+      "preview": "{{images}} from {{sessions}}, about {{size}}.",
+      "confirm": "Clear images",
+      "cleared": "Cleared {{images}}, {{size}} freed"
+    },
     "removeSessions": {
       "name": "Remove all sessions from Kettu",
       "description": "Clears the list. Agents keep their own transcripts.",
@@ -669,6 +700,11 @@
       "network": "Network",
       "data": "Diagnostics and data",
       "danger": "Danger zone"
+    },
+    "backup": {
+      "name": "Backup",
+      "description": "A copy of Kettu’s data each day on this computer, and restoring one.",
+      "open": "Backup settings…"
     }
   },
   "agents": {
@@ -1250,7 +1286,8 @@
     "hostsWeb": "The computer this page connects to. Its sessions, projects and agents stay on it; here is only how this browser reaches it.",
     "devices": "Simulators and phones agents may use without asking.",
     "computer-use": "Lets agents read and drive the desktop apps of this computer, one app and one session at a time.",
-    "agent-network": "Each agent’s traffic through a node of your proxy subscriptions, and never around it."
+    "agent-network": "Each agent’s traffic through a node of your proxy subscriptions, and never around it.",
+    "backup": "A copy of Kettu’s own data each day, kept on this computer, to restore after a loss."
   },
   "archived": {
     "description": "{{project}} · archived {{when}}",
@@ -2330,5 +2367,76 @@
       "description": "An agent set to an interface sends its traffic only through it, and has no network while it is disconnected or gone.",
       "keywords": "interface adapter nic tun vpn wifi ethernet bind"
     }
+  },
+  "backup": {
+    "groups": {
+      "schedule": "Daily backup",
+      "folder": "Where backups go",
+      "restore": "Restore"
+    },
+    "enabled": {
+      "name": "Back up every day",
+      "description": "Copies Kettu’s sessions, settings, memory, artifacts and attachments into one file a day. A day missed while the computer was off is made up once, the next time Kettu runs.",
+      "keywords": "backup copy daily schedule save data archive"
+    },
+    "time": {
+      "name": "Time",
+      "description": "When the daily backup runs, in this computer’s time.",
+      "keywords": "backup schedule hour clock time of day"
+    },
+    "keep": {
+      "name": "Backups kept",
+      "description": "Once the folder holds more, the oldest goes.",
+      "option_one": "{{count}} backup",
+      "option_other": "{{count}} backups",
+      "keywords": "backup keep count copies retention prune"
+    },
+    "status": {
+      "name": "Last backup",
+      "never": "No backup yet",
+      "running": "Backing up…",
+      "done_one": "{{when}}, {{size}}, {{count}} file",
+      "done_other": "{{when}}, {{size}}, {{count}} files",
+      "next": "next {{when}}",
+      "off": "daily backups are off",
+      "now": "Back up now",
+      "keywords": "backup last status now run"
+    },
+    "folder": {
+      "name": "Backup folder",
+      "description": "Each backup is one zip file, named by when it was made.",
+      "stored_one": "{{count}} backup here, {{size}}.",
+      "stored_other": "{{count}} backups here, {{size}}.",
+      "choose": "Choose…",
+      "reset": "Use the default",
+      "open": "Open backup folder",
+      "keywords": "backup folder location destination drive documents"
+    },
+    "problem": {
+      "destination-missing": "The backup folder is not there. Plug in its drive, or choose another folder.",
+      "destination-unwritable": "Kettu may not write into the backup folder. Choose another folder.",
+      "no-space": "The backup folder’s drive is full.",
+      "migrating": "Kettu is moving its data to a new format; the backup waits until it is done.",
+      "failed": "The last backup did not finish."
+    },
+    "restore": {
+      "name": "Restore from backup",
+      "description": "Puts a backup’s data in place of Kettu’s, after saving the data it replaces as a backup of its own.",
+      "button": "Restore from backup…",
+      "keywords": "backup restore recover roll back import",
+      "title": "Restore this backup?",
+      "made_one": "{{file}}, made {{date}} by Kettu {{version}}: {{count}} file, {{size}}.",
+      "made_other": "{{file}}, made {{date}} by Kettu {{version}}: {{count}} files, {{size}}.",
+      "replaces": "It replaces Kettu’s sessions, settings, memory, artifacts and attachments. What came after the backup goes, but a copy of the data now is saved in the backup folder first.",
+      "keeps": "Paired devices, the Kettu account sign-in, Marketplace keys and proxy subscriptions are never in backups, and stay as they are.",
+      "restart": "Running agents stop, and Kettu restarts to restore.",
+      "confirm": "Restore and restart",
+      "invalid": "This file cannot be restored: {{message}}",
+      "restoring": "Kettu restarts to restore the backup…",
+      "done": "Restored {{from}} {{when}}",
+      "safety": "The data it replaced is in {{safety}}, in the backup folder.",
+      "failed": "Could not restore {{from}}"
+    },
+    "note": "Left out: this computer’s keys and pairings, the Kettu account sign-in, Marketplace keys and proxy subscriptions, which hold secrets; and caches, logs and the search index, which Kettu rebuilds."
   }
 }

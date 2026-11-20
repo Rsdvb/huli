@@ -65,7 +65,11 @@ function renameWithRetry(from: string, to: string): void {
  * to disk, then renamed into place, so the file is whole whenever it exists.
  */
 export function putContent(dir: string, hash: string, data: Uint8Array): void {
-  const file = contentPath(dir, hash)
+  putWhole(contentPath(dir, hash), data)
+}
+
+/** Writes `file` as `putContent` does, unless it exists: whole whenever it exists. */
+export function putWhole(file: string, data: Uint8Array): void {
   if (existsSync(file)) return
   mkdirSync(path.dirname(file), { recursive: true })
   const temp = `${file}.${randomBytes(4).toString('hex')}.tmp`
@@ -91,7 +95,7 @@ export function moveContent(dir: string, target: string): boolean {
   return true
 }
 
-function removeIfEmpty(folder: string): void {
+export function removeIfEmpty(folder: string): void {
   try {
     rmdirSync(folder)
   } catch {

@@ -200,6 +200,7 @@
     "copiedResume": "Copied the resume command",
     "copySessionId": "Copy session ID",
     "copiedSessionId": "Copied the session ID",
+    "export": "Export…",
     "showInParent": "Show in parent session",
     "agentOf": "{{harness}} · {{agent}}",
     "tokensUsed": "{{tokens}} tokens",

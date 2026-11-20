@@ -34,6 +34,7 @@ const SECTIONS: readonly SettingsSection[] = [
   'account',
   'hosts',
   'browser',
+  'backup',
   'agents',
   'harnesses',
   'memory',
@@ -326,7 +327,10 @@ function useSectionEntries(): SearchEntry[] {
   return useMemo(() => {
     const english = i18n.getFixedT('en', ['settings', 'usage'])
     const noAccount = isWeb || cloudOff
-    return SECTIONS.filter((id) => !(noAccount && id === 'account')).map((id): SearchEntry => {
+    const shown = SECTIONS.filter(
+      (id) => !(noAccount && id === 'account') && !(isWeb && id === 'backup'),
+    )
+    return shown.map((id): SearchEntry => {
       const usage = id === 'usage'
       const title = usage ? t('usage:settings.title') : t(`settings:sections.${id}`)
       const inEnglish = usage ? english('usage:settings.title') : english(`settings:sections.${id}`)

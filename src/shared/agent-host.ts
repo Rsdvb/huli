@@ -123,6 +123,7 @@ import type {
   TaskView,
 } from './workflow'
 import type { ClockRequest, UsageScope, UsageStatus, UsageSummary, UsageTotal } from './usage'
+import type { ImageClear, ImageClearScope, StorageUsage } from './data-usage'
 import type { TurnWork } from './turn-phase'
 import type { LimitPause, LimitPauseAction, Stall, StallAction } from './supervisor'
 import type {
@@ -1549,6 +1550,15 @@ export interface HostContract {
   'usage.sync': { params: void; result: void }
   'usage.reimport': { params: { agentId: AgentId }; result: void }
   'usage.clearRecord': { params: void; result: void }
+  // What the host's data folder holds, by what keeps it, for the Storage row of Settings.
+  'storage.usage': { params: void; result: StorageUsage }
+  // Clears the pictures of the archived sessions, or of those last active more than `days` days
+  // ago, which the threads then show as cleared; `dryRun` only counts them. A session whose turn
+  // is running is left alone.
+  'storage.clearImages': {
+    params: { scope: ImageClearScope; days: number; dryRun: boolean }
+    result: ImageClear
+  }
   // Every artifact, newest first, or those in Recently deleted, the latest deletion first.
   'artifacts.list': { params: { deleted?: boolean }; result: ArtifactSummary[] }
   // The latest version without `version`.
@@ -2087,6 +2097,8 @@ export const HOST_METHODS = [
   'usage.sync',
   'usage.reimport',
   'usage.clearRecord',
+  'storage.usage',
+  'storage.clearImages',
   'artifacts.list',
   'artifacts.read',
   'artifacts.file',

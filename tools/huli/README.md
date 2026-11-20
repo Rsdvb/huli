@@ -171,6 +171,75 @@ Hooks into upstream files, one or two lines each:
 The phone app (`mobile/`) shows them on its home list, with the system's context menus and the
 other paired computers' sessions (`mobile/src/fleet.ts`, `folders.tsx`, `homeList.ts`).
 
+### Backup
+
+A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,
+this computer's alone (the web client has none). Claude Code's `~/.claude` has a backup of its own
+and is not part of it.
+
+- What it keeps and leaves out is `src/main/backup/plan.ts`: the settings, `state/` (the thread
+  and usage databases, sessions, projects, agents, routines, workflows...), `memory/`,
+  `artifacts/content/`, the threads' media under `state/thread-media/`, `attachments/`, themes,
+  workflows and what the Marketplace installed. Left out: `remote/` (this computer's keys, its Kite
+  Cloud sign-in and paired devices, encrypted by the system for this user here, so a copy opens
+  nowhere else, and plain text on Linux without a keyring), `market-keys.json` and
+  `published-artifacts.json` (keys and tokens, encrypted the same way), `agent-network/` (the
+  subscriptions' tokens and nodes' passwords in plain text), and what is rebuilt or fetched again:
+  the search index, thumbnails, the Marketplace's caches, logs, reports and Chromium's folders.
+  A restore leaves all of those as they are, so pairings and the sign-in carry on.
+- A backup runs in a utility process of its own below normal priority (`worker.ts`). The databases
+  are copied with SQLite's `VACUUM INTO`, a consistent copy of a database the agent host has open;
+  the content folders they name (`state/thread-media/`, `artifacts/content/`) are copied before
+  them and topped up after, so every file a copy names is in the zip; one no copy names does no
+  harm. The zip
+  (`zip.ts`, streamed, zip64 past 4 GiB) is written as `Kite-backup-<local time>.zip.partial` and
+  renamed once whole, with `manifest.json`: the app's version, when, each database's schema
+  version, and each file's size and SHA-256. Then the oldest `Kite-backup-*.zip` past the count go; nothing else in the folder is
+  touched.
+- Main keeps the schedule (`service.ts`, `schedule.ts`) and the last runs in `backup-state.json`
+  (never in a backup). A day whose time passed while the computer was off or Kite was closed is
+  made up once, five minutes after the next start; while the agent host starts or reports
+  `host:migrating` (`src/agent-host/migration-watch.ts`: its thread database opening at a new
+  schema, then schema 9's pictures moving out into files), a backup waits ten minutes and looks
+  again, a day at most, since the copy is consistent mid-move too. The default folder is
+  `Documents\Kite 备份`; a development run uses `<data folder> backups` beside its own data folder.
+  The folder and the file to restore come from main's dialogs; the page sends only a token.
+- Restore (`restore.ts`) runs between stopping the hosts and starting again, through the quit
+  flow's restart (`QuitFlow.restart(relaunch, afterStop)`), which asks first while agents work. It
+  checks every file of the backup against its manifest's SHA-256 while unpacking it beside the
+  data, saves the data in place as `Kite-before-restore-<time>.zip` in the backup folder (never
+  pruned), then swaps what the backup covers by renames, moving everything back if one fails. The
+  databases' journals, the search index and thumbnails go, to be rebuilt. Every file is in place,
+  the media with the database that names them, before the app starts and opens the database.
+- Settings: `backup` in `src/shared/settings.ts` (on, 03:00, 7 kept, the default folder), checked in
+  `settings-schema.ts`; the folder is set only through the dialog (`setBackupFolder`), and a patch
+  may only clear it. IPC: `backup:*` in `src/shared/ipc.ts`, `registerBackupIpc` in
+  `src/main/ipc.ts`, `backup` in the preload. Page: `features/settings/backup-section.tsx`,
+  `backup-rows.tsx`, `stores/backup.ts`; Advanced › Data has a row beside Storage that opens it.
+  Tests: `src/main/backup/backup.test.ts`,
+  `src/main/settings.test.ts`, `src/agent-host/migration-watch.test.ts`.
+
+### Session export
+
+Export… in a session's menus (the row's and the top bar's More) saves the session as Markdown
+with its pictures in a `<name>.assets` folder beside it, the same in a zip, or a PDF; the dialog
+remembers the format and what to include: the agent's thinking, each tool call's full input and
+output, and the sub-agents' sessions. The desktop app's alone (`window.kettu.exportSession`).
+
+- The page reads the whole thread and its pictures from the session's host, so a session of
+  another computer exports too, and builds the Markdown with `src/shared/session-export.ts`
+  (pure): the title and facts, each speaker's messages, a tool call as one line with its diffs as
+  fenced `diff` blocks (paths relative to the session's folder), plans, questions with their
+  answers, and the folded parts as `<details>`. Pictures are linked as `kite-export-asset:` names.
+- Main (`src/main/session-export/`) checks the request (`request.ts`), asks where with its save
+  dialog, masks secrets as the logs do (`mask.ts`: the log's redactor, but a value after a
+  secret-like name masked only when it reads as a secret, so `token: Token` in code stays, and
+  `‹redacted›` for the mark, which a Markdown viewer would hide as a tag), points the pictures'
+  links at where they land, and writes. The PDF is `html.ts`'s page, every piece of text escaped
+  but the export's own folds, links to http(s) only and pictures only the export's own, printed
+  by Chromium in a hidden window with no script, in light colors whatever the theme.
+- Tests: `src/main/session-export/session-export.test.ts`.
+
 Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy

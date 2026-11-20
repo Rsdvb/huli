@@ -9,6 +9,7 @@ import { AutoPublishNotice } from '@renderer/features/artifacts/auto-publish-not
 import { ArtifactConsentDialog } from '@renderer/features/artifacts/consent-dialog'
 import { GitDialogsHost } from '@renderer/features/git/git-dialogs'
 import { MediaViewer } from '@renderer/features/session/media/media-viewer'
+import { SessionExportDialog } from '@renderer/features/session/export/export-dialog'
 import { HostBanner } from '@renderer/features/shell/host-banner'
 import { LaunchCover } from '@renderer/features/shell/launch-cover'
 import { SplitDragProvider } from '@renderer/features/split/session-drag'
@@ -136,6 +137,8 @@ export function App() {
           </Suspense>
         )}
         <GitDialogsHost />
+        {/* Huli: Export… in a session's menu, which main saves. */}
+        {!isWeb && <SessionExportDialog />}
         <Toaster />
       </div>
     </TooltipProvider>

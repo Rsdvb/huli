@@ -4,7 +4,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import os from 'node:os'
-import { createRedactor, type Redactor } from './redact'
+import { createRedactor, looksSecret, type Redactor } from './redact'
 import { pruneLogFolder, RotatingFile } from './rotating-file'
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -177,6 +177,20 @@ export function removeLogSecret(value: string): void {
 /** Text masked as this process masks its log, with the secrets it holds now. */
 export function redactLogText(text: string): string {
   return redact(text)
+}
+
+const exportRedact: Redactor = createRedactor({
+  home: os.homedir(),
+  secrets: () => secrets,
+  namedValue: looksSecret,
+})
+
+/**
+ * Huli: text masked as the log is, but for a value after a secret-like name that reads as code,
+ * as `token: Token` does: an exported session's code stays whole.
+ */
+export function redactExportText(text: string): string {
+  return exportRedact(text)
 }
 
 /** Only for tests: a redactor with a fixed home folder. */

@@ -123,7 +123,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     return () => {
       current = false
     }
-  }, [computer, sessionId, first])
+  }, [computer, sessionId, first, setThread])
 
   // The thread the computer sent goes to the cache now and then, and when the screen closes.
   const latest = useRef<ThreadState | null>(null)
@@ -231,7 +231,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
         void openRef.current()
       }, wait)
     }
-  }, [link, sessionId, reloadRequests])
+  }, [link, sessionId, reloadRequests, setThread])
   openRef.current = open
 
   useEffect(() => {
@@ -269,9 +269,11 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   useEffect(() => {
     if (!connected) return
     failures.current = 0
+    // A counter, not a node: the cleanup moves on whatever value it holds by then.
+    const generations = generation
     void open()
     return () => {
-      generation.current++
+      generations.current++
       if (retryTimer.current) clearTimeout(retryTimer.current)
       retryTimer.current = null
       void link.request('sessions.unwatch', { sessionId }).catch(() => {})

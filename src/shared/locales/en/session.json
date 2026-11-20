@@ -1420,5 +1420,77 @@
     "continueHint": "{{agent}} has used {{percent}}%. It reads the conversation so far and picks up where the turn stopped.",
     "continueHintLeft": "{{agent}} has {{percent}}% left. It reads the conversation so far and picks up where the turn stopped.",
     "continuePrompt": "Continue the task from where it stopped."
+  },
+  "export": {
+    "title": "Export session",
+    "format": "Format",
+    "formats": {
+      "md": {
+        "name": "Markdown",
+        "hint": "A .md file, its pictures in a folder beside it."
+      },
+      "zip": {
+        "name": "Markdown in a zip",
+        "hint": "The .md file and its pictures in one .zip."
+      },
+      "pdf": {
+        "name": "PDF",
+        "hint": "For reading and printing, in light colors."
+      }
+    },
+    "include": "Include",
+    "options": {
+      "thoughts": "The agent’s thinking",
+      "tools": "Each tool call’s full input and output",
+      "subagents": "Sub-agents’ sessions"
+    },
+    "masked": "Secrets such as API keys, tokens and passwords are masked, as in Kettu’s logs.",
+    "export": "Export…",
+    "building": "Preparing…",
+    "saved": "Exported the session",
+    "text": {
+      "agent": "Agent",
+      "model": "Model",
+      "project": "Project",
+      "started": "Started",
+      "updated": "Last activity",
+      "exported": "Exported",
+      "you": "You",
+      "fromSession": "Another session’s agent",
+      "otherSession": "Message from another session",
+      "thinking": "Thinking",
+      "details": "Input and output",
+      "input": "Input",
+      "output": "Output",
+      "status": {
+        "pending": "pending",
+        "in_progress": "running",
+        "completed": "done",
+        "failed": "failed",
+        "cancelled": "cancelled"
+      },
+      "denied": "denied",
+      "plan": "Plan, version {{version}}",
+      "planApproved": "approved",
+      "planDeclined": "sent back",
+      "note": "Note",
+      "question": "Question",
+      "answer": "Answer",
+      "noAnswer": "(no answer)",
+      "todo": "To-do",
+      "subagent": "Sub-agent: {{title}}",
+      "compacted": "Earlier conversation compacted",
+      "attached": "Attached: {{name}}",
+      "commit": "Committed",
+      "pushed": "Pushed {{count}} commits to {{upstream}}",
+      "branch": "On branch {{branch}}",
+      "pullRequest": "Opened a pull request:",
+      "artifact": "Artifact “{{title}}”, version {{version}}",
+      "memory": "Memory: {{title}}",
+      "takeover": "{{agent}} took the session over",
+      "linesMore": "{{count}} more lines",
+      "image": "Picture",
+      "media": "Media: {{name}}"
+    }
   }
 }

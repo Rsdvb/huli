@@ -1053,6 +1053,7 @@ export class Hosts {
       case 'host:badge':
       case 'host:busy-changed':
       case 'host:routines-working':
+      case 'host:migrating':
       case 'host:media-grant':
       case 'host:media-revoke':
       case 'host:service-port':

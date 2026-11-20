@@ -58,7 +58,20 @@
     "chooseAgentFolder": "选择 Agent 的配置目录",
     "chooseHistoryFolder": "选择存有 Agent 会话的文件夹",
     "chooseEditor": "选择编辑器",
-    "chooseSshKey": "选择 SSH 密钥文件"
+    "chooseSshKey": "选择 SSH 密钥文件",
+    "chooseBackupFolder": "选择备份文件夹",
+    "chooseBackup": "选择要恢复的备份",
+    "backupFiles": "Kettu 备份",
+    "exportSession": "导出会话",
+    "exportFilter": {
+      "md": "Markdown",
+      "zip": "Zip 压缩包",
+      "pdf": "PDF"
+    }
+  },
+  "backup": {
+    "restoreFailed": "没能从备份恢复",
+    "restartAnyway": "重新启动"
   },
   "quit": {
     "titleQuit": "退出 {{name}}？",
