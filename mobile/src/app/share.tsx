@@ -4,7 +4,7 @@
 // sessions.create for a new session, which then opens. Out of the computer's reach it says so,
 // with a retry, and can leave the message in the outbox (outbox.ts) to go once the computer is back.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -203,6 +203,18 @@ export default function Share() {
         .sort((a, b) => b.updatedAt - a.updatedAt),
     [host.sessions],
   )
+  // A session's project by the computer's name for it, its folder's otherwise.
+  const projectNames = useMemo(
+    () => new Map(host.projects.map((p) => [p.path, p.name])),
+    [host.projects],
+  )
+  const placeOf = useCallback(
+    (session: SessionSummary) =>
+      session.scratch
+        ? '无项目'
+        : (projectNames.get(session.projectPath) ?? folder(session.projectPath)),
+    [projectNames],
+  )
   const words = query.trim().toLowerCase()
   const shown = useMemo(
     () =>
@@ -210,11 +222,11 @@ export default function Share() {
         ? sessions.filter(
             (session) =>
               sessionTitle(session).toLowerCase().includes(words) ||
-              folder(session.projectPath).toLowerCase().includes(words),
+              placeOf(session).toLowerCase().includes(words),
           )
         : sessions
       ).slice(0, MAX_ROWS),
-    [sessions, words],
+    [sessions, words, placeOf],
   )
   const agent = useMemo(() => {
     const usable = [...host.agents.values()].filter(
@@ -341,7 +353,7 @@ export default function Share() {
     ...shown.map((session) => ({
       key: session.id,
       title: sessionTitle(session),
-      detail: `${session.scratch ? '无项目' : folder(session.projectPath)} · ${listTime(session.updatedAt)}`,
+      detail: `${placeOf(session)} · ${listTime(session.updatedAt)}`,
       session,
     })),
   ]

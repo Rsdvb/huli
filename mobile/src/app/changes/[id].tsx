@@ -27,7 +27,7 @@ import {
 import { useGitSteps } from '../../components/git/useGitSteps'
 import { WorktreeCard } from '../../components/git/WorktreeCard'
 import { sessionFolder, useChanges, useCurrentPr, useGitRunning, useGitTools } from '../../git'
-import { useConnected, useHasSessions, useLink, useSession } from '../../host'
+import { useConnected, useHasSessions, useLink, useProjects, useSession } from '../../host'
 import { joinGroups, type MenuNode } from '../../ui/menu'
 import { baseName } from '../../ui/session/format'
 import { GI } from '../../ui/session/gitIcons'
@@ -45,6 +45,7 @@ export default function ChangesScreen() {
   const hasSessions = useHasSessions()
   const link = useLink()
   const summary = useSession(id)
+  const projectName = useProjects().find((p) => p.path === summary?.projectPath)?.name
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const changes = useChanges(link, folder)
   const { status, files, error } = changes
@@ -243,7 +244,7 @@ export default function ChangesScreen() {
         title="改动"
         subtitle={
           summary && !summary.scratch
-            ? `${baseName(summary.projectPath)}${summary.worktree ? ' · worktree' : ''}`
+            ? `${projectName ?? baseName(summary.projectPath)}${summary.worktree ? ' · worktree' : ''}`
             : null
         }
         right={

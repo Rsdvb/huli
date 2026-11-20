@@ -219,9 +219,13 @@ export default function Search() {
       )
   }, [allSessions, words])
 
+  // The computer's own names for its projects, where rows would otherwise show a folder's.
+  const projectNames = useMemo(
+    () => new Map(allProjects.map((p) => [p.path, p.name])),
+    [allProjects],
+  )
   const projects = useMemo(() => {
     if (words.length === 0) return []
-    const names = new Map(allProjects.map((p) => [p.path, p.name]))
     const counts = new Map<string, number>()
     for (const s of allSessions.values()) {
       if (s.parentId !== null || s.scratch) continue
@@ -229,10 +233,10 @@ export default function Search() {
     }
     for (const p of allProjects) if (!counts.has(p.path)) counts.set(p.path, 0)
     return [...counts.entries()]
-      .map(([path, count]) => ({ path, count, name: names.get(path) ?? folder(path) }))
+      .map(([path, count]) => ({ path, count, name: projectNames.get(path) ?? folder(path) }))
       .filter((p) => matches(p.name, words) || matches(p.path, words))
       .sort((a, b) => b.count - a.count)
-  }, [allSessions, allProjects, words])
+  }, [allSessions, allProjects, projectNames, words])
 
   const artifactHits = useMemo(
     () =>
@@ -440,7 +444,9 @@ export default function Search() {
         )
       case 'session': {
         const s = item.session
-        const place = s.scratch ? '无项目' : folder(s.projectPath)
+        const place = s.scratch
+          ? '无项目'
+          : (projectNames.get(s.projectPath) ?? folder(s.projectPath))
         return (
           <ContextMenu items={sessionMenu(s)} title={sessionTitle(s)}>
             {(longPress) => (
@@ -575,7 +581,8 @@ export default function Search() {
                     numberOfLines={2}
                   />
                   <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
-                    {KIND_TEXT[kind]} · {a.scratch ? '无项目' : folder(a.project)} ·{' '}
+                    {KIND_TEXT[kind]} ·{' '}
+                    {a.scratch ? '无项目' : (projectNames.get(a.project) ?? folder(a.project))} ·{' '}
                     {listTime(a.updatedAt)}
                   </Text>
                 </View>
