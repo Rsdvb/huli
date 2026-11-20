@@ -7,10 +7,11 @@ import { useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { HostLink } from '@shared/remote/link'
 import type { PendingQuestion, QuestionAnswer, ToolEntry } from '@shared/thread'
-import { useConnected, useSession } from '../../host'
+import { useConnected } from '../../host'
 import { haptic } from '../../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
+import { agentIdOf, useSessionField } from '../../ui/session/sessionField'
 import { PressScale } from '../../ui/session/Press'
 import { useAgentName } from './AccessEntries'
 import { E, SendState, useSender } from './kit'
@@ -46,7 +47,7 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
   const { entry, link, sessionId } = props
   const { c, s } = useSessionTokens()
   const agent = useAgentName(sessionId)
-  const agentId = useSession(sessionId)?.agentId ?? ''
+  const agentId = useSessionField(sessionId, agentIdOf) ?? ''
   const permission = entry.permission!
   const questions = permission.questions ?? []
   const sender = useSender(entry.id)

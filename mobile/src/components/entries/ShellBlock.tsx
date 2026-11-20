@@ -11,7 +11,7 @@ import {
   type ToolContent,
   type ToolEntry,
 } from '@shared/thread'
-import { useSession } from '../../host'
+import { agentIdOf, useSessionField } from '../../ui/session/sessionField'
 import { ContextMenu } from '../../ui/ContextMenu'
 import type { MenuNode } from '../../ui/menu'
 import { copyText } from '../../ui/session/feedback'
@@ -216,7 +216,7 @@ export function ShellBlock(props: {
 }) {
   const { c } = useSessionTokens()
   const [all, setAll] = useDisclosure(`shell-all:${props.id}`)
-  const agentId = useSession(props.sessionId)?.agentId
+  const agentId = useSessionField(props.sessionId, agentIdOf)
   const harness = agentId && isAgentId(agentId) ? harnessOf(agentId) : null
   const exit = exitOf(props.output, props.status, harness)
   const raw = exit.output?.replace(/\n$/, '') ?? ''
