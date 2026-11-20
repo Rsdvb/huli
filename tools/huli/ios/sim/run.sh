@@ -67,6 +67,12 @@ xcrun simctl io "$UDID" screenshot "$RESULTS/paired.png"
 
 failed=0
 for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
+  # What the app costs at rest, sampled without a recording, which would load the runner.
+  if [ "$flow" = measure ]; then
+    echo "== measure"
+    UDID="$UDID" MAESTRO="$MAESTRO" RESULTS="$RESULTS" bash tools/huli/ios/sim/measure.sh
+    continue
+  fi
   [ -f "$flow" ] || flow="tools/huli/ios/sim/flows/$flow.yaml"
   name=$(basename "$flow" .yaml)
   echo "== $name"

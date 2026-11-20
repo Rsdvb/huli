@@ -1,0 +1,12 @@
+# measure.sh: the app launched afresh, then the session whose row says WORD opened. Nothing after
+# the tap reads the app's view tree, which a long streaming reply made too slow to read.
+appId: io.github.rsdvb.huli
+---
+- runFlow:
+    file: launch.yaml
+    env:
+      GLASS: ${GLASS}
+- tapOn:
+    text: '.*${WORD}.*'
+    index: 0
+- takeScreenshot: ${SHOT}
