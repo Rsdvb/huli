@@ -243,7 +243,7 @@ export default function ChangesScreen() {
         title="改动"
         subtitle={
           summary && !summary.scratch
-            ? `${baseName(summary.projectPath)}${summary.worktree ? ' · 工作树' : ''}`
+            ? `${baseName(summary.projectPath)}${summary.worktree ? ' · worktree' : ''}`
             : null
         }
         right={

@@ -139,7 +139,7 @@ export default function BranchesScreen() {
       return ahead > 0 ? `↑${ahead}` : null
     }
     if (!branch) return null
-    if (branch.worktree) return '在工作树中'
+    if (branch.worktree) return '在 worktree 中'
     if (branch.name === defaultBranch) return '默认'
     return branch.committedAt ? ago(branch.committedAt) : null
   }

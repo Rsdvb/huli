@@ -1199,8 +1199,8 @@ function ClaudeSettingsGroup({ agentId }: { agentId: AgentId }) {
         ) : null}
       </ListGroup>
       <ListGroup
-        header="Prompt cache 时长"
-        footer="Claude Code 让对话的 prompt cache 保持多久。Auto：订阅账号在限额内用 1 小时，API key 和云服务商用 5 分钟；1 小时的缓存写入收费更高。项目自己的设置在该项目里优先，改动从下一个会话起生效。"
+        header="提示缓存时长"
+        footer="Claude Code 让对话的提示缓存保持多久。Auto：订阅账号在限额内用 1 小时，API key 和云服务商用 5 分钟；1 小时的缓存写入收费更高。项目自己的设置在该项目里优先，改动从下一个会话起生效。"
       >
         <ListRow
           title="时长"
@@ -1215,7 +1215,7 @@ function ClaudeSettingsGroup({ agentId }: { agentId: AgentId }) {
           disabled={disabled}
           onPress={() =>
             setPicker({
-              title: 'Prompt cache 时长',
+              title: '提示缓存时长',
               items: [
                 { key: AUTO, label: 'Auto', value: null },
                 { key: '5m', label: '5 分钟', value: '5m' as const },

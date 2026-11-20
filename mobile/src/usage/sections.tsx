@@ -723,13 +723,13 @@ export function Facts(props: { facts: Figures; tokenFacts: Figures; kind: Metric
     },
     tokenFacts.cacheShare !== null && {
       key: 'cache',
-      label: '来自 prompt cache',
+      label: '来自提示缓存',
       value: percent(tokenFacts.cacheShare),
     },
     tokenFacts.priced &&
       tokenFacts.parts.cacheSaved > 0 && {
         key: 'saved',
-        label: 'prompt cache 省下（按 API 价格）',
+        label: '提示缓存省下（按 API 价格）',
         value: metricText('cost', tokenFacts.parts.cacheSaved),
       },
   ].filter((line): line is { key: string; label: string; value: string } => !!line)
@@ -772,7 +772,7 @@ export function Facts(props: { facts: Figures; tokenFacts: Figures; kind: Metric
                 <Text style={[styles.tabular, { color: c.text, fontWeight: '600' }]}>
                   {cache.perHundred}%
                 </Text>{' '}
-                从 prompt cache 读取
+                从提示缓存读取
               </Text>
             )}
           </View>
