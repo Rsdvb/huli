@@ -393,6 +393,12 @@ export function Trend(props: {
 }) {
   const { c } = useTokens()
   const [selected, setSelected] = useState<number | null>(null)
+  // A bar chosen in one period means nothing in the next: the choice goes with the period.
+  const [selectedIn, setSelectedIn] = useState(props.rangeLabel)
+  if (selectedIn !== props.rangeLabel) {
+    setSelectedIn(props.rangeLabel)
+    setSelected(null)
+  }
   const { unit, bars, kind } = props
   const chosen = selected !== null && selected < bars.length ? selected : null
   const total = bars.reduce((sum, bar) => sum + bar.total, 0)
@@ -474,7 +480,8 @@ export function Trend(props: {
             {chosen !== null && unit !== null
               ? `${barText(unit, bars[chosen]!.from, bars[chosen]!.to)} · ${metricText(kind, bars[chosen]!.total)}`
               : unit !== null
-                ? UNIT_NAMES[unit]
+                ? // The tallest bar reaches the top line: its value gives the chart its scale.
+                  `${UNIT_NAMES[unit]}${peak !== null ? ` · 最高 ${metricText(kind, bars[peak]!.total)}` : ''}`
                 : ''}
           </Text>
         }

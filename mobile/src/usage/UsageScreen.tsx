@@ -135,6 +135,22 @@ const WINDOW_SPANS: Record<string, string> = {
 
 const DONUT_UNITS = { tokens: 'token', requests: '次请求', turns: '轮', cost: '估算费用' } as const
 
+const OTHERS = '__others'
+const LEGEND_ROWS = 6
+
+/**
+ * The donut's legend: every agent while they fit, else the first five and 其他 for the rest, so
+ * the shares listed still add up to the whole.
+ */
+function legendOf<T extends { agentId: string; value: number }>(
+  rows: readonly T[],
+): { agentId: string | null; value: number }[] {
+  if (rows.length <= LEGEND_ROWS) return [...rows]
+  const shown = rows.slice(0, LEGEND_ROWS - 1)
+  const rest = rows.slice(LEGEND_ROWS - 1).reduce((sum, row) => sum + row.value, 0)
+  return [...shown, { agentId: null, value: rest }]
+}
+
 export default function UsageScreen() {
   const { c } = useTokens()
   const link = useMaybeLink()
@@ -615,14 +631,22 @@ export default function UsageScreen() {
                     </Text>
                   </Donut>
                   <View style={styles.legend}>
-                    {derived.byMetric.slice(0, 6).map((a) => (
-                      <View key={a.agentId} style={styles.legendRow}>
-                        <View style={[styles.swatch, { backgroundColor: colorOf(a.agentId) }]} />
+                    {legendOf(derived.byMetric).map((a) => (
+                      <View key={a.agentId ?? OTHERS} style={styles.legendRow}>
+                        <View
+                          style={[
+                            styles.swatch,
+                            {
+                              backgroundColor:
+                                a.agentId === null ? c.textTertiary : colorOf(a.agentId),
+                            },
+                          ]}
+                        />
                         <Text
                           style={[typeScale.callout, styles.flex, { color: c.text }]}
                           numberOfLines={1}
                         >
-                          {nameOf(a.agentId)}
+                          {a.agentId === null ? '其他' : nameOf(a.agentId)}
                         </Text>
                         <Text style={[typeScale.callout, styles.tabular, { color: c.text }]}>
                           {metricText(kind, a.value)}
