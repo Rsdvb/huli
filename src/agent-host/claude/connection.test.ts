@@ -2207,6 +2207,25 @@ describe('permissions', () => {
     expect(target.entry('t:toolu_7')).toMatchObject({ status: 'in_progress' })
   })
 
+  it('says why Claude Code asks: what allowing grants and the check that asked', async () => {
+    void s.sdk.last.options.canUseTool!(
+      'Read',
+      { file_path: '/home/ada/Downloads/a.txt' },
+      {
+        signal: new AbortController().signal,
+        toolUseID: 'toolu_8',
+        description: 'Claude will have read access to files in ~/Downloads',
+        decisionReason: 'Path is outside the allowed working directories',
+      },
+    )
+    await settle()
+    expect(target.asked[0]!.request.reason).toBe(
+      'Claude will have read access to files in ~/Downloads' +
+        String.fromCharCode(10) +
+        'Path is outside the allowed working directories',
+    )
+  })
+
   it('adds the suggested rules for always allow, and denies a rejection or a cancel', async () => {
     let answer = ask()
     await settle()

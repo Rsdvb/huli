@@ -248,6 +248,24 @@ describe('a call that did not run', () => {
     expect(run.entry('t:t1')).toMatchObject({ status: 'cancelled', denied: { by: 'user' } })
   })
 
+  it('is denied by what denied it without asking, with its reason', () => {
+    const run = new Run().feed(
+      toolCall('t1', 'Bash', { command: 'rm -rf build' }),
+      system('permission_denied', {
+        tool_name: 'Bash',
+        tool_use_id: 't1',
+        decision_reason_type: 'classifier',
+        decision_reason: 'Deletes files outside the task',
+        message: 'Permission denied',
+      }),
+      toolResult('t1', 'Permission denied', { is_error: true }),
+    )
+    expect(run.entry('t:t1')).toMatchObject({
+      status: 'cancelled',
+      denied: { by: 'review', reason: 'Deletes files outside the task' },
+    })
+  })
+
   it('still fails when the tool itself failed', () => {
     const run = new Run().feed(
       toolCall('t1', 'Read', { file_path: '/repo/missing.ts' }),

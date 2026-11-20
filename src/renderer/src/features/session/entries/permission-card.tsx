@@ -355,7 +355,10 @@ export function PermissionEntry({
           target={target ?? undefined}
           toolIcon={<Icon icon={KIND_GLYPH[entry.toolKind]} size={12} />}
           risk={entry.toolKind === 'execute' || entry.toolKind === 'delete' ? 'risky' : 'safe'}
-          reason={entry.description}
+          reason={
+            // Huli: why the agent asks, beside what a command says it does.
+            [entry.description, permission?.reason].filter(Boolean).join(' · ') || undefined
+          }
           previewTitle={t('permission.card.touches')}
           preview={preview}
           scopes={[first ?? 'once']}

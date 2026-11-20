@@ -436,6 +436,17 @@ function claudeServers(servers: readonly McpServer[]): Record<string, McpServerC
   )
 }
 
+/**
+ * Huli: why Claude Code asks, as its card shows it: what allowing grants, as its bridge words it,
+ * and the check or rule that made it ask.
+ */
+function askReason(permission: ToolPermissionContext): { reason?: string } {
+  const parts = [permission.description, permission.decisionReason]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter((part, i, all) => part !== '' && all.indexOf(part) === i)
+  return parts.length > 0 ? { reason: parts.join('\n') } : {}
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -2126,6 +2137,7 @@ export class ClaudeConnection implements AgentConnection {
             output,
             options,
             ...(plan ? { plan: typeof input.plan === 'string' ? input.plan : '' } : {}),
+            ...askReason(permission),
           },
           permission.signal,
         ),

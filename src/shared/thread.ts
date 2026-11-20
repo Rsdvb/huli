@@ -835,6 +835,8 @@ export interface PendingPermission {
   plan?: { markdown: string; previous: string | null }
   // An MCP server's request: a form to fill in, or a page to open.
   elicitation?: PendingElicitation
+  // Huli: why the agent asks, in its words: the check or rule that made it ask, what allowing grants.
+  reason?: string
 }
 
 export interface PermissionOption {

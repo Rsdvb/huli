@@ -39,6 +39,8 @@ export interface PermissionRequest {
   plan?: string
   /** An MCP server's request: a form, answered with its values, or a page to open. */
   elicitation?: PendingElicitation
+  /** Huli: why the agent asks, in its words, which the card shows beside the request. */
+  reason?: string
   /**
    * The agent does not wait for the answer, so its turn goes on or ends and the card stays until
    * the user answers it or the session closes.

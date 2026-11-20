@@ -9296,6 +9296,7 @@ export class SessionManager {
               ...(request.questions ? { questions: request.questions } : {}),
               ...(plan ? { plan: { markdown: request.plan!, previous: plan.previous } } : {}),
               ...(elicitation ? { elicitation } : {}),
+              ...(request.reason ? { reason: request.reason } : {}),
             },
             permissionResult: null,
             ...(plan ? { planVersion: plan.version } : {}),

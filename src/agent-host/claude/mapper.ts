@@ -1105,6 +1105,8 @@ export class ClaudeMapper {
           },
         ]
       }
+      case 'permission_denied':
+        return this.permissionDenied(message)
       case 'local_command_output':
         return this.commandOutput(message)
       case 'informational':
@@ -1215,6 +1217,40 @@ export class ClaudeMapper {
         title!.trim(),
         description === '' ? undefined : description,
       ),
+    ]
+  }
+
+  /**
+   * Huli: Claude Code denied a call without asking: its auto mode's check, its permission mode or a
+   * rule. The call is denied rather than failed, and says by what and why.
+   */
+  private permissionDenied(message: SystemMessage): Delivery[] {
+    const toolUseId = typeof message.tool_use_id === 'string' ? message.tool_use_id : null
+    if (!toolUseId) return []
+    const tool = this.tools.get(toolUseId)
+    const sessionId = tool?.sessionId ?? this.route(message as { agent_id?: string })
+    const reason =
+      (typeof message.decision_reason === 'string' && message.decision_reason.trim()) ||
+      (typeof message.message === 'string' && message.message.trim()) ||
+      ''
+    const denied: ToolDenial = {
+      by: deniedBy(message.decision_reason_type),
+      ...(reason !== '' ? { reason } : {}),
+    }
+    return [
+      {
+        sessionId,
+        map: (ctx) => {
+          const out = output()
+          const id = `t:${toolUseId}`
+          const entry = ctx.thread.byId[id]
+          if (entry?.kind !== 'tool') return out
+          const changes = { status: 'cancelled' as const, denied }
+          out.patches.push({ op: 'entry.update', id, changes })
+          toolEffects(out, toolUseId, id, entry.status, { ...entry, ...changes })
+          return out
+        },
+      },
     ]
   }
 
@@ -1658,6 +1694,21 @@ function retryReason(message: SystemMessage): string {
   return status === null
     ? t('claude.retryReason.connection')
     : t('claude.retryReason.status', { status })
+}
+
+/** Huli: what denied a call, from the kind of decision Claude Code names. */
+function deniedBy(kind: unknown): ToolDenial['by'] {
+  switch (kind) {
+    case 'classifier':
+      return 'review'
+    case 'mode':
+    case 'asyncAgent':
+      return 'mode'
+    case 'hook':
+      return 'hook'
+    default:
+      return 'rule'
+  }
 }
 
 /** Huli: the text of the thread's latest entry: a reply's, or the output a notice holds. */
