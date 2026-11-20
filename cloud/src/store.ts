@@ -13,6 +13,9 @@
 // The file the single-account service wrote (v1) is read once, kept as it was beside as
 // state.v1.json, and written as v2: its account becomes the owner's, named `owner`, and every
 // sign-in, computer and token of it stays as it was.
+//
+// The owner signs in with a password and two-step verification. Every other account signs up with
+// a password alone, and keeps a TOTP secret only if it bound one before that changed.
 
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -66,12 +69,16 @@ export interface Account {
   name: string | null
   /** The account from before there were others; it manages them and cannot be disabled. */
   owner: boolean
-  /** Null, as the TOTP secret, while a reset waits for its invite: it cannot sign in then. */
+  /** Null while a reset waits for its invite: it cannot sign in then. */
   password: string | null
+  /**
+   * Null for an account without two-step verification, as every account but the owner's signs up
+   * now; a reset clears it too. The owner's is never null while it may sign in.
+   */
   totp: string | null
   /** The last TOTP step used, so a code works once. */
   totpLastStep: number
-  /** SHA-256 hashes of the unused recovery codes. */
+  /** SHA-256 hashes of the unused recovery codes; none without two-step verification. */
   recovery: string[]
   createdAt: number
   /** When the owner disabled it; nothing of it is taken while set. */
@@ -130,7 +137,7 @@ export interface ComputerProfile {
 
 /**
  * An invite code the owner made: a new account signs up with it once, or, when it names an
- * account, that account sets a new password and two-step verification with it once.
+ * account, that account sets a new password with it once.
  */
 export interface Invite {
   /** Short and public, for listing and revoking; the code itself is kept only as its hash. */
@@ -190,13 +197,41 @@ export type RefreshResult =
   | { ok: true; tokens: IssuedTokens }
   | { ok: false; reason: 'unknown' | 'reused' | 'expired' | 'client' }
 
-/** What a new or reset account sets as it redeems its invite. */
+/** What an account signs in with; what a new or reset account sets as it redeems its invite. */
 export interface Credentials {
   password: string
-  totp: string
+  /** Null for a password alone, as signing up with an invite sets. */
+  totp: string | null
   totpLastStep: number
   /** Hashes. */
   recovery: string[]
+}
+
+/** A password alone, as an account signing up with an invite gets. */
+export function passwordOnly(password: string): Credentials {
+  return { password, totp: null, totpLastStep: -1, recovery: [] }
+}
+
+/**
+ * Whether signing in to the account takes a one-time or recovery code after its password: the
+ * owner's always does, any other account's only when it has a TOTP secret.
+ */
+export function needsCode(account: Account): boolean {
+  return account.owner || account.totp !== null
+}
+
+/**
+ * An account as the file has it, its two-step fields made whole: an account without two-step
+ * verification may lack them, and an empty secret, whose codes anyone could work out, is none.
+ */
+function readAccount(account: Account): Account {
+  const { totp, totpLastStep, recovery } = account as Partial<Account>
+  return {
+    ...account,
+    totp: typeof totp === 'string' && totp !== '' ? totp : null,
+    totpLastStep: typeof totpLastStep === 'number' ? totpLastStep : -1,
+    recovery: Array.isArray(recovery) ? recovery.filter((r) => typeof r === 'string') : [],
+  }
 }
 
 export type RedeemResult =
@@ -235,7 +270,7 @@ export class Store {
       throw error
     }
     const parsed = JSON.parse(text) as State | StateV1
-    if (parsed.v === 2) return parsed
+    if (parsed.v === 2) return { ...parsed, accounts: parsed.accounts.map(readAccount) }
     if (parsed.v !== 1) throw new Error(`${this.file} has an unknown version`)
     // The file as it was is kept before anything is written over it.
     this.keepCopy('state.v1.json', text)
@@ -296,10 +331,16 @@ export class Store {
     return this.state.accounts.find((account) => account.id === id) ?? null
   }
 
-  /** An account that may sign in and be used: not disabled, its password and TOTP set. */
+  /**
+   * An account that may sign in and be used: not disabled and its password set, and the owner's
+   * TOTP secret too, as it always was.
+   */
   activeAccount(id: string): Account | null {
     const account = this.account(id)
-    return account && account.disabledAt === null && account.password && account.totp
+    return account &&
+      account.disabledAt === null &&
+      account.password &&
+      (account.totp || !account.owner)
       ? account
       : null
   }
@@ -389,7 +430,8 @@ export class Store {
 
   /**
    * Signs an account out everywhere and clears its password and two-step verification; an invite
-   * for it, which replaces any before, sets them anew. Null for no such account, or the owner's.
+   * for it, which replaces any before, sets a new password. Null for no such account, or the
+   * owner's.
    */
   resetAccount(
     id: string,
@@ -791,19 +833,21 @@ function migrate(old: StateV1, now: number): State {
   const v1 = old.account
   if (v1) {
     const firstSignIn = Math.min(now, ...old.families.map((family) => family.createdAt))
-    accounts.push({
-      id: v1.id,
-      username: OWNER_USERNAME,
-      email: v1.email,
-      name: v1.name,
-      owner: true,
-      password: v1.password,
-      totp: v1.totp,
-      totpLastStep: v1.totpLastStep,
-      recovery: v1.recovery,
-      createdAt: firstSignIn,
-      disabledAt: null,
-    })
+    accounts.push(
+      readAccount({
+        id: v1.id,
+        username: OWNER_USERNAME,
+        email: v1.email,
+        name: v1.name,
+        owner: true,
+        password: v1.password,
+        totp: v1.totp,
+        totpLastStep: v1.totpLastStep,
+        recovery: v1.recovery,
+        createdAt: firstSignIn,
+        disabledAt: null,
+      }),
+    )
   }
   return {
     v: 2,

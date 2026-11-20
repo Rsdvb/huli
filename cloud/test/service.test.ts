@@ -28,6 +28,7 @@ import {
   TOTP_PERIOD_S,
 } from '../src/secrets'
 import { makeServer, type ServerParts } from '../src/server'
+import { signInSteps } from './accounts'
 
 const ORIGIN = 'http://127.0.0.1'
 const PASSWORD = 'correct horse battery staple'
@@ -117,16 +118,19 @@ async function post(pathname: string, fields: Record<string, string>, cookie?: s
   })
 }
 
+/** The owner's browser sign-in, as the page asks it: the password, then the code. */
+const ownerSignIn = (ticket: string, owner = code()) =>
+  signInSteps(
+    (fields) => post('/signin/app/', fields),
+    { ticket, password: PASSWORD, action: 'allow' },
+    owner,
+  )
+
 async function signIn(): Promise<{ access: string; refresh: string; cookie: string }> {
   nextStep()
   const verifier = randomToken(48)
   const { ticket } = await startSignIn(verifier)
-  const answer = await post('/signin/app/', {
-    ticket: ticket!,
-    password: PASSWORD,
-    code: code(),
-    action: 'allow',
-  })
+  const answer = await ownerSignIn(ticket!)
   expect(answer.status).toBe(302)
   const location = new URL(answer.headers.get('location')!)
   expect(location.origin + location.pathname).toBe(REDIRECT)
@@ -187,12 +191,7 @@ describe('browser sign-in', () => {
     nextStep()
     const verifier = randomToken(48)
     const { ticket } = await startSignIn(verifier)
-    const answer = await post('/signin/app/', {
-      ticket: ticket!,
-      password: PASSWORD,
-      code: code(),
-      action: 'allow',
-    })
+    const answer = await ownerSignIn(ticket!)
     const issued = new URL(answer.headers.get('location')!).searchParams.get('code')!
     expect(
       await failure(
@@ -260,21 +259,12 @@ describe('browser sign-in', () => {
   it('takes a recovery code once', async () => {
     nextStep()
     const first = await startSignIn(randomToken(48))
-    const ok = await post('/signin/app/', {
-      ticket: first.ticket!,
-      password: PASSWORD,
-      code: 'AAAAA-BBBBB',
-      action: 'allow',
-    })
+    const ok = await ownerSignIn(first.ticket!, 'AAAAA-BBBBB')
     expect(ok.status).toBe(302)
     const second = await startSignIn(randomToken(48))
-    const again = await post('/signin/app/', {
-      ticket: second.ticket!,
-      password: PASSWORD,
-      code: 'aaaaa-bbbbb',
-      action: 'allow',
-    })
+    const again = await ownerSignIn(second.ticket!, 'aaaaa-bbbbb')
     expect(again.status).toBe(401)
+    expect(await again.text()).toContain('验证码不对')
   })
 })
 
@@ -368,19 +358,13 @@ describe('brute force', () => {
       const answer = await post('/signin/app/', {
         ticket: ticket!,
         password: 'wrong password',
-        code: '000000',
         action: 'allow',
       })
       expect(answer.status).toBe(401)
     }
     nextStep()
     const { ticket } = await startSignIn(randomToken(48))
-    const blocked = await post('/signin/app/', {
-      ticket: ticket!,
-      password: PASSWORD,
-      code: code(),
-      action: 'allow',
-    })
+    const blocked = await ownerSignIn(ticket!)
     expect(blocked.status).toBe(401)
     expect(await blocked.text()).toContain('尝试次数太多')
     expect(lines.filter((l) => l.includes('login failed from')).length).toBeGreaterThanOrEqual(5)
@@ -454,7 +438,7 @@ describe('limits by address, behind the proxy', () => {
     const tickets = await Promise.all(Array.from({ length: 8 }, () => ticketFrom(address)))
     const answers = await Promise.all(
       tickets.map((ticket) =>
-        submit(address, { ticket, password: 'wrong password', code: '000000', action: 'allow' }),
+        submit(address, { ticket, password: 'wrong password', action: 'allow' }),
       ),
     )
     const statuses = answers.map((answer) => answer.status)
@@ -466,12 +450,11 @@ describe('limits by address, behind the proxy', () => {
     clock += 16 * 60 * 1000
     for (let i = 0; i < 6; i++) {
       nextStep()
-      const ok = await submit(address, {
-        ticket: await ticketFrom(address),
-        password: PASSWORD,
-        code: code(),
-        action: 'allow',
-      })
+      const ok = await signInSteps(
+        (fields) => submit(address, fields),
+        { ticket: await ticketFrom(address), password: PASSWORD, action: 'allow' },
+        code(),
+      )
       expect(ok.status).toBe(302)
     }
   })
@@ -484,19 +467,17 @@ describe('limits by address, behind the proxy', () => {
         const answer = await submit(address, {
           ticket: await ticketFrom(address),
           password: 'x'.repeat(1025),
-          code: '000000',
           action: 'allow',
         })
         expect(answer.status).toBe(401)
       }
     }
     nextStep()
-    const owner = await submit('192.0.2.1', {
-      ticket: await ticketFrom('192.0.2.1'),
-      password: PASSWORD,
-      code: code(),
-      action: 'allow',
-    })
+    const owner = await signInSteps(
+      (fields) => submit('192.0.2.1', fields),
+      { ticket: await ticketFrom('192.0.2.1'), password: PASSWORD, action: 'allow' },
+      code(),
+    )
     expect(owner.status).toBe(302)
   })
 })

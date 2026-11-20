@@ -37,8 +37,8 @@ import {
   TOTP_PERIOD_S,
 } from '../src/secrets'
 import { makeServer, type ServerParts } from '../src/server'
-import type { Account } from '../src/store'
-import { makeMember, makeOwner } from './accounts'
+import { passwordOnly, type Account } from '../src/store'
+import { makeMember, makeOwner, signInSteps, stepOf } from './accounts'
 
 const PC: HuliClientInfo = { kind: 'desktop', name: 'PC', os: 'win32', arch: 'x64', version: '1' }
 const PHONE: HuliClientInfo = {
@@ -428,6 +428,8 @@ describe('sign-in failures by account', () => {
   const PASSWORD = 'correct horse battery staple'
   const ownerSecret = newTotpSecret()
   const friendSecret = newTotpSecret()
+  /** Not the friend's: its codes are wrong ones. */
+  const otherSecret = newTotpSecret()
   const lines: string[] = []
 
   beforeAll(async () => {
@@ -437,12 +439,15 @@ describe('sign-in failures by account', () => {
     })
     const password = await hashPassword(PASSWORD)
     makeOwner(parts.store, { password, totp: ownerSecret, totpLastStep: -1, recovery: [] })
+    // A friend who bound two-step verification before sign-up stopped asking for it, and one who
+    // signed up with a password alone.
     makeMember(parts.store, 'friend', {
       password,
       totp: friendSecret,
       totpLastStep: -1,
       recovery: [],
     })
+    makeMember(parts.store, 'pal', passwordOnly(password))
     await new Promise<void>((resolve) => parts.server.listen(0, '127.0.0.1', resolve))
     base = `http://127.0.0.1:${(parts.server.address() as AddressInfo).port}`
   })
@@ -465,47 +470,44 @@ describe('sign-in failures by account', () => {
     return /name="ticket" value="([^"]+)"/.exec(html)![1]!
   }
 
-  async function signIn(address: string, fields: Record<string, string>) {
-    return fetch(new URL('/signin/app/', base), {
+  const post = (address: string) => (form: Record<string, string>) =>
+    fetch(new URL('/signin/app/', base), {
       method: 'POST',
-      body: new URLSearchParams({ ticket: await ticketFrom(address), action: 'allow', ...fields }),
+      body: new URLSearchParams(form),
       redirect: 'manual',
       headers: { 'x-real-ip': address },
     })
+
+  /** A browser sign-in on a page of its own: the password, then `secret`'s code if asked. */
+  async function signIn(address: string, fields: Record<string, string>, secret?: string) {
+    return signInSteps(
+      post(address),
+      { ticket: await ticketFrom(address), action: 'allow', ...fields },
+      secret ? code(secret) : '',
+    )
   }
 
   it('locks one account out of an address, never the other', async () => {
     const shared = '198.51.100.7'
     for (let i = 0; i < 5; i++) {
-      const answer = await signIn(shared, { username: 'friend', password: 'wrong', code: '000000' })
+      const answer = await signIn(shared, { username: 'friend', password: 'wrong' })
       expect(answer.status).toBe(401)
     }
     clock += TOTP_PERIOD_S * 1000
-    const friend = await signIn(shared, {
-      username: 'friend',
-      password: PASSWORD,
-      code: code(friendSecret),
-    })
+    const friend = await signIn(shared, { username: 'friend', password: PASSWORD }, friendSecret)
     expect(friend.status).toBe(401)
     expect(await friend.text()).toContain('尝试次数太多')
     // The owner, from the very same address, and with the username left out or given.
-    expect((await signIn(shared, { password: PASSWORD, code: code(ownerSecret) })).status).toBe(302)
+    expect((await signIn(shared, { password: PASSWORD }, ownerSecret)).status).toBe(302)
     clock += TOTP_PERIOD_S * 1000
-    const named = await signIn(shared, {
-      username: 'OWNER',
-      password: PASSWORD,
-      code: code(ownerSecret),
-    })
+    const named = await signIn(shared, { username: 'OWNER', password: PASSWORD }, ownerSecret)
     expect(named.status).toBe(302)
+    // The friend without two-step verification, from there too, with the password alone.
+    expect((await signIn(shared, { username: 'pal', password: PASSWORD })).status).toBe(302)
     // And the friend from elsewhere.
     expect(
-      (
-        await signIn('198.51.100.8', {
-          username: 'friend',
-          password: PASSWORD,
-          code: code(friendSecret),
-        })
-      ).status,
+      (await signIn('198.51.100.8', { username: 'friend', password: PASSWORD }, friendSecret))
+        .status,
     ).toBe(302)
   })
 
@@ -513,36 +515,47 @@ describe('sign-in failures by account', () => {
     clock += 16 * 60 * 1000
     const shared = '198.51.100.9'
     for (let i = 0; i < 5; i++) {
-      await signIn(shared, { password: 'wrong', code: '000000' })
+      await signIn(shared, { password: 'wrong' })
     }
     clock += TOTP_PERIOD_S * 1000
-    expect((await signIn(shared, { password: PASSWORD, code: code(ownerSecret) })).status).toBe(401)
-    const friend = await signIn(shared, {
-      username: 'friend',
-      password: PASSWORD,
-      code: code(friendSecret),
-    })
+    expect((await signIn(shared, { password: PASSWORD }, ownerSecret)).status).toBe(401)
+    const friend = await signIn(shared, { username: 'friend', password: PASSWORD }, friendSecret)
     expect(friend.status).toBe(302)
+  })
+
+  it('counts wrong codes as it counts wrong passwords', async () => {
+    clock += 16 * 60 * 1000
+    const shared = '198.51.100.10'
+    for (let i = 0; i < 5; i++) {
+      clock += TOTP_PERIOD_S * 1000
+      const answer = await signIn(shared, { username: 'friend', password: PASSWORD }, otherSecret)
+      expect(answer.status).toBe(401)
+      expect(await answer.text()).toContain('验证码不对')
+    }
+    expect(lines.filter((l) => l === `huli-cloud: login failed from ${shared}`)).toHaveLength(5)
+    clock += TOTP_PERIOD_S * 1000
+    const blocked = await signIn(shared, { username: 'friend', password: PASSWORD }, friendSecret)
+    expect(await blocked.text()).toContain('尝试次数太多')
+    expect((await signIn(shared, { username: 'pal', password: PASSWORD })).status).toBe(302)
   })
 
   it('caps what one address tries across usernames, ten failures in all', async () => {
     clock += 16 * 60 * 1000
     const sprayer = '203.0.113.50'
     for (let i = 0; i < 7; i++) {
-      await signIn(sprayer, { username: `nobody${i}`, password: 'x'.repeat(1025), code: '000000' })
+      await signIn(sprayer, { username: `nobody${i}`, password: 'x'.repeat(1025) })
     }
     for (let i = 0; i < 5; i++) {
-      await signIn(sprayer, { username: 'friend', password: 'wrong', code: '000000' })
+      await signIn(sprayer, { username: 'friend', password: 'wrong' })
     }
-    // Five for the usernames nobody has, five for the friend: the address is spent, the owner
-    // included; the owner from anywhere else is not.
+    // Seven for the usernames nobody has, each counted under its own name as an account would
+    // be, and three for the friend: the address is spent, the owner included; the owner from
+    // anywhere else is not.
     clock += TOTP_PERIOD_S * 1000
-    const blocked = await signIn(sprayer, { password: PASSWORD, code: code(ownerSecret) })
+    const blocked = await signIn(sprayer, { password: PASSWORD }, ownerSecret)
     expect(blocked.status).toBe(401)
     expect(await blocked.text()).toContain('尝试次数太多')
-    expect(
-      (await signIn('203.0.113.51', { password: PASSWORD, code: code(ownerSecret) })).status,
-    ).toBe(302)
+    expect((await signIn('203.0.113.51', { password: PASSWORD }, ownerSecret)).status).toBe(302)
     // Every failure checked is the line fail2ban counts, whichever username it named.
     expect(lines.filter((l) => l === `huli-cloud: login failed from ${sprayer}`)).toHaveLength(10)
   })
@@ -550,19 +563,32 @@ describe('sign-in failures by account', () => {
   it('refuses a disabled account’s right password with its own answer, and no lockout', async () => {
     clock += 16 * 60 * 1000
     expect(runAdmin(parts.admin, { op: 'disable', username: 'friend' }).ok).toBe(true)
-    const refused = await signIn('198.51.100.20', {
+    expect(runAdmin(parts.admin, { op: 'disable', username: 'pal' }).ok).toBe(true)
+    // Said only to whoever has all the account signs in with: the code too, when it takes one.
+    const asked = await post('198.51.100.20')({
+      ticket: await ticketFrom('198.51.100.20'),
+      action: 'allow',
       username: 'friend',
       password: PASSWORD,
-      code: code(friendSecret),
     })
+    expect(asked.status).toBe(200)
+    const html = await asked.text()
+    expect(stepOf(html)).not.toBeNull()
+    expect(html).not.toContain('已停用')
+    clock += TOTP_PERIOD_S * 1000
+    const refused = await signIn(
+      '198.51.100.20',
+      { username: 'friend', password: PASSWORD },
+      friendSecret,
+    )
     expect(refused.status).toBe(403)
     expect(await refused.text()).toContain('已停用')
-    const wrong = await signIn('198.51.100.20', {
-      username: 'friend',
-      password: 'wrong',
-      code: '000000',
-    })
-    expect(await wrong.text()).toContain('用户名、密码或验证码不对')
+    const palRefused = await signIn('198.51.100.20', { username: 'pal', password: PASSWORD })
+    expect(palRefused.status).toBe(403)
+    expect(await palRefused.text()).toContain('已停用')
+    const wrong = await signIn('198.51.100.20', { username: 'friend', password: 'wrong' })
+    expect(await wrong.text()).toContain('用户名或密码不对')
     expect(runAdmin(parts.admin, { op: 'enable', username: 'friend' }).ok).toBe(true)
+    expect(runAdmin(parts.admin, { op: 'enable', username: 'pal' }).ok).toBe(true)
   })
 })

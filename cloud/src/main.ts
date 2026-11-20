@@ -175,8 +175,8 @@ function showCode(code: string, invite: InviteRow): void {
   console.log(`    ${code}\n`)
   console.log(
     invite.resets === null
-      ? '发给要注册的人：在纸鸢手机端「设置 › 账号」点「用邀请码注册」，或电脑端「设置 › 账号」点「注册账号」，自己定用户名和密码，再绑定两步验证。'
-      : `发给 ${invite.resets}：在纸鸢的登录页点「用邀请码注册」，用户名填 ${invite.resets}，重新设密码和两步验证。`,
+      ? '发给要注册的人：在纸鸢手机端「设置 › 账号」点「用邀请码注册」，或电脑端「设置 › 账号」点「注册账号」，自己定用户名和密码（至少 12 位）就注册好了，以后只用密码登录。'
+      : `发给 ${invite.resets}：在纸鸢的登录页点「用邀请码注册」，用户名填 ${invite.resets}，重新设密码（至少 12 位），以后只用密码登录。`,
   )
   console.log(`撤销：huli-cloud user uninvite ${invite.id}`)
 }
@@ -188,8 +188,9 @@ async function userList(): Promise<void> {
     const state = a.owner
       ? '机主'
       : { active: '正常', disabled: '已停用', reset: '等待重设' }[a.state]
+    const signIn = a.state === 'reset' ? '' : a.twoStep ? '  两步验证' : '  仅密码'
     console.log(
-      `  ${a.username}  ${state}  创建于 ${time(a.createdAt)}  ${a.devices} 台设备  ${a.computers} 台电脑  ${a.pushTargets} 个推送目标`,
+      `  ${a.username}  ${state}${signIn}  创建于 ${time(a.createdAt)}  ${a.devices} 台设备  ${a.computers} 台电脑  ${a.pushTargets} 个推送目标`,
     )
   }
   console.log(invites.length ? '邀请码：' : '没有邀请码。')
@@ -245,7 +246,7 @@ async function run(): Promise<void> {
     }
     case 'user-reset': {
       await confirm(
-        `${command.username} 的所有设备会退出登录，密码和两步验证清掉，直到用新邀请码重设。继续请输入 y：`,
+        `${command.username} 的所有设备会退出登录，密码和两步验证清掉，直到用新邀请码重新设密码。继续请输入 y：`,
         'y',
       )
       const {

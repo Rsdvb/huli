@@ -17,6 +17,7 @@ import { parsePairingLink } from '@shared/remote/pairing'
 import { dialRelay } from '@shared/remote/relay-device'
 import { webSocketTransport } from '@shared/remote/websocket-transport'
 import { base32Decode, hashPassword, hotp, newTotpSecret, TOTP_PERIOD_S } from '../src/secrets'
+import { signInSteps } from './accounts'
 
 const ROOT = path.join(import.meta.dirname, '..', '..')
 const PORT = 3911
@@ -108,13 +109,18 @@ describe.runIf(process.env.E2E_LOCAL)('relay end to end', () => {
     try {
       await waitFor('the cloud', () => output.get(cloud)!.includes('listening'))
 
-      // One web session approves every device code.
+      // One web session approves every device code: the owner's password, then its code.
       const code = hotp(base32Decode(secret), Math.floor(Date.now() / 1000 / TOTP_PERIOD_S))
-      const login = await fetch(`${DEVICE}/web/login`, {
-        method: 'POST',
-        body: new URLSearchParams({ password: PASSWORD, code, next: '/account/devices/' }),
-        redirect: 'manual',
-      })
+      const login = await signInSteps(
+        (fields) =>
+          fetch(`${DEVICE}/web/login`, {
+            method: 'POST',
+            body: new URLSearchParams(fields),
+            redirect: 'manual',
+          }),
+        { password: PASSWORD, next: '/account/devices/' },
+        code,
+      )
       expect(login.status).toBe(302)
       const cookie = login.headers.get('set-cookie')!.split(';')[0]!
       const approve = async (userCode: string) => {

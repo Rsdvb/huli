@@ -44,6 +44,8 @@ export interface AccountRow {
   email: string
   owner: boolean
   state: 'active' | 'disabled' | 'reset'
+  /** Whether it signs in with a one-time code after its password. */
+  twoStep: boolean
   createdAt: number
   devices: number
   computers: number
@@ -80,11 +82,14 @@ export interface AdminContext {
 
 const isText = (value: unknown, max = 256): value is string =>
   typeof value === 'string' && value.length <= max
+/** A TOTP secret: never empty, as codes from an empty one are anyone's to work out. */
+const isSecret = (value: unknown): value is string => isText(value, 128) && value !== ''
 const isHashList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.length <= 32 && value.every((v) => isText(v, 128))
 const isDays = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_INVITE_DAYS
 
+/** The owner's credentials, as `init` makes them: a password hash and a TOTP secret, always. */
 function isCredentials(value: unknown): value is Credentials {
   const c = value as Partial<Credentials> | null
   return (
@@ -92,7 +97,7 @@ function isCredentials(value: unknown): value is Credentials {
     c !== null &&
     isText(c.password) &&
     c.password.startsWith('scrypt$') &&
-    isText(c.totp, 128) &&
+    isSecret(c.totp) &&
     typeof c.totpLastStep === 'number' &&
     isHashList(c.recovery)
   )
@@ -138,7 +143,7 @@ export function parseAdminRequest(value: unknown): AdminRequest | null {
         ? { op: 'passwd', password: r.password }
         : null
     case 'totp':
-      return isText(r.totp, 128) && typeof r.totpLastStep === 'number' && isHashList(r.recovery)
+      return isSecret(r.totp) && typeof r.totpLastStep === 'number' && isHashList(r.recovery)
         ? { op: 'totp', totp: r.totp, totpLastStep: r.totpLastStep, recovery: r.recovery }
         : null
     default:
@@ -153,6 +158,7 @@ export function listAccounts(store: Store): Required<Pick<AdminAnswer, 'accounts
     email: account.email,
     owner: account.owner,
     state: account.disabledAt !== null ? 'disabled' : account.password ? 'active' : 'reset',
+    twoStep: account.totp !== null,
     createdAt: account.createdAt,
     ...store.holdings(account.id),
   }))
