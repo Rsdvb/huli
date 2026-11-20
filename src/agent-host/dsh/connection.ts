@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import type { Platform } from '@shared/platform'
 import type { ConfigOption, QuestionAnswer, StopReason, TokenTotals } from '@shared/thread'
 import {
   AgentRequestError,
@@ -16,6 +17,7 @@ import {
   type AgentConnection,
   type AgentInit,
   type ConnectionHooks,
+  type ListedEverywhere,
   type ListedSession,
   type McpServer,
   type OpenedSession,
@@ -61,8 +63,21 @@ import type {
   SessionStatusNotification,
   SubagentFinishedNotification,
   SubagentStartedNotification,
+  WireMessage,
 } from './protocol'
 import { credentialsStamp, dshHome, readProvider, type Provider } from './credentials'
+import {
+  DshFormatError,
+  NEWEST_FORMAT,
+  findLog,
+  fromUser,
+  listSessions,
+  readHistory,
+  readImages,
+  sessionsRoot,
+  type DshHistory,
+  type DshListed,
+} from './history'
 import { listingRows, readListing, type ListedModel } from './listing'
 import { NO_ROUTES, readRoutes, type Routes } from './routes'
 
@@ -89,6 +104,12 @@ const AUTH_CODES = new Set([
   'MISSING_CREDENTIAL',
 ])
 const OPTION = { allow: 'allow-once', reject: 'reject', approve: 'approve', keep: 'keep' }
+/** The sessions a page of the import lists. */
+const LIST_PAGE = 50
+/** How deep a replay follows subagents that started subagents. */
+const SUBAGENT_DEPTH = 8
+/** History rows a replay leaves out: retries and jobs only mattered while they ran. */
+const NOT_REPLAYED = new Set(['llm/retry', 'job/registered', 'job/settled'])
 /** An option id answering a question's choice, as a client without the card's questions sends. */
 const ANSWER = /^answer:(\d+)$/
 const OTHER_ANSWER = 'other'
@@ -196,6 +217,54 @@ function stopReason(reason: EventData['turn/end']['reason']): StopReason {
     default:
       return 'end_turn'
   }
+}
+
+/** A page of the import's list, by the offset its cursor holds. */
+function listPage<T>(
+  all: readonly T[],
+  cursor: string | null,
+): {
+  items: T[]
+  nextCursor: string | null
+} {
+  const offset = cursor ? Number.parseInt(cursor, 10) : 0
+  const start = Number.isSafeInteger(offset) && offset > 0 ? offset : 0
+  const end = start + LIST_PAGE
+  return { items: all.slice(start, end), nextCursor: end < all.length ? String(end) : null }
+}
+
+/** How a subagent's history ended, as its parent's subagent row shows it. */
+function endState(history: DshHistory): SubagentState {
+  for (let i = history.events.length - 1; i >= 0; i--) {
+    const event = history.events[i]!
+    if (event.type !== 'turn/end') continue
+    const reason = (event.data as EventData['turn/end'] | undefined)?.reason
+    if (!reason || typeof reason.kind !== 'string') break
+    return {
+      kind: 'idle',
+      stopReason: stopReason(reason),
+      error:
+        reason.kind === 'error'
+          ? { message: reason.error?.message || t('dsh.subagent.failed', { reason: reason.kind }) }
+          : null,
+      tokens: null,
+    }
+  }
+  return { kind: 'idle', stopReason: null, error: null, tokens: null }
+}
+
+/** Why a session's history cannot be replayed, as the session's error says it. */
+function historyError(error: unknown): AgentRequestError {
+  if (error instanceof DshFormatError) {
+    const key =
+      error.version > NEWEST_FORMAT ? 'dsh.history.newerFormat' : 'dsh.history.olderFormat'
+    return new AgentRequestError('agent_error', t(key, { version: error.version }))
+  }
+  return new AgentRequestError('agent_error', (error as Error)?.message ?? String(error))
+}
+
+function iso(time: number): string | null {
+  return time > 0 ? new Date(time).toISOString() : null
 }
 
 /** A name dsh takes for an MCP server: letters, digits, `_` and `-`, at most 32. */
@@ -332,6 +401,7 @@ export class DshConnection implements AgentConnection {
   /** A listing ended, with a list or without: only then is a home known to offer no model. */
   private settled = false
   private readonly stopListing = new AbortController()
+  private readonly platform = process.platform as Platform
 
   constructor(private readonly context: HostedContext) {
     this.closed = new Promise((resolve) => (this.resolveClosed = resolve))
@@ -389,8 +459,9 @@ export class DshConnection implements AgentConnection {
       name: 'DeepSeek Harness',
       version: this.version,
       capabilities: {
-        loadSession: false,
-        listSessions: false,
+        // Both read dsh's own session logs; a resumed session runs in dsh again.
+        loadSession: true,
+        listSessions: true,
         resumeSession: true,
         closeSession: true,
         deleteSession: false,
@@ -624,10 +695,148 @@ export class DshConnection implements AgentConnection {
     return { config: this.options(this.open(sessionId, cwd, options, true)) }
   }
 
-  loadSession(): Promise<SessionSetup> {
-    return Promise.reject(
-      new AgentRequestError('agent_error', 'DeepSeek Harness replays no history'),
-    )
+  /**
+   * Opens a session as `resumeSession` does, replaying the history dsh keeps of it first, its
+   * subagents' into their own threads. A session dsh has no log of replays nothing.
+   */
+  async loadSession(
+    sessionId: string,
+    cwd: string,
+    options: SessionOptions = {},
+  ): Promise<SessionSetup> {
+    this.assertOpen()
+    await this.refresh()
+    if (this.listed === null) await this.listSoon()
+    const home = this.home()
+    const history = await this.historyOf(home, sessionId, [cwd]).catch((error: unknown) => {
+      throw historyError(error)
+    })
+    const existing = this.sessions.get(sessionId)
+    const session = existing ?? this.open(sessionId, cwd, options, true)
+    session.options = options
+    // The thread was emptied for the replay, so the calls a mapper knew went with it.
+    session.mapper = new SessionMapper(session.cwd)
+    if (!existing && history?.route) this.takeRoute(session, history.route)
+    if (history) {
+      await this.replay(sessionId, sessionId, history, session.mapper, home, new Set(), 0)
+    }
+    return { config: this.options(session) }
+  }
+
+  /** The home dsh runs with for this agent, its configuration folder when one was chosen. */
+  private home(): string {
+    return dshHome({ ...this.context.env, ...this.context.spec.env })
+  }
+
+  /** A session's history from dsh's log, looked for under `cwds` first; null without one. */
+  private async historyOf(
+    home: string,
+    sessionId: string,
+    cwds: readonly string[],
+  ): Promise<DshHistory | null> {
+    const log = await findLog(sessionsRoot(home), sessionId, cwds, this.platform)
+    return log ? readHistory(log) : null
+  }
+
+  /** A session dsh made elsewhere goes on with the model of its latest request, when listed. */
+  private takeRoute(session: Session, route: NonNullable<DshHistory['route']>): void {
+    const model = choiceOf(this.models, route.provider, route.model)
+    if (!model) return
+    session.model = model.value
+    session.effort =
+      route.effort !== null && model.efforts.includes(route.effort) ? route.effort : null
+  }
+
+  /**
+   * Replays a history to the session `id`'s target. Only the root's own messages show the user's
+   * words: live, Kettu shows the prompts it sent itself, and a subagent's task or the context dsh
+   * adds shows as none.
+   */
+  private async replay(
+    id: string,
+    rootId: string,
+    history: DshHistory,
+    mapper: SessionMapper,
+    home: string,
+    seen: Set<string>,
+    depth: number,
+  ): Promise<void> {
+    const root = id === rootId
+    const images = root ? await readImages(home, history.events) : new Map<string, string>()
+    for (const [index, event] of history.events.entries()) {
+      if (NOT_REPLAYED.has(event.type)) continue
+      if (event.type === 'user/message') {
+        const message = event.data as WireMessage
+        if (root && fromUser(message)) this.mapTo(id, (ctx) => mapper.prompt(message, ctx, images))
+        continue
+      }
+      if (event.type === 'subagent/catalog') {
+        // A fork's inherited entries name the subagents of the session it was made from.
+        if (index >= history.inherited && depth < SUBAGENT_DEPTH) {
+          await this.replayChild(id, rootId, history, event.data, home, seen, depth + 1)
+        }
+        continue
+      }
+      this.mapTo(id, (ctx) => mapper.event(event, ctx))
+    }
+    this.mapTo(id, (ctx) => mapper.closeOpen(ctx))
+  }
+
+  /** A subagent's history, which its parent's row opens: the child's own log, when dsh kept one. */
+  private async replayChild(
+    parentId: string,
+    rootId: string,
+    parent: DshHistory,
+    data: unknown,
+    home: string,
+    seen: Set<string>,
+    depth: number,
+  ): Promise<void> {
+    const catalog = data as { childId?: unknown; label?: unknown; name?: unknown } | null
+    const childId = typeof catalog?.childId === 'string' ? catalog.childId : null
+    if (!childId || seen.has(childId)) return
+    seen.add(childId)
+    const cwd = parent.header.cwd ?? this.sessions.get(rootId)?.cwd ?? os.homedir()
+    const history = await this.historyOf(home, childId, [cwd]).catch((error: unknown) => {
+      this.hooks.log(
+        'warn',
+        `Could not read DeepSeek Harness subagent ${childId}: ${(error as Error).message}`,
+      )
+      return null
+    })
+    if (!history?.header.subagent || history.header.parentSession !== parent.header.id) return
+    const label = typeof catalog?.label === 'string' && catalog.label ? catalog.label : null
+    const name = typeof catalog?.name === 'string' && catalog.name ? catalog.name : null
+    const title = label ?? name
+    this.deliver(parentId, {
+      patches: [],
+      effects: [
+        {
+          kind: 'subagent',
+          sessionId: childId,
+          ...(title ? { title } : {}),
+          ...(name && name !== title ? { description: name } : {}),
+        },
+      ],
+    })
+    const mapper = new SessionMapper(history.header.cwd ?? cwd)
+    this.children.set(childId, { rootId, mapper })
+    await this.replay(childId, rootId, history, mapper, home, seen, depth)
+    this.deliver(parentId, {
+      patches: [],
+      effects: [{ kind: 'subagent', sessionId: childId, state: endState(history) }],
+    })
+  }
+
+  /** Maps for the session's target against its thread, or once one is registered. */
+  private mapTo(sessionId: string, map: Deferred): void {
+    const target = this.targets.get(sessionId)
+    if (!target) {
+      this.hold(sessionId, map)
+      return
+    }
+    const output = map(target.context())
+    if (output) target.apply(output)
   }
 
   forkSession(): Promise<OpenedSession> {
@@ -649,8 +858,48 @@ export class DshConnection implements AgentConnection {
     )
   }
 
-  async listSessions(): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
-    return { sessions: [], nextCursor: null }
+  /** The sessions dsh keeps of a folder that hold a turn, newest first; subagents' are not. */
+  async listSessions(
+    cwd: string,
+    cursor: string | null,
+  ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
+    const all = await listSessions(sessionsRoot(this.home()), this.platform, cwd)
+    const { items, nextCursor } = listPage(
+      all.filter((item) => !item.subagent && item.prompted),
+      cursor,
+    )
+    return {
+      sessions: items.map((item) => ({
+        sessionId: item.sessionId,
+        title: item.title,
+        updatedAt: iso(item.updatedAt),
+        cwd: item.cwd ?? cwd,
+      })),
+      nextCursor,
+    }
+  }
+
+  /** Huli: every folder's sessions, subagents' and blank ones marked, for the import's count. */
+  async listAllSessions(
+    cursor: string | null,
+  ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }> {
+    const all = await listSessions(sessionsRoot(this.home()), this.platform)
+    const { items, nextCursor } = listPage(
+      all.filter((item): item is DshListed & { cwd: string } => item.cwd !== null),
+      cursor,
+    )
+    return {
+      sessions: items.map((item) => ({
+        sessionId: item.sessionId,
+        title: item.title,
+        createdAt: iso(item.createdAt),
+        updatedAt: iso(item.updatedAt),
+        cwd: item.cwd,
+        subagent: item.subagent,
+        prompted: item.prompted,
+      })),
+      nextCursor,
+    }
   }
 
   async removeHidden(sessionId: string): Promise<void> {

@@ -887,6 +887,10 @@
     "subagent": {
       "failed": "The subagent ended: {{reason}}"
     },
+    "history": {
+      "newerFormat": "A newer DeepSeek Harness saved this session (format {{version}}), which this version cannot read yet.",
+      "olderFormat": "An early DeepSeek Harness saved this session (format {{version}}), whose history cannot be read here."
+    },
     "auth": {
       "account": "DeepSeek account",
       "accountDescription": "Run `dsh web` and sign in to DeepSeek in its page"
