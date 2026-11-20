@@ -52,9 +52,14 @@ import {
 // It opens on its latest page with its newest items rendered. Whenever less than a viewport of
 // rendered items lies above the view, a batch of older ones renders in a transition, which
 // MessageScroller keeps in place as they are prepended; once every loaded item is rendered, the
-// page before them loads. Rendered items stay, and off-screen ones skip layout and paint.
+// page before them loads. Rendered items stay while the thread is read, and off-screen ones skip
+// layout and paint; once it rests at its end, all but the newest go again (TrimAtEnd).
 const FIRST_ITEMS = 24
 const MORE_ITEMS = 16
+/** Rendered items past which a thread resting at its end lets the older ones go. */
+const KEEP_ITEMS = 3 * FIRST_ITEMS
+/** How long a thread rests at its end before it does. */
+const TRIM_AFTER_MS = 3000
 
 /** The entry an item starts with; a reply's footer and the turn's status start with none. */
 function firstEntryOf(item: Item | undefined): string | null {
@@ -245,6 +250,24 @@ function useSelectedText(viewport: RefObject<HTMLElement | null>): boolean {
   return selected
 }
 
+/**
+ * Huli: lets the items far above the view go once the thread has rested at its end a while, so
+ * the newest FIRST_ITEMS stay rendered. Off-screen items skip layout and paint but kept their DOM,
+ * so a session open for hours, or one scrolled back through, held every item it had rendered: a
+ * thread of 1,500 entries read to its start kept 41,000 nodes and half a gigabyte in the renderer,
+ * and every frame's style, observers and animations ran over all of them. Scrolling back renders
+ * them again as before.
+ */
+function TrimAtEnd({ excess, trim }: { excess: boolean; trim: () => void }) {
+  const { end: below } = useMessageScrollerScrollable()
+  useEffect(() => {
+    if (below || !excess) return
+    const timer = setTimeout(() => startTransition(trim), TRIM_AFTER_MS)
+    return () => clearTimeout(timer)
+  }, [below, excess, trim])
+  return null
+}
+
 /** Shown at the top while an older page loads there, after a beat so a quick one never flashes. */
 function OlderLoading({ sessionId }: { sessionId: string }) {
   const loading = useThreadsStore((s) => s.replicas[sessionId]?.loadingOlder ?? false)
@@ -430,6 +453,8 @@ export const Thread = memo(function Thread({
   }, [sessionId, held, returnTo, hasOlder, shownFrom, showFrom])
   // Also after each prepend, and for a page too short to scroll.
   useEffect(nearStart, [nearStart, items.length])
+  const trimmable = !held && !returnTo && !gap && shownFrom < items.length - KEEP_ITEMS
+  const trim = useCallback(() => showFrom(items.length - FIRST_ITEMS), [items.length, showFrom])
   // From the first paint of its items, so the thread never shows before it enters.
   const entrance = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
@@ -476,6 +501,7 @@ export const Thread = memo(function Thread({
       scrollEdgeThreshold={40}
     >
       <ScrollOnSend sent={sent} />
+      <TrimAtEnd excess={trimmable} trim={trim} />
       <MessageScroller className="ks-thread min-h-0 flex-1 scroll-fade-top-overlay">
         <MessageScrollerViewport
           ref={viewport}
