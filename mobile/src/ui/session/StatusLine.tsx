@@ -184,7 +184,7 @@ export function StatusLine(props: {
                   }
                 : {})}
               disabled={!props.onFolderPress && !path}
-              hitSlop={8}
+              hitSlop={ITEM_SLOP}
               accessibilityRole="button"
               accessibilityLabel={
                 props.folderPicker
@@ -255,7 +255,7 @@ export function StatusLine(props: {
         <Pressable
           onPress={props.onLimitPress}
           disabled={!props.onLimitPress}
-          hitSlop={10}
+          hitSlop={ITEM_SLOP}
           accessibilityRole="button"
           accessibilityLabel={
             out
@@ -309,7 +309,7 @@ export function StatusLine(props: {
       {props.context && (
         <Pressable
           onPress={props.context.onPress}
-          hitSlop={10}
+          hitSlop={ITEM_SLOP}
           accessibilityRole="button"
           accessibilityLabel={`上下文已用 ${Math.round(props.context.share * 100)}%，查看构成`}
           style={({ pressed }) => [styles.chip, { opacity: pressed ? 0.55 : 1 }]}
@@ -335,7 +335,7 @@ function CacheChip(props: { expiry: KnownExpiry; onPress(): void }) {
   return (
     <Pressable
       onPress={props.onPress}
-      hitSlop={10}
+      hitSlop={ITEM_SLOP}
       accessibilityRole="button"
       accessibilityLabel={`提示词缓存：${
         phase === 'expired' ? (expiry.estimate ? '可能已过期' : '已过期') : `剩余 ${time}`
@@ -353,6 +353,12 @@ function CacheChip(props: { expiry: KnownExpiry; onPress(): void }) {
     </Pressable>
   )
 }
+
+/**
+ * The line's items sit 8pt apart: each takes touches above and below it, and only half the gap
+ * beside it, so a tap between two opens the nearer one.
+ */
+const ITEM_SLOP = { top: 10, bottom: 10, left: 4, right: 4 }
 
 const styles = StyleSheet.create({
   row: {

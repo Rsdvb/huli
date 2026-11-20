@@ -271,7 +271,12 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
             )
           })}
           {preview.length > 4 && (
-            <Pressable onPress={() => setAllShown((v) => !v)} hitSlop={6}>
+            <Pressable
+              onPress={() => setAllShown((v) => !v)}
+              hitSlop={MORE_SLOP}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: allShown }}
+            >
               <Text style={[styles.more, { color: c.tint }]}>
                 {allShown ? '收起' : `还有 ${preview.length - 4} 项`}
               </Text>
@@ -292,7 +297,7 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
           {command.split(/\r?\n/).length > COMMAND_LINES || command.length > COMMAND_LINES * 40 ? (
             <Pressable
               onPress={() => setCommandShown((v) => !v)}
-              hitSlop={6}
+              hitSlop={MORE_SLOP}
               accessibilityRole="button"
               accessibilityState={{ expanded: commandShown }}
             >
@@ -394,6 +399,9 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
     </View>
   )
 }
+
+/** A one-line text button grown to a 44pt touch. */
+const MORE_SLOP = { top: 13, bottom: 13, left: 8, right: 8 }
 
 const styles = StyleSheet.create({
   card: {
