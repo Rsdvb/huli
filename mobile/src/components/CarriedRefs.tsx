@@ -4,7 +4,7 @@
 // under it.
 
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { readTextThumb } from '@shared/attachments'
 import type { AttachmentBytes } from '@shared/agent-host'
@@ -18,6 +18,7 @@ import { FileMark, G, Icon, type IconSpec } from '../ui/session/icons'
 import { MONO, useSessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
 import { PictureStrip, pictureOf, type Picture } from './Pictures'
+import { openUrl } from '../system/openUrl'
 
 type Tiled = Exclude<ContentRef, { kind: 'image' }>
 
@@ -159,7 +160,7 @@ function useOpener() {
       }
       case 'link': {
         if (/^https?:/i.test(ref.uri)) {
-          return () => void Linking.openURL(ref.uri).catch(() => {})
+          return () => openUrl(ref.uri)
         }
         const path = uriPath(ref.uri)
         return path ? () => openPath(path, false) : null

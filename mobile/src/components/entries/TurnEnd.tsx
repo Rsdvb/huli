@@ -4,7 +4,7 @@
 // and another model.
 
 import { useState, type ReactNode } from 'react'
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import {
   outOfCreditTurn,
   retryableTurn,
@@ -23,6 +23,7 @@ import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { useSessionRows } from '../../ui/session/context'
 import { useDisclosure } from '../../ui/session/disclosure'
 import { CardButton, E, SendState, useSender } from './kit'
+import { openUrl } from '../../system/openUrl'
 
 type Notice = Extract<ThreadEntry, { kind: 'notice' }>
 
@@ -192,7 +193,7 @@ function Linked(props: { text: string; color: string }): ReactNode {
         key={from}
         style={{ color: props.color }}
         accessibilityRole="link"
-        onPress={() => void Linking.openURL(url).catch(() => {})}
+        onPress={() => openUrl(url)}
       >
         {url}
       </Text>,
@@ -211,7 +212,7 @@ function reportFailure(title: string, description: string | null): void {
   const error = [title, description].filter(Boolean).join('\n').slice(0, 2000)
   const body = `这一轮出错了：\n\n\`\`\`\n${error}\n\`\`\`\n\n（发生了什么，想做什么：）\n`
   const url = `${GITHUB_URL}/issues/new?title=${encodeURIComponent(`会话出错：${title}`)}&body=${encodeURIComponent(body)}`
-  void Linking.openURL(url).catch(() => {})
+  openUrl(url)
 }
 
 /** Above the composer after a turn the provider refused for want of credit. */

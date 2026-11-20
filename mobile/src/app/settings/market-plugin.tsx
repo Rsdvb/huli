@@ -2,7 +2,7 @@
 // the agents it is installed in, each with its switch and Uninstall, and installing it in another.
 
 import { useState } from 'react'
-import { Linking, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentId } from '@shared/agents'
@@ -52,6 +52,7 @@ import { cacheFor } from '../../ui/memory'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { tokensText } from '../../ui/session/limits'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 const PARTS = [
   ['skills', '技能'],
@@ -148,7 +149,7 @@ export default function MarketPlugin() {
           icon="puzzle"
           title="找不到这个插件"
           message="它可能已从插件市场下架，或者已被卸载。"
-          action={{ label: '返回 Marketplace', onPress: () => router.back() }}
+          action={{ label: '返回插件市场', onPress: () => router.back() }}
         />
       </ManagePage>
     )
@@ -232,7 +233,7 @@ export default function MarketPlugin() {
           <ListRow title="插件市场" value={plugin.marketplace} />
           <ListRow title="插件" value={plugin.id} />
           {plugin.homepage ? (
-            <ListRow title="主页" external onPress={() => void Linking.openURL(plugin.homepage!)} />
+            <ListRow title="主页" external onPress={() => openUrl(plugin.homepage!)} />
           ) : null}
         </ListGroup>
       ) : null}

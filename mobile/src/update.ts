@@ -5,10 +5,11 @@
 // and update there.
 
 import { useSyncExternalStore } from 'react'
-import { AppState, Linking, Platform } from 'react-native'
+import { AppState, Platform } from 'react-native'
 import * as Application from 'expo-application'
 import * as SecureStore from 'expo-secure-store'
 import { RELEASES_URL, UPDATE_CHANNEL_READY } from '@shared/updates'
+import { openUrl } from './system/openUrl'
 
 export interface Release {
   version: string
@@ -183,7 +184,7 @@ export function openUpdate(release: Release): void {
   const url = IOS
     ? `itms-services://?action=download-manifest&url=${encodeURIComponent(release.url)}`
     : release.url
-  void Linking.openURL(url).catch(() => {})
+  openUrl(url)
 }
 
 /** Whether this build updates from the channel; on iOS false until its profile is read. */

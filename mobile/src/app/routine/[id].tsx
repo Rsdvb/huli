@@ -36,6 +36,7 @@ import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { SkeletonRows } from '../../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { agentLabel } from '../../agentName'
 
 function stateLine(r: RoutineView): string {
   if (r.activeRun) return `${RUN_TEXT[r.activeRun.status]}`
@@ -316,7 +317,7 @@ export default function RoutinePage() {
           <ListRow title="计划" value={scheduleText(routine.trigger.schedule)} />
           <ListRow
             title="Agent"
-            value={agent?.name ?? routine.agentId}
+            value={agentLabel(routine.agentId, agent?.name)}
             trailing={<AgentGlyph agentId={routine.agentId} name={agent?.name} size={16} />}
           />
           <ListRow title="项目" value={place} />

@@ -5,7 +5,7 @@
 // the bubble offers to copy or select its text.
 
 import { memo, useMemo } from 'react'
-import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
+import { Alert, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { Attachment, ContentRef, FromDevice, FromSession, UserContent } from '@shared/thread'
 import { leadingCommand, mentionResolver, type Chip } from '../ui/session/chips'
@@ -23,6 +23,7 @@ import { selectText } from '../ui/session/SelectText'
 import { RefTiles } from './CarriedRefs'
 import { Markdown, type MarkdownChips } from './Markdown'
 import { PictureStrip, pictureOf, type Picture } from './Pictures'
+import { openUrl } from '../system/openUrl'
 
 /** Taller than this, a message is cut short behind 展开. */
 const COLLAPSED_HEIGHT = 300
@@ -60,11 +61,17 @@ export const UserMessage = memo(function UserMessage(props: {
   }))
   const refs = useFileRefs()
   const text = textOf(content)
-  const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
-  const attachments = carried.flatMap((ref): Attachment[] =>
-    ref.kind === 'attachment' ? [ref.attachment] : [],
-  )
-  const pictures = carried.map(pictureOf).filter((each): each is Picture => each !== null)
+  // Read from the content once, so what follows them changes only with it.
+  const { carried, attachments, pictures } = useMemo(() => {
+    const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
+    return {
+      carried,
+      attachments: carried.flatMap((ref): Attachment[] =>
+        ref.kind === 'attachment' ? [ref.attachment] : [],
+      ),
+      pictures: carried.map(pictureOf).filter((each): each is Picture => each !== null),
+    }
+  }, [content])
 
   // Mentions resolve against what the message carried, then the project's files.
   const mentions = /[@＠]/.test(text)
@@ -74,15 +81,14 @@ export const UserMessage = memo(function UserMessage(props: {
         attachments,
         mentions && refs?.known ? { files: refs.known, folders: foldersOf(refs.known) } : null,
       ),
-    // The attachments change only with the content.
-    [content, mentions, refs?.known],
+    [attachments, mentions, refs?.known],
   )
   const chips = useMemo<MarkdownChips>(
     () => ({
       resolve,
       onOpen: (chip: Chip) => {
         if (chip.kind === 'link') {
-          void Linking.openURL(chip.url).catch(() => {})
+          openUrl(chip.url)
           return
         }
         const attachment = chip.attachmentId
@@ -107,7 +113,7 @@ export const UserMessage = memo(function UserMessage(props: {
         }
       },
     }),
-    [resolve, sessionId, refs?.root],
+    [resolve, attachments, sessionId, refs?.root],
   )
 
   // A file a mention names is its chip in the text; pictures stay above as thumbnails.

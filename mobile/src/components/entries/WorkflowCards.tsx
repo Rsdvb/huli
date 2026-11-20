@@ -37,6 +37,7 @@ import {
   type ReportCall,
   type Suggestion,
 } from './workflowTools'
+import { agentLabel } from '../../agentName'
 
 export { workflowCardOf }
 
@@ -511,7 +512,7 @@ function pickLine(check: string, pick: PickCall['picks'][number], who: string): 
     case 'model':
       return pick.model ? `${who} 有 ${pick.model}` : `${who} 有这个模型`
     case 'effort':
-      return pick.effort ? `${pick.effort} 是它支持的 effort` : '它支持这个 effort'
+      return pick.effort ? `${pick.effort} 是它支持的推理强度` : '它支持这个推理强度'
     case 'tools':
       return '这一步的工具可以交给它'
     case 'limit':
@@ -544,7 +545,7 @@ function PickCard(props: { call: PickCall; sessionId: string }) {
     <Shell tone={pick.accepted ? 'good' : 'bad'}>
       <Head title={`选择 · ${listOf(steps.map(nameOf))}`} badge={pick.accepted} />
       {pick.picks.map((p, i) => {
-        const who = agents.get(p.agent)?.name ?? p.agent
+        const who = agentLabel(p.agent, agents.get(p.agent)?.name)
         const lines = pick.checks?.find((check) => check.step === p.step)?.lines
         return (
           <View key={i} style={{ gap: 3 }}>

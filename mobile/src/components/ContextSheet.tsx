@@ -2,7 +2,7 @@
 // and their rows by the desktop's grouping (features/session/composer/context-bar.ts), the prompt
 // cache's time left, and the plan's windows on the computer, whose line opens the plan's usage.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import Svg, { ClipPath, Defs, G as SvgGroup, Path, Pattern, Rect } from 'react-native-svg'
 import type { AgentStatus, ContextList } from '@shared/agent-host'
@@ -15,10 +15,10 @@ import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
 import { haptic } from '../ui/session/feedback'
 import { clockTime } from '../ui/session/format'
+import { cacheLeftText, useCacheLeft } from '../ui/session/promptCache'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import {
   isExhausted,
-  leftText,
   limitTextColor,
   moneyText,
   planName,
@@ -84,11 +84,22 @@ const NAMES: Record<string, string> = {
   'system tools': '系统工具',
   'mcp tools': 'MCP 工具',
   'system prompt': '系统提示',
+  skills: '技能',
+  'mcp server instructions': 'MCP 服务器说明',
   'autocompact buffer': '自动压缩预留',
   'free space': '空闲',
 }
 
 const rowName = (name: string) => NAMES[name.toLowerCase()] ?? name
+
+/** A listed item's tokens as the agent wrote them, 「1.2k」 or 「12345」, as a count. */
+function parseTokens(text: string): number | null {
+  const match = /([\d.,]+)\s*([kKmM])?/.exec(text)
+  if (!match) return null
+  const n = Number(match[1]!.replace(/,/g, ''))
+  const unit = match[2]?.toLowerCase()
+  return Number.isFinite(n) ? n * (unit === 'k' ? 1e3 : unit === 'm' ? 1e6 : 1) : null
+}
 
 function partColor(part: Part, c: Palette, grays: readonly string[], buffer: string): string {
   if (part.kind === 'buffer') return buffer
@@ -142,7 +153,20 @@ export function ContextSheet(props: {
       void link.request('agents.refreshLimits', { agentId: agent.id, ask: true }).catch(() => {})
     }
     // Read once each time the sheet opens; later snapshots come with the host's pushes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.visible, props.connected])
+
+  // Opened mid-turn, the breakdown waits for the turn's end, then is read while still shown.
+  const readable = props.visible && props.connected && canRead
+  const waited = useRef(false)
+  useEffect(() => {
+    if (!props.visible) waited.current = false
+    else if (!canRead) waited.current = true
+    else if (readable && waited.current) {
+      waited.current = false
+      load()
+    }
+  }, [props.visible, canRead, readable, load])
 
   const pushed = session?.context?.breakdown ?? null
   const fetched = read.kind === 'done' ? read.breakdown : null
@@ -329,7 +353,7 @@ export function ContextSheet(props: {
         <Text style={[styles.note, { color: c.textSecondary }]}>这一轮结束后可以看到构成。</Text>
       ) : null}
 
-      {expiry && <CacheBlock expiry={expiry} used={used} now={now} />}
+      {expiry && <CacheBlock expiry={expiry} used={used} />}
 
       {(subscribed && agent) || usage?.tokens || usage?.cost ? (
         <View style={styles.plan}>
@@ -494,6 +518,11 @@ function HatchSwatch(props: { color: string }) {
 
 const SWATCH = 10
 
+function itemTokens(text: string): string {
+  const n = parseTokens(text)
+  return n === null ? text : tokensText(n)
+}
+
 function ListItems(props: { list: ContextList }) {
   const { c } = useSessionTokens()
   return (
@@ -504,31 +533,30 @@ function ListItems(props: { list: ContextList }) {
             {item.name}
             {item.detail ? <Text style={{ color: c.textTertiary }}> · {item.detail}</Text> : null}
           </Text>
-          <Text style={[styles.itemValue, { color: c.textTertiary }]}>{item.tokens}</Text>
+          <Text style={[styles.itemValue, { color: c.textTertiary }]}>
+            {itemTokens(item.tokens)}
+          </Text>
         </View>
       ))}
     </View>
   )
 }
 
-function CacheBlock(props: {
-  expiry: NonNullable<ReturnType<typeof knownExpiry>>
-  used: number
-  now: number
-}) {
+/** The cache's time left, counting as the status line's chip does, so the two always agree. */
+function CacheBlock(props: { expiry: NonNullable<ReturnType<typeof knownExpiry>>; used: number }) {
   const { c } = useSessionTokens()
-  const { expiry, now } = props
-  const left = Math.max(0, expiry.expiresAt - now)
+  const { expiry } = props
+  const left = useCacheLeft(expiry.expiresAt)
   const state =
     left <= 0
       ? expiry.estimate
-        ? '大概已经过期'
+        ? '可能已过期'
         : '已过期'
-      : `${expiry.estimate ? '大约' : ''}剩余 ${leftText(left)}`
+      : `${expiry.estimate ? '约剩' : '剩余'} ${cacheLeftText(left)}`
   const color = left <= 0 ? c.textTertiary : left <= 60_000 ? c.warning : c.tint
   return (
     <View style={styles.cache}>
-      <Text style={[styles.section, { color: c.textSecondary }]}>Prompt cache</Text>
+      <Text style={[styles.section, { color: c.textSecondary }]}>提示词缓存</Text>
       <View style={styles.cacheRow}>
         <UsageRing
           percent={(left / expiry.ttl) * 100}
@@ -542,7 +570,7 @@ function CacheBlock(props: {
             {state} · 上次请求 {clockTime(expiry.lastRequestAt)}
           </Text>
           <Text style={[styles.note, { color: c.textSecondary }]}>
-            {left > 0 ? '之后' : ''}下一条消息会按全价重新读取全部 {tokensText(props.used)}。
+            {left > 0 ? '之后' : ''}下一条消息会按全价重新读取全部 {tokensText(props.used)} token。
           </Text>
         </View>
       </View>

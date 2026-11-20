@@ -251,7 +251,12 @@ export function AskCard(props: {
             </Text>
           ))}
           {items.length > 4 && (
-            <Pressable onPress={() => setListOpen((v) => !v)} hitSlop={6}>
+            <Pressable
+              onPress={() => setListOpen((v) => !v)}
+              hitSlop={MORE_SLOP}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: listOpen }}
+            >
               <Text style={[styles.more, { color: c.tint }]}>
                 {listOpen ? '收起' : `还有 ${items.length - 4} 项`}
               </Text>
@@ -320,6 +325,7 @@ export function CardButton(props: {
       scale={0.96}
       disabled={props.disabled}
       onPress={props.onPress}
+      hitSlop={BUTTON_SLOP}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!props.disabled, busy: !!props.busy }}
       style={[
@@ -438,6 +444,11 @@ export const kit = StyleSheet.create({
   mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17 },
   block: { borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, padding: 10 },
 })
+
+/** A one-line text button grown to a 44pt touch. */
+const MORE_SLOP = { top: 13, bottom: 13, left: 8, right: 8 }
+/** A card's 40pt button takes the last 2pt above and below it. */
+const BUTTON_SLOP = { top: 2, bottom: 2 }
 
 const styles = StyleSheet.create({
   card: {

@@ -4,7 +4,7 @@
 
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import { harnessOf, type ThreadEntry } from '@shared/thread'
+import type { ThreadEntry } from '@shared/thread'
 import { useAgent, useConnected, useLink, useSession } from '../../host'
 import { sessionTitle } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
@@ -19,22 +19,16 @@ import { subagentRunning, useSubagentDigest } from '../../ui/session/subagents'
 import { durationText } from '../../ui/session/work'
 import { useAgentName } from './AccessEntries'
 import { E, QuietLine } from './kit'
+import { agentLabel } from '../../agentName'
 
 type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
-
-const HARNESS_NAMES: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  opencode: 'opencode',
-  pi: 'Pi',
-}
 
 export function TakeoverEntry(props: { entry: Of<'takeover'> }) {
   const { entry } = props
   const { c } = useSessionTokens()
   const agent = useAgent(entry.agentId)
   const [open, setOpen] = useDisclosure(`takeover:${entry.id}`)
-  const name = agent?.name ?? HARNESS_NAMES[harnessOf(entry.agentId)] ?? 'Agent'
+  const name = agentLabel(entry.agentId, agent?.name)
   const text = entry.turns > 0 ? `由 ${name} 接手 · 带上前面 ${entry.turns} 轮` : `由 ${name} 接手`
   return (
     <View>

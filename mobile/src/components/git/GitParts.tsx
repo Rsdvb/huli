@@ -3,7 +3,7 @@
 // checks, the uncommitted files, the branch's own commits, and the folder it is checked out in.
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type {
   ChangeStatus,
@@ -37,11 +37,12 @@ import { ContextMenu } from '../../ui/ContextMenu'
 import type { MenuNode } from '../../ui/menu'
 import { showNotice } from '../../ui/NoticeBar'
 import { copyText, haptic } from '../../ui/session/feedback'
-import { baseName, dirName } from '../../ui/session/format'
+import { baseName, dirName, durationText, elapsedText } from '../../ui/session/format'
 import { GI, PR_STATE_TEXT, PrMark, usePrColor } from '../../ui/session/gitIcons'
 import { FileMark, G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { Counts } from '../../ui/session/TurnChanges'
+import { openUrl } from '../../system/openUrl'
 
 export function Card(props: { children: ReactNode; flush?: boolean }) {
   const { s } = useSessionTokens()
@@ -305,13 +306,6 @@ function waitingFor(pr: PullRequest): string | null {
   return pr.mergeable === 'clean' ? '可以合并' : null
 }
 
-function spanShort(ms: number): string {
-  const sec = Math.max(0, Math.round(ms / 1000))
-  if (sec < 60) return `${sec} 秒`
-  const min = Math.floor(sec / 60)
-  return min < 60 ? `${min} 分` : `${Math.floor(min / 60)} 小时`
-}
-
 function CheckRow(props: { run: CheckRun }) {
   const { c } = useSessionTokens()
   const { run } = props
@@ -328,16 +322,16 @@ function CheckRow(props: { run: CheckRun }) {
   const took =
     run.outcome === 'pending'
       ? run.startedAt
-        ? spanShort(Date.now() - run.startedAt)
+        ? elapsedText(Date.now() - run.startedAt)
         : '排队中'
       : run.startedAt && run.completedAt
-        ? spanShort(run.completedAt - run.startedAt)
+        ? durationText(run.completedAt - run.startedAt)
         : null
   const url = run.url
   return (
     <Pressable
       disabled={!url}
-      onPress={() => url && void Linking.openURL(url)}
+      onPress={() => url && openUrl(url)}
       style={({ pressed }) => [styles.checkRow, { opacity: pressed ? 0.55 : 1 }]}
     >
       <View style={styles.checkIcon}>{icon}</View>
@@ -383,7 +377,7 @@ export function PrPart(props: {
           </View>
         </View>
         <Pressable
-          onPress={() => void Linking.openURL(pr.url)}
+          onPress={() => openUrl(pr.url)}
           accessibilityRole="link"
           style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1 })}
         >
@@ -421,11 +415,7 @@ export function PrPart(props: {
           </>
         ) : null}
         <View style={styles.prFoot}>
-          <PillButton
-            label="在 GitHub 上打开"
-            icon={G.link}
-            onPress={() => void Linking.openURL(pr.url)}
-          />
+          <PillButton label="在 GitHub 上打开" icon={G.link} onPress={() => openUrl(pr.url)} />
           {note ? (
             <Text
               style={[
@@ -474,11 +464,7 @@ export function PrPart(props: {
     line = '安装 GitHub CLI 后即可查看和创建 Pull Request。'
     if (compare) {
       action = (
-        <PillButton
-          label="在 GitHub 上打开"
-          icon={G.link}
-          onPress={() => void Linking.openURL(compare)}
-        />
+        <PillButton label="在 GitHub 上打开" icon={G.link} onPress={() => openUrl(compare)} />
       )
     }
   } else if (props.gh === 'signed-out') {
@@ -720,7 +706,7 @@ function CommitRow(props: {
             key: 'github',
             label: '在 GitHub 上打开',
             icon: 'link' as const,
-            onPress: () => void Linking.openURL(commitUrl),
+            onPress: () => openUrl(commitUrl),
           },
         ]
       : []),
@@ -782,7 +768,7 @@ function CommitRow(props: {
                 <PillButton
                   label="在 GitHub 上打开"
                   icon={G.link}
-                  onPress={() => void Linking.openURL(commitUrl)}
+                  onPress={() => openUrl(commitUrl)}
                 />
               ) : null}
             </>

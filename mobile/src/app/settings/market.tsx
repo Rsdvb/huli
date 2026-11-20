@@ -516,10 +516,10 @@ export default function Market() {
       <Field
         value={query}
         onChangeText={setQuery}
-        placeholder="搜索 Marketplace"
+        placeholder="搜索插件市场"
         clearButtonMode="while-editing"
         returnKeyType="search"
-        accessibilityLabel="搜索 Marketplace"
+        accessibilityLabel="搜索插件市场"
         style={styles.search}
       />
       {tab === 'installed' ? installed() : directory()}

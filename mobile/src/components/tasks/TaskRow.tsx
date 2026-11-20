@@ -29,6 +29,7 @@ import type { MenuNode } from '../../ui/menu'
 import { Press } from '../../ui/Press'
 import { SwipeRow, type SwipeAction } from '../../ui/SwipeRow'
 import { size as sizes, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { agentLabel } from '../../agentName'
 
 /** The user as a step's doer: a person on the avatar's disc, amber when something waits. */
 export function YouAvatar(props: { size?: number; waiting?: boolean }) {
@@ -103,7 +104,7 @@ export const TaskRow = memo(function TaskRow(props: {
         : yours
           ? { text: '你', color: c.textSecondary }
           : {
-              text: agentId ? `${agent?.name ?? agentId} 在做` : '进行中',
+              text: agentId ? `${agentLabel(agentId, agent?.name)} 在做` : '进行中',
               color: c.textSecondary,
             }
 

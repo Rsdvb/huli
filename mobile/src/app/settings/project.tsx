@@ -98,7 +98,7 @@ export default function ProjectPage() {
   const [leaving, setLeaving] = useState(false)
   const allowLeaving = usePreventRemove(changed && !leaving, ({ repeat }) => {
     haptic.warning()
-    Alert.alert('放弃没有保存的更改？', '这个项目的 worktree 设置改了还没保存。', [
+    Alert.alert('放弃没有保存的更改？', '这个项目的工作树设置改了还没保存。', [
       { text: '继续编辑', style: 'cancel' },
       {
         text: '放弃更改',
@@ -204,13 +204,13 @@ export default function ProjectPage() {
 
       <View style={styles.section}>
         <Text style={[typeScale.headline, styles.header, { color: c.textSecondary }]}>
-          Worktree 设置
+          工作树设置
         </Text>
         <Text style={[typeScale.footnote, styles.header, { color: c.textTertiary }]}>
-          纸鸢怎样为这个项目的新会话命名和准备 worktree。
+          纸鸢怎样为这个项目的新会话命名和准备工作树。
         </Text>
         {loaded === null ? (
-          <ReadState read={read} what="Worktree 设置" icon="sliders" rows={3} />
+          <ReadState read={read} what="工作树设置" icon="sliders" rows={3} />
         ) : (
           <View style={[styles.form, { backgroundColor: c.surface, borderColor: c.border }]}>
             <FieldLabel>分支名</FieldLabel>
@@ -238,8 +238,7 @@ export default function ProjectPage() {
               accessibilityLabel="要复制的文件"
             />
             <FieldNote>
-              相对项目的路径，一行一个，会复制到每个新 worktree。项目里的 .worktreeinclude
-              也会读取。
+              相对项目的路径，一行一个，会复制到每个新工作树。项目里的 .worktreeinclude 也会读取。
             </FieldNote>
             {fieldError('copy')}
 
@@ -253,7 +252,7 @@ export default function ProjectPage() {
               placeholder="pnpm install"
               accessibilityLabel="初始化命令"
             />
-            <FieldNote>在每个新 worktree 里运行，比如安装依赖。留空表示不运行。</FieldNote>
+            <FieldNote>在每个新工作树里运行，比如安装依赖。留空表示不运行。</FieldNote>
             {fieldError('setup')}
 
             <View style={styles.waitRow}>

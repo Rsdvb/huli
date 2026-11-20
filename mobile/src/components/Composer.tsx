@@ -326,8 +326,9 @@ export function Composer(props: ComposerProps) {
 
   useEffect(() => {
     mounted.current = true
-    // The same map for the composer's life.
+    // The same map and set for the composer's life.
     const going = uploads.current
+    const kept = carried.current
     return () => {
       mounted.current = false
       // An upload under way would only be forgotten once it got there.
@@ -335,7 +336,7 @@ export function Composer(props: ComposerProps) {
       going.clear()
       // A draft keeps what the computer holds for it; without one, the computer forgets it.
       for (const item of latest.current) {
-        if (carried.current.has(item.key)) continue
+        if (kept.has(item.key)) continue
         if (item.local && computer) dropFile(computer, item.local.file)
         if (!item.attachment) continue
         if (draftKey && item.status === 'ready') continue
@@ -552,6 +553,7 @@ export function Composer(props: ComposerProps) {
       enqueue(item.key, item.source)
     }
     // The tiles are read when the link comes back, not on each change of them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected])
 
   /** Adds what was picked, as many as there is room for; the keys name mention's items. */
@@ -1183,14 +1185,17 @@ const AttachButton = memo(function AttachButton(props: {
   onPress(): void
 }) {
   const { c } = useSessionTokens()
+  // Blocked, it looks off but still takes a tap, which says why instead of the menu: a disabled
+  // button could never say it.
   return (
     <View ref={props.anchor} collapsable={false}>
-      <NativeMenu source={props.source} disabled={!!props.blocked}>
+      <NativeMenu source={props.blocked ? null : props.source}>
         <RoundButton
           onPress={props.onPress}
-          disabled={!!props.blocked}
           accessibilityLabel="添加照片、文件或命令"
-          {...(props.blocked ? { accessibilityHint: props.blocked } : {})}
+          {...(props.blocked
+            ? { accessibilityHint: props.blocked, style: styles.blockedButton }
+            : {})}
         >
           <Icon icon={G.plus} size={19} color={c.text} weight="medium" />
         </RoundButton>
@@ -1441,75 +1446,80 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
               ? formatBytes(item.size)
               : '上传中'
             : null
+  // The remove button sits on the tile's corner, inside a slot of room around the tile: Android
+  // drops a touch outside a view's parent, which took half of a button hung off the tile itself.
   return (
-    <PressScale
-      scale={0.97}
-      onPress={props.onPress}
-      accessibilityRole="button"
-      accessibilityLabel={item.source.name}
-      accessibilityHint={props.note}
-      style={[styles.tile, { borderColor: c.border, backgroundColor: c.fill }]}
-    >
-      {preview ? (
-        <Image
-          source={{ uri: preview }}
-          style={styles.preview}
-          contentFit="cover"
-          cachePolicy="memory"
-        />
-      ) : textThumb ? (
-        <View style={styles.file}>
-          <Text style={[styles.textLines, { color: c.textSecondary }]} numberOfLines={3}>
-            {textThumb.lines.join('\n')}
-          </Text>
-          <Text style={[styles.fileExt, { color: c.text }]} numberOfLines={1}>
-            {textThumb.count} 行
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.file}>
-          <FileMark path={item.source.name} size={18} />
-          <Text style={[styles.fileExt, { color: c.textSecondary }]} numberOfLines={1}>
-            {item.source.kind === 'text'
-              ? '文本'
-              : extensionOf(item.source.name).toUpperCase() || '文件'}
-          </Text>
-          <Text style={[styles.fileName, { color: c.text }]} numberOfLines={1}>
-            {item.source.name}
-          </Text>
-        </View>
-      )}
-      {working && (
-        <View
-          style={[styles.cover, { backgroundColor: s.veil }]}
-          {...(share !== null
-            ? {
-                accessible: true,
-                accessibilityRole: 'progressbar' as const,
-                accessibilityLabel: `正在上传 ${item.source.name}`,
-                accessibilityValue: { min: 0, max: 100, now: Math.floor(share * 100) },
-              }
-            : {})}
-        >
-          {share !== null ? (
-            <ProgressRing share={share} color={c.text} track={c.border as string} />
-          ) : (
-            <ActivityIndicator size="small" color={c.text} />
-          )}
-          {label && <Text style={[styles.coverText, { color: c.text }]}>{label}</Text>}
-        </View>
-      )}
-      {item.status === 'failed' && (
-        <View style={[styles.cover, { backgroundColor: s.dangerSoft }]}>
-          <Icon icon={G.warning} size={18} color={c.danger} />
-          <Text style={[styles.coverText, { color: c.danger }]}>
-            {item.gone ? '已不可用' : '点按查看'}
-          </Text>
-        </View>
-      )}
+    <View style={styles.tileSlot}>
+      <PressScale
+        scale={0.97}
+        onPress={props.onPress}
+        accessibilityRole="button"
+        accessibilityLabel={item.source.name}
+        accessibilityHint={props.note}
+        style={[styles.tile, { borderColor: c.border, backgroundColor: c.fill }]}
+      >
+        {preview ? (
+          <Image
+            source={{ uri: preview }}
+            style={styles.preview}
+            contentFit="cover"
+            cachePolicy="memory"
+          />
+        ) : textThumb ? (
+          <View style={styles.file}>
+            <Text style={[styles.textLines, { color: c.textSecondary }]} numberOfLines={3}>
+              {textThumb.lines.join('\n')}
+            </Text>
+            <Text style={[styles.fileExt, { color: c.text }]} numberOfLines={1}>
+              {textThumb.count} 行
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.file}>
+            <FileMark path={item.source.name} size={18} />
+            <Text style={[styles.fileExt, { color: c.textSecondary }]} numberOfLines={1}>
+              {item.source.kind === 'text'
+                ? '文本'
+                : extensionOf(item.source.name).toUpperCase() || '文件'}
+            </Text>
+            <Text style={[styles.fileName, { color: c.text }]} numberOfLines={1}>
+              {item.source.name}
+            </Text>
+          </View>
+        )}
+        {working && (
+          <View
+            style={[styles.cover, { backgroundColor: s.veil }]}
+            {...(share !== null
+              ? {
+                  accessible: true,
+                  accessibilityRole: 'progressbar' as const,
+                  accessibilityLabel: `正在上传 ${item.source.name}`,
+                  accessibilityValue: { min: 0, max: 100, now: Math.floor(share * 100) },
+                }
+              : {})}
+          >
+            {share !== null ? (
+              <ProgressRing share={share} color={c.text} track={c.border as string} />
+            ) : (
+              <ActivityIndicator size="small" color={c.text} />
+            )}
+            {label && <Text style={[styles.coverText, { color: c.text }]}>{label}</Text>}
+          </View>
+        )}
+        {item.status === 'failed' && (
+          <View style={[styles.cover, { backgroundColor: s.dangerSoft }]}>
+            <Icon icon={G.warning} size={18} color={c.danger} />
+            <Text style={[styles.coverText, { color: c.danger }]}>
+              {item.gone ? '已不可用' : '点按查看'}
+            </Text>
+          </View>
+        )}
+      </PressScale>
       <Pressable
         onPress={props.onRemove}
-        hitSlop={8}
+        hitSlop={REMOVE_SLOP}
+        accessibilityRole="button"
         accessibilityLabel={
           item.status === 'uploading' ? `取消上传 ${item.source.name}` : `移除 ${item.source.name}`
         }
@@ -1517,7 +1527,7 @@ function Tile(props: { item: PendingAttachment; note: string; onPress(): void; o
       >
         <Icon icon={G.close} size={10} color={s.onScrim} weight="bold" strokeWidth={2.8} />
       </Pressable>
-    </PressScale>
+    </View>
   )
 }
 
@@ -1656,6 +1666,10 @@ function SheetButton(props: {
 }
 
 const TILE = 64
+/** How far the remove button reaches past the tile's corner: the slot's room above and beside it. */
+const REMOVE_OVER = 8
+/** The remove button's 24pt grows to the 44pt the system asks for, within the tiles' row. */
+const REMOVE_SLOP = 10
 const TRAY_RADIUS = 30
 
 const styles = StyleSheet.create({
@@ -1673,7 +1687,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   glassCard: { borderColor: 'transparent', backgroundColor: 'transparent' },
-  tiles: { gap: 12, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 2 },
+  tiles: { gap: 12 - REMOVE_OVER, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 2 },
   status: { fontSize: 12, lineHeight: 16, paddingHorizontal: 18, paddingTop: 6 },
   input: {
     minHeight: 48,
@@ -1724,12 +1738,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   pasteText: { fontSize: 14, fontWeight: '500' },
+  blockedButton: { opacity: 0.38 },
+  tileSlot: { paddingTop: REMOVE_OVER, paddingRight: REMOVE_OVER },
   tile: {
     width: TILE,
     height: TILE,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    marginTop: 6,
   },
   preview: { width: TILE, height: TILE, borderRadius: 12 },
   file: { flex: 1, padding: 7, justifyContent: 'space-between' },
@@ -1752,8 +1767,8 @@ const styles = StyleSheet.create({
   ring: { transform: [{ rotate: '-90deg' }] },
   remove: {
     position: 'absolute',
-    top: -8,
-    right: -8,
+    top: 0,
+    right: 0,
     width: 24,
     height: 24,
     borderRadius: 12,

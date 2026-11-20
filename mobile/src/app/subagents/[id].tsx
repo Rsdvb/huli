@@ -64,6 +64,8 @@ export default function SubagentsScreen() {
     .join(',')
   // Only a child that changed since its last read is read again, not every child each time one does.
   const readAt = useRef(new Map<string, number>())
+  const latestChildren = useRef(children)
+  latestChildren.current = children
   const mounted = useRef(true)
   useEffect(
     () => () => {
@@ -72,7 +74,7 @@ export default function SubagentsScreen() {
     [],
   )
   useEffect(() => {
-    for (const child of children.slice(0, READ_REPLIES)) {
+    for (const child of latestChildren.current.slice(0, READ_REPLIES)) {
       if (readAt.current.get(child.id) === child.updatedAt) continue
       readAt.current.set(child.id, child.updatedAt)
       call(link, 'sessions.outputs', { sessionId: child.id }).then(

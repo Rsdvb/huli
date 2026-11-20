@@ -288,7 +288,11 @@ export function ComputerSheet(props: { visible: boolean; onClose(): void }) {
         visible={props.visible}
         onClose={props.onClose}
         title="电脑"
-        message="纸鸢一次显示一台电脑的会话、产物、定时任务和用量。"
+        message={
+          host.computers.length > 1
+            ? '首页可以一起看全部电脑的会话；产物、定时任务和用量一次显示一台电脑的。'
+            : '纸鸢一次显示一台电脑的会话、产物、定时任务和用量。'
+        }
       >
         <View style={[styles.group, { backgroundColor: c.surface, borderColor: c.border }]}>
           {host.computers.map((h, i) => (

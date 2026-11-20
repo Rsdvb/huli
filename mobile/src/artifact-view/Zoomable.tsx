@@ -4,6 +4,7 @@
 
 import { useRef, type ComponentRef, type ReactNode } from 'react'
 import { Animated, PanResponder, StyleSheet, View, type GestureResponderEvent } from 'react-native'
+import { useReduceMotion } from '../ui/Press'
 
 const MAX = 4
 const DOUBLE_TAP_MS = 280
@@ -55,6 +56,9 @@ export function Zoomable(props: {
   onZoomed.current = props.onZoomed
   const size = useRef({ width: props.width, height: props.height })
   size.current = { width: props.width, height: props.height }
+  // Read by the gesture's handlers, made once.
+  const reduce = useRef(false)
+  reduce.current = useReduceMotion()
 
   const clamp = (s: number, px: number, py: number) => {
     const maxX = (size.current.width * (s - 1)) / 2
@@ -69,11 +73,12 @@ export function Zoomable(props: {
     const next = s < 1.05 ? { s: 1, x: 0, y: 0 } : { s, ...clamp(s, px, py) }
     state.current = { ...state.current, scale: next.s, x: next.x, y: next.y }
     if (animate) {
-      Animated.parallel([
-        Animated.spring(scale, { toValue: next.s, useNativeDriver: true, bounciness: 0 }),
-        Animated.spring(x, { toValue: next.x, useNativeDriver: true, bounciness: 0 }),
-        Animated.spring(y, { toValue: next.y, useNativeDriver: true, bounciness: 0 }),
-      ]).start()
+      // Under Reduce Motion it eases there quickly instead of springing, as the app's springs do.
+      const to = (value: Animated.Value, toValue: number) =>
+        reduce.current
+          ? Animated.timing(value, { toValue, duration: 120, useNativeDriver: true })
+          : Animated.spring(value, { toValue, useNativeDriver: true, bounciness: 0 })
+      Animated.parallel([to(scale, next.s), to(x, next.x), to(y, next.y)]).start()
     } else {
       scale.setValue(next.s)
       x.setValue(next.x)

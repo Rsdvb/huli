@@ -10,7 +10,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -99,7 +98,7 @@ import {
 } from '../../components/entries/Waiting'
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { WorktreeLine } from '../../components/git/WorktreeCard'
-import { useSessionActions } from '../../components/SessionActions'
+import { toggleMuted, useSessionActions } from '../../components/SessionActions'
 import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionChips'
 import { sessionMenuPages } from '../../components/SessionMenu'
 import { useSessionPane } from '../../components/SessionPane'
@@ -128,7 +127,7 @@ import {
   useLinkDown,
   type HostData,
 } from '../../host'
-import { setMuted, useMuted } from '../../push/muted'
+import { useMuted } from '../../push/muted'
 import { folder, sessionTitle } from '../../sessions'
 import { hostErrorText } from '../../hostErrors'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
@@ -171,6 +170,7 @@ import {
 import { WorkingRow } from '../../ui/session/Working'
 import { devMode } from '../../dev/devMode'
 import { FrameMeter } from '../../dev/FrameMeter'
+import { openUrl } from '../../system/openUrl'
 
 const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
 
@@ -883,7 +883,7 @@ function Session() {
     !running &&
     pendingSwitch === null &&
     (cachePhase === 'warm' || cachePhase === 'ending')
-      ? `在这里改动会重写约 ${tokensText(reread)} token 的 prompt cache`
+      ? `在这里改动会重写约 ${tokensText(reread)} token 的提示词缓存`
       : null
 
   const starting = status === 'starting'
@@ -960,11 +960,11 @@ function Session() {
         actions,
         canFork,
         muted,
-        onMute: () => void setMuted(id, !muted).then(() => haptic.success()),
+        onMute: () => toggleMuted(id, !muted),
         onFork: (worktree) => fork(null, worktree),
         onNewSubSession: newChild,
         onShowParent: () => summary.parentId && openSession(summary.parentId),
-        onOpenUrl: (url) => void Linking.openURL(url),
+        onOpenUrl: (url) => openUrl(url),
       })
     : null
 

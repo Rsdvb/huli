@@ -19,6 +19,7 @@ import { currentPrimitives } from '@shared/remote/primitives'
 import { APP_VERSION } from './connection'
 import { relayTokens } from './relay'
 import { createStore, useSelector } from './select'
+import { DEVICE, DEVICE_NAME, SYSTEM_VERSION } from './system/device'
 import { fromBase64Url, toBase64, type SavedHost } from './store'
 
 const VAULT_ITEM = 'huli.cloud.signin'
@@ -64,9 +65,9 @@ export const session = new CloudSession({
   random: (bytes) => crypto.getRandomValues(new Uint8Array(bytes)),
   sha256: (bytes) => currentPrimitives().sha256(bytes),
   info: {
-    name: Device.deviceName ?? Device.modelName ?? 'iPhone',
-    os: `iOS ${Device.osVersion ?? ''}`.trim(),
-    arch: Device.modelName ?? 'iPhone',
+    name: DEVICE_NAME,
+    os: SYSTEM_VERSION,
+    arch: Device.modelName ?? DEVICE,
     version: APP_VERSION,
   },
 })

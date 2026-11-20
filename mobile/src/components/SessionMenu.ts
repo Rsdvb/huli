@@ -13,6 +13,7 @@ import type { MenuEntry, MenuPage, MenuRow } from '../ui/session/Popover'
 import type { SessionActions } from './SessionActions'
 import { optionOf, shownChoice } from './ConfigMenus'
 import { shortModelName } from '../ui/session/optionText'
+import { agentLabel } from '../agentName'
 
 export interface SessionMenuContext {
   summary: SessionSummary
@@ -39,7 +40,7 @@ function modelName(session: SessionView | undefined): string | null {
 /** The menu's head: the agent that runs it, its model and the tokens used, not a button. */
 function headRow(ctx: SessionMenuContext): MenuRow {
   const { agent, session, summary } = ctx
-  const harness = agent?.harnessName ?? agent?.name ?? summary.agentId
+  const harness = agent?.harnessName ?? agentLabel(summary.agentId, agent?.name)
   const name = agent && agent.name !== agent.harnessName ? `${harness} · ${agent.name}` : harness
   const used = session?.usage?.tokens?.total
   const detail = [
@@ -53,7 +54,7 @@ function headRow(ctx: SessionMenuContext): MenuRow {
     label: name,
     icon: G.subagent,
     ...(detail ? { subtitle: detail } : {}),
-    disabled: true,
+    info: true,
   }
 }
 
@@ -147,7 +148,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         ? [
             {
               key: 'fork',
-              label: worktree ? '在新 worktree 中分叉' : '分叉',
+              label: worktree ? '在新工作树中分叉' : '分叉',
               icon: G.fork,
               onPress: () => ctx.onFork(),
             },
@@ -155,7 +156,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
               ? [
                   {
                     key: 'fork-same',
-                    label: '在同一个 worktree 中分叉',
+                    label: '在当前工作树中分叉',
                     icon: G.fork,
                     onPress: () => ctx.onFork('same'),
                   },

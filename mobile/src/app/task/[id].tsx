@@ -371,6 +371,7 @@ function Notes(props: { view: TaskView }) {
         <Press
           onPress={send}
           disabled={off || !text.trim() || request.busy !== null}
+          hitSlop={5}
           accessibilityRole="button"
           accessibilityLabel="补充"
           style={[styles.send, { backgroundColor: off || !text.trim() ? c.fillStrong : c.accent }]}

@@ -92,7 +92,7 @@ export default function Workflows() {
       <EmptyState
         icon="flow"
         title="还没有工作流"
-        message="在任意会话里让 Agent 帮你写一个，它会在这里等你批准；也可以在电脑上的 Marketplace 里添加。"
+        message="在任意会话里让 Agent 帮你写一个，它会在这里等你批准；也可以在电脑上的插件市场里添加。"
       />
     )
   } else {

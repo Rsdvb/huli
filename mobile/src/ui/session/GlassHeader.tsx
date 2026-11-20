@@ -2,7 +2,7 @@
 // round buttons on the right. Floating, the conversation scrolls under it: with Liquid Glass each
 // control is glass of its own, the title a capsule; otherwise the bar is frosted as a whole.
 
-import type { ReactNode, RefObject } from 'react'
+import { useState, type ReactNode, type RefObject } from 'react'
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView } from 'expo-blur'
@@ -55,8 +55,11 @@ export function GlassHeader(props: {
   const insets = useSafeAreaInsets()
   const mode = useGlassMode()
   const floating = useFloatingControls()
-  // A system menu sizes its label by the label's content, so the title is held to a width of its own.
-  const titleWidth = useWindowDimensions().width - 150
+  // A system menu sizes its label by the label's content, so the title is held to a width of its
+  // own: the bar's, which in the iPad split's pane is narrower than the window.
+  const windowWidth = useWindowDimensions().width
+  const [barWidth, setBarWidth] = useState<number | null>(null)
+  const titleWidth = (barWidth ?? windowWidth) - 150
   // In the iPad split's pane there is nothing to go back to; the button empties the pane.
   const pane = useSessionPane()
   const top = props.modal && Platform.OS === 'ios' ? 8 : insets.top
@@ -120,7 +123,11 @@ export function GlassHeader(props: {
       {props.floating && !liquid && (
         <View style={[styles.hairline, { backgroundColor: c.border }]} pointerEvents="none" />
       )}
-      <View style={styles.bar} pointerEvents="box-none">
+      <View
+        style={styles.bar}
+        pointerEvents="box-none"
+        onLayout={(event) => setBarWidth(Math.round(event.nativeEvent.layout.width))}
+      >
         <RoundButton
           tone="glass"
           size={44}

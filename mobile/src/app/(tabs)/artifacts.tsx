@@ -50,6 +50,7 @@ import {
   type as typeScale,
   useTokens,
 } from '../../ui/tokens'
+import { agentLabel } from '../../agentName'
 
 type Sort = 'updated' | 'created' | 'name'
 
@@ -257,6 +258,8 @@ function ArtifactsTab() {
       }}
       accessibilityRole="tab"
       accessibilityState={{ selected: on }}
+      // 38pt tall, its touch reaches the 44pt the system asks for.
+      hitSlop={{ top: 3, bottom: 3 }}
       style={[
         styles.chip,
         { backgroundColor: on ? c.fillStrong : 'transparent', borderColor: c.borderStrong },
@@ -420,7 +423,7 @@ function ArtifactsTab() {
     },
     ...agents.map((id) => ({
       key: id,
-      label: hostAgents.get(id)?.name ?? id,
+      label: agentLabel(id, hostAgents.get(id)?.name),
       checked: agentId === id,
       onPress: () => {
         haptic.select()

@@ -24,6 +24,7 @@ import { call } from './git'
 import { useConnected, useMaybeLink, withinRefreshLimit } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
+import { elapsedText } from './ui/session/format'
 import { useQuarterMinute } from './ui/session/now'
 
 export const LANG = 'zh-CN'
@@ -243,16 +244,8 @@ export function sourceText(entry: WireWorkflowEntry): string {
 
 export { usableWorkflow }
 
-/** How long something has gone: 12 秒, 5 分钟, 2 小时 3 分, 3 天. */
-export function spanText(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s} 秒`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m} 分钟`
-  const h = Math.floor(m / 60)
-  if (h < 48) return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`
-  return `${Math.floor(h / 24)} 天`
-}
+/** How long a task or a step has gone, on the clock that ticks every 15 seconds. */
+export const spanText = elapsedText
 
 /** The time every 15 seconds while `on`, for a clock that counts up, on the screen's shared clock. */
 export function useTick(on: boolean): number {
@@ -484,7 +477,7 @@ export function confirmCancel(link: HostLink, task: TaskSummary): void {
   Alert.alert(
     `取消“${task.title}”？`,
     task.branch
-      ? '正在做的步骤会停下。它们的会话、需求的 worktree 和分支都留着。'
+      ? '正在做的步骤会停下。它们的会话、需求的工作树和分支都留着。'
       : '正在做的步骤会停下。它们的会话留着，做过什么还能看。',
     [
       { text: '继续做', style: 'cancel' },
@@ -508,7 +501,7 @@ export function confirmDelete(link: HostLink, task: TaskSummary, done?: () => vo
   Alert.alert(
     `删除“${task.title}”？`,
     task.branch
-      ? `需求和它各步骤的会话删除后无法恢复。分支 ${task.branch} 和它的 worktree 会留着。`
+      ? `需求和它各步骤的会话删除后无法恢复。分支 ${task.branch} 和它的工作树会留着。`
       : '需求和它各步骤的会话删除后无法恢复。',
     [
       { text: '取消', style: 'cancel' },

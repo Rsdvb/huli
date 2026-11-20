@@ -3,8 +3,8 @@
 // a plan's answer, the turn's changes and footer, and the host's own records as small notes.
 
 import { memo, useMemo, useRef } from 'react'
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
-import type { ThreadEntry, ToolEntry } from '@shared/thread'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
+import type { ArtifactAction, ThreadEntry, ToolEntry } from '@shared/thread'
 import { openArtifact } from '../artifacts'
 import { countRender } from '../ui/renders'
 import { useSessionRows } from '../ui/session/context'
@@ -49,6 +49,7 @@ import { NoticeEntry } from './entries/TurnEnd'
 import { workflowCardOf, WorkflowToolCard } from './entries/WorkflowCards'
 import { Markdown, partGap } from './Markdown'
 import { UserMessage } from './UserMessage'
+import { openUrl } from '../system/openUrl'
 
 type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
@@ -190,6 +191,7 @@ function Note(props: {
     <Pressable
       onPress={props.onPress}
       disabled={!props.onPress}
+      {...(props.onPress ? { accessibilityRole: 'button' as const, hitSlop: NOTE_SLOP } : {})}
       style={({ pressed }) => [styles.quiet, { opacity: pressed ? 0.55 : 1 }]}
     >
       <Icon icon={props.icon} size={14} color={c.textTertiary} />
@@ -325,37 +327,45 @@ export const EntryView = memo(function EntryView(props: {
     case 'market_publish':
       return <MarketPublishEntry entry={entry} {...request} />
     case 'git':
+      // In the desktop's words: 已提交, 已推送, 已切换到, 已创建 PR.
       if (entry.event === 'commit') {
         const count = entry.commits.length + entry.more
+        const first = entry.commits[0]
+        const detail = first
+          ? count > 1
+            ? first.subject
+            : `${first.oid.slice(0, 7)} ${first.subject}`
+          : null
         return (
           <Note
             icon={G.commit}
-            text={`提交了 ${count} 个 commit`}
-            {...(entry.commits[0] ? { detail: entry.commits[0].subject } : {})}
+            text={count > 1 ? `已提交 ${count} 个提交` : '已提交'}
+            {...(detail ? { detail } : {})}
           />
         )
       }
       if (entry.event === 'push') {
         return (
-          <Note icon={G.push} text={`推送了 ${entry.count} 个 commit`} detail={entry.upstream} />
+          <Note icon={G.push} text={`已推送 ${entry.count} 个提交到`} detail={entry.upstream} />
         )
       }
       if (entry.event === 'branch') {
-        return <Note icon={G.branch} text="切换到分支" detail={entry.branch} />
+        return <Note icon={G.branch} text="已切换到" detail={entry.branch} />
       }
       return (
         <Note
           icon={G.pr}
-          text="开了 Pull Request"
-          onPress={() => void Linking.openURL(entry.url).catch(() => {})}
+          text="已创建 PR"
+          detail={pullRequestName(entry.url)}
+          onPress={() => openUrl(entry.url)}
         />
       )
     case 'artifact':
       return (
         <Note
           icon={G.artifact}
-          text="产物"
-          detail={entry.title}
+          text={`${ARTIFACT_ACTION[entry.action]}产物`}
+          detail={entry.version !== null ? `${entry.title} · v${entry.version}` : entry.title}
           onPress={entry.action === 'delete' ? undefined : () => openArtifact(entry.artifactId)}
         />
       )
@@ -363,6 +373,23 @@ export const EntryView = memo(function EntryView(props: {
       return null
   }
 })
+
+const ARTIFACT_ACTION: Record<ArtifactAction, string> = {
+  create: '已创建',
+  update: '已更新',
+  restore: '已恢复',
+  delete: '已删除',
+}
+
+/** A pull request by its repository and number, 「owner/repo#12」, else its site. */
+function pullRequestName(url: string): string {
+  const match = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pulls?\/(\d+)/.exec(url)
+  if (match) return `${match[1]}#${match[2]}`
+  return /^https?:\/\/([^/]+)/.exec(url)?.[1] ?? url
+}
+
+/** A note's line grows to a 44pt touch, as its row is 28pt. */
+const NOTE_SLOP = { top: 8, bottom: 8 }
 
 const CARD: [number, number] = [6, 6]
 

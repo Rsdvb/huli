@@ -2,7 +2,7 @@
 // package Huli adds for it, the agents that use it, and uninstalling it.
 
 import { useState } from 'react'
-import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
+import { Alert, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentInstallMethod, AgentStatus, AgentTask } from '@shared/agent-host'
@@ -52,6 +52,7 @@ import { haptic } from '../../ui/haptics'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { Press } from '../../ui/Press'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 type Actions = ReturnType<typeof useActions>
 
@@ -277,11 +278,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
           title={r.message}
           actions={
             r.url ? (
-              <Button
-                label={r.action}
-                icon="external"
-                onPress={() => void Linking.openURL(r.url!).catch(() => {})}
-              />
+              <Button label={r.action} icon="external" onPress={() => openUrl(r.url!)} />
             ) : undefined
           }
         />
@@ -848,11 +845,7 @@ function InstallSheet(props: {
       {method && status.installNotice ? <FieldNote>{status.installNotice}</FieldNote> : null}
       {status.installUrl ? (
         <View style={styles.row}>
-          <Button
-            label="安装指南"
-            icon="external"
-            onPress={() => void Linking.openURL(status.installUrl!).catch(() => {})}
-          />
+          <Button label="安装指南" icon="external" onPress={() => openUrl(status.installUrl!)} />
         </View>
       ) : null}
     </FormSheet>

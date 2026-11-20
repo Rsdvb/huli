@@ -80,8 +80,8 @@ export function DeleteSessionDialog(props: {
     else if (worktree) {
       stakeLine =
         stake.files === 0
-          ? `它在 worktree ${name}（分支 ${worktree.branch}）里工作。删除会话不会删掉 worktree，除非你选择删除。`
-          : `它的 worktree ${name}（分支 ${worktree.branch}）有 ${stake.files} 个未提交的文件。`
+          ? `它在工作树 ${name}（分支 ${worktree.branch}）里工作。删除会话不会删掉工作树，除非你选择删除。`
+          : `它的工作树 ${name}（分支 ${worktree.branch}）有 ${stake.files} 个未提交的文件。`
     } else if (stake.files > 0) stakeLine = `它的文件夹 ${name} 有 ${stake.files} 个未提交的文件。`
   }
   const body =

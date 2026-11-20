@@ -296,8 +296,7 @@ function MergeCard(props: { view: TaskView; need: Extract<TaskNeed, { kind: 'end
       body={
         <View style={styles.body}>
           <Text selectable style={[typeScale.callout, { color: c.textSecondary }]}>
-            {need.error ??
-              `${need.conflicts.length} 个文件有冲突。在需求的 worktree 里解决后重试。`}
+            {need.error ?? `${need.conflicts.length} 个文件有冲突。在需求的工作树里解决后重试。`}
           </Text>
           {need.conflicts.map((file) => (
             <Text

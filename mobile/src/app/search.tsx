@@ -369,7 +369,7 @@ export default function Search() {
           out.push({ kind: 'loading', key: 'l-artifacts', text: '正在读取产物…' })
         }
       }
-      group('artifacts', 'Artifacts', artifactHits, (a) => ({
+      group('artifacts', '产物', artifactHits, (a) => ({
         kind: 'artifact',
         key: `a-${a.id}`,
         artifact: a,

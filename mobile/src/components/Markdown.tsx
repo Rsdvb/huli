@@ -14,15 +14,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import {
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type TextStyle,
-} from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
 import { Image } from 'expo-image'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { cacheFor } from '../ui/memory'
@@ -52,6 +44,7 @@ import {
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
+import { openUrl } from '../system/openUrl'
 
 export type MarkdownSize = 'body' | 'compact'
 
@@ -109,7 +102,7 @@ function openLink(href: string, refs: FileRefsContext | null) {
     else showNotice({ text: '这个文件不在会话的文件夹里，请在电脑上查看' })
     return
   }
-  void Linking.openURL(href).catch(() => showNotice({ text: '手机上打不开这个链接' }))
+  openUrl(href)
 }
 
 /**
