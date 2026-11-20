@@ -3,7 +3,7 @@
 // desktop's `@` does (its name in the text, the file attached); and the agent's slash commands,
 // one of which goes at the start of the message, listed only when the agent reports some.
 
-import { useState, type RefObject } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 import { StyleSheet, TextInput, View } from 'react-native'
 import type { HostLink } from '@shared/remote/link'
 import type { SlashCommand } from '@shared/thread'
@@ -36,6 +36,10 @@ export function useAttachPages(props: {
   const { c } = useSessionTokens()
   const [query, setQuery] = useState('')
   const files = useProjectFiles(props.link, props.folder, props.mentioning)
+  // A menu closed without a pick opens again on the whole list, not on the last search.
+  useEffect(() => {
+    if (!props.mentioning) setQuery('')
+  }, [props.mentioning])
   const commandNames = props.commands.map((command) => command.name)
   const full = props.count >= ATTACHMENT_LIMIT
   const limit = full ? { subtitle: `最多 ${ATTACHMENT_LIMIT} 个附件`, disabled: true } : {}

@@ -4,7 +4,7 @@
 // agent to pick while the chosen one's plan is used up (composer/quota-strip.tsx), and the prompt
 // the agent predicts comes next, which the desktop shows faint in the empty box.
 
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
+import { Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native'
 import Reanimated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import type { Fallback, PlanQuota } from '@shared/plan-quota'
 import type { ConfigOption } from '@shared/thread'
@@ -12,6 +12,7 @@ import { haptic } from '../ui/session/feedback'
 import { fallbackText, quotaText, tokensText } from '../ui/session/limits'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
+import { space } from '../ui/tokens'
 import { optionName, shortModelName } from '../ui/session/optionText'
 import { modelName, optionOf, shownChoice } from './ConfigMenus'
 
@@ -62,11 +63,13 @@ export function SwitchStrip(props: {
           accessibilityHint={`${props.agentName} 先读完前面的对话写一份总结再接着做，用的是它自己的额度。`}
           style={styles.toggle}
         >
+          {/* The system's own switch: a scale or an off color of ours breaks iOS 26's glass knob. */}
           <Switch
             value={props.summarize}
             onValueChange={props.onSummarize}
-            trackColor={{ true: c.accent, false: c.fillStrong }}
-            style={styles.switch}
+            trackColor={
+              Platform.OS === 'ios' ? { true: c.accent } : { true: c.accent, false: c.fillStrong }
+            }
           />
           <Text style={[styles.small, { color: c.textSecondary }]}>先总结再接着做</Text>
         </Pressable>
@@ -113,7 +116,7 @@ export function CacheNotice(props: { estimate: boolean; used: number; onDismiss(
       </View>
       <Pressable
         onPress={props.onDismiss}
-        hitSlop={10}
+        hitSlop={TEXT_SLOP}
         accessibilityRole="button"
         accessibilityLabel="关闭"
       >
@@ -164,7 +167,7 @@ export function QuotaSuggestion(props: {
         >
           <Text style={[styles.undoText, { color: c.text }]}>{fallbackText(props.fallback)}</Text>
         </Pressable>
-        <Pressable onPress={props.onDismiss} hitSlop={8} accessibilityRole="button">
+        <Pressable onPress={props.onDismiss} hitSlop={TEXT_SLOP} accessibilityRole="button">
           <Text style={[styles.small, { color: c.textSecondary }]}>不用了</Text>
         </Pressable>
       </View>
@@ -211,6 +214,9 @@ export function PromptSuggestionChip(props: { text: string; onUse(): void; onDis
   )
 }
 
+/** A small text or icon button's touch, grown to about 44pt tall. */
+const TEXT_SLOP = { top: 14, bottom: 14, left: space.sm, right: space.sm }
+
 const styles = StyleSheet.create({
   note: {
     borderRadius: 18,
@@ -225,8 +231,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 14, lineHeight: 20, fontWeight: '600' },
   small: { fontSize: 12.5, lineHeight: 17 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 25 },
-  toggle: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  switch: { transform: [{ scale: 0.75 }], marginVertical: -6, marginLeft: -6 },
+  toggle: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm },
   undo: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
