@@ -665,8 +665,9 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
               <Text style={[styles.leftText, { color: c.textSecondary }]}>剩余 {left}%</Text>
             </View>
           ) : undefined,
+        // An agent that leads to its models has no check of its own, so the current one says so.
         ...(need === null && models > 1
-          ? { page: `agent:${agent.id}` }
+          ? { page: `agent:${agent.id}`, ...(agent.id === props.current ? { detail: '当前' } : {}) }
           : { checked: agent.id === props.current }),
         disabled: need !== null,
         onPress: () => props.onChoose(agent, null),
