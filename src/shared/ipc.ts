@@ -5,6 +5,7 @@ import type { ArtifactImportKind, ArtifactImportResult, ThumbnailPage } from './
 import type { SelectMessage } from './artifact-runtime/page-messages'
 import type { ArtifactExportFormat } from './artifact-types'
 import type { GrantedAttachment } from './attachments'
+import type { BackupStatus, RestorePick } from './backup'
 import type { BrowserBounds, BrowserOriginDecision, BrowserState } from './browser'
 import type { ControlAgent, ControlOutcome } from './control'
 import type { DebugStatus } from './debug'
@@ -30,6 +31,7 @@ import type {
 import type { PairingState } from './remote/pairing'
 import type { DirectAddress } from './remote/protocol'
 import type { RemoteStatus } from './remote/status'
+import type { SessionExportRequest } from './session-export'
 import type { AgentColor, SettingsFile, SettingsPatch } from './settings'
 import type {
   BroughtSite,
@@ -509,6 +511,16 @@ export interface IpcInvokeContract {
   'browser:load-site-icon': { args: [url: string]; result: void }
   /** A link in Kettu opened the address, in either place, so its site counts as opened. */
   'browser:site-opened': { args: [url: string]; result: void }
+  // Huli: the daily backup of the data folder. The folder and the file to restore come from
+  // main's dialogs; `backup:restore` takes the token `backup:pick-restore` gave.
+  'backup:status': { args: []; result: BackupStatus }
+  'backup:run': { args: []; result: BackupStatus }
+  'backup:choose-folder': { args: []; result: BackupStatus }
+  'backup:open-folder': { args: []; result: void }
+  'backup:pick-restore': { args: []; result: RestorePick }
+  'backup:restore': { args: [token: string]; result: void }
+  // Huli: a session as the page built it, saved where main's dialog says; false when cancelled.
+  'session:export': { args: [request: SessionExportRequest]; result: boolean }
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -549,6 +561,8 @@ export interface IpcEventContract {
   'sign-ins:changed': BroughtSite[]
   /** To the menu bar panel: it came forward. */
   'tray:shown': null
+  /** Huli: the backup's status changed. */
+  'backup:changed': BackupStatus
 }
 
 export type IpcEventChannel = keyof IpcEventContract
@@ -1044,4 +1058,23 @@ export interface KettuApi {
      */
     saveCapture(device: string, kind: DeviceCaptureKind, data: ArrayBuffer): Promise<string | null>
   }
+  /** Huli: the daily backup of this computer's data folder; absent in the web client. */
+  backup?: {
+    status(): Promise<BackupStatus>
+    /** Starts a backup now unless one runs; the status says how it goes. */
+    run(): Promise<BackupStatus>
+    /** Asks for the folder with the system's dialog; the settings keep it. */
+    chooseFolder(): Promise<BackupStatus>
+    openFolder(): Promise<void>
+    /** Asks for a backup to restore and checks it; null when cancelled. */
+    pickRestore(): Promise<RestorePick>
+    /** Restores the picked backup: the app stops, restores and starts again. */
+    restore(token: string): Promise<void>
+    onChanged(listener: (status: BackupStatus) => void): () => void
+  }
+  /**
+   * Huli: saves a session's export where the save dialog says, its secrets masked; false when
+   * cancelled. Absent in the web client.
+   */
+  exportSession?(request: SessionExportRequest): Promise<boolean>
 }

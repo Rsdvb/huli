@@ -14,6 +14,8 @@ const LEFT_OUT: Partial<Record<SectionDef['id'], readonly string[] | 'all'>> = {
   'computer-use': 'all',
   // The agents' network is the desktop app's computer's own, which no device sees.
   'agent-network': 'all',
+  // Huli: so is the backup of its data folder.
+  backup: 'all',
   ...(isHosted ? {} : { account: 'all' as const }),
   // Kettu's cloud is switched on the computer itself.
   general: ['confirm-quit', 'background', 'open-at-login', 'cloud', 'other-connections'],

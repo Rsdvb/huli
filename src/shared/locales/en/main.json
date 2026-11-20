@@ -58,7 +58,20 @@
     "chooseAgentFolder": "Choose Agent Folder",
     "chooseHistoryFolder": "Choose a Folder of Agent Sessions",
     "chooseEditor": "Choose Editor",
-    "chooseSshKey": "Choose SSH Key File"
+    "chooseSshKey": "Choose SSH Key File",
+    "chooseBackupFolder": "Choose Backup Folder",
+    "chooseBackup": "Choose a Backup to Restore",
+    "backupFiles": "Kettu Backups",
+    "exportSession": "Export Session",
+    "exportFilter": {
+      "md": "Markdown",
+      "zip": "Zip archive",
+      "pdf": "PDF"
+    }
+  },
+  "backup": {
+    "restoreFailed": "Could not restore from the backup",
+    "restartAnyway": "Restart"
   },
   "quit": {
     "titleQuit": "Quit {{name}}?",

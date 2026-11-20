@@ -3,9 +3,13 @@
 import { isStartMode, takesClaudeSettings, takesStartMode } from '@shared/agents'
 import {
   AGENT_NAME_CHARS,
+  BACKUP_KEEP_MAX,
+  BACKUP_KEEP_MIN,
   CONFIG_VARIABLES,
   DEFAULT_SETTINGS,
   AGENT_COLORS,
+  isBackupKeep,
+  isBackupTime,
   CLAUDE_BUDGET_MAX_USD,
   isAgentColor,
   isClaudeBudgetUsd,
@@ -936,6 +940,79 @@ function checkRemote(value: unknown, problems: string[]): void {
   }
 }
 
+const isBackupTimeValue: Check = (value, path) =>
+  isBackupTime(value) ? null : `"${path}" must be a time of day as HH:MM`
+
+const isBackupKeepValue: Check = (value, path) =>
+  isBackupKeep(value)
+    ? null
+    : `"${path}" must be a whole number from ${BACKUP_KEEP_MIN} to ${BACKUP_KEEP_MAX}`
+
+/** Huli: a stored backup folder is an absolute path on this computer, as the dialog gave it. */
+const isBackupFolderValue: Check = (value, path) =>
+  value === null
+    ? null
+    : (checkStoredPath(value, path) ??
+      (isAbsolutePath(value as string, process.platform)
+        ? null
+        : `"${path}" must be an absolute path`))
+
+/**
+ * Huli: a change to the backup from the renderer. The folder can only be cleared back to the
+ * default; one is picked in main's dialog, so the page never names where the data goes.
+ */
+function checkBackupPatch(value: unknown, problems: string[]): void {
+  if (!isRecord(value)) {
+    problems.push('"backup" must be an object')
+    return
+  }
+  for (const [key, field] of Object.entries(value)) {
+    const path = `backup.${key}`
+    const problem =
+      key === 'enabled'
+        ? isBoolean(field, path)
+        : key === 'time'
+          ? isBackupTimeValue(field, path)
+          : key === 'keep'
+            ? isBackupKeepValue(field, path)
+            : key === 'folder'
+              ? field === null
+                ? null
+                : `"${path}" can only be cleared with null; choose a folder in the dialog`
+              : `Unknown setting "${path}"`
+    if (problem) problems.push(problem)
+  }
+}
+
+/** Huli: the stored backup section, each valid value kept and the rest at its default. */
+function readBackup(raw: unknown, problems: string[]): SettingsFile['backup'] {
+  const backup = structuredClone(DEFAULT_SETTINGS.backup)
+  if (!isRecord(raw)) {
+    problems.push('"backup" must be an object')
+    return backup
+  }
+  const read = (key: keyof SettingsFile['backup'], check: Check): void => {
+    if (raw[key] === undefined) return
+    const problem = check(raw[key], `backup.${key}`)
+    if (problem) problems.push(problem)
+    else (backup as unknown as Record<string, unknown>)[key] = raw[key]
+  }
+  read('enabled', isBoolean)
+  read('time', isBackupTimeValue)
+  read('keep', isBackupKeepValue)
+  read('folder', isBackupFolderValue)
+  return backup
+}
+
+/** Huli: the backup folder main's dialog gave. */
+export function withBackupFolder(current: SettingsFile, folder: string): SettingsFile {
+  const problem = isBackupFolderValue(folder, 'backup.folder')
+  if (problem) throw new SettingsError(problem)
+  const next = structuredClone(current)
+  next.backup.folder = folder
+  return next
+}
+
 function normalizeProxy(proxy: ProxySettings): ProxySettings {
   if (proxy.mode === 'environment') return { mode: 'environment' }
   return { mode: 'custom', url: proxy.url.trim(), noProxy: proxy.noProxy.trim() }
@@ -1013,6 +1090,8 @@ export function validateSettingsPatch(raw: unknown): SettingsPatch {
       if (problem) problems.push(problem)
     } else if (section === 'remote') {
       checkRemote(value, problems)
+    } else if (section === 'backup') {
+      checkBackupPatch(value, problems)
     } else if (section === 'terminal') {
       if (!isRecord(value)) {
         problems.push('"terminal" must be an object')
@@ -1122,6 +1201,13 @@ export function mergeSettings(current: SettingsFile, patch: SettingsPatch): Sett
     if (direct?.addresses) {
       next.remote.direct.addresses = direct.addresses.map(({ host, port }) => ({ host, port }))
     }
+  }
+  if (patch.backup) {
+    const { enabled, time, keep, folder } = patch.backup
+    if (enabled !== undefined) next.backup.enabled = enabled
+    if (time !== undefined) next.backup.time = time
+    if (keep !== undefined) next.backup.keep = keep
+    if (folder === null) next.backup.folder = null
   }
   holdForRemote(next)
   return next
@@ -1416,6 +1502,7 @@ export function parseSettingsFile(raw: unknown): LoadedSettings {
     else settings.disabledAgents = readAgentIds(raw.disabledAgents)
   }
   if (raw.startModes !== undefined) settings.startModes = readStartModes(raw.startModes, problems)
+  if (raw.backup !== undefined) settings.backup = readBackup(raw.backup, problems)
   if (raw.remote !== undefined) {
     if (!isRecord(raw.remote)) problems.push('"remote" must be an object')
     else settings.remote = readRemote(raw.remote, problems)

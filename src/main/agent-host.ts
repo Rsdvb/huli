@@ -362,6 +362,7 @@ export class AgentHost {
   private nextListId = 1
   private readonly runtimeRequests = new Map<number, (answer: RuntimeAnswer) => void>()
   private nextRuntimeId = 1
+  private migratingNow = false
 
   constructor(private readonly deps: AgentHostDeps) {
     this.host = new UtilityHost<MainToHost, HostToMain>({
@@ -404,6 +405,11 @@ export class AgentHost {
 
   get state(): UtilityHostState {
     return this.host.state
+  }
+
+  /** Huli: the host is starting, or moving its stored data to a new format. */
+  get migrating(): boolean {
+    return this.host.state === 'starting' || this.migratingNow
   }
 
   history(): UtilityHostEvent[] {
@@ -868,6 +874,9 @@ export class AgentHost {
       case 'host:routines-working':
         if (typeof message.working === 'boolean') this.deps.onRoutinesWorking(message.working)
         break
+      case 'host:migrating':
+        if (typeof message.running === 'boolean') this.migratingNow = message.running
+        break
       case 'host:busy': {
         const resolve = this.busyRequests.get(message.requestId)
         if (!resolve) break
@@ -1017,6 +1026,7 @@ export class AgentHost {
   }
 
   private exited(clean: boolean): void {
+    this.migratingNow = false
     for (const resolve of this.busyRequests.values()) resolve([])
     this.busyRequests.clear()
     this.grants.failAll()

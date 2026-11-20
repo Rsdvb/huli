@@ -22,6 +22,7 @@ import {
   withRenamedAgent,
   withAllowedComputerApp,
   withAgentNetworkChoice,
+  withBackupFolder,
   withDefaultNode,
   withShellPath,
 } from './settings-schema'
@@ -248,6 +249,11 @@ export class SettingsStore {
   /** Huli: a paired device picked one agent's network. */
   setAgentNetwork(agentId: unknown, choice: unknown): SettingsFile {
     return this.replace(withAgentNetworkChoice(this.current, agentId, choice))
+  }
+
+  /** Huli: the backup folder picked in main's dialog. */
+  setBackupFolder(folder: string): SettingsFile {
+    return this.replace(withBackupFolder(this.current, folder))
   }
 
   /** A session's card allowed an app always. */

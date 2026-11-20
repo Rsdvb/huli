@@ -395,6 +395,16 @@ const api: KettuApi = {
     onOpened: onDeviceOpened,
     saveCapture: (device, kind, data) => invoke('devices:save-capture', device, kind, data),
   } as KettuApi['devices'],
+  backup: {
+    status: () => invoke('backup:status'),
+    run: () => invoke('backup:run'),
+    chooseFolder: () => invoke('backup:choose-folder'),
+    openFolder: () => invoke('backup:open-folder'),
+    pickRestore: () => invoke('backup:pick-restore'),
+    restore: (token) => invoke('backup:restore', token),
+    onChanged: subscribe('backup:changed'),
+  },
+  exportSession: (request) => invoke('session:export', request),
 }
 
 contextBridge.exposeInMainWorld('kettu', api)

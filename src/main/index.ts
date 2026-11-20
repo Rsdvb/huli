@@ -43,6 +43,7 @@ import { BrowserTools } from './browser/tools'
 import { BrowserOriginStore } from './browser/origins'
 import { SiteIcons } from './browser/site-icons'
 import { startSignIns } from './browser/signins'
+import { BackupService } from './backup/service'
 import { asksForDebug, isDebugRun, lockData, startDebugMode } from './debug-mode'
 import { broadcast, sendCommand } from './events'
 import { HostAdmin } from './host-admin'
@@ -53,7 +54,9 @@ import { mainDiagnostics } from './diagnostics'
 import {
   appInfo,
   launchToInteractive,
+  registerBackupIpc,
   registerIpcHandlers,
+  registerSessionExportIpc,
   registerSignInIpc,
   registerTrayIpc,
 } from './ipc'
@@ -796,6 +799,18 @@ async function start(): Promise<void> {
   sharingKettuChanged = () => sharing.kettuChanged()
   sharingArtifactsChanged = () => sharing.artifactsChanged()
   let quit: QuitFlow | null = null
+  // Huli: the daily backup of the data folder; Settings › Backup.
+  const backup = new BackupService({
+    dataDir: userDataPath,
+    documentsDir: app.getPath('documents'),
+    packaged: app.isPackaged,
+    appVersion: app.getVersion(),
+    settings: () => settings.get().backup,
+    setFolder: (folder) => void settings.setBackupFolder(folder),
+    migrating: () => agentHost.migrating,
+    changed: (status) => broadcast('backup:changed', status),
+    restart: (step) => quit?.restart(() => ({}), step),
+  })
   const updater = new Updater({
     appState,
     settings: () => settings.get(),
@@ -810,6 +825,7 @@ async function start(): Promise<void> {
     shutDown: async () => {
       account.stop()
       relayToken.stop()
+      backup.stop()
       // Devices hear that Kettu is stopping before their sessions' agent host goes.
       await Promise.all([
         remoteHost.stop().then(() => agentHost.stop()),
@@ -826,6 +842,7 @@ async function start(): Promise<void> {
         browserOrigins.flush(),
         signIns.store.flush(),
         siteIcons.flush(),
+        backup.flush(),
       ])
     },
     installUpdate: () => updater.installNow(),
@@ -984,6 +1001,7 @@ async function start(): Promise<void> {
       accountProxy = accountSession.setProxy(sessionProxy(next.proxy))
     }
     updater.settingsChanged(next, changed)
+    if (changed.has('backup')) backup.settingsChanged()
   })
 
   registerIpcHandlers({
@@ -1015,6 +1033,8 @@ async function start(): Promise<void> {
     quit: quitFlow,
     reports,
   })
+  registerBackupIpc(backup)
+  registerSessionExportIpc()
   ipcReady = true
   installMenu(menuDeps)
 
@@ -1054,6 +1074,7 @@ async function start(): Promise<void> {
   })
 
   agentHost.start()
+  backup.start()
   // A sign-in left from before Kettu cloud was turned off is forgotten here, without the service.
   if (!cloudOn() && account.status().state !== 'signed-out') void account.signOut()
   relayToken.update()

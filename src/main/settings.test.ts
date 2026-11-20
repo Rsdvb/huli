@@ -518,3 +518,79 @@ describe('the terminal font', () => {
     expect(client).toEqual({ terminal: { fontFamily: 'Menlo' } })
   })
 })
+
+// Huli: the daily backup of the data folder.
+describe('the backup', () => {
+  it('runs daily at 03:00 into the default folder, keeping 7, until the user changes it', async () => {
+    expect((await SettingsStore.load(dir)).get().backup).toEqual({
+      enabled: true,
+      time: '03:00',
+      keep: 7,
+      folder: null,
+    })
+  })
+
+  it('keeps the valid values of a stored section and drops the rest on load', async () => {
+    const folder = join(dir, 'backups')
+    await save({ version: 1, backup: { enabled: false, time: '21:45', keep: 30, folder } })
+    expect((await SettingsStore.load(dir)).get().backup).toEqual({
+      enabled: false,
+      time: '21:45',
+      keep: 30,
+      folder,
+    })
+    await save({
+      version: 1,
+      backup: { enabled: 'yes', time: '24:00', keep: 0, folder: 'relative/backups' },
+    })
+    expect((await SettingsStore.load(dir)).get().backup).toEqual({
+      enabled: true,
+      time: '03:00',
+      keep: 7,
+      folder: null,
+    })
+  })
+
+  it('takes a switch, a time of day and a count in a change, and clears the folder', () => {
+    const patch = { backup: { enabled: false, time: '00:05', keep: 60, folder: null } }
+    expect(validateSettingsPatch(patch)).toEqual(patch)
+    const next = mergeSettings(
+      { ...DEFAULT_SETTINGS, backup: { ...DEFAULT_SETTINGS.backup, folder: join(dir, 'b') } },
+      patch,
+    )
+    expect(next.backup).toEqual({ enabled: false, time: '00:05', keep: 60, folder: null })
+  })
+
+  it('refuses a folder from the renderer, which only the dialog in main may name', () => {
+    expect(() => validateSettingsPatch({ backup: { folder: join(dir, 'elsewhere') } })).toThrow(
+      'can only be cleared with null',
+    )
+  })
+
+  it('refuses times, counts and keys it does not know', () => {
+    for (const time of ['3:00', '24:00', '12:60', '12:00:00', '', 300]) {
+      expect(() => validateSettingsPatch({ backup: { time } })).toThrow('HH:MM')
+    }
+    for (const keep of [0, 61, 1.5, '7', null]) {
+      expect(() => validateSettingsPatch({ backup: { keep } })).toThrow('whole number')
+    }
+    expect(() => validateSettingsPatch({ backup: { enabled: 1 } })).toThrow('boolean')
+    expect(() => validateSettingsPatch({ backup: { secrets: true } })).toThrow('Unknown setting')
+    expect(() => validateSettingsPatch({ backup: true })).toThrow('must be an object')
+  })
+
+  it('sets a folder the dialog gave, absolute only', async () => {
+    const store = await SettingsStore.load(dir)
+    const folder = join(dir, 'picked')
+    expect(store.setBackupFolder(folder).backup.folder).toBe(folder)
+    expect(() => store.setBackupFolder('relative')).toThrow('absolute path')
+    expect(() => store.setBackupFolder(`${folder}\0x`)).toThrow('NUL')
+    await store.flush()
+  })
+
+  it('stays with this computer, never on a host a device changes', () => {
+    const { host, client } = splitSettingsPatch({ backup: { keep: 3 } })
+    expect(host).toBeNull()
+    expect(client).toEqual({ backup: { keep: 3 } })
+  })
+})
