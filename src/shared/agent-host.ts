@@ -1,6 +1,7 @@
 // The contract between the renderer and the agent host, over the agent host port.
 
 import type { CodebuddyShellOverride, CodebuddySite, PromptCacheTtl } from './agents'
+import type { AgentResetCategory, AgentResetPreview, AgentResetResult } from './agent-reset'
 import type { DeviceAccessDecision } from './device-agent'
 import type { ArtifactConsentAsk, ArtifactConsentRow, RuntimeAnswer } from './artifact-capabilities'
 import type { ArtifactContent, ArtifactSession, ArtifactSummary, VersionSummary } from './artifacts'
@@ -901,6 +902,13 @@ export interface HostContract {
     result: void
   }
   'agents.clearApiKey': { params: { agentId: AgentId }; result: void }
+  // Huli: what resetting the agent's environment would remove on the host now, and what stays.
+  'agents.resetPreview': { params: { agentId: AgentId }; result: AgentResetPreview }
+  // Huli: removes it, its own sign-out first; refuses while a session of the agent works.
+  'agents.reset': {
+    params: { agentId: AgentId; categories: AgentResetCategory[] }
+    result: AgentResetResult
+  }
   'agents.install': {
     params: { agentId: AgentId; method?: AgentInstallMethod['id'] }
     result: void
@@ -1945,6 +1953,8 @@ export const HOST_METHODS = [
   'agents.updateCli',
   'agents.setApiKey',
   'agents.clearApiKey',
+  'agents.resetPreview',
+  'agents.reset',
   'agents.install',
   'agents.uninstall',
   'agents.cancelTask',

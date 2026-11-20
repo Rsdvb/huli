@@ -1,6 +1,7 @@
 // Live sessions: the authoritative thread state, prompts, permissions, cancellation, the
 // session lifecycle, sub-sessions, and the session index.
 
+import type { AgentResetBusy } from '@shared/agent-reset'
 import type { DeviceAccessAnswer, DeviceAccessDecision } from '@shared/device-agent'
 import type { PublishVisibility } from '@shared/market-publish'
 import { createHash, randomUUID } from 'node:crypto'
@@ -1519,6 +1520,40 @@ export class SessionManager {
       if (live.record.agentId === agentId && CONNECTED.has(live.thread.session.status)) count++
     }
     return count
+  }
+
+  /** Huli: the agent's sessions that work or wait now, which a reset of its environment waits for. */
+  busyWith(agentId: AgentId): AgentResetBusy[] {
+    const busy: AgentResetBusy[] = []
+    for (const live of this.live.values()) {
+      if (live.record.agentId !== agentId || live.prepared || live.record.origin === 'subagent') {
+        continue
+      }
+      if (!CONNECTED.has(live.thread.session.status) || this.holdReason(live) === null) continue
+      busy.push({ sessionId: live.id, title: this.summary(live.id).title })
+    }
+    return busy
+  }
+
+  /**
+   * Huli: lets every session of the agent go before its environment is reset, so none of its
+   * processes writes the files back: the windows' prepared sessions are removed, and the others
+   * stored and closed, to attach again when next used.
+   */
+  async releaseAgent(agentId: AgentId): Promise<void> {
+    const runs: Promise<unknown>[] = []
+    for (const live of [...this.live.values()]) {
+      if (live.record.agentId !== agentId) continue
+      if (live.prepared) {
+        runs.push(this.dropPrepared(live))
+        continue
+      }
+      if (live.record.origin === 'subagent' || live.connection === null) continue
+      this.release(live, 'environment reset')
+      const run = this.releasing.get(live.id)
+      if (run) runs.push(run)
+    }
+    await Promise.allSettled(runs)
   }
 
   // Summaries and patches.

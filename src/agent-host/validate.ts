@@ -2,6 +2,7 @@
 // params object with only the known fields, or throws `invalid_params` before anything runs.
 
 import type { AgentInstallMethod, HostMethod, HostParams } from '@shared/agent-host'
+import { AGENT_RESET_CATEGORIES, type AgentResetCategory } from '@shared/agent-reset'
 import { MAX_TERMINAL_COMMAND, replyCommandProblem } from '@shared/terminal-agent'
 import { COMMENT_CHARS, THREAD_ID, type CommentAnchor } from '@shared/artifact-comments'
 import { artifactPathProblem, isHtmlPath } from '@shared/artifact-files'
@@ -1355,6 +1356,21 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'agents.clearApiKey': agent,
+    'agents.resetPreview': agent,
+    'agents.reset': (params) => {
+      const o = fields(params)
+      const list = o.categories
+      if (!Array.isArray(list) || list.length === 0) {
+        throw invalidParams('categories must name what to reset')
+      }
+      const categories = list.filter((item): item is AgentResetCategory =>
+        (AGENT_RESET_CATEGORIES as readonly unknown[]).includes(item),
+      )
+      if (categories.length !== list.length || new Set(categories).size !== list.length) {
+        throw invalidParams('categories must be credentials, identifiers or caches, each once')
+      }
+      return { agentId: agentId(o), categories }
+    },
     'agents.install': (params) => {
       const o = fields(params)
       const method = o.method
