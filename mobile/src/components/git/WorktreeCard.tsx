@@ -179,15 +179,20 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
   }
   if (state === 'setup-failed') {
     return (
-      <Pressable
-        onPress={open}
-        accessibilityRole="button"
-        style={[styles.line, { backgroundColor: s.dangerSoft }]}
-      >
-        <Icon icon={G.error} size={15} color={c.danger} />
-        <Text style={[styles.lineText, { color: c.text, flex: 1 }]} numberOfLines={1}>
-          worktree 没能准备好
-        </Text>
+      // The row opens the details and 重试 is a button beside it, not inside it: a button within a
+      // button was out of VoiceOver's reach.
+      <View style={[styles.line, { backgroundColor: s.dangerSoft }]}>
+        <Pressable
+          onPress={open}
+          accessibilityRole="button"
+          accessibilityLabel="worktree 没能准备好，查看详情"
+          style={styles.lineMain}
+        >
+          <Icon icon={G.error} size={15} color={c.danger} />
+          <Text style={[styles.lineText, { color: c.text, flex: 1 }]} numberOfLines={1}>
+            worktree 没能准备好
+          </Text>
+        </Pressable>
         <SmallButton
           label="重试"
           filled
@@ -195,8 +200,10 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
           disabled={actions.busy !== null}
           onPress={() => actions.run('retry')}
         />
-        <Icon icon={G.right} size={12} color={c.textTertiary} />
-      </Pressable>
+        <Pressable onPress={open} accessible={false} hitSlop={SMALL_SLOP}>
+          <Icon icon={G.right} size={12} color={c.textTertiary} />
+        </Pressable>
+      </View>
     )
   }
   if (state === 'missing' || state === 'removed') {
@@ -403,6 +410,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     minHeight: 40,
   },
+  lineMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
   lineText: { fontSize: 13, fontWeight: '500' },
   lineLog: { flex: 1, fontFamily: MONO, fontSize: 11.5 },
 })
