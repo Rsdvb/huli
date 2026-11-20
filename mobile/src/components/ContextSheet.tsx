@@ -29,6 +29,7 @@ import {
   windowName,
 } from '../ui/session/limits'
 import { useSessionTokens } from '../ui/session/palette'
+import { shortModelName } from '../ui/session/optionText'
 import { gentle } from '../ui/session/Press'
 import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
@@ -166,7 +167,9 @@ export function ContextSheet(props: {
     (l) => !rows?.some((r) => r.name.toLowerCase() === l.name.toLowerCase()),
   )
   const model = session ? optionOf(session.config, 'model') : undefined
-  const modelLabel = model ? modelName(shownChoice(model)?.name ?? String(model.value)) : null
+  const modelLabel = model
+    ? shortModelName(shownChoice(model) ?? { name: modelName(String(model.value)) })
+    : null
 
   const expiry = session
     ? knownExpiry(

@@ -11,6 +11,8 @@ import { G } from '../ui/session/icons'
 import { tokensText } from '../ui/session/limits'
 import type { MenuEntry, MenuPage, MenuRow } from '../ui/session/Popover'
 import type { SessionActions } from './SessionActions'
+import { optionOf, shownChoice } from './ConfigMenus'
+import { shortModelName } from '../ui/session/optionText'
 
 export interface SessionMenuContext {
   summary: SessionSummary
@@ -26,10 +28,12 @@ export interface SessionMenuContext {
   onOpenUrl(url: string): void
 }
 
+/** The model as the composer's chip names it: 「Opus 5.5」, not its id or 「Default (recommended)」. */
 function modelName(session: SessionView | undefined): string | null {
-  const option = session?.config.find((o) => o.category === 'model' && o.type === 'select')
+  const option = session ? optionOf(session.config, 'model') : undefined
   if (!option) return null
-  return option.choices?.find((choice) => choice.value === option.value)?.name ?? null
+  const choice = shownChoice(option)
+  return shortModelName(choice ?? { name: String(option.value) })
 }
 
 /** The menu's head: the agent that runs it, its model and the tokens used, not a button. */
