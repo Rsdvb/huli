@@ -150,14 +150,55 @@ export function toolView(name: string, raw: unknown, cwd: string): ToolView {
         content: file ? [{ type: 'diff', path: file, oldText, newText }] : [],
       })
     }
+    case 'MultiEdit': {
+      const edits = Array.isArray(input.edits) ? input.edits.map(asInput) : []
+      const title = file
+        ? t('claude.tool.editPath', { path: displayPath(file, cwd) })
+        : t('claude.tool.edit')
+      return view(title, 'edit', {
+        locations: file ? [{ path: file }] : [],
+        content: file
+          ? edits.map((one) => ({
+              type: 'diff' as const,
+              path: file,
+              oldText: typeof one.old_string === 'string' ? toLf(one.old_string) : '',
+              newText: typeof one.new_string === 'string' ? toLf(one.new_string) : '',
+            }))
+          : [],
+      })
+    }
     case 'NotebookEdit': {
       const notebook = text(input.notebook_path)
       const title = notebook
         ? t('claude.tool.editPath', { path: displayPath(notebook, cwd) })
         : t('claude.tool.editNotebook')
+      // Huli: the cell's new source, which its result sets beside the old one.
+      const source = typeof input.new_source === 'string' ? toLf(input.new_source) : ''
+      const deletes = input.edit_mode === 'delete'
       return view(title, 'edit', {
         locations: notebook ? [{ path: notebook }] : [],
+        content:
+          notebook && !deletes
+            ? [{ type: 'diff', path: notebook, oldText: '', newText: source }]
+            : [],
       })
+    }
+    case 'SendUserFile': {
+      const files = [
+        text(input.file_path),
+        text(input.path),
+        ...(Array.isArray(input.files) ? input.files : []).map((one) =>
+          typeof one === 'string' ? one : text(asInput(one).path),
+        ),
+      ].filter((one): one is string => typeof one === 'string' && one !== '')
+      const first = files[0]
+      return view(
+        first
+          ? t('claude.tool.sendFile', { path: displayPath(first, cwd) })
+          : t('claude.tool.sendFiles'),
+        'other',
+        { locations: files.map((one) => ({ path: one })) },
+      )
     }
     case 'Glob': {
       const pattern = text(input.pattern)
@@ -307,8 +348,16 @@ export function resultContent(
   if (error) return [...(body ? [markdown(fenced(body))] : []), ...images]
   switch (name) {
     case 'Edit':
-    case 'NotebookEdit':
+    case 'MultiEdit':
       return null
+    case 'NotebookEdit': {
+      const notebook = before.find((item) => item.type === 'diff')
+      if (!notebook || notebook.type !== 'diff') return null
+      const old = typeof shaped.old_source === 'string' ? toLf(shaped.old_source) : null
+      const next =
+        typeof shaped.new_source === 'string' ? toLf(shaped.new_source) : notebook.newText
+      return [{ ...notebook, oldText: old ?? notebook.oldText ?? '', newText: next }]
+    }
     case 'Write': {
       const original = shaped.originalFile
       if (typeof original !== 'string') return null

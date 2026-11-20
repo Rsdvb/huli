@@ -370,6 +370,53 @@ describe('lost writes', () => {
   })
 })
 
+describe('file tools', () => {
+  it("shows each of MultiEdit's edits, and a notebook cell's change once its result has the old source", () => {
+    const run = new Run().feed(
+      toolCall('t1', 'MultiEdit', {
+        file_path: '/repo/a.ts',
+        edits: [
+          { old_string: 'a', new_string: 'b' },
+          { old_string: 'c', new_string: 'd' },
+        ],
+      }),
+      toolCall('t2', 'NotebookEdit', {
+        notebook_path: '/repo/n.ipynb',
+        cell_id: 'x',
+        new_source: 'print(2)',
+      }),
+      toolResult('t2', 'Updated cell x', {}),
+    )
+    expect(run.entry('t:t1')).toMatchObject({
+      title: 'Edit a.ts',
+      locations: [{ path: '/repo/a.ts' }],
+      content: [
+        { type: 'diff', path: '/repo/a.ts', oldText: 'a', newText: 'b' },
+        { type: 'diff', path: '/repo/a.ts', oldText: 'c', newText: 'd' },
+      ],
+    })
+    run.feed(
+      toolCall('t3', 'NotebookEdit', { notebook_path: '/repo/n.ipynb', new_source: 'print(3)' }),
+    )
+    run.feed({
+      ...toolResult('t3', 'Updated cell y', {}),
+      tool_use_result: { new_source: 'print(3)', old_source: 'print(1)', cell_type: 'code' },
+    })
+    expect(run.entry('t:t3')).toMatchObject({
+      status: 'completed',
+      content: [{ type: 'diff', path: '/repo/n.ipynb', oldText: 'print(1)', newText: 'print(3)' }],
+    })
+  })
+
+  it('names the file SendUserFile sends, and where it is', () => {
+    const run = new Run().feed(toolCall('t1', 'SendUserFile', { file_path: '/repo/report.pdf' }))
+    expect(run.entry('t:t1')).toMatchObject({
+      title: 'Send report.pdf to you',
+      locations: [{ path: '/repo/report.pdf' }],
+    })
+  })
+})
+
 describe('a refusal', () => {
   it('says the request went to the fallback model, and why the first refused', () => {
     const run = new Run().feed(

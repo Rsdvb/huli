@@ -479,7 +479,9 @@
       "loadSkill": "加载技能",
       "loadSkillNamed": "加载技能：{{skill}}",
       "tool": "工具",
-      "codeExecution": "运行代码"
+      "codeExecution": "运行代码",
+      "sendFile": "把 {{path}} 发给你",
+      "sendFiles": "发送文件给你"
     },
     "notice": {
       "retrying": "正在重试（{{attempt}}/{{max}}）· {{reason}}",

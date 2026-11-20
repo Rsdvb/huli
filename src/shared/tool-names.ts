@@ -152,6 +152,19 @@ const CLAUDE_TOOLS: Names = {
   MultiEdit: ['Edit file', '编辑文件'],
   ProposeGoal: ['Propose goal', '提议目标'],
   ProposeSkills: ['Propose skills', '提议技能'],
+  propose_skills: ['Propose skills', '提议技能'],
+  SetGoal: ['Set goal', '设定目标'],
+  ListAgents: ['List agents', '列出 Agent'],
+  SendUserMessage: ['Message you', '给你发消息'],
+  ReadMcpResourceDirTool: ['List MCP resource folder', '列出 MCP 资源目录'],
+  WaitForMcpServers: ['Wait for MCP servers', '等待 MCP 服务器'],
+  LSP: ['Ask the language server', '查询语言服务器'],
+  EndConversation: ['End conversation', '结束对话'],
+  SendFeedback: ['Send feedback', '发送反馈'],
+  Projects: ['Projects', '项目'],
+  Artifact: ['Artifact', 'Artifact'],
+  ClaudeDesign: ['Claude Design', 'Claude Design'],
+  OfferChromeSetup: ['Offer Chrome setup', '提议设置 Chrome'],
 }
 
 /** Words that keep their own spelling when a name is humanized. */

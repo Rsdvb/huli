@@ -482,7 +482,9 @@
       "loadSkill": "Load skill",
       "loadSkillNamed": "Load skill: {{skill}}",
       "tool": "Tool",
-      "codeExecution": "Run code"
+      "codeExecution": "Run code",
+      "sendFile": "Send {{path}} to you",
+      "sendFiles": "Send files to you"
     },
     "notice": {
       "retrying": "Retrying ({{attempt}}/{{max}}) · {{reason}}",
