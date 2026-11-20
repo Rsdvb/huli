@@ -67,19 +67,23 @@ export default function SubagentsScreen() {
     .slice(0, READ_REPLIES)
     .map((s) => `${s.id}:${s.updatedAt}`)
     .join(',')
+  // Keyed by the children's stamps, not by each render's new array.
+  const readIds = useMemo(
+    () => (stamps ? stamps.split(',').map((stamp) => stamp.slice(0, stamp.lastIndexOf(':'))) : []),
+    [stamps],
+  )
   useEffect(() => {
     let alive = true
-    for (const child of children.slice(0, READ_REPLIES)) {
-      call(link, 'sessions.outputs', { sessionId: child.id }).then(
-        (out) => alive && setOutputs((was) => ({ ...was, [child.id]: out })),
+    for (const childId of readIds) {
+      call(link, 'sessions.outputs', { sessionId: childId }).then(
+        (out) => alive && setOutputs((was) => ({ ...was, [childId]: out })),
         () => {},
       )
     }
     return () => {
       alive = false
     }
-    // Keyed by the children's stamps, not by each render's new array.
-  }, [link, stamps])
+  }, [link, readIds])
 
   const create = () => {
     if (!parent || creating) return
