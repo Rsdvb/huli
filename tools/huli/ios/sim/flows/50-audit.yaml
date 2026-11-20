@@ -1,6 +1,6 @@
-# What the audit's last fixes touched, in light and then in dark: a session's artifact notes and
-# its context sheet with the names and counts in Chinese, the title menu's head, the search's 产物
-# group, the computers sheet, the artifacts tab's chips and a project's 工作树设置.
+# What the audit's last fixes touched, in light and then in dark: a session's artifact notes, its
+# context sheet where the agent reports one (the fake agent does not), the title menu's head,
+# search's 产物 scope and the artifacts tab.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -36,7 +36,7 @@ appId: io.github.rsdvb.huli
     timeout: 1500
     optional: true
 - takeScreenshot: a01-artifact-notes
-# The context's breakdown, which the fake agent reports on /context.
+# The context's breakdown, from the status line's ring where the agent reports one.
 - tapOn:
     text: '给 .* 发消息.*'
 - inputText: '/context'
@@ -91,51 +91,15 @@ appId: io.github.rsdvb.huli
     text: '(返回|取消|关闭)'
     optional: true
 - waitForAnimationToEnd
-# The computers sheet from the top bar's computer.
-- tapOn:
-    text: '.*点按切换电脑'
-    optional: true
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 1500
-    optional: true
-- takeScreenshot: a05-computers
-- swipe:
-    start: 50%, 40%
-    end: 50%, 95%
-    duration: 400
-- waitForAnimationToEnd
 - tapOn: '产物'
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2500
     optional: true
-- takeScreenshot: a06-artifacts-tab
-# A project's 工作树设置.
+- takeScreenshot: a05-artifacts-tab
+# The same in dark.
 - tapOn: '会话'
 - tapOn: '账户与设置'
-- scrollUntilVisible:
-    element: '项目'
-- tapOn: '项目'
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 2000
-    optional: true
-- tapOn:
-    text: 'project'
-    optional: true
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 2500
-    optional: true
-- takeScreenshot: a07-project
-- tapOn: '返回'
-- tapOn: '返回'
-# The same in dark.
-- scrollUntilVisible:
-    element: '主题'
-    direction: UP
-    optional: true
 - scrollUntilVisible:
     element: '主题'
 - tapOn: '主题'
@@ -157,7 +121,7 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 1500
     optional: true
-- takeScreenshot: a08-session-dark
+- takeScreenshot: a06-session-dark
 - tapOn:
     text: '上下文已用.*'
     optional: true
@@ -165,7 +129,7 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 2500
     optional: true
-- takeScreenshot: a09-context-sheet-dark
+- takeScreenshot: a07-context-sheet-dark
 - swipe:
     start: 50%, 45%
     end: 50%, 95%
@@ -177,7 +141,7 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 2000
     optional: true
-- takeScreenshot: a10-artifacts-tab-dark
+- takeScreenshot: a08-artifacts-tab-dark
 # Back to the light theme, as the next flow expects.
 - tapOn: '会话'
 - tapOn: '账户与设置'
