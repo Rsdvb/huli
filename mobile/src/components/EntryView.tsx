@@ -341,7 +341,7 @@ export const EntryView = memo(function EntryView(props: {
       return (
         <Note
           icon={G.artifact}
-          text="Artifact"
+          text="产物"
           detail={entry.title}
           onPress={entry.action === 'delete' ? undefined : () => openArtifact(entry.artifactId)}
         />
