@@ -137,7 +137,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
       },
       {
         key: 'mute',
-        label: ctx.muted ? '取消静音' : '静音',
+        label: ctx.muted ? '取消静音' : '静音通知',
         icon: ctx.muted ? G.unmute : G.mute,
         onPress: ctx.onMute,
       },

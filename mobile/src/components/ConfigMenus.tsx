@@ -254,12 +254,12 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
     const { levels, shown } = levelsOf(effort, modelKey(control.config))
     if (levels.length > 0) {
       const hint = locked ? BETWEEN_TURNS : EFFORT_HINT
-      entries.push({ kind: 'divider', key: 'effort-rule', title: '思考强度' })
+      entries.push({ kind: 'divider', key: 'effort-rule', title: '推理强度' })
       entries.push({
         kind: 'custom',
         key: 'effort',
         picker: {
-          label: '思考强度',
+          label: '推理强度',
           options: levels.map((l) => ({ key: l.value, label: optionName(l.name) })),
           value: shown ?? '',
           onChange: (value) => control.set(effort, value),
@@ -270,7 +270,7 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
           <View
             style={[styles.effort, locked && { opacity: 0.4 }]}
             pointerEvents={locked ? 'none' : 'auto'}
-            accessibilityLabel="思考强度"
+            accessibilityLabel="推理强度"
             accessibilityHint={hint}
           >
             <SegmentedControl

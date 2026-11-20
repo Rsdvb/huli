@@ -249,7 +249,7 @@ export function ModelChip(props: {
         accessibilityLabel={
           props.pending
             ? `下一条消息交给 ${props.pending}`
-            : `模型：${props.model ?? ''}${props.effort ? `，思考强度：${props.effort}` : ''}`
+            : `模型：${props.model ?? ''}${props.effort ? `，推理强度：${props.effort}` : ''}`
         }
         style={[styles.chip, { opacity: props.disabled ? 0.5 : 1 }]}
       >
