@@ -84,13 +84,31 @@ function toolStatus(status: string | null | undefined): ToolEntry['status'] {
     case 'completed':
       return 'completed'
     case 'failed':
-    case 'declined':
       return 'failed'
+    // Huli: a declined call never ran, which is no failure.
+    case 'declined':
     case 'interrupted':
       return 'cancelled'
     default:
       return 'in_progress'
   }
+}
+
+/**
+ * Huli: who declined a call Codex says was declined: the user when they answered its request, else
+ * its automatic review, which says so first, or the session's approval policy.
+ */
+function declined(
+  ctx: MapperContext,
+  itemId: string,
+  status: string | null | undefined,
+): Pick<ToolEntry, 'denied'> {
+  if (status !== 'declined') return {}
+  const entry = ctx.thread.byId[`t:${itemId}`]
+  if (entry?.kind === 'tool' && entry.denied) return {}
+  const answer = entry?.kind === 'tool' ? entry.permissionResult : null
+  const user = typeof answer === 'object' && answer !== null && answer.kind.startsWith('reject')
+  return { denied: { by: user ? 'user' : 'rule' } }
 }
 
 function absolute(cwd: string, file: string): string {
@@ -380,6 +398,7 @@ export class ThreadMapper {
           title: t('codex.tool.editFiles'),
           toolKind: 'edit',
           status: done ? toolStatus(item.status) : 'in_progress',
+          ...(done ? declined(ctx, item.id, item.status) : {}),
           content: fileChangeContent(item.changes),
           locations: changedPaths(item.changes),
         })
@@ -729,6 +748,8 @@ export class ThreadMapper {
     const changes: ToolChanges = {
       ...facts,
       status: done ? toolStatus(item.status) : 'in_progress',
+      ...(done ? declined(ctx, item.id, item.status) : {}),
+      ...(done && typeof item.exitCode === 'number' ? { exitCode: item.exitCode } : {}),
     }
     if (done) {
       const printed = item.aggregatedOutput ?? this.outputs.get(item.id) ?? ''
@@ -787,6 +808,8 @@ export class ThreadMapper {
       ...(changes.planVersion !== undefined ? { planVersion: changes.planVersion } : {}),
       ...(changes.elicitation !== undefined ? { elicitation: changes.elicitation } : {}),
       ...(changes.structured !== undefined ? { structured: changes.structured } : {}),
+      ...(changes.denied !== undefined ? { denied: changes.denied } : {}),
+      ...(changes.exitCode !== undefined ? { exitCode: changes.exitCode } : {}),
     }
     addEntry(ctx, out, entry)
     toolEffects(out, itemId, id, null, entry)

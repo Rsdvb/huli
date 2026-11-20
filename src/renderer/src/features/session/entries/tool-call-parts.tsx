@@ -59,6 +59,13 @@ export const ToolBody = memo(function ToolBody({
           </p>
         </ToolCallSection>
       )}
+      {entry.denied?.reason && (
+        <ToolCallSection label={t('toolCall.section.denied')} labels={labels}>
+          <p data-selectable="" className="ks-tool-prompt">
+            {entry.denied.reason}
+          </p>
+        </ToolCallSection>
+      )}
       {fields && <ToolInput fields={fields} raw={entry.rawInput ?? ''} />}
       {command && (
         <ContextMenu>
@@ -69,6 +76,7 @@ export const ToolBody = memo(function ToolBody({
               command={command}
               output={output}
               status={entry.status}
+              {...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {})}
             />
           </ContextMenuTrigger>
           <ContextMenuContent>

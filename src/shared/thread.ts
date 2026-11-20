@@ -802,6 +802,22 @@ export interface ToolEntry {
    * where the harness did not pass it on, such as Claude Code for a call that returned an error.
    */
   structured?: Record<string, unknown>
+  /**
+   * Huli: set on a call that never ran because it was denied, which is `cancelled` rather than
+   * failed: by whom, and the reason the denying side gave.
+   */
+  denied?: ToolDenial
+  /** Huli: the exit code a command ended with, when the agent reports one apart from its output. */
+  exitCode?: number
+}
+
+/**
+ * Who denied a call: the user, the agent's automatic review (Codex's auto-review, Claude Code's
+ * auto mode), its permission mode, a permission rule, or a hook.
+ */
+export interface ToolDenial {
+  by: 'user' | 'review' | 'mode' | 'rule' | 'hook'
+  reason?: string
 }
 
 export type ToolContent =

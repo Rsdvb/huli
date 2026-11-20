@@ -7,6 +7,7 @@ import type {
   BackgroundTaskView,
   PlanItem,
   SlashCommand,
+  ToolDenial,
   ToolEntry,
   UserContent,
 } from '@shared/thread'
@@ -787,13 +788,17 @@ export class ClaudeMapper {
       return out
     }
     if (entry?.kind !== 'tool') return out
-    const status: ToolEntry['status'] = block.is_error === true ? 'failed' : 'completed'
+    const stopped =
+      block.is_error === true ? stoppedCall(entry, resultText(block), structured) : null
+    const status: ToolEntry['status'] =
+      block.is_error !== true ? 'completed' : stopped ? 'cancelled' : 'failed'
     const content = resultContent(name, block, structured, entry.content)
     const own = name.startsWith(KETTU_PREFIX)
       ? workflowToolStructured(name.slice(KETTU_PREFIX.length), structured)
       : undefined
     const changes = {
       status,
+      ...(stopped?.denied ? { denied: stopped.denied } : {}),
       ...(content ? { content } : {}),
       ...(own ? { structured: own } : {}),
       ...(name === 'ExitPlanMode' && status === 'completed'
@@ -1537,6 +1542,29 @@ function inputOf(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
+}
+
+/** Claude Code's words for a call the user stopped or turned down in its own prompt. */
+const STOPPED_TEXT =
+  /^\s*(?:\[Request interrupted by user|The user doesn't want to (?:proceed|take this action))/
+
+/**
+ * Huli: a call that ended in an error without running, which is cancelled rather than failed:
+ * one the user denied, which says so, or one a stop interrupted. Null for a call that failed.
+ */
+function stoppedCall(
+  entry: ToolEntry,
+  text: string,
+  structured: unknown,
+): { denied?: ToolDenial } | null {
+  if (entry.denied) return {}
+  const answer = entry.permissionResult
+  if (typeof answer === 'object' && answer !== null && answer.kind.startsWith('reject')) {
+    return { denied: { by: 'user' } }
+  }
+  if (answer === 'cancelled' || answer === 'withdrawn') return {}
+  if (STOPPED_TEXT.test(text) || inputOf(structured).interrupted === true) return {}
+  return null
 }
 
 function resultText(block: ToolResultBlock): string {

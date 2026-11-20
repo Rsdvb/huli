@@ -9,7 +9,8 @@
     "running": "运行中",
     "done": "已完成",
     "failed": "失败",
-    "cancelled": "已取消"
+    "cancelled": "已取消",
+    "denied": "已拒绝"
   },
   "summary": {
     "separator": " · ",
@@ -65,7 +66,13 @@
     "runInTerminal": "在终端中运行",
     "copyCommand": "复制命令",
     "showAll": "显示全部",
-    "showFullDiff": "显示完整差异"
+    "showFullDiff": "显示完整差异",
+    "deniedBy": {
+      "review": "被自动审查拒绝",
+      "mode": "被权限模式拒绝",
+      "rule": "被权限规则拒绝",
+      "hook": "被 Hook 拒绝"
+    }
   },
   "permission": {
     "outsideScope": "超出此例程的权限：{{level}}。",
@@ -979,7 +986,8 @@
       "result": "结果",
       "changes": "更改",
       "input": "输入",
-      "prompt": "提示词"
+      "prompt": "提示词",
+      "denied": "拒绝原因"
     },
     "exitCode": "退出码 {{code}}",
     "earlierLines_other": "前面 {{count}} 行",

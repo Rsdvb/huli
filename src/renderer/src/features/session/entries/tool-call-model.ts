@@ -118,6 +118,7 @@ export function toolHasBody(entry: ToolEntry, projectPath: string): boolean {
     toolMedia(entry).length > 0 ||
     (!!command && (command.length > 60 || command.includes('\n'))) ||
     (!command && !!entry.description) ||
+    !!entry.denied?.reason ||
     toolInputFields(entry) !== null
   )
 }

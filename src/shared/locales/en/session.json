@@ -9,7 +9,8 @@
     "running": "Running",
     "done": "Done",
     "failed": "Failed",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "denied": "Denied"
   },
   "summary": {
     "separator": " · ",
@@ -75,7 +76,13 @@
     "runInTerminal": "Run in terminal",
     "copyCommand": "Copy command",
     "showAll": "Show all",
-    "showFullDiff": "Show full diff"
+    "showFullDiff": "Show full diff",
+    "deniedBy": {
+      "review": "Denied by automatic review",
+      "mode": "Denied by the permission mode",
+      "rule": "Denied by a permission rule",
+      "hook": "Denied by a hook"
+    }
   },
   "permission": {
     "outsideScope": "Outside this routine's permissions: {{level}}.",
@@ -1021,7 +1028,8 @@
       "result": "Result",
       "changes": "Changes",
       "input": "Input",
-      "prompt": "Prompt"
+      "prompt": "Prompt",
+      "denied": "Why it was denied"
     },
     "exitCode": "Exit code {{code}}",
     "earlierLines_one": "{{count}} earlier line",

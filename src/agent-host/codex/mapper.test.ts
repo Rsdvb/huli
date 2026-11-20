@@ -210,7 +210,7 @@ describe('commands', () => {
     expect(entries[0]).toMatchObject({ kind: 'tool', toolKind: 'read', content: [] })
   })
 
-  it('keeps the end of a long output, and marks a declined command failed', () => {
+  it('keeps the end of a long output, and marks a declined command cancelled, not failed', () => {
     const item = {
       type: 'commandExecution',
       id: 'x',
@@ -227,11 +227,27 @@ describe('commands', () => {
       completed({ ...item, status: 'declined' }),
     ])
     const tool = entries[0]
-    expect(tool).toMatchObject({ status: 'failed' })
+    expect(tool).toMatchObject({ status: 'cancelled', denied: { by: 'rule' } })
     const markdown =
       tool?.kind === 'tool' && tool.content[0]?.type === 'markdown' ? tool.content[0].markdown : ''
     expect(markdown.startsWith('```\n…\n')).toBe(true)
     expect(markdown.length).toBeLessThan(70 * 1024)
+  })
+
+  it('keeps the exit code a command ended with', () => {
+    const item = {
+      type: 'commandExecution',
+      id: 'x',
+      command: 'false',
+      cwd: '/p',
+      status: 'failed',
+      commandActions: [{ type: 'unknown', command: 'false' }],
+      aggregatedOutput: '',
+      exitCode: 1,
+    }
+    const { entries } = run([completed(item)])
+    expect(entries[0]).toMatchObject({ status: 'failed', exitCode: 1 })
+    expect(entries[0]).not.toHaveProperty('denied')
   })
 })
 

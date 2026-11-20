@@ -77,9 +77,14 @@ export function StepCard({
     if (note === undefined && typeof result === 'object' && result?.by === 'routine') {
       note = t('permission.answer.allowedByRoutine')
     }
+    // Huli: a denied call reads Denied, not Cancelled, and says what denied it.
+    const denial = entry.denied
+    if (note === undefined && denial && denial.by !== 'user') note = t(`tool.deniedBy.${denial.by}`)
+    const cardLabels = denial ? { ...labels, cancelled: t('status.denied') } : labels
     return (
       <ToolCallCard
         {...facts}
+        labels={cardLabels}
         name={label.verb ?? label.target ?? entry.title}
         summary={
           label.verb && label.target ? (
