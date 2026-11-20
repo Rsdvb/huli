@@ -79,7 +79,9 @@ export function elapsedText(ms: number): string {
   const m = Math.floor(s / 60)
   if (m < 60) return `${m} 分钟`
   const h = Math.floor(m / 60)
-  return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`
+  if (h < 24) return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`
+  const d = Math.floor(h / 24)
+  return h % 24 ? `${d} 天 ${h % 24} 小时` : `${d} 天`
 }
 
 /** Re-renders every `everyMs` while `on`, for a clock that counts up. */
@@ -245,7 +247,9 @@ export const SessionRow = memo(function SessionRow(props: {
   const subagents =
     props.stale && props.subagents ? { ...props.subagents, running: false } : props.subagents
   const since = running ? (s.turnStartedAt ?? null) : null
-  const now = useTick(since !== null, 15_000)
+  // Seconds count each second through the first minute; minutes and hours need less.
+  const counting = since !== null && Date.now() - since < 60_000
+  const now = useTick(since !== null, counting ? 1000 : 15_000)
   // A running row says how long its turn has gone; the rest say when they last changed.
   const time = since !== null ? elapsedText(now - since) : listTime(props.time ?? s.updatedAt)
   // The avatar's badge already says it runs; the meta line keeps only what asks for the user, and
