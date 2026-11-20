@@ -7,6 +7,7 @@
 // response's `usage`, and `session/fork` with its fork point in `_meta`); nothing else
 // unstable is advertised or called.
 
+import { homedir } from 'node:os'
 import { Readable, Writable } from 'node:stream'
 import {
   client,
@@ -102,6 +103,7 @@ import {
   withFullAccess,
 } from './agy-access'
 import { systemPromptMeta, takesSystemPromptAppend } from './agy-prompt'
+import { AgySubagents, fileBrain, subagentCall, type AgyBrain } from './agy-subagents'
 import {
   agyAllowOnce,
   agyAutoAllowed,
@@ -186,6 +188,10 @@ export interface AcpOptions {
   kettuExtension?: boolean
   /** Accounts its vendor moved to another harness, whose refusal is no sign-in to ask for. */
   movedAccounts?: MovedAccounts
+  /** agy's brain folder, where it writes its subagents' work; the user's own unless a test sets it. */
+  agyBrain?: AgyBrain
+  /** How often a running agy subagent's work is read again, in milliseconds. */
+  agyPollMs?: number
 }
 
 export type AcpHooks = ConnectionHooks & AcpOptions
@@ -427,11 +433,22 @@ export class AcpConnection implements AgentConnection {
   private readonly scopeFiles = new ScopeFiles()
   /** Pages a session's elicitation opened, by its id, until the agent says they are done. */
   private readonly openPages = new Map<string, { sessionId: string; entryId: string }>()
+  /** agy's subagents, which Kettu reads from its brain folder. */
+  private readonly subagents: AgySubagents | null
 
   private constructor(
     private readonly transport: AcpTransport,
     private readonly hooks: AcpHooks,
   ) {
+    this.subagents =
+      hooks.agentId === 'antigravity'
+        ? new AgySubagents({
+            brain: hooks.agyBrain ?? fileBrain(homedir()),
+            target: (sessionId) => this.targets.get(sessionId),
+            ignored: (sessionId, what) => hooks.ignored(sessionId, what),
+            ...(hooks.agyPollMs !== undefined ? { pollMs: hooks.agyPollMs } : {}),
+          })
+        : null
     const app = client({ name: 'Kettu' })
       .onNotification(methods.client.session.update, (ctx) => {
         this.deliver(ctx.params.sessionId, ctx.params.update)
@@ -517,7 +534,10 @@ export class AcpConnection implements AgentConnection {
         if (!ctx.method.startsWith('$/')) hooks.ignored(null, `notification ${ctx.method}`)
       })
     this.connection = app.connect(this.tap(transport.stream))
-    void this.connection.closed.then(() => this.scopeFiles.close())
+    void this.connection.closed.then(() => {
+      this.scopeFiles.close()
+      this.subagents?.forget()
+    })
   }
 
   static connect(transport: AcpTransport | AgentTransport, hooks: AcpHooks): AcpConnection {
@@ -722,13 +742,16 @@ export class AcpConnection implements AgentConnection {
     return this.hooks.agentId === 'antigravity'
   }
 
-  private map(update: SessionUpdate, ctx: MapperContext): MapperOutput {
+  private map(sessionId: string, update: SessionUpdate, ctx: MapperContext): MapperOutput {
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
       return mapSessionUpdate(update, ctx)
     }
+    // agy's subagent shows as its card, not as the call that started it.
+    const subagent = this.subagents ? subagentCall(update) : null
+    if (subagent) return this.subagents!.callOutput(sessionId, update, subagent)
     if (this.agy && onAgyOwnFiles(update, ctx)) return { patches: [], effects: [] }
     const shaped = this.agy
-      ? fromAgy(update)
+      ? fromAgy(update, (id) => this.subagents?.nameOf(id) ?? null)
       : this.naming === 'code'
         ? fromCodeMode(update)
         : update
@@ -755,6 +778,23 @@ export class AcpConnection implements AgentConnection {
     if (Object.keys(changes).length > 0) out.patches.push({ op: 'entry.update', id, changes })
   }
 
+  /**
+   * After a session applied an update: agy's subagent its call started shows its prompt and work,
+   * which Kettu now holds as a session, and one its message woke is read again.
+   */
+  private afterApply(update: SessionUpdate): void {
+    if (!this.subagents) return
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
+    if (subagentCall(update)) {
+      this.subagents.started(update)
+      return
+    }
+    const input = update.rawInput as { Recipient?: unknown } | null | undefined
+    if ((update as { name?: unknown }).name === 'send_message') {
+      if (typeof input?.Recipient === 'string') this.subagents.messaged(input.Recipient)
+    }
+  }
+
   private deliver(sessionId: string, update: SessionUpdate): void {
     if (this.dropStartup(sessionId, update)) return
     this.learnChild(sessionId, update)
@@ -762,8 +802,12 @@ export class AcpConnection implements AgentConnection {
     if (target) {
       this.notePlanWrite(sessionId, update)
       target.apply(
-        this.withAccess(sessionId, this.withScope(sessionId, this.map(update, target.context()))),
+        this.withAccess(
+          sessionId,
+          this.withScope(sessionId, this.map(sessionId, update, target.context())),
+        ),
       )
+      this.afterApply(update)
       return
     }
     const collector = this.collectors.get(sessionId)
@@ -838,8 +882,12 @@ export class AcpConnection implements AgentConnection {
     for (const update of early.updates) {
       if (!this.dropStartup(sessionId, update)) {
         target.apply(
-          this.withAccess(sessionId, this.withScope(sessionId, this.map(update, target.context()))),
+          this.withAccess(
+            sessionId,
+            this.withScope(sessionId, this.map(sessionId, update, target.context())),
+          ),
         )
+        this.afterApply(update)
       }
     }
   }
@@ -851,6 +899,7 @@ export class AcpConnection implements AgentConnection {
     this.pendingStartup.delete(sessionId)
     this.agyPlans.delete(sessionId)
     this.agyBuildModes.delete(sessionId)
+    this.subagents?.forget(sessionId)
     this.unregistered.add(sessionId)
     if (this.unregistered.size > CLOSED_SESSIONS) {
       this.unregistered.delete(this.unregistered.values().next().value!)
