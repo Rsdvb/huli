@@ -377,10 +377,9 @@ export default function SessionScreen() {
   )
   const childrenRunning = children.filter((s) => live(s.status)).length
 
-  // What the ⋯ menu counts is read as it opens, and again as the session changes. A system menu
-  // is built before it opens, so there it is read all along: once the session's changes pause
-  // rather than on each of them, which while it streams would be many a second.
-  const moreOpen = NATIVE_MENUS || menu.openId === 'more-menu'
+  // What the ⋯ menu counts is read as it opens, and again as the session changes while it is
+  // open, once those changes pause. It is always our popover, so nothing is read while it is shut.
+  const moreOpen = menu.openId === 'more-menu'
   const countsRead = useRef(false)
   const projectPath = summary?.projectPath ?? null
   useEffect(() => {
@@ -1282,24 +1281,22 @@ export default function SessionScreen() {
           <View ref={moreAnchor} collapsable={false}>
             {/* Our popover, not the system's menu: a system menu cannot hold each row's count on
                 its right, as 文件 1 and 改动 没有改动 read in Kettu. */}
-            <NativeMenu source={{ root: 'more-menu', pages }} disabled>
-              <RoundButton
-                tone="glass"
-                size={44}
-                systemImage={G.more.sf}
-                onPress={() =>
-                  menu.open('more-menu', moreAnchor, {
-                    placement: 'below',
-                    align: 'end',
-                    width: 290,
-                  })
-                }
-                disabled={!summary}
-                accessibilityLabel="文件、改动、Artifacts、终端和子会话"
-              >
-                <Icon icon={G.more} size={18} color={c.text} weight="bold" />
-              </RoundButton>
-            </NativeMenu>
+            <RoundButton
+              tone="glass"
+              size={44}
+              systemImage={G.more.sf}
+              onPress={() =>
+                menu.open('more-menu', moreAnchor, {
+                  placement: 'below',
+                  align: 'end',
+                  width: 290,
+                })
+              }
+              disabled={!summary}
+              accessibilityLabel="文件、改动、Artifacts、终端和子会话"
+            >
+              <Icon icon={G.more} size={18} color={c.text} weight="bold" />
+            </RoundButton>
           </View>
         }
       />

@@ -65,6 +65,8 @@ export interface MenuRow {
   trail?: ReactNode
   /** Drawn on a line of its own under the label and subtitle, such as what is left of a limit. */
   below?: ReactNode
+  /** What `below` says, for a native menu, which cannot draw it: added to the subtitle there. */
+  belowText?: string
   checked?: boolean
   destructive?: boolean
   disabled?: boolean
@@ -98,6 +100,8 @@ export type MenuEntry =
       node: ReactNode
       /** What a native menu shows in the node's place; it is left out without one. */
       picker?: MenuPicker
+      /** A row a native menu shows in the node's place, as a line that opens something. */
+      row?: MenuRow
     }
 
 /** A menu by its pages, for a control to open as the system's menu or as our popover. */
