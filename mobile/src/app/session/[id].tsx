@@ -517,8 +517,10 @@ export default function SessionScreen() {
     })
   }
 
-  const forkAtMessage = !!agent?.capabilities.forkAtMessage
-  const canFork = forkAtMessage || !!agent?.capabilities.forkSession
+  // Every agent forks, at any reply: one that cannot do it itself gets the computer's copy of the
+  // thread, which the computer decides.
+  const forkAtMessage = !!agent
+  const canFork = !!agent
   const forking = useRef(false)
   const fork = useCallback(
     (entryId: string | null, worktree?: 'same') => {

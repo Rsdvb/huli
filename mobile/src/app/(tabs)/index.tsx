@@ -639,7 +639,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       const folders = l.foldersOf.get(p.computer) ?? []
       const here = p.computer === activeId
       const agent = here ? l.agents.get(p.session.agentId) : undefined
-      const canFork = !!agent?.capabilities.forkSession || !!agent?.capabilities.forkAtMessage
+      const canFork = !!agent
       const extras: MenuExtras = {
         folders: moveToFolderNodes(
           folders,

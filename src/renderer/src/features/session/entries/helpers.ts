@@ -500,9 +500,12 @@ export function forkEntry(
   agent: { forkSession: boolean; forkAtMessage: boolean } | undefined,
 ): string | null {
   const last = reply.agentIds.at(-1)
-  if (last == null || !agent?.forkSession) return null
+  if (last == null || !agent) return null
   if (reply.latest) return last
-  return agent.forkAtMessage && entryMessageId(last) !== null ? last : null
+  // Huli: an agent that cannot fork at a reply gets Kettu's copy of the thread up to it instead,
+  // which needs no id of the agent's own.
+  if (!agent.forkSession || !agent.forkAtMessage) return last
+  return entryMessageId(last) !== null ? last : null
 }
 
 /**

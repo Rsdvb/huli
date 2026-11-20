@@ -238,9 +238,8 @@ export function SessionMenuItems({
       return usableAgents(order, byId).filter((a) => isInstalled(a) && !a.hidden && !a.disabled)
     }),
   )
-  const canFork = useAgentsStore(
-    (s) => !!agentsOn(s, hostId).byId[summary.agentId]?.capabilities?.forkSession,
-  )
+  // Huli: every agent forks, one that cannot do it itself from Kettu's copy of the thread.
+  const canFork = useAgentsStore((s) => !!agentsOn(s, hostId).byId[summary.agentId])
   const inFront = useInFront(summary.id)
   // A session a pane shows already, in view or folded, has no Open in split view.
   const inSplit = useViewStore((s) => !!paneWithSession(s.layout, summary.id))

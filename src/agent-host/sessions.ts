@@ -8219,6 +8219,13 @@ export class SessionManager {
         : writerOf(source.thread, at, this.firstAgentOf(source.record))
     if (cut && writer !== source.record.agentId)
       return this.forkToEarlier(source, cut.entries, writer)
+    // Huli: an agent that cannot fork, such as Antigravity, or cannot at a reply, gets a new session
+    // of its own that starts from Kettu's copy of the thread, carried as a takeover's would be.
+    const capable = (await this.deps.agents.ensureReady(source.record.agentId)).init.capabilities
+    if (!capable.forkSession || (cut && !capable.forkAtMessage)) {
+      const entries = cut?.entries ?? threadEntries(source.thread)
+      return this.forkToEarlier(source, entries, source.record.agentId, worktree)
+    }
     // Not every agent forks a session it does not have open, so a closed one attaches first.
     try {
       await this.attachClosed(source)
@@ -8226,20 +8233,6 @@ export class SessionManager {
       throw agentError(error)
     }
     const runtime = await this.deps.agents.ensureReady(source.record.agentId)
-    if (!runtime.init.capabilities.forkSession) {
-      throw new HostError(
-        'agent_unavailable',
-        t('session.cannotFork', { agent: this.deps.agents.name(source.record.agentId) }),
-      )
-    }
-    if (cut && !runtime.init.capabilities.forkAtMessage) {
-      // Without a reply to name, the session menu's fork cannot say where a running turn starts.
-      if (entryId === undefined) throw busyError(status)
-      throw new HostError(
-        'agent_unavailable',
-        t('session.cannotForkAt', { agent: this.deps.agents.name(source.record.agentId) }),
-      )
-    }
     // A closed session takes prompts while it attaches; a turn that started since then wins,
     // unless the fork ends at a reply, which that turn does not change.
     const after = source.thread.session.status
@@ -8421,8 +8414,11 @@ export class SessionManager {
     source: Live,
     entries: ThreadEntry[],
     agentId: AgentId,
+    worktree?: 'new' | 'same',
   ): Promise<SessionSummary> {
     this.deps.agents.assertEnabled(agentId)
+    // A fork in a worktree that asked for one of its own gets it; otherwise it shares the source's.
+    const own = worktree ? await this.forkWorktree(source.record, worktree) : null
     const kept = entries.filter((entry) => entry.kind !== 'subagent')
     const blobs = (
       await Promise.all(
@@ -8447,6 +8443,7 @@ export class SessionManager {
       updatedAt: now,
       lastViewedAt: now,
       branch: null,
+      ...(own ? { worktree: own } : {}),
     }
     for (const key of [
       'queue',
