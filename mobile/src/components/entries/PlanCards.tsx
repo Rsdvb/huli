@@ -191,7 +191,10 @@ function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) 
 
 function PlanChanges(props: { previous: string; markdown: string }) {
   const { c } = useSessionTokens()
-  const lines = useMemo(() => planDiff(props.previous, props.markdown), [props])
+  const lines = useMemo(
+    () => planDiff(props.previous, props.markdown),
+    [props.previous, props.markdown],
+  )
   return (
     <View style={[styles.planBody, { backgroundColor: c.fill, gap: 4 }]}>
       <Text style={[styles.small, { color: c.textTertiary }]}>和上一版相比改了什么。</Text>

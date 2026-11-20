@@ -361,14 +361,20 @@ function PopoverView(props: {
     }
   }, [pageId, reduce, pageIn])
 
+  // Subscribed once while open, reading what Back does now through a ref: keyed on the props, it
+  // was taken off and put back on every render.
+  const back = useRef(() => {})
+  back.current = () => {
+    if (stack.length > 1) props.onBack()
+    else onClose()
+  }
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (stack.length > 1) props.onBack()
-      else onClose()
+      back.current()
       return true
     })
     return () => sub.remove()
-  }, [stack.length, props, onClose])
+  }, [])
 
   // The page went away, as a menu whose session ended: nothing is left to show.
   useEffect(() => {
