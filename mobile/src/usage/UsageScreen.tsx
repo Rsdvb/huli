@@ -546,7 +546,12 @@ export default function UsageScreen() {
                   ? '只算纸鸢运行的对话时还没有用量；在筛选里换成电脑上的全部日志试试。'
                   : status.fromComputer
                     ? `在 ${hostName} 上用 Agent 写代码之后，token、请求和费用会出现在这里。`
-                    : `纸鸢会记下它运行的每一轮对话。要算上之前和在终端里的使用，请在 ${hostName} 的 设置 › 用量 里打开「统计本机用量」。`
+                    : `纸鸢会记下它运行的每一轮对话。要算上之前和在终端里的使用，请在 设置 › 用量记录 里打开「统计电脑上的用量」。`
+              }
+              action={
+                status.fromComputer
+                  ? undefined
+                  : { label: '打开用量记录', onPress: () => router.push('/settings/usage') }
               }
             />
             {status.fromComputer && filters}
