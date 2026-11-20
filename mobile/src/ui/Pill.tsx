@@ -20,6 +20,8 @@ export function Pill(props: {
   color?: string
   onPress?: () => void
   onLongPress?: () => void
+  /** Greyed and not pressable, as a button that cannot act now. */
+  disabled?: boolean
   accessibilityLabel?: string
   style?: StyleProp<ViewStyle>
 }) {
@@ -35,7 +37,7 @@ export function Pill(props: {
     outline: 'transparent',
   }[tone]
   const ink = props.color ?? (tone === 'accent' ? c.onAccent : tone === 'tint' ? c.tint : c.text)
-  const pressable = !!props.onPress || !!props.onLongPress
+  const pressable = (!!props.onPress || !!props.onLongPress) && !props.disabled
   const glass = tone === 'glass'
   const liquid = glass && mode === 'liquid'
   const shape = [
@@ -56,6 +58,7 @@ export function Pill(props: {
               borderColor: tone === 'outline' ? c.borderStrong : 'transparent',
             },
         props.style,
+        props.disabled && styles.disabled,
       ]}
     >
       {props.leading}
@@ -82,13 +85,30 @@ export function Pill(props: {
       {props.trailing}
     </Body>
   )
+  if (props.disabled) {
+    return (
+      <View
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={props.accessibilityLabel ?? props.label}
+        accessibilityState={{ disabled: true }}
+        style={styles.shrink}
+      >
+        {body}
+      </View>
+    )
+  }
   if (!pressable) return body
+  // The touch reaches 44pt even where the capsule is shorter.
+  const slop = Math.max(0, (sizes.hit - MIN_HEIGHT[size]) / 2)
+  const hitSlop = { top: slop, bottom: slop, left: space.xs, right: space.xs }
   // Liquid Glass answers the touch itself; a fade on top of it would dim the glass.
   if (liquid) {
     return (
       <Pressable
         onPress={props.onPress}
         onLongPress={props.onLongPress}
+        hitSlop={hitSlop}
         accessibilityRole="button"
         accessibilityLabel={props.accessibilityLabel ?? props.label}
         style={styles.shrink}
@@ -101,6 +121,7 @@ export function Pill(props: {
     <Press
       onPress={props.onPress}
       onLongPress={props.onLongPress}
+      hitSlop={hitSlop}
       accessibilityRole="button"
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       containerStyle={styles.shrink}
@@ -128,6 +149,8 @@ function GlassPillBody(props: BodyProps) {
   )
 }
 
+const MIN_HEIGHT = { sm: 24, md: 32, lg: 48, bar: sizes.barPill } as const
+
 const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
@@ -136,10 +159,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     flexShrink: 1,
   },
-  sm: { gap: space.xs, paddingHorizontal: space.sm, minHeight: 24 },
-  md: { gap: space.sm - 2, paddingHorizontal: space.md, minHeight: 32 },
-  lg: { gap: space.sm + 2, paddingHorizontal: space.lg + 2, minHeight: 48 },
+  sm: { gap: space.xs, paddingHorizontal: space.sm, minHeight: MIN_HEIGHT.sm },
+  md: { gap: space.sm - 2, paddingHorizontal: space.md, minHeight: MIN_HEIGHT.md },
+  lg: { gap: space.sm + 2, paddingHorizontal: space.lg + 2, minHeight: MIN_HEIGHT.lg },
   bar: { gap: space.sm, paddingHorizontal: 14, minHeight: sizes.barPill, alignSelf: 'center' },
   glass: { borderWidth: 0 },
+  disabled: { opacity: 0.4 },
   shrink: { flexShrink: 1 },
 })

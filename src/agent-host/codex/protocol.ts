@@ -302,6 +302,8 @@ export type ThreadItem = ItemTimes &
         type: 'dynamicToolCall'
         id: string
         tool: string
+        /** Since Codex 0.170: the namespace the tool was registered under. */
+        namespace?: string | null
         arguments: JsonValue
         status: 'inProgress' | 'completed' | 'failed'
         contentItems:
@@ -324,6 +326,9 @@ export type ThreadItem = ItemTimes &
           string,
           { status: CollabAgentStatus; message: string | null } | undefined
         >
+        /** Since Codex 0.170: the model and effort a new agent runs on. */
+        model?: string | null
+        reasoningEffort?: string | null
       }
     | {
         type: 'subAgentActivity'
@@ -332,7 +337,14 @@ export type ThreadItem = ItemTimes &
         agentThreadId: string
         agentPath: string
       }
-    | { type: 'webSearch'; id: string; query: string; action: WebSearchAction | null }
+    | {
+        type: 'webSearch'
+        id: string
+        query: string
+        action: WebSearchAction | null
+        /** Since Codex 0.170: what a standalone search found, as opaque JSON. */
+        results?: JsonValue[] | null
+      }
     | { type: 'imageView'; id: string; path: string }
     | {
         type: 'imageGeneration'
@@ -341,11 +353,13 @@ export type ThreadItem = ItemTimes &
         revisedPrompt: string | null
         result?: string
         savedPath?: string
+        /** Since Codex 0.170: why no image was made. */
+        failure?: { type: string; limitId?: string; resetsAt?: number | null } | null
       }
     | { type: 'enteredReviewMode'; id: string; review: string }
     | { type: 'exitedReviewMode'; id: string; review: string }
     | { type: 'contextCompaction'; id: string }
-    | { type: 'hookPrompt'; id: string }
+    | { type: 'hookPrompt'; id: string; fragments?: { hookRunId: string; text: string }[] }
     | { type: 'functionCallOutput'; id: string }
     | { type: 'sleep'; id: string }
   )
@@ -548,7 +562,24 @@ export interface NetworkPolicyAmendment {
 
 export interface AdditionalPermissions {
   network?: { enabled?: boolean | null } | null
-  fileSystem?: { read?: string[] | null; write?: string[] | null } | null
+  fileSystem?: {
+    read?: string[] | null
+    write?: string[] | null
+    /** Since Codex 0.170, in place of `read` and `write`: each path with its access. */
+    entries?: FileSystemSandboxEntry[] | null
+  } | null
+}
+
+/** A path, a glob or one of the sandbox's special places, and what may be done there. */
+export interface FileSystemSandboxEntry {
+  access: 'read' | 'write' | 'deny'
+  path:
+    | { type: 'path'; path: string }
+    | { type: 'glob_pattern'; pattern: string }
+    | {
+        type: 'special'
+        value: { kind: string; path?: string; subpath?: string | null }
+      }
 }
 
 export interface CommandExecutionRequestApprovalParams {
@@ -564,6 +595,13 @@ export interface CommandExecutionRequestApprovalParams {
   proposedExecpolicyAmendment?: string[] | null
   proposedNetworkPolicyAmendments?: NetworkPolicyAmendment[] | null
   availableDecisions?: CommandExecutionApprovalDecision[] | null
+  /**
+   * Since Codex 0.170: a command, input for a command that runs already (`writeStdin`), or a
+   * checkpoint that asks the user again (`humanCommand`); `command` when absent.
+   */
+  kind?: 'command' | 'writeStdin' | 'humanCommand' | null
+  /** Tells apart the callbacks of one item, such as each input sent to its command. */
+  approvalId?: string | null
 }
 
 export type FileChangeApprovalDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel'

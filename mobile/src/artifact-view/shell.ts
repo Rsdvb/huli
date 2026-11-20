@@ -64,13 +64,17 @@ if(frame.contentWindow)frame.contentWindow.postMessage({v:1,kind:'select-pick',x
 window.__huli=Object.freeze({
 drive(m){if(frame.contentWindow)frame.contentWindow.postMessage(m,'*')},
 answer(a){if(port)port.postMessage(a)},
-picking(on){document.body.classList.toggle('picking',!!on)}});
+picking(on){document.body.classList.toggle('picking',!!on)},
+background(c){if(typeof c==='string'&&c.length<=64){document.documentElement.style.background=c;document.body.style.background=c}}});
 layout();addEventListener('resize',layout);
 frame.srcdoc=PAGE;
 send({kind:'shell'})})()</script></body></html>`
 }
 
 /** A script that calls the shell, for the web view's injectJavaScript. */
-export function shellCall(method: 'drive' | 'answer' | 'picking', value: unknown): string {
+export function shellCall(
+  method: 'drive' | 'answer' | 'picking' | 'background',
+  value: unknown,
+): string {
   return `window.__huli&&window.__huli.${method}(${json(value)});true;`
 }

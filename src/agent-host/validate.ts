@@ -67,6 +67,12 @@ import {
 } from '@shared/workflow'
 import type { ClockRequest, ClockZone } from '@shared/usage'
 import {
+  LIMIT_PAUSE_ACTIONS,
+  STALL_ACTIONS,
+  type LimitPauseAction,
+  type StallAction,
+} from '@shared/supervisor'
+import {
   isPermissionScope,
   isSchedule,
   isTimeLimit,
@@ -286,6 +292,25 @@ function absolutePath(o: Fields, key: string, platform: Platform): string {
   const value = string(o, key, PATH_CHARS)
   if (value.includes('\0')) throw invalidParams(`${key} contains a NUL character`)
   if (!isAbsolutePath(value, platform)) throw invalidParams(`${key} must be an absolute path`)
+  return value
+}
+
+// Huli: what an import from another folder of an agent's takes: as many sessions as a listing of
+// it holds, each by the agent's own id, and the plan the host made of them.
+const HISTORY_COPY_SESSIONS = 20_000
+const HISTORY_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
+const HISTORY_PLAN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/**
+ * Huli: a folder an agent's sessions are read from: absolute, with no `..` step out of it and,
+ * on Windows, no device namespace (`\\.\`, `\\?\`). The host checks it is a folder that exists.
+ */
+function historyFolder(o: Fields, key: string, platform: Platform): string {
+  const value = absolutePath(o, key, platform)
+  if (value.split(/[\\/]/).includes('..')) throw invalidParams(`${key} must not contain ..`)
+  if (platform === 'win32' && /^[\\/]{2}[.?][\\/]/.test(value)) {
+    throw invalidParams(`${key} must be a folder, not a device path`)
+  }
   return value
 }
 
@@ -1855,6 +1880,24 @@ export function createValidators(platform: Platform): Validators {
     'sessions.steer': queueItem,
     'sessions.sendNow': queueItem,
     'sessions.resumeQueue': session,
+    'sessions.limitPause': (params) => {
+      const o = fields(params)
+      if (!(LIMIT_PAUSE_ACTIONS as readonly unknown[]).includes(o.action)) {
+        throw invalidParams(`action must be one of ${LIMIT_PAUSE_ACTIONS.join(', ')}`)
+      }
+      return { sessionId: sessionId(o), action: o.action as LimitPauseAction }
+    },
+    'sessions.setAutoResume': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), on: flag(o, 'on') }
+    },
+    'sessions.stall': (params) => {
+      const o = fields(params)
+      if (!(STALL_ACTIONS as readonly unknown[]).includes(o.action)) {
+        throw invalidParams(`action must be one of ${STALL_ACTIONS.join(', ')}`)
+      }
+      return { sessionId: sessionId(o), action: o.action as StallAction }
+    },
     'sessions.blob': (params) => {
       const o = fields(params)
       const hash = string(o, 'hash', 64)
@@ -2669,7 +2712,34 @@ export function createValidators(platform: Platform): Validators {
     'agentHistory.list': (params) => {
       const o = fields(params)
       const cursor = optionalString(o, 'cursor', TEXT_CHARS)
-      return { agentId: agentId(o), ...(cursor !== undefined ? { cursor } : {}) }
+      return {
+        agentId: agentId(o),
+        ...(cursor !== undefined ? { cursor } : {}),
+        ...(o.folder !== undefined ? { folder: historyFolder(o, 'folder', platform) } : {}),
+      }
+    },
+    'agentHistory.planCopy': (params) => {
+      const o = fields(params)
+      const ids = o.sessionIds
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > HISTORY_COPY_SESSIONS) {
+        throw invalidParams(`sessionIds must be a list of 1 to ${HISTORY_COPY_SESSIONS} ids`)
+      }
+      return {
+        agentId: agentId(o),
+        folder: historyFolder(o, 'folder', platform),
+        sessionIds: ids.map((id: unknown) => {
+          if (typeof id !== 'string' || !HISTORY_SESSION_ID.test(id)) {
+            throw invalidParams('sessionIds must hold session ids')
+          }
+          return id
+        }),
+      }
+    },
+    'agentHistory.copy': (params) => {
+      const token = string(fields(params), 'token', ID_CHARS)
+      if (!HISTORY_PLAN.test(token))
+        throw invalidParams('token must be a plan agentHistory.planCopy made')
+      return { token }
     },
     ...folderValidators,
     ...networkValidators,

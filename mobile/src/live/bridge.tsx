@@ -36,10 +36,17 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 
 const pickPhase = (d: HostData) => d.phase
 
+/** Whether no session waits for the user, which alone of the sessions the tidying reads. */
+const pickNothingWaits = (d: HostData) => {
+  for (const s of d.sessions.values()) if (needsYou(s)) return false
+  return true
+}
+
 export function LiveBridge() {
   const link = useMaybeLink()
   const phase = useHostSelector(pickPhase)
   const sessions = useSessions()
+  const nothingWaits = useHostSelector(pickNothingWaits)
   const agents = useAgents()
   const host = useActiveHost()
   const loaded = useListsLoaded()
@@ -123,10 +130,14 @@ export function LiveBridge() {
     }
     if (phase !== 'ready' || !loaded || !connected) return
     const input = { ...base, enabled: true }
-    syncLocal(input)
-    if (!foreground) return
-    const timer = setInterval(() => syncLocal(input), 60_000)
-    return () => clearInterval(timer)
+    // A streaming turn changes the sessions many times a second: the activity follows a beat
+    // behind, once for each burst, rather than once for each change.
+    const soon = setTimeout(() => syncLocal(input), 250)
+    const timer = foreground ? setInterval(() => syncLocal(input), 60_000) : null
+    return () => {
+      clearTimeout(soon)
+      if (timer) clearInterval(timer)
+    }
   }, [
     phase,
     loaded,
@@ -146,7 +157,6 @@ export function LiveBridge() {
     let live = true
     const timer = setTimeout(() => {
       void (async () => {
-        const nothingWaits = ![...sessions.values()].some(needsYou)
         await tidyComputerActivities({
           enabled,
           nothingWaits: nothingWaits && foreground && freshAt.current !== null,
@@ -162,7 +172,9 @@ export function LiveBridge() {
       live = false
       clearTimeout(timer)
     }
-  }, [link, connected, loaded, enabled, sessions, foreground, changes])
+    // Not on every change of the sessions: only whether one waits matters here, and each run may
+    // ask the computer for the push tokens again.
+  }, [link, connected, loaded, enabled, nothingWaits, foreground, changes])
 
   return null
 }

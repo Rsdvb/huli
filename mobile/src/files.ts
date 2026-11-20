@@ -64,30 +64,37 @@ export function useProjectFiles(
   return { list: folder ? list : null, error, reload }
 }
 
-// A list's paths in lower case with where each name starts, worked out once per list: a project
-// lists up to 50,000 files, and each keystroke of a mention searched them all again.
-const lowered = new WeakMap<readonly string[], { lower: string[]; names: number[] }>()
+// A list's paths in lower case, worked out once per list: a project lists up to 50,000 files, and
+// each keystroke of a mention searched them all again.
+const loweredKept = new WeakMap<readonly string[], string[]>()
 
-function lowerOf(paths: readonly string[]): { lower: string[]; names: number[] } {
-  let known = lowered.get(paths)
+function lowerOf(paths: readonly string[]): string[] {
+  let known = loweredKept.get(paths)
   if (!known) {
-    const lower = paths.map((path) => path.toLowerCase())
-    known = { lower, names: lower.map((path) => path.lastIndexOf('/') + 1) }
-    lowered.set(paths, known)
+    known = paths.map((path) => path.toLowerCase())
+    loweredKept.set(paths, known)
   }
   return known
 }
 
-/** The paths whose name or path holds the query, names that start with it first. */
-export function matchFiles(paths: readonly string[], query: string, limit = 40): string[] {
+/**
+ * The paths whose name or path holds the query, names that start with it first. `lowered`, the
+ * paths in lower case in the same order, spares a long list lowering every path on each keystroke;
+ * without it the list's own are worked out once and kept.
+ */
+export function matchFiles(
+  paths: readonly string[],
+  query: string,
+  limit = 40,
+  lowered?: readonly string[],
+): string[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
-  const { lower: all, names } = lowerOf(paths)
+  const all = lowered ?? lowerOf(paths)
   const scored: { path: string; score: number }[] = []
-  for (let i = 0; i < paths.length; i++) {
-    const path = paths[i]!
-    const lower = all[i]!
-    const name = lower.slice(names[i]!)
+  for (const [at, path] of paths.entries()) {
+    const lower = all[at] ?? path.toLowerCase()
+    const name = lower.slice(lower.lastIndexOf('/') + 1)
     const score = name.startsWith(needle)
       ? 0
       : name.includes(needle)

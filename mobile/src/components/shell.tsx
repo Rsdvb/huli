@@ -42,6 +42,9 @@ import { ComputerSheet } from './ComputerSheet'
 
 const noop = () => {}
 
+/** What the computer's mark beside the compact bar's project pill takes: itself, its pad, a gap. */
+const MARK_ROOM = 16 + space.xs * 2 + space.sm + 2
+
 export type ProjectFilter =
   { kind: 'all' } | { kind: 'scratch' } | { kind: 'project'; path: string }
 
@@ -102,6 +105,22 @@ export function projectMenuNodes(
   ]
 }
 
+interface ProjectCounts {
+  list: { path: string; count: number; name: string }[]
+  scratch: number
+}
+
+function sameProjectCounts(a: ProjectCounts, b: ProjectCounts): boolean {
+  return (
+    a.scratch === b.scratch &&
+    a.list.length === b.list.length &&
+    a.list.every(
+      (p, i) =>
+        p.path === b.list[i]!.path && p.count === b.list[i]!.count && p.name === b.list[i]!.name,
+    )
+  )
+}
+
 const ShellContext = createContext<ShellValue | null>(null)
 
 export function useShell(): ShellValue {
@@ -126,6 +145,8 @@ export function ShellProvider(props: { children: ReactNode }) {
   const hostProjects = useProjects()
   const [filter, setFilter] = useState<ProjectFilter>({ kind: 'all' })
   const [sheet, setSheet] = useState<'host' | null>(null)
+  const opened = useRef(false)
+  if (sheet === 'host') opened.current = true
 
   // A project belongs to one computer: another computer starts with everything shown.
   const activeId = useComputerId()
@@ -133,7 +154,10 @@ export function ShellProvider(props: { children: ReactNode }) {
     setFilter({ kind: 'all' })
   }, [activeId])
 
-  // The projects the listed sessions are in, latest first, named as the computer names them.
+  // The projects the listed sessions are in, latest first, named as the computer names them. The
+  // same list keeps its identity, so the menu and the top bars that read it do not redraw on every
+  // session's turn, which changes the sessions but seldom their projects.
+  const lastProjects = useRef<ProjectCounts | null>(null)
   const projects = useMemo(() => {
     const names = new Map(hostProjects.map((p) => [p.path, p.name]))
     const latest = new Map<string, { updated: number; count: number }>()
@@ -153,7 +177,11 @@ export function ShellProvider(props: { children: ReactNode }) {
     const list = [...latest.entries()]
       .sort((a, b) => b[1].updated - a[1].updated)
       .map(([path, { count }]) => ({ path, count, name: names.get(path) ?? folder(path) }))
-    return { list, scratch }
+    const next = { list, scratch }
+    const last = lastProjects.current
+    if (last && sameProjectCounts(last, next)) return last
+    lastProjects.current = next
+    return next
   }, [sessions, hostProjects])
 
   const filterName =
@@ -187,7 +215,10 @@ export function ShellProvider(props: { children: ReactNode }) {
     <ShellContext.Provider value={value}>
       <ProjectMenuContext.Provider value={projectMenu}>
         {props.children}
-        <ComputerSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
+        {/* Mounted once first opened: until then the computers' sheet costs the app nothing. */}
+        {opened.current ? (
+          <ComputerSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
+        ) : null}
       </ProjectMenuContext.Provider>
     </ShellContext.Provider>
   )
@@ -229,6 +260,15 @@ export function TopBar(props: {
     link.state.kind === 'connected' ? link.state.welcome.host.platform : undefined,
   )
   const several = link.several
+  // The room between the buttons, which a long computer or project name must not run past: the
+  // system menu around a pill sizes it to its content, so the pill takes this as its width's limit.
+  const [room, setRoom] = useState<number | null>(null)
+  const middle = (children: ReactNode) => (
+    <View style={styles.middle} onLayout={(e) => setRoom(e.nativeEvent.layout.width)}>
+      {children}
+    </View>
+  )
+  const fit = (reserve: number) => (room === null ? undefined : { maxWidth: room - reserve })
   const openSearch = () => {
     haptic.tap()
     router.push({
@@ -286,35 +326,39 @@ export function TopBar(props: {
     return (
       <FloatingHeader header={props.header}>
         {avatar}
-        <TapMenu items={layers} title="按项目查看">
-          {(open) => (
-            <Pill
-              tone="glass"
-              size="bar"
-              {...(open ? { onPress: open } : {})}
-              accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
-              leading={
-                <Icon
-                  name="layers"
-                  size={16}
-                  color={shell.filterName ? c.tint : c.text}
-                  weight="medium"
+        {middle(
+          <>
+            <TapMenu items={layers} title="按项目查看">
+              {(open) => (
+                <Pill
+                  tone="glass"
+                  size="bar"
+                  style={fit(MARK_ROOM)}
+                  {...(open ? { onPress: open } : {})}
+                  accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
+                  leading={
+                    <Icon
+                      name="layers"
+                      size={16}
+                      color={shell.filterName ? c.tint : c.text}
+                      weight="medium"
+                    />
+                  }
+                  label={shell.filterName ?? '全部'}
                 />
-              }
-              label={shell.filterName ?? '全部'}
-            />
-          )}
-        </TapMenu>
-        <Press
-          onPress={shell.openHost}
-          accessibilityRole="button"
-          accessibilityLabel={hostLabel}
-          hitSlop={10}
-          style={styles.mark}
-        >
-          {mark(c.textSecondary)}
-        </Press>
-        <View style={styles.spacer} />
+              )}
+            </TapMenu>
+            <Press
+              onPress={shell.openHost}
+              accessibilityRole="button"
+              accessibilityLabel={hostLabel}
+              hitSlop={10}
+              style={styles.mark}
+            >
+              {mark(c.textSecondary)}
+            </Press>
+          </>,
+        )}
         {search}
       </FloatingHeader>
     )
@@ -337,40 +381,45 @@ export function TopBar(props: {
           )}
         </TapMenu>
       )}
-      {props.computers ? (
-        <TapMenu items={props.computers.items}>
-          {(open) => (
-            <Pill
-              tone="glass"
-              size="bar"
-              {...(open ? { onPress: open } : {})}
-              accessibilityLabel={
-                props.computers?.all ? '全部电脑，点按切换' : `${hostLabel}，点按切换电脑`
-              }
-              leading={
-                props.computers?.all ? <Icon name="layers" size={16} color={c.text} /> : mark()
-              }
-              trailing={<Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />}
-              label={props.computers?.all ? '全部电脑' : name}
-            />
-          )}
-        </TapMenu>
-      ) : (
-        <Pill
-          tone="glass"
-          size="bar"
-          onPress={shell.openHost}
-          accessibilityLabel={hostLabel}
-          leading={mark()}
-          trailing={
-            several ? (
-              <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
-            ) : undefined
-          }
-          label={name}
-        />
+      {middle(
+        props.computers ? (
+          <TapMenu items={props.computers.items}>
+            {(open) => (
+              <Pill
+                tone="glass"
+                size="bar"
+                style={fit(0)}
+                {...(open ? { onPress: open } : {})}
+                accessibilityLabel={
+                  props.computers?.all ? '全部电脑，点按切换' : `${hostLabel}，点按切换电脑`
+                }
+                leading={
+                  props.computers?.all ? <Icon name="layers" size={16} color={c.text} /> : mark()
+                }
+                trailing={
+                  <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
+                }
+                label={props.computers?.all ? '全部电脑' : name}
+              />
+            )}
+          </TapMenu>
+        ) : (
+          <Pill
+            tone="glass"
+            size="bar"
+            style={fit(0)}
+            onPress={shell.openHost}
+            accessibilityLabel={hostLabel}
+            leading={mark()}
+            trailing={
+              several ? (
+                <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
+              ) : undefined
+            }
+            label={name}
+          />
+        ),
       )}
-      <View style={styles.spacer} />
       {search}
     </FloatingHeader>
   )
@@ -429,7 +478,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1.5,
   },
-  spacer: { flex: 1 },
+  middle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.sm + 2 },
   mark: { padding: space.xs },
   filterNote: { flexDirection: 'row', marginTop: space.md },
 })

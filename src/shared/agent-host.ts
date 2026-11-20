@@ -31,7 +31,7 @@ import type { ContextBreakdown, ContextEstimates } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
-import type { AgentHistoryPage } from './agent-history'
+import type { AgentHistoryPage, HistoryCopyOutcome, HistoryCopyPlan } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type {
   CatalogServer,
@@ -124,6 +124,7 @@ import type {
 } from './workflow'
 import type { ClockRequest, UsageScope, UsageStatus, UsageSummary, UsageTotal } from './usage'
 import type { TurnWork } from './turn-phase'
+import type { LimitPause, LimitPauseAction, Stall, StallAction } from './supervisor'
 import type {
   AgentId,
   HarnessId,
@@ -728,6 +729,12 @@ export interface SessionSummary {
   // What its running turn does now, as the desktop's working row says it, with the latest running
   // tool call's title; null between turns; absent from older hosts
   working?: TurnWork | null
+  // Huli: paused at its agent's plan limit until it goes on by itself; absent from older hosts
+  limitPause?: LimitPause | null
+  // Huli: whether it goes on by itself after a plan limit, its own choice or the settings'
+  autoResume?: boolean
+  // Huli: its running turn has said nothing for a while and may be stuck
+  stall?: Stall | null
 }
 
 /**
@@ -1337,6 +1344,12 @@ export interface HostContract {
   // Steers where the agent can; otherwise stops the turn and sends the prompt as the next one.
   'sessions.sendNow': { params: { sessionId: string; itemId: string }; result: void }
   'sessions.resumeQueue': { params: { sessionId: string }; result: void }
+  /** Huli: drops a session's limit pause, or goes on now without waiting for the reset. */
+  'sessions.limitPause': { params: { sessionId: string; action: LimitPauseAction }; result: void }
+  /** Huli: whether the session goes on by itself after a plan limit, over the settings' choice. */
+  'sessions.setAutoResume': { params: { sessionId: string; on: boolean }; result: void }
+  /** Huli: stops a turn that looks stuck, stops it and goes on again, or keeps waiting. */
+  'sessions.stall': { params: { sessionId: string; action: StallAction }; result: void }
   // An image or pasted text the thread store keeps for a sent attachment, by its hash.
   'sessions.blob': { params: { sessionId: string; hash: string }; result: AttachmentBytes }
   'sessions.setConfigOption': {
@@ -1765,8 +1778,21 @@ export interface HostContract {
   // Huli: an agent's past sessions of every folder it ran in, for the import from the agents, which
   // imports the chosen ones with `sessions.import`. A window's alone: it names every folder.
   'agentHistory.list': {
-    params: { agentId: AgentId; cursor?: string }
+    // `folder`: another folder of the agent's kind to list instead of its own, such as a backup
+    // of Claude Code's configuration folder or a Codex home copied from another computer.
+    params: { agentId: AgentId; cursor?: string; folder?: string }
     result: AgentHistoryPage
+  }
+  // Huli: the files copying the chosen sessions of a `folder` that `agentHistory.list` read
+  // writes into the agent's own folder, for the user to confirm; nothing is written yet.
+  'agentHistory.planCopy': {
+    params: { agentId: AgentId; folder: string; sessionIds: string[] }
+    result: HistoryCopyPlan
+  }
+  // Huli: runs a plan, once; the chosen folder is only read.
+  'agentHistory.copy': {
+    params: { token: string }
+    result: { items: HistoryCopyOutcome[] }
   }
   // Huli: the agents' network through the user's proxy subscriptions, for this computer's windows
   // alone: a paired device may call none of these, and `agentNetwork.changed` reaches no device.
@@ -1965,6 +1991,9 @@ export const HOST_METHODS = [
   'sessions.steer',
   'sessions.sendNow',
   'sessions.resumeQueue',
+  'sessions.limitPause',
+  'sessions.setAutoResume',
+  'sessions.stall',
   'sessions.blob',
   'sessions.setConfigOption',
   'sessions.refreshModels',
@@ -2115,6 +2144,8 @@ export const HOST_METHODS = [
   'computer.show',
   'computer.declineSetup',
   'agentHistory.list',
+  'agentHistory.planCopy',
+  'agentHistory.copy',
   'agentNetwork.status',
   'agentNetwork.addSubscription',
   'agentNetwork.importSubscription',

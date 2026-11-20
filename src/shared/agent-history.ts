@@ -28,4 +28,48 @@ export interface AgentHistoryPage {
   nextCursor: string | null
   /** What this page left out: sessions another started (subagents), and ones without a message. */
   hidden: { subagents: number; empty: number }
+  /** For a listing of another folder: the folder its sessions were read from, inside the chosen one. */
+  source?: string
+}
+
+/**
+ * Huli: what an import from another folder does with a chosen session in the agent's own folder:
+ * `new`, its transcript is copied in; `newer`, the agent's copy holds less of the conversation, so
+ * it is kept beside it as a backup and replaced; `same` and `older`, the agent has it already, as
+ * much of it or more, and only what the session's folder lacks is copied; `conflict`, the agent's
+ * copy went another way, and nothing is written; `missing`, the folder it ran in is not here.
+ */
+export type HistoryCopyAction = 'new' | 'newer' | 'same' | 'older' | 'conflict' | 'missing'
+
+export interface HistoryCopyItem {
+  acpSessionId: string
+  title: string | null
+  cwd: string
+  action: HistoryCopyAction
+  /** The files it writes, absolute, the transcript first when it is one of them. */
+  files: string[]
+  /** Files it writes beyond those `files` names, which a long list leaves out. */
+  moreFiles: number
+  /** For `newer` over a file: where the agent's own copy is kept first. */
+  backup: string | null
+}
+
+/** The files an import from another folder writes, which the user confirms before it runs. */
+export interface HistoryCopyPlan {
+  /** Runs this plan with `agentHistory.copy`, once, within a few minutes. */
+  token: string
+  /** The agent's own folder the files go into. */
+  target: string
+  items: HistoryCopyItem[]
+}
+
+export interface HistoryCopyOutcome {
+  acpSessionId: string
+  /**
+   * `copied`, its transcript was written; `present`, the agent had it already; `skipped`, it was
+   * left alone, as for a conflict or a file that changed since the plan; `failed`, a write failed.
+   */
+  status: 'copied' | 'present' | 'skipped' | 'failed'
+  written: number
+  message?: string
 }

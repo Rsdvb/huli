@@ -252,6 +252,8 @@ export interface IpcInvokeContract {
   // `trash`: move the folder Kettu made for the agent to the trash.
   'settings:remove-agent': { args: [agentId: AgentId, trash: boolean]; result: void }
   'dialog:choose-shell': { args: []; result: string | null }
+  // Huli: a folder of an agent's sessions kept elsewhere, for the import from the agents to read.
+  'dialog:choose-history-folder': { args: []; result: string | null }
   // `defaultPath`: the folder the dialog opens in, the session's; an empty list when cancelled.
   'dialog:add-attachments': {
     args: [kind: 'files' | 'folder', defaultPath: string | null]
@@ -868,6 +870,8 @@ export interface KettuApi {
     /** Picks or creates a configuration folder for an agent to add, which `addAgent` accepts. */
     chooseAgentFolder(): Promise<string | null>
     chooseShell(): Promise<string | null>
+    /** Huli: a folder with another copy of an agent's sessions; null when cancelled. */
+    chooseHistoryFolder(): Promise<string | null>
   }
   /** Debug mode: this run's ports, and restarting into it or out of it. */
   debug: {

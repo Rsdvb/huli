@@ -138,7 +138,7 @@ export function stateText(status: AgentStatus): { text: string; tone: StateTone 
     case 'starting':
       return { text: '正在启动', tone: 'tint' }
     case 'failed':
-      return { text: '出错', tone: 'danger' }
+      return { text: '失败', tone: 'danger' }
     case 'missing':
       return cliOutdated(status) !== null
         ? { text: '需要更新', tone: 'warning' }

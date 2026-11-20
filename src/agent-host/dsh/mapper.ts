@@ -12,7 +12,7 @@ import type {
   ToolKind,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
-import { fenced } from '../codex/mapper'
+import { fenced } from '../session-updates'
 import { t } from '../i18n'
 import { isClaudeRowlessCall, isClaudeRowWhenFailed } from '../plan-tool'
 import {

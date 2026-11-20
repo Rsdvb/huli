@@ -18,6 +18,7 @@ import {
   useNetworkStatus,
 } from '../../manage/network'
 import { ListGroup, ListRow } from '../../ui/ListRow'
+import { dateText } from '../../usage/text'
 
 function usageText(usage: SubscriptionUsage | null): string | null {
   if (!usage) return null
@@ -25,7 +26,7 @@ function usageText(usage: SubscriptionUsage | null): string | null {
   if (usage.total > 0) {
     parts.push(`已用 ${formatBytes(usage.upload + usage.download)} / ${formatBytes(usage.total)}`)
   }
-  if (usage.expire) parts.push(`${new Date(usage.expire).toLocaleDateString('zh-CN')}到期`)
+  if (usage.expire) parts.push(`${dateText(usage.expire)}到期`)
   return parts.length > 0 ? parts.join(' · ') : null
 }
 

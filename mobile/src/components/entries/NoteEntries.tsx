@@ -304,7 +304,7 @@ const STOP_REASON = {
   cancelled: '已取消',
   max_tokens: '已达到 token 上限而停止',
   max_turn_requests: '已达到请求次数上限而停止',
-  refusal: 'Agent 拒绝了请求',
+  refusal: '模型拒绝继续（API 未给出原因）',
 } as const
 
 /** A turn's end, when it shows on its own rather than as a turn's footer. */

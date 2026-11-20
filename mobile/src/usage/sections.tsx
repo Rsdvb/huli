@@ -20,7 +20,7 @@ import { Press } from '../ui/Press'
 import { SectionHeader } from '../ui/SectionHeader'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { Skeleton } from '../ui/Skeleton'
-import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
+import { FONT_SCALE, radius, space, type as typeScale, useTokens } from '../ui/tokens'
 import {
   addDays,
   busiestWeekday,
@@ -118,6 +118,7 @@ export function Activity(props: {
     () => days.filter((d) => d.day >= heat.from && d.day < heat.to),
     [days, heat.from, heat.to],
   )
+  const dayStarts = useMemo(() => heatDays.map((d) => d.day), [heatDays])
   const values = useMemo(
     () => heatDays.map((d) => metricValue(d.parts, metric, scope) ?? 0),
     [heatDays, metric, scope],
@@ -186,7 +187,7 @@ export function Activity(props: {
         </View>
       ) : null}
       <Heatmap
-        days={heatDays.map((d) => d.day)}
+        days={dayStarts}
         levels={levels}
         frame={dayCount(range) > 1 ? range : null}
         accessibilityLabel={`活动，过去一年每天的${METRIC_NAMES[kind]}。${facts}`}
@@ -379,6 +380,9 @@ function tickIndices(unit: TrendUnit, n: number): number[] {
   return out
 }
 
+/** The faint lines of a bar chart, at half and all of its tallest bar. */
+export const CHART_GRID = [0.5, 1]
+
 export function Trend(props: {
   unit: TrendUnit | null
   bars: TrendBar[]
@@ -393,7 +397,27 @@ export function Trend(props: {
 }) {
   const { c } = useTokens()
   const [selected, setSelected] = useState<number | null>(null)
+  // A bar chosen in one period means nothing in the next: the choice goes with the period.
+  const [selectedIn, setSelectedIn] = useState(props.rangeLabel)
+  if (selectedIn !== props.rangeLabel) {
+    setSelectedIn(props.rangeLabel)
+    setSelected(null)
+  }
   const { unit, bars, kind } = props
+  // The same bars while the read holds, so the chart's memoized bars skip a redraw.
+  const { series, colorOf } = props
+  const stacked = useMemo(
+    () =>
+      bars.map((bar) => ({
+        key: String(bar.from),
+        segments: series.map((agentId) => ({
+          key: agentId,
+          value: bar.byAgent[agentId] ?? 0,
+          color: colorOf(agentId),
+        })),
+      })),
+    [bars, series, colorOf],
+  )
   const chosen = selected !== null && selected < bars.length ? selected : null
   const total = bars.reduce((sum, bar) => sum + bar.total, 0)
   const peak = bars.reduce<number | null>(
@@ -414,15 +438,8 @@ export function Trend(props: {
       <>
         <StackedBarChart
           height={150}
-          grid={[0.5, 1]}
-          bars={bars.map((bar) => ({
-            key: String(bar.from),
-            segments: props.series.map((agentId) => ({
-              key: agentId,
-              value: bar.byAgent[agentId] ?? 0,
-              color: props.colorOf(agentId),
-            })),
-          }))}
+          grid={CHART_GRID}
+          bars={stacked}
           ticks={Object.fromEntries(
             tickIndices(unit, bars.length).map((i) => [i, tickText(unit, bars[i]!.from)]),
           )}
@@ -474,7 +491,8 @@ export function Trend(props: {
             {chosen !== null && unit !== null
               ? `${barText(unit, bars[chosen]!.from, bars[chosen]!.to)} · ${metricText(kind, bars[chosen]!.total)}`
               : unit !== null
-                ? UNIT_NAMES[unit]
+                ? // The tallest bar reaches the top line: its value gives the chart its scale.
+                  `${UNIT_NAMES[unit]}${peak !== null ? ` · 最高 ${metricText(kind, bars[peak]!.total)}` : ''}`
                 : ''}
           </Text>
         }
@@ -570,11 +588,16 @@ export function Breakdown(props: {
                     />
                   )}
                 </View>
-                <Text style={[typeScale.callout, styles.rowShare, { color: c.text }]}>
+                <Text
+                  style={[typeScale.callout, styles.rowShare, { color: c.text }]}
+                  maxFontSizeMultiplier={FONT_SCALE.dense}
+                  numberOfLines={1}
+                >
                   {percent(share)}
                 </Text>
                 <Text
                   style={[typeScale.callout, styles.rowValue, { color: c.textSecondary }]}
+                  maxFontSizeMultiplier={FONT_SCALE.dense}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                 >
@@ -723,13 +746,13 @@ export function Facts(props: { facts: Figures; tokenFacts: Figures; kind: Metric
     },
     tokenFacts.cacheShare !== null && {
       key: 'cache',
-      label: '来自 prompt cache',
+      label: '来自提示缓存',
       value: percent(tokenFacts.cacheShare),
     },
     tokenFacts.priced &&
       tokenFacts.parts.cacheSaved > 0 && {
         key: 'saved',
-        label: 'prompt cache 省下（按 API 价格）',
+        label: '提示缓存省下（按 API 价格）',
         value: metricText('cost', tokenFacts.parts.cacheSaved),
       },
   ].filter((line): line is { key: string; label: string; value: string } => !!line)
@@ -772,7 +795,7 @@ export function Facts(props: { facts: Figures; tokenFacts: Figures; kind: Metric
                 <Text style={[styles.tabular, { color: c.text, fontWeight: '600' }]}>
                   {cache.perHundred}%
                 </Text>{' '}
-                从 prompt cache 读取
+                从提示缓存读取
               </Text>
             )}
           </View>
@@ -1098,8 +1121,10 @@ const styles = StyleSheet.create({
   rowName: { width: '32%' },
   track: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3, minWidth: 6 },
-  rowShare: { width: 44, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  rowValue: { width: 64, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  // At least as wide as their figures at the usual size, so the rows line up, and wider when the
+  // system's text is large rather than cut the figure.
+  rowShare: { minWidth: 44, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  rowValue: { minWidth: 64, textAlign: 'right', fontVariant: ['tabular-nums'] },
   sessions: { gap: space.lg },
   session: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   sessionHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },

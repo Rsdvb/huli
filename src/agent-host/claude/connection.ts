@@ -19,6 +19,7 @@ import {
   type PromptSuggestion,
   type TokenTotals,
   type ToolEntry,
+  type TurnRefusal,
 } from '@shared/thread'
 import {
   AgentRequestError,
@@ -76,7 +77,9 @@ import {
   ClaudeMapper,
   DEFAULT_CONTEXT_WINDOW,
   mapCommands,
+  mcpFailedNotice,
   MODE_OPTION_ID,
+  refusalOf,
   SYNTHETIC_MODEL,
   type Delivery,
 } from './mapper'
@@ -262,6 +265,8 @@ interface Turn {
   onText: ((text: string) => void) | null
   /** Claude Code started it between Kettu's turns, so its end goes to the host as an effect. */
   byAgent: boolean
+  /** Huli: why the model refused the turn, when Claude Code said. */
+  refusal?: TurnRefusal
 }
 
 interface Session {
@@ -434,6 +439,17 @@ function claudeServers(servers: readonly McpServer[]): Record<string, McpServerC
           },
     ]),
   )
+}
+
+/**
+ * Huli: why Claude Code asks, as its card shows it: what allowing grants, as its bridge words it,
+ * and the check or rule that made it ask.
+ */
+function askReason(permission: ToolPermissionContext): { reason?: string } {
+  const parts = [permission.description, permission.decisionReason]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter((part, i, all) => part !== '' && all.indexOf(part) === i)
+  return parts.length > 0 ? { reason: parts.join('\n') } : {}
 }
 
 function errorText(error: unknown): string {
@@ -1169,6 +1185,7 @@ export class ClaudeConnection implements AgentConnection {
       (result) => {
         for (const [name, error] of Object.entries(result.errors)) {
           this.context.hooks.log('warn', `MCP server ${name} did not connect: ${error}`)
+          if (!session.quiet) this.deliver(mcpFailedNotice(session.id, name, error))
         }
       },
       (error: unknown) => {
@@ -1255,6 +1272,7 @@ export class ClaudeConnection implements AgentConnection {
       session.stale = true
       for (const delivery of session.mapper.endAll('error')) this.deliver(delivery)
       for (const delivery of session.mapper.endBackground()) this.deliver(delivery)
+      for (const delivery of session.mapper.retryEnded(false)) this.deliver(delivery)
       this.scheduled(session, 0)
     }
     const turn = session.turn
@@ -1301,6 +1319,8 @@ export class ClaudeConnection implements AgentConnection {
         this.setChoice(session, 'mode', system.permissionMode)
       } else if (system.subtype === 'elicitation_complete') {
         this.pageDone(message as ElicitationCompleteMessage)
+      } else if (system.subtype === 'model_refusal_no_fallback' && turn) {
+        turn.refusal = refusalOf(system)
       }
     } else if (message.type === 'assistant') {
       const assistant = message as AssistantMessage
@@ -1358,6 +1378,8 @@ export class ClaudeConnection implements AgentConnection {
 
   private result(session: Session, result: ResultMessage): void {
     const turn = session.turn
+    // A request still retried when its turn ends never went through.
+    for (const delivery of session.mapper.retryEnded(false)) this.deliver(delivery)
     const totals = result.modelUsage ?? {}
     // The first result after a resume carries the history's totals, so only its own usage counts.
     const spent =
@@ -1433,7 +1455,12 @@ export class ClaudeConnection implements AgentConnection {
 
   private turnResult(turn: Turn, stopReason: PromptResult['stopReason']): PromptResult {
     const models: ModelTokens[] = [...turn.models].map(([model, tokens]) => ({ model, tokens }))
-    return { stopReason, tokens: turn.tokens, models }
+    return {
+      stopReason,
+      tokens: turn.tokens,
+      models,
+      ...(turn.refusal && stopReason === 'refusal' ? { refusal: turn.refusal } : {}),
+    }
   }
 
   private settle(session: Session): void {
@@ -2123,6 +2150,7 @@ export class ClaudeConnection implements AgentConnection {
             output,
             options,
             ...(plan ? { plan: typeof input.plan === 'string' ? input.plan : '' } : {}),
+            ...askReason(permission),
           },
           permission.signal,
         ),

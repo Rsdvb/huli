@@ -17,6 +17,7 @@ import {
 import { AccountComputers } from '../../components/AccountComputers'
 import { Button, confirm, GroupNote, ManagePage, SkeletonGroup, Tag } from '../../manage/kit'
 import { ago } from '../../sessions'
+import { DEVICE, KEYCHAIN, THIS_DEVICE } from '../../system/device'
 import { haptic } from '../../ui/haptics'
 import { HuliIcon } from '../../ui/HuliMark'
 import { ListGroup, ListRow } from '../../ui/ListRow'
@@ -105,8 +106,7 @@ export default function AccountSettings() {
           onPress={() => void startSignIn('register')}
         />
         <Text style={[typeScale.footnote, styles.note, { color: c.textTertiary }]}>
-          登录在系统的登录页里完成，纸鸢看不到你的密码。登录凭据只存在这台 iPhone
-          的钥匙串里，不会同步到别的设备。
+          {`登录在系统的登录页里完成，纸鸢看不到你的密码。登录凭据只存在${THIS_DEVICE}的${KEYCHAIN}里，不会同步到别的设备。`}
         </Text>
       </ManagePage>
     )
@@ -132,7 +132,7 @@ export default function AccountSettings() {
   const revokeOthers = async () => {
     const ok = await confirm({
       title: '让其他设备都退出登录？',
-      message: '除了这台 iPhone，账号下的手机、浏览器和电脑都要重新登录；电脑会离开中转。',
+      message: `除了${THIS_DEVICE}，账号下的手机、浏览器和电脑都要重新登录；电脑会离开中转。`,
       confirm: '全部退出',
     })
     if (ok) await run('others', () => revokeDevices({ others: true }), '没能退出')
@@ -141,7 +141,7 @@ export default function AccountSettings() {
   const leave = async () => {
     const ok = await confirm({
       title: '退出 Kite Cloud？',
-      message: '这台 iPhone 不再经中转连接电脑；局域网和 Tailscale 照常。已配对的电脑都会留着。',
+      message: `${THIS_DEVICE}不再经中转连接电脑；局域网和 Tailscale 照常。已配对的电脑都会留着。`,
       confirm: '退出登录',
     })
     if (ok) await run('signout', () => signOut(), '没能退出')
@@ -169,9 +169,9 @@ export default function AccountSettings() {
       ) : null}
 
       {me ? (
-        <ListGroup header="这台 iPhone">
+        <ListGroup header={THIS_DEVICE}>
           <ListRow
-            title={me.name ?? 'iPhone'}
+            title={me.name ?? DEVICE}
             subtitle={`登录于 ${ago(me.createdAt)}`}
             icon="phone"
             plainIcon
@@ -215,7 +215,7 @@ export default function AccountSettings() {
         </ListGroup>
       ) : null}
 
-      <ListGroup footer="密码和两步验证在服务器上用 huli-cloud passwd / totp 修改；网页上能看到同样的设备列表。">
+      <ListGroup footer="密码和两步验证要在 Kite Cloud 的服务器上修改；网页上能看到同样的设备列表。">
         {others.length > 0 ? (
           <ListRow
             title="让其他设备都退出登录"

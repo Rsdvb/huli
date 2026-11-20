@@ -611,6 +611,26 @@ const outOfCredit: Scenario = async (turn) => {
   )
 }
 
+// Claude Code's words for a used-up window with the reset in Unix seconds, as an adapter passes
+// them on; the same prompt again after the reset answers.
+const planLimit: Scenario = async (turn) => {
+  const until = turn.session.limitedUntil
+  if (until !== null && Date.now() >= until) {
+    turn.session.limitedUntil = null
+    await stream(turn, 'The plan reset, so the turn goes through this time.')
+    return 'end_turn'
+  }
+  const resetAt = until ?? Date.now() + turn.options.resetS * 1000
+  turn.session.limitedUntil = resetAt
+  if (!turn.options.silent && until === null) {
+    await stream(turn, 'Reading the project first. ', { messageId: turn.messageId() })
+  }
+  throw RequestError.internalError(
+    undefined,
+    `Claude AI usage limit reached|${Math.ceil(resetAt / 1000)}`,
+  )
+}
+
 const largeHistory: Scenario = async (turn) => {
   const entries = turn.options.entries
   turn.session.largeHistory = entries
@@ -1559,6 +1579,15 @@ const screenshots: Scenario = async (turn) => {
   return 'end_turn'
 }
 
+/** Huli: a turn the model stops on its own, saying why first unless `--plain`. */
+const refusal: Scenario = async (turn) => {
+  if (!turn.options.plain) {
+    const said = "I'm sorry, but I can't continue with this request."
+    if (!(await stream(turn, said, { messageId: turn.messageId() }))) return 'cancelled'
+  }
+  return 'refusal'
+}
+
 export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   'basic-turn': basicTurn,
   'long-stream': longStream,
@@ -1571,6 +1600,8 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   error,
   'auth-required': authRequired,
   'out-of-credit': outOfCredit,
+  'plan-limit': planLimit,
+  refusal,
   'large-history': largeHistory,
   'slow-start': slowStart,
   'all-updates': allUpdates,

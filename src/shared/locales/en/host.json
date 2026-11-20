@@ -153,7 +153,7 @@
       "cancelled": "Cancelled",
       "max_tokens": "Stopped at the token limit",
       "max_turn_requests": "Stopped at the request limit",
-      "refusal": "The agent refused"
+      "refusal": "The model declined to continue"
     },
     "wantsToRun": "Wants to run {{command}}",
     "wantsToEdit": "Wants to edit {{target}}",
@@ -166,6 +166,23 @@
     "withChanges_other": "{{text}} {{count}} files changed.",
     "marketPublish": "Wants to publish {{name}} to the Kettu Marketplace",
     "marketUnlist": "Wants to unlist {{name}} from the Kettu Marketplace"
+  },
+  "supervisor": {
+    "continueText": "Continue",
+    "paused": "{{message}}\nGoes on by itself at {{time}}, once the plan resets.",
+    "pausedUnknown": "{{message}}\nWhen the plan resets is not known: it looks again at {{time}} and goes on once it can.",
+    "resumed": "The plan is back, going on: {{title}}",
+    "resumedBody": {
+      "queue": "Sending the queued messages.",
+      "resend": "Sending the stopped message again.",
+      "continue": "Asking the agent to carry on."
+    },
+    "notHere": "Only a session you started goes on by itself after a plan limit.",
+    "stalled": "May be stuck: {{title}}",
+    "stalledSilent_one": "No output for {{count}} minute.",
+    "stalledSilent_other": "No output for {{count}} minutes.",
+    "stalledRetrying_one": "Still retrying, with no output for {{count}} minute.",
+    "stalledRetrying_other": "Still retrying, with no output for {{count}} minutes."
   },
   "routines": {
     "busy": "This routine already has a run working",
@@ -396,12 +413,29 @@
     "text": "Text",
     "unknown": "Unknown content",
     "terminal": "Terminal {{id}}",
+    "subagent": "Works with a subagent, whose card is in the thread",
+    "session": "Works with session {{id}}",
     "unknownTool": "Unknown tool content",
-    "toolCall": "Tool call"
+    "toolCall": "Tool call",
+    "toolReference": "Found tool: {{name}}",
+    "document": "Document: {{name}}"
   },
   "antigravity": {
     "plan": {
       "title": "Plan"
+    },
+    "tool": {
+      "sendMessage": "Message {{to}}",
+      "mainAgent": "the main agent",
+      "manageSubagents": "Manage subagents",
+      "manageSubagentsAction": "Manage subagents: {{action}}",
+      "manageTask": "Manage a background task",
+      "manageTaskAction": "Manage a background task: {{action}}",
+      "defineSubagent": "Define a subagent",
+      "defineSubagentNamed": "Define the subagent {{name}}",
+      "generateImage": "Generate an image",
+      "schedule": "Set a timer",
+      "finish": "Finish"
     },
     "mode": {
       "default": {
@@ -452,6 +486,73 @@
         "name": "Full access",
         "description": "Never asks. Use it in a sandbox or a worktree"
       }
+    },
+    "tool": {
+      "terminal": "Terminal",
+      "file": "File",
+      "read": "Read {{path}}{{range}}",
+      "lines": " ({{from}} - {{to}})",
+      "fromLine": " (from line {{line}})",
+      "write": "Write",
+      "writePath": "Write {{path}}",
+      "edit": "Edit",
+      "editPath": "Edit {{path}}",
+      "editNotebook": "Edit notebook",
+      "find": "Find files",
+      "findPattern": "Find {{pattern}}",
+      "findPath": "Find files in {{path}}",
+      "findIn": "Find {{pattern}} in {{path}}",
+      "fetch": "Fetch",
+      "fetchUrl": "Fetch {{url}}",
+      "webSearch": "Web search",
+      "searchQuery": "Search \"{{query}}\"",
+      "task": "Task",
+      "approvePlan": "Approve plan",
+      "plan": "Plan",
+      "exitedPlan": "Exited plan mode",
+      "question": "Question",
+      "loadSkill": "Load skill",
+      "loadSkillNamed": "Load skill: {{skill}}",
+      "tool": "Tool",
+      "codeExecution": "Run code",
+      "sendFile": "Send {{path}} to you",
+      "sendFiles": "Send files to you"
+    },
+    "notice": {
+      "retrying": "Retrying ({{attempt}}/{{max}}) · {{reason}}",
+      "retried_one": "Went through after 1 retry · {{reason}}",
+      "retried_other": "Went through after {{count}} retries · {{reason}}",
+      "retryFailed_one": "Still failing after 1 retry · {{reason}}",
+      "retryFailed_other": "Still failing after {{count}} retries · {{reason}}",
+      "commandOutput": "Command output",
+      "mcpFailed_one": "MCP server {{names}} could not start",
+      "mcpFailed_other": "MCP servers {{names}} could not start",
+      "mcpFailedHint": "Its tools are unavailable in this session until it starts.",
+      "mcpNeedsAuth_one": "MCP server {{names}} needs you to sign in",
+      "mcpNeedsAuth_other": "MCP servers {{names}} need you to sign in",
+      "mcpNeedsAuthHint": "Sign in with /mcp in Claude Code in a terminal; until then its tools are unavailable.",
+      "refusalFallback": "{{from}} refused, so Claude Code asked {{to}} instead",
+      "refusalFallbackLocal": "{{from}} refused a reply, so Claude Code asked {{to}} for that one",
+      "writesLost": {
+        "full": "The disk is full, so Claude Code could not save all of this session",
+        "quota": "The disk quota is used up, so Claude Code could not save all of this session",
+        "transcript": "Part of this conversation is missing from its history, so resuming it may lose it.",
+        "config": "Changes to Claude Code's settings in ~/.claude.json were not saved."
+      }
+    },
+    "retryReason": {
+      "overloaded": "service overloaded",
+      "rate_limit": "rate limited",
+      "server_error": "server error",
+      "authentication_failed": "sign-in failed",
+      "billing_error": "billing problem",
+      "invalid_request": "request rejected",
+      "model_not_found": "model not found",
+      "max_output_tokens": "reply too long",
+      "cloud_credential_error": "cloud credentials failed",
+      "noResponse": "no response",
+      "connection": "connection failed",
+      "status": "HTTP {{status}}"
     }
   },
   "codex": {
@@ -541,7 +642,18 @@
       "write": "Write {{path}}",
       "permissionsTitle": "More permissions",
       "elicitationTitle": "{{server}} asks to continue",
-      "allowEdit": "Allow this edit"
+      "allowEdit": "Allow this edit",
+      "deny": "No access to {{path}}",
+      "place": {
+        "root": "the whole file system",
+        "minimal": "the system files every command needs",
+        "project_roots": "the project's folders",
+        "tmpdir": "the temporary folder",
+        "slash_tmp": "/tmp"
+      },
+      "stdinTitle": "Type into the running command",
+      "writeStdinReason": "Codex wants to send input to a command that is running.",
+      "humanCommandReason": "This command needs your approval each time it runs."
     },
     "tool": {
       "readFile": "Read file '{{path}}'",
@@ -565,11 +677,35 @@
         "sendInput": "Message subagent",
         "resumeAgent": "Resume subagent",
         "wait": "Wait for subagents",
-        "closeAgent": "Close subagent"
-      }
+        "closeAgent": "Close subagent",
+        "sendMessage": "Message subagent",
+        "followupTask": "Give subagent a follow-up task",
+        "interruptAgent": "Interrupt subagent",
+        "listAgents": "List subagents"
+      },
+      "searchedFor": "Also searched for:",
+      "imageLimit": "The image usage limit is reached.",
+      "imageLimitUntil": "The image usage limit is reached until {{time}}."
     },
     "notice": {
-      "rerouted": "Codex switched from {{from}} to {{to}}"
+      "rerouted": "Codex switched from {{from}} to {{to}}",
+      "reconnecting": "Reconnecting ({{attempt}}/{{max}})…",
+      "reconnectingPlain": "Reconnecting…",
+      "reconnected_one": "Reconnected after 1 retry",
+      "reconnected_other": "Reconnected after {{count}} retries",
+      "reconnectFailed_one": "Could not reconnect after 1 retry",
+      "reconnectFailed_other": "Could not reconnect after {{count}} retries",
+      "config": "Codex config: {{summary}}",
+      "worldWritable": "Folders anyone on this computer can write to",
+      "worldWritableScan": "Codex could not check which folders anyone on this computer can write to",
+      "andMore_one": "and {{count}} more",
+      "andMore_other": "and {{count}} more",
+      "mcpFailed": "MCP server {{name}} could not start",
+      "mcpNeedsAuth": "MCP server {{name}} needs you to sign in again",
+      "planChanged": "The plan changed",
+      "rerouteReason": {
+        "highRiskCyberActivity": "The request looked like high-risk cybersecurity activity."
+      }
     },
     "command": {
       "plan": {
@@ -661,6 +797,65 @@
       "stillStarting": "Some MCP servers are still starting. Run `/mcp` again later to see their status.",
       "unknownError": "unknown MCP startup error",
       "unnamed": "(unnamed)"
+    },
+    "review": {
+      "strict": "Automatic review now asks for a strict review",
+      "warning": "Automatic review warning",
+      "action": "Action under review",
+      "entered": "Review started",
+      "exited": "Review finished"
+    },
+    "agent": {
+      "model": "Runs on {{model}}",
+      "modelEffort": "Runs on {{model}} · {{effort}} effort",
+      "status": {
+        "pendingInit": "Starting",
+        "running": "Running",
+        "interrupted": "Interrupted",
+        "completed": "Finished",
+        "errored": "Failed",
+        "shutdown": "Closed",
+        "notFound": "Not found"
+      }
+    },
+    "goal": {
+      "active": "Goal: {{objective}}",
+      "paused": "Goal paused: {{objective}}",
+      "blocked": "Goal blocked: {{objective}}",
+      "usageLimited": "Goal paused at the usage limit: {{objective}}",
+      "budgetLimited": "Goal out of budget: {{objective}}",
+      "complete": "Goal reached: {{objective}}",
+      "cleared": "Goal cleared",
+      "used": "{{tokens}} tokens used{{budget}} · {{time}}",
+      "budget": " of {{budget}}",
+      "seconds_one": "{{count}} second",
+      "seconds_other": "{{count}} seconds",
+      "minutes_one": "{{count}} minute",
+      "minutes_other": "{{count}} minutes",
+      "hours": "{{hours}} h {{minutes}} min"
+    },
+    "hook": {
+      "blocked": "A {{event}} hook blocked it",
+      "stopped": "A {{event}} hook stopped the turn",
+      "failed": "A {{event}} hook failed",
+      "warned": "A {{event}} hook warns",
+      "prompt": "A hook added to the conversation",
+      "event": {
+        "preModelRequest": "before-request",
+        "postModelRequest": "after-request",
+        "preToolUse": "before-tool",
+        "permissionRequest": "permission",
+        "postToolUse": "after-tool",
+        "preCompact": "before-compaction",
+        "postCompact": "after-compaction",
+        "sessionStart": "session-start",
+        "sessionEnd": "session-end",
+        "userPromptSubmit": "prompt-submit",
+        "subagentStart": "subagent-start",
+        "subagentStop": "subagent-stop",
+        "stop": "stop",
+        "interrupt": "interrupt"
+      }
     }
   },
   "dsh": {
@@ -834,5 +1029,13 @@
     "notJson": "{{agent}}’s settings file {{file}} is not valid JSON. Fix it there, or make this change in it yourself.",
     "notJsonAt": "{{agent}}’s settings file {{file}} is not valid JSON (line {{line}}). Fix it there, or make this change in it yourself.",
     "notObject": "{{agent}}’s settings file {{file}} does not hold a JSON object. Fix it there, or make this change in it yourself."
+  },
+  "agentHistory": {
+    "notFolder": "{{folder}} is not a folder here.",
+    "noSessionsIn": "No {{agent}} sessions in {{folder}}. Choose its configuration folder, or the folder of its sessions in it.",
+    "ownFolder": "This is {{agent}}’s own folder, which the list shows already. Choose another one, such as a backup.",
+    "folderUnsupported": "{{agent}} cannot list the sessions of another folder.",
+    "listAgain": "That folder’s list is out of date. Choose the folder again.",
+    "planGone": "The copy waited too long and was dropped. Import again to see the files once more."
   }
 }

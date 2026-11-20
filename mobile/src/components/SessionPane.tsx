@@ -13,6 +13,23 @@ export interface SessionPaneValue {
 
 const SessionPane = createContext<SessionPaneValue | null>(null)
 
+let paneListener: ((id: string) => void) | null = null
+
+/**
+ * Asks the 会话 tab's pane to show a session, as search does on a wide window rather than push it
+ * over the split. False when no pane listens, as on a phone, for the caller to open it itself.
+ */
+export function openInPane(id: string): boolean {
+  if (!paneListener) return false
+  paneListener(id)
+  return true
+}
+
+/** The 会话 tab's split, taking pane requests while it is wide. */
+export function listenForPane(listener: ((id: string) => void) | null): void {
+  paneListener = listener
+}
+
 /** The pane the session screen is in; null when it is a screen of its own. */
 export function useSessionPane(): SessionPaneValue | null {
   return useContext(SessionPane)

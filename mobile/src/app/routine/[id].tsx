@@ -2,16 +2,7 @@
 // works), its prompt, its runs (each opens its session), editing and deleting it.
 
 import { useCallback, useEffect, useState } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  RefreshControl,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native'
+import { ActivityIndicator, Alert, Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { RoutineView, RunPage, RunSwitch, RunView } from '@shared/routines'
@@ -36,10 +27,12 @@ import { IconButton } from '../../ui/IconButton'
 import { LargeTitle } from '../../ui/LargeTitle'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { NavBar } from '../../ui/NavBar'
+import { PendingSwitch } from '../../ui/PendingSwitch'
 import { Pill } from '../../ui/Pill'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { SkeletonRows } from '../../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
@@ -55,6 +48,7 @@ export default function RoutinePage() {
   const { c } = useTokens()
   const host = useHost()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(() => Promise.all([loadList(), loadRuns()]), header)
   const insets = useSafeAreaInsets()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { data, error: listError, load: loadList } = useRoutineList()
@@ -63,7 +57,6 @@ export default function RoutinePage() {
   const [older, setOlder] = useState<number | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
   const [more, setMore] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [seed, setSeed] = useState<EditorSeed | null>(null)
   const connected = host.state.kind === 'connected'
@@ -115,7 +108,7 @@ export default function RoutinePage() {
           {!data && !listError && !connected ? (
             <EmptyState
               icon="wifi"
-              title="打不开这个定时任务"
+              title="打不开这个例程"
               message="它所在的电脑没有连上，连上后会再显示。"
               action={{ label: '立即重连', onPress: () => host.retry() }}
             />
@@ -125,19 +118,19 @@ export default function RoutinePage() {
             <EmptyState
               tone="error"
               icon="warning"
-              title="没能读到定时任务"
+              title="没能读到例程"
               message={listError}
               action={{ label: '重试', onPress: () => void loadList() }}
             />
           ) : (
             <EmptyState
               icon="history"
-              title="这个定时任务已经删除了"
+              title="这个例程已经删除了"
               action={{ label: '返回', onPress: () => router.back() }}
             />
           )}
         </View>
-        <NavBar header={header} title="定时任务" titleAlways />
+        <NavBar header={header} title="例程" titleAlways />
       </Screen>
     )
   }
@@ -182,14 +175,16 @@ export default function RoutinePage() {
     ])
   }
 
-  const toggle = (enabled: boolean) => {
-    if (!host.link) return
+  const toggle = async (enabled: boolean): Promise<boolean> => {
+    if (!host.link) return false
     haptic.select()
-    host.link
-      .request('routines.update', { routineId: routine.id, changes: { enabled } })
-      .catch((failure: unknown) =>
-        Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure)),
-      )
+    try {
+      await host.link.request('routines.update', { routineId: routine.id, changes: { enabled } })
+      return true
+    } catch (failure) {
+      Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure))
+      return false
+    }
   }
 
   // Which agent ran it in place of the routine's, and why.
@@ -277,17 +272,7 @@ export default function RoutinePage() {
           paddingBottom: insets.bottom + space.xxxl,
           gap: space.xl,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              void Promise.all([loadList(), loadRuns()]).finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         <View style={styles.titlePad}>
           <LargeTitle title={routine.name} subtitle={stateLine(routine)} />
@@ -300,8 +285,9 @@ export default function RoutinePage() {
               size="lg"
               label="停止运行"
               color={c.danger}
-              leading={<Icon name="pause" size={18} color={c.danger} />}
-              onPress={connected ? stop : undefined}
+              leading={<Icon name="stop" size={16} color={c.danger} />}
+              disabled={!connected}
+              onPress={stop}
             />
           ) : (
             <Pill
@@ -309,7 +295,8 @@ export default function RoutinePage() {
               size="lg"
               label={busy ? '正在开始…' : '立即运行'}
               leading={<Icon name="play" size={16} color={c.onAccent} />}
-              onPress={connected && !busy ? () => void runNow() : undefined}
+              disabled={!connected || busy}
+              onPress={() => void runNow()}
             />
           )}
         </View>
@@ -318,12 +305,11 @@ export default function RoutinePage() {
           <ListRow
             title="开启"
             trailing={
-              <Switch
+              <PendingSwitch
                 value={routine.enabled}
                 disabled={!connected}
-                onValueChange={toggle}
-                trackColor={{ true: c.success }}
-                accessibilityLabel="开启这个定时任务"
+                onChange={toggle}
+                accessibilityLabel="开启这个例程"
               />
             }
           />
@@ -389,7 +375,7 @@ export default function RoutinePage() {
 
         <ListGroup>
           <ListRow
-            title="删除定时任务"
+            title="删除例程"
             destructive
             disabled={!connected}
             leading={<Icon name="trash" size={18} color={c.danger} />}

@@ -351,7 +351,7 @@ function RoundBlock(props: { view: TaskView; round: RoundView; several: boolean 
         <DocumentChip
           artifactId={round.document.artifactId}
           title={round.document.title}
-          detail={`第 ${round.document.version} 版`}
+          detail={`v${round.document.version}`}
         />
       ) : null}
       {round.stuck?.detail ? (

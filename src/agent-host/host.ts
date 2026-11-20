@@ -1586,6 +1586,9 @@ export class AgentHost {
     if (JSON.stringify(previous.idleSessions) !== JSON.stringify(next.idleSessions)) {
       this.idleRelease.notify()
     }
+    if (JSON.stringify(previous.supervisor) !== JSON.stringify(next.supervisor)) {
+      this.sessions.supervisorChanged()
+    }
     this.marketChanged(previous.marketplace.mcp, this.marketKeys)
     if (JSON.stringify(previous.marketplace.mcp) !== JSON.stringify(next.marketplace.mcp)) {
       void this.marketBundles.sweep()
@@ -2804,6 +2807,10 @@ export class AgentHost {
       'sessions.steer': ({ sessionId, itemId }) => sessions.steer(sessionId, itemId),
       'sessions.sendNow': ({ sessionId, itemId }) => sessions.sendNow(sessionId, itemId),
       'sessions.resumeQueue': ({ sessionId }) => sessions.resumeQueue(sessionId),
+      'sessions.limitPause': ({ sessionId, action }) =>
+        sessions.limitPauseAction(sessionId, action),
+      'sessions.setAutoResume': ({ sessionId, on }) => sessions.setAutoResume(sessionId, on),
+      'sessions.stall': ({ sessionId, action }) => sessions.stallAction(sessionId, action),
       'sessions.blob': ({ sessionId, hash }) => sessions.blob(sessionId, hash),
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
         sessions.setConfigOption(sessionId, optionId, value),
@@ -3214,7 +3221,11 @@ export class AgentHost {
           throw new HostError('not_found', `No setup waits in ${entryId}`)
         }
       },
-      'agentHistory.list': ({ agentId, cursor }) => this.agentHistory.list(agentId, cursor ?? null),
+      'agentHistory.list': ({ agentId, cursor, folder }) =>
+        this.agentHistory.list(agentId, cursor ?? null, folder ?? null),
+      'agentHistory.planCopy': ({ agentId, folder, sessionIds }) =>
+        this.agentHistory.planCopy(agentId, folder, sessionIds),
+      'agentHistory.copy': ({ token }) => this.agentHistory.copy(token),
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),

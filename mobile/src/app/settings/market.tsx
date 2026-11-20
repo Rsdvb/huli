@@ -3,7 +3,7 @@
 // keeps, its built-in skills and the plugin marketplaces the agents read.
 
 import { useState } from 'react'
-import { StyleSheet, Switch, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { AgentId } from '@shared/agents'
 import { displayTitle, type InstalledPlugin, type MarketSkill } from '@shared/marketplace'
@@ -51,6 +51,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { IconButton } from '../../ui/IconButton'
 import { ListGroup, ListRow } from '../../ui/ListRow'
+import { PendingSwitch } from '../../ui/PendingSwitch'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { space, type as typeScale, useTokens } from '../../ui/tokens'
 
@@ -66,7 +67,6 @@ const TABS: { key: Tab; label: string }[] = [
 const GITHUB_URL = /^(?:https?:\/\/)?(?:www\.)?github\.com\/[^/\s]+\/[^/\s]+/i
 
 export default function Market() {
-  const { c } = useTokens()
   const host = useHost()
   const plugins = useMarketPlugins()
   const skills = useMarketSkills()
@@ -254,7 +254,7 @@ export default function Market() {
     displayTitle(pluginName(plugin.id))
 
   const setPluginEnabled = (plugin: InstalledPlugin, enabled: boolean) =>
-    void actions.run(
+    actions.run(
       placeKey(plugin),
       async () => {
         if (!host.link) throw new Error('电脑没有连上。')
@@ -268,7 +268,7 @@ export default function Market() {
     )
 
   const setSkillOn = (skill: MarketSkill, on: boolean) =>
-    void actions.run(
+    actions.run(
       `skill:${skill.id}`,
       () => save((list) => list.map((s) => (s.id === skill.id ? { ...s, on } : s))),
       `无法修改 ${skill.name}`,
@@ -321,14 +321,13 @@ export default function Market() {
                     .join(' · ')}
                   icon="puzzle"
                   trailing={
-                    <Switch
+                    <PendingSwitch
                       value={plugin.enabled}
                       disabled={actions.busy(placeKey(plugin))}
-                      onValueChange={(on) => {
+                      onChange={(on) => {
                         haptic.select()
-                        setPluginEnabled(plugin, on)
+                        return setPluginEnabled(plugin, on)
                       }}
-                      trackColor={{ true: c.success }}
                       accessibilityLabel={`在 ${agentName(plugin.agentId)} 中启用 ${pluginTitle(plugin)}`}
                     />
                   }
@@ -381,14 +380,13 @@ export default function Market() {
                   .join(' · ')}
                 icon="sparkles"
                 trailing={
-                  <Switch
+                  <PendingSwitch
                     value={skill.on}
                     disabled={actions.busy(`skill:${skill.id}`)}
-                    onValueChange={(on) => {
+                    onChange={(on) => {
                       haptic.select()
-                      setSkillOn(skill, on)
+                      return setSkillOn(skill, on)
                     }}
-                    trackColor={{ true: c.success }}
                     accessibilityLabel={`启用 ${skill.name}`}
                   />
                 }

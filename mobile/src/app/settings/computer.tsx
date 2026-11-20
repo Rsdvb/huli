@@ -1,7 +1,6 @@
 // Settings › 已配对的电脑 › one computer: how the phone reaches it, the addresses it tries, and
 // switching to it, renaming, reconnecting or unpairing. Without an `id`, the active computer.
 
-import { useEffect, useState } from 'react'
 import { Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -11,11 +10,13 @@ import {
   useComputerLine,
   useReach,
 } from '../../components/ComputerSheet'
-import { currentRoute, routeKind, usableAddresses, type CurrentRoute } from '../../connection'
+import { routeKind, usableAddresses } from '../../connection'
 import { useHost } from '../../host'
 import { hostPort, osName, platformOf, ROUTE_NAMES, routesNote } from '../../linkInfo'
 import { ago } from '../../sessions'
 import { computerName } from '../../store'
+import { THIS_DEVICE } from '../../system/device'
+import { useCurrentRoute } from '../../system/route'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
@@ -37,16 +38,9 @@ export default function Computer() {
   const reach = useReach(!active)
   const line = useComputerLine(reach)
   const actions = useComputerActions()
-  const [route, setRoute] = useState<CurrentRoute | null>(() => currentRoute())
+  const route = useCurrentRoute(!!active, host.state)
   const welcome = active && host.state.kind === 'connected' ? host.state.welcome : null
   const connected = welcome !== null
-
-  useEffect(() => {
-    if (!active) return
-    setRoute(currentRoute())
-    const timer = setInterval(() => setRoute(currentRoute()), 2000)
-    return () => clearInterval(timer)
-  }, [active, host.state])
 
   if (!computer) {
     return (
@@ -105,7 +99,7 @@ export default function Computer() {
           {computer.label ? <ListRow title="电脑自己的名称" value={computer.name} /> : null}
           <ListRow title="系统" value={osName(platform)} />
           {welcome ? <ListRow title="电脑上的纸鸢" value={welcome.host.version} /> : null}
-          <ListRow title="这台 iPhone 在电脑上叫" value={computer.deviceName || '—'} />
+          <ListRow title={`${THIS_DEVICE}在电脑上叫`} value={computer.deviceName || '—'} />
           {!active ? (
             <ListRow
               title="上次在线"

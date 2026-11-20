@@ -15,6 +15,7 @@ import { artifactKind, KIND_ICON, KIND_TEXT, openArtifact } from '../artifacts'
 import { artifactMenu } from '../components/ArtifactCard'
 import { ArtifactSheet, confirmDelete } from '../components/ArtifactSheet'
 import { useSessionActions } from '../components/SessionActions'
+import { openInPane } from '../components/SessionPane'
 import { useShell } from '../components/shell'
 import {
   useActiveHost,
@@ -28,6 +29,7 @@ import {
   clearSearches,
   forgetSearch,
   isScope,
+  longEnough,
   matches,
   rememberSearch,
   SCOPES,
@@ -41,8 +43,10 @@ import { errorText, folder, listTime, sessionTitle } from '../sessions'
 import { computerName } from '../store'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { ContextMenu } from '../ui/ContextMenu'
+import { offlineMenu } from '../ui/menu'
 import { EmptyState } from '../ui/EmptyState'
 import { haptic } from '../ui/haptics'
+import { useWide } from '../ui/layout'
 import { Icon, type IconName } from '../ui/Icon'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
@@ -115,6 +119,7 @@ function Highlighted(props: {
 
 export default function Search() {
   const { c } = useTokens()
+  const wide = useWide()
   const link = useMaybeLink()
   const allSessions = useSessions()
   const allProjects = useProjects()
@@ -152,7 +157,7 @@ export default function Search() {
     (text: string) => {
       const asked = text.trim()
       const askedWords = wordsOf(asked)
-      if (asked.length < 2) {
+      if (!longEnough(askedWords)) {
         setContent(null)
         return
       }
@@ -217,9 +222,13 @@ export default function Search() {
       )
   }, [allSessions, words])
 
+  // The computer's own names for its projects, where rows would otherwise show a folder's.
+  const projectNames = useMemo(
+    () => new Map(allProjects.map((p) => [p.path, p.name])),
+    [allProjects],
+  )
   const projects = useMemo(() => {
     if (words.length === 0) return []
-    const names = new Map(allProjects.map((p) => [p.path, p.name]))
     const counts = new Map<string, number>()
     for (const s of allSessions.values()) {
       if (s.parentId !== null || s.scratch) continue
@@ -227,10 +236,10 @@ export default function Search() {
     }
     for (const p of allProjects) if (!counts.has(p.path)) counts.set(p.path, 0)
     return [...counts.entries()]
-      .map(([path, count]) => ({ path, count, name: names.get(path) ?? folder(path) }))
+      .map(([path, count]) => ({ path, count, name: projectNames.get(path) ?? folder(path) }))
       .filter((p) => matches(p.name, words) || matches(p.path, words))
       .sort((a, b) => b.count - a.count)
-  }, [allSessions, allProjects, words])
+  }, [allSessions, allProjects, projectNames, words])
 
   const artifactHits = useMemo(
     () =>
@@ -280,7 +289,7 @@ export default function Search() {
     }
     if (all || scope === 'content') {
       if (!contentCurrent) {
-        if (query.trim().length >= 2) {
+        if (longEnough(words)) {
           if (!all) out.push({ kind: 'header', key: 'h-content', title: '对话内容' })
           out.push({
             kind: 'note',
@@ -291,7 +300,10 @@ export default function Search() {
             label: '搜索对话内容',
             action: () => runContent(query),
           })
-        } else if (!all) {
+        } else if (!all || query.trim()) {
+          // The computer searches what was said by two characters or more; say so rather than
+          // stay silent after one.
+          if (all) out.push({ kind: 'header', key: 'h-content', title: '对话内容' })
           out.push({ kind: 'note', key: 'n-short', text: '至少输入两个字再搜索对话内容。' })
         }
       } else if (content.state === 'loading') {
@@ -382,11 +394,17 @@ export default function Search() {
     loadArtifacts,
   ])
 
-  const sessionMenu = (s: SessionSummary) => (connected ? actions.menu(s) : [])
+  const sessionMenu = (s: SessionSummary) => (connected ? actions.menu(s) : offlineMenu())
 
   const openSession = (id: string) => {
     haptic.tap()
     rememberSearch(query)
+    // On a wide window the session opens in the 会话 tab's pane, beside its list, not over both.
+    if (wide && openInPane(id)) {
+      if (router.canDismiss()) router.dismissAll()
+      router.navigate('/')
+      return
+    }
     router.push({ pathname: '/session/[id]', params: { id } })
   }
 
@@ -435,7 +453,9 @@ export default function Search() {
         )
       case 'session': {
         const s = item.session
-        const place = s.scratch ? '无项目' : folder(s.projectPath)
+        const place = s.scratch
+          ? '无项目'
+          : (projectNames.get(s.projectPath) ?? folder(s.projectPath))
         return (
           <ContextMenu items={sessionMenu(s)} title={sessionTitle(s)}>
             {(longPress) => (
@@ -570,7 +590,8 @@ export default function Search() {
                     numberOfLines={2}
                   />
                   <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
-                    {KIND_TEXT[kind]} · {a.scratch ? '无项目' : folder(a.project)} ·{' '}
+                    {KIND_TEXT[kind]} ·{' '}
+                    {a.scratch ? '无项目' : (projectNames.get(a.project) ?? folder(a.project))} ·{' '}
                     {listTime(a.updatedAt)}
                   </Text>
                 </View>

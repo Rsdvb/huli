@@ -50,6 +50,7 @@ export const HOST_SETTING_KEYS = {
   marketplace: 'all',
   startModes: 'all',
   idleSessions: 'all',
+  supervisor: 'all',
   updates: 'all',
   usage: ['fromComputer'],
   remote: 'all',
@@ -68,6 +69,7 @@ export interface HostSettingsPart {
   marketplace: SettingsFile['marketplace']
   startModes: SettingsFile['startModes']
   idleSessions: SettingsFile['idleSessions']
+  supervisor: SettingsFile['supervisor']
   updates: SettingsFile['updates']
   usage: Pick<SettingsFile['usage'], 'fromComputer'>
   remote: SettingsFile['remote']

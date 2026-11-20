@@ -21,6 +21,31 @@ import { ago } from '../../sessions'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { space } from '../../ui/tokens'
 
+/**
+ * An always-allowed device by its id, which the computer keeps without a name (`ios-sim:<udid>`,
+ * `ios:<udid>`, `android:<serial>`, `avd:<name>`): what kind it is, and the id's own part, short.
+ */
+function allowedText(id: string): { title: string; subtitle: string } {
+  const at = id.indexOf(':')
+  const scheme = at < 0 ? '' : id.slice(0, at)
+  const rest = at < 0 ? id : id.slice(at + 1)
+  const short = rest.length > 20 ? `${rest.slice(0, 8)}…${rest.slice(-4)}` : rest
+  switch (scheme) {
+    case 'ios-sim':
+      return { title: 'iOS 模拟器', subtitle: short }
+    case 'ios':
+      return { title: 'iPhone 或 iPad', subtitle: short }
+    case 'avd':
+      return { title: rest.replace(/_/g, ' '), subtitle: 'Android 模拟器' }
+    case 'android':
+      return /^emulator-\d+$/.test(rest)
+        ? { title: 'Android 模拟器', subtitle: rest }
+        : { title: 'Android 设备', subtitle: short }
+    default:
+      return { title: id, subtitle: '设备' }
+  }
+}
+
 export default function DevicesSettings() {
   const host = useHost()
   const connected = useConnected()
@@ -141,7 +166,8 @@ export default function DevicesSettings() {
             {allowed.value.map((deviceId) => (
               <ListRow
                 key={deviceId}
-                title={deviceId}
+                title={allowedText(deviceId).title}
+                subtitle={allowedText(deviceId).subtitle}
                 icon="phone"
                 plainIcon
                 trailing={

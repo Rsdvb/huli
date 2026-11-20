@@ -12,6 +12,8 @@ export const SCENARIOS = [
   'error',
   'auth-required',
   'out-of-credit',
+  'plan-limit',
+  'refusal',
   'large-history',
   'slow-start',
   'all-updates',
@@ -74,8 +76,17 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   'auth-required': {
     description: 'Signs the agent out; requests fail until you sign in, then the retry answers',
   },
+  'plan-limit': {
+    description:
+      "Stops at the plan's usage limit as Claude Code words it; sent again after the reset, it answers",
+    hint: '--reset <seconds until the plan resets> --silent',
+  },
   'out-of-credit': {
     description: 'Fails the turn as a provider out of credit does; the retry answers',
+  },
+  refusal: {
+    description: 'The model declines to go on, as Claude ends a turn with stop_reason refusal',
+    hint: '--plain: without a word of its own first',
   },
   'large-history': {
     description: 'Makes reopening this session replay 1,000 entries',
@@ -185,7 +196,8 @@ export interface ScenarioOptions {
   child: string | null // artifacts: the calls come from this subagent session, as OpenCode's do
   meta: string | null // artifacts: the session id the calls name instead; none names none
   execute: boolean // artifacts: the calls run inside one tool call, as OpenCode's Code Mode runs them
-  silent: boolean // error, crash: fails before writing anything
+  silent: boolean // error, crash, plan-limit: fails before writing anything
+  resetS: number // plan-limit: seconds until the plan resets, not scaled
   summaries: boolean // reasoning: short summaries in place of the raw reasoning
   // titles: a branch name is held until this file exists, FAKE_AGENT_BRANCH_NAME_GATE
   branchNameGate: string | null
@@ -299,6 +311,7 @@ export function chooseScenario(prompt: string, env: Env): ScenarioChoice {
     meta: flagValue(args, 'meta') || null,
     execute: flagValue(args, 'execute') !== undefined,
     silent: flagValue(args, 'silent') !== undefined,
+    resetS: parseNumber(flagValue(args, 'reset')) ?? 300,
     summaries: flagValue(args, 'summaries') !== undefined,
     branchNameGate: env.FAKE_AGENT_BRANCH_NAME_GATE || null,
   }

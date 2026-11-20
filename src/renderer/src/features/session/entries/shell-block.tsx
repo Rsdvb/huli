@@ -47,19 +47,23 @@ export function ShellBlock({
   command,
   output,
   status,
+  exitCode,
 }: {
   sessionId: string
   projectPath: string
   command: string
   output: string | null
   status: ToolEntry['status']
+  /** Huli: the exit code the agent reported apart from the output. */
+  exitCode?: number
 }) {
   const { t } = useTranslation('session')
   const labels = useToolCallLabels()
   const [all, setAll] = useState(false)
   const agentId = useSessionsStore((s) => s.byId[sessionId]?.agentId ?? null)
   const harness = agentId && isAgentId(agentId) ? harnessOf(agentId) : null
-  const exit = exitOf(output, status, harness)
+  const parsed = exitOf(output, status, harness)
+  const exit = exitCode === undefined ? parsed : { code: exitCode, output: parsed.output }
   const printed = exit.output?.replace(/\n$/, '') ?? ''
   const { shown, earlier } = shellTail(printed)
   const terminal = useTerminalAllowed(projectPath)

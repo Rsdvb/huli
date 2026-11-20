@@ -41,7 +41,37 @@
     "importingTitle": "正在导入 {{done}}/{{total}}：{{title}}",
     "stop": "停止",
     "close": "关闭",
-    "readOnly": "只读取 Agent 自己的文件。子 Agent 会在这里打开它的会话时回到会话下面。终端里正开着的 Claude Code 会话不会导入，请先在那边关掉。"
+    "readOnly": "只读取 Agent 自己的文件。子 Agent 会在这里打开它的会话时回到会话下面。终端里正开着的 Claude Code 会话不会导入，请先在那边关掉。",
+    "source": "会话来源",
+    "ownFolder": "{{agent}} 自己的文件夹",
+    "chooseFolder": "选择文件夹…",
+    "recentFolders": "最近的文件夹",
+    "backToOwn": "回到 {{agent}} 自己的会话",
+    "readFrom": "读取自 {{folder}}",
+    "folderNote": "只读取所选的文件夹。导入时会先把每个会话复制到 {{agent}} 自己的文件夹，它才能在那里接着进行；写入任何文件之前都会先列出来给你看。",
+    "noFolderSessions": "这个文件夹里没有可导入的会话。",
+    "planning": "正在检查要复制的文件…",
+    "copying": "正在复制文件…",
+    "forgetFolder": "不再列出这个文件夹"
+  },
+  "confirm": {
+    "title": "复制到 {{agent}} 的文件夹",
+    "description": "这些文件会写入 {{target}}。所选文件夹里的内容不会改变；除了会话较旧的副本外不会覆盖任何文件，较旧的副本会先在旁边保留为 .kite-bak 文件。",
+    "total_other": "要写入 {{count}} 个文件",
+    "more_other": "还有 {{count}} 个文件",
+    "action": {
+      "new": "新会话",
+      "newer": "替换较旧的副本",
+      "same": "已经有了",
+      "older": "{{agent}} 的副本更完整",
+      "conflict": "那边有另一个版本，不动它",
+      "missing": "文件夹已不在，不动它"
+    },
+    "nothing": "无需复制，直接从 {{agent}} 自己的副本导入。",
+    "backup": "较旧的副本保留为 {{file}}",
+    "back": "返回",
+    "run_other": "复制并导入 {{count}} 个会话",
+    "titleMany": "复制到各 Agent 的文件夹"
   },
   "result": {
     "imported_other": "已导入 {{count}} 个会话。",
@@ -50,6 +80,10 @@
     "failure": "{{title}}：{{message}}",
     "memory": "把它们的记忆也导入…",
     "memoryHint": "Claude Code 和 Codex 自己关于现已在 Kettu 中的项目的记忆，可以导入 Kettu 的记忆。",
-    "open": "打开最新的会话"
+    "open": "打开最新的会话",
+    "skipped_other": "{{count}} 个没有动：",
+    "conflict": "{{agent}} 自己的文件夹里有它的另一个版本",
+    "changed": "它在 {{agent}} 文件夹里的文件刚刚被改过",
+    "missingFolder": "它运行时所在的文件夹不在这台电脑上"
   }
 }

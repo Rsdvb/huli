@@ -48,7 +48,40 @@
     "importingTitle": "Importing {{done}} of {{total}}: {{title}}",
     "stop": "Stop",
     "close": "Close",
-    "readOnly": "The agents' own files are only read. Subagents come back under their session when it is opened here. A Claude Code session a terminal has open is not imported; close it there first."
+    "readOnly": "The agents' own files are only read. Subagents come back under their session when it is opened here. A Claude Code session a terminal has open is not imported; close it there first.",
+    "source": "Sessions from",
+    "ownFolder": "{{agent}}'s own folder",
+    "chooseFolder": "Choose folder…",
+    "recentFolders": "Recent folders",
+    "backToOwn": "Back to {{agent}}'s own sessions",
+    "readFrom": "Read from {{folder}}",
+    "folderNote": "The chosen folder is only read. Importing copies each session into {{agent}}'s own folder first, where it can pick up; you see every file before anything is written.",
+    "noFolderSessions": "No sessions to import in this folder.",
+    "planning": "Checking what to copy…",
+    "copying": "Copying files…",
+    "forgetFolder": "Forget this folder"
+  },
+  "confirm": {
+    "title": "Copy into {{agent}}'s folder",
+    "description": "These files are written into {{target}}. Nothing in the chosen folder changes, and nothing is overwritten except an older copy of a session, which is kept beside it as a .kite-bak file first.",
+    "total_one": "{{count}} file to write",
+    "total_other": "{{count}} files to write",
+    "more_one": "and {{count}} more file",
+    "more_other": "and {{count}} more files",
+    "action": {
+      "new": "New",
+      "newer": "Replaces an older copy",
+      "same": "Already there",
+      "older": "{{agent}}'s copy has more",
+      "conflict": "Another version there; left alone",
+      "missing": "Folder gone; left alone"
+    },
+    "nothing": "Nothing to copy; it is imported from {{agent}}'s own copy.",
+    "backup": "The older copy is kept as {{file}}",
+    "back": "Back",
+    "run_one": "Copy and import {{count}} session",
+    "run_other": "Copy and import {{count}} sessions",
+    "titleMany": "Copy into the agents' folders"
   },
   "result": {
     "imported_one": "Imported {{count}} session.",
@@ -60,6 +93,11 @@
     "failure": "{{title}}: {{message}}",
     "memory": "Import their memory too…",
     "memoryHint": "Claude Code's and Codex's own memory of the projects now in Kettu can come into Kettu's memory.",
-    "open": "Open the latest"
+    "open": "Open the latest",
+    "skipped_one": "{{count}} left alone:",
+    "skipped_other": "{{count}} left alone:",
+    "conflict": "{{agent}}'s own folder has another version of it",
+    "changed": "its file in {{agent}}'s folder changed meanwhile",
+    "missingFolder": "the folder it ran in is not on this computer"
   }
 }

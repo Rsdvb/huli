@@ -299,7 +299,10 @@ export function useCurrentPr(link: HostLink, status: GitStatus | null): CurrentP
 }
 
 /** The folder's changes while the calling screen shows; null folder: none to watch. */
-export function useChanges(link: HostLink, folder: string | null): Changes & { reload(): void } {
+export function useChanges(
+  link: HostLink,
+  folder: string | null,
+): Changes & { reload(): Promise<void> } {
   const [value, setValue] = useState<Changes>(EMPTY)
   const current = useRef<Watch | null>(null)
   useEffect(() => {
@@ -316,8 +319,10 @@ export function useChanges(link: HostLink, folder: string | null): Changes & { r
       release(watch)
     }
   }, [link, folder])
-  const reload = useCallback(() => {
-    if (current.current) void read(current.current)
-  }, [])
+  /** Reads again; settles when the read does. */
+  const reload = useCallback(
+    () => (current.current ? read(current.current) : Promise.resolve()),
+    [],
+  )
   return { ...value, reload }
 }

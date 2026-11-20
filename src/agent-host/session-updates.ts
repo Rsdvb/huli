@@ -253,7 +253,25 @@ export function rawInputText(raw: unknown): string | undefined {
   return json.length > RAW_INPUT_LIMIT ? `${json.slice(0, RAW_INPUT_LIMIT)}\n…` : json
 }
 
+/** `text` as one fenced block, with a fence longer than any it holds. */
+export function fenced(text: string): string {
+  let longest = 2
+  for (const match of text.matchAll(/^\s*(`{3,})/gm)) longest = Math.max(longest, match[1]!.length)
+  const fence = '`'.repeat(longest + 1)
+  return `${fence}\n${text.replace(/\n$/, '')}\n${fence}`
+}
+
 const DESCRIPTION_LIMIT = 200
+
+/** An agent's words of what a call does as one line, cut to a length a row shows. */
+export function descriptionLine(text: unknown): string | undefined {
+  if (typeof text !== 'string') return undefined
+  const line = [...text.replace(/\s+/g, ' ').trim()]
+  if (line.length === 0) return undefined
+  return line.length > DESCRIPTION_LIMIT
+    ? `${line.slice(0, DESCRIPTION_LIMIT).join('').trimEnd()}…`
+    : line.join('')
+}
 
 /** What a command says it does, as one line: the `description` beside its input's `command`. */
 export function commandDescription(raw: unknown): string | undefined {
@@ -261,13 +279,7 @@ export function commandDescription(raw: unknown): string | undefined {
   const input = raw as Record<string, unknown>
   if (input.command === undefined) return undefined
   // Claude Code also accepts `command_description` since CLI 2.1.295, and forwards the key used.
-  const description = input.description ?? input.command_description
-  if (typeof description !== 'string') return undefined
-  const line = [...description.replace(/\s+/g, ' ').trim()]
-  if (line.length === 0) return undefined
-  return line.length > DESCRIPTION_LIMIT
-    ? `${line.slice(0, DESCRIPTION_LIMIT).join('').trimEnd()}…`
-    : line.join('')
+  return descriptionLine(input.description ?? input.command_description)
 }
 
 export function toolOutput(content: readonly ToolContent[]): string {

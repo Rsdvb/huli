@@ -69,14 +69,28 @@ export function ArtifactFrame(props: ArtifactFrameProps) {
   latest.current = props
 
   const background = c.bg
+  // The page is built with the background of the moment; a theme switch then repaints the shell
+  // in place rather than build the page anew, which reloaded the artifact and lost its state.
+  const shownBackground = useRef(background)
+  shownBackground.current = background
   const html = useMemo(
-    () => shellHtml({ page: props.page, layout: props.layout, nonce, background }),
-    [props.page, props.layout, nonce, background],
+    () =>
+      shellHtml({
+        page: props.page,
+        layout: props.layout,
+        nonce,
+        background: shownBackground.current,
+      }),
+    [props.page, props.layout, nonce],
   )
 
-  const inject = useCallback((method: 'drive' | 'answer' | 'picking', value: unknown) => {
-    view.current?.injectJavaScript(shellCall(method, value))
-  }, [])
+  const inject = useCallback(
+    (method: 'drive' | 'answer' | 'picking' | 'background', value: unknown) => {
+      view.current?.injectJavaScript(shellCall(method, value))
+    },
+    [],
+  )
+  useEffect(() => inject('background', background), [inject, background])
 
   // One relay per page shown; a new page, or a new web view after a crash, starts another.
   const relay = useMemo(

@@ -51,6 +51,7 @@ import {
 import { addressKey, isPort, MAX_OWN_ADDRESSES, parseDirectAddress } from '@shared/remote/address'
 import type { DirectAddress } from '@shared/remote/protocol'
 import { DEVICE_NAME_CHARS, isDeviceName } from '@shared/remote/device'
+import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { THEME_ID } from '@shared/themes'
 import { isAbsolutePath } from '../agent-host/paths'
 import {
@@ -99,6 +100,12 @@ const isVerboseUntil: Check = (value, path) =>
     value <= Date.now() + VERBOSE_FOR_MS + VERBOSE_SLACK_MS)
     ? null
     : `"${path}" must be null or a time within a day`
+
+/** Huli: what a session sends to go on after a plan limit; empty for the default. */
+const isResumeText: Check = (value, path) =>
+  typeof value === 'string' && value.length <= RESUME_TEXT_CHARS
+    ? null
+    : `"${path}" must be a string of at most ${RESUME_TEXT_CHARS} characters`
 
 const isAgentChoice: Check = (value, path) =>
   value === null || isAgentId(value) ? null : `"${path}" must be an agent id or null`
@@ -269,6 +276,11 @@ const SECTION_FIELDS = {
     outOfView: oneOf(...OUT_OF_VIEW_MINUTES),
     inView: oneOf(...IN_VIEW_MINUTES),
     limit: oneOf(...IDLE_LIMITS),
+  },
+  supervisor: {
+    resumeAfterLimit: isBoolean,
+    resumeText: isResumeText,
+    stallMinutes: oneOf(...STALL_MINUTES),
   },
   computerUse: {
     enabled: isBoolean,
@@ -1619,6 +1631,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     marketplace: structuredClone(settings.marketplace),
     startModes: { ...settings.startModes },
     idleSessions: { ...settings.idleSessions },
+    supervisor: { ...settings.supervisor },
     usage: { fromComputer: settings.usage.fromComputer },
     sessionTitles: settings.general.sessionTitles,
     claudeTestEntrypoint: settings.general.claudeTestEntrypoint
@@ -1657,6 +1670,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'marketplace',
   'startModes',
   'idleSessions',
+  'supervisor',
   'usage',
   'computerUse',
   'agentNetwork',

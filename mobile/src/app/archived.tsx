@@ -10,6 +10,8 @@ import { SessionRow } from '../components/SessionRow'
 import { useHost } from '../host'
 import { sessionTitle } from '../sessions'
 import { ContextMenu } from '../ui/ContextMenu'
+import { offlineMenu } from '../ui/menu'
+import { showNotice } from '../ui/NoticeBar'
 import { EmptyState } from '../ui/EmptyState'
 import { LargeTitle } from '../ui/LargeTitle'
 import { NavBar } from '../ui/NavBar'
@@ -51,7 +53,13 @@ export default function Archived() {
           <View style={styles.pad}>
             <LargeTitle
               title="已归档"
-              subtitle={archived.length > 0 ? '左滑恢复，长按重命名或删除。' : undefined}
+              subtitle={
+                archived.length === 0
+                  ? undefined
+                  : connected
+                    ? '左滑恢复，长按重命名或删除。'
+                    : '电脑没有连上：连上后才能恢复、重命名或删除。'
+              }
             />
           </View>
         }
@@ -63,7 +71,10 @@ export default function Archived() {
           />
         }
         renderItem={({ item }: { item: SessionSummary }) => (
-          <ContextMenu items={connected ? actions.menu(item) : []} title={sessionTitle(item)}>
+          <ContextMenu
+            items={connected ? actions.menu(item) : offlineMenu()}
+            title={sessionTitle(item)}
+          >
             {(longPress) => (
               <SessionRow
                 session={item}
@@ -72,16 +83,15 @@ export default function Archived() {
                 time={item.archivedAt ?? item.updatedAt}
                 onPress={() => router.push(`/session/${item.id}`)}
                 {...(longPress ? { onLongPress: longPress } : {})}
-                end={
-                  connected
-                    ? {
-                        label: '恢复',
-                        icon: 'inbox',
-                        color: c.tint,
-                        onPress: () => actions.restore(item),
-                      }
-                    : undefined
-                }
+                end={{
+                  label: '恢复',
+                  icon: 'inbox',
+                  color: connected ? c.tint : c.textTertiary,
+                  onPress: () =>
+                    connected
+                      ? actions.restore(item)
+                      : showNotice({ text: '电脑没有连上，连上后才能恢复。', tone: 'warning' }),
+                }}
               />
             )}
           </ContextMenu>

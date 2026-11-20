@@ -1045,6 +1045,45 @@ describe('approvals', () => {
     })
   })
 
+  it('asks about input for a running command on a card of its own, not as the command again', async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    const t = threadTarget((request) => ({ optionId: request.options[0]!.id }))
+    connection.register('thread-1', t.target)
+    server.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        type: 'commandExecution',
+        id: 'exec-2',
+        command: 'python3 ask.py',
+        cwd: '/project',
+        status: 'inProgress',
+        commandActions: [{ type: 'unknown', command: 'python3 ask.py' }],
+        aggregatedOutput: null,
+        exitCode: null,
+      },
+    })
+    await until(() => t.entry('t:exec-2') !== undefined)
+    const { answer } = server.request('item/commandExecution/requestApproval', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'exec-2',
+      approvalId: 'stdin-1',
+      kind: 'writeStdin',
+      reason: null,
+      availableDecisions: ['accept', 'decline', 'cancel'],
+    })
+    expect(await answer).toEqual({ decision: 'accept' })
+    expect(t.requests[0]!.request.toolEntryId).toBe('t:exec-2:writeStdin:stdin-1')
+    expect(t.entry('t:exec-2')).toMatchObject({ status: 'in_progress', permission: null })
+    expect(t.entry('t:exec-2:writeStdin:stdin-1')).toMatchObject({
+      title: 'Type into the running command',
+      status: 'completed',
+      description: 'Codex wants to send input to a command that is running.',
+    })
+  })
+
   it('offers the usual decisions when the request lists none, and cancels an unanswered one', async () => {
     const { server, connection } = await connect()
     await connection.newSession('/project')
@@ -1251,6 +1290,45 @@ describe('approvals', () => {
     })
     expect(await answer).toEqual({ permissions, scope: 'turn' })
     expect(t.entry('t:perm-1')).toMatchObject({ toolKind: 'other' })
+  })
+
+  it("lists Codex 0.170's file system entries, globs and special places among them", async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    const t = threadTarget((request) => ({ optionId: request.options[0]!.id }))
+    connection.register('thread-1', t.target)
+    const permissions = {
+      fileSystem: {
+        entries: [
+          { access: 'read', path: { type: 'path', path: '/data/in.csv' } },
+          { access: 'write', path: { type: 'glob_pattern', pattern: 'out/**' } },
+          { access: 'deny', path: { type: 'special', value: { kind: 'root' } } },
+          { access: 'write', path: { type: 'special', value: { kind: 'tmpdir' } } },
+        ],
+      },
+    }
+    const { answer } = server.request('item/permissions/requestApproval', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'perm-2',
+      cwd: '/project',
+      reason: null,
+      permissions,
+    })
+    expect(await answer).toEqual({ permissions, scope: 'turn' })
+    expect(t.entry('t:perm-2')).toMatchObject({
+      content: [
+        {
+          type: 'markdown',
+          markdown: [
+            '- Read /data/in.csv',
+            '- Write out/**',
+            '- No access to the whole file system',
+            '- Write the temporary folder',
+          ].join(String.fromCharCode(10)),
+        },
+      ],
+    })
   })
 })
 
@@ -1969,6 +2047,56 @@ describe('side questions', () => {
     })
     server.notify('turn/completed', { threadId: start.threadId, turn: turn('turn-2', 'completed') })
     expect(await asking).toMatchObject({ text: 'Because.', synthetic: false })
+  })
+})
+
+describe('warnings about Codex itself', () => {
+  it('shows each once in every session, those from before it opened too', async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    server.notify('configWarning', {
+      summary: 'Unknown key "modle"',
+      details: 'Did you mean "model"?',
+      path: '/home/ada/.codex/config.toml',
+      range: null,
+    })
+    const t = threadTarget()
+    connection.register('thread-1', t.target)
+    server.notify('configWarning', {
+      summary: 'Unknown key "modle"',
+      details: 'Did you mean "model"?',
+      path: '/home/ada/.codex/config.toml',
+      range: null,
+    })
+    server.notify('windows/worldWritableWarning', {
+      samplePaths: ['C:/Shared'],
+      extraCount: 2,
+      failedScan: false,
+    })
+    server.notify('mcpServer/startupStatus/updated', {
+      name: 'github',
+      status: 'failed',
+      error: 'spawn gh-mcp ENOENT',
+      failureReason: null,
+      threadId: 'thread-1',
+    })
+    await until(() => t.entries().length >= 3)
+    expect(t.entries()).toMatchObject([
+      {
+        kind: 'notice',
+        severity: 'warning',
+        title: 'Codex config: Unknown key "modle"',
+        description: ['Did you mean "model"?', '/home/ada/.codex/config.toml'].join(
+          String.fromCharCode(10),
+        ),
+      },
+      { kind: 'notice', title: 'Folders anyone on this computer can write to' },
+      {
+        kind: 'notice',
+        title: 'MCP server github could not start',
+        description: 'spawn gh-mcp ENOENT',
+      },
+    ])
   })
 })
 

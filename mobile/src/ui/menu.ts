@@ -49,6 +49,22 @@ export function menuGroups(nodes: readonly MenuNode[]): MenuGroup[] {
   return groups.filter((group) => group.items.length > 0)
 }
 
+/**
+ * The menu of a session while its computer is not connected: why nothing can be done to it now,
+ * greyed, so a long press says so rather than doing nothing.
+ */
+export function offlineMenu(): MenuNode[] {
+  return [
+    {
+      key: 'offline',
+      label: '电脑没有连上',
+      subtitle: '连上后才能整理这个会话',
+      icon: 'wifi.slash',
+      disabled: true,
+    },
+  ]
+}
+
 /** Groups of items as one list of nodes, a divider between each two. */
 export function joinGroups(groups: readonly (readonly MenuNode[])[]): MenuNode[] {
   const out: MenuNode[] = []

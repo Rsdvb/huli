@@ -1,0 +1,46 @@
+# Home at rest, pulled and back in front: no refresh spinner may show unless the list is pulled,
+# and a pull's spinner sits under the top bar, never over the rows. Run after 10-session, whose
+# sessions fill the list.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
+- takeScreenshot: h01-launched
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+    duration: 700
+- takeScreenshot: h02-pulled
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- takeScreenshot: h03-after-pull
+# Back in front after a while in the background, as the owner saw the stray spinner.
+- pressKey: home
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1000
+    optional: true
+- takeScreenshot: h04-foreground
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- takeScreenshot: h05-foreground-later

@@ -10,6 +10,8 @@ import type {
   ExitIp,
   NodeRef,
 } from '@shared/agent-network'
+import { useCallback, useEffect, useRef } from 'react'
+import { useFocusEffect } from 'expo-router'
 import type { HostLink } from '@shared/remote/link'
 import type { AgentId } from '@shared/thread'
 import { admin } from '../admin'
@@ -34,8 +36,42 @@ export const PROBLEM_TEXT = {
   exited: 'mihomo 已停止，在它重新运行之前，用节点的 Agent 都无法联网。',
 } as const
 
+/** Every page that shows the network, told to read it again. */
+const readers = new Set<() => void>()
+let soon: ReturnType<typeof setTimeout>[] = []
+
+function stopSoon(): void {
+  for (const timer of soon) clearTimeout(timer)
+  soon = []
+}
+
+/**
+ * The network as the computer has it. Every page that shows it reads it again after a pick on any
+ * of them (reloadSoon), and on coming back into view, since the computer tells no phone of a change
+ * made on it.
+ */
 export function useNetworkStatus(): Read<NetworkStatus> {
-  return useRead('agent-network', (link) => call(link, 'agentNetwork.deviceStatus', undefined))
+  const read = useRead('agent-network', (link) =>
+    call(link, 'agentNetwork.deviceStatus', undefined),
+  )
+  const { reload } = read
+  useEffect(() => {
+    const hear = () => void reload()
+    readers.add(hear)
+    return () => {
+      readers.delete(hear)
+      if (readers.size === 0) stopSoon()
+    }
+  }, [reload])
+  // The first focus is the mount, which reads already.
+  const shown = useRef(false)
+  useFocusEffect(
+    useCallback(() => {
+      if (shown.current) void reload()
+      shown.current = true
+    }, [reload]),
+  )
+  return read
 }
 
 /** A node's key, as the latency results are kept by. */
@@ -157,8 +193,15 @@ export async function setPick(
   })
 }
 
-/** Reads again now and twice more, as the computer checks the exits after a node change. */
-export function reloadSoon(read: Read<NetworkStatus>): void {
-  void read.reload()
-  for (const ms of [3_000, 9_000]) setTimeout(() => void read.reload(), ms)
+/**
+ * Has every page that shows the network read it again now and twice more, as the computer checks
+ * the exits after a node change. A later change starts over; the reads stop once no page is left.
+ */
+export function reloadSoon(): void {
+  stopSoon()
+  const tell = () => {
+    for (const reader of readers) reader()
+  }
+  tell()
+  soon = [3_000, 9_000].map((ms) => setTimeout(tell, ms))
 }

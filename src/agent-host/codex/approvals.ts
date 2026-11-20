@@ -13,16 +13,18 @@ import type {
 import { commandSteps, unsafeArgvPrefix, unsafeCommand } from '../command-safety'
 import type { OptionAnswer, PermissionAnswer, PermissionRequest } from '../connection'
 import { formFields, isWebUrl } from '../elicitation'
-import { t } from '../i18n'
+import { hasMessage, t } from '../i18n'
 import { answerWords } from '../question-answers'
 import type { MapperContext, MapperOutput } from '../session-updates'
 import { replyText, type AsyncQuestionItem, type QuestionReply } from './async-questions'
+import { fenced } from '../session-updates'
 import { commandFacts, type ThreadMapper } from './mapper'
 import type {
   AdditionalPermissions,
   CommandExecutionApprovalDecision,
   CommandExecutionRequestApprovalParams,
   FileChangeRequestApprovalParams,
+  FileSystemSandboxEntry,
   McpServerElicitationRequestParams,
   PermissionsRequestApprovalParams,
   RequestId,
@@ -74,9 +76,36 @@ function permissionsText(permissions: AdditionalPermissions | null | undefined):
   for (const file of permissions?.fileSystem?.write ?? []) {
     lines.push(t('codex.approval.write', { path: file }))
   }
+  // Huli: Codex 0.170 lists paths with their access instead, globs and special places among them.
+  for (const entry of permissions?.fileSystem?.entries ?? []) {
+    const path = sandboxPath(entry.path)
+    if (path === null) continue
+    if (entry.access === 'read') lines.push(t('codex.approval.read', { path }))
+    else if (entry.access === 'write') lines.push(t('codex.approval.write', { path }))
+    else if (entry.access === 'deny') lines.push(t('codex.approval.deny', { path }))
+  }
   return lines.length > 0
     ? [{ type: 'markdown', markdown: lines.map((l) => `- ${l}`).join('\n') }]
     : []
+}
+
+/** Huli: a path of a sandbox entry as the card names it: the path, the glob, or the place. */
+function sandboxPath(path: FileSystemSandboxEntry['path'] | null | undefined): string | null {
+  switch (path?.type) {
+    case 'path':
+      return path.path
+    case 'glob_pattern':
+      return path.pattern
+    case 'special': {
+      const { kind, subpath } = path.value
+      if (kind === 'unknown') return path.value.path ?? null
+      const key = `codex.approval.place.${kind}`
+      const place = hasMessage(key) ? t(key as 'codex.approval.place.root') : kind
+      return subpath ? `${place}/${subpath}` : place
+    }
+    default:
+      return null
+  }
 }
 
 /**
@@ -187,6 +216,9 @@ export function commandApproval(
   mapper: ThreadMapper,
   ctx: MapperContext,
 ): Approval {
+  if (params.kind === 'writeStdin' || params.kind === 'humanCommand') {
+    return checkpointApproval(params, mapper, ctx, params.kind)
+  }
   const out = output()
   const network = params.networkApprovalContext
   const facts = params.command
@@ -227,6 +259,65 @@ export function commandApproval(
           ? null
           : choices.find((choice) => choice.option.id === answer.optionId)
       return { decision: chosen?.decision ?? 'cancel' }
+    },
+  }
+}
+
+/**
+ * Huli: a request about a command that is not the command's own first approval: input Codex wants
+ * to type into a command that runs already, or a checkpoint that asks the user again. Each is a card
+ * of its own beside the command's row, which it would otherwise look like approving again.
+ */
+function checkpointApproval(
+  params: CommandExecutionRequestApprovalParams,
+  mapper: ThreadMapper,
+  ctx: MapperContext,
+  kind: 'writeStdin' | 'humanCommand',
+): Approval {
+  const out = output()
+  const callId = `${params.itemId}:${kind}:${params.approvalId ?? params.turnId}`
+  const command = ctx.thread.byId[`t:${params.itemId}`]
+  const running = command?.kind === 'tool' ? (command.rawInput ?? command.title) : null
+  const facts = params.command
+    ? commandFacts(params.command, params.cwd ?? '', params.commandActions)
+    : null
+  const shown = facts?.rawInput ?? running
+  const entryId = mapper.tool(ctx, out, callId, {
+    ...(kind === 'writeStdin'
+      ? {
+          title: t('codex.approval.stdinTitle'),
+          toolKind: 'other',
+          ...(shown ? { content: [{ type: 'markdown', markdown: fenced(shown) }] } : {}),
+        }
+      : {
+          title: facts?.title ?? t('codex.tool.runCommand'),
+          toolKind: facts?.toolKind ?? 'execute',
+          locations: facts?.locations ?? [],
+          ...(facts?.rawInput !== undefined ? { rawInput: facts.rawInput } : {}),
+        }),
+    status: 'pending',
+    description: params.reason || t(`codex.approval.${kind}Reason`),
+  })
+  const choices = commandDecisions(params)
+    .filter((decision) => decision === 'accept' || decision === 'decline' || decision === 'cancel')
+    .map((decision, index) => commandOption(decision, index, true))
+    .filter((choice) => choice !== null)
+  const options = ordered(choices.map((choice) => choice.option))
+  return {
+    request: { toolCallId: callId, toolEntryId: entryId, output: out, options },
+    respond: (answer) => {
+      const chosen =
+        answer === 'cancelled'
+          ? null
+          : choices.find((choice) => choice.option.id === answer.optionId)
+      return { decision: chosen?.decision ?? 'cancel' }
+    },
+    settled: (answer) => {
+      const chosen =
+        answer !== 'cancelled' && 'optionId' in answer
+          ? choices.find((choice) => choice.option.id === answer.optionId)
+          : undefined
+      return chosen?.decision === 'accept' ? 'completed' : 'cancelled'
     },
   }
 }

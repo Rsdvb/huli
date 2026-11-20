@@ -163,7 +163,7 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
             return (
               <ListRow
                 key={v.version}
-                title={`v${v.version}${current ? ' · 当前' : ''}`}
+                title={`v${v.version}${current ? ' · 最新' : ''}`}
                 subtitle={`${author(v)} · ${whenText(v.createdAt)}${v.note ? `\n${v.note}` : ''}`}
                 trailing={
                   current ? undefined : <Icon name="restore" size={16} color={c.textSecondary} />
