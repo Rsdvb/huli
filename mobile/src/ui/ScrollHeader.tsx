@@ -13,7 +13,7 @@ import {
 } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { ScrollEdge, useGlassMode } from './Glass'
+import { GlassOverBlur, ScrollEdge, useGlassMode } from './Glass'
 import { space, useTokens } from './tokens'
 
 export const HEADER_BAR = 64
@@ -132,7 +132,7 @@ export function FloatingHeader(props: { header: CollapsingHeader; children: Reac
         {mode !== 'liquid' && <View style={[styles.hairline, { backgroundColor: c.border }]} />}
       </Animated.View>
       <View style={[styles.bar, { marginTop: insets.top }]} pointerEvents="box-none">
-        {props.children}
+        {mode === 'blur' ? <GlassOverBlur>{props.children}</GlassOverBlur> : props.children}
       </View>
     </View>
   )
