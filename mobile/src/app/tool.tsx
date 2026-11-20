@@ -7,7 +7,8 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
-import { call, errorText, sessionFolder } from '../git'
+import { call, sessionFolder } from '../git'
+import { hostErrorText } from '../hostErrors'
 import { PictureStrip, pictureOf, type Picture } from '../components/Pictures'
 import { useLink, useSession } from '../host'
 import { SessionRows } from '../ui/session/context'
@@ -104,7 +105,7 @@ export default function ToolScreen() {
         setEntry(next)
         setError(null)
       },
-      (failed: unknown) => setError(errorText(failed, '没能读取这次调用。')),
+      (failed: unknown) => setError(hostErrorText(failed, '没能读取这次调用。')),
     )
   }, [link, sessionId, entryId])
 

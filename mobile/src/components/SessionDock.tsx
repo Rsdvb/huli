@@ -10,7 +10,7 @@ import type { ConfigOption, QueuedPrompt, SessionView, UserContent } from '@shar
 import type { HarnessId } from '@shared/agents'
 import { useAgent, useConnected, useMaybeLink } from '../host'
 import { setPrefs, usePrefs } from '../prefs'
-import { errorText } from '../sessions'
+import { hostErrorText } from '../hostErrors'
 import { haptic } from '../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
@@ -101,7 +101,7 @@ export function useSessionConfig(
     setSetting(option.id)
     link
       .request('sessions.setConfigOption', { sessionId, optionId: option.id, value })
-      .catch((error: unknown) => Alert.alert(`没能更改${option.name}`, errorText(error)))
+      .catch((error: unknown) => Alert.alert(`没能更改${option.name}`, hostErrorText(error)))
       .finally(() => setSetting(null))
   }
 
@@ -279,7 +279,7 @@ export function QueueStack(props: {
     haptic.tap()
     setBusyItem(item.id)
     work()
-      .catch((error: unknown) => Alert.alert(failed, errorText(error)))
+      .catch((error: unknown) => Alert.alert(failed, hostErrorText(error)))
       .finally(() => setBusyItem(null))
   }
 
@@ -323,7 +323,7 @@ export function QueueStack(props: {
   const resume = () => {
     link
       .request('sessions.resumeQueue', { sessionId })
-      .catch((error: unknown) => Alert.alert('没能继续发送', errorText(error)))
+      .catch((error: unknown) => Alert.alert('没能继续发送', hostErrorText(error)))
   }
 
   return (

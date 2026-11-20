@@ -24,6 +24,7 @@ import {
 import { ALREADY_ANSWERED } from '@shared/agent-host'
 import type { FromDevice } from '@shared/thread'
 import { useActiveHost, useHostState } from '../../host'
+import { hostErrorText } from '../../hostErrors'
 import { haptic } from '../../ui/session/feedback'
 import { clockTime } from '../../ui/session/format'
 import { G, Icon, type IconSpec } from '../../ui/session/icons'
@@ -60,8 +61,7 @@ export function answeredBy(error: unknown): FromDevice | null | undefined {
 }
 
 export function messageOf(error: unknown, fallback = '没有发出去，请稍后再试。'): string {
-  const message = (error as { message?: unknown } | null)?.message
-  return typeof message === 'string' && message ? message : fallback
+  return hostErrorText(error, fallback)
 }
 
 // When this phone saw a request answered, by entry id, for the answered line's time.

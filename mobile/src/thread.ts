@@ -22,6 +22,7 @@ import {
 } from '@shared/thread'
 import { readThread, recentThread, writeThread } from './cache'
 import { useComputerId } from './host'
+import { hostErrorText } from './hostErrors'
 import { createStore, useSelector, type Store } from './select'
 
 export interface ThreadView {
@@ -194,8 +195,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       void link.request('sessions.show', { sessionIds: [sessionId] }).catch(() => {})
       reloadRequests()
     } catch (failure) {
-      if (mine === generation.current)
-        setError((failure as { message?: string }).message ?? '打不开这个会话')
+      if (mine === generation.current) setError(hostErrorText(failure, '打不开这个会话。'))
     }
   }, [link, sessionId, reloadRequests])
 

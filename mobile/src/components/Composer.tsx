@@ -88,6 +88,7 @@ import { FileMark, G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { Glass, useGlassMode } from '../ui/Glass'
 import { NativeMenu } from '../ui/session/NativeMenu'
+import { hostErrorText } from '../hostErrors'
 import { useMenuEdge, type MenuSource, type ViewHandle } from '../ui/session/Popover'
 import { PressScale, RoundButton } from '../ui/session/Press'
 import { PictureViewer, type Picture } from './Pictures'
@@ -939,7 +940,7 @@ export function Composer(props: ComposerProps) {
       for (const item of taken.items) carried.current.delete(item.key)
       if (mounted.current) restoreMessage(taken, true)
       if (!(error instanceof SendCancelled)) {
-        Alert.alert(failTitle, (error as { message?: string }).message || '请稍后再试。')
+        Alert.alert(failTitle, hostErrorText(error))
       }
     } finally {
       if (mounted.current) setSending(false)

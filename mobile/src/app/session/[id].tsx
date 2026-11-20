@@ -125,7 +125,8 @@ import {
   type HostData,
 } from '../../host'
 import { setMuted, useMuted } from '../../push/muted'
-import { errorText, folder } from '../../sessions'
+import { folder } from '../../sessions'
+import { hostErrorText } from '../../hostErrors'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
 import { useThread, useThreadSelector } from '../../thread'
 import { useComputer } from '../../ui/session/computer'
@@ -446,7 +447,7 @@ export default function SessionScreen() {
                   if (pane) pane.open(madeId)
                   else router.push(`/session/${madeId}`)
                 })
-                .catch((error: unknown) => Alert.alert('没能分叉', errorText(error)))
+                .catch((error: unknown) => Alert.alert('没能分叉', hostErrorText(error)))
             },
           },
         ],
@@ -484,7 +485,7 @@ export default function SessionScreen() {
         ])
       }
     } catch (error) {
-      Alert.alert('没能撤销', errorText(error))
+      Alert.alert('没能撤销', hostErrorText(error))
     } finally {
       setReverting(false)
     }
@@ -632,7 +633,7 @@ export default function SessionScreen() {
     // Once queued, a failed send-now leaves the message in the queue, not lost.
     link
       .request('sessions.sendNow', { sessionId: id, itemId })
-      .catch((error: unknown) => Alert.alert('没能立即发送', errorText(error)))
+      .catch((error: unknown) => Alert.alert('没能立即发送', hostErrorText(error)))
   }
 
   // Picking the session's own agent undoes a switch; another's model makes it the pending one.

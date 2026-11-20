@@ -10,7 +10,7 @@ import type { ContextBreakdown } from '@shared/context'
 import { expiryOf, knownExpiry, modelOption } from '@shared/prompt-cache'
 import type { HostLink } from '@shared/remote/link'
 import type { SessionView } from '@shared/thread'
-import { errorText } from '../sessions'
+import { hostErrorText } from '../hostErrors'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
 import { haptic } from '../ui/session/feedback'
@@ -126,7 +126,7 @@ export function ContextSheet(props: {
     setRead({ kind: 'loading' })
     ;(link.request('sessions.context', { sessionId }) as Promise<ContextBreakdown | null>).then(
       (breakdown) => setRead({ kind: 'done', breakdown }),
-      (error: unknown) => setRead({ kind: 'error', error: errorText(error) }),
+      (error: unknown) => setRead({ kind: 'error', error: hostErrorText(error) }),
     )
   }, [link, sessionId])
 
