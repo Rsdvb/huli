@@ -19,11 +19,13 @@ import type { SearchIndexing, SessionFindMatch } from '@shared/agent-host'
 import { longEnough, queryWords } from '@shared/search-fold'
 import { onAppEvent } from '@renderer/app/events'
 import { IconAction } from '@renderer/components/copy-action'
+import { takeOver } from '@renderer/components/ui/message-scroller'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { usePaneFocused } from '@renderer/features/split/pane-context'
 import { errorCode, errorMessage, host } from '@renderer/lib/host'
 import { showFind, useFindStore } from '@renderer/stores/find'
 import { useThreadsStore } from '@renderer/stores/threads'
+import { partsRendered } from '../markdown/in-parts'
 import { useJumpToMessage } from '../outline/use-jump'
 import type { ThreadJumps } from '../thread'
 import { clearMarks, MESSAGE_BODY, rangesOf, setMarks } from './find-marks'
@@ -257,11 +259,13 @@ export function FindInSession({
     for (let pass = 0; pass < REVEAL_PASSES; pass++) {
       const rect = range.getBoundingClientRect()
       const box = view.getBoundingClientRect()
+      if (rect.height > 0 && rect.top >= box.top + EDGE && rect.bottom <= box.bottom - EDGE) return
+      // A thread following its end would take it back there at its next change of size.
+      if (pass === 0) takeOver(view)
       if (rect.height === 0) {
         item.scrollIntoView({ block: 'start', behavior: 'instant' })
         continue
       }
-      if (rect.top >= box.top + EDGE && rect.bottom <= box.bottom - EDGE) return
       view.scrollTo({
         top: view.scrollTop + rect.top - box.top - box.height / 3,
         behavior: 'instant',
@@ -307,6 +311,12 @@ export function FindInSession({
         )
         if (!live || !arrived) return
       }
+      // A long reply opened a moment ago may still be rendering its parts.
+      const item = [...(content.current?.children ?? [])].find(
+        (child) => child instanceof HTMLElement && child.dataset.messageId === target.entryId,
+      )
+      if (item) await partsRendered(item)
+      if (!live) return
       latest.current.reveal(target.entryId)
       latest.current.mark()
     })()

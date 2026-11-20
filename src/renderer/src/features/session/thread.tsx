@@ -30,6 +30,7 @@ import { RunGroup } from './entries/run-group'
 import { ToolGroup } from './entries/tool-group'
 import { FindInSession } from './find/find-in-session'
 import { JumpToLatest } from './jump-to-latest'
+import { InPartsContext } from './markdown/live'
 import { MessageOutline } from './outline/message-outline'
 import { RevealTarget } from './outline/reveal-target'
 import { hoverReply } from './reply-hover'
@@ -587,13 +588,15 @@ export const Thread = memo(function Thread({
                       agentName={agentName}
                     />
                   ) : (
-                    <Entry
-                      sessionId={sessionId}
-                      entryId={item.id}
-                      endId={item.endId}
-                      projectPath={projectPath}
-                      agentName={agentName}
-                    />
+                    <InPartsContext value={!returnPending}>
+                      <Entry
+                        sessionId={sessionId}
+                        entryId={item.id}
+                        endId={item.endId}
+                        projectPath={projectPath}
+                        agentName={agentName}
+                      />
+                    </InPartsContext>
                   )}
                 </MessageScrollerItem>
               )

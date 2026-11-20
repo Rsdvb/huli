@@ -163,6 +163,7 @@ function MessageScrollerButton({
 }
 
 export {
+  takeOver,
   MessageScrollerProvider,
   MessageScroller,
   MessageScrollerViewport,

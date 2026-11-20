@@ -6,6 +6,7 @@ import {
   Suspense,
   useContext,
   useDeferredValue,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -43,6 +44,7 @@ import {
 } from '@renderer/features/session/media/named'
 import { HAN } from '@renderer/lib/han'
 import { cn } from '@renderer/lib/utils'
+import { markdownHeight } from '@renderer/features/session/thread-items'
 import { Blockquote } from './alert'
 import { splitIntoChunks } from './chunks'
 import { codeThemeInput, useCodeThemes, type CodeThemes } from './code-themes'
@@ -54,6 +56,7 @@ import { fenceInlineSvg } from './inline-svg'
 import { remarkPlugins } from './remark'
 import { BlockCode } from './code-frame'
 import { MarkdownTable } from './markdown-table'
+import { useRenderedChunks } from './in-parts'
 import { LiveContext } from './live'
 import type { MarkdownProps } from './index'
 
@@ -302,6 +305,36 @@ function useChunks(markdown: string): string[] {
 }
 
 /**
+ * Holds a chunk's place until it renders, at about its height, so the text around it stays put.
+ * Coming into view asks for it to render next.
+ */
+const ChunkPlaceholder = memo(function ChunkPlaceholder({
+  markdown,
+  index,
+  onSeen,
+}: {
+  markdown: string
+  index: number
+  onSeen: (index: number) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const height = useMemo(() => markdownHeight(markdown), [markdown])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) onSeen(index)
+      },
+      { rootMargin: '50% 0px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [index, onSeen])
+  return <div ref={ref} aria-hidden className="markdown-chunk" style={{ height }} />
+})
+
+/**
  * Agent prose. Raw HTML goes through the sanitizer, and an inline `<svg>` is first written as an
  * `svg` code block (`inline-svg.ts`). A long text renders in chunks (`chunks.ts`), so a streamed
  * update re-renders, lays out and paints the live tail instead of the whole message. Streaming
@@ -320,20 +353,28 @@ function MarkdownImpl({
   // React split that work across frames instead of blocking one.
   const live = useDeferredValue(streaming)
   const chunks = useChunks(useMemo(() => fenceInlineSvg(markdown, live), [markdown, live]))
+  const root = useRef<HTMLDivElement>(null)
+  const { rendered, show } = useRenderedChunks(chunks, streaming, root)
   const [named] = useState(() => new NamedMedia())
+  const pending = chunks.some((_, i) => !rendered(i))
   return (
-    <div className={cn('markdown', className)}>
+    // Marks a text whose parts are still to render, for a find to wait on (in-parts.ts).
+    <div ref={root} className={cn('markdown', className)} data-parts-pending={pending || undefined}>
       <NamedMediaContext value={named}>
-        {chunks.map((chunk, i) => (
+        {chunks.map((chunk, i) =>
           // By position: when the tail settles, the chunk in its place keeps its rendered blocks.
-          <Chunk
-            key={i}
-            markdown={chunk}
-            live={live}
-            components={customComponents}
-            remarkPlugins={customRemarkPlugins}
-          />
-        ))}
+          rendered(i) ? (
+            <Chunk
+              key={i}
+              markdown={chunk}
+              live={live}
+              components={customComponents}
+              remarkPlugins={customRemarkPlugins}
+            />
+          ) : (
+            <ChunkPlaceholder key={i} markdown={chunk} index={i} onSeen={show} />
+          ),
+        )}
       </NamedMediaContext>
     </div>
   )
