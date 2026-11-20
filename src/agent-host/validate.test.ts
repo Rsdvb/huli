@@ -68,6 +68,25 @@ describe('createValidators', () => {
     )
   })
 
+  it('takes an agent and the categories of its environment to reset, each once', () => {
+    expect(posix['agents.resetPreview']({ agentId: 'codex', paths: ['/'] })).toEqual({
+      agentId: 'codex',
+    })
+    expect(
+      posix['agents.reset']({ agentId: 'claude-code', categories: ['caches', 'credentials'] }),
+    ).toEqual({ agentId: 'claude-code', categories: ['caches', 'credentials'] })
+    expect(
+      posix['agents.reset']({ agentId: 'codex', categories: ['identifiers'], paths: ['/'] }),
+    ).toEqual({ agentId: 'codex', categories: ['identifiers'] })
+    rejects(() => posix['agents.reset']({ agentId: 'codex' }))
+    rejects(() => posix['agents.reset']({ agentId: 'codex', categories: [] }))
+    rejects(() => posix['agents.reset']({ agentId: 'codex', categories: 'caches' }))
+    rejects(() => posix['agents.reset']({ agentId: 'codex', categories: ['history'] }))
+    rejects(() => posix['agents.reset']({ agentId: 'codex', categories: ['caches', 'caches'] }))
+    rejects(() => posix['agents.reset']({ agentId: 'nobody', categories: ['caches'] }))
+    rejects(() => posix['agents.resetPreview']({}))
+  })
+
   it('takes a fork for an import only when asked', () => {
     const base = { agentId: 'claude-code', projectPath: '/p', acpSessionId: 'id' }
     expect(posix['sessions.import']({ ...base, fork: true })).toEqual({ ...base, fork: true })
