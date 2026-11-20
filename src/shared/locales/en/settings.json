@@ -1189,6 +1189,62 @@
       "title": "Sign out of {{name}}?",
       "body": "{{name}} shares its sign-in with the Antigravity app and CLI, so they are signed out too.",
       "confirm": "Sign out"
+    },
+    "resetEnv": {
+      "name": "Reset environment",
+      "description": "Signs it out and removes the ids and caches it made on this computer. Its history and settings stay.",
+      "keywords": "reset clean sign out logout credentials cache identifiers userID installation_id",
+      "button": "Reset environment…",
+      "title": "Reset {{name}}’s environment",
+      "lead": "Puts it back the way a fresh install finds it. Kettu first stops its idle sessions and its processes.",
+      "failed": "Could not read what to reset",
+      "total": "{{size}} in all",
+      "done": "Done",
+      "confirm": "Reset",
+      "checkAgain": "Check again",
+      "busy_one": "A session is working; stop it or let it finish",
+      "busy_other": "{{count}} sessions are working; stop them or let them finish",
+      "untitled": "Untitled session",
+      "outside_one": "Claude Code is open outside Kettu",
+      "outside_other": "Claude Code is open outside Kettu ({{count}})",
+      "outsideHint": "It may write the files back. Close it first.",
+      "sharedApp": "The {{harness}} app shares this sign-in, so it is signed out too.",
+      "sharedProgram": "The {{harness}} you run yourself uses this folder too, so it is reset as well.",
+      "credentials": {
+        "name": "Sign-in and credentials",
+        "hint": "Sign-in tokens, OAuth files and API keys, including those Kettu keeps for it."
+      },
+      "identifiers": {
+        "name": "Local identifiers",
+        "hint": "Anonymous ids it made on this computer. It makes new ones on its next start."
+      },
+      "caches": {
+        "name": "Caches and temporary files",
+        "hint": "Feature flag caches, telemetry queues, logs, shell snapshots and temporary folders."
+      },
+      "unknown": "Kettu doesn’t know where {{name}} keeps these, so it leaves them.",
+      "unknownCredentials": "Kettu doesn’t know where {{name}} keeps the rest, so only its own sign-out runs.",
+      "nothing": "None on this computer.",
+      "kept": "Its history and settings stay.",
+      "keptNamed": "Kept, its history and settings: {{names}}",
+      "separator": ", ",
+      "keys": "{{file}}: {{keys}}",
+      "files_one": "{{folder}} ({{count}} file)",
+      "files_other": "{{folder}} ({{count}} files)",
+      "unreadable": "{{file}} (not valid JSON; left as it is)",
+      "store": {
+        "keychain": "Keychain: {{name}}",
+        "credential-manager": "Credential Manager: {{name}}",
+        "secret-service": "Keyring: {{name}}"
+      },
+      "logout": "Run {{command}}",
+      "logoutAgent": "Its own sign-out",
+      "apiKey": "The API key Kettu gave it ({{file}})",
+      "kiteKey": "{{name}}, kept by Kettu",
+      "partly": "Removed {{count}}; {{failed}} could not be removed",
+      "finished_one": "Reset. 1 item removed.",
+      "finished_other": "Reset. {{count}} items removed.",
+      "afterHint": "It makes the files it needs again on its next start. Sign in again if you need to."
     }
   },
   "about": {

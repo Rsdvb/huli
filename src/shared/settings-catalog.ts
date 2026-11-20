@@ -1446,7 +1446,7 @@ const ENTRIES = {
   },
   'remote.reset': {
     section: 'remote',
-    row: 'reset',
+    row: 'reset-environment',
     group: 'remote.groups.danger',
     name: 'remote.reset.name',
     description: 'remote.reset.description',
@@ -1603,6 +1603,17 @@ const ENTRIES = {
   },
 
   // ---- Huli: Kite's own rows; see tools/huli/README.md.
+  'agents.reset-environment': {
+    section: 'agents',
+    row: 'reset-environment',
+    name: 'agents.resetEnv.name',
+    description: 'agents.resetEnv.description',
+    keywords: 'agents.resetEnv.keywords',
+    part: 'host',
+    kind: 'action',
+    item: 'agent',
+    on: isAgent,
+  },
   'general.agent-history': {
     section: 'general',
     row: 'agent-history',
