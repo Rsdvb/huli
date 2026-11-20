@@ -9,7 +9,7 @@ import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { Attachment, ContentRef, FromDevice, FromSession, UserContent } from '@shared/thread'
 import { leadingCommand, mentionResolver, type Chip } from '../ui/session/chips'
-import { Clamp } from '../ui/session/Clamp'
+import { Clamp, clampedText, useClampOpen } from '../ui/session/Clamp'
 import { useSessionRows } from '../ui/session/context'
 import { ContextMenu } from '../ui/ContextMenu'
 import type { MenuNode } from '../ui/menu'
@@ -131,7 +131,8 @@ export const UserMessage = memo(function UserMessage(props: {
   // the composer to be sent again.
   const lead = leadingCommand(text, commands ?? [])
   const name = lead ? text.slice(1, lead) : null
-  const body = name ? text.slice(lead).replace(/^ /, '') : text
+  const whole = useClampOpen(`user:${props.id ?? ''}`)
+  const body = clampedText(name ? text.slice(lead).replace(/^ /, '') : text, whole)
   const head = name ? (
     <Text
       style={{ color: c.tint, fontWeight: '600' }}

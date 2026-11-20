@@ -20,7 +20,7 @@ import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { ShellBlock, StepSection } from '../../components/entries/ShellBlock'
 import { Markdown } from '../../components/Markdown'
 import { handDiff } from '../../diff'
-import { Clamp } from './Clamp'
+import { Clamp, clampedText, useClampOpen } from './Clamp'
 import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
 import { plainText } from './feedback'
@@ -158,6 +158,24 @@ export function LiveTime(props: { since: number; color: string; prefix?: string 
       {props.prefix ?? ''}
       {formatMs(Math.max(0, now - props.since))}
     </Text>
+  )
+}
+
+/**
+ * A call's result under its clamp: a file's content as Markdown, else its plain text. Closed, only
+ * what the clamp can show is laid out, as a whole file read behind it held the screen up.
+ */
+function ClampedResult(props: { id: string; text: string; markdown?: boolean }) {
+  const { c } = useSessionTokens()
+  const text = clampedText(props.text, useClampOpen(props.id))
+  return (
+    <Clamp maxHeight={props.markdown ? 320 : 240} more="显示全部" id={props.id}>
+      {props.markdown ? (
+        <Markdown markdown={text} size="compact" />
+      ) : (
+        <Text style={[styles.raw, { color: c.text }]}>{text}</Text>
+      )}
+    </Clamp>
   )
 }
 
@@ -418,18 +436,14 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
           if (read) {
             return (
               <StepSection key={i} label="内容" copy={fenceBody(read)}>
-                <Clamp maxHeight={320} more="显示全部" id={`result:${entry.id}:${i}`}>
-                  <Markdown markdown={read} size="compact" />
-                </Clamp>
+                <ClampedResult id={`result:${entry.id}:${i}`} text={read} markdown />
               </StepSection>
             )
           }
           const raw = fenceBody(part.markdown)
           return (
             <StepSection key={i} label="结果" copy={raw}>
-              <Clamp maxHeight={240} more="显示全部" id={`result:${entry.id}:${i}`}>
-                <Text style={[styles.raw, { color: c.text }]}>{raw}</Text>
-              </Clamp>
+              <ClampedResult id={`result:${entry.id}:${i}`} text={raw} />
             </StepSection>
           )
         }
