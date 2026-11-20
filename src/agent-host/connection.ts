@@ -7,8 +7,6 @@ import type {
   PlanLimit,
   PromptCapabilities,
   ProviderBalance,
-  ResetCreditOutcome,
-  ResetCredits,
 } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
 import type {
@@ -307,6 +305,12 @@ export function promptBlocks(content: readonly UserContent[]): PromptBlock[] {
           : { type: 'text', text: ref.mimeType }
       case 'link':
         return { type: 'resource_link', uri: ref.uri, name: ref.name }
+      case 'terminal':
+        return { type: 'text', text: terminalNotice(ref.terminalId, ref.name) }
+      case 'page':
+        return { type: 'text', text: pageNotice(ref.name) }
+      case 'device':
+        return { type: 'text', text: deviceNotice(ref.deviceId, ref.name) }
       // The host turns attachments into images and links before a prompt goes; never reached.
       case 'attachment':
         return { type: 'text', text: ref.attachment.name }
@@ -318,6 +322,21 @@ export function promptBlocks(content: readonly UserContent[]): PromptBlock[] {
         return { type: 'text', text: ref.label }
     }
   })
+}
+
+/** What the agent reads where the user referenced a terminal of the session. */
+export function terminalNotice(terminalId: string, name: string): string {
+  return `[The user shares their terminal "${name}" with you, id ${terminalId}: read its output with terminal_read, and carry on in it with terminal_input.]`
+}
+
+/** What the agent reads where the user referenced a tab of the session's browser. */
+export function pageNotice(title: string): string {
+  return `[The user shares their browser tab "${title}" with you: find it with browser_tabs and select it to work in it.]`
+}
+
+/** What the agent reads where the user referenced a mobile device of the session. */
+export function deviceNotice(deviceId: string, name: string): string {
+  return `[The user shares the device "${name}" with you, id ${deviceId}: use it with the device tools.]`
 }
 
 /** A message of the conversation before an agent took a session over, as it is carried to it. */
@@ -362,11 +381,6 @@ export interface SessionOptions {
    */
   memory?: SessionMemory
   /**
-   * Kettu's MCP service for an agent with `kettuExtension`, which takes it only through Kettu's
-   * extension in the agent; the session's own token, so its calls need not name the session.
-   */
-  kettuService?: KettuService
-  /**
    * The session's own instructions get nothing of Kettu's: its guide and memory go ahead of its
    * prompts, as for a session whose agent recorded its instructions outside Kettu.
    */
@@ -386,24 +400,6 @@ export interface SessionMemory {
   /** The index of both layers and how to use them, marked as reference data. */
   text: string
 }
-
-/** Where a session reaches Kettu's MCP service, and its bearer token there. */
-export interface KettuService {
-  url: string
-  token: string
-}
-
-/**
- * Where ACP's `session/new` and `session/load` carry a session's `KettuService` to the session
- * router, which takes it out into that session's process environment for Kettu's extension.
- */
-export const KETTU_SERVICE_META = 'sh.kettu/mcp'
-
-/**
- * Where ACP's `session/new` names the file Kettu's extension writes the session's model scope to;
- * the session router takes it out into that session's process environment as well.
- */
-export const MODEL_SCOPE_META = 'sh.kettu/model-scope'
 
 /** Decides which of the MCP servers a session's folder declares itself may start. */
 export interface ProjectMcpGate {
@@ -450,11 +446,6 @@ export interface AgentConnection {
    * the session's messages. Only a session created with it has the text; the host records which.
    */
   readonly systemPromptAppend?: boolean
-  /**
-   * Whether the agent runs Kettu's extension, which reaches Kettu's MCP service with
-   * `SessionOptions.kettuService` though the agent takes no MCP server over ACP (Pi).
-   */
-  readonly kettuExtension?: boolean
   readonly isClosed: boolean
   close(): void
 
@@ -573,12 +564,10 @@ export interface AgentConnection {
    */
   readLimits?(): Promise<PlanLimit[]>
   /**
-   * What the last `readLimits` read beside the windows: balances that pay once a window runs out,
-   * and the credits that reset the windows; null before a read.
+   * What the last `readLimits` read beside the windows: balances that pay once a window runs out;
+   * null before a read.
    */
-  planExtras?(): { balances: ProviderBalance[]; resetCredits: ResetCredits | null } | null
-  /** Redeems a limit reset credit: the one named, or the next the vendor picks. */
-  useResetCredit?(creditId: string | null): Promise<ResetCreditOutcome>
+  planExtras?(): { balances: ProviderBalance[] } | null
   /** A request of the agent's own protocol outside any session, for what only its harness has. */
   request?<T>(method: string, params?: unknown): Promise<T>
   /**

@@ -17,7 +17,7 @@ import {
   StatusControl,
   TimeField,
 } from './backup-rows'
-import { english, type GroupDef, type RowDef, type SectionDef } from './model'
+import type { GroupDef, RowDef, SectionDef } from './model'
 import { GroupNote } from './rows'
 
 function group(id: string, label: string, extra?: Omit<GroupDef, 'id' | 'label'>): GroupDef {
@@ -44,7 +44,6 @@ function statusLine(status: BackupStatus | null, t: TFunction<'settings'>): stri
 
 export function useBackupSection(): SectionDef {
   const { t } = useTranslation('settings')
-  const en = english()
   useFollowBackup()
   const status = useBackupStore((s) => s.status)
   const stored = status?.stored
@@ -56,58 +55,42 @@ export function useBackupSection(): SectionDef {
   const rows: RowDef[] = [
     {
       id: 'enabled',
-      name: t('backup.enabled.name'),
-      english: en('backup.enabled.name'),
-      description: t('backup.enabled.description'),
-      keywords: t('backup.enabled.keywords'),
+      setting: 'backup.enabled',
       group: schedule,
       render: () => <EnabledSwitch label={t('backup.enabled.name')} />,
     },
     {
       id: 'time',
-      name: t('backup.time.name'),
-      english: en('backup.time.name'),
-      description: t('backup.time.description'),
-      keywords: t('backup.time.keywords'),
+      setting: 'backup.time',
       group: schedule,
       render: () => <TimeField label={t('backup.time.name')} />,
     },
     {
       id: 'keep',
-      name: t('backup.keep.name'),
-      english: en('backup.keep.name'),
-      description: t('backup.keep.description'),
-      keywords: t('backup.keep.keywords'),
+      setting: 'backup.keep',
       group: schedule,
       render: () => <KeepSelect label={t('backup.keep.name')} />,
     },
     {
       id: 'status',
-      name: t('backup.status.name'),
-      english: en('backup.status.name'),
+      setting: 'backup.status',
       description: statusLine(status, t),
-      keywords: t('backup.status.keywords'),
       group: schedule,
       render: () => <StatusControl />,
     },
     {
       id: 'folder',
-      name: t('backup.folder.name'),
-      english: en('backup.folder.name'),
+      setting: 'backup.folder',
       description: stored
         ? t('backup.folder.stored', { count: stored.count, size: storageBytes(stored.bytes) })
         : t('backup.folder.description'),
-      keywords: t('backup.folder.keywords'),
       group: where,
       layout: 'block',
       render: (text) => <FolderRow text={text} />,
     },
     {
       id: 'restore',
-      name: t('backup.restore.name'),
-      english: en('backup.restore.name'),
-      description: t('backup.restore.description'),
-      keywords: t('backup.restore.keywords'),
+      setting: 'backup.restore',
       group: restore,
       render: () => <RestoreControl />,
     },

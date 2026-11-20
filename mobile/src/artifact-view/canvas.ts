@@ -53,7 +53,7 @@ export function viewOf(version: LoadedVersion): VersionView {
     }
   }
   const entry = version.files.get(ARTIFACT_ENTRY)
-  if (!entry) return { kind: 'broken', reason: '这个 Artifact 没有可以显示的页面。' }
+  if (!entry) return { kind: 'broken', reason: '这个产物没有可以显示的页面。' }
   const split = splitLegacyCanvas(textOf(entry.bytes), new Set(version.files.keys()))
   if (!split) return { kind: 'page' }
   const counts = new Map<string, number>()

@@ -77,7 +77,7 @@ export function answerWords(
     return { headline: '已不再需要', note: `${agent} 已不再需要`, allowed: false }
   }
   const allowed = result.kind === 'allow_once' || result.kind === 'allow_always'
-  if (result.by === 'routine') return { headline: '由例程允许', note: '', allowed }
+  if (result.by === 'routine') return { headline: '由定时任务允许', note: '', allowed }
   if (result.questions?.length) {
     return {
       headline: '已回答',
@@ -319,7 +319,7 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
   const result = entry.permissionResult
   const note =
     props.note ??
-    (typeof result === 'object' && result?.by === 'routine' ? '由例程允许' : undefined)
+    (typeof result === 'object' && result?.by === 'routine' ? '由定时任务允许' : undefined)
   const body = hasBody(entry, label)
   const toggle = () => {
     setOpen((v) => !v)

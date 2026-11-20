@@ -14,7 +14,7 @@ import { ARTIFACT_ID, ARTIFACT_TITLE_CHARS, longer } from '@shared/artifacts'
 import { CanvasError, parseCanvasOps, type CanvasOp } from '@shared/canvas-doc'
 import { PARAMS_MAX, type ParamValue } from '@shared/artifact-params'
 import type { BrowserCallAnswer, BrowserOriginAnswer, BrowserOriginDecision } from '@shared/browser'
-import { isControlOutcome } from '@shared/control'
+import { isControlOutcome, isSurfaceAccessDecision } from '@shared/control'
 import { isComputerAppDecision } from '@shared/computer-use'
 import { FILE_READ_LIMIT } from '@shared/files'
 import { IMAGE_CLEAR_DAYS } from '@shared/data-usage'
@@ -54,6 +54,7 @@ import {
   type WorktreeInspection,
 } from '@shared/git'
 import type { Platform } from '@shared/platform'
+import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
 import {
   MAX_WORKFLOW_STEPS,
   PICK_REASON_CHARS,
@@ -118,6 +119,8 @@ const ACP_ID_CHARS = 1_024
 // Windows extended-length paths go up to 32,767 characters.
 const PATH_CHARS = 32_767
 const TEXT_CHARS = 4_096
+// A terminal tab's name as a message carries it: its process title or the name the user gave.
+const TERMINAL_NAME_CHARS = 256
 // A side question and the passage it quotes, which a hidden session gets with carried context.
 const SIDE_QUESTION_CHARS = 32_000
 const SIDE_QUOTE_CHARS = 16_000
@@ -936,13 +939,30 @@ function contentRef(value: unknown, at: string): { ref: ContentRef; bytes: numbe
       const name = string(o, 'name', TEXT_CHARS)
       return { ref: { kind: 'link', uri, name }, bytes: uri.length + name.length }
     }
+    case 'terminal': {
+      const terminalId = string(o, 'terminalId', ID_CHARS)
+      const name = string(o, 'name', TERMINAL_NAME_CHARS)
+      return { ref: { kind: 'terminal', terminalId, name }, bytes: terminalId.length + name.length }
+    }
+    case 'page': {
+      const tabId = string(o, 'tabId', ID_CHARS)
+      const name = string(o, 'name', TEXT_CHARS)
+      return { ref: { kind: 'page', tabId, name }, bytes: tabId.length + name.length }
+    }
+    case 'device': {
+      const deviceId = string(o, 'deviceId', ID_CHARS)
+      const name = string(o, 'name', TERMINAL_NAME_CHARS)
+      return { ref: { kind: 'device', deviceId, name }, bytes: deviceId.length + name.length }
+    }
     case 'attachment': {
       // Only the id counts: the host takes everything else from its own record.
       const id = string(fields(o.attachment), 'id', ID_CHARS)
       return { ref: { kind: 'attachment', attachment: attachmentStub(id) }, bytes: 0 }
     }
     default:
-      throw invalidParams(`${at}: a prompt can carry images, links and attachments only`)
+      throw invalidParams(
+        `${at}: a prompt can carry images, links, terminals, tabs, devices and attachments only`,
+      )
   }
 }
 
@@ -1366,10 +1386,18 @@ export function createValidators(platform: Platform): Validators {
     },
     'agents.readFirstOptions': agent,
     'agents.refreshLimits': limitsRefresh,
-    'agents.useResetCredit': (params) => {
+    'agents.spendReset': (params) => {
       const o = fields(params)
-      const creditId = optionalString(o, 'creditId', ID_CHARS)
-      return { agentId: agentId(o), ...(creditId !== undefined ? { creditId } : {}) }
+      const creditId = string(o, 'creditId', ID_CHARS)
+      if (!/^[\w-]+$/.test(creditId)) throw invalidParams('creditId is not a credit id')
+      const requestId = string(o, 'requestId', ID_CHARS)
+      // The vendor's idempotency key is a UUID v4, so a retry carries the same one.
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestId)
+      ) {
+        throw invalidParams('requestId must be a UUID v4')
+      }
+      return { agentId: agentId(o), creditId, requestId }
     },
     'agents.details': agent,
     'agents.claudeSettings': agent,
@@ -1414,6 +1442,26 @@ export function createValidators(platform: Platform): Validators {
     },
     'agents.refreshAccount': agentWithForce,
     'agents.options': none,
+    'agents.lightAgents': none,
+    'agents.draftReport': (params) => {
+      const o = fields(params)
+      const absent = (key: string): boolean => o[key] === null || o[key] === undefined
+      if (!absent('origin') && !(REPORT_ORIGINS as readonly unknown[]).includes(o.origin))
+        throw invalidParams('origin is not a place reports open from')
+      const error = o.error
+      if (!absent('error') && (typeof error !== 'string' || error.length > REPORT_ERROR_MAX))
+        throw invalidParams(`error must be text of at most ${REPORT_ERROR_MAX} characters`)
+      const language = string(o, 'language', 35)
+      if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(language))
+        throw invalidParams('language must be a language tag')
+      return {
+        origin: absent('origin') ? null : (o.origin as ReportOrigin),
+        sessionId: absent('sessionId') ? null : sessionId(o),
+        agentId: absent('agentId') ? null : agentId(o),
+        error: absent('error') ? null : (error as string),
+        language,
+      }
+    },
     'mcp.status': none,
     'mcp.retry': none,
     'market.catalog': marketRead,
@@ -1479,6 +1527,21 @@ export function createValidators(platform: Platform): Validators {
       return { id, ...(refresh === undefined ? {} : { refresh }) }
     },
     'market.addSkill': (params) => ({ source: skillSource(fields(params).source, platform) }),
+    'settings.answerChange': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'change' && o.decision !== 'keep') {
+        throw invalidParams('decision must be change or keep')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+      }
+    },
+    'settings.undoChange': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
+    },
     'market.answerPublish': (params) => {
       const o = fields(params)
       if (o.decision !== 'confirm' && o.decision !== 'later') {
@@ -1535,6 +1598,7 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'market.communityListing': (params) => ({ id: listingId(fields(params)) }),
+    'market.communityWorkflow': (params) => ({ id: listingId(fields(params)) }),
     'market.communityInstalled': (params) => {
       const refresh = optionalFlag(
         params === undefined || params === null ? {} : fields(params),
@@ -1644,6 +1708,10 @@ export function createValidators(platform: Platform): Validators {
     'projects.add': folder,
     'projects.remove': folder,
     'projects.touch': folder,
+    'projects.pin': (params) => {
+      const o = fields(params)
+      return { path: absolutePath(o, 'path', platform), pinned: flag(o, 'pinned') }
+    },
     'projects.worktreeSettings': folder,
     'projects.setWorktreeSettings': (params) => {
       const o = fields(params)
@@ -1926,7 +1994,11 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), pinned: flag(o, 'pinned') }
     },
-    'sessions.archive': session,
+    'sessions.archive': (params) => {
+      const o = fields(params)
+      const subSessions = optionalFlag(o, 'subSessions')
+      return { sessionId: sessionId(o), ...(subSessions === undefined ? {} : { subSessions }) }
+    },
     'sessions.unarchive': session,
     'sessions.markUnread': (params) => {
       const o = fields(params)
@@ -2593,6 +2665,20 @@ export function createValidators(platform: Platform): Validators {
         throw invalidParams('deviceId is not a device id')
       }
       return { sessionId: sessionId(o), deviceId }
+    },
+    'surfaces.answerAccess': (params) => {
+      const o = fields(params)
+      if (!isSurfaceAccessDecision(o.decision))
+        throw invalidParams('decision must be allow or deny')
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+      }
+    },
+    'terminals.revokeAccess': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), terminalId: string(o, 'terminalId', ID_CHARS) }
     },
     'devices.answerAccess': (params) => {
       const o = fields(params)

@@ -306,6 +306,10 @@ export interface TestHostOptions {
   fakeAppServer?: FakeAppServer
   /** Drivers over the built-in ones, by protocol. */
   drivers?: HostOptions['drivers']
+  /** The version detection reads from the program of an agent that runs the fake agent. */
+  programVersions?: Partial<Record<AgentId, string>>
+  /** The version of Kettu's own install that the launch of an agent running the fake agent names. */
+  installedVersions?: Partial<Record<AgentId, string>>
   /** The thread worker, the service in the test's own thread unless given. */
   threadWorker?: HostOptions['threadWorker']
 }
@@ -366,6 +370,7 @@ export async function startTestHost(options: TestHostOptions = {}): Promise<Test
       claudeTestEntrypoint: null,
       claudeRuns: {},
       promptSuggestions: true,
+      lightModel: { mode: 'small' },
       initialSetupDone: true,
       defaultAgent: null,
       computerUse: DEFAULT_SETTINGS.computerUse,
@@ -418,7 +423,17 @@ export async function startTestHost(options: TestHostOptions = {}): Promise<Test
           adapter: null,
         }
       }
-      if (options.fakeAs?.includes(def.id)) return detectAgent(fakeAgent(FAKE_AGENT_MAIN), ctx)
+      if (options.fakeAs?.includes(def.id)) {
+        const detection = await detectAgent(fakeAgent(FAKE_AGENT_MAIN), ctx)
+        const version = options.programVersions?.[def.id]
+        const installed = options.installedVersions?.[def.id]
+        if (installed && detection.state === 'available' && detection.spec) {
+          return { ...detection, spec: { ...detection.spec, version: installed } }
+        }
+        return version && detection.state === 'available'
+          ? { ...detection, cli: { path: FAKE_AGENT_MAIN, version, variable: null, problem: null } }
+          : detection
+      }
       return { state: 'not-installed', detail: `${def.name} is not part of the tests` }
     },
     protocols,

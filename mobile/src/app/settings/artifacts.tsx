@@ -48,7 +48,7 @@ export default function ArtifactConsents() {
 
   return (
     <ManagePage
-      title="Artifact 权限"
+      title="产物权限"
       intro="页面要读取项目文件或向你的 Agent 提问时会先问你。只保存自己数据的页面不会问。"
       onRefresh={read.reload}
     >

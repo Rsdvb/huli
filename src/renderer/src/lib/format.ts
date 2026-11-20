@@ -25,6 +25,12 @@ function makeFormatters(locale: string) {
     // like one today rather than on a 24-hour clock.
     weekdayClock: new Intl.DateTimeFormat(locale, { weekday: 'short', ...dayClockOptions(locale) }),
     monthDay: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+    monthDayClock: new Intl.DateTimeFormat(locale, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }),
     clock: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }),
     dayClock: new Intl.DateTimeFormat(locale, dayClockOptions(locale)),
     full: new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }),
@@ -120,6 +126,11 @@ export function clockTime(at: number): string {
 /** The day alone: "Oct 28", "10月28日". */
 export function monthDay(at: number): string {
   return format().monthDay.format(at)
+}
+
+/** The day and the clock time, without the year: "Dec 12, 2:05 PM", "12月12日 14:05". */
+export function monthDayTime(at: number): string {
+  return format().monthDayClock.format(at)
 }
 
 /** Calendar days from `at` to `now`: 0 the same day, 1 the day before. */

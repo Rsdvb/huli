@@ -256,7 +256,7 @@ export function RoutineEditor(props: {
       solid
       visible={seed !== null}
       onClose={props.onClose}
-      title={props.routine ? '编辑例程' : '新建例程'}
+      title={props.routine ? '编辑定时任务' : '新建定时任务'}
       message={
         props.routine ? undefined : '看一眼再创建；创建之前什么都不会运行。之后可以随时改或关掉。'
       }

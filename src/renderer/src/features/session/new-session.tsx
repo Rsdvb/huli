@@ -61,6 +61,7 @@ import { refreshLimits } from '@renderer/stores/usage'
 import {
   chooseNewSessionHost,
   choosePaneAgent,
+  newSessionPanel,
   openAgentSettings,
   openHarnessSettings,
   openSession,
@@ -70,10 +71,12 @@ import {
 import { DropOverlay } from './attachments/drop-overlay'
 import { useFileDrop } from './attachments/use-file-drop'
 import { attachmentContent, attachmentsBlock } from './composer/attachments'
+import { mentionResolver, NO_SURFACES, surfaceRefs } from './composer/chips'
+import { mentionSurfacesOf } from './composer/mention-surfaces'
 import { hasMessage, NEW_SESSION_DRAFT, readDraft, readDraftAttachments } from './composer/drafts'
 import { useAddMenu } from './composer/add-menu'
 import { StartStyles, TrayStyles } from './composer/affect-styles'
-import { PromptBox } from './composer/prompt-box'
+import { PromptBox, type SlashNote } from './composer/prompt-box'
 import { QuotaStrip } from './composer/quota-strip'
 import { useFallback } from './plan-quota'
 import { useBlockedEnter } from './composer/use-blocked-enter'
@@ -378,10 +381,28 @@ function DraftComposer({
   const agentsRead = useAgentsStore((s) => hostId !== null || s.loaded)
   const signIn = !!status && agentNeed(status) === 'sign-in'
   const parentId = parent?.id ?? null
+  // The commands the session will list once it starts, as its agent reported them to the session
+  // the first message will use.
+  const reported = useAgentOptionsStore((s) =>
+    agentId ? preparedFor(s, hostId, agentId)?.summary?.prepared?.commands : undefined,
+  )
+  const opening = useAgentOptionsStore((s) => {
+    const prepared = agentId ? preparedFor(s, hostId, agentId) : null
+    return !prepared || (!prepared.summary && !prepared.error)
+  })
+  const task = !!workflow
+  // Kettu's `/btw` asks about a conversation, and there is none yet; a task's message is its
+  // requirement, never a command.
+  const commands = useMemo(
+    () => (task || !reported ? NO_COMMANDS : reported.filter((c) => c.name !== 'btw')),
+    [task, reported],
+  )
+  const commandsNote: SlashNote | null =
+    !agentId || signIn || task ? null : !ready ? 'chooseProject' : opening ? 'loading' : null
   const add = useAddMenu({
     box,
     agentName: name ?? tc('attachments.theAgent'),
-    commands: NO_COMMANDS,
+    commands,
   })
 
   // The session the first message will use opens while it is written, so the menu shows what the
@@ -461,9 +482,14 @@ function DraftComposer({
       }
       const preparedId = preparedFor(optionsState, hostId, agentId)?.summary?.id ?? null
       const text = editor.current?.text() ?? box.source.text
+      const surfaces = projectPath ? mentionSurfacesOf(newSessionPanel(projectPath)) : NO_SURFACES
       const content: UserContent[] = [
         ...(text.trim() ? [{ type: 'text' as const, text }] : []),
         ...attachmentContent(attachments),
+        ...surfaceRefs(text, mentionResolver([], null, surfaces)).map((ref) => ({
+          type: 'ref' as const,
+          ref,
+        })),
       ]
       // A worktree chosen before the project's status is read is still a worktree.
       const worktree =
@@ -550,7 +576,8 @@ function DraftComposer({
               agentId={agentId}
               hostId={hostId}
               agentName={name ?? tc('attachments.theAgent')}
-              commands={NO_COMMANDS}
+              commands={commands}
+              commandsNote={commandsNote}
               placeholder={
                 reached?.resetsAt
                   ? tc('prompt.placeholder.limitReached', {

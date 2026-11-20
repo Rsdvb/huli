@@ -55,6 +55,7 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       nodeRuntime: message.nodeRuntime,
       fakeAgentPath: message.fakeAgentPath,
       sessionRouterPath: message.sessionRouterPath,
+      clineHostPath: message.clineHostPath,
       settings: message.settings,
       baseEnv: process.env,
       // A development run keeps its installs apart from the installed app's.
@@ -112,6 +113,15 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
           message.answer !== null
         ) {
           withHost((h) => h.marketResult(message.callId, message.answer))
+        }
+        break
+      case 'settings-result':
+        if (
+          Number.isSafeInteger(message.callId) &&
+          typeof message.answer === 'object' &&
+          message.answer !== null
+        ) {
+          withHost((h) => h.settingsResult(message.callId, message.answer))
         }
         break
       case 'trash-result':

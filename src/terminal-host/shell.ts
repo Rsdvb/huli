@@ -31,6 +31,18 @@ export function programName(file: string, platform: Platform): string {
 }
 
 /**
+ * A sign-in line the agent host wrote for PowerShell, Windows' default terminal shell, as the
+ * terminal's own shell runs it: unchanged in PowerShell, else handed to Windows PowerShell, for a
+ * shell Settings set to cmd.exe, Git Bash or another.
+ */
+export function forWindowsShell(line: string, shellName: string): string {
+  const name = shellName.toLowerCase()
+  if (name === 'pwsh' || name === 'powershell') return line
+  if (name === 'cmd') return `powershell -NoProfile -Command "${line.replace(/"/g, '\\"')}"`
+  return `powershell.exe -NoProfile -Command '${line.replace(/'/g, `'\\''`)}'`
+}
+
+/**
  * The shell a new terminal runs: the program picked in Settings, else `$SHELL` as a login shell
  * on macOS and Linux, else pwsh when it is on PATH and Windows PowerShell otherwise.
  */

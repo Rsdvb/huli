@@ -4,6 +4,7 @@
 // in the agent's process trees so that an idle stop, a restart, a quit or a crash stops it too.
 
 import type { ChildProcess } from 'node:child_process'
+import type { NodeRuntime } from '@shared/host-control'
 import type { ClaudeRunSettings } from '@shared/settings'
 import type { ConfigOption } from '@shared/thread'
 import type { AgentDefinition, LaunchSpec } from './catalog'
@@ -88,6 +89,14 @@ export interface HostedContext extends DriverContext {
    * detection finds again. Rejects with why none can run. A test may leave it out.
    */
   currentCli?(started: string): Promise<string>
+  /** The version the user's CLI printed when it was detected; null when it printed none. */
+  cliVersion?: string | null
+  /** Kettu's own folder for the files a driver writes for the agent, such as an extension. */
+  kettuDir?: string
+  /** The program that runs a script of Kettu's own as Node.js; a test may leave it out. */
+  nodeRuntime?: NodeRuntime
+  /** The bundle of the process that runs Cline's SDK; null or absent without one. */
+  clineHostPath?: string | null
 }
 
 export interface HostedDriver extends StoredConfig {

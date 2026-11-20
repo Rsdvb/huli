@@ -33,6 +33,7 @@ import { NARROW_WINDOW, PHONE_WINDOW } from '@renderer/features/shell/narrow'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
+import type { SettingsSection } from '@shared/settings-catalog'
 
 type PageView =
   // At launch, until the last session or New session replaces it.
@@ -111,9 +112,13 @@ export const PINNED_GROUP = 'pinned'
 /** This computer as the host the sidebar is narrowed to, which has no id of its own. */
 export const THIS_COMPUTER = 'this-computer'
 
-/** What the side panel shows; one pane at a time. An artifact's pane opens from the thread. */
+/**
+ * What the side panel shows; one pane at a time. An artifact's pane opens from the thread.
+ * Terminals, browser pages and devices share one row of tabs, and `surfaces` is that row's pane
+ * while none of them is open yet.
+ */
 export type SidePane =
-  'terminal' | 'files' | 'browser' | 'devices' | 'computer' | 'requests' | 'artifact'
+  'terminal' | 'files' | 'browser' | 'devices' | 'surfaces' | 'computer' | 'requests' | 'artifact'
 
 // No session id takes this form, so New session's panel in a project has a key of its own.
 const NEW_SESSION_PANEL = 'new-session:'
@@ -121,29 +126,7 @@ const NEW_SESSION_PANEL = 'new-session:'
 /** How many sessions' open panes a restart brings back; the most recently changed win. */
 const REMEMBERED_PANELS = 200
 
-export type SettingsSection =
-  | 'general'
-  | 'appearance'
-  | 'agents'
-  | 'harnesses'
-  | 'memory'
-  | 'terminal'
-  | 'git'
-  | 'notifications'
-  | 'account'
-  | 'usage'
-  | 'archived'
-  | 'artifacts'
-  | 'sharing'
-  | 'remote'
-  | 'hosts'
-  | 'browser'
-  | 'devices'
-  | 'computer-use'
-  | 'agent-network'
-  | 'backup'
-  | 'advanced'
-  | 'about'
+export type { SettingsSection }
 
 interface ViewStore {
   /** The regular New session draft's choices, kept while another view replaces its pane. */
@@ -159,7 +142,13 @@ interface ViewStore {
    * `item` is the page of one item of the section, such as an agent's or a server's, instead of
    * the list.
    */
-  settings: { open: boolean; section: SettingsSection | null; item: string | null }
+  settings: {
+    open: boolean
+    section: SettingsSection | null
+    item: string | null
+    /** A row to scroll to and flash once its page shows, as an agent's open_settings asks. */
+    row?: string | null
+  }
   /** The shortcuts dialog, over whatever the window shows. Not persisted. */
   shortcutsOpen: boolean
   /** Search, over whatever the window shows. Not persisted. */
@@ -811,6 +800,11 @@ export function openSettings(section: SettingsSection | null = null): void {
 /** Opens a section at one of its items' own pages, or at the list with null. */
 export function openSettingsItem(section: SettingsSection, item: string | null): void {
   useViewStore.setState({ settings: { open: true, section, item } })
+}
+
+/** Opens a section, or one of its items' pages, at a row, which flashes as a search result does. */
+export function openSettingsRow(section: SettingsSection, item: string | null, row: string): void {
+  useViewStore.setState({ settings: { open: true, section, item, row } })
 }
 
 /** Opens Agents at one agent's page, or at the list with null. */

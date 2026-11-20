@@ -313,7 +313,7 @@ function Note(props: {
   const extra = (agent.balances ?? []).some((b) => b.label === 'Extra usage' && b.amount > 0)
   const note = extra
     ? `到 100% 时，${agent.name} 会改从额外用量里扣，扣完才停止回答。`
-    : `到 100% 时，${agent.name} 会停止回答，直到窗口重置。例程会等待并说明原因；会话可以切换到其他 Agent 继续。`
+    : `到 100% 时，${agent.name} 会停止回答，直到窗口重置。定时任务会等待并说明原因；会话可以切换到其他 Agent 继续。`
   return (
     <View style={styles.noteWrap}>
       <View style={styles.noteRow}>
@@ -352,7 +352,7 @@ function Note(props: {
 function Extras(props: { agent: AgentStatus }) {
   const { agent } = props
   const balances = agent.balances ?? []
-  const credits = agent.resetCredits
+  const credits = agent.resets
   if (balances.length === 0 && !credits) return null
   return (
     <ListGroup>
@@ -369,11 +369,11 @@ function Extras(props: { agent: AgentStatus }) {
       {credits ? (
         <ListRow
           title="重置卡"
-          subtitle={credits.available > 0 ? '在 Agent 设置里使用。' : '账号里现在没有重置卡。'}
-          value={`${credits.available} 张`}
-          chevron={credits.available > 0}
+          subtitle={credits.count > 0 ? '在 Agent 设置里使用。' : '账号里现在没有重置卡。'}
+          value={`${credits.count} 张`}
+          chevron={credits.count > 0}
           onPress={
-            credits.available > 0
+            credits.count > 0
               ? () => router.push({ pathname: '/settings/agent', params: { id: agent.id } })
               : undefined
           }

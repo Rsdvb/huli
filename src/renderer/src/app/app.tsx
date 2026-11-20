@@ -44,6 +44,7 @@ import { showSearch, useViewStore } from '@renderer/stores/view'
 import { usePathRequest } from '@renderer/web/host-path-request'
 import { useKeyboardShortcuts } from './shortcuts'
 import { useActionLog, useAppCommands } from './commands'
+import { QuitHint } from './quit-hint'
 
 const SettingsPage = lazy(() => import('@renderer/features/settings/settings-page'))
 // The picker for a folder or a program on a host reached over the channel, in place of a system
@@ -140,6 +141,7 @@ export function App() {
         {/* Huli: Export… in a session's menu, which main saves. */}
         {!isWeb && <SessionExportDialog />}
         <Toaster />
+        <QuitHint />
       </div>
     </TooltipProvider>
   )

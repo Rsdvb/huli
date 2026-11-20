@@ -40,7 +40,7 @@ export default function SessionArtifacts() {
             .filter((a) => a.sessionId === id && a.deletedAt === null)
             .sort((a, b) => b.updatedAt - a.updatedAt),
         ),
-      (failed: unknown) => setError(errorText(failed, '没能读取 Artifacts。')),
+      (failed: unknown) => setError(errorText(failed, '没能读取产物。')),
     )
   }, [link, id])
 
@@ -53,7 +53,7 @@ export default function SessionArtifacts() {
   if (!list) {
     body = error ? <StateView text={error} tone="danger" retry={load} /> : <StateView loading />
   } else if (list.length === 0) {
-    body = <StateView text="这个会话还没有做出 Artifact。" icon={G.artifacts} />
+    body = <StateView text="这个会话还没有做出产物。" icon={G.artifacts} />
   } else {
     body = (
       <FlatList

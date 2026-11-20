@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository. `CLAUDE.md` imports this 
 
 Kettu is an Electron desktop GUI for terminal coding agents: Claude Code, Codex CLI, opencode and Pi. It is in early development; [README.md](./README.md) has the product vision and features, and [ROADMAP.md](./ROADMAP.md) the plans.
 
-Kettu is only a GUI: it implements no agent. It drives Claude Code through the Claude Agent SDK, Codex through `codex app-server`, and every other agent over the Agent Client Protocol (ACP).
+Kettu is only a GUI: it implements no agent. It drives Claude Code through the Claude Agent SDK, Codex through `codex app-server`, DeepSeek Harness through its SDK interface, Pi through its RPC mode, OpenCode through its own server and Cline through Cline's SDK, the last two with the Agent Client Protocol (ACP) as their fallback, and every other agent over ACP.
 
 ## Engineering rules
 
@@ -36,13 +36,15 @@ Kettu is only a GUI: it implements no agent. It drives Claude Code through the C
 
 Electron 44, electron-vite 6 (Vite 8), React 19, TypeScript 6 in strict mode, Tailwind CSS v4, pnpm 10, electron-builder. TypeScript stays on 6.0 until typescript-eslint supports 7.
 
-Beyond the UI stack: `@agentclientprotocol/sdk` for ACP (protocol v1 through the SDK's `unstable` entrypoint, whose schema carries the subagent updates), `@modelcontextprotocol/sdk` for the artifacts service's MCP server, `electron-updater` for updates, Vitest for tests, `react-day-picker` for the usage page's date range picker, `uqr` for the pairing QR code in Settings › Remote access, `perfect-freehand` for the strokes of the artifact canvas's pen, `tldts` for the registrable domain the link confirmation names and the public names a link's site icon is asked for, `semver` for matching harness versions against the npm ranges of Kettu's signed harness compatibility manifest, and the Inter, Manrope, Source Serif 4 and JetBrains Mono faces from `@fontsource-variable`: the built-in theme sets the interface and replies in Inter, page and dialog titles in Manrope and code in JetBrains Mono, and a theme may choose others.
+Beyond the UI stack: `@agentclientprotocol/sdk` for ACP (protocol v1 through the SDK's `unstable` entrypoint, whose schema carries the subagent updates), `@modelcontextprotocol/sdk` for the artifacts service's MCP server, `electron-updater` for updates, Vitest for tests, `react-day-picker` for the usage page's date range picker, `uqr` for the pairing QR code in Settings › Remote access, `perfect-freehand` for the strokes of the artifact canvas's pen, `tldts` for the registrable domain the link confirmation names and the public names a link's site icon is asked for, `country-flag-icons` for the flags of the interface languages in Settings › General, `semver` for matching harness versions against the npm ranges of Kettu's signed harness compatibility manifest, and the Inter, Manrope, Source Serif 4 and JetBrains Mono faces from `@fontsource-variable`: the built-in theme sets the interface and replies in Inter, page and dialog titles in Manrope and code in JetBrains Mono, and a theme may choose others.
 
 Computer use runs Cua Driver's `cua-driver` program (MIT) as a child of the agent host, in its direct MCP mode with its usage reports and update checks off. It is no npm dependency: `tools/install/cua-driver.mjs` fetches the pinned release for the target into `resources/cua-driver/`, checked by SHA-256, and the app ships it in its resources.
 
 Agents' network can go through mihomo (GPL-3.0), run as a separate child program of the agent host and not linked into the app: `tools/install/mihomo.mjs` fetches the pinned release for the target into `resources/mihomo/`, checked by SHA-256.
 
 Claude Code's `@anthropic-ai/claude-agent-sdk` is never a dependency: Kettu installs it into its data folder on first use and loads it at runtime, because the SDK's license grants no right to redistribute it. Codex's `@openai/codex` is not one either: Kettu runs the user's own `codex`. The repository holds only its own types for the parts of the SDK it uses, and lint rejects a value import of the package.
+
+Cline's `@cline/sdk` is no dependency either: the `cline` package Kettu installs into its data folder brings it, and a process of Kettu's own (`src/agent-host/cline/cline-host.ts`) loads it from there, so the SDK always has its CLI's version. It is Cline's preferred interface: a version it was not checked on, or a start over it that fails, runs `cline --acp` instead.
 
 ### UI stack: one library per concern
 

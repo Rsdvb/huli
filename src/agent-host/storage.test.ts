@@ -21,6 +21,7 @@ import {
   type SessionRecord,
 } from './storage'
 import { parseAgentOptionsFile } from './agent-options'
+import { Projects } from './projects'
 
 it.each(['default', true, false] as const)(
   'preserves boolean configuration inheritance and metadata for %s',
@@ -307,6 +308,21 @@ describe('the host files', () => {
     })
   })
 
+  it('keeps the sub-sessions a session archived alone left in the list', () => {
+    const archived: SessionRecord = { ...session, archivedAt: 3, leftSubSessions: ['c1', 'c2'] }
+    expect(parseSessionsFile({ sessions: [archived] })).toEqual({
+      version: 1,
+      sessions: [archived],
+    })
+    expect(
+      parseSessionsFile({ sessions: [{ ...archived, leftSubSessions: ['c1', '', 4, 'c1'] }] }),
+    ).toEqual({ version: 1, sessions: [{ ...archived, leftSubSessions: ['c1'] }] })
+    expect(parseSessionsFile({ sessions: [{ ...archived, leftSubSessions: 'c1' }] })).toEqual({
+      version: 1,
+      sessions: [{ ...session, archivedAt: 3 }],
+    })
+  })
+
   it('keeps the agents that had a session before its current one', () => {
     const switched: SessionRecord = {
       ...session,
@@ -547,6 +563,49 @@ describe('the host files', () => {
     )
     const store = projectsFile(dir, log)
     expect(store.file).toBe(path.join(dir, 'state', 'projects.json'))
+  })
+
+  it('keeps project pins across loads and ignores invalid stored pin times', async () => {
+    const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
+    const file = projectsFile(dir, log)
+    file.save({ version: 1, projects: [project] })
+    await file.flush()
+    const registry = (time: number) =>
+      new Projects({
+        file: projectsFile(dir, log),
+        platform: 'linux',
+        now: () => time,
+        isDirectory: async () => false,
+      })
+
+    const first = registry(3)
+    await first.load()
+    expect(first.list()).toEqual([
+      {
+        path: '/repo',
+        name: 'repo',
+        missing: true,
+        lastOpenedAt: 2,
+        pinnedAt: null,
+      },
+    ])
+    first.pin(first.match('/repo'), true)
+    await first.flush()
+
+    const next = registry(4)
+    await next.load()
+    next.pin(next.match('/repo'), true)
+    next.touch(next.match('/repo'))
+    expect(next.list()[0]).toMatchObject({ pinnedAt: 3, lastOpenedAt: 4 })
+    next.pin(next.match('/repo'), false)
+    await next.flush()
+    expect((await projectsFile(dir, log).load()).projects).toEqual([
+      { ...project, lastOpenedAt: 4 },
+    ])
+    expect(parseProjectsFile({ projects: [{ ...project, pinnedAt: -1 }] })).toEqual({
+      version: 1,
+      projects: [project],
+    })
   })
 
   it('keeps what each agent reported and drops what does not parse, entry by entry', () => {

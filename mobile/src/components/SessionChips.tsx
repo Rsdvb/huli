@@ -154,12 +154,12 @@ export function SessionChips(props: {
         ) : null}
         {summary.routine ? (
           <Chip
-            label={`例程 ${routine ?? ''}`}
+            label={`定时任务 ${routine ?? ''}`}
             onPress={() => router.push(`/routine/${summary.routine!.routineId}`)}
           >
             <Icon icon={GI.routine} size={13} color={c.textSecondary} />
             <Text style={[styles.text, { color: c.text }]} numberOfLines={1}>
-              {routine ?? '例程'}
+              {routine ?? '定时任务'}
             </Text>
           </Chip>
         ) : null}

@@ -81,6 +81,7 @@ export function FailedTurnActions({
         onRetry={retry}
         retrying={busy}
         report={{ hostId, sessionId, ...(agentId ? { agentId } : {}) }}
+        origin="turn"
         error={error}
         lead={
           fallback && (

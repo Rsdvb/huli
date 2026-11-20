@@ -26,7 +26,7 @@ import type {
   NodeRef,
   NodeView,
 } from './agent-network'
-import type { ControlOutcome } from './control'
+import type { ControlOutcome, SurfaceAccessDecision } from './control'
 import type { ContextBreakdown, ContextEstimates } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
@@ -70,6 +70,7 @@ import type {
   CommunityDirectory,
   CommunityInstalled,
   CommunityListing,
+  CommunityWorkflow,
 } from './market-community'
 import type { MediaAuthorization, MediaOpenResult } from './media'
 import type { ModelRequestRaw, ModelRequestsOverview, ModelRequestsPage } from './model-requests'
@@ -101,6 +102,7 @@ import type {
 } from './git'
 import type { PortConnectionState } from './port-rpc'
 import type { PathCompletion } from './remote/host-admin'
+import type { ReportOrigin } from './report'
 import type {
   RoutineChanges,
   RoutineDraft,
@@ -111,6 +113,7 @@ import type {
   RoutinesProblem,
 } from './routines'
 import type { AgentColor } from './settings'
+import type { SettingsSection } from './settings-catalog'
 import type {
   SessionTaskRef,
   WorkflowAddSource,
@@ -145,6 +148,7 @@ import type {
   MarketPublishAsk,
   SessionSnapshot,
   SessionStatus,
+  SlashCommand,
   ThreadEntry,
   UserContent,
 } from './thread'
@@ -196,6 +200,23 @@ export interface PlanAlert {
   resetsAt: number | null
 }
 
+/** The rate-limit reset credits an account holds: spending one restarts its windows at once. */
+export interface PlanResets {
+  count: number
+  /**
+   * Each credit and when it runs out, null for never: the soonest first, those that never run out
+   * last. Absent when only the number could be read, so the expiries are unknown.
+   */
+  each?: { id: string; until: number | null }[]
+  observedAt: number
+}
+
+/** Why the last read of the reset credits fell short: the sign-in, their details, or the read. */
+export type ResetsError = 'sign-in-expired' | 'details' | 'failed'
+
+/** The vendor's answer to spending a reset credit; only `reset` started the windows again. */
+export type ResetSpendCode = 'reset' | 'nothing_to_reset' | 'no_credit' | 'already_redeemed'
+
 export type LimitsReason =
   | 'vendor-disallows'
   | 'harness-does-not-offer'
@@ -210,24 +231,6 @@ export interface ProviderBalance {
   amount: number
   currency: string
 }
-
-/** A credit that resets a plan's current limit windows once, as its vendor names it. */
-export interface ResetCredit {
-  id: string
-  title: string | null
-  description: string | null
-  /** When it expires, in ms; null when it does not. */
-  expiresAt: number | null
-}
-
-/** The limit reset credits an account has: how many, and those the vendor detailed. */
-export interface ResetCredits {
-  available: number
-  credits: ResetCredit[]
-}
-
-/** What redeeming a reset credit did, as Codex answers. */
-export type ResetCreditOutcome = 'reset' | 'nothingToReset' | 'noCredit' | 'alreadyRedeemed'
 
 export interface AgentProvider {
   id: string
@@ -425,9 +428,10 @@ export interface AgentStatus {
    */
   movedAccounts?: { to: HarnessId; audience: string; refused: boolean }
   limits: PlanLimit[] // subscription windows, see plan limits in the session model
-  /** The limit reset credits the account has, for an agent that can redeem them (Codex). */
-  resetCredits?: ResetCredits
   limitsError?: string // why the last limits read failed, until one succeeds; `limits` stay
+  /** Codex's reset credits on a ChatGPT sign-in; absent when none were read or it holds none. */
+  resets?: PlanResets
+  resetsError?: ResetsError
   detail: string | null // install hint or error message
   installUrl: string | null
   installNotice?: string | null // the vendor installer's effects, shown before installation
@@ -594,6 +598,7 @@ export type McpToolGroup =
   | 'memory'
   | 'reports'
   | 'workflows'
+  | 'settings'
 
 export interface McpToolSummary {
   name: string
@@ -661,6 +666,7 @@ export interface Project {
   name: string
   missing: boolean // the folder no longer exists
   lastOpenedAt: number
+  pinnedAt?: number | null // absent on hosts that do not support project pins
 }
 
 export type SessionAttention = 'none' | 'permission' | 'unread' | 'error'
@@ -757,6 +763,12 @@ export interface SideChatAgent {
   name: string
 }
 
+/** An agent the lightweight tasks' model may be pinned to: one that can ask in a hidden session. */
+export interface LightAgent {
+  agentId: AgentId
+  name: string
+}
+
 /** How far a session's latest plan got, as its summary carries it. */
 export interface PlanProgress {
   done: number
@@ -795,9 +807,14 @@ export interface StartNotice {
   actual: string | boolean | null // null when the session has no such option
 }
 
-/** What only a prepared session carries: New session shows its options before the first message. */
+/**
+ * What only a prepared session carries: New session shows its options and slash commands before
+ * the first message.
+ */
 export interface PreparedInfo {
   config: ConfigOption[]
+  /** The slash commands its agent reported; absent from older hosts. */
+  commands?: SlashCommand[]
   notices: StartNotice[]
   openedAt: number
 }
@@ -906,11 +923,10 @@ export interface HostContract {
     params: { agentId: AgentId; force?: boolean; ask?: boolean }
     result: void
   }
-  // Redeems one of the account's limit reset credits, the one named or the next the vendor picks,
-  // then reads the limits again.
-  'agents.useResetCredit': {
-    params: { agentId: AgentId; creditId?: string }
-    result: { outcome: ResetCreditOutcome }
+  /** Spends one reset credit, which cannot be undone; `requestId` makes a retry spend no second. */
+  'agents.spendReset': {
+    params: { agentId: AgentId; creditId: string; requestId: string }
+    result: { code: ResetSpendCode }
   }
   'agents.details': { params: { agentId: AgentId }; result: AgentDetails }
   // A Claude Code agent's auto-compact windows and prompt cache duration, read from its settings
@@ -935,6 +951,22 @@ export interface HostContract {
     result: { sessions: ImportableSession[]; nextCursor: string | null }
   }
   'agents.options': { params: void; result: AgentOptions[] }
+  // The agents the lightweight tasks' model may be pinned to; older hosts lack it.
+  'agents.lightAgents': { params: void; result: { agents: LightAgent[] } }
+  // A draft of a problem report's description, written by the agent the report is about, else the
+  // one new sessions start with, from where the report was opened, the error and the host's recent
+  // warnings, with the name of the agent that wrote it; a null draft when there is neither an error nor a
+  // recent record to write from. `language` is the tag the user reads.
+  'agents.draftReport': {
+    params: {
+      origin: ReportOrigin | null
+      sessionId: string | null
+      agentId: AgentId | null
+      error: string | null
+      language: string
+    }
+    result: { draft: string | null; agent: string | null }
+  }
   // For Marketplace › Installed: Kettu's own server and each agent's own file.
   // Neither starts an agent, and neither reads an agent's configuration file.
   'mcp.status': { params: void; result: McpStatus }
@@ -1012,6 +1044,15 @@ export interface HostContract {
     }
     result: void
   }
+  // Any window's or device's answer to a card an agent's change_settings shows: Change or Don't
+  // change; the first counts.
+  'settings.answerChange': {
+    params: { sessionId: string; entryId: string; decision: 'change' | 'keep' }
+    result: void
+  }
+  // Undo on a settings line: the rows go back to what they were, refused with `conflict` once one
+  // of them changed again since, which takes the undo away.
+  'settings.undoChange': { params: { sessionId: string; entryId: string }; result: void }
   // What was put off or refused, newest first, kept on the host to publish later.
   'market.publishDrafts': { params: void; result: { drafts: PublishDraft[] } }
   'market.discardPublishDraft': { params: { id: string }; result: void }
@@ -1022,6 +1063,9 @@ export interface HostContract {
     result: CommunityDirectory
   }
   'market.communityListing': { params: { id: string }; result: CommunityListing }
+  // A workflow listing's flow for its page, before it is added: only the current version's
+  // `workflow.yaml` is read, checked and parsed; nothing is kept on the host or run.
+  'market.communityWorkflow': { params: { id: string }; result: CommunityWorkflow }
   // The plugins installed from the Kettu Marketplace, and where every installed item stands.
   'market.communityInstalled': { params: { refresh?: boolean }; result: CommunityInstalled }
   // Downloads a plugin listing's current version, checks every file, and installs or updates it
@@ -1069,6 +1113,7 @@ export interface HostContract {
   'projects.add': { params: { path: string }; result: Project }
   'projects.remove': { params: { path: string }; result: void }
   'projects.touch': { params: { path: string }; result: void }
+  'projects.pin': { params: { path: string; pinned: boolean }; result: void }
   // How the project names and prepares its sessions' worktrees.
   'projects.worktreeSettings': { params: { path: string }; result: ProjectWorktreeSettings }
   // A device needs the owner's leave to use the terminal to change these, as they run a command.
@@ -1363,7 +1408,11 @@ export interface HostContract {
   'sessions.rename': { params: { sessionId: string; title: string | null }; result: void }
   'sessions.close': { params: { sessionId: string }; result: void }
   'sessions.pin': { params: { sessionId: string; pinned: boolean }; result: void }
-  'sessions.archive': { params: { sessionId: string }; result: void }
+  /**
+   * `subSessions: false` archives the session alone, its sub-sessions staying in the list on their
+   * own until it is restored; without it, its whole tree is archived.
+   */
+  'sessions.archive': { params: { sessionId: string; subSessions?: boolean }; result: void }
   'sessions.unarchive': { params: { sessionId: string }; result: void }
   // unread false: seen, as showing it would mark it.
   'sessions.markUnread': { params: { sessionId: string; unread: boolean }; result: void }
@@ -1699,6 +1748,14 @@ export interface HostContract {
     params: { sessionId: string; entryId: string; decision: DeviceAccessDecision }
     result: void
   }
+  // Any window's or device's answer to a card asking whether the agent may use a terminal or a
+  // browser tab the user opened, or rename a terminal of theirs; the first counts.
+  'surfaces.answerAccess': {
+    params: { sessionId: string; entryId: string; decision: SurfaceAccessDecision }
+    result: void
+  }
+  // Takes back the use of a terminal the user opened from the session's agent, which asks again.
+  'terminals.revokeAccess': { params: { sessionId: string; terminalId: string }; result: void }
   // Takes back the allow a session's agent has for a device, so its next use asks again.
   'devices.revokeAccess': { params: { sessionId: string; deviceId: string }; result: void }
   // The mobile devices agents may always use on this host, and taking one off that list.
@@ -1894,7 +1951,7 @@ export const HOST_METHODS = [
   'agents.readOptions',
   'agents.readFirstOptions',
   'agents.refreshLimits',
-  'agents.useResetCredit',
+  'agents.spendReset',
   'agents.details',
   'agents.claudeSettings',
   'agents.setClaudeSetting',
@@ -1903,6 +1960,8 @@ export const HOST_METHODS = [
   'agents.refreshAccount',
   'agents.listSessions',
   'agents.options',
+  'agents.lightAgents',
+  'agents.draftReport',
   'mcp.status',
   'mcp.retry',
   'market.catalog',
@@ -1925,10 +1984,13 @@ export const HOST_METHODS = [
   'market.skillRepository',
   'market.addSkill',
   'market.answerPublish',
+  'settings.answerChange',
+  'settings.undoChange',
   'market.publishDrafts',
   'market.discardPublishDraft',
   'market.community',
   'market.communityListing',
+  'market.communityWorkflow',
   'market.communityInstalled',
   'market.installCommunityPlugin',
   'market.addCommunityWorkflow',
@@ -1949,6 +2011,7 @@ export const HOST_METHODS = [
   'projects.add',
   'projects.remove',
   'projects.touch',
+  'projects.pin',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
   'paths.complete',
@@ -2134,6 +2197,8 @@ export const HOST_METHODS = [
   'browser.answerOrigin',
   'devices.answerAccess',
   'devices.revokeAccess',
+  'surfaces.answerAccess',
+  'terminals.revokeAccess',
   'devices.allowed',
   'devices.forget',
   'computer.answerApp',
@@ -2209,6 +2274,8 @@ export type HostEvent =
   | { type: 'market.keysChanged' } // the Marketplace's keys changed; a page showing them reads again
   // The account, what it published or the drafts changed; Marketplace › Published reads again.
   | { type: 'market.publishedChanged' }
+  // To the windows showing a session: its agent's open_settings, Settings at a row.
+  | { type: 'settings.open'; section: SettingsSection; item: string | null; row: string }
   | { type: 'memory.changed' } // Kettu's memory or its switch changed; a page showing it reads again
   // A server's sign-in changed; `loginId` and `error` close a Connect the window started.
   | {

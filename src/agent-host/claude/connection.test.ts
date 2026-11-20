@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1923,6 +1923,57 @@ describe('a turn', () => {
   })
 })
 
+describe('terminal-only commands', () => {
+  const names = (target: Target): string[] =>
+    target.thread.session.commands.map((command) => command.name)
+  const init = (query: FakeQuery, terminal: string[]): SdkMessage =>
+    ({
+      type: 'system',
+      subtype: 'init',
+      session_id: query.sessionId,
+      terminal_slash_commands: terminal,
+    }) as SdkMessage
+
+  async function opened(s: Awaited<ReturnType<typeof setup>>, version: string) {
+    s.sdk.init = { ...s.sdk.init, claude_code_version: version }
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    await settle()
+    return { target, sessionId }
+  }
+
+  it('leaves out, before a turn of its own, what a turn of the same version named', async () => {
+    const kettuDir = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-dir-'))
+    dirs.push(kettuDir)
+    const s = await setup({}, {}, { kettuDir })
+    const first = await opened(s, '2.1.327')
+    // Claude Code names them only in the init a turn starts with.
+    expect(names(first.target)).toEqual(['review', 'statusline'])
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit(init(query, ['statusline']))
+      query.finish()
+    }
+    await s.connection.prompt(first.sessionId, [{ type: 'text', text: 'Hi' }])
+    expect(names(first.target)).toEqual(['review'])
+
+    const second = await opened(s, '2.1.327')
+    expect(names(second.target)).toEqual(['review'])
+
+    s.connection.close()
+    await vi.waitFor(async () =>
+      expect(await readFile(path.join(kettuDir, 'terminal-commands.json'), 'utf8')).toContain(
+        'statusline',
+      ),
+    )
+    const later = await setup({}, {}, { kettuDir })
+    expect(names((await opened(later, '2.1.327')).target)).toEqual(['review'])
+    // Another version may name others, so its sessions wait for a turn of their own.
+    expect(names((await opened(later, '2.1.328')).target)).toEqual(['review', 'statusline'])
+  })
+})
+
 describe('ultracode', () => {
   const option = (config: readonly ConfigOption[]): ConfigOption | undefined =>
     config.find((item) => item.id === '__ultracode')
@@ -3293,6 +3344,17 @@ describe('subagents', () => {
   async function subagentsOn(s: Awaited<ReturnType<typeof setup>>, models: string[]) {
     const parent = new Target()
     const children = models.map(() => new Target())
+    for (const child of children) {
+      child.thread = threadFromSnapshot({
+        session: {
+          ...baseSession,
+          origin: 'subagent',
+          subagent: { description: null, canCancel: true, stateKnown: true, stopReason: null },
+        },
+        entries: [],
+        seq: 0,
+      })
+    }
     const { sessionId } = await s.connection.newSession('/repo')
     s.connection.register(sessionId, parent)
     children.forEach((child, i) => s.connection.register(`task-${i + 1}`, child))
@@ -3360,6 +3422,29 @@ describe('subagents', () => {
     ])
     expect(children[0]!.thread.session.usage).toMatchObject({ used: 10_012, size: 500_000 })
     expect(children[1]!.thread.session.usage).toMatchObject({ used: 12_012, size: 150_000 })
+    query().finish()
+    await turn
+  })
+
+  it("names the model each subagent ran on, apart from its parent's model", async () => {
+    const s = await setup()
+    const { parent, children, query, turn } = await subagentsOn(s, [
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+    ])
+    expect(children[0]!.thread.session.subagent).toMatchObject({ model: 'claude-sonnet-5-5' })
+    expect(children[1]!.thread.session.subagent).toMatchObject({ model: 'claude-haiku-5-5' })
+    expect(parent.thread.session.subagent).toBeNull()
+    // Claude Code's own messages name no model.
+    query().emit(
+      assistant(query(), 'msg_x', [{ type: 'text', text: 'Stopped' }], {
+        message: { id: 'msg_x', model: '<synthetic>', content: [] },
+        parent_tool_use_id: 'toolu_1',
+        agent_id: 'task-1',
+      }),
+    )
+    await settle()
+    expect(children[0]!.thread.session.subagent).toMatchObject({ model: 'claude-sonnet-5-5' })
     query().finish()
     await turn
   })

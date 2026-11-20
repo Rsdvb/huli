@@ -2,15 +2,8 @@
 // session is a Codex thread under the thread's own id; its settings live here and go with each
 // turn, since app-server keeps none between them that Kettu could read back.
 
-import { randomUUID } from 'node:crypto'
 import os from 'node:os'
-import type {
-  AgentAccount,
-  PlanLimit,
-  ProviderBalance,
-  ResetCreditOutcome,
-  ResetCredits,
-} from '@shared/agent-host'
+import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
 import type { Platform } from '@shared/platform'
 import type { ConfigOption, PermissionOption, SideChatStep, TokenTotals } from '@shared/thread'
@@ -96,7 +89,6 @@ import {
 } from './mcp-status'
 import type {
   CollaborationMode,
-  ConsumeResetCreditResponse,
   GetAccountRateLimitsResponse,
   GetAccountResponse,
   InitializeResponse,
@@ -511,7 +503,7 @@ export class CodexConnection implements AgentConnection {
   private readonly collectors = new Map<string, (delivery: Delivery) => void>()
   /** Subagent threads, to the thread each runs under. */
   private readonly parents = new Map<string, string>()
-  private extras: { balances: ProviderBalance[]; resetCredits: ResetCredits | null } | null = null
+  private extras: { balances: ProviderBalance[] } | null = null
   /** The models as last listed, which each turn's service tier is read from. */
   private knownModels: Model[] = []
   private modelsReadAt: number | null = null
@@ -2168,17 +2160,8 @@ export class CodexConnection implements AgentConnection {
     return snapshots.flatMap((snapshot) => mapRateLimits(snapshot, now))
   }
 
-  planExtras(): { balances: ProviderBalance[]; resetCredits: ResetCredits | null } | null {
+  planExtras(): { balances: ProviderBalance[] } | null {
     return this.extras
-  }
-
-  async useResetCredit(creditId: string | null): Promise<ResetCreditOutcome> {
-    const response = await this.call<ConsumeResetCreditResponse>(
-      'account/rateLimitResetCredit/consume',
-      // One key per attempt: Codex answers a repeat of a redeemed one without spending another.
-      { idempotencyKey: randomUUID(), ...(creditId ? { creditId } : {}) },
-    )
-    return response.outcome
   }
 }
 

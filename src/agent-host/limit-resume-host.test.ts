@@ -94,12 +94,15 @@ function stopAtLimit(
 const paused = (window: TestPort, id: string) =>
   window.until(() => (window.summary(id)?.limitPause ?? null) !== null)
 
+// Taken once the host runs, just before the limit stops the turn: a host that starts slowly, as
+// under a full test run, would otherwise find the reset already past.
 const soon = () => Math.ceil(Date.now() / 1000) + 1
 
 it('pauses until the reset Codex gave, then sends the stopped message again', async () => {
-  const resetS = soon()
+  let resetS = 0
   const fake = codex(() => usedUp(resetS))
   const { test, window, id, started } = await running(fake)
+  resetS = soon()
   stopAtLimit(fake.server, started, resetS)
   await paused(window, id)
   expect(window.summary(id)?.limitPause).toMatchObject({
@@ -122,13 +125,14 @@ it('pauses until the reset Codex gave, then sends the stopped message again', as
 })
 
 it('sends the prompt queued behind the stopped turn instead', async () => {
-  const resetS = soon()
+  let resetS = 0
   const fake = codex(() => usedUp(resetS))
   const { window, id, started } = await running(fake)
   await window.request('sessions.queue', {
     sessionId: id,
     content: [{ type: 'text', text: 'then add tests' }],
   })
+  resetS = soon()
   stopAtLimit(fake.server, started, resetS)
   await paused(window, id)
   await vi.waitFor(() => expect(fake.turnOf('then add tests')).toBeDefined(), { timeout: 5_000 })
@@ -136,7 +140,7 @@ it('sends the prompt queued behind the stopped turn instead', async () => {
 })
 
 it('asks the agent to carry on after work the stopped turn did', async () => {
-  const resetS = soon()
+  let resetS = 0
   const fake = codex(() => usedUp(resetS))
   const { window, id, started } = await running(fake)
   fake.server.notify('item/completed', {
@@ -144,6 +148,7 @@ it('asks the agent to carry on after work the stopped turn did', async () => {
     item: { type: 'agentMessage', id: 'msg-1', text: 'Reading the parser.', phase: null },
   })
   await window.untilEntry(id, (entry) => entry.kind === 'agent')
+  resetS = soon()
   stopAtLimit(fake.server, started, resetS)
   await paused(window, id)
   await vi.waitFor(() => expect(fake.turnOf('Continue')).toBeDefined(), { timeout: 5_000 })
@@ -151,9 +156,10 @@ it('asks the agent to carry on after work the stopped turn did', async () => {
 })
 
 it('keeps the session stopped once the pause is cancelled', async () => {
-  const resetS = soon()
+  let resetS = 0
   const fake = codex(() => usedUp(resetS))
   const { window, id, started } = await running(fake)
+  resetS = soon()
   stopAtLimit(fake.server, started, resetS)
   await paused(window, id)
   await window.request('sessions.limitPause', { sessionId: id, action: 'cancel' })
@@ -176,9 +182,10 @@ it("waits on while the plan is still used up at the pause's time", async () => {
 
 it('keeps the pause across a restart and goes on after it', async () => {
   const dir = await tempFolder('kite-limit-host-')
-  const resetS = soon() + 1
+  let resetS = 0
   const first = codex(() => usedUp(resetS))
   const { test, window, id, started } = await running(first, dir)
+  resetS = soon() + 1
   stopAtLimit(first.server, started, resetS)
   await paused(window, id)
   await test.stop()

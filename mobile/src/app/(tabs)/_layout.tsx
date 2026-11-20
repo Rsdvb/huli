@@ -70,7 +70,7 @@ export default function TabsLayout() {
           sf={{ default: 'shippingbox', selected: 'shippingbox.fill' }}
           md="deployed_code"
         />
-        <NativeTabs.Trigger.Label>Artifacts</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>产物</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="routines" contentStyle={{ backgroundColor: c.bg }}>
         <NativeTabs.Trigger.Icon
