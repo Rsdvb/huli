@@ -24,6 +24,7 @@ import { ReplayBuffer } from './replay'
 import {
   type Environment,
   type FindOnPath,
+  forWindowsShell,
   pathLookup,
   resolveShell,
   shellEnvironment,
@@ -803,8 +804,17 @@ export class TerminalManager {
       typed?.(ok)
       return
     }
-    if (terminal.agentCommand || (command.run && this.authCommands.has(command.text))) {
+    if (terminal.agentCommand) {
       pty.write(`${command.text}\r`)
+      typed?.(true)
+      return
+    }
+    if (command.run && this.authCommands.has(command.text)) {
+      const line =
+        this.options.platform === 'win32'
+          ? forWindowsShell(command.text, terminal.shell.name)
+          : command.text
+      pty.write(`${line}\r`)
       typed?.(true)
       return
     }
