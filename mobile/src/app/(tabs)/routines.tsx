@@ -22,7 +22,14 @@ import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
 import { ListSyncNote } from '../../components/SyncNote'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { TasksView } from '../../components/tasks/TasksView'
-import { useAgents, useHostActions, useHostState, useMaybeLink, useProjects } from '../../host'
+import {
+  useAgents,
+  useComputerId,
+  useHostActions,
+  useHostState,
+  useMaybeLink,
+  useProjects,
+} from '../../host'
 import {
   confirmDeleteRoutine,
   routineExamples,
@@ -52,6 +59,8 @@ import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '
 
 export default function TasksTab() {
   const view = useTasksTabView()
+  // Each computer's lists mount afresh, so none shows another's while its own load.
+  const hostId = useComputerId() ?? ''
   const switcher = (
     <SegmentedControl
       segments={[
@@ -62,7 +71,11 @@ export default function TasksTab() {
       onChange={setTasksTabView}
     />
   )
-  return view === 'tasks' ? <TasksView switcher={switcher} /> : <Routines switcher={switcher} />
+  return view === 'tasks' ? (
+    <TasksView key={hostId} switcher={switcher} />
+  ) : (
+    <Routines key={hostId} switcher={switcher} />
+  )
 }
 
 function Routines(props: { switcher: ReactNode }) {

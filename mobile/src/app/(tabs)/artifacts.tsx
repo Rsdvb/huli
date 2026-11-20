@@ -24,6 +24,7 @@ import { Sheet, type SheetItem } from '../../components/Sheet'
 import { ListSyncNote } from '../../components/SyncNote'
 import {
   useAgents,
+  useComputerId,
   useHostActions,
   useHostSelector,
   useHostState,
@@ -74,7 +75,13 @@ function sameAgentIds(a: Map<string, string>, b: Map<string, string>): boolean {
   return true
 }
 
+/** Each computer's artifacts mount afresh, so none shows another's while its own load. */
 export default function Artifacts() {
+  const hostId = useComputerId()
+  return <ArtifactsTab key={hostId ?? ''} />
+}
+
+function ArtifactsTab() {
   const { c } = useTokens()
   const link = useMaybeLink()
   const state = useHostState()

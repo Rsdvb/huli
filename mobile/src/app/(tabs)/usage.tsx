@@ -4,15 +4,18 @@
 
 import { lazy, Suspense } from 'react'
 import { View } from 'react-native'
+import { useComputerId } from '../../host'
 import { useTokens } from '../../ui/tokens'
 
 const UsageScreen = lazy(() => import('../../usage/UsageScreen'))
 
 export default function Usage() {
   const { c } = useTokens()
+  // Each computer's usage mounts afresh, so none shows another's while its own loads.
+  const hostId = useComputerId() ?? ''
   return (
     <Suspense fallback={<View style={{ flex: 1, backgroundColor: c.bg }} />}>
-      <UsageScreen />
+      <UsageScreen key={hostId} />
     </Suspense>
   )
 }

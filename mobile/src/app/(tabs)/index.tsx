@@ -51,6 +51,7 @@ import {
   sameFields,
   useActiveHost,
   useAgents,
+  useComputerId,
   useFolders,
   useHost,
   useHostActions,
@@ -134,6 +135,10 @@ export default function Home() {
   const wide = useWide()
   const { c } = useTokens()
   const [selected, setSelected] = useState<string | null>(null)
+  const hostId = useComputerId()
+  const several = useHostSelector(severalComputers)
+  const scope = usePrefs().homeScope
+  const allMode = several && scope === 'all'
 
   // A session that went away on the computer leaves the pane.
   const gone = useHostSelector(
@@ -147,13 +152,16 @@ export default function Home() {
   }, [gone])
   const close = useCallback(() => setSelected(null), [])
 
+  // One computer's list mounts afresh with another, so none shows the last one's while its own
+  // loads; 全部电脑 lists them all and stays, as when a row opens another computer's session.
+  const listKey = allMode ? 'all' : (hostId ?? '')
   if (!wide) {
-    return <SessionList selected={null} onOpen={openScreen} />
+    return <SessionList key={listKey} selected={null} onOpen={openScreen} />
   }
   return (
     <View style={[styles.split, { backgroundColor: c.bg }]}>
       <View style={styles.column}>
-        <SessionList selected={selected} onOpen={setSelected} />
+        <SessionList key={listKey} selected={selected} onOpen={setSelected} />
       </View>
       <View style={[styles.divider, { backgroundColor: c.border }]} />
       <View style={styles.pane}>
@@ -373,6 +381,8 @@ function GroupHeader(props: {
     </DropTarget>
   )
 }
+
+const severalComputers = (d: HostData) => d.computers.hosts.length > 1
 
 const pickLink = (d: HostData) => ({
   state: d.state,

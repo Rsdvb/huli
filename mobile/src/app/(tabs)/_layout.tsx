@@ -1,7 +1,8 @@
 // The four tabs under the system's own tab bar, once the phone has a computer; pairing until then.
 // The third, 任务, holds tasks and routines.
-// The tabs belong to the active computer: switching computers mounts them afresh, so no tab shows
-// one computer's lists while the other's load.
+// Each tab's content belongs to the active computer and mounts afresh when it changes, so no tab
+// shows one computer's lists while the other's load; the tabs themselves stay, on the tab that
+// shows. Home in 全部电脑 lists every computer and stays as it is.
 //
 // On iOS this is UITabBarController: Liquid Glass on iOS 26, minimizing as a list scrolls down,
 // and on iOS 27 the new-session button on a surface of its own beside the tabs. Android gets
@@ -11,13 +12,7 @@ import { View } from 'react-native'
 import { router } from 'expo-router'
 import { NativeTabs } from 'expo-router/native-tabs'
 import { SessionRowSkeleton } from '../../components/SessionRow'
-import {
-  sameFields,
-  useComputerId,
-  useHostActions,
-  useHostSelector,
-  type HostData,
-} from '../../host'
+import { sameFields, useHostActions, useHostSelector, type HostData } from '../../host'
 import { PairScreen } from '../../screens/PairScreen'
 import { Screen } from '../../ui/Screen'
 import { rememberTab } from '../../ui/lastTab'
@@ -34,7 +29,6 @@ export default function TabsLayout() {
   const host = useHostSelector(pickPhase, sameFields)
   const { paired } = useHostActions()
   const canCompose = useHostSelector(pickCompose)
-  const hostId = useComputerId()
 
   if (host.phase === 'loading') {
     return (
@@ -56,7 +50,6 @@ export default function TabsLayout() {
 
   return (
     <NativeTabs
-      key={hostId ?? undefined}
       minimizeBehavior="onScrollDown"
       tintColor={c.tint}
       backgroundColor={c.bg}
