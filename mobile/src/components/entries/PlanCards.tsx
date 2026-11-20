@@ -130,7 +130,8 @@ function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) 
   const [height, setHeight] = useState(0)
   const [sheet, setSheet] = useState(false)
   const copy = () =>
-    void copyText(props.markdown).then(() => {
+    void copyText(props.markdown, null).then((ok) => {
+      if (!ok) return
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     })

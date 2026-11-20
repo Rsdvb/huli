@@ -296,7 +296,7 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
     return () => clearTimeout(timer)
   }, [copied])
   const copy = () => {
-    void copyText(props.text).then(() => setCopied(true))
+    void copyText(props.text, null).then(setCopied)
   }
   const refs = props.look.refs
   const fileRef = file ? knownFileRef(file, refs) : null

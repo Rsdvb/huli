@@ -56,7 +56,8 @@ function Block(props: { label: string; text: string; tone?: 'plain' | 'muted' })
         </PressScale>
         <PressScale
           onPress={() =>
-            void copyText(props.text).then(() => {
+            void copyText(props.text, null).then((ok) => {
+              if (!ok) return
               setCopied(true)
               setTimeout(() => setCopied(false), 1500)
             })

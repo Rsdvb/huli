@@ -54,7 +54,7 @@ export const TurnFooter = memo(function TurnFooter(props: {
         {reply ? (
           <PressScale
             hitSlop={10}
-            onPress={() => void copyText(reply).then(() => setCopied(true))}
+            onPress={() => void copyText(reply, null).then(setCopied)}
             accessibilityRole="button"
             accessibilityLabel="复制回复"
             style={styles.button}

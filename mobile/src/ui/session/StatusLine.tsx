@@ -10,7 +10,6 @@ import Svg, { Circle } from 'react-native-svg'
 import type { PlanLimit } from '@shared/agent-host'
 import { cachePhase, endingWindow, type KnownExpiry } from '@shared/prompt-cache'
 import type { LinkState } from '@shared/remote/link'
-import { showNotice } from '../NoticeBar'
 import { copyText } from './feedback'
 import { G, Icon, SystemMark } from './icons'
 import { cacheLeftText, useCacheLeft } from './promptCache'
@@ -176,10 +175,7 @@ export function StatusLine(props: {
                       Alert.alert(props.folder ?? '项目', path, [
                         {
                           text: '复制路径',
-                          onPress: () =>
-                            void copyText(path).then(() =>
-                              showNotice({ text: '已复制', tone: 'success' }),
-                            ),
+                          onPress: () => void copyText(path),
                         },
                         { text: '好', style: 'cancel' },
                       ]),

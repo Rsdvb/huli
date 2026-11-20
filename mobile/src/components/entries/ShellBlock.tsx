@@ -175,7 +175,8 @@ export function StepSection(props: {
             {text !== undefined ? (
               <Pressable
                 onPress={() =>
-                  void copyText(text).then(() => {
+                  void copyText(text, null).then((ok) => {
+                    if (!ok) return
                     setCopied(true)
                     setTimeout(() => setCopied(false), 1500)
                   })
