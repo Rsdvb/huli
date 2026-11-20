@@ -1,5 +1,5 @@
 # The tabs, search and some of Settings in light and in dark: the top bar with a long computer
-# name, the 例程 and 需求 lists, the usage tab, a sheet opened and closed, the devices and usage
+# name, the 定时任务 and 需求 lists, the usage tab, a sheet opened and closed, the devices and usage
 # record pages, and search's note for a single character. Run after 10-session for a fuller list.
 appId: io.github.rsdvb.huli
 ---
@@ -10,7 +10,7 @@ appId: io.github.rsdvb.huli
 - tapOn:
     text: '允许'
     optional: true
-- tapOn: 'Artifacts'
+- tapOn: '产物'
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2500
@@ -22,7 +22,7 @@ appId: io.github.rsdvb.huli
     timeout: 2000
     optional: true
 - takeScreenshot: t02-tasks
-- tapOn: '例程'
+- tapOn: '定时任务'
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2000
@@ -103,7 +103,7 @@ appId: io.github.rsdvb.huli
     timeout: 1500
     optional: true
 - takeScreenshot: t13-home-dark
-- tapOn: 'Artifacts'
+- tapOn: '产物'
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 1500

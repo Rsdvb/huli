@@ -1,0 +1,191 @@
+# What the audit's last fixes touched, in light and then in dark: a session's artifact notes and
+# its context sheet with the names and counts in Chinese, the title menu's head, the search's 产物
+# group, the computers sheet, the artifacts tab's chips and a project's 工作树设置.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/artifacts'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: a01-artifact-notes
+# The context's breakdown, which the fake agent reports on /context.
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/context'
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 60000
+    optional: true
+- tapOn:
+    text: '上下文已用.*'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: a02-context-sheet
+- swipe:
+    start: 50%, 45%
+    end: 50%, 95%
+    duration: 400
+- waitForAnimationToEnd
+# The title's menu, whose head names the agent.
+- tapOn:
+    text: 'Fake agent: .*'
+    index: 0
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: a03-title-menu
+- tapOn:
+    point: 50%,92%
+    optional: true
+- waitForAnimationToEnd
+- tapOn: '返回'
+- waitForAnimationToEnd
+# Search: the artifacts the session made are in its 产物 group.
+- tapOn: '搜索'
+- inputText: 'Fake'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: a04-search
+- tapOn:
+    text: '(返回|取消|关闭)'
+    optional: true
+- waitForAnimationToEnd
+# The computers sheet from the top bar's computer.
+- tapOn:
+    text: '.*点按切换电脑'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: a05-computers
+- swipe:
+    start: 50%, 40%
+    end: 50%, 95%
+    duration: 400
+- waitForAnimationToEnd
+- tapOn: '产物'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: a06-artifacts-tab
+# A project's 工作树设置.
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '项目'
+- tapOn: '项目'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- tapOn:
+    text: 'project'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: a07-project
+- tapOn: '返回'
+- tapOn: '返回'
+# The same in dark.
+- scrollUntilVisible:
+    element: '主题'
+    direction: UP
+    optional: true
+- scrollUntilVisible:
+    element: '主题'
+- tapOn: '主题'
+- tapOn: '深色'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(返回|关闭)'
+    optional: true
+- waitForAnimationToEnd
+- tapOn: '会话'
+- tapOn:
+    text: '.*Fake agent: artifacts.*'
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: a08-session-dark
+- tapOn:
+    text: '上下文已用.*'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: a09-context-sheet-dark
+- swipe:
+    start: 50%, 45%
+    end: 50%, 95%
+    duration: 400
+- waitForAnimationToEnd
+- tapOn: '返回'
+- tapOn: '产物'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: a10-artifacts-tab-dark
+# Back to the light theme, as the next flow expects.
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '主题'
+- tapOn: '主题'
+- tapOn: '浅色'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(返回|关闭)'
+    optional: true
