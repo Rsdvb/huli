@@ -1,0 +1,16 @@
+# long-reply.sh: the app launched afresh and left on the sessions tab.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+- tapOn:
+    text: '会话.*'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- takeScreenshot: ${SHOT}

@@ -5,6 +5,7 @@ import type { PlanEntry, ThreadEntry, ThreadState, ToolEntry } from '@shared/thr
 import { writingId } from '@shared/turn-phase'
 import { workflowCardOf } from '../../components/entries/workflowTools'
 import { diffTexts, type Diff } from '../../diff'
+import { splitReply, type ReplyPart, type ReplySplit } from './markdown'
 
 type TurnEnd = Extract<ThreadEntry, { kind: 'turn_end' }>
 type AgentEntry = Extract<ThreadEntry, { kind: 'agent' }>
@@ -31,6 +32,12 @@ export type Row =
    * enough: an agent that never ends a message leaves each of its turn's messages streaming.
    */
   | { type: 'entry'; key: string; entry: ThreadEntry; writing?: true }
+  /**
+   * An agent's reply, or a part of a long one (splitReply): each part is a row of its own, so the
+   * list mounts only the parts near the screen rather than the whole reply. `writing` marks every
+   * part of the reply being written.
+   */
+  | { type: 'reply'; key: string; entry: AgentEntry; part: ReplyPart; writing?: true }
   /**
    * The work between messages, as the desktop folds it: thoughts, tool calls and project memory
    * writes in a row, one line that opens to a line per step. `latest` is the last thing in a
@@ -147,8 +154,36 @@ function startsTurn(entry: ThreadEntry): boolean {
   return entry.kind === 'user' && !entry.steered && !entry.approval
 }
 
+/** A reply's parts, kept between calls by the reply's id so a reply being written is read on. */
+type PartsOf = (entry: AgentEntry) => ReplyPart[]
+
+// As many replies as a few sessions' latest turns hold; a reply forgotten is only read again.
+const SPLITS_KEPT = 200
+
+function partsReader(): PartsOf {
+  const splits = new Map<string, ReplySplit>()
+  return (entry) => {
+    const before = splits.get(entry.id)
+    const split = splitReply(entry.markdown, before)
+    if (split !== before) {
+      splits.delete(entry.id)
+      splits.set(entry.id, split)
+      if (splits.size > SPLITS_KEPT) splits.delete(splits.keys().next().value!)
+    }
+    return split.parts
+  }
+}
+
+/** The rows of a reply: its first part keyed by the entry, as an unsplit reply always was. */
+function replyRows(entry: AgentEntry, parts: readonly ReplyPart[], rows: Row[]): void {
+  for (const part of parts) {
+    const key = part.index === 0 ? entry.id : `part:${part.index}:${entry.id}`
+    rows.push({ type: 'reply', key, entry, part })
+  }
+}
+
 /** The rows of entries that hold at most one turn's start, at their beginning, oldest first. */
-function turnRows(entries: readonly ThreadEntry[]): Row[] {
+function turnRows(entries: readonly ThreadEntry[], partsOf: PartsOf): Row[] {
   const rows: Row[] = []
   let tools: ToolEntry[] = []
   let replies: AgentEntry[] = []
@@ -178,7 +213,8 @@ function turnRows(entries: readonly ThreadEntry[]): Row[] {
       case 'agent':
         replies.push(entry)
         startedAt ??= entry.at ?? null
-        break
+        replyRows(entry, partsOf(entry), rows)
+        continue
       case 'compaction': {
         // Compactions in a row read as one divider: the latest stands for them all. The entry
         // after the last of a turn starts the next turn, so it is never one.
@@ -230,8 +266,12 @@ function markLatest(rows: Row[], thread: ThreadState, live: boolean): Row[] {
     // The reply being written is among the last rows; only plans and notices may follow it.
     for (let i = rows.length - 1; i >= 0; i--) {
       const row = rows[i]!
-      if (row.type === 'entry' && row.key === writing) {
-        rows[i] = { ...row, writing: true }
+      if (row.type === 'reply' && row.entry.id === writing) {
+        for (let p = i; p >= 0; p--) {
+          const part = rows[p]!
+          if (part.type !== 'reply' || part.entry.id !== writing) break
+          rows[p] = { ...part, writing: true }
+        }
         break
       }
     }
@@ -245,7 +285,12 @@ function markLatest(rows: Row[], thread: ThreadState, live: boolean): Row[] {
  * `live`, the turn still runs and its last run of work is the latest.
  */
 export function threadRows(thread: ThreadState, live = false): Row[] {
-  return markLatest(turnsOf(thread).flatMap(turnRows), thread, live)
+  const partsOf = partsReader()
+  return markLatest(
+    turnsOf(thread).flatMap((entries) => turnRows(entries, partsOf)),
+    thread,
+    live,
+  )
 }
 
 interface Turn {
@@ -265,6 +310,7 @@ interface Turn {
  * than gathered into a new array first, and only a rebuilt turn's rows are matched to its old ones.
  */
 export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
+  const partsOf = partsReader()
   let turns = new Map<ThreadEntry, Turn>()
   let shown: Row[] = []
   let seen: { order: string[]; byId: Record<string, ThreadEntry>; live: boolean } | null = null
@@ -309,7 +355,7 @@ export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
           const entry = byId[order[x]!]
           if (entry) entries.push(entry)
         }
-        const built = turnRows(entries)
+        const built = turnRows(entries, partsOf)
         // A turn not known by its first entry, as the first after an older page came in, may
         // still hold rows shown before.
         turn = { entries, rows: keepRows(known ? known.rows : shown, built) }
@@ -322,9 +368,11 @@ export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
     const next = markLatest(rows, thread, live)
     // A row marked as the latest or as being written is a new object each time: the one shown
     // stands for it while it draws the same.
-    for (let r = next.length - 1; r >= 0 && r >= next.length - MARKED_FROM_END; r--) {
+    for (let r = next.length - 1; r >= 0; r--) {
+      const row = next[r]!
+      if (r < next.length - MARKED_FROM_END && !(row.type === 'reply' && row.writing)) break
       const old = shown[r - next.length + shown.length]
-      if (old && old !== next[r] && sameRow(old, next[r]!)) next[r] = old
+      if (old && old !== row && sameRow(old, row)) next[r] = old
     }
     let changed = next.length !== shown.length
     for (let r = 0; !changed && r < next.length; r++) changed = next[r] !== shown[r]
@@ -333,8 +381,8 @@ export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
   }
 }
 
-// How far from the end the rows markLatest may mark lie: the latest run is the last row, and only
-// plans and notices may follow the reply being written.
+// How far from the end the rows markLatest may mark lie, past the parts of the reply being
+// written: the latest run is the last row, and only plans and notices may follow that reply.
 const MARKED_FROM_END = 8
 
 /** `next` with each row that draws as one of `before` does replaced by it; `before` if all were. */
@@ -410,6 +458,16 @@ export function sameRow(a: Row, b: Row): boolean {
   if (a.type === 'entry') {
     const other = b as typeof a
     return a.entry === other.entry && a.writing === other.writing
+  }
+  if (a.type === 'reply') {
+    // While the reply is written its menu waits and a part draws only its own text, which a
+    // token added to the reply leaves alone but in the last part.
+    const other = b as typeof a
+    return (
+      a.part === other.part &&
+      a.writing === other.writing &&
+      (a.writing === true || a.entry === other.entry)
+    )
   }
   if (a.type === 'run') {
     const other = b as typeof a

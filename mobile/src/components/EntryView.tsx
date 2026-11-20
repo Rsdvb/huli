@@ -19,6 +19,7 @@ import { selectText } from '../ui/session/SelectText'
 import { answerWords, ThoughtRow, ToolRow } from '../ui/session/ToolRow'
 import { TurnChanges } from '../ui/session/TurnChanges'
 import { TurnFooter } from '../ui/session/TurnFooter'
+import type { ReplyPart } from '../ui/session/markdown'
 import { sameRow, type Row } from '../ui/session/turns'
 import { CarriedRefs } from './CarriedRefs'
 import {
@@ -46,15 +47,23 @@ import {
 } from './entries/NoteEntries'
 import { NoticeEntry } from './entries/TurnEnd'
 import { workflowCardOf, WorkflowToolCard } from './entries/WorkflowCards'
-import { Markdown } from './Markdown'
+import { Markdown, partGap } from './Markdown'
 import { UserMessage } from './UserMessage'
 
 type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
 const NO_MENU: MenuNode[] = []
 
-function Reply(props: { entry: Of<'agent'>; writing: boolean }) {
+/**
+ * A reply, or one part of a long one, which the conversation draws as rows of their own. Each part
+ * opens the reply's menu; the last carries what the reply carried, and while the reply is written,
+ * its caret.
+ */
+function Reply(props: { entry: Of<'agent'>; writing: boolean; part?: ReplyPart }) {
   const { entry, writing } = props
+  const part = props.part
+  const text = part ? part.text : entry.markdown
+  const last = part ? part.last : true
   const { fork, forkAtMessage } = useSessionRows((r) => ({
     fork: r.fork,
     forkAtMessage: r.forkAtMessage,
@@ -104,16 +113,20 @@ function Reply(props: { entry: Of<'agent'>; writing: boolean }) {
   if (!entry.markdown && !writing && entry.attachments.length === 0) return null
   return (
     <View style={{ gap: 8 }}>
-      {entry.markdown || writing ? (
+      {text || (writing && last) ? (
         <ContextMenu items={menu}>
           {(longPress) => (
             <Pressable onLongPress={longPress} delayLongPress={400}>
-              <Markdown markdown={entry.markdown} streaming={writing} />
+              <Markdown
+                markdown={text}
+                streaming={writing && last}
+                {...(part && part.index > 0 ? { continues: true } : {})}
+              />
             </Pressable>
           )}
         </ContextMenu>
       ) : null}
-      {entry.attachments.length > 0 && <CarriedRefs refs={entry.attachments} />}
+      {last && entry.attachments.length > 0 && <CarriedRefs refs={entry.attachments} />}
     </View>
   )
 }
@@ -391,6 +404,22 @@ export const ThreadRow = memo(
       return (
         <View style={{ paddingVertical: 3 }}>
           <RunRow entries={row.entries} latest={row.latest} />
+        </View>
+      )
+    }
+    if (row.type === 'reply') {
+      const { entry, part } = row
+      if (!entry.markdown && !row.writing && entry.attachments.length === 0) return null
+      const [top, bottom] = SPACING.agent!
+      // A later part stands as far below the one before as the whole reply's blocks stood apart.
+      return (
+        <View
+          style={{
+            paddingTop: part.index === 0 ? top : partGap(part.joint),
+            paddingBottom: part.last ? bottom : 0,
+          }}
+        >
+          <Reply entry={entry} writing={!!row.writing} part={part} />
         </View>
       )
     }

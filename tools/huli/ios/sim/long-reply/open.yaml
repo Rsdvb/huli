@@ -1,0 +1,12 @@
+# long-reply.sh: the app launched afresh, then the session whose row says WORD opened. Nothing
+# after the tap reads the app's view tree, which the long reply once made take minutes to read.
+appId: io.github.rsdvb.huli
+---
+- runFlow:
+    file: home.yaml
+    env:
+      SHOT: r02-home
+- tapOn:
+    text: '.*${WORD}.*'
+    index: 0
+- takeScreenshot: r03-tapped

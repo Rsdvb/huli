@@ -215,6 +215,154 @@ export function streamBlocks(source: string, settled: { current: Settled | null 
   return [...base.blocks, ...parseBlocks(source.slice(base.text.length))]
 }
 
+/** A reply's first part runs at least this many characters before the reply is cut. */
+const FIRST_PART = 3000
+/** Each later part runs at least this many characters. */
+const PART = 1000
+
+/** A piece of a long reply that the conversation draws as a row of its own. */
+export interface ReplyPart {
+  index: number
+  text: string
+  /** How it follows the part before: after a block, or between two items of one bullet list. */
+  joint: 'block' | 'item'
+  last: boolean
+}
+
+/** A reply cut into parts, with where its reading stopped, so a growing reply is read on. */
+export interface ReplySplit {
+  source: string
+  parts: ReplyPart[]
+  cuts: { at: number; joint: 'block' | 'item' }[]
+  /** The start of the first line not read yet, which may still be being written. */
+  read: number
+  fence: string | null
+  blank: boolean
+  /** The kind of list a line at the margin seems to go on in: only to pass lines by quickly. */
+  list: 'bullet' | 'ordered' | null
+}
+
+/**
+ * How `line` may start a part after `before`: as a block of its own, as the next item of the
+ * bullet list `before` ends in, or not at all. Read by the parser itself, so a cut never changes
+ * what the reply reads as: the line starts afresh exactly when reading it after `before` gives
+ * the blocks of the two read apart, and from such a line on, the rest reads alike either way.
+ */
+function jointAt(before: string, line: string): 'block' | 'item' | null {
+  const head = parseBlocks(before)
+  const tail = parseBlocks(line)
+  const together = parseBlocks(before + line)
+  if (sameBlocks(together, [...head, ...tail])) return 'block'
+  const end = head[head.length - 1]
+  const first = tail[0]
+  // Read apart, an item with a pipe heads a table when a separator row follows, which a list
+  // reading it as its next item never asks.
+  if (
+    line.includes('|') ||
+    tail.length !== 1 ||
+    end?.kind !== 'list' ||
+    first?.kind !== 'list' ||
+    end.ordered ||
+    first.ordered ||
+    together.length !== head.length
+  ) {
+    return null
+  }
+  const merged: Block = { ...end, items: [...end.items, ...first.items] }
+  return sameBlocks(together, [...head.slice(0, -1), merged]) ? 'item' : null
+}
+
+/**
+ * `source` cut into parts at the starts of blocks and between the items of bullet lists at the
+ * margin, read on from `before` when it only grew. Each cut is checked by `jointAt`, so the parts
+ * draw as the whole did. Cuts are made only once a line has ended and never move, so a part keeps
+ * its text, and its object, as the reply grows; a reply read as it grew is cut where it would be
+ * read finished.
+ */
+export function splitReply(source: string, before?: ReplySplit | null): ReplySplit {
+  if (before && before.source === source) return before
+  const grew = !!before && source.startsWith(before.source)
+  const state: ReplySplit =
+    before && grew
+      ? { ...before, source, cuts: before.cuts }
+      : {
+          source,
+          parts: [],
+          cuts: [],
+          read: 0,
+          fence: null,
+          blank: false,
+          list: null,
+        }
+  let cuts = state.cuts
+  const cut = (at: number, end: number) => {
+    const from = cuts.length ? cuts[cuts.length - 1]!.at : 0
+    if (at - from < (cuts.length ? PART : FIRST_PART)) return
+    const joint = jointAt(source.slice(from, at), source.slice(at, end + 1))
+    if (!joint) return
+    if (cuts === state.cuts) cuts = [...cuts]
+    cuts.push({ at, joint })
+  }
+  let at = state.read
+  while (at < source.length) {
+    const end = source.indexOf('\n', at)
+    if (end === -1) break
+    const line = source.slice(at, end).replace(/\r$/, '')
+    const trimmed = line.trim()
+    if (state.fence !== null) {
+      if (trimmed.startsWith(state.fence) && /^[`~]+$/.test(trimmed)) state.fence = null
+    } else if (!trimmed) {
+      state.blank = true
+      at = end + 1
+      continue
+    } else {
+      if (!/^\s/.test(line)) {
+        const item = RULE.test(line) ? null : ITEM.exec(line)
+        if (item) {
+          const bullet = !/\d/.test(item[2]!)
+          // The next item of an ordered list never reads alike apart, so it is not tried.
+          if ((bullet && state.list === 'bullet') || (state.blank && state.list !== 'ordered')) {
+            cut(at, end)
+          }
+          state.list = bullet ? 'bullet' : 'ordered'
+        } else if (state.blank) {
+          cut(at, end)
+          state.list = null
+        } else if (startsBlock(line)) {
+          state.list = null
+        }
+      }
+      const open = FENCE.exec(line)
+      if (open) state.fence = open[2]![0]!.repeat(open[2]!.length)
+    }
+    state.blank = false
+    at = end + 1
+  }
+  state.read = at
+  state.cuts = cuts
+
+  const count = cuts.length + 1
+  const parts: ReplyPart[] = []
+  for (let i = 0; i < count; i++) {
+    const from = i === 0 ? 0 : cuts[i - 1]!.at
+    const to = i < cuts.length ? cuts[i]!.at : source.length
+    const last = i === count - 1
+    const old = grew ? before!.parts[i] : undefined
+    // A part that ended before the text grew ends there still.
+    if (old && !old.last && old.last === last) {
+      parts.push(old)
+      continue
+    }
+    const text = count === 1 ? source : source.slice(from, to)
+    const joint = i === 0 ? 'block' : cuts[i - 1]!.joint
+    parts.push(
+      old && old.last === last && old.text === text ? old : { index: i, text, joint, last },
+    )
+  }
+  state.parts = parts
+  return state
+}
+
 function blocks(lines: string[]): Block[] {
   const out: Block[] = []
   let para: string[] = []
