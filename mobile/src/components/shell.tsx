@@ -105,6 +105,22 @@ export function projectMenuNodes(
   ]
 }
 
+interface ProjectCounts {
+  list: { path: string; count: number; name: string }[]
+  scratch: number
+}
+
+function sameProjectCounts(a: ProjectCounts, b: ProjectCounts): boolean {
+  return (
+    a.scratch === b.scratch &&
+    a.list.length === b.list.length &&
+    a.list.every(
+      (p, i) =>
+        p.path === b.list[i]!.path && p.count === b.list[i]!.count && p.name === b.list[i]!.name,
+    )
+  )
+}
+
 const ShellContext = createContext<ShellValue | null>(null)
 
 export function useShell(): ShellValue {
@@ -129,6 +145,8 @@ export function ShellProvider(props: { children: ReactNode }) {
   const hostProjects = useProjects()
   const [filter, setFilter] = useState<ProjectFilter>({ kind: 'all' })
   const [sheet, setSheet] = useState<'host' | null>(null)
+  const opened = useRef(false)
+  if (sheet === 'host') opened.current = true
 
   // A project belongs to one computer: another computer starts with everything shown.
   const activeId = useComputerId()
@@ -136,7 +154,10 @@ export function ShellProvider(props: { children: ReactNode }) {
     setFilter({ kind: 'all' })
   }, [activeId])
 
-  // The projects the listed sessions are in, latest first, named as the computer names them.
+  // The projects the listed sessions are in, latest first, named as the computer names them. The
+  // same list keeps its identity, so the menu and the top bars that read it do not redraw on every
+  // session's turn, which changes the sessions but seldom their projects.
+  const lastProjects = useRef<ProjectCounts | null>(null)
   const projects = useMemo(() => {
     const names = new Map(hostProjects.map((p) => [p.path, p.name]))
     const latest = new Map<string, { updated: number; count: number }>()
@@ -156,7 +177,11 @@ export function ShellProvider(props: { children: ReactNode }) {
     const list = [...latest.entries()]
       .sort((a, b) => b[1].updated - a[1].updated)
       .map(([path, { count }]) => ({ path, count, name: names.get(path) ?? folder(path) }))
-    return { list, scratch }
+    const next = { list, scratch }
+    const last = lastProjects.current
+    if (last && sameProjectCounts(last, next)) return last
+    lastProjects.current = next
+    return next
   }, [sessions, hostProjects])
 
   const filterName =
@@ -190,7 +215,10 @@ export function ShellProvider(props: { children: ReactNode }) {
     <ShellContext.Provider value={value}>
       <ProjectMenuContext.Provider value={projectMenu}>
         {props.children}
-        <ComputerSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
+        {/* Mounted once first opened: until then the computers' sheet costs the app nothing. */}
+        {opened.current ? (
+          <ComputerSheet visible={sheet === 'host'} onClose={() => setSheet(null)} />
+        ) : null}
       </ProjectMenuContext.Provider>
     </ShellContext.Provider>
   )
