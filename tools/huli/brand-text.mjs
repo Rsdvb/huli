@@ -39,6 +39,59 @@ const ZH_APP_NAME = {
   ],
 }
 
+/**
+ * Chinese copy that says 分叉 where Kettu's now says 复制 or 另开会话, as Kite's owner asked: by locale
+ * file and key path, set only where the key exists. Swapped before the names, so Kettu and 智能体
+ * in them read as Kite's.
+ */
+const ZH_FORK = {
+  'host.json': {
+    'session.cannotFork': '{{agent}} 不支持分叉会话',
+    'session.cannotForkAt': '{{agent}} 只能从最新一条回复分叉',
+    'session.noForkPoint': '无法从这条回复分叉',
+    'session.forkTitle': '{{title}}（分叉）',
+    'session.forkTitleNumbered': '{{title}}（分叉 {{n}}）',
+    'session.heldOutside':
+      '这个会话还开在终端里。先在那边输入 /exit 再试，或者分叉一份在 Kettu 里接着做。',
+    'session.subagent.noFork': '子智能体会话不能分叉',
+    'notice.lostValues.fork.title': '这个分叉没能沿用全部设置',
+    'notice.lostValues.fork.missing': '这个分叉没有 {{option}} 选项，无法使用 {{wanted}}。',
+    'notice.lostValues.fork.cannotTurnOn': '这个分叉没有 {{option}} 选项，无法开启。',
+  },
+  'session.json': {
+    'replyFooter.fork': '从这里分叉',
+    'replyFooter.forking': '正在分叉…',
+    'replyFooter.forkNotReady': '会话就绪后才能分叉',
+    'sideChat.note.fork': '不进对话 · 临时分叉，用完即删',
+    'sideChat.empty.forkHow': '{{agent}} 把这个会话分叉出一份来答，Kettu 答完就删掉这份分叉',
+    'sideChat.empty.forkCost': '和主会话共用一部分缓存；开分叉要几秒',
+    'sideChat.empty.hiddenHow':
+      '{{agent}} 没有自带的侧问，也不能分叉会话，Kettu 开一个用完即删的临时会话来答',
+    'sideChat.saw.fork': '看到整段对话 · 临时分叉',
+    'sideChat.saw.forkCompacted': '看到的是智能体现在记得的对话 · 临时分叉',
+    'sideChat.saw.fellBackFork': '{{agent}} 分叉不了这个会话，改由临时会话来答',
+  },
+  'sidebar.json': {
+    'row.fork': '分叉',
+    'row.forkFromHere': '从这里分叉',
+    'import.heldTip': '先在终端里退出，或者分叉一份',
+    'import.fork': '分叉一份',
+    'worktree.forkNew': '在新工作树中分叉',
+    'worktree.forkSame': '在当前工作树中分叉',
+  },
+}
+
+/** `value` with each key path in `keys` that it holds set to the text given. */
+function setKnown(value, keys) {
+  for (const [key, text] of Object.entries(keys)) {
+    const parts = key.split('.')
+    let node = value
+    for (const part of parts.slice(0, -1)) node = node?.[part]
+    if (node && typeof node[parts.at(-1)] === 'string') node[parts.at(-1)] = text
+  }
+  return value
+}
+
 /** Keys the rebranded code reads, by locale file, key path and language (`*` for the rest). */
 const ADD = {
   // About's title: both names in Chinese, since ZH_NAME is the Chinese name of Kite.
@@ -259,7 +312,7 @@ function addKeys(value, keys, lang) {
 export function brandLocale(value, file, lang) {
   if (KEEP_FILES.has(file)) return value
   const zh = lang.startsWith('zh')
-  let swapped = swapValues(value, zh)
+  let swapped = swapValues(zh && ZH_FORK[file] ? setKnown(value, ZH_FORK[file]) : value, zh)
   if (zh && ZH_APP_NAME[file]) swapped = zhAppName(swapped, ZH_APP_NAME[file])
   if (ADD[file]) swapped = addKeys(swapped, ADD[file], lang)
   return swapped
