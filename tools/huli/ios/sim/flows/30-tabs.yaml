@@ -1,0 +1,123 @@
+# The tabs, search and some of Settings in light and in dark: the top bar with a long computer
+# name, the 例程 and 需求 lists, the usage tab, a sheet opened and closed, the devices and usage
+# record pages, and search's note for a single character. Run after 10-session for a fuller list.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: 'Artifacts'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: t01-artifacts
+- tapOn: '任务'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: t02-tasks
+- tapOn: '例程'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: t03-routines
+- tapOn: '用量'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
+- takeScreenshot: t04-usage
+- scroll
+- takeScreenshot: t05-usage-scrolled
+# Search, with one character and then more.
+- tapOn: '会话'
+- tapOn: '搜索'
+- inputText: 'F'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t06-search-one
+- inputText: 'ake'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t07-search-more
+- tapOn:
+    text: '(返回|取消|关闭)'
+    optional: true
+# Settings, its theme sheet, and the dark theme.
+- tapOn: '账户与设置'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t08-settings
+- scrollUntilVisible:
+    element: '主题'
+- tapOn: '主题'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t09-theme-sheet
+- tapOn: '深色'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t10-settings-dark
+- scrollUntilVisible:
+    element: '设备'
+- tapOn: '设备'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: t11-devices-dark
+- tapOn: '返回'
+- scrollUntilVisible:
+    element: '用量记录'
+- tapOn: '用量记录'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: t12-usage-records-dark
+- tapOn: '返回'
+- tapOn:
+    text: '(返回|关闭)'
+    optional: true
+# The tabs again, dark.
+- tapOn: '会话'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t13-home-dark
+- tapOn: 'Artifacts'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t14-artifacts-dark
+- tapOn: '任务'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: t15-routines-dark
+- tapOn: '用量'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: t16-usage-dark
