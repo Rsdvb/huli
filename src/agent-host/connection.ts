@@ -23,6 +23,7 @@ import type {
   SideChatStep,
   StopReason,
   TokenTotals,
+  TurnRefusal,
   UserContent,
 } from '@shared/thread'
 import type { MapperContext, MapperOutput } from './session-updates'
@@ -39,6 +40,8 @@ export interface PermissionRequest {
   plan?: string
   /** An MCP server's request: a form, answered with its values, or a page to open. */
   elicitation?: PendingElicitation
+  /** Huli: why the agent asks, in its words, which the card shows beside the request. */
+  reason?: string
   /**
    * The agent does not wait for the answer, so its turn goes on or ends and the card stays until
    * the user answers it or the session closes.
@@ -333,6 +336,8 @@ export interface PromptResult {
   stopReason: StopReason
   tokens: TokenTotals | null
   models: ModelTokens[]
+  /** Huli: why the model refused the turn, for a turn that ended in a refusal. */
+  refusal?: TurnRefusal
 }
 
 /** What Kettu opens a session no thread shows for. */

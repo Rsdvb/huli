@@ -396,7 +396,9 @@
     "subagent": "与子代理协作，卡片见对话中",
     "session": "与会话 {{id}} 协作",
     "unknownTool": "未知工具内容",
-    "toolCall": "工具调用"
+    "toolCall": "工具调用",
+    "toolReference": "找到工具：{{name}}",
+    "document": "文档：{{name}}"
   },
   "antigravity": {
     "plan": {
@@ -464,6 +466,69 @@
         "name": "完全访问",
         "description": "从不询问。请在沙箱或 worktree 里使用"
       }
+    },
+    "tool": {
+      "terminal": "终端",
+      "file": "文件",
+      "read": "读取 {{path}}{{range}}",
+      "lines": "（第 {{from}}–{{to}} 行）",
+      "fromLine": "（从第 {{line}} 行起）",
+      "write": "写入",
+      "writePath": "写入 {{path}}",
+      "edit": "编辑",
+      "editPath": "编辑 {{path}}",
+      "editNotebook": "编辑笔记本",
+      "find": "查找文件",
+      "findPattern": "查找 {{pattern}}",
+      "findPath": "在 {{path}} 里查找文件",
+      "findIn": "在 {{path}} 里查找 {{pattern}}",
+      "fetch": "获取网页",
+      "fetchUrl": "获取 {{url}}",
+      "webSearch": "网页搜索",
+      "searchQuery": "搜索“{{query}}”",
+      "task": "任务",
+      "approvePlan": "批准计划",
+      "plan": "计划",
+      "exitedPlan": "已退出计划模式",
+      "question": "问题",
+      "loadSkill": "加载技能",
+      "loadSkillNamed": "加载技能：{{skill}}",
+      "tool": "工具",
+      "codeExecution": "运行代码",
+      "sendFile": "把 {{path}} 发给你",
+      "sendFiles": "发送文件给你"
+    },
+    "notice": {
+      "retrying": "正在重试（{{attempt}}/{{max}}）· {{reason}}",
+      "retried_other": "重试 {{count}} 次后已恢复 · {{reason}}",
+      "retryFailed_other": "重试 {{count}} 次后仍然失败 · {{reason}}",
+      "commandOutput": "命令输出",
+      "mcpFailed_other": "MCP 服务器 {{names}} 没能启动",
+      "mcpFailedHint": "在它启动之前，这个会话用不了它的工具。",
+      "mcpNeedsAuth_other": "MCP 服务器 {{names}} 需要登录",
+      "mcpNeedsAuthHint": "在终端里的 Claude Code 中用 /mcp 登录；登录前用不了它的工具。",
+      "refusalFallback": "{{from}} 拒绝了请求，Claude Code 改用 {{to}} 重试",
+      "refusalFallbackLocal": "{{from}} 拒绝了一条回复，Claude Code 改用 {{to}} 重试了这一条",
+      "writesLost": {
+        "full": "磁盘已满，Claude Code 没能保存这个会话的全部内容",
+        "quota": "磁盘配额已用完，Claude Code 没能保存这个会话的全部内容",
+        "transcript": "这次对话有一部分没有写进会话记录，之后恢复会话时可能会缺失。",
+        "config": "对 Claude Code 设置文件 ~/.claude.json 的更改没有保存。"
+      }
+    },
+    "retryReason": {
+      "overloaded": "服务繁忙",
+      "rate_limit": "请求太频繁",
+      "server_error": "服务出错",
+      "authentication_failed": "登录失效",
+      "billing_error": "账单问题",
+      "invalid_request": "请求被拒",
+      "model_not_found": "找不到模型",
+      "max_output_tokens": "回复太长",
+      "cloud_credential_error": "云服务凭据出错",
+      "noResponse": "没有响应",
+      "connection": "连接失败",
+      "status": "HTTP {{status}}"
     }
   },
   "codex": {
@@ -553,7 +618,18 @@
       "write": "写入 {{path}}",
       "permissionsTitle": "更多权限",
       "elicitationTitle": "{{server}} 请求继续",
-      "allowEdit": "允许这次修改"
+      "allowEdit": "允许这次修改",
+      "deny": "禁止访问 {{path}}",
+      "place": {
+        "root": "整个文件系统",
+        "minimal": "每个命令都需要的系统文件",
+        "project_roots": "项目文件夹",
+        "tmpdir": "临时文件夹",
+        "slash_tmp": "/tmp"
+      },
+      "stdinTitle": "向正在运行的命令输入",
+      "writeStdinReason": "Codex 想向一个正在运行的命令发送输入。",
+      "humanCommandReason": "这个命令每次运行都需要你批准。"
     },
     "tool": {
       "readFile": "读取文件 '{{path}}'",
@@ -577,11 +653,32 @@
         "sendInput": "给子 Agent 发消息",
         "resumeAgent": "恢复子 Agent",
         "wait": "等待子 Agent",
-        "closeAgent": "关闭子 Agent"
-      }
+        "closeAgent": "关闭子 Agent",
+        "sendMessage": "给子 Agent 发消息",
+        "followupTask": "给子 Agent 追加任务",
+        "interruptAgent": "打断子 Agent",
+        "listAgents": "列出子 Agent"
+      },
+      "searchedFor": "还搜索了：",
+      "imageLimit": "图片生成已达用量上限。",
+      "imageLimitUntil": "图片生成已达用量上限，{{time}} 恢复。"
     },
     "notice": {
-      "rerouted": "Codex 从 {{from}} 换到了 {{to}}"
+      "rerouted": "Codex 从 {{from}} 换到了 {{to}}",
+      "reconnecting": "重新连接中（{{attempt}}/{{max}}）…",
+      "reconnectingPlain": "重新连接中…",
+      "reconnected_other": "重试 {{count}} 次后已重新连接",
+      "reconnectFailed_other": "重试 {{count}} 次后仍未连上",
+      "config": "Codex 配置：{{summary}}",
+      "worldWritable": "这台电脑上任何人都能写入的文件夹",
+      "worldWritableScan": "Codex 没能检查这台电脑上哪些文件夹任何人都能写入",
+      "andMore_other": "还有 {{count}} 个",
+      "mcpFailed": "MCP 服务器 {{name}} 没能启动",
+      "mcpNeedsAuth": "MCP 服务器 {{name}} 需要重新登录",
+      "planChanged": "计划有变",
+      "rerouteReason": {
+        "highRiskCyberActivity": "请求看起来涉及高风险的网络安全活动。"
+      }
     },
     "command": {
       "plan": {
@@ -672,6 +769,63 @@
       "stillStarting": "有些 MCP 服务器还在启动。稍后再运行 `/mcp` 查看它们的状态。",
       "unknownError": "未知的 MCP 启动错误",
       "unnamed": "（未命名）"
+    },
+    "review": {
+      "strict": "自动审查现在要求严格审查",
+      "warning": "自动审查提醒",
+      "action": "待审查的操作",
+      "entered": "开始审查",
+      "exited": "审查结束"
+    },
+    "agent": {
+      "model": "使用 {{model}}",
+      "modelEffort": "使用 {{model}} · 推理强度 {{effort}}",
+      "status": {
+        "pendingInit": "启动中",
+        "running": "运行中",
+        "interrupted": "已打断",
+        "completed": "已完成",
+        "errored": "出错",
+        "shutdown": "已关闭",
+        "notFound": "找不到"
+      }
+    },
+    "goal": {
+      "active": "目标：{{objective}}",
+      "paused": "目标已暂停：{{objective}}",
+      "blocked": "目标受阻：{{objective}}",
+      "usageLimited": "目标因用量上限暂停：{{objective}}",
+      "budgetLimited": "目标预算已用完：{{objective}}",
+      "complete": "目标已达成：{{objective}}",
+      "cleared": "目标已清除",
+      "used": "已用 {{tokens}} tokens{{budget}} · {{time}}",
+      "budget": "（预算 {{budget}}）",
+      "seconds_other": "{{count}} 秒",
+      "minutes_other": "{{count}} 分钟",
+      "hours": "{{hours}} 小时 {{minutes}} 分钟"
+    },
+    "hook": {
+      "blocked": "{{event}} Hook 拦下了这一步",
+      "stopped": "{{event}} Hook 停止了这一轮",
+      "failed": "{{event}} Hook 出错",
+      "warned": "{{event}} Hook 提醒",
+      "prompt": "Hook 向对话追加了内容",
+      "event": {
+        "preModelRequest": "请求前",
+        "postModelRequest": "请求后",
+        "preToolUse": "工具调用前",
+        "permissionRequest": "授权请求",
+        "postToolUse": "工具调用后",
+        "preCompact": "压缩前",
+        "postCompact": "压缩后",
+        "sessionStart": "会话开始",
+        "sessionEnd": "会话结束",
+        "userPromptSubmit": "提交消息",
+        "subagentStart": "子 Agent 启动",
+        "subagentStop": "子 Agent 结束",
+        "stop": "停止",
+        "interrupt": "打断"
+      }
     }
   },
   "dsh": {

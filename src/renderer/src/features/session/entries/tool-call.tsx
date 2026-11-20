@@ -77,10 +77,28 @@ export function StepCard({
     if (note === undefined && typeof result === 'object' && result?.by === 'routine') {
       note = t('permission.answer.allowedByRoutine')
     }
+    // Huli: a denied call reads Denied, not Cancelled, and says what denied it.
+    const denial = entry.denied
+    if (note === undefined && denial && denial.by !== 'user') note = t(`tool.deniedBy.${denial.by}`)
+    // Huli: how far a running call says it got.
+    const running = entry.status === 'pending' || entry.status === 'in_progress'
+    if (note === undefined && running && entry.progress) note = entry.progress
+    const review = entry.review
+    if (
+      note === undefined &&
+      review &&
+      (review.status === 'approved' || review.status === 'reviewing')
+    ) {
+      note = review.risk
+        ? t(`tool.review.${review.status}Risk`, { risk: t(`tool.review.risk.${review.risk}`) })
+        : t(`tool.review.${review.status}`)
+    }
+    const cardLabels = denial ? { ...labels, cancelled: t('status.denied') } : labels
     return (
       <ToolCallCard
         {...facts}
-        name={label.verb ?? entry.title}
+        labels={cardLabels}
+        name={label.verb ?? label.target ?? entry.title}
         summary={
           label.verb && label.target ? (
             <ToolSummary entry={entry} target={label.target} note={note} />

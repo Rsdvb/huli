@@ -171,8 +171,8 @@ export function toolAction(
       return { kind: 'agent', label: what ? `Agent ${what}` : 'Agent' }
     }
   }
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  return { kind: 'tool', label: mcp ? `${mcp[2]}` : name }
+  // Huli: the whole name, which the pane shows as its server and tool in words.
+  return { kind: 'tool', label: name }
 }
 
 /** A row's summary of what came back: tool calls by kind, thinking first and the reply last. */

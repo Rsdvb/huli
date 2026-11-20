@@ -43,6 +43,8 @@ export interface ToolPermissionContext {
   displayName?: string
   description?: string
   blockedPath?: string
+  /** Why Claude Code asks, such as the rule or check that made it. */
+  decisionReason?: string
   /** The CLI would not offer to remember the answer. */
   suppressAlwaysAllowRule?: boolean
 }

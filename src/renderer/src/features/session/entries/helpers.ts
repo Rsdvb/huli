@@ -13,6 +13,7 @@ import {
   type ToolEntry,
   type ToolKind,
 } from '@shared/thread'
+import { toolTitle } from '@shared/tool-names'
 import { basename, duration, shownPath } from '@renderer/lib/format'
 import { errorCode, host } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
@@ -66,7 +67,81 @@ export function toolLabel(
     const target = entry.rawInput ?? entry.title.replace(/^run\s+/i, '')
     return { verb: i18n.t(`${verbs}.run`), target, kind: 'command' }
   }
-  return { verb: null, target: entry.title, kind: 'title' }
+  return { verb: null, target: shownToolTitle(entry.title), kind: 'title' }
+}
+
+/** Huli: a call's own title in words, where the agent named it only by its tool. */
+export function shownToolTitle(title: string): string {
+  return toolTitle(title, i18n.language)
+}
+
+/** Huli: one field of a call's input, as its card lists it. */
+export interface InputField {
+  key: string
+  value: string
+  /** Shown as written, in the code face: JSON, or text of more than one line. */
+  code: boolean
+}
+
+// The kinds whose title, path or diff already says all their input does.
+const SAID_BY_ROW: ReadonlySet<ToolKind> = new Set([
+  'execute',
+  'edit',
+  'read',
+  'search',
+  'switch_mode',
+])
+
+/**
+ * Huli: what a call's card lists of its input, so that a call of an MCP tool is no blind step: each
+ * field the title, paths and content do not already show. Null when nothing is left to show.
+ */
+export function toolInputFields(
+  entry: Pick<
+    ToolEntry,
+    | 'toolKind'
+    | 'rawInput'
+    | 'title'
+    | 'description'
+    | 'locations'
+    | 'content'
+    | 'question'
+    | 'planVersion'
+  >,
+): InputField[] | null {
+  const raw = entry.rawInput?.trim()
+  if (!raw || SAID_BY_ROW.has(entry.toolKind)) return null
+  if (entry.question !== undefined || entry.planVersion !== undefined) return null
+  // What the agent's mapper already shows from the input: a prompt as the content, a path.
+  const texts = entry.content.flatMap((c) => (c.type === 'markdown' ? [c.markdown.trim()] : []))
+  const shown = (value: string): boolean =>
+    value === entry.title ||
+    value === entry.description ||
+    entry.locations.some((l) => l.path === value) ||
+    texts.includes(value)
+  let input: unknown
+  try {
+    input = JSON.parse(raw)
+  } catch {
+    return shown(raw) ? null : [{ key: '', value: raw, code: true }]
+  }
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return [{ key: '', value: JSON.stringify(input, null, 2), code: true }]
+  }
+  const fields: InputField[] = []
+  for (const [key, value] of Object.entries(input)) {
+    if (value === null || value === undefined) continue
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (text === '' || shown(text)) continue
+      fields.push({ key, value, code: value.includes('\n') })
+    } else if (typeof value === 'object') {
+      fields.push({ key, value: JSON.stringify(value, null, 2), code: true })
+    } else {
+      fields.push({ key, value: String(value), code: false })
+    }
+  }
+  return fields.length > 0 ? fields : null
 }
 
 /** An option's answer; `note` goes with an option that takes one, such as keeping on planning. */
