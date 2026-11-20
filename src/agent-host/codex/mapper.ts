@@ -356,6 +356,29 @@ function reviewFacts(action: ReviewAction): ToolChanges {
   }
 }
 
+/**
+ * Huli: what a sub-agent call tells of its agents: the model and effort a new one runs on, and each
+ * agent's state with its message, such as what it reported when it finished. Null when none.
+ */
+function agentStates(item: Item<'collabAgentToolCall'>): string | null {
+  const lines: string[] = []
+  if (item.model) {
+    lines.push(
+      item.reasoningEffort
+        ? t('codex.agent.modelEffort', { model: item.model, effort: item.reasoningEffort })
+        : t('codex.agent.model', { model: item.model }),
+    )
+  }
+  const states = Object.values(item.agentsStates ?? {}).filter((state) => state !== undefined)
+  for (const state of states) {
+    const key = `codex.agent.status.${state.status}`
+    const status = hasMessage(key) ? t(key as 'codex.agent.status.running') : state.status
+    const message = state.message?.trim()
+    lines.push(message ? `${status}: ${message}` : status)
+  }
+  return lines.length > 0 ? lines.map((line) => `- ${line}`).join('\n') : null
+}
+
 /** The thread ids of the subagents an item names. */
 export function childThreads(item: ThreadItem): string[] {
   if (item.type === 'collabAgentToolCall') return item.receiverThreadIds
@@ -670,12 +693,14 @@ export class ThreadMapper {
         })
         break
       }
-      case 'collabAgentToolCall':
+      case 'collabAgentToolCall': {
+        const states = agentStates(item)
         this.tool(ctx, out, item.id, {
           title: agentToolTitle(item.tool),
           toolKind: 'other',
           status: done ? toolStatus(item.status) : 'in_progress',
           ...(item.prompt ? { description: oneLine(item.prompt) } : {}),
+          ...(states ? { content: [{ type: 'markdown', markdown: states }] } : {}),
         })
         for (const sessionId of item.receiverThreadIds) {
           out.effects.push({
@@ -688,6 +713,7 @@ export class ThreadMapper {
           })
         }
         break
+      }
       case 'subAgentActivity':
         out.effects.push({ kind: 'subagent', sessionId: item.agentThreadId, canCancel: true })
         break

@@ -746,6 +746,19 @@
       "strict": "自动审查现在要求严格审查",
       "warning": "自动审查提醒",
       "action": "待审查的操作"
+    },
+    "agent": {
+      "model": "使用 {{model}}",
+      "modelEffort": "使用 {{model}} · 推理强度 {{effort}}",
+      "status": {
+        "pendingInit": "启动中",
+        "running": "运行中",
+        "interrupted": "已打断",
+        "completed": "已完成",
+        "errored": "出错",
+        "shutdown": "已关闭",
+        "notFound": "找不到"
+      }
     }
   },
   "dsh": {

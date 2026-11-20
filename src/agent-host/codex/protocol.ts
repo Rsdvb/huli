@@ -326,6 +326,9 @@ export type ThreadItem = ItemTimes &
           string,
           { status: CollabAgentStatus; message: string | null } | undefined
         >
+        /** Since Codex 0.170: the model and effort a new agent runs on. */
+        model?: string | null
+        reasoningEffort?: string | null
       }
     | {
         type: 'subAgentActivity'

@@ -756,6 +756,19 @@
       "strict": "Automatic review now asks for a strict review",
       "warning": "Automatic review warning",
       "action": "Action under review"
+    },
+    "agent": {
+      "model": "Runs on {{model}}",
+      "modelEffort": "Runs on {{model}} · {{effort}} effort",
+      "status": {
+        "pendingInit": "Starting",
+        "running": "Running",
+        "interrupted": "Interrupted",
+        "completed": "Finished",
+        "errored": "Failed",
+        "shutdown": "Closed",
+        "notFound": "Not found"
+      }
     }
   },
   "dsh": {

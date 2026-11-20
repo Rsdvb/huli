@@ -329,6 +329,53 @@ describe('MCP results', () => {
   })
 })
 
+describe('sub-agent calls', () => {
+  it("show the new agent's model and effort, and each agent's state with its message", () => {
+    const { entries } = run([
+      completed({
+        type: 'collabAgentToolCall',
+        id: 'spawn-1',
+        tool: 'spawnAgent',
+        status: 'completed',
+        senderThreadId: 'thread-1',
+        receiverThreadIds: ['child-1'],
+        prompt: 'Find the flaky test',
+        model: 'gpt-5.5-codex',
+        reasoningEffort: 'high',
+        agentsStates: { 'child-1': { status: 'pendingInit', message: null } },
+      }),
+      completed({
+        type: 'collabAgentToolCall',
+        id: 'wait-1',
+        tool: 'wait',
+        status: 'completed',
+        senderThreadId: 'thread-1',
+        receiverThreadIds: ['child-1'],
+        prompt: null,
+        agentsStates: { 'child-1': { status: 'completed', message: 'It was the clock test' } },
+      }),
+    ])
+    expect(entries).toMatchObject([
+      {
+        title: 'Start subagent',
+        description: 'Find the flaky test',
+        content: [
+          {
+            type: 'markdown',
+            markdown: ['- Runs on gpt-5.5-codex · high effort', '- Starting'].join(
+              String.fromCharCode(10),
+            ),
+          },
+        ],
+      },
+      {
+        title: 'Wait for subagents',
+        content: [{ type: 'markdown', markdown: '- Finished: It was the clock test' }],
+      },
+    ])
+  })
+})
+
 describe('a lost stream', () => {
   const lost = (attempt: number, willRetry = true): [string, unknown] => [
     'error',
