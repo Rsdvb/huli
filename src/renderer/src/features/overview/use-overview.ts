@@ -11,11 +11,22 @@ export function useOverviewRows(): OverviewRow[] {
   return useMemo(() => overviewRows(tasks, liveTree(byId)), [tasks, byId])
 }
 
-/** What is for the user: ready to take, or waiting for an answer. */
+/** The count for the last tasks and sessions it was taken of, which most store changes keep. */
+let counted: { tasks: unknown; byId: unknown; count: number } | null = null
+
+/**
+ * What is for the user: ready to take, or waiting for an answer. Selected as the number alone: the
+ * sidebar's menu reads it, and a change to any session re-rendered the whole window's frame.
+ */
 export function useOverviewCount(): number {
-  const rows = useOverviewRows()
-  const counts = countByState(rows)
-  return counts.ready + counts.you
+  const tasks = useTasksStore((s) => s.summaries)
+  return useSessionsStore((s) => {
+    if (counted?.tasks !== tasks || counted.byId !== s.byId) {
+      const counts = countByState(overviewRows(tasks, liveTree(s.byId)))
+      counted = { tasks, byId: s.byId, count: counts.ready + counts.you }
+    }
+    return counted.count
+  })
 }
 
 export type OverviewView = 'inbox' | 'flow' | 'timeline'
