@@ -44,6 +44,19 @@ export function sourceKey(agentId: AgentId, folder: string | null): string {
   return folder === null ? agentId : `${agentId}\n${folder}`
 }
 
+/** Huli: the tab of the Claude desktop app's Code sessions, beside the agents' own. */
+export const DESKTOP_TAB = 'claude-desktop'
+
+/** Huli: the listing of the Claude desktop app's sessions, which Claude Code agent `agentId` imports. */
+export function desktopSourceKey(agentId: AgentId): string {
+  return `${agentId}\n${DESKTOP_TAB}`
+}
+
+/** Huli: whether a listing's key is one of the agent's: its own, another folder's or the desktop app's. */
+export function ofAgent(key: string, agentId: AgentId): boolean {
+  return key === agentId || key.startsWith(`${agentId}\n`)
+}
+
 /** A session of a listing, `source` an agent's id or a `sourceKey`. */
 export function sessionKey(source: string, acpSessionId: string): string {
   return `${source}\n${acpSessionId}`
@@ -86,7 +99,9 @@ export function forgetFolder(harness: HarnessId, folder: string): string[] {
  * carried on, and its folder still there.
  */
 export function selectable(session: AgentHistorySession): boolean {
-  return (!session.imported || session.outside === 'fork') && !session.missing
+  return (
+    (!session.imported || session.outside === 'fork') && !session.missing && !session.unavailable
+  )
 }
 
 export function matches(session: AgentHistorySession, query: string): boolean {
@@ -98,14 +113,23 @@ export function matches(session: AgentHistorySession, query: string): boolean {
   )
 }
 
-/** The sessions under their folders, the folder used last first. */
-export function groupsOf(sessions: readonly AgentHistorySession[]): HistoryGroup[] {
+/**
+ * The sessions under their folders, the folder used last first; Huli: with `scratch`, the Claude
+ * desktop app's sessions in its scratch folders together under that heading.
+ */
+export function groupsOf(
+  sessions: readonly AgentHistorySession[],
+  scratch?: { name: string; path: string },
+): HistoryGroup[] {
   const groups = new Map<string, HistoryGroup>()
   for (const session of sessions) {
-    const key = folderKey(session.cwd)
+    const together = scratch !== undefined && session.scratch === true
+    const key = together ? `\n${DESKTOP_TAB}` : folderKey(session.cwd)
     let group = groups.get(key)
     if (!group) {
-      group = { key, path: session.cwd, name: basename(session.cwd), sessions: [], latest: 0 }
+      group = together
+        ? { key, path: scratch.path, name: scratch.name, sessions: [], latest: 0 }
+        : { key, path: session.cwd, name: basename(session.cwd), sessions: [], latest: 0 }
       groups.set(key, group)
     }
     group.sessions.push(session)

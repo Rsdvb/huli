@@ -102,6 +102,34 @@ Huli's own files:
   folder is checked in `validate.ts` (absolute, no `..` step, no Windows device path) and by the
   host (an existing folder, not the agent's own), and is only read. A WSL session's folder is a
   Linux path, so it shows as gone and is not imported into Windows' agent.
+- `src/agent-host/claude-desktop.ts` (+ `.test.ts`): the Claude desktop app's Code sessions, the
+  dialog's 「Claude 桌面版」 tab (`agentHistory.list` with `source: 'claude-desktop'` for a Claude
+  Code agent), shown once the app's index holds a session. The app runs Claude Code itself (its own
+  copy under `claude-code/<version>/`), with the configuration folder of `CLAUDE_CONFIG_DIR` from
+  its own settings (kept encrypted, so not read), else the environment's, else `~/.claude`; it has
+  no folder of its own for Code sessions, so their transcripts are under the agent's `projects/`
+  like any Claude Code's. Its index is one JSON file per session under
+  `claude-code-sessions/<account>/<organization>/local_<uuid>.json` in its data folder, found
+  without naming a package suffix: Windows' Store app in
+  `%LOCALAPPDATA%\Claude-Data\<package family>` (an older one virtualized under
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`), the installer's
+  `%APPDATA%\Claude`, `~/Library/Application Support/Claude` on macOS,
+  `~/.config/Claude` on Linux, and the `-3p` builds' beside them; `KITE_CLAUDE_DESKTOP_DATA` (a
+  list of data folders) replaces the search, for a test copy. Of each file only the folder
+  (`cwd`, `originCwd`, `folderPlace.cwd`), the Claude Code sessions (`cliSessionId`,
+  `lastAssistantCliSessionId`), the title (`titleSource` `user` becomes the session's own title),
+  the times (epoch ms as numbers or strings) and `isArchived` are read; `deleted_<uuid>` markers
+  leave a session out, `archived-sessions.idx` (version 1 only) marks one archived. Each is listed
+  as the Claude Code session whose transcript is in the project folder of the folder it runs in
+  (of the two, the one written last), marked 找不到记录 without one, and imported through
+  `sessions.import` as any Claude Code session, the app's title, times and archive kept
+  (`keptFor` prefers them), deduped by the Claude Code session ids of every Claude Code agent here.
+  A session in one of the app's scratch folders
+  (`scratch-workspaces/<account>/<organization>/scratch-*`) is No project here, still running in
+  that folder, so its transcript, resume and outside sync stay as they are: `Sessions` lets
+  `ScratchFolders` adopt such a folder at import and at start (`adoptOutsideScratch`), unless it is
+  a project here, and an adopted folder is never removed. One that went on in the project it
+  started in imports under that project.
 - `src/agent-host/memory/codex-import.ts` (+ `.test.ts`): Codex's own memory for the memory
   import beside Claude Code's (`memory.importScan`, `memory.import`). Only the curated files of
   `$CODEX_HOME/memories`: each `# Task Group:` of MEMORY.md (without its lists of rollout files),
@@ -121,6 +149,9 @@ Hooks into upstream files, one or two lines each:
 
 - `src/agent-host/connection.ts` (`ListedEverywhere`, the optional `listAllSessions`), its
   implementations in `codex/connection.ts` and `acp/connection.ts`.
+- `src/agent-host/scratch.ts` (`adopt`), `src/agent-host/sessions.ts` (`adoptOutsideScratch`, and
+  `importSession` adding no project for a scratch folder), `src/agent-host/host.ts` (the desktop
+  app's folders, `adoptOutsideScratch` once loaded), for the Claude desktop app's sessions.
 - `src/agent-host/sessions.ts` (`agentSessionIds`; `importSession` takes an optional `kept`, the
   title, times, pin and archive, and the `KeptField` type), `src/agent-host/host.ts` (the handler,
   and `sessions.import` taking over a listed session's title and times through `keptFor`; the

@@ -59,10 +59,13 @@ import { usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { openSession } from '@renderer/stores/view'
 import {
+  DESKTOP_TAB,
+  desktopSourceKey,
   eachLimited,
   forgetFolder,
   groupsOf,
   matches,
+  ofAgent,
   recentFolders,
   recentKeys,
   rememberFolder,
@@ -76,6 +79,8 @@ import {
 
 /** Imports at once: each reads the transcript's tail and writes the index. */
 const IMPORTS = 3
+const TAB =
+  'h-7 flex-none gap-1.5 rounded-xl px-3 text-control font-medium text-secondary not-data-active:hover:bg-hover data-active:bg-subtle data-active:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-none dark:text-secondary'
 /** Rows a folder shows before it asks for a search. */
 const SHOWN_PER_FOLDER = 200
 const RECENT_DAYS = 30
@@ -100,6 +105,12 @@ interface Chosen {
   folder: string | null
   key: string
   session: AgentHistorySession
+}
+
+/** Huli: the Claude Code agent that imports the Claude desktop app's sessions, on this computer. */
+function desktopAgentOf(agents: readonly { id: AgentId }[]): AgentId | null {
+  if (isWeb) return null
+  return agents.find((agent) => harnessOf(agent.id) === 'claude-code')?.id ?? null
 }
 
 /** Huli: the plans of the copies from other folders, which the user confirms. */
@@ -153,7 +164,8 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     ),
   )
   const [lists, setLists] = useState<Record<string, HistoryList>>({})
-  const [chosenAgent, setChosenAgent] = useState<AgentId | null>(null)
+  // An agent's id, or Huli: `DESKTOP_TAB`.
+  const [chosenTab, setChosenTab] = useState<string | null>(null)
   // Huli: the other folder each agent's tab lists, when one is chosen.
   const [folders, setFolders] = useState<Partial<Record<AgentId, string>>>({})
   const [query, setQuery] = useState('')
@@ -179,8 +191,8 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
   // The latest listing of each source; an earlier one drops its pages.
   const runs = useRef(new Map<string, number>())
 
-  const load = (agentId: AgentId, folder: string | null): void => {
-    const key = sourceKey(agentId, folder)
+  const load = (agentId: AgentId, folder: string | null, desktop = false): void => {
+    const key = desktop ? desktopSourceKey(agentId) : sourceKey(agentId, folder)
     const run = (runs.current.get(key) ?? 0) + 1
     runs.current.set(key, run)
     const live = () => alive.current && runs.current.get(key) === run
@@ -200,6 +212,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
             agentId,
             ...(cursor ? { cursor } : {}),
             ...(folder !== null ? { folder } : {}),
+            ...(desktop ? { source: 'claude-desktop' as const } : {}),
           })
           if (!live()) return
           if (first && folder !== null) rememberFolder(harnessOf(agentId), folder)
@@ -243,6 +256,9 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     alive.current = true
     for (const agent of agents) load(agent.id, null)
+    // Huli: the Claude desktop app's sessions, whose tab shows once some are found.
+    const desktopAgent = desktopAgentOf(agents)
+    if (desktopAgent) load(desktopAgent, null, true)
     return () => {
       alive.current = false
     }
@@ -255,20 +271,35 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     const harness = harnessOf(a.id)
     return harness === 'claude-code' || harness === 'codex' || !lists[a.id]?.error
   })
-  const shown = shownAgents.find((a) => a.id === chosenAgent)?.id ?? shownAgents[0]?.id ?? null
-  const shownName = shownAgents.find((a) => a.id === shown)?.name ?? shown ?? ''
-  const folder = shown ? (folders[shown] ?? null) : null
-  const source = shown ? sourceKey(shown, folder) : null
+  // Huli: the Claude desktop app's tab, while its listing holds a session.
+  const desktopAgent = desktopAgentOf(shownAgents)
+  const desktopList = desktopAgent ? lists[desktopSourceKey(desktopAgent)] : undefined
+  const desktopShown = !!desktopList && !desktopList.error && desktopList.sessions.length > 0
+  const onDesktop = desktopShown && chosenTab === DESKTOP_TAB
+  const shown = onDesktop
+    ? desktopAgent
+    : (shownAgents.find((a) => a.id === chosenTab)?.id ?? shownAgents[0]?.id ?? null)
+  const shownName = onDesktop
+    ? t('desktop.tab')
+    : (shownAgents.find((a) => a.id === shown)?.name ?? shown ?? '')
+  const folder = shown && !onDesktop ? (folders[shown] ?? null) : null
+  const source = shown ? (onDesktop ? desktopSourceKey(shown) : sourceKey(shown, folder)) : null
   const list = source ? lists[source] : undefined
   const filtered = useMemo(
     () => (list ? list.sessions.filter((s) => matches(s, query.trim())) : []),
     [list, query],
   )
-  const groups = useMemo(() => groupsOf(filtered), [filtered])
+  const scratchName = t('desktop.scratch')
+  const scratchPath = t('desktop.scratchPath')
+  const groups = useMemo(
+    () =>
+      onDesktop ? groupsOf(filtered, { name: scratchName, path: scratchPath }) : groupsOf(filtered),
+    [filtered, onDesktop, scratchName, scratchPath],
+  )
   const visibleKeys = source
     ? filtered.filter(selectable).map((s) => sessionKey(source, s.acpSessionId))
     : []
-  const toImport: Chosen[] = shownAgents.flatMap((agent) =>
+  const fromAgents: Chosen[] = shownAgents.flatMap((agent) =>
     [null, folders[agent.id] ?? null]
       .filter((from, index) => index === 0 || from !== null)
       .flatMap((from) => {
@@ -283,6 +314,30 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
           }))
       }),
   )
+  // Huli: the desktop app's chosen ones first, so one chosen in both tabs comes in with its title.
+  const fromDesktop: Chosen[] =
+    desktopAgent && desktopShown
+      ? desktopList.sessions
+          .filter(
+            (s) =>
+              selectable(s) &&
+              selected.has(sessionKey(desktopSourceKey(desktopAgent), s.acpSessionId)),
+          )
+          .map((s) => ({
+            agentId: desktopAgent,
+            folder: null,
+            key: sessionKey(desktopSourceKey(desktopAgent), s.acpSessionId),
+            session: s,
+          }))
+      : []
+  const toImport: Chosen[] = [...fromDesktop, ...fromAgents].filter(
+    (item, index, all) =>
+      all.findIndex(
+        (other) =>
+          other.agentId === item.agentId &&
+          other.session.acpSessionId === item.session.acpSessionId,
+      ) === index,
+  )
 
   const chooseFolder = async (agentId: AgentId, picked?: string): Promise<void> => {
     const chosen = picked ?? (await window.kettu.dialogs.chooseHistoryFolder())
@@ -292,19 +347,20 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     load(agentId, chosen)
   }
 
-  const markImported = (key: string, acpSessionId: string): void =>
+  // In every listing of the agent: its own, another folder's and Huli: the desktop app's.
+  const markImported = (agentId: AgentId, acpSessionId: string): void =>
     setLists((l) => {
-      const current = l[key]
-      if (!current) return l
-      return {
-        ...l,
-        [key]: {
+      const next = { ...l }
+      for (const [key, current] of Object.entries(l)) {
+        if (!ofAgent(key, agentId)) continue
+        next[key] = {
           ...current,
           sessions: current.sessions.map((s) =>
             s.acpSessionId === acpSessionId ? { ...s, imported: true, outside: undefined } : s,
           ),
-        },
+        }
       }
+      return next
     })
 
   const runImports = async (items: Chosen[], before: Pick<Outcome, 'failed' | 'skipped'>) => {
@@ -320,7 +376,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
       items,
       IMPORTS,
       () => alive.current && !stopping.current,
-      async ({ agentId, folder: from, key, session }) => {
+      async ({ agentId, key, session }) => {
         setProgress((p) => ({ ...p, title: session.title }))
         try {
           const summary = await host('sessions.import', {
@@ -333,8 +389,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
           useSessionsStore.getState().upsert(summary)
           result.imported.push(summary)
           if (!alive.current) return
-          markImported(sourceKey(agentId, from), session.acpSessionId)
-          if (from !== null) markImported(sourceKey(agentId, null), session.acpSessionId)
+          markImported(agentId, session.acpSessionId)
           setSelected((s) => withKeys(s, [key], false))
         } catch (error) {
           result.failed.push({
@@ -450,17 +505,30 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     null,
   )
   const alreadyHere = list?.sessions.filter((s) => s.imported).length ?? 0
+  const archived = list?.sessions.filter((s) => s.archived).length ?? 0
+  const unavailable = list?.sessions.filter((s) => s.unavailable).length ?? 0
   const statusParts = list
     ? [
         t('dialog.listed', { count: list.sessions.length }),
-        t('dialog.projects', { count: groupsOf(list.sessions).length }),
+        t('dialog.projects', {
+          count: (onDesktop
+            ? groupsOf(list.sessions, { name: scratchName, path: scratchPath })
+            : groupsOf(list.sessions)
+          ).length,
+        }),
         alreadyHere > 0 ? t('dialog.alreadyHere', { count: alreadyHere }) : null,
+        archived > 0 ? t('desktop.archivedCount', { count: archived }) : null,
+        unavailable > 0 ? t('desktop.unavailableCount', { count: unavailable }) : null,
         list.hidden.subagents > 0
           ? t('dialog.hiddenSubagents', { count: list.hidden.subagents })
           : null,
         list.hidden.empty > 0 ? t('dialog.hiddenEmpty', { count: list.hidden.empty }) : null,
       ].filter(Boolean)
     : []
+  const statusTip = [
+    ...statusParts,
+    ...(onDesktop && list?.source ? [t('dialog.readFrom', { folder: list.source })] : []),
+  ].join('\n')
   const busy = running || planning
   const copyCount = confirming
     ? confirming.chosen.filter(
@@ -505,7 +573,10 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
       ) : (
         <>
           <div className="flex flex-col gap-2.5 px-5.5 pt-3.5">
-            <Tabs value={shown} onValueChange={(value: AgentId) => setChosenAgent(value)}>
+            <Tabs
+              value={onDesktop ? DESKTOP_TAB : shown}
+              onValueChange={(value: string) => setChosenTab(value)}
+            >
               <TabsList
                 aria-label={t('dialog.agents')}
                 className="justify-start gap-1.5 rounded-none bg-transparent p-0 shadow-none group-data-horizontal/tabs:h-auto"
@@ -513,11 +584,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                 {shownAgents.map((agent) => {
                   const agentList = lists[sourceKey(agent.id, folders[agent.id] ?? null)]
                   return (
-                    <TabsTrigger
-                      key={agent.id}
-                      value={agent.id}
-                      className="h-7 flex-none gap-1.5 rounded-xl px-3 text-control font-medium text-secondary not-data-active:hover:bg-hover data-active:bg-subtle data-active:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-none dark:text-secondary"
-                    >
+                    <TabsTrigger key={agent.id} value={agent.id} className={TAB}>
                       <AgentMark agent={agent.id} size={14} />
                       {agent.name}
                       {agentList && !agentList.error && (
@@ -529,9 +596,18 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                     </TabsTrigger>
                   )
                 })}
+                {desktopAgent && desktopShown && (
+                  <TabsTrigger value={DESKTOP_TAB} className={TAB} title={t('desktop.tabTip')}>
+                    <AgentMark agent={desktopAgent} size={14} />
+                    {t('desktop.tab')}
+                    <span className="text-meta text-tertiary tabular">
+                      {desktopList.sessions.length}
+                    </span>
+                  </TabsTrigger>
+                )}
               </TabsList>
             </Tabs>
-            {readsFolders(shown) && (
+            {!onDesktop && readsFolders(shown) && (
               <SourceRow
                 agentId={shown}
                 agentName={shownName}
@@ -596,7 +672,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
               </Button>
             </div>
             {list && !list.error && (
-              <p className="truncate text-hint text-tertiary" title={statusParts.join('\n')}>
+              <p className="truncate text-hint text-tertiary" title={statusTip}>
                 {list.loading
                   ? t('dialog.listing', { count: list.sessions.length })
                   : statusParts.join(t('dialog.separator'))}
@@ -674,7 +750,11 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
         )}
         {!confirming && (
           <p className="text-hint text-tertiary">
-            {folder !== null ? t('dialog.folderNote', { agent: shownName }) : t('dialog.readOnly')}
+            {onDesktop
+              ? t('desktop.note')
+              : folder !== null
+                ? t('dialog.folderNote', { agent: shownName })
+                : t('dialog.readOnly')}
           </p>
         )}
       </div>
@@ -1095,17 +1175,33 @@ function SessionRow({
     }
   }
   const meta = [
-    session.imported ? t('dialog.imported') : session.missing ? t('dialog.missing') : null,
+    session.imported
+      ? t('dialog.imported')
+      : session.unavailable
+        ? t('desktop.unavailable')
+        : session.missing
+          ? t('dialog.missing')
+          : null,
+    session.archived ? t('desktop.archived') : null,
     newer ? t('dialog.newer') : session.outside === 'fork' ? t('dialog.fork') : null,
     session.updatedAt ? mediumAgo(session.updatedAt) : null,
   ]
     .filter(Boolean)
     .join(' · ')
+  const tip = session.imported
+    ? undefined
+    : session.unavailable
+      ? t('desktop.unavailableTip')
+      : session.missing
+        ? t('dialog.missingTip')
+        : session.archived
+          ? t('desktop.archivedTip')
+          : undefined
   return (
     <li>
       <label
         className="flex h-10 items-center gap-2.5 border-b border-subtle pr-1 pl-7"
-        title={session.missing && !session.imported ? t('dialog.missingTip') : undefined}
+        title={tip}
       >
         <Checkbox
           checked={session.imported || (can && checked)}

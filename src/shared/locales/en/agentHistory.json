@@ -61,6 +61,21 @@
     "copying": "Copying files…",
     "forgetFolder": "Forget this folder"
   },
+  "desktop": {
+    "tab": "Claude desktop",
+    "tabTip": "The sessions of the Claude desktop app's Code tab, with its own titles and times",
+    "scratch": "Scratch sessions",
+    "scratchPath": "No project · the Claude desktop app's scratch folders",
+    "archived": "Archived",
+    "archivedTip": "Archived in the Claude desktop app; it is imported archived too.",
+    "archivedCount_one": "{{count}} archived",
+    "archivedCount_other": "{{count}} archived",
+    "unavailable": "No transcript",
+    "unavailableTip": "Claude Code keeps no transcript of this session for the folder it runs in (it may have been deleted, or be under another folder only), so it cannot be imported.",
+    "unavailableCount_one": "{{count}} without a transcript",
+    "unavailableCount_other": "{{count}} without a transcript",
+    "note": "Only the Claude desktop app's and Claude Code's own files are read. Scratch sessions come in under No project and keep running in their scratch folders; archived ones come in archived. Sessions deleted in the app are not listed."
+  },
   "confirm": {
     "title": "Copy into {{agent}}'s folder",
     "description": "These files are written into {{target}}. Nothing in the chosen folder changes, and nothing is overwritten except an older copy of a session, which is kept beside it as a .kite-bak file first.",
