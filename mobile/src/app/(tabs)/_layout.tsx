@@ -12,8 +12,11 @@ import { View } from 'react-native'
 import { router } from 'expo-router'
 import { NativeTabs } from 'expo-router/native-tabs'
 import { SessionRowSkeleton } from '../../components/SessionRow'
-import { sameFields, useHostActions, useHostSelector, type HostData } from '../../host'
+import { getHost, sameFields, useHostActions, useHostSelector, type HostData } from '../../host'
+import { linkProblem } from '../../linkInfo'
 import { PairScreen } from '../../screens/PairScreen'
+import { haptic } from '../../ui/haptics'
+import { showNotice } from '../../ui/NoticeBar'
 import { Screen } from '../../ui/Screen'
 import { rememberTab } from '../../ui/lastTab'
 import { space, useTokens } from '../../ui/tokens'
@@ -89,7 +92,20 @@ export default function TabsLayout() {
         disabled
         listeners={{
           tabPress: () => {
-            if (canCompose) router.push('/new')
+            if (canCompose) {
+              router.push('/new')
+              return
+            }
+            // It cannot open yet: say why rather than ignore the press.
+            haptic.warning()
+            const { state } = getHost()
+            showNotice({
+              tone: 'warning',
+              text:
+                state.kind === 'stopped'
+                  ? `${linkProblem(state) ?? '电脑的连接已断开。'}现在不能开新会话。`
+                  : '正在连接电脑，连上后就能开新会话。',
+            })
           },
         }}
         accessibilityLabel="新会话"
