@@ -2,7 +2,7 @@
 // reply, to fork the session from it and, under the latest turn, to undo that turn.
 
 import { memo, useEffect, useState } from 'react'
-import { StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { useSessionRows } from './context'
 import { copyText } from './feedback'
 import { clockTime, spanText } from './format'
@@ -26,7 +26,7 @@ export const TurnFooter = memo(function TurnFooter(props: {
   replies: Footer['replies']
 }) {
   const { c } = useSessionTokens()
-  const { fork, undo } = useSessionRows()
+  const { fork, undo } = useSessionRows((r) => ({ fork: r.fork, undo: r.undo }))
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
@@ -83,11 +83,15 @@ export const TurnFooter = memo(function TurnFooter(props: {
             disabled={undo.blocked}
             onPress={undo.run}
             accessibilityRole="button"
-            accessibilityLabel="撤销这一轮"
-            accessibilityState={{ disabled: undo.blocked }}
-            style={[styles.button, undo.blocked && styles.blocked]}
+            accessibilityLabel={undo.busy ? '正在撤销这一轮' : '撤销这一轮'}
+            accessibilityState={{ disabled: undo.blocked, busy: !!undo.busy }}
+            style={[styles.button, undo.blocked && !undo.busy && styles.blocked]}
           >
-            <Icon icon={G.undo} size={16} color={c.textTertiary} />
+            {undo.busy ? (
+              <ActivityIndicator size="small" color={c.textTertiary} />
+            ) : (
+              <Icon icon={G.undo} size={16} color={c.textTertiary} />
+            )}
           </PressScale>
         ) : null}
       </View>

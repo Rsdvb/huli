@@ -19,6 +19,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native'
 import { useSharedValue } from 'react-native-reanimated'
+import { hideNotice, showNotice } from '../../ui/NoticeBar'
 import {
   KeyboardGestureArea,
   KeyboardStickyView,
@@ -215,6 +216,9 @@ const isPlanAsk = (entry: ThreadEntry): entry is ToolEntry =>
 
 const pickKeyboard = (state: { isVisible: boolean; height: number }) =>
   state.isVisible ? state.height : 0
+
+// How long Stop waits for the turn to end before it can be asked again.
+const STOP_WAIT = 15_000
 
 const live = (status: string | undefined) =>
   status === 'running' || status === 'awaiting_permission' || status === 'starting'
@@ -414,14 +418,30 @@ export default function SessionScreen() {
     }
   }, [moreOpen, connected, link, id, terminalAllowed, projectPath, summary])
 
+  // Stop asks once: the button turns until the turn ends, rather than cancel it again with each
+  // tap while the agent winds down.
+  const [stopping, setStopping] = useState(false)
+  useEffect(() => {
+    if (!running) setStopping(false)
+  }, [running])
+  useEffect(() => {
+    if (!stopping) return
+    // An agent that never ends its turn leaves Stop to be asked again.
+    const timer = setTimeout(() => setStopping(false), STOP_WAIT)
+    return () => clearTimeout(timer)
+  }, [stopping])
   const stop = () => {
-    void link.request('sessions.cancel', { sessionId: id }).catch((error: { message?: string }) => {
-      Alert.alert('没能停止', error.message ?? '')
+    if (stopping) return
+    setStopping(true)
+    link.request('sessions.cancel', { sessionId: id }).catch((error: unknown) => {
+      setStopping(false)
+      Alert.alert('没能停止', hostErrorText(error))
     })
   }
 
   const forkAtMessage = !!agent?.capabilities.forkAtMessage
   const canFork = forkAtMessage || !!agent?.capabilities.forkSession
+  const forking = useRef(false)
   const fork = useCallback(
     (entryId: string | null, worktree?: 'same') => {
       const atMessage = forkAtMessage && entryId !== null
@@ -435,6 +455,10 @@ export default function SessionScreen() {
           {
             text: '分叉',
             onPress: () => {
+              if (forking.current) return
+              forking.current = true
+              // Forking copies the session on the computer, which takes a moment.
+              showNotice({ text: '正在分叉…' })
               link
                 .request('sessions.fork', {
                   sessionId: id,
@@ -443,11 +467,18 @@ export default function SessionScreen() {
                 })
                 .then((made) => {
                   haptic.success()
+                  hideNotice()
                   const madeId = (made as SessionSummary).id
                   if (pane) pane.open(madeId)
                   else router.push(`/session/${madeId}`)
                 })
-                .catch((error: unknown) => Alert.alert('没能分叉', hostErrorText(error)))
+                .catch((error: unknown) => {
+                  hideNotice()
+                  Alert.alert('没能分叉', hostErrorText(error))
+                })
+                .finally(() => {
+                  forking.current = false
+                })
             },
           },
         ],
@@ -478,7 +509,13 @@ export default function SessionScreen() {
     try {
       await link.request('sessions.revert', { sessionId: id, entryId: revertStart })
       haptic.success()
-      if (text.trim() && !composer.current?.putBack(text)) {
+      const back = !!text.trim() && !!composer.current?.putBack(text)
+      if (!text.trim() || back) {
+        showNotice({
+          text: back ? '已撤销这一轮，消息放回了输入框' : '已撤销这一轮',
+          tone: 'success',
+        })
+      } else {
         Alert.alert('输入框里已有草稿', '撤销的消息没有放回去。', [
           { text: '复制消息', onPress: () => void copyText(text) },
           { text: '好', style: 'cancel' },
@@ -494,8 +531,10 @@ export default function SessionScreen() {
   const undoBlocked = reverting || (status !== 'ready' && status !== 'closed')
   const undo = useMemo(
     () =>
-      undoEnd === null ? null : { end: undoEnd, blocked: undoBlocked, run: () => void revert() },
-    [undoEnd, undoBlocked, revert],
+      undoEnd === null
+        ? null
+        : { end: undoEnd, blocked: undoBlocked, busy: reverting, run: () => void revert() },
+    [undoEnd, undoBlocked, reverting, revert],
   )
 
   // New session opens under this one, in its project, as the desktop's 新建子会话 does.
@@ -1145,6 +1184,7 @@ export default function SessionScreen() {
             bottomInset={insets.bottom}
             running={running}
             onStop={stop}
+            stopping={stopping}
             onAttach={(anchor) =>
               menu.open('attach', anchor, { placement: 'above', align: 'start' })
             }

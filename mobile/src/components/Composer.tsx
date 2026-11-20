@@ -137,6 +137,8 @@ export interface ComposerProps {
   /** A turn runs: an empty box offers to stop it. */
   running?: boolean
   onStop?: () => void
+  /** Stop was asked and the turn winds down: the button turns and takes no more taps. */
+  stopping?: boolean
   /**
    * Over the card, such as the switch's strip or the prompt cache's notice; as a function it is
    * told whether the box holds a message, so typing never renders the screen around it.
@@ -1131,10 +1133,16 @@ export function Composer(props: ComposerProps) {
                   haptic.firm()
                   props.onStop!()
                 }}
-                accessibilityLabel="停止这一轮"
+                disabled={props.stopping}
+                accessibilityLabel={props.stopping ? '正在停止' : '停止这一轮'}
+                accessibilityState={{ busy: !!props.stopping }}
                 style={{ backgroundColor: s.stop }}
               >
-                <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
+                {props.stopping ? (
+                  <ActivityIndicator size="small" color={s.onStop} />
+                ) : (
+                  <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
+                )}
               </RoundButton>
             )}
           </View>
