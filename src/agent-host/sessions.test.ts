@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,7 @@ import type { AgentManager } from './agents'
 import type { Diagnostics } from './diagnostics'
 import type { LastRequest, OutsideReader } from './outside-sessions'
 import type { Projects } from './projects'
-import type { ScratchFolders } from './scratch'
+import { ScratchFolders } from './scratch'
 import { SessionManager, type SessionEvents } from './sessions'
 import { returnedFile, sessionsFile, type SessionRecord, type SessionsFile } from './storage'
 import type { StoredThread } from './threads/model'
@@ -19,7 +19,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
+  // A save the manager queued may still land as the folder goes, under a loaded machine.
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
 
 const log = () => {}
@@ -31,6 +32,7 @@ function manager(
     agents?: Record<string, unknown>
     outside?: OutsideReader
     threads?: Partial<ThreadStore>
+    scratch?: ScratchFolders
   } = {},
 ) {
   const added: string[] = []
@@ -53,7 +55,7 @@ function manager(
       },
       ...projects,
     } as unknown as Projects,
-    scratch: { contains: () => false } as unknown as ScratchFolders,
+    scratch: extra.scratch ?? ({ contains: () => false } as unknown as ScratchFolders),
     file: sessionsFile(dir, log),
     returned: returnedFile(dir, log),
     portOpen: () => false,
@@ -173,6 +175,70 @@ describe('importing a session from a terminal', () => {
     await vi.waitFor(async () =>
       expect((await index())?.sessions[0]).toMatchObject({ acpSessionId: 'copy-1' }),
     )
+  })
+})
+
+describe('the Claude desktop app’s scratch folders', () => {
+  const support = '/Users/me/Library/Application Support/Claude/scratch-workspaces/a/o'
+  const first = `${support}/scratch-2026-11-10-df326f`
+  const second = `${support}/scratch-2026-11-11-11feb9`
+  const scratch = () => new ScratchFolders(path.join(dir, 'scratch'), 'darwin')
+
+  it('imports a session of one under No project, adding no project', async () => {
+    const { sessions, added } = manager({}, { scratch: scratch() })
+    await sessions.load()
+    const summary = await sessions.importSession({
+      agentId: 'claude-code',
+      projectPath: first,
+      acpSessionId: 'cli-1',
+    })
+    expect(summary.scratch).toBe(true)
+    expect(added).toEqual([])
+    const project = await sessions.importSession({
+      agentId: 'claude-code',
+      projectPath: '/repo',
+      acpSessionId: 'cli-2',
+    })
+    expect(project.scratch).toBe(false)
+    expect(added).toEqual(['/repo'])
+  })
+
+  it('keeps them No project after a restart, unless the folder is a project here', async () => {
+    const before = manager({}, { scratch: scratch() })
+    await before.sessions.load()
+    for (const [projectPath, acpSessionId] of [
+      [first, 'cli-1'],
+      [second, 'cli-2'],
+    ] as const) {
+      await before.sessions.importSession({ agentId: 'claude-code', projectPath, acpSessionId })
+    }
+    await before.sessions.flush()
+    const after = manager({ list: () => [{ path: second }] as never }, { scratch: scratch() })
+    await after.sessions.load()
+    after.sessions.adoptOutsideScratch()
+    expect(
+      after.sessions
+        .list()
+        .map((s) => [s.projectPath, s.scratch])
+        .sort(),
+    ).toEqual([
+      [first, true],
+      [second, false],
+    ])
+  })
+
+  it('never removes one as an unused scratch folder of its own', async () => {
+    const folder = path.join(dir, 'data', 'scratch-workspaces', 'a', 'o', 'scratch-2026-11-10-abc')
+    await mkdir(folder, { recursive: true })
+    const folders = new ScratchFolders(path.join(dir, 'scratch'), process.platform)
+    await folders.ready()
+    folders.adopt(folder)
+    expect(folders.contains(path.join(folder, 'sub'))).toBe(true)
+    await folders.removeIfEmpty(folder)
+    expect((await stat(folder)).isDirectory()).toBe(true)
+    const own = await folders.create()
+    await folders.removeIfEmpty(own)
+    await expect(stat(own)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 

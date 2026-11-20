@@ -21,7 +21,16 @@ export interface AgentHistorySession {
    * `fork`, a conversation that went another way, which imports as a copy of its own.
    */
   outside?: 'newer' | 'fork'
+  /** Huli: of the Claude desktop app's sessions, one it archived, which imports archived. */
+  archived?: true
+  /** Huli: of the Claude desktop app's sessions, one in its scratch folder: No project here. */
+  scratch?: true
+  /** Huli: of the Claude desktop app's sessions, one whose transcript is gone: not importable. */
+  unavailable?: true
 }
+
+/** Huli: the sessions `agentHistory.list` reads from another app's index instead of the agent. */
+export type HistorySource = 'claude-desktop'
 
 export interface AgentHistoryPage {
   sessions: AgentHistorySession[]

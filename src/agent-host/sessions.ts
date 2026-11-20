@@ -288,6 +288,7 @@ import type { TaskSessionHooksRef, TaskStepStart } from './workflow/engine'
 import { scopeAnswer } from './routines/scope'
 import { CONTEXT_REPORT, runReport } from './reports'
 import type { ScratchFolders } from './scratch'
+import { isDesktopScratch } from './claude-desktop'
 import type { WorktreeInspection } from './worktrees/api'
 import type { PrepareState, SetupLog, WorktreeManager } from './worktrees/manager'
 import { BranchNaming } from './worktrees/naming'
@@ -1414,6 +1415,24 @@ export class SessionManager {
     for (const live of this.live.values()) if (holds(live.record)) return true
     for (const record of this.records.values()) if (holds(record)) return true
     return false
+  }
+
+  /**
+   * Huli: a session in one of the Claude desktop app's scratch folders, made for a session without
+   * a project, is No project here too, as in Kite's own, unless that folder is a project here. Run
+   * once the projects and sessions are loaded, and for each import.
+   */
+  adoptOutsideScratch(projectPath?: string): void {
+    const folders =
+      projectPath === undefined
+        ? [...this.records.values()].map((r) => r.projectPath)
+        : [projectPath]
+    const projects = this.deps.projects.list()
+    for (const folder of new Set(folders)) {
+      if (!isDesktopScratch(folder)) continue
+      if (projects.some((project) => samePath(project.path, folder, this.deps.platform))) continue
+      this.deps.scratch.adopt(folder)
+    }
   }
 
   /** Huli: the agent's own ids of its sessions here, earlier ones included, for the bulk import. */
@@ -11932,7 +11951,8 @@ export class SessionManager {
           ?.lastRequest(params.agentId, projectPath, params.acpSessionId, configDir)
           .catch(() => null)
       : null
-    await this.deps.projects.add(projectPath)
+    this.adoptOutsideScratch(projectPath)
+    if (!this.deps.scratch.contains(projectPath)) await this.deps.projects.add(projectPath)
     const listed = this.listed.get(`${params.agentId}\n${params.acpSessionId}`)
     const now = this.now()
     const updatedAt = listed?.updatedAt ? Date.parse(listed.updatedAt) : NaN

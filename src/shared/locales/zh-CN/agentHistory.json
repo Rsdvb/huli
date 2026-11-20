@@ -54,6 +54,19 @@
     "copying": "正在复制文件…",
     "forgetFolder": "不再列出这个文件夹"
   },
+  "desktop": {
+    "tab": "Claude 桌面版",
+    "tabTip": "Claude 桌面版 Code 标签页里的会话，用它自己的标题和时间",
+    "scratch": "临时会话",
+    "scratchPath": "无项目 · Claude 桌面版的临时文件夹",
+    "archived": "已归档",
+    "archivedTip": "在 Claude 桌面版里已归档，导入后也放在归档里。",
+    "archivedCount_other": "{{count}} 个已归档",
+    "unavailable": "找不到记录",
+    "unavailableTip": "Claude Code 在这个会话运行的文件夹下没有它的对话记录（可能已删除，或只在别的文件夹里），所以无法导入。",
+    "unavailableCount_other": "{{count}} 个找不到记录",
+    "note": "只读取 Claude 桌面版和 Claude Code 自己的文件。临时会话导入后放在“无项目”下，仍在原来的临时文件夹里运行；已归档的导入后也在归档里。在桌面版里删掉的会话不会列出。"
+  },
   "confirm": {
     "title": "复制到 {{agent}} 的文件夹",
     "description": "这些文件会写入 {{target}}。所选文件夹里的内容不会改变；除了会话较旧的副本外不会覆盖任何文件，较旧的副本会先在旁边保留为 .kite-bak 文件。",

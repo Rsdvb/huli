@@ -32,7 +32,12 @@ import type { ContextBreakdown, ContextEstimates } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
-import type { AgentHistoryPage, HistoryCopyOutcome, HistoryCopyPlan } from './agent-history'
+import type {
+  AgentHistoryPage,
+  HistoryCopyOutcome,
+  HistoryCopyPlan,
+  HistorySource,
+} from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type {
   CatalogServer,
@@ -1912,7 +1917,9 @@ export interface HostContract {
   'agentHistory.list': {
     // `folder`: another folder of the agent's kind to list instead of its own, such as a backup
     // of Claude Code's configuration folder or a Codex home copied from another computer.
-    params: { agentId: AgentId; cursor?: string; folder?: string }
+    // `source`: for a Claude Code agent, the Claude desktop app's Code sessions instead, from the
+    // app's own index, which this agent's transcripts import.
+    params: { agentId: AgentId; cursor?: string; folder?: string; source?: HistorySource }
     result: AgentHistoryPage
   }
   // Huli: the files copying the chosen sessions of a `folder` that `agentHistory.list` read

@@ -14,9 +14,11 @@ import type {
   AgentHistorySession,
   HistoryCopyOutcome,
   HistoryCopyPlan,
+  HistorySource,
 } from '@shared/agent-history'
 import { harnessOf, type AgentId } from '@shared/agents'
 import type { Platform } from '@shared/platform'
+import { locateTranscript, readDesktopIndex, type DesktopSession } from './claude-desktop'
 import {
   folderSource,
   LISTED_FILES,
@@ -440,6 +442,8 @@ export interface AgentHistoryDeps {
     name(agentId: AgentId): string
     /** The agent's own configuration folder, as for Claude Code `CLAUDE_CONFIG_DIR`. */
     configFolder(agentId: AgentId): string | null
+    /** Huli: every agent here, for the Claude Code sessions any of them has. */
+    ids?(): AgentId[]
     ensureReady(agentId: AgentId): Promise<Pick<AgentRuntime, 'connection' | 'init'>>
   }
   sessions: {
@@ -447,6 +451,8 @@ export interface AgentHistoryDeps {
     /** Huli: how another folder's copy of an imported session's transcript stands to its own. */
     outsideCopy?(agentId: AgentId, acpSessionId: string): Promise<'newer' | 'fork' | null>
   }
+  /** Huli: the Claude desktop app's data folders that hold its index of Code sessions. */
+  desktopFolders?(): Promise<string[]>
   isDirectory?(folder: string): Promise<boolean>
   log: LogFn
   now?(): number
@@ -498,6 +504,8 @@ export class AgentHistory {
   /** A Claude Code agent's last scan, which its later pages are cut from. */
   private readonly scans = new Map<AgentId, ClaudeScan>()
   private readonly kept = new Map<string, Kept>()
+  /** Huli: what the Claude desktop app's index kept of the sessions it listed. */
+  private readonly desktopKept = new Map<string, Kept>()
   private readonly folders = new Map<string, FolderListing>()
   private readonly plans = new Map<
     string,
@@ -512,16 +520,19 @@ export class AgentHistory {
 
   /**
    * An agent's past sessions; Huli: with `folder`, those of another folder of the agent's kind
-   * rather than its own, which an import copies into its own with `planCopy` and `copy`.
+   * rather than its own, which an import copies into its own with `planCopy` and `copy`; with
+   * `index`, those another app's index lists, as the Claude desktop app's.
    */
   async list(
     agentId: AgentId,
     cursor: string | null,
     folder: string | null = null,
+    index: HistorySource | null = null,
   ): Promise<AgentHistoryPage> {
     const { agents } = this.deps
     if (!agents.has(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
     agents.assertEnabled(agentId)
+    if (index === 'claude-desktop') return this.desktopPage(agentId)
     let items: HistoryItem[]
     let nextCursor: string | null
     let oldSubagents = 0
@@ -733,7 +744,98 @@ export class AgentHistory {
    * for one this host has not listed.
    */
   keptFor(agentId: AgentId, acpSessionId: string): Kept {
-    return this.kept.get(`${agentId}\n${acpSessionId}`) ?? {}
+    const key = `${agentId}\n${acpSessionId}`
+    // Huli: the Claude desktop app's title, times and archive win over its transcript's.
+    return { ...this.kept.get(key), ...this.desktopKept.get(key) }
+  }
+
+  /**
+   * Huli: the Claude desktop app's Code sessions, from its own index, each as the Claude Code
+   * session whose transcript the agent's folder holds. One the app deleted is not listed; one it
+   * archived, one in its scratch folder and one whose transcript is gone are marked. Sessions that
+   * run the same Claude Code session are listed once, the latest.
+   */
+  private async desktopPage(agentId: AgentId): Promise<AgentHistoryPage> {
+    const { agents } = this.deps
+    const configDir = harnessOf(agentId) === 'claude-code' ? agents.configFolder(agentId) : null
+    if (!configDir) {
+      throw new HostError(
+        'agent_unavailable',
+        t('session.cannotList', { agent: agents.name(agentId) }),
+      )
+    }
+    const started = Date.now()
+    const index = await readDesktopIndex((await this.deps.desktopFolders?.()) ?? [])
+    const projects = path.join(configDir, 'projects')
+    const here = new Set<string>()
+    for (const id of agents.ids?.() ?? [agentId]) {
+      if (harnessOf(id) !== 'claude-code') continue
+      for (const acp of this.deps.sessions.agentSessionIds(id)) here.add(acp)
+    }
+    const rows = new Map<string, { row: AgentHistorySession; session: DesktopSession }>()
+    await eachLimited(index.sessions, READS, async (session) => {
+      const transcript = await locateTranscript(session, projects).catch(() => null)
+      const acpSessionId = transcript?.acpSessionId ?? session.id
+      const folder = transcript?.folder ?? session.cwd
+      const row: AgentHistorySession = {
+        acpSessionId,
+        title: session.title,
+        cwd: folder,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        imported: [acpSessionId, session.cliSessionId, session.lastAssistantCliSessionId].some(
+          (id) => id !== null && here.has(id),
+        ),
+        missing: false,
+        ...(session.archived ? { archived: true as const } : {}),
+        ...(session.scratch && folder === session.cwd ? { scratch: true as const } : {}),
+        ...(transcript?.found ? {} : { unavailable: true as const }),
+      }
+      // Of two that run one session, the one whose transcript is found, then the latest.
+      const other = rows.get(acpSessionId)?.row
+      const better =
+        !other ||
+        (other.unavailable === true && row.unavailable === undefined) ||
+        (other.unavailable === row.unavailable && (row.updatedAt ?? 0) > (other.updatedAt ?? 0))
+      if (better) rows.set(acpSessionId, { row, session })
+    })
+    const listed = [...rows.values()].sort(
+      (a, b) => (b.row.updatedAt ?? 0) - (a.row.updatedAt ?? 0),
+    )
+    const gone = await this.goneFolders(listed.map(({ row }) => row))
+    for (const { row, session } of listed) {
+      row.missing = gone.has(row.cwd)
+      if (!row.unavailable) this.keepDesktop(agentId, row, session)
+    }
+    this.deps.log(
+      'info',
+      `Listed ${listed.length} Claude desktop app sessions of ${index.folders.length} data folders in ${Date.now() - started} ms` +
+        (index.unreadable > 0 ? `; ${index.unreadable} index files left out` : ''),
+    )
+    return {
+      sessions: listed.map(({ row }) => row),
+      nextCursor: null,
+      hidden: { subagents: 0, empty: 0 },
+      ...(index.folders.length > 0 ? { source: index.folders.join('\n') } : {}),
+    }
+  }
+
+  /** Huli: what an import of a desktop app's session takes over from the app's index. */
+  private keepDesktop(agentId: AgentId, row: AgentHistorySession, session: DesktopSession): void {
+    const key = `${agentId}\n${row.acpSessionId}`
+    const title = row.title
+    this.desktopKept.delete(key)
+    this.desktopKept.set(key, {
+      ...(title
+        ? session.userTitle
+          ? { customTitle: title }
+          : { title, titleSource: 'agent' as const }
+        : {}),
+      ...(row.createdAt !== null ? { createdAt: row.createdAt } : {}),
+      ...(row.updatedAt !== null ? { updatedAt: row.updatedAt } : {}),
+      ...(row.archived ? { archivedAt: row.updatedAt ?? this.now() } : {}),
+    })
+    if (this.desktopKept.size > KEPT) this.desktopKept.delete(this.desktopKept.keys().next().value!)
   }
 
   private async claudePage(
@@ -776,7 +878,7 @@ export class AgentHistory {
     }
   }
 
-  private async goneFolders(items: readonly HistoryItem[]): Promise<Set<string>> {
+  private async goneFolders(items: readonly { cwd: string }[]): Promise<Set<string>> {
     const folders = [...new Set(items.filter((item) => item.cwd !== '').map((item) => item.cwd))]
     const gone = new Set<string>()
     const isDirectory =

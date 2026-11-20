@@ -2828,10 +2828,15 @@ export function createValidators(platform: Platform): Validators {
     'agentHistory.list': (params) => {
       const o = fields(params)
       const cursor = optionalString(o, 'cursor', TEXT_CHARS)
+      // Huli: another app's index, never with a folder.
+      if (o.source !== undefined && (o.source !== 'claude-desktop' || o.folder !== undefined)) {
+        throw invalidParams('source must be claude-desktop, without a folder')
+      }
       return {
         agentId: agentId(o),
         ...(cursor !== undefined ? { cursor } : {}),
         ...(o.folder !== undefined ? { folder: historyFolder(o, 'folder', platform) } : {}),
+        ...(o.source !== undefined ? { source: 'claude-desktop' as const } : {}),
       }
     },
     'agentHistory.planCopy': (params) => {

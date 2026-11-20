@@ -244,6 +244,7 @@ import { LOG_READERS } from './usage/readers'
 import { UsageStore, type UsageWorkerFactory } from './usage/store'
 import { createValidators } from './validate'
 import { AgentHistory } from './agent-history'
+import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 
 // The agent menu reads a running agent's options again once they are older than this.
@@ -1272,6 +1273,12 @@ export class AgentHost {
       platform,
       agents: this.agents,
       sessions: this.sessions,
+      desktopFolders: () =>
+        claudeDesktopFolders({
+          platform,
+          env: options.baseEnv,
+          home: options.homeDir ?? os.homedir(),
+        }),
       log,
     })
     this.sessionFolders = new SessionFolders({
@@ -1518,6 +1525,8 @@ export class AgentHost {
           writeLog('warn', 'host', `Kite's Node.js: ${(error as Error).message}`),
         ),
     ])
+    // Huli: once both the projects and the sessions are in.
+    host.sessions.adoptOutsideScratch()
     // After the sessions, whose step sessions it messages when it resumes.
     await host.tasks.load()
     host.agents.restore(remembered)
@@ -3641,8 +3650,8 @@ export class AgentHost {
           throw new HostError('not_found', `No setup waits in ${entryId}`)
         }
       },
-      'agentHistory.list': ({ agentId, cursor, folder }) =>
-        this.agentHistory.list(agentId, cursor ?? null, folder ?? null),
+      'agentHistory.list': ({ agentId, cursor, folder, source }) =>
+        this.agentHistory.list(agentId, cursor ?? null, folder ?? null, source ?? null),
       'agentHistory.planCopy': ({ agentId, folder, sessionIds }) =>
         this.agentHistory.planCopy(agentId, folder, sessionIds),
       'agentHistory.copy': ({ token }) => this.agentHistory.copy(token),
