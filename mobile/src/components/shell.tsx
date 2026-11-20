@@ -42,6 +42,9 @@ import { ComputerSheet } from './ComputerSheet'
 
 const noop = () => {}
 
+/** What the computer's mark beside the compact bar's project pill takes: itself, its pad, a gap. */
+const MARK_ROOM = 16 + space.xs * 2 + space.sm + 2
+
 export type ProjectFilter =
   { kind: 'all' } | { kind: 'scratch' } | { kind: 'project'; path: string }
 
@@ -229,6 +232,15 @@ export function TopBar(props: {
     link.state.kind === 'connected' ? link.state.welcome.host.platform : undefined,
   )
   const several = link.several
+  // The room between the buttons, which a long computer or project name must not run past: the
+  // system menu around a pill sizes it to its content, so the pill takes this as its width's limit.
+  const [room, setRoom] = useState<number | null>(null)
+  const middle = (children: ReactNode) => (
+    <View style={styles.middle} onLayout={(e) => setRoom(e.nativeEvent.layout.width)}>
+      {children}
+    </View>
+  )
+  const fit = (reserve: number) => (room === null ? undefined : { maxWidth: room - reserve })
   const openSearch = () => {
     haptic.tap()
     router.push({
@@ -286,35 +298,39 @@ export function TopBar(props: {
     return (
       <FloatingHeader header={props.header}>
         {avatar}
-        <TapMenu items={layers} title="按项目查看">
-          {(open) => (
-            <Pill
-              tone="glass"
-              size="bar"
-              {...(open ? { onPress: open } : {})}
-              accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
-              leading={
-                <Icon
-                  name="layers"
-                  size={16}
-                  color={shell.filterName ? c.tint : c.text}
-                  weight="medium"
+        {middle(
+          <>
+            <TapMenu items={layers} title="按项目查看">
+              {(open) => (
+                <Pill
+                  tone="glass"
+                  size="bar"
+                  style={fit(MARK_ROOM)}
+                  {...(open ? { onPress: open } : {})}
+                  accessibilityLabel={`按项目查看，当前：${shell.filterName ?? '全部项目'}`}
+                  leading={
+                    <Icon
+                      name="layers"
+                      size={16}
+                      color={shell.filterName ? c.tint : c.text}
+                      weight="medium"
+                    />
+                  }
+                  label={shell.filterName ?? '全部'}
                 />
-              }
-              label={shell.filterName ?? '全部'}
-            />
-          )}
-        </TapMenu>
-        <Press
-          onPress={shell.openHost}
-          accessibilityRole="button"
-          accessibilityLabel={hostLabel}
-          hitSlop={10}
-          style={styles.mark}
-        >
-          {mark(c.textSecondary)}
-        </Press>
-        <View style={styles.spacer} />
+              )}
+            </TapMenu>
+            <Press
+              onPress={shell.openHost}
+              accessibilityRole="button"
+              accessibilityLabel={hostLabel}
+              hitSlop={10}
+              style={styles.mark}
+            >
+              {mark(c.textSecondary)}
+            </Press>
+          </>,
+        )}
         {search}
       </FloatingHeader>
     )
@@ -337,40 +353,45 @@ export function TopBar(props: {
           )}
         </TapMenu>
       )}
-      {props.computers ? (
-        <TapMenu items={props.computers.items}>
-          {(open) => (
-            <Pill
-              tone="glass"
-              size="bar"
-              {...(open ? { onPress: open } : {})}
-              accessibilityLabel={
-                props.computers?.all ? '全部电脑，点按切换' : `${hostLabel}，点按切换电脑`
-              }
-              leading={
-                props.computers?.all ? <Icon name="layers" size={16} color={c.text} /> : mark()
-              }
-              trailing={<Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />}
-              label={props.computers?.all ? '全部电脑' : name}
-            />
-          )}
-        </TapMenu>
-      ) : (
-        <Pill
-          tone="glass"
-          size="bar"
-          onPress={shell.openHost}
-          accessibilityLabel={hostLabel}
-          leading={mark()}
-          trailing={
-            several ? (
-              <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
-            ) : undefined
-          }
-          label={name}
-        />
+      {middle(
+        props.computers ? (
+          <TapMenu items={props.computers.items}>
+            {(open) => (
+              <Pill
+                tone="glass"
+                size="bar"
+                style={fit(0)}
+                {...(open ? { onPress: open } : {})}
+                accessibilityLabel={
+                  props.computers?.all ? '全部电脑，点按切换' : `${hostLabel}，点按切换电脑`
+                }
+                leading={
+                  props.computers?.all ? <Icon name="layers" size={16} color={c.text} /> : mark()
+                }
+                trailing={
+                  <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
+                }
+                label={props.computers?.all ? '全部电脑' : name}
+              />
+            )}
+          </TapMenu>
+        ) : (
+          <Pill
+            tone="glass"
+            size="bar"
+            style={fit(0)}
+            onPress={shell.openHost}
+            accessibilityLabel={hostLabel}
+            leading={mark()}
+            trailing={
+              several ? (
+                <Icon name="upDown" size={12} color={c.textSecondary} weight="semibold" />
+              ) : undefined
+            }
+            label={name}
+          />
+        ),
       )}
-      <View style={styles.spacer} />
       {search}
     </FloatingHeader>
   )
@@ -429,7 +450,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1.5,
   },
-  spacer: { flex: 1 },
+  middle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.sm + 2 },
   mark: { padding: space.xs },
   filterNote: { flexDirection: 'row', marginTop: space.md },
 })
