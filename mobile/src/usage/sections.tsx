@@ -20,7 +20,7 @@ import { Press } from '../ui/Press'
 import { SectionHeader } from '../ui/SectionHeader'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { Skeleton } from '../ui/Skeleton'
-import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
+import { FONT_SCALE, radius, space, type as typeScale, useTokens } from '../ui/tokens'
 import {
   addDays,
   busiestWeekday,
@@ -588,11 +588,16 @@ export function Breakdown(props: {
                     />
                   )}
                 </View>
-                <Text style={[typeScale.callout, styles.rowShare, { color: c.text }]}>
+                <Text
+                  style={[typeScale.callout, styles.rowShare, { color: c.text }]}
+                  maxFontSizeMultiplier={FONT_SCALE.dense}
+                  numberOfLines={1}
+                >
                   {percent(share)}
                 </Text>
                 <Text
                   style={[typeScale.callout, styles.rowValue, { color: c.textSecondary }]}
+                  maxFontSizeMultiplier={FONT_SCALE.dense}
                   numberOfLines={1}
                   adjustsFontSizeToFit
                 >
@@ -1116,8 +1121,10 @@ const styles = StyleSheet.create({
   rowName: { width: '32%' },
   track: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3, minWidth: 6 },
-  rowShare: { width: 44, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  rowValue: { width: 64, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  // At least as wide as their figures at the usual size, so the rows line up, and wider when the
+  // system's text is large rather than cut the figure.
+  rowShare: { minWidth: 44, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  rowValue: { minWidth: 64, textAlign: 'right', fontVariant: ['tabular-nums'] },
   sessions: { gap: space.lg },
   session: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   sessionHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
