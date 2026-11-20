@@ -15,6 +15,7 @@ import { artifactKind, KIND_ICON, KIND_TEXT, openArtifact } from '../artifacts'
 import { artifactMenu } from '../components/ArtifactCard'
 import { ArtifactSheet, confirmDelete } from '../components/ArtifactSheet'
 import { useSessionActions } from '../components/SessionActions'
+import { openInPane } from '../components/SessionPane'
 import { useShell } from '../components/shell'
 import {
   useActiveHost,
@@ -45,6 +46,7 @@ import { ContextMenu } from '../ui/ContextMenu'
 import { offlineMenu } from '../ui/menu'
 import { EmptyState } from '../ui/EmptyState'
 import { haptic } from '../ui/haptics'
+import { useWide } from '../ui/layout'
 import { Icon, type IconName } from '../ui/Icon'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
@@ -117,6 +119,7 @@ function Highlighted(props: {
 
 export default function Search() {
   const { c } = useTokens()
+  const wide = useWide()
   const link = useMaybeLink()
   const allSessions = useSessions()
   const allProjects = useProjects()
@@ -396,6 +399,12 @@ export default function Search() {
   const openSession = (id: string) => {
     haptic.tap()
     rememberSearch(query)
+    // On a wide window the session opens in the 会话 tab's pane, beside its list, not over both.
+    if (wide && openInPane(id)) {
+      if (router.canDismiss()) router.dismissAll()
+      router.navigate('/')
+      return
+    }
     router.push({ pathname: '/session/[id]', params: { id } })
   }
 

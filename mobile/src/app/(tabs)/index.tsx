@@ -16,7 +16,7 @@ import type { SessionSummary } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import { folderOfSession, type SessionFolder } from '@shared/session-folders'
 import { forkSession, useSessionActions, type MenuExtras } from '../../components/SessionActions'
-import { SessionPaneProvider } from '../../components/SessionPane'
+import { listenForPane, SessionPaneProvider } from '../../components/SessionPane'
 import {
   SessionRow,
   SessionRowSkeleton,
@@ -151,6 +151,12 @@ export default function Home() {
     if (gone) setSelected(null)
   }, [gone])
   const close = useCallback(() => setSelected(null), [])
+  // Wide, a session opened from search shows in the pane, beside the list, as a row's does.
+  useEffect(() => {
+    if (!wide) return
+    listenForPane(setSelected)
+    return () => listenForPane(null)
+  }, [wide])
 
   // One computer's list mounts afresh with another, so none shows the last one's while its own
   // loads; 全部电脑 lists them all and stays, as when a row opens another computer's session.
