@@ -15,6 +15,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useDeferredValue,
   useMemo,
   useRef,
   useState,
@@ -88,6 +89,7 @@ import { FileMark, G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { Glass, useGlassMode } from '../ui/Glass'
 import { NativeMenu } from '../ui/session/NativeMenu'
+import { hostErrorText } from '../hostErrors'
 import { useMenuEdge, type MenuSource, type ViewHandle } from '../ui/session/Popover'
 import { PressScale, RoundButton } from '../ui/session/Press'
 import { PictureViewer, type Picture } from './Pictures'
@@ -136,6 +138,8 @@ export interface ComposerProps {
   /** A turn runs: an empty box offers to stop it. */
   running?: boolean
   onStop?: () => void
+  /** Stop was asked and the turn winds down: the button turns and takes no more taps. */
+  stopping?: boolean
   /**
    * Over the card, such as the switch's strip or the prompt cache's notice; as a function it is
    * told whether the box holds a message, so typing never renders the screen around it.
@@ -939,7 +943,7 @@ export function Composer(props: ComposerProps) {
       for (const item of taken.items) carried.current.delete(item.key)
       if (mounted.current) restoreMessage(taken, true)
       if (!(error instanceof SendCancelled)) {
-        Alert.alert(failTitle, (error as { message?: string }).message || '请稍后再试。')
+        Alert.alert(failTitle, hostErrorText(error))
       }
     } finally {
       if (mounted.current) setSending(false)
@@ -1130,10 +1134,16 @@ export function Composer(props: ComposerProps) {
                   haptic.firm()
                   props.onStop!()
                 }}
-                accessibilityLabel="停止这一轮"
+                disabled={props.stopping}
+                accessibilityLabel={props.stopping ? '正在停止' : '停止这一轮'}
+                accessibilityState={{ busy: !!props.stopping }}
                 style={{ backgroundColor: s.stop }}
               >
-                <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
+                {props.stopping ? (
+                  <ActivityIndicator size="small" color={s.onStop} />
+                ) : (
+                  <Icon icon={G.stop} size={13} color={s.onStop} weight="bold" />
+                )}
               </RoundButton>
             )}
           </View>
@@ -1322,6 +1332,18 @@ function MentionList(props: {
   const link = useLink()
   const { c } = useSessionTokens()
   const files = useProjectFiles(link, props.folder, props.folder !== null)
+  // The shallowest files, for a bare `@`, sorted once per list rather than on every keystroke.
+  const shallow = useMemo(() => {
+    const paths = files.list?.paths
+    if (!paths) return []
+    return paths
+      .map((path) => ({ path, depth: path.split('/').length }))
+      .sort((a, b) => a.depth - b.depth)
+      .slice(0, 30)
+      .map((each) => each.path)
+  }, [files.list])
+  // Typing stays quick: the search follows the query a render behind when the list is long.
+  const deferred = useDeferredValue(props.query)
   let body: ReactNode
   if (!props.folder) {
     body = <PickerNote text="选择一个项目后才能提及其中的文件" />
@@ -1336,13 +1358,9 @@ function MentionList(props: {
     )
   } else {
     const paths = files.list.paths
-    const query = props.query.trim()
+    const query = deferred.trim()
     const used = query ? [] : props.used.slice(0, 12)
-    const found = query
-      ? matchFiles(paths, query, 40)
-      : used.length > 0
-        ? used
-        : [...paths].sort((a, b) => a.split('/').length - b.split('/').length).slice(0, 30)
+    const found = query ? matchFiles(paths, query, 40) : used.length > 0 ? used : shallow
     body =
       found.length === 0 ? (
         <PickerNote text={query ? '没有匹配的文件' : '项目里没有文件'} />

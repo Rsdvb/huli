@@ -27,7 +27,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import {
   ActivityIndicator,
   Keyboard,
+  Pressable,
   StyleSheet,
+  Text,
   useWindowDimensions,
   View,
   type NativeScrollEvent,
@@ -247,6 +249,24 @@ export function Conversation(props: {
             <View style={styles.older}>
               <ActivityIndicator size="small" color={c.textTertiary} />
             </View>
+          ) : view.olderError && view.hasOlder ? (
+            // A page that failed is not asked for again by scrolling, which reached the top
+            // already: it says so, with a way to try again.
+            <Pressable
+              onPress={view.loadOlder}
+              accessibilityRole="button"
+              accessibilityLabel={`${view.olderError}，重试`}
+              style={({ pressed }) => [
+                styles.older,
+                styles.olderFailed,
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Text style={[styles.olderText, { color: c.textSecondary }]} numberOfLines={2}>
+                {view.olderError}
+              </Text>
+              <Text style={[styles.olderText, { color: c.tint, fontWeight: '600' }]}>重试</Text>
+            </Pressable>
           ) : !view.hasOlder && props.fromParent ? (
             <SubSessionStart sessionId={id} />
           ) : (
@@ -283,6 +303,8 @@ export function Conversation(props: {
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 18, paddingBottom: 12 },
   older: { paddingVertical: 14, alignItems: 'center' },
+  olderFailed: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  olderText: { fontSize: 13, lineHeight: 18 },
   end: { height: 4 },
   // Tall enough to hold the button, whose touches a zero-height box would not reach.
   overDock: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 72 },

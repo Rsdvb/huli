@@ -10,7 +10,7 @@ import type { ContextBreakdown } from '@shared/context'
 import { expiryOf, knownExpiry, modelOption } from '@shared/prompt-cache'
 import type { HostLink } from '@shared/remote/link'
 import type { SessionView } from '@shared/thread'
-import { errorText } from '../sessions'
+import { hostErrorText } from '../hostErrors'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
 import { haptic } from '../ui/session/feedback'
@@ -29,7 +29,7 @@ import {
   windowName,
 } from '../ui/session/limits'
 import { useSessionTokens } from '../ui/session/palette'
-import { gentle } from '../ui/session/Press'
+import { shortModelName } from '../ui/session/optionText'
 import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
 import { modelName, optionOf, shownChoice } from './ConfigMenus'
@@ -126,7 +126,7 @@ export function ContextSheet(props: {
     setRead({ kind: 'loading' })
     ;(link.request('sessions.context', { sessionId }) as Promise<ContextBreakdown | null>).then(
       (breakdown) => setRead({ kind: 'done', breakdown }),
-      (error: unknown) => setRead({ kind: 'error', error: errorText(error) }),
+      (error: unknown) => setRead({ kind: 'error', error: hostErrorText(error) }),
     )
   }, [link, sessionId])
 
@@ -166,7 +166,9 @@ export function ContextSheet(props: {
     (l) => !rows?.some((r) => r.name.toLowerCase() === l.name.toLowerCase()),
   )
   const model = session ? optionOf(session.config, 'model') : undefined
-  const modelLabel = model ? modelName(shownChoice(model)?.name ?? String(model.value)) : null
+  const modelLabel = model
+    ? shortModelName(shownChoice(model) ?? { name: modelName(String(model.value)) })
+    : null
 
   const expiry = session
     ? knownExpiry(
@@ -180,7 +182,6 @@ export function ContextSheet(props: {
     : null
 
   const toggle = (name: string) => {
-    gentle()
     setOpen((was) => (was === name ? null : name))
   }
 

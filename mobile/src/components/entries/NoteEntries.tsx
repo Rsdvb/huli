@@ -2,7 +2,6 @@
 // session over, the user taking a surface over and handing it back, a message from another session,
 // and a session or sub-agent this one started, with whether it waits for the user.
 
-import { useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { harnessOf, type ThreadEntry } from '@shared/thread'
@@ -11,10 +10,10 @@ import { sessionTitle } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { WorkingDots } from '../../ui/session/Working'
 import { useSecond } from '../../ui/session/now'
-import { gentle } from '../../ui/session/Press'
 import { spanText } from '../../ui/session/format'
 import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
+import { useDisclosure } from '../../ui/session/disclosure'
 import { subagentRunning, useSubagentDigest } from '../../ui/session/subagents'
 import { durationText } from '../../ui/session/work'
 import { useAgentName } from './AccessEntries'
@@ -33,7 +32,7 @@ export function TakeoverEntry(props: { entry: Of<'takeover'> }) {
   const { entry } = props
   const { c } = useSessionTokens()
   const agent = useAgent(entry.agentId)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(`takeover:${entry.id}`)
   const name = agent?.name ?? HARNESS_NAMES[harnessOf(entry.agentId)] ?? 'Agent'
   const text = entry.turns > 0 ? `由 ${name} 接手 · 带上前面 ${entry.turns} 轮` : `由 ${name} 接手`
   return (
@@ -44,7 +43,6 @@ export function TakeoverEntry(props: { entry: Of<'takeover'> }) {
         {...(entry.carried
           ? {
               onPress: () => {
-                gentle()
                 setOpen((v) => !v)
               },
             }

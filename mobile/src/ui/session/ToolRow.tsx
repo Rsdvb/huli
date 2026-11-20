@@ -4,7 +4,7 @@
 // while it waits. Tapped, it opens to its command and output, its result or the file it read, and
 // its edits, each opening to its diff.
 
-import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -20,16 +20,15 @@ import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { ShellBlock, StepSection } from '../../components/entries/ShellBlock'
 import { Markdown } from '../../components/Markdown'
 import { handDiff } from '../../diff'
-import { Clamp } from './Clamp'
+import { Clamp, clampedText, useClampOpen } from './Clamp'
 import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
 import { plainText } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useTenth } from './now'
-import { useReducedMotion } from '../motion'
 import { MONO, useSessionTokens } from './palette'
-import { gentle } from './Press'
+import { useOpenFade } from './Press'
 import { Counts } from './TurnChanges'
 import { toolEdits, type FileEdit } from './turns'
 import {
@@ -157,8 +156,26 @@ export function LiveTime(props: { since: number; color: string; prefix?: string 
   return (
     <Text style={[styles.time, { color: props.color }]}>
       {props.prefix ?? ''}
-      {formatMs(Math.max(0, now - props.since), true)}
+      {formatMs(Math.max(0, now - props.since))}
     </Text>
+  )
+}
+
+/**
+ * A call's result under its clamp: a file's content as Markdown, else its plain text. Closed, only
+ * what the clamp can show is laid out, as a whole file read behind it held the screen up.
+ */
+function ClampedResult(props: { id: string; text: string; markdown?: boolean }) {
+  const { c } = useSessionTokens()
+  const text = clampedText(props.text, useClampOpen(props.id))
+  return (
+    <Clamp maxHeight={props.markdown ? 320 : 240} more="显示全部" id={props.id}>
+      {props.markdown ? (
+        <Markdown markdown={text} size="compact" />
+      ) : (
+        <Text style={[styles.raw, { color: c.text }]}>{text}</Text>
+      )}
+    </Clamp>
   )
 }
 
@@ -196,9 +213,7 @@ export function StepMark(props: {
       return <Text style={[styles.time, { color: c.textTertiary }]}>已取消</Text>
     case 'success':
       return props.duration !== undefined ? (
-        <Text style={[styles.time, { color: c.textTertiary }]}>
-          {formatMs(props.duration, false)}
-        </Text>
+        <Text style={[styles.time, { color: c.textTertiary }]}>{formatMs(props.duration)}</Text>
       ) : null
   }
 }
@@ -255,24 +270,6 @@ export function StepLine(props: {
 }
 
 /**
- * The opacity of what a disclosure opens: it fades in when opened here, but not when a row that
- * was open mounts again as it scrolls back into view, nor under Reduce Motion.
- */
-export function useOpenFade(open: boolean): Animated.Value {
-  const reduce = useReducedMotion()
-  const shown = useRef(new Animated.Value(1)).current
-  const was = useRef(open)
-  useLayoutEffect(() => {
-    if (open && !was.current && !reduce) {
-      shown.setValue(0)
-      Animated.timing(shown, { toValue: 1, duration: 180, useNativeDriver: true }).start()
-    }
-    was.current = open
-  }, [open, reduce, shown])
-  return shown
-}
-
-/**
  * A step that opens into a rounded card its line heads, over its sections. Closed or open the line
  * keeps its view and its place: the card reaches out around it rather than pushing it in, and what
  * opens fades in under it, so only the rows below move.
@@ -303,7 +300,7 @@ function hasBody(entry: ToolEntry, label: ToolLabel): boolean {
 }
 
 export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: string }) {
-  const { root, sessionId } = useSessionRows()
+  const { root, sessionId } = useSessionRows((r) => ({ root: r.root, sessionId: r.sessionId }))
   const { c } = useSessionTokens()
   const { entry } = props
   const status = stepStatus(entry)
@@ -325,7 +322,6 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
     (typeof result === 'object' && result?.by === 'routine' ? '由定时任务允许' : undefined)
   const body = hasBody(entry, label)
   const toggle = () => {
-    gentle()
     setOpen((v) => !v)
   }
   const line = (
@@ -409,7 +405,7 @@ function DiffPreview(props: { edit: FileEdit; root: string | null }) {
  */
 function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
   const { c, s } = useSessionTokens()
-  const { root, sessionId } = useSessionRows()
+  const { root, sessionId } = useSessionRows((r) => ({ root: r.root, sessionId: r.sessionId }))
   const { entry, label } = props
   const command = label.kind === 'command' ? label.target : null
   const output = command ? commandOutput(entry.content) : null
@@ -425,7 +421,13 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
         </Text>
       ) : null}
       {command ? (
-        <ShellBlock sessionId={sessionId} command={command} output={output} status={entry.status} />
+        <ShellBlock
+          sessionId={sessionId}
+          id={entry.id}
+          command={command}
+          output={output}
+          status={entry.status}
+        />
       ) : null}
       {content.map((part, i) => {
         if (part.type === 'markdown') {
@@ -434,18 +436,14 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
           if (read) {
             return (
               <StepSection key={i} label="内容" copy={fenceBody(read)}>
-                <Clamp maxHeight={320} more="显示全部" id={`result:${entry.id}:${i}`}>
-                  <Markdown markdown={read} size="compact" />
-                </Clamp>
+                <ClampedResult id={`result:${entry.id}:${i}`} text={read} markdown />
               </StepSection>
             )
           }
           const raw = fenceBody(part.markdown)
           return (
             <StepSection key={i} label="结果" copy={raw}>
-              <Clamp maxHeight={240} more="显示全部" id={`result:${entry.id}:${i}`}>
-                <Text style={[styles.raw, { color: c.text }]}>{raw}</Text>
-              </Clamp>
+              <ClampedResult id={`result:${entry.id}:${i}`} text={raw} />
             </StepSection>
           )
         }
@@ -528,7 +526,6 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
       onToggle={
         has
           ? () => {
-              gentle()
               setOpen((v) => !v)
             }
           : null

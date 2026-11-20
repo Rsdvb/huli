@@ -9,18 +9,17 @@ import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { Attachment, ContentRef, FromDevice, FromSession, UserContent } from '@shared/thread'
 import { leadingCommand, mentionResolver, type Chip } from '../ui/session/chips'
-import { Clamp } from '../ui/session/Clamp'
+import { Clamp, clampedText, useClampOpen } from '../ui/session/Clamp'
 import { useSessionRows } from '../ui/session/context'
 import { ContextMenu } from '../ui/ContextMenu'
 import type { MenuNode } from '../ui/menu'
 import { copyText } from '../ui/session/feedback'
 import { foldersOf, openFile, parseFileRef, useFileRefs } from '../ui/session/fileRefs'
+import { clockTime } from '../ui/session/format'
 import { G, Icon } from '../ui/session/icons'
-import { useMinute } from '../ui/session/now'
 import { useSessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
-import { agoText } from '../ui/session/work'
 import { RefTiles } from './CarriedRefs'
 import { Markdown, type MarkdownChips } from './Markdown'
 import { PictureStrip, pictureOf, type Picture } from './Pictures'
@@ -43,11 +42,6 @@ function copiedText(content: readonly UserContent[]): string {
     .join('\n')
 }
 
-function Ago(props: { at: number; color: string }) {
-  const now = useMinute()
-  return <Text style={[styles.meta, { color: props.color }]}>{agoText(props.at, now)}</Text>
-}
-
 export const UserMessage = memo(function UserMessage(props: {
   content: UserContent[]
   at?: number
@@ -59,7 +53,11 @@ export const UserMessage = memo(function UserMessage(props: {
 }) {
   const { content } = props
   const { c, s } = useSessionTokens()
-  const { sessionId, commands, command } = useSessionRows()
+  const { sessionId, commands, command } = useSessionRows((r) => ({
+    sessionId: r.sessionId,
+    commands: r.commands,
+    command: r.command,
+  }))
   const refs = useFileRefs()
   const text = textOf(content)
   const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
@@ -133,7 +131,8 @@ export const UserMessage = memo(function UserMessage(props: {
   // the composer to be sent again.
   const lead = leadingCommand(text, commands ?? [])
   const name = lead ? text.slice(1, lead) : null
-  const body = name ? text.slice(lead).replace(/^ /, '') : text
+  const whole = useClampOpen(`user:${props.id ?? ''}`)
+  const body = clampedText(name ? text.slice(lead).replace(/^ /, '') : text, whole)
   const head = name ? (
     <Text
       style={{ color: c.tint, fontWeight: '600' }}
@@ -183,12 +182,8 @@ export const UserMessage = memo(function UserMessage(props: {
       {tiles.length > 0 && <RefTiles refs={tiles} align="end" />}
       {text ? (
         <ContextMenu items={menu} fit="content">
-          {(longPress) => (
-            <PressScale
-              scale={0.98}
-              {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
-              style={[styles.bubble, { backgroundColor: s.bubble }]}
-            >
+          {(longPress) => {
+            const bubble = (
               <Clamp
                 maxHeight={COLLAPSED_HEIGHT}
                 align="end"
@@ -196,8 +191,23 @@ export const UserMessage = memo(function UserMessage(props: {
               >
                 <Markdown markdown={body} chips={chips} head={head} />
               </Clamp>
-            </PressScale>
-          )}
+            )
+            // The system's context menu lifts the bubble itself; a press scale of ours under it
+            // shrank as a scroll began on the bubble and sprang back as it took over.
+            return longPress ? (
+              <PressScale
+                scale={0.98}
+                unstable_pressDelay={120}
+                onLongPress={longPress}
+                delayLongPress={350}
+                style={[styles.bubble, { backgroundColor: s.bubble }]}
+              >
+                {bubble}
+              </PressScale>
+            ) : (
+              <View style={[styles.bubble, { backgroundColor: s.bubble }]}>{bubble}</View>
+            )
+          }}
         </ContextMenu>
       ) : null}
       {(props.steered || props.at !== undefined) && (
@@ -213,7 +223,10 @@ export const UserMessage = memo(function UserMessage(props: {
               <Text style={[styles.meta, { color: c.textTertiary }]}>已插入当前对话</Text>
             </View>
           )}
-          {props.at !== undefined && <Ago at={props.at} color={c.textTertiary} />}
+          {/* A clock time, as the turn's footer says when it ended: the two read together. */}
+          {props.at !== undefined && (
+            <Text style={[styles.meta, { color: c.textTertiary }]}>{clockTime(props.at)}</Text>
+          )}
         </View>
       )}
       {note && <Text style={[styles.meta, { color: c.textTertiary }]}>{note}</Text>}

@@ -1,28 +1,39 @@
 // Placeholder shapes that breathe while something loads, in place of a spinner.
 
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { Animated, StyleSheet, View, type DimensionValue } from 'react-native'
 import { useReduceMotion } from './Press'
 import { radius, size, space, useTokens } from './tokens'
 
-function usePulse() {
+// One breath for every placeholder on screen: each ran a loop of its own, a list of them a dozen,
+// and they drifted apart. It runs while any placeholder shows.
+const breath = new Animated.Value(0.55)
+const still = new Animated.Value(0.8)
+let breathing = 0
+let loop: Animated.CompositeAnimation | null = null
+
+function usePulse(): Animated.Value {
   const reduce = useReduceMotion()
-  const value = useRef(new Animated.Value(0.55)).current
   useEffect(() => {
-    if (reduce) {
-      value.setValue(0.8)
-      return
+    if (reduce) return
+    if (breathing++ === 0) {
+      breath.setValue(0.55)
+      loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(breath, { toValue: 1, duration: 700, useNativeDriver: true }),
+          Animated.timing(breath, { toValue: 0.55, duration: 700, useNativeDriver: true }),
+        ]),
+      )
+      loop.start()
     }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(value, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(value, { toValue: 0.55, duration: 700, useNativeDriver: true }),
-      ]),
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [reduce, value])
-  return value
+    return () => {
+      if (--breathing === 0) {
+        loop?.stop()
+        loop = null
+      }
+    }
+  }, [reduce])
+  return reduce ? still : breath
 }
 
 export function Skeleton(props: { width?: DimensionValue; height: number; radius?: number }) {

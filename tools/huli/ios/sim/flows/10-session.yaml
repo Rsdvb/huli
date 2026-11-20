@@ -2,7 +2,9 @@
 # run of tool calls, then keeps a turn running. Its recording shows the keyboard coming and going
 # at the end of the conversation and scrolled up (the keyboard dragged down too), a message queued
 # and sent at once from the queue card, and a run of work opened and closed.
-# The composer reads to Maestro as 「给 <agent> 发消息」 and then its placeholder.
+# The composer reads to Maestro as 「给 <agent> 发消息」 and then its placeholder. Maestro's
+# hideKeyboard fails on this screen, so the keyboard goes down as a reader takes it down: the list
+# dragged down past the keyboard's top (keyboardDismissMode interactive), then back to the newest.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -45,7 +47,17 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 10000
     optional: true
-- hideKeyboard
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 800
+    optional: true
+- tapOn:
+    text: '.*回到最新'
+    optional: true
 - takeScreenshot: s03-running
 # The keyboard at the end of the conversation: up, dragged down by the list, up again, hidden.
 - extendedWaitUntil:
@@ -74,7 +86,17 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 2000
     optional: true
-- hideKeyboard
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 800
+    optional: true
+- tapOn:
+    text: '.*回到最新'
+    optional: true
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2000
@@ -96,7 +118,10 @@ appId: io.github.rsdvb.huli
     timeout: 2000
     optional: true
 - takeScreenshot: s07-scrolled-keyboard
-- hideKeyboard
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2000
@@ -114,7 +139,17 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 1500
     optional: true
-- hideKeyboard
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 800
+    optional: true
+- tapOn:
+    text: '.*回到最新'
+    optional: true
 - takeScreenshot: s09-queued
 - tapOn:
     text: '立即发送'

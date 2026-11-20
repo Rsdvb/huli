@@ -248,34 +248,94 @@ export function threadRows(thread: ThreadState, live = false): Row[] {
   return markLatest(turnsOf(thread).flatMap(turnRows), thread, live)
 }
 
-const sameEntries = (x: readonly ThreadEntry[], y: readonly ThreadEntry[]) =>
-  x.length === y.length && x.every((entry, i) => entry === y[i])
+interface Turn {
+  entries: ThreadEntry[]
+  rows: Row[]
+}
 
 /**
- * `threadRows` for one screen, oldest first, as the conversation's list takes them. A
- * turn whose entries are the same objects as last time keeps its rows, so a token appended to the
- * reply being written rebuilds only the latest turn's; and every row that draws the same as
- * before keeps its object, so the list and its rows compare by reference. While nothing changed,
- * the same array comes back.
+ * `threadRows` for one screen, oldest first, as the conversation's list takes them. A turn whose
+ * entries are the same objects as last time keeps its rows, so a token appended to the reply
+ * being written rebuilds only the latest turn's; and every row that draws the same as before keeps
+ * its object, so the list and its rows compare by reference. While nothing changed, the same
+ * array comes back.
+ *
+ * It runs on every patch the screen applies, so it walks the thread once and allocates only for
+ * the turns that changed: a turn is compared entry by entry with what it held, in place, rather
+ * than gathered into a new array first, and only a rebuilt turn's rows are matched to its old ones.
  */
 export function rowBuilder(): (thread: ThreadState, live: boolean) => Row[] {
-  let turns = new Map<ThreadEntry, { entries: ThreadEntry[]; rows: Row[] }>()
+  let turns = new Map<ThreadEntry, Turn>()
   let shown: Row[] = []
+  let seen: { order: string[]; byId: Record<string, ThreadEntry>; live: boolean } | null = null
   return (thread, live) => {
-    const kept = new Map<ThreadEntry, { entries: ThreadEntry[]; rows: Row[] }>()
+    const { order, byId } = thread
+    if (seen && seen.order === order && seen.byId === byId && seen.live === live) return shown
+    seen = { order, byId, live }
+    const kept = new Map<ThreadEntry, Turn>()
     const rows: Row[] = []
-    for (const entries of turnsOf(thread)) {
-      const known = turns.get(entries[0]!)
-      const turn =
-        known && sameEntries(known.entries, entries) ? known : { entries, rows: turnRows(entries) }
-      kept.set(entries[0]!, turn)
+    let i = 0
+    while (i < order.length) {
+      const first = byId[order[i]!]
+      if (!first) {
+        i++
+        continue
+      }
+      // The turn runs from its first entry to the next that starts a turn.
+      let end = i + 1
+      while (end < order.length) {
+        const entry = byId[order[end]!]
+        if (entry && startsTurn(entry)) break
+        end++
+      }
+      const known = turns.get(first)
+      let same = known !== undefined
+      if (known) {
+        let k = 0
+        for (let x = i; x < end && same; x++) {
+          const entry = byId[order[x]!]
+          if (!entry) continue
+          if (known.entries[k] !== entry) same = false
+          k++
+        }
+        if (k !== known.entries.length) same = false
+      }
+      let turn: Turn
+      if (same) {
+        turn = known!
+      } else {
+        const entries: ThreadEntry[] = []
+        for (let x = i; x < end; x++) {
+          const entry = byId[order[x]!]
+          if (entry) entries.push(entry)
+        }
+        const built = turnRows(entries)
+        // A turn not known by its first entry, as the first after an older page came in, may
+        // still hold rows shown before.
+        turn = { entries, rows: keepRows(known ? known.rows : shown, built) }
+      }
+      kept.set(first, turn)
       for (const row of turn.rows) rows.push(row)
+      i = end
     }
     turns = kept
-    shown = keepRows(shown, markLatest(rows, thread, live))
+    const next = markLatest(rows, thread, live)
+    // A row marked as the latest or as being written is a new object each time: the one shown
+    // stands for it while it draws the same.
+    for (let r = next.length - 1; r >= 0 && r >= next.length - MARKED_FROM_END; r--) {
+      const old = shown[r - next.length + shown.length]
+      if (old && old !== next[r] && sameRow(old, next[r]!)) next[r] = old
+    }
+    let changed = next.length !== shown.length
+    for (let r = 0; !changed && r < next.length; r++) changed = next[r] !== shown[r]
+    if (changed) shown = next
     return shown
   }
 }
+
+// How far from the end the rows markLatest may mark lie: the latest run is the last row, and only
+// plans and notices may follow the reply being written.
+const MARKED_FROM_END = 8
 
 /** `next` with each row that draws as one of `before` does replaced by it; `before` if all were. */
 export function keepRows(before: readonly Row[], next: Row[]): Row[] {
@@ -290,19 +350,34 @@ export function keepRows(before: readonly Row[], next: Row[]): Row[] {
   }
   return same ? (before as Row[]) : next
 }
+// Where the latest plan lies in a thread's order, and whether its turn is the latest: a thread with
+// no plan was read whole on every patch, though only an added entry can change this.
+const planAt = new WeakMap<readonly string[], { index: number; ownTurn: boolean }>()
+
 /** The latest plan of the thread, or of the page before it, and whether its turn is the latest. */
 export function latestPlan(
   thread: ThreadState | null,
   before: PlanEntry | null,
 ): { plan: PlanEntry | null; ownTurn: boolean } {
   if (!thread) return { plan: before, ownTurn: false }
-  let ownTurn = true
-  for (let i = thread.order.length - 1; i >= 0; i--) {
-    const entry = thread.byId[thread.order[i]!]
-    if (entry?.kind === 'plan') return { plan: entry, ownTurn }
-    if (entry?.kind === 'user' && !entry.steered && !entry.approval) ownTurn = false
+  let at = planAt.get(thread.order)
+  if (!at) {
+    at = { index: -1, ownTurn: false }
+    let ownTurn = true
+    for (let i = thread.order.length - 1; i >= 0; i--) {
+      const entry = thread.byId[thread.order[i]!]
+      if (entry?.kind === 'plan') {
+        at = { index: i, ownTurn }
+        break
+      }
+      if (entry?.kind === 'user' && !entry.steered && !entry.approval) ownTurn = false
+    }
+    planAt.set(thread.order, at)
   }
-  return { plan: before, ownTurn: false }
+  const entry = at.index >= 0 ? thread.byId[thread.order[at.index]!] : undefined
+  return entry?.kind === 'plan'
+    ? { plan: entry, ownTurn: at.ownTurn }
+    : { plan: before, ownTurn: false }
 }
 
 const NO_TURN = { start: null, end: null }

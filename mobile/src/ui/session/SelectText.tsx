@@ -123,7 +123,7 @@ export function SelectTextHost() {
           <Action
             icon={copied ? G.copied : G.copy}
             label={copied ? '已复制' : '复制'}
-            onPress={() => void copyText(chosen()).then(() => setCopied(true))}
+            onPress={() => void copyText(chosen(), null).then(setCopied)}
           />
           <Action
             icon={G.share}

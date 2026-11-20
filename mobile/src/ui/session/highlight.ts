@@ -97,7 +97,26 @@ function patternFor(key: keyof typeof FAMILIES): RegExp {
 }
 
 /** Tokens of `code` in `language`, or null for a language it does not know. */
+// Blocks highlighted already, by language and text: a row the list mounts again as it scrolls back
+// into view draws its colors at once rather than working them out again. The oldest go first.
+const KEPT = 120
+const kept = new Map<string, Token[] | null>()
+
 export function highlight(code: string, language: string): Token[] | null {
+  const id = `${language}\n${code}`
+  const known = kept.get(id)
+  if (known !== undefined) {
+    kept.delete(id)
+    kept.set(id, known)
+    return known
+  }
+  const tokens = tokensOf(code, language)
+  kept.set(id, tokens)
+  if (kept.size > KEPT) kept.delete(kept.keys().next().value!)
+  return tokens
+}
+
+function tokensOf(code: string, language: string): Token[] | null {
   const key = LANGUAGES[language.toLowerCase()]
   if (!key || code.length > 20_000) return null
   const pattern = patternFor(key)

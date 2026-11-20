@@ -6,16 +6,25 @@ import { useState, type RefObject } from 'react'
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Reanimated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import { useKeyboardState } from 'react-native-keyboard-controller'
-import type { ConfigOption, QueuedPrompt, SessionView, UserContent } from '@shared/thread'
+import type {
+  ConfigOption,
+  OutsideKind,
+  QueuedPrompt,
+  SessionView,
+  UserContent,
+} from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
+import type { LimitPause, LimitPauseAction, Stall, StallAction } from '@shared/supervisor'
+import { whenText } from '../ui/session/limits'
+import { useMinute } from '../ui/session/now'
 import { useAgent, useConnected, useMaybeLink } from '../host'
 import { setPrefs, usePrefs } from '../prefs'
-import { errorText } from '../sessions'
+import { hostErrorText } from '../hostErrors'
 import { haptic } from '../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import type { ViewHandle } from '../ui/session/Popover'
-import { gentle, PressScale, RoundButton } from '../ui/session/Press'
+import { PressScale, RoundButton } from '../ui/session/Press'
 import {
   MODE_ICON,
   modeLook,
@@ -75,6 +84,228 @@ export function slotOf(
   }
 }
 
+/** What has a session open outside the computer's Kite, in the desktop's words (HeldStrip). */
+export function heldText(by: OutsideKind, busy: boolean): string {
+  if (by === 'terminal') {
+    return '这个会话正开在终端里。在那边输入 /exit 退出后，它的对话会同步到这里。'
+  }
+  if (by === 'desktop') {
+    return busy
+      ? '这个会话正在 Claude 桌面版里回复。回复完后会同步到这里。'
+      : '这个会话在 Claude 桌面版里开着。那边的新对话会同步到这里。'
+  }
+  return busy
+    ? '这个会话正在另一个 Claude Code 里运行。运行完后会同步到这里。'
+    : '这个会话在另一个 Claude Code 里开着。那边的新对话会同步到这里。'
+}
+
+/** Why a message asks first while a program outside has the session open but idle. */
+export function heldConfirmText(by: OutsideKind): string {
+  return by === 'desktop'
+    ? '这个会话还在 Claude 桌面版里开着。在这里继续后，别同时在那边发消息。'
+    : by === 'terminal'
+      ? '这个会话还开在终端里。在这里继续后，别同时在那边发消息。'
+      : '这个会话还在另一个 Claude Code 里开着。在这里继续后，别同时在那边发消息。'
+}
+
+/**
+ * The note over the composer while a program outside has the session open, as the desktop's: at
+ * work there, nothing is sent from here until it is done.
+ */
+export function HeldStrip(props: { by: OutsideKind; busy: boolean }) {
+  const { c, s } = useSessionTokens()
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.held, { backgroundColor: s.dockCard, borderColor: c.border }]}
+      accessibilityLiveRegion="polite"
+    >
+      <Icon icon={G.terminal} size={15} color={c.textTertiary} />
+      <Text style={[styles.heldText, { color: c.text }]}>{heldText(props.by, props.busy)}</Text>
+    </Reanimated.View>
+  )
+}
+
+const MINUTE = 60_000
+
+/** One of a supervisor strip's buttons, sending what it says to the computer. */
+function StripButton(props: {
+  label: string
+  busy: boolean
+  disabled: boolean
+  strong?: boolean
+  onPress(): void
+}) {
+  const { c, s } = useSessionTokens()
+  return (
+    <PressScale
+      scale={0.96}
+      onPress={props.onPress}
+      disabled={props.disabled}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      accessibilityState={{ disabled: props.disabled, busy: props.busy }}
+      style={[
+        styles.actionPill,
+        {
+          backgroundColor: props.strong ? s.accentSoft : c.fill,
+          opacity: props.disabled && !props.busy ? 0.5 : 1,
+        },
+      ]}
+    >
+      {props.busy ? <ActivityIndicator size="small" color={c.textSecondary} /> : null}
+      <Text style={[styles.action, { color: props.strong ? c.accent : c.text }]}>
+        {props.label}
+      </Text>
+    </PressScale>
+  )
+}
+
+/** A strip's request to the computer: one at a time, with its failure said under the strip. */
+function useStripAction<A extends string>(
+  send: (action: A) => Promise<unknown>,
+  /** The strip goes once the session drops what it showed: a success stays busy until then. */
+  holdAfter: boolean,
+) {
+  const [busy, setBusy] = useState<A | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const act = (action: A) => {
+    if (busy !== null) return
+    haptic.tap()
+    setBusy(action)
+    setError(null)
+    send(action)
+      .then(() => {
+        if (!holdAfter) setBusy(null)
+      })
+      .catch((failed: unknown) => {
+        setError(hostErrorText(failed))
+        setBusy(null)
+      })
+  }
+  return { busy, error, act }
+}
+
+/**
+ * Over the composer while a turn its agent's plan limit stopped waits to go on by itself, as the
+ * desktop's: when the plan comes back and when the session goes on, with 取消, which leaves it
+ * stopped, and 立即重试.
+ */
+export function LimitPauseStrip(props: { sessionId: string; pause: LimitPause }) {
+  const { c, s } = useSessionTokens()
+  const link = useMaybeLink()
+  const connected = useConnected()
+  const now = useMinute()
+  const { pause } = props
+  const { busy, error, act } = useStripAction<LimitPauseAction>(
+    (action) =>
+      link
+        ? link.request('sessions.limitPause', { sessionId: props.sessionId, action })
+        : Promise.reject(new Error('')),
+    true,
+  )
+  const left = Math.max(0, pause.resumeAt - now)
+  const wait = left < MINUTE ? '马上' : `${Math.ceil(left / MINUTE)} 分钟后`
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.held, { backgroundColor: s.dockCard, borderColor: c.border }]}
+      accessibilityLiveRegion="polite"
+    >
+      <Icon icon={G.timer} size={15} color={c.warning} />
+      <View style={styles.stripBody}>
+        <Text style={[styles.heldText, { color: c.text }]}>
+          {pause.resetsAt === null
+            ? `额度恢复时间未知，${whenText(pause.resumeAt, now)} 再查一次`
+            : `额度 ${whenText(pause.resetsAt, now)} 恢复后自动继续`}
+        </Text>
+        <Text style={[styles.stripSmall, { color: c.textTertiary }]}>
+          {pause.resetsAt === null ? `额度有空余后自动继续 · ${wait}再查` : `${wait}继续`}
+        </Text>
+        {error ? <Text style={[styles.stripSmall, { color: c.danger }]}>{error}</Text> : null}
+        <View style={styles.stripActions}>
+          <StripButton
+            label="取消"
+            busy={busy === 'cancel'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('cancel')}
+          />
+          <StripButton
+            label="立即重试"
+            strong
+            busy={busy === 'now'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('now')}
+          />
+        </View>
+      </View>
+    </Reanimated.View>
+  )
+}
+
+/**
+ * Over the composer while the running turn has said nothing for a while, as the desktop's: for how
+ * long, with 继续等, 重试, which stops it and goes on again, and 停止. It goes by itself once the
+ * turn says something again.
+ */
+export function StallStrip(props: { sessionId: string; stall: Stall }) {
+  const { c, s } = useSessionTokens()
+  const link = useMaybeLink()
+  const connected = useConnected()
+  const now = useMinute()
+  const { busy, error, act } = useStripAction<StallAction>(
+    (action) =>
+      link
+        ? link.request('sessions.stall', { sessionId: props.sessionId, action })
+        : Promise.reject(new Error('')),
+    false,
+  )
+  const minutes = Math.max(1, Math.floor((now - props.stall.since) / MINUTE))
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.held, { backgroundColor: s.dockCard, borderColor: c.border }]}
+      accessibilityLiveRegion="polite"
+    >
+      <Icon icon={G.timer} size={15} color={c.warning} />
+      <View style={styles.stripBody}>
+        <Text style={[styles.heldText, { color: c.text }]}>可能卡住了</Text>
+        <Text style={[styles.stripSmall, { color: c.textTertiary }]}>
+          {props.stall.reason === 'retrying'
+            ? `一直在重试，已经 ${minutes} 分钟没有输出`
+            : `已经 ${minutes} 分钟没有输出`}
+        </Text>
+        {error ? <Text style={[styles.stripSmall, { color: c.danger }]}>{error}</Text> : null}
+        <View style={styles.stripActions}>
+          <StripButton
+            label="继续等"
+            busy={busy === 'wait'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('wait')}
+          />
+          <StripButton
+            label="重试"
+            busy={busy === 'retry'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('retry')}
+          />
+          <StripButton
+            label="停止"
+            strong
+            busy={busy === 'stop'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('stop')}
+          />
+        </View>
+      </View>
+    </Reanimated.View>
+  )
+}
+
 /** A mode's name short enough for the composer's pill. */
 const MODE_SHORT: Record<ModeLook, string> = {
   asks: '询问',
@@ -101,7 +332,7 @@ export function useSessionConfig(
     setSetting(option.id)
     link
       .request('sessions.setConfigOption', { sessionId, optionId: option.id, value })
-      .catch((error: unknown) => Alert.alert(`没能更改${option.name}`, errorText(error)))
+      .catch((error: unknown) => Alert.alert(`没能更改${option.name}`, hostErrorText(error)))
       .finally(() => setSetting(null))
   }
 
@@ -152,13 +383,7 @@ export function ModeButton(props: {
           disabled={props.disabled}
           accessibilityRole="button"
           accessibilityLabel={`权限模式：${mode.name}`}
-          style={[
-            styles.modePill,
-            {
-              backgroundColor: c.fill,
-              opacity: props.disabled ? 0.38 : mode.locked ? 0.5 : 1,
-            },
-          ]}
+          style={[styles.modePill, { backgroundColor: c.fill, opacity: props.disabled ? 0.38 : 1 }]}
         >
           {icon}
           <Text style={[styles.modeText, { color: full ? c.danger : c.text }]} numberOfLines={1}>
@@ -166,11 +391,13 @@ export function ModeButton(props: {
           </Text>
         </PressScale>
       ) : (
+        // A mode locked for the turn still opens its menu, which says so: the button is not
+        // dimmed as if it would not.
         <RoundButton
           onPress={props.onPress}
           disabled={props.disabled}
           accessibilityLabel={`权限模式：${mode.name}`}
-          style={mode.locked ? { opacity: 0.5 } : null}
+          {...(mode.locked ? { accessibilityHint: '仅在两轮对话之间可更改' } : {})}
         >
           {icon}
         </RoundButton>
@@ -204,7 +431,7 @@ export function ModelChip(props: {
         accessibilityLabel={
           props.pending
             ? `下一条消息交给 ${props.pending}`
-            : `模型：${props.model ?? ''}${props.effort ? `，思考强度：${props.effort}` : ''}`
+            : `模型：${props.model ?? ''}${props.effort ? `，推理强度：${props.effort}` : ''}`
         }
         style={[styles.chip, { opacity: props.disabled ? 0.5 : 1 }]}
       >
@@ -266,7 +493,6 @@ export function QueueStack(props: {
   const count = session.queue.length
   const open = keyboardUp ? (typing?.open ?? false) : (chosen ?? count === 1)
   const toggle = () => {
-    gentle()
     if (keyboardUp) setTyping({ open: !open })
     else setPrefs({ queueOpen: !open })
   }
@@ -279,7 +505,7 @@ export function QueueStack(props: {
     haptic.tap()
     setBusyItem(item.id)
     work()
-      .catch((error: unknown) => Alert.alert(failed, errorText(error)))
+      .catch((error: unknown) => Alert.alert(failed, hostErrorText(error)))
       .finally(() => setBusyItem(null))
   }
 
@@ -323,7 +549,7 @@ export function QueueStack(props: {
   const resume = () => {
     link
       .request('sessions.resumeQueue', { sessionId })
-      .catch((error: unknown) => Alert.alert('没能继续发送', errorText(error)))
+      .catch((error: unknown) => Alert.alert('没能继续发送', hostErrorText(error)))
   }
 
   return (
@@ -457,6 +683,19 @@ const QUEUE_MOVE = LinearTransition.springify().dampingRatio(0.84).duration(400)
 const QUEUE_FOLD = LinearTransition.duration(220).easing(Easing.out(Easing.cubic))
 
 const styles = StyleSheet.create({
+  held: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  heldText: { flex: 1, fontSize: 14, lineHeight: 20 },
+  stripBody: { flex: 1, minWidth: 0, gap: 2 },
+  stripSmall: { fontSize: 12.5, lineHeight: 17 },
+  stripActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',

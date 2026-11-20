@@ -22,6 +22,7 @@ import {
 } from '@shared/thread'
 import { readThread, recentThread, writeThread } from './cache'
 import { useComputerId } from './host'
+import { hostErrorText } from './hostErrors'
 import { createStore, useSelector, type Store } from './select'
 
 export interface ThreadView {
@@ -29,9 +30,16 @@ export interface ThreadView {
   store: Store<ThreadState | null>
   /** The thread is the cache's copy from an earlier visit; the computer has not sent it yet. */
   cached: boolean
+  /** The cache was looked in, whether or not it held the thread. */
+  cacheRead: boolean
+  /** Why the computer's copy could not be read; the cache's, if any, still shows. */
   error: string | null
+  /** Reads the computer's copy again now, as it does by itself a while after a failure. */
+  retry(): void
   hasOlder: boolean
   loadingOlder: boolean
+  /** Why the last read of an older page failed, until one succeeds. */
+  olderError: string | null
   loadOlder(): void
   /** What waits for the user, which may lie on a page not read yet. */
   requests: ThreadEntry[]
@@ -52,6 +60,9 @@ const APPLY_EVERY = 50
  * rather than once a batch.
  */
 const REQUESTS_AFTER = 250
+/** How long after a failed read it is tried again, doubling with each failure up to the most. */
+const RETRY_FIRST = 2000
+const RETRY_MOST = 30_000
 
 /** Whether two answers of what waits hold the same entries, so the screen keeps its own. */
 function sameEntries(a: readonly ThreadEntry[], b: readonly ThreadEntry[]): boolean {
@@ -70,10 +81,12 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const store = useMemo(() => createStore<ThreadState | null>(first), [first])
   const setThread = store.set
   const [cached, setCached] = useState(first !== null)
+  const [cacheRead, setCacheRead] = useState(first !== null || !computer)
   const cachedRef = useRef(first !== null)
   const [error, setError] = useState<string | null>(null)
   const [older, setOlder] = useState<number | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState<string | null>(null)
   const [requests, setRequests] = useState<ThreadEntry[]>([])
   const [plan, setPlan] = useState<PlanEntry | null>(null)
   const seq = useRef(-1)
@@ -84,6 +97,11 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const queued = useRef<PatchBatch[]>([])
   const applyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const appliedAt = useRef(0)
+  // After a failed read, until it is tried again: patches meanwhile go unread, as the next read
+  // has them, rather than each starting a read of its own.
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const failures = useRef(0)
+  const openRef = useRef<() => Promise<void>>(async () => {})
   const connected = state.kind === 'connected'
 
   // Until the computer sends the thread, the cache's copy from an earlier visit shows, read-only.
@@ -91,12 +109,17 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   useEffect(() => {
     if (!computer || first) return
     let current = true
-    void readThread(computer, sessionId).then((copy) => {
-      if (!current || !copy || live.current) return
-      cachedRef.current = true
-      setCached(true)
-      setThread(threadFromSnapshot({ session: copy.session, entries: copy.entries, seq: -1 }))
-    })
+    void readThread(computer, sessionId)
+      .then((copy) => {
+        if (!current || !copy || live.current) return
+        cachedRef.current = true
+        setCached(true)
+        setThread(threadFromSnapshot({ session: copy.session, entries: copy.entries, seq: -1 }))
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (current) setCacheRead(true)
+      })
     return () => {
       current = false
     }
@@ -169,6 +192,8 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
 
   const open = useCallback(async () => {
     const mine = ++generation.current
+    if (retryTimer.current) clearTimeout(retryTimer.current)
+    retryTimer.current = null
     dropQueued()
     pending.current = []
     try {
@@ -191,18 +216,29 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       setOlder(snapshot.older)
       setPlan(snapshot.plan ?? null)
       setError(null)
+      failures.current = 0
       void link.request('sessions.show', { sessionIds: [sessionId] }).catch(() => {})
       reloadRequests()
     } catch (failure) {
-      if (mine === generation.current)
-        setError((failure as { message?: string }).message ?? '打不开这个会话')
+      if (mine !== generation.current) return
+      // What came in while it was read is not kept: the next read has it.
+      pending.current = null
+      setError(hostErrorText(failure, '打不开这个会话。'))
+      const wait = Math.min(RETRY_MOST, RETRY_FIRST * 2 ** failures.current)
+      failures.current++
+      retryTimer.current = setTimeout(() => {
+        retryTimer.current = null
+        void openRef.current()
+      }, wait)
     }
   }, [link, sessionId, reloadRequests, setThread])
+  openRef.current = open
 
   useEffect(() => {
     const off = link.onHostEvent((raw) => {
       const event = raw as HostEvent
       if (event.type !== 'session.patches' || event.batch.sessionId !== sessionId) return
+      if (retryTimer.current) return
       const batch = event.batch
       if (pending.current) {
         pending.current.push(batch)
@@ -232,11 +268,14 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
 
   useEffect(() => {
     if (!connected) return
+    failures.current = 0
     // A counter, not a node: the cleanup moves on whatever value it holds by then.
     const generations = generation
     void open()
     return () => {
       generations.current++
+      if (retryTimer.current) clearTimeout(retryTimer.current)
+      retryTimer.current = null
       void link.request('sessions.unwatch', { sessionId }).catch(() => {})
       void link.request('sessions.show', { sessionIds: [] }).catch(() => {})
     }
@@ -249,17 +288,26 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       .then((page) => {
         setThread((current) => (current ? prependEntries(current, page.entries) : current))
         setOlder(page.older)
+        setOlderError(null)
       })
-      .catch(() => {})
+      .catch((failure: unknown) => setOlderError(hostErrorText(failure, '没能读取更早的内容。')))
       .finally(() => setLoadingOlder(false))
   }, [link, sessionId, older, loadingOlder, store, setThread])
+
+  const retry = useCallback(() => {
+    failures.current = 0
+    void openRef.current()
+  }, [])
 
   return {
     store,
     cached,
+    cacheRead,
     error,
+    retry,
     hasOlder: older !== null && !cached,
     loadingOlder,
+    olderError,
     loadOlder,
     requests,
     reloadRequests,

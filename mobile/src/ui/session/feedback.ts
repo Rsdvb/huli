@@ -4,6 +4,7 @@
 import { Alert, ActionSheetIOS, Platform } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
+import { showNotice } from '../NoticeBar'
 
 export const haptic = {
   tap: () => void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}),
@@ -13,9 +14,20 @@ export const haptic = {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}),
 }
 
-export async function copyText(text: string): Promise<void> {
-  await Clipboard.setStringAsync(text)
+/**
+ * Copies text, with a tick and a note that says so, `toast` or none for a button that shows it
+ * itself; a failure says so too rather than going unheard. Whether it was copied.
+ */
+export async function copyText(text: string, toast: string | null = '已复制'): Promise<boolean> {
+  try {
+    await Clipboard.setStringAsync(text)
+  } catch {
+    showNotice({ text: '没能复制，请再试一次', tone: 'warning' })
+    return false
+  }
   haptic.pick()
+  if (toast) showNotice({ text: toast, tone: 'success' })
+  return true
 }
 
 /** Markdown read as the words it shows: marks, fences and link targets left out. */

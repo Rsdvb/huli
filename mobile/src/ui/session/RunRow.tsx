@@ -13,8 +13,8 @@ import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
 import { G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useSessionTokens } from './palette'
-import { gentle } from './Press'
-import { LiveTime, ThoughtRow, ToolRow, useOpenFade } from './ToolRow'
+import { useOpenFade } from './Press'
+import { LiveTime, ThoughtRow, ToolRow } from './ToolRow'
 import {
   diffStats,
   formatMs,
@@ -39,7 +39,7 @@ function iconOf(entry: ThreadEntry): IconSpec | null {
 
 /** A step of a run: a tool call, a thought or a project memory write. */
 export const Step = memo(function Step(props: { entry: ThreadEntry }) {
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   const { entry } = props
   if (entry.kind === 'tool') return <ToolRow entry={entry} />
   if (entry.kind === 'thought') return <ThoughtRow entry={entry} />
@@ -50,7 +50,7 @@ export const Step = memo(function Step(props: { entry: ThreadEntry }) {
 
 export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; latest: boolean }) {
   const { c } = useSessionTokens()
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   const { entries, latest } = props
   const [open, setOpen] = useDisclosure(`run:${entries[0]!.id}`)
   const shown = useOpenFade(open)
@@ -111,7 +111,6 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
     <View>
       <Pressable
         onPress={() => {
-          gentle()
           setOpen((v) => !v)
         }}
         accessibilityRole="button"
@@ -151,7 +150,7 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
             {since !== undefined && <LiveTime since={since - total} color={c.textTertiary} />}
           </View>
         ) : known && total > 0 ? (
-          <Text style={[styles.meta, { color: c.textTertiary }]}>· {formatMs(total, false)}</Text>
+          <Text style={[styles.meta, { color: c.textTertiary }]}>· {formatMs(total)}</Text>
         ) : null}
       </Pressable>
       {open && (

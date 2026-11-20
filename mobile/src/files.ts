@@ -10,12 +10,20 @@ const KEEP_MS = 60_000
 
 const kept = new WeakMap<HostLink, Map<string, { at: number; list: Promise<FileList> }>>()
 
-/** The folder's files, read again once the kept list is a minute old or `fresh` asks. */
-export function readFiles(link: HostLink, folder: string, fresh = false): Promise<FileList> {
+/**
+ * The folder's files, read again once the kept list is `maxAge` old (a minute by default) or
+ * `fresh` asks.
+ */
+export function readFiles(
+  link: HostLink,
+  folder: string,
+  fresh = false,
+  maxAge = KEEP_MS,
+): Promise<FileList> {
   let byFolder = kept.get(link)
   if (!byFolder) kept.set(link, (byFolder = new Map()))
   const known = byFolder.get(folder)
-  if (known && !fresh && Date.now() - known.at < KEEP_MS) return known.list
+  if (known && !fresh && Date.now() - known.at < maxAge) return known.list
   const list = call(link, 'files.list', { projectPath: folder })
   byFolder.set(folder, { at: Date.now(), list })
   list.catch(() => byFolder.delete(folder))
@@ -32,6 +40,8 @@ export function useProjectFiles(
   link: HostLink,
   folder: string | null,
   enabled: boolean,
+  /** How old a kept list may be: longer where only whether a file exists matters. */
+  maxAge?: number,
 ): ProjectFiles {
   const [list, setList] = useState<FileList | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -41,22 +51,36 @@ export function useProjectFiles(
     if (!enabled || !folder) return
     let live = true
     setError(null)
-    readFiles(link, folder, round > 0).then(
+    readFiles(link, folder, round > 0, maxAge).then(
       (next) => live && setList(next),
       (failed: unknown) => live && setError(errorText(failed, '没能读取项目的文件。')),
     )
     return () => {
       live = false
     }
-  }, [link, folder, enabled, round])
+  }, [link, folder, enabled, round, maxAge])
 
   const reload = useCallback(() => setRound((n) => n + 1), [])
   return { list: folder ? list : null, error, reload }
 }
 
+// A list's paths in lower case, worked out once per list: a project lists up to 50,000 files, and
+// each keystroke of a mention searched them all again.
+const loweredKept = new WeakMap<readonly string[], string[]>()
+
+function lowerOf(paths: readonly string[]): string[] {
+  let known = loweredKept.get(paths)
+  if (!known) {
+    known = paths.map((path) => path.toLowerCase())
+    loweredKept.set(paths, known)
+  }
+  return known
+}
+
 /**
  * The paths whose name or path holds the query, names that start with it first. `lowered`, the
- * paths in lower case in the same order, spares a long list lowering every path on each keystroke.
+ * paths in lower case in the same order, spares a long list lowering every path on each keystroke;
+ * without it the list's own are worked out once and kept.
  */
 export function matchFiles(
   paths: readonly string[],
@@ -66,9 +90,10 @@ export function matchFiles(
 ): string[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
+  const all = lowered ?? lowerOf(paths)
   const scored: { path: string; score: number }[] = []
   for (const [at, path] of paths.entries()) {
-    const lower = lowered?.[at] ?? path.toLowerCase()
+    const lower = all[at] ?? path.toLowerCase()
     const name = lower.slice(lower.lastIndexOf('/') + 1)
     const score = name.startsWith(needle)
       ? 0

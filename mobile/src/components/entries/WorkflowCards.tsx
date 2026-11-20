@@ -94,7 +94,7 @@ function useTask(taskId: string | null): { view: TaskView | null; reload(): void
 }
 
 export function WorkflowToolCard(props: { entry: ToolEntry }) {
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   const tool = workflowCardOf(props.entry)
   switch (tool) {
     case 'start':
@@ -141,7 +141,7 @@ function SuggestionPending(props: { entry: ToolEntry; sessionId: string; suggest
   const { entry, sessionId, suggestion } = props
   const { c, s } = useSessionTokens()
   const link = useLink()
-  const { config } = useSessionRows()
+  const { config } = useSessionRows((r) => ({ config: r.config }))
   const agent = useAgentName(sessionId)
   const summary = useSession(sessionId)
   const { entries, loaded } = useWorkflows()

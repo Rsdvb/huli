@@ -24,6 +24,7 @@ import {
 import { ALREADY_ANSWERED } from '@shared/agent-host'
 import type { FromDevice } from '@shared/thread'
 import { useActiveHost, useHostState } from '../../host'
+import { hostErrorText } from '../../hostErrors'
 import { haptic } from '../../ui/session/feedback'
 import { clockTime } from '../../ui/session/format'
 import { G, Icon, type IconSpec } from '../../ui/session/icons'
@@ -60,8 +61,7 @@ export function answeredBy(error: unknown): FromDevice | null | undefined {
 }
 
 export function messageOf(error: unknown, fallback = '没有发出去，请稍后再试。'): string {
-  const message = (error as { message?: unknown } | null)?.message
-  return typeof message === 'string' && message ? message : fallback
+  return hostErrorText(error, fallback)
 }
 
 // When this phone saw a request answered, by entry id, for the answered line's time.
@@ -93,7 +93,10 @@ export function answeredDetail(at: number | null, device: FromDevice | undefined
 export type Run = () => Promise<unknown>
 
 export interface Sender {
-  /** The action that is being sent, by its key. */
+  /**
+   * The action that is being sent, by its key; for a request's answer, also the one that went,
+   * whose button keeps turning until the card goes, as nothing else may be sent for it.
+   */
   busy: string | null
   error: string | null
   /** A note that is no failure, as an answer another device gave first. */
@@ -102,7 +105,11 @@ export interface Sender {
   retry(): void
 }
 
-/** Sends a card's answer once at a time, with a haptic on success and the failure kept to retry. */
+/**
+ * Sends a card's answer once at a time, with a haptic on success and the failure kept to retry.
+ * A second tap before the first is answered sends nothing, nor does any tap once a request's
+ * answer (`entryId`) went.
+ */
 export function useSender(entryId?: string): Sender {
   const state = useHostState()
   const host = useActiveHost()
@@ -111,6 +118,9 @@ export function useSender(entryId?: string): Sender {
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const last = useRef<{ key: string; run: Run } | null>(null)
+  // Read at the tap, not from the render: two taps in one frame both saw no answer in flight.
+  const flying = useRef(false)
+  const answered = useRef(false)
   const alive = useRef(true)
   useEffect(
     () => () => {
@@ -121,31 +131,39 @@ export function useSender(entryId?: string): Sender {
 
   const send = useCallback(
     async (key: string, run: Run): Promise<boolean> => {
-      if (busy !== null) return false
+      if (flying.current || answered.current) return false
+      flying.current = true
       last.current = { key, run }
       setBusy(key)
       setError(null)
       setNote(null)
+      let went = false
       try {
         const result = await run()
         if (result === false) return false
         haptic.success()
-        if (entryId) markAnswered(entryId)
+        if (entryId) {
+          markAnswered(entryId)
+          answered.current = true
+          went = true
+        }
         return true
       } catch (caught) {
         if (!alive.current) return false
         const by = answeredBy(caught)
         if (by !== undefined) {
+          answered.current = !!entryId
           setNote(`已在 ${by?.name ?? computer} 上回答过。`)
         } else {
           setError(messageOf(caught))
         }
         return false
       } finally {
-        if (alive.current) setBusy(null)
+        flying.current = false
+        if (alive.current && !went) setBusy(null)
       }
     },
-    [busy, computer, entryId],
+    [computer, entryId],
   )
 
   const retry = useCallback(() => {

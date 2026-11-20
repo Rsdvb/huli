@@ -157,6 +157,64 @@ export function parseBlocks(source: string): Block[] {
   return blocks(source.replace(/\r\n?/g, '\n').split('\n'))
 }
 
+/** What of a reply being written was read already: its text up to a block's start, and blocks. */
+export interface Settled {
+  text: string
+  blocks: Block[]
+}
+
+/**
+ * Where the last block that cannot reach back starts in `source`, from `from` on: a line after a
+ * blank one, outside a fence, at the margin, that no list, quote or table goes on into. The parser
+ * reads what comes before such a line and what comes after it apart as it reads them together.
+ * `from` lies at such a start, or is 0.
+ */
+function lastStart(source: string, from: number): number {
+  let found = from
+  let fence: string | null = null
+  let blank = false
+  let at = from
+  while (at < source.length) {
+    const end = source.indexOf('\n', at)
+    const next = end === -1 ? source.length : end + 1
+    // The last line may still be being written: a start is known only once it has ended.
+    if (end === -1) break
+    const line = source.slice(at, end).replace(/\r$/, '')
+    const trimmed = line.trim()
+    if (fence !== null) {
+      if (trimmed.startsWith(fence) && /^[`~]+$/.test(trimmed)) fence = null
+    } else if (!trimmed) {
+      blank = true
+      at = next
+      continue
+    } else {
+      if (blank && !/^\s/.test(line) && !ITEM.test(line) && !QUOTE.test(line)) found = at
+      const open = FENCE.exec(line)
+      if (open) fence = open[2]![0]!.repeat(open[2]!.length)
+    }
+    blank = false
+    at = next
+  }
+  return found
+}
+
+/**
+ * The blocks of a reply being written, read again as it grows: what was settled is kept and only
+ * the text after its last block's start is read again, so a long reply costs the same each time
+ * rather than more with each line. `settled` carries what was read between calls.
+ */
+export function streamBlocks(source: string, settled: { current: Settled | null }): Block[] {
+  let base = settled.current
+  if (!base || !source.startsWith(base.text)) base = { text: '', blocks: [] }
+  const cut = lastStart(source, base.text.length)
+  if (cut > base.text.length) {
+    const read = parseBlocks(source.slice(base.text.length, cut))
+    base = { text: source.slice(0, cut), blocks: [...base.blocks, ...read] }
+  }
+  settled.current = base
+  return [...base.blocks, ...parseBlocks(source.slice(base.text.length))]
+}
+
 function blocks(lines: string[]): Block[] {
   const out: Block[] = []
   let para: string[] = []

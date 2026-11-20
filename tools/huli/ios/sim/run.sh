@@ -37,6 +37,17 @@ xcrun simctl install "$UDID" "$APP"
 export KETTU_DAEMON_DATA="$OUT/daemon"
 export KETTU_FAKE_AGENT="$PWD/tools/fake-agent/main.ts"
 export KETTU_DIRECT_PORT=47231
+# The fake agent's first start reads and compiles its modules, which on a loaded runner outlasted the
+# 30 s the host gives an agent to start, so the session flows had no agent and failed. Runs of it
+# first (it ends with its closed input), with Node's compile cache kept for the daemon's own starts,
+# leave only the quick part.
+export NODE_COMPILE_CACHE="$OUT/node-compile-cache"
+mkdir -p "$NODE_COMPILE_CACHE"
+for warm in 1 2; do
+  started=$(date +%s)
+  node "$KETTU_FAKE_AGENT" < /dev/null > /dev/null 2>&1 || true
+  echo "fake agent warm-up $warm: $(($(date +%s) - started)) s"
+done
 mkdir -p "$KETTU_DAEMON_DATA"
 node out/daemon/main.cjs run > "$RESULTS/daemon.log" 2>&1 &
 DAEMON=$!
@@ -71,6 +82,10 @@ for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
   kill -INT "$REC" || true
   wait "$REC" 2>/dev/null || true
 done
+
+# What the developer's frame meter counted in the flows that ran it (FrameMeter.tsx).
+DATA=$(xcrun simctl get_app_container "$UDID" io.github.rsdvb.huli data 2>/dev/null || true)
+[ -n "$DATA" ] && cp "$DATA/Documents/huli-frames.json" "$RESULTS/" 2>/dev/null || true
 
 # The same screen in the dark appearance.
 xcrun simctl ui "$UDID" appearance dark

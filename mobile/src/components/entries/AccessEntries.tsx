@@ -16,10 +16,11 @@ import type { ThreadEntry } from '@shared/thread'
 import { originLabel } from '@shared/browser'
 import { admin } from '../../admin'
 import { call } from '../../git'
-import { getHost, useAgent, useLink, useSession } from '../../host'
+import { getHost, useAgent, useLink } from '../../host'
 import { useComputer } from '../../ui/session/computer'
 import { G } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
+import { agentIdOf, useSessionField } from '../../ui/session/sessionField'
 import {
   answeredDetail,
   AskCard,
@@ -37,8 +38,7 @@ type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 export type Place = 'dock' | 'thread'
 
 export function useAgentName(sessionId: string): string {
-  const summary = useSession(sessionId)
-  const agent = useAgent(summary?.agentId)
+  const agent = useAgent(useSessionField(sessionId, agentIdOf))
   return agent?.name || 'Agent'
 }
 

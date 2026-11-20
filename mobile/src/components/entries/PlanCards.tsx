@@ -11,6 +11,7 @@ import {
   Dimensions,
   Easing,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -21,7 +22,8 @@ import type { ConfigOption, PlanEntry, ToolEntry } from '@shared/thread'
 import { useConnected, useLink } from '../../host'
 import { useSelector, type Store } from '../../select'
 import { BottomSheet } from '../../ui/BottomSheet'
-import { GlassCapsule } from '../../ui/Glass'
+import { GlassCapsule, useGlassMode } from '../../ui/Glass'
+import { useReducedMotion } from '../../ui/motion'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import type { MenuPage, ViewHandle } from '../../ui/session/Popover'
 import { Clamp } from '../../ui/session/Clamp'
@@ -29,7 +31,8 @@ import { useSessionRows } from '../../ui/session/context'
 import { copyText, haptic } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
-import { gentle, PressScale } from '../../ui/session/Press'
+import { useDisclosure } from '../../ui/session/disclosure'
+import { PressScale } from '../../ui/session/Press'
 import { Markdown } from '../Markdown'
 import { useAgentName } from './AccessEntries'
 import { CardButton, E, SendState, useSender } from './kit'
@@ -128,7 +131,8 @@ function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) 
   const [height, setHeight] = useState(0)
   const [sheet, setSheet] = useState(false)
   const copy = () =>
-    void copyText(props.markdown).then(() => {
+    void copyText(props.markdown, null).then((ok) => {
+      if (!ok) return
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     })
@@ -156,7 +160,6 @@ function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) 
           {height > PLAN_PEEK && (
             <Pressable
               onPress={() => {
-                gentle()
                 setSheet(true)
               }}
               hitSlop={8}
@@ -188,7 +191,10 @@ function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) 
 
 function PlanChanges(props: { previous: string; markdown: string }) {
   const { c } = useSessionTokens()
-  const lines = useMemo(() => planDiff(props.previous, props.markdown), [props])
+  const lines = useMemo(
+    () => planDiff(props.previous, props.markdown),
+    [props.previous, props.markdown],
+  )
   return (
     <View style={[styles.planBody, { backgroundColor: c.fill, gap: 4 }]}>
       <Text style={[styles.small, { color: c.textTertiary }]}>和上一版相比改了什么。</Text>
@@ -223,7 +229,15 @@ function PlanChanges(props: { previous: string; markdown: string }) {
  * A plan waiting for the user: the plan, the mode it builds in, and a note for keeping on
  * planning. 开始构建 builds; 继续计划 sends it back, with the note when there is one.
  */
-export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string }) {
+export function PlanApprovalCard(props: {
+  entry: ToolEntry
+  sessionId: string
+  /**
+   * The most the card may take: past it, the plan and its choices scroll between the card's head
+   * and its buttons, which stay in view however short the phone.
+   */
+  maxHeight?: number
+}) {
   const { entry, sessionId } = props
   const { c, s } = useSessionTokens()
   const link = useLink()
@@ -267,6 +281,7 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
       style={[
         styles.card,
         { backgroundColor: s.dockCard, borderColor: c.borderStrong, shadowColor: c.shadow },
+        props.maxHeight !== undefined ? { maxHeight: props.maxHeight } : null,
       ]}
     >
       <View style={styles.head}>
@@ -278,83 +293,93 @@ export function PlanApprovalCard(props: { entry: ToolEntry; sessionId: string })
         </Text>
         <Text style={[styles.label, { color: c.warning }]}>等你回答</Text>
       </View>
-      <Text style={[styles.description, { color: c.textSecondary }]}>
-        {modes.length > 0
-          ? `${agent} 已完成计划。开始构建，或附上意见继续计划。`
-          : `${agent} 已完成计划。按它实施，或附上意见继续计划。`}
-      </Text>
-      <View style={{ gap: 10, marginTop: 12 }}>
-        {plan.previous ? (
-          <SegmentedControl<'plan' | 'changes'>
-            segments={[
-              { key: 'plan', label: '计划' },
-              { key: 'changes', label: '改动' },
-            ]}
-            value={view}
-            onChange={setView}
-          />
-        ) : null}
-        {view === 'changes' && plan.previous ? (
-          <PlanChanges previous={plan.previous} markdown={plan.markdown} />
-        ) : (
-          <PlanBody markdown={plan.markdown} peek />
-        )}
-        {(modes.length > 0 || choices.length > 1) && (
-          <View style={{ gap: 6 }}>
-            <Text style={[styles.small, { color: c.textSecondary, fontWeight: '600' }]}>
-              {modes.length > 0 ? '开始构建，使用' : '按这个计划实施吗？'}
-            </Text>
-            {picks.length <= 3 ? (
-              <SegmentedControl
-                segments={picks.map((o) => ({ key: o.id, label: o.name.replace(/`/g, '') }))}
-                value={chosen}
-                onChange={setChosen}
-              />
-            ) : (
-              <View style={styles.choices}>
-                {picks.map((o) => {
-                  const on = o.id === chosen
-                  return (
-                    <PressScale
-                      key={o.id}
-                      scale={0.97}
-                      onPress={() => {
-                        haptic.pick()
-                        setChosen(o.id)
-                      }}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: on }}
-                      style={[
-                        styles.choice,
-                        {
-                          borderColor: on ? c.accent : c.border,
-                          backgroundColor: on ? s.accentSoft : c.fill,
-                        },
-                      ]}
-                    >
-                      <Text style={[styles.choiceText, { color: c.text }]}>
-                        {o.name.replace(/`/g, '')}
-                      </Text>
-                    </PressScale>
-                  )
-                })}
-              </View>
-            )}
-          </View>
-        )}
-        {keepOption?.note && (
-          <TextInput
-            value={note}
-            onChangeText={setNote}
-            placeholder={`继续计划，告诉 ${agent} 要改什么…`}
-            placeholderTextColor={c.textTertiary}
-            selectionColor={c.accent}
-            multiline
-            accessibilityLabel={keepOption.name}
-            style={[styles.note, { color: c.text, borderColor: c.border, backgroundColor: c.fill }]}
-          />
-        )}
-      </View>
+      <ScrollView
+        style={styles.planScroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <Text style={[styles.description, { color: c.textSecondary }]}>
+          {modes.length > 0
+            ? `${agent} 已完成计划。开始构建，或附上意见继续计划。`
+            : `${agent} 已完成计划。按它实施，或附上意见继续计划。`}
+        </Text>
+        <View style={{ gap: 10, marginTop: 12 }}>
+          {plan.previous ? (
+            <SegmentedControl<'plan' | 'changes'>
+              segments={[
+                { key: 'plan', label: '计划' },
+                { key: 'changes', label: '改动' },
+              ]}
+              value={view}
+              onChange={setView}
+            />
+          ) : null}
+          {view === 'changes' && plan.previous ? (
+            <PlanChanges previous={plan.previous} markdown={plan.markdown} />
+          ) : (
+            <PlanBody markdown={plan.markdown} peek />
+          )}
+          {(modes.length > 0 || choices.length > 1) && (
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.small, { color: c.textSecondary, fontWeight: '600' }]}>
+                {modes.length > 0 ? '开始构建，使用' : '按这个计划实施吗？'}
+              </Text>
+              {picks.length <= 3 ? (
+                <SegmentedControl
+                  segments={picks.map((o) => ({ key: o.id, label: o.name.replace(/`/g, '') }))}
+                  value={chosen}
+                  onChange={setChosen}
+                />
+              ) : (
+                <View style={styles.choices}>
+                  {picks.map((o) => {
+                    const on = o.id === chosen
+                    return (
+                      <PressScale
+                        key={o.id}
+                        scale={0.97}
+                        onPress={() => {
+                          haptic.pick()
+                          setChosen(o.id)
+                        }}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: on }}
+                        style={[
+                          styles.choice,
+                          {
+                            borderColor: on ? c.accent : c.border,
+                            backgroundColor: on ? s.accentSoft : c.fill,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.choiceText, { color: c.text }]}>
+                          {o.name.replace(/`/g, '')}
+                        </Text>
+                      </PressScale>
+                    )
+                  })}
+                </View>
+              )}
+            </View>
+          )}
+          {keepOption?.note && (
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder={`继续计划，告诉 ${agent} 要改什么…`}
+              placeholderTextColor={c.textTertiary}
+              selectionColor={c.accent}
+              multiline
+              accessibilityLabel={keepOption.name}
+              style={[
+                styles.note,
+                { color: c.text, borderColor: c.border, backgroundColor: c.fill },
+              ]}
+            />
+          )}
+        </View>
+      </ScrollView>
       <View style={styles.row}>
         <CardButton
           label={note.trim() ? '发送意见' : '继续计划'}
@@ -406,8 +431,8 @@ export function PlanWaitingLine(props: { entry: ToolEntry }) {
 export function PlanSettled(props: { entry: ToolEntry }) {
   const { entry } = props
   const { c } = useSessionTokens()
-  const { config } = useSessionRows()
-  const [open, setOpen] = useState(false)
+  const { config } = useSessionRows((r) => ({ config: r.config }))
+  const [open, setOpen] = useDisclosure(`plan:${entry.id}`)
   const result = entry.permissionResult
   const markdown = planMarkdown(entry)
   const version = entry.planVersion ?? 1
@@ -437,7 +462,6 @@ export function PlanSettled(props: { entry: ToolEntry }) {
       <View style={[styles.settled, { backgroundColor: c.fill }]}>
         <Pressable
           onPress={() => {
-            gentle()
             setOpen((v) => !v)
           }}
           disabled={!markdown}
@@ -472,7 +496,7 @@ export function PlanSettled(props: { entry: ToolEntry }) {
         <View style={styles.moved}>
           <Icon icon={G.right} size={11} color={c.textTertiary} weight="semibold" />
           <Text style={[styles.small, { color: c.textSecondary }]}>
-            模式从 <Text style={{ fontWeight: '700' }}>{planMode ?? 'Plan'}</Text> 改为{' '}
+            模式从 <Text style={{ fontWeight: '700' }}>{planMode ?? '计划模式'}</Text> 改为{' '}
             <Text style={{ fontWeight: '700' }}>{mode}</Text>
           </Text>
         </View>
@@ -612,7 +636,10 @@ export const PLAN_PILL_ROOM = 44
 /**
  * The session's plan, floating under the header as a glass capsule: its ring, or a turning ring
  * while the step runs, the step it is on and which of how many. Tapped, it opens the step list
- * (`planPage`). It fades while the conversation is flung, so it never sits over text being read.
+ * (`planPage`). It steps aside while the conversation is flung, so it never sits over text being
+ * read: Liquid Glass melts away and back on its own (glass under a fading opacity draws nothing,
+ * and once faded out it stayed clear, leaving the step's words over the reply's), while its
+ * content and the other glass fade; with Reduce Motion it only fades.
  */
 export function PlanPill(props: {
   items: PlanItems
@@ -624,6 +651,8 @@ export function PlanPill(props: {
   onPress(): void
 }) {
   const { c } = useSessionTokens()
+  const liquid = useGlassMode() === 'liquid'
+  const reduce = useReducedMotion()
   const { items } = props
   const { index, text } = currentStep(items)
   const working = props.running && items[index]?.status === 'in_progress'
@@ -637,21 +666,19 @@ export function PlanPill(props: {
       useNativeDriver: true,
     }).start()
   }, [hidden, shown])
+  const moves = reduce
+    ? []
+    : [
+        { translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) },
+        { scale: shown.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
+      ]
   return (
     <Animated.View
       pointerEvents={hidden ? 'none' : 'box-none'}
       style={[
         styles.pillDock,
-        {
-          top: props.top,
-          opacity: shown,
-          transform: [
-            {
-              translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }),
-            },
-            { scale: shown.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
-          ],
-        },
+        { top: props.top, transform: moves },
+        liquid ? null : { opacity: shown },
       ]}
     >
       <View ref={props.anchor} collapsable={false} style={styles.pillAnchor}>
@@ -663,14 +690,22 @@ export function PlanPill(props: {
           accessibilityHint="显示计划的全部步骤"
           outerStyle={styles.pillOuter}
         >
-          <GlassCapsule interactive elevated height={34} style={styles.planPill}>
-            {working ? <PlanSpinner /> : <PlanRing items={items} />}
-            <Text style={[styles.pillText, { color: c.text }]} numberOfLines={1}>
-              {text ?? '都已完成'}
-            </Text>
-            <Text style={[styles.pillCount, { color: c.textTertiary }]}>
-              {index + 1}/{items.length}
-            </Text>
+          <GlassCapsule
+            interactive
+            elevated
+            height={34}
+            style={styles.planPill}
+            {...(liquid ? { dematerialized: hidden } : {})}
+          >
+            <Animated.View style={[styles.pillContent, liquid ? { opacity: shown } : null]}>
+              {working ? <PlanSpinner /> : <PlanRing items={items} />}
+              <Text style={[styles.pillText, { color: c.text }]} numberOfLines={1}>
+                {text ?? '都已完成'}
+              </Text>
+              <Text style={[styles.pillCount, { color: c.textTertiary }]}>
+                {index + 1}/{items.length}
+              </Text>
+            </Animated.View>
           </GlassCapsule>
         </PressScale>
       </View>
@@ -779,6 +814,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     overflow: 'hidden',
   },
+  planScroll: { flexGrow: 0, flexShrink: 1 },
   choices: { gap: 8 },
   choice: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   choiceText: { fontSize: 15 },
@@ -826,11 +862,13 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     paddingHorizontal: 48,
-    zIndex: 9,
+    // Over the header's scroll edge, which reaches under it.
+    zIndex: 11,
   },
   pillAnchor: { maxWidth: '100%' },
   pillOuter: { maxWidth: '100%' },
-  planPill: { gap: 8, paddingHorizontal: 12, maxWidth: '100%' },
+  planPill: { paddingHorizontal: 12, maxWidth: '100%' },
+  pillContent: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   pillText: { flexShrink: 1, fontSize: 14, fontWeight: '500' },
   pillCount: { fontSize: 13, fontVariant: ['tabular-nums'] },
   steps: { paddingHorizontal: 8, paddingVertical: 4, gap: 2 },
