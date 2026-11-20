@@ -1150,7 +1150,9 @@ export function turnText(state: Pick<ThreadState, 'order' | 'byId'>, startId: st
 }
 
 /** The id the agent gave a message, from its entry id (`m:<messageId>`); null when it gave none. */
-export function entryMessageId(id: string): string | null {
+export function entryMessageId(id: string | null | undefined): string | null {
+  // A transcript whose assistant records lack `message.id` gives entries no id to read.
+  if (typeof id !== 'string') return null
   return id.startsWith('m:') ? id.slice(2).replace(/#(agent|thought|user)$/, '') : null
 }
 

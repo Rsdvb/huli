@@ -395,7 +395,7 @@ export function forkEntry(
   agent: { forkSession: boolean; forkAtMessage: boolean } | undefined,
 ): string | null {
   const last = reply.agentIds.at(-1)
-  if (last === undefined || !agent?.forkSession) return null
+  if (last == null || !agent?.forkSession) return null
   if (reply.latest) return last
   return agent.forkAtMessage && entryMessageId(last) !== null ? last : null
 }
