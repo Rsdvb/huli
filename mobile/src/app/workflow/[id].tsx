@@ -156,11 +156,8 @@ export default function WorkflowPage() {
             tone="accent"
             size="lg"
             label="用它开始一个需求"
-            onPress={
-              connected
-                ? () => router.push({ pathname: '/start-task', params: { workflow: entry.id } })
-                : undefined
-            }
+            disabled={!connected}
+            onPress={() => router.push({ pathname: '/start-task', params: { workflow: entry.id } })}
             style={styles.start}
           />
         )}

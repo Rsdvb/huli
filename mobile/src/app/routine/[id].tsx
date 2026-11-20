@@ -285,8 +285,9 @@ export default function RoutinePage() {
               size="lg"
               label="停止运行"
               color={c.danger}
-              leading={<Icon name="pause" size={18} color={c.danger} />}
-              onPress={connected ? stop : undefined}
+              leading={<Icon name="stop" size={16} color={c.danger} />}
+              disabled={!connected}
+              onPress={stop}
             />
           ) : (
             <Pill
@@ -294,7 +295,8 @@ export default function RoutinePage() {
               size="lg"
               label={busy ? '正在开始…' : '立即运行'}
               leading={<Icon name="play" size={16} color={c.onAccent} />}
-              onPress={connected && !busy ? () => void runNow() : undefined}
+              disabled={!connected || busy}
+              onPress={() => void runNow()}
             />
           )}
         </View>
