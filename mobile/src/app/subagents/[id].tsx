@@ -3,12 +3,12 @@
 // The + starts a new sub-session of the same agent in the same folder. A long list, such as a
 // session's many sub-agents that its row's badge opens here, gets a search field.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, SectionList, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { SessionOutputs, SessionSummary } from '@shared/agent-host'
 import { call } from '../../git'
-import { useHost, useLink } from '../../host'
+import { useAgents, useLink, useSessions } from '../../host'
 import { errorText, sessionTitle } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { haptic, plainText } from '../../ui/session/feedback'
@@ -30,9 +30,11 @@ const SEARCH_FROM = 12
 export default function SubagentsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { c } = useSessionTokens()
-  const host = useHost()
+  // The sessions and agents alone, not every change of the link and the lists.
+  const sessions = useSessions()
+  const agents = useAgents()
   const link = useLink()
-  const parent = host.sessions.get(id)
+  const parent = sessions.get(id)
   const [outputs, setOutputs] = useState<Record<string, SessionOutputs>>({})
   const [now, setNow] = useState(Date.now())
   const [creating, setCreating] = useState(false)
@@ -40,10 +42,10 @@ export default function SubagentsScreen() {
 
   const children = useMemo(
     () =>
-      [...host.sessions.values()]
+      [...sessions.values()]
         .filter((s) => s.parentId === id)
         .sort((a, b) => b.createdAt - a.createdAt),
-    [host.sessions, id],
+    [sessions, id],
   )
   const searchable = children.length > SEARCH_FROM
   const words = searchable ? query.trim().toLowerCase() : ''
@@ -67,16 +69,24 @@ export default function SubagentsScreen() {
     .slice(0, READ_REPLIES)
     .map((s) => `${s.id}:${s.updatedAt}`)
     .join(',')
+  // Only a child that changed since its last read is read again, not every child each time one does.
+  const readAt = useRef(new Map<string, number>())
+  const mounted = useRef(true)
+  useEffect(
+    () => () => {
+      mounted.current = false
+    },
+    [],
+  )
   useEffect(() => {
-    let alive = true
     for (const child of children.slice(0, READ_REPLIES)) {
+      if (readAt.current.get(child.id) === child.updatedAt) continue
+      readAt.current.set(child.id, child.updatedAt)
       call(link, 'sessions.outputs', { sessionId: child.id }).then(
-        (out) => alive && setOutputs((was) => ({ ...was, [child.id]: out })),
-        () => {},
+        (out) => mounted.current && setOutputs((was) => ({ ...was, [child.id]: out })),
+        // Read again at its next change, or when the page opens again.
+        () => readAt.current.delete(child.id),
       )
-    }
-    return () => {
-      alive = false
     }
     // Keyed by the children's stamps, not by each render's new array.
   }, [link, stamps])
@@ -120,7 +130,7 @@ export default function SubagentsScreen() {
           </RoundButton>
         }
       />
-      {!parent && host.sessions.size === 0 ? (
+      {!parent && sessions.size === 0 ? (
         <StateView loading />
       ) : children.length === 0 ? (
         <StateView text="还没有子会话。点右上角的 + 从这里开一个。" icon={G.child} />
@@ -166,7 +176,7 @@ export default function SubagentsScreen() {
               child={item}
               outputs={outputs[item.id]}
               now={now}
-              agentName={host.agents.get(item.agentId)?.name}
+              agentName={agents.get(item.agentId)?.name}
             />
           )}
         />
