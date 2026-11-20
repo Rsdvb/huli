@@ -31,6 +31,7 @@ import type {
 import type { PairingState } from './remote/pairing'
 import type { DirectAddress } from './remote/protocol'
 import type { RemoteStatus } from './remote/status'
+import type { SessionExportRequest } from './session-export'
 import type { AgentColor, SettingsFile, SettingsPatch } from './settings'
 import type {
   BroughtSite,
@@ -516,6 +517,8 @@ export interface IpcInvokeContract {
   'backup:open-folder': { args: []; result: void }
   'backup:pick-restore': { args: []; result: RestorePick }
   'backup:restore': { args: [token: string]; result: void }
+  // Huli: a session as the page built it, saved where main's dialog says; false when cancelled.
+  'session:export': { args: [request: SessionExportRequest]; result: boolean }
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -1065,4 +1068,9 @@ export interface KettuApi {
     restore(token: string): Promise<void>
     onChanged(listener: (status: BackupStatus) => void): () => void
   }
+  /**
+   * Huli: saves a session's export where the save dialog says, its secrets masked; false when
+   * cancelled. Absent in the web client.
+   */
+  exportSession?(request: SessionExportRequest): Promise<boolean>
 }

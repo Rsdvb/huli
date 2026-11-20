@@ -39,6 +39,20 @@ export interface RedactorOptions {
   platform?: NodeJS.Platform
   /** Values to mask wherever they appear, such as tokens Kettu holds. */
   secrets?: () => Iterable<string>
+  /**
+   * Huli: which values after a secret-like name, as in `token: x`, are masked; every one but a
+   * plain value when absent. An export of code passes `looksSecret`, so `token: Token` stays.
+   */
+  namedValue?: (value: string) => boolean
+}
+
+/**
+ * Huli: a value that reads as a secret rather than code: no brackets, quotes or operators, and
+ * long, or with a digit in it.
+ */
+export function looksSecret(value: string): boolean {
+  if (/[()<>{}=+*/\\]/.test(value)) return false
+  return value.length >= 16 || (value.length >= 8 && /\d/.test(value))
 }
 
 export function createRedactor(options: RedactorOptions = {}): Redactor {
@@ -60,7 +74,9 @@ export function createRedactor(options: RedactorOptions = {}): Redactor {
       .replace(JWT, REDACTED)
       .replace(URL_PASSWORD, (_, prefix: string) => `${prefix}${REDACTED}@`)
       .replace(NAMED_SECRET, (match, name: string, value: string) =>
-        PLAIN_VALUE.test(value) ? match : `${name}${REDACTED}`,
+        PLAIN_VALUE.test(value) || (options.namedValue && !options.namedValue(value))
+          ? match
+          : `${name}${REDACTED}`,
       )
     for (const home of homes) out = out.replace(home, '~')
     return out

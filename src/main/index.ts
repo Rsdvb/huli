@@ -56,6 +56,7 @@ import {
   launchToInteractive,
   registerBackupIpc,
   registerIpcHandlers,
+  registerSessionExportIpc,
   registerSignInIpc,
   registerTrayIpc,
 } from './ipc'
@@ -1033,6 +1034,7 @@ async function start(): Promise<void> {
     reports,
   })
   registerBackupIpc(backup)
+  registerSessionExportIpc()
   ipcReady = true
   installMenu(menuDeps)
 

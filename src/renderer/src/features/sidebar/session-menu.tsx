@@ -8,6 +8,7 @@ import {
   ComputerTerminal01Icon,
   Copy01Icon,
   Delete02Icon,
+  FileExportIcon,
   FolderOpenIcon,
   GitBranchIcon,
   Layout2ColumnIcon,
@@ -113,6 +114,7 @@ import { markReturning } from './row-exit'
 import { sessionPullRequests } from './session-prs'
 import { sessionFolder } from '@renderer/lib/session-folder'
 import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
+import { askExport, canExport } from '@renderer/features/session/export/export'
 import {
   askRemoveWorktree,
   canRemoveWorktree,
@@ -485,6 +487,13 @@ export function SessionMenuItems({
             {t('row.copySessionId')}
           </DropdownMenuItem>
         )
+      case 'export':
+        return (
+          <DropdownMenuItem key={name} {...props} onClick={() => askExport(summary)}>
+            <MenuGlyph icon={FileExportIcon} />
+            {t('row.export')}
+          </DropdownMenuItem>
+        )
       case 'showInParent':
         return (
           <DropdownMenuItem
@@ -549,6 +558,7 @@ export function SessionMenuItems({
     rename: onRename !== undefined,
     worktree: hasLiveWorktree(summary),
     removeWorktree: canRemoveWorktree(summary),
+    exportable: canExport(),
   }
   return sessionMenuGroups(summary, context).map((group, index) => (
     <DropdownMenuGroup key={group[0]}>

@@ -190,6 +190,27 @@ and is not part of it.
   `backup-rows.tsx`, `stores/backup.ts`. Tests: `src/main/backup/backup.test.ts`,
   `src/main/settings.test.ts`.
 
+### Session export
+
+Export… in a session's menus (the row's and the top bar's More) saves the session as Markdown
+with its pictures in a `<name>.assets` folder beside it, the same in a zip, or a PDF; the dialog
+remembers the format and what to include: the agent's thinking, each tool call's full input and
+output, and the sub-agents' sessions. The desktop app's alone (`window.kettu.exportSession`).
+
+- The page reads the whole thread and its pictures from the session's host, so a session of
+  another computer exports too, and builds the Markdown with `src/shared/session-export.ts`
+  (pure): the title and facts, each speaker's messages, a tool call as one line with its diffs as
+  fenced `diff` blocks (paths relative to the session's folder), plans, questions with their
+  answers, and the folded parts as `<details>`. Pictures are linked as `kite-export-asset:` names.
+- Main (`src/main/session-export/`) checks the request (`request.ts`), asks where with its save
+  dialog, masks secrets as the logs do (`mask.ts`: the log's redactor, but a value after a
+  secret-like name masked only when it reads as a secret, so `token: Token` in code stays, and
+  `‹redacted›` for the mark, which a Markdown viewer would hide as a tag), points the pictures'
+  links at where they land, and writes. The PDF is `html.ts`'s page, every piece of text escaped
+  but the export's own folds, links to http(s) only and pictures only the export's own, printed
+  by Chromium in a hidden window with no script, in light colors whatever the theme.
+- Tests: `src/main/session-export/session-export.test.ts`.
+
 Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy

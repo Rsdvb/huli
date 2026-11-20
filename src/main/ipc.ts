@@ -75,6 +75,7 @@ import type { HostMedia } from './host-media'
 import type { HostSessions } from './host-sessions'
 import type { HostPairingListener, RemoteHost } from './remote-host'
 import { isRendererUrl, rendererPage } from './renderer'
+import { exportSession } from './session-export'
 import type { TrayPanel } from './tray-panel'
 import type { SettingsStore } from './settings'
 import type { Sharing } from './sharing'
@@ -1064,6 +1065,14 @@ export function registerBackupIpc(backup: BackupService): void {
   handle('backup:restore', 1, (_, token) => {
     actionLog.info('backup.restore')
     backup.restore(token)
+  })
+}
+
+/** Huli: Export… in a session's menu; the request is checked before the save dialog. */
+export function registerSessionExportIpc(): void {
+  handle('session:export', 1, ({ window }, request) => {
+    actionLog.info('session.export')
+    return exportSession(window, request)
   })
 }
 

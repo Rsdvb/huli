@@ -20,6 +20,7 @@ export type SessionMenuItem =
   | 'openTerminal'
   | 'copyResume'
   | 'copySessionId'
+  | 'export'
   | 'showInParent'
   | 'removeWorktree'
   | 'archive'
@@ -76,6 +77,8 @@ export interface SessionMenuContext {
   worktree?: boolean
   /** Its worktree can be removed now. */
   removeWorktree?: boolean
+  /** Huli: this window can export it, as the desktop app's can. */
+  exportable?: boolean
 }
 
 /**
@@ -95,6 +98,7 @@ export function sessionMenuGroups(
     rename = true,
     worktree = false,
     removeWorktree = false,
+    exportable = false,
   }: SessionMenuContext,
 ): SessionMenuItem[][] {
   const running = isRunning(summary)
@@ -124,7 +128,7 @@ export function sessionMenuGroups(
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
           ['openInEditor', 'showInFolder', 'openTerminal'],
-          ['copyResume', 'copySessionId'],
+          ['copyResume', 'copySessionId', 'export'],
           ending,
         ]
       : [
@@ -138,6 +142,7 @@ export function sessionMenuGroups(
               : []),
             'copyResume',
             'showInFolder',
+            'export',
           ],
           ending,
         ]
@@ -146,6 +151,7 @@ export function sessionMenuGroups(
     ...(terminal ? [] : (['openTerminal'] as const)),
     ...(resume ? [] : (['copyResume'] as const)),
     ...(rename ? [] : (['rename'] as const)),
+    ...(exportable ? [] : (['export'] as const)),
   ])
   return groups
     .map((group) => group.filter((item) => !missing.has(item)))

@@ -60,7 +60,13 @@
     "chooseSshKey": "Choose SSH Key File",
     "chooseBackupFolder": "Choose Backup Folder",
     "chooseBackup": "Choose a Backup to Restore",
-    "backupFiles": "Kettu Backups"
+    "backupFiles": "Kettu Backups",
+    "exportSession": "Export Session",
+    "exportFilter": {
+      "md": "Markdown",
+      "zip": "Zip archive",
+      "pdf": "PDF"
+    }
   },
   "backup": {
     "restoreFailed": "Could not restore from the backup",

@@ -186,6 +186,7 @@
     "copiedResume": "已复制恢复命令",
     "copySessionId": "复制会话 ID",
     "copiedSessionId": "已复制会话 ID",
+    "export": "导出…",
     "showInParent": "在父会话中显示",
     "agentOf": "{{harness}} · {{agent}}",
     "tokensUsed": "{{tokens}} tokens",

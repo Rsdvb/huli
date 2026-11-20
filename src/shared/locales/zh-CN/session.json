@@ -1331,5 +1331,77 @@
     "continueHint": "{{agent}} 已用 {{percent}}%，它会读到之前的对话，从刚才停下的地方接着做。",
     "continueHintLeft": "{{agent}} 剩余 {{percent}}%，它会读到之前的对话，从刚才停下的地方接着做。",
     "continuePrompt": "继续刚才的任务。"
+  },
+  "export": {
+    "title": "导出会话",
+    "format": "格式",
+    "formats": {
+      "md": {
+        "name": "Markdown",
+        "hint": "一个 .md 文件，图片放在旁边的文件夹里。"
+      },
+      "zip": {
+        "name": "Markdown 压缩包",
+        "hint": ".md 文件和图片打包成一个 .zip。"
+      },
+      "pdf": {
+        "name": "PDF",
+        "hint": "便于阅读和打印，使用浅色。"
+      }
+    },
+    "include": "包含",
+    "options": {
+      "thoughts": "Agent 的思考过程",
+      "tools": "每次工具调用的完整输入和输出",
+      "subagents": "子 Agent 的会话"
+    },
+    "masked": "API 密钥、令牌、密码等机密会像 Kettu 的日志那样被遮盖。",
+    "export": "导出…",
+    "building": "正在准备…",
+    "saved": "会话已导出",
+    "text": {
+      "agent": "Agent",
+      "model": "模型",
+      "project": "项目",
+      "started": "开始于",
+      "updated": "最近活动",
+      "exported": "导出于",
+      "you": "你",
+      "fromSession": "另一个会话的 Agent",
+      "otherSession": "来自另一个会话的消息",
+      "thinking": "思考过程",
+      "details": "输入和输出",
+      "input": "输入",
+      "output": "输出",
+      "status": {
+        "pending": "等待中",
+        "in_progress": "进行中",
+        "completed": "完成",
+        "failed": "失败",
+        "cancelled": "已取消"
+      },
+      "denied": "已拒绝",
+      "plan": "计划，第 {{version}} 版",
+      "planApproved": "已批准",
+      "planDeclined": "已退回",
+      "note": "备注",
+      "question": "问题",
+      "answer": "回答",
+      "noAnswer": "（未回答）",
+      "todo": "待办",
+      "subagent": "子 Agent：{{title}}",
+      "compacted": "之前的对话已压缩",
+      "attached": "附件：{{name}}",
+      "commit": "提交",
+      "pushed": "推送了 {{count}} 个提交到 {{upstream}}",
+      "branch": "切换到分支 {{branch}}",
+      "pullRequest": "创建了 Pull Request：",
+      "artifact": "Artifact「{{title}}」，第 {{version}} 版",
+      "memory": "记忆：{{title}}",
+      "takeover": "{{agent}} 接手了会话",
+      "linesMore": "还有 {{count}} 行",
+      "image": "图片",
+      "media": "媒体：{{name}}"
+    }
   }
 }

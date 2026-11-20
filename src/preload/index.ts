@@ -403,6 +403,7 @@ const api: KettuApi = {
     restore: (token) => invoke('backup:restore', token),
     onChanged: subscribe('backup:changed'),
   },
+  exportSession: (request) => invoke('session:export', request),
 }
 
 contextBridge.exposeInMainWorld('kettu', api)
