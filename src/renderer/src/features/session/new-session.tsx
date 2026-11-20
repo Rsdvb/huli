@@ -15,6 +15,7 @@ import { FolderMark } from '@renderer/components/affect/assistant-home'
 import { ChatComposer } from '@renderer/components/affect/chat-composer'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { HostChip } from '@renderer/features/session/composer/host-chip'
 import { useModeControl } from '@renderer/features/session/composer/mode-control'
 import { isSelect } from '@renderer/features/session/composer/options'
@@ -832,7 +833,10 @@ function NoAgentLine({
       >
         {text}
       </p>
-      {hostId === null && (
+      {hostId === null && waitingForNode.length > 0 && (
+        <NodeInstallAction look="inline" className="shrink-0" />
+      )}
+      {hostId === null && waitingForNode.length === 0 && (
         <Button
           variant="outline"
           size="xs"

@@ -294,7 +294,22 @@ async function tunnel(
   }
 }
 
-function request(url: URL, hop: DownloadHop | null, signal: AbortSignal): Promise<IncomingMessage> {
+const SUBSCRIPTION_HEADERS: Readonly<Record<string, string>> = {
+  'User-Agent': SUBSCRIPTION_USER_AGENT,
+  Accept: '*/*',
+  'Accept-Encoding': 'gzip, deflate, br',
+}
+
+/**
+ * One GET of `url`, directly or through the hop's tunnel, with no redirect followed. Kite's own
+ * Node.js downloads go this way too, with headers of their own.
+ */
+export function request(
+  url: URL,
+  hop: DownloadHop | null,
+  signal: AbortSignal,
+  headers: Readonly<Record<string, string>> = SUBSCRIPTION_HEADERS,
+): Promise<IncomingMessage> {
   const secure = url.protocol === 'https:'
   const host = url.hostname.replace(/^\[(.*)\]$/, '$1')
   const port = url.port ? Number(url.port) : secure ? 443 : 80
@@ -314,11 +329,7 @@ function request(url: URL, hop: DownloadHop | null, signal: AbortSignal): Promis
           ...(socket ? {} : { agent: false }),
           signal,
           ...(auth ? { auth } : {}),
-          headers: {
-            'User-Agent': SUBSCRIPTION_USER_AGENT,
-            Accept: '*/*',
-            'Accept-Encoding': 'gzip, deflate, br',
-          },
+          headers: { ...headers },
           ...(socket
             ? {
                 createConnection: () => {

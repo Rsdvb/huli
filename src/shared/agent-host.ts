@@ -665,6 +665,46 @@ export interface EnvironmentInfo {
   warning: string | null // why it fell back, or a note such as the Windows restart hint
   nodeVersion: string | null
   npmPath: string | null
+  /** Huli: which Node.js agents run on, and Kite's own; absent from a host without it. */
+  node?: NodeRuntimeInfo
+}
+
+/**
+ * Huli: which Node.js agents use when Kite has its own. `auto` takes the user's own while it is new
+ * enough for every agent, `kite` Kite's own whenever it is installed.
+ */
+export type NodeChoice = 'auto' | 'kite'
+
+export const NODE_CHOICES: readonly NodeChoice[] = ['auto', 'kite']
+
+/** Huli: an install, update or removal of Kite's own Node.js, running or failed. */
+export interface NodeTask {
+  kind: 'install' | 'remove'
+  state: 'running' | 'failed'
+  phase: 'checking' | 'downloading' | 'verifying' | 'extracting' | 'removing'
+  /** How much of the archive arrived, 0 to 1, while its size is known. */
+  progress: number | null
+  /** The version being installed, once chosen. */
+  version: string | null
+  /** Where the archive comes from: `nodejs.org` or `npmmirror`. */
+  source: string | null
+  error: string | null
+}
+
+/** Huli: the Node.js agents run on, the user's own on PATH and Kite's own install of it. */
+export interface NodeRuntimeInfo {
+  /** Whose agents run on: the user's on PATH, Kite's own, or none found. */
+  using: 'system' | 'kite' | null
+  /** The user's own node on PATH, whether used or not; `suitable` when it meets `required`. */
+  system: { path: string; version: string | null; suitable: boolean } | null
+  /** Kite's own install that agents would run on: the newest. */
+  kite: { version: string; path: string } | null
+  choice: NodeChoice
+  /** The floor every built-in agent's needs meet, such as `>=24.9.0`. */
+  required: string | null
+  /** Whether nodejs.org has a build for this computer, so Kite can install one. */
+  installable: boolean
+  task: NodeTask | null
 }
 
 export interface Project {
@@ -882,6 +922,18 @@ export interface HostContract {
   // Detects again, then names the harnesses whose user program is found, in the order to add them.
   'agents.detectedPrograms': { params: void; result: HarnessId[] }
   'agents.environment': { params: void; result: EnvironmentInfo }
+  // Huli: installs Kite's own Node.js, the newest LTS release, or updates it to that; resolves
+  // once done, with `installed` false when that version was there already. Its progress comes in
+  // `environment.changed` (`node.task`), and agents are detected again after.
+  'environment.installNode': {
+    params: void
+    result: { version: string; installed: boolean; source: string }
+  }
+  // Stops the install under way, which then rejects; clears a failed one.
+  'environment.cancelNodeInstall': { params: void; result: void }
+  // Removes Kite's own Node.js; refuses while an agent still runs on it.
+  'environment.removeNode': { params: void; result: void }
+  'environment.setNodeChoice': { params: { choice: NodeChoice }; result: void }
   // Its page, when it hands one over, comes to the asking port as `agents.signInLink`. A paired
   // device may not run an agent method that opens a browser on this computer instead.
   'agents.authenticate': { params: { agentId: AgentId; methodId: string }; result: void }
@@ -1945,6 +1997,10 @@ export const HOST_METHODS = [
   'agents.reloadEnvironment',
   'agents.detectedPrograms',
   'agents.environment',
+  'environment.installNode',
+  'environment.cancelNodeInstall',
+  'environment.removeNode',
+  'environment.setNodeChoice',
   'agents.authenticate',
   'agents.cancelSignIn',
   'agents.logout',

@@ -633,7 +633,7 @@
     "chooseAgentFirst": "先选择智能体",
     "noAgent": "没有可用的智能体，先添加或启用一个再开始。",
     "noAgentOnHost": "{{host}} 上暂时没有可以启动的智能体。",
-    "noAgentNode_other": "暂时没有可以启动的智能体：{{agents, list(style: narrow)}} 需要 Node.js 22 或更高版本。",
+    "noAgentNode_other": "暂时没有可以启动的 Agent：{{agents, list(style: narrow)}} 需要 Node.js。",
     "noAgentUpdate_other": "暂时没有可以启动的智能体：你的 {{agents, list(style: narrow)}} 版本比 Kettu 要的旧，更新后才能开始。",
     "setUpAgents": "设置智能体…",
     "agentMenu": {

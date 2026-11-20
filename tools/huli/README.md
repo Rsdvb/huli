@@ -528,6 +528,60 @@ shows it in `mobile/src/app/settings/network.tsx` (设置 › Agent 网络), `ne
 node picker with latencies), the 网络出口 group of `settings/agent.tsx`, and
 `mobile/src/manage/network.ts`.
 
+### Kite's own Node.js
+
+Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and
+only linked nodejs.org. Kite now installs Node.js itself, the same on Windows, macOS and Linux:
+no administrator rights, no package manager, nothing written to the system's PATH or shell
+profiles.
+
+- What: the newest release of `index.json` with `lts` set that has this computer's official
+  archive (`win-x64`/`win-arm64` `.zip`, `darwin-arm64`/`darwin-x64` and `linux-x64`/`linux-arm64`
+  `.tar.gz`; none on musl) and meets every built-in agent's `requiresNode`
+  (`strictestRequirement`), into `<userData>/runtimes/node/<version>/` with its `kite-node.json`.
+  The newest two installs stay.
+- Where from: `https://nodejs.org/dist/`, unless its `index.json` fails or takes more than 3 s;
+  then `https://npmmirror.com/mirrors/node/` races it and whichever answers first serves the
+  archive; a failed download tries the other. The archive's SHA-256 is checked against
+  `SHASUMS256.txt` from nodejs.org, or from the mirror when nodejs.org does not answer (a weaker
+  trust path: the mirror then vouches for its own file). A mismatch deletes it.
+- How: the requests go the way Kite's own do, as subscriptions download (Advanced › Proxy, else
+  the environment's proxy variables, else directly, which a TUN still catches), never through an
+  agent's node. The archive streams into `.partial-<random>/`, is extracted there by the system's
+  tar (Windows' own `System32\tar.exe`, which reads `.zip`; Git's GNU tar takes `C:` for a host),
+  with only paths Kite made as arguments and no shell, its `node --version` must say the version,
+  and the folder is renamed into place last. A stall of 30 s fails the download.
+- Which runs: `EnvironmentService` (`shell-env.ts`) probes the user's node on PATH, then
+  `chooseNode` picks it while it meets the agents' needs, else Kite's; `kite` in
+  `state/node-runtime.json` (`环境` › 始终用纸鸢的 Node.js) takes Kite's whenever installed.
+  When Kite's runs, `agentEnv()` puts its folder first on PATH (`withNodeBin`), so agents' launches,
+  npm installs, git and commands, and `ctx.node` in detection all use it. After an install, an
+  update, a removal or a change of choice the host probes again, detects every agent again (a
+  `node-missing` agent becomes installable without a restart) and stops idle agents' processes so
+  their next start takes the new PATH.
+- Requests: `environment.installNode` (resolves when done; `installed: false` when that version is
+  there), `environment.cancelNodeInstall`, `environment.removeNode` (refused, with the rest kept
+  whole, while an agent still runs on it: Windows cannot move a folder whose node runs) and
+  `environment.setNodeChoice`, checked in `node-runtime/validate.ts`; paired devices may call them.
+  Progress comes in `environment.changed` as `node.task` (at most every 250 ms, and at each phase).
+- Where it shows: an agent's page, the harness row and page (Settings › Harness), New session's
+  line while no agent can start, and the environment lines under Settings › Harness, which say
+  which Node.js agents use and offer 更新, 移除 and the choice: 「一键安装 Node.js」 with its
+  progress and error, and a small 「手动安装」 link to nodejs.org. The phone's 设置 › Agent › 环境
+  offers the same.
+
+Huli's own files: `src/agent-host/node-runtime/` (`release.ts`, `install.ts`, `transport.ts`,
+`service.ts`, `validate.ts`, with `release.test.ts`, `install.test.ts`, `environment.test.ts` and
+`fixtures/index.json`), `src/renderer/src/features/agents/node-install.tsx` and `node-runtime.ts`.
+Hooks into upstream files: `src/agent-host/shell-env.ts` (`ManagedNode`, `chooseNode`,
+`withNodeBin`, `setNodeSetup`, `info().node`), `src/agent-host/host.ts` (the service, its load
+before the first detection, `nodeSetupChanged`, the handlers, `ownProxy`),
+`src/agent-host/node-proxy/download.ts` (`request` exported with headers),
+`src/agent-host/validate.ts`, `src/shared/agent-host.ts` (`NodeRuntimeInfo`, the methods),
+`src/shared/host-request-limits.ts`, `features/agents/readiness.ts`, `agents-section.tsx`,
+`harness-section.tsx`, `new-session.tsx`, `mobile/src/app/settings/agents.tsx` and the
+`node`/`nodeRuntime` keys of `locales/*/{agents,settings,host}.json`.
+
 ## Tests
 
 `pnpm test` passes on Linux, as CI runs it, and on Windows. Tests of what Huli changes read the

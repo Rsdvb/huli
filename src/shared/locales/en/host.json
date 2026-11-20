@@ -331,7 +331,7 @@
     "geminiAudience": "Gemini CLI is for Gemini Code Assist Standard and Enterprise, Code Assist for GitHub, and paid Gemini API or Vertex AI keys. Since June 18, 2026, Google serves personal Google accounts, free or Google AI Pro and Ultra, in Google Antigravity.",
     "hermesInstallNotice": "The official installer adds ~/.local/bin to PATH in your shell configuration files. ACP is included; browser and computer-use components are skipped.",
     "hint": {
-      "node": "Install Node.js from nodejs.org, then reload the environment in Settings.",
+      "node": "Install Node.js in Settings › Harnesses with one click, or from nodejs.org, then reload the environment.",
       "uv": "Install uv from docs.astral.sh/uv, then reload the environment in Settings.",
       "opencode": "Install OpenCode, or choose its binary in Settings › Harnesses.",
       "pi": "Install pi with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` or the installer at pi.dev.",
@@ -1188,5 +1188,19 @@
   "report": {
     "draftNoAgent": "No agent is available to draft the description",
     "draftFailed": "{{agent}} could not draft the description: {{reason}}"
+  },
+  "nodeRuntime": {
+    "busy": "Kite’s Node.js is being installed or removed. Wait for it to finish.",
+    "unsupported": "nodejs.org has no Node.js build for this computer. Install Node.js yourself.",
+    "stopped": "The Node.js install was stopped.",
+    "unreachable": "Neither nodejs.org nor its China mirror could be reached ({{reason}}). Check the network or the proxy in Settings › Advanced.",
+    "noRelease": "nodejs.org lists no LTS release of Node.js {{required}} for this computer.",
+    "noChecksum": "SHASUMS256.txt does not list {{file}}, so it cannot be checked.",
+    "stalled": "the download stalled",
+    "downloadFailed": "Node.js could not be downloaded: {{reason}}",
+    "hashMismatch": "{{file}} does not match its SHA-256 in SHASUMS256.txt, so it was deleted and not installed.",
+    "extractFailed": "The Node.js archive could not be extracted: {{reason}}",
+    "doesNotRun": "Node.js {{version}} was extracted, but it does not run on this computer.",
+    "inUse": "An agent still runs on Kite’s Node.js. Stop its sessions, then try again."
   }
 }

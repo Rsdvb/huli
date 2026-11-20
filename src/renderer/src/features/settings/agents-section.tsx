@@ -51,6 +51,7 @@ import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@renderer/components/ui/radio-group'
 import { toast } from '@renderer/components/ui/toast'
 import { AgentStateLine } from '@renderer/features/agents/agent-state'
+import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { readiness, type AgentReadiness } from '@renderer/features/agents/readiness'
 import { focusedPane } from '@renderer/features/split/layout'
 import { errorMessage } from '@renderer/lib/host'
@@ -969,7 +970,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             data-selectable=""
           >
             {r.message}{' '}
-            {r.kind === 'missing' && (
+            {r.kind === 'missing' && !r.node && (
               <button
                 type="button"
                 onClick={() => openHarnessSettings(status.harnessId)}
@@ -980,6 +981,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             )}
           </p>
         )}
+        {r.kind === 'missing' && r.node && <NodeInstallAction className="mb-3" />}
         {status.movedAccounts?.refused && <MovedAccountsNotice status={status} />}
         {signsInWithKeyOnly(status.id) && (
           <p className="ui-sg-hint" data-wrap="">

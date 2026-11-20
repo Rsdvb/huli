@@ -1,10 +1,10 @@
 // Settings › Agent: the agents on the computer with their state and account, the harnesses they run
 // on, installed or not, with updates and installs under way, and adding an agent.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import type { AgentStatus, HostEvent } from '@shared/agent-host'
+import type { AgentStatus, HostEvent, NodeRuntimeInfo, NodeTask } from '@shared/agent-host'
 import { KEY_ONLY_ADDED_HARNESSES, MULTI_AGENT_HARNESSES, type CodebuddySite } from '@shared/agents'
 import { AGENT_NAME_CHARS, type SettingsPatch } from '@shared/settings'
 import type { AgentId, HarnessId } from '@shared/thread'
@@ -224,7 +224,15 @@ export default function Agents() {
               trailing={busy('environment') ? <Tag label="正在读取…" tone="tint" /> : undefined}
               onPress={reloadEnvironment}
             />
-            {environment.value?.nodeVersion ? (
+            {environment.value?.node ? (
+              nodeRows({
+                node: environment.value.node,
+                connected,
+                busy,
+                run,
+                call: (method) => (link ? call(link, method, undefined) : Promise.resolve()),
+              })
+            ) : environment.value?.nodeVersion ? (
               <ListRow key="node" title="Node.js" value={environment.value.nodeVersion} />
             ) : null}
             {environment.value?.warning ? (
@@ -235,6 +243,124 @@ export default function Agents() {
       )}
     </ManagePage>
   )
+}
+
+const NODE_PHASES: Record<NodeTask['phase'], string> = {
+  checking: '正在查找最新版…',
+  downloading: '正在下载',
+  verifying: '正在校验…',
+  extracting: '正在解压…',
+  removing: '正在移除…',
+}
+
+/** Huli: what the Node.js agents run on says, the user's or Kite's own, with its version. */
+function nodeLine(node: NodeRuntimeInfo): string {
+  const required = node.required?.replace(/^>=\s*/, '') ?? ''
+  if (node.using === 'kite' && node.kite) return `纸鸢的 Node.js ${node.kite.version}`
+  if (!node.system) return '没有找到 Node.js，有些 Agent 需要它'
+  if (!node.system.version) return '系统的 Node.js 运行不了'
+  if (!node.system.suitable)
+    return `系统的 ${node.system.version} 太旧，有些 Agent 要 ${required} 或更高`
+  return `系统的 Node.js ${node.system.version}`
+}
+
+/**
+ * Huli: the Node.js agents run on, and Kite's own: installed with one tap where the computer's is
+ * missing or too old, its progress, updated or removed. The computer does the work. Rows, not a
+ * component, so the group draws its lines between them.
+ */
+function nodeRows(props: {
+  node: NodeRuntimeInfo
+  connected: boolean
+  busy: (key: string) => boolean
+  run: (key: string, action: () => Promise<unknown>, failTitle: string) => Promise<boolean>
+  call: (
+    method: 'environment.installNode' | 'environment.cancelNodeInstall' | 'environment.removeNode',
+  ) => Promise<unknown>
+}) {
+  const { node, connected, busy, run, call: ask } = props
+  const task = node.task
+  const running = task?.state === 'running'
+  const lacking = node.using === null || (node.using === 'system' && !node.system?.suitable)
+  const percent =
+    task?.phase === 'downloading' && task.progress !== null
+      ? ` ${Math.floor(task.progress * 100)}%`
+      : ''
+  const install = (title: string) => void run('node', () => ask('environment.installNode'), title)
+  const rows: ReactElement[] = [
+    <ListRow
+      key="node"
+      title="Node.js"
+      subtitle={nodeLine(node)}
+      value={node.using === 'kite' ? node.kite?.version : (node.system?.version ?? undefined)}
+    />,
+  ]
+  if (running && task) {
+    rows.push(
+      <ListRow
+        key="node-task"
+        title={
+          task.phase === 'downloading'
+            ? `${NODE_PHASES.downloading} ${task.version ?? 'Node.js'}${percent}`
+            : NODE_PHASES[task.phase]
+        }
+        subtitle={task.source ? `来自 ${task.source}` : undefined}
+        trailing={<Tag label={task.kind === 'remove' ? '正在移除' : '正在安装'} tone="tint" />}
+      />,
+    )
+    if (task.kind === 'install') {
+      rows.push(
+        <ListRow
+          key="node-stop"
+          title="停止安装"
+          icon="stop"
+          plainIcon
+          action
+          disabled={!connected}
+          onPress={() => void ask('environment.cancelNodeInstall').catch(() => {})}
+        />,
+      )
+    }
+  } else {
+    if (task?.state === 'failed' && task.error) {
+      rows.push(
+        <ListRow
+          key="node-failed"
+          title={task.kind === 'remove' ? 'Node.js 移除失败' : 'Node.js 安装失败'}
+          subtitle={task.error}
+          trailing={<Tag label="失败" tone="danger" />}
+        />,
+      )
+    }
+    if (node.installable && (lacking || node.kite)) {
+      rows.push(
+        <ListRow
+          key="node-install"
+          title={node.kite ? '更新纸鸢的 Node.js' : '一键安装 Node.js'}
+          subtitle={node.kite ? undefined : '装在纸鸢自己的文件夹里，不改系统设置'}
+          icon="download"
+          plainIcon
+          action
+          disabled={!connected || busy('node')}
+          onPress={() => install(node.kite ? '没能更新 Node.js' : '没能安装 Node.js')}
+        />,
+      )
+    }
+    if (node.kite) {
+      rows.push(
+        <ListRow
+          key="node-remove"
+          title="移除纸鸢的 Node.js"
+          icon="trash"
+          plainIcon
+          destructive
+          disabled={!connected || busy('node')}
+          onPress={() => void run('node', () => ask('environment.removeNode'), '没能移除 Node.js')}
+        />,
+      )
+    }
+  }
+  return rows
 }
 
 function AgentRow({ status, statuses }: { status: AgentStatus; statuses: AgentStatus[] }) {

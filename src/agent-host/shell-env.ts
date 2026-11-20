@@ -4,7 +4,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
-import type { EnvironmentInfo } from '@shared/agent-host'
+import type { EnvironmentInfo, NodeChoice, NodeRuntimeInfo, NodeTask } from '@shared/agent-host'
 import { NODE_NO_PROXY } from '@shared/agent-network'
 import type { NodeRuntime } from '@shared/host-control'
 import { withLongPaths } from '@shared/git'
@@ -280,6 +280,65 @@ export async function probeNode(env: Env, platform: Platform): Promise<NodeProbe
   return { nodeVersion, npmPath, nodePath }
 }
 
+/** Huli: Kite's own Node.js install, as agents use it. */
+export interface ManagedNode {
+  version: string
+  /** The folder that holds `node` and `npm`: the install's own on Windows, its `bin` elsewhere. */
+  binDir: string
+}
+
+/**
+ * Huli: whose Node.js agents run on. The user's own wins while it meets what the agents need,
+ * unless Kite's is chosen; Kite's runs when the user's is missing or too old.
+ */
+export function chooseNode(
+  system: NodeProbe,
+  managed: boolean,
+  choice: NodeChoice,
+  required: string | null,
+): 'system' | 'kite' | null {
+  if (managed && choice === 'kite') return 'kite'
+  if (system.nodePath && system.nodeVersion && systemSuitable(system, required)) return 'system'
+  if (managed) return 'kite'
+  return system.nodePath ? 'system' : null
+}
+
+function isInside(dir: string, file: string, platform: Platform): boolean {
+  const p = platform === 'win32' ? path.win32 : path.posix
+  const relative = p.relative(dir, file)
+  return relative !== '' && !relative.startsWith('..') && !p.isAbsolute(relative)
+}
+
+function systemSuitable(system: NodeProbe, required: string | null): boolean {
+  if (!system.nodePath || !system.nodeVersion) return false
+  return required === null || satisfiesNode(system.nodeVersion, required)
+}
+
+/**
+ * Huli: the environment with Kite's Node.js folder first on PATH, under the name PATH already has
+ * there (Windows' `Path`), and no second copy of the folder further on.
+ */
+export function withNodeBin(env: Env, binDir: string, platform: Platform): Env {
+  const separator = platform === 'win32' ? ';' : ':'
+  const p = platform === 'win32' ? path.win32 : path.posix
+  const same = (entry: string): boolean => {
+    const a = p.resolve(entry.replace(/^"(.*)"$/, '$1'))
+    const b = p.resolve(binDir)
+    return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+  }
+  const key =
+    (platform === 'win32'
+      ? Object.keys(env).find((name) => name.toUpperCase() === 'PATH' && env[name] !== undefined)
+      : 'PATH') ?? 'PATH'
+  const rest = (getEnv(env, 'PATH', platform) ?? '')
+    .split(separator)
+    .filter((entry) => entry !== '' && !same(entry))
+  const out = { ...env }
+  deleteEnv(out, 'PATH', platform)
+  out[key] = [binDir, ...rest].join(separator)
+  return out
+}
+
 /** Whether a `v24.1.0`-style version satisfies a `>=22`-style requirement. */
 export function satisfiesNode(version: string, requirement: string): boolean {
   const have = /^v?(\d+)(?:\.(\d+))?/.exec(version.trim())
@@ -298,6 +357,20 @@ export interface EnvironmentServiceDeps {
   probe?: (env: Env, platform: Platform) => Promise<NodeProbe>
 }
 
+/** Huli: what decides whose Node.js agents run on, beside the user's own on PATH. */
+export interface NodeSetup {
+  managed: ManagedNode | null
+  choice: NodeChoice
+  /** What every built-in agent needs, such as `>=24.9.0`. */
+  required: string | null
+}
+
+/** Huli: what Kite's own install says of itself, for `info().node`. */
+export interface NodeInstallStatus {
+  installable: boolean
+  task: NodeTask | null
+}
+
 /**
  * Resolves the environment once, in the background, and caches it for the life of the
  * host. Agents wait for it; `reload` resolves it again. A read that fell back is tried again in
@@ -306,6 +379,11 @@ export interface EnvironmentServiceDeps {
 export class EnvironmentService {
   private resolved: ShellEnvironment | null = null
   private node: NodeProbe = { nodeVersion: null, npmPath: null, nodePath: null }
+  /** Huli: the user's own node on PATH, which `node` is unless Kite's runs instead. */
+  private systemNode: NodeProbe = { nodeVersion: null, npmPath: null, nodePath: null }
+  private nodeSetup: NodeSetup = { managed: null, choice: 'auto', required: null }
+  private usingNode: 'system' | 'kite' | null = null
+  private installStatus: () => NodeInstallStatus = () => ({ installable: false, task: null })
   private current: Promise<void> | null = null
   private proxy: ProxySettings = { mode: 'environment' }
   private configFolders: Partial<Record<AgentId, ConfigFolder>> = {}
@@ -338,11 +416,60 @@ export class EnvironmentService {
       nodeRuntime: this.deps.nodeRuntime,
       baseEnv: this.deps.baseEnv,
     })
-    this.node = await (this.deps.probe ?? probeNode)(this.resolved.env, this.deps.platform)
+    await this.probeNodes()
     this.resolvedAt = Date.now()
+    this.notify()
+    this.retryLater()
+  }
+
+  /**
+   * Huli: finds the user's node on PATH, then picks whose agents run on; Kite's is probed with
+   * its folder first on PATH, as agents get it. One that is gone leaves the user's in its place.
+   */
+  private async probeNodes(): Promise<void> {
+    if (!this.resolved) return
+    const { platform } = this.deps
+    const probe = this.deps.probe ?? probeNode
+    const env = this.resolved.env
+    this.systemNode = await probe(env, platform)
+    const { managed, choice, required } = this.nodeSetup
+    const using = chooseNode(this.systemNode, managed !== null, choice, required)
+    if (using !== 'kite' || !managed) {
+      this.node = this.systemNode
+      this.usingNode = using
+      return
+    }
+    const node = await probe(withNodeBin(env, managed.binDir, platform), platform)
+    const inside = node.nodePath !== null && isInside(managed.binDir, node.nodePath, platform)
+    this.node = inside ? node : this.systemNode
+    this.usingNode = inside ? 'kite' : this.systemNode.nodePath ? 'system' : null
+  }
+
+  /**
+   * Huli: Kite's own Node.js or the choice changed. Probes again with the environment already
+   * read, once any read under way is done, and tells the listeners.
+   */
+  async setNodeSetup(setup: Partial<NodeSetup>): Promise<void> {
+    this.nodeSetup = { ...this.nodeSetup, ...setup }
+    if (!this.current) return
+    const next = this.current.then(
+      () => this.probeNodes(),
+      () => this.probeNodes(),
+    )
+    this.current = next
+    await next
+    this.notify()
+  }
+
+  /** Huli: where `info().node` takes the install's own state from. */
+  setInstallStatus(status: () => NodeInstallStatus): void {
+    this.installStatus = status
+  }
+
+  /** Tells the listeners what `info()` says now, as after Kite's install made progress. */
+  notify(): void {
     const info = this.info()
     for (const listener of this.listeners) listener(info)
-    this.retryLater()
   }
 
   private retryLater(): void {
@@ -383,7 +510,10 @@ export class EnvironmentService {
    */
   agentEnv(agentId?: AgentId): Env {
     const { platform } = this.deps
-    const base = this.resolved?.env ?? withoutElectronVars(this.deps.baseEnv, platform)
+    const resolved = this.resolved?.env ?? withoutElectronVars(this.deps.baseEnv, platform)
+    // Huli: Kite's own Node.js runs as `node` and `npm` for agents, their installs and commands.
+    const managed = this.usingNode === 'kite' ? this.nodeSetup.managed : null
+    const base = managed ? withNodeBin(resolved, managed.binDir, platform) : resolved
     const port = agentId ? this.nodePort(agentId) : null
     const proxied =
       port === null ? applyProxy(base, this.proxy, platform) : applyNodeProxy(base, port, platform)
@@ -406,6 +536,28 @@ export class EnvironmentService {
       warning: resolved?.warning ? translate(resolved.warning) : null,
       nodeVersion: this.node.nodeVersion,
       npmPath: this.node.npmPath,
+      node: this.nodeInfo(),
+    }
+  }
+
+  private nodeInfo(): NodeRuntimeInfo {
+    const { managed, choice, required } = this.nodeSetup
+    const system = this.systemNode
+    const status = this.installStatus()
+    return {
+      using: this.usingNode,
+      system: system.nodePath
+        ? {
+            path: system.nodePath,
+            version: system.nodeVersion,
+            suitable: systemSuitable(system, required),
+          }
+        : null,
+      kite: managed ? { version: managed.version, path: managed.binDir } : null,
+      choice,
+      required,
+      installable: status.installable,
+      task: status.task,
     }
   }
 
