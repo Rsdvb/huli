@@ -1006,6 +1006,21 @@ describe('attachments', () => {
     )
   })
 
+  it('clears pictures only of a scope and a span it knows', () => {
+    const clear = posix['storage.clearImages']
+    expect(clear({ scope: 'older', days: 30, dryRun: true, more: 1 })).toEqual({
+      scope: 'older',
+      days: 30,
+      dryRun: true,
+    })
+    expect(clear({ scope: 'archived', days: 7, dryRun: false })).toMatchObject({ dryRun: false })
+    rejects(() => clear({ scope: 'all', days: 30, dryRun: true }))
+    rejects(() => clear({ scope: 'older', days: 0, dryRun: true }))
+    rejects(() => clear({ scope: 'older', days: 30.5, dryRun: true }))
+    rejects(() => clear({ scope: 'older', days: 30 }))
+    rejects(() => clear({ scope: 'older', days: 30, dryRun: 'yes' }))
+  })
+
   it('reads a sent blob only by its SHA-256', () => {
     const hash = 'ab'.repeat(32)
     expect(posix['sessions.blob']({ sessionId: 's', hash })).toEqual({ sessionId: 's', hash })

@@ -7423,6 +7423,22 @@ export class SessionManager {
     if (patches.length > 0) this.emit(live, patches)
   }
 
+  /**
+   * The sessions whose pictures a clear in Settings takes: the archived ones with `archived`, else
+   * those last active before `before`. A session whose turn is running is left alone.
+   */
+  imageClearTargets(archived: boolean, before: number | null): string[] {
+    const out: string[] = []
+    for (const id of new Set([...this.records.keys(), ...this.live.keys()])) {
+      const live = this.live.get(id)
+      const record = live?.record ?? this.records.get(id)
+      if (!record || live?.turn) continue
+      const updatedAt = live?.thread.session.updatedAt ?? record.updatedAt
+      if (archived ? this.isArchived(record) : before !== null && updatedAt < before) out.push(id)
+    }
+    return out
+  }
+
   async blob(sessionId: string, hash: string): Promise<AttachmentBytes> {
     this.recordOf(sessionId)
     const stored = await this.storedBlob(sessionId, hash)

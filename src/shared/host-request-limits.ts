@@ -239,6 +239,8 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'usage.sync': NONE,
   'usage.reimport': NONE,
   'usage.clearRecord': AGENT_MS,
+  'storage.usage': HOST_MS,
+  'storage.clearImages': AGENT_MS,
   'artifacts.list': HOST_MS,
   'artifacts.read': HOST_MS,
   'artifacts.file': HOST_MS,
