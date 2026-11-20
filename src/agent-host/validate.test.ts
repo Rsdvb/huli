@@ -1465,6 +1465,24 @@ describe('agentHistory.list', () => {
     rejects(() => posix['agentHistory.list']({ agentId: 'codex', cursor: 'x'.repeat(100_000) }))
   })
 
+  it('takes the Claude desktop app’s index as its source, without a folder', () => {
+    expect(
+      posix['agentHistory.list']({ agentId: 'claude-code', source: 'claude-desktop' }),
+    ).toEqual({ agentId: 'claude-code', source: 'claude-desktop' })
+    rejects(() => posix['agentHistory.list']({ agentId: 'claude-code', source: 'codex-app' }))
+    rejects(() => posix['agentHistory.list']({ agentId: 'claude-code', source: 1 }))
+    rejects(() =>
+      posix['agentHistory.list']({
+        agentId: 'claude-code',
+        source: 'claude-desktop',
+        folder: '/mnt/old/.claude',
+      }),
+    )
+    expect(
+      forbiddenToDevices('agentHistory.list', { agentId: 'claude-code', source: 'claude-desktop' }),
+    ).toBe(true)
+  })
+
   it('is a window’s alone: a paired device cannot list every folder', () => {
     expect(forbiddenToDevices('agentHistory.list', { agentId: 'codex' })).toBe(true)
     expect(forbiddenToDevices('agentHistory.planCopy', { agentId: 'codex' })).toBe(true)

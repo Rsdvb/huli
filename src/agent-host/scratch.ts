@@ -15,6 +15,8 @@ const pad = (n: number) => String(n).padStart(2, '0')
  */
 export class ScratchFolders {
   private canonicalRoot: string | null = null
+  /** Huli: other apps' scratch folders sessions here work in, by `pathKey`. */
+  private readonly adopted = new Set<string>()
 
   constructor(
     private readonly root: string,
@@ -43,12 +45,32 @@ export class ScratchFolders {
 
   /** Removes a folder made for a session that went unused; one that is not empty stays. */
   async removeIfEmpty(folder: string): Promise<void> {
-    if (!this.contains(folder)) return
+    if (!this.own(folder)) return
     await rmdir(folder).catch(() => {})
+  }
+
+  /**
+   * Huli: counts another app's scratch folder that a session here works in, as the Claude desktop
+   * app's, as one of these: No project, and never removed. `canonical` as `contains` takes it.
+   */
+  adopt(canonical: string): void {
+    this.adopted.add(pathKey(canonical, this.platform))
   }
 
   /** Whether a canonical path is a scratch folder or inside one; false before `ready`. */
   contains(canonical: string): boolean {
+    if (this.own(canonical)) return true
+    if (this.adopted.size === 0) return false
+    const key = pathKey(canonical, this.platform)
+    const sep = this.platform === 'win32' ? '\\' : '/'
+    for (const folder of this.adopted) {
+      if (key === folder || key.startsWith(folder + sep)) return true
+    }
+    return false
+  }
+
+  /** Whether a canonical path is in the root this hands folders out from. */
+  private own(canonical: string): boolean {
     if (this.canonicalRoot === null) return false
     const root = pathKey(this.canonicalRoot, this.platform)
     const sep = this.platform === 'win32' ? '\\' : '/'
