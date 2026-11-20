@@ -36,7 +36,7 @@ export const HOST_CLIENTS: readonly string[] = [DESKTOP_CLIENT, DAEMON_CLIENT]
 /** Lists the account's devices and computers; revokes devices. Bearer access tokens only. */
 export const ACCOUNT_DEVICES_PATH = '/api/v1/account/devices'
 export const ACCOUNT_REVOKE_PATH = '/api/v1/account/devices/revoke'
-/** The web page where the account's password and two-step verification are changed. */
+/** The account's web page: its signed-in devices and computers, and how its password is reset. */
 export const ACCOUNT_PAGE_PATH = '/account/devices/'
 
 export type DeviceKind = 'desktop' | 'daemon' | 'web' | 'mobile' | 'other'

@@ -216,7 +216,7 @@ export default function AccountSettings() {
         </ListGroup>
       ) : null}
 
-      <ListGroup footer="密码和两步验证要在 Kite Cloud 的服务器上修改；网页上能看到同样的设备列表。">
+      <ListGroup footer="密码在 Kite Cloud 的服务器上管理，忘了密码请机主重设账号；网页上能看到同样的设备列表。">
         {others.length > 0 ? (
           <ListRow
             title="让其他设备都退出登录"
