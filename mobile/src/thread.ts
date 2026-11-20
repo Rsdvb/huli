@@ -6,6 +6,7 @@
 // session, the turn's phase, what waits) and only the conversation list follows every patch.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AppState } from 'react-native'
 import type { HostEvent } from '@shared/agent-host'
 import type { HostLink, LinkState } from '@shared/remote/link'
 import {
@@ -266,8 +267,11 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     }
   }, [link, sessionId, open, applyQueued])
 
+  // In the background the session is let go, so a turn streaming meanwhile costs the phone no
+  // work and the computer counts it as not shown; back in front, it is read afresh.
+  const inFront = useInFront()
   useEffect(() => {
-    if (!connected) return
+    if (!connected || !inFront) return
     failures.current = 0
     // A counter, not a node: the cleanup moves on whatever value it holds by then.
     const generations = generation
@@ -279,7 +283,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       void link.request('sessions.unwatch', { sessionId }).catch(() => {})
       void link.request('sessions.show', { sessionIds: [] }).catch(() => {})
     }
-  }, [connected, open, link, sessionId])
+  }, [connected, inFront, open, link, sessionId])
 
   const loadOlder = useCallback(() => {
     if (older === null || loadingOlder || !store.get()) return
@@ -315,11 +319,24 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   }
 }
 
-/** Part of a session's thread: redraws only when it changes by `equal`. */
+/** Whether the app is in front or about to be: not while it is in the background. */
+function useInFront(): boolean {
+  const [inFront, setInFront] = useState(AppState.currentState !== 'background')
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) =>
+      setInFront(next !== 'background'),
+    )
+    return () => subscription.remove()
+  }, [])
+  return inFront
+}
+
+/** Part of a session's thread: redraws only when it changes by `equal`, and not while `paused`. */
 export function useThreadSelector<S>(
   view: Pick<ThreadView, 'store'>,
   select: (thread: ThreadState | null) => S,
   equal?: (a: S, b: S) => boolean,
+  paused?: boolean,
 ): S {
-  return useSelector(view.store, select, equal)
+  return useSelector(view.store, select, equal, paused)
 }

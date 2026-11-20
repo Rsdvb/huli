@@ -39,6 +39,7 @@ import { KeyboardAwareLegendList } from '@legendapp/list/keyboard'
 import type { LegendListRef } from '@legendapp/list/react-native'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Reanimated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated'
+import { useIsFocused } from 'expo-router'
 import type { ThreadState } from '@shared/thread'
 import type { WritableStore } from '../select'
 import { useThreadSelector, type ThreadView } from '../thread'
@@ -47,7 +48,7 @@ import { haptic } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 import { rowBuilder, type Row } from '../ui/session/turns'
 import { observeTools } from '../ui/session/work'
-import { ToBottomButton } from '../ui/session/Working'
+import { MarksShown, ToBottomButton } from '../ui/session/Working'
 import { SubSessionStart } from './entries/NoteEntries'
 import { ThreadRow } from './EntryView'
 
@@ -119,7 +120,9 @@ export function Conversation(props: {
   countRender('Conversation')
   const { c } = useSessionTokens()
   const { view, sessionId: id, running } = props
-  const thread = useThreadSelector(view, selectThread)
+  // Covered by another screen, the conversation holds what it showed rather than following every
+  // patch out of sight, and catches up once in front again.
+  const thread = useThreadSelector(view, selectThread, undefined, !useIsFocused())
   const list = useRef<LegendListRef>(null)
   const [away, setAway] = useState(false)
   const [fresh, setFresh] = useState(false)
@@ -274,14 +277,11 @@ export function Conversation(props: {
           )
         }
         ListFooterComponent={
-          props.pending ? (
-            <>
-              {props.working}
-              {props.pending}
-            </>
-          ) : (
-            props.working
-          )
+          // Scrolled away, the working line is out of sight, and its marks hold still.
+          <MarksShown value={!away}>
+            {props.working}
+            {props.pending}
+          </MarksShown>
         }
         contentContainerStyle={contentStyle}
         keyboardDismissMode="interactive"
