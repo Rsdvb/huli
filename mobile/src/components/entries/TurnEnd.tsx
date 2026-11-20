@@ -3,8 +3,8 @@
 // refused for want of credit, with its details, and the strip above the composer that offers Retry
 // and another model.
 
-import { useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { useState, type ReactNode } from 'react'
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import {
   outOfCreditTurn,
   retryableTurn,
@@ -13,7 +13,9 @@ import {
   type ThreadEntry,
   type ThreadState,
 } from '@shared/thread'
+import { GITHUB_URL } from '../../about'
 import { call } from '../../git'
+import { Clamp } from '../../ui/session/Clamp'
 import { useLink } from '../../host'
 import { copyText } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
@@ -125,11 +127,14 @@ export function NoticeEntry(props: { entry: Notice }) {
             )}
           </>
         ) : entry.description ? (
-          <Text selectable style={[styles.text, { color: c.textSecondary }]}>
-            {entry.description}
-          </Text>
+          // An agent's error can run to pages, as a stack trace does: it is cut short until opened.
+          <Clamp maxHeight={120} id={`notice:${entry.id}`}>
+            <Text selectable style={[styles.text, { color: c.textSecondary }]}>
+              <Linked text={entry.description} color={c.tint} />
+            </Text>
+          </Clamp>
         ) : null}
-        {(retry || resume) && (
+        {(retry || resume || entry.cause === 'turn_failed') && (
           <View style={styles.actions}>
             {carry && (
               <CardButton
@@ -139,29 +144,74 @@ export function NoticeEntry(props: { entry: Notice }) {
                 onPress={() => void sender.send('carry', carry.go).then(setSent)}
               />
             )}
-            <CardButton
-              label={retry ? '重试' : '继续'}
-              busy={sender.busy !== null || sent}
-              disabled={sender.busy !== null || sent}
-              onPress={() =>
-                void sender
-                  .send('go', () =>
-                    retry
-                      ? call(link, 'sessions.retry', { sessionId })
-                      : call(link, 'sessions.queue', {
-                          sessionId,
-                          content: [{ type: 'text', text: '继续' }],
-                        }),
-                  )
-                  .then(setSent)
-              }
-            />
+            {retry || resume ? (
+              <CardButton
+                label={retry ? '重试' : '继续'}
+                busy={sender.busy !== null || sent}
+                disabled={sender.busy !== null || sent}
+                onPress={() =>
+                  void sender
+                    .send('go', () =>
+                      retry
+                        ? call(link, 'sessions.retry', { sessionId })
+                        : call(link, 'sessions.queue', {
+                            sessionId,
+                            content: [{ type: 'text', text: '继续' }],
+                          }),
+                    )
+                    .then(setSent)
+                }
+              />
+            ) : null}
+            {entry.cause === 'turn_failed' ? (
+              <CardButton
+                label="报告问题"
+                onPress={() => reportFailure(entry.title, entry.description ?? null)}
+              />
+            ) : null}
           </View>
         )}
         <SendState sender={sender} />
       </View>
     </View>
   )
+}
+
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'）)】]+/g
+
+/** Text with its web addresses tappable, as the desktop's notice links them. */
+function Linked(props: { text: string; color: string }): ReactNode {
+  const parts: ReactNode[] = []
+  let at = 0
+  for (const match of props.text.matchAll(URL_IN_TEXT)) {
+    const url = match[0].replace(/[.,;:!?。，；：！？]+$/, '')
+    const from = match.index
+    if (from > at) parts.push(props.text.slice(at, from))
+    parts.push(
+      <Text
+        key={from}
+        style={{ color: props.color }}
+        accessibilityRole="link"
+        onPress={() => void Linking.openURL(url).catch(() => {})}
+      >
+        {url}
+      </Text>,
+    )
+    at = from + url.length
+  }
+  if (at < props.text.length) parts.push(props.text.slice(at))
+  return parts
+}
+
+/**
+ * Opens a new issue for a failed turn, as the desktop's 报告问题 opens its report: the error goes in
+ * the issue's text for the user to read and send, nothing else.
+ */
+function reportFailure(title: string, description: string | null): void {
+  const error = [title, description].filter(Boolean).join('\n').slice(0, 2000)
+  const body = `这一轮出错了：\n\n\`\`\`\n${error}\n\`\`\`\n\n（发生了什么，想做什么：）\n`
+  const url = `${GITHUB_URL}/issues/new?title=${encodeURIComponent(`会话出错：${title}`)}&body=${encodeURIComponent(body)}`
+  void Linking.openURL(url).catch(() => {})
 }
 
 /** Above the composer after a turn the provider refused for want of credit. */
