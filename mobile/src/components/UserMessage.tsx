@@ -181,12 +181,8 @@ export const UserMessage = memo(function UserMessage(props: {
       {tiles.length > 0 && <RefTiles refs={tiles} align="end" />}
       {text ? (
         <ContextMenu items={menu} fit="content">
-          {(longPress) => (
-            <PressScale
-              scale={0.98}
-              {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
-              style={[styles.bubble, { backgroundColor: s.bubble }]}
-            >
+          {(longPress) => {
+            const bubble = (
               <Clamp
                 maxHeight={COLLAPSED_HEIGHT}
                 align="end"
@@ -194,8 +190,23 @@ export const UserMessage = memo(function UserMessage(props: {
               >
                 <Markdown markdown={body} chips={chips} head={head} />
               </Clamp>
-            </PressScale>
-          )}
+            )
+            // The system's context menu lifts the bubble itself; a press scale of ours under it
+            // shrank as a scroll began on the bubble and sprang back as it took over.
+            return longPress ? (
+              <PressScale
+                scale={0.98}
+                unstable_pressDelay={120}
+                onLongPress={longPress}
+                delayLongPress={350}
+                style={[styles.bubble, { backgroundColor: s.bubble }]}
+              >
+                {bubble}
+              </PressScale>
+            ) : (
+              <View style={[styles.bubble, { backgroundColor: s.bubble }]}>{bubble}</View>
+            )
+          }}
         </ContextMenu>
       ) : null}
       {(props.steered || props.at !== undefined) && (
