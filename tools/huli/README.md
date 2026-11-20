@@ -552,6 +552,10 @@ one once upstream fixes the same thing:
 - `src/agent-host/marketplace/mcpb.ts`: an MCP bundle's paths in Windows' separators.
 - `src/agent-host/settings-file.ts`: an unreadable agent settings file is reported translated, with
   its line; a byte order mark is accepted.
+- `src/agent-host/git/service.ts`: tool calls that end in a burst share a status refresh at most
+  every second (`TOOL_REFRESH_MS`), which a turn's end starts at once, instead of running git back
+  to back; calls sharing one report in the order they ended and each still finds a pull request in
+  its own output.
 - `src/agent-host/sessions.ts` (`planProgress`): the latest plan is looked up again only after a
   patch that can change it, not by scanning the whole thread on every update.
 - `src/renderer/src/app/crash-screen.tsx`: a render error shows a recoverable screen.
