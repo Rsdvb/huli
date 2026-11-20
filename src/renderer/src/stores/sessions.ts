@@ -38,15 +38,33 @@ const leaving = new Map<string, { at: number; parentId: string; reported: string
 
 /**
  * A summary as the list shows it: one archived here stays archived, and a sub-session it leaves
- * stays on its own, until the host answers.
+ * stays on its own, until the host answers. Huli: without `working`, which names the running tool
+ * call for the phone's list; the window draws a turn's work from its thread, and the field changed
+ * at every tool call, re-rendering every list of sessions in a burst of them.
  */
-function listed(summary: SessionSummary): SessionSummary {
+function listed(received: SessionSummary): SessionSummary {
+  const summary = { ...received }
+  delete summary.working
   const at = archiving.get(summary.id)
   const shown = at === undefined || summary.archivedAt ? summary : { ...summary, archivedAt: at }
   const left = leaving.get(summary.id)
   if (!left) return shown
   left.reported = summary.parentId
   return shown.parentId === null ? shown : { ...shown, parentId: null }
+}
+
+/** Whether two values parsed from the host's JSON hold the same data. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  return keys.every(
+    (key) =>
+      Object.hasOwn(b, key) &&
+      sameValue((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+  )
 }
 
 /** Sessions listed under their projects: a routine's runs and a task's steps are listed elsewhere. */
@@ -73,7 +91,12 @@ export const useSessionsStore = create<SessionsStore>()((set, get) => ({
     }))
   },
   upsert(summary) {
-    set((state) => ({ byId: { ...state.byId, [summary.id]: listed(summary) } }))
+    set((state) => {
+      const next = listed(summary)
+      // A summary sent again as it was keeps its object, so nothing that reads it renders.
+      if (sameValue(state.byId[summary.id], next)) return state
+      return { byId: { ...state.byId, [summary.id]: next } }
+    })
   },
   remove(sessionId) {
     set((state) => {

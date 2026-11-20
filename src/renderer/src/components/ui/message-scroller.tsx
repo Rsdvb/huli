@@ -71,7 +71,9 @@ function MessageScrollerViewport({
     <MessageScrollerPrimitive.Viewport
       data-slot="message-scroller-viewport"
       className={cn(
-        'size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-pending-scroll:invisible',
+        // Transparent rather than invisible while it settles: visibility is inherited, so showing it
+        // again restyled every element of a long thread and ran each button's transition.
+        'size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-pending-scroll:opacity-0',
         className,
       )}
       onPointerDown={(event) => {
@@ -161,6 +163,7 @@ function MessageScrollerButton({
 }
 
 export {
+  takeOver,
   MessageScrollerProvider,
   MessageScroller,
   MessageScrollerViewport,

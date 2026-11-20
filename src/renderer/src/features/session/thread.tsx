@@ -30,6 +30,7 @@ import { RunGroup } from './entries/run-group'
 import { ToolGroup } from './entries/tool-group'
 import { FindInSession } from './find/find-in-session'
 import { JumpToLatest } from './jump-to-latest'
+import { InPartsContext } from './markdown/live'
 import { MessageOutline } from './outline/message-outline'
 import { RevealTarget } from './outline/reveal-target'
 import { hoverReply } from './reply-hover'
@@ -507,9 +508,11 @@ export const Thread = memo(function Thread({
           ref={viewport}
           onScroll={nearStart}
           aria-label={t('thread.label')}
+          // Transparent rather than invisible: visibility is inherited, so showing the thread again
+          // restyled every element in it, and ran each button's transition.
           className={cn(
             'outline-none [scroll-timeline:--scroll-fade-top_y]',
-            returnPending && 'invisible',
+            returnPending && 'opacity-0',
           )}
         >
           <MessageScrollerContent
@@ -585,13 +588,15 @@ export const Thread = memo(function Thread({
                       agentName={agentName}
                     />
                   ) : (
-                    <Entry
-                      sessionId={sessionId}
-                      entryId={item.id}
-                      endId={item.endId}
-                      projectPath={projectPath}
-                      agentName={agentName}
-                    />
+                    <InPartsContext value={!returnPending}>
+                      <Entry
+                        sessionId={sessionId}
+                        entryId={item.id}
+                        endId={item.endId}
+                        projectPath={projectPath}
+                        agentName={agentName}
+                      />
+                    </InPartsContext>
                   )}
                 </MessageScrollerItem>
               )
