@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Pressable,
@@ -97,6 +98,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
   const [renaming, setRenaming] = useState(false)
   const [desktopOnly, setDesktopOnly] = useState(false)
   const [slide, setSlide] = useState(0)
+  /** What is being made to share, while the computer converts it or the phone packs it. */
+  const [exporting, setExporting] = useState<string | null>(null)
+  const exportBusy = useRef(false)
   const toastOpacity = useRef(new Animated.Value(0)).current
   const shownVersion = useRef<number | null>(null)
   /** A new version came while the latest was shown, so its arrival is told. */
@@ -385,13 +389,21 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     ])
   }
 
+  // One export at a time: a second tap while the first converts would hand two files over.
   const share = async (format?: Parameters<typeof shareExport>[2]) => {
-    if (!link || !loaded) return
+    if (!link || !loaded || exportBusy.current) return
+    exportBusy.current = true
+    setExporting(
+      format ? `正在导出 ${FORMAT_TEXT[format].replace(/（.*）$/, '')}…` : '正在准备分享…',
+    )
     try {
       if (format) await shareExport(link, loaded, format)
       else await shareFiles(loaded)
     } catch (failure) {
       Alert.alert('没能分享', errorText(failure))
+    } finally {
+      exportBusy.current = false
+      setExporting(null)
     }
   }
 
@@ -405,8 +417,8 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     },
     {
       key: 'share',
-      label: '分享',
-      disabled: !loaded,
+      label: exporting ?? '分享',
+      disabled: !loaded || exporting !== null,
       onPress: () => {
         if (loaded?.type) setSheet('share')
         else void share()
@@ -467,6 +479,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     ? shareFormats(loaded.type.name).map((format) => ({
         key: format,
         label: FORMAT_TEXT[format],
+        disabled: exporting !== null,
         onPress: () => void share(format),
       }))
     : []
@@ -621,6 +634,20 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
             )}
           </View>
         )}
+      {exporting !== null && !picking && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.banner,
+            { top: contentTop + 8, backgroundColor: s.menuSolid, borderColor: c.border },
+          ]}
+        >
+          <ActivityIndicator size="small" color={c.textSecondary} />
+          <Text style={[styles.bannerText, { color: c.text }]} numberOfLines={1}>
+            {exporting}
+          </Text>
+        </View>
+      )}
       {toast !== null && (
         <Animated.View
           pointerEvents="none"
