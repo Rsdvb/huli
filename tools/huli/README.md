@@ -52,6 +52,7 @@ Code (kept small so upstream merges stay clean):
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                                                   |
 | `features/session/entries/refusal-end.tsx` and its uses, `locales/*/session.json` (`refusal`), `tools/fake-agent` (`/refusal`)           | a turn the model declined (`stop_reason: "refusal"`) says the API gives no reason, quotes the model's own explanation when a longer reply holds one, and on the latest turn offers Try again (the same message through the queue; the host's retry resends only failed turns) and Edit message                      |
 | `styles/affect.css` (the sidebar list's scrollbar)                                                                                       | App Shell hides the sidebar's scrollbar for good; it shows thin while the pointer or the keyboard is in the sidebar and hides at rest, on Windows in a gutter clear of the resize handle; macOS keeps its overlay scrollbar                                                                                         |
+| `src/agent-host/{agents,sessions,host,start,validate}.ts`, `src/shared/{agent-host,host-request-limits}.ts`, `agents-section.tsx`        | an agent's page offers Reset environment…, its sign-in, ids and caches removed and its history and settings kept (see Agent reset)                                                                                                                                                                                  |
 | `eslint.config.mjs`, `.prettierignore`                                                                                                   | lint and formatting reach the phone app in `mobile/` (see Workflows)                                                                                                                                                                                                                                                |
 
 ### Import from agents
@@ -239,6 +240,49 @@ output, and the sub-agents' sessions. The desktop app's alone (`window.kettu.exp
   but the export's own folds, links to http(s) only and pictures only the export's own, printed
   by Chromium in a hidden window with no script, in light colors whatever the theme.
 - Tests: `src/main/session-export/session-export.test.ts`.
+
+### Agent reset
+
+Settings › Agents › an agent › Reset environment… puts an agent back the way a fresh install finds
+it, for one whose sign-in is stuck or whose state broke: (1) its sign-in and credentials, the keys
+Kite handed or keeps for it included; (2) the anonymous ids it made on this computer, which it
+makes again on its next start; (3) its caches, logs and temporary files. Its history (Claude Code's
+`projects/` and `history.jsonl`, Codex's `sessions/`, `history.jsonl` and thread databases,
+Antigravity's `conversations/` and `brain/`, Kite's own sessions) and its configuration
+(`settings.json`, `config.toml`, `CLAUDE.md`/`AGENTS.md`, skills, agents, commands, plugins, MCP
+servers, memories, per-project permissions) always stay. It is no machine-wide wipe and touches no
+system identifier (MachineGuid, MAC addresses, hardware ids).
+
+- The host's `agents.resetPreview` lists what is there now, with sizes (names and key names, never
+  contents), and `agents.reset` removes the categories ticked (`src/agent-host/validate.ts` checks
+  both). It refuses while a session of the agent works; otherwise it runs the agent's own sign-out
+  first where Kite has one (`codex logout`, `claude auth logout`, ACP `logout`), then lets the
+  agent's sessions go (prepared ones removed, idle ones stored and closed), stops its process and
+  keeps it stopped (`resetHold`), and removes the rest. It logs what went by category, paths and
+  key names only. The window clears the keys Kite keeps for the agent (`setAgentEnv`).
+- `src/agent-host/agent-reset/plan.ts` holds every path and key, from the agents' own code: Claude
+  Code 2.1.326's bundled source (config folder `CLAUDE_CONFIG_DIR` or `~/.claude`; `.claude.json`
+  in the home folder unless the folder was moved; its keychain services `Claude Code-credentials`
+  and `Claude Code`, suffixed `-` and 8 hex of the SHA-256 of the variable's value as given when
+  moved; Credential Manager `<service>/claude-code-user` and its `#` parts, as Bun.secrets names
+  them, behind a flag), Codex 0.171's source (`auth.json`, `.credentials.json` for MCP sign-ins,
+  three files of `secrets/` but not `local.age` or the passphrase they share, `installation_id`,
+  the keyring entry `cli|<16 hex of the SHA-256 of the canonical folder>` under `Codex Auth`),
+  agy 1.5.13's binary (go-keyring's `gemini`/`antigravity`, shared with the Antigravity app,
+  `~/.gemini/antigravity-cli/installation_id`, its logs and caches), and Pi, Cline, DimCode and
+  OpenCode's sources where they are sure; the others offer only their sign-out and Kite's keys.
+  `.claude.json` and its backups lose only the keys named (`json-keys.ts`: every other byte kept,
+  a file that does not parse left alone, written beside it and moved over it).
+- Left alone on purpose: what every Claude Code shares whatever its folder (`%TEMP%\claude`,
+  `claude-cli-nodejs` logs, `~/.claude/.device-keys.json`), Codex's MCP keyring entries (keyed by
+  server, shared by every Codex folder), its Windows sandbox users and ACLs, and the Codex and
+  Antigravity desktop apps' own files.
+- `secrets.ts` reaches the Keychain with `security` (never `-w`/`-g`), Credential Manager with
+  `cmdkey` (a name quoted after its switch; cmdkey exits with 0 even when it deleted nothing, so
+  the list says whether it did) and the Secret Service with `secret-tool` (output thrown away). A
+  test copy (`KITE_TEST_WINDOW=background`, unpackaged) uses names in `<data>/test-secrets.json`
+  instead, so its reset reaches none of the owner's entries.
+- Tests: `src/agent-host/agent-reset/*.test.ts`, and the requests in `validate.test.ts`.
 
 Generated before a build (not hand edits, never committed):
 
