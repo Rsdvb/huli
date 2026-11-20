@@ -101,7 +101,14 @@ import {
   withFullAccess,
 } from './agy-access'
 import { systemPromptMeta, takesSystemPromptAppend } from './agy-prompt'
-import { agyAllowOnce, agyAutoAllowed, fromAgy, inWholeFile, onAgyOwnFiles } from './agy-tools'
+import {
+  agyAllowOnce,
+  agyAutoAllowed,
+  agyQuestion,
+  fromAgy,
+  inWholeFile,
+  onAgyOwnFiles,
+} from './agy-tools'
 import { fromCodeMode } from './code-mode'
 import { forkPointMeta, forksAtMessage } from './fork-point'
 import {
@@ -111,7 +118,15 @@ import {
   sessionMeta,
   type Removal,
 } from './hidden-sessions'
-import { formAnswer, pendingElicitation, sessionElicitation } from './elicitation'
+import {
+  agyAnswer,
+  answerOption,
+  formAnswer,
+  OTHER_ANSWER,
+  pendingElicitation,
+  sessionElicitation,
+  type SessionElicitation,
+} from './elicitation'
 import { askedCall, mcpNaming, ownCall, type McpNaming } from './kettu-calls'
 import { dropScopeFile, ScopeFiles, takeScope, withinScope } from './model-scope'
 import { ownTitles } from './own-titles'
@@ -543,22 +558,26 @@ export class AcpConnection implements AgentConnection {
   }
 
   /**
-   * A session's form or page as a card, answered by the user. A request outside a session Kettu
-   * has, or one no card can show, is declined.
+   * A session's form or page as a card, and agy's questions as the questions card, answered by the
+   * user. A request outside a session Kettu has, or one no card can show, is declined.
    */
   private async elicit(
     params: CreateElicitationRequest,
     signal: AbortSignal,
   ): Promise<CreateElicitationResponse> {
-    const raw = params as { sessionId?: unknown; mode?: unknown }
+    const raw = params as { sessionId?: unknown; toolCallId?: unknown; mode?: unknown }
     const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId : null
     const target = sessionId ? this.targets.get(sessionId) : undefined
-    const asked = target ? sessionElicitation(params) : null
+    const asked = target ? sessionElicitation(params, this.agy) : null
     if (!sessionId || !target || !asked) {
       this.hooks.ignored(sessionId, `elicitation/create (${String(raw.mode)}) Kettu cannot show`)
       return { action: 'decline' }
     }
     const ctx = target.context()
+    if (asked.kind === 'questions') {
+      const toolCallId = typeof raw.toolCallId === 'string' ? raw.toolCallId : null
+      return this.askQuestions(target, toolCallId, asked, signal)
+    }
     const server = this.hooks.name ?? this.hooks.agentId ?? 'ACP'
     const elicitation = pendingElicitation(asked, server)
     const entryId = ctx.nextId()
@@ -611,6 +630,70 @@ export class AcpConnection implements AgentConnection {
     return result
   }
 
+  /**
+   * agy's questions on the call that asks them, which the thread shows already, as the questions
+   * card; the answers go back as the fields agy reads.
+   */
+  private async askQuestions(
+    target: SessionTarget,
+    toolCallId: string | null,
+    asked: Extract<SessionElicitation, { kind: 'questions' }>,
+    signal: AbortSignal,
+  ): Promise<CreateElicitationResponse> {
+    const ctx = target.context()
+    const { questions, fields } = asked
+    const first = questions[0]!
+    const entryId = toolCallId ? `t:${toolCallId}` : ctx.nextId()
+    const shown = ctx.thread.byId[entryId]
+    const entry: ToolEntry = {
+      kind: 'tool',
+      id: entryId,
+      title: first.question,
+      toolKind: 'other',
+      status: 'pending',
+      content: [],
+      locations: [],
+      permission: null,
+      permissionResult: null,
+      question: first.question,
+    }
+    const output = {
+      patches: [
+        shown?.kind === 'tool'
+          ? {
+              op: 'entry.update' as const,
+              id: entryId,
+              changes: { title: first.question, question: first.question },
+            }
+          : { op: 'entry.add' as const, entry },
+      ],
+      effects: [],
+    }
+    try {
+      const answer = await target.requestPermission(
+        {
+          toolCallId: toolCallId ?? entryId,
+          toolEntryId: entryId,
+          output,
+          options: [
+            ...first.options.map((option, index) => ({
+              id: answerOption(index),
+              name: option.label,
+              kind: 'allow_once' as const,
+            })),
+            { id: OTHER_ANSWER, name: t('question.other'), kind: 'reject_once' as const },
+          ],
+          questions,
+        },
+        signal,
+      )
+      return agyAnswer(fields, answer)
+    } catch {
+      // Withdrawn: the agent no longer waits for the answer.
+      return { action: 'cancel' }
+    }
+  }
+
   private pageDone(elicitationId: string): void {
     const page = this.openPages.get(elicitationId)
     if (!page) return
@@ -648,7 +731,16 @@ export class AcpConnection implements AgentConnection {
         ? fromCodeMode(update)
         : update
     const call = ownCall(shaped, this.naming, ctx)
-    return call ? mapSessionUpdate(call, ctx) : { patches: [], effects: [] }
+    if (!call) return { patches: [], effects: [] }
+    const out = mapSessionUpdate(call, ctx)
+    // agy's question stands apart from the work as Claude Code's do, even before it is asked.
+    const question = this.agy ? agyQuestion(update) : null
+    const id = `t:${update.toolCallId}`
+    const shown = ctx.thread.byId[id]
+    if (question !== null && !(shown?.kind === 'tool' && shown.question !== undefined)) {
+      out.patches.push({ op: 'entry.update', id, changes: { question } })
+    }
+    return out
   }
 
   private deliver(sessionId: string, update: SessionUpdate): void {

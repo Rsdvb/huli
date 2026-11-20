@@ -1,4 +1,5 @@
-// Elicitations an ACP agent sends in a session: a form or a page as a card, and what is declined.
+// Elicitations an ACP agent sends in a session: agy 1.5.12's `ask_question`, recorded, as the
+// questions card and back, and any agent's form or page as a card, with what is declined.
 
 import {
   agent,
@@ -7,6 +8,7 @@ import {
   type ClientCapabilities,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
+  type SessionUpdate,
 } from '@agentclientprotocol/sdk/unstable'
 import { describe, expect, it } from 'vitest'
 import {
@@ -15,6 +17,7 @@ import {
   threadFromSnapshot,
   type ThreadEntry,
   type ThreadState,
+  type ToolEntry,
 } from '@shared/thread'
 import type {
   ConnectionHooks,
@@ -24,6 +27,8 @@ import type {
 } from '../connection'
 import { newTurnScope } from '../session-updates'
 import { AcpConnection, inProcessTransport } from './connection'
+import { agyAnswer, agyQuestions } from './elicitation'
+import recorded from './fixtures/agy-ask.json'
 
 type Scripted = (client: AgentContext, sessionId: string) => Promise<void>
 
@@ -118,8 +123,149 @@ function threadTarget(answer: (request: PermissionRequest) => PermissionAnswer |
   return { target, requests, shown, entries: (): ThreadEntry[] => threadEntries(thread) }
 }
 
+const notify = (client: AgentContext, sessionId: string, value: unknown) =>
+  client.notify(methods.client.session.update, { sessionId, update: value as SessionUpdate })
+
 const elicit = (client: AgentContext, params: Record<string, unknown>) =>
   client.request(methods.client.elicitation.create, params as unknown as CreateElicitationRequest)
+
+/** Runs agy's recorded ask, answered with `answer`, and returns what agy got back. */
+async function askAgy(
+  ask: { before: unknown[]; elicitation: Record<string, unknown>; after: unknown[] },
+  answer: (request: PermissionRequest) => PermissionAnswer | Promise<never>,
+) {
+  let response: CreateElicitationResponse | null = null
+  const { connection } = connect(async (client, sessionId) => {
+    for (const value of ask.before) await notify(client, sessionId, value)
+    response = await elicit(client, { sessionId, ...ask.elicitation })
+    for (const value of ask.after) await notify(client, sessionId, value)
+  }, 'antigravity')
+  await connection.initialize('1.0.0')
+  const { sessionId } = await connection.newSession('/tmp/ask')
+  const thread = threadTarget(answer)
+  connection.register(sessionId, thread.target)
+  await connection.prompt(sessionId, [{ type: 'text', text: 'ask me' }])
+  connection.close()
+  return { ...thread, response: response as CreateElicitationResponse | null }
+}
+
+describe("agy's ask_question", () => {
+  it('reads its form as questions, single and multi-select, with own words', () => {
+    expect(agyQuestions(recorded.single.elicitation.requestedSchema)).toEqual({
+      questions: [
+        {
+          header: '',
+          question: 'Pick a color',
+          multiSelect: false,
+          options: [{ label: 'Red' }, { label: 'Blue' }],
+          allowsText: true,
+          secret: false,
+        },
+      ],
+      fields: [{ key: 'q1', multiSelect: false, values: ['1', '2'], textKey: 'q1_other' }],
+    })
+    expect(agyQuestions(recorded.multi.elicitation.requestedSchema)?.fields).toEqual([
+      { key: 'q1', multiSelect: true, values: ['1', '2', '3'], textKey: 'q1_other' },
+    ])
+  })
+
+  it('reads no questions from a form of another shape', () => {
+    const schema = recorded.single.elicitation.requestedSchema
+    const props = schema.properties
+    expect(agyQuestions({ ...schema, properties: { ...props, extra: { type: 'string' } } })).toBe(
+      null,
+    )
+    expect(agyQuestions({ ...schema, properties: { q1_other: props.q1_other } })).toBe(null)
+    expect(agyQuestions({ ...schema, properties: { q1: { ...props.q1, title: ' ' } } })).toBe(null)
+    expect(
+      agyQuestions({
+        ...schema,
+        properties: { q1: { ...props.q1, oneOf: [props.q1.oneOf[0], props.q1.oneOf[0]] } },
+      }),
+    ).toBe(null)
+    expect(agyQuestions({ type: 'object', properties: {} })).toBe(null)
+    expect(agyQuestions(null)).toBe(null)
+  })
+
+  it('shows the questions on the call that asks them and sends the answer', async () => {
+    const { requests, shown, entries, response } = await askAgy(recorded.single, () => ({
+      answers: [{ question: 0, choices: [1] }],
+    }))
+    expect(response).toEqual({ action: 'accept', content: { q1: '2' } })
+    expect(requests).toHaveLength(1)
+    const [request] = requests
+    expect(request!.toolEntryId).toBe('t:call_14246997105528906331')
+    expect(request!.questions?.map((q) => q.question)).toEqual(['Pick a color'])
+    expect(request!.options.map((option) => option.id)).toEqual(['answer:0', 'answer:1', 'other'])
+    expect(shown[0]).toMatchObject({ title: 'Pick a color', question: 'Pick a color' })
+    // One row, the question's, which agy then completes.
+    const rows = entries().filter((entry): entry is ToolEntry => entry.kind === 'tool')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      title: 'Pick a color',
+      question: 'Pick a color',
+      status: 'completed',
+    })
+  })
+
+  it("sends a multi-select's choices and own words, in the agent's order", async () => {
+    const { response } = await askAgy(recorded.multi, () => ({
+      answers: [{ question: 0, choices: [2, 0], text: ' Kiwi ' }],
+    }))
+    expect(response).toEqual({ action: 'accept', content: { q1: ['1', '3'], q1_other: 'Kiwi' } })
+  })
+
+  it('declines a skipped ask or Something else, and cancels a cancelled or withdrawn one', async () => {
+    expect((await askAgy(recorded.single, () => ({ answers: [] }))).response).toEqual({
+      action: 'decline',
+    })
+    expect((await askAgy(recorded.single, () => ({ optionId: 'other' }))).response).toEqual({
+      action: 'decline',
+    })
+    expect((await askAgy(recorded.single, () => 'cancelled')).response).toEqual({
+      action: 'cancel',
+    })
+    const withdrawn = await askAgy(recorded.single, () => Promise.reject(new Error('withdrawn')))
+    expect(withdrawn.response).toEqual({ action: 'cancel' })
+  })
+
+  it("answers the first question from an option, for a client without the card's questions", async () => {
+    const { response } = await askAgy(recorded.multi, () => ({ optionId: 'answer:1' }))
+    expect(response).toEqual({ action: 'accept', content: { q1: ['2'] } })
+  })
+
+  it('sends only the questions answered, and own words only where a question takes them', () => {
+    const fields = [
+      { key: 'q1', multiSelect: false, values: ['1', '2'], textKey: null },
+      { key: 'q2', multiSelect: false, values: ['1', '2', '3'], textKey: 'q2_other' },
+    ]
+    expect(agyAnswer(fields, { answers: [{ question: 1, choices: [], text: 'mine' }] })).toEqual({
+      action: 'accept',
+      content: { q2_other: 'mine' },
+    })
+    expect(
+      agyAnswer(fields, { answers: [{ question: 0, choices: [0], text: 'dropped' }] }),
+    ).toEqual({ action: 'accept', content: { q1: '1' } })
+    expect(agyAnswer(fields, { optionId: 'answer:9' })).toEqual({ action: 'decline' })
+    expect(agyAnswer(fields, { values: { q1: '1' } })).toEqual({ action: 'cancel' })
+  })
+
+  it("shows another agent's form of that shape as a form, not as questions", async () => {
+    let response: CreateElicitationResponse | null = null
+    const { connection } = connect(async (client, sessionId) => {
+      response = await elicit(client, { sessionId, ...recorded.single.elicitation })
+    })
+    await connection.initialize('1.0.0')
+    const { sessionId } = await connection.newSession('/tmp/ask')
+    const { target, requests } = threadTarget(() => ({ values: { q1: '1' } }))
+    connection.register(sessionId, target)
+    await connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+    connection.close()
+    expect(requests[0]?.questions).toBeUndefined()
+    expect(requests[0]?.elicitation?.kind).toBe('form')
+    expect(response).toEqual({ action: 'accept', content: { q1: '1' } })
+  })
+})
 
 const FORM = {
   mode: 'form',

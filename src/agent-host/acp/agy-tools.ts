@@ -83,12 +83,26 @@ function command(update: acp.ToolCallUpdate, line: string, summary: unknown): ac
   return shaped
 }
 
+/**
+ * The first question of an `ask_question` call, which its row is titled by and stands apart as a
+ * question for; null for any other call.
+ */
+export function agyQuestion(update: acp.ToolCallUpdate): string | null {
+  if (toolName(update) !== 'ask_question') return null
+  const questions = record(update.rawInput)?.questions
+  const first = Array.isArray(questions) ? record(questions[0]) : null
+  const question = typeof first?.question === 'string' ? first.question.trim() : ''
+  return question || null
+}
+
 /** An agy tool call in the shape the mapper reads every agent's. */
 export function fromAgy<T extends acp.ToolCallUpdate>(update: T): T {
   const input = record(update.rawInput)
   if (typeof input?.CommandLine === 'string') {
     return command(update, input.CommandLine, input.toolSummary) as T
   }
+  const question = agyQuestion(update)
+  if (question !== null) return { ...update, title: question }
   return update
 }
 
