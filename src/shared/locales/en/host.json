@@ -485,7 +485,13 @@
       "retrying": "Retrying ({{attempt}}/{{max}}) · {{reason}}",
       "retried": "Went through after {{count}} retries · {{reason}}",
       "retryFailed": "Still failing after {{count}} retries · {{reason}}",
-      "commandOutput": "Command output"
+      "commandOutput": "Command output",
+      "mcpFailed_one": "MCP server {{names}} could not start",
+      "mcpFailed_other": "MCP servers {{names}} could not start",
+      "mcpFailedHint": "Its tools are unavailable in this session until it starts.",
+      "mcpNeedsAuth_one": "MCP server {{names}} needs you to sign in",
+      "mcpNeedsAuth_other": "MCP servers {{names}} need you to sign in",
+      "mcpNeedsAuthHint": "Sign in with /mcp in Claude Code in a terminal; until then its tools are unavailable."
     },
     "retryReason": {
       "overloaded": "service overloaded",

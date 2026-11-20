@@ -482,7 +482,11 @@
       "retrying": "正在重试（{{attempt}}/{{max}}）· {{reason}}",
       "retried": "重试 {{count}} 次后已恢复 · {{reason}}",
       "retryFailed": "重试 {{count}} 次后仍然失败 · {{reason}}",
-      "commandOutput": "命令输出"
+      "commandOutput": "命令输出",
+      "mcpFailed_other": "MCP 服务器 {{names}} 没能启动",
+      "mcpFailedHint": "在它启动之前，这个会话用不了它的工具。",
+      "mcpNeedsAuth_other": "MCP 服务器 {{names}} 需要登录",
+      "mcpNeedsAuthHint": "在终端里的 Claude Code 中用 /mcp 登录；登录前用不了它的工具。"
     },
     "retryReason": {
       "overloaded": "服务繁忙",

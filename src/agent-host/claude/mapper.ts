@@ -225,6 +225,8 @@ export class ClaudeMapper {
   private lastSentAt: number | null = null
   /** The main thread's request streaming now, timed for its speed. */
   private timing: RequestTiming | null = null
+  /** Huli: the state each MCP server was last said to be in. */
+  private readonly mcpStates = new Map<string, string>()
   /** Huli: the request Claude Code retries now, and the notice that says so. */
   private retry: { id: string; attempts: number; reason: string } | null = null
 
@@ -1041,6 +1043,7 @@ export class ClaudeMapper {
         this.lastSentAt = Date.now()
         return this.retrying(message)
       case 'init':
+        return this.mcpServers(message)
       case 'session_state_changed':
       case 'hook_started':
       case 'hook_progress':
@@ -1252,6 +1255,37 @@ export class ClaudeMapper {
         },
       },
     ]
+  }
+
+  /**
+   * Huli: the MCP servers that could not start or need a sign-in, as the init each query and turn
+   * opens with lists them: said once a server is in that state, and again only after it left it.
+   */
+  private mcpServers(message: SystemMessage): Delivery[] {
+    if (!Array.isArray(message.mcp_servers)) return []
+    const failed: string[] = []
+    const signIn: string[] = []
+    for (const item of message.mcp_servers as unknown[]) {
+      const { name, status } = inputOf(item)
+      if (typeof name !== 'string' || typeof status !== 'string') continue
+      if (this.mcpStates.get(name) === status) continue
+      this.mcpStates.set(name, status)
+      if (status === 'failed') failed.push(name)
+      else if (status === 'needs-auth') signIn.push(name)
+    }
+    const at = String(message.uuid ?? Date.now())
+    const deliveries: Delivery[] = []
+    if (failed.length > 0) {
+      deliveries.push(
+        mcpNotice(this.sessionId, `n:mcp:failed:${at}`, failed, 'claude.notice.mcpFailed'),
+      )
+    }
+    if (signIn.length > 0) {
+      deliveries.push(
+        mcpNotice(this.sessionId, `n:mcp:auth:${at}`, signIn, 'claude.notice.mcpNeedsAuth'),
+      )
+    }
+    return deliveries
   }
 
   /** Huli: a notification Claude Code queues for the user; one of the same key replaces it. */
@@ -1717,6 +1751,30 @@ function latestReply(ctx: MapperContext): string | null {
   if (entry?.kind === 'agent') return entry.markdown.trim()
   if (entry?.kind === 'notice') return entry.description?.trim() ?? null
   return null
+}
+
+/** Huli: MCP servers that could not start, or that need a sign-in, by name. */
+function mcpNotice(
+  sessionId: string,
+  id: string,
+  names: readonly string[],
+  key: 'claude.notice.mcpFailed' | 'claude.notice.mcpNeedsAuth',
+  error?: string,
+): Delivery {
+  const title = t(key, { names: names.join(', '), count: names.length })
+  const hint = t(`${key}Hint` as 'claude.notice.mcpFailedHint')
+  return noticeDelivery(sessionId, id, 'warning', title, error ? [error, hint].join('\n') : hint)
+}
+
+/** Huli: a server Kite gave the query once it ran could not connect. */
+export function mcpFailedNotice(sessionId: string, name: string, error: string): Delivery {
+  return mcpNotice(
+    sessionId,
+    `n:mcp:failed:${name}:${Date.now()}`,
+    [name],
+    'claude.notice.mcpFailed',
+    error,
+  )
 }
 
 /** Huli: adds a notice of Kite's own, or changes it once it shows. */

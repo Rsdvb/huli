@@ -76,6 +76,7 @@ import {
   ClaudeMapper,
   DEFAULT_CONTEXT_WINDOW,
   mapCommands,
+  mcpFailedNotice,
   MODE_OPTION_ID,
   SYNTHETIC_MODEL,
   type Delivery,
@@ -1180,6 +1181,7 @@ export class ClaudeConnection implements AgentConnection {
       (result) => {
         for (const [name, error] of Object.entries(result.errors)) {
           this.context.hooks.log('warn', `MCP server ${name} did not connect: ${error}`)
+          if (!session.quiet) this.deliver(mcpFailedNotice(session.id, name, error))
         }
       },
       (error: unknown) => {

@@ -230,6 +230,32 @@ describe("Claude Code's own lines", () => {
   })
 })
 
+describe('MCP servers', () => {
+  const init = (servers: { name: string; status: string }[], uuid: string) =>
+    system('init', { mcp_servers: servers, uuid })
+
+  it('says which could not start or need a sign-in, once until their state changes', () => {
+    const run = new Run().feed(
+      init(
+        [
+          { name: 'github', status: 'failed' },
+          { name: 'linear', status: 'needs-auth' },
+          { name: 'kettu', status: 'connected' },
+        ],
+        'a',
+      ),
+      init([{ name: 'github', status: 'failed' }], 'b'),
+      init([{ name: 'github', status: 'connected' }], 'c'),
+      init([{ name: 'github', status: 'failed' }], 'd'),
+    )
+    expect(notices(run)).toMatchObject([
+      { id: 'n:mcp:failed:a', severity: 'warning', title: 'MCP server github could not start' },
+      { id: 'n:mcp:auth:a', title: 'MCP server linear needs you to sign in' },
+      { id: 'n:mcp:failed:d', title: 'MCP server github could not start' },
+    ])
+  })
+})
+
 describe('a call that did not run', () => {
   it('is cancelled, not failed, when the user stopped it', () => {
     const run = new Run().feed(
