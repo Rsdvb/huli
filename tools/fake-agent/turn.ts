@@ -22,6 +22,8 @@ export interface FakeSessionState {
   signedOut: boolean
   /** Its last prompt failed with the out-of-credit scenario. */
   outOfCredit: boolean
+  /** The plan-limit scenario stopped it until then, in ms since the epoch; null when it did not. */
+  limitedUntil: number | null
   mode: string
   model: string
   thought: string

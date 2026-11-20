@@ -609,6 +609,9 @@
       "waiting": "等待你的授权",
       "working": "进行中",
       "failed": "出错停止",
+      "stalled": "可能卡住了",
+      "paused": "额度 {{time}} 恢复后继续",
+      "pausedUnknown": "额度恢复后继续",
       "signIn": "等待登录",
       "finished": "{{ago}}完成"
     },

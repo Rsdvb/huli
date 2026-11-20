@@ -406,6 +406,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       largeHistory: id.startsWith('large-history') ? historyEntries(env) : historySize(id),
       signedOut: false,
       outOfCredit: false,
+      limitedUntil: null,
       systemPrompt: null,
       ...DEFAULT_CONFIG,
       moreModels: projectModels(cwd),

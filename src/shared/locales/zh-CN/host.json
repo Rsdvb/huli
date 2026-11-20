@@ -165,6 +165,21 @@
     "marketPublish": "想把 {{name}} 发布到 Kettu 的 Marketplace",
     "marketUnlist": "想把 {{name}} 从 Kettu 的 Marketplace 下架"
   },
+  "supervisor": {
+    "continueText": "继续",
+    "paused": "{{message}}\n额度 {{time}} 恢复后自动继续。",
+    "pausedUnknown": "{{message}}\n额度恢复时间未知，{{time}} 再查一次，恢复后自动继续。",
+    "resumed": "额度已恢复，继续中：{{title}}",
+    "resumedBody": {
+      "queue": "正在发送排队的消息。",
+      "resend": "正在重新发送被打断的消息。",
+      "continue": "正在让 Agent 接着做。"
+    },
+    "notHere": "只有你自己开始的会话能在额度恢复后自动继续。",
+    "stalled": "可能卡住了：{{title}}",
+    "stalledSilent_other": "已经 {{count}} 分钟没有输出了。",
+    "stalledRetrying_other": "一直在重试，已经 {{count}} 分钟没有输出了。"
+  },
   "routines": {
     "busy": "此例程已经有一个运行正在工作",
     "stopping": "Kettu 正在退出",

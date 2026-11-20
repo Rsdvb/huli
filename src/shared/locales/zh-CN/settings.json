@@ -77,6 +77,24 @@
       "description": "由小模型为每个会话命名一次，会用掉少量 Agent 的套餐额度。",
       "keywords": "标题 命名 会话 模型 额度 title name session"
     },
+    "resumeAfterLimit": {
+      "name": "额度恢复后自动继续",
+      "description": "Agent 的套餐额度用完、这一轮被停下后，额度恢复约一分钟后自动接着做。每个会话的菜单里可以单独关掉。",
+      "keywords": "额度 限额 用量 恢复 继续 暂停 limit quota resume"
+    },
+    "resumeText": {
+      "name": "继续时发送",
+      "description": "被停下的这一轮已经做了一些事时发送这句话；什么都没做的会重新发送原来的消息。",
+      "keywords": "继续 恢复 额度 消息 continue resume",
+      "placeholder": "继续"
+    },
+    "stallMinutes": {
+      "name": "提醒可能卡住的会话",
+      "description": "正在运行的一轮这么久没有任何输出时标出来，并通知手机一次。等你回答时不算。",
+      "keywords": "卡住 卡死 没有输出 超时 重试 stuck stall",
+      "off": "不提醒",
+      "after_other": "{{count}} 分钟后"
+    },
     "background": {
       "name": "在后台运行",
       "descriptionMac": "关闭窗口后，会话和例程在菜单栏中继续运行。",

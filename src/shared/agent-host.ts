@@ -124,6 +124,7 @@ import type {
 } from './workflow'
 import type { ClockRequest, UsageScope, UsageStatus, UsageSummary, UsageTotal } from './usage'
 import type { TurnWork } from './turn-phase'
+import type { LimitPause, LimitPauseAction, Stall, StallAction } from './supervisor'
 import type {
   AgentId,
   HarnessId,
@@ -728,6 +729,12 @@ export interface SessionSummary {
   // What its running turn does now, as the desktop's working row says it, with the latest running
   // tool call's title; null between turns; absent from older hosts
   working?: TurnWork | null
+  // Huli: paused at its agent's plan limit until it goes on by itself; absent from older hosts
+  limitPause?: LimitPause | null
+  // Huli: whether it goes on by itself after a plan limit, its own choice or the settings'
+  autoResume?: boolean
+  // Huli: its running turn has said nothing for a while and may be stuck
+  stall?: Stall | null
 }
 
 /**
@@ -1337,6 +1344,12 @@ export interface HostContract {
   // Steers where the agent can; otherwise stops the turn and sends the prompt as the next one.
   'sessions.sendNow': { params: { sessionId: string; itemId: string }; result: void }
   'sessions.resumeQueue': { params: { sessionId: string }; result: void }
+  /** Huli: drops a session's limit pause, or goes on now without waiting for the reset. */
+  'sessions.limitPause': { params: { sessionId: string; action: LimitPauseAction }; result: void }
+  /** Huli: whether the session goes on by itself after a plan limit, over the settings' choice. */
+  'sessions.setAutoResume': { params: { sessionId: string; on: boolean }; result: void }
+  /** Huli: stops a turn that looks stuck, stops it and goes on again, or keeps waiting. */
+  'sessions.stall': { params: { sessionId: string; action: StallAction }; result: void }
   // An image or pasted text the thread store keeps for a sent attachment, by its hash.
   'sessions.blob': { params: { sessionId: string; hash: string }; result: AttachmentBytes }
   'sessions.setConfigOption': {
@@ -1978,6 +1991,9 @@ export const HOST_METHODS = [
   'sessions.steer',
   'sessions.sendNow',
   'sessions.resumeQueue',
+  'sessions.limitPause',
+  'sessions.setAutoResume',
+  'sessions.stall',
   'sessions.blob',
   'sessions.setConfigOption',
   'sessions.refreshModels',

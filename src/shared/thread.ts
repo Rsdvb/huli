@@ -32,6 +32,7 @@ import type {
 } from './market-publish'
 import type { MemoryAction, MemoryDraft, MemoryLayer, MemoryWriteStatus } from './memory'
 import type { RoutineRef } from './routines'
+import type { LimitPause, Stall } from './supervisor'
 
 export {
   AUTO_AGENT_HARNESSES,
@@ -111,6 +112,13 @@ export interface SessionView {
    * prompt goes or another turn starts. Absent for an agent that predicts none.
    */
   suggestion?: PromptSuggestion | null
+  /**
+   * Huli: its turn stopped at its agent's plan limit and goes on by itself once the plan resets;
+   * absent from older hosts.
+   */
+  limitPause?: LimitPause | null
+  /** Huli: ephemeral: its running turn has said nothing for a while and may be stuck. */
+  stall?: Stall | null
 }
 
 /** A predicted next prompt: one line of plain text, `id` telling one prediction from the next. */
