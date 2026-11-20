@@ -2,7 +2,7 @@
 // the agents it is installed in, each with its switch and Uninstall, and installing it in another.
 
 import { useState } from 'react'
-import { Linking, StyleSheet, Switch, Text, View } from 'react-native'
+import { Linking, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentId } from '@shared/agents'
@@ -47,6 +47,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
+import { PendingSwitch } from '../../ui/PendingSwitch'
 import { cacheFor } from '../../ui/memory'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { tokensText } from '../../ui/session/limits'
@@ -97,7 +98,7 @@ export default function MarketPlugin() {
     Promise.all([plugins.refresh(), logo.reload(), details.reload()]).then(() => {})
 
   const setEnabled = (install: InstalledPlugin, enabled: boolean) =>
-    void actions.run(
+    actions.run(
       placeKey(install),
       async () => {
         if (!host.link) throw new Error('电脑没有连上。')
@@ -256,14 +257,13 @@ export default function MarketPlugin() {
                       accessibilityLabel={`从 ${agent} 卸载 ${title}`}
                       onPress={() => void uninstall(install)}
                     />
-                    <Switch
+                    <PendingSwitch
                       value={install.enabled}
                       disabled={actions.busy(placeKey(install))}
-                      onValueChange={(on) => {
+                      onChange={(on) => {
                         haptic.select()
-                        setEnabled(install, on)
+                        return setEnabled(install, on)
                       }}
-                      trackColor={{ true: c.success }}
                       accessibilityLabel={`在 ${agent} 中启用 ${title}`}
                     />
                   </View>

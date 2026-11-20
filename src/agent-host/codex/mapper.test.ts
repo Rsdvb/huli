@@ -5,7 +5,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { applyPatches, threadEntries, threadFromSnapshot, type ThreadState } from '@shared/thread'
 import { newTurnScope, type MapperContext, type MapperEffect } from '../session-updates'
-import { commandFacts, diffHunks, fenced, stripShellPrefix, ThreadMapper } from './mapper'
+import { fenced } from '../session-updates'
+import { commandFacts, diffHunks, stripShellPrefix, ThreadMapper } from './mapper'
 
 function run(
   notifications: [string, unknown, number?][],
@@ -210,7 +211,7 @@ describe('commands', () => {
     expect(entries[0]).toMatchObject({ kind: 'tool', toolKind: 'read', content: [] })
   })
 
-  it('keeps the end of a long output, and marks a declined command failed', () => {
+  it('keeps the end of a long output, and marks a declined command cancelled, not failed', () => {
     const item = {
       type: 'commandExecution',
       id: 'x',
@@ -227,11 +228,433 @@ describe('commands', () => {
       completed({ ...item, status: 'declined' }),
     ])
     const tool = entries[0]
-    expect(tool).toMatchObject({ status: 'failed' })
+    expect(tool).toMatchObject({ status: 'cancelled', denied: { by: 'rule' } })
     const markdown =
       tool?.kind === 'tool' && tool.content[0]?.type === 'markdown' ? tool.content[0].markdown : ''
     expect(markdown.startsWith('```\n…\n')).toBe(true)
     expect(markdown.length).toBeLessThan(70 * 1024)
+  })
+
+  it('shows what Codex typed into a running command in its output', () => {
+    const item = {
+      type: 'commandExecution',
+      id: 'x',
+      command: 'python3 ask.py',
+      cwd: '/p',
+      status: 'inProgress',
+      commandActions: [{ type: 'unknown', command: 'python3 ask.py' }],
+      aggregatedOutput: null,
+      exitCode: null,
+    }
+    const { entries, unknown } = run([
+      started(item),
+      ['item/commandExecution/outputDelta', { ...at, itemId: 'x', delta: 'Name? ' }],
+      [
+        'item/commandExecution/terminalInteraction',
+        { ...at, itemId: 'x', processId: 'p', stdin: 'Ada\n' },
+      ],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries[0]).toMatchObject({
+      content: [{ type: 'markdown', markdown: '```\nName? \n› Ada\n```' }],
+    })
+  })
+
+  it('keeps the exit code a command ended with', () => {
+    const item = {
+      type: 'commandExecution',
+      id: 'x',
+      command: 'false',
+      cwd: '/p',
+      status: 'failed',
+      commandActions: [{ type: 'unknown', command: 'false' }],
+      aggregatedOutput: '',
+      exitCode: 1,
+    }
+    const { entries } = run([completed(item)])
+    expect(entries[0]).toMatchObject({ status: 'failed', exitCode: 1 })
+    expect(entries[0]).not.toHaveProperty('denied')
+  })
+})
+
+describe('MCP results', () => {
+  const call = (result: unknown, status = 'completed') => ({
+    type: 'mcpToolCall',
+    id: 'mcp-1',
+    server: 'github',
+    tool: 'get_pr',
+    status,
+    arguments: { number: 7 },
+    result,
+    error: null,
+  })
+
+  it('keeps links, sounds and the structured result, and shows progress on the running row', () => {
+    const { entries, unknown } = run([
+      started(call(null, 'inProgress')),
+      ['item/mcpToolCall/progress', { ...at, itemId: 'mcp-1', message: 'Fetching reviews 2/5' }],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries[0]).toMatchObject({ status: 'in_progress', progress: 'Fetching reviews 2/5' })
+    const done = run([
+      completed(
+        call({
+          content: [
+            { type: 'resource_link', uri: 'https://github.com/o/r/pull/7', name: 'PR 7' },
+            { type: 'audio', data: 'AAAA', mimeType: 'audio/wav' },
+          ],
+          structuredContent: { number: 7, state: 'open' },
+        }),
+      ),
+    ]).entries[0]
+    expect(done).toMatchObject({
+      content: [
+        { type: 'ref', ref: { kind: 'link', uri: 'https://github.com/o/r/pull/7', name: 'PR 7' } },
+        { type: 'ref', ref: { kind: 'audio', mimeType: 'audio/wav', data: 'AAAA' } },
+        { type: 'markdown', markdown: '```json\n{\n  "number": 7,\n  "state": "open"\n}\n```' },
+      ],
+    })
+  })
+
+  it('leaves out a structured result its text already holds as JSON', () => {
+    const { entries } = run([
+      completed(
+        call({
+          content: [{ type: 'text', text: '{"state":"open"}' }],
+          structuredContent: { state: 'open' },
+        }),
+      ),
+    ])
+    expect(entries[0]).toMatchObject({ content: [{ type: 'markdown' }] })
+    expect(entries[0]?.kind === 'tool' && entries[0].content).toHaveLength(1)
+  })
+})
+
+describe('sub-agent calls', () => {
+  it("show the new agent's model and effort, and each agent's state with its message", () => {
+    const { entries } = run([
+      completed({
+        type: 'collabAgentToolCall',
+        id: 'spawn-1',
+        tool: 'spawnAgent',
+        status: 'completed',
+        senderThreadId: 'thread-1',
+        receiverThreadIds: ['child-1'],
+        prompt: 'Find the flaky test',
+        model: 'gpt-5.5-codex',
+        reasoningEffort: 'high',
+        agentsStates: { 'child-1': { status: 'pendingInit', message: null } },
+      }),
+      completed({
+        type: 'collabAgentToolCall',
+        id: 'wait-1',
+        tool: 'wait',
+        status: 'completed',
+        senderThreadId: 'thread-1',
+        receiverThreadIds: ['child-1'],
+        prompt: null,
+        agentsStates: { 'child-1': { status: 'completed', message: 'It was the clock test' } },
+      }),
+    ])
+    expect(entries).toMatchObject([
+      {
+        title: 'Start subagent',
+        description: 'Find the flaky test',
+        content: [
+          {
+            type: 'markdown',
+            markdown: ['- Runs on gpt-5.5-codex · high effort', '- Starting'].join(
+              String.fromCharCode(10),
+            ),
+          },
+        ],
+      },
+      {
+        title: 'Wait for subagents',
+        content: [{ type: 'markdown', markdown: '- Finished: It was the clock test' }],
+      },
+    ])
+  })
+})
+
+describe("Codex 0.170's details", () => {
+  it('marks a review, and keeps search results, a plan change, a reroute and an image failure', () => {
+    const nl = String.fromCharCode(10)
+    const { entries, unknown } = run([
+      completed({ type: 'enteredReviewMode', id: 'rv', review: 'uncommitted changes' }),
+      completed({
+        type: 'webSearch',
+        id: 'w',
+        query: 'vitest',
+        action: { type: 'search', query: 'vitest', queries: ['vitest', 'vitest config'] },
+        results: [{ url: 'https://vitest.dev', title: 'Vitest' }],
+      }),
+      [
+        'turn/plan/updated',
+        { ...at, explanation: 'Found the cause', plan: [{ step: 'Fix', status: 'inProgress' }] },
+      ],
+      ['model/rerouted', { ...at, fromModel: 'a', toModel: 'b', reason: 'highRiskCyberActivity' }],
+      completed({
+        type: 'imageGeneration',
+        id: 'img',
+        status: 'failed',
+        revisedPrompt: null,
+        failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: null },
+      }),
+      completed({ type: 'exitedReviewMode', id: 'rv2', review: 'done' }),
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      { kind: 'notice', title: 'Review started', description: 'uncommitted changes' },
+      {
+        kind: 'tool',
+        content: [
+          {
+            type: 'markdown',
+            markdown: [
+              'Also searched for:',
+              '',
+              '- vitest config',
+              '',
+              '- [Vitest](https://vitest.dev)',
+            ].join(nl),
+          },
+        ],
+      },
+      { kind: 'plan' },
+      { kind: 'notice', title: 'The plan changed', description: 'Found the cause' },
+      {
+        kind: 'notice',
+        title: 'Codex switched from a to b',
+        description: 'The request looked like high-risk cybersecurity activity.',
+      },
+      {
+        kind: 'tool',
+        status: 'failed',
+        content: [{ type: 'markdown', markdown: 'The image usage limit is reached.' }],
+      },
+      { kind: 'notice', title: 'Review finished' },
+    ])
+  })
+})
+
+describe('hooks', () => {
+  const hook = (
+    status: string,
+    entries: { kind: string; text: string }[],
+    statusMessage: string | null = null,
+  ): [string, unknown] => [
+    'hook/completed',
+    {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      run: {
+        id: `h-${status}`,
+        eventName: 'preToolUse',
+        status,
+        statusMessage,
+        entries,
+        displayOrder: 0,
+        executionMode: 'sync',
+        handlerType: 'command',
+        scope: 'turn',
+        sourcePath: '/p/.codex/hooks.toml',
+        startedAt: 1,
+      },
+    },
+  ]
+
+  it('shows a hook that blocked, failed or warned, with what it said, and none that only ran', () => {
+    const { entries, unknown } = run([
+      ['hook/started', { threadId: 'thread-1', turnId: 'turn-1', run: {} }],
+      hook('completed', [{ kind: 'context', text: 'for the model only' }]),
+      hook('blocked', [{ kind: 'feedback', text: 'No writes outside src/' }], 'Denied by policy'),
+      hook('failed', [{ kind: 'error', text: 'exit 2' }]),
+      completed({
+        type: 'hookPrompt',
+        id: 'hp-1',
+        fragments: [{ hookRunId: 'h', text: 'Run the tests too.' }],
+      }),
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      {
+        kind: 'notice',
+        severity: 'warning',
+        title: 'A before-tool hook blocked it',
+        description: ['Denied by policy', 'No writes outside src/'].join(String.fromCharCode(10)),
+      },
+      {
+        kind: 'notice',
+        severity: 'error',
+        title: 'A before-tool hook failed',
+        description: 'exit 2',
+      },
+      {
+        kind: 'notice',
+        id: 'n:hook:hp-1',
+        title: 'A hook added to the conversation',
+        description: 'Run the tests too.',
+      },
+    ])
+  })
+})
+
+describe('the goal', () => {
+  const goal = (status: string, tokensUsed: number, timeUsedSeconds: number): [string, unknown] => [
+    'thread/goal/updated',
+    {
+      threadId: 'thread-1',
+      turnId: null,
+      goal: {
+        threadId: 'thread-1',
+        objective: 'Make the suite pass',
+        status,
+        tokensUsed,
+        tokenBudget: 200_000,
+        timeUsedSeconds,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    },
+  ]
+
+  it('shows its state, keeps its use up to date, and says when it changed or was cleared', () => {
+    const { entries, unknown } = run([
+      goal('active', 1_200, 30),
+      goal('active', 45_000, 600),
+      goal('budgetLimited', 200_000, 3_900),
+      ['thread/goal/cleared', { threadId: 'thread-1' }],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      {
+        kind: 'notice',
+        severity: 'info',
+        title: 'Goal: Make the suite pass',
+        description: '45,000 tokens used of 200,000 · 10 minutes',
+      },
+      {
+        kind: 'notice',
+        severity: 'warning',
+        title: 'Goal out of budget: Make the suite pass',
+        description: '200,000 tokens used of 200,000 · 1 h 5 min',
+      },
+      { kind: 'notice', title: 'Goal cleared' },
+    ])
+  })
+})
+
+describe('a lost stream', () => {
+  const lost = (attempt: number, willRetry = true): [string, unknown] => [
+    'error',
+    {
+      ...at,
+      willRetry,
+      error: {
+        message: `Reconnecting... ${attempt}/5 (stream disconnected before completion)`,
+        codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+      },
+    },
+  ]
+
+  it('shows one notice that counts the attempts, then says the stream came back', () => {
+    const { entries, unknown } = run([
+      lost(1),
+      lost(2),
+      ['item/agentMessage/delta', { ...at, itemId: 'm', delta: 'Hi' }],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      {
+        kind: 'notice',
+        id: 'n:retry:turn-1',
+        severity: 'info',
+        title: 'Reconnected after 2 retries',
+      },
+      { kind: 'agent', markdown: 'Hi' },
+    ])
+  })
+
+  it('says so when the turn failed while it retried', () => {
+    const { entries } = run([lost(1), lost(5, false)])
+    expect(entries).toMatchObject([
+      { kind: 'notice', severity: 'warning', title: 'Could not reconnect after 1 retry' },
+    ])
+  })
+})
+
+describe('auto-review', () => {
+  const action = { type: 'command', command: 'rm -rf build', cwd: '/p', source: 'shell' }
+  const review = (status: string, extra: Record<string, unknown> = {}): [string, unknown] => [
+    status === 'inProgress'
+      ? 'item/autoApprovalReview/started'
+      : 'item/autoApprovalReview/completed',
+    {
+      ...at,
+      reviewId: 'r1',
+      targetItemId: 'cmd-1',
+      startedAtMs: 1,
+      action,
+      review: { status, riskLevel: 'high', rationale: null, ...extra },
+    },
+  ]
+
+  it('shows the review on the row of the call it looks at, and a denial as no failure', () => {
+    const { entries, unknown } = run([
+      review('inProgress'),
+      review('denied', { rationale: 'Deletes the build outside the task' }),
+      completed({
+        type: 'commandExecution',
+        id: 'cmd-1',
+        command: 'rm -rf build',
+        cwd: '/p',
+        status: 'declined',
+        commandActions: [{ type: 'unknown', command: 'rm -rf build' }],
+        aggregatedOutput: null,
+        exitCode: null,
+      }),
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      id: 't:cmd-1',
+      title: 'rm -rf build',
+      toolKind: 'execute',
+      status: 'cancelled',
+      review: { status: 'denied', risk: 'high', rationale: 'Deletes the build outside the task' },
+      denied: { by: 'review', reason: 'Deletes the build outside the task' },
+    })
+  })
+
+  it('leaves an approved call to run, and ends one that starts no item with its review', () => {
+    const { entries } = run([
+      review('approved', { riskLevel: 'low' }),
+      [
+        'item/autoApprovalReview/completed',
+        {
+          ...at,
+          reviewId: 'r2',
+          targetItemId: null,
+          startedAtMs: 1,
+          action: {
+            type: 'networkAccess',
+            host: 'pypi.org',
+            port: 443,
+            protocol: 'https',
+            target: 'x',
+          },
+          review: { status: 'approved', riskLevel: 'low', rationale: null },
+        },
+      ],
+      ['guardianWarning', { threadId: 'thread-1', message: 'Too many denied actions' }],
+    ])
+    expect(entries).toMatchObject([
+      { id: 't:cmd-1', status: 'pending', review: { status: 'approved', risk: 'low' } },
+      { id: 't:review:r2', status: 'completed', toolKind: 'fetch' },
+      { kind: 'notice', severity: 'warning', description: 'Too many denied actions' },
+    ])
+    expect(entries[0]).not.toHaveProperty('denied')
   })
 })
 

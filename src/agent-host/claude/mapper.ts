@@ -7,11 +7,13 @@ import type {
   BackgroundTaskView,
   PlanItem,
   SlashCommand,
+  ToolDenial,
   ToolEntry,
+  TurnRefusal,
   UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
-import { t } from '../i18n'
+import { hasMessage, t } from '../i18n'
 import {
   appendContent,
   attachmentCount,
@@ -24,6 +26,7 @@ import {
 import {
   addEntry,
   commandDescription,
+  lastEntry,
   messageEntryId,
   rateLimitEffects,
   rawInputText,
@@ -50,7 +53,16 @@ import type {
 import { isClaudeRowlessCall, isClaudeRowWhenFailed } from '../plan-tool'
 import { SERVICE_NAME } from '../service-name'
 import { workflowToolStructured } from '../workflow/tools'
-import { PLAN_TOOLS, resultContent, startsBackgroundWork, SUBAGENT_TOOLS, toolView } from './tools'
+import {
+  isServerToolResult,
+  PLAN_TOOLS,
+  resultContent,
+  serverResultView,
+  startsBackgroundWork,
+  SUBAGENT_TOOLS,
+  toolView,
+  type ServerToolResult,
+} from './tools'
 
 /** When a main-thread request went out and started its output, and its output tokens. */
 interface RequestTiming {
@@ -213,6 +225,8 @@ export class ClaudeMapper {
   /** What the session was last told about `working`; null before anything ran. */
   private told: { running: boolean; listed: boolean } | null = null
   private compacting: string | null = null
+  /** Huli: the compaction whose summary has not come yet. */
+  private compacted: string | null = null
   /** In a replay: the subagents its history started, whose own histories follow. */
   readonly replayed: ReplayedSubagent[] = []
   /** In a subagent's replay: its parent, whose prompt its first message is. */
@@ -223,6 +237,10 @@ export class ClaudeMapper {
   private lastSentAt: number | null = null
   /** The main thread's request streaming now, timed for its speed. */
   private timing: RequestTiming | null = null
+  /** Huli: the state each MCP server was last said to be in. */
+  private readonly mcpStates = new Map<string, string>()
+  /** Huli: the request Claude Code retries now, and the notice that says so. */
+  private retry: { id: string; attempts: number; reason: string } | null = null
 
   constructor(
     /** The session's own id, Claude Code's. */
@@ -326,7 +344,10 @@ export class ClaudeMapper {
         }
         const usage = event.message?.usage
         const sentAt = this.lastSentAt
-        return [{ sessionId, map: (ctx) => this.request(ctx, usage, sentAt) }]
+        return [
+          ...this.retryEnded(true),
+          { sessionId, map: (ctx) => this.request(ctx, usage, sentAt) },
+        ]
       }
       case 'content_block_start': {
         const block = event.content_block
@@ -498,13 +519,23 @@ export class ClaudeMapper {
       if (block.type === 'text') {
         const value = (block as { text: string }).text
         if (!value || (!replaying && this.streamed.delete(`${messageId}:agent`))) continue
-        deliveries.push({ sessionId, map: (ctx) => this.chunk(ctx, 'agent', messageId, value) })
+        const own = message.message.model === SYNTHETIC_MODEL
+        deliveries.push({
+          sessionId,
+          // Huli: a command's output that came as output first shows once.
+          map: (ctx) =>
+            own && latestReply(ctx) === toLf(value).trim()
+              ? output()
+              : this.chunk(ctx, 'agent', messageId, value),
+        })
       } else if (block.type === 'thinking') {
         const value = (block as { thinking: string }).thinking
         if (!value || (!replaying && this.streamed.delete(`${messageId}:thought`))) continue
         deliveries.push({ sessionId, map: (ctx) => this.chunk(ctx, 'thought', messageId, value) })
       } else if (isToolUse(block)) {
         deliveries.push({ sessionId, map: (ctx) => this.toolUse(ctx, block, sessionId, true) })
+      } else if (isServerToolResult(block)) {
+        deliveries.push({ sessionId, map: (ctx) => this.serverToolResult(ctx, block) })
       }
     }
     const usage = message.message.usage
@@ -644,7 +675,12 @@ export class ClaudeMapper {
     asked = false,
   ): MapperOutput {
     const out = output()
-    const { name } = block
+    // Huli: an MCP tool the API calls itself names its server apart.
+    const server = (block as { server_name?: unknown }).server_name
+    const name =
+      block.type === 'mcp_tool_use' && typeof server === 'string' && server !== ''
+        ? `mcp__${server}__${block.name}`
+        : block.name
     this.tools.set(block.id, { name, input: block.input, sessionId })
     // The host wrote the plan or the report from the call itself; a call that waits for an answer keeps its row.
     if (isClaudeRowlessCall(name) && !asked) return out
@@ -708,6 +744,26 @@ export class ClaudeMapper {
     return out
   }
 
+  /**
+   * Huli: the result of a tool the API ran itself, which comes in the assistant's message rather
+   * than as a tool result, so the call's row would otherwise run on until the turn cancelled it.
+   */
+  private serverToolResult(ctx: MapperContext, block: ServerToolResult): MapperOutput {
+    const out = output()
+    const id = `t:${block.tool_use_id}`
+    const entry = ctx.thread.byId[id]
+    if (entry?.kind !== 'tool') return out
+    const view = serverResultView(block)
+    const changes = {
+      status: view.failed ? ('failed' as const) : ('completed' as const),
+      ...(view.content.length > 0 ? { content: view.content } : {}),
+      ...(view.exitCode !== undefined ? { exitCode: view.exitCode } : {}),
+    }
+    out.patches.push({ op: 'entry.update', id, changes })
+    toolEffects(out, block.tool_use_id, id, entry.status, { ...entry, ...changes })
+    return out
+  }
+
   /** The tool entry a permission request belongs to, added first if the thread has none. */
   permissionTool(ctx: MapperContext, block: ToolUseBlock, sessionId: string): MapperOutput {
     return this.toolUse(ctx, block, sessionId, true, true)
@@ -735,6 +791,7 @@ export class ClaudeMapper {
       deliveries.push({ sessionId, map: (ctx) => this.toolResult(ctx, block, structured) })
     }
     // Live, the host added the user's own message when it sent it; others are Claude Code's.
+    if (!replaying && !message.parent_tool_use_id) deliveries.push(...this.liveSummary(blocks))
     if (!replaying || message.parent_tool_use_id) return deliveries
     const content = blocks.filter((block) => !isToolResult(block))
     if (content.length === 0 || !message.uuid) return deliveries
@@ -744,6 +801,34 @@ export class ClaudeMapper {
       map: (ctx) => this.replayedUser(ctx, uuid, content),
     })
     return deliveries
+  }
+
+  /**
+   * Huli: the summary a live compaction wrote, which Claude Code sends as the message the
+   * conversation goes on from: the row of that compaction shows it, as a replayed one does.
+   */
+  private liveSummary(blocks: readonly ContentBlock[]): Delivery[] {
+    const id = this.compacted
+    if (id === null) return []
+    const text = blocks
+      .flatMap((block) => (block.type === 'text' ? [(block as { text: string }).text] : []))
+      .join('\n')
+    if (!COMPACT_SUMMARY.test(text)) return []
+    this.compacted = null
+    const summary = toLf(text)
+    return [
+      {
+        sessionId: this.sessionId,
+        map: (ctx) => {
+          const out = output()
+          const entry = ctx.thread.byId[id]
+          if (entry?.kind === 'compaction' && entry.summary === '') {
+            out.patches.push({ op: 'entry.update', id, changes: { summary } })
+          }
+          return out
+        },
+      },
+    ]
   }
 
   private toolResult(
@@ -787,16 +872,22 @@ export class ClaudeMapper {
       return out
     }
     if (entry?.kind !== 'tool') return out
-    const status: ToolEntry['status'] = block.is_error === true ? 'failed' : 'completed'
+    const stopped =
+      block.is_error === true ? stoppedCall(entry, resultText(block), structured) : null
+    const status: ToolEntry['status'] =
+      block.is_error !== true ? 'completed' : stopped ? 'cancelled' : 'failed'
     const content = resultContent(name, block, structured, entry.content)
     const own = name.startsWith(KETTU_PREFIX)
       ? workflowToolStructured(name.slice(KETTU_PREFIX.length), structured)
       : undefined
     const changes = {
       status,
+      ...(stopped?.denied ? { denied: stopped.denied } : {}),
       ...(content ? { content } : {}),
       ...(own ? { structured: own } : {}),
-      ...(name === 'ExitPlanMode' && status === 'completed' ? { title: 'Exited Plan Mode' } : {}),
+      ...(name === 'ExitPlanMode' && status === 'completed'
+        ? { title: t('claude.tool.exitedPlan') }
+        : {}),
     }
     out.patches.push({ op: 'entry.update', id, changes })
     toolEffects(out, block.tool_use_id, id, entry.status, { ...entry, ...changes })
@@ -1018,8 +1109,9 @@ export class ClaudeMapper {
       case 'api_retry':
         // The request goes out again, so its first token is timed from the retry.
         this.lastSentAt = Date.now()
-        return []
+        return this.retrying(message)
       case 'init':
+        return this.mcpServers(message)
       case 'session_state_changed':
       case 'hook_started':
       case 'hook_progress':
@@ -1069,6 +1161,7 @@ export class ClaudeMapper {
       case 'compact_boundary': {
         const id = this.compacting ?? `c:${String(message.uuid ?? Date.now())}`
         this.compacting = null
+        this.compacted = id
         return [
           {
             sessionId: parent,
@@ -1084,6 +1177,21 @@ export class ClaudeMapper {
           },
         ]
       }
+      case 'session_writes_lost':
+        return this.writesLost(message)
+      case 'permission_denied':
+        return this.permissionDenied(message)
+      case 'model_refusal_fallback':
+        return this.refusalFallback(message)
+      case 'model_refusal_no_fallback':
+        // The turn ends in the refusal, whose end says why (refusalOf).
+        return []
+      case 'local_command_output':
+        return this.commandOutput(message)
+      case 'informational':
+        return this.informational(message)
+      case 'notification':
+        return this.notified(message)
       case 'task_started':
         return this.taskStarted(message)
       case 'task_notification':
@@ -1098,6 +1206,214 @@ export class ClaudeMapper {
       default:
         return null
     }
+  }
+
+  /**
+   * Huli: Claude Code retries a request that failed: one notice says so while it does, counting the
+   * attempts, and then whether the request went through.
+   */
+  private retrying(message: SystemMessage): Delivery[] {
+    if (message.agent_id || message.parent_tool_use_id) return []
+    const attempt = typeof message.attempt === 'number' ? message.attempt : 1
+    const max = typeof message.max_retries === 'number' ? message.max_retries : attempt
+    const reason = retryReason(message)
+    const retry = (this.retry ??= {
+      id: `n:retry:${String(message.uuid ?? Date.now())}`,
+      attempts: 0,
+      reason,
+    })
+    retry.attempts = attempt
+    retry.reason = reason
+    const title = t('claude.notice.retrying', { attempt, max, reason })
+    return [noticeDelivery(this.sessionId, retry.id, 'warning', title)]
+  }
+
+  /**
+   * Huli: the retried request went through, as its stream starts, or the turn ended without it:
+   * the retry's notice says how it went.
+   */
+  retryEnded(through: boolean): Delivery[] {
+    const retry = this.retry
+    if (!retry) return []
+    this.retry = null
+    const params = { count: retry.attempts, reason: retry.reason }
+    return [
+      through
+        ? noticeDelivery(this.sessionId, retry.id, 'info', t('claude.notice.retried', params))
+        : noticeDelivery(
+            this.sessionId,
+            retry.id,
+            'warning',
+            t('claude.notice.retryFailed', params),
+          ),
+    ]
+  }
+
+  /**
+   * Huli: what a command Claude Code runs itself printed, such as /usage. A Claude Code that also
+   * writes it as its own message shows it once.
+   */
+  private commandOutput(message: SystemMessage): Delivery[] {
+    const text = typeof message.content === 'string' ? toLf(message.content).trim() : ''
+    if (text === '') return []
+    const id = `n:output:${String(message.uuid ?? Date.now())}`
+    return [
+      {
+        sessionId: this.sessionId,
+        map: (ctx) => {
+          if (latestReply(ctx) === text) return output()
+          return noticeDelivery(
+            this.sessionId,
+            id,
+            'info',
+            t('claude.notice.commandOutput'),
+            text,
+          ).map(ctx)
+        },
+      },
+    ]
+  }
+
+  /**
+   * Huli: a line Claude Code shows the user, such as the reason a hook blocked a prompt or that a
+   * Stop hook kept the turn from going on; those for its transcript view alone stay out. Lines
+   * about one tool call replace each other.
+   */
+  private informational(message: SystemMessage): Delivery[] {
+    const text = typeof message.content === 'string' ? toLf(message.content).trim() : ''
+    const level = message.level
+    if (text === '' || level === 'info') return []
+    const key = typeof message.tool_use_id === 'string' ? message.tool_use_id : String(message.uuid)
+    const severity =
+      level === 'warning' || message.prevent_continuation === true ? 'warning' : 'info'
+    const [title, ...rest] = text.split('\n')
+    const description = rest.join('\n').trim()
+    return [
+      noticeDelivery(
+        this.route(message as { agent_id?: string }),
+        `n:info:${key}`,
+        severity,
+        title!.trim(),
+        description === '' ? undefined : description,
+      ),
+    ]
+  }
+
+  /**
+   * Huli: Claude Code denied a call without asking: its auto mode's check, its permission mode or a
+   * rule. The call is denied rather than failed, and says by what and why.
+   */
+  private permissionDenied(message: SystemMessage): Delivery[] {
+    const toolUseId = typeof message.tool_use_id === 'string' ? message.tool_use_id : null
+    if (!toolUseId) return []
+    const tool = this.tools.get(toolUseId)
+    const sessionId = tool?.sessionId ?? this.route(message as { agent_id?: string })
+    const reason =
+      (typeof message.decision_reason === 'string' && message.decision_reason.trim()) ||
+      (typeof message.message === 'string' && message.message.trim()) ||
+      ''
+    const denied: ToolDenial = {
+      by: deniedBy(message.decision_reason_type),
+      ...(reason !== '' ? { reason } : {}),
+    }
+    return [
+      {
+        sessionId,
+        map: (ctx) => {
+          const out = output()
+          const id = `t:${toolUseId}`
+          const entry = ctx.thread.byId[id]
+          if (entry?.kind !== 'tool') return out
+          const changes = { status: 'cancelled' as const, denied }
+          out.patches.push({ op: 'entry.update', id, changes })
+          toolEffects(out, toolUseId, id, entry.status, { ...entry, ...changes })
+          return out
+        },
+      },
+    ]
+  }
+
+  /**
+   * Huli: the MCP servers that could not start or need a sign-in, as the init each query and turn
+   * opens with lists them: said once a server is in that state, and again only after it left it.
+   */
+  private mcpServers(message: SystemMessage): Delivery[] {
+    if (!Array.isArray(message.mcp_servers)) return []
+    const failed: string[] = []
+    const signIn: string[] = []
+    for (const item of message.mcp_servers as unknown[]) {
+      const { name, status } = inputOf(item)
+      if (typeof name !== 'string' || typeof status !== 'string') continue
+      if (this.mcpStates.get(name) === status) continue
+      this.mcpStates.set(name, status)
+      if (status === 'failed') failed.push(name)
+      else if (status === 'needs-auth') signIn.push(name)
+    }
+    const at = String(message.uuid ?? Date.now())
+    const deliveries: Delivery[] = []
+    if (failed.length > 0) {
+      deliveries.push(
+        mcpNotice(this.sessionId, `n:mcp:failed:${at}`, failed, 'claude.notice.mcpFailed'),
+      )
+    }
+    if (signIn.length > 0) {
+      deliveries.push(
+        mcpNotice(this.sessionId, `n:mcp:auth:${at}`, signIn, 'claude.notice.mcpNeedsAuth'),
+      )
+    }
+    return deliveries
+  }
+
+  /**
+   * Huli: the model refused, and Claude Code ran the request again on its fallback model: a notice
+   * says which, and why the first refused when its provider said.
+   */
+  private refusalFallback(message: SystemMessage): Delivery[] {
+    const from = typeof message.original_model === 'string' ? message.original_model : ''
+    const to = typeof message.fallback_model === 'string' ? message.fallback_model : ''
+    if (to === '') return []
+    const refusal = refusalOf(message)
+    const key = message.scope === 'local' ? 'refusalFallbackLocal' : 'refusalFallback'
+    return [
+      noticeDelivery(
+        this.sessionId,
+        `n:refusal:${String(message.uuid ?? Date.now())}`,
+        'info',
+        t(`claude.notice.${key}`, { from: from || '?', to }),
+        refusal.explanation ?? undefined,
+      ),
+    ]
+  }
+
+  /**
+   * Huli: Claude Code could not save part of the session, as the disk was full: a resume may miss
+   * what it lost, so the thread says so.
+   */
+  private writesLost(message: SystemMessage): Delivery[] {
+    const lost = Array.isArray(message.lost) ? (message.lost as unknown[]) : []
+    const why = message.error_code === 'EDQUOT' ? 'quota' : 'full'
+    const parts = [
+      lost.includes('transcript') ? t('claude.notice.writesLost.transcript') : null,
+      lost.includes('global_config') ? t('claude.notice.writesLost.config') : null,
+    ].filter((part): part is string => part !== null)
+    return [
+      noticeDelivery(
+        this.sessionId,
+        `n:lost:${String(message.uuid ?? Date.now())}`,
+        'error',
+        t(`claude.notice.writesLost.${why}`),
+        parts.length > 0 ? parts.join(' ') : undefined,
+      ),
+    ]
+  }
+
+  /** Huli: a notification Claude Code queues for the user; one of the same key replaces it. */
+  private notified(message: SystemMessage): Delivery[] {
+    const text = typeof message.text === 'string' ? toLf(message.text).trim() : ''
+    if (text === '') return []
+    const key = typeof message.key === 'string' ? message.key : String(message.uuid)
+    const urgent = message.priority === 'high' || message.priority === 'immediate'
+    return [noticeDelivery(this.sessionId, `n:note:${key}`, urgent ? 'warning' : 'info', text)]
   }
 
   private taskStarted(message: SystemMessage): Delivery[] {
@@ -1521,6 +1837,99 @@ export class ClaudeMapper {
   }
 }
 
+/** Huli: why a request is retried, in words: the error Claude Code names, or its HTTP status. */
+function retryReason(message: SystemMessage): string {
+  if (message.no_response) return t('claude.retryReason.noResponse')
+  const error = typeof message.error === 'string' ? message.error : 'unknown'
+  const key = `claude.retryReason.${error}`
+  if (error !== 'unknown' && hasMessage(key)) return t(key as 'claude.retryReason.overloaded')
+  const status = typeof message.error_status === 'number' ? message.error_status : null
+  return status === null
+    ? t('claude.retryReason.connection')
+    : t('claude.retryReason.status', { status })
+}
+
+/** Huli: why a model refused, from Claude Code's notice of the refusal. */
+export function refusalOf(message: SystemMessage): TurnRefusal {
+  const text = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+  return {
+    explanation: text(message.api_refusal_explanation),
+    category: text(message.api_refusal_category),
+    model: text(message.original_model),
+  }
+}
+
+/** Huli: what denied a call, from the kind of decision Claude Code names. */
+function deniedBy(kind: unknown): ToolDenial['by'] {
+  switch (kind) {
+    case 'classifier':
+      return 'review'
+    case 'mode':
+    case 'asyncAgent':
+      return 'mode'
+    case 'hook':
+      return 'hook'
+    default:
+      return 'rule'
+  }
+}
+
+/** Huli: the text of the thread's latest entry: a reply's, or the output a notice holds. */
+function latestReply(ctx: MapperContext): string | null {
+  const entry = lastEntry(ctx.thread)
+  if (entry?.kind === 'agent') return entry.markdown.trim()
+  if (entry?.kind === 'notice') return entry.description?.trim() ?? null
+  return null
+}
+
+/** Huli: MCP servers that could not start, or that need a sign-in, by name. */
+function mcpNotice(
+  sessionId: string,
+  id: string,
+  names: readonly string[],
+  key: 'claude.notice.mcpFailed' | 'claude.notice.mcpNeedsAuth',
+  error?: string,
+): Delivery {
+  const title = t(key, { names: names.join(', '), count: names.length })
+  const hint = t(`${key}Hint` as 'claude.notice.mcpFailedHint')
+  return noticeDelivery(sessionId, id, 'warning', title, error ? [error, hint].join('\n') : hint)
+}
+
+/** Huli: a server Kite gave the query once it ran could not connect. */
+export function mcpFailedNotice(sessionId: string, name: string, error: string): Delivery {
+  return mcpNotice(
+    sessionId,
+    `n:mcp:failed:${name}:${Date.now()}`,
+    [name],
+    'claude.notice.mcpFailed',
+    error,
+  )
+}
+
+/** Huli: adds a notice of Kite's own, or changes it once it shows. */
+function noticeDelivery(
+  sessionId: string,
+  id: string,
+  severity: 'info' | 'warning' | 'error',
+  title: string,
+  description?: string,
+): Delivery {
+  return {
+    sessionId,
+    map: (ctx) => {
+      const out = output()
+      const changes = { severity, title, ...(description !== undefined ? { description } : {}) }
+      if (ctx.thread.byId[id]?.kind === 'notice') {
+        out.patches.push({ op: 'entry.update', id, changes })
+      } else {
+        addEntry(ctx, out, { kind: 'notice', id, ...changes })
+      }
+      return out
+    },
+  }
+}
+
 /** What a task is called: its description, else the command or workflow it runs. */
 function taskTitle(...candidates: unknown[]): string {
   for (const candidate of candidates) {
@@ -1535,6 +1944,29 @@ function inputOf(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
+}
+
+/** Claude Code's words for a call the user stopped or turned down in its own prompt. */
+const STOPPED_TEXT =
+  /^\s*(?:\[Request interrupted by user|The user doesn't want to (?:proceed|take this action))/
+
+/**
+ * Huli: a call that ended in an error without running, which is cancelled rather than failed:
+ * one the user denied, which says so, or one a stop interrupted. Null for a call that failed.
+ */
+function stoppedCall(
+  entry: ToolEntry,
+  text: string,
+  structured: unknown,
+): { denied?: ToolDenial } | null {
+  if (entry.denied) return {}
+  const answer = entry.permissionResult
+  if (typeof answer === 'object' && answer !== null && answer.kind.startsWith('reject')) {
+    return { denied: { by: 'user' } }
+  }
+  if (answer === 'cancelled' || answer === 'withdrawn') return {}
+  if (STOPPED_TEXT.test(text) || inputOf(structured).interrupted === true) return {}
+  return null
 }
 
 function resultText(block: ToolResultBlock): string {

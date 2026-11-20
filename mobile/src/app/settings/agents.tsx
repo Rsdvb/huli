@@ -176,6 +176,9 @@ export default function Agents() {
             <ListRow
               key="add"
               title="添加 Agent"
+              subtitle={
+                connected && addable.length === 0 ? '能添加的 Agent 都已经添加了' : undefined
+              }
               icon="plus"
               plainIcon
               action

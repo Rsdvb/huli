@@ -58,6 +58,8 @@ private enum Categories {
   static let permission = "huli.permission"
   static let allowOnly = "huli.permission.allow"
   static let turnEnded = "huli.turn"
+  /// Huli: a turn that may be stuck, with Stop, Retry and Keep waiting; the app registers it.
+  static let stalled = "huli.stalled"
   static let questionPrefix = "huli.question."
   private static let maxChoices = 4
 
@@ -180,6 +182,8 @@ private enum Notice {
         }
       case "turn-ended":
         result.categoryIdentifier = Categories.turnEnded
+      case "stalled":
+        result.categoryIdentifier = Categories.stalled
       default:
         break
       }
@@ -204,6 +208,10 @@ private enum Notice {
       return ("例行任务已暂停", "\(hostName) 上的例行任务接近套餐上限，已暂停")
     case "plan-limit":
       return ("套餐额度快用完了", "\(hostName) 上有 Agent 的套餐限额已用到 90% 以上")
+    case "limit-resumed":
+      return ("额度已恢复", "\(hostName) 上的会话正在自动继续")
+    case "stalled":
+      return ("可能卡住了", "\(hostName) 上的会话很久没有输出了")
     default:
       return ("纸鸢", "纸鸢有新动态")
     }

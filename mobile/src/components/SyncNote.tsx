@@ -71,6 +71,32 @@ export function SyncNote() {
 }
 
 /**
+ * Why a page's buttons and switches are greyed while the computer is not connected: 未连接, what
+ * waits for the connection, and a retry once the computer seems away. Nothing while connected, or
+ * while the link is down only a moment.
+ */
+export function OfflineNote(props: {
+  /** What waits for the connection, after 连上后才能: 「修改这一页」. */
+  what: string
+}) {
+  const host = useHostSelector(pick, sameFields)
+  const { retry } = useHostActions()
+  if (host.state.kind === 'connected' || !host.down) return null
+  const away = host.unreachable
+  const state = away ? '未连接' : (linkProblem(host.state) ?? '未连接')
+  const second = `连上后才能${props.what}`
+  return (
+    <NoteRow
+      busy={!away && host.state.kind !== 'stopped'}
+      first={state}
+      second={second}
+      label={`${state}，${second}`}
+      retry={away && host.state.kind !== 'stopped' ? { label: '重试连接', onPress: retry } : null}
+    />
+  )
+}
+
+/**
  * The same line for a tab's own list, as Artifacts' and 任务's: nothing while the list is current,
  * and once a read of it failed with an older copy still shown, when that copy is from and a retry,
  * which spins while it runs.

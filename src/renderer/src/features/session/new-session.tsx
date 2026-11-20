@@ -27,7 +27,7 @@ import { useHostLabel } from '@renderer/features/sidebar/host-label'
 import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { usePane } from '@renderer/features/split/pane-context'
 import { useCloudOff } from '@renderer/lib/cloud'
-import { basename, limitPhrase, longAgo, resetTime } from '@renderer/lib/format'
+import { backTime, basename, limitPhrase, longAgo, resetTime } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { newestLimits } from '@renderer/lib/plan-readings'
@@ -949,6 +949,20 @@ function PickupStatus({ session, now }: { session: SessionSummary; now: number }
         <span className="kettu-pickup__status">
           <TurnDots phase="working" className="size-2.75" />
           {t('newSession.pickup.working')}
+        </span>
+      )
+    case 'stalled':
+      return (
+        <span className="kettu-pickup__status" data-status="waiting">
+          {t('newSession.pickup.stalled')}
+        </span>
+      )
+    case 'paused':
+      return (
+        <span className="kettu-pickup__status" data-status="waiting">
+          {session.limitPause?.resetsAt
+            ? t('newSession.pickup.paused', { time: backTime(session.limitPause.resetsAt, now) })
+            : t('newSession.pickup.pausedUnknown')}
         </span>
       )
     case 'failed':

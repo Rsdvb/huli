@@ -1548,6 +1548,35 @@ describe('a turn', () => {
     ])
   })
 
+  it('ends a refused turn with why the model refused', async () => {
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit({
+        type: 'system',
+        subtype: 'model_refusal_no_fallback',
+        original_model: 'claude-opus-5',
+        request_id: null,
+        api_refusal_category: 'bio',
+        api_refusal_explanation: 'The request asked for a pathogen protocol.',
+        content: '',
+        uuid: 'u-refused',
+        session_id: query.sessionId,
+      } as SdkMessage)
+      query.finish({ stop_reason: 'refusal' })
+    }
+    await expect(
+      s.connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }]),
+    ).resolves.toMatchObject({
+      stopReason: 'refusal',
+      refusal: {
+        explanation: 'The request asked for a pathogen protocol.',
+        category: 'bio',
+        model: 'claude-opus-5',
+      },
+    })
+    expect(target.entries().filter((entry) => entry.kind === 'notice')).toEqual([])
+  })
+
   it('passes an error result on as the turn failing', async () => {
     s.sdk.script = (query) => {
       query.running()
@@ -2205,6 +2234,25 @@ describe('permissions', () => {
       toolUseID: 'toolu_7',
     })
     expect(target.entry('t:toolu_7')).toMatchObject({ status: 'in_progress' })
+  })
+
+  it('says why Claude Code asks: what allowing grants and the check that asked', async () => {
+    void s.sdk.last.options.canUseTool!(
+      'Read',
+      { file_path: '/home/ada/Downloads/a.txt' },
+      {
+        signal: new AbortController().signal,
+        toolUseID: 'toolu_8',
+        description: 'Claude will have read access to files in ~/Downloads',
+        decisionReason: 'Path is outside the allowed working directories',
+      },
+    )
+    await settle()
+    expect(target.asked[0]!.request.reason).toBe(
+      'Claude will have read access to files in ~/Downloads' +
+        String.fromCharCode(10) +
+        'Path is outside the allowed working directories',
+    )
   })
 
   it('adds the suggested rules for always allow, and denies a rejection or a cancel', async () => {

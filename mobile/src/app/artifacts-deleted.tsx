@@ -2,7 +2,7 @@
 // good; a tap offers both.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Animated, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { Alert, Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { HostEvent } from '@shared/agent-host'
 import type { ArtifactSummary } from '@shared/artifacts'
@@ -18,6 +18,7 @@ import { NavBar } from '../ui/NavBar'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
 import { useCollapsingHeader } from '../ui/ScrollHeader'
+import { usePullRefresh } from '../ui/PullRefresh'
 import { SkeletonRows } from '../ui/Skeleton'
 import { SwipeRow } from '../ui/SwipeRow'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
@@ -26,10 +27,10 @@ export default function DeletedArtifacts() {
   const { c } = useTokens()
   const host = useHost()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(() => load(), header)
   const insets = useSafeAreaInsets()
   const [items, setItems] = useState<ArtifactSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [menu, setMenu] = useState<ArtifactSummary | null>(null)
   const connected = host.state.kind === 'connected'
 
@@ -118,17 +119,7 @@ export default function DeletedArtifacts() {
           paddingTop: header.contentTop,
           paddingBottom: insets.bottom + space.xxxl,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              void load().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
         ListHeaderComponent={
           <View style={styles.pad}>
             <LargeTitle

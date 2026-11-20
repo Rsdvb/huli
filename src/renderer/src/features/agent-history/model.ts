@@ -2,8 +2,9 @@
 // tools/huli/README.md.
 
 import type { AgentHistoryPage, AgentHistorySession } from '@shared/agent-history'
-import type { AgentId } from '@shared/agents'
+import type { AgentId, HarnessId } from '@shared/agents'
 import { basename } from '@renderer/lib/format'
+import { readJson, writeJson } from '@renderer/lib/storage'
 
 /** One agent's listing as it loads, page by page. */
 export interface HistoryList {
@@ -12,6 +13,8 @@ export interface HistoryList {
   /** More pages are coming. */
   loading: boolean
   error: string | null
+  /** For another folder's listing: the folder its sessions were read from. */
+  source?: string
 }
 
 export interface HistoryGroup {
@@ -33,8 +36,49 @@ export function folderKey(cwd: string): string {
     : trimmed
 }
 
-export function sessionKey(agentId: AgentId, acpSessionId: string): string {
-  return `${agentId}\n${acpSessionId}`
+/**
+ * Where a listing comes from: an agent's own sessions, keyed by the agent, or Huli: another
+ * folder's of the agent's kind.
+ */
+export function sourceKey(agentId: AgentId, folder: string | null): string {
+  return folder === null ? agentId : `${agentId}\n${folder}`
+}
+
+/** A session of a listing, `source` an agent's id or a `sourceKey`. */
+export function sessionKey(source: string, acpSessionId: string): string {
+  return `${source}\n${acpSessionId}`
+}
+
+const RECENT_FOLDERS_KEY = 'agentHistory.folders'
+const RECENT_FOLDERS = 6
+
+/** Huli: the folders chosen last for an agent kind, the latest first. */
+export function recentFolders(harness: HarnessId): string[] {
+  const kept = readJson<unknown>(RECENT_FOLDERS_KEY, null)
+  const list =
+    typeof kept === 'object' && kept !== null ? (kept as Record<string, unknown>)[harness] : null
+  return Array.isArray(list)
+    ? list.filter((item): item is string => typeof item === 'string').slice(0, RECENT_FOLDERS)
+    : []
+}
+
+export function rememberFolder(harness: HarnessId, folder: string): string[] {
+  const kept = readJson<unknown>(RECENT_FOLDERS_KEY, null)
+  const all = typeof kept === 'object' && kept !== null ? (kept as Record<string, unknown>) : {}
+  const next = [folder, ...recentFolders(harness).filter((item) => item !== folder)].slice(
+    0,
+    RECENT_FOLDERS,
+  )
+  writeJson(RECENT_FOLDERS_KEY, { ...all, [harness]: next })
+  return next
+}
+
+export function forgetFolder(harness: HarnessId, folder: string): string[] {
+  const kept = readJson<unknown>(RECENT_FOLDERS_KEY, null)
+  const all = typeof kept === 'object' && kept !== null ? (kept as Record<string, unknown>) : {}
+  const next = recentFolders(harness).filter((item) => item !== folder)
+  writeJson(RECENT_FOLDERS_KEY, { ...all, [harness]: next })
+  return next
 }
 
 /**
@@ -75,14 +119,14 @@ export function groupsOf(sessions: readonly AgentHistorySession[]): HistoryGroup
 
 /** The keys of the sessions that may be chosen and last changed within `days`. */
 export function recentKeys(
-  agentId: AgentId,
+  source: string,
   sessions: readonly AgentHistorySession[],
   days: number,
   now: number,
 ): string[] {
   return sessions
     .filter((s) => selectable(s) && (s.updatedAt ?? 0) >= now - days * DAY_MS)
-    .map((s) => sessionKey(agentId, s.acpSessionId))
+    .map((s) => sessionKey(source, s.acpSessionId))
 }
 
 export function withKeys(

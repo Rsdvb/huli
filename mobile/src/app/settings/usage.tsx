@@ -20,17 +20,13 @@ import { ago } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { space, type as typeScale, useTokens } from '../../ui/tokens'
+import { dateText } from '../../usage/text'
 
 function bytesText(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`
   if (n >= 1e3) return `${Math.round(n / 1e3)} KB`
   return `${n} B`
-}
-
-function dateText(at: number): string {
-  const d = new Date(at)
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
 }
 
 export default function UsageRecords() {

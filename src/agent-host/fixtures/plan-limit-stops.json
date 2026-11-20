@@ -1,0 +1,105 @@
+{
+  "claude-code": {
+    "agent": "Claude Code 2.x through the Agent SDK, its 5-hour window used up: the SDK's message shapes (SDKRateLimitEvent, the synthetic assistant message, the error result), times set for the test",
+    "messages": [
+      {
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+          "status": "rejected",
+          "resetsAt": 1800018000,
+          "rateLimitType": "five_hour",
+          "overageStatus": "rejected",
+          "overageDisabledReason": "org_level_disabled",
+          "isUsingOverage": false
+        },
+        "uuid": "4b1f0f5e-2a51-4a5c-9d3e-1f2a3b4c5d6e",
+        "session_id": "SESSION"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "id": "6f2c3a1e-0b7d-4e2a-8c1f-9a8b7c6d5e4f",
+          "model": "<synthetic>",
+          "role": "assistant",
+          "content": [
+            { "type": "text", "text": "You've hit your limit · resets 3pm (Europe/Berlin)" }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "error": "rate_limit",
+        "uuid": "8d7e6f5a-4b3c-2d1e-0f9a-8b7c6d5e4f3a",
+        "session_id": "SESSION"
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "result": "You've hit your limit · resets 3pm (Europe/Berlin)",
+        "stop_reason": "stop_sequence",
+        "session_id": "SESSION"
+      }
+    ]
+  },
+  "claude-code-1": {
+    "agent": "Claude Code 1.x, whose synthetic message carried the reset in Unix seconds",
+    "message": "Claude AI usage limit reached|1800018000"
+  },
+  "codex": {
+    "agent": "codex app-server, a ChatGPT plan's 5-hour window used up: the app-server's notifications (account/rateLimits/updated, error, turn/completed), times set for the test",
+    "notifications": [
+      {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "primary": { "usedPercent": 100, "windowDurationMins": 300, "resetsAt": 1800018000 },
+            "secondary": { "usedPercent": 41, "windowDurationMins": 10080, "resetsAt": 1800600000 }
+          }
+        }
+      },
+      {
+        "method": "error",
+        "params": {
+          "threadId": "THREAD",
+          "turnId": "TURN",
+          "willRetry": false,
+          "error": {
+            "message": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:00 PM.",
+            "codexErrorInfo": "usageLimitExceeded",
+            "additionalDetails": null
+          }
+        }
+      },
+      {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "THREAD",
+          "turn": {
+            "id": "TURN",
+            "items": [],
+            "status": "failed",
+            "error": {
+              "message": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:00 PM.",
+              "codexErrorInfo": "usageLimitExceeded",
+              "additionalDetails": null
+            }
+          }
+        }
+      }
+    ]
+  },
+  "gemini": {
+    "agent": "an ACP agent on the Gemini API passing its quota refusal on as an internal error; the words are the API's and Code Assist's, not a capture of Antigravity",
+    "errors": [
+      {
+        "code": -32603,
+        "message": "Internal error: You have exhausted your capacity on this model. Your quota will reset after 2h5m30s."
+      },
+      {
+        "code": -32603,
+        "message": "Internal error: [429 Too Many Requests] Resource has been exhausted (e.g. check quota)."
+      }
+    ]
+  }
+}

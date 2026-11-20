@@ -25,6 +25,14 @@ export function wordsOf(query: string): string[] {
   return query.trim().toLowerCase().split(/\s+/).filter(Boolean)
 }
 
+/**
+ * Whether a query is long enough to search what was said: the computer looks only for two
+ * characters or more of its words together (shared/search-fold.ts), so a single 字 finds nothing.
+ */
+export function longEnough(words: readonly string[]): boolean {
+  return Array.from(words.join('')).length >= 2
+}
+
 export function matches(text: string, words: string[]): boolean {
   if (words.length === 0) return false
   const lower = text.toLowerCase()

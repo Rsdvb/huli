@@ -3,23 +3,15 @@
 // year's activity, the filters, the trend, the breakdown by model or project, the facts and the
 // token composition, as the computer counts them.
 
-import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
-import {
-  ActivityIndicator,
-  Animated,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
+import { ActivityIndicator, Animated, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useIsFocused, useLocalSearchParams } from 'expo-router'
-import type { AgentStatus, LimitsReason, PlanLimit } from '@shared/agent-host'
+import type { AgentStatus, PlanLimit } from '@shared/agent-host'
 import type { UsageScope } from '@shared/usage'
 import { TopBar, useScrollTopOnTabPress } from '../components/shell'
 import { useActiveHost, useAgents, useHostState, useMaybeLink } from '../host'
-import { clockOf, errorText } from '../sessions'
+import { errorText } from '../sessions'
 import { agentColor } from '../ui/agent-marks'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { Card } from '../ui/Card'
@@ -32,17 +24,11 @@ import { Pill } from '../ui/Pill'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
 import { useCollapsingHeader } from '../ui/ScrollHeader'
+import { usePullRefresh } from '../ui/PullRefresh'
 import { SectionHeader } from '../ui/SectionHeader'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { Skeleton } from '../ui/Skeleton'
-import {
-  radius,
-  space,
-  TAB_BAR_CLEARANCE,
-  type as typeScale,
-  useTokens,
-  type Palette,
-} from '../ui/tokens'
+import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../ui/tokens'
 import {
   addDays,
   agentTotals,
@@ -69,6 +55,7 @@ import {
   Activity,
   Breakdown,
   EmptyNote,
+  CHART_GRID,
   Facts,
   Filters,
   Footnote,
@@ -90,7 +77,15 @@ import {
   rangeText,
 } from './text'
 import { useUsage } from './useUsage'
-import { inlineReset, isExhausted } from '../ui/session/limits'
+import {
+  inlineReset,
+  isExhausted,
+  limitColor,
+  limitsWhy,
+  limitTextColor,
+  readText,
+  windowName,
+} from '../ui/session/limits'
 import { useTicking } from '../ui/session/ticking'
 
 type Period = PeriodUnit | 'all'
@@ -129,16 +124,6 @@ function periodWord(unit: PeriodUnit, step: number, today: number, near = true):
   }
 }
 
-const WINDOWS: Record<string, string> = {
-  five_hour: '5 小时',
-  seven_day: '每周',
-  seven_day_opus: '每周 · Opus',
-  seven_day_sonnet: '每周 · Sonnet',
-  monthly: '每月',
-  annual: '每年',
-  overage: '额外用量',
-}
-
 /** How the summary sentence names a window: 本周的 37%. */
 const WINDOW_SPANS: Record<string, string> = {
   five_hour: '这 5 小时',
@@ -149,31 +134,22 @@ const WINDOW_SPANS: Record<string, string> = {
   annual: '今年',
 }
 
-const REASONS: Record<LimitsReason, string> = {
-  'vendor-disallows': '服务商不提供套餐额度的读取。',
-  'harness-does-not-offer': '这个 Agent 不报告套餐额度。',
-  'administrator-managed': '额度由管理员管理。',
-  'model-provider-managed': '额度由模型服务商管理。',
-  'not-yet-supported': '暂不支持读取这个 Agent 的额度。',
-  'console-managed': '用 API 密钥登录，用量请到服务商控制台查看。',
-}
-
 const DONUT_UNITS = { tokens: 'token', requests: '次请求', turns: '轮', cost: '估算费用' } as const
 
-function limitLabel(limit: PlanLimit): string {
-  const known = WINDOWS[limit.window]
-  if (known) return known
-  const weekly = /^Weekly · (.+)$/.exec(limit.label)
-  if (weekly) return `每周 · ${weekly[1]}`
-  const fiveHour = /^5-hour · (.+)$/.exec(limit.label)
-  return fiveHour ? `5 小时 · ${fiveHour[1]}` : limit.label
-}
+const OTHERS = '__others'
+const LEGEND_ROWS = 6
 
-function limitColor(c: Palette, limit: PlanLimit): string {
-  const used = limit.usedPercent ?? 0
-  if (limit.state === 'reached' || used >= 90) return c.danger
-  if (limit.state === 'warning' || used >= 75) return c.warning
-  return c.tint
+/**
+ * The donut's legend: every agent while they fit, else the first five and 其他 for the rest, so
+ * the shares listed still add up to the whole.
+ */
+function legendOf<T extends { agentId: string; value: number }>(
+  rows: readonly T[],
+): { agentId: string | null; value: number }[] {
+  if (rows.length <= LEGEND_ROWS) return [...rows]
+  const shown = rows.slice(0, LEGEND_ROWS - 1)
+  const rest = rows.slice(LEGEND_ROWS - 1).reduce((sum, row) => sum + row.value, 0)
+  return [...shown, { agentId: null, value: rest }]
 }
 
 export default function UsageScreen() {
@@ -183,6 +159,7 @@ export default function UsageScreen() {
   const state = useHostState()
   const host = useActiveHost()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(() => usage.sync(), header)
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
   const [choice, setChoice] = useState<RangeChoice>({ kind: 'day', step: 0 })
@@ -191,7 +168,6 @@ export default function UsageScreen() {
   const [agent, setAgent] = useState<AgentFilter>('all')
   const [metric, setMetric] = useState<Metric>('tokens')
   const [picking, setPicking] = useState(false)
-  const [pulled, setPulled] = useState(false)
   const [refreshing, setRefreshing] = useState<Set<string>>(new Set())
   const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
   const [hour, setHour] = useState<number | null>(null)
@@ -297,12 +273,16 @@ export default function UsageScreen() {
 
   // Series slots follow the agent's place in the summary's own agent list, so a period with fewer
   // agents never repaints the rest.
-  const colorOf = (agentId: string) => {
-    const order: readonly string[] = read?.summary.agents ?? []
-    const slot = Math.max(0, order.indexOf(agentId))
-    return agentColor(agentId, c.series[slot % c.series.length]!)
-  }
-  const nameOf = (agentId: string) => agents.get(agentId)?.name ?? agentId
+  // The same functions while what they read holds, so the charts' memos can hold too.
+  const order = read?.summary.agents
+  const colorOf = useCallback(
+    (agentId: string) => {
+      const slot = Math.max(0, ((order ?? []) as readonly string[]).indexOf(agentId))
+      return agentColor(agentId, c.series[slot % c.series.length]!)
+    },
+    [order, c.series],
+  )
+  const nameOf = useCallback((agentId: string) => agents.get(agentId)?.name ?? agentId, [agents])
 
   // The plan window nearest its limit, for the summary's second line.
   const tightest = (() => {
@@ -355,7 +335,7 @@ export default function UsageScreen() {
             style={styles.readAt}
           >
             <Text style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}>
-              {observed > 0 ? `读取于 ${clockOf(observed)}` : '还没读过'}
+              {observed > 0 ? readText(observed) : '还没读过'}
             </Text>
             {anyRefreshing ? (
               <ActivityIndicator size="small" color={c.textTertiary} />
@@ -481,10 +461,10 @@ export default function UsageScreen() {
                 size={22}
                 stroke={4}
                 progress={(tightest.limit.usedPercent ?? 0) / 100}
-                color={limitColor(c, tightest.limit)}
+                color={limitColor(tightest.limit, c)}
               />
               <Text style={[typeScale.lead, styles.flex, { color: c.textSecondary }]}>
-                {WINDOW_SPANS[tightest.limit.window] ?? limitLabel(tightest.limit)}的{' '}
+                {WINDOW_SPANS[tightest.limit.window] ?? windowName(tightest.limit)}的{' '}
                 {Math.round(tightest.limit.usedPercent ?? 0)}%。
               </Text>
             </View>
@@ -587,7 +567,12 @@ export default function UsageScreen() {
                   ? '只算纸鸢运行的对话时还没有用量；在筛选里换成电脑上的全部日志试试。'
                   : status.fromComputer
                     ? `在 ${hostName} 上用 Agent 写代码之后，token、请求和费用会出现在这里。`
-                    : `纸鸢会记下它运行的每一轮对话。要算上之前和在终端里的使用，请在 ${hostName} 的 设置 › 用量 里打开「统计本机用量」。`
+                    : `纸鸢会记下它运行的每一轮对话。要算上之前和在终端里的使用，请在 设置 › 用量记录 里打开「统计电脑上的用量」。`
+              }
+              action={
+                status.fromComputer
+                  ? undefined
+                  : { label: '打开用量记录', onPress: () => router.push('/settings/usage') }
               }
             />
             {status.fromComputer && filters}
@@ -651,14 +636,22 @@ export default function UsageScreen() {
                     </Text>
                   </Donut>
                   <View style={styles.legend}>
-                    {derived.byMetric.slice(0, 6).map((a) => (
-                      <View key={a.agentId} style={styles.legendRow}>
-                        <View style={[styles.swatch, { backgroundColor: colorOf(a.agentId) }]} />
+                    {legendOf(derived.byMetric).map((a) => (
+                      <View key={a.agentId ?? OTHERS} style={styles.legendRow}>
+                        <View
+                          style={[
+                            styles.swatch,
+                            {
+                              backgroundColor:
+                                a.agentId === null ? c.textTertiary : colorOf(a.agentId),
+                            },
+                          ]}
+                        />
                         <Text
                           style={[typeScale.callout, styles.flex, { color: c.text }]}
                           numberOfLines={1}
                         >
-                          {nameOf(a.agentId)}
+                          {a.agentId === null ? '其他' : nameOf(a.agentId)}
                         </Text>
                         <Text style={[typeScale.callout, styles.tabular, { color: c.text }]}>
                           {metricText(kind, a.value)}
@@ -704,7 +697,7 @@ export default function UsageScreen() {
                 <BarChart
                   values={hourly}
                   height={120}
-                  grid={[0.5, 1]}
+                  grid={CHART_GRID}
                   emphasis={busiest}
                   selected={hour}
                   onSelect={setHour}
@@ -796,17 +789,7 @@ export default function UsageScreen() {
           paddingHorizontal: space.xl,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={pulled}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setPulled(true)
-              void usage.sync().finally(() => setPulled(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         {body()}
       </Animated.ScrollView>
@@ -853,12 +836,13 @@ function Stat(props: { value: string; label: string; note?: string }) {
   )
 }
 
+/** Why a card shows no windows, in the 套餐 page's words. */
 function limitWhy(agent: AgentStatus, readable: boolean): string {
-  if (agent.limitsReason) return REASONS[agent.limitsReason]
-  if (agent.signIn === 'required' && agent.capabilities.reports) return '登录后才能读到额度。'
   // Huli reads Antigravity's limits only when asked: running agy by itself breaks Google's terms.
-  if (agent.id === 'antigravity' && readable) return '点开后按「刷新」查询额度，只在你点的时候查。'
-  return readable ? '还没有报告套餐用量。' : '不报告套餐额度。'
+  if (agent.id === 'antigravity' && readable && !agent.limitsReason) {
+    return '点开后按「刷新」查询额度，只在你点的时候查。'
+  }
+  return limitsWhy(agent)
 }
 
 function PlanCard(props: {
@@ -904,7 +888,7 @@ function PlanCard(props: {
             gap={2.5}
             rings={limits.map((l) => ({
               progress: (l.usedPercent ?? 0) / 100,
-              color: limitColor(c, l),
+              color: limitColor(l, c),
             }))}
           />
           {/* Each window as the desktop's card has it: a dot in its ring's color, the rings from
@@ -915,16 +899,16 @@ function PlanCard(props: {
             {limits.map((l) => {
               const reset = inlineReset(l, now)
               const out = reset !== null && isExhausted(l, now)
-              const tone = (l.usedPercent ?? 0) >= 95 || out ? limitColor(c, l) : c.text
+              const tone = out ? limitColor(l, c) : limitTextColor(l, c, c.text)
               return (
                 <View key={l.window}>
                   <View style={styles.planLine}>
-                    <View style={[styles.planDot, { backgroundColor: limitColor(c, l) }]} />
+                    <View style={[styles.planDot, { backgroundColor: limitColor(l, c) }]} />
                     <Text
                       style={[typeScale.caption, styles.planLineName, { color: c.textSecondary }]}
                       numberOfLines={1}
                     >
-                      {limitLabel(l)}
+                      {windowName(l)}
                     </Text>
                     <Text style={[typeScale.subhead, styles.tabular, { color: tone }]}>
                       {out
@@ -941,8 +925,7 @@ function PlanCard(props: {
                         styles.tabular,
                         styles.planReset,
                         {
-                          color:
-                            (l.usedPercent ?? 0) >= 90 || out ? limitColor(c, l) : c.textSecondary,
+                          color: out ? limitColor(l, c) : limitTextColor(l, c, c.textSecondary),
                         },
                       ]}
                       numberOfLines={1}

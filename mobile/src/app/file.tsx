@@ -1,13 +1,22 @@
 // One file of a session's folder, read-only: its text in monospace with line numbers, scrolled
 // sideways rather than wrapped, and a button that copies it all.
 
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
+import {
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { DeviceFileContent } from '@shared/files'
 import { formatBytes } from '../attachments'
 import { call, errorText, sessionFolder } from '../git'
-import { useLink, useSession } from '../host'
+import { sameFields, useHostSelector, useLink, type HostData } from '../host'
 import { ContextMenu } from '../ui/ContextMenu'
 import { copyText } from '../ui/session/feedback'
 import { baseName, dirName } from '../ui/session/format'
@@ -17,13 +26,31 @@ import { MONO, useSessionTokens } from '../ui/session/palette'
 import { RoundButton } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
 import { StateView } from '../ui/session/StateView'
+import { FONT_SCALE } from '../ui/tokens'
 
 export default function FileScreen() {
   const { id, path, line } = useLocalSearchParams<{ id: string; path: string; line?: string }>()
   const { c, s } = useSessionTokens()
   const link = useLink()
-  const summary = useSession(id)
-  const folder = summary && !summary.scratch ? sessionFolder(summary) : null
+  const insets = useSafeAreaInsets()
+  // Only the session's folder, so its every turn and status does not draw the file again.
+  const { known, folder } = useHostSelector(
+    useCallback(
+      (d: HostData) => {
+        const summary = d.sessions.get(id)
+        return {
+          known: summary !== undefined,
+          folder: summary && !summary.scratch ? sessionFolder(summary) : null,
+        }
+      },
+      [id],
+    ),
+    sameFields,
+  )
+  // The lines follow the system's text size up to the dense cap, and their rows grow with them;
+  // React Native scales a line height with its text, so the styles keep the unscaled one.
+  const scale = Math.min(useWindowDimensions().fontScale, FONT_SCALE.dense)
+  const rowHeight = Math.ceil(LINE * scale)
   const [content, setContent] = useState<DeviceFileContent | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -38,7 +65,10 @@ export default function FileScreen() {
 
   useEffect(load, [load])
 
-  const lines = content?.kind === 'text' ? content.text.split(/\r?\n/) : []
+  const lines = useMemo(
+    () => (content?.kind === 'text' ? content.text.split(/\r?\n/) : []),
+    [content],
+  )
   const gutter = String(lines.length).length
   // A reference to a line opens the file a few lines above it.
   const target = line ? Math.min(Math.max(0, Number(line) - 4), Math.max(0, lines.length - 1)) : 0
@@ -51,6 +81,8 @@ export default function FileScreen() {
   let body: ReactElement
   if (error) {
     body = <StateView text={error} tone="danger" retry={load} />
+  } else if (known && !folder) {
+    body = <StateView text="这个会话没有项目，没有可看的文件。" icon={G.folder} />
   } else if (!content) {
     body = <StateView loading />
   } else if (content.kind === 'text') {
@@ -66,13 +98,13 @@ export default function FileScreen() {
             ? {
                 initialScrollIndex: target,
                 getItemLayout: (_: unknown, index: number) => ({
-                  length: LINE,
-                  offset: LINE * index,
+                  length: rowHeight,
+                  offset: rowHeight * index,
                   index,
                 }),
               }
             : {})}
-          contentContainerStyle={styles.code}
+          contentContainerStyle={[styles.code, { paddingBottom: insets.bottom + EDGE }]}
           renderItem={({ item, index }) => (
             <ContextMenu
               items={[
@@ -90,14 +122,25 @@ export default function FileScreen() {
                   {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
                   style={[
                     styles.line,
-                    { backgroundColor: c.bg },
+                    { height: rowHeight, backgroundColor: c.bg },
                     index === marked && { backgroundColor: s.inlineCode },
                   ]}
                 >
-                  <Text style={[styles.number, { color: c.textTertiary, width: gutter * 8 + 8 }]}>
+                  <Text
+                    maxFontSizeMultiplier={FONT_SCALE.dense}
+                    style={[
+                      styles.number,
+                      { color: c.textTertiary, width: (gutter * 8 + 8) * scale },
+                    ]}
+                  >
                     {index + 1}
                   </Text>
-                  <Text style={[styles.text, { color: c.text }]}>{item || ' '}</Text>
+                  <Text
+                    maxFontSizeMultiplier={FONT_SCALE.dense}
+                    style={[styles.text, { color: c.text }]}
+                  >
+                    {item || ' '}
+                  </Text>
                 </Pressable>
               )}
             </ContextMenu>
@@ -150,13 +193,16 @@ export default function FileScreen() {
   )
 }
 
+/** A line's height at the system's own text size. */
 const LINE = 18
+/** Room above the first line and below the last, over the home indicator. */
+const EDGE = 10
 
 const styles = StyleSheet.create({
   frame: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
   actions: { flexDirection: 'row', gap: 8 },
-  code: { paddingVertical: 10, paddingRight: 16 },
-  line: { flexDirection: 'row', height: LINE },
+  code: { paddingTop: EDGE, paddingRight: 16 },
+  line: { flexDirection: 'row' },
   number: { fontFamily: MONO, fontSize: 12, lineHeight: LINE, textAlign: 'right', marginRight: 10 },
   text: { fontFamily: MONO, fontSize: 12.5, lineHeight: LINE },
 })

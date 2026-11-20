@@ -35,6 +35,7 @@ import {
 import {
   addEntry,
   commandDescription,
+  fenced,
   firstUserMessage,
   lastEntry,
   mergeConfig,
@@ -80,6 +81,8 @@ export const KNOWN_UPDATES: ReadonlySet<string> = new Set([
 
 /** The most base64 a sound or a clip keeps, so one block cannot swell the thread and its snapshots. */
 export const CARRIED_DATA_LIMIT = 20 * 1024 * 1024
+/** The most of an embedded resource's text a message or a call's result carries. */
+export const RESOURCE_TEXT_LIMIT = 50_000
 
 /** The file name a resource's URI ends in, if any. */
 function uriName(uri: string): string | null {
@@ -113,6 +116,20 @@ function carriedRef(
       size: megabytes,
     }),
   }
+}
+
+/**
+ * An embedded resource's text, under its name, as Markdown whose code block a card folds when it
+ * is long; null for any other block, a resource's bytes among them.
+ */
+export function resourceMarkdown(block: acp.ContentBlock): string | null {
+  if (block.type !== 'resource' || !('text' in block.resource)) return null
+  const { uri, text } = block.resource
+  if (typeof text !== 'string') return null
+  const shown =
+    text.length > RESOURCE_TEXT_LIMIT ? `${text.slice(0, RESOURCE_TEXT_LIMIT)}\n…` : text
+  const name = (uriName(uri) ?? uri).replace(/`/g, '')
+  return `\`${name}\`\n\n${fenced(toLf(shown))}`
 }
 
 export function contentRef(block: acp.ContentBlock): ContentRef {
@@ -230,12 +247,21 @@ function blocksText(blocks: readonly acp.ContentBlock[]): string {
   return blocks.map((block) => (block.type === 'text' ? block.text : '')).join('')
 }
 
-export function toolContent(item: acp.ToolCallContent): ToolContent {
+/**
+ * A call's content as the entry keeps it. A session it names, such as a subagent it started or
+ * waits on, shows by that: its card stands in the thread, which `ctx` tells known from not.
+ */
+export function toolContent(item: acp.ToolCallContent, ctx?: MapperContext): ToolContent {
   switch (item.type) {
-    case 'content':
-      return item.content.type === 'text'
-        ? { type: 'markdown', markdown: toLf(item.content.text) }
+    case 'content': {
+      if (item.content.type === 'text') {
+        return { type: 'markdown', markdown: toLf(item.content.text) }
+      }
+      const embedded = resourceMarkdown(item.content)
+      return embedded !== null
+        ? { type: 'markdown', markdown: embedded }
         : { type: 'ref', ref: contentRef(item.content) }
+    }
     case 'diff':
       return {
         type: 'diff',
@@ -249,6 +275,16 @@ export function toolContent(item: acp.ToolCallContent): ToolContent {
         type: 'ref',
         ref: { kind: 'unsupported', label: t('content.terminal', { id: item.terminalId }) },
       }
+    case 'session': {
+      const known = ctx?.sessionIdFor(item.sessionId) != null
+      return {
+        type: 'ref',
+        ref: {
+          kind: 'unsupported',
+          label: known ? t('content.subagent') : t('content.session', { id: item.sessionId }),
+        },
+      }
+    }
     default:
       return { type: 'ref', ref: { kind: 'unsupported', label: t('content.unknownTool') } }
   }
@@ -294,8 +330,15 @@ function mapMessageChunk(
   const last = lastEntry(ctx.thread)
   const targetId = byId ?? (last?.kind === kind ? last.id : null)
   const existing = targetId ? ctx.thread.byId[targetId] : undefined
-  const isText = chunk.content.type === 'text'
-  const text = chunk.content.type === 'text' ? chunk.content.text : ''
+  // A message's embedded text shows in it, set apart, rather than as a chip that drops it.
+  const embedded = kind === 'agent' ? resourceMarkdown(chunk.content) : null
+  const isText = chunk.content.type === 'text' || embedded !== null
+  const text =
+    chunk.content.type === 'text'
+      ? chunk.content.text
+      : embedded !== null
+        ? `\n\n${embedded}\n\n`
+        : ''
 
   if (existing && existing.kind === kind) {
     if (isText) {
@@ -431,7 +474,7 @@ function mapToolCall(
   if (update.title != null) changes.title = update.title
   if (update.kind != null) changes.toolKind = toolKind(update.kind)
   if (update.status != null) changes.status = update.status
-  if (update.content != null) changes.content = update.content.map(toolContent)
+  if (update.content != null) changes.content = update.content.map((item) => toolContent(item, ctx))
   if (update.locations != null) changes.locations = toolLocations(update.locations)
   const raw = rawInputText(update.rawInput)
   if (raw !== undefined) changes.rawInput = raw

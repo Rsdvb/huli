@@ -1,16 +1,8 @@
 // The files of the folder a session works in, read-only: one folder at a time, its folders first,
 // with a search over the whole project; a file opens in a plain viewer.
 
-import { useMemo, useState, type ReactElement } from 'react'
-import {
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { useDeferredValue, useMemo, useState, type ReactElement } from 'react'
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { matchFiles, useProjectFiles } from '../../files'
 import { sessionFolder } from '../../git'
@@ -20,6 +12,7 @@ import { GlassHeader } from '../../ui/session/GlassHeader'
 import { FileMark, G, Icon, TOOL_ICONS } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
 import { StateView } from '../../ui/session/StateView'
+import { useNextChange, usePullRefresh } from '../../ui/PullRefresh'
 
 interface Item {
   path: string
@@ -56,18 +49,27 @@ export default function FilesScreen() {
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const files = useProjectFiles(link, folder, true)
   const [query, setQuery] = useState('')
+  const read = useNextChange(files.list ?? files.error)
+  const pull = usePullRefresh(() => {
+    files.reload()
+    return read()
+  })
 
+  // A project's paths are lowered once, and the search follows the typing a beat behind, so a long
+  // project does not scan every path in lower case on each keystroke before the field updates.
+  const lowered = useMemo(() => files.list?.paths.map((p) => p.toLowerCase()) ?? [], [files.list])
+  const searched = useDeferredValue(query)
   const items = useMemo((): Item[] => {
     if (!files.list) return []
-    if (query.trim()) {
-      return matchFiles(files.list.paths, query, 200).map((path) => ({
+    if (searched.trim()) {
+      return matchFiles(files.list.paths, searched, 200, lowered).map((path) => ({
         path,
         folder: false,
         where: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
       }))
     }
     return listing(files.list.paths, files.list.folders, dir)
-  }, [files.list, query, dir])
+  }, [files.list, lowered, searched, dir])
 
   const open = (item: Item) => {
     if (item.folder) router.push({ pathname: '/files/[id]', params: { id, dir: item.path } })
@@ -92,9 +94,7 @@ export default function FilesScreen() {
         keyExtractor={(item) => item.path}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl refreshing={false} onRefresh={files.reload} tintColor={c.textSecondary} />
-        }
+        refreshControl={pull}
         ListHeaderComponent={
           <View style={[styles.search, { backgroundColor: c.fill }]}>
             <Icon icon={TOOL_ICONS.search} size={15} color={c.textTertiary} />

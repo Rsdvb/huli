@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { app, type BrowserWindow, dialog, type NativeImage } from 'electron'
-import JSZip from 'jszip'
+import type JSZip from 'jszip'
 import { flushLog } from '@shared/log/process-log'
 import { bundleForDevice, ReportShelf } from '@shared/log/report-bundle'
 import {
@@ -30,6 +30,9 @@ import { t } from './i18n'
 import { createLogger } from './log'
 
 const log = createLogger('report')
+
+// The zip library and its deflate, loaded with the first report rather than with main.
+const zipLibrary = async (): Promise<typeof JSZip> => (await import('jszip')).default
 
 // What the dialog shows of one text file; saving still takes all of it.
 const VIEW_CHARS = 2 * 1024 * 1024
@@ -133,7 +136,7 @@ export class Reports {
     const bytes = Buffer.from(zip, 'base64')
     let parsed: JSZip
     try {
-      parsed = await JSZip.loadAsync(bytes)
+      parsed = await (await zipLibrary()).loadAsync(bytes)
     } catch {
       throw new ReportError('failed', 'The bundle is not a zip')
     }
@@ -162,7 +165,7 @@ export class Reports {
     if (!info) throw new ReportError('not_found', 'The bundle has no such file')
     let zip = this.zips.get(id as string)
     if (!zip) {
-      zip = await JSZip.loadAsync(await readFile(kept.file))
+      zip = await (await zipLibrary()).loadAsync(await readFile(kept.file))
       if (this.shelf.get(id)) this.zips.set(id as string, zip)
     }
     const entry = zip.file(info.path)

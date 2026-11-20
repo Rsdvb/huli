@@ -8,7 +8,6 @@ import {
   Alert,
   Animated,
   Platform,
-  RefreshControl,
   StyleSheet,
   Switch,
   Text,
@@ -25,7 +24,7 @@ import type { HostLink } from '@shared/remote/link'
 import type { SettingsPatch } from '@shared/settings'
 import { admin } from '../admin'
 import { useConnected, useHostActions, useMaybeLink, withinRefreshLimit } from '../host'
-import { ListSyncNote } from '../components/SyncNote'
+import { ListSyncNote, OfflineNote } from '../components/SyncNote'
 import { errorText } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
 import { EmptyState } from '../ui/EmptyState'
@@ -36,6 +35,7 @@ import { NavBar } from '../ui/NavBar'
 import { Press } from '../ui/Press'
 import { Screen } from '../ui/Screen'
 import { useCollapsingHeader } from '../ui/ScrollHeader'
+import { usePullRefresh } from '../ui/PullRefresh'
 import { Skeleton } from '../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
@@ -244,7 +244,6 @@ export function ManagePage(props: {
   const { c } = useTokens()
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
-  const [refreshing, setRefreshing] = useState(false)
   const { onRefresh } = props
   const connected = useConnected()
   const { retry } = useHostActions()
@@ -266,6 +265,7 @@ export function ManagePage(props: {
       throw error
     }
   }
+  const refreshControl = usePullRefresh(onRefresh ? pull : undefined, header)
   return (
     <Screen readable>
       <Animated.ScrollView
@@ -277,22 +277,9 @@ export function ManagePage(props: {
           paddingBottom: insets.bottom + space.xxxl,
           gap: space.xxl,
         }}
-        refreshControl={
-          onRefresh ? (
-            <RefreshControl
-              refreshing={refreshing}
-              tintColor={c.textSecondary}
-              progressViewOffset={header.height}
-              onRefresh={() => {
-                setRefreshing(true)
-                void pull()
-                  .catch(() => {})
-                  .finally(() => setRefreshing(false))
-              }}
-            />
-          ) : undefined
-        }
+        refreshControl={refreshControl}
       >
+        <OfflineNote what="修改这一页" />
         <ListSyncNote error={failure} syncedAt={null} onRetry={pull} />
         {props.intro ? (
           <Text style={[typeScale.footnote, styles.intro, { color: c.textSecondary }]}>
@@ -410,6 +397,7 @@ export function Button(props: {
       accessibilityRole="button"
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       accessibilityState={{ busy: !!props.busy, disabled: !!props.disabled }}
+      hitSlop={BUTTON_SLOP}
       containerStyle={props.wide ? styles.wide : undefined}
       style={[styles.button, { backgroundColor: background }]}
     >
@@ -426,6 +414,9 @@ export function Button(props: {
     </Press>
   )
 }
+
+/** A 36pt button takes touches 44pt tall. */
+const BUTTON_SLOP = { top: 4, bottom: 4, left: 0, right: 0 }
 
 /** Buttons side by side, wrapping when they do not fit. */
 export function Buttons(props: { children: ReactNode; style?: StyleProp<ViewStyle> }) {

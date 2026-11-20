@@ -1,12 +1,14 @@
 // Unsent messages, per computer and session, as the desktop keeps them (composer/drafts.ts): the
 // text, the attachments the computer already holds, and the `@` mentions among them. Kept in memory
-// and written 300 ms after the last change to one JSON file per computer in the app's documents
-// folder, so a draft outlives leaving the screen and a restart of the app. New session's draft is
+// and written a moment after the last change, and at once when the app leaves the front, to one
+// JSON file per computer in the app's documents folder, so a draft outlives leaving the screen and
+// a restart of the app; a file that would read the same is not written again. New session's draft is
 // kept under NEW_SESSION_DRAFT until the session it starts exists.
 //
 //   <documents>/huli/drafts/<computer id>.json   { v: 1, drafts: { <session id>: Draft } }
 
 import { useSyncExternalStore } from 'react'
+import { AppState } from 'react-native'
 import { Directory, File, Paths } from 'expo-file-system'
 import { isAttachment, type Attachment } from '@shared/thread'
 
@@ -35,13 +37,16 @@ export interface Draft {
 }
 
 const VERSION = 1
-const WRITE_DELAY_MS = 300
+/** A pause in typing this long writes the drafts; leaving the app writes them at once. */
+const WRITE_DELAY_MS = 1500
 /** A draft whose JSON is larger than this stays in memory only. */
 const MAX_DRAFT_CHARS = 512 * 1024
 
 const memory = new Map<string, Map<string, Draft>>()
 const loading = new Map<string, Promise<void>>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
+/** What each computer's file was last written with, so the same drafts are not written again. */
+const written = new Map<string, string>()
 const listeners = new Set<() => void>()
 let version = 0
 
@@ -189,20 +194,36 @@ async function save(computer: string): Promise<void> {
   try {
     const file = fileOf(computer)
     if (Object.keys(kept).length === 0) {
+      written.delete(computer)
       if (file.exists) file.delete()
       return
     }
+    const body = JSON.stringify({ v: VERSION, drafts: kept })
+    if (written.get(computer) === body && file.exists) return
     const dir = file.parentDirectory
     if (!dir.exists) dir.create({ intermediates: true, idempotent: true })
     if (!file.exists) file.create({ intermediates: true })
-    await file.write(JSON.stringify({ v: VERSION, drafts: kept }))
+    await file.write(body)
+    written.set(computer, body)
   } catch (error) {
     console.warn('Could not save the drafts; keeping them in memory', error)
   }
 }
 
+// Leaving the front, the drafts waiting for a pause are written now: the system may end the app
+// before the pause is over.
+AppState.addEventListener('change', (next) => {
+  if (next === 'active') return
+  for (const [computer, timer] of timers) {
+    clearTimeout(timer)
+    timers.delete(computer)
+    void save(computer)
+  }
+})
+
 /** Forgets every draft of a computer, as when it is unpaired. */
 export function dropDrafts(computer: string): void {
+  written.delete(computer)
   memory.delete(computer)
   loading.delete(computer)
   const timer = timers.get(computer)

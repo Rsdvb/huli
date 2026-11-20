@@ -3,7 +3,7 @@
 // A task opens its page.
 
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
+import { StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { TaskSummary } from '@shared/workflow'
@@ -26,12 +26,13 @@ import type { MenuNode } from '../../ui/menu'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { Skeleton } from '../../ui/Skeleton'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../shell'
-import { ListSyncNote } from '../SyncNote'
-import { TaskRow } from './TaskRow'
+import { ListSyncNote, OfflineNote } from '../SyncNote'
+import { TaskRow, taskMenu } from './TaskRow'
 
 type Section = 'waiting' | 'running' | 'done' | 'dropped'
 
@@ -62,10 +63,13 @@ export function TasksView(props: { switcher: ReactNode }) {
   const projects = useProjects()
   const shell = useShell()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(async () => {
+    retry()
+    await reload()
+  }, header)
   const insets = useSafeAreaInsets()
   const list = useRef<FlashListRef<Item>>(null)
   const { tasks, views, loaded, error, syncedAt, reload } = useTaskList()
-  const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const connected = state.kind === 'connected'
@@ -130,43 +134,12 @@ export function TasksView(props: { switcher: ReactNode }) {
     )
   }
 
-  const menuOf = (t: TaskSummary): MenuNode[] => [
-    {
-      key: 'open',
-      label: '打开',
-      icon: 'arrow.up.right.square',
-      onPress: () => router.push(`/task/${t.id}`),
-    },
-    {
-      key: 'pin',
-      label: t.pinnedAt !== null ? '取消置顶' : '置顶',
-      icon: t.pinnedAt !== null ? 'pin.slash' : 'pin',
-      disabled: !connected,
-      onPress: () => link && togglePin(link, t),
-    },
-    { kind: 'divider', key: 'danger' },
-    t.status === 'running'
-      ? {
-          key: 'cancel',
-          label: '取消需求…',
-          icon: 'xmark.circle',
-          destructive: true,
-          disabled: !connected,
-          onPress: () => link && confirmCancel(link, t),
-        }
-      : {
-          key: 'delete',
-          label: '删除…',
-          icon: 'trash',
-          destructive: true,
-          disabled: !connected,
-          onPress: () => link && confirmDelete(link, t),
-        },
-  ]
+  const menuOf = (t: TaskSummary): MenuNode[] => taskMenu(t, connected ? link : null)
 
   const top = (
     <View style={styles.top}>
       {props.switcher}
+      {tasks.length > 0 ? <OfflineNote what="开始、置顶和取消需求" /> : null}
       {tasks.length > 0 ? (
         <ListSyncNote error={error} syncedAt={syncedAt} onRetry={reload} />
       ) : null}
@@ -346,18 +319,7 @@ export function TasksView(props: { switcher: ReactNode }) {
           paddingTop: header.contentTop + space.md,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              retry()
-              void reload().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
         ListHeaderComponent={top}
         ListEmptyComponent={empty()}
       />

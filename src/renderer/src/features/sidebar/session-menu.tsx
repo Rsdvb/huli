@@ -2,6 +2,7 @@ import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import {
   Archive01Icon,
   ArrowMoveDownRightIcon,
+  Clock01Icon,
   CodeIcon,
   ComputerIcon,
   FolderRemoveIcon,
@@ -53,6 +54,7 @@ import {
 } from '@renderer/components/ui/alert-dialog'
 import { Button } from '@renderer/components/ui/button'
 import {
+  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -308,6 +310,23 @@ export function SessionMenuItems({
             {unread ? t('row.markRead') : t('row.markUnread')}
             {shortcut}
           </DropdownMenuItem>
+        )
+      case 'autoResume':
+        return (
+          <DropdownMenuCheckboxItem
+            key={name}
+            {...props}
+            checked={summary.autoResume ?? false}
+            onCheckedChange={(on) =>
+              void host('sessions.setAutoResume', { sessionId: id, on }).catch((e: unknown) =>
+                toast(errorMessage(e)),
+              )
+            }
+            closeOnClick
+          >
+            <MenuGlyph icon={Clock01Icon} />
+            {t('row.autoResume')}
+          </DropdownMenuCheckboxItem>
         )
       case 'rename':
         return (

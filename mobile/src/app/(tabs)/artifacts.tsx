@@ -4,15 +4,7 @@
 // Recently deleted sits at the end.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Animated,
-  FlatList,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { Animated, FlatList, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
@@ -32,6 +24,7 @@ import { Sheet, type SheetItem } from '../../components/Sheet'
 import { ListSyncNote } from '../../components/SyncNote'
 import {
   useAgents,
+  useComputerId,
   useHostActions,
   useHostSelector,
   useHostState,
@@ -46,6 +39,8 @@ import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { useWhenShown } from '../../ui/focus'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { Skeleton } from '../../ui/Skeleton'
 import {
   FONT_SCALE,
@@ -81,7 +76,13 @@ function sameAgentIds(a: Map<string, string>, b: Map<string, string>): boolean {
   return true
 }
 
+/** Each computer's artifacts mount afresh, so none shows another's while its own load. */
 export default function Artifacts() {
+  const hostId = useComputerId()
+  return <ArtifactsTab key={hostId ?? ''} />
+}
+
+function ArtifactsTab() {
   const { c } = useTokens()
   const link = useMaybeLink()
   const state = useHostState()
@@ -90,13 +91,16 @@ export default function Artifacts() {
   const sessionAgents = useHostSelector(pickSessionAgents, sameAgentIds)
   const shell = useShell()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(async () => {
+    retry()
+    await load()
+  }, header)
   const insets = useSafeAreaInsets()
   const list = useRef<FlatList<Row>>(null)
   const [items, setItems] = useState<ArtifactSummary[] | null>(null)
   const [deleted, setDeleted] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [syncedAt, setSyncedAt] = useState<number | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [kind, setKind] = useState<ArtifactKind | null>(null)
   const [sort, setSort] = useState<Sort>('updated')
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -131,13 +135,15 @@ export default function Artifacts() {
     if (connected) void load()
   }, [connected, load])
 
+  // A change made while another tab shows is read once this one shows again.
+  const loadShown = useWhenShown(() => void load())
   useEffect(() => {
     if (!link) return
     return link.onHostEvent((raw: unknown) => {
       const event = raw as HostEvent
-      if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') void load()
+      if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') loadShown()
     })
-  }, [link, load])
+  }, [link, loadShown])
 
   const agentOf = useCallback(
     (a: ArtifactSummary) => sessionAgents.get(a.sessionId) ?? null,
@@ -462,18 +468,7 @@ export default function Artifacts() {
           paddingTop: header.contentTop,
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              retry()
-              void load().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
         ListHeaderComponent={
           <View style={styles.top}>
             {summary}

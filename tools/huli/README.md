@@ -50,6 +50,8 @@ Code (kept small so upstream merges stay clean):
 | `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts` | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub                                |
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json`                              | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved                                                                                                                                                       |
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                               | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                                                   |
+| `features/session/entries/refusal-end.tsx` and its uses, `locales/*/session.json` (`refusal`), `tools/fake-agent` (`/refusal`)           | a turn the model declined (`stop_reason: "refusal"`) says the API gives no reason, quotes the model's own explanation when a longer reply holds one, and on the latest turn offers Try again (the same message through the queue; the host's retry resends only failed turns) and Edit message                      |
+| `styles/affect.css` (the sidebar list's scrollbar)                                                                                       | App Shell hides the sidebar's scrollbar for good; it shows thin while the pointer or the keyboard is in the sidebar and hides at rest, on Windows in a gutter clear of the resize handle; macOS keeps its overlay scrollbar                                                                                         |
 | `eslint.config.mjs`, `.prettierignore`                                                                                                   | lint and formatting reach the phone app in `mobile/` (see Workflows)                                                                                                                                                                                                                                                |
 
 ### Import from agents
@@ -76,6 +78,24 @@ Huli's own files:
   What was listed keeps its title and times for `sessions.import`, which imports each as the
   sidebar does (adding its project if needed). A window's alone (`WINDOW_ONLY`): it names every
   folder an agent ran in, which a paired device otherwise learns only by naming a folder.
+- `src/agent-host/agent-history-folder.ts` (+ `.test.ts`): another folder of an agent's kind,
+  for the dialog's Choose folder… (`agentHistory.list` with `folder`, `agentHistory.planCopy`,
+  `agentHistory.copy`), as a backup, a WSL home or a folder copied from another computer; the
+  folders chosen last are kept per agent kind in the window's storage. Claude Code's: its
+  configuration folder, `projects` or one project folder, read as above. Codex's: its home,
+  `sessions` or a year, month or day folder, each rollout read up to its first prompt (at most
+  1 MiB), compressed ones through `node:zlib`'s zstd, titles from the home's `session_index.jsonl`.
+  An import copies each chosen session where the agent resumes it: Claude Code's transcript to
+  `projects/<the cwd as Claude Code names it>/<id>.jsonl` with the files of its `<id>/` folder
+  (subagents, tool results) that the agent's copy lacks, Codex's rollout to
+  `sessions/<year>/<month>/<day>/` under its own name. Nothing is overwritten but a copy that
+  holds less of the conversation (`compareTranscripts`; a byte prefix for Codex), kept as
+  `.kite-bak-<time>` first; a fork, a whole rollout against a compressed one and a session whose
+  folder is not here are left alone. The dialog shows every file first; the host runs only a plan
+  it made, once, within 15 minutes, and leaves alone a file that appeared or changed since. The
+  folder is checked in `validate.ts` (absolute, no `..` step, no Windows device path) and by the
+  host (an existing folder, not the agent's own), and is only read. A WSL session's folder is a
+  Linux path, so it shows as gone and is not imported into Windows' agent.
 - `src/agent-host/memory/codex-import.ts` (+ `.test.ts`): Codex's own memory for the memory
   import beside Claude Code's (`memory.importScan`, `memory.import`). Only the curated files of
   `$CODEX_HOME/memories`: each `# Task Group:` of MEMORY.md (without its lists of rollout files),
@@ -103,6 +123,10 @@ Hooks into upstream files, one or two lines each:
   `import`), `src/shared/memory.ts` and `memory.import` (a source's `project` may be null: global
   memory), `features/settings/memory-rows.tsx` (a tick per source, its entries' titles, a source of
   global memory, and `MemoryImportDialog` for the summary).
+- `src/agent-host/claude-copies.ts` (`compareTranscripts`), and for the folder picker
+  `dialog:choose-history-folder` in `src/shared/ipc.ts`, `src/main/ipc.ts`, `src/preload/index.ts`
+  and `src/renderer/src/web/api.ts`, with `locales/*/main.json` and `locales/*/host.json`
+  (`agentHistory`).
 - `src/shared/agent-host.ts`, `src/shared/host-request-limits.ts`, `src/agent-host/validate.ts`,
   `src/shared/remote/allow-list.ts`, `src/shared/i18next.d.ts`,
   `features/settings/section-defs.tsx` (the row), `locales/*/settings.json`

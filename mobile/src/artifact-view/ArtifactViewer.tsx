@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Pressable,
@@ -29,6 +30,7 @@ import { Sheet, type SheetItem } from '../components/Sheet'
 import { useHost } from '../host'
 import { whenText } from '../routines'
 import { errorText, sessionTitle } from '../sessions'
+import { useWhenShown } from '../ui/focus'
 import { haptic } from '../ui/haptics'
 import { Skeleton } from '../ui/Skeleton'
 import { GlassHeader, goBack, useHeaderHeight } from '../ui/session/GlassHeader'
@@ -97,6 +99,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
   const [renaming, setRenaming] = useState(false)
   const [desktopOnly, setDesktopOnly] = useState(false)
   const [slide, setSlide] = useState(0)
+  /** What is being made to share, while the computer converts it or the phone packs it. */
+  const [exporting, setExporting] = useState<string | null>(null)
+  const exportBusy = useRef(false)
   const toastOpacity = useRef(new Animated.Value(0)).current
   const shownVersion = useRef<number | null>(null)
   /** A new version came while the latest was shown, so its arrival is told. */
@@ -177,6 +182,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     [toastOpacity],
   )
 
+  // Under another screen, a new version or a changed list is read once the viewer shows again.
+  const reloadShown = useWhenShown(() => setAttempt((n) => n + 1))
+  const summaryShown = useWhenShown(() => loadSummary())
   // Watching makes this phone one of its viewers, and brings its new versions and who edits it.
   useEffect(() => {
     if (!link || !connected) return
@@ -187,19 +195,19 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
         setLatest((v) => Math.max(v ?? 0, event.version))
         if (pinned === null) {
           announce.current = true
-          setAttempt((n) => n + 1)
+          reloadShown()
         } else say(`有新版本 v${event.version}`)
       } else if (event.type === 'artifacts.activity' && event.id === id) {
         setEditors(event.sessions.filter((s) => s.editing).map((s) => s.sessionId))
       } else if (event.type === 'artifacts.changed') {
-        loadSummary()
+        summaryShown()
       }
     })
     return () => {
       off()
       void link.request('artifacts.unwatch', { id }).catch(() => {})
     }
-  }, [link, connected, id, pinned, say, loadSummary])
+  }, [link, connected, id, pinned, say, reloadShown, summaryShown])
 
   // The note that the latest is now shown, once the new version is in.
   useEffect(() => {
@@ -385,13 +393,21 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     ])
   }
 
+  // One export at a time: a second tap while the first converts would hand two files over.
   const share = async (format?: Parameters<typeof shareExport>[2]) => {
-    if (!link || !loaded) return
+    if (!link || !loaded || exportBusy.current) return
+    exportBusy.current = true
+    setExporting(
+      format ? `正在导出 ${FORMAT_TEXT[format].replace(/（.*）$/, '')}…` : '正在准备分享…',
+    )
     try {
       if (format) await shareExport(link, loaded, format)
       else await shareFiles(loaded)
     } catch (failure) {
       Alert.alert('没能分享', errorText(failure))
+    } finally {
+      exportBusy.current = false
+      setExporting(null)
     }
   }
 
@@ -405,8 +421,8 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     },
     {
       key: 'share',
-      label: '分享',
-      disabled: !loaded,
+      label: exporting ?? '分享',
+      disabled: !loaded || exporting !== null,
       onPress: () => {
         if (loaded?.type) setSheet('share')
         else void share()
@@ -467,6 +483,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     ? shareFormats(loaded.type.name).map((format) => ({
         key: format,
         label: FORMAT_TEXT[format],
+        disabled: exporting !== null,
         onPress: () => void share(format),
       }))
     : []
@@ -621,6 +638,20 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
             )}
           </View>
         )}
+      {exporting !== null && !picking && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.banner,
+            { top: contentTop + 8, backgroundColor: s.menuSolid, borderColor: c.border },
+          ]}
+        >
+          <ActivityIndicator size="small" color={c.textSecondary} />
+          <Text style={[styles.bannerText, { color: c.text }]} numberOfLines={1}>
+            {exporting}
+          </Text>
+        </View>
+      )}
       {toast !== null && (
         <Animated.View
           pointerEvents="none"
@@ -655,6 +686,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
                   setPicked(null)
                   setFile(null)
                 }}
+                hitSlop={CHIP_SLOP}
                 style={[styles.chip, { backgroundColor: c.fillStrong }]}
               >
                 <Text style={[styles.chipText, { color: c.text }]}>回到首页</Text>
@@ -669,6 +701,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
               <PressScale
                 onPress={() => restore(pinned!)}
                 disabled={!connected}
+                hitSlop={CHIP_SLOP}
                 style={[styles.chip, { backgroundColor: c.fillStrong }]}
               >
                 <Text style={[styles.chipText, { color: c.text }]}>恢复这个版本</Text>
@@ -678,6 +711,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
                   setPicked(null)
                   setPinned(null)
                 }}
+                hitSlop={CHIP_SLOP}
                 style={[styles.chip, { backgroundColor: c.accent }]}
               >
                 <Text style={[styles.chipText, { color: c.onAccent }]}>看最新</Text>
@@ -821,6 +855,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     </View>
   )
 }
+
+/** A 34pt chip takes touches 44pt tall. */
+const CHIP_SLOP = { top: 5, bottom: 5, left: 0, right: 0 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },

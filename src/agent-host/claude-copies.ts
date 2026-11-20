@@ -227,6 +227,24 @@ export async function claudeCopies(
     : { home, current: home, moved: false, forks }
 }
 
+/**
+ * How transcript `a` stands to `b`: the same conversation, `ahead` when it holds all of `b` and
+ * more, `behind` when `b` holds all of it and more, or a `fork` when each has what the other has
+ * not. Null when either is unreadable or too large to compare.
+ */
+export async function compareTranscripts(
+  a: string,
+  b: string,
+): Promise<'same' | 'ahead' | 'behind' | 'fork' | null> {
+  const first = await chainOf(a)
+  const second = first && (await chainOf(b))
+  if (!first || !second) return null
+  if (first.tail === second.tail) return 'same'
+  if (second.tail === null || reaches(first, second.tail)) return 'ahead'
+  if (first.tail === null || reaches(second, first.tail)) return 'behind'
+  return 'fork'
+}
+
 export type SyncResult = 'synced' | 'fork' | 'unchanged'
 
 const syncing = new Map<string, Promise<SyncResult>>()

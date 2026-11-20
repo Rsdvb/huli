@@ -4,6 +4,7 @@ import type { IdleSessionsSettings } from './idle-release'
 import type { LanguageSetting, Locale } from './locale'
 import type { MarketServer, MarketSkill } from './marketplace'
 import type { DirectAddress } from './remote/protocol'
+import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
 
@@ -106,6 +107,8 @@ export interface SettingsFile {
   startModes: Partial<Record<AgentId, string>>
   // When idle Claude Code sessions let their agent go; outOfView and inView in minutes.
   idleSessions: IdleSessionsSettings
+  // Huli: a turn a plan limit stopped goes on once the plan resets; a silent turn is flagged.
+  supervisor: SupervisorSettings
   // source: where updates come from; GitHub only never reaches Kettu's download service.
   updates: { automatic: 'download' | 'restart' | 'notify' | 'off'; source: 'auto' | 'github' }
   privacy: { hideAccount: boolean } // kept so older files still parse; loading turns it off
@@ -347,6 +350,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   marketplace: { mcp: [], skills: [] },
   startModes: {},
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
+  supervisor: DEFAULT_SUPERVISOR,
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
   diagnostics: { verboseUntil: null },
@@ -412,6 +416,7 @@ export interface SettingsPatch {
   disabledAgents?: AgentId[] // replaced whole
   startModes?: Partial<Record<AgentId, string | null>> // merged by agent; null clears one
   idleSessions?: Partial<SettingsFile['idleSessions']>
+  supervisor?: Partial<SettingsFile['supervisor']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
   diagnostics?: Partial<SettingsFile['diagnostics']>
@@ -451,6 +456,8 @@ export interface HostSettings {
   marketplace: SettingsFile['marketplace']
   startModes: SettingsFile['startModes']
   idleSessions: SettingsFile['idleSessions']
+  // Huli: absent from a parent older than it, which leaves the defaults.
+  supervisor?: SettingsFile['supervisor']
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled
   claudeTestEntrypoint: string | null

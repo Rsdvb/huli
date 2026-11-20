@@ -17,6 +17,11 @@ export function AgentAvatar(props: {
   name?: string
   size?: number
   badge?: AvatarBadge
+  /**
+   * What the avatar sits on, which the badge's ring takes so it cuts the badge from the disc:
+   * the screen by default, a card's surface on a card, where the screen's color read as a halo.
+   */
+  ring?: string
 }) {
   const { c, scheme } = useTokens()
   const side = props.size ?? sizes.avatar
@@ -40,7 +45,7 @@ export function AgentAvatar(props: {
           </Text>
         )}
       </View>
-      {props.badge ? <Badge kind={props.badge} side={side} /> : null}
+      {props.badge ? <Badge kind={props.badge} side={side} ring={props.ring ?? c.bg} /> : null}
     </View>
   )
 }
@@ -65,7 +70,7 @@ export function AgentGlyph(props: { agentId: string; name?: string; size?: numbe
 }
 
 /** A running session's mark: a small bubble whose three dots pulse in turn, as a typing one does. */
-function Typing(props: { side: number }) {
+function Typing(props: { side: number; ring: string }) {
   const { c } = useTokens()
   const reduce = useReduceMotion()
   const phase = useRef(new Animated.Value(0)).current
@@ -93,7 +98,7 @@ function Typing(props: { side: number }) {
           right: -Math.round(width * 0.35),
           bottom: -Math.round(height * 0.25),
           backgroundColor: c.surfaceRaised,
-          borderColor: c.bg,
+          borderColor: props.ring,
           gap: dot * 0.8,
         },
       ]}
@@ -122,12 +127,12 @@ function Typing(props: { side: number }) {
   )
 }
 
-function Badge(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
-  if (props.kind === 'live') return <Typing side={props.side} />
-  return <Dot kind={props.kind} side={props.side} />
+function Badge(props: { kind: Exclude<AvatarBadge, null>; side: number; ring: string }) {
+  if (props.kind === 'live') return <Typing side={props.side} ring={props.ring} />
+  return <Dot kind={props.kind} side={props.side} ring={props.ring} />
 }
 
-function Dot(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
+function Dot(props: { kind: Exclude<AvatarBadge, null>; side: number; ring: string }) {
   const { c } = useTokens()
   const reduce = useReduceMotion()
   const halo = useRef(new Animated.Value(0)).current
@@ -177,7 +182,7 @@ function Dot(props: { kind: Exclude<AvatarBadge, null>; side: number }) {
           borderRadius: dot / 2,
           backgroundColor: color,
           borderWidth: 2,
-          borderColor: c.bg,
+          borderColor: props.ring,
         }}
       />
     </View>

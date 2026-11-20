@@ -211,7 +211,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
   const reinstall = async () => {
     const go = await confirm({
       title: `重新安装 ${status.package?.name ?? name}？`,
-      message: '删掉 纸鸢装的这一份，重新安装。',
+      message: '删掉纸鸢装的这一份，重新安装。',
       confirm: '重新安装',
     })
     if (!go) return
@@ -446,7 +446,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
             <ListRow
               key="reinstall"
               title="重新安装"
-              subtitle="删掉 纸鸢装的这一份，重新安装。"
+              subtitle="删掉纸鸢装的这一份，重新安装。"
               icon="refresh"
               plainIcon
               action

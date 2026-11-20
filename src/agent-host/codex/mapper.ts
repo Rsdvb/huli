@@ -9,19 +9,23 @@ import type {
   TokenTotals,
   ToolContent,
   ToolEntry,
+  ToolReview,
   UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { replayedBlock } from '../acp/mapper'
-import { hasMessage, t } from '../i18n'
+import { currentLocale, hasMessage, t } from '../i18n'
 import { planMarkdown, planRevision } from '../plan-revision'
 import { isRowlessCall, isRowWhenFailed } from '../plan-tool'
 import { ANSWERS_OPTION } from '../question-answers'
 import { parseReplayedText } from '../replayed-content'
+import { blockRef, blockText } from '../mcp-content'
+import { resultMarkdown } from '../result-text'
 import { SERVICE_NAME } from '../service-name'
 import { workflowToolStructured } from '../workflow/tools'
 import {
   addEntry,
+  fenced,
   firstUserMessage,
   messageEntryId,
   rawInputText,
@@ -66,14 +70,6 @@ export function stripShellPrefix(command: string): string {
     : inner
 }
 
-/** `text` as one fenced block, with a fence longer than any it holds. */
-export function fenced(text: string): string {
-  let longest = 2
-  for (const match of text.matchAll(/^\s*(`{3,})/gm)) longest = Math.max(longest, match[1]!.length)
-  const fence = '`'.repeat(longest + 1)
-  return `${fence}\n${text.replace(/\n$/, '')}\n${fence}`
-}
-
 function cut(text: string): string {
   return text.length > OUTPUT_LIMIT ? `…\n${text.slice(text.length - OUTPUT_LIMIT)}` : text
 }
@@ -83,13 +79,31 @@ function toolStatus(status: string | null | undefined): ToolEntry['status'] {
     case 'completed':
       return 'completed'
     case 'failed':
-    case 'declined':
       return 'failed'
+    // Huli: a declined call never ran, which is no failure.
+    case 'declined':
     case 'interrupted':
       return 'cancelled'
     default:
       return 'in_progress'
   }
+}
+
+/**
+ * Huli: who declined a call Codex says was declined: the user when they answered its request, else
+ * its automatic review, which says so first, or the session's approval policy.
+ */
+function declined(
+  ctx: MapperContext,
+  itemId: string,
+  status: string | null | undefined,
+): Pick<ToolEntry, 'denied'> {
+  if (status !== 'declined') return {}
+  const entry = ctx.thread.byId[`t:${itemId}`]
+  if (entry?.kind === 'tool' && entry.denied) return {}
+  const answer = entry?.kind === 'tool' ? entry.permissionResult : null
+  const user = typeof answer === 'object' && answer !== null && answer.kind.startsWith('reject')
+  return { denied: { by: user ? 'user' : 'rule' } }
 }
 
 function absolute(cwd: string, file: string): string {
@@ -196,6 +210,44 @@ function webSearchFacts(item: Item<'webSearch'>): Pick<ToolEntry, 'title' | 'too
   }
 }
 
+/**
+ * Huli: what a web search found, as links, and the queries it ran beside the one its title names;
+ * Codex sends results only from its standalone search, as opaque JSON.
+ */
+function webSearchContent(item: Item<'webSearch'>): ToolContent[] {
+  const lines: string[] = []
+  const queries = item.action?.type === 'search' ? (item.action.queries ?? []) : []
+  for (const query of queries) if (query && query !== item.query) lines.push(`- ${query}`)
+  const links = (item.results ?? []).flatMap((result) => {
+    const value = (typeof result === 'object' && result !== null ? result : {}) as Record<
+      string,
+      unknown
+    >
+    const url = typeof value.url === 'string' ? value.url : null
+    if (!url) return []
+    const title = typeof value.title === 'string' && value.title.trim() !== '' ? value.title : url
+    return [`- [${title.replace(/[[\]]/g, '')}](${url})`]
+  })
+  const parts = [
+    ...(lines.length > 0 ? [[t('codex.tool.searchedFor'), lines.join('\n')].join('\n\n')] : []),
+    ...(links.length > 0 ? [links.join('\n')] : []),
+  ]
+  return parts.length > 0 ? [{ type: 'markdown', markdown: parts.join('\n\n') }] : []
+}
+
+/** Huli: why an image was not made, as Codex names it. */
+function imageFailure(failure: { type: string; resetsAt?: number | null }): ToolContent {
+  const markdown =
+    failure.type === 'usageLimitExceeded'
+      ? typeof failure.resetsAt === 'number'
+        ? t('codex.tool.imageLimitUntil', {
+            time: new Date(failure.resetsAt * 1000).toLocaleString(currentLocale()),
+          })
+        : t('codex.tool.imageLimit')
+      : failure.type
+  return { type: 'markdown', markdown }
+}
+
 function agentToolTitle(tool: string): string {
   const key = `codex.tool.agent.${tool}`
   return hasMessage(key) ? t(key as 'codex.tool.agent.spawnAgent') : tool
@@ -204,29 +256,196 @@ function agentToolTitle(tool: string): string {
 function mcpContent(item: Item<'mcpToolCall'>): ToolContent[] {
   if (item.error) return [{ type: 'markdown', markdown: item.error.message }]
   const content: ToolContent[] = []
+  const texts: string[] = []
   for (const block of item.result?.content ?? []) {
-    if (typeof block !== 'object' || block === null || Array.isArray(block)) continue
-    const value = block as Record<string, unknown>
-    if (value.type === 'text' && typeof value.text === 'string') {
-      content.push({ type: 'markdown', markdown: value.text })
-    } else if (
-      value.type === 'image' &&
-      typeof value.data === 'string' &&
-      typeof value.mimeType === 'string'
-    ) {
-      content.push({
-        type: 'ref',
-        ref: { kind: 'image', mimeType: value.mimeType, data: value.data },
-      })
+    // Huli: resources, links to them and sounds too, which were dropped.
+    const text = blockText(block)
+    if (text !== null) {
+      texts.push(text)
+      content.push({ type: 'markdown', markdown: resultMarkdown(toLf(text)) })
+      continue
     }
+    const ref = blockRef(block)
+    if (ref) content.push({ type: 'ref', ref })
+  }
+  // Huli: the structured result, unless a text block already holds it as JSON.
+  const structured = item.result?.structuredContent
+  if (
+    structured !== null &&
+    structured !== undefined &&
+    !texts.some((text) => sameJson(text, structured))
+  ) {
+    content.push({
+      type: 'markdown',
+      markdown: resultMarkdown(JSON.stringify(structured)),
+    })
   }
   return content
 }
 
+/** Whether text is the JSON of a value. */
+function sameJson(text: string, value: unknown): boolean {
+  try {
+    return JSON.stringify(JSON.parse(text)) === JSON.stringify(value)
+  } catch {
+    return false
+  }
+}
+
 function dynamicContent(item: Item<'dynamicToolCall'>): ToolContent[] {
   return (item.contentItems ?? []).flatMap((part): ToolContent[] =>
-    part.type === 'inputText' ? [{ type: 'markdown', markdown: part.text }] : [],
+    part.type === 'inputText'
+      ? [{ type: 'markdown', markdown: resultMarkdown(toLf(part.text)) }]
+      : [],
   )
+}
+
+/** Huli: one run of a hook, as Codex reports it once it ended. */
+interface HookRun {
+  id: string
+  eventName: string
+  status: 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
+  statusMessage?: string | null
+  entries?: { kind: string; text: string }[]
+}
+
+/** Huli: what a hook's output says to the user, rather than to the model. */
+const HOOK_SAYS: ReadonlySet<string> = new Set(['warning', 'stop', 'error', 'feedback'])
+
+/** Huli: a `/goal` as Codex reports it. */
+interface ThreadGoal {
+  objective: string
+  status: string
+  tokensUsed?: number
+  tokenBudget?: number | null
+  timeUsedSeconds?: number
+}
+
+const GOAL_STATES: ReadonlySet<string> = new Set([
+  'active',
+  'paused',
+  'blocked',
+  'usageLimited',
+  'budgetLimited',
+  'complete',
+])
+
+/** Huli: a time spent in whole units: "45 s", "12 min", "3 h 5 min". */
+function spentTime(seconds: number): string {
+  if (seconds < 60) return t('codex.goal.seconds', { count: Math.max(0, Math.round(seconds)) })
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return t('codex.goal.minutes', { count: minutes })
+  return t('codex.goal.hours', { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
+}
+
+/** Huli: notifications that say the model's stream runs again after a retry. */
+const PROGRESS: ReadonlySet<string> = new Set([
+  'item/started',
+  'item/agentMessage/delta',
+  'item/reasoning/summaryTextDelta',
+  'item/reasoning/textDelta',
+  'item/plan/delta',
+  'thread/tokenUsage/updated',
+])
+
+/** Huli: adds a notice of Kite's own, or changes it once it shows. */
+function upsertNotice(
+  ctx: MapperContext,
+  out: MapperOutput,
+  id: string,
+  severity: 'info' | 'warning' | 'error',
+  title: string,
+  description?: string,
+): void {
+  const changes = { severity, title, ...(description !== undefined ? { description } : {}) }
+  if (ctx.thread.byId[id]?.kind === 'notice') out.patches.push({ op: 'entry.update', id, changes })
+  else addEntry(ctx, out, { kind: 'notice', id, ...changes })
+}
+
+/** Huli: an action Codex's auto-review looks at, as its notifications describe it. */
+type ReviewAction =
+  | { type: 'command'; command: string; cwd: string }
+  | { type: 'execve'; program: string; argv: string[]; cwd: string }
+  | { type: 'writeStdin'; stdin: string }
+  | { type: 'applyPatch'; files: string[]; cwd: string }
+  | { type: 'networkAccess'; host: string; protocol: string; target: string }
+  | { type: 'mcpToolCall'; server: string; toolName: string; toolTitle?: string | null }
+  | { type: 'requestPermissions'; reason?: string | null }
+  | { type?: undefined }
+
+const REVIEW_STATUS: Record<string, ToolReview['status']> = {
+  inProgress: 'reviewing',
+  approved: 'approved',
+  denied: 'denied',
+  timedOut: 'timed_out',
+  aborted: 'aborted',
+}
+
+const REVIEW_RISKS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'critical'])
+
+/** Huli: the row of an action an auto-review looks at before Codex has an item for it. */
+function reviewFacts(action: ReviewAction): ToolChanges {
+  switch (action.type) {
+    case 'command':
+      return commandFacts(action.command, action.cwd, null)
+    case 'execve': {
+      const command = [action.program, ...action.argv.slice(1)].join(' ')
+      return { title: command, toolKind: 'execute', rawInput: command }
+    }
+    case 'writeStdin':
+      return {
+        title: t('codex.approval.stdinTitle'),
+        toolKind: 'other',
+        ...(action.stdin ? { rawInput: action.stdin } : {}),
+      }
+    case 'applyPatch':
+      return {
+        title: t('codex.tool.editFiles'),
+        toolKind: 'edit',
+        locations: action.files.map((file) => ({ path: absolute(action.cwd, file) })),
+      }
+    case 'networkAccess':
+      return {
+        title: t('codex.approval.networkTitle', { protocol: action.protocol, host: action.host }),
+        toolKind: 'fetch',
+      }
+    case 'mcpToolCall':
+      return {
+        title: t('codex.tool.mcp', { server: action.server, tool: action.toolName }),
+        toolKind: 'other',
+      }
+    case 'requestPermissions':
+      return {
+        title: t('codex.approval.permissionsTitle'),
+        toolKind: 'other',
+        ...(action.reason ? { description: action.reason } : {}),
+      }
+    default:
+      return { title: t('codex.review.action'), toolKind: 'other' }
+  }
+}
+
+/**
+ * Huli: what a sub-agent call tells of its agents: the model and effort a new one runs on, and each
+ * agent's state with its message, such as what it reported when it finished. Null when none.
+ */
+function agentStates(item: Item<'collabAgentToolCall'>): string | null {
+  const lines: string[] = []
+  if (item.model) {
+    lines.push(
+      item.reasoningEffort
+        ? t('codex.agent.modelEffort', { model: item.model, effort: item.reasoningEffort })
+        : t('codex.agent.model', { model: item.model }),
+    )
+  }
+  const states = Object.values(item.agentsStates ?? {}).filter((state) => state !== undefined)
+  for (const state of states) {
+    const key = `codex.agent.status.${state.status}`
+    const status = hasMessage(key) ? t(key as 'codex.agent.status.running') : state.status
+    const message = state.message?.trim()
+    lines.push(message ? `${status}: ${message}` : status)
+  }
+  return lines.length > 0 ? lines.map((line) => `- ${line}`).join('\n') : null
 }
 
 /** The thread ids of the subagents an item names. */
@@ -257,13 +476,21 @@ export class ThreadMapper {
   private sentAt: number | null = null
   /** When the request running now first showed output, if it has. */
   private firstOutputAt: number | null = null
+  /** Huli: the notice of the session's goal in its latest state. */
+  private goal: { id: string; status: string } | null = null
+  /** Huli: the stream Codex reconnects now, and the notice that says so. */
+  private retry: { id: string; attempts: number } | null = null
 
   /** Maps one notification; null for one this mapper does not take. */
   notification(method: string, params: unknown, ctx: MapperContext): MapperOutput | null {
     const out = output()
     const p = params as Record<string, unknown>
     if (!ctx.replaying) this.timeOutput(ctx, out, method, p)
+    if (this.retry && method !== 'error' && PROGRESS.has(method)) this.reconnected(ctx, out, true)
     switch (method) {
+      case 'error':
+        this.streamError(ctx, out, p)
+        break
       case 'item/started':
         this.item(ctx, out, p.item as ThreadItem, false)
         break
@@ -292,6 +519,21 @@ export class ThreadMapper {
       case 'item/commandExecution/outputDelta':
         this.appendOutput(ctx, out, p.itemId as string, p.delta as string)
         break
+      case 'item/commandExecution/terminalInteraction':
+        // Huli: what Codex typed into a running command shows in its output, as a terminal echoes it.
+        if (typeof p.stdin === 'string' && p.stdin !== '') {
+          const printed = this.outputs.get(p.itemId as string) ?? ''
+          const start = printed === '' || printed.endsWith('\n') ? '' : '\n'
+          const typed = p.stdin.replace(/\n$/, '')
+          this.appendOutput(ctx, out, p.itemId as string, `${start}› ${typed}\n`)
+        }
+        break
+      case 'item/mcpToolCall/progress':
+        // Huli: an MCP tool's own word on how far it got, on its running row.
+        if (typeof p.message === 'string' && p.message.trim() !== '') {
+          this.updateTool(ctx, out, p.itemId as string, { progress: p.message.trim() })
+        }
+        break
       case 'item/fileChange/patchUpdated':
         this.updateTool(ctx, out, p.itemId as string, {
           content: fileChangeContent(p.changes as FileUpdateChange[]),
@@ -300,6 +542,16 @@ export class ThreadMapper {
         break
       case 'turn/plan/updated':
         this.plan(ctx, out, p.plan as TurnPlanStep[])
+        // Huli: why the plan changed, in the agent's words, when it says.
+        if (typeof p.explanation === 'string' && p.explanation.trim() !== '') {
+          addEntry(ctx, out, {
+            kind: 'notice',
+            id: ctx.nextId(),
+            severity: 'info',
+            title: t('codex.notice.planChanged'),
+            description: p.explanation.trim(),
+          })
+        }
         break
       case 'thread/tokenUsage/updated':
         this.usage(ctx, out, p.tokenUsage as ThreadTokenUsage)
@@ -316,6 +568,54 @@ export class ThreadMapper {
             from: p.fromModel as string,
             to: p.toModel as string,
           }),
+          // Huli: why Codex switched, which it names.
+          ...(typeof p.reason === 'string' && p.reason !== ''
+            ? {
+                description: hasMessage(`codex.notice.rerouteReason.${p.reason}`)
+                  ? t(
+                      `codex.notice.rerouteReason.${p.reason}` as 'codex.notice.rerouteReason.highRiskCyberActivity',
+                    )
+                  : p.reason,
+              }
+            : {}),
+        })
+        break
+      case 'item/autoApprovalReview/started':
+      case 'item/autoApprovalReview/completed':
+        this.review(ctx, out, p, method.endsWith('completed'))
+        break
+      case 'hook/started':
+        break
+      case 'hook/completed':
+        this.hookRun(ctx, out, p.run as HookRun | undefined)
+        break
+      case 'thread/goal/updated':
+        this.goalUpdated(ctx, out, p.goal as ThreadGoal | undefined)
+        break
+      case 'thread/goal/cleared':
+        this.goal = null
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: ctx.nextId(),
+          severity: 'info',
+          title: t('codex.goal.cleared'),
+        })
+        break
+      case 'autoApprovalReview/strictReviewRequired':
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: ctx.nextId(),
+          severity: 'warning',
+          title: t('codex.review.strict'),
+        })
+        break
+      case 'guardianWarning':
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: ctx.nextId(),
+          severity: 'warning',
+          title: t('codex.review.warning'),
+          ...(typeof p.message === 'string' && p.message !== '' ? { description: p.message } : {}),
         })
         break
       case 'warning':
@@ -330,6 +630,140 @@ export class ThreadMapper {
         return null
     }
     return out
+  }
+
+  /**
+   * Huli: Codex's auto-review of an action before it runs, shown on the row of the call it reviews,
+   * which it adds when the call has none yet. A denied call is denied by the review, with its
+   * rationale; an action that starts no item of its own ends with the review.
+   */
+  private review(
+    ctx: MapperContext,
+    out: MapperOutput,
+    p: Record<string, unknown>,
+    done: boolean,
+  ): void {
+    const review = (p.review ?? {}) as {
+      status?: string
+      riskLevel?: string | null
+      rationale?: string | null
+    }
+    const action = (p.action ?? {}) as ReviewAction
+    const target =
+      typeof p.targetItemId === 'string' && p.targetItemId !== '' ? p.targetItemId : null
+    const itemId = target ?? `review:${String(p.reviewId ?? ctx.nextId())}`
+    const status = REVIEW_STATUS[review.status ?? ''] ?? (done ? 'aborted' : 'reviewing')
+    const risk = REVIEW_RISKS.has(review.riskLevel ?? '')
+      ? (review.riskLevel as ToolReview['risk'])
+      : null
+    const verdict: ToolReview = { status, risk, rationale: review.rationale?.trim() || null }
+    const existing = ctx.thread.byId[`t:${itemId}`]
+    const ownItem =
+      target !== null && action.type !== 'networkAccess' && action.type !== 'requestPermissions'
+    this.tool(ctx, out, itemId, {
+      ...(existing?.kind === 'tool' ? {} : { ...reviewFacts(action), status: 'pending' as const }),
+      review: verdict,
+      ...(status === 'denied' || status === 'timed_out'
+        ? {
+            status: 'cancelled' as const,
+            denied: {
+              by: 'review' as const,
+              ...(verdict.rationale ? { reason: verdict.rationale } : {}),
+            },
+          }
+        : status === 'aborted'
+          ? { status: 'cancelled' as const }
+          : status === 'approved' && !ownItem
+            ? { status: 'completed' as const }
+            : {}),
+    })
+  }
+
+  /**
+   * Huli: Codex lost the model's stream and retries it: one notice counts the attempts while it
+   * does, and then says whether it got through. Other errors end the turn, which says why.
+   */
+  private streamError(ctx: MapperContext, out: MapperOutput, p: Record<string, unknown>): void {
+    const error = (p.error ?? {}) as { message?: string }
+    const message = typeof error.message === 'string' ? error.message.trim() : ''
+    if (p.willRetry !== true) {
+      if (this.retry) this.reconnected(ctx, out, false)
+      return
+    }
+    const counted = /(\d+)\s*\/\s*(\d+)/.exec(message)
+    const retry = (this.retry ??= {
+      id: `n:retry:${String(p.turnId ?? ctx.nextId())}`,
+      attempts: 0,
+    })
+    retry.attempts = counted ? Number(counted[1]) : retry.attempts + 1
+    const title = counted
+      ? t('codex.notice.reconnecting', { attempt: counted[1], max: counted[2] })
+      : t('codex.notice.reconnectingPlain')
+    upsertNotice(ctx, out, retry.id, 'warning', title, message || undefined)
+  }
+
+  /** Huli: the stream Codex retried came back, or the turn failed while it retried. */
+  private reconnected(ctx: MapperContext, out: MapperOutput, through: boolean): void {
+    const retry = this.retry
+    if (!retry) return
+    this.retry = null
+    const title = through
+      ? t('codex.notice.reconnected', { count: retry.attempts })
+      : t('codex.notice.reconnectFailed', { count: retry.attempts })
+    upsertNotice(ctx, out, retry.id, through ? 'info' : 'warning', title)
+  }
+
+  /**
+   * Huli: the session's `/goal` as Codex pursues it: a notice when its state changes, naming the
+   * goal, which then keeps the tokens and time it has used up to date.
+   */
+  private goalUpdated(ctx: MapperContext, out: MapperOutput, goal: ThreadGoal | undefined): void {
+    if (!goal || typeof goal.objective !== 'string') return
+    const status = GOAL_STATES.has(goal.status) ? goal.status : 'active'
+    const title = t(`codex.goal.${status}` as 'codex.goal.active', {
+      objective: oneLine(goal.objective),
+    })
+    const tokens = new Intl.NumberFormat(currentLocale()).format(goal.tokensUsed ?? 0)
+    const budget =
+      typeof goal.tokenBudget === 'number'
+        ? t('codex.goal.budget', {
+            budget: new Intl.NumberFormat(currentLocale()).format(goal.tokenBudget),
+          })
+        : ''
+    const description = t('codex.goal.used', {
+      tokens,
+      budget,
+      time: spentTime(goal.timeUsedSeconds ?? 0),
+    })
+    const severity = status === 'blocked' || status.endsWith('Limited') ? 'warning' : 'info'
+    if (this.goal?.status !== status) this.goal = { id: ctx.nextId(), status }
+    upsertNotice(ctx, out, this.goal.id, severity, title, description)
+  }
+
+  /**
+   * Huli: a hook that blocked or stopped what it ran on, failed, or warned: a notice with what it
+   * said. One that ran and said nothing for the user shows nothing.
+   */
+  private hookRun(ctx: MapperContext, out: MapperOutput, run: HookRun | undefined): void {
+    if (!run) return
+    const said = (run.entries ?? []).filter(
+      (entry) => HOOK_SAYS.has(entry.kind) && entry.text.trim() !== '',
+    )
+    const outcome = run.status === 'completed' ? (said.length > 0 ? 'warned' : null) : run.status
+    if (outcome === null || outcome === 'running') return
+    const eventKey = `codex.hook.event.${run.eventName}`
+    const event = hasMessage(eventKey) ? t(eventKey as 'codex.hook.event.stop') : run.eventName
+    const description = [run.statusMessage?.trim(), ...said.map((entry) => entry.text.trim())]
+      .filter((part, i, all): part is string => !!part && all.indexOf(part) === i)
+      .join('\n')
+    upsertNotice(
+      ctx,
+      out,
+      `n:hook:${run.id}`,
+      outcome === 'failed' ? 'error' : 'warning',
+      t(`codex.hook.${outcome}` as 'codex.hook.blocked', { event }),
+      description || undefined,
+    )
   }
 
   /** One item of the thread's history, as `session/load` replays one. */
@@ -377,6 +811,7 @@ export class ThreadMapper {
           title: t('codex.tool.editFiles'),
           toolKind: 'edit',
           status: done ? toolStatus(item.status) : 'in_progress',
+          ...(done ? declined(ctx, item.id, item.status) : {}),
           content: fileChangeContent(item.changes),
           locations: changedPaths(item.changes),
         })
@@ -408,7 +843,10 @@ export class ThreadMapper {
       case 'dynamicToolCall': {
         const raw = rawInputText(item.arguments)
         this.tool(ctx, out, item.id, {
-          title: item.tool,
+          // Huli: named as an MCP tool is, so the clients show its namespace and name in words.
+          title: item.namespace
+            ? t('codex.tool.mcp', { server: item.namespace, tool: item.tool })
+            : item.tool,
           toolKind: 'other',
           status: done ? toolStatus(item.status) : 'in_progress',
           ...(done ? { content: dynamicContent(item) } : {}),
@@ -416,12 +854,14 @@ export class ThreadMapper {
         })
         break
       }
-      case 'collabAgentToolCall':
+      case 'collabAgentToolCall': {
+        const states = agentStates(item)
         this.tool(ctx, out, item.id, {
           title: agentToolTitle(item.tool),
           toolKind: 'other',
           status: done ? toolStatus(item.status) : 'in_progress',
           ...(item.prompt ? { description: oneLine(item.prompt) } : {}),
+          ...(states ? { content: [{ type: 'markdown', markdown: states }] } : {}),
         })
         for (const sessionId of item.receiverThreadIds) {
           out.effects.push({
@@ -434,15 +874,19 @@ export class ThreadMapper {
           })
         }
         break
+      }
       case 'subAgentActivity':
         out.effects.push({ kind: 'subagent', sessionId: item.agentThreadId, canCancel: true })
         break
-      case 'webSearch':
+      case 'webSearch': {
+        const found = done ? webSearchContent(item) : []
         this.tool(ctx, out, item.id, {
           ...webSearchFacts(item),
           status: done ? 'completed' : 'in_progress',
+          ...(found.length > 0 ? { content: found } : {}),
         })
         break
+      }
       case 'imageView':
         this.tool(ctx, out, item.id, {
           title: t('codex.tool.viewImage', { path: item.path }),
@@ -458,15 +902,46 @@ export class ThreadMapper {
           status: done ? toolStatus(item.status) : 'in_progress',
           ...(item.revisedPrompt ? { description: oneLine(item.revisedPrompt) } : {}),
           ...(done && item.savedPath ? { locations: [{ path: item.savedPath }] } : {}),
+          ...(done && item.failure ? { content: [imageFailure(item.failure)] } : {}),
         })
         break
       case 'contextCompaction':
         this.compaction(ctx, out, item.id, done)
         break
-      case 'enteredReviewMode':
-      case 'exitedReviewMode':
-        // The review's findings follow as an agent message of their own.
+      case 'hookPrompt': {
+        // Huli: what a hook added to the conversation, as a prompt of its own.
+        const text = (item.fragments ?? [])
+          .map((fragment) => fragment.text.trim())
+          .filter(Boolean)
+          .join('\n\n')
+        if (text === '' || ctx.thread.byId[`n:hook:${item.id}`]) break
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: `n:hook:${item.id}`,
+          severity: 'info',
+          title: t('codex.hook.prompt'),
+          description: text,
+        })
         break
+      }
+      case 'enteredReviewMode':
+      case 'exitedReviewMode': {
+        // Huli: where a review starts and ends; its findings follow as an agent message.
+        const id = `n:review:${item.id}`
+        if (!done || ctx.thread.byId[id]) break
+        const what = item.review?.trim()
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id,
+          severity: 'info',
+          title:
+            item.type === 'enteredReviewMode'
+              ? t('codex.review.entered')
+              : t('codex.review.exited'),
+          ...(item.type === 'enteredReviewMode' && what ? { description: what } : {}),
+        })
+        break
+      }
       default:
         out.effects.push({
           kind: 'ignored',
@@ -723,6 +1198,8 @@ export class ThreadMapper {
     const changes: ToolChanges = {
       ...facts,
       status: done ? toolStatus(item.status) : 'in_progress',
+      ...(done ? declined(ctx, item.id, item.status) : {}),
+      ...(done && typeof item.exitCode === 'number' ? { exitCode: item.exitCode } : {}),
     }
     if (done) {
       const printed = item.aggregatedOutput ?? this.outputs.get(item.id) ?? ''
@@ -781,6 +1258,10 @@ export class ThreadMapper {
       ...(changes.planVersion !== undefined ? { planVersion: changes.planVersion } : {}),
       ...(changes.elicitation !== undefined ? { elicitation: changes.elicitation } : {}),
       ...(changes.structured !== undefined ? { structured: changes.structured } : {}),
+      ...(changes.denied !== undefined ? { denied: changes.denied } : {}),
+      ...(changes.review !== undefined ? { review: changes.review } : {}),
+      ...(changes.progress !== undefined ? { progress: changes.progress } : {}),
+      ...(changes.exitCode !== undefined ? { exitCode: changes.exitCode } : {}),
     }
     addEntry(ctx, out, entry)
     toolEffects(out, itemId, id, null, entry)

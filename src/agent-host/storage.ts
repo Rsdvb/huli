@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { AgentAccount, AgentUpdate, PlanLimit, VersionMoveReason } from '@shared/agent-host'
 import { GITHUB_PULL_REQUEST_URL, type ProjectWorktreeSettings } from '@shared/git'
+import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
 import {
   isAgentId,
@@ -354,6 +355,10 @@ export interface SessionRecord {
    * guide and memory go ahead of its prompts instead.
    */
   instructionsAhead?: true
+  /** Huli: its turn stopped at its agent's plan limit and goes on by itself once the plan resets. */
+  limitPause?: LimitPause
+  /** Huli: the user's own choice of going on after a plan limit; absent follows the settings. */
+  autoResume?: boolean
 }
 
 /** The values of the last request a session made outside Kettu, as its agent recorded them. */
@@ -874,6 +879,12 @@ function agentWorktreeOf(value: unknown): { agentWorktree?: SessionRecord['agent
   }
 }
 
+/** A stored limit pause; one that does not read is dropped, so the session simply stays stopped. */
+function limitPauseField(value: unknown): { limitPause?: LimitPause } {
+  const pause = limitPauseOf(value)
+  return pause ? { limitPause: pause } : {}
+}
+
 export function parseSessionsFile(data: Record<string, unknown>): SessionsFile | string {
   if (!Array.isArray(data.sessions)) return 'sessions is not a list'
   const sessions: SessionRecord[] = []
@@ -942,6 +953,8 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
         ? { outsideTail: item.outsideTail }
         : {}),
       ...(item.instructionsAhead === true ? { instructionsAhead: true as const } : {}),
+      ...limitPauseField(item.limitPause),
+      ...(typeof item.autoResume === 'boolean' ? { autoResume: item.autoResume } : {}),
     })
   }
   return {

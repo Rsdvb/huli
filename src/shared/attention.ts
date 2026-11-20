@@ -14,6 +14,8 @@ export const ATTENTION_SETTING = {
   'routine-ended': 'routines',
   'routine-paused': 'routines',
   'plan-limit': 'limits',
+  'limit-resumed': 'limits',
+  stalled: 'error',
 } as const satisfies Record<HostAttention['kind'], keyof SettingsFile['notifications']>
 
 const MAX_TITLE = 120

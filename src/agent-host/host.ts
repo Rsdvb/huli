@@ -156,6 +156,7 @@ import { AcpMessages, acpModelRequests } from './model-requests/acp-messages'
 import { IdleRelease } from './idle-release'
 import { PortHub, type Handlers, type RequestContext } from './rpc'
 import { Attachments, toArrayBuffer } from './attachments'
+import { storageUsage } from './data-usage'
 import { RoutinesManager, type RoutineTimings } from './routines/manager'
 import { TaskEngine, type TaskSessionHooksRef, type WrittenDocument } from './workflow/engine'
 import type { WorkflowSettings, TaskSummary } from '@shared/workflow'
@@ -1592,6 +1593,9 @@ export class AgentHost {
     if (JSON.stringify(previous.idleSessions) !== JSON.stringify(next.idleSessions)) {
       this.idleRelease.notify()
     }
+    if (JSON.stringify(previous.supervisor) !== JSON.stringify(next.supervisor)) {
+      this.sessions.supervisorChanged()
+    }
     this.marketChanged(previous.marketplace.mcp, this.marketKeys)
     if (JSON.stringify(previous.marketplace.mcp) !== JSON.stringify(next.marketplace.mcp)) {
       void this.marketBundles.sweep()
@@ -2810,6 +2814,10 @@ export class AgentHost {
       'sessions.steer': ({ sessionId, itemId }) => sessions.steer(sessionId, itemId),
       'sessions.sendNow': ({ sessionId, itemId }) => sessions.sendNow(sessionId, itemId),
       'sessions.resumeQueue': ({ sessionId }) => sessions.resumeQueue(sessionId),
+      'sessions.limitPause': ({ sessionId, action }) =>
+        sessions.limitPauseAction(sessionId, action),
+      'sessions.setAutoResume': ({ sessionId, on }) => sessions.setAutoResume(sessionId, on),
+      'sessions.stall': ({ sessionId, action }) => sessions.stallAction(sessionId, action),
       'sessions.blob': ({ sessionId, hash }) => sessions.blob(sessionId, hash),
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
         sessions.setConfigOption(sessionId, optionId, value),
@@ -3013,6 +3021,13 @@ export class AgentHost {
       'usage.sync': () => this.usage.sync(),
       'usage.reimport': ({ agentId }) => this.usage.reimport(agentId),
       'usage.clearRecord': () => this.usage.clearRecord(),
+      'storage.usage': () => storageUsage(this.options.userDataPath, logFolder()),
+      'storage.clearImages': async ({ scope, days, dryRun }) => {
+        const before = scope === 'older' ? Date.now() - days * 24 * 60 * 60 * 1000 : null
+        const sessionIds = sessions.imageClearTargets(scope === 'archived', before)
+        if (!this.threads || sessionIds.length === 0) return { sessions: 0, images: 0, bytes: 0 }
+        return this.threads.clearImages(sessionIds, dryRun)
+      },
       'artifacts.list': async ({ deleted }) =>
         (await artifacts.list({ deleted: deleted ?? false })).map((artifact) => ({
           ...artifact,
@@ -3220,7 +3235,11 @@ export class AgentHost {
           throw new HostError('not_found', `No setup waits in ${entryId}`)
         }
       },
-      'agentHistory.list': ({ agentId, cursor }) => this.agentHistory.list(agentId, cursor ?? null),
+      'agentHistory.list': ({ agentId, cursor, folder }) =>
+        this.agentHistory.list(agentId, cursor ?? null, folder ?? null),
+      'agentHistory.planCopy': ({ agentId, folder, sessionIds }) =>
+        this.agentHistory.planCopy(agentId, folder, sessionIds),
+      'agentHistory.copy': ({ token }) => this.agentHistory.copy(token),
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),

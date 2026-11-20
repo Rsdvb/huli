@@ -3,6 +3,9 @@
 
 import path from 'node:path'
 import type { ContentRef, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
+import { t } from '../i18n'
+import { blockRef as otherRef, blockText as otherText } from '../mcp-content'
+import { resultMarkdown } from '../result-text'
 import { toLf } from '../session-updates'
 import type { ContentBlock, ToolResultBlock } from './sdk'
 
@@ -111,23 +114,27 @@ export function toolView(name: string, raw: unknown, cwd: string): ToolView {
   switch (name) {
     case 'Bash':
     case 'PowerShell':
-      return view(text(input.command) ?? 'Terminal', 'execute')
+      return view(text(input.command) ?? t('claude.tool.terminal'), 'execute')
     case 'Read': {
       const offset = typeof input.offset === 'number' ? input.offset : null
       const limit = typeof input.limit === 'number' && input.limit > 0 ? input.limit : null
       const range =
         limit !== null
-          ? ` (${offset ?? 1} - ${(offset ?? 1) + limit - 1})`
+          ? t('claude.tool.lines', { from: offset ?? 1, to: (offset ?? 1) + limit - 1 })
           : offset
-            ? ` (from line ${offset})`
+            ? t('claude.tool.fromLine', { line: offset })
             : ''
-      return view(`Read ${file ? displayPath(file, cwd) : 'File'}${range}`, 'read', {
+      const shown = file ? displayPath(file, cwd) : t('claude.tool.file')
+      return view(t('claude.tool.read', { path: shown, range }), 'read', {
         locations: file ? [{ path: file, line: offset ?? 1 }] : [],
       })
     }
     case 'Write': {
       const content = text(input.content) ?? text(input.file_text) ?? ''
-      return view(file ? `Write ${displayPath(file, cwd)}` : 'Write', 'edit', {
+      const title = file
+        ? t('claude.tool.writePath', { path: displayPath(file, cwd) })
+        : t('claude.tool.write')
+      return view(title, 'edit', {
         locations: file ? [{ path: file }] : [],
         content: file ? [{ type: 'diff', path: file, oldText: null, newText: toLf(content) }] : [],
       })
@@ -135,54 +142,131 @@ export function toolView(name: string, raw: unknown, cwd: string): ToolView {
     case 'Edit': {
       const oldText = typeof input.old_string === 'string' ? toLf(input.old_string) : ''
       const newText = typeof input.new_string === 'string' ? toLf(input.new_string) : ''
-      return view(file ? `Edit ${displayPath(file, cwd)}` : 'Edit', 'edit', {
+      const title = file
+        ? t('claude.tool.editPath', { path: displayPath(file, cwd) })
+        : t('claude.tool.edit')
+      return view(title, 'edit', {
         locations: file ? [{ path: file }] : [],
         content: file ? [{ type: 'diff', path: file, oldText, newText }] : [],
       })
     }
-    case 'NotebookEdit': {
-      const notebook = text(input.notebook_path)
-      return view(notebook ? `Edit ${displayPath(notebook, cwd)}` : 'Edit notebook', 'edit', {
-        locations: notebook ? [{ path: notebook }] : [],
+    case 'MultiEdit': {
+      const edits = Array.isArray(input.edits) ? input.edits.map(asInput) : []
+      const title = file
+        ? t('claude.tool.editPath', { path: displayPath(file, cwd) })
+        : t('claude.tool.edit')
+      return view(title, 'edit', {
+        locations: file ? [{ path: file }] : [],
+        content: file
+          ? edits.map((one) => ({
+              type: 'diff' as const,
+              path: file,
+              oldText: typeof one.old_string === 'string' ? toLf(one.old_string) : '',
+              newText: typeof one.new_string === 'string' ? toLf(one.new_string) : '',
+            }))
+          : [],
       })
     }
+    case 'NotebookEdit': {
+      const notebook = text(input.notebook_path)
+      const title = notebook
+        ? t('claude.tool.editPath', { path: displayPath(notebook, cwd) })
+        : t('claude.tool.editNotebook')
+      // Huli: the cell's new source, which its result sets beside the old one.
+      const source = typeof input.new_source === 'string' ? toLf(input.new_source) : ''
+      const deletes = input.edit_mode === 'delete'
+      return view(title, 'edit', {
+        locations: notebook ? [{ path: notebook }] : [],
+        content:
+          notebook && !deletes
+            ? [{ type: 'diff', path: notebook, oldText: '', newText: source }]
+            : [],
+      })
+    }
+    case 'SendUserFile': {
+      const files = [
+        text(input.file_path),
+        text(input.path),
+        ...(Array.isArray(input.files) ? input.files : []).map((one) =>
+          typeof one === 'string' ? one : text(asInput(one).path),
+        ),
+      ].filter((one): one is string => typeof one === 'string' && one !== '')
+      const first = files[0]
+      return view(
+        first
+          ? t('claude.tool.sendFile', { path: displayPath(first, cwd) })
+          : t('claude.tool.sendFiles'),
+        'other',
+        { locations: files.map((one) => ({ path: one })) },
+      )
+    }
     case 'Glob': {
-      let label = 'Find'
-      if (text(input.path)) label += ` \`${String(input.path)}\``
-      if (text(input.pattern)) label += ` \`${String(input.pattern)}\``
-      return view(label, 'search', {
-        locations: text(input.path) ? [{ path: String(input.path) }] : [],
+      const pattern = text(input.pattern)
+      const where = text(input.path)
+      const title =
+        pattern && where
+          ? t('claude.tool.findIn', { pattern, path: where })
+          : pattern
+            ? t('claude.tool.findPattern', { pattern })
+            : where
+              ? t('claude.tool.findPath', { path: where })
+              : t('claude.tool.find')
+      return view(title, 'search', {
+        locations: where ? [{ path: where }] : [],
       })
     }
     case 'Grep':
       return view(grepTitle(input), 'search')
-    case 'WebFetch':
-      return view(text(input.url) ? `Fetch ${String(input.url)}` : 'Fetch', 'fetch', {
+    case 'WebFetch': {
+      const url = text(input.url)
+      return view(url ? t('claude.tool.fetchUrl', { url }) : t('claude.tool.fetch'), 'fetch', {
         content: text(input.prompt) ? [markdown(String(input.prompt))] : [],
       })
-    case 'WebSearch':
-      return view(text(input.query) ? `Search "${String(input.query)}"` : 'Web search', 'fetch')
+    }
+    // Huli: the API's own tools, which Claude runs on Anthropic's side.
+    case 'web_search':
+      return toolView('WebSearch', input, cwd)
+    case 'web_fetch':
+      return toolView('WebFetch', input, cwd)
+    case 'code_execution':
+    case 'bash_code_execution':
+      return view(
+        text(input.command) ?? text(input.code) ?? t('claude.tool.codeExecution'),
+        'execute',
+      )
+    case 'WebSearch': {
+      const query = text(input.query)
+      return view(
+        query ? t('claude.tool.searchQuery', { query }) : t('claude.tool.webSearch'),
+        'fetch',
+      )
+    }
     case 'Agent':
     case 'Task':
-      return view(text(input.description) ?? 'Task', 'think', {
+      return view(text(input.description) ?? t('claude.tool.task'), 'think', {
         content: text(input.prompt) ? [markdown(String(input.prompt))] : [],
       })
     case 'ExitPlanMode':
-      return view('Approve Plan', 'switch_mode', {
+      return view(t('claude.tool.approvePlan'), 'switch_mode', {
         content: text(input.plan) ? [markdown(String(input.plan))] : [],
       })
     case 'EnterPlanMode':
-      return view('Plan', 'switch_mode')
+      return view(t('claude.tool.plan'), 'switch_mode')
     case 'AskUserQuestion': {
       const first = askedQuestions(input)?.[0]
       return first
         ? view(first.header || first.question, 'other', { question: first.question })
-        : view('Question', 'other')
+        : view(t('claude.tool.question'), 'other')
     }
-    case 'Skill':
-      return view(text(input.skill) ? `Load skill: ${String(input.skill)}` : 'Load skill', 'other')
+    case 'Skill': {
+      const skill = text(input.skill)
+      return view(
+        skill ? t('claude.tool.loadSkillNamed', { skill }) : t('claude.tool.loadSkill'),
+        'other',
+      )
+    }
     default:
-      return view(name || 'Tool', 'other')
+      return view(name || t('claude.tool.tool'), 'other')
   }
 }
 
@@ -217,7 +301,17 @@ export function resultParts(result: ToolResultBlock): { text: string; refs: Cont
     if (block.type === 'text') texts.push((block as { text: string }).text)
     else {
       const ref = blockRef(block)
-      if (ref) refs.push(ref)
+      if (ref) {
+        refs.push(ref)
+        continue
+      }
+      // Huli: a resource, a document, a search result, a tool a search found, a sound.
+      const other = otherText(block)
+      if (other !== null) texts.push(other)
+      else {
+        const shown = otherRef(block)
+        if (shown) refs.push(shown)
+      }
     }
   }
   return { text: texts.join('\n'), refs }
@@ -254,8 +348,16 @@ export function resultContent(
   if (error) return [...(body ? [markdown(fenced(body))] : []), ...images]
   switch (name) {
     case 'Edit':
-    case 'NotebookEdit':
+    case 'MultiEdit':
       return null
+    case 'NotebookEdit': {
+      const notebook = before.find((item) => item.type === 'diff')
+      if (!notebook || notebook.type !== 'diff') return null
+      const old = typeof shaped.old_source === 'string' ? toLf(shaped.old_source) : null
+      const next =
+        typeof shaped.new_source === 'string' ? toLf(shaped.new_source) : notebook.newText
+      return [{ ...notebook, oldText: old ?? notebook.oldText ?? '', newText: next }]
+    }
     case 'Write': {
       const original = shaped.originalFile
       if (typeof original !== 'string') return null
@@ -292,9 +394,83 @@ export function resultContent(
       }
       return [...(body ? [markdown(body)] : []), ...images]
     }
-    default:
-      return [...(body ? [markdown(body)] : []), ...images]
+    default: {
+      // An MCP tool's JSON, a listing of files or a search's lines show as written.
+      const shown = resultMarkdown(body)
+      return [...(shown ? [markdown(shown)] : []), ...images]
+    }
   }
+}
+
+/** Huli: a result block of a tool the API runs itself, such as `web_search_tool_result`. */
+export interface ServerToolResult {
+  type: string
+  tool_use_id: string
+  content?: unknown
+  is_error?: boolean
+}
+
+/** Huli: whether a block of an assistant message is the result of one of the API's own tools. */
+export function isServerToolResult(block: ContentBlock): block is ServerToolResult {
+  return (
+    block.type !== 'tool_result' &&
+    block.type.endsWith('_tool_result') &&
+    typeof (block as { tool_use_id?: unknown }).tool_use_id === 'string'
+  )
+}
+
+/**
+ * Huli: what a call of one of the API's own tools shows once its result block came: the pages a
+ * search found, the page a fetch read, what code printed and its exit code, an MCP tool's text.
+ */
+export function serverResultView(block: ServerToolResult): {
+  failed: boolean
+  content: ToolContent[]
+  exitCode?: number
+} {
+  const value = block.content
+  const fields = asInput(value)
+  const error = typeof fields.type === 'string' && fields.type.endsWith('_error')
+  if (error) {
+    const code = text(fields.error_code) ?? text(fields.error_message) ?? ''
+    return { failed: true, content: code ? [markdown(fenced(code))] : [] }
+  }
+  if (block.type === 'web_search_tool_result' && Array.isArray(value)) {
+    const lines = value.flatMap((item) => {
+      const result = asInput(item)
+      const url = text(result.url)
+      if (!url) return []
+      const title = (text(result.title) ?? url).replace(/[[\]]/g, '')
+      return [`- [${title}](${url})`]
+    })
+    return { failed: false, content: lines.length > 0 ? [markdown(lines.join('\n'))] : [] }
+  }
+  if (block.type === 'web_fetch_tool_result') {
+    const url = text(fields.url)
+    const title = text(asInput(fields.content).title)
+    return { failed: false, content: url ? [markdown(`[${title ?? url}](${url})`)] : [] }
+  }
+  if (typeof fields.stdout === 'string' || typeof fields.stderr === 'string') {
+    const printed = [fields.stdout, fields.stderr].filter(
+      (part) => typeof part === 'string' && part !== '',
+    )
+    const code = typeof fields.return_code === 'number' ? fields.return_code : undefined
+    return {
+      failed: code !== undefined && code !== 0,
+      content: printed.length > 0 ? [markdown(fenced(toLf(printed.join('\n')), 'console'))] : [],
+      ...(code !== undefined ? { exitCode: code } : {}),
+    }
+  }
+  const texts =
+    typeof value === 'string'
+      ? [value]
+      : Array.isArray(value)
+        ? value.flatMap((item) =>
+            asInput(item).type === 'text' ? [String(asInput(item).text)] : [],
+          )
+        : []
+  const shown = resultMarkdown(toLf(texts.join('\n')))
+  return { failed: block.is_error === true, content: shown ? [markdown(shown)] : [] }
 }
 
 /** The tool the turn's own work keeps running after its call ended. */

@@ -9,7 +9,8 @@
     "running": "Running",
     "done": "Done",
     "failed": "Failed",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "denied": "Denied"
   },
   "summary": {
     "separator": " · ",
@@ -49,12 +50,19 @@
     "moveMore": "Moved {{names}} and {{more}} more",
     "failed": "{{failed}} failed"
   },
+  "refusal": {
+    "title": "The model declined to continue",
+    "body": "It stopped this reply on its own, and the API gives no reason. Try the message again, rephrase it, or pick another model in the composer below.",
+    "saidBody": "It stopped this reply on its own, and the API gives no reason beyond what it said. Rephrase the message, try it again, or pick another model in the composer below.",
+    "again": "Try again",
+    "rephrase": "Edit message"
+  },
   "stopReason": {
     "endTurn": "Worked for {{duration}}",
     "cancelled": "Cancelled",
     "maxTokens": "Stopped at the token limit",
     "maxTurnRequests": "Stopped at the request limit",
-    "refusal": "Declined",
+    "refusal": "The model declined to continue",
     "withTime": "{{reason}} · {{time}}"
   },
   "tool": {
@@ -75,7 +83,25 @@
     "runInTerminal": "Run in terminal",
     "copyCommand": "Copy command",
     "showAll": "Show all",
-    "showFullDiff": "Show full diff"
+    "showFullDiff": "Show full diff",
+    "deniedBy": {
+      "review": "Denied by automatic review",
+      "mode": "Denied by the permission mode",
+      "rule": "Denied by a permission rule",
+      "hook": "Denied by a hook"
+    },
+    "review": {
+      "approved": "Approved by automatic review",
+      "approvedRisk": "Approved by automatic review · {{risk}}",
+      "reviewing": "Automatic review…",
+      "reviewingRisk": "Automatic review… · {{risk}}",
+      "risk": {
+        "low": "low risk",
+        "medium": "medium risk",
+        "high": "high risk",
+        "critical": "critical risk"
+      }
+    }
   },
   "permission": {
     "outsideScope": "Outside this routine's permissions: {{level}}.",
@@ -602,6 +628,9 @@
       "waiting": "Waiting for your approval",
       "working": "Working",
       "failed": "Stopped with an error",
+      "stalled": "May be stuck",
+      "paused": "Goes on when the plan resets at {{time}}",
+      "pausedUnknown": "Goes on when the plan resets",
       "signIn": "Waiting for sign-in",
       "finished": "Finished {{ago}}"
     },
@@ -1019,7 +1048,11 @@
       "output": "Output",
       "content": "Content",
       "result": "Result",
-      "changes": "Changes"
+      "changes": "Changes",
+      "input": "Input",
+      "prompt": "Prompt",
+      "denied": "Why it was denied",
+      "review": "Automatic review"
     },
     "exitCode": "Exit code {{code}}",
     "earlierLines_one": "{{count}} earlier line",

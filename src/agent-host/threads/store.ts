@@ -367,6 +367,23 @@ export class ThreadStore {
     return this.read({ op: 'blob', sessionId, hash }, sessionId)
   }
 
+  /** How many media files the threads keep and their bytes, and what is not moved into files yet. */
+  mediaTotals(): Promise<{ files: number; bytes: number; legacy: number }> {
+    return this.readAll({ op: 'mediaTotals' })
+  }
+
+  /**
+   * Clears away the pictures of these sessions, or with `dryRun` tells how many it would and the
+   * bytes that would come back.
+   */
+  clearImages(
+    sessionIds: readonly string[],
+    dryRun: boolean,
+  ): Promise<{ sessions: number; images: number; bytes: number }> {
+    if (dryRun) return this.readAll({ op: 'clearImages', sessionIds: [...sessionIds], dryRun })
+    return this.sessionWrite({ op: 'clearImages', sessionIds: [...sessionIds], dryRun }, sessionIds)
+  }
+
   /** Whether an agent or user entry of the stored thread holds `text`. */
   mentions(sessionId: string, text: string): Promise<boolean> {
     return this.read({ op: 'mentions', sessionId, text }, sessionId)

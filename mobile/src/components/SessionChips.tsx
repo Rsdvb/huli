@@ -7,12 +7,13 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-na
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { call } from '../git'
-import { useLink, useSession } from '../host'
+import { useConnected, useLink, useSession } from '../host'
 import { sessionTitle } from '../sessions'
 import { sessionPullRequests, topPrState } from '../sessionMenu'
 import { TapMenu } from '../ui/ContextMenu'
 import { GlassCapsule } from '../ui/Glass'
 import type { MenuNode } from '../ui/menu'
+import { showNotice } from '../ui/NoticeBar'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import { GI, PrMark } from '../ui/session/gitIcons'
 import { useSessionTokens } from '../ui/session/palette'
@@ -38,7 +39,7 @@ function Chip(props: { children: ReactNode; label: string; onPress?: () => void 
       disabled={!props.onPress}
       accessibilityRole={props.onPress ? 'button' : 'text'}
       accessibilityLabel={props.label}
-      hitSlop={4}
+      hitSlop={CHIP_SLOP}
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
       <GlassCapsule height={30} style={styles.chip}>
@@ -48,15 +49,28 @@ function Chip(props: { children: ReactNode; label: string; onPress?: () => void 
   )
 }
 
-/** A name read once from the computer, for a chip that names what the session runs for. */
+/** The chip's 30pt capsule takes touches over 44pt, short of the chip beside it. */
+const CHIP_SLOP = { top: 7, bottom: 7, left: 3, right: 3 }
+
+/** Names read before, so a chip coming back, or a session opened again, names at once. */
+const names = new Map<string, string>()
+
+/**
+ * A name read from the computer, for a chip that names what the session runs for. A read made
+ * while the computer was away is made again once it connects, rather than leave the chip generic.
+ */
 function useName(read: (() => Promise<string | null>) | null, key: string | null): string | null {
-  const [name, setName] = useState<string | null>(null)
+  const connected = useConnected()
+  const [name, setName] = useState<string | null>(key ? (names.get(key) ?? null) : null)
   useEffect(() => {
-    setName(null)
-    if (!read || !key) return
+    setName(key ? (names.get(key) ?? null) : null)
+    if (!read || !key || !connected) return
     let live = true
     read().then(
-      (got) => live && setName(got),
+      (got) => {
+        if (got) names.set(key, got)
+        if (live) setName(got)
+      },
       () => {},
     )
     return () => {
@@ -64,8 +78,15 @@ function useName(read: (() => Promise<string | null>) | null, key: string | null
     }
     // `key` names what `read` reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  }, [key, connected])
   return name
+}
+
+/** Opens a pull request's page, saying so when the phone cannot. */
+function openPage(url: string): void {
+  Linking.openURL(url).catch(() =>
+    showNotice({ text: '打不开这个 Pull Request 的网页。', tone: 'warning' }),
+  )
 }
 
 export function SessionChips(props: {
@@ -87,11 +108,11 @@ export function SessionChips(props: {
             (list) => list.routines.find((r) => r.id === routineId)?.name ?? null,
           )
       : null,
-    routineId,
+    routineId && `routine:${routineId}`,
   )
   const task = useName(
     taskId ? () => call(link, 'tasks.get', { taskId }).then((view) => view.title) : null,
-    taskId,
+    taskId && `task:${taskId}`,
   )
 
   if (!hasChips(summary, !!parent)) return null
@@ -102,7 +123,7 @@ export function SessionChips(props: {
           key: pr.url,
           label: `${pr.repo}#${pr.number}`,
           icon: 'arrow.triangle.pull',
-          onPress: () => void Linking.openURL(pr.url),
+          onPress: () => openPage(pr.url),
         }))
       : []
   const failing = prs.some((pr) => pr.failing)
@@ -143,7 +164,10 @@ export function SessionChips(props: {
           </Chip>
         ) : null}
         {summary.task ? (
-          <Chip label={`任务 ${task ?? ''}`}>
+          <Chip
+            label={`任务 ${task ?? ''}`}
+            onPress={() => router.push({ pathname: '/task/[id]', params: { id: taskId! } })}
+          >
             <Icon icon={GI.task} size={13} color={c.textSecondary} />
             <Text style={[styles.text, { color: c.text }]} numberOfLines={1}>
               {task ?? '任务'}
@@ -166,7 +190,7 @@ export function SessionChips(props: {
             {(open) => (
               <Chip
                 label={`${prs.length} 个 Pull Request${failing ? '，检查失败' : ''}`}
-                onPress={open ?? (() => void Linking.openURL(prs[0]!.url))}
+                onPress={open ?? (() => openPage(prs[0]!.url))}
               >
                 <PrMark state={topPrState(prs)} size={13} failing={failing} />
                 <Text style={[styles.text, { color: c.text }]}>

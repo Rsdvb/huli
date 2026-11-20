@@ -3,10 +3,14 @@
 
 import { memo } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
+import { router } from 'expo-router'
+import type { HostLink } from '@shared/remote/link'
 import type { TaskSummary, TaskView } from '@shared/workflow'
 import { useAgent } from '../../host'
 import { listTime } from '../../sessions'
 import {
+  confirmCancel,
+  confirmDelete,
   ENDED_TEXT,
   frontStep,
   needsAttention,
@@ -14,12 +18,14 @@ import {
   spanText,
   stepTitle,
   stepWord,
+  togglePin,
   useTick,
   WORD_TEXT,
   workflowTitle,
 } from '../../tasks'
 import { AgentAvatar, type AvatarBadge } from '../../ui/AgentAvatar'
 import { Icon } from '../../ui/Icon'
+import type { MenuNode } from '../../ui/menu'
 import { Press } from '../../ui/Press'
 import { SwipeRow, type SwipeAction } from '../../ui/SwipeRow'
 import { size as sizes, space, type as typeScale, useTokens } from '../../ui/tokens'
@@ -199,3 +205,44 @@ const styles = StyleSheet.create({
   tabular: { fontVariant: ['tabular-nums'], fontWeight: '400' },
   time: { fontVariant: ['tabular-nums'], fontWeight: '400' },
 })
+
+/**
+ * A task's long-press menu, the same in the 需求 list and on home: open, pin, and cancel or
+ * delete, which wait for the computer (`link` null while it is away).
+ */
+export function taskMenu(t: TaskSummary, link: HostLink | null): MenuNode[] {
+  const connected = link !== null
+  return [
+    {
+      key: 'open',
+      label: '打开',
+      icon: 'arrow.up.right.square',
+      onPress: () => router.push(`/task/${t.id}`),
+    },
+    {
+      key: 'pin',
+      label: t.pinnedAt !== null ? '取消置顶' : '置顶',
+      icon: t.pinnedAt !== null ? 'pin.slash' : 'pin',
+      disabled: !connected,
+      onPress: () => link && togglePin(link, t),
+    },
+    { kind: 'divider', key: 'danger' },
+    t.status === 'running'
+      ? {
+          key: 'cancel',
+          label: '取消需求…',
+          icon: 'xmark.circle',
+          destructive: true,
+          disabled: !connected,
+          onPress: () => link && confirmCancel(link, t),
+        }
+      : {
+          key: 'delete',
+          label: '删除…',
+          icon: 'trash',
+          destructive: true,
+          disabled: !connected,
+          onPress: () => link && confirmDelete(link, t),
+        },
+  ]
+}

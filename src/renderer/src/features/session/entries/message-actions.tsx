@@ -29,6 +29,7 @@ import { useReplyHover } from '../reply-hover'
 import { useEntry, useEntryAnimation } from '../use-thread'
 import { ChangesCard } from './changes-card'
 import { forkBlocked, forkEntry, latestTurnStart, revertBlocked } from './helpers'
+import { RefusalEnd } from './refusal-end'
 import { TurnEndTag } from './turn-end-tag'
 
 function Ago({ at }: { at: number }) {
@@ -243,12 +244,22 @@ export const ReplyFooter = memo(
     return (
       <>
         <ChangesCard sessionId={sessionId} projectPath={projectPath} toolIds={toolIds} />
-        {end && end.stopReason !== 'end_turn' && (
-          <TurnEndTag
-            stopReason={end.stopReason}
+        {end && endId && end.stopReason === 'refusal' ? (
+          <RefusalEnd
+            sessionId={sessionId}
+            entryId={endId}
             durationMs={end.durationMs}
             className={animation}
           />
+        ) : (
+          end &&
+          end.stopReason !== 'end_turn' && (
+            <TurnEndTag
+              stopReason={end.stopReason}
+              durationMs={end.durationMs}
+              className={animation}
+            />
+          )
         )}
         <div
           className={cn('ks-reply-foot', animation)}

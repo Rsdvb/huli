@@ -30,8 +30,9 @@ import { hostOfPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
 import { useRoutinesStore } from '@renderer/stores/routines'
 import { useSessionsStore } from '@renderer/stores/sessions'
-import { codeSpans, respondToPermission, toolLabel } from './helpers'
+import { codeSpans, respondToPermission, toolInputFields, toolLabel } from './helpers'
 import { StepCard } from './tool-call'
+import { ToolInput } from './tool-call-parts'
 import { KIND_GLYPH, stepFacts, useToolCallLabels } from './tool-call-model'
 import { ContentBlock, ToolMedia } from './tool-parts'
 import { useAnswering } from './use-answering'
@@ -310,6 +311,9 @@ export function PermissionEntry({
         </div>,
       )
     }
+    // Huli: what the call would be given, so allowing a tool such as javascript_tool is not blind.
+    const fields = toolInputFields(entry)
+    if (fields) more.push(<ToolInput key="input" fields={fields} raw={entry.rawInput ?? ''} />)
     entry.content.forEach((content, i) =>
       more.push(
         <ContentBlock
@@ -351,7 +355,10 @@ export function PermissionEntry({
           target={target ?? undefined}
           toolIcon={<Icon icon={KIND_GLYPH[entry.toolKind]} size={12} />}
           risk={entry.toolKind === 'execute' || entry.toolKind === 'delete' ? 'risky' : 'safe'}
-          reason={entry.description}
+          reason={
+            // Huli: why the agent asks, beside what a command says it does.
+            [entry.description, permission?.reason].filter(Boolean).join(' · ') || undefined
+          }
           previewTitle={t('permission.card.touches')}
           preview={preview}
           scopes={[first ?? 'once']}

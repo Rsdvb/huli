@@ -8,6 +8,7 @@ import { authenticate, useBiometryName } from '../../lock'
 import { LOCK_DELAYS, setPrefs, usePrefs, type LockDelay } from '../../prefs'
 import { pushChoicesChanged } from '../../push/sync'
 import { errorText } from '../../sessions'
+import { THIS_DEVICE } from '../../system/device'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
@@ -39,7 +40,7 @@ export default function LockSettings() {
       setPrefs({ lock: on })
     } else if (result.error === 'passcode_not_set' || result.error === 'not_available') {
       haptic.warning()
-      Alert.alert('这台 iPhone 没有设置密码', '先在系统设置里设置锁屏密码，才能用它锁定纸鸢。')
+      Alert.alert(`${THIS_DEVICE}没有设置密码`, '先在系统设置里设置锁屏密码，才能用它锁定纸鸢。')
     }
   }
 

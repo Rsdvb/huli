@@ -56,6 +56,7 @@
     "installTheme": "安装主题",
     "exportTheme": "导出主题",
     "chooseAgentFolder": "选择 Agent 的配置目录",
+    "chooseHistoryFolder": "选择存有 Agent 会话的文件夹",
     "chooseEditor": "选择编辑器",
     "chooseSshKey": "选择 SSH 密钥文件",
     "chooseBackupFolder": "选择备份文件夹",

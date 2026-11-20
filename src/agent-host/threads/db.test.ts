@@ -16,6 +16,7 @@ import type { ContextBreakdown } from '@shared/context'
 import type { ContentRef, SessionView, ThreadEntry } from '@shared/thread'
 import { contentHash, contentPath } from '../artifacts/content'
 import { schemaAt, SCHEMA_VERSION, ThreadDb, ThreadDbError } from './db'
+import { mediaDirOf, mediaPath } from './media'
 import {
   changesStored,
   EMPTY_SESSION,
@@ -50,6 +51,16 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
   logs.length = 0
 })
+
+/** The names of the files in the media folder of the database `file`, sorted. */
+function mediaFiles(file: string): string[] {
+  const dir = mediaDirOf(file)
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .toSorted()
+}
 
 const user = (id: string, steered?: boolean): ThreadEntry => ({
   kind: 'user',
@@ -498,11 +509,14 @@ describe('the thread database', () => {
     db.close()
 
     const raw = new DatabaseSync(file)
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM blobs').get()!.n).toBe(1)
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM blobs').get()!.n).toBe(0)
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM media').get()!.n).toBe(1)
     const json = raw.prepare("SELECT json FROM entries WHERE entry_id = 't1'").get()!.json
     raw.close()
     expect(String(json)).not.toContain(big.slice(0, 64))
     expect(String(json)).toContain('"blob"')
+    // The bytes are one file of their content, beside the database.
+    expect(readFileSync(mediaPath(mediaDirOf(file), hash, 'image/png'))).toEqual(bytes)
   })
 
   it('keeps large sounds and clips apart as it does images, with their kind and size', () => {
@@ -535,7 +549,7 @@ describe('the thread database', () => {
 
     const raw = new DatabaseSync(file)
     // The same bytes once, whatever kind each ref says they are.
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM blobs').get()!.n).toBe(1)
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM media').get()!.n).toBe(1)
     const json = String(raw.prepare("SELECT json FROM entries WHERE entry_id = 'a'").get()!.json)
     raw.close()
     expect(json).not.toContain(big.slice(0, 64))
@@ -711,11 +725,13 @@ describe('the thread database', () => {
     expect(db.page('s2', null)).not.toBeNull()
     db.close()
     const raw = new DatabaseSync(file)
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM blobs').get()!.n).toBe(0)
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM media').get()!.n).toBe(0)
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM session_media').get()!.n).toBe(0)
     expect(raw.prepare("SELECT COUNT(*) AS n FROM entries WHERE session_id = 's1'").get()!.n).toBe(
       0,
     )
     raw.close()
+    expect(mediaFiles(file)).toEqual([])
   })
 
   it('treats a thread with an entry that does not parse as not stored, and says so', () => {
@@ -762,6 +778,239 @@ describe('the thread database', () => {
     const check = new DatabaseSync(file)
     expect(check.prepare('SELECT COUNT(*) AS n FROM threads').get()!.n).toBe(0)
     check.close()
+  })
+})
+
+describe("the thread database's media", () => {
+  const sha = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex')
+  const shotOf = (id: string, ref: ContentRef): ThreadEntry => ({
+    ...(tool(id) as Extract<ThreadEntry, { kind: 'tool' }>),
+    content: [{ type: 'ref', ref }],
+  })
+  const picture = (bytes: Uint8Array, mimeType = 'image/png'): ContentRef => ({
+    kind: 'image',
+    mimeType,
+    data: Buffer.from(bytes).toString('base64'),
+  })
+  const big = (fill: number, size = INLINE_MEDIA_LIMIT): Uint8Array =>
+    new Uint8Array(Buffer.alloc(size, fill))
+  const count = (file: string, table: string): number => {
+    const raw = new DatabaseSync(file)
+    const n = Number(raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n)
+    raw.close()
+    return n
+  }
+
+  it('keeps the same bytes once for every session that names them, until the last one goes', () => {
+    const file = tempFile()
+    const db = open(file)
+    const bytes = big(9)
+    const entries = [shotOf('t1', picture(bytes))]
+    db.write('s1', { head, entries: entries.map((entry, pos) => ({ pos, entry })) })
+    db.write('s2', { head, entries: entries.map((entry, pos) => ({ pos, entry })) })
+    expect(count(file, 'media')).toBe(1)
+    expect(count(file, 'session_media')).toBe(2)
+    expect(mediaFiles(file)).toEqual([`${sha(bytes)}.png`])
+
+    db.remove(['s1'])
+    expect(db.page('s2', null, null, 'inline')!.entries).toEqual(entries)
+    expect(mediaFiles(file)).toHaveLength(1)
+    db.remove(['s2'])
+    expect(count(file, 'media')).toBe(0)
+    expect(mediaFiles(file)).toEqual([])
+    db.close()
+  })
+
+  it('keeps a sent attachment by its own bytes, whatever name it came with', () => {
+    const file = tempFile()
+    const db = open(file)
+    const name = 'ab'.repeat(32)
+    const mine = new Uint8Array([1, 2, 3])
+    const theirs = new Uint8Array([4, 5, 6])
+    db.write('s1', { head, entries: [], blobs: [{ hash: name, mime: 'image/png', data: mine }] })
+    db.write('s2', { head, entries: [], blobs: [{ hash: name, mime: 'image/png', data: theirs }] })
+    expect(db.blob('s1', name)?.data).toEqual(mine)
+    expect(db.blob('s2', name)?.data).toEqual(theirs)
+    expect(count(file, 'media')).toBe(2)
+    db.close()
+  })
+
+  it('moves the bytes of version 9 out in steps, resuming after a crash, and gives the space back', () => {
+    const file = tempFile()
+    mkdirSync(path.dirname(file), { recursive: true })
+    const raw = new DatabaseSync(file)
+    raw.exec('PRAGMA auto_vacuum = INCREMENTAL; PRAGMA journal_mode = WAL')
+    raw.exec(`BEGIN; ${schemaAt(9)} PRAGMA user_version = 9; COMMIT;`)
+    const pictures = [1, 2, 3, 4, 5, 6].map((fill) => big(fill, 256 * 1024))
+    const named = (bytes: Uint8Array): ContentRef =>
+      ({ kind: 'image', mimeType: 'image/jpeg', blob: sha(bytes) }) as ContentRef
+    for (const sessionId of ['s1', 's2']) {
+      // The second session is a fork: the same first two pictures, kept again.
+      const own = sessionId === 's1' ? pictures : pictures.slice(0, 2)
+      raw
+        .prepare(
+          "INSERT INTO threads (session_id, agent_id, acp_session_id, session_json, next_pos, updated_at) VALUES (?, 'claude-code', 'acp-1', ?, ?, 1)",
+        )
+        .run(sessionId, JSON.stringify(EMPTY_SESSION), own.length)
+      own.forEach((bytes, pos) => {
+        const entry = shotOf(`t${pos}`, named(bytes))
+        raw
+          .prepare(
+            'INSERT INTO entries (session_id, pos, turn, entry_id, kind, json) VALUES (?, ?, 0, ?, ?, ?)',
+          )
+          .run(sessionId, pos, entry.id, entry.kind, JSON.stringify(entry))
+        raw
+          .prepare(
+            "INSERT INTO blobs (session_id, hash, mime, data) VALUES (?, ?, 'image/jpeg', ?)",
+          )
+          .run(sessionId, sha(bytes), bytes)
+      })
+    }
+    raw.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    raw.close()
+    const before = readFileSync(file).length
+    // A crash after a file was written and before its row moved leaves the file, and a temporary.
+    const media = mediaDirOf(file)
+    const early = mediaPath(media, sha(pictures[0]!), 'image/jpeg')
+    mkdirSync(path.dirname(early), { recursive: true })
+    writeFileSync(early, pictures[0]!)
+    writeFileSync(`${early}.0badf00d.tmp`, 'half')
+
+    const expected = pictures.map((bytes, pos) => shotOf(`t${pos}`, picture(bytes, 'image/jpeg')))
+    let db = open(file)
+    expect(db.status).toBe('ok')
+    // Until they move, the bytes read from where they are.
+    expect(db.page('s1', null, null, 'inline')!.entries).toEqual(expected)
+    expect(db.page('s1', null)!.entries[0]).toEqual(shotOf('t0', named(pictures[0]!)))
+    expect(db.legacyLeft()).toEqual({ rows: 8, bytes: 8 * 256 * 1024 })
+    expect(db.moveLegacy(3, Number.MAX_SAFE_INTEGER).rows).toBe(3)
+    db.close()
+
+    db = open(file)
+    expect(db.legacyLeft().rows).toBe(5)
+    expect(db.page('s1', null, null, 'inline')!.entries).toEqual(expected)
+    // A step stops at its bytes.
+    expect(db.moveLegacy(64, 1)).toEqual({ rows: 1, bytes: 256 * 1024 })
+    while (db.moveLegacy(64, Number.MAX_SAFE_INTEGER).rows > 0);
+    expect(db.legacyLeft()).toEqual({ rows: 0, bytes: 0 })
+    expect(db.page('s1', null, null, 'inline')!.entries).toEqual(expected)
+    expect(db.page('s2', null, null, 'inline')!.entries).toEqual(expected.slice(0, 2))
+    expect(db.blob('s2', sha(pictures[1]!))?.data).toEqual(pictures[1])
+    while (db.shrink(16) > 0);
+    expect(db.checkpoint()).toBe(true)
+    expect(db.sweepMedia().files).toBe(1)
+    db.close()
+
+    expect(mediaFiles(file)).toEqual(pictures.map((bytes) => `${sha(bytes)}.jpg`).toSorted())
+    expect(count(file, 'media')).toBe(6)
+    expect(count(file, 'session_media')).toBe(8)
+    expect(readFileSync(file).length).toBeLessThan(before - 7 * 256 * 1024)
+    const again = open(file)
+    expect(again.page('s1', null, null, 'inline')!.entries).toEqual(expected)
+    again.close()
+  })
+
+  it('moves the bytes of version 9 by itself in the worker, while it answers', async () => {
+    const file = tempFile()
+    mkdirSync(path.dirname(file), { recursive: true })
+    const raw = new DatabaseSync(file)
+    raw.exec('PRAGMA auto_vacuum = INCREMENTAL')
+    raw.exec(`BEGIN; ${schemaAt(9)} PRAGMA user_version = 9; COMMIT;`)
+    raw
+      .prepare(
+        "INSERT INTO threads (session_id, agent_id, acp_session_id, session_json, next_pos, updated_at) VALUES ('s1', 'claude-code', 'acp-1', ?, 0, 1)",
+      )
+      .run(JSON.stringify(EMPTY_SESSION))
+    const insert = raw.prepare(
+      "INSERT INTO blobs (session_id, hash, mime, data) VALUES ('s1', ?, 'image/png', ?)",
+    )
+    for (let fill = 0; fill < 20; fill++) insert.run(sha(big(fill)), big(fill))
+    raw.close()
+    const { startThreadService } = await import('./service')
+    const replies: unknown[] = []
+    const handle = startThreadService(
+      { file, contentDir: null },
+      (reply) => replies.push(reply),
+      () => 0,
+      undefined,
+      { startMs: 0, quietMs: 0, restMs: 0, batchRows: 3 },
+    )
+    handle({ id: 1, op: 'mediaTotals' })
+    await handle.upkeep!.settled()
+    handle({ id: 2, op: 'mediaTotals' })
+    handle({ id: 3, op: 'close' })
+    const results = replies.filter((r) => (r as { type: string }).type === 'result')
+    expect(results[0]).toMatchObject({ value: { legacy: 20 * INLINE_MEDIA_LIMIT } })
+    expect(results[1]).toMatchObject({
+      value: { files: 20, bytes: 20 * INLINE_MEDIA_LIMIT, legacy: 0 },
+    })
+    expect(mediaFiles(file)).toHaveLength(20)
+  })
+
+  it('clears the pictures of sessions, keeping their sounds and what other sessions hold', () => {
+    const file = tempFile()
+    const db = open(file)
+    const own = big(1)
+    const shared = big(2)
+    const sound = big(3)
+    const clip: ContentRef = {
+      kind: 'audio',
+      mimeType: 'audio/wav',
+      data: Buffer.from(sound).toString('base64'),
+      size: sound.length,
+      name: null,
+    } as ContentRef
+    const mine = [
+      shotOf('t1', picture(own)),
+      shotOf('t2', picture(shared)),
+      shotOf('t3', clip),
+    ].map((entry, pos) => ({ pos, entry }))
+    db.write('s1', { head, entries: mine })
+    db.write('s2', { head, entries: [{ pos: 0, entry: shotOf('t1', picture(shared)) }] })
+
+    const cleared = { sessions: 1, images: 2, bytes: own.length }
+    expect(db.clearImages(['s1', 's1'], true)).toEqual(cleared)
+    expect(mediaFiles(file)).toHaveLength(3)
+    expect(db.clearImages(['s1'], false)).toEqual(cleared)
+    const unsupported = { kind: 'unsupported', label: 'image/png' }
+    const page = db.page('s1', null, null, 'inline')!.entries
+    expect(page[0]).toMatchObject({ content: [{ ref: unsupported }] })
+    expect(page[1]).toMatchObject({ content: [{ ref: unsupported }] })
+    expect(page[2]).toEqual(mine[2]!.entry)
+    expect(db.page('s2', null, null, 'inline')!.entries[0]).toEqual(shotOf('t1', picture(shared)))
+    expect(mediaFiles(file)).toEqual([`${sha(shared)}.png`, `${sha(sound)}.wav`].toSorted())
+    // A cleared picture is no lost one, and stays cleared through a whole write.
+    const loaded = db.load('s1')!.entries
+    db.write('s1', { head, entries: loaded, replace: true })
+    expect(db.page('s1', null)!.entries[0]).toMatchObject({ content: [{ ref: unsupported }] })
+    expect(logs.filter((l) => l.message.includes('is missing'))).toEqual([])
+    expect(db.clearImages(['s1'], true)).toEqual({ sessions: 0, images: 0, bytes: 0 })
+    db.close()
+  })
+
+  it('drops the names no entry uses, and sweeps the files no row names', () => {
+    const file = tempFile()
+    const db = open(file)
+    const bytes = big(4)
+    db.write('s1', { head, entries: [{ pos: 0, entry: shotOf('t1', picture(bytes)) }] })
+    db.write('s1', { head, entries: [{ pos: 0, entry: tool('t1') }] })
+    expect(count(file, 'session_media')).toBe(1)
+    expect(db.pruneMedia('s1')).toBe(1)
+    expect(count(file, 'session_media')).toBe(0)
+    expect(count(file, 'media')).toBe(0)
+    expect(mediaFiles(file)).toEqual([])
+
+    db.write('s1', { head, entries: [{ pos: 1, entry: shotOf('t2', picture(bytes)) }] })
+    expect(db.pruneMedia('s1')).toBe(0)
+    const kept = mediaPath(mediaDirOf(file), sha(bytes), 'image/png')
+    const folder = path.dirname(kept)
+    writeFileSync(path.join(folder, `${'c'.repeat(64)}.png`), 'stray')
+    writeFileSync(path.join(folder, `${sha(bytes)}.jpg`), 'another type')
+    writeFileSync(path.join(folder, 'notes.txt'), 'not ours')
+    expect(db.sweepMedia().files).toBe(2)
+    expect(mediaFiles(file)).toEqual([`${sha(bytes)}.png`, 'notes.txt'])
+    expect(readFileSync(kept)).toEqual(Buffer.from(bytes))
+    db.close()
   })
 })
 

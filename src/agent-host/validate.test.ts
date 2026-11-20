@@ -1006,6 +1006,21 @@ describe('attachments', () => {
     )
   })
 
+  it('clears pictures only of a scope and a span it knows', () => {
+    const clear = posix['storage.clearImages']
+    expect(clear({ scope: 'older', days: 30, dryRun: true, more: 1 })).toEqual({
+      scope: 'older',
+      days: 30,
+      dryRun: true,
+    })
+    expect(clear({ scope: 'archived', days: 7, dryRun: false })).toMatchObject({ dryRun: false })
+    rejects(() => clear({ scope: 'all', days: 30, dryRun: true }))
+    rejects(() => clear({ scope: 'older', days: 0, dryRun: true }))
+    rejects(() => clear({ scope: 'older', days: 30.5, dryRun: true }))
+    rejects(() => clear({ scope: 'older', days: 30 }))
+    rejects(() => clear({ scope: 'older', days: 30, dryRun: 'yes' }))
+  })
+
   it('reads a sent blob only by its SHA-256', () => {
     const hash = 'ab'.repeat(32)
     expect(posix['sessions.blob']({ sessionId: 's', hash })).toEqual({ sessionId: 's', hash })
@@ -1368,7 +1383,77 @@ describe('agentHistory.list', () => {
 
   it('is a window’s alone: a paired device cannot list every folder', () => {
     expect(forbiddenToDevices('agentHistory.list', { agentId: 'codex' })).toBe(true)
+    expect(forbiddenToDevices('agentHistory.planCopy', { agentId: 'codex' })).toBe(true)
+    expect(forbiddenToDevices('agentHistory.copy', { token: 'x' })).toBe(true)
     expect(forbiddenToDevices('agents.listSessions', { agentId: 'codex' })).toBe(false)
+  })
+
+  it('takes another folder only as an absolute path that steps nowhere out', () => {
+    expect(
+      posix['agentHistory.list']({ agentId: 'claude-code', folder: '/mnt/old/.claude' }),
+    ).toEqual({ agentId: 'claude-code', folder: '/mnt/old/.claude' })
+    expect(
+      windows['agentHistory.list']({
+        agentId: 'claude-code',
+        folder: '\\\\wsl$\\Ubuntu\\home\\me\\.claude',
+      }),
+    ).toEqual({ agentId: 'claude-code', folder: '\\\\wsl$\\Ubuntu\\home\\me\\.claude' })
+    expect(
+      windows['agentHistory.list']({ agentId: 'codex', folder: 'E:\\backup\\.codex' }),
+    ).toEqual({
+      agentId: 'codex',
+      folder: 'E:\\backup\\.codex',
+    })
+    for (const folder of ['relative/.claude', '', '/a/../etc', '/a/b/..', '/a\0b', 7, null]) {
+      rejects(() => posix['agentHistory.list']({ agentId: 'claude-code', folder }))
+    }
+    for (const folder of [
+      'E:backup',
+      'E:\\a\\..\\b',
+      'E:/a/../b',
+      '\\\\.\\pipe\\x',
+      '\\\\?\\C:\\x',
+      '/tmp/x',
+    ]) {
+      rejects(() => windows['agentHistory.list']({ agentId: 'codex', folder }))
+    }
+  })
+
+  it('plans a copy of known ids from a valid folder, and runs one by its token', () => {
+    const id = '1b3e33b5-0398-45a8-95d7-eb6d1548192c'
+    expect(
+      posix['agentHistory.planCopy']({
+        agentId: 'claude-code',
+        folder: '/b/.claude',
+        sessionIds: [id],
+        extra: 1,
+      }),
+    ).toEqual({ agentId: 'claude-code', folder: '/b/.claude', sessionIds: [id] })
+    rejects(() => posix['agentHistory.planCopy']({ agentId: 'claude-code', sessionIds: [id] }))
+    rejects(() =>
+      posix['agentHistory.planCopy']({ agentId: 'claude-code', folder: '/b', sessionIds: [] }),
+    )
+    for (const bad of ['../x', 'a/b', '', 'x'.repeat(129), 5]) {
+      rejects(() =>
+        posix['agentHistory.planCopy']({
+          agentId: 'claude-code',
+          folder: '/b',
+          sessionIds: [id, bad],
+        }),
+      )
+    }
+    rejects(() =>
+      posix['agentHistory.planCopy']({
+        agentId: 'claude-code',
+        folder: '/b/../c',
+        sessionIds: [id],
+      }),
+    )
+    const token = '00000000-0000-4000-8000-000000000001'
+    expect(posix['agentHistory.copy']({ token })).toEqual({ token })
+    for (const bad of ['', 'nope', `${token}x`, 1]) {
+      rejects(() => posix['agentHistory.copy']({ token: bad }))
+    }
   })
 })
 
