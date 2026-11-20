@@ -108,7 +108,7 @@ export default function RoutinePage() {
           {!data && !listError && !connected ? (
             <EmptyState
               icon="wifi"
-              title="打不开这个例程"
+              title="打不开这个定时任务"
               message="它所在的电脑没有连上，连上后会再显示。"
               action={{ label: '立即重连', onPress: () => host.retry() }}
             />
@@ -118,19 +118,19 @@ export default function RoutinePage() {
             <EmptyState
               tone="error"
               icon="warning"
-              title="没能读到例程"
+              title="没能读到定时任务"
               message={listError}
               action={{ label: '重试', onPress: () => void loadList() }}
             />
           ) : (
             <EmptyState
               icon="history"
-              title="这个例程已经删除了"
+              title="这个定时任务已经删除了"
               action={{ label: '返回', onPress: () => router.back() }}
             />
           )}
         </View>
-        <NavBar header={header} title="例程" titleAlways />
+        <NavBar header={header} title="定时任务" titleAlways />
       </Screen>
     )
   }
@@ -309,7 +309,7 @@ export default function RoutinePage() {
                 value={routine.enabled}
                 disabled={!connected}
                 onChange={toggle}
-                accessibilityLabel="开启这个例程"
+                accessibilityLabel="开启这个定时任务"
               />
             }
           />
@@ -375,7 +375,7 @@ export default function RoutinePage() {
 
         <ListGroup>
           <ListRow
-            title="删除例程"
+            title="删除定时任务"
             destructive
             disabled={!connected}
             leading={<Icon name="trash" size={18} color={c.danger} />}

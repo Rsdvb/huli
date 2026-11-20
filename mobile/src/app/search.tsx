@@ -354,19 +354,19 @@ export default function Search() {
     if (all || scope === 'artifacts') {
       if (artifacts === null && (scope === 'artifacts' || artifactsError)) {
         if (artifactsError) {
-          out.push({ kind: 'header', key: 'h-artifacts', title: 'Artifacts' })
+          out.push({ kind: 'header', key: 'h-artifacts', title: '产物' })
           out.push({
             kind: 'note',
             key: 'e-artifacts',
             tone: 'error',
-            text: `没能读取 Artifacts：${artifactsError}`,
+            text: `没能读取产物：${artifactsError}`,
             label: '重试',
             action: loadArtifacts,
           })
         } else if (!connected) {
-          out.push({ kind: 'note', key: 'n-artifacts', text: '连上电脑后才能搜索 Artifacts。' })
+          out.push({ kind: 'note', key: 'n-artifacts', text: '连上电脑后才能搜索产物。' })
         } else {
-          out.push({ kind: 'loading', key: 'l-artifacts', text: '正在读取 Artifacts…' })
+          out.push({ kind: 'loading', key: 'l-artifacts', text: '正在读取产物…' })
         }
       }
       group('artifacts', 'Artifacts', artifactHits, (a) => ({
@@ -663,7 +663,7 @@ export default function Search() {
       return (
         <EmptyState
           icon="search"
-          title="搜索会话、对话内容、项目和 Artifacts"
+          title="搜索会话、对话内容、项目和产物"
           message={`在「${computerName(active)}」上找。按键盘上的「搜索」，也会搜全部对话内容。`}
         />
       )
@@ -697,7 +697,7 @@ export default function Search() {
               haptic.tap()
               runContent(query)
             }}
-            placeholder="搜索会话、内容、项目、Artifacts"
+            placeholder="搜索会话、内容、项目、产物"
             placeholderTextColor={c.textTertiary}
             returnKeyType="search"
             enablesReturnKeyAutomatically

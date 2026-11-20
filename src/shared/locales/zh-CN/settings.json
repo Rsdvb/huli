@@ -672,7 +672,7 @@
         "threads": "对话记录",
         "media": "图片与媒体",
         "attachments": "附件",
-        "artifacts": "Artifact",
+        "artifacts": "产物",
         "logs": "日志",
         "usage": "用量记录"
       },
@@ -832,7 +832,7 @@
         },
         "budget": {
           "name": "每次运行的预算（美元）",
-          "description": "例程的一次运行花费超过这个金额时停止。留空表示不限。从下一个会话起生效。",
+          "description": "定时任务的一次运行花费超过这个金额时停止。留空表示不限。从下一个会话起生效。",
           "placeholder": "不限",
           "invalid": "请填大于 0、不超过 10000 的金额，或留空。"
         },
@@ -2209,7 +2209,7 @@
     "enabled": {
       "name": "让 Agent 走节点",
       "description": "Agent 只能经由它的节点联网。节点或 mihomo 不可用时，它就没有网络，而不会从别的路出去。本机回环、局域网和 Tailscale 仍然直连。Kettu 自身的流量仍按「高级 › 代理」。",
-      "keywords": "代理 节点 订阅 机场 clash mihomo vpn tun 网络 出口 Agent 智能体"
+      "keywords": "代理 节点 订阅 机场 clash mihomo vpn tun 网络 出口 Agent"
     },
     "status": {
       "name": "状态",
@@ -2342,7 +2342,7 @@
     },
     "enabled": {
       "name": "每天备份",
-      "description": "每天把 Kettu 的会话、设置、记忆、Artifact 和附件备份成一个文件。电脑关着错过的那天，下次 Kettu 运行时补做一次。",
+      "description": "每天把 Kettu 的会话、设置、记忆、产物和附件备份成一个文件。电脑关着错过的那天，下次 Kettu 运行时补做一次。",
       "keywords": "备份 每日 定时 保存 数据 归档 backup"
     },
     "time": {
@@ -2389,7 +2389,7 @@
       "keywords": "备份 恢复 还原 回滚 导入 restore",
       "title": "恢复这份备份？",
       "made_other": "{{file}}，{{date}} 由 Kettu {{version}} 备份：{{count}} 个文件，{{size}}。",
-      "replaces": "它会替换 Kettu 现在的会话、设置、记忆、Artifact 和附件，备份之后新增的内容会丢失；不过恢复前会先把现在的数据另存一份到备份文件夹。",
+      "replaces": "它会替换 Kettu 现在的会话、设置、记忆、产物和附件，备份之后新增的内容会丢失；不过恢复前会先把现在的数据另存一份到备份文件夹。",
       "keeps": "已配对的设备、Kettu 账号的登录、插件市场的密钥和代理订阅从不放进备份，会保持现状。",
       "restart": "正在运行的 Agent 会停止，Kettu 会重启以完成恢复。",
       "confirm": "恢复并重启",

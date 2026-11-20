@@ -362,7 +362,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
         setFile(path === 'index.html' ? null : path)
         return
       }
-      say('这个链接指向的页面不在这个 Artifact 里。')
+      say('这个链接指向的页面不在这个产物里。')
     },
     [loaded, pages, view, say],
   )
@@ -494,7 +494,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
 
   let body
   if (phase.kind === 'gone') {
-    body = <StateView text="这个 Artifact 已经删除，或不在这台电脑上了。" icon={G.trash} />
+    body = <StateView text="这个产物已经删除，或不在这台电脑上了。" icon={G.trash} />
   } else if (!loaded && cached && !connected && link) {
     body = (
       <ArtifactFrame
@@ -532,7 +532,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
       <View style={styles.center}>
         <Icon icon={G.warning} size={26} color={c.textSecondary} />
         <Text style={[styles.note, { color: c.textSecondary }]}>
-          这个 Artifact 有 {formatBytes(phase.size)}，在手机上打开要下载很多数据。
+          这个产物有 {formatBytes(phase.size)}，在手机上打开要下载很多数据。
         </Text>
         <PressScale
           onPress={() => setAnySize(true)}
@@ -629,7 +629,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
                 ? `离线，显示上次打开的 v${cached.version}`
                 : desktopOnly
                   ? '这个页面要读电脑上的文件或问 Agent，要在电脑上用。'
-                  : '这个 Artifact 较大，页面用脚本读取的部分文件没有载入。'}
+                  : '这个产物较大，页面用脚本读取的部分文件没有载入。'}
             </Text>
             {desktopOnly && (
               <Pressable onPress={() => setDesktopOnly(false)} hitSlop={10}>
@@ -839,8 +839,8 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
       <RenameDialog
         visible={renaming}
         title={summary?.title ?? title}
-        heading="重命名 Artifact"
-        placeholder="Artifact 标题"
+        heading="重命名产物"
+        placeholder="产物标题"
         noReset
         maxLength={ARTIFACT_TITLE_CHARS}
         onClose={() => setRenaming(false)}

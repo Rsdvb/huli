@@ -1568,7 +1568,7 @@
       "pushed": "推送了 {{count}} 个提交到 {{upstream}}",
       "branch": "切换到分支 {{branch}}",
       "pullRequest": "创建了 Pull Request：",
-      "artifact": "Artifact「{{title}}」，第 {{version}} 版",
+      "artifact": "产物「{{title}}」，第 {{version}} 版",
       "memory": "记忆：{{title}}",
       "takeover": "{{agent}} 接手了会话",
       "linesMore": "还有 {{count}} 行",

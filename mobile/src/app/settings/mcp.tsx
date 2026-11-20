@@ -245,7 +245,7 @@ export default function McpSettings() {
           {server ? (
             <ListGroup
               header="内置"
-              footer="Artifacts、会话和浏览器都通过纸鸢自带的服务器提供给每个 Agent。"
+              footer="产物、会话和浏览器都通过纸鸢自带的服务器提供给每个 Agent。"
             >
               <ListRow
                 title={shown(server.title)}

@@ -57,7 +57,7 @@ export default function TasksTab() {
     <SegmentedControl
       segments={[
         { key: 'tasks', label: '需求' },
-        { key: 'routines', label: '例程' },
+        { key: 'routines', label: '定时任务' },
       ]}
       value={view}
       onChange={setTasksTabView}
@@ -257,7 +257,7 @@ function Routines(props: { switcher: ReactNode }) {
   const intro = (
     <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
       <View style={styles.introText}>
-        <Text style={[typeScale.headline, { color: c.text }]}>例程按计划运行一条提示词</Text>
+        <Text style={[typeScale.headline, { color: c.text }]}>定时任务按计划运行一条提示词</Text>
         <Text style={[typeScale.callout, { color: c.textSecondary }]}>
           每次运行都会在电脑上开一个会话，只在你给的权限内干活，做完告诉你。
         </Text>
@@ -271,7 +271,7 @@ function Routines(props: { switcher: ReactNode }) {
         style={styles.newRow}
       >
         <Icon name="plus" size={22} color={c.tint} />
-        <Text style={[typeScale.body, { color: c.tint }]}>新建例程</Text>
+        <Text style={[typeScale.body, { color: c.tint }]}>新建定时任务</Text>
       </Press>
     </View>
   )
@@ -281,7 +281,7 @@ function Routines(props: { switcher: ReactNode }) {
       return (
         <EmptyState
           icon="history"
-          title="连上电脑后才能看例程"
+          title="连上电脑后才能看定时任务"
           message="纸鸢正在连接你的电脑。"
           action={{ label: '立即重连', onPress: () => retry() }}
         />
@@ -292,7 +292,7 @@ function Routines(props: { switcher: ReactNode }) {
         <EmptyState
           tone="error"
           icon="warning"
-          title="没能读到例程"
+          title="没能读到定时任务"
           message={error}
           action={{ label: '重试', onPress: () => void load() }}
         />
@@ -323,7 +323,7 @@ function Routines(props: { switcher: ReactNode }) {
     if (visible.length > 0) {
       return (
         <>
-          <SectionHeader title="你的例程" count={visible.length} />
+          <SectionHeader title="你的定时任务" count={visible.length} />
           <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
             {visible.map(routineRow)}
           </View>
@@ -331,13 +331,13 @@ function Routines(props: { switcher: ReactNode }) {
       )
     }
     if (words) {
-      return <EmptyState icon="search" title={`没有例程包含「${query.trim()}」`} />
+      return <EmptyState icon="search" title={`没有定时任务包含「${query.trim()}」`} />
     }
     if (shell.filter.kind !== 'all' && data.routines.length > 0) {
       return (
         <EmptyState
           icon="folder"
-          title="这个项目里没有例程"
+          title="这个项目里没有定时任务"
           action={{ label: '查看全部项目', onPress: () => shell.setFilter({ kind: 'all' }) }}
         />
       )
@@ -363,7 +363,7 @@ function Routines(props: { switcher: ReactNode }) {
         refreshControl={pull}
       >
         {props.switcher}
-        {data ? <OfflineNote what="开关、新建和运行例程" /> : null}
+        {data ? <OfflineNote what="开关、新建和运行定时任务" /> : null}
         {data ? <ListSyncNote error={error} syncedAt={syncedAt} onRetry={load} /> : null}
         {searching ? (
           <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
@@ -388,7 +388,7 @@ function Routines(props: { switcher: ReactNode }) {
           <View style={[styles.problem, { backgroundColor: c.removedBg }]}>
             <Icon name="warning" size={16} color={c.danger} />
             <Text style={[typeScale.footnote, styles.body, { color: c.text }]}>
-              例程文件读不了：{data.problem.reason}
+              定时任务文件读不了：{data.problem.reason}
               {data.problem.backup ? `。原文件已另存为 ${data.problem.backup}。` : ''}
             </Text>
           </View>
@@ -431,7 +431,7 @@ function Routines(props: { switcher: ReactNode }) {
               ))}
             </View>
             <Text style={[typeScale.footnote, styles.footnote, { color: c.textTertiary }]}>
-              例程在电脑上的纸鸢开着时按电脑的时间运行。Agent
+              定时任务在电脑上的纸鸢开着时按电脑的时间运行。Agent
               接近套餐限额时，它会先暂停，或按设置换用有额度的 Agent。
             </Text>
           </>

@@ -814,7 +814,7 @@ export default function SessionScreen() {
           : []),
         {
           key: 'artifacts',
-          label: 'Artifacts',
+          label: '产物',
           icon: G.artifacts,
           ...(counts.artifacts !== null ? { detail: String(counts.artifacts) } : {}),
           onPress: () => router.push({ pathname: '/session-artifacts/[id]', params: { id } }),
@@ -1261,7 +1261,7 @@ export default function SessionScreen() {
                   })
                 }
                 disabled={!summary}
-                accessibilityLabel="文件、改动、Artifacts、终端和子会话"
+                accessibilityLabel="文件、改动、产物、终端和子会话"
               >
                 <Icon icon={G.more} size={18} color={c.text} weight="bold" />
               </RoundButton>

@@ -101,11 +101,7 @@ export default function DeletedArtifacts() {
     }
     if (!items) return <SkeletonRows count={4} />
     return (
-      <EmptyState
-        icon="trash"
-        title="最近删除里是空的"
-        message="删除的 Artifact 会在这里保留 30 天。"
-      />
+      <EmptyState icon="trash" title="最近删除里是空的" message="删除的产物会在这里保留 30 天。" />
     )
   }
 
@@ -124,7 +120,7 @@ export default function DeletedArtifacts() {
           <View style={styles.pad}>
             <LargeTitle
               title="最近删除"
-              subtitle="删除的 Artifact 在这里保留 30 天。右滑恢复，左滑永久删除。"
+              subtitle="删除的产物在这里保留 30 天。右滑恢复，左滑永久删除。"
             />
           </View>
         }

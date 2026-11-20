@@ -204,10 +204,21 @@ function swapCopy(text) {
   return swapAll(linked, COPY)
 }
 
+/**
+ * Kite's Chinese copy says "Agent", as its owner does, where Kettu's says 智能体; set off from Han
+ * characters with a space, as any Latin word.
+ */
+const zhTerms = (text) =>
+  text.replace(/智能体/g, (match, offset, whole) => {
+    const left = new RegExp(HAN).test(whole[offset - 1] ?? '') ? ' ' : ''
+    const right = new RegExp(HAN).test(whole[offset + match.length] ?? '') ? ' ' : ''
+    return `${left}Agent${right}`
+  })
+
 function swapValues(value, zh) {
   if (typeof value === 'string') {
     const out = swapCopy(swapName(value, zh))
-    return zh ? spaceCloud(out) : out
+    return zh ? zhTerms(spaceCloud(out)) : out
   }
   if (Array.isArray(value)) return value.map((v) => swapValues(v, zh))
   if (value && typeof value === 'object') {

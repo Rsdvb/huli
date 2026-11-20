@@ -313,7 +313,7 @@ function Note(props: {
   const extra = (agent.balances ?? []).some((b) => b.label === 'Extra usage' && b.amount > 0)
   const note = extra
     ? `到 100% 时，${agent.name} 会改从额外用量里扣，扣完才停止回答。`
-    : `到 100% 时，${agent.name} 会停止回答，直到窗口重置。例程会等待并说明原因；会话可以切换到其他 Agent 继续。`
+    : `到 100% 时，${agent.name} 会停止回答，直到窗口重置。定时任务会等待并说明原因；会话可以切换到其他 Agent 继续。`
   return (
     <View style={styles.noteWrap}>
       <View style={styles.noteRow}>

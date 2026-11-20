@@ -284,7 +284,7 @@ export default function Settings() {
 
         <ListGroup
           header="电脑"
-          footer={`例程按计划在你的电脑上运行，无论${THIS_DEVICE}是否连得上。`}
+          footer={`定时任务按计划在你的电脑上运行，无论${THIS_DEVICE}是否连得上。`}
         >
           <ListRow
             title="已配对的电脑"
@@ -299,7 +299,7 @@ export default function Settings() {
             onPress={() => router.push('/settings/computers')}
           />
           <ListRow
-            title="例程"
+            title="定时任务"
             icon="history"
             plainIcon
             value={enabledRoutines === undefined ? '—' : `${enabledRoutines} 个开着`}
@@ -367,7 +367,7 @@ export default function Settings() {
 
         <ListGroup header="权限与数据">
           <ListRow
-            title="Artifact 权限"
+            title="产物权限"
             icon="shield"
             plainIcon
             chevron

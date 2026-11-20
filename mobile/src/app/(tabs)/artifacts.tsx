@@ -219,18 +219,16 @@ function ArtifactsTab() {
           </View>
         ) : (
           <Text style={[typeScale.lead, { color: c.textSecondary }]}>
-            这里是你的 Agent 做的 Artifact。
+            这里是你的 Agent 做的产物。
           </Text>
         )
       ) : inProject.length === 0 ? (
-        <Text style={[typeScale.lead, { color: c.textSecondary }]}>
-          你的 Agent 还没做过 Artifact。
-        </Text>
+        <Text style={[typeScale.lead, { color: c.textSecondary }]}>你的 Agent 还没做过产物。</Text>
       ) : (
         <View
           style={styles.sentence}
           accessible
-          accessibilityLabel={`你的 Agent 做了 ${inProject.length} 个 Artifact`}
+          accessibilityLabel={`你的 Agent 做了 ${inProject.length} 个产物`}
         >
           <Text style={[typeScale.lead, { color: c.textSecondary }]}>你的 Agent 做了</Text>
           {kinds.length > 0 ? (
@@ -241,7 +239,7 @@ function ArtifactsTab() {
             </View>
           ) : null}
           <Text style={[typeScale.lead, styles.count, { color: c.text }]}>
-            {inProject.length} 个 Artifact。
+            {inProject.length} 个产物。
           </Text>
         </View>
       )}
@@ -315,7 +313,7 @@ function ArtifactsTab() {
       return (
         <EmptyState
           icon="box"
-          title="连上电脑后才能看 Artifact"
+          title="连上电脑后才能看产物"
           message="纸鸢正在连接你的电脑。"
           action={{ label: '立即重连', onPress: () => retry() }}
         />
@@ -326,7 +324,7 @@ function ArtifactsTab() {
         <EmptyState
           tone="error"
           icon="warning"
-          title="没能读到 Artifact"
+          title="没能读到产物"
           message={error}
           action={{ label: '重试', onPress: () => void load() }}
         />
@@ -349,7 +347,7 @@ function ArtifactsTab() {
       return (
         <EmptyState
           icon="search"
-          title="没有符合条件的 Artifact"
+          title="没有符合条件的产物"
           action={{ label: '清除筛选', onPress: clearFilters }}
         />
       )
@@ -358,7 +356,7 @@ function ArtifactsTab() {
       return (
         <EmptyState
           icon="folder"
-          title="这个项目里还没有 Artifact"
+          title="这个项目里还没有产物"
           action={{ label: '查看全部项目', onPress: () => shell.setFilter({ kind: 'all' }) }}
         />
       )
@@ -366,7 +364,7 @@ function ArtifactsTab() {
     return (
       <EmptyState
         icon="box"
-        title="还没有 Artifact"
+        title="还没有产物"
         message="让 Agent 做一份报告、一页原型或一套幻灯片，它们会出现在这里。"
         action={
           state.kind !== 'stopped'
