@@ -118,7 +118,10 @@ describe('the admin socket', () => {
     const listed = await callAdmin(socket, { op: 'list' })
     expect(listed).toMatchObject({
       ok: true,
-      answer: { accounts: [{ username: 'owner', owner: true }], invites: [{ status: 'open' }] },
+      answer: {
+        accounts: [{ username: 'owner', owner: true, twoStep: true }],
+        invites: [{ status: 'open' }],
+      },
     })
     expect(await callAdmin(socket, { op: 'disable', username: 'owner' })).toEqual({
       ok: false,
@@ -146,6 +149,17 @@ describe('the admin socket', () => {
       { op: 'init', force: false, username: 'o', email: 'e', name: null, credentials: {} },
       { op: 'totp', totp: 'X', totpLastStep: 'one', recovery: [] },
       { op: 'totp', totp: 'X', totpLastStep: 1, recovery: new Array(33).fill('h') },
+      // The owner's two-step verification is never cleared from here.
+      { op: 'totp', totp: '', totpLastStep: 1, recovery: [] },
+      { op: 'totp', totp: null, totpLastStep: 1, recovery: [] },
+      {
+        op: 'init',
+        force: false,
+        username: 'owner',
+        email: 'e',
+        name: null,
+        credentials: { password: 'scrypt$x', totp: null, totpLastStep: -1, recovery: [] },
+      },
     ]
     for (const value of refused) expect(parseAdminRequest(value)).toBeNull()
     expect(parseAdminRequest({ op: 'remove', username: 'bob', extra: 'ignored' })).toEqual({

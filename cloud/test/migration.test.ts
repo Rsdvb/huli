@@ -1,6 +1,8 @@
 // The single-account file (v1) as the deployed service wrote it becomes v2 once, losslessly: its
 // account the owner's, every sign-in, token and computer of it kept, so nothing signs in again; a
-// copy of the file as it was is kept beside, once.
+// copy of the file as it was is kept beside, once. A v2 file whose accounts have no two-step
+// verification, the fields of it null or missing altogether, is read as it is, with no new
+// version: those accounts sign in with a password alone, and the owner still with its code.
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
@@ -9,6 +11,7 @@ import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { AccountApi, DESKTOP_CLIENT } from '@shared/account-api'
 import { HuliCloudApi, MOBILE_CLIENT } from '@shared/huli-cloud'
+import { listAccounts } from '../src/admin'
 import {
   base32Decode,
   hashPassword,
@@ -21,6 +24,7 @@ import {
 } from '../src/secrets'
 import { makeServer } from '../src/server'
 import { Store } from '../src/store'
+import { signInSteps } from './accounts'
 
 const dirs: string[] = []
 afterAll(() => {
@@ -215,7 +219,7 @@ describe('the single-account file', () => {
       const next = await api.refresh(MOBILE_CLIENT, tokens.phoneRefresh)
       await api.me(next.accessToken)
 
-      // The owner's sign-in page asks the same password and code, the username left empty.
+      // The owner's sign-in pages ask the same password and code, the username left empty.
       clock += TOTP_PERIOD_S * 1000
       const verifier = randomToken(48)
       const url = new URL('/signin/app/', base)
@@ -228,19 +232,138 @@ describe('the single-account file', () => {
       }).toString()
       const html = await (await fetch(url)).text()
       const ticket = /name="ticket" value="([^"]+)"/.exec(html)![1]!
-      const answer = await fetch(new URL('/signin/app/', base), {
-        method: 'POST',
-        body: new URLSearchParams({
-          ticket,
-          action: 'allow',
-          username: '',
-          password: PASSWORD,
-          code: hotp(base32Decode(totp), Math.floor(clock / 1000 / TOTP_PERIOD_S)),
-        }),
-        redirect: 'manual',
-      })
+      const answer = await signInSteps(
+        (fields) =>
+          fetch(new URL('/signin/app/', base), {
+            method: 'POST',
+            body: new URLSearchParams(fields),
+            redirect: 'manual',
+          }),
+        { ticket, action: 'allow', username: '', password: PASSWORD },
+        hotp(base32Decode(totp), Math.floor(clock / 1000 / TOTP_PERIOD_S)),
+      )
       expect(answer.status).toBe(302)
       expect(new URL(answer.headers.get('location')!).searchParams.get('code')).toBeTruthy()
+    } finally {
+      parts.relay.close()
+      parts.server.close()
+    }
+  })
+})
+
+describe('a file whose accounts have no two-step verification', () => {
+  /** A v2 state.json: the owner's account with its TOTP secret, and others without one. */
+  async function v2State(ownerTotp: string) {
+    const password = await hashPassword(PASSWORD)
+    const account = (id: string, username: string, extra: object) => ({
+      id,
+      username,
+      email: username,
+      name: null,
+      owner: false,
+      password,
+      createdAt: NOW - DAY,
+      disabledAt: null,
+      ...extra,
+    })
+    const state = {
+      v: 2,
+      accounts: [
+        account('acct-owner', 'owner', {
+          owner: true,
+          email: 'me@example.com',
+          createdAt: NOW - 2 * DAY,
+          totp: ownerTotp,
+          totpLastStep: -1,
+          recovery: [sha256Hex('aaaaa-bbbbb')],
+        }),
+        account('acct-null', 'nulls', { totp: null, totpLastStep: -1, recovery: [] }),
+        // Without the fields at all, as a file written by hand might be.
+        account('acct-bare', 'bare', {}),
+        // An empty secret is none: the codes it gives are anyone's to work out.
+        account('acct-empty', 'empty', { totp: '', totpLastStep: 5, recovery: null }),
+      ],
+      families: [],
+      access: [],
+      computers: [],
+      invites: [],
+      push: [],
+    }
+    const dir = mkdtempSync(path.join(tmpdir(), 'huli-migration-'))
+    dirs.push(dir)
+    const text = JSON.stringify(state, null, 2)
+    writeFileSync(path.join(dir, 'state.json'), text, { mode: 0o600 })
+    return { dir, text }
+  }
+
+  it('reads them as v2, with no copy made, and writes the fields back whole', async () => {
+    const { dir, text } = await v2State(newTotpSecret())
+    const store = new Store(dir, () => NOW)
+    expect(store.account('acct-null')).toMatchObject({ totp: null, totpLastStep: -1, recovery: [] })
+    expect(store.account('acct-bare')).toMatchObject({ totp: null, totpLastStep: -1, recovery: [] })
+    expect(store.account('acct-empty')).toMatchObject({ totp: null, totpLastStep: 5, recovery: [] })
+    for (const id of ['acct-owner', 'acct-null', 'acct-bare', 'acct-empty']) {
+      expect(store.activeAccount(id)?.id).toBe(id)
+    }
+    expect(listAccounts(store).accounts.map((a) => [a.username, a.state, a.twoStep])).toEqual([
+      ['owner', 'active', true],
+      ['nulls', 'active', false],
+      ['bare', 'active', false],
+      ['empty', 'active', false],
+    ])
+    // Reading changes nothing on disk; the next write keeps v2 and fills the fields in.
+    expect(readdirSync(dir)).toEqual(['state.json'])
+    expect(readFileSync(path.join(dir, 'state.json'), 'utf8')).toBe(text)
+    expect(store.issue('acct-bare', DESKTOP_CLIENT, null)).not.toBeNull()
+    const written = JSON.parse(readFileSync(path.join(dir, 'state.json'), 'utf8'))
+    expect(written.v).toBe(2)
+    for (const id of ['acct-bare', 'acct-empty']) {
+      expect(written.accounts.find((a: { id: string }) => a.id === id)).toMatchObject({
+        totp: null,
+        recovery: [],
+      })
+    }
+    expect(new Store(dir, () => NOW).account('acct-bare')).toEqual(store.account('acct-bare'))
+    // The owner's account takes its secret as it always did: without one it is not active.
+    store.updateAccount('acct-owner', { totp: null })
+    expect(store.activeAccount('acct-owner')).toBeNull()
+  })
+
+  it('signs them in with the password alone, and the owner still with its code', async () => {
+    const totp = newTotpSecret()
+    const { dir } = await v2State(totp)
+    let clock = NOW
+    const parts = makeServer(
+      { origin: 'http://127.0.0.1', dataDir: dir, trustProxy: false },
+      null,
+      {
+        now: () => clock,
+        log: () => {},
+      },
+    )
+    await new Promise<void>((resolve) => parts.server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(parts.server.address() as AddressInfo).port}`
+    const login = (fields: Record<string, string>) =>
+      fetch(new URL('/web/login', base), {
+        method: 'POST',
+        body: new URLSearchParams({ next: '/account/devices/', ...fields }),
+        redirect: 'manual',
+      })
+    try {
+      for (const username of ['nulls', 'bare', 'empty']) {
+        const answer = await login({ username, password: PASSWORD })
+        expect(answer.status, username).toBe(302)
+        expect(answer.headers.get('location')).toBe('/account/devices/')
+      }
+      const asked = await login({ password: PASSWORD })
+      expect(asked.status).toBe(200)
+      expect(await asked.text()).toContain('两步验证')
+      clock += TOTP_PERIOD_S * 1000
+      const code = hotp(base32Decode(totp), Math.floor(clock / 1000 / TOTP_PERIOD_S))
+      expect((await signInSteps(login, { password: PASSWORD }, '000000')).status).toBe(401)
+      expect((await signInSteps(login, { password: PASSWORD }, code)).status).toBe(302)
+      expect((await signInSteps(login, { password: PASSWORD }, 'aaaaa-bbbbb')).status).toBe(302)
+      expect(parts.store.account('acct-owner')!.recovery).toEqual([])
     } finally {
       parts.relay.close()
       parts.server.close()

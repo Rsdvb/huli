@@ -1,8 +1,10 @@
 // Signing up with an invite code inside the browser sign-in, as the desktop app, the phone and
-// the web client open it: the code works once, lapses, can be revoked, is never guessed (limits
-// by address and in all), and nothing makes an account without one. A reset invite sets an
-// account's credentials anew after its devices were signed out. The owner's page makes and
-// revokes invites, and nobody else's session reaches it.
+// the web client open it: a username and a password make the account, with no two-step
+// verification, and the client is signed in to it. The code works once, lapses, can be revoked,
+// is never guessed (limits by address and in all), and nothing makes an account without one. A
+// reset invite sets an account's password anew after its devices were signed out, and leaves it
+// without two-step verification. The owner's page makes and revokes invites, and nobody else's
+// session reaches it.
 
 import { mkdtempSync, rmSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
@@ -18,10 +20,11 @@ import {
   newTotpSecret,
   pkceChallenge,
   randomToken,
+  sha256Hex,
   TOTP_PERIOD_S,
 } from '../src/secrets'
 import { makeServer, type ServerParts } from '../src/server'
-import { makeOwner } from './accounts'
+import { makeOwner, signInSteps, stepOf } from './accounts'
 
 const REDIRECT = 'http://127.0.0.1:5555/callback'
 const PASSWORD = 'correct horse battery staple'
@@ -100,7 +103,7 @@ function post(address: string, fields: Record<string, string>, cookie?: string) 
   })
 }
 
-/** The sign-up form posted: the enrollment page, and what it carries. */
+/** The sign-up form posted: what came back, and the code its redirect carries when it worked. */
 async function submit(
   address: string,
   ticket: string,
@@ -115,43 +118,28 @@ async function submit(
     password,
     password2: fields.password2 ?? password,
   })
-  const html = await answer.text()
+  const location = answer.headers.get('location')
   return {
     status: answer.status,
-    html,
-    enrollment: field(html, 'enrollment'),
-    secret: /<code class="secret">([A-Z2-7]+)<\/code>/.exec(html)?.[1] ?? null,
+    html: await answer.text(),
+    location: location ? new URL(location) : null,
+    cookie: answer.headers.get('set-cookie')?.split(';')[0] ?? null,
   }
 }
 
 /** A whole sign-up, through to the client holding tokens of the new account. */
 async function signUp(address: string, code: string, username: string, password = PASSWORD) {
   const { ticket, verifier } = await start(address)
-  const enroll = await submit(address, ticket, { invite: code, username, password })
-  expect(enroll.status).toBe(200)
-  expect(enroll.html).toContain('<img class="qr" src="data:image/svg+xml,')
-  expect(enroll.html).toContain('href="otpauth://totp/')
-  nextStep()
-  const done = await post(address, {
-    ticket,
-    action: 'enroll',
-    enrollment: enroll.enrollment!,
-    code: totp(enroll.secret!),
-  })
-  expect(done.status).toBe(200)
-  const html = await done.text()
-  const recovery = /<pre class="codes">([^<]+)<\/pre>/.exec(html)![1]!.split('\n')
-  const cookie = done.headers.get('set-cookie')!.split(';')[0]!
-  const back = await post(address, { ticket, csrf: field(html, 'csrf')!, action: 'allow' }, cookie)
-  expect(back.status).toBe(302)
-  const location = new URL(back.headers.get('location')!)
-  expect(location.searchParams.get('state')).toBe('state-1')
+  const done = await submit(address, ticket, { invite: code, username, password })
+  expect(done.status).toBe(302)
+  expect(done.location!.origin + done.location!.pathname).toBe(REDIRECT)
+  expect(done.location!.searchParams.get('state')).toBe('state-1')
   const tokens = await new AccountApi(base, fetch, now).exchangeCode({
-    code: location.searchParams.get('code')!,
+    code: done.location!.searchParams.get('code')!,
     redirectUri: REDIRECT,
     verifier,
   })
-  return { tokens, recovery, secret: enroll.secret!, cookie }
+  return { tokens, cookie: done.cookie! }
 }
 
 describe('signing up with an invite code', () => {
@@ -164,74 +152,78 @@ describe('signing up with an invite code', () => {
     const register = await start('192.0.2.1')
     expect(register.html).toContain('name="invite"')
     expect(register.html).toContain('autocomplete="new-password"')
+    // A username and a password are all it asks: no authenticator, no codes.
+    expect(register.html).not.toMatch(/验证器|两步验证|恢复码|otpauth/)
   })
 
-  it('makes the account and signs the client in to it, recovery codes shown once', async () => {
+  it('makes an account with a password alone and signs the client in to it at once', async () => {
     const code = invite()
-    const { tokens, recovery, secret } = await signUp('192.0.2.2', code, 'Alice')
-    expect(recovery).toHaveLength(10)
+    const { tokens } = await signUp('192.0.2.2', code, 'Alice')
     const me = await new AccountApi(base, fetch, now).me(tokens.accessToken)
     const alice = parts.store.findAccount('alice')!
     expect(me.account).toMatchObject({ id: alice.id, email: 'alice', name: null })
-    expect(alice.owner).toBe(false)
+    expect(alice).toMatchObject({ owner: false, totp: null, totpLastStep: -1, recovery: [] })
     expect(lines).toContain('huli-cloud: signed up account alice')
     const listed = runAdmin(parts.admin, { op: 'list' })
     expect(listed.ok && listed.answer.invites?.[0]).toMatchObject({
       status: 'used',
       usedBy: 'alice',
     })
+    expect(listed.ok && listed.answer.accounts?.find((a) => a.username === 'alice')).toMatchObject({
+      state: 'active',
+      twoStep: false,
+    })
 
-    // Signing in later: the username, the password and a code; a recovery code once.
+    // Signing in later: the username and the password, and nothing after them.
     const later = await start('192.0.2.2', null)
-    nextStep()
     const signedIn = await post('192.0.2.2', {
       ticket: later.ticket,
       action: 'allow',
       username: 'alice',
       password: PASSWORD,
-      code: totp(secret),
     })
     expect(signedIn.status).toBe(302)
-    const again = await start('192.0.2.2', null)
-    const recovered = await post('192.0.2.2', {
-      ticket: again.ticket,
-      action: 'allow',
-      username: 'alice',
-      password: PASSWORD,
-      code: recovery[0]!,
-    })
-    expect(recovered.status).toBe(302)
+    expect(new URL(signedIn.headers.get('location')!).searchParams.get('code')).toBeTruthy()
   })
 
-  it('takes an invite once, and the second sign-up under way finds it used', async () => {
+  it('takes an invite once, and the sign-up that came second finds it used', async () => {
     const code = invite()
     const first = await start('192.0.2.3')
     const second = await start('192.0.2.3')
-    const a = await submit('192.0.2.3', first.ticket, { invite: code, username: 'bob' })
-    const b = await submit('192.0.2.3', second.ticket, { invite: code, username: 'bob2' })
-    expect(a.status).toBe(200)
-    expect(b.status).toBe(200)
-    nextStep()
-    const done = await post('192.0.2.3', {
-      ticket: first.ticket,
-      action: 'enroll',
-      enrollment: a.enrollment!,
-      code: totp(a.secret!),
-    })
-    expect(done.status).toBe(200)
-    const late = await post('192.0.2.3', {
-      ticket: second.ticket,
-      action: 'enroll',
-      enrollment: b.enrollment!,
-      code: totp(b.secret!),
-    })
-    expect(late.status).toBe(409)
-    expect(await late.text()).toContain('邀请码刚刚被用掉或撤销了')
-    expect(parts.store.findAccount('bob2')).toBeNull()
+    // Both at once: both find the invite open before either's password is hashed, and only the
+    // first to be done uses it.
+    const [a, b] = await Promise.all([
+      submit('192.0.2.3', first.ticket, { invite: code, username: 'bob' }),
+      submit('192.0.2.3', second.ticket, { invite: code, username: 'bob2' }),
+    ])
+    const statuses = [a.status, b.status].sort()
+    expect(statuses[0]).toBe(302)
+    expect([401, 409]).toContain(statuses[1])
+    const loser = a.status === 302 ? b : a
+    expect(loser.html).toMatch(/邀请码刚刚被用掉或撤销了|邀请码不对、已经用过或已经过期/)
+    expect(
+      [parts.store.findAccount('bob'), parts.store.findAccount('bob2')].filter(Boolean),
+    ).toHaveLength(1)
     const third = await start('192.0.2.3')
     const reused = await submit('192.0.2.3', third.ticket, { invite: code, username: 'carol' })
     expect(reused.status).toBe(401)
     expect(reused.html).toContain('邀请码不对、已经用过或已经过期')
+  })
+
+  it('signs in once per sign-in page, though two sign-ups are posted for it at once', async () => {
+    const one = invite()
+    const two = invite()
+    const { ticket } = await start('192.0.2.10')
+    const answers = await Promise.all([
+      submit('192.0.2.10', ticket, { invite: one, username: 'paul' }),
+      submit('192.0.2.10', ticket, { invite: two, username: 'paula' }),
+    ])
+    expect(answers.map((answer) => answer.status).sort()).toEqual([302, 400])
+    expect(answers.find((answer) => answer.status === 400)!.html).toContain('登录已过期')
+    // The one that lost made no account and left its invite open.
+    const made = [parts.store.findAccount('paul'), parts.store.findAccount('paula')]
+    expect(made.filter(Boolean)).toHaveLength(1)
+    expect([one, two].filter((code) => parts.store.openInvite(code))).toHaveLength(1)
   })
 
   it('refuses an invite past its time, and one revoked', async () => {
@@ -261,46 +253,25 @@ describe('signing up with an invite code', () => {
       [{ username: 'owner' }, '已经有人用了'],
       [{ username: 'ALICE' }, '已经有人用了'],
       [{ username: 'erin', password: 'short' }, '密码至少 12 位'],
+      [{ username: 'erin', password: 'eleven char' }, '密码至少 12 位'],
+      [{ username: 'erin', password: 'x'.repeat(1025) }, '密码至少 12 位'],
       [{ username: 'erin', password2: 'something else entirely' }, '两次输入的密码不一样'],
     ]
     for (const [fields, error] of tries) {
       const answer = await submit('192.0.2.5', ticket, { invite: code, username: '', ...fields })
       expect(answer.html).toContain(error)
-      expect(answer.enrollment).toBeNull()
+      expect(answer.status).toBe(400)
     }
+    expect(parts.store.findAccount('erin')).toBeNull()
+    expect(parts.store.openInvite(code)).not.toBeNull()
     // None of them counted against the address: the right form goes through.
-    expect((await submit('192.0.2.5', ticket, { invite: code, username: 'erin' })).status).toBe(200)
-  })
-
-  it('gives up a sign-up after five wrong one-time codes', async () => {
-    const code = invite()
-    const { ticket } = await start('192.0.2.6')
-    const enroll = await submit('192.0.2.6', ticket, { invite: code, username: 'frank' })
-    for (let i = 0; i < 4; i++) {
-      const wrong = await post('192.0.2.6', {
-        ticket,
-        action: 'enroll',
-        enrollment: enroll.enrollment!,
-        code: '000000',
-      })
-      expect(await wrong.text()).toContain('验证码不对')
-    }
-    const last = await post('192.0.2.6', {
-      ticket,
-      action: 'enroll',
-      enrollment: enroll.enrollment!,
-      code: '000000',
+    const done = await submit('192.0.2.5', ticket, {
+      invite: code,
+      username: 'erin',
+      password: 'twelve chars',
     })
-    expect(await last.text()).toContain('错了太多次')
-    nextStep()
-    const late = await post('192.0.2.6', {
-      ticket,
-      action: 'enroll',
-      enrollment: enroll.enrollment!,
-      code: totp(enroll.secret!),
-    })
-    expect(await late.text()).toContain('这次注册已过期')
-    expect(parts.store.findAccount('frank')).toBeNull()
+    expect(done.status).toBe(302)
+    expect(parts.store.findAccount('erin')?.totp).toBeNull()
   })
 
   it('makes no account without a valid invite, whatever is posted', async () => {
@@ -308,16 +279,20 @@ describe('signing up with an invite code', () => {
     const { ticket } = await start('192.0.2.7')
     for (const code of ['', 'AAAA-AAAA-AAAA-AAAA', 'not a code at all', 'x'.repeat(5000)]) {
       const answer = await submit('192.0.2.7', ticket, { invite: code, username: 'mallory' })
-      expect(answer.enrollment).toBeNull()
+      expect(answer.status).toBe(401)
     }
+    // The steps sign-up once had lead nowhere now.
     const fresh = await start('192.0.2.8')
-    const forged = await post('192.0.2.8', {
-      ticket: fresh.ticket,
-      action: 'enroll',
-      enrollment: randomToken(18),
-      code: '123456',
-    })
-    expect(await forged.text()).toContain('这次注册已过期')
+    for (const action of ['enroll', 'code']) {
+      const forged = await post('192.0.2.8', {
+        ticket: fresh.ticket,
+        action,
+        enrollment: randomToken(18),
+        step: randomToken(18),
+        code: '123456',
+      })
+      expect(forged.status).not.toBe(302)
+    }
     expect(parts.store.accounts()).toHaveLength(before)
   })
 
@@ -336,16 +311,24 @@ describe('signing up with an invite code', () => {
       fetch(new URL('/signin/app/', base), {
         method: 'POST',
         body: new URLSearchParams(fields),
+        redirect: 'manual',
         headers: { 'x-real-ip': '192.0.2.9', 'sec-fetch-site': site },
       })
     for (const site of ['cross-site', 'same-site']) expect((await posted(site)).status).toBe(403)
+    expect(parts.store.findAccount('oscar')).toBeNull()
     const login = await fetch(new URL('/web/login', base), {
       method: 'POST',
-      body: new URLSearchParams({ password: PASSWORD, code: '000000' }),
+      body: new URLSearchParams({ password: PASSWORD }),
       headers: { 'sec-fetch-site': 'cross-site' },
     })
     expect(login.status).toBe(403)
-    expect((await posted('same-origin')).status).toBe(200)
+    const step = await fetch(new URL('/web/login', base), {
+      method: 'POST',
+      body: new URLSearchParams({ step: randomToken(18), code: '000000' }),
+      headers: { 'sec-fetch-site': 'cross-site' },
+    })
+    expect(step.status).toBe(403)
+    expect((await posted('same-origin')).status).toBe(302)
   })
 
   it('limits invite codes tried, by address and in all', async () => {
@@ -377,35 +360,55 @@ describe('signing up with an invite code', () => {
     // Sign-in is untouched by it.
     nextStep()
     const owner = await start('203.0.113.9', null)
-    const signedIn = await post('203.0.113.9', {
-      ticket: owner.ticket,
-      action: 'allow',
-      password: PASSWORD,
-      code: totp(ownerSecret),
-    })
+    const signedIn = await signInSteps(
+      (fields) => post('203.0.113.9', fields),
+      { ticket: owner.ticket, action: 'allow', password: PASSWORD },
+      totp(ownerSecret),
+    )
     expect(signedIn.status).toBe(302)
     clock += 61 * 60 * 1000
     const reopened = await start('203.0.113.9')
     expect(
       (await submit('203.0.113.9', reopened.ticket, { invite: code, username: 'gina' })).status,
-    ).toBe(200)
+    ).toBe(302)
   })
 })
 
 describe('resetting an account', () => {
-  it('signs it out at once, and its reset invite sets new credentials for it alone', async () => {
+  it('signs it out at once, and its reset invite sets a new password for it alone', async () => {
     const code = invite()
-    const { tokens, secret, cookie: before } = await signUp('192.0.2.20', code, 'henry')
+    const { tokens, cookie: before } = await signUp('192.0.2.20', code, 'henry')
     const henry = parts.store.findAccount('henry')!
+    // As a friend who bound two-step verification before sign-up stopped asking for it.
+    const secret = newTotpSecret()
+    parts.store.updateAccount(henry.id, {
+      totp: secret,
+      recovery: [sha256Hex('aaaaa-bbbbb')],
+    })
+    const asked = await start('192.0.2.20', null)
+    const page = await post('192.0.2.20', {
+      ticket: asked.ticket,
+      action: 'allow',
+      username: 'henry',
+      password: PASSWORD,
+    })
+    expect(page.status).toBe(200)
+    expect(stepOf(await page.text())).not.toBeNull()
+
     const reset = runAdmin(parts.admin, { op: 'reset', username: 'henry', days: 2 })
     if (!reset.ok) throw new Error(reset.error)
     expect(reset.answer.signedOut).toBeGreaterThanOrEqual(1)
+    expect(parts.store.account(henry.id)).toMatchObject({
+      password: null,
+      totp: null,
+      recovery: [],
+    })
     const api = new AccountApi(base, fetch, now)
     await expect(api.me(tokens.accessToken)).rejects.toMatchObject({ status: 401 })
     await expect(api.refresh(DESKTOP_CLIENT, tokens.refreshToken)).rejects.toMatchObject({
       code: 'invalid_grant',
     })
-    // The old password and code no longer sign in.
+    // The old password no longer signs in, and is answered as any wrong one.
     nextStep()
     const old = await start('192.0.2.20', null)
     const refused = await post('192.0.2.20', {
@@ -413,10 +416,10 @@ describe('resetting an account', () => {
       action: 'allow',
       username: 'henry',
       password: PASSWORD,
-      code: totp(secret),
     })
     expect(refused.status).toBe(401)
-    // The reset code makes no other account, and sets this one's anew.
+    expect(await refused.text()).toContain('用户名或密码不对')
+    // The reset code makes no other account, and sets this one's password anew.
     const { ticket } = await start('192.0.2.21')
     const other = await submit('192.0.2.21', ticket, {
       invite: reset.answer.code!,
@@ -427,6 +430,16 @@ describe('resetting an account', () => {
     const me = await api.me(again.tokens.accessToken)
     expect(me.account.id).toBe(henry.id)
     expect(lines).toContain('huli-cloud: reset account henry')
+    // Without two-step verification now: the new password alone signs in.
+    expect(parts.store.account(henry.id)).toMatchObject({ totp: null, recovery: [] })
+    const later = await start('192.0.2.21', null)
+    const signedIn = await post('192.0.2.21', {
+      ticket: later.ticket,
+      action: 'allow',
+      username: 'henry',
+      password: NEW_PASSWORD,
+    })
+    expect(signedIn.status).toBe(302)
     // A web session from before the reset does not come back with the account.
     const devices = (cookie: string) =>
       fetch(new URL('/account/devices/', base), { headers: { cookie } }).then((r) => r.text())
@@ -436,15 +449,21 @@ describe('resetting an account', () => {
 })
 
 describe('the owner’s page', () => {
-  async function webLogin(address: string, fields: Record<string, string>) {
+  async function webLogin(address: string, fields: Record<string, string>, code: string) {
     nextStep()
-    const answer = await fetch(new URL('/web/login', base), {
-      method: 'POST',
-      body: new URLSearchParams({ next: '/account/admin/', ...fields }),
-      redirect: 'manual',
-      headers: { 'x-real-ip': address },
-    })
+    const answer = await signInSteps(
+      (form) =>
+        fetch(new URL('/web/login', base), {
+          method: 'POST',
+          body: new URLSearchParams(form),
+          redirect: 'manual',
+          headers: { 'x-real-ip': address },
+        }),
+      { next: '/account/admin/', ...fields },
+      code,
+    )
     expect(answer.status).toBe(302)
+    expect(answer.headers.get('location')).toBe('/account/admin/')
     return answer.headers.get('set-cookie')!.split(';')[0]!
   }
 
@@ -462,10 +481,14 @@ describe('the owner’s page', () => {
     const refused = await page(memberCookie)
     expect(refused.status).toBe(403)
     expect((await fetch(new URL('/account/admin/', base))).status).toBe(200)
+    // A member's own web sign-in, with the password alone, reaches no further.
+    const memberLogin = await webLogin('192.0.2.32', { username: 'judy', password: PASSWORD }, '')
+    expect((await page(memberLogin)).status).toBe(403)
 
-    const owner = await webLogin('192.0.2.31', { password: PASSWORD, code: totp(ownerSecret) })
+    const owner = await webLogin('192.0.2.31', { password: PASSWORD }, totp(ownerSecret))
     const html = await (await page(owner)).text()
-    expect(html).toContain('<b>judy</b>')
+    expect(html).toContain('<b>judy</b> · 正常 · 仅密码')
+    expect(html).toContain('<b>owner</b> · 机主 · 两步验证')
     const csrf = field(html, 'csrf')!
     const opened = () => parts.store.invites().filter((i) => parts.store.inviteStatus(i) === 'open')
     const before = opened().length

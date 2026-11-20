@@ -1,21 +1,26 @@
 // Sign-in as Kettu's clients speak it: the browser sign-in with PKCE and a loopback redirect
 // (RFC 6749, 7636, 8252), device codes (RFC 8628), refresh with rotation, revocation (RFC 7009)
-// and /api/v1/me; the web pages a person signs in to with a username, a password and a one-time
-// code; and signing up with an invite code the owner made, inside the same browser sign-in, so
-// that the client that opened it ends up signed in to the new account.
+// and /api/v1/me; the web pages a person signs in to with a username and a password, and then a
+// one-time code for an account with two-step verification (the owner's always); and signing up
+// with an invite code the owner made, with a username and a password alone, inside the same
+// browser sign-in, so that the client that opened it ends up signed in to the new account.
+//
+// Nothing tells whether an account exists, or has two-step verification, before its password is
+// right: a username nobody has is checked and counted as an account would be, and every wrong
+// password gets the same answer. Only a right one leads to the code's page.
 //
 // Every code, device code and web session names the account it was signed in to, and none is
-// taken once that account is disabled or removed. Failed sign-ins are counted per address and
-// account: five for one account from one address, ten from one address in all. One account's
-// failures never block another's sign-in from elsewhere, and no limit holds for all addresses
-// together, as anyone with a few addresses could use it to lock an account out. Password checks
-// (scrypt, 32 MiB each) run two at a time per account, so a flood aimed at one account leaves the
-// others' room. Invite codes are tried at most five times per address in 15 minutes and thirty
-// times in all in an hour; a code is long enough that this never gets near one.
+// taken once that account is disabled or removed. Failed sign-ins, wrong passwords and wrong codes
+// alike, are counted per address and account (or per username nobody has): five for one account
+// from one address, ten from one address in all. One account's failures never block another's
+// sign-in from elsewhere, and no limit holds for all addresses together, as anyone with a few
+// addresses could use it to lock an account out. Password checks (scrypt, 32 MiB each) run two
+// at a time per account, so a flood aimed at one account leaves the others' room. Invite codes
+// are tried at most five times per address in 15 minutes and thirty times in all in an hour; a
+// code is long enough that this never gets near one.
 
 import { randomInt } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { renderSVG } from 'uqr'
 import { clientInfo, DAEMON_CLIENT, DESKTOP_CLIENT, WEB_CLIENT } from '@shared/account-api'
 import {
   MOBILE_CLIENT,
@@ -37,25 +42,21 @@ import {
   sessionCookie,
 } from './http'
 import {
+  codePage,
   consentPage,
   describeClient,
   deviceConfirmPage,
   devicePage,
   devicesPage,
-  enrollPage,
   loginPage,
   messagePage,
   printable,
-  recoveryPage,
   signupPage,
 } from './pages'
 import {
   checkTotp,
   hashPassword,
-  newRecoveryCodes,
-  newTotpSecret,
   normalizeRecovery,
-  otpauthUri,
   PKCE_CHALLENGE,
   PKCE_VERIFIER,
   pkceChallenge,
@@ -64,7 +65,7 @@ import {
   sha256Hex,
   verifyPassword,
 } from './secrets'
-import { normalizeUsername, type Account, type Store } from './store'
+import { needsCode, normalizeUsername, passwordOnly, type Account, type Store } from './store'
 
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
 const SESSION_COOKIE = 'huli_session'
@@ -85,10 +86,10 @@ const MAX_DEVICE_GRANTS = 1000
  */
 const MAX_VERIFYING = 8
 const MAX_VERIFYING_EACH = 2
-/** Sign-ups between their password and their first one-time code, at once; how long each waits. */
-const MAX_ENROLLMENTS = 100
-const ENROLL_MS = 15 * 60 * 1000
-const MAX_ENROLL_TRIES = 5
+/** Sign-ins between their right password and their one-time code, at once; how long each waits. */
+const MAX_CODE_STEPS = 100
+const CODE_STEP_MS = 5 * 60 * 1000
+const MAX_CODE_TRIES = 5
 export const MIN_PASSWORD = 12
 const MAX_PASSWORD = 1024
 const SWEEP_MS = 60_000
@@ -102,6 +103,13 @@ const NO_ACCOUNT = '-'
  */
 const NO_PASSWORD =
   'scrypt$15$8$1$xgVQIS4rwZv3rd9FiVxPwA$mw727ttbzZ69ss3LLCTTkFIDG5qettd1lHUuufDcjEOO-m4I2x0O1h0C-REh3dgtjJeuTTsY1-Ec80UcIvZcLw'
+
+/** The one answer to every wrong password, whether or not the account exists or has a code. */
+const WRONG_LOGIN = '用户名或密码不对。'
+const WRONG_CODE = '验证码不对：看验证器里这个账号最新的验证码，或输入一个没用过的恢复码。'
+const TOO_MANY = '尝试次数太多，请过一会儿再试。'
+const DISABLED = '这个账号已停用，请联系机主。'
+const STEP_EXPIRED = '这次登录已过期，请重新输入密码。'
 
 /** Clients that use device codes; those that sign in through the browser are `redirectFor`'s. */
 const DEVICE_CLIENTS = new Set([DAEMON_CLIENT])
@@ -158,21 +166,29 @@ interface Session extends Grant {
   expiresAt: number
 }
 
-/** A sign-up between its password and its first one-time code. */
-interface Enrollment {
-  /** The browser sign-in it is part of. */
-  ticket: string
-  invite: string
+/**
+ * A sign-in whose password was right, waiting for the one-time or recovery code of its account,
+ * which has two-step verification. It holds the password's hash as it was, as a grant does, so a
+ * reset or a new password in between ends it.
+ */
+interface CodeStep extends Grant {
+  /** The browser sign-in it is part of; null for the web pages' sign-in. */
+  ticket: string | null
+  /** Where the web pages' sign-in goes on to. */
+  next: string
   username: string
-  /** The password's hash. */
-  password: string
-  totp: string
   expiresAt: number
   tries: number
 }
 
-type LoginResult =
-  { ok: true; account: Account } | { ok: false; status: 401 | 403 | 429; message: string }
+type Refused = { kind: 'failed'; status: 400 | 401 | 403 | 429; message: string }
+
+/** The password checked: signed in, or a code to ask for next, or refused. */
+type PasswordResult =
+  { kind: 'done'; account: Account } | { kind: 'code'; account: Account } | Refused
+
+/** The code checked: signed in, or another try at it, or refused and the password asked again. */
+type CodeResult = { kind: 'done'; account: Account } | { kind: 'again'; message: string } | Refused
 
 export interface AuthOptions {
   store: Store
@@ -267,7 +283,7 @@ export class Auth {
   private readonly devices = new Map<string, DeviceGrant>()
   private readonly userCodes = new Map<string, string>()
   private readonly sessions = new Map<string, Session>()
-  private readonly enrollments = new Map<string, Enrollment>()
+  private readonly codeSteps = new Map<string, CodeStep>()
   /** Failed sign-ins by address and account, and by address alone. */
   private readonly failedByAccount: Limiter
   private readonly failedByAddress: Limiter
@@ -342,7 +358,7 @@ export class Auth {
     for (const [k, v] of this.tickets) if (v.expiresAt <= now) this.tickets.delete(k)
     for (const [k, v] of this.codes) if (v.expiresAt <= now) this.codes.delete(k)
     for (const [k, v] of this.sessions) if (v.expiresAt <= now) this.sessions.delete(k)
-    for (const [k, v] of this.enrollments) if (v.expiresAt <= now) this.enrollments.delete(k)
+    for (const [k, v] of this.codeSteps) if (v.expiresAt <= now) this.codeSteps.delete(k)
     for (const [k, v] of this.devices) {
       if (v.expiresAt <= now) {
         this.devices.delete(k)
@@ -412,64 +428,130 @@ export class Auth {
   }
 
   /**
-   * Checks a username (empty for the owner), a password and a one-time or recovery code, counting
-   * failures by address and account; the account, or why it failed and the status to answer.
+   * The first step of signing in: a username (empty for the owner) and a password, failures
+   * counted by address and account. A username nobody has, or an account waiting for its reset,
+   * is checked against NO_PASSWORD, and one nobody has counted under its own name as an account is
+   * under its id, so that neither the answer, its time nor the limits tell whether it exists.
+   * Only once the password is right does it matter whether the account takes a code.
    */
-  private async verifyLogin(
+  private async checkPassword(
     request: IncomingMessage,
     login: string,
     password: string,
-    code: string,
-  ): Promise<LoginResult> {
+  ): Promise<PasswordResult> {
     const address = clientAddress(request, this.options.trustProxy)
     const found = login.length <= 256 ? this.store.findAccount(login) : null
     const bucket = found?.id ?? NO_ACCOUNT
-    const key = `${address} ${bucket}`
+    const key = `${address} ${found?.id ?? `?${login.trim().toLowerCase().slice(0, 256)}`}`
     if (this.failedByAddress.blocked(address) || this.failedByAccount.blocked(key)) {
       this.log(`huli-cloud: login blocked from ${address}`)
-      return { ok: false, status: 401, message: '尝试次数太多，请过一会儿再试。' }
+      return { kind: 'failed', status: 401, message: TOO_MANY }
     }
     if (!this.takeSlot(bucket)) {
-      return { ok: false, status: 429, message: '正在验证别的登录，请过几秒再试。' }
+      return { kind: 'failed', status: 429, message: '正在验证别的登录，请过几秒再试。' }
     }
     // Counted before the password is checked, so that requests sent at once cannot all pass the
-    // check above while the first wait for scrypt; taken back when the sign-in succeeds.
+    // check above while the first wait for scrypt; taken back when the password is right.
     this.failedByAddress.hit(address)
     this.failedByAccount.hit(key)
-    const fail = (): LoginResult => {
+    const fail = (): PasswordResult => {
       this.log(`huli-cloud: login failed from ${address}`)
-      return { ok: false, status: 401, message: '用户名、密码或验证码不对。' }
+      return { kind: 'failed', status: 401, message: WRONG_LOGIN }
     }
     const checked = found?.password ?? null
     let passwordOk: boolean
     try {
-      if (password.length > MAX_PASSWORD || code.length > 64) return fail()
+      if (password.length > MAX_PASSWORD) return fail()
       passwordOk = await verifyPassword(password, checked ?? NO_PASSWORD)
     } finally {
       this.releaseSlot(bucket)
     }
-    // As it is now: its password may have changed, or this code been used, while scrypt ran.
+    // As it is now: its password may have changed, or it been reset, while scrypt ran.
     const account = found && this.store.account(found.id)
-    if (!account || !passwordOk || account.password !== checked || !account.totp) {
+    if (!account || !passwordOk || checked === null || account.password !== checked) {
       return fail()
-    }
-    const step = checkTotp(account.totp, code.trim(), this.now(), account.totpLastStep)
-    if (step !== null) {
-      this.store.updateAccount(account.id, { totpLastStep: step })
-    } else {
-      const recovery = sha256Hex(normalizeRecovery(code))
-      if (!account.recovery.includes(recovery)) return fail()
-      this.store.updateAccount(account.id, {
-        recovery: account.recovery.filter((r) => r !== recovery),
-      })
-      this.log('huli-cloud: a recovery code was used')
     }
     this.failedByAddress.undo(address)
     this.failedByAccount.undo(key)
-    if (account.disabledAt !== null) {
-      return { ok: false, status: 403, message: '这个账号已停用，请联系机主。' }
+    // A disabled account says so only to whoever also has its code, when it takes one.
+    if (needsCode(account)) return { kind: 'code', account }
+    if (account.disabledAt !== null) return { kind: 'failed', status: 403, message: DISABLED }
+    return { kind: 'done', account }
+  }
+
+  /** The second step begins, for an account whose password was right just now; the step's id. */
+  private startCodeStep(account: Account, ticket: string | null, next: string): string {
+    const id = randomToken(18)
+    for (const old of this.codeSteps.keys()) {
+      if (this.codeSteps.size < MAX_CODE_STEPS) break
+      this.codeSteps.delete(old)
     }
-    return { ok: true, account }
+    this.codeSteps.set(sha256Hex(id), {
+      ...this.grantOf(account),
+      ticket,
+      next,
+      username: account.username,
+      expiresAt: this.now() + CODE_STEP_MS,
+      tries: 0,
+    })
+    return id
+  }
+
+  /**
+   * The second step of signing in: a one-time code, which works once, or a recovery code, used up.
+   * A wrong one counts as a failed sign-in, as a wrong password does; MAX_CODE_TRIES end the step,
+   * and the password is asked again.
+   */
+  private takeCode(
+    request: IncomingMessage,
+    key: string,
+    step: CodeStep,
+    code: string,
+  ): CodeResult {
+    const account = this.store.account(step.account)
+    if (!account || account.password !== step.credential) {
+      this.codeSteps.delete(key)
+      return { kind: 'failed', status: 400, message: STEP_EXPIRED }
+    }
+    const address = clientAddress(request, this.options.trustProxy)
+    const limit = `${address} ${account.id}`
+    if (this.failedByAddress.blocked(address) || this.failedByAccount.blocked(limit)) {
+      this.log(`huli-cloud: login blocked from ${address}`)
+      this.codeSteps.delete(key)
+      return { kind: 'failed', status: 401, message: TOO_MANY }
+    }
+    this.failedByAddress.hit(address)
+    this.failedByAccount.hit(limit)
+    if (!this.useCode(account, code.trim())) {
+      this.log(`huli-cloud: login failed from ${address}`)
+      if (++step.tries < MAX_CODE_TRIES) return { kind: 'again', message: WRONG_CODE }
+      this.codeSteps.delete(key)
+      return { kind: 'failed', status: 401, message: '验证码错了太多次，请重新登录。' }
+    }
+    this.failedByAddress.undo(address)
+    this.failedByAccount.undo(limit)
+    this.codeSteps.delete(key)
+    if (account.disabledAt !== null) return { kind: 'failed', status: 403, message: DISABLED }
+    return { kind: 'done', account }
+  }
+
+  /** Spends `code` as the account's one-time code or one of its recovery codes; false if neither. */
+  private useCode(account: Account, code: string): boolean {
+    if (code.length > 64) return false
+    const step = account.totp
+      ? checkTotp(account.totp, code, this.now(), account.totpLastStep)
+      : null
+    if (step !== null) {
+      this.store.updateAccount(account.id, { totpLastStep: step })
+      return true
+    }
+    const recovery = sha256Hex(normalizeRecovery(code))
+    if (!account.recovery.includes(recovery)) return false
+    this.store.updateAccount(account.id, {
+      recovery: account.recovery.filter((r) => r !== recovery),
+    })
+    this.log('huli-cloud: a recovery code was used')
+    return true
   }
 
   // ---- Browser sign-in ----------------------------------------------------------------------
@@ -577,6 +659,65 @@ export class Auth {
     )
   }
 
+  /**
+   * The page that asks for the code, its form posting the step's id back: to the browser sign-in
+   * of `where`'s ticket, or to the web pages' sign-in going on to `where`'s next.
+   */
+  private codeForm(
+    response: ServerResponse,
+    step: string,
+    where: { ticket: string } | { next: string },
+    username: string,
+    error?: string,
+  ): void {
+    const browser = 'ticket' in where
+    sendHtml(
+      response,
+      this.secure,
+      error ? 401 : 200,
+      codePage({
+        action: browser ? '/signin/app/' : '/web/login',
+        fields: { ...where, step },
+        username,
+        cancel: browser,
+        ...(error ? { error } : {}),
+      }),
+      browser ? this.signInHeaders : {},
+    )
+  }
+
+  /** A failed try on a sign-in page; MAX_TICKET_TRIES of them end it. */
+  private failedTry(ticketId: string, ticket: Ticket): void {
+    if (++ticket.tries >= MAX_TICKET_TRIES) this.tickets.delete(ticketId)
+  }
+
+  /** The browser sign-in ends as `account`: a code for its client, on the client's redirect. */
+  private finish(
+    response: ServerResponse,
+    ticketId: string,
+    params: AuthorizeParams,
+    account: Account,
+    headers: Record<string, string> = {},
+  ): void {
+    this.tickets.delete(ticketId)
+    const code = randomToken()
+    this.codes.set(sha256Hex(code), {
+      ...this.grantOf(account),
+      clientId: params.clientId,
+      redirectUri: params.redirectUri,
+      challenge: params.challenge,
+      info: params.info,
+      expiresAt: this.now() + CODE_MS,
+    })
+    this.log(`huli-cloud: signed in ${describeClient(params.info)} as ${account.username}`)
+    redirect(
+      response,
+      this.secure,
+      withQuery(params.redirectUri, { code, state: params.state }),
+      headers,
+    )
+  }
+
   /** POST /signin/app/ */
   async signInSubmit(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const form = await readForm(request)
@@ -604,61 +745,78 @@ export class Auth {
         })
       case 'signup-submit':
         return await this.signUp(request, response, ticketId, ticket, form)
-      case 'enroll':
-        return this.enroll(response, ticketId, ticket, form)
+      case 'code':
+        return this.codeSubmit(request, response, ticketId, ticket, form)
     }
-    const headers: Record<string, string> = {}
-    let account: Account
     const web = this.webSession(request)
     if (web) {
       if (!this.csrfOk(form, web.session)) {
         return sendHtml(response, this.secure, 403, messagePage('无法登录', '页面已过期，请重试。'))
       }
-      account = web.account
-    } else {
-      const username = form.get('username') ?? ''
-      const result = await this.verifyLogin(
-        request,
-        username,
-        form.get('password') ?? '',
-        form.get('code') ?? '',
-      )
-      if (!result.ok) {
-        if (result.status !== 429) ticket.tries++
-        if (ticket.tries >= MAX_TICKET_TRIES) this.tickets.delete(ticketId)
+      return this.finish(response, ticketId, params, web.account)
+    }
+    const username = form.get('username') ?? ''
+    const result = await this.checkPassword(request, username, form.get('password') ?? '')
+    switch (result.kind) {
+      case 'failed':
+        if (result.status !== 429) this.failedTry(ticketId, ticket)
         return this.loginForm(response, ticketId, params, result.status, {
           error: result.message,
           username: username.slice(0, 256),
         })
+      case 'code': {
+        ticket.expiresAt = this.now() + TICKET_MS
+        const step = this.startCodeStep(result.account, ticketId, '')
+        return this.codeForm(response, step, { ticket: ticketId }, result.account.username)
       }
-      account = result.account
-      headers['set-cookie'] = this.startSession(account).cookie
+      case 'done':
+        return this.finish(response, ticketId, params, result.account, {
+          'set-cookie': this.startSession(result.account).cookie,
+        })
     }
-    this.tickets.delete(ticketId)
-    const code = randomToken()
-    this.codes.set(sha256Hex(code), {
-      ...this.grantOf(account),
-      clientId: params.clientId,
-      redirectUri: params.redirectUri,
-      challenge: params.challenge,
-      info: params.info,
-      expiresAt: this.now() + CODE_MS,
-    })
-    this.log(`huli-cloud: signed in ${describeClient(params.info)} as ${account.username}`)
-    redirect(
-      response,
-      this.secure,
-      withQuery(params.redirectUri, { code, state: params.state }),
-      headers,
-    )
+  }
+
+  /** The code's page of the browser sign-in posted. */
+  private codeSubmit(
+    request: IncomingMessage,
+    response: ServerResponse,
+    ticketId: string,
+    ticket: Ticket,
+    form: URLSearchParams,
+  ): void {
+    const id = form.get('step') ?? ''
+    const key = sha256Hex(id)
+    const step = this.live(this.codeSteps, key)
+    if (!step || step.ticket !== ticketId) {
+      return this.loginForm(response, ticketId, ticket.params, 400, {
+        error: STEP_EXPIRED,
+        username: '',
+      })
+    }
+    const result = this.takeCode(request, key, step, form.get('code') ?? '')
+    switch (result.kind) {
+      case 'again':
+        this.failedTry(ticketId, ticket)
+        return this.codeForm(response, id, { ticket: ticketId }, step.username, result.message)
+      case 'failed':
+        if (result.status !== 400) this.failedTry(ticketId, ticket)
+        return this.loginForm(response, ticketId, ticket.params, result.status, {
+          error: result.message,
+          username: step.username,
+        })
+      case 'done':
+        return this.finish(response, ticketId, ticket.params, result.account, {
+          'set-cookie': this.startSession(result.account).cookie,
+        })
+    }
   }
 
   // ---- Signing up with an invite code -------------------------------------------------------
 
   /**
    * The sign-up form posted: an invite code, which is counted against the address and in all
-   * unless it is one that can be used, a username and a password. The invite is not used yet: the
-   * new TOTP secret is shown, and the account is made once a code from it comes back.
+   * unless it is one that can be used, a username and a password. The invite is used then, once,
+   * the account made or reset with the password alone, and the sign-in goes on as that account.
    */
   private async signUp(
     request: IncomingMessage,
@@ -673,14 +831,14 @@ export class Auth {
       this.signupForm(response, ticketId, status, { error, username: typed })
     if (this.signupsByAddress.blocked(address) || this.signups.blocked(NO_ACCOUNT)) {
       this.log(`huli-cloud: signup blocked from ${address}`)
-      return again('尝试次数太多，请过一会儿再试。', 429)
+      return again(TOO_MANY, 429)
     }
     this.signupsByAddress.hit(address)
     this.signups.hit(NO_ACCOUNT)
     const invite = this.store.openInvite((form.get('invite') ?? '').slice(0, 64))
     if (!invite) {
       this.log(`huli-cloud: signup failed from ${address}`)
-      if (++ticket.tries >= MAX_TICKET_TRIES) this.tickets.delete(ticketId)
+      this.failedTry(ticketId, ticket)
       return again('邀请码不对、已经用过或已经过期。', 401)
     }
     this.signupsByAddress.undo(address)
@@ -710,101 +868,19 @@ export class Auth {
     } finally {
       this.releaseSlot(NO_ACCOUNT)
     }
-    const id = randomToken(18)
-    for (const old of this.enrollments.keys()) {
-      if (this.enrollments.size < MAX_ENROLLMENTS) break
-      this.enrollments.delete(old)
+    // The sign-in may have ended, or gone on as another form posted at once, while scrypt ran.
+    if (this.live(this.tickets, ticketId) !== ticket) {
+      return sendHtml(response, this.secure, 400, messagePage('登录已过期', '回到纸鸢重新点登录。'))
     }
-    const enrollment: Enrollment = {
-      ticket: ticketId,
-      invite: invite.id,
-      username,
-      password: hash,
-      totp: newTotpSecret(),
-      expiresAt: this.now() + ENROLL_MS,
-      tries: 0,
-    }
-    this.enrollments.set(sha256Hex(id), enrollment)
-    this.enrollForm(response, ticketId, id, enrollment)
-  }
-
-  private enrollForm(
-    response: ServerResponse,
-    ticket: string,
-    id: string,
-    enrollment: Enrollment,
-    error?: string,
-  ): void {
-    const uri = otpauthUri(enrollment.totp, enrollment.username)
-    sendHtml(
-      response,
-      this.secure,
-      error ? 401 : 200,
-      enrollPage({
-        ticket,
-        enrollment: id,
-        username: enrollment.username,
-        qrSvg: renderSVG(uri),
-        uri,
-        secret: enrollment.totp,
-        ...(error ? { error } : {}),
-      }),
-      this.signInHeaders,
-    )
-  }
-
-  /**
-   * The first one-time code from the new secret: the invite is used now, once, and the account
-   * made or reset; its recovery codes are shown once, and the sign-in goes on as the new account.
-   */
-  private enroll(
-    response: ServerResponse,
-    ticketId: string,
-    ticket: Ticket,
-    form: URLSearchParams,
-  ): void {
-    const id = form.get('enrollment') ?? ''
-    const key = sha256Hex(id)
-    const enrollment = this.live(this.enrollments, key)
-    if (!enrollment || enrollment.ticket !== ticketId) {
-      return this.signupForm(response, ticketId, 400, {
-        error: '这次注册已过期，请重新开始。',
-        username: '',
-      })
-    }
-    ticket.expiresAt = this.now() + TICKET_MS
-    const step = checkTotp(enrollment.totp, (form.get('code') ?? '').trim(), this.now(), -1)
-    if (step === null) {
-      if (++enrollment.tries >= MAX_ENROLL_TRIES) {
-        this.enrollments.delete(key)
-        return this.signupForm(response, ticketId, 401, {
-          error: '验证码错了太多次，请重新开始。',
-          username: enrollment.username,
-        })
-      }
-      return this.enrollForm(
-        response,
-        ticketId,
-        id,
-        enrollment,
-        '验证码不对：看验证器里这个账号最新的验证码。',
-      )
-    }
-    this.enrollments.delete(key)
-    const codes = newRecoveryCodes()
-    const result = this.store.redeemInvite(enrollment.invite, enrollment.username, {
-      password: enrollment.password,
-      totp: enrollment.totp,
-      totpLastStep: step,
-      recovery: codes.map((code) => sha256Hex(code)),
-    })
+    // Checked once more as it is used: the invite may have been used or revoked since.
+    const result = this.store.redeemInvite(invite.id, username, passwordOnly(hash))
     if (!result.ok) {
       const error = {
         invite: '邀请码刚刚被用掉或撤销了。',
         username: '这个用户名刚刚被别人用了，换一个。',
         full: '账号已经满了，请联系机主。',
       }[result.reason]
-      return this.signupForm(response, ticketId, 409, { error, username: enrollment.username })
+      return again(error, 409)
     }
     const { account, reset } = result
     this.log(`huli-cloud: ${reset ? 'reset' : 'signed up'} account ${account.username}`)
@@ -818,20 +894,9 @@ export class Auth {
         messagePage('账号已重设', '这个账号目前停用中，请联系机主。'),
       )
     }
-    const { cookie, session } = this.startSession(account)
-    sendHtml(
-      response,
-      this.secure,
-      200,
-      recoveryPage({
-        ticket: ticketId,
-        csrf: session.csrf,
-        username: account.username,
-        codes,
-        reset,
-      }),
-      { ...this.signInHeaders, 'set-cookie': cookie },
-    )
+    this.finish(response, ticketId, ticket.params, account, {
+      'set-cookie': this.startSession(account).cookie,
+    })
   }
 
   // ---- Token endpoint -----------------------------------------------------------------------
@@ -1036,34 +1101,67 @@ export class Auth {
       : '/account/devices/'
   }
 
-  /** POST /web/login */
+  private webLoginForm(
+    response: ServerResponse,
+    next: string,
+    failure: Refused & { username: string },
+  ): void {
+    sendHtml(
+      response,
+      this.secure,
+      failure.status,
+      loginPage({
+        action: '/web/login',
+        fields: { next },
+        purpose: '登录',
+        username: failure.username,
+        error: failure.message,
+      }),
+    )
+  }
+
+  /** POST /web/login: the password, and then, for an account that takes one, the code. */
   async webLogin(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const form = await readForm(request)
     const next = this.safeNext(form.get('next'))
-    const username = form.get('username') ?? ''
-    const result = await this.verifyLogin(
-      request,
-      username,
-      form.get('password') ?? '',
-      form.get('code') ?? '',
-    )
-    if (!result.ok) {
-      return sendHtml(
-        response,
-        this.secure,
-        result.status,
-        loginPage({
-          action: '/web/login',
-          fields: { next },
-          purpose: '登录',
-          username: username.slice(0, 256),
-          error: result.message,
-        }),
-      )
+    const id = form.get('step')
+    if (id !== null) {
+      const key = sha256Hex(id)
+      const step = this.live(this.codeSteps, key)
+      if (!step || step.ticket !== null) {
+        return this.webLoginForm(response, next, {
+          kind: 'failed',
+          status: 400,
+          message: STEP_EXPIRED,
+          username: '',
+        })
+      }
+      const result = this.takeCode(request, key, step, form.get('code') ?? '')
+      switch (result.kind) {
+        case 'again':
+          return this.codeForm(response, id, { next: step.next }, step.username, result.message)
+        case 'failed':
+          return this.webLoginForm(response, step.next, { ...result, username: step.username })
+        case 'done':
+          return redirect(response, this.secure, step.next, {
+            'set-cookie': this.startSession(result.account).cookie,
+          })
+      }
     }
-    redirect(response, this.secure, next, {
-      'set-cookie': this.startSession(result.account).cookie,
-    })
+    const username = form.get('username') ?? ''
+    const result = await this.checkPassword(request, username, form.get('password') ?? '')
+    switch (result.kind) {
+      case 'failed':
+        return this.webLoginForm(response, next, { ...result, username: username.slice(0, 256) })
+      case 'code': {
+        const step = this.startCodeStep(result.account, null, next)
+        return this.codeForm(response, step, { next }, result.account.username)
+      }
+      case 'done':
+        return redirect(response, this.secure, next, {
+          'set-cookie': this.startSession(result.account).cookie,
+        })
+    }
   }
 
   /** GET /account/ and /account/devices/ */

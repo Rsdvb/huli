@@ -1,5 +1,6 @@
-// The web pages: sign-in, sign-up with an invite code, consent, device codes, the device list and
-// the owner's page of accounts and invites. Plain HTML forms, no script.
+// The web pages: sign-in (the password, then the code for an account with two-step verification),
+// sign-up with an invite code, consent, device codes, the device list and the owner's page of
+// accounts and invites. Plain HTML forms, no script.
 
 import type { HuliClientInfo } from '@shared/huli-cloud'
 import type { AccountRow, InviteRow } from './admin'
@@ -20,9 +21,6 @@ p{margin:8px 0}
 label{display:block;margin:14px 0 4px;font-size:13px;color:var(--muted)}
 input,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--fg);font-size:15px}
 a{color:var(--accent)}
-.qr{display:block;width:220px;height:220px;margin:16px auto;background:#fff;border-radius:8px}
-.secret{font-size:14px;letter-spacing:1px;word-break:break-all}
-pre.codes{font-size:16px;line-height:1.8;background:var(--bg);border-radius:8px;padding:12px 16px}
 .row{display:flex;gap:8px;margin-top:18px}
 button{flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg);font-size:15px;cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -92,9 +90,10 @@ const errorLine = (error: string | undefined) =>
   error ? `<p class="error">${escape(error)}</p>` : ''
 
 /**
- * The username, password and one-time code form, posting to `action` with its hidden fields. The
- * owner may leave the username empty. In the browser sign-in (with a ticket) it also leads to
- * signing up with an invite code.
+ * The username and password form, posting to `action` with its hidden fields. The owner may leave
+ * the username empty. An account with two-step verification is asked its code on the next page,
+ * once its password is right. In the browser sign-in (with a ticket) it also leads to signing up
+ * with an invite code.
  */
 export function loginPage(input: {
   action: string
@@ -110,10 +109,32 @@ export function loginPage(input: {
 <form method="post" action="${escape(input.action)}">${hiddenFields(input.fields)}
 <label for="username">用户名（机主可不填）</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="256" value="${escape(input.username ?? '')}" autofocus>
 <label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required>
-<label for="code">两步验证码（或恢复码）</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+<p class="muted">开了两步验证的账号（比如机主），密码对了之后下一页再输验证码。</p>
 ${errorLine(input.error)}
 <div class="row"><button class="primary" name="action" value="allow">登录</button>${ticket ? '<button name="action" value="deny" formnovalidate>取消</button>' : ''}</div>
 ${ticket ? '<div class="row"><button name="action" value="signup" formnovalidate>没有账号？用邀请码注册</button></div>' : ''}</form>`,
+  )
+}
+
+/**
+ * The second step of signing in, for an account with two-step verification once its password was
+ * right: a one-time code from its authenticator app, or one of its recovery codes.
+ */
+export function codePage(input: {
+  action: string
+  fields: Record<string, string>
+  username: string
+  /** Whether it offers to cancel the browser sign-in. */
+  cancel: boolean
+  error?: string
+}): string {
+  return page(
+    '两步验证',
+    `<h1>两步验证</h1><p class="muted">账号 <b>${escape(input.username)}</b> 开了两步验证：输入验证器 App 里的 6 位验证码。手机不在身边时，可以用一个恢复码代替，每个只能用一次。</p>
+<form method="post" action="${escape(input.action)}">${hiddenFields(input.fields)}
+<label for="code">验证码或恢复码</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" maxlength="64" required autofocus>
+${errorLine(input.error)}
+<div class="row"><button class="primary" name="action" value="code">继续</button>${input.cancel ? '<button name="action" value="deny" formnovalidate>取消</button>' : ''}</div></form>`,
   )
 }
 
@@ -121,57 +142,16 @@ ${ticket ? '<div class="row"><button name="action" value="signup" formnovalidate
 export function signupPage(input: { ticket: string; username?: string; error?: string }): string {
   return page(
     '注册',
-    `<h1>用邀请码注册</h1><p class="muted">邀请码是机主给你的，只能用一次。注册好后会回到纸鸢，并已登录。</p>
+    `<h1>用邀请码注册</h1><p class="muted">邀请码是机主给你的，只能用一次。定好用户名和密码就注册好了，会回到纸鸢并已登录。</p>
 <form method="post" action="/signin/app/">${hidden('ticket', input.ticket)}
 <label for="invite">邀请码</label><input id="invite" name="invite" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64" required autofocus>
 <label for="username">用户名</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="2" maxlength="32" value="${escape(input.username ?? '')}" required>
 <p class="muted">2 到 32 位：字母、数字或 . _ -，以字母或数字开头，不分大小写。</p>
 <label for="password">密码（至少 12 位）</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
 <label for="password2">再输一次密码</label><input id="password2" name="password2" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+<p class="muted">以后登录只用用户名和密码，所以请用一个够长、没在别处用过的密码，最好让密码管理器生成并记住它。</p>
 ${errorLine(input.error)}
-<div class="row"><button class="primary" name="action" value="signup-submit">下一步</button><button name="action" value="login" formnovalidate>返回登录</button></div></form>`,
-  )
-}
-
-/** The second step of signing up: the authenticator app takes the new TOTP secret. */
-export function enrollPage(input: {
-  ticket: string
-  enrollment: string
-  username: string
-  qrSvg: string
-  uri: string
-  secret: string
-  error?: string
-}): string {
-  const qr = `data:image/svg+xml,${encodeURIComponent(input.qrSvg)}`
-  return page(
-    '两步验证',
-    `<h1>绑定两步验证</h1><p class="muted">账号 <b>${escape(input.username)}</b>。用验证器 App（如 iOS「密码」、Google Authenticator）扫这个二维码；在这台设备上注册的话，点下面的链接添加，或手动输入密钥。</p>
-<img class="qr" src="${escape(qr)}" alt="两步验证的二维码">
-<p class="muted"><a href="${escape(input.uri)}">在这台设备上添加验证码</a> · 密钥 <code class="secret">${escape(input.secret)}</code></p>
-<form method="post" action="/signin/app/">${hidden('ticket', input.ticket)}${hidden('enrollment', input.enrollment)}
-<label for="code">验证器显示的 6 位验证码</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="16" required autofocus>
-${errorLine(input.error)}
-<div class="row"><button class="primary" name="action" value="enroll">完成注册</button></div></form>`,
-  )
-}
-
-/** The new account's recovery codes, shown once, before the sign-in goes on. */
-export function recoveryPage(input: {
-  ticket: string
-  csrf: string
-  username: string
-  codes: string[]
-  reset: boolean
-}): string {
-  const title = input.reset ? '账号已重设' : '注册完成'
-  return page(
-    title,
-    `<h1>${title}</h1><p>账号 <b>${escape(input.username)}</b> 的密码和两步验证已经设好。</p>
-<p class="error">下面是恢复码：每个只能用一次，手机丢了时代替验证码登录。现在抄下来或存进密码管理器，之后不会再显示。</p>
-<pre class="codes">${input.codes.map(escape).join('\n')}</pre>
-<form method="post" action="/signin/app/">${hidden('ticket', input.ticket)}${hidden('csrf', input.csrf)}
-<div class="row"><button class="primary" name="action" value="allow">我已存好，继续</button></div></form>`,
+<div class="row"><button class="primary" name="action" value="signup-submit">注册</button><button name="action" value="login" formnovalidate>返回登录</button></div></form>`,
   )
 }
 
@@ -261,7 +241,7 @@ ${computers ? `<table>${computers}</table>` : '<p class="muted">还没有电脑�
 ${
   input.account.owner
     ? '<p class="gap"><a href="/account/admin/">账号和邀请码</a></p><p class="muted">改密码和两步验证：在服务器上运行 <b>huli-cloud passwd</b> 或 <b>huli-cloud totp</b>（见服务端的说明）。</p>'
-    : '<p class="muted gap">忘了密码或换了手机：请机主重设你的账号，再用新的邀请码重新设密码和两步验证。</p>'
+    : `<p class="muted gap">${input.account.totp ? '忘了密码或换了手机' : '忘了密码'}：请机主重设你的账号，再用新的邀请码重新设密码。</p>`
 }
 <form method="post" action="/account/signout">${hidden('csrf', input.csrf)}<div class="row"><button>退出网页登录</button></div></form>`,
   )
@@ -299,7 +279,8 @@ export function ownerPage(input: {
         : row.state === 'disabled'
           ? button('enable', { username: row.username }, '启用')
           : button('disable', { username: row.username }, '停用', true)
-      return `<tr><td><b>${escape(row.username)}</b> · ${state}<br><span class="muted">创建于 ${time(row.createdAt)} · ${row.devices} 台设备 · ${row.computers} 台电脑</span></td><td>${action}</td></tr>`
+      const signIn = row.state === 'reset' ? '' : row.twoStep ? ' · 两步验证' : ' · 仅密码'
+      return `<tr><td><b>${escape(row.username)}</b> · ${state}${signIn}<br><span class="muted">创建于 ${time(row.createdAt)} · ${row.devices} 台设备 · ${row.computers} 台电脑</span></td><td>${action}</td></tr>`
     })
     .join('')
   const invites = input.invites
