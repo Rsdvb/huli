@@ -23,7 +23,7 @@ import type { ToolCallLabels, ToolCallStatus } from '@renderer/components/affect
 import { shortDuration } from '@renderer/lib/format'
 import { toolMedia } from '../media/named'
 import { toolTime } from '../tool-times'
-import { toolLabel } from './helpers'
+import { toolInputFields, toolLabel } from './helpers'
 import { entryPictures, type RowPicture } from './row-pictures'
 
 export const KIND_GLYPH: Record<ToolKind, IconSvgElement> = {
@@ -116,7 +116,9 @@ export function toolHasBody(entry: ToolEntry, projectPath: string): boolean {
   return (
     entry.content.length > 0 ||
     toolMedia(entry).length > 0 ||
-    (!!command && (command.length > 60 || command.includes('\n')))
+    (!!command && (command.length > 60 || command.includes('\n'))) ||
+    (!command && !!entry.description) ||
+    toolInputFields(entry) !== null
   )
 }
 

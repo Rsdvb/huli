@@ -1019,7 +1019,9 @@
       "output": "Output",
       "content": "Content",
       "result": "Result",
-      "changes": "Changes"
+      "changes": "Changes",
+      "input": "Input",
+      "prompt": "Prompt"
     },
     "exitCode": "Exit code {{code}}",
     "earlierLines_one": "{{count}} earlier line",

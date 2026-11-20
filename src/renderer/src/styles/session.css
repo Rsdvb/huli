@@ -398,6 +398,50 @@
   font-family: var(--font-mono);
   font-size: 12px;
 }
+/* Huli: a call's input, one field per line, its name in the muted label face; and the prompt a
+   sub-agent or a picture was given. */
+.ks-tool-input {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+.ks-tool-input__field {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: 10px;
+  min-width: 0;
+}
+.ks-tool-input__field > dt {
+  max-width: 12em;
+  overflow: hidden;
+  color: var(--thread-muted);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ks-tool-input__field > dd {
+  grid-column: 2;
+  min-width: 0;
+  margin: 0;
+  color: var(--ui-tcc-ink);
+  overflow-wrap: anywhere;
+}
+.ks-tool-input__field > dd:only-child {
+  grid-column: 1 / -1;
+}
+.ks-tool-input__field > dd pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}
+.ks-tool-prompt {
+  margin: 0;
+  color: var(--ui-tcc-ink);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* The run's line: its stacked tiles stay, its words a step lighter than a reply. */
 .ks-thread .ui-tcc-group {

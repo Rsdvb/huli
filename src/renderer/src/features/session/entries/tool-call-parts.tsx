@@ -14,7 +14,7 @@ import { Markdown } from '../markdown'
 import { EntryIdContext, SessionIdContext } from '../media/grants'
 import { toolMedia } from '../media/named'
 import { useEntry } from '../use-thread'
-import { commandOutput, toolLabel } from './helpers'
+import { commandOutput, toolInputFields, toolLabel, type InputField } from './helpers'
 import { fenceBody, numberedRead } from './read-code'
 import { ShellBlock } from './shell-block'
 import { useToolCallLabels } from './tool-call-model'
@@ -45,8 +45,21 @@ export const ToolBody = memo(function ToolBody({
   const output = command ? commandOutput(entry.content) : null
   const content = output === null ? entry.content : entry.content.slice(1)
   const path = entry.locations[0]?.path
+  const fields = toolInputFields(entry)
   return (
     <>
+      {!command && entry.description && (
+        <ToolCallSection
+          label={t('toolCall.section.prompt')}
+          copy={entry.description}
+          labels={labels}
+        >
+          <p data-selectable="" className="ks-tool-prompt">
+            {entry.description}
+          </p>
+        </ToolCallSection>
+      )}
+      {fields && <ToolInput fields={fields} raw={entry.rawInput ?? ''} />}
       {command && (
         <ContextMenu>
           <ContextMenuTrigger render={<div className="min-w-0" />}>
@@ -110,6 +123,34 @@ export const ToolBody = memo(function ToolBody({
     </>
   )
 })
+
+// Past this a value of the input folds behind "Show all": about six lines.
+const VALUE_MAX_HEIGHT = 110
+
+/**
+ * Huli: what a call was given, as its card's first section: each field of its input by name, a
+ * long value folded, so allowing or reading a call of an MCP tool is never blind.
+ */
+export function ToolInput({ fields, raw }: { fields: InputField[]; raw: string }) {
+  const { t } = useTranslation('session')
+  const labels = useToolCallLabels()
+  return (
+    <ToolCallSection label={t('toolCall.section.input')} copy={raw} labels={labels}>
+      <dl data-selectable="" className="ks-tool-input">
+        {fields.map((field, i) => (
+          <div key={`${field.key}:${i}`} className="ks-tool-input__field">
+            {field.key && <dt>{field.key}</dt>}
+            <dd>
+              <Clamp maxHeight={VALUE_MAX_HEIGHT} more={t('tool.showAll')}>
+                {field.code ? <pre>{field.value}</pre> : <span>{field.value}</span>}
+              </Clamp>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </ToolCallSection>
+  )
+}
 
 /** What the card says after the tool's name: its path or command, and an edit's counts. */
 export function ToolSummary({
