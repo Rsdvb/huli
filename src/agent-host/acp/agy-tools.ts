@@ -1,12 +1,15 @@
 // agy's tool calls in the shape the ACP mapper reads every agent's. agy 1.5.9 sends its tool's own
 // name beside each call, a command's input as `{ CommandLine, toolSummary }`, its output under a
 // header of times and the exit code, and an MCP server's tool as `mcp_<server>_<tool>`. It keeps
-// what it writes for itself, such as a Plan mode plan, in `~/.gemini/antigravity-cli/brain/`.
+// what it writes for itself, such as a Plan mode plan, in `~/.gemini/antigravity-cli/brain/`. Its own
+// tools it has no title for come as "Run <name>", which 1.5.12 sends for `send_message`, the
+// subagent and task tools, `generate_image`, `schedule` and `finish`.
 
 import type * as acp from '@agentclientprotocol/sdk/unstable'
 import { fenced } from '../codex/mapper'
 import type { McpServer } from '../connection'
-import { toLf, type MapperContext, type TurnScope } from '../session-updates'
+import { t } from '../i18n'
+import { descriptionLine, toLf, type MapperContext, type TurnScope } from '../session-updates'
 
 const RESULT = /^Created At: [^\n]*\nCompleted At: [^\n]*\nCommand exited with code (-?\d+)\.\n\n/
 const OUTPUT = 'Command output:\n'
@@ -95,15 +98,98 @@ export function agyQuestion(update: acp.ToolCallUpdate): string | null {
   return question || null
 }
 
+/** A conversation agy names by its id, such as a subagent's, as a row names it; null if unknown. */
+export type AgyNames = (conversationId: string) => string | null
+
+const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+
+/** The first of `keys` the input holds as text, for an argument agy has spelled more than one way. */
+function arg(input: Record<string, unknown> | null, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = text(input?.[key])
+    if (value) return value
+  }
+  return ''
+}
+
+/**
+ * The title, and what the call says when it shows nothing else, of agy's own tools it sends
+ * untitled; null for any other tool.
+ */
+function ownTool(
+  name: string,
+  input: Record<string, unknown> | null,
+  names: AgyNames,
+): { title: string; text?: string } | null {
+  switch (name) {
+    case 'send_message': {
+      const to = arg(input, 'Recipient', 'ConversationId')
+      const message = arg(input, 'Message')
+      const named = to ? (names(to) ?? to.slice(0, 8)) : t('antigravity.tool.mainAgent')
+      return { title: t('antigravity.tool.sendMessage', { to: named }), text: message }
+    }
+    case 'manage_subagents': {
+      const action = arg(input, 'Action')
+      return {
+        title: action
+          ? t('antigravity.tool.manageSubagentsAction', { action })
+          : t('antigravity.tool.manageSubagents'),
+      }
+    }
+    case 'manage_task': {
+      const action = arg(input, 'Action')
+      return {
+        title: action
+          ? t('antigravity.tool.manageTaskAction', { action })
+          : t('antigravity.tool.manageTask'),
+      }
+    }
+    case 'define_subagent': {
+      const named = arg(input, 'Name', 'TypeName')
+      return {
+        title: named
+          ? t('antigravity.tool.defineSubagentNamed', { name: named })
+          : t('antigravity.tool.defineSubagent'),
+      }
+    }
+    case 'generate_image':
+      return { title: t('antigravity.tool.generateImage'), text: arg(input, 'Prompt') }
+    case 'schedule':
+      return { title: t('antigravity.tool.schedule') }
+    case 'finish':
+      return { title: t('antigravity.tool.finish'), text: arg(input, 'Result', 'Summary') }
+    default:
+      return null
+  }
+}
+
 /** An agy tool call in the shape the mapper reads every agent's. */
-export function fromAgy<T extends acp.ToolCallUpdate>(update: T): T {
+export function fromAgy<T extends acp.ToolCallUpdate>(update: T, names: AgyNames = () => null): T {
   const input = record(update.rawInput)
   if (typeof input?.CommandLine === 'string') {
     return command(update, input.CommandLine, input.toolSummary) as T
   }
   const question = agyQuestion(update)
   if (question !== null) return { ...update, title: question }
-  return update
+  const name = toolName(update)
+  // Only the title agy gives a tool it has none for is replaced.
+  const own = name !== null && update.title === `Run ${name}` ? ownTool(name, input, names) : null
+  if (!own) return update
+  const shaped: T = { ...update, title: own.title }
+  if (own.text && !update.content?.length) {
+    shaped.content = [{ type: 'content', content: { type: 'text', text: own.text } }]
+  }
+  return shaped
+}
+
+/**
+ * What agy says a call other than a command does, its `toolSummary`, as the entry's description;
+ * a command's is set as Claude Code's is.
+ */
+export function agySummary(update: acp.ToolCallUpdate): string | undefined {
+  const input = record(update.rawInput)
+  if (!input || typeof input.CommandLine === 'string') return undefined
+  return descriptionLine(input.toolSummary)
 }
 
 /**

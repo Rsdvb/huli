@@ -26,6 +26,7 @@ import {
   type PromptResponse,
   type SessionUpdate,
   type Stream,
+  type ToolCallUpdate,
 } from '@agentclientprotocol/sdk/unstable'
 import type { AgentId, ConfigOption, PermissionOption, ToolEntry } from '@shared/thread'
 import {
@@ -105,6 +106,7 @@ import {
   agyAllowOnce,
   agyAutoAllowed,
   agyQuestion,
+  agySummary,
   fromAgy,
   inWholeFile,
   onAgyOwnFiles,
@@ -733,14 +735,24 @@ export class AcpConnection implements AgentConnection {
     const call = ownCall(shaped, this.naming, ctx)
     if (!call) return { patches: [], effects: [] }
     const out = mapSessionUpdate(call, ctx)
-    // agy's question stands apart from the work as Claude Code's do, even before it is asked.
-    const question = this.agy ? agyQuestion(update) : null
+    if (this.agy) this.agyRow(update, ctx, out)
+    return out
+  }
+
+  /**
+   * What agy's call carries that ACP has no field for: a question, which stands apart from the
+   * work as Claude Code's do even before it is asked, and what a call says it does.
+   */
+  private agyRow(update: ToolCallUpdate, ctx: MapperContext, out: MapperOutput): void {
     const id = `t:${update.toolCallId}`
     const shown = ctx.thread.byId[id]
-    if (question !== null && !(shown?.kind === 'tool' && shown.question !== undefined)) {
-      out.patches.push({ op: 'entry.update', id, changes: { question } })
-    }
-    return out
+    const entry = shown?.kind === 'tool' ? shown : null
+    const changes: { question?: string; description?: string } = {}
+    const question = agyQuestion(update)
+    if (question !== null && entry?.question === undefined) changes.question = question
+    const summary = agySummary(update)
+    if (summary !== undefined && entry?.description !== summary) changes.description = summary
+    if (Object.keys(changes).length > 0) out.patches.push({ op: 'entry.update', id, changes })
   }
 
   private deliver(sessionId: string, update: SessionUpdate): void {

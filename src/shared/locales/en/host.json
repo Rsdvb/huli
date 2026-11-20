@@ -403,6 +403,19 @@
     "plan": {
       "title": "Plan"
     },
+    "tool": {
+      "sendMessage": "Message {{to}}",
+      "mainAgent": "the main agent",
+      "manageSubagents": "Manage subagents",
+      "manageSubagentsAction": "Manage subagents: {{action}}",
+      "manageTask": "Manage a background task",
+      "manageTaskAction": "Manage a background task: {{action}}",
+      "defineSubagent": "Define a subagent",
+      "defineSubagentNamed": "Define the subagent {{name}}",
+      "generateImage": "Generate an image",
+      "schedule": "Set a timer",
+      "finish": "Finish"
+    },
     "mode": {
       "default": {
         "name": "Default",
