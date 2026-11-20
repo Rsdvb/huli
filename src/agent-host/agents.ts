@@ -167,6 +167,7 @@ import {
   type AgentInit,
   type AuthMethodInfo,
   type ConnectionHooks,
+  type SignInImage,
 } from './connection'
 import type { Diagnostics } from './diagnostics'
 import type { AgentDriver, AgentTransport } from './driver'
@@ -4568,7 +4569,11 @@ export class AgentManager {
   async authenticate(
     agentId: AgentId,
     methodId: string,
-    client: { device: boolean; openLink(url: string): void },
+    client: {
+      device: boolean
+      openLink(url: string): void
+      showImage?(image: SignInImage | null): void
+    },
   ): Promise<void> {
     const runtime = await this.ensureReady(agentId)
     const method = runtime.init.authMethods.find((m) => m.id === methodId)
@@ -4591,6 +4596,7 @@ export class AgentManager {
     try {
       await runtime.connection.authenticate(methodId, {
         openLink: client.openLink,
+        ...(client.showImage ? { showImage: client.showImage } : {}),
         signal: abort.signal,
       })
     } catch (error) {

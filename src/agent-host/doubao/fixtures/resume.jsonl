@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"10000000000001112"}
+{"type":"stream_event","session_id":"10000000000001112","message_id":"10000000000012220","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你刚才问的是：“用一句话回答：1+1"}}}
+{"type":"stream_event","session_id":"10000000000001112","message_id":"10000000000012220","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" 等于几？”"}}}
+{"type":"assistant","session_id":"10000000000001112","message":{"id":"10000000000012220","role":"assistant","content":[{"type":"text","text":"你刚才问的是：“用一句话回答：1+1 等于几？”"}]}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"10000000000001112","result":{"type":"text","content":"你刚才问的是：“用一句话回答：1+1 等于几？”"},"log_id":"LOGID","message_id":"10000000000012220","tool_calls_truncated":false}

@@ -6,6 +6,7 @@ import { CLAUDE_SDK_DRIVER } from './claude/driver'
 import { CLINE_SDK_DRIVER } from './cline/driver'
 import { protocolOf, type AgentDefinition, type AgentProtocol } from './catalog'
 import { CODEX_DRIVER } from './codex/driver'
+import { DOUBAO_DRIVER } from './doubao/driver'
 import { DSH_DRIVER } from './dsh/driver'
 import type { AgentDriver } from './driver'
 import { heldBack, inNpmRange, type HarnessRule } from './harness-manifest'
@@ -17,6 +18,7 @@ export const DRIVERS: Readonly<Record<AgentProtocol, AgentDriver>> = {
   'claude-sdk': CLAUDE_SDK_DRIVER,
   'cline-sdk': CLINE_SDK_DRIVER,
   'codex-app-server': CODEX_DRIVER,
+  'doubao-cli': DOUBAO_DRIVER,
   'dsh-sdk': DSH_DRIVER,
   'opencode-server': OPENCODE_SERVER_DRIVER,
   'pi-rpc': PI_DRIVER,

@@ -352,13 +352,15 @@
       "archive": "Install it in Settings › Harnesses.",
       "fakeAgent": "The fake agent runs tools/fake-agent/main.ts from the repository.",
       "claudeCode": "Install Claude Code in Settings › Harnesses, or choose its program there.",
-      "codex": "Install Codex in Settings › Harnesses, or choose its program there."
+      "codex": "Install Codex in Settings › Harnesses, or choose its program there.",
+      "doubao": "Install Doubao CLI with the Install button, or with `npm install -g --allow-scripts=@bytedance/doubao-cli @bytedance/doubao-cli`."
     },
     "cliMissing": "{{agent}} runs your own {{command}}, which was not found on PATH. Install it in Settings › Harnesses.",
     "cliUnsupported": "{{agent}} found {{path}}, which cannot be run without a shell.",
     "cliFailed": "{{agent}} could not read the version of its program: {{reason}}",
     "cliOutdated": "{{agent}} needs {{command}} {{required}} or later; {{installed}} is installed. Update it in Settings › Harnesses.",
-    "uninstalled": "{{agent}} was uninstalled. Install it to use it again."
+    "uninstalled": "{{agent}} was uninstalled. Install it to use it again.",
+    "doubaoInstallNotice": "npm runs Doubao CLI’s install script, which downloads its program, about 100 MB. Doubao CLI is free with a Doubao account, and runs on Windows x64, macOS on Apple silicon and Linux x64 only."
   },
   "environment": {
     "inherited": "Changes to PATH made after Kettu started take effect after a restart.",
@@ -1206,5 +1208,56 @@
     "extractFailed": "The Node.js archive could not be extracted: {{reason}}",
     "doesNotRun": "Node.js {{version}} was extracted, but it does not run on this computer.",
     "inUse": "An agent still runs on Kite’s Node.js. Stop its sessions, then try again."
+  },
+  "doubao": {
+    "name": "Doubao",
+    "unsupported": "Doubao CLI runs on Windows x64, macOS on Apple silicon and Linux x64 only.",
+    "failed": "Doubao CLI could not finish the turn.",
+    "exited": "Doubao CLI exited with code {{code}}.",
+    "emptyPrompt": "The message is empty.",
+    "promptTooLong": "The message is longer than the 1 MB Doubao CLI takes.",
+    "signInNeeded": "Doubao needs you to sign in.",
+    "auth": {
+      "qr": "Scan with the Doubao app",
+      "qrDescription": "Shows a QR code: scan it with the Doubao app on your phone and confirm there.",
+      "cancelled": "The sign-in was cancelled."
+    },
+    "account": {
+      "plan": "Free"
+    },
+    "mode": {
+      "name": "Mode",
+      "askAlways": "Sandbox",
+      "askAlwaysDescription": "Runs in a sandbox that can change only the project’s files. Anything that would leave it is refused, since Kettu cannot answer Doubao’s confirmations.",
+      "askRisky": "Refuse risky actions",
+      "askRiskyDescription": "Runs without a sandbox and can change any file. What Doubao counts as risky, such as deleting files, is refused, since Kettu cannot answer its confirmations.",
+      "alwaysAllow": "Full access",
+      "alwaysAllowDescription": "Runs without a sandbox, and everything runs without confirmation."
+    },
+    "model": "Model",
+    "effort": {
+      "name": "Reasoning",
+      "none": "Off",
+      "minimal": "Minimal",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Max"
+    },
+    "tool": {
+      "outputTooLong": "The output was too long for Doubao CLI to pass on."
+    },
+    "notice": {
+      "denied_one": "Doubao refused an action that needed your confirmation",
+      "denied_other": "Doubao refused {{count}} actions that needed your confirmation",
+      "deniedHint": "Kettu cannot answer Doubao CLI’s confirmations, so it refuses them itself. To allow such actions, choose a wider mode for this session.",
+      "deniedReason": "Doubao CLI asked for a confirmation, which Kettu cannot answer."
+    },
+    "queue": {
+      "title_one": "Waiting for another Doubao session",
+      "title_other": "Waiting for {{count}} other Doubao sessions",
+      "description": "Doubao runs one session at a time, so this message goes once the sessions before it are done."
+    }
   }
 }

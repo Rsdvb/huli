@@ -33,6 +33,7 @@ import {
   openSignInPage,
   signInAgent,
   useAgentsStore,
+  useSignInImage,
   useSignInPage,
 } from '@renderer/stores/agents'
 
@@ -77,10 +78,11 @@ export function SignIn({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const page = useSignInPage(hostId, agentId)
+  const image = useSignInImage(hostId, agentId)
   // A device, or this window on another host: an agent method that hands over no page opens its
   // browser on the computer the agent runs on.
   const remote = isWeb || hostId !== null
-  const listed = page === null ? methods : NO_METHODS
+  const listed = page === null && image === null ? methods : NO_METHODS
 
   useEffect(
     () =>
@@ -125,6 +127,36 @@ export function SignIn({
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent className="max-w-[440px] gap-3">
+        {image !== null && (
+          <div className="flex w-full flex-col items-center gap-2 rounded-xl bg-card p-3 text-center shadow-card">
+            <img
+              src={image}
+              alt={t('signIn.scanAlt')}
+              className="size-48 rounded-lg [image-rendering:pixelated]"
+              draggable={false}
+            />
+            <div className="flex flex-col gap-0.5">
+              <span className="flex items-center justify-center gap-1.5 text-ui font-medium">
+                <Spinner className="size-3" />
+                {t('signIn.scanTitle')}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t('signIn.scanHint', { agent: name })}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="compact"
+              onClick={() =>
+                void cancelAgentSignIn(hostId, agentId).catch((e: unknown) =>
+                  setError(errorMessage(e)),
+                )
+              }
+            >
+              {t('common:actions.cancel')}
+            </Button>
+          </div>
+        )}
         {page !== null && (
           <div className="flex w-full flex-col gap-2 rounded-xl bg-card p-3 text-left shadow-card">
             <div className="flex flex-col gap-0.5">

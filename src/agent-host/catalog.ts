@@ -30,6 +30,7 @@ import { DEEPSEEK } from './agents/deepseek'
 import { DEVIN } from './agents/devin'
 import { DIMCODE } from './agents/dimcode'
 import { DIRAC } from './agents/dirac'
+import { DOUBAO } from './agents/doubao'
 import { DROID } from './agents/droid'
 import { fakeAgent } from './agents/fake-agent'
 import { FAST_AGENT } from './agents/fast-agent'
@@ -116,7 +117,14 @@ export type LaunchKind =
 
 /** How Kettu talks to an agent; each protocol has its driver in `drivers.ts`. */
 export type AgentProtocol =
-  'acp' | 'claude-sdk' | 'cline-sdk' | 'codex-app-server' | 'dsh-sdk' | 'opencode-server' | 'pi-rpc'
+  | 'acp'
+  | 'claude-sdk'
+  | 'cline-sdk'
+  | 'codex-app-server'
+  | 'doubao-cli'
+  | 'dsh-sdk'
+  | 'opencode-server'
+  | 'pi-rpc'
 
 /**
  * An interface of the harness's own that an agent runs on in place of the definition's protocol
@@ -254,6 +262,7 @@ export {
   DEVIN,
   DIMCODE,
   DIRAC,
+  DOUBAO,
   DROID,
   fakeAgent,
   FAST_AGENT,
@@ -335,6 +344,7 @@ export function buildCatalog(fakeAgentPath: string | null): AgentDefinition[] {
     VTCODE,
     FAST_AGENT,
     MINION,
+    DOUBAO,
   ]
   if (fakeAgentPath) catalog.push(fakeAgent(fakeAgentPath))
   return catalog

@@ -798,7 +798,10 @@
     "pageOpen": "等待浏览器",
     "pageOpenHint": "{{agent}} 的登录页面已在这台设备的浏览器中打开，请在那里完成登录。",
     "openPageAgain": "再次打开页面",
-    "onComputer": "这种方式会在 {{agent}} 所在的电脑上打开浏览器，请到那台电脑上登录，然后重试。"
+    "onComputer": "这种方式会在 {{agent}} 所在的电脑上打开浏览器，请到那台电脑上登录，然后重试。",
+    "scanTitle": "扫码登录",
+    "scanHint": "用手机上的{{agent}} App 扫这个二维码，然后在手机上确认。",
+    "scanAlt": "登录二维码"
   },
   "takeover": {
     "title": "由 {{agent}} 接手",

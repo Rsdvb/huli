@@ -1,0 +1,101 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "result": {
+    "type": "model_list",
+    "models": [
+      {
+        "id": "9",
+        "name": "Auto",
+        "is_default": true,
+        "efforts": ["low", "medium", "high"],
+        "default_effort": "high"
+      },
+      {
+        "id": "seed-lite-7b",
+        "name": "豆包 2.1 Lite",
+        "is_default": false,
+        "efforts": ["low", "medium", "high"],
+        "default_effort": "medium"
+      },
+      {
+        "id": "person-deepseek-v4-1-flash-261017",
+        "name": "DeepSeek V4.1 Flash",
+        "is_default": false,
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-qwen4-max",
+        "name": "Qwen 4 Max",
+        "is_default": false,
+        "efforts": ["low", "high", "xhigh"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-kimi-k3-1-pro-261111",
+        "name": "Kimi K3.1 Pro",
+        "is_default": false,
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-kimi-k3-1-pro-highspeed-261111",
+        "name": "Kimi K3.1 Pro 高速",
+        "is_default": false,
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-kimi-k3-261111",
+        "name": "Kimi K3",
+        "is_default": false,
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-glm-5-3-261111",
+        "name": "GLM 5.3",
+        "is_default": false,
+        "efforts": ["low", "high", "max"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-glm-5-3-flash-261111",
+        "name": "GLM 5.3 Flash",
+        "is_default": false,
+        "efforts": ["low", "high", "max"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-deepseek-v4-pro-ga-260813",
+        "name": "DeepSeek V4 Pro",
+        "is_default": false,
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-qwen3-8-max",
+        "name": "Qwen 3.8 Max",
+        "is_default": false,
+        "efforts": ["low", "high", "xhigh"],
+        "default_effort": "high"
+      },
+      {
+        "id": "person-qwen3-8-flash",
+        "name": "Qwen 3.8 Flash",
+        "is_default": false,
+        "efforts": ["low", "high", "xhigh"],
+        "default_effort": "high"
+      },
+      {
+        "id": "4",
+        "name": "Doubao 2.1 Turbo",
+        "is_default": false,
+        "efforts": ["low", "medium", "high"],
+        "default_effort": "high"
+      }
+    ]
+  }
+}

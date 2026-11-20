@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Alert, StyleSheet, Text, View } from 'react-native'
+import { Image } from 'expo-image'
 import * as Clipboard from 'expo-clipboard'
 import { randomUUID } from 'expo-crypto'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -122,6 +123,8 @@ function AgentBody({ status }: { status: AgentStatus }) {
   const [envVar, setEnvVar] = useState<string | null>(null)
   const [removing, setRemoving] = useState(false)
   const [page, setPage] = useState<string | null>(null)
+  // Huli: the picture to scan, such as Doubao's QR code, while the sign-in waits for it.
+  const [image, setImage] = useState<string | null>(null)
   const id = status.id
   const r = readiness(status)
   const state = stateText(status)
@@ -158,6 +161,10 @@ function AgentBody({ status }: { status: AgentStatus }) {
         setPage(event.url)
         openUrl(event.url)
       }
+      if (event.type === 'agents.signInImage' && event.agentId === id) {
+        const shown = event.image
+        setImage(shown?.mimeType === 'image/png' ? `data:image/png;base64,${shown.data}` : null)
+      }
     })
   }, [host.link, id])
 
@@ -179,6 +186,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
           await call(link, 'agents.authenticate', { agentId: id, methodId: method.id })
         } finally {
           setPage(null)
+          setImage(null)
         }
       },
       '没能登录',
@@ -187,6 +195,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
 
   const cancelSignIn = () => {
     setPage(null)
+    setImage(null)
     if (host.link) void call(host.link, 'agents.cancelSignIn', { agentId: id }).catch(() => {})
   }
 
@@ -407,7 +416,26 @@ function AgentBody({ status }: { status: AgentStatus }) {
       ) : null}
 
       {!providerMode && r.kind === 'sign-in' && methods.length > 0 ? (
-        page !== null ? (
+        image !== null ? (
+          <Notice
+            tone="info"
+            busy
+            title="扫码登录"
+            actions={<Button label="取消" tone="plain" onPress={cancelSignIn} />}
+          >
+            <View style={styles.gap}>
+              <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+                {`用${status.name} App 扫这个二维码，然后在手机上确认。`}
+              </Text>
+              <Image
+                source={{ uri: image }}
+                style={styles.qr}
+                contentFit="contain"
+                accessibilityLabel="登录二维码"
+              />
+            </View>
+          </Notice>
+        ) : page !== null ? (
           <Notice
             tone="info"
             busy
@@ -1281,4 +1309,5 @@ const styles = StyleSheet.create({
   limitLine: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   track: { height: 6, borderRadius: 3, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
+  qr: { width: 200, height: 200, borderRadius: radius.md },
 })

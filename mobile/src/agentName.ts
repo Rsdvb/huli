@@ -50,6 +50,7 @@ const HARNESS_NAMES: Record<string, string> = {
   vtcode: 'VT Code',
   'fast-agent': 'fast-agent',
   minion: 'Minion Code',
+  doubao: '豆包',
 }
 
 /** The agent's name, else its harness's (an added agent's id is its harness's, `~`, its own), else Agent. */

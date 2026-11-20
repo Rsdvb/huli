@@ -120,7 +120,18 @@ export interface AuthMethodInfo {
 export interface SignInClient {
   /** Opens the agent's sign-in page on the client that asked, a web address only. */
   openLink(url: string): void
+  /**
+   * Huli: shows the client that asked a picture to scan, such as Doubao's QR code, each time a new
+   * one comes; null once the sign-in no longer waits for it.
+   */
+  showImage?(image: SignInImage | null): void
   signal: AbortSignal
+}
+
+/** Huli: a sign-in's picture to scan, as base64. */
+export interface SignInImage {
+  mimeType: 'image/png'
+  data: string
 }
 
 /** How an agent's session titles arrive: as `session_info_update`, or only through `session/list`. */

@@ -59,6 +59,11 @@ export interface BinaryInstalls {
   npm?: string
   /** The npm route skips the package's install scripts, as the vendor's own command does. */
   ignoreScripts?: true
+  /**
+   * The npm route allows the package's own install scripts, which npm 11 blocks by default, for a
+   * package whose install script fetches its program, as the vendor's own command does.
+   */
+  allowScripts?: true
   archive?: ArchiveRoute
   /** The routes in the vendor's order, the recommended first; archive, Homebrew, script, npm otherwise. */
   order?: AgentInstallMethod['id'][]
@@ -71,6 +76,13 @@ export const NPM_GLOBAL_FLAGS = [
   '--no-update-notifier',
   '--loglevel=http',
 ] as const
+
+/** What the npm route says of the package's install scripts. */
+function scriptFlags(installs: BinaryInstalls, name: string): string[] {
+  if (installs.ignoreScripts) return ['--ignore-scripts']
+  if (installs.allowScripts) return [`--allow-scripts=${name}`]
+  return []
+}
 
 /** The registry's key for a platform and architecture, such as `darwin-aarch64`. */
 export function archiveKey(platform: Platform, arch: string): string {
@@ -229,12 +241,7 @@ export async function installPlans(
     })
   }
   if (installs.npm) {
-    const npmArgs = [
-      'install',
-      '-g',
-      ...(installs.ignoreScripts ? ['--ignore-scripts'] : []),
-      installs.npm,
-    ]
+    const npmArgs = ['install', '-g', ...scriptFlags(installs, installs.npm), installs.npm]
     const command = formatCommand({ command: 'npm', args: npmArgs }, platform)
     plans.push({
       id: 'npm',
@@ -397,7 +404,7 @@ export async function updatePlan(
         'install',
         '-g',
         ...(ctx.npmPrefix ? ['--prefix', ctx.npmPrefix] : []),
-        ...(installs.ignoreScripts ? ['--ignore-scripts'] : []),
+        ...scriptFlags(installs, installs.npm),
         `${installs.npm}@latest`,
       ]
       return {

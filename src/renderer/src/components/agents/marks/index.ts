@@ -21,6 +21,7 @@ import * as deepagents from './deepagents'
 import * as devin from './devin'
 import * as dimcode from './dimcode'
 import * as dirac from './dirac'
+import * as doubao from './doubao'
 import * as droid from './droid'
 import * as fakeAgent from './fake-agent'
 import * as fastAgent from './fast-agent'
@@ -109,5 +110,6 @@ export const AGENT_MARKS: Record<HarnessId, AgentMarkModule> = {
   vtcode,
   'fast-agent': fastAgent,
   minion,
+  doubao,
   'fake-agent': fakeAgent,
 }

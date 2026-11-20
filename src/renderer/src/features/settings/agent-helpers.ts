@@ -21,6 +21,7 @@ export const VENDORS: Partial<Record<HarnessId, string>> = {
   muse: 'Meta',
   codewhale: 'Codewhale',
   deepseek: 'DeepSeek',
+  doubao: 'ByteDance',
 }
 
 export function useAction(): [(run: () => Promise<unknown>) => void, boolean, string | null] {

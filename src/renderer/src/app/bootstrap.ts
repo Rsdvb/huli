@@ -42,6 +42,7 @@ import {
 import {
   hostAgentChanged,
   hostAgentRemoved,
+  receiveSignInImage,
   receiveSignInLink,
   useAgentsStore,
 } from '@renderer/stores/agents'
@@ -159,6 +160,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'agents.signInLink':
       receiveSignInLink(hostId, event.agentId, event.url)
+      return
+    case 'agents.signInImage':
+      receiveSignInImage(hostId, event.agentId, event.image)
       return
     case 'agents.limitAlert':
       showLimitAlert(event.alert, hostId)
