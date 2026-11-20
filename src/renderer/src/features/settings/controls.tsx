@@ -316,22 +316,25 @@ export function SettingSelect<T extends string>({
   onChange,
   disabled,
   className,
-  lead,
 }: {
   label: string
   value: T
-  options: { value: T; label: string; icon?: ReactNode; hint?: string; disabled?: boolean }[]
+  options: {
+    value: T
+    label: string
+    icon?: ReactNode
+    hint?: string
+    disabled?: boolean
+    /** Red, for a choice that removes a safeguard, as Full access does. */
+    danger?: boolean
+  }[]
   onChange: (value: T) => void
   disabled?: boolean
   className?: string
-  /** Shown before the value when the chosen option has no icon, as Language's globe. */
-  lead?: ReactNode
 }) {
   const chosen = options.find((o) => o.value === value)
-  const mark = chosen?.icon ?? lead
   return (
     <>
-      <SecurityStyles />
       <Dropdown
         align="end"
         items={options.map((o) => ({
@@ -339,6 +342,7 @@ export function SettingSelect<T extends string>({
           logo: o.icon,
           description: o.hint,
           checked: o.value === value,
+          danger: o.danger,
           disabled: o.disabled,
           onSelect: () => {
             if (o.value !== value) onChange(o.value)
@@ -354,12 +358,33 @@ export function SettingSelect<T extends string>({
             disabled={disabled}
             onClick={toggle}
           >
-            {mark && <span className="k-select__lead">{mark}</span>}
-            <span className="k-select__value">{chosen?.label}</span>
-            <Icon icon={ArrowDown01Icon} size={14} />
+            <SelectFace mark={chosen?.icon} value={chosen?.label ?? ''} danger={chosen?.danger} />
           </button>
         )}
       />
+    </>
+  )
+}
+
+/**
+ * What SettingSelect's field shows: a mark, the value and the arrow, for the `ui-ss-select
+ * k-select` trigger of a menu SettingSelect cannot draw, such as one with submenus.
+ */
+export function SelectFace({
+  mark,
+  value,
+  danger,
+}: {
+  mark?: ReactNode
+  value: string
+  danger?: boolean
+}) {
+  return (
+    <>
+      <SecurityStyles />
+      {mark && <span className="k-select__lead">{mark}</span>}
+      <span className={cn('k-select__value', danger && 'text-danger')}>{value}</span>
+      <Icon icon={ArrowDown01Icon} size={14} />
     </>
   )
 }

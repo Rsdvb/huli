@@ -10,9 +10,8 @@
       "awaiting": "Waiting for your approval",
       "awaitingAnswer": "Waiting for your answer",
       "limitReached": "{{limit}} limit reached · resets {{time}}",
-      "ask": "Reply to {{agent}}…",
-      "denied": "Tell {{agent}} what to do differently",
-      "running": "Queue a message · {{keys}} sends it into this turn · Esc stops",
+      "ask": "Reply…",
+      "denied": "Say what to do differently",
       "runningQueue": "Queue a message · Esc stops",
       "runningTouch": "Queue a message",
       "pickAgent": "Pick an agent to carry on with…"
@@ -121,6 +120,17 @@
       "annual": "1y"
     },
     "context": {
+      "parts": {
+        "messages": "Messages",
+        "memoryFiles": "Memory files",
+        "systemTools": "System tools",
+        "mcpTools": "MCP tools",
+        "systemPrompt": "System prompt",
+        "skills": "Skills",
+        "mcpInstructions": "MCP server instructions",
+        "autocompactBuffer": "Autocompact buffer",
+        "freeSpace": "Free space"
+      },
       "title": "Context",
       "used": "Context used",
       "summary": "{{percent}}% used · {{used}} / {{size}}",
@@ -132,37 +142,28 @@
       "cacheWrite": "Cache write",
       "ofUsed": "of context used",
       "tokens": "{{tokens}} tokens",
-      "cacheHit": "Cache hit",
-      "cached": "{{percent}} cached",
-      "parts": {
-        "messages": "Messages",
-        "memoryFiles": "Memory files",
-        "systemTools": "System tools",
-        "mcpTools": "MCP tools",
-        "systemPrompt": "System prompt",
-        "skills": "Skills",
-        "mcpInstructions": "MCP server instructions",
-        "autocompactBuffer": "Autocompact buffer",
-        "freeSpace": "Free space"
-      }
+      "cacheHit": "Cache hit"
     },
     "breakdown": {
       "loading": "Reading what fills the context",
       "error": "Couldn't break the context down: {{error}}",
       "betweenTurns": "What fills the context shows between turns",
       "stale": "Read before this turn",
-      "refreshFailed": "Showing the last reading. The context will update automatically when it can be read again."
+      "refreshFailed": "Showing the last reading. The context will update automatically when it can be read again.",
+      "subagent": "Breakdown unavailable: only a sub-agent's total is reported"
     },
     "estimates": {
+      "title": "Available definitions",
+      "tag": "Estimate",
       "skills": "Skill catalog",
       "mcpServers": "MCP tool definitions",
       "count": "≈ {{count}}",
-      "partial": "{{estimate}} (partial)",
+      "partial": "Partial",
       "unavailable": "Unavailable",
       "loading": "Reading skill and MCP definitions",
       "readFailed": "Couldn't read skill and MCP definitions.",
       "disconnected": "Definition estimates are available while the session is connected.",
-      "note": "Definition sizes are estimated. Actual context use depends on what Codex loads."
+      "note": "Sizes of what Codex can load, not parts of the context above."
     },
     "limits": {
       "plan": "Plan",
@@ -232,9 +233,8 @@
       "nothing": "Nothing listed"
     },
     "lastRequest": {
-      "title": "Last request",
-      "line": "{{input}} in · {{output}} out · {{hit}} cached",
       "io": "{{input}} in · {{output}} out",
+      "title": "Last request",
       "running": "running"
     },
     "everyRequest": "Every request"
@@ -292,6 +292,10 @@
   },
   "history": {
     "label": "History"
+  },
+  "slash": {
+    "loading": "Listing commands…",
+    "chooseProject": "Choose a project to list its commands"
   },
   "mentions": {
     "used": "Used in this session",

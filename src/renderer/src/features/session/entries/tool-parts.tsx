@@ -112,7 +112,11 @@ export function ContentBlock({
             ? content.ref.name || content.ref.uri
             : content.ref.kind === 'unsupported'
               ? content.ref.label
-              : content.ref.attachment.name}
+              : content.ref.kind === 'terminal' ||
+                  content.ref.kind === 'page' ||
+                  content.ref.kind === 'device'
+                ? content.ref.name
+                : content.ref.attachment.name}
         </div>
       )
   }

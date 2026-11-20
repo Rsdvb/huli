@@ -18,7 +18,7 @@ import { limitPhrase, resetTime, tokens } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
-import { isMac, isMod } from '@renderer/lib/platform'
+import { isMod } from '@renderer/lib/platform'
 import { selectionPrompt } from '@renderer/features/artifacts/anchors'
 import { SelectionChip } from '@renderer/features/artifacts/selection-chip'
 import { usePane } from '@renderer/features/split/pane-context'
@@ -45,6 +45,8 @@ import { askSide, openSideChat, sideQuestionOf } from '@renderer/stores/side-cha
 import { awaitsAnswer, endedOnRejection } from '../turn-phase'
 import { TrayStyles } from './affect-styles'
 import { attachmentContent, attachmentsBlock, type AttachmentsBlock } from './attachments'
+import { mentionResolver, surfaceRefs } from './chips'
+import { mentionSurfacesOf } from './mention-surfaces'
 import { OptionMenu } from './control-row'
 import { useModeControl } from './mode-control'
 import { isSelect, onCycleKeys } from './options'
@@ -376,6 +378,13 @@ export function Composer({
     const content: UserContent[] = [
       ...(prompt.trim() ? [{ type: 'text' as const, text: prompt }] : []),
       ...attachmentContent(taken.held),
+      // A terminal, tab or device the text mentions goes with it, which lets the agent use it.
+      ...surfaceRefs(prompt, mentionResolver([], null, mentionSurfacesOf(sessionId))).map(
+        (ref) => ({
+          type: 'ref' as const,
+          ref,
+        }),
+      ),
     ]
     return { taken, sent, content }
   }
@@ -568,14 +577,10 @@ export function Composer({
               time: resetTime(reached.resetsAt),
             })
           : !running && rejected
-            ? t('prompt.placeholder.denied', { agent: agentName })
+            ? t('prompt.placeholder.denied')
             : running
-              ? phone
-                ? t('prompt.placeholder.runningTouch')
-                : steering
-                  ? t('prompt.placeholder.running', { keys: steerKeys(sendKey) })
-                  : t('prompt.placeholder.runningQueue')
-              : t('prompt.placeholder.ask', { agent: agentName })
+              ? t(phone ? 'prompt.placeholder.runningTouch' : 'prompt.placeholder.runningQueue')
+              : t('prompt.placeholder.ask')
 
   const cache = cacheExpiry(session, agent?.account ?? null)
   const timed = cache?.expiresAt != null ? cache : null
@@ -863,10 +868,4 @@ export function Composer({
       />
     </div>
   )
-}
-
-/** The keys that send a message into the running turn, as the placeholder names them. */
-function steerKeys(sendKey: string): string {
-  if (isMac) return sendKey === 'enter' ? '⌘↩' : '⇧⌘↩'
-  return sendKey === 'enter' ? 'Ctrl+Enter' : 'Ctrl+Shift+Enter'
 }

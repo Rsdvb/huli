@@ -1,6 +1,6 @@
 // Pure validation and merging of settings.json and of the renderer's patches.
 
-import { isStartMode, takesClaudeSettings, takesStartMode } from '@shared/agents'
+import { isStartMode, START_MODE_CHARS, takesClaudeSettings, takesStartMode } from '@shared/agents'
 import {
   AGENT_NAME_CHARS,
   BACKUP_KEEP_MAX,
@@ -18,6 +18,7 @@ import {
   nextAgentColor,
   isFontFamilyName,
   isLinkSite,
+  LIGHT_MODEL_CHARS,
   MAX_LINK_SITES,
   NEW_SESSION_LISTS,
   ONBOARDING_STEPS,
@@ -113,6 +114,22 @@ const isResumeText: Check = (value, path) =>
 
 const isAgentChoice: Check = (value, path) =>
   value === null || isAgentId(value) ? null : `"${path}" must be an agent id or null`
+
+/** One of the three choices, a pinned one with an agent id and a model id and nothing else. */
+const isLightModel: Check = (value, path) => {
+  const problem = `"${path}" must be {"mode":"small"}, {"mode":"session"} or a pinned agent and model`
+  if (!isRecord(value)) return problem
+  const keys = Object.keys(value)
+  if (value.mode === 'small' || value.mode === 'session') return keys.length === 1 ? null : problem
+  if (value.mode !== 'pinned' || keys.length !== 3 || !isAgentId(value.agentId)) return problem
+  const { model } = value
+  return typeof model === 'string' &&
+    model.trim() !== '' &&
+    model.length <= LIGHT_MODEL_CHARS &&
+    !model.includes('\0')
+    ? null
+    : problem
+}
 
 const isHostName: Check = (value, path) =>
   value === null || isDeviceName(value)
@@ -239,6 +256,7 @@ const SECTION_FIELDS = {
         : `"${path}" must be a valid custom Claude entrypoint label`,
     claudeRuns: isClaudeRuns,
     promptSuggestions: isBoolean,
+    lightModel: isLightModel,
   },
   thread: {
     outlineSummaries: isBoolean,
@@ -870,7 +888,7 @@ function checkStartModes(value: unknown, path: string): string | null {
     if (!isAgentId(id)) return `"${path}.${id}" is not an agent id`
     if (!takesStartMode(id)) return `"${path}.${id}" is an agent that takes no start mode`
     if (mode !== null && !isStartMode(id, mode)) {
-      return `"${path}.${id}" must be a mode that does not give full access, or null`
+      return `"${path}.${id}" must be a mode id of 1 to ${START_MODE_CHARS} characters, or null`
     }
   }
   return null
@@ -1726,6 +1744,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
       : null,
     claudeRuns: structuredClone(settings.general.claudeRuns),
     promptSuggestions: settings.general.promptSuggestions,
+    lightModel: structuredClone(settings.general.lightModel),
     defaultAgent: settings.general.defaultAgent,
     computerUse: structuredClone(settings.computerUse),
     agentNetwork: structuredClone(settings.agentNetwork),

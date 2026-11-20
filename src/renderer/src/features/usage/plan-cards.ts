@@ -6,9 +6,12 @@ import { limitLevel, type LimitLevel } from '@renderer/lib/plan-limit'
 import {
   accountCardKey,
   accountKey,
+  newerResets,
   newestLimits,
   ownKey,
   readAtOf,
+  resetsOf,
+  type CardResets,
   type HostAgentList,
   type PlanReading,
 } from '@renderer/lib/plan-readings'
@@ -114,6 +117,8 @@ export interface UsageCard {
   readAt: number | null
   /** The computers shown that it is on, in their order. */
   places: CardPlace[]
+  /** Its reset credits; null for an account that holds none, which shows nothing of them. */
+  resets: CardResets | null
 }
 
 /** How the page's own read of a card's limits went, by the card's key. */
@@ -162,6 +167,7 @@ export function usageCards(
               provider.usage!.state === 'error' ? 'failed' : rings.length > 0 ? 'ready' : 'notYet',
             readAt: readAtOf(limits),
             places: [place],
+            resets: null,
           })
         }
         continue
@@ -185,6 +191,7 @@ export function usageCards(
       const same = cards.find((card) => card.key === key)
       if (same) {
         same.places.push(place)
+        same.resets = newerResets(same.resets, resetsOf(agent, hostId))
         continue
       }
       const rings = cardRings(limits, now)
@@ -210,6 +217,7 @@ export function usageCards(
                 : 'notYet',
         readAt: readAtOf(limits),
         places: [place],
+        resets: resetsOf(agent, hostId),
       })
     }
   }

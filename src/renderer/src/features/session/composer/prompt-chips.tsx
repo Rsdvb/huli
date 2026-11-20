@@ -15,13 +15,16 @@ import { formatShortcut, isMod, isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import type { DraftAttachment } from '@renderer/stores/attachments'
 import { ensureFiles, openFile, useFilesStore } from '@renderer/stores/files'
+import { revealSurface } from '@renderer/features/shell/open-surfaces'
+import { newSessionPanel } from '@renderer/stores/view'
 import { openViewer } from '@renderer/stores/viewer'
 import { openAttachmentPath } from '../attachments/open-attachment'
 import { draftKey } from '../media/viewer-items'
 import { ChipPreview } from './chip-preview'
 import { removeAttachment } from './attachments'
 import { ChipView } from './chip-view'
-import { mentionResolver, type Chip } from './chips'
+import { isSurfaceMention, mentionResolver, type Chip } from './chips'
+import { useMentionSurfaces } from './mention-surfaces'
 import type { ComposerEditorHandle } from './editor'
 import type { ChipHooks } from './editor-chips'
 import { useLinkOpener } from './link-opener'
@@ -91,7 +94,12 @@ export function usePromptChips({
     if (projectPath && mentions) ensureFiles(projectPath)
   }, [projectPath, mentions])
   const project = files ? projectOf(files.paths, files.known) : null
-  const resolve = useMemo(() => mentionResolver(attachments, project), [attachments, project])
+  const panel = sessionId ?? (projectPath ? newSessionPanel(projectPath) : null)
+  const surfaces = useMentionSurfaces(panel)
+  const resolve = useMemo(
+    () => mentionResolver(attachments, project, surfaces),
+    [attachments, project, surfaces],
+  )
   const names = useMemo(() => commands.map((c) => c.name), [commands])
 
   // The preview belongs to the text it was opened on: an edit can take its chip away.
@@ -99,7 +107,7 @@ export function usePromptChips({
   const hoverTimer = useRef<number | undefined>(undefined)
   const onHover = (chip: Chip | null, element: HTMLElement | null) => {
     window.clearTimeout(hoverTimer.current)
-    if (!chip || !element || chip.kind === 'command') {
+    if (!chip || !element || chip.kind === 'command' || isSurfaceMention(chip.kind)) {
       setHover(null)
       return
     }
@@ -142,6 +150,10 @@ export function usePromptChips({
     if (chip.kind === 'command') return
     if (chip.kind === 'link') {
       links.open(chip.url)
+      return
+    }
+    if (isSurfaceMention(chip.kind)) {
+      if (chip.surfaceId && panel) revealSurface(panel, chip.kind, chip.surfaceId)
       return
     }
     const item = attachments.find((a) => a.key === chip.attachmentKey)

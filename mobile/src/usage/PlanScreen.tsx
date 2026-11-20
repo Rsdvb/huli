@@ -352,7 +352,7 @@ function Note(props: {
 function Extras(props: { agent: AgentStatus }) {
   const { agent } = props
   const balances = agent.balances ?? []
-  const credits = agent.resetCredits
+  const credits = agent.resets
   if (balances.length === 0 && !credits) return null
   return (
     <ListGroup>
@@ -369,11 +369,11 @@ function Extras(props: { agent: AgentStatus }) {
       {credits ? (
         <ListRow
           title="重置卡"
-          subtitle={credits.available > 0 ? '在 Agent 设置里使用。' : '账号里现在没有重置卡。'}
-          value={`${credits.available} 张`}
-          chevron={credits.available > 0}
+          subtitle={credits.count > 0 ? '在 Agent 设置里使用。' : '账号里现在没有重置卡。'}
+          value={`${credits.count} 张`}
+          chevron={credits.count > 0}
           onPress={
-            credits.available > 0
+            credits.count > 0
               ? () => router.push({ pathname: '/settings/agent', params: { id: agent.id } })
               : undefined
           }

@@ -218,6 +218,13 @@ export function RefTiles(props: { refs: Tiled[]; align: 'start' | 'end' }) {
                 onPress={null}
               />
             )
+          // A terminal, tab or device of the computer the user named, which its agent may use.
+          case 'terminal':
+            return <Tile key={i} icon={G.terminal} name={ref.name} detail="终端" onPress={null} />
+          case 'page':
+            return <Tile key={i} icon={G.link} name={ref.name} detail="网页" onPress={null} />
+          case 'device':
+            return <Tile key={i} icon={G.info} name={ref.name} detail="设备" onPress={null} />
           default:
             return <Tile key={i} icon={G.info} name={ref.label} detail={null} onPress={null} />
         }

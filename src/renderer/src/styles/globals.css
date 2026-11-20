@@ -172,6 +172,11 @@
   --color-control-on: var(--control-on);
   --color-control-on-tint: var(--control-on-tint);
   --color-send: var(--send);
+  --color-hud: var(--hud-bg);
+  --color-hud-ink: var(--hud-ink);
+  --color-hud-text: var(--hud-text);
+  --color-hud-key: var(--hud-key);
+  --color-hud-countdown: var(--hud-countdown);
   --color-limit-ok: var(--limit-ok);
   --color-limit-warn: var(--limit-warn);
   --color-limit-bad: var(--limit-bad);
@@ -273,6 +278,8 @@
   --shadow-raised: var(--raised-ring);
   --shadow-thumb: var(--thumb-shadow);
   --shadow-toast: var(--elevation-toast);
+  --shadow-hud: var(--hud-shadow);
+  --shadow-hud-key: var(--hud-key-shadow);
   --shadow-sheet: var(--sheet-ring);
   --shadow-sheet-focused: var(--sheet-focused-ring);
   --shadow-media: var(--elevation-media);
@@ -885,6 +892,19 @@
 }
 @utility animate-breathe {
   animation: breathe var(--duration-breath) ease-in-out infinite;
+}
+
+/* A fill that runs out once; the element sets its duration and, to join late, a negative delay. */
+@keyframes run-out {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+@utility animate-run-out {
+  animation: run-out 0s linear both;
 }
 
 @keyframes stream-caret {
@@ -1685,39 +1705,37 @@
   color: var(--danger);
   font-size: 12px;
 }
-/* An SVG on a checkerboard, so its transparent parts show. */
-.block-frame-checker {
-  display: flex;
-  justify-content: center;
-  padding: 12px 16px;
-  background-color: var(--bg-surface);
-  background-image:
-    linear-gradient(45deg, var(--bg-subtle) 25%, transparent 25%),
-    linear-gradient(-45deg, var(--bg-subtle) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, var(--bg-subtle) 75%),
-    linear-gradient(-45deg, transparent 75%, var(--bg-subtle) 75%);
-  background-position:
-    0 0,
-    0 6px,
-    6px -6px,
-    -6px 0;
-  background-size: 12px 12px;
-  & img {
+/* An SVG or a diagram, bare in the prose at its own size; its actions show at its corner. */
+.block-picture {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  & > img {
     display: block;
     max-width: 100%;
     height: auto;
   }
 }
-.block-frame-diagram {
+.block-picture-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
   display: flex;
-  justify-content: center;
-  overflow-x: auto;
-  padding: 16px 14px 10px;
-  background: var(--bg-surface);
-  & img {
-    display: block;
-    max-width: 100%;
-    height: auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: calc(var(--radius-tile) + 2px);
+  background: var(--thread-card);
+  box-shadow: var(--thread-card-shadow);
+  opacity: 0;
+  transition: opacity var(--duration-fast);
+}
+.block-picture:hover > .block-picture-actions,
+.block-picture:focus-within > .block-picture-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .block-picture-actions {
+    opacity: 1;
   }
 }
 /* Streamdown's code block inside the frame: only its highlighted body, with the line numbers in

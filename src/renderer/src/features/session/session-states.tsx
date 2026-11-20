@@ -9,6 +9,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
+import type { ReportOrigin } from '@shared/report'
 import type { AgentId, UserContent } from '@shared/thread'
 import { unarchiveSession } from '@renderer/app/actions'
 import { Button } from '@renderer/components/ui/button'
@@ -290,6 +291,7 @@ export function FailedActions({
   onRetry,
   retrying = false,
   report,
+  origin = 'error',
   error,
   className,
   lead,
@@ -297,6 +299,8 @@ export function FailedActions({
   onRetry: () => void
   retrying?: boolean
   report?: { hostId: string | null; sessionId?: string; agentId?: AgentId }
+  /** What failed, which the report's description starts from. */
+  origin?: ReportOrigin
   error: string
   className?: string
   /** An action before Retry, such as going on with another agent. */
@@ -330,6 +334,7 @@ export function FailedActions({
         onClick={() =>
           void openReport({
             hostId: report?.hostId ?? null,
+            origin,
             context: {
               sessionId: report?.sessionId ?? null,
               agentId: report?.agentId ?? null,

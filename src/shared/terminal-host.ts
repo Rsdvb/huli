@@ -21,12 +21,26 @@ export interface TerminalInfo {
   /** The session it belongs to; null for its project's New session, which hands it on. */
   sessionId: string | null
   shell: string // the program name, such as "zsh" or "pwsh"
-  title: string // the foreground process, or the title the shell set
+  /**
+   * What it runs or last ran: the foreground program's command line, kept once the program ends;
+   * the shell's name until a program ran, and on Windows the title the shell set.
+   */
+  title: string
+  /** The name the user or the agent gave the tab, shown in place of the title; null for none. */
+  name: string | null
+  namedBy: 'user' | 'agent' | null
   busy: boolean // a process other than the shell is in the foreground
   exitCode: number | null // set once the shell has exited
   createdAt: number
   /** Null for a terminal the user opened; cleared when its shell is restarted. */
   owner: TerminalOwner | null
+  /**
+   * The user allowed their session's agent to use this terminal they opened. False for one an
+   * agent opened, which needs no allow; cleared when its shell is restarted.
+   */
+  agentAllowed: boolean
+  /** A card asks the user whether the session's agent may use it. */
+  agentAsks?: true
   /** Who uses it in the owner's running turn; idle for every terminal no turn uses. */
   control: SurfaceControl
   /** What its program waits for the user to type: a password, or nothing known. */
@@ -55,6 +69,8 @@ export interface TerminalContract {
   'terminals.ack': { params: { id: string; chars: number }; result: void }
   'terminals.kill': { params: { id: string }; result: void }
   'terminals.restart': { params: { id: string }; result: TerminalInfo }
+  /** The user names the tab; an empty name goes back to the title. */
+  'terminals.rename': { params: { id: string; name: string }; result: TerminalInfo }
   /** Take over and Hand back of a terminal an agent's turn uses; false when no turn has it. */
   'terminals.takeOver': { params: { id: string }; result: boolean }
   'terminals.handBack': { params: { id: string }; result: boolean }
@@ -74,6 +90,25 @@ export type TerminalMethod = keyof TerminalContract
 export type TerminalParams<M extends TerminalMethod> = TerminalContract[M]['params']
 export type TerminalResult<M extends TerminalMethod> = TerminalContract[M]['result']
 
+/** The longest name a terminal's tab takes, from the user or an agent. */
+export const MAX_TERMINAL_NAME = 40
+
+/**
+ * A tab's name as given, trimmed; null to go back to the title, or a string saying why it cannot
+ * be a name: too long, or more than one line.
+ */
+export function terminalName(name: string): { name: string | null } | { problem: string } {
+  const trimmed = name.trim()
+  if (trimmed.length > MAX_TERMINAL_NAME) {
+    return { problem: `A terminal's name is at most ${MAX_TERMINAL_NAME} characters` }
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) {
+    return { problem: "A terminal's name is one line without control characters" }
+  }
+  return { name: trimmed || null }
+}
+
 export const TERMINAL_METHODS = [
   'terminals.create',
   'terminals.list',
@@ -84,6 +119,7 @@ export const TERMINAL_METHODS = [
   'terminals.ack',
   'terminals.kill',
   'terminals.restart',
+  'terminals.rename',
   'terminals.takeOver',
   'terminals.handBack',
 ] as const satisfies readonly TerminalMethod[]

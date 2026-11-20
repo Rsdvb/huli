@@ -18,6 +18,7 @@ type OwnEntry = Extract<
       | 'control_ask'
       | 'control_note'
       | 'device_access'
+      | 'surface_access'
       | 'computer_app'
       | 'computer_setup'
       | 'project_mcp'
@@ -25,6 +26,7 @@ type OwnEntry = Extract<
       | 'problem_report'
       | 'memory'
       | 'market_publish'
+      | 'settings_change'
       | 'takeover'
   }
 >
@@ -149,6 +151,7 @@ function isOwn(entry: ThreadEntry): entry is OwnEntry {
     case 'control_ask':
     case 'control_note':
     case 'device_access':
+    case 'surface_access':
     case 'computer_app':
     case 'computer_setup':
     case 'project_mcp':
@@ -156,6 +159,7 @@ function isOwn(entry: ThreadEntry): entry is OwnEntry {
     case 'problem_report':
     case 'memory':
     case 'market_publish':
+    case 'settings_change':
     case 'session_started':
     case 'git':
     case 'turn_end':

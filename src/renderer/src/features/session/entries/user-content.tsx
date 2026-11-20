@@ -10,6 +10,10 @@ import { ProjectPathContext } from '@renderer/features/files/file-refs'
 import { host } from '@renderer/lib/host'
 import { cn } from '@renderer/lib/utils'
 import { ensureFiles, openFile, useFilesStore } from '@renderer/stores/files'
+import { useBrowserStore } from '@renderer/stores/browser'
+import { useDevicesStore } from '@renderer/stores/devices'
+import { useTerminalsStore } from '@renderer/stores/terminals'
+import { revealSurface } from '@renderer/features/shell/open-surfaces'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { openViewer } from '@renderer/stores/viewer'
 import { AttachmentTile, type TileView } from '../attachments/attachment-tile'
@@ -18,7 +22,15 @@ import { TextDialog, type TextDialogTarget } from '../attachments/text-dialog'
 import { replayThumb } from '../attachments/thumb'
 import { Clamp } from '../clamp'
 import { ChipView } from '../composer/chip-view'
-import { mentioned, mentionResolver, type Chip } from '../composer/chips'
+import {
+  isSurfaceMention,
+  mentioned,
+  mentionResolver,
+  NO_SURFACES,
+  type Chip,
+  type MentionItem,
+  type MentionSurfaces,
+} from '../composer/chips'
 import { useLinkOpener } from '../composer/link-opener'
 import { projectOf } from '../composer/prompt-chips'
 import { CarriedImage } from '../media/carried-image'
@@ -46,7 +58,10 @@ export function UserContentView({
   entryId?: string
 }) {
   const text = textOf(content)
-  const refs = content.flatMap((c) => (c.type === 'ref' ? [c.ref] : []))
+  // A terminal, tab or device shows as the chip its mention in the text is.
+  const refs = content.flatMap((c) =>
+    c.type === 'ref' && !isSurfaceMention(MENTIONED[c.ref.kind] ?? '') ? [c.ref] : [],
+  )
   return (
     <div className="flex flex-col gap-2">
       {text && (
@@ -116,22 +131,76 @@ function useSentEntry(sessionId: string | null | undefined, entryId: string | nu
   )
 }
 
-/** Resolves a sent prompt's mentions against what it carried, then the project's files. */
-function useSentResolver(attachments: readonly Attachment[], text: string) {
+// The mention each kind of reference is written as in the text.
+const MENTIONED: Partial<Record<ContentRef['kind'], string>> = {
+  terminal: 'terminal',
+  page: 'page',
+  device: 'device',
+}
+
+/** The terminals, browser tabs and devices a sent prompt referenced, as mentions name them. */
+function surfacesOf(entry: ThreadEntry | undefined): MentionSurfaces {
+  if (entry?.kind !== 'user') return NO_SURFACES
+  const terminal: MentionItem[] = []
+  const page: MentionItem[] = []
+  const device: MentionItem[] = []
+  for (const c of entry.content) {
+    if (c.type !== 'ref') continue
+    const { ref } = c
+    if (ref.kind === 'terminal') terminal.push({ id: ref.terminalId, name: ref.name })
+    if (ref.kind === 'page') page.push({ id: ref.tabId, name: ref.name })
+    if (ref.kind === 'device') device.push({ id: ref.deviceId, name: ref.name })
+  }
+  return { terminal, page, device }
+}
+
+/**
+ * Resolves a sent prompt's mentions against what it carried, then the project's files. A terminal,
+ * tab or device that has gone since reads as missing.
+ */
+function useSentResolver(
+  attachments: readonly Attachment[],
+  surfaces: MentionSurfaces,
+  text: string,
+) {
   const projectPath = useContext(ProjectPathContext)
   const files = useFilesStore((s) => (projectPath ? s.byProject[projectPath] : undefined))
+  const terminals = useTerminalsStore((s) =>
+    surfaces.terminal
+      .filter((t) => s.byId[t.id])
+      .map((t) => t.id)
+      .join('\n'),
+  )
+  const pages = useBrowserStore((s) =>
+    surfaces.page
+      .filter((p) => Object.values(s.bySession).some((b) => b.tabs.some((tab) => tab.id === p.id)))
+      .map((p) => p.id)
+      .join('\n'),
+  )
+  const devices = useDevicesStore((s) =>
+    surfaces.device
+      .filter((d) => s.devices.some((device) => device.id === d.id))
+      .map((d) => d.id)
+      .join('\n'),
+  )
   const mentions = /[@＠]/.test(text)
   useEffect(() => {
     if (projectPath && mentions) ensureFiles(projectPath)
   }, [projectPath, mentions])
-  return useMemo(
-    () =>
-      mentionResolver(
-        attachments.map((a) => ({ key: a.id, name: a.name, kind: a.type, thumb: a.thumb })),
-        files ? projectOf(files.paths, files.known) : null,
-      ),
-    [attachments, files],
-  )
+  return useMemo(() => {
+    const resolve = mentionResolver(
+      attachments.map((a) => ({ key: a.id, name: a.name, kind: a.type, thumb: a.thumb })),
+      files ? projectOf(files.paths, files.known) : null,
+      surfaces,
+    )
+    const live = new Set([terminals, pages, devices].flatMap((ids) => ids.split('\n')))
+    return (token: string) => {
+      const target = resolve(token)
+      return target && isSurfaceMention(target.kind) && !live.has(target.surfaceId ?? '')
+        ? { ...target, missing: true }
+        : target
+    }
+  }, [attachments, surfaces, files, terminals, pages, devices])
 }
 
 /** Opens a sent attachment as its tile does: an image in the viewer, a file or folder itself. */
@@ -176,7 +245,8 @@ function ChipText({
   const projectPath = useContext(ProjectPathContext)
   const entry = useSentEntry(sessionId, entryId)
   const attachments = useMemo(() => attachmentsOf(entry), [entry])
-  const resolve = useSentResolver(attachments, text)
+  const surfaces = useMemo(() => surfacesOf(entry), [entry])
+  const resolve = useSentResolver(attachments, surfaces, text)
   const commands = useThreadsStore((s) =>
     sessionId ? s.replicas[sessionId]?.state?.session.commands : undefined,
   )
@@ -188,6 +258,11 @@ function ChipText({
   const opener = (chip: Chip): ((from: HTMLElement) => void) | null => {
     if (chip.kind === 'command') return null
     if (chip.kind === 'link') return () => links.open(chip.url)
+    if (isSurfaceMention(chip.kind)) {
+      const id = chip.surfaceId
+      const kind = chip.kind
+      return id && sessionId && !chip.missing ? () => revealSurface(sessionId, kind, id) : null
+    }
     const attachment = attachments.find((a) => a.id === chip.attachmentKey)
     if (attachment) {
       return (from) =>
@@ -283,7 +358,11 @@ export function RefChip({
       ? contentRef.name || basename(contentRef.uri)
       : contentRef.kind === 'attachment'
         ? contentRef.attachment.name
-        : contentRef.label
+        : contentRef.kind === 'terminal' ||
+            contentRef.kind === 'page' ||
+            contentRef.kind === 'device'
+          ? contentRef.name
+          : contentRef.label
   return (
     <span
       className="inline-flex h-6 max-w-60 items-center gap-1.5 rounded-md bg-background/60 px-2 text-xs text-muted-foreground shadow-card"
@@ -330,7 +409,7 @@ export function SentAttachments({
   // A file or folder the text names is its chip there; images stay above as thumbnails.
   const entry = useSentEntry(sessionId, entryId)
   const text = entry?.kind === 'user' ? textOf(entry.content) : ''
-  const resolve = useSentResolver(attachments, text)
+  const resolve = useSentResolver(attachments, NO_SURFACES, text)
   const named = useMemo(() => mentioned(text, resolve), [text, resolve])
   const shown = attachments.filter((a) => a.type === 'image' || !named.has(a.id))
   const open = (attachment: Attachment, from: HTMLElement) => {
