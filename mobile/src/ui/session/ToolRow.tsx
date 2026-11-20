@@ -157,7 +157,7 @@ export function LiveTime(props: { since: number; color: string; prefix?: string 
   return (
     <Text style={[styles.time, { color: props.color }]}>
       {props.prefix ?? ''}
-      {formatMs(Math.max(0, now - props.since), true)}
+      {formatMs(Math.max(0, now - props.since))}
     </Text>
   )
 }
@@ -196,9 +196,7 @@ export function StepMark(props: {
       return <Text style={[styles.time, { color: c.textTertiary }]}>已取消</Text>
     case 'success':
       return props.duration !== undefined ? (
-        <Text style={[styles.time, { color: c.textTertiary }]}>
-          {formatMs(props.duration, false)}
-        </Text>
+        <Text style={[styles.time, { color: c.textTertiary }]}>{formatMs(props.duration)}</Text>
       ) : null
   }
 }

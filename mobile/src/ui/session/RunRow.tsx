@@ -151,7 +151,7 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
             {since !== undefined && <LiveTime since={since - total} color={c.textTertiary} />}
           </View>
         ) : known && total > 0 ? (
-          <Text style={[styles.meta, { color: c.textTertiary }]}>· {formatMs(total, false)}</Text>
+          <Text style={[styles.meta, { color: c.textTertiary }]}>· {formatMs(total)}</Text>
         ) : null}
       </Pressable>
       {open && (

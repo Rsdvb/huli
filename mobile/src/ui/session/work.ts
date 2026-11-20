@@ -9,7 +9,7 @@ import { turnDoing, type TurnDoing, type TurnPhaseName } from '@shared/turn-phas
 
 export { writingId } from '@shared/turn-phase'
 import { diffTexts } from '../../diff'
-import { baseName, relativePath } from './format'
+import { baseName, durationText, relativePath } from './format'
 import { toolTitle } from './toolNames'
 
 type FileKind = 'read' | 'edit' | 'delete' | 'move'
@@ -367,24 +367,11 @@ export function diffStats(diffs: readonly Diff[]): { insertions: number; deletio
 
 // ---- Times and counts ----
 
-/** "12 秒", "1 分 3 秒", "1 小时 5 分", as the desktop's durations read in Chinese. */
-export function durationText(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
-  if (s < 60) return `${s} 秒`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m} 分 ${s % 60} 秒`
-  return `${Math.floor(m / 60)} 小时 ${m % 60} 分`
-}
+export { durationText }
 
-/** 0.4s, 12.3s, 2m 05s, 3h 12m: a step's time; a live one always shows tenths below a minute. */
-export function formatMs(ms: number, live: boolean): string {
-  if (!live && ms < 1000) return `${Math.max(1, Math.round(ms))}ms`
-  if (ms < 60_000) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`
-  const s = Math.floor(ms / 1000)
-  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
-  const h = Math.floor(s / 3600)
-  if (h < 24) return `${h}h ${String(Math.floor(s / 60) % 60).padStart(2, '0')}m`
-  return `${Math.floor(h / 24)}d ${h % 24}h`
+/** A step's time, as every duration reads: 「0.4 秒」「12.3 秒」「2 分 5 秒」. */
+export function formatMs(ms: number): string {
+  return durationText(Math.max(ms, 100), true)
 }
 
 /** A count as Chinese shortens it: "980", "4.1万", "1.2亿". */
