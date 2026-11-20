@@ -41,6 +41,8 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import Reanimated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated'
 import { useIsFocused } from 'expo-router'
 import type { ThreadState } from '@shared/thread'
+import { devMode } from '../dev/devMode'
+import { keepResult } from '../dev/FrameMeter'
 import type { WritableStore } from '../select'
 import { useThreadSelector, type ThreadView } from '../thread'
 import { countRender } from '../ui/renders'
@@ -63,6 +65,7 @@ const GUESS = 90
 const DRAW_AHEAD = 500
 
 const NO_ROWS: Row[] = []
+const DEV = devMode()
 const selectThread = (thread: ThreadState | null) => thread
 const renderRow = ({ item }: { item: Row }) => <ThreadRow row={item} />
 
@@ -217,6 +220,21 @@ export function Conversation(props: {
     ],
   }))
 
+  // For the simulator scripts: how long the list took from its mount to show its rows, which it
+  // does once it has placed the end of the thread.
+  const mountedAt = useRef(Date.now())
+  const rowCount = useRef(0)
+  rowCount.current = rows.length
+  const onLoad = useCallback(() => {
+    const at = Date.now()
+    keepResult({
+      label: 'conversation-shown',
+      ms: at - mountedAt.current,
+      rows: rowCount.current,
+      at,
+    })
+  }, [])
+
   const contentStyle = useMemo(
     () => [styles.content, { paddingTop: props.paddingTop }],
     [props.paddingTop],
@@ -243,6 +261,7 @@ export function Conversation(props: {
         maintainScrollAtEndThreshold={0.1}
         // Anywhere else, the rows on screen stay put as pages come in above or rows change.
         maintainVisibleContentPosition
+        {...(DEV ? { onLoad } : {})}
         onStartReached={view.loadOlder}
         onStartReachedThreshold={0.6}
         onScroll={onScroll}

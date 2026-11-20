@@ -607,7 +607,10 @@ disables every other workflow after each merge, new ones included.
   with the Pinyin keyboard, starts this checkout's daemon with the fake agent in a data folder of
   its own, pairs the app with it alone (`pair.mjs` answers `kettu pair`), and runs the Maestro
   flows under `tools/huli/ios/sim/flows` (or those named in its `flows` input) while recording the
-  screen. The screenshots, recordings and logs are the run's `huli-sim` artifact, kept for a day.
+  screen. Two names in `flows` sample the app's processes instead: `measure`, what it costs in
+  resting states (`measure.sh`), and `long-reply`, a session with a finished 120 KB reply opened
+  afresh (`long-reply.sh`). The screenshots, recordings and logs are the run's `huli-sim`
+  artifact, kept for a day.
   It uses no secrets and never runs on a push or pull request.
 
 The monitor's alerts are GitHub's notifications: the owner keeps this repository watched

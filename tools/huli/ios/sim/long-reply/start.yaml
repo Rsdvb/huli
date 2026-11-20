@@ -1,0 +1,27 @@
+# long-reply.sh: a new session sent PROMPT, left as soon as its screen shows, while the reply is
+# still short, so Maestro never reads the view tree of the long reply.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+- tapOn:
+    text: '(允许|Allow)'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: ${PROMPT}
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息.*'
+    timeout: 120000
+- takeScreenshot: r01-started

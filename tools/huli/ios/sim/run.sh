@@ -79,6 +79,12 @@ for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
     UDID="$UDID" MAESTRO="$MAESTRO" RESULTS="$RESULTS" bash tools/huli/ios/sim/measure.sh
     continue
   fi
+  # A long finished reply opened afresh, sampled the same way (long-reply.sh).
+  if [ "$flow" = long-reply ]; then
+    echo "== long-reply"
+    UDID="$UDID" MAESTRO="$MAESTRO" RESULTS="$RESULTS" bash tools/huli/ios/sim/long-reply.sh
+    continue
+  fi
   [ -f "$flow" ] || flow="tools/huli/ios/sim/flows/$flow.yaml"
   name=$(basename "$flow" .yaml)
   echo "== $name"
