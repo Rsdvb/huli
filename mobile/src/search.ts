@@ -13,7 +13,7 @@ export const SCOPES: readonly { key: SearchScope; label: string }[] = [
   { key: 'sessions', label: '会话' },
   { key: 'content', label: '对话内容' },
   { key: 'projects', label: '项目' },
-  { key: 'artifacts', label: 'Artifacts' },
+  { key: 'artifacts', label: '产物' },
 ]
 
 export function isScope(value: unknown): value is SearchScope {
