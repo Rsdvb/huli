@@ -5,7 +5,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
-  Linking,
   ScrollView,
   StyleSheet,
   Switch,
@@ -35,6 +34,7 @@ import { MONO } from '../../ui/session/palette'
 import { Counts } from '../../ui/session/TurnChanges'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 import type { GitSteps } from './useGitSteps'
+import { openUrl } from '../../system/openUrl'
 
 function Label(props: { children: ReactNode }) {
   const { c } = useTokens()
@@ -524,7 +524,7 @@ export function CreatePrSheet(props: {
       showNotice({
         text: `已创建拉取请求 #${pr.number}`,
         tone: 'success',
-        action: { label: '打开', onPress: () => void Linking.openURL(pr.url) },
+        action: { label: '打开', onPress: () => openUrl(pr.url) },
       })
     } catch (e) {
       haptic.warning()

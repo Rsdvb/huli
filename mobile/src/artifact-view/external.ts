@@ -1,7 +1,8 @@
 // A link out of an artifact: the desktop blocks the page's navigation and offers the browser; the
 // phone asks first, naming where the link goes, and opens only web, mail and phone links.
 
-import { Alert, Linking } from 'react-native'
+import { Alert } from 'react-native'
+import { openUrl } from '../system/openUrl'
 
 let asking = false
 
@@ -27,7 +28,7 @@ export function confirmLink(href: string): void {
         text: '打开',
         onPress: () => {
           done()
-          void Linking.openURL(href).catch(() => {})
+          openUrl(href)
         },
       },
     ],

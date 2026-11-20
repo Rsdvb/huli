@@ -2,7 +2,7 @@
 // key, its plan usage, its configuration, and removing it.
 
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
+import { Alert, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { randomUUID } from 'expo-crypto'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -74,6 +74,7 @@ import {
   windowName,
 } from '../../ui/session/limits'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 export default function AgentScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>()
@@ -155,7 +156,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
       const event = raw as HostEvent
       if (event.type === 'agents.signInLink' && event.agentId === id) {
         setPage(event.url)
-        void Linking.openURL(event.url).catch(() => {})
+        openUrl(event.url)
       }
     })
   }, [host.link, id])
@@ -413,10 +414,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
             title="等待浏览器"
             actions={
               <>
-                <Button
-                  label="再次打开页面"
-                  onPress={() => void Linking.openURL(page).catch(() => {})}
-                />
+                <Button label="再次打开页面" onPress={() => openUrl(page)} />
                 <Button label="取消" tone="plain" onPress={cancelSignIn} />
               </>
             }

@@ -34,6 +34,7 @@ import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 const THEME_TEXT: Record<ThemePref, string> = { system: '跟随系统', light: '浅色', dark: '深色' }
 
@@ -413,14 +414,14 @@ export default function Settings() {
             icon="code"
             plainIcon
             external
-            onPress={() => void Linking.openURL(GITHUB_URL)}
+            onPress={() => openUrl(GITHUB_URL)}
           />
           <ListRow
             title="隐私"
             icon="hand"
             plainIcon
             external
-            onPress={() => void Linking.openURL(PRIVACY_URL)}
+            onPress={() => openUrl(PRIVACY_URL)}
           />
           <ListRow
             title="致谢"
@@ -432,7 +433,7 @@ export default function Settings() {
         </ListGroup>
 
         <Press
-          onPress={() => void Linking.openURL(GITHUB_URL)}
+          onPress={() => openUrl(GITHUB_URL)}
           scale={false}
           accessibilityRole="link"
           style={styles.footer}

@@ -11,6 +11,7 @@ import { useSessionTokens } from '../../ui/session/palette'
 import { useDisclosure } from '../../ui/session/disclosure'
 import { useAgentName } from './AccessEntries'
 import { AskCard, E, kit, QuietLine, useSender } from './kit'
+import { openUrl } from '../../system/openUrl'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -385,7 +386,7 @@ export function ElicitationSettled(props: { entry: ToolEntry }) {
         text={asked.server}
         detail={[state, device].filter(Boolean).join(' · ')}
         {...(finishing && url
-          ? { onPress: () => void Linking.openURL(url).catch(() => {}) }
+          ? { onPress: () => openUrl(url) }
           : fields.length > 0
             ? { onPress: () => setOpen((v) => !v) }
             : {})}

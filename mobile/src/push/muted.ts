@@ -42,13 +42,23 @@ export function onMutedChange(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
+/** Shown at once; a list that could not be kept goes back to what it was, and the call fails. */
 export async function setMuted(sessionId: string, on: boolean): Promise<void> {
+  const was = muted
   const next = new Set(muted)
   if (on) next.add(sessionId)
   else next.delete(sessionId)
   muted = next
   emit()
-  await SecureStore.setItemAsync(ITEM, JSON.stringify([...next]))
+  try {
+    await SecureStore.setItemAsync(ITEM, JSON.stringify([...next]))
+  } catch (error) {
+    if (muted === next) {
+      muted = was
+      emit()
+    }
+    throw error
+  }
 }
 
 export function useMuted(sessionId: string): boolean {

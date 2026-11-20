@@ -3,7 +3,7 @@
 // with when each was last seen, signing others out, the web page for the rest, and signing out.
 
 import { useState } from 'react'
-import { Linking, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import type { AccountDevice, DeviceKind } from '@shared/huli-cloud'
 import {
   ACCOUNT_PAGE_URL,
@@ -22,6 +22,7 @@ import { haptic } from '../../ui/haptics'
 import { HuliIcon } from '../../ui/HuliMark'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 const KIND_TEXT: Record<DeviceKind, string> = {
   desktop: '纸鸢桌面端',
@@ -231,7 +232,7 @@ export default function AccountSettings() {
           icon="globe"
           plainIcon
           external
-          onPress={() => void Linking.openURL(ACCOUNT_PAGE_URL)}
+          onPress={() => openUrl(ACCOUNT_PAGE_URL)}
         />
         <ListRow
           title="退出登录"

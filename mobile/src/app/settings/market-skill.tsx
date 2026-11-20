@@ -3,7 +3,7 @@
 // goes to and Remove.
 
 import { useEffect, useState } from 'react'
-import { Linking, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { displayTitle, type CatalogSkill, type MarketSkill } from '@shared/marketplace'
 import { useHost } from '../../host'
@@ -37,6 +37,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 const SOURCE_TEXT: Record<MarketSkill['source'], string> = {
   catalog: '技能目录',
@@ -230,7 +231,7 @@ export default function MarketSkillPage() {
           <ListRow title="版本" value={(mine?.version ?? catalog?.version ?? '').slice(0, 12)} />
         ) : null}
         {repository ? (
-          <ListRow title="源代码" external onPress={() => void Linking.openURL(repository)} />
+          <ListRow title="源代码" external onPress={() => openUrl(repository)} />
         ) : null}
       </ListGroup>
 

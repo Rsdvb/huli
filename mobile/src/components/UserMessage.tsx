@@ -5,7 +5,7 @@
 // the bubble offers to copy or select its text.
 
 import { memo, useMemo } from 'react'
-import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
+import { Alert, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { Attachment, ContentRef, FromDevice, FromSession, UserContent } from '@shared/thread'
 import { leadingCommand, mentionResolver, type Chip } from '../ui/session/chips'
@@ -23,6 +23,7 @@ import { selectText } from '../ui/session/SelectText'
 import { RefTiles } from './CarriedRefs'
 import { Markdown, type MarkdownChips } from './Markdown'
 import { PictureStrip, pictureOf, type Picture } from './Pictures'
+import { openUrl } from '../system/openUrl'
 
 /** Taller than this, a message is cut short behind 展开. */
 const COLLAPSED_HEIGHT = 300
@@ -82,7 +83,7 @@ export const UserMessage = memo(function UserMessage(props: {
       resolve,
       onOpen: (chip: Chip) => {
         if (chip.kind === 'link') {
-          void Linking.openURL(chip.url).catch(() => {})
+          openUrl(chip.url)
           return
         }
         const attachment = chip.attachmentId

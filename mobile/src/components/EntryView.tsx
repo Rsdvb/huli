@@ -3,7 +3,7 @@
 // a plan's answer, the turn's changes and footer, and the host's own records as small notes.
 
 import { memo, useMemo, useRef } from 'react'
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { openArtifact } from '../artifacts'
 import { countRender } from '../ui/renders'
@@ -49,6 +49,7 @@ import { NoticeEntry } from './entries/TurnEnd'
 import { workflowCardOf, WorkflowToolCard } from './entries/WorkflowCards'
 import { Markdown, partGap } from './Markdown'
 import { UserMessage } from './UserMessage'
+import { openUrl } from '../system/openUrl'
 
 type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
@@ -343,13 +344,7 @@ export const EntryView = memo(function EntryView(props: {
       if (entry.event === 'branch') {
         return <Note icon={G.branch} text="切换到分支" detail={entry.branch} />
       }
-      return (
-        <Note
-          icon={G.pr}
-          text="开了 Pull Request"
-          onPress={() => void Linking.openURL(entry.url).catch(() => {})}
-        />
-      )
+      return <Note icon={G.pr} text="开了 Pull Request" onPress={() => openUrl(entry.url)} />
     case 'artifact':
       return (
         <Note

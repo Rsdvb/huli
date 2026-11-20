@@ -2,7 +2,7 @@
 // servers Huli keeps for the agents with their sign-ins, and where each agent keeps its own.
 
 import { useEffect, useState } from 'react'
-import { Linking, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import type { AgentStatus, HostEvent, McpStatus } from '@shared/agent-host'
 import type { AgentId } from '@shared/agents'
 import {
@@ -37,6 +37,7 @@ import { BottomSheet } from '../../ui/BottomSheet'
 import { haptic } from '../../ui/haptics'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 /** The product's name where the host still says Kettu's. */
 const shown = (title: string) => (title === 'Kettu' ? '纸鸢' : title)
@@ -227,7 +228,7 @@ export default function McpSettings() {
                   label="打开服务页面"
                   tone="primary"
                   icon="external"
-                  onPress={() => void Linking.openURL(code.verificationUri)}
+                  onPress={() => openUrl(code.verificationUri)}
                 />
                 <Text style={[typeScale.footnote, styles.center, { color: c.textTertiary }]}>
                   正在等待登录完成…

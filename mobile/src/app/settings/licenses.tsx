@@ -1,6 +1,6 @@
 // Settings › 致谢: what Huli is a fork of, under which license, and the open-source work it ships.
 
-import { Animated, Linking, StyleSheet, Text, View } from 'react-native'
+import { Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { GITHUB_URL, KETTU_URL, LIBRARIES, MARKS, type Credit } from '../../about'
 import { HuliIcon } from '../../ui/HuliMark'
@@ -9,6 +9,7 @@ import { NavBar } from '../../ui/NavBar'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { openUrl } from '../../system/openUrl'
 
 function creditRow(credit: Credit) {
   return (
@@ -18,7 +19,7 @@ function creditRow(credit: Credit) {
       subtitle={credit.note}
       value={credit.license}
       external
-      onPress={() => void Linking.openURL(credit.url)}
+      onPress={() => openUrl(credit.url)}
     />
   )
 }
@@ -52,14 +53,14 @@ export default function Licenses() {
             title="纸鸢源代码"
             value="AGPL-3.0"
             external
-            onPress={() => void Linking.openURL(GITHUB_URL)}
+            onPress={() => openUrl(GITHUB_URL)}
           />
           <ListRow
             title="Kettu"
             subtitle="纸鸢基于它而来"
             value="AGPL-3.0"
             external
-            onPress={() => void Linking.openURL(KETTU_URL)}
+            onPress={() => openUrl(KETTU_URL)}
           />
         </ListGroup>
 

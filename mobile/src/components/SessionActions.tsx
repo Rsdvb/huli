@@ -9,7 +9,7 @@
 // left out of its menu.
 
 import { useState, type ReactNode } from 'react'
-import { Alert, Linking } from 'react-native'
+import { Alert } from 'react-native'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
@@ -32,6 +32,7 @@ import { showNotice } from '../ui/NoticeBar'
 import { copyText } from '../ui/session/feedback'
 import { DeleteSessionDialog } from './DeleteSessionDialog'
 import { RenameDialog } from './RenameDialog'
+import { openUrl } from '../system/openUrl'
 
 export type ActionsPlace = 'list' | 'archive' | 'session'
 
@@ -268,7 +269,7 @@ export function useSessionActions(
         key: 'mute',
         label: muted ? '取消静音' : '静音通知',
         icon: muted ? 'bell' : 'bell.slash',
-        onPress: () => void setMuted(s.id, !muted).then(() => haptic.success()),
+        onPress: () => toggleMuted(s.id, !muted),
       },
     ]
     const organize: MenuNode[] = [
@@ -308,7 +309,7 @@ export function useSessionActions(
         key: `pr:${p.url}`,
         label: `打开 Pull Request #${p.number}`,
         icon: 'arrow.triangle.pull' as const,
-        onPress: () => void Linking.openURL(p.url),
+        onPress: () => openUrl(p.url),
       })),
       ...(resume
         ? [
@@ -405,6 +406,20 @@ export function useSessionActions(
 }
 
 /** Asks, then forks a whole session on the active computer and opens the new one. */
+/** Mutes or unmutes a session's notifications, saying so when the phone could not keep it. */
+export function toggleMuted(sessionId: string, on: boolean): void {
+  setMuted(sessionId, on).then(
+    () => haptic.success(),
+    () => {
+      haptic.warning()
+      showNotice({
+        text: on ? '没能静音通知，请再试一次。' : '没能取消静音，请再试一次。',
+        tone: 'warning',
+      })
+    },
+  )
+}
+
 export function forkSession(link: HostLink | null, summary: SessionSummary): void {
   if (!link) return
   Alert.alert('分叉这个会话？', '新会话会带上目前的整个对话，原来的会话不受影响。', [
