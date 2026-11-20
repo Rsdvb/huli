@@ -9,6 +9,7 @@ import type {
   SlashCommand,
   ToolDenial,
   ToolEntry,
+  TurnRefusal,
   UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
@@ -1110,6 +1111,11 @@ export class ClaudeMapper {
       }
       case 'permission_denied':
         return this.permissionDenied(message)
+      case 'model_refusal_fallback':
+        return this.refusalFallback(message)
+      case 'model_refusal_no_fallback':
+        // The turn ends in the refusal, whose end says why (refusalOf).
+        return []
       case 'local_command_output':
         return this.commandOutput(message)
       case 'informational':
@@ -1286,6 +1292,27 @@ export class ClaudeMapper {
       )
     }
     return deliveries
+  }
+
+  /**
+   * Huli: the model refused, and Claude Code ran the request again on its fallback model: a notice
+   * says which, and why the first refused when its provider said.
+   */
+  private refusalFallback(message: SystemMessage): Delivery[] {
+    const from = typeof message.original_model === 'string' ? message.original_model : ''
+    const to = typeof message.fallback_model === 'string' ? message.fallback_model : ''
+    if (to === '') return []
+    const refusal = refusalOf(message)
+    const key = message.scope === 'local' ? 'refusalFallbackLocal' : 'refusalFallback'
+    return [
+      noticeDelivery(
+        this.sessionId,
+        `n:refusal:${String(message.uuid ?? Date.now())}`,
+        'info',
+        t(`claude.notice.${key}`, { from: from || '?', to }),
+        refusal.explanation ?? undefined,
+      ),
+    ]
   }
 
   /** Huli: a notification Claude Code queues for the user; one of the same key replaces it. */
@@ -1728,6 +1755,17 @@ function retryReason(message: SystemMessage): string {
   return status === null
     ? t('claude.retryReason.connection')
     : t('claude.retryReason.status', { status })
+}
+
+/** Huli: why a model refused, from Claude Code's notice of the refusal. */
+export function refusalOf(message: SystemMessage): TurnRefusal {
+  const text = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+  return {
+    explanation: text(message.api_refusal_explanation),
+    category: text(message.api_refusal_category),
+    model: text(message.original_model),
+  }
 }
 
 /** Huli: what denied a call, from the kind of decision Claude Code names. */

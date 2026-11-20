@@ -486,7 +486,9 @@
       "mcpFailed_other": "MCP 服务器 {{names}} 没能启动",
       "mcpFailedHint": "在它启动之前，这个会话用不了它的工具。",
       "mcpNeedsAuth_other": "MCP 服务器 {{names}} 需要登录",
-      "mcpNeedsAuthHint": "在终端里的 Claude Code 中用 /mcp 登录；登录前用不了它的工具。"
+      "mcpNeedsAuthHint": "在终端里的 Claude Code 中用 /mcp 登录；登录前用不了它的工具。",
+      "refusalFallback": "{{from}} 拒绝了请求，Claude Code 改用 {{to}} 重试",
+      "refusalFallbackLocal": "{{from}} 拒绝了一条回复，Claude Code 改用 {{to}} 重试了这一条"
     },
     "retryReason": {
       "overloaded": "服务繁忙",

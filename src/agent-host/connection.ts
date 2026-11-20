@@ -23,6 +23,7 @@ import type {
   SideChatStep,
   StopReason,
   TokenTotals,
+  TurnRefusal,
   UserContent,
 } from '@shared/thread'
 import type { MapperContext, MapperOutput } from './session-updates'
@@ -335,6 +336,8 @@ export interface PromptResult {
   stopReason: StopReason
   tokens: TokenTotals | null
   models: ModelTokens[]
+  /** Huli: why the model refused the turn, for a turn that ended in a refusal. */
+  refusal?: TurnRefusal
 }
 
 /** What Kettu opens a session no thread shows for. */

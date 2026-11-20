@@ -230,6 +230,31 @@ describe("Claude Code's own lines", () => {
   })
 })
 
+describe('a refusal', () => {
+  it('says the request went to the fallback model, and why the first refused', () => {
+    const run = new Run().feed(
+      system('model_refusal_fallback', {
+        trigger: 'refusal',
+        direction: 'retry',
+        scope: 'session',
+        original_model: 'claude-opus-5',
+        fallback_model: 'claude-sonnet-5',
+        api_refusal_category: 'cyber',
+        api_refusal_explanation: 'The request asked for a working exploit.',
+        content: '',
+      }),
+      system('model_refusal_no_fallback', { original_model: 'claude-opus-5', content: '' }),
+    )
+    expect(notices(run)).toMatchObject([
+      {
+        severity: 'info',
+        title: 'claude-opus-5 refused, so Claude Code asked claude-sonnet-5 instead',
+        description: 'The request asked for a working exploit.',
+      },
+    ])
+  })
+})
+
 describe('MCP servers', () => {
   const init = (servers: { name: string; status: string }[], uuid: string) =>
     system('init', { mcp_servers: servers, uuid })

@@ -384,6 +384,8 @@ export type ThreadEntry =
       stopReason: StopReason
       durationMs: number
       after?: string | null // the agent's entry before it, to put it back after a replay
+      /** Huli: for a turn its model refused, why, as the agent reported it. */
+      refusal?: TurnRefusal
     }
   | TakeoverEntry // Kettu's own record of another agent taking the session over
   | GitEntry // Kettu's own observation of the repository, see the git design
@@ -399,6 +401,16 @@ export type ThreadEntry =
   | ProblemReportEntry // Kettu's own record of a problem report an agent drafted, and its outcome
   | MemoryWriteEntry // Kettu's own record of an agent's write to Kettu's memory, and its answer
   | MarketPublishEntry // Kettu's own record of a publish to the Kettu Marketplace, and its outcome
+
+/**
+ * Huli: why a model refused a turn: the explanation its provider gave, to show and never parse, the
+ * category of the refusal, and the model; each null when the agent did not say.
+ */
+export interface TurnRefusal {
+  explanation: string | null
+  category: string | null
+  model: string | null
+}
 
 /**
  * Where another agent took the session over: from here on its turns are that agent's. `turns` of

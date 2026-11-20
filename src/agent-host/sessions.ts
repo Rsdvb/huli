@@ -119,6 +119,7 @@ import {
   type ThreadState,
   type TokenTotals,
   type ToolEntry,
+  type TurnRefusal,
   type UserContent,
   type OutsideKind,
 } from '@shared/thread'
@@ -7716,8 +7717,8 @@ export class SessionManager {
       this.failTurn(live, turn, effect.error)
       return
     }
-    const { stopReason, tokens, models } = effect.result
-    this.endTurn(live, turn, stopReason, tokens, models)
+    const { stopReason, tokens, models, refusal } = effect.result
+    this.endTurn(live, turn, stopReason, tokens, models, refusal)
   }
 
   /**
@@ -8163,7 +8164,7 @@ export class SessionManager {
       const result = await sending
       if (turn.ended) return
       this.deps.agents.signedIn(live.record.agentId)
-      this.endTurn(live, turn, result.stopReason, result.tokens, result.models)
+      this.endTurn(live, turn, result.stopReason, result.tokens, result.models, result.refusal)
     } catch (error) {
       if (turn.ended) return
       this.failTurn(live, turn, error)
@@ -8198,7 +8199,12 @@ export class SessionManager {
   }
 
   /** Settles the turn; returns its `turn_end` entry's id when there is a stop reason. */
-  private finishTurn(live: Live, turn: Turn, stopReason: StopReason | null): string | null {
+  private finishTurn(
+    live: Live,
+    turn: Turn,
+    stopReason: StopReason | null,
+    refusal?: TurnRefusal,
+  ): string | null {
     turn.ended = true
     if (turn.fallback) clearTimeout(turn.fallback)
     turn.fallback = null
@@ -8244,6 +8250,7 @@ export class SessionManager {
           stopReason,
           durationMs: Math.max(0, this.now() - turn.startedAt),
           after: agentEntryBefore(live.thread),
+          ...(refusal && stopReason === 'refusal' ? { refusal } : {}),
         },
       },
     ])
@@ -8256,10 +8263,11 @@ export class SessionManager {
     stopReason: StopReason,
     tokens: TokenTotals | null,
     models: ModelTokens[] = [],
+    refusal?: TurnRefusal,
   ): void {
     // The prompt Send now chose goes next, whether the stop landed or the turn finished first.
     const chosen = live.sendNext && (stopReason === 'cancelled' || stopReason === 'end_turn')
-    const turnEntryId = this.finishTurn(live, turn, stopReason)
+    const turnEntryId = this.finishTurn(live, turn, stopReason, refusal)
     const now = this.now()
     const changes: Partial<SessionView> = {
       status: 'ready',

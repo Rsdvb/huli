@@ -1548,6 +1548,35 @@ describe('a turn', () => {
     ])
   })
 
+  it('ends a refused turn with why the model refused', async () => {
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit({
+        type: 'system',
+        subtype: 'model_refusal_no_fallback',
+        original_model: 'claude-opus-5',
+        request_id: null,
+        api_refusal_category: 'bio',
+        api_refusal_explanation: 'The request asked for a pathogen protocol.',
+        content: '',
+        uuid: 'u-refused',
+        session_id: query.sessionId,
+      } as SdkMessage)
+      query.finish({ stop_reason: 'refusal' })
+    }
+    await expect(
+      s.connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }]),
+    ).resolves.toMatchObject({
+      stopReason: 'refusal',
+      refusal: {
+        explanation: 'The request asked for a pathogen protocol.',
+        category: 'bio',
+        model: 'claude-opus-5',
+      },
+    })
+    expect(target.entries().filter((entry) => entry.kind === 'notice')).toEqual([])
+  })
+
   it('passes an error result on as the turn failing', async () => {
     s.sdk.script = (query) => {
       query.running()

@@ -19,6 +19,7 @@ import {
   type PromptSuggestion,
   type TokenTotals,
   type ToolEntry,
+  type TurnRefusal,
 } from '@shared/thread'
 import {
   AgentRequestError,
@@ -78,6 +79,7 @@ import {
   mapCommands,
   mcpFailedNotice,
   MODE_OPTION_ID,
+  refusalOf,
   SYNTHETIC_MODEL,
   type Delivery,
 } from './mapper'
@@ -263,6 +265,8 @@ interface Turn {
   onText: ((text: string) => void) | null
   /** Claude Code started it between Kettu's turns, so its end goes to the host as an effect. */
   byAgent: boolean
+  /** Huli: why the model refused the turn, when Claude Code said. */
+  refusal?: TurnRefusal
 }
 
 interface Session {
@@ -1315,6 +1319,8 @@ export class ClaudeConnection implements AgentConnection {
         this.setChoice(session, 'mode', system.permissionMode)
       } else if (system.subtype === 'elicitation_complete') {
         this.pageDone(message as ElicitationCompleteMessage)
+      } else if (system.subtype === 'model_refusal_no_fallback' && turn) {
+        turn.refusal = refusalOf(system)
       }
     } else if (message.type === 'assistant') {
       const assistant = message as AssistantMessage
@@ -1449,7 +1455,12 @@ export class ClaudeConnection implements AgentConnection {
 
   private turnResult(turn: Turn, stopReason: PromptResult['stopReason']): PromptResult {
     const models: ModelTokens[] = [...turn.models].map(([model, tokens]) => ({ model, tokens }))
-    return { stopReason, tokens: turn.tokens, models }
+    return {
+      stopReason,
+      tokens: turn.tokens,
+      models,
+      ...(turn.refusal && stopReason === 'refusal' ? { refusal: turn.refusal } : {}),
+    }
   }
 
   private settle(session: Session): void {
