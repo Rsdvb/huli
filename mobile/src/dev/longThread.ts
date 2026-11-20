@@ -441,6 +441,7 @@ export function useLongThread(options: {
       retry: () => {},
       hasOlder,
       loadingOlder,
+      olderError: null,
       loadOlder,
       requests: [],
       reloadRequests: () => {},

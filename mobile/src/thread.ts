@@ -38,6 +38,8 @@ export interface ThreadView {
   retry(): void
   hasOlder: boolean
   loadingOlder: boolean
+  /** Why the last read of an older page failed, until one succeeds. */
+  olderError: string | null
   loadOlder(): void
   /** What waits for the user, which may lie on a page not read yet. */
   requests: ThreadEntry[]
@@ -84,6 +86,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const [error, setError] = useState<string | null>(null)
   const [older, setOlder] = useState<number | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState<string | null>(null)
   const [requests, setRequests] = useState<ThreadEntry[]>([])
   const [plan, setPlan] = useState<PlanEntry | null>(null)
   const seq = useRef(-1)
@@ -283,8 +286,9 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       .then((page) => {
         setThread((current) => (current ? prependEntries(current, page.entries) : current))
         setOlder(page.older)
+        setOlderError(null)
       })
-      .catch(() => {})
+      .catch((failure: unknown) => setOlderError(hostErrorText(failure, '没能读取更早的内容。')))
       .finally(() => setLoadingOlder(false))
   }, [link, sessionId, older, loadingOlder, store, setThread])
 
@@ -301,6 +305,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     retry,
     hasOlder: older !== null && !cached,
     loadingOlder,
+    olderError,
     loadOlder,
     requests,
     reloadRequests,
