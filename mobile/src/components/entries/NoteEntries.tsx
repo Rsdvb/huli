@@ -2,12 +2,13 @@
 // session over, the user taking a surface over and handing it back, a message from another session,
 // and a session or sub-agent this one started, with whether it waits for the user.
 
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { harnessOf, type ThreadEntry } from '@shared/thread'
 import { useAgent, useConnected, useLink, useSession } from '../../host'
 import { sessionTitle } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
+import { Spinner } from '../../ui/StepMarks'
 import { WorkingDots } from '../../ui/session/Working'
 import { useSecond } from '../../ui/session/now'
 import { spanText } from '../../ui/session/format'
@@ -292,11 +293,7 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
       ) : failed ? (
         <Text style={[styles.small, { color: c.danger }]}>失败</Text>
       ) : running ? (
-        <ActivityIndicator
-          size="small"
-          color={c.textTertiary}
-          style={{ transform: [{ scale: 0.75 }] }}
-        />
+        <Spinner size={15} color={c.textTertiary} />
       ) : child ? (
         <Text style={[styles.small, { color: c.textTertiary }]}>已完成</Text>
       ) : null}

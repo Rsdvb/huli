@@ -2,7 +2,7 @@
 // quotes, tables that scroll sideways with their numbers on the right, and code in cards with their
 // language or file, a copy button and a light tint, long ones folded past 20 lines. Links and
 // inline code that name a file of the session's folder open it. A reply still streaming ends in a
-// blinking caret. A sent prompt's mentions and links read as chips.
+// caret. A sent prompt's mentions and links read as chips.
 
 import {
   memo,
@@ -39,7 +39,6 @@ import {
 } from '../ui/session/fileRefs'
 import { showNotice } from '../ui/NoticeBar'
 import { highlight } from '../ui/session/highlight'
-import { useReducedMotion } from '../ui/motion'
 import { G, Icon } from '../ui/session/icons'
 import {
   keepBlocks,
@@ -153,16 +152,12 @@ function ChipRuns(props: { text: string; look: Look }): ReactNode {
   return out
 }
 
+/**
+ * The end of a reply still being written. It stands still: in the reply's last line, each blink
+ * laid the whole paragraph out again twice a second.
+ */
 function Caret(props: { color: string }) {
-  const reduce = useReducedMotion()
-  const [on, setOn] = useState(true)
-  useEffect(() => {
-    // Under Reduce Motion it stands still, as the system's own caret does.
-    if (reduce) return setOn(true)
-    const timer = setInterval(() => setOn((v) => !v), 530)
-    return () => clearInterval(timer)
-  }, [reduce])
-  return <Text style={{ color: on ? props.color : 'transparent' }}> ▍</Text>
+  return <Text style={{ color: props.color }}> ▍</Text>
 }
 
 function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
@@ -828,7 +823,7 @@ function useBlocks(markdown: string, streaming: boolean): Block[] {
 
 export const Markdown = memo(function Markdown(props: {
   markdown: string
-  /** Still being written: a caret blinks at its end. */
+  /** Still being written: a caret stands at its end. */
   streaming?: boolean
   size?: MarkdownSize
   color?: string

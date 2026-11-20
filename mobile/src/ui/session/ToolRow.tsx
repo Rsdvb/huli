@@ -5,15 +5,7 @@
 // its edits, each opening to its diff.
 
 import { memo, useState, type ReactNode } from 'react'
-import {
-  ActivityIndicator,
-  Animated,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
@@ -24,11 +16,12 @@ import { Clamp, clampedText, useClampOpen } from './Clamp'
 import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
 import { plainText } from './feedback'
-import { relativePath } from './format'
+import { durationText, relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
-import { useTenth } from './now'
+import { useSecond } from './now'
 import { MONO, useSessionTokens } from './palette'
 import { useOpenFade } from './Press'
+import { Spinner } from '../StepMarks'
 import { Counts } from './TurnChanges'
 import { toolEdits, type FileEdit } from './turns'
 import {
@@ -150,13 +143,16 @@ export function stepStatus(entry: ToolEntry): StepStatus {
         : 'running'
 }
 
-/** How long since `since`, ticking while shown, with tenths below a minute. */
+/**
+ * How long since `since`, ticking each second while shown, on the screen's shared clock: a
+ * tenth's tick redrew its line ten times a second for as long as a call ran.
+ */
 export function LiveTime(props: { since: number; color: string; prefix?: string }) {
-  const now = useTenth()
+  const elapsed = Math.max(0, useSecond() - props.since)
   return (
     <Text style={[styles.time, { color: props.color }]}>
       {props.prefix ?? ''}
-      {formatMs(Math.max(0, now - props.since))}
+      {durationText(elapsed - (elapsed % 1000))}
     </Text>
   )
 }
@@ -196,7 +192,7 @@ export function StepMark(props: {
     case 'running':
       return (
         <View style={styles.mark}>
-          <ActivityIndicator size="small" color={c.textTertiary} style={styles.spinner} />
+          <Spinner size={14} color={c.textTertiary} style={styles.spinner} />
           {props.startedAt !== undefined && (
             <LiveTime since={props.startedAt} color={c.textTertiary} />
           )}
@@ -569,7 +565,7 @@ const styles = StyleSheet.create({
   summary: { flex: 1, fontSize: 15, lineHeight: 20 },
   monoSummary: { fontFamily: MONO, fontSize: 13.5 },
   mark: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  spinner: { transform: [{ scale: 0.7 }], width: 16, height: 16 },
+  spinner: { margin: 1 },
   time: { fontSize: 13, fontVariant: ['tabular-nums'] },
   pill: {
     fontSize: 11,

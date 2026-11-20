@@ -68,6 +68,3 @@ export const useSecond = ticker(1000)
 
 /** The time every 15 seconds, for a clock of minutes and hours that counts up. */
 export const useQuarterMinute = ticker(15_000)
-
-/** The time to a tenth of a second, while a step that runs shows it. */
-export const useTenth = ticker(100)

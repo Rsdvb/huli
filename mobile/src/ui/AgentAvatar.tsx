@@ -1,12 +1,13 @@
 // An agent in a round avatar: its harness's mark on a quiet disc, or its initial when the phone has
 // no mark for it. A dot on the edge tells a running session (breathing), one that waits for the
 // user, or one that failed; a still grey one, a session that was running when last heard of.
+// A running one's typing bubble steps on the step clock (steps.ts).
 
-import { useEffect, useRef } from 'react'
-import { Animated, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import Svg from 'react-native-svg'
 import { markFor } from './agent-marks'
-import { useReduceMotion } from './Press'
+import { StepOpacity } from './StepMarks'
+import { stepsIn, useSteps } from './steps'
 import { size as sizes, useTokens } from './tokens'
 
 export type AvatarBadge = 'live' | 'stale' | 'waiting' | 'error' | 'unread' | null
@@ -69,24 +70,28 @@ export function AgentGlyph(props: { agentId: string; name?: string; size?: numbe
   )
 }
 
-/** A running session's mark: a small bubble whose three dots pulse in turn, as a typing one does. */
+// The typing bubble's loop: each dot bright in turn, 1.5 s round, in steps.
+const TYPING = (() => {
+  const n = stepsIn(1500)
+  return [0, 1, 2].map((i) =>
+    Array.from({ length: n }, (_, k) => {
+      const at = (3 * k) / n
+      const d = Math.abs(at - (i + 0.5))
+      return d >= 0.5 ? 0.35 : 1 - (d / 0.5) * 0.65
+    }),
+  )
+})()
+
+/**
+ * A running session's mark: a small bubble whose three dots pulse in turn, as a typing one does,
+ * stepped on the step clock.
+ */
 function Typing(props: { side: number; ring: string }) {
   const { c } = useTokens()
-  const reduce = useReduceMotion()
-  const phase = useRef(new Animated.Value(0)).current
+  const steps = useSteps()
   const height = Math.max(11, Math.round(props.side * 0.4))
   const width = Math.round(height * 1.9)
   const dot = Math.max(2.5, height * 0.22)
-
-  useEffect(() => {
-    if (reduce) return
-    const loop = Animated.loop(
-      Animated.timing(phase, { toValue: 3, duration: 1200, useNativeDriver: true }),
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [reduce, phase])
-
   return (
     <View
       style={[
@@ -105,76 +110,41 @@ function Typing(props: { side: number; ring: string }) {
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      {[0, 1, 2].map((i) => (
-        <Animated.View
+      {TYPING.map((frames, i) => (
+        <StepOpacity
           key={i}
-          style={{
-            width: dot,
-            height: dot,
-            borderRadius: dot / 2,
-            backgroundColor: c.danger,
-            opacity: reduce
-              ? 0.8
-              : phase.interpolate({
-                  inputRange: [0, i, i + 0.5, i + 1, 3],
-                  outputRange: [0.35, 0.35, 1, 0.35, 0.35],
-                  extrapolate: 'clamp',
-                }),
-          }}
+          steps={steps}
+          // Held still, the bubble shows its dots evenly lit.
+          frames={steps ? frames : STILL_TYPING}
+          style={{ width: dot, height: dot, borderRadius: dot / 2, backgroundColor: c.danger }}
         />
       ))}
     </View>
   )
 }
 
+const STILL_TYPING = [0.8]
+
 function Badge(props: { kind: Exclude<AvatarBadge, null>; side: number; ring: string }) {
   if (props.kind === 'live') return <Typing side={props.side} ring={props.ring} />
   return <Dot kind={props.kind} side={props.side} ring={props.ring} />
 }
 
-function Dot(props: { kind: Exclude<AvatarBadge, null>; side: number; ring: string }) {
+function Dot(props: { kind: Exclude<AvatarBadge, 'live' | null>; side: number; ring: string }) {
   const { c } = useTokens()
-  const reduce = useReduceMotion()
-  const halo = useRef(new Animated.Value(0)).current
   const color = {
-    live: c.success,
     stale: c.textTertiary,
     waiting: c.warning,
     error: c.danger,
     unread: c.tint,
   }[props.kind]
   const dot = Math.max(8, Math.round(props.side * 0.28))
-
-  useEffect(() => {
-    if (props.kind !== 'live' || reduce) return
-    const loop = Animated.loop(
-      Animated.timing(halo, { toValue: 1, duration: 1400, useNativeDriver: true }),
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [props.kind, reduce, halo])
-
   return (
     <View
       style={[styles.badge, { width: dot, height: dot, right: -1, bottom: -1 }]}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      {props.kind === 'live' && !reduce && (
-        <Animated.View
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              borderRadius: dot / 2,
-              backgroundColor: color,
-              opacity: halo.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
-              transform: [
-                { scale: halo.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] }) },
-              ],
-            },
-          ]}
-        />
-      )}
       <View
         style={{
           width: dot,

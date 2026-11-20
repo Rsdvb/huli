@@ -1,52 +1,46 @@
 // While a turn runs and nothing is being written: a softly pulsing line with how long it has run,
-// what it has added to the context and what it does now.
+// what it has added to the context and what it does now, its dots and pulse stepped on the step
+// clock (steps.ts) rather than redrawn on every frame.
 // And the button that brings a scrolled-up conversation back to its newest message.
 
-import { useEffect, useRef, useState } from 'react'
-import { AccessibilityInfo, Animated, Easing, StyleSheet, Text, View } from 'react-native'
-import { useIsFocused } from 'expo-router'
+import { createContext, useContext, useEffect, useRef } from 'react'
+import {
+  Animated,
+  Easing,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type TextStyle,
+} from 'react-native'
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated'
 import {
   CELLS,
   KEYFRAMES,
   PATTERNS,
   turnDotPattern,
   type DotKeyframes,
-  type TurnDot,
   type TurnDotPatternName,
 } from '@shared/turn-dots'
 import { G, Icon } from './icons'
+import { useSecond } from './now'
 import { compactCount, durationText } from './work'
 import { GlassButton, useGlassMode } from '../Glass'
+import { StepOpacity } from '../StepMarks'
+import { stepsIn, useSteps } from '../steps'
 import { useSessionTokens } from './palette'
 
-function usePulse(): Animated.Value {
-  const value = useRef(new Animated.Value(0.7)).current
-  useEffect(() => {
-    let loop: Animated.CompositeAnimation | null = null
-    let live = true
-    void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
-      if (!live) return
-      if (reduce) {
-        value.setValue(0.8)
-        return
-      }
-      const step = (toValue: number) =>
-        Animated.timing(value, {
-          toValue,
-          duration: 900,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        })
-      loop = Animated.loop(Animated.sequence([step(1), step(0.7)]))
-      loop.start()
-    })
-    return () => {
-      live = false
-      loop?.stop()
-    }
-  }, [value])
-  return value
-}
+/**
+ * Whether the marks inside show on screen: false holds them still, as the working line's while the
+ * conversation is scrolled away from its end.
+ */
+export const MarksShown = createContext(true)
+
+// The text's breath while the turn runs, 1.8 s from dim to bright and back, in steps.
+const PULSE = (() => {
+  const n = stepsIn(1800)
+  return Array.from({ length: n }, (_, k) => 0.85 - 0.15 * Math.cos((2 * Math.PI * k) / n))
+})()
 
 // The grid at 15 points: dots of 4 with gaps of 1.5, scaled for another size.
 const gapOf = (size: number) => (size * 1.5) / 15
@@ -69,8 +63,6 @@ function easeInOut(x: number): number {
   return at((lo + hi) / 2, 0, 1)
 }
 
-// An eased segment is drawn as this many straight ones, which the native driver interpolates.
-const EASED_STEPS = 6
 const STILL_OPACITY = 0.22
 
 /** A dot's opacity `q` of the way through its keyframes' loop. */
@@ -86,104 +78,46 @@ function opacityAt(name: DotKeyframes, q: number, eased: boolean): number {
   return stops[0]![1]
 }
 
+const DOT_FRAMES = new Map<TurnDotPatternName, number[][]>()
+
 /**
- * One dot's opacity along the loop's single value, from 0 to 1, as the native driver interpolates
- * it: its keyframes started `at` into the loop, as the desktop's negative CSS delay starts them.
+ * Each dot's opacity at each step of the pattern's loop: its keyframes started `at` into the loop,
+ * as the desktop's negative CSS delay starts them.
  */
-function dotRanges(dot: TurnDot, eased: boolean): { inputRange: number[]; outputRange: number[] } {
-  const name = dot.keyframes
-  if (!name) return { inputRange: [0, 1], outputRange: [STILL_OPACITY, STILL_OPACITY] }
-  const qs = new Set<number>()
-  const stops = KEYFRAMES[name]
-  for (let i = 0; i < stops.length; i++) {
-    qs.add(stops[i]![0])
-    if (eased && i > 0) {
-      const from = stops[i - 1]![0]
-      const to = stops[i]![0]
-      for (let k = 1; k < EASED_STEPS; k++) qs.add(from + ((to - from) * k) / EASED_STEPS)
-    }
-  }
-  // The loop's value v plays the dot's keyframes at q = v - at, wrapped; at v = at the dot's loop
-  // ends and starts again, so the end comes first there.
-  // Rounded, so a stop that wraps lands exactly where the next loop starts.
-  const round = (v: number) => Math.round(v * 1e6) / 1e6
-  const points = [...qs].map((q) => {
-    const wrapped = round(q + dot.at) > 1
-    const v = round(wrapped ? q + dot.at - 1 : q + dot.at)
-    return { v, wrapped, value: opacityAt(name, q, eased) }
-  })
-  if (dot.at > 0) {
-    const edge = opacityAt(name, 1 - dot.at, eased)
-    points.push({ v: 0, wrapped: true, value: edge }, { v: 1, wrapped: false, value: edge })
-  }
-  points.sort((a, b) => a.v - b.v || Number(b.wrapped) - Number(a.wrapped))
-  const inputRange: number[] = []
-  const outputRange: number[] = []
-  for (const point of points) {
-    const last = inputRange[inputRange.length - 1]
-    inputRange.push(last !== undefined && point.v <= last ? Math.min(1, last + 1e-4) : point.v)
-    outputRange.push(point.value)
-  }
-  return { inputRange, outputRange }
-}
-
-const DOT_RANGES = new Map<TurnDotPatternName, { inputRange: number[]; outputRange: number[] }[]>()
-
-function patternRanges(name: TurnDotPatternName) {
-  let ranges = DOT_RANGES.get(name)
-  if (!ranges) {
+function patternFrames(name: TurnDotPatternName): number[][] {
+  let frames = DOT_FRAMES.get(name)
+  if (!frames) {
     const pattern = PATTERNS[name]
-    ranges = CELLS.map(([x, y]) => dotRanges(pattern.dot(x, y), pattern.easing === 'ease-in-out'))
-    DOT_RANGES.set(name, ranges)
+    const eased = pattern.easing === 'ease-in-out'
+    const n = stepsIn(pattern.ms, 6)
+    frames = CELLS.map(([x, y]) => {
+      const dot = pattern.dot(x, y)
+      return Array.from({ length: n }, (_, k) => {
+        if (!dot.keyframes) return STILL_OPACITY
+        const q = k / n - dot.at
+        return Math.round(opacityAt(dot.keyframes, q - Math.floor(q), eased) * 100) / 100
+      })
+    })
+    DOT_FRAMES.set(name, frames)
   }
-  return ranges
+  return frames
 }
 
 /**
  * The running turn's mark: three by three dots acting out what the turn does now, the desktop's
  * patterns (@shared/turn-dots) played here from the phase this phone knows, never in step with the
- * desktop. A new phase starts its pattern afresh. The loop runs on the native driver, rests while
- * its screen is covered by another, and holds its first frame under Reduce Motion.
+ * desktop, a few steps a second. It holds still while `on` is false or its marks don't show, while
+ * its screen is covered by another, and under Reduce Motion.
  */
-export function WorkingDots(props: { color: string; size?: number; phase?: string | null }) {
-  const pattern = turnDotPattern(props.phase)
-  return <TurnDots key={pattern} pattern={pattern} color={props.color} size={props.size} />
-}
-
-function TurnDots(props: {
-  pattern: TurnDotPatternName
+export function WorkingDots(props: {
   color: string
-  size?: number | undefined
+  size?: number
+  phase?: string | null
+  on?: boolean
 }) {
-  const loop = useRef(new Animated.Value(0)).current
-  const [still, setStill] = useState(false)
-  const focused = useIsFocused()
-  const { ms } = PATTERNS[props.pattern]
-  useEffect(() => {
-    if (!focused) return
-    let running: Animated.CompositeAnimation | null = null
-    let live = true
-    void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
-      if (!live) return
-      if (reduce) return setStill(true)
-      // From the start of the loop, as a loop stopped midway would repeat only its rest.
-      loop.setValue(0)
-      running = Animated.loop(
-        Animated.timing(loop, {
-          toValue: 1,
-          duration: ms,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      )
-      running.start()
-    })
-    return () => {
-      live = false
-      running?.stop()
-    }
-  }, [loop, focused, ms])
-  const ranges = patternRanges(props.pattern)
+  const shown = useContext(MarksShown)
+  const steps = useSteps((props.on ?? true) && shown)
+  const frames = patternFrames(turnDotPattern(props.phase))
   return (
     <View
       style={[
@@ -193,21 +127,27 @@ function TurnDots(props: {
       accessibilityElementsHidden
       importantForAccessibility="no"
     >
-      {ranges.map((range, i) => (
-        <Animated.View
+      {frames.map((dot, i) => (
+        <StepOpacity
           key={i}
+          steps={steps}
+          frames={dot}
           style={[
             styles.dot,
             props.size ? dotOf(props.size) : null,
-            {
-              backgroundColor: props.color,
-              opacity: still ? range.outputRange[0]! : loop.interpolate(range),
-            },
+            { backgroundColor: props.color },
           ]}
         />
       ))}
     </View>
   )
+}
+
+/** How long the turn has run, to the second. */
+function Elapsed(props: { since: number; style: StyleProp<TextStyle> }) {
+  const now = useSecond(useContext(MarksShown))
+  const elapsed = Math.max(0, now - props.since)
+  return <Text style={props.style}>{durationText(elapsed - (elapsed % 1000))}</Text>
 }
 
 /**
@@ -224,26 +164,29 @@ export function WorkingRow(props: {
   phase?: string | null
 }) {
   const { c } = useSessionTokens()
-  const pulse = usePulse()
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    if (props.since === null) return
-    const since = props.since
-    let timer: ReturnType<typeof setTimeout>
-    // Just past each whole second, so a timer that fires late never skips one.
-    const schedule = () => {
-      const delay = 1000 - (Math.max(0, Date.now() - since) % 1000) + 5
-      timer = setTimeout(() => {
-        setNow(Date.now())
-        schedule()
-      }, delay)
-    }
-    schedule()
-    return () => clearTimeout(timer)
-  }, [props.since])
-  const elapsed = props.since !== null ? Math.max(0, now - props.since) : null
+  const steps = useSteps(useContext(MarksShown) && !props.waiting)
   const tone = { color: c.textSecondary }
   const dot = <Text style={[styles.fixed, { color: c.textTertiary }]}>{'  ·  '}</Text>
+  // Time · what it does · tokens, as the desktop orders them: only the middle one gives way.
+  const line = (
+    <>
+      {props.since !== null && (
+        <>
+          <Elapsed since={props.since} style={[styles.fixed, tone]} />
+          {dot}
+        </>
+      )}
+      <Text style={[styles.label, tone]} numberOfLines={1}>
+        {props.label}
+      </Text>
+      {props.tokens !== null && props.tokens > 0 && (
+        <>
+          {dot}
+          <Text style={[styles.fixed, tone]}>{compactCount(props.tokens)} token</Text>
+        </>
+      )}
+    </>
+  )
   return (
     <View
       style={styles.row}
@@ -261,54 +204,39 @@ export function WorkingRow(props: {
       ) : (
         <WorkingDots color={c.accent} phase={props.phase} />
       )}
-      {/* Time · what it does · tokens, as the desktop orders them: only the middle one gives way. */}
-      <Animated.View style={[styles.line, { opacity: props.waiting ? 1 : pulse }]}>
-        {elapsed !== null && (
-          <>
-            <Text style={[styles.fixed, tone]}>{durationText(elapsed - (elapsed % 1000))}</Text>
-            {dot}
-          </>
-        )}
-        <Text style={[styles.label, tone]} numberOfLines={1}>
-          {props.label}
-        </Text>
-        {props.tokens !== null && props.tokens > 0 && (
-          <>
-            {dot}
-            <Text style={[styles.fixed, tone]}>{compactCount(props.tokens)} token</Text>
-          </>
-        )}
-      </Animated.View>
+      {props.waiting ? (
+        <View style={styles.line}>{line}</View>
+      ) : (
+        <StepOpacity steps={steps} frames={PULSE} style={styles.line}>
+          {line}
+        </StepOpacity>
+      )}
     </View>
   )
 }
 
+// The halo's scale with the pulse, from 0.85 at its dimmest to 1.1 at its brightest.
+const HALO_SCALE = PULSE.map((v) => 0.85 + ((v - 0.7) / 0.3) * 0.25)
+
 /** The orange dot with its halo for a turn that waits for the user, softly pulsing. */
-function AttentionMark() {
+function AttentionMark(props: { on: boolean }) {
   const { c, s } = useSessionTokens()
-  const pulse = usePulse()
+  const steps = useSteps(props.on)
+  const breath = useAnimatedStyle(() => {
+    const k = steps ? steps.value % PULSE.length : 0
+    return { opacity: PULSE[k], transform: [{ scale: HALO_SCALE[k]! }] }
+  }, [steps])
   return (
-    <Animated.View
-      style={[
-        styles.halo,
-        {
-          backgroundColor: s.accentSoft,
-          opacity: pulse,
-          transform: [
-            { scale: pulse.interpolate({ inputRange: [0.7, 1], outputRange: [0.85, 1.1] }) },
-          ],
-        },
-      ]}
-    >
+    <Reanimated.View style={[styles.halo, { backgroundColor: s.accentSoft }, breath]}>
       <View style={[styles.haloDot, { backgroundColor: c.accent, shadowColor: c.accent }]} />
-    </Animated.View>
+    </Reanimated.View>
   )
 }
 
 /**
  * The way back to the newest message, which says what the turn does: the working dots while it
  * runs, the attention dot while it waits for the user, else a chevron, marked when new messages
- * came in while scrolled away.
+ * came in while scrolled away. Its marks hold still while it is hidden.
  */
 export function ToBottomButton(props: {
   visible: boolean
@@ -367,9 +295,9 @@ export function ToBottomButton(props: {
         >
           <Animated.View style={liquid ? { opacity: shown } : null}>
             {props.state === 'running' ? (
-              <WorkingDots color={c.accent} size={16} phase={props.phase} />
+              <WorkingDots color={c.accent} size={16} phase={props.phase} on={props.visible} />
             ) : props.state === 'waiting' ? (
-              <AttentionMark />
+              <AttentionMark on={props.visible} />
             ) : (
               <Icon icon={G.toBottom} size={16} color={c.text} weight="semibold" />
             )}

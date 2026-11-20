@@ -1,52 +1,19 @@
-// Placeholder shapes that breathe while something loads, in place of a spinner.
+// Placeholder shapes that stand where something loads, in place of a spinner. They hold still: a
+// breathing loop redrew the screen on every frame for as long as a slow read took.
 
-import { useEffect } from 'react'
-import { Animated, StyleSheet, View, type DimensionValue } from 'react-native'
-import { useReduceMotion } from './Press'
+import { StyleSheet, View, type DimensionValue } from 'react-native'
 import { radius, size, space, useTokens } from './tokens'
-
-// One breath for every placeholder on screen: each ran a loop of its own, a list of them a dozen,
-// and they drifted apart. It runs while any placeholder shows.
-const breath = new Animated.Value(0.55)
-const still = new Animated.Value(0.8)
-let breathing = 0
-let loop: Animated.CompositeAnimation | null = null
-
-function usePulse(): Animated.Value {
-  const reduce = useReduceMotion()
-  useEffect(() => {
-    if (reduce) return
-    if (breathing++ === 0) {
-      breath.setValue(0.55)
-      loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(breath, { toValue: 1, duration: 700, useNativeDriver: true }),
-          Animated.timing(breath, { toValue: 0.55, duration: 700, useNativeDriver: true }),
-        ]),
-      )
-      loop.start()
-    }
-    return () => {
-      if (--breathing === 0) {
-        loop?.stop()
-        loop = null
-      }
-    }
-  }, [reduce])
-  return reduce ? still : breath
-}
 
 export function Skeleton(props: { width?: DimensionValue; height: number; radius?: number }) {
   const { c } = useTokens()
-  const opacity = usePulse()
   return (
-    <Animated.View
+    <View
       style={{
         width: props.width ?? '100%',
         height: props.height,
         borderRadius: props.radius ?? radius.xs,
         backgroundColor: c.skeleton,
-        opacity,
+        opacity: 0.8,
       }}
     />
   )
