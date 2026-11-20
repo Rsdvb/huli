@@ -1,6 +1,6 @@
 // The buttons on Huli's notifications and what pressing one does. A waiting request offers 允许 and
-// 拒绝 when the computer sent its one-time answers, a question offers its choices and 回复…, and a
-// finished turn offers 回复… and 打开. The answering buttons run without bringing the app to the
+// 拒绝 when the computer sent its one-time answers, a question offers its choices and 回复…, a
+// finished turn offers 回复… and 打开, and a turn that may be stuck offers 停止, 重试 and 继续等. The answering buttons run without bringing the app to the
 // front, after the phone is unlocked: the app connects to the computer that sent it, sends the
 // answer, and leaves a notice of how it went, which opens the session when it failed. A
 // notification from a computer other than the active one is not answered in the background; its
@@ -20,6 +20,9 @@ export const ACTION = {
   deny: 'deny',
   reply: 'reply',
   open: 'open',
+  stop: 'stall.stop',
+  retry: 'stall.retry',
+  wait: 'stall.wait',
 } as const
 
 /** A question's choice: this and its position. */
@@ -31,6 +34,8 @@ export const CATEGORY = {
   /** A request with a one-time allow and no deny. */
   allowOnly: 'huli.permission.allow',
   turnEnded: 'huli.turn',
+  /** A running turn that has said nothing for a while (NotificationService.swift sets it). */
+  stalled: 'huli.stalled',
 } as const
 
 /** How long an answer waits for the computer, within the time the system gives the app. */
@@ -62,6 +67,24 @@ const open: Notifications.NotificationAction = {
   options: { opensAppToForeground: true },
 }
 
+const stop: Notifications.NotificationAction = {
+  identifier: ACTION.stop,
+  buttonTitle: '停止',
+  options: { opensAppToForeground: false, isDestructive: true, isAuthenticationRequired: true },
+}
+
+const retry: Notifications.NotificationAction = {
+  identifier: ACTION.retry,
+  buttonTitle: '重试',
+  options: { opensAppToForeground: false, isAuthenticationRequired: true },
+}
+
+const wait: Notifications.NotificationAction = {
+  identifier: ACTION.wait,
+  buttonTitle: '继续等',
+  options: { opensAppToForeground: false },
+}
+
 let registered: Promise<void> | null = null
 
 /**
@@ -73,6 +96,7 @@ export function registerCategories(): Promise<void> {
     await Notifications.setNotificationCategoryAsync(CATEGORY.permission, [allow, deny])
     await Notifications.setNotificationCategoryAsync(CATEGORY.allowOnly, [allow])
     await Notifications.setNotificationCategoryAsync(CATEGORY.turnEnded, [reply, open])
+    await Notifications.setNotificationCategoryAsync(CATEGORY.stalled, [stop, retry, wait])
   })().catch(() => {
     registered = null
   })
@@ -80,10 +104,17 @@ export function registerCategories(): Promise<void> {
 }
 
 interface Answer {
-  method: 'permissions.respond' | 'sessions.queue'
+  method: 'permissions.respond' | 'sessions.queue' | 'sessions.stall'
   params: Record<string, unknown>
   /** The notice's title once it went. */
   done: string
+}
+
+/** What a stuck turn's buttons ask of the session, and what the notice says once it went. */
+const STALL_ANSWERS: Record<string, { action: 'stop' | 'retry' | 'wait'; done: string }> = {
+  [ACTION.stop]: { action: 'stop', done: '已停止' },
+  [ACTION.retry]: { action: 'retry', done: '已重试' },
+  [ACTION.wait]: { action: 'wait', done: '继续等' },
 }
 
 /** What pressing the button sends; null for one that sends nothing, as an empty reply. */
@@ -98,6 +129,12 @@ function answerOf(action: string, typed: string, data: NotificationData): Answer
       params: { sessionId, content: [{ type: 'text', text: words }] },
       done: '已发送',
     }
+  }
+  if (data.kind === 'stalled') {
+    const stall = STALL_ANSWERS[action]
+    return stall
+      ? { method: 'sessions.stall', params: { sessionId, action: stall.action }, done: stall.done }
+      : null
   }
   if (data.kind !== 'permission' || !requestId) return null
   const respond = (answer: Record<string, unknown>, done: string): Answer => ({
