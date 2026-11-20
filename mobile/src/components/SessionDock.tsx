@@ -15,7 +15,7 @@ import { haptic } from '../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import type { ViewHandle } from '../ui/session/Popover'
-import { gentle, PressScale, RoundButton } from '../ui/session/Press'
+import { PressScale, RoundButton } from '../ui/session/Press'
 import {
   MODE_ICON,
   modeLook,
@@ -266,7 +266,6 @@ export function QueueStack(props: {
   const count = session.queue.length
   const open = keyboardUp ? (typing?.open ?? false) : (chosen ?? count === 1)
   const toggle = () => {
-    gentle()
     if (keyboardUp) setTyping({ open: !open })
     else setPrefs({ queueOpen: !open })
   }

@@ -14,7 +14,6 @@ import { joinGroups, type MenuNode } from '../ui/menu'
 import { copyText, plainText } from '../ui/session/feedback'
 import { G, Icon, type IconSpec } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
-import { gentle } from '../ui/session/Press'
 import { RunRow } from '../ui/session/RunRow'
 import { selectText } from '../ui/session/SelectText'
 import { answerWords, ThoughtRow, ToolRow } from '../ui/session/ToolRow'
@@ -202,7 +201,6 @@ function Compaction(props: { entry: Of<'compaction'> }) {
     <View>
       <Pressable
         onPress={() => {
-          gentle()
           setOpen((v) => !v)
         }}
         disabled={!expandable}

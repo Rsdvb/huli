@@ -13,8 +13,8 @@ import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
 import { G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useSessionTokens } from './palette'
-import { gentle } from './Press'
-import { LiveTime, ThoughtRow, ToolRow, useOpenFade } from './ToolRow'
+import { useOpenFade } from './Press'
+import { LiveTime, ThoughtRow, ToolRow } from './ToolRow'
 import {
   diffStats,
   formatMs,
@@ -111,7 +111,6 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
     <View>
       <Pressable
         onPress={() => {
-          gentle()
           setOpen((v) => !v)
         }}
         accessibilityRole="button"

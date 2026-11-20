@@ -19,6 +19,7 @@ import { copyText } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { useSessionRows } from '../../ui/session/context'
+import { useDisclosure } from '../../ui/session/disclosure'
 import { CardButton, E, SendState, useSender } from './kit'
 
 type Notice = Extract<ThreadEntry, { kind: 'notice' }>
@@ -67,7 +68,7 @@ export function NoticeEntry(props: { entry: Notice }) {
   }))
   const link = useLink()
   const sender = useSender()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(`notice:${entry.id}`)
   // Held after it went: the button goes once the turn that starts reaches the phone.
   const [sent, setSent] = useState(false)
   const credit = entry.cause === 'out_of_credit'

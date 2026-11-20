@@ -5,7 +5,6 @@ import { useState, type ReactNode } from 'react'
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native'
 import { useDisclosure } from './disclosure'
 import { useSessionTokens } from './palette'
-import { gentle } from './Press'
 
 // Past the height by less than this, the content shows whole: a button would hide too little.
 const SLACK = 24
@@ -62,7 +61,6 @@ export function Clamp(props: {
       {cut && (
         <Pressable
           onPress={() => {
-            gentle()
             setOpen((v) => !v)
           }}
           hitSlop={8}

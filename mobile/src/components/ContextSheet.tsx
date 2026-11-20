@@ -30,7 +30,6 @@ import {
 } from '../ui/session/limits'
 import { useSessionTokens } from '../ui/session/palette'
 import { shortModelName } from '../ui/session/optionText'
-import { gentle } from '../ui/session/Press'
 import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
 import { modelName, optionOf, shownChoice } from './ConfigMenus'
@@ -183,7 +182,6 @@ export function ContextSheet(props: {
     : null
 
   const toggle = (name: string) => {
-    gentle()
     setOpen((was) => (was === name ? null : name))
   }
 

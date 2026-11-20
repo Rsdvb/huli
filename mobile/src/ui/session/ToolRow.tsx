@@ -4,7 +4,7 @@
 // while it waits. Tapped, it opens to its command and output, its result or the file it read, and
 // its edits, each opening to its diff.
 
-import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -27,9 +27,8 @@ import { plainText } from './feedback'
 import { relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useTenth } from './now'
-import { useReducedMotion } from '../motion'
 import { MONO, useSessionTokens } from './palette'
-import { gentle } from './Press'
+import { useOpenFade } from './Press'
 import { Counts } from './TurnChanges'
 import { toolEdits, type FileEdit } from './turns'
 import {
@@ -253,24 +252,6 @@ export function StepLine(props: {
 }
 
 /**
- * The opacity of what a disclosure opens: it fades in when opened here, but not when a row that
- * was open mounts again as it scrolls back into view, nor under Reduce Motion.
- */
-export function useOpenFade(open: boolean): Animated.Value {
-  const reduce = useReducedMotion()
-  const shown = useRef(new Animated.Value(1)).current
-  const was = useRef(open)
-  useLayoutEffect(() => {
-    if (open && !was.current && !reduce) {
-      shown.setValue(0)
-      Animated.timing(shown, { toValue: 1, duration: 180, useNativeDriver: true }).start()
-    }
-    was.current = open
-  }, [open, reduce, shown])
-  return shown
-}
-
-/**
  * A step that opens into a rounded card its line heads, over its sections. Closed or open the line
  * keeps its view and its place: the card reaches out around it rather than pushing it in, and what
  * opens fades in under it, so only the rows below move.
@@ -323,7 +304,6 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
     (typeof result === 'object' && result?.by === 'routine' ? '由例程允许' : undefined)
   const body = hasBody(entry, label)
   const toggle = () => {
-    gentle()
     setOpen((v) => !v)
   }
   const line = (
@@ -423,7 +403,13 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
         </Text>
       ) : null}
       {command ? (
-        <ShellBlock sessionId={sessionId} command={command} output={output} status={entry.status} />
+        <ShellBlock
+          sessionId={sessionId}
+          id={entry.id}
+          command={command}
+          output={output}
+          status={entry.status}
+        />
       ) : null}
       {content.map((part, i) => {
         if (part.type === 'markdown') {
@@ -526,7 +512,6 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
       onToggle={
         has
           ? () => {
-              gentle()
               setOpen((v) => !v)
             }
           : null

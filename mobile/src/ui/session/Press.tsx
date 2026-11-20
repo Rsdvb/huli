@@ -1,9 +1,10 @@
 // Press feedback for the session screens: a control that settles a little smaller while held, a
 // round icon button, and the gentle layout change a disclosure opens with. All honor Reduce Motion.
 
-import type { ReactNode } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import {
   AccessibilityInfo,
+  Animated,
   LayoutAnimation,
   Pressable,
   type PressableProps,
@@ -134,4 +135,22 @@ export function RoundButton(
       ]}
     />
   )
+}
+
+/**
+ * The opacity of what a disclosure opens: it fades in when opened here, but not when a row that
+ * was open mounts again as it scrolls back into view, nor under Reduce Motion.
+ */
+export function useOpenFade(open: boolean): Animated.Value {
+  const reduce = useReducedMotion()
+  const shown = useRef(new Animated.Value(1)).current
+  const was = useRef(open)
+  useLayoutEffect(() => {
+    if (open && !was.current && !reduce) {
+      shown.setValue(0)
+      Animated.timing(shown, { toValue: 1, duration: 180, useNativeDriver: true }).start()
+    }
+    was.current = open
+  }, [open, reduce, shown])
+  return shown
 }

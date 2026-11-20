@@ -31,7 +31,8 @@ import { useSessionRows } from '../../ui/session/context'
 import { copyText, haptic } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
-import { gentle, PressScale } from '../../ui/session/Press'
+import { useDisclosure } from '../../ui/session/disclosure'
+import { PressScale } from '../../ui/session/Press'
 import { Markdown } from '../Markdown'
 import { useAgentName } from './AccessEntries'
 import { CardButton, E, SendState, useSender } from './kit'
@@ -159,7 +160,6 @@ function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) 
           {height > PLAN_PEEK && (
             <Pressable
               onPress={() => {
-                gentle()
                 setSheet(true)
               }}
               hitSlop={8}
@@ -429,7 +429,7 @@ export function PlanSettled(props: { entry: ToolEntry }) {
   const { entry } = props
   const { c } = useSessionTokens()
   const { config } = useSessionRows((r) => ({ config: r.config }))
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(`plan:${entry.id}`)
   const result = entry.permissionResult
   const markdown = planMarkdown(entry)
   const version = entry.planVersion ?? 1
@@ -459,7 +459,6 @@ export function PlanSettled(props: { entry: ToolEntry }) {
       <View style={[styles.settled, { backgroundColor: c.fill }]}>
         <Pressable
           onPress={() => {
-            gentle()
             setOpen((v) => !v)
           }}
           disabled={!markdown}

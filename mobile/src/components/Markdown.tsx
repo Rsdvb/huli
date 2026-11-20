@@ -35,7 +35,7 @@ import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
 import { keepBlocks, parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
-import { gentle, PressScale } from '../ui/session/Press'
+import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
 
 export type MarkdownSize = 'body' | 'compact'
@@ -387,7 +387,6 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
       {foldable && (
         <Pressable
           onPress={() => {
-            gentle()
             setFolded((v) => !v)
           }}
           accessibilityRole="button"

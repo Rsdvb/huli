@@ -15,6 +15,7 @@ import { useSession } from '../../host'
 import { ContextMenu } from '../../ui/ContextMenu'
 import type { MenuNode } from '../../ui/menu'
 import { copyText } from '../../ui/session/feedback'
+import { useDisclosure } from '../../ui/session/disclosure'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { selectText } from '../../ui/session/SelectText'
@@ -207,12 +208,14 @@ export function StepSection(props: {
 /** The command's block and its output's, for a shell call's opened row. */
 export function ShellBlock(props: {
   sessionId: string
+  /** The call's, so its output stays shown whole as the list mounts the row again. */
+  id: string
   command: string
   output: string | null
   status: ToolEntry['status']
 }) {
   const { c } = useSessionTokens()
-  const [all, setAll] = useState(false)
+  const [all, setAll] = useDisclosure(`shell-all:${props.id}`)
   const agentId = useSession(props.sessionId)?.agentId
   const harness = agentId && isAgentId(agentId) ? harnessOf(agentId) : null
   const exit = exitOf(props.output, props.status, harness)
@@ -239,19 +242,31 @@ export function ShellBlock(props: {
             <Text style={[styles.none, { color: c.textTertiary }]}>没有输出</Text>
           ) : (
             <>
+              {all && raw.length > MOST_CHARS ? (
+                // Laying out more than this would hold the screen up; the copy has all of it.
+                <Text style={[styles.earlierText, { color: c.textTertiary }]}>
+                  只显示最后 {Math.round(MOST_CHARS / 1000)}k 个字符，复制可得到全部输出
+                </Text>
+              ) : null}
               <Printed text={all ? printed : shown} color={c.text} />
-              {earlier > 0 && !all && (
+              {earlier > 0 && (
                 <Pressable
-                  onPress={() => setAll(true)}
+                  onPress={() => setAll((v) => !v)}
                   hitSlop={6}
                   accessibilityRole="button"
-                  accessibilityLabel={`显示全部，还有前面 ${earlier} 行`}
+                  accessibilityLabel={
+                    all ? '收起，只看最后几行' : `显示全部，还有前面 ${earlier} 行`
+                  }
                   style={styles.earlier}
                 >
-                  <Text style={[styles.earlierText, { color: c.tint }]}>显示全部</Text>
-                  <Text style={[styles.earlierText, { color: c.textTertiary }]}>
-                    前面还有 {earlier} 行
+                  <Text style={[styles.earlierText, { color: c.tint }]}>
+                    {all ? '收起' : '显示全部'}
                   </Text>
+                  {all ? null : (
+                    <Text style={[styles.earlierText, { color: c.textTertiary }]}>
+                      前面还有 {earlier} 行
+                    </Text>
+                  )}
                 </Pressable>
               )}
             </>
