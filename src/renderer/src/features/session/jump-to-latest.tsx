@@ -22,6 +22,7 @@ const AFTER_END = new Set([
   'artifact',
   'browser_origin',
   'device_access',
+  'surface_access',
   'computer_app',
   'computer_setup',
   'control_ask',
@@ -31,6 +32,7 @@ const AFTER_END = new Set([
   'problem_report',
   'memory',
   'market_publish',
+  'settings_change',
   'session_started',
 ])
 

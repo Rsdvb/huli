@@ -74,6 +74,16 @@ describe('createValidators', () => {
     expect(posix['sessions.import']({ ...base, fork: 'yes' })).toEqual(base)
   })
 
+  it('archives a whole tree unless asked, as a boolean, to leave the sub-sessions', () => {
+    const archive = posix['sessions.archive']
+    expect(archive({ sessionId: 's' })).toEqual({ sessionId: 's' })
+    expect(archive({ sessionId: 's', subSessions: false })).toEqual({
+      sessionId: 's',
+      subSessions: false,
+    })
+    rejects(() => archive({ sessionId: 's', subSessions: 'false' }))
+  })
+
   it('takes a session and a bounded task id for a background task', () => {
     for (const method of ['sessions.stopTask', 'sessions.taskOutput'] as const) {
       expect(posix[method]({ sessionId: 's', taskId: 'b1', other: 1 })).toEqual({
@@ -505,6 +515,14 @@ describe('createValidators', () => {
     rejects(() => windows['sessions.create']({ agentId: 'codex', projectPath: 'app' }))
   })
 
+  it('requires an absolute project path and an explicit boolean for pinning', () => {
+    const pin = posix['projects.pin']
+    expect(pin({ path: '/repo', pinned: false })).toEqual({ path: '/repo', pinned: false })
+    rejects(() => pin({ path: 'repo', pinned: true }))
+    rejects(() => pin({ path: '/repo', pinned: 'true' }))
+    rejects(() => pin({ path: '/repo' }))
+  })
+
   it('keeps optional fields out when absent', () => {
     expect(
       posix['sessions.create']({ agentId: 'codex', projectPath: '/p', parentId: undefined }),
@@ -552,16 +570,19 @@ describe('createValidators', () => {
     })
   })
 
-  it('takes a reset credit to redeem only by its id', () => {
-    const redeem = posix['agents.useResetCredit']
-    expect(redeem({ agentId: 'codex' })).toEqual({ agentId: 'codex' })
-    expect(redeem({ agentId: 'codex', creditId: 'rc_1', extra: 1 })).toEqual({
+  it('takes a reset credit to spend only with a credit id and a UUID v4 request id', () => {
+    const spend = posix['agents.spendReset']
+    const requestId = '0b0e7a52-6d0c-4a6e-9a3b-0d6f6f0c2a11'
+    expect(spend({ agentId: 'codex', creditId: 'RateLimitResetCredit_abc-1', requestId })).toEqual({
       agentId: 'codex',
-      creditId: 'rc_1',
+      creditId: 'RateLimitResetCredit_abc-1',
+      requestId,
     })
-    rejects(() => redeem({ agentId: 'codex', creditId: 7 }))
-    rejects(() => redeem({ agentId: 'codex', creditId: 'x'.repeat(257) }))
-    rejects(() => redeem({ creditId: 'rc_1' }))
+    rejects(() => spend({ agentId: 'codex', creditId: '../consume?x=1', requestId }))
+    rejects(() => spend({ agentId: 'codex', creditId: '', requestId }))
+    rejects(() => spend({ agentId: 'codex', creditId: 'a', requestId: 'again' }))
+    rejects(() => spend({ agentId: 'codex', creditId: 'a' }))
+    rejects(() => spend({ agentId: 'nobody', creditId: 'a', requestId }))
   })
 
   it('takes a read the user asked for only as a flag', () => {
@@ -828,6 +849,50 @@ describe('promptContent', () => {
       { type: 'ref', ref: { kind: 'image', mimeType: 'image/png', data: png } },
       { type: 'ref', ref: { kind: 'link', uri: 'file:///a.ts', name: 'a.ts' } },
     ])
+  })
+
+  it('keeps a browser tab and a device the user referenced by their ids and names alone', () => {
+    expect(
+      promptContent([
+        { type: 'text', text: 'Look at @page:t4 on @device:0E02CA7B' },
+        { type: 'ref', ref: { kind: 'page', tabId: 't4', name: 'Mail', url: 'x' } },
+        { type: 'ref', ref: { kind: 'device', deviceId: 'ios-sim:0E02', name: 'iPhone 17' } },
+      ]),
+    ).toEqual([
+      { type: 'text', text: 'Look at @page:t4 on @device:0E02CA7B' },
+      { type: 'ref', ref: { kind: 'page', tabId: 't4', name: 'Mail' } },
+      { type: 'ref', ref: { kind: 'device', deviceId: 'ios-sim:0E02', name: 'iPhone 17' } },
+    ])
+    rejects(() =>
+      promptContent([
+        { type: 'text', text: 'x' },
+        { type: 'ref', ref: { kind: 'page', name: 'x' } },
+      ]),
+    )
+  })
+
+  it('keeps a terminal the user referenced by its id and name alone', () => {
+    expect(
+      promptContent([
+        { type: 'text', text: 'Carry on in @terminal:3fa2c1d0' },
+        { type: 'ref', ref: { kind: 'terminal', terminalId: 't-1', name: 'pnpm dev', run: 'x' } },
+      ]),
+    ).toEqual([
+      { type: 'text', text: 'Carry on in @terminal:3fa2c1d0' },
+      { type: 'ref', ref: { kind: 'terminal', terminalId: 't-1', name: 'pnpm dev' } },
+    ])
+    rejects(() =>
+      promptContent([
+        { type: 'text', text: 'x' },
+        { type: 'ref', ref: { kind: 'terminal', terminalId: 't-1', name: 'n'.repeat(257) } },
+      ]),
+    )
+    rejects(() =>
+      promptContent([
+        { type: 'text', text: 'x' },
+        { type: 'ref', ref: { kind: 'terminal', name: 'zsh' } },
+      ]),
+    )
   })
 
   it('rejects empty prompts and content the agent cannot take', () => {

@@ -219,6 +219,7 @@ export function settled(entry: ThreadEntry): ThreadEntry {
       return entry.status === 'in_progress' ? { ...entry, status: 'cancelled' } : entry
     case 'browser_origin':
     case 'device_access':
+    case 'surface_access':
       // A request still waiting went unanswered: its page is gone with the session.
       return entry.decision === null ? { ...entry, decision: 'timeout' } : entry
     case 'computer_app':
@@ -240,6 +241,9 @@ export function settled(entry: ThreadEntry): ThreadEntry {
       return entry.outcome.kind === 'publishing' || entry.outcome.kind === 'unlisting'
         ? { ...entry, outcome: { kind: 'interrupted' } }
         : entry
+    case 'settings_change':
+      // A card still waiting ended with the turn that asked, and changed nothing.
+      return entry.outcome === null ? { ...entry, outcome: { kind: 'ended' } } : entry
     case 'tool': {
       const open = entry.status === 'pending' || entry.status === 'in_progress'
       if (!open && entry.permission === null) return entry

@@ -10,7 +10,7 @@ import { usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useAgentNetwork, useAgentNetworkStore } from '@renderer/stores/agent-network'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { SetButton } from './controls'
-import { english, type GroupDef, type RowDef, type SectionDef } from './model'
+import type { GroupDef, RowDef, SectionDef } from './model'
 import {
   DefaultNodeControl,
   ExitCheckAction,
@@ -35,7 +35,6 @@ function group(id: string, label: string, extra?: Omit<GroupDef, 'id' | 'label'>
 
 export function useAgentNetworkSection(): SectionDef {
   const { t } = useTranslation('settings')
-  const en = english()
   useAgentNetwork()
   const status = useAgentNetworkStore((s) => s.status)
   const statusError = useAgentNetworkStore((s) => s.statusError)
@@ -114,30 +113,24 @@ export function useAgentNetworkSection(): SectionDef {
   const rows: RowDef[] = [
     {
       id: 'enabled',
-      name: t('network.enabled.name'),
-      english: en('network.enabled.name'),
-      description: t('network.enabled.description'),
-      keywords: t('network.enabled.keywords'),
+      setting: 'agent-network.enabled',
       group: main,
       render: () => <NetworkSwitch label={t('network.enabled.name')} />,
     },
     {
       id: 'status',
-      name: t('network.status.name'),
-      english: en('network.status.name'),
+      setting: 'agent-network.status',
       group: main,
       render: () => <NetworkState status={status} />,
     },
     {
       id: 'interface',
-      name: t('network.interface.name'),
-      english: en('network.interface.name'),
+      setting: 'agent-network.interface',
       description: status?.interface.detected
         ? t('network.interface.descriptionFound', { name: status.interface.detected })
         : enabled && status?.problem === 'interface'
           ? t('network.interface.descriptionNone')
           : t('network.interface.description'),
-      keywords: t('network.interface.keywords'),
       group: main,
       render: () => <InterfaceField label={t('network.interface.name')} />,
     },
@@ -145,8 +138,8 @@ export function useAgentNetworkSection(): SectionDef {
       ? [
           {
             id: 'no-subscriptions',
-            name: t('network.subscriptions.emptyTitle'),
-            keywords: t('network.subscriptions.keywords'),
+            setting: 'agent-network.subscriptions',
+            item: { name: t('network.subscriptions.emptyTitle') },
             group: subs,
             layout: 'custom',
             render: () => (
@@ -161,8 +154,8 @@ export function useAgentNetworkSection(): SectionDef {
         ]
       : subscriptions.map((sub): RowDef => ({
           id: `subscription-${sub.id}`,
-          name: sub.name,
-          keywords: t('network.subscriptions.keywords'),
+          setting: 'agent-network.subscriptions',
+          item: { name: sub.name, keywords: t('network.subscriptions.keywords') },
           group: subs,
           layout: 'custom',
           render: () => (
@@ -175,21 +168,19 @@ export function useAgentNetworkSection(): SectionDef {
         }))),
     {
       id: 'default-node',
-      name: t('network.default.name'),
-      english: en('network.default.name'),
+      setting: 'agent-network.default-node',
       description:
         running && nodes?.length === 0
           ? t('network.default.noNodes')
           : t('network.default.description'),
-      keywords: t('network.default.keywords'),
       group: defaults,
       render: () => <DefaultNodeControl label={t('network.default.name')} />,
     },
     ...(interfaces && interfaces.length > 0
       ? interfaces.map((item): RowDef => ({
           id: `interface-${item.name}`,
-          name: item.name,
-          keywords: t('network.interfaces.keywords'),
+          setting: 'agent-network.interfaces',
+          item: { name: item.name, keywords: t('network.interfaces.keywords') },
           group: interfaceGroup,
           layout: 'custom',
           render: () => <InterfaceRow item={item} agents={boundTo(item.name)} />,
@@ -197,8 +188,7 @@ export function useAgentNetworkSection(): SectionDef {
       : [
           {
             id: 'no-interfaces',
-            name: t('network.groups.interfaces'),
-            keywords: t('network.interfaces.keywords'),
+            setting: 'agent-network.interfaces',
             group: interfaceGroup,
             layout: 'custom',
             render: () => <InterfacesEmpty />,
@@ -206,8 +196,8 @@ export function useAgentNetworkSection(): SectionDef {
         ]),
     ...agents.map((agent): RowDef => ({
       id: `agent-${agent.id}`,
-      name: agent.name,
-      keywords: t('network.choice.keywords'),
+      setting: 'agent-network.agents',
+      item: { name: agent.name, keywords: t('network.choice.keywords') },
       group: agentGroup,
       rich: <ExitLine agentId={agent.id} />,
       render: () => (

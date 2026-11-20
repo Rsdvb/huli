@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { CONTEXT_REFRESH_MS, type ContextReport } from '@shared/context'
 export type { ContextReport } from '@shared/context'
+import type { ResetSpendCode } from '@shared/agent-host'
 import type { AgentId } from '@shared/thread'
 import type { UsageScope, UsageStatus, UsageSummary, UsageTotal } from '@shared/usage'
 import {
@@ -141,6 +142,16 @@ export function refreshLimits(
   ask = false,
 ): Promise<void> {
   return hostAt(hostId, 'agents.refreshLimits', ask ? { agentId, ask } : { agentId })
+}
+
+/** Spends one of an account's reset credits through `hostId`'s agent; it cannot be undone. */
+export function spendReset(
+  hostId: string | null,
+  agentId: AgentId,
+  creditId: string,
+  requestId: string,
+): Promise<{ code: ResetSpendCode }> {
+  return hostAt(hostId, 'agents.spendReset', { agentId, creditId, requestId })
 }
 
 /** What reads every plan limit this window knows of, by card key, each account once. */

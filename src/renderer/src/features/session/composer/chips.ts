@@ -1,11 +1,15 @@
 // What in a prompt's text reads as a chip: the command it starts with, `@` mentions of attached
-// or project files, and links. Chips are only how the text looks; the text is what is sent.
+// or project files and of the session's terminals, and links. Chips are only how the text looks;
+// the text is what is sent, with a ref for each terminal it mentions.
 
 import { leadingCommand } from './slash'
 
 /** What an `@` mention names, once resolved against the attachments and the project. */
 export interface MentionTarget {
-  kind: 'file' | 'folder' | 'image'
+  kind: 'file' | 'folder' | 'image' | SurfaceMention
+  /** The terminal, browser tab or device it stands for, and the name its tab shows. */
+  surfaceId?: string
+  name?: string
   /** The draft attachment it stands for, when one has its name. */
   attachmentKey?: string
   /** The path relative to the project, when the project has it. */
@@ -151,8 +155,13 @@ export function findChips(text: string, context: ChipContext): Chip[] {
     const found = resolveMention(match[2]!, context.resolve)
     if (!found) continue
     const { token, name, lines, target } = found
-    const label =
-      target.kind === 'folder' ? (name.endsWith('/') ? name : `${name}/`) : basename(name)
+    const label = isSurfaceMention(target.kind)
+      ? (target.name ?? name)
+      : target.kind === 'folder'
+        ? name.endsWith('/')
+          ? name
+          : `${name}/`
+        : basename(name)
     chips.push({ ...target, from, to: from + 1 + token.length, label, lines })
   }
   const taken = (from: number, to: number) => chips.some((c) => from < c.to && to > c.from)
@@ -192,9 +201,86 @@ export function mentionedAs(item: { name: string; kind: string }): string {
   return item.kind === 'folder' ? `${item.name}/` : item.name
 }
 
+/** What else of the session a message can mention, which the agent may then use. */
+export type SurfaceMention = 'terminal' | 'page' | 'device'
+const SURFACE_MENTIONS: readonly SurfaceMention[] = ['terminal', 'page', 'device']
+
+export function isSurfaceMention(kind: string): kind is SurfaceMention {
+  return (SURFACE_MENTIONS as readonly string[]).includes(kind)
+}
+
+/** A terminal, browser tab or device as a mention names it: its id and the name its tab shows. */
+export interface MentionItem {
+  id: string
+  name: string
+}
+
+/** The session's terminals, browser tabs and devices that a message can mention. */
+export interface MentionSurfaces {
+  terminal: readonly MentionItem[]
+  page: readonly MentionItem[]
+  device: readonly MentionItem[]
+}
+
+export const NO_SURFACES: MentionSurfaces = { terminal: [], page: [], device: [] }
+
+// Enough of an id to tell the session's terminals, tabs or devices apart; a device's id starts with
+// its kind, so its own part after the last colon counts.
+const SHORT_ID_CHARS = 8
+
+function shortId(id: string): string {
+  return id
+    .slice(id.lastIndexOf(':') + 1)
+    .replace(/[^A-Za-z0-9]/g, '')
+    .slice(0, SHORT_ID_CHARS)
+}
+
+/** How the text mentions a terminal, tab or device: its name, with spaces, would end the mention. */
+export function surfaceMention(kind: SurfaceMention, id: string): string {
+  return `@${kind}:${shortId(id)}`
+}
+
+/** A terminal, tab or device the text mentions as `<kind>:<short id>`, among `surfaces`. */
+function surfaceOf(token: string, surfaces: MentionSurfaces): MentionTarget | null {
+  const colon = token.indexOf(':')
+  const kind = token.slice(0, colon)
+  if (colon < 1 || !isSurfaceMention(kind)) return null
+  const short = token.slice(colon + 1)
+  if (!short) return null
+  const item = surfaces[kind].find((entry) => shortId(entry.id) === short)
+  return item ? { kind, surfaceId: item.id, name: item.name } : null
+}
+
+/** The terminals, tabs and devices the text mentions, as a prompt carries them, each once. */
+export function surfaceRefs(
+  text: string,
+  resolve: (token: string) => MentionTarget | null,
+): SurfaceRef[] {
+  const refs = new Map<string, SurfaceRef>()
+  for (const chip of findChips(text, { commands: [], resolve })) {
+    if (!('surfaceId' in chip) || !chip.surfaceId) continue
+    const id = chip.surfaceId
+    const ref: SurfaceRef | null =
+      chip.kind === 'terminal'
+        ? { kind: 'terminal', terminalId: id, name: chip.label }
+        : chip.kind === 'page'
+          ? { kind: 'page', tabId: id, name: chip.label }
+          : chip.kind === 'device'
+            ? { kind: 'device', deviceId: id, name: chip.label }
+            : null
+    if (ref) refs.set(`${chip.kind}:${id}`, ref)
+  }
+  return [...refs.values()]
+}
+
+export type SurfaceRef =
+  | { kind: 'terminal'; terminalId: string; name: string }
+  | { kind: 'page'; tabId: string; name: string }
+  | { kind: 'device'; deviceId: string; name: string }
+
 /**
- * Resolves a mention against the attachments first, by the name it is written as, then against
- * the project's files and folders by path.
+ * Resolves a mention against the session's terminals and the attachments first, by the name it is
+ * written as, then against the project's files and folders by path.
  */
 export function mentionResolver(
   attachments: readonly {
@@ -205,8 +291,11 @@ export function mentionResolver(
     thumb?: string | null
   }[],
   project: { files: ReadonlySet<string>; folders: ReadonlySet<string> } | null,
+  surfaces: MentionSurfaces = NO_SURFACES,
 ): (token: string) => MentionTarget | null {
   return (token) => {
+    const surface = surfaceOf(token, surfaces)
+    if (surface) return surface
     const item = attachments.find(
       (a) => a.kind !== 'text' && (mentionedAs(a) === token || a.name === token),
     )

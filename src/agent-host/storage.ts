@@ -271,6 +271,7 @@ export interface ProjectRecord {
   name: string
   addedAt: number
   lastOpenedAt: number
+  pinnedAt?: number
   worktree?: Partial<ProjectWorktreeSettings> // only what differs from the defaults
 }
 
@@ -318,6 +319,8 @@ export interface SessionRecord {
   model?: string // the model option as its last turn left it, which an estimate of the cache needs
   pinnedAt?: number // when the user pinned it, which orders the Pinned group
   archivedAt?: number // when the user archived it; off the sidebar while set
+  /** Archived alone: the sub-sessions it left in the list, which restoring it puts back under it. */
+  leftSubSessions?: string[]
   startedBy?: string // the session whose agent started it through start_session
   configDir?: string // the configuration folder picked for its agent when it was created
   pullRequests?: string[] // the pull requests it opened, oldest first, by their github.com URL
@@ -667,6 +670,7 @@ export function parseProjectsFile(data: Record<string, unknown>): ProjectsFile |
       name: item.name,
       addedAt: item.addedAt,
       lastOpenedAt: item.lastOpenedAt,
+      ...(isTime(item.pinnedAt) ? { pinnedAt: item.pinnedAt } : {}),
       ...projectWorktreeOf(item.worktree),
     })
   }
@@ -935,6 +939,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...(isString(item.model) ? { model: item.model } : {}),
       ...(isTime(item.pinnedAt) ? { pinnedAt: item.pinnedAt } : {}),
       ...(isTime(item.archivedAt) ? { archivedAt: item.archivedAt } : {}),
+      ...leftSubSessionsOf(item.leftSubSessions),
       ...(isString(item.startedBy) ? { startedBy: item.startedBy } : {}),
       ...(isString(item.configDir) && item.configDir !== '' ? { configDir: item.configDir } : {}),
       ...pullRequestsOf(item.pullRequests),
@@ -1262,6 +1267,12 @@ function pullRequestsOf(value: unknown): { pullRequests?: string[] } {
     ),
   ].slice(-MAX_SESSION_PULL_REQUESTS)
   return urls.length > 0 ? { pullRequests: urls } : {}
+}
+
+function leftSubSessionsOf(value: unknown): { leftSubSessions?: string[] } {
+  if (!Array.isArray(value)) return {}
+  const ids = [...new Set(value.filter((id): id is string => isString(id) && id !== ''))]
+  return ids.length > 0 ? { leftSubSessions: ids } : {}
 }
 
 export function sessionsFile(userDataPath: string, log: LogFn): JsonFile<SessionsFile> {

@@ -20,12 +20,12 @@ import type {
   ClaudeSettings,
   CodebuddySettings,
   CodebuddySiteChange,
-  InstalledCli,
   McpStatus,
   PlanLimit,
+  PlanResets,
   ProviderBalance,
-  ResetCreditOutcome,
-  ResetCredits,
+  ResetsError,
+  ResetSpendCode,
   VersionMoveReason,
 } from '@shared/agent-host'
 import {
@@ -42,7 +42,13 @@ import { readCopilotQuota } from './vendor-usage/copilot'
 import { readKiloProfile } from './vendor-usage/kilo'
 import { readQoderUsage } from './vendor-usage/qoder'
 import { storedSignInReader } from './vendor-usage/readers'
-import { readerOpen, type StoredSignInReader } from './vendor-usage/stored-sign-in'
+import { readerOpen, UsageReadError, type StoredSignInReader } from './vendor-usage/stored-sign-in'
+import {
+  CODEX_RESETS_VERSION,
+  readCodexResets,
+  spendCodexReset,
+  type CodexPlace,
+} from './vendor-usage/codex'
 import type { VendorUsage } from './vendor-usage/common'
 import {
   ANTIGRAVITY_PLAN_SIGN_INS,
@@ -134,8 +140,9 @@ import {
 import {
   detectAgent,
   displayCommand,
-  protocolOf,
+  EXTENSIONS_FOLDER,
   type AgentDefinition,
+  type AgentProtocol,
   type CommandWords,
   type DetectContext,
   type Detection,
@@ -152,7 +159,7 @@ import {
 } from './connection'
 import type { Diagnostics } from './diagnostics'
 import type { AgentDriver, AgentTransport } from './driver'
-import { driverOf, type DriverOverrides } from './drivers'
+import { driverOf, preferredProtocol, protocolFor, type DriverOverrides } from './drivers'
 import { HostError, invalidParams } from './errors'
 import { getEnv, isExecutableFile, type Env } from './find-command'
 import {
@@ -183,6 +190,8 @@ import { HostedRun, type HostedRunHooks } from './hosted-run'
 import { t } from './i18n'
 import { CliVersions, type CliProbe, type CliVersion } from './installed-cli'
 import { OpenCodeClient } from './opencode/client'
+import { OpenCodeConnection } from './opencode/connection'
+import type { OpenCodeSessions } from './model-requests/opencode'
 import { readProviderUsage, type ProviderUsage } from './opencode/provider-usage'
 import { claudeJsonPath, readClaudeProfile } from './plan-tier'
 import { QUIT_REASON, type ToolOptions } from './process-tree'
@@ -340,6 +349,8 @@ export interface AgentManagerDeps extends DriverOverrides {
   adaptersDir: string
   /** The session router a per-session agent launches through; null without one. */
   sessionRouterPath?: string | null
+  /** The bundle of the process that runs Cline's SDK; null without one. */
+  clineHostPath?: string | null
   detect?(def: AgentDefinition, ctx: DetectContext): Promise<Detection>
   install?(options: InstallOptions): Promise<InstalledAdapter>
   /** Downloads and extracts a binary agent's release archive. */
@@ -440,11 +451,10 @@ class Harness {
   cliMethod: AgentInstallMethod['id'] | null = null
   /** A binary agent's version, from its own `--version`, until it starts and reports its own. */
   binaryVersion: string | null = null
-  /** The `requires` program detection found, and the version it printed. */
-  requiresProgram: string | null = null
-  requiresVersion: string | null = null
   /** The program `binaryVersion` was read from, so an answer for another one is dropped. */
   binaryProgram: string | null = null
+  /** The `--version` question that fills `binaryVersion`, while or once it is asked. */
+  binaryVersionAsked: Promise<void> | null = null
   /** The `--version` failure already logged, so a repeated detection logs it once. */
   binaryVersionFailure: string | null = null
   /** The program's install routes, found at detection. */
@@ -469,6 +479,10 @@ class Slot {
   stopping: Promise<void> | null = null
   /** What the running launch ran, which is the command shown while it runs. */
   launchSpec: LaunchSpec | null = null
+  /** The harness's preferred interface, while the launch runs on it instead of its protocol. */
+  protocol: AgentProtocol | null = null
+  /** The version of the program whose preferred interface did not start, which runs without it. */
+  preferredFailed: string | null = null
   /** The configuration folder the running launch got, for an agent whose folder can be chosen. */
   launchConfig: RunningConfig | null = null
   intentionalStop = false
@@ -486,8 +500,6 @@ class Slot {
   balanceReadAt = 0
   limits = new Map<string, PlanLimit>()
   balances: ProviderBalance[] = []
-  /** The limit reset credits the last read found, for an agent that can redeem them. */
-  resetCredits: ResetCredits | null = null
   /** Kettu handed the harness an API key for this agent, which it never reads back. */
   apiKey = false
   /** The capabilities of the last `initialize`, from this run or an earlier one. */
@@ -498,6 +510,12 @@ class Slot {
   limitsReadAt = 0
   /** Why the last limits read failed; null once one succeeds. */
   limitsError: string | null = null
+  /** Codex's reset credits as last read; null while it holds none or none were read. */
+  resets: PlanResets | null = null
+  resetsError: ResetsError | null = null
+  resetsRun: Promise<void> | null = null
+  resetsReadAt = 0
+  resetsRetry: ReturnType<typeof setTimeout> | null = null
   optionsRun: Promise<void> | null = null
   /** The removal of the hidden session that read the options, once its `session/new` answered. */
   optionsRemoval: Promise<void> | null = null
@@ -846,10 +864,6 @@ export class AgentManager {
     h.installedCli = installedCli
     h.installPlans = plans
     h.cliMethod = cliMethod
-    h.requiresProgram =
-      effective.state === 'available' ? (effective.requires?.program ?? null) : null
-    h.requiresVersion =
-      effective.state === 'available' ? (effective.requires?.version ?? null) : null
     // A binary agent's own version is asked in the background, so detection never waits for it.
     // A routed program's launch command is the runtime the router runs on, not the program.
     const program =
@@ -860,6 +874,7 @@ export class AgentManager {
       h.binaryProgram = program
       h.binaryVersion = null
       h.binaryVersionFailure = null
+      h.binaryVersionAsked = null
     }
     for (const slot of this.agentsOf(h)) {
       // A running, installing, failed or recovering agent keeps its lifecycle state.
@@ -870,14 +885,7 @@ export class AgentManager {
       }
     }
     this.emit(this.home(h))
-    if (program) void this.askBinaryVersion(h, program, env)
-  }
-
-  /** The program an adapter runs, as the page shows the user's CLI; null while it is not found. */
-  private requiresCli(detection: Detection | null | undefined): InstalledCli | null {
-    if (detection?.state !== 'available' || !detection.requires) return null
-    const { program, version } = detection.requires
-    return { path: program, version, variable: null, problem: null }
+    if (program) h.binaryVersionAsked = this.askBinaryVersion(h, program, env)
   }
 
   /** How the user's own CLI, or a binary harness's program, was installed. */
@@ -888,7 +896,6 @@ export class AgentManager {
     const installs = h.def.installs
     const found =
       detection.cli?.path ??
-      (detection.state === 'available' ? detection.requires?.program : undefined) ??
       (h.def.launch.kind === 'binary' && detection.state === 'available'
         ? detection.spec?.command
         : undefined)
@@ -1089,9 +1096,16 @@ export class AgentManager {
   private async start(slot: Slot, spec: LaunchSpec | null): Promise<AgentRuntime> {
     const run = (async () => {
       const chosen = spec ?? (await this.installPackage(slot))
+      slot.protocol = preferredProtocol(
+        slot.def,
+        this.programVersion(slot.h, chosen),
+        this.programRule(slot.h),
+        slot.preferredFailed,
+      )
       try {
         return await this.launch(slot, chosen)
       } catch (error) {
+        if (this.leavePreferred(slot, error, chosen)) return this.launch(slot, chosen)
         const previous = await this.fallBack(slot, chosen, error)
         if (!previous) throw error
         return this.launch(slot, previous)
@@ -1141,6 +1155,35 @@ export class AgentManager {
   }
 
   /**
+   * The version of the program a start runs: as detection read it from the user's program, or of
+   * Kettu's own install of a package, which the `spec` it launches names. Null while unknown.
+   */
+  private programVersion(h: Harness, spec: LaunchSpec | null = null): string | null {
+    const detection = h.detection
+    if (detection?.state !== 'available') return null
+    const installed = h.def.launch.kind === 'package' ? (spec?.version ?? null) : null
+    return detection.cli?.version ?? h.binaryVersion ?? installed
+  }
+
+  /**
+   * When a start over the harness's preferred interface fails, the agent starts over its
+   * definition's protocol instead, and keeps to it while its program stays that version. False
+   * when the start that failed already ran on the definition's protocol.
+   */
+  private leavePreferred(slot: Slot, error: unknown, spec: LaunchSpec): boolean {
+    if (slot.protocol === null) return false
+    if (error instanceof InstallCancelled || this.stopped || !this.has(slot.id)) return false
+    slot.preferredFailed = this.programVersion(slot.h, spec)
+    slot.protocol = null
+    this.deps.diagnostics.event(
+      slot.id,
+      'fall back',
+      `its own interface did not start: ${(error as Error).message}`,
+    )
+    return true
+  }
+
+  /**
    * When a version of Kettu's own install that never ran fails to start, the install a start runs
    * without it runs instead, and that version is not taken again until the target moves on. Null
    * when no other install is there, so the start fails as any other.
@@ -1184,6 +1227,11 @@ export class AgentManager {
   private async launch(slot: Slot, spec: LaunchSpec): Promise<AgentRuntime> {
     const { diagnostics } = this.deps
     const agentId = slot.id
+    // A program picked in Settings is asked its version in the background, and a driver that
+    // goes by the version would take one not answered yet for the oldest.
+    if (this.driver(slot).kind === 'hosted' && !slot.h.detection?.cli) {
+      await slot.h.binaryVersionAsked
+    }
     this.registeredSlot(agentId)
     this.assertEnabled(agentId)
     if (this.stopped) throw new Error(`${slot.name} was not started: the host is stopping.`)
@@ -1283,7 +1331,7 @@ export class AgentManager {
   }
 
   private driver(slot: Slot): AgentDriver {
-    return driverOf(slot.def, this.deps)
+    return driverOf(slot.def, this.deps, slot.protocol)
   }
 
   /**
@@ -1363,6 +1411,10 @@ export class AgentManager {
         claudeTestEntrypoint: () => this.deps.settings().claudeTestEntrypoint,
         claudeRun: () => this.deps.settings().claudeRuns[slot.id] ?? null,
         claudePromptSuggestions: () => this.deps.settings().promptSuggestions,
+        cliVersion: slot.h.detection?.cli?.version ?? slot.h.binaryVersion,
+        kettuDir: path.join(this.deps.adaptersDir, EXTENSIONS_FOLDER, slot.def.id),
+        nodeRuntime: this.deps.nodeRuntime,
+        clineHostPath: this.deps.clineHostPath ?? null,
       })
     } catch (error) {
       slot.launched = null
@@ -2006,15 +2058,11 @@ export class AgentManager {
   }
 
   /**
-   * The user's own program, as detection found it: the SDK's CLI, the program an adapter runs, or a
-   * binary harness's program.
+   * The user's own program, as detection found it: the SDK's CLI or a binary harness's program.
    */
   private userProgram(h: Harness): { path: string; version: string | null } | null {
     const detection = h.detection
     if (detection?.cli) return { path: detection.cli.path, version: detection.cli.version }
-    if (detection?.state === 'available' && detection.requires) {
-      return { path: detection.requires.program, version: detection.requires.version }
-    }
     if (h.def.launch.kind !== 'binary' || detection?.state !== 'available' || !detection.spec) {
       return null
     }
@@ -2898,11 +2946,9 @@ export class AgentManager {
   async install(agentId: AgentId, method?: AgentInstallMethod['id']): Promise<void> {
     const { h } = this.slot(agentId)
     await this.detectAll()
-    // The user's program the adapter runs is installed first, the SDK's CLI or pi for pi-acp; one
-    // found too old is updated instead.
+    // The user's program an SDK runs is installed first; one found too old is updated instead.
     const cliMissing = h.detection?.state === 'not-installed' && !h.detection.cli
-    const runsProgram = !!h.def.cli || (!!h.def.requires && !!h.def.installs)
-    if (runsProgram && h.def.launch.kind === 'package' && cliMissing) {
+    if (h.def.cli && h.def.launch.kind === 'package' && cliMissing) {
       return this.installProgram(h, method)
     }
     switch (h.def.launch.kind) {
@@ -3036,9 +3082,7 @@ export class AgentManager {
           npmPrefix: () => this.npmPrefix(plan.tool),
         })
         const command =
-          h.def.cli?.command ??
-          h.def.requires?.command ??
-          (h.def.launch.kind === 'binary' ? h.def.launch.command : agent)
+          h.def.cli?.command ?? (h.def.launch.kind === 'binary' ? h.def.launch.command : agent)
         throw new Error(
           folder
             ? t('agent.binaryInstall.notOnPath', { agent, command, folder })
@@ -3204,6 +3248,7 @@ export class AgentManager {
       slot.failures = []
       slot.state = 'available'
       slot.detail = null
+      slot.preferredFailed = null
       await this.detect(slot.h)
     }
     if (this.hooks.liveSessions(agentId) > 0 && !slot.runtime) await this.ensureReady(agentId)
@@ -3331,6 +3376,10 @@ export class AgentManager {
     this.registryTimer = null
     if (this.limitsTimer) clearInterval(this.limitsTimer)
     this.limitsTimer = null
+    for (const slot of this.slots.values()) {
+      if (slot.resetsRetry) clearTimeout(slot.resetsRetry)
+      slot.resetsRetry = null
+    }
     this.updateAbort?.abort(QUIT_REASON)
     const slots = [...this.slots.values()]
     const harnesses = [...this.harnesses.values()]
@@ -3367,7 +3416,7 @@ export class AgentManager {
   private connectionHooks(slot: Slot): ConnectionHooks {
     const { diagnostics, acpMessages } = this.deps
     const agentId = slot.id
-    const acp = (this.deps.protocols?.[agentId] ?? protocolOf(slot.def)) === 'acp'
+    const acp = protocolFor(slot.def, this.deps, slot.protocol) === 'acp'
     return {
       traffic: (direction, message) => {
         diagnostics.traffic(agentId, direction, message)
@@ -3662,24 +3711,106 @@ export class AgentManager {
     slot.limits.clear()
     for (const limit of merged) slot.limits.set(limit.window, limit)
     const extras = connection.planExtras?.()
-    if (extras) {
-      slot.balances = extras.balances
-      slot.resetCredits = extras.resetCredits
+    if (extras) slot.balances = extras.balances
+    this.emit(slot)
+    // The windows do not wait for the reset credits, which arrive in a status of their own.
+    if (slot.def.id === 'codex') void this.readResets(slot)
+  }
+
+  /** Where Codex keeps its ChatGPT sign-in; null for another agent or an unchecked version. */
+  private codexPlace(slot: Slot): CodexPlace | null {
+    if (slot.def.id !== 'codex' || slot.account?.kind !== 'account') return null
+    const version = slot.init?.version ?? slot.h.binaryVersion
+    const folder = this.configFolder(slot.id)
+    if (!folder || !version || !versionAtLeast(version, CODEX_RESETS_VERSION)) return null
+    if (!/^[\w.+-]+$/.test(version)) return null
+    return {
+      env: this.deps.env.agentEnv(slot.id),
+      home: os.homedir(),
+      platform: this.deps.platform,
+      now: Date.now(),
+      folder,
+      version,
     }
+  }
+
+  /**
+   * Reads Codex's reset credits with the windows, never twice within `RESETS_GAP_MS` however
+   * often a refresh is pressed. Never rejects: what fell short is kept for the status.
+   */
+  private readResets(slot: Slot, retried = false): Promise<void> {
+    if (slot.resetsRun) return slot.resetsRun
+    if (Date.now() - slot.resetsReadAt < RESETS_GAP_MS) return Promise.resolve()
+    slot.resetsRun = this.resetsRead(slot, retried).finally(() => {
+      slot.resetsRun = null
+    })
+    return slot.resetsRun
+  }
+
+  private async resetsRead(slot: Slot, retried: boolean): Promise<void> {
+    if (slot.resetsRetry) clearTimeout(slot.resetsRetry)
+    slot.resetsRetry = null
+    const place = this.codexPlace(slot)
+    let resets = place ? slot.resets : null
+    let error: ResetsError | null = null
+    if (place) {
+      slot.resetsReadAt = place.now
+      try {
+        const read = await readCodexResets(place)
+        resets = read && read.resets.count > 0 ? read.resets : null
+        if (read && read.details !== 'read') {
+          error = read.details === 'failed' ? 'details' : read.details
+        }
+      } catch (failed) {
+        const status = failed instanceof UsageReadError ? failed.status : undefined
+        // A failed count read is told only where credits were shown, or the sign-in ran out.
+        error = status === 401 ? 'sign-in-expired' : resets ? 'failed' : null
+        const message = failed instanceof Error ? failed.message : String(failed)
+        this.deps.diagnostics.log('warn', `${slot.name}: the reset credits read failed: ${message}`)
+      }
+    }
+    // The expiries are tried again sooner than the next regular read, once.
+    if (!retried && !this.stopped && (error === 'details' || error === 'failed')) {
+      slot.resetsRetry = setTimeout(() => {
+        slot.resetsRetry = null
+        void this.readResets(slot, true)
+      }, RESETS_RETRY_MS)
+      slot.resetsRetry.unref?.()
+    }
+    if (JSON.stringify(slot.resets) === JSON.stringify(resets) && slot.resetsError === error) {
+      return
+    }
+    slot.resets = resets
+    slot.resetsError = error
     this.emit(slot)
   }
 
-  /** Redeems one of the account's limit reset credits, then reads the limits it reset. */
-  async useResetCredit(agentId: AgentId, creditId: string | null): Promise<ResetCreditOutcome> {
+  /**
+   * Spends one of Codex's reset credits, which cannot be undone, then reads the windows and the
+   * credits again: both changed with it, so neither is edited here.
+   */
+  async spendReset(
+    agentId: AgentId,
+    creditId: string,
+    requestId: string,
+  ): Promise<{ code: ResetSpendCode }> {
     const slot = this.registeredSlot(agentId)
-    if (slot.def.id !== 'codex') throw invalidParams(`${slot.def.name} has no reset credits`)
-    const runtime = await this.ensureReady(slot.id)
-    if (!runtime.connection.useResetCredit) {
-      throw invalidParams(`${slot.def.name} has no reset credits`)
+    const place = this.codexPlace(slot)
+    if (!place) throw new HostError('agent_error', t('agent.noResets', { agent: slot.name }))
+    let code: ResetSpendCode
+    try {
+      code = await spendCodexReset(place, creditId, requestId)
+    } catch (error) {
+      if (error instanceof UsageReadError && error.status === 401) {
+        throw new HostError('agent_error', t('agent.resetSignInExpired', { agent: slot.name }))
+      }
+      throw agentError(error)
     }
-    const outcome = await runtime.connection.useResetCredit(creditId)
+    await slot.resetsRun?.catch(() => {})
+    slot.resetsReadAt = 0
     await this.refreshLimits(agentId, { force: true }).catch(() => {})
-    return outcome
+    await this.readResets(slot)
+    return { code }
   }
 
   /**
@@ -3906,7 +4037,8 @@ export class AgentManager {
     slot.account = null
     slot.limits.clear()
     slot.balances = []
-    slot.resetCredits = null
+    slot.resets = null
+    slot.resetsError = null
     this.emit(slot)
   }
 
@@ -4198,7 +4330,11 @@ export class AgentManager {
     const slot = this.registeredSlot(agentId)
     if (this.isDisabled(agentId)) return
     if (slot.def.id === 'opencode') return this.refreshProviders(slot, options?.force === true)
-    if (slot.def.id === 'deepseek') return this.refreshBalance(slot, options?.force === true)
+    if (slot.def.id === 'deepseek') {
+      // A model route set up in dsh's own pages tells Kettu nothing.
+      if (options?.force === true && slot.signIn === 'required') await this.checkSignIn(slot)
+      return this.refreshBalance(slot, options?.force === true)
+    }
     const force = options?.force === true
     if (!slot.def.reportsAccount) {
       if (force && slot.signIn === 'required') await this.checkSignIn(slot)
@@ -4240,10 +4376,17 @@ export class AgentManager {
     if (slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
   }
 
-  /** OpenCode's own client for an OpenCode agent, which reads its sessions; null for another. */
-  openCode(agentId: AgentId): OpenCodeClient | null {
+  /**
+   * What reads an OpenCode agent's stored sessions; null for another agent. The server that runs
+   * its sessions reads them while it runs, else OpenCode's own client does.
+   */
+  openCode(agentId: AgentId): OpenCodeSessions | null {
     const slot = this.slots.get(agentId)
-    return slot && harnessOf(agentId) === 'opencode' ? this.openCodeClient(slot) : null
+    if (!slot || harnessOf(agentId) !== 'opencode') return null
+    const connection = slot.stopping ? null : slot.runtime?.connection
+    return connection instanceof OpenCodeConnection && !connection.isClosed
+      ? connection.stored
+      : this.openCodeClient(slot)
   }
 
   private openCodeClient(slot: Slot): OpenCodeClient {
@@ -4706,6 +4849,9 @@ export class AgentManager {
     slot.limits.clear()
     slot.limitsReadAt = 0
     slot.limitsError = null
+    slot.resets = null
+    slot.resetsError = null
+    slot.resetsReadAt = 0
     slot.signIn = 'unknown'
     if (slot.runtime && this.hooks.liveSessions(slot.id) === 0) await this.stopProcess(slot)
     this.emit(slot)
@@ -4770,10 +4916,7 @@ export class AgentManager {
       return formatCommand({ command: method.command, args: method.args, env }, this.deps.platform)
     }
     return formatCommand(
-      // pi-acp 0.0.34's only method just runs the `requires` program, so it runs alone.
-      slot.def.signInWithCli && slot.h.requiresProgram
-        ? { command: slot.h.requiresProgram, args: [], env: {} }
-        : { command: display.command, args: [...display.args, ...method.args], env },
+      { command: display.command, args: [...display.args, ...method.args], env },
       this.deps.platform,
     )
   }
@@ -4917,7 +5060,7 @@ export class AgentManager {
     const color = slot.added ? agentColor(this.deps.settings().addedAgents, slot.id) : null
     const cliVersion = this.cliUpdateVersion(h)
     const cliCommand = cliVersion ? (this.cliCommands.get(h) ?? null) : null
-    const cliCommandName = slot.def.cli?.command ?? slot.def.requires?.command
+    const cliCommandName = slot.def.cli?.command
     return {
       id: slot.id,
       name: slot.name,
@@ -4938,11 +5081,8 @@ export class AgentManager {
           ? { set: slot.apiKey, providers: slot.def.id === 'claude-code' }
           : null,
       state: slot.state,
-      // For an agent with a `requires` program its own version is the one shown, never the adapter's.
       // Kettu's own install names its release when the program reports no version of its own.
-      version: slot.def.requires
-        ? (h.requiresVersion ?? h.binaryVersion ?? null)
-        : (init?.version ?? h.binaryVersion ?? installed?.version ?? null),
+      version: init?.version ?? h.binaryVersion ?? installed?.version ?? null,
       package:
         launch.kind === 'package'
           ? {
@@ -4983,8 +5123,9 @@ export class AgentManager {
           }
         : {}),
       limits: [...slot.limits.values()],
-      ...(slot.resetCredits ? { resetCredits: slot.resetCredits } : {}),
       ...(slot.limitsError ? { limitsError: slot.limitsError } : {}),
+      ...(slot.resets ? { resets: slot.resets } : {}),
+      ...(slot.resetsError ? { resetsError: slot.resetsError } : {}),
       detail: slot.detail ?? h.adapterNote,
       installNotice: slot.def.install.notice ? t(slot.def.install.notice) : null,
       installUrl:
@@ -5024,7 +5165,7 @@ export class AgentManager {
       cli: cliCommandName
         ? {
             command: cliCommandName,
-            installed: detection?.cli ?? this.requiresCli(detection),
+            installed: detection?.cli ?? null,
             method: h.cliMethod,
             update: cliVersion && cliCommand ? { version: cliVersion, command: cliCommand } : null,
           }
@@ -5249,6 +5390,10 @@ export class AgentManager {
 // A stop waits this long at most for a hidden session's removal, well under the 6 s main gives
 // the host to stop on quit; removing takes milliseconds unless the agent hangs.
 const REMOVAL_WAIT_MS = 1_000
+/** The reset credits are not asked for twice within this, however a read was started. */
+const RESETS_GAP_MS = 5_000
+/** How soon a read that fell short of the credits' expiries is tried again. */
+const RESETS_RETRY_MS = 20_000
 
 /** Waits for `promise`, which never rejects, for at most `ms`. */
 function settledWithin(promise: Promise<void>, ms: number): Promise<void> {

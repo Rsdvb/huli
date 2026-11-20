@@ -1,6 +1,6 @@
 // Codex's account and plan limits in Kettu's terms, with the labels codex-acp gave them.
 
-import type { AgentAccount, PlanLimit, ProviderBalance, ResetCredits } from '@shared/agent-host'
+import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import { t } from '../i18n'
 import type {
   GetAccountRateLimitsResponse,
@@ -112,31 +112,17 @@ export function mapRateLimits(snapshot: RateLimitSnapshot, now: number): PlanLim
 
 /**
  * What a limits read says beside the windows: the credits balance that pays once a window runs
- * out, as an extra usage balance, and the reset credits. An older Codex reports no reset credits,
- * which leaves them null rather than none.
+ * out, as an extra usage balance. The reset credits are read from the vendor instead, as
+ * `vendor-usage/codex.ts` does.
  */
 export function mapPlanExtras(
   response: GetAccountRateLimitsResponse,
   snapshots: readonly RateLimitSnapshot[],
-): { balances: ProviderBalance[]; resetCredits: ResetCredits | null } {
+): { balances: ProviderBalance[] } {
   const credits = [response.rateLimits, ...snapshots].find((s) => s?.credits)?.credits
   const amount = credits?.hasCredits && !credits.unlimited ? Number(credits.balance) : NaN
   const balances: ProviderBalance[] = Number.isFinite(amount)
     ? [{ label: 'Extra usage', amount, currency: 'credits' }]
     : []
-  const summary = response.rateLimitResetCredits
-  const resetCredits: ResetCredits | null = summary
-    ? {
-        available: Math.max(0, Math.floor(summary.availableCount)),
-        credits: (summary.credits ?? [])
-          .filter((credit) => credit.status === 'available')
-          .map((credit) => ({
-            id: credit.id,
-            title: credit.title ?? null,
-            description: credit.description ?? null,
-            expiresAt: credit.expiresAt ? credit.expiresAt * 1000 : null,
-          })),
-      }
-    : null
-  return { balances, resetCredits }
+  return { balances }
 }

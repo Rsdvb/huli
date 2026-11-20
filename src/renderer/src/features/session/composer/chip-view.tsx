@@ -2,11 +2,14 @@ import { useEffect, useLayoutEffect, useMemo } from 'react'
 import {
   Alert02Icon,
   BrowserIcon,
+  ComputerTerminal01Icon,
+  SmartPhone01Icon,
   File01Icon,
   Folder01Icon,
   GlobalIcon,
 } from '@hugeicons/core-free-icons'
 import { githubReferenceFromLink, type GitHubReference } from '@shared/git'
+import { SiteIconImage } from '@renderer/components/site-icon-image'
 import { ProjectPathContext } from '@renderer/features/files/file-refs'
 import { ReferenceIcon } from '@renderer/features/git/gh-reference'
 import {
@@ -66,14 +69,7 @@ function SiteIcon({ url }: { url: string }) {
   const icon = useSiteIcon(url)
   useEffect(loadSiteIcons, [])
   if (!icon) return <Glyph icon={GlobalIcon} className="size-3.5 shrink-0 text-tertiary" />
-  return (
-    <img
-      src={icon}
-      alt=""
-      draggable={false}
-      className="size-3.5 shrink-0 rounded-sm object-contain"
-    />
-  )
+  return <SiteIconImage src={icon} className="size-3.5 shrink-0 rounded-sm object-contain" />
 }
 
 /** A GitHub issue or pull request as the thread's reference: its state, number and title. */
@@ -136,6 +132,12 @@ function ChipBody({ chip, missing }: { chip: Chip; missing: boolean }) {
         />
       ) : chip.kind === 'folder' ? (
         <Glyph icon={Folder01Icon} className="size-3.25 shrink-0 text-tertiary" />
+      ) : chip.kind === 'terminal' ? (
+        <Glyph icon={ComputerTerminal01Icon} className="size-3.25 shrink-0 text-tertiary" />
+      ) : chip.kind === 'page' ? (
+        <Glyph icon={GlobalIcon} className="size-3.25 shrink-0 text-tertiary" />
+      ) : chip.kind === 'device' ? (
+        <Glyph icon={SmartPhone01Icon} className="size-3.25 shrink-0 text-tertiary" />
       ) : (
         <Glyph icon={File01Icon} className="size-3.25 shrink-0 text-tertiary" />
       )}

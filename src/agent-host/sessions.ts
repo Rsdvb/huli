@@ -27,6 +27,7 @@ import {
   type SessionFindMatch,
   type SessionSummary,
   type SideChatAgent,
+  type LightAgent,
   type StartNotice,
 } from '@shared/agent-host'
 import { LOCALES } from '@shared/locale'
@@ -36,7 +37,13 @@ import { firstLine, outlineText } from '@shared/outline'
 import { longEnough, queryWords } from '@shared/search-fold'
 import { turnWork, type TurnWork } from '@shared/turn-phase'
 import { originLabel, type BrowserOriginAnswer, type BrowserOriginDecision } from '@shared/browser'
-import type { ControlOutcome, ControlStep, ControlSurface } from '@shared/control'
+import type {
+  ControlOutcome,
+  ControlStep,
+  ControlSurface,
+  SurfaceAccessAnswer,
+  SurfaceAccessDecision,
+} from '@shared/control'
 import type {
   ComputerApp,
   ComputerAppAnswer,
@@ -110,8 +117,12 @@ import {
   type ControlAskEntry,
   type ControlNoteEntry,
   type DeviceAccessEntry,
+  type SurfaceAccessEntry,
   type MarketPublishEntry,
   type MarketPublishOutcome,
+  type SettingChangeItem,
+  type SettingsChangeEntry,
+  type SettingsChangeOutcome,
   type ComputerAppEntry,
   type ComputerSetupEntry,
   type ComputerUseView,
@@ -148,6 +159,7 @@ import {
   requestText,
 } from './attention'
 import type { MarketAnswer, MarketAsk } from './marketplace/publish-tools'
+import type { SettingsAnswer, SettingsAsk } from './settings/tools'
 import { MODE_OPTION as AGY_MODE_OPTION } from './acp/agy-plan'
 import { parseContextReport } from './acp/claude-reports'
 import {
@@ -194,7 +206,6 @@ import {
   type ProjectHooksGate,
   type ProjectMcpGate,
   type PromptBlock,
-  type KettuService,
   type ListedSession,
   type RevertPoint,
   type SessionMemory,
@@ -298,6 +309,7 @@ import {
   type WorktreeRecord,
 } from './storage'
 import { SUMMARY_RETRY_MS, writeTitles } from './outline-titles'
+import { lightTarget, type LightTarget } from './light-model'
 import {
   SIDE_ANSWER_CHARS,
   SIDE_STEPS,
@@ -1186,10 +1198,13 @@ export class SessionManager {
   private readonly originRequests = new Map<string, OriginRequest>()
   /** Each device card's answer, by its entry id, which the waiting tool call takes. */
   private readonly deviceWaits = new Map<string, (answer: DeviceAccessAnswer) => void>()
+  private readonly surfaceWaits = new Map<string, (answer: SurfaceAccessAnswer) => void>()
   /** Marketplace cards that wait for the user, by entry id. */
   private readonly marketWaits = new Map<string, (answer: MarketAnswer) => void>()
   /** Cards whose Publish is setting the account's publisher name, which a second answer waits out. */
   private readonly marketAnswering = new Set<string>()
+  /** Settings cards that wait for the user, by entry id. */
+  private readonly settingsWaits = new Map<string, (answer: SettingsAnswer) => void>()
   /** Each first use of an app that waits, by the computer use service's request id. */
   private readonly appRequests = new Map<number, AppRequest>()
   /** Each session's card holding its folder's own MCP servers while it waits, with the folder. */
@@ -1567,6 +1582,7 @@ export class SessionManager {
         ? {
             prepared: {
               config: session?.config ?? [],
+              commands: session?.commands ?? [],
               notices: live.prepared.notices,
               openedAt: live.prepared.openedAt,
             },
@@ -2167,6 +2183,131 @@ export class SessionManager {
     })
   }
 
+  /**
+   * An agent wants a terminal the user opened in its session: a card in the thread that waits for
+   * the user, as a device's first use does, and settles with their answer or `timeout`.
+   */
+  surfaceAccessAsked(
+    sessionId: string,
+    target: { surface: 'terminal' | 'browser'; id: string; name: string },
+    ask: { readOnly: boolean; rename?: string },
+    waitMs: number,
+  ): Promise<SurfaceAccessAnswer> {
+    const live = this.live.get(sessionId)
+    if (!live) return Promise.resolve('timeout')
+    const entry: SurfaceAccessEntry = {
+      kind: 'surface_access',
+      id: this.nextId(live),
+      surface: target.surface,
+      targetId: target.id,
+      targetName: target.name,
+      ...(ask.readOnly ? { readOnly: true as const } : {}),
+      ...(ask.rename !== undefined ? { rename: ask.rename } : {}),
+      decision: null,
+      expiresAt: Date.now() + waitMs,
+      after: agentEntryBefore(live.thread),
+    }
+    live.origins.set(`surface:${entry.id}`, entry.id)
+    this.emit(live, [{ op: 'entry.add', entry }])
+    const status = live.thread.session.status
+    if (status === 'running' || status === 'ready')
+      this.update(live, { status: 'awaiting_permission' })
+    this.touch(live.id)
+    this.updateBadge()
+    this.deps.events.attention(
+      live.id,
+      'permission',
+      this.titleOf(live),
+      target.surface === 'browser'
+        ? t('attention.tabAccess', { tab: target.name })
+        : ask.rename !== undefined
+          ? t('attention.terminalRename', { terminal: target.name, name: ask.rename })
+          : t('attention.terminalAccess', { terminal: target.name }),
+      { id: entry.id },
+    )
+    return new Promise((resolve) => {
+      const timer = setTimeout(
+        () => this.settleSurfaceAccess(sessionId, entry.id, 'timeout'),
+        waitMs,
+      )
+      this.surfaceWaits.set(entry.id, (answer) => {
+        clearTimeout(timer)
+        resolve(answer)
+      })
+    })
+  }
+
+  /** A window's or a device's answer to a terminal card; the first one counts. */
+  answerSurfaceAccess(
+    sessionId: string,
+    entryId: string,
+    decision: SurfaceAccessDecision,
+    device?: FromDevice,
+  ): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const entry = live?.thread.byId[entryId]
+    if (!live || entry?.kind !== 'surface_access')
+      throw notFound(`No terminal request in ${entryId}`)
+    if (entry.decision !== null || !this.surfaceWaits.has(entryId)) {
+      throw new HostError('not_found', `The terminal request ${entryId} was already answered`, {
+        reason: ALREADY_ANSWERED,
+        device: entry.device ?? null,
+      })
+    }
+    this.settleSurfaceAccess(sessionId, entryId, decision, device)
+  }
+
+  /** Marks the cards that allowed the agent a terminal as taken back. */
+  surfaceAccessRevoked(sessionId: string, targetId: string): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    if (!live) return
+    const patches = threadEntries(live.thread)
+      .filter(
+        (entry) =>
+          entry.kind === 'surface_access' &&
+          entry.targetId === targetId &&
+          entry.decision === 'allow' &&
+          !entry.revoked,
+      )
+      .map((entry) => ({
+        op: 'entry.update' as const,
+        id: entry.id,
+        changes: { revoked: true as const },
+      }))
+    if (patches.length > 0) this.emit(live, patches)
+  }
+
+  /** Full access let the agent use a terminal the user opened without asking: the thread says so. */
+  surfaceUsed(sessionId: string, surface: ControlSurface, name: string): void {
+    this.controlNote(sessionId, surface, { event: 'used', name })
+  }
+
+  private settleSurfaceAccess(
+    sessionId: string,
+    entryId: string,
+    decision: SurfaceAccessAnswer,
+    device?: FromDevice,
+  ): void {
+    const resolve = this.surfaceWaits.get(entryId)
+    this.surfaceWaits.delete(entryId)
+    const live = this.live.get(sessionId)
+    if (live) {
+      live.origins.delete(`surface:${entryId}`)
+      const entry = live.thread.byId[entryId]
+      if (entry?.kind === 'surface_access' && entry.decision === null) {
+        this.emit(live, [
+          { op: 'entry.update', id: entryId, changes: { decision, ...(device ? { device } : {}) } },
+        ])
+      }
+      this.stopWaiting(live)
+      this.touch(live.id)
+      this.updateBadge()
+    }
+    resolve?.(decision)
+  }
+
   /** A window's or a device's answer to a device card; the first one counts. */
   answerDeviceAccess(
     sessionId: string,
@@ -2376,6 +2517,145 @@ export class SessionManager {
   }
 
   /**
+   * An agent wants to change Kettu's settings: a card in the thread that waits for the user as a
+   * permission request does, and settles with their answer, `expired` after `waitMs`, or `ended`
+   * with the turn.
+   */
+  settingsAsked(
+    sessionId: string,
+    ask: SettingsAsk,
+    waitMs: number,
+  ): { entryId: string; answer: Promise<SettingsAnswer> } | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: SettingsChangeEntry = {
+      kind: 'settings_change',
+      id: this.nextId(live),
+      items: ask.items,
+      asked: true,
+      expiresAt: Date.now() + waitMs,
+      outcome: null,
+      after: agentEntryBefore(live.thread),
+    }
+    live.origins.set(`settings:${entry.id}`, entry.id)
+    this.emit(live, [{ op: 'entry.add', entry }])
+    const status = live.thread.session.status
+    if (status === 'running' || status === 'ready')
+      this.update(live, { status: 'awaiting_permission' })
+    this.touch(live.id)
+    this.updateBadge()
+    this.deps.events.attention(
+      live.id,
+      'permission',
+      this.titleOf(live),
+      t('attention.settingsChange', { count: ask.items.length }),
+      { id: entry.id },
+    )
+    const answer = new Promise<SettingsAnswer>((resolve) => {
+      const timer = setTimeout(
+        () => this.settleSettings(sessionId, entry.id, { decision: 'expired' }),
+        waitMs,
+      )
+      this.settingsWaits.set(entry.id, (given) => {
+        clearTimeout(timer)
+        resolve(given)
+      })
+    })
+    return { entryId: entry.id, answer }
+  }
+
+  /** A change Full access made without asking: only the line it leaves, with its undo. */
+  settingsRecorded(sessionId: string, items: SettingChangeItem[]): string | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: SettingsChangeEntry = {
+      kind: 'settings_change',
+      id: this.nextId(live),
+      items,
+      asked: false,
+      expiresAt: null,
+      outcome: { kind: 'changed' },
+      after: agentEntryBefore(live.thread),
+    }
+    this.emit(live, [{ op: 'entry.add', entry }])
+    return entry.id
+  }
+
+  /** A window's or a device's answer to a settings card; the first one counts. */
+  answerSettings(
+    sessionId: string,
+    entryId: string,
+    decision: 'change' | 'keep',
+    device?: FromDevice,
+  ): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const entry = live?.thread.byId[entryId]
+    if (!live || entry?.kind !== 'settings_change') throw notFound(`No settings card ${entryId}`)
+    if (entry.outcome !== null || !this.settingsWaits.has(entryId)) {
+      throw new HostError('not_found', `The settings card ${entryId} was already answered`, {
+        reason: ALREADY_ANSWERED,
+        device: entry.device ?? null,
+      })
+    }
+    this.settleSettings(sessionId, entryId, { decision }, device)
+  }
+
+  /** What became of a change the user confirmed, or of one undone later. */
+  settingsSettled(sessionId: string, entryId: string, outcome: SettingsChangeOutcome): void {
+    const live = this.live.get(sessionId)
+    if (live?.thread.byId[entryId]?.kind !== 'settings_change') return
+    this.emit(live, [{ op: 'entry.update', id: entryId, changes: { outcome } }])
+  }
+
+  /** A settings line's change, for its undo: the rows it set, once it was made and not undone. */
+  settingsChange(sessionId: string, entryId: string): SettingChangeItem[] {
+    this.recordOf(sessionId)
+    const entry = this.live.get(sessionId)?.thread.byId[entryId]
+    if (entry?.kind !== 'settings_change') throw notFound(`No settings change ${entryId}`)
+    if (entry.outcome?.kind !== 'changed' || entry.outcome.undone || entry.outcome.stale) {
+      throw new HostError('conflict', 'This change cannot be undone')
+    }
+    return entry.items
+  }
+
+  private settleSettings(
+    sessionId: string,
+    entryId: string,
+    answer: SettingsAnswer,
+    device?: FromDevice,
+  ): void {
+    const resolve = this.settingsWaits.get(entryId)
+    this.settingsWaits.delete(entryId)
+    const live = this.live.get(sessionId)
+    if (live) {
+      live.origins.delete(`settings:${entryId}`)
+      const entry = live.thread.byId[entryId]
+      if (entry?.kind === 'settings_change' && entry.outcome === null) {
+        // Change is settled by what applying it gives; the card holds until then.
+        if (answer.decision !== 'change') {
+          const outcome: SettingsChangeOutcome = {
+            kind: answer.decision === 'keep' ? 'declined' : answer.decision,
+          }
+          this.emit(live, [
+            {
+              op: 'entry.update',
+              id: entryId,
+              changes: { outcome, ...(device ? { device } : {}) },
+            },
+          ])
+        } else if (device) {
+          this.emit(live, [{ op: 'entry.update', id: entryId, changes: { device } }])
+        }
+      }
+      this.stopWaiting(live)
+      this.touch(live.id)
+      this.updateBadge()
+    }
+    resolve?.(answer)
+  }
+
+  /**
    * The agent asked the user to do a step on the session's page: the thread shows it, waiting, and
    * the session waits as for a permission. A call made again for the same step adds nothing.
    */
@@ -2469,7 +2749,10 @@ export class SessionManager {
   private controlNote(
     sessionId: string,
     surface: ControlSurface,
-    note: { event: 'handed_back'; durationMs: number } | { event: 'paused'; app: string },
+    note:
+      | { event: 'handed_back'; durationMs: number }
+      | { event: 'paused'; app: string }
+      | { event: 'used'; name: string },
   ): void {
     const live = this.live.get(sessionId)
     if (!live) return
@@ -3370,15 +3653,18 @@ export class SessionManager {
       return { titles: [] }
     }
     this.titling.add(sessionId)
+    let writer = record.agentId
     try {
       const { rows, model } = await this.outlineRows(sessionId)
       const untitled = rows.filter((row) => row.title === null && row.text.trim() !== '')
       if (untitled.length === 0) return { titles: [] }
-      const runtime = await this.deps.agents.ensureReady(record.agentId)
+      const target = lightTarget(this.deps.settings().lightModel, record.agentId, model)
+      writer = target.agentId
+      const runtime = await this.deps.agents.ensureReady(target.agentId)
       await mkdir(this.deps.reportsDir, { recursive: true })
       const titles = await writeTitles(runtime, {
         dir: this.deps.reportsDir,
-        sessionModel: model,
+        model: target.model,
         messages: untitled,
         log: (message) => this.deps.diagnostics.log('warn', message),
       })
@@ -3394,7 +3680,7 @@ export class SessionManager {
       this.summaryFailedAt.set(sessionId, this.now())
       this.deps.diagnostics.log(
         'warn',
-        `${this.deps.agents.name(record.agentId)}: could not title the outline of session ${sessionId}: ${(error as Error).message}`,
+        `${this.deps.agents.name(writer)}: could not title the outline of session ${sessionId}: ${(error as Error).message}`,
       )
       return { titles: [] }
     } finally {
@@ -3585,8 +3871,7 @@ export class SessionManager {
     const projectMcp = this.projectMcpGate(sessionId)
     const projectHooks = this.projectHooksGate(sessionId)
     const own = this.kettuServers(sessionId, record, runtime)
-    const kettuService = this.kettuService(sessionId, record, runtime)
-    const reached = own.length > 0 || kettuService !== null
+    const reached = own.length > 0
     const skills = (await this.deps.skills?.(record.agentId, reached)) ?? {}
     const memory = await this.memoryFor(sessionId, record, reached)
     const append = runtime?.connection.systemPromptAppend
@@ -3601,7 +3886,6 @@ export class SessionManager {
       ...(projectMcp ? { projectMcp } : {}),
       ...(projectHooks ? { projectHooks } : {}),
       ...(memory ? { memory } : {}),
-      ...(kettuService ? { kettuService } : {}),
       ...(record.instructionsAhead ? { promptAhead: true } : {}),
       ...(append ? { systemPromptAppend: append } : {}),
       ...(record.origin === 'routine' ? { routine: true } : {}),
@@ -3829,26 +4113,6 @@ export class SessionManager {
     return runtime.init.capabilities.mcpHttp && runtime.kettu
       ? this.deps.mcp.servers(sessionId, record, runtime.connection)
       : []
-  }
-
-  /**
-   * Kettu's MCP service for an agent that reaches it only through Kettu's extension, as Pi does,
-   * while Kettu's server is on for it: the URL and token of the session's own server.
-   */
-  private kettuService(
-    sessionId: string,
-    record: SessionRecord,
-    runtime: AgentRuntime | null | undefined,
-  ): KettuService | null {
-    if (!this.deps.mcp || !runtime?.kettu || !runtime.connection.kettuExtension) return null
-    if (runtime.init.capabilities.mcpHttp) return null
-    for (const server of this.deps.mcp.servers(sessionId, record, runtime.connection)) {
-      if (server.type !== 'http') continue
-      const header = server.headers.find((h) => h.name.toLowerCase() === 'authorization')
-      const token = /^Bearer (\S+)$/.exec(header?.value ?? '')?.[1]
-      if (token) return { url: server.url, token }
-    }
-    return null
   }
 
   private libraryServers(
@@ -4538,7 +4802,7 @@ export class SessionManager {
       worktree = await manager.create(projectPath, request)
       newWorktree = true
       if (prompt && !request.branch?.trim()) {
-        this.nameBranch(params.agentId, projectPath, worktree, prompt, request)
+        this.nameBranch(params.agentId, projectPath, worktree, prompt, request, params.options)
       }
     }
     const now = this.now()
@@ -7272,7 +7536,7 @@ export class SessionManager {
     if (record.systemPromptSentTo === record.acpSessionId) return null
     const runtime = this.deps.agents.runtime(record.agentId)
     const servers = this.kettuServers(live.id, record, runtime)
-    const tools = servers.length > 0 || this.kettuService(live.id, record, runtime) !== null
+    const tools = servers.length > 0
     // What the session's own instructions would hold, the plan paragraph with the guide.
     const text = record.instructionsAhead
       ? servers
@@ -7833,7 +8097,12 @@ export class SessionManager {
   /** Asks the agent's hidden session for a title and applies it, unless another came meanwhile. */
   private async writeTitle(live: Live, message: UserContent[]): Promise<void> {
     const { agentId } = live.record
-    const name = this.deps.agents.name(agentId)
+    const target = lightTarget(
+      this.deps.settings().lightModel,
+      agentId,
+      modelOf(live.thread.session.config),
+    )
+    const name = this.deps.agents.name(target.agentId)
     try {
       const runtime = await this.deps.agents.ensureReady(agentId)
       // Only an agent that titles none has Kettu pay for one.
@@ -7841,11 +8110,13 @@ export class SessionManager {
         live.titlePrompt = null
         return
       }
+      const writer =
+        target.agentId === agentId ? runtime : await this.deps.agents.ensureReady(target.agentId)
       // The reports folder holds every hidden session, made once for the first of them.
       await mkdir(this.deps.reportsDir, { recursive: true })
-      const title = await writeSessionTitle(runtime, {
+      const title = await writeSessionTitle(writer, {
         dir: this.deps.reportsDir,
-        sessionModel: modelOf(live.thread.session.config),
+        model: target.model,
         message,
         log: (line) => this.deps.diagnostics.log('warn', line),
       })
@@ -7986,6 +8257,7 @@ export class SessionManager {
     delete record.queue
     delete record.pinnedAt
     delete record.archivedAt
+    delete record.leftSubSessions
     delete record.routine
     delete record.task
     if (record.origin === 'task') record.origin = 'user'
@@ -8145,6 +8417,7 @@ export class SessionManager {
       'queue',
       'pinnedAt',
       'archivedAt',
+      'leftSubSessions',
       'routine',
       'task',
       'configDir',
@@ -9625,11 +9898,18 @@ export class SessionManager {
   /** The agents of this host that can answer side questions for the session's agent. */
   sideAgents(sessionId: string): SideChatAgent[] {
     const record = this.recordOf(sessionId)
+    return this.lightAgents().filter((agent) => agent.agentId !== record.agentId)
+  }
+
+  /**
+   * The agents that may ask a prompt in a hidden session for others: on, added and installed, and
+   * able to remove such a session without a trace. Side questions and lightweight tasks take them.
+   */
+  lightAgents(): LightAgent[] {
     return this.deps.agents
       .ids()
       .filter(
         (agentId) =>
-          agentId !== record.agentId &&
           !this.deps.agents.isDisabled(agentId) &&
           answersForOthers(agentId) &&
           this.sideUsable(agentId),
@@ -9882,9 +10162,18 @@ export class SessionManager {
         this.settleDeviceAccess(live.id, entryId, 'timeout')
         continue
       }
+      if (requestId.startsWith('surface:')) {
+        this.settleSurfaceAccess(live.id, entryId, 'timeout')
+        continue
+      }
       // A publish put off this way is kept as a draft, as by Not now.
       if (requestId.startsWith('market:')) {
         this.settleMarket(live.id, entryId, { decision: 'ended' })
+        continue
+      }
+      // A settings card ends with its turn, changing nothing.
+      if (requestId.startsWith('settings:')) {
+        this.settleSettings(live.id, entryId, { decision: 'ended' })
         continue
       }
       live.origins.delete(requestId)
@@ -10162,17 +10451,59 @@ export class SessionManager {
     this.saveRecord(sessionId)
   }
 
-  /** Takes a top-level session and its sub-sessions off the list, closed; the index keeps them. */
-  async archive(sessionId: string): Promise<void> {
+  /**
+   * Takes a top-level session off the list, closed, with its sub-sessions; the index keeps them.
+   * Without them, its subagents still go with it, and the sub-sessions in the list leave its tree
+   * to stay there as sessions of their own until it is restored.
+   */
+  async archive(sessionId: string, subSessions = true): Promise<void> {
     const record = this.topLevel(sessionId)
     if (record.archivedAt !== undefined) return
     await this.settled(sessionId)
-    const all = [...this.descendants(sessionId), record]
+    const left = subSessions ? [] : this.listedSubSessions(sessionId)
+    const staying = new Set(
+      left.flatMap((child) => [child.id, ...this.descendants(child.id).map((item) => item.id)]),
+    )
+    const all = [...this.descendants(sessionId).filter((item) => !staying.has(item.id)), record]
     await this.closeAll(all, true)
+    for (const child of left) {
+      child.parentId = null
+      this.saveRecord(child.id)
+    }
+    if (left.length > 0) record.leftSubSessions = left.map((child) => child.id)
+    else delete record.leftSubSessions
     delete record.pinnedAt
     record.archivedAt = this.now()
     this.saveRecord(sessionId)
     this.deps.events.ended(all.map((item) => item.id))
+  }
+
+  /**
+   * The sub-sessions right under a session that the list shows, reached through its subagents,
+   * which belong to it: not one archived on its own, nor one a window prepared and never sent.
+   */
+  private listedSubSessions(sessionId: string): SessionRecord[] {
+    return this.children(sessionId).flatMap((child) => {
+      if (child.origin === 'subagent') return this.listedSubSessions(child.id)
+      const listed = child.archivedAt === undefined && !this.live.get(child.id)?.prepared
+      return listed ? [child] : []
+    })
+  }
+
+  /** Puts the sub-sessions a session left in the list when archived back under it. */
+  private takeBackSubSessions(record: SessionRecord): void {
+    const left = record.leftSubSessions
+    if (!left) return
+    delete record.leftSubSessions
+    for (const id of left) {
+      const child = this.live.get(id)?.record ?? this.records.get(id)
+      // One deleted since stays gone, and one another tree took stays there.
+      if (!child || child.parentId !== null) continue
+      child.parentId = record.id
+      // Only a top-level session is pinned.
+      delete child.pinnedAt
+      this.saveRecord(id)
+    }
   }
 
   // The session tools: what the artifacts service calls, under the caller's id.
@@ -10256,6 +10587,35 @@ export class SessionManager {
       harness === 'codex' &&
       config.some((option) => option.id === CODEX_COLLABORATION_ID && option.value === 'plan')
     return starterRank(harness, typeof mode === 'string' ? mode : undefined, planning)
+  }
+
+  /**
+   * Whether the session's agent changes Kettu's settings without asking: a session the user
+   * started, in Full access at this moment. One another session started, a workflow step's and a
+   * routine's always ask, as do agents whose modes Kettu cannot rank.
+   */
+  settingsFullAccess(sessionId: string): boolean {
+    const record = this.records.get(sessionId) ?? this.live.get(sessionId)?.record
+    if (!record || record.origin !== 'user' || record.startedBy) return false
+    return this.starterRank(sessionId) === 4
+  }
+
+  /**
+   * What a session's mode lets its agent do with a terminal the user opened: Full access uses it
+   * without asking, planning only reads it. A mode Kettu cannot rank asks.
+   */
+  surfaceAccessOf(sessionId: string): { fullAccess: boolean; planning: boolean } {
+    const record = this.recordOf(sessionId)
+    const harness = harnessOf(record.agentId)
+    const config = this.live.get(sessionId)?.thread.session.config ?? []
+    const optionId = modeOptionId(record.agentId)
+    const mode = config.find((option) => option.id === optionId)?.value
+    const planning =
+      mode === 'plan' ||
+      (harness === 'codex' &&
+        config.some((option) => option.id === CODEX_COLLABORATION_ID && option.value === 'plan'))
+    const rank = starterRank(harness, typeof mode === 'string' ? mode : undefined, planning)
+    return { fullAccess: rank === 4, planning }
   }
 
   /** A session's permission mode, from memory or its stored thread; null when it has none. */
@@ -10774,12 +11134,18 @@ export class SessionManager {
     worktree: WorktreeRecord,
     message: UserContent[],
     values: { type?: string; issue?: string },
+    picks: Record<string, string | boolean> = {},
   ): void {
     const manager = this.deps.worktrees
     if (!manager || !this.deps.settings().sessionTitles) return
     if (!manager.settings(projectPath).waitForSetup) return
     if (titleMessageText(message).trim() === '') return
-    const naming = new BranchNaming(this.writeBranchSlug(agentId, message))
+    const target = lightTarget(
+      this.deps.settings().lightModel,
+      agentId,
+      this.startModel(agentId, picks),
+    )
+    const naming = new BranchNaming(this.writeBranchSlug(target, message))
     const { type, issue } = values
     this.branchNames.set(pathKey(worktree.path, this.deps.platform), {
       naming,
@@ -10791,23 +11157,35 @@ export class SessionManager {
   }
 
   /** The slug the agent's hidden session writes for a branch, or null when it writes none. */
-  private async writeBranchSlug(agentId: AgentId, message: UserContent[]): Promise<string | null> {
+  private async writeBranchSlug(
+    target: LightTarget,
+    message: UserContent[],
+  ): Promise<string | null> {
     try {
-      const runtime = await this.deps.agents.ensureReady(agentId)
+      const runtime = await this.deps.agents.ensureReady(target.agentId)
       await mkdir(this.deps.reportsDir, { recursive: true })
       return await writeBranchSlug(runtime, {
         dir: this.deps.reportsDir,
-        sessionModel: null,
+        model: target.model,
         message,
         log: (line) => this.deps.diagnostics.log('warn', line),
       })
     } catch (error) {
       this.deps.diagnostics.log(
         'warn',
-        `${this.deps.agents.name(agentId)}: could not name a branch: ${(error as Error).message}`,
+        `${this.deps.agents.name(target.agentId)}: could not name a branch: ${(error as Error).message}`,
       )
       return null
     }
+  }
+
+  /** The model a new session of the agent starts on with New session's picks, as cached. */
+  private startModel(agentId: AgentId, picks: Record<string, string | boolean>): string | null {
+    const cached = this.deps.options?.get(agentId)
+    const option = cached?.config.find((o) => o.category === 'model' && o.type === 'select')
+    if (!cached || !option) return null
+    const value = picks[option.id] ?? cached.remembered[option.id] ?? option.value
+    return typeof value === 'string' ? value : null
   }
 
   /**
@@ -11004,6 +11382,7 @@ export class SessionManager {
       await this.deps.projects.add(projectPath)
     }
     delete record.archivedAt
+    this.takeBackSubSessions(record)
     this.saveRecord(record.id)
   }
 

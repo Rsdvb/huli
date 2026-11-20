@@ -4,14 +4,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Linking, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
+import { randomUUID } from 'expo-crypto'
 import { router, useLocalSearchParams } from 'expo-router'
 import type {
   AgentAuthMethod,
   AgentStatus,
   ClaudeCompactRow,
   HostEvent,
-  ResetCreditOutcome,
   PlanLimit,
+  ResetSpendCode,
 } from '@shared/agent-host'
 import {
   AUTO_COMPACT_STEPS,
@@ -760,11 +761,18 @@ function LimitRow({ limit }: { limit: PlanLimit }) {
   )
 }
 
-const RESET_OUTCOME: Record<ResetCreditOutcome, string> = {
+const RESET_OUTCOME: Record<ResetSpendCode, string> = {
   reset: '已重置，用量已重新读取。',
-  nothingToReset: '现在没有可以重置的用量窗口，卡没有用掉。',
-  noCredit: '账号里已经没有可用的重置卡。',
-  alreadyRedeemed: '这张卡刚才已经用过了。',
+  nothing_to_reset: '现在没有可以重置的用量窗口，卡没有用掉。',
+  no_credit: '账号里已经没有可用的重置卡。',
+  already_redeemed: '这张卡刚才已经用过了。',
+}
+
+/** Why the reset credits could not be read in full, as the desktop's usage card says it. */
+const RESETS_ERROR: Record<NonNullable<AgentStatus['resetsError']>, string> = {
+  'sign-in-expired': 'Codex 的登录已过期，重新登录后才能读取重置卡。',
+  details: '读到了重置卡的张数，但没读到每张的有效期，暂时不能在这里使用。',
+  failed: '没能读取重置卡，稍后会再试。',
 }
 
 /** Plan usage, one row per window, with the read and why there is none. */
@@ -782,25 +790,29 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
         call(host.link!, 'agents.refreshLimits', { agentId: status.id, force: true, ask: true }),
       '没能读取套餐用量',
     )
+  const resets = status.resets
+  // A credit is spent by its id, which only a read with the details gives.
+  const next = resets?.each?.[0] ?? null
   const redeemCredit = async () => {
-    const credits = status.resetCredits
-    if (!credits || credits.available === 0) return
-    const next = credits.credits[0]
+    if (!resets || !next) return
     const go = await confirm({
       title: '使用一张重置卡？',
-      message: `${next?.title ? `${next.title}。` : ''}会立即重置正在计算的用量窗口，用掉后不能退回。现在还有 ${credits.available} 张。`,
+      message: `会立即重置正在计算的用量窗口，用掉后不能退回。${next.until === null ? '' : `用掉的是最早到期的一张（${new Date(next.until).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })} 到期）。`}现在还有 ${resets.count} 张。`,
       confirm: '使用一张',
       destructive: false,
     })
     if (!go) return
+    // One id for this attempt: Codex answers a repeat of it without spending a second credit.
+    const requestId = randomUUID()
     await run(
       'reset',
       async () => {
-        const { outcome } = await call(host.link!, 'agents.useResetCredit', {
+        const { code } = await call(host.link!, 'agents.spendReset', {
           agentId: status.id,
-          ...(next ? { creditId: next.id } : {}),
+          creditId: next.id,
+          requestId,
         })
-        Alert.alert(RESET_OUTCOME[outcome])
+        Alert.alert(RESET_OUTCOME[code])
       },
       '没能使用重置卡',
     )
@@ -847,18 +859,20 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
               )
             })
           : null}
-        {status.resetCredits ? (
+        {resets || status.resetsError ? (
           <ListRow
             key="reset-credits"
             title="重置卡"
             subtitle={
-              status.resetCredits.available > 0
-                ? '用一张可以立即重置当前的用量窗口。'
-                : '账号里现在没有重置卡。'
+              status.resetsError
+                ? RESETS_ERROR[status.resetsError]
+                : next
+                  ? '用一张可以立即重置当前的用量窗口。'
+                  : '账号里现在没有可用的重置卡。'
             }
-            value={`${status.resetCredits.available} 张`}
-            action={status.resetCredits.available > 0}
-            disabled={!connected || busy('reset') || status.resetCredits.available === 0}
+            value={resets ? `${resets.count} 张` : '—'}
+            action={next !== null}
+            disabled={!connected || busy('reset') || next === null}
             trailing={busy('reset') ? <Tag label="正在重置…" tone="tint" /> : undefined}
             onPress={() => void redeemCredit()}
           />

@@ -39,6 +39,7 @@ import type {
   HostToMain,
   MainToHost,
   SessionProgress,
+  SettingsCallAnswer,
 } from '@shared/host-control'
 import {
   isComputerApp,
@@ -56,6 +57,7 @@ import { reportBuildResult, type ReportBuildResult } from '@shared/report'
 import type { HostSettings } from '@shared/settings'
 import agentHostPath from '../agent-host/index?modulePath'
 // The host's own bundle is built without electron-vite's worker plugin, so main builds this one.
+import clineHostPath from '../agent-host/cline/cline-host?modulePath'
 import sessionRouterPath from '../agent-host/session-router/router?modulePath'
 import threadWorkerPath from '../agent-host/threads/worker?modulePath'
 import usageWorkerPath from '../agent-host/usage/worker?modulePath'
@@ -97,6 +99,8 @@ export interface AgentHostDeps {
   marketAccount(): MarketAccount | null
   /** Makes a Marketplace API call of the host's with the account's access token. */
   market?: (call: MarketCall) => Promise<MarketCallAnswer>
+  /** An agent's settings tool reads or changes the settings. */
+  settingsCall?: (call: unknown) => SettingsCallAnswer
   /** The host's first start found the programs of these harnesses; main adds their agents. */
   onFirstStart?(harnesses: unknown): void
   onAttention(message: Extract<HostToMain, { type: 'host:attention' }>): void
@@ -384,6 +388,7 @@ export class AgentHost {
         usageWorkerPath,
         // The router runs on the user's Node.js, which cannot read inside app.asar.
         sessionRouterPath: unpackedPath(sessionRouterPath),
+        clineHostPath,
         settings: deps.settings(),
         computer: computerHostOptions(),
         mihomoPath: mihomoPath(),
@@ -771,6 +776,17 @@ export class AgentHost {
         )
         break
       }
+      case 'host:settings-call': {
+        const { callId } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.deps.settingsCall
+        this.host.post({
+          type: 'settings-result',
+          callId,
+          answer: run ? run(message.call) : { error: 'This build keeps no settings for agents.' },
+        })
+        break
+      }
       case 'host:market-call': {
         const { callId } = message
         const call = marketCallOf(message.call)
@@ -983,7 +999,7 @@ export class AgentHost {
 
   /** Runs a call on the session's page and posts its answer; a page that fails says why. */
   private browserCall(message: Extract<HostToMain, { type: 'host:browser-call' }>): void {
-    const { callId, sessionId, tool, args, projectPath } = message
+    const { callId, sessionId, tool, args, projectPath, allowTab } = message
     if (
       !Number.isSafeInteger(callId) ||
       typeof sessionId !== 'string' ||
@@ -1001,6 +1017,7 @@ export class AgentHost {
           tool: tool as BrowserCallRequest['tool'],
           args,
           projectPath: typeof projectPath === 'string' ? projectPath : '',
+          ...(typeof allowTab === 'string' ? { allowTab } : {}),
         })
       : Promise.resolve({
           error: { code: 'no_page', message: 'This build drives no browser.' },

@@ -13,12 +13,18 @@ import { DeviceAccessStore } from './devices/access'
 import os from 'node:os'
 import path from 'node:path'
 import { cp, mkdir, rename, rm, stat } from 'node:fs/promises'
-import type { AgentOptions, DiagnosticsBundle, HostEvent, McpStatus } from '@shared/agent-host'
+import type {
+  AgentOptions,
+  DiagnosticsBundle,
+  HostEvent,
+  HostParams,
+  McpStatus,
+} from '@shared/agent-host'
 import { OWNER } from '@shared/artifact-comments'
 import { flushLog, logFolder, redactLogText, writeLog } from '@shared/log/process-log'
 import { writeReport } from '@shared/log/report-bundle'
 import { parseReportRequest } from '@shared/report'
-import { harnessOf, type HarnessId } from '@shared/agents'
+import { harnessOf, takesStartMode, type HarnessId } from '@shared/agents'
 import type { RuntimeAnswer } from '@shared/artifact-capabilities'
 import { ARTIFACT_ENTRY, artifactFileType } from '@shared/artifact-files'
 import { type ArtifactImportResult, type ArtifactSummary, NO_SESSION } from '@shared/artifacts'
@@ -29,7 +35,7 @@ import {
   type BrowserCallRequest,
   type BrowserOriginAnswer,
 } from '@shared/browser'
-import { isControlOutcome, isControlStep } from '@shared/control'
+import { isControlOutcome, isControlStep, SURFACE_ACCESS_WAIT_MS } from '@shared/control'
 import type {
   AgentProcess,
   AttentionFront,
@@ -42,6 +48,10 @@ import type {
   MainToHost,
   NodeRuntime,
   ReportBuildResult,
+  SettingFacts,
+  SettingsCall,
+  SettingsCallAnswer,
+  SettingsSnapshot,
 } from '@shared/host-control'
 import type { ArtifactExportFormat } from '@shared/artifact-types'
 import type { ComputerFrame } from '@shared/computer-use'
@@ -62,7 +72,13 @@ import {
   type MarketResults,
 } from '@shared/market-publish'
 import { HARNESSES_FOLDER, KETTU_HOME_FOLDER, PLUGINS_FOLDER } from '@shared/storage'
-import type { AgentId, DigestedThreadEntry, FromDevice, ThreadEntry } from '@shared/thread'
+import type {
+  AgentId,
+  DigestedThreadEntry,
+  FromDevice,
+  ThreadEntry,
+  UserContent,
+} from '@shared/thread'
 import { AgentFiles } from './agent-files'
 import { agentOptionsFile, AgentOptionsStore, startModeIn } from './agent-options'
 import { listedModels } from './claude/user-settings'
@@ -108,9 +124,11 @@ import {
 } from './device-browser'
 import { BrowserTurns } from './browser-turns'
 import { writeCommitMessage } from './commit-message'
+import { lightTarget } from './light-model'
+import { reportDraftPrompt, writeReportDraft } from './report-draft'
 import { Diagnostics } from './diagnostics'
 import { HostError, invalidParams } from './errors'
-import { setLocale, t } from './i18n'
+import { setLocale, t, tSettings, tSettingsEnglish } from './i18n'
 import { FilesService } from './files'
 import { MediaService } from './media'
 import { MemoryError, type MemoryErrorCode } from './memory/errors'
@@ -126,6 +144,13 @@ import { MarketPluginsService, pluginsFile } from './marketplace/plugins'
 import { MarketSkillsService, skillFor, skillsCatalogFile } from './marketplace/skills'
 import { PublishDrafts } from './marketplace/publish-drafts'
 import { MARKET_WAIT_MS, MarketCallError, MarketTools } from './marketplace/publish-tools'
+import {
+  SETTINGS_WAIT_MS,
+  SettingsTools,
+  StaleUndo,
+  type LocalFacts,
+  type SettingsTarget,
+} from './settings/tools'
 import {
   ALL_TRANSPORTS,
   keyState,
@@ -149,6 +174,7 @@ import { Projects } from './projects'
 import { claudeOutside, type OutsideReader } from './outside-sessions'
 import { claudeCacheTtl, type CacheTtlReader } from './prompt-cache'
 import { claudeModelRequests } from './model-requests/claude'
+import { clineModelRequests } from './model-requests/cline'
 import { codexModelRequests } from './model-requests/codex'
 import { opencodeModelRequests } from './model-requests/opencode'
 import { byHarness } from './model-requests/reader'
@@ -279,6 +305,8 @@ export interface HostOptions {
   fakeAgentPath: string | null
   /** The session router's bundle, which a per-session agent's process runs under. */
   sessionRouterPath?: string | null
+  /** The bundle of the process that runs Cline's SDK; without it Cline runs over ACP. */
+  clineHostPath?: string | null
   settings: HostSettings
   baseEnv: Env
   send(message: HostToMain): void
@@ -386,6 +414,12 @@ const REPLY_RUN_ERRORS: Record<TerminalCallErrorCode, PortErrorCode> = {
   failed: 'conflict',
 }
 
+/** Whether the user referenced a surface in a message to `sessionId`, or to New session's. */
+function sharedWith(shared: Map<string, string | null>, id: string, sessionId: string): boolean {
+  const to = shared.get(id)
+  return to !== undefined && (to === null || to === sessionId)
+}
+
 export class AgentHost {
   readonly diagnostics: Diagnostics
   /** What each ACP session sent and received since the host started, for the Requests pane. */
@@ -465,6 +499,12 @@ export class AgentHost {
   private nextTerminalCall = 1
   // Sessions whose running turn used a terminal, told to the terminal host when the turn ends.
   private readonly terminalTurns = new Set<string>()
+  // Terminals the user referenced in a message, by id, with the session it went to; null for New
+  // session's, whose terminals go to the session it creates. Each allows that session's agent.
+  private readonly sharedTerminals = new Map<string, string | null>()
+  // Browser tabs and devices the user referenced the same way.
+  private readonly sharedTabs = new Map<string, string | null>()
+  private readonly sharedDevices = new Map<string, string | null>()
   /** Sessions whose running turn acted on a device, which the device host hears the end of. */
   private readonly deviceTurns = new Set<string>()
   private nextDeviceCall = 1
@@ -501,6 +541,11 @@ export class AgentHost {
   /** Trash calls awaiting main's answer: null once done, else why not. */
   private readonly trashCalls = new Map<number, (error: string | null) => void>()
   private nextTrashCall = 1
+  /** Settings calls awaiting main's or the daemon's answer. */
+  private readonly settingsCalls = new Map<number, (answer: SettingsCallAnswer) => void>()
+  private nextSettingsCall = 1
+  /** The settings tools of Kettu's MCP service. */
+  private readonly settingsTools: SettingsTools
   /** What was put off or refused, to publish later. */
   private readonly publishDrafts: PublishDrafts
   /** The Marketplace tools of Kettu's MCP service. */
@@ -566,6 +611,20 @@ export class AgentHost {
       agentOf: (sessionId) => this.sessions.sessionAgent(sessionId),
       sessionTitle: (sessionId) => this.sessions.title(sessionId),
       home: options.homeDir ?? os.homedir(),
+    })
+    this.settingsTools = new SettingsTools({
+      platform,
+      read: () => this.settingsCall({ kind: 'read' }),
+      apply: (patch) => this.settingsCall({ kind: 'change', patch }),
+      local: () => this.settingsLocal(),
+      fullAccess: (sessionId) => this.sessions.settingsFullAccess(sessionId),
+      ask: (sessionId, ask) => this.sessions.settingsAsked(sessionId, ask, SETTINGS_WAIT_MS),
+      recorded: (sessionId, items) => this.sessions.settingsRecorded(sessionId, items),
+      settle: (sessionId, entryId, outcome) =>
+        this.sessions.settingsSettled(sessionId, entryId, outcome),
+      open: (sessionId, target) => this.openSettings(sessionId, target),
+      words: tSettings,
+      english: tSettingsEnglish,
     })
     this.projects = new Projects({ file: projectsFile(options.userDataPath, log), platform })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
@@ -816,6 +875,18 @@ export class AgentHost {
       },
       wrote: (sessionId, write) => this.sessions.artifactWritten(sessionId, write),
       browserCall: (request, caller) => this.browserCall(request, caller),
+      browserAccess: {
+        fullAccess: (sessionId) => this.sessions.surfaceAccessOf(sessionId).fullAccess,
+        ask: (sessionId, tab) =>
+          this.sessions.surfaceAccessAsked(
+            sessionId,
+            { surface: 'browser', id: tab.id, name: tab.title },
+            { readOnly: false },
+            SURFACE_ACCESS_WAIT_MS,
+          ),
+        used: (sessionId, title) => this.sessions.surfaceUsed(sessionId, 'browser', title),
+        shared: (sessionId, tabId) => sharedWith(this.sharedTabs, tabId, sessionId),
+      },
       browserSession: (sessionId) => this.sessions.browserSession(sessionId),
       devices: {
         call: (call) => this.deviceCall(call),
@@ -823,16 +894,31 @@ export class AgentHost {
         ask: (sessionId, deviceId, deviceName) =>
           this.sessions.deviceAccessAsked(sessionId, deviceId, deviceName, DEVICE_ACCESS_WAIT_MS),
         alwaysAllowed: (deviceId) => this.deviceAccess.has(deviceId),
+        fullAccess: (sessionId) => this.sessions.surfaceAccessOf(sessionId).fullAccess,
+        used: (sessionId, name) => this.sessions.surfaceUsed(sessionId, 'device', name),
+        shared: (sessionId, deviceId) => sharedWith(this.sharedDevices, deviceId, sessionId),
         allowAlways: (deviceId) => this.deviceAccess.add(deviceId),
       },
       terminals: {
         call: (call) => this.terminalCall(call),
         agentOf: (sessionId) => this.sessions.sessionAgent(sessionId),
+        accessOf: (sessionId) => this.sessions.surfaceAccessOf(sessionId),
+        ask: (sessionId, terminal, ask) =>
+          this.sessions.surfaceAccessAsked(
+            sessionId,
+            { surface: 'terminal', id: terminal.id, name: terminal.name ?? terminal.title },
+            ask,
+            SURFACE_ACCESS_WAIT_MS,
+          ),
+        used: (sessionId, terminal) =>
+          this.sessions.surfaceUsed(sessionId, 'terminal', terminal.name ?? terminal.title),
+        shared: (sessionId, terminalId) => sharedWith(this.sharedTerminals, terminalId, sessionId),
       },
       sessionProject: (sessionId) => this.sessions.sessionProject(sessionId),
       sessionFolder: (sessionId) => this.sessions.sessionFolder(sessionId),
       ...(this.computer ? { computer: this.computer } : {}),
       market: this.marketTools,
+      settings: this.settingsTools,
       proxy: this.mcpProxy,
       sessions: {
         info: (sessionId) => this.sessions.sessionInfo(sessionId),
@@ -901,6 +987,7 @@ export class AgentHost {
       reportsDir: path.join(options.userDataPath, 'agent-reports'),
       adaptersDir,
       sessionRouterPath: options.sessionRouterPath ?? null,
+      clineHostPath: options.clineHostPath ?? null,
       ...(options.detect ? { detect: options.detect } : {}),
       ...(options.protocols ? { protocols: options.protocols } : {}),
       ...(options.drivers ? { drivers: options.drivers } : {}),
@@ -1022,6 +1109,7 @@ export class AgentHost {
           this.computer?.turnEnded(sessionId)
           this.browserTurnEnded(sessionId)
           this.marketTools.turnEnded(sessionId)
+          this.settingsTools.turnEnded(sessionId)
           if (this.deviceTurns.delete(sessionId)) {
             this.options.send({ type: 'host:device-turn-ended', sessionId })
           }
@@ -1062,6 +1150,13 @@ export class AgentHost {
             },
           }),
           opencode: opencodeModelRequests({ sessions: (agentId) => this.agents.openCode(agentId) }),
+          cline: clineModelRequests({
+            home: options.homeDir ?? os.homedir(),
+            env: async () => {
+              await this.env.ready()
+              return this.env.agentEnv('cline')
+            },
+          }),
         },
         acpModelRequests(this.acpMessages),
       ),
@@ -1692,6 +1787,119 @@ export class AgentHost {
     resolve(error)
   }
 
+  /** Reads or changes the settings through main or the daemon, which keep the file. */
+  private settingsCall(call: SettingsCall): Promise<SettingsSnapshot> {
+    const callId = this.nextSettingsCall++
+    return new Promise<SettingsCallAnswer>((resolve) => {
+      this.settingsCalls.set(callId, resolve)
+      this.options.send({ type: 'host:settings-call', callId, call })
+    }).then((answer) => {
+      if ('error' in answer) throw new Error(answer.error)
+      return answer.result
+    })
+  }
+
+  /** `settings-result`: main's or the daemon's answer to a settings call. */
+  settingsResult(callId: number, answer: SettingsCallAnswer): void {
+    const resolve = this.settingsCalls.get(callId)
+    if (!resolve) return
+    this.settingsCalls.delete(callId)
+    resolve(answer)
+  }
+
+  /** What the settings tools read of the host itself: its agents and harnesses, and their facts. */
+  private async settingsLocal(): Promise<LocalFacts> {
+    const statuses = this.agents
+      .statuses()
+      .filter((status) => status.registered !== false && status.uninstalled !== true)
+    const facts: SettingFacts = {}
+    const modes: Partial<Record<AgentId, { value: string; name: string }[]>> = {}
+    for (const status of statuses) {
+      const account = status.account
+      facts[`agents.account:${status.id}`] =
+        account && account.kind !== 'none'
+          ? [account.label, account.email].filter(Boolean).join(' · ') || null
+          : null
+      // Only whether a key is set; its value stays where Kettu keeps it.
+      facts[`agents.api-key:${status.id}`] = status.apiKey ? status.apiKey.set : null
+      if (takesStartMode(status.id)) {
+        const option = this.agentOptions
+          .get(status.id)
+          ?.config.find((o) => o.category === 'mode' && o.type === 'select' && !!o.choices?.length)
+        if (option?.choices) {
+          modes[status.id] = option.choices.map((choice) => ({
+            value: choice.value,
+            name: choice.name,
+          }))
+        }
+      }
+    }
+    const harnesses = new Map(statuses.map((s) => [s.harnessId, s.harnessName]))
+    facts['agents.agents'] = statuses.length
+    facts['harnesses.installed'] = harnesses.size
+    facts['archived.sessions'] = this.sessions
+      .summaries()
+      .filter((summary) => summary.archivedAt !== null).length
+    facts['memory.enabled'] = this.memory.enabled
+    facts['agents.workflow-suggest'] = this.workflowLibrary.suggest
+    try {
+      facts['artifacts.page-permissions'] = (await this.consents.list()).length
+    } catch {
+      // Unread lists go without a count.
+    }
+    try {
+      await this.deviceAccess.ready
+      facts['devices.allowed-devices'] = this.deviceAccess.list().length
+    } catch {
+      // As above.
+    }
+    return {
+      agents: statuses.map((status) => ({
+        id: status.id,
+        name: status.name,
+        harnessId: status.harnessId,
+      })),
+      harnesses: [...harnesses].map(([id, name]) => ({ id, name })),
+      modes,
+      facts,
+    }
+  }
+
+  /**
+   * open_settings: Settings opens at the row in the desktop windows that show the session, a
+   * desktop app connected as a device included; a row of the desktop app's own only in this
+   * computer's windows. False when no such window shows it.
+   */
+  private openSettings(sessionId: string, target: SettingsTarget): boolean {
+    const ports = this.sessions.showing(sessionId).filter((portId) => {
+      const device = this.hub.deviceOf(portId)
+      return device === null || (!target.desktop && device.browser === true)
+    })
+    if (ports.length === 0) return false
+    this.hub.send(ports, {
+      type: 'settings.open',
+      section: target.section,
+      item: target.item,
+      row: target.row,
+    })
+    return true
+  }
+
+  /** Undo on a settings line: the rows go back, unless one changed again since. */
+  private async undoSettings(sessionId: string, entryId: string): Promise<void> {
+    const items = this.sessions.settingsChange(sessionId, entryId)
+    try {
+      await this.settingsTools.undo(items)
+    } catch (error) {
+      if (error instanceof StaleUndo) {
+        this.sessions.settingsSettled(sessionId, entryId, { kind: 'changed', stale: true })
+        throw new HostError('conflict', error.message)
+      }
+      throw new HostError('unavailable', (error as Error).message)
+    }
+    this.sessions.settingsSettled(sessionId, entryId, { kind: 'changed', undone: true })
+  }
+
   /** `market-result`: main's or the daemon's answer to a Marketplace call. */
   marketResult(callId: number, answer: MarketCallAnswer): void {
     const resolve = this.marketCalls.get(callId)
@@ -2074,25 +2282,84 @@ export class AgentHost {
     return agentId
   }
 
-  /** A commit message for the changed files at `paths`, from the project's preferred agent. */
+  /**
+   * A commit message for the changed files at `paths`, from the project's preferred agent or the
+   * one the lightweight tasks' model is pinned to.
+   */
   private async commitMessage(projectPath: string, paths: string[]): Promise<string> {
     const context = await this.gitProjectCall(projectPath, (g, p) => g.commitContext(p, paths))
-    const agentId = this.preferredAgent(projectPath)
-    if (agentId === null) throw new HostError('agent_error', t('git.commitMessageNoAgent'))
-    const agent = this.agents.name(agentId)
+    const target = lightTarget(this.settings.lightModel, this.preferredAgent(projectPath), null)
+    if (target === null) throw new HostError('agent_error', t('git.commitMessageNoAgent'))
+    const agent = this.agents.name(target.agentId)
     try {
-      const runtime = await this.agents.ensureReady(agentId)
+      const runtime = await this.agents.ensureReady(target.agentId)
       const dir = path.join(this.options.userDataPath, 'agent-reports')
       await mkdir(dir, { recursive: true })
       return await writeCommitMessage(runtime, {
         dir,
         context,
+        model: target.model,
         log: (line) => this.diagnostics.log('warn', line),
       })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       this.diagnostics.log('warn', `${agent}: could not write a commit message: ${reason}`)
       throw new HostError('agent_error', t('git.commitMessageFailed', { agent, reason }))
+    }
+  }
+
+  /**
+   * A draft of a problem report's description from the agent the report is about, else the one
+   * new sessions start with, unless the lightweight tasks' model is pinned to another; null when
+   * Kettu observed nothing to write from.
+   */
+  private async draftReport(
+    params: HostParams<'agents.draftReport'>,
+  ): Promise<{ draft: string | null; agent: string | null }> {
+    const session =
+      params.sessionId !== null && this.sessions.has(params.sessionId)
+        ? this.sessions.summary(params.sessionId)
+        : null
+    const about = session?.agentId ?? params.agentId
+    const known = about !== null && this.agents.has(about)
+    const prompt = reportDraftPrompt(
+      {
+        origin: params.origin,
+        language: params.language,
+        agent: known ? this.agents.name(about) : null,
+        error: params.error,
+        log: this.diagnostics.logEntries(),
+        events: known ? this.diagnostics.agentEvents(about) : [],
+        now: Date.now(),
+      },
+      redactLogText,
+    )
+    if (prompt === null) return { draft: null, agent: null }
+    const agentId =
+      known && !this.agents.isDisabled(about)
+        ? about
+        : this.preferredAgent(session && !session.scratch ? session.projectPath : null)
+    // The session's model only for its own agent, which another agent may not offer.
+    const model = session && session.agentId === agentId ? session.model : null
+    const target = lightTarget(this.settings.lightModel, agentId, model)
+    if (target === null) throw new HostError('agent_error', t('report.draftNoAgent'))
+    const agent = this.agents.name(target.agentId)
+    try {
+      const runtime = await this.agents.ensureReady(target.agentId)
+      const dir = path.join(this.options.userDataPath, 'agent-reports')
+      await mkdir(dir, { recursive: true })
+      const draft = await writeReportDraft(runtime, {
+        dir,
+        prompt,
+        model: target.model,
+        log: (line) => this.diagnostics.log('warn', line),
+      })
+      return { draft, agent }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      // Info: the report this draft is for must not read its own failure as part of the problem.
+      this.diagnostics.log('info', `${agent}: could not draft a problem report: ${reason}`)
+      throw new HostError('agent_error', t('report.draftFailed', { agent, reason }))
     }
   }
 
@@ -2245,6 +2512,7 @@ export class AgentHost {
         tool: request.tool,
         args: request.args,
         projectPath: request.projectPath,
+        ...(request.allowTab ? { allowTab: request.allowTab } : {}),
       })
     })
   }
@@ -2338,6 +2606,34 @@ export class AgentHost {
       writeLog('warn', 'host', `A reply's run could not be told: ${(error as Error).message}`)
       return { terminalId, notified: false }
     }
+  }
+
+  /**
+   * The terminals, browser tabs and devices a user's message references: the session's agent may
+   * use them from now on, as the user shared them. A terminal of a session that exists gets the
+   * allow at once, so its tab says so; the rest is given on the agent's first call, as New
+   * session's terminals reach their session only later.
+   */
+  private shareSurfaces(sessionId: string | null, content: readonly UserContent[]): void {
+    for (const item of content) {
+      if (item.type !== 'ref') continue
+      if (item.ref.kind === 'page') this.sharedTabs.set(item.ref.tabId, sessionId)
+      if (item.ref.kind === 'device') this.sharedDevices.set(item.ref.deviceId, sessionId)
+      if (item.ref.kind !== 'terminal') continue
+      const terminalId = item.ref.terminalId
+      this.sharedTerminals.set(terminalId, sessionId)
+      if (sessionId === null) continue
+      const session = this.sessions.browserSession(sessionId) ?? sessionId
+      void this.terminalCall({ kind: 'allow', sessionId: session, terminalId, allowed: true })
+    }
+  }
+
+  /** Takes back the session's agent the use of a terminal the user opened, from the tab's menu. */
+  private async revokeTerminal(sessionId: string, terminalId: string): Promise<void> {
+    this.sharedTerminals.delete(terminalId)
+    const answer = await this.terminalCall({ kind: 'allow', sessionId, terminalId, allowed: false })
+    if ('error' in answer) throw new HostError('not_found', answer.error.message)
+    this.sessions.surfaceAccessRevoked(sessionId, terminalId)
   }
 
   /** Sends an agent's terminal call to its parent, which hands it to the terminal host. */
@@ -2616,9 +2912,8 @@ export class AgentHost {
       },
       'agents.refreshLimits': ({ agentId, force, ask }) =>
         agents.refreshLimits(agentId, { force, ask }),
-      'agents.useResetCredit': async ({ agentId, creditId }) => ({
-        outcome: await agents.useResetCredit(agentId, creditId ?? null),
-      }),
+      'agents.spendReset': ({ agentId, creditId, requestId }) =>
+        agents.spendReset(agentId, creditId, requestId),
       'agents.details': ({ agentId }) => agents.details(agentId),
       'agents.claudeSettings': ({ agentId }) =>
         agents.claudeSettings(agentId, listedModels(this.agentOptions.get(agentId)?.config)),
@@ -2627,6 +2922,8 @@ export class AgentHost {
       'agents.setCodebuddySite': ({ agentId, change }) => agents.setCodebuddySite(agentId, change),
       'agents.refreshAccount': ({ agentId, force }) => agents.refreshAccount(agentId, { force }),
       'agents.options': () => this.agentOptions.list().map((o) => this.withStartMode(o)),
+      'agents.lightAgents': () => ({ agents: this.sessions.lightAgents() }),
+      'agents.draftReport': (params) => this.draftReport(params),
       'mcp.status': () => this.mcpStatus(),
       'market.catalog': ({ refresh, cached }) =>
         this.marketCatalog.catalog(refresh === true, cached === true),
@@ -2662,6 +2959,9 @@ export class AgentHost {
       'market.skillRepository': ({ id, refresh }) =>
         this.marketSkills.repository(id, refresh === true),
       'market.addSkill': ({ source }) => this.marketSkills.add(source),
+      'settings.answerChange': ({ sessionId, entryId, decision }, { device }) =>
+        this.sessions.answerSettings(sessionId, entryId, decision, fromDevice(device)),
+      'settings.undoChange': ({ sessionId, entryId }) => this.undoSettings(sessionId, entryId),
       'market.answerPublish': ({ sessionId, entryId, ...answer }, { device }) =>
         this.sessions.answerMarket(
           sessionId,
@@ -2705,6 +3005,7 @@ export class AgentHost {
       'market.community': ({ refresh, ...query }) =>
         this.marketCommunity.directory(query, refresh === true),
       'market.communityListing': ({ id }) => this.marketCommunity.listing(id),
+      'market.communityWorkflow': ({ id }) => this.marketCommunity.workflow(id),
       'market.communityInstalled': ({ refresh }) =>
         this.marketCommunity.installed(refresh === true),
       'market.installCommunityPlugin': ({ id, agentId, scope, projectPath }) =>
@@ -2733,6 +3034,7 @@ export class AgentHost {
         this.options.send({ type: 'host:media-revoke', sessionId: null })
       },
       'projects.touch': ({ path }) => projects.touch(projects.match(path)),
+      'projects.pin': ({ path, pinned }) => projects.pin(projects.match(path), pinned),
       'projects.worktreeSettings': ({ path }) =>
         projects.worktreeSettings(projects.match(path).path),
       'projects.setWorktreeSettings': ({ path, settings }) =>
@@ -2743,6 +3045,7 @@ export class AgentHost {
       'sessions.create': async (params, { portId, device }) => {
         // A worktree is made with git, which is found as the agents find it.
         if (params.worktree) await this.env.ready()
+        if (params.prompt) this.shareSurfaces(null, params.prompt)
         return sessions.create(device ? { ...params, device: fromDevice(device) } : params, portId)
       },
       'sessions.prepare': (params, { portId }) => sessions.prepare(params, portId),
@@ -2777,8 +3080,10 @@ export class AgentHost {
       'sessions.watch': ({ sessionId }, { portId }) => sessions.watch(sessionId, portId),
       'sessions.unwatch': ({ sessionId }, { portId }) => sessions.unwatch(sessionId, portId),
       'sessions.show': ({ sessionIds }, { portId }) => sessions.show(sessionIds, portId),
-      'sessions.prompt': ({ sessionId, content }, { portId, device }) =>
-        sessions.prompt(sessionId, content, portId, fromDevice(device)),
+      'sessions.prompt': ({ sessionId, content }, { portId, device }) => {
+        this.shareSurfaces(sessionId, content)
+        return sessions.prompt(sessionId, content, portId, fromDevice(device))
+      },
       'sessions.attachEarly': ({ sessionId }) => sessions.attachEarly(sessionId),
       'sessions.cancel': ({ sessionId }) => sessions.cancel(sessionId),
       'sessions.runningWork': ({ sessionIds }) => ({ sessions: sessions.runningWork(sessionIds) }),
@@ -2801,12 +3106,16 @@ export class AgentHost {
       'worktrees.retrySetup': ({ sessionId }) => sessions.retryWorktreeSetup(sessionId),
       'worktrees.skipSetup': ({ sessionId }) => sessions.skipWorktreeSetup(sessionId),
       'worktrees.setupLog': ({ sessionId, from }) => sessions.worktreeSetupLog(sessionId, from),
-      'sessions.switchAgent': (params, { portId, device }) =>
-        sessions.switchAgent(params, portId, fromDevice(device)),
+      'sessions.switchAgent': (params, { portId, device }) => {
+        this.shareSurfaces(params.sessionId, params.content)
+        return sessions.switchAgent(params, portId, fromDevice(device))
+      },
       'sessions.context': ({ sessionId }) => sessions.context(sessionId),
       'sessions.contextEstimates': ({ sessionId }) => sessions.contextEstimates(sessionId),
-      'sessions.queue': ({ sessionId, content }, { portId, device }) =>
-        sessions.queue(sessionId, content, portId, fromDevice(device)),
+      'sessions.queue': ({ sessionId, content }, { portId, device }) => {
+        this.shareSurfaces(sessionId, content)
+        return sessions.queue(sessionId, content, portId, fromDevice(device))
+      },
       'sessions.runCommand': (params, { portId, device }) =>
         this.runReplyCommand(params, portId, device),
       'sessions.unqueue': ({ sessionId, itemId }) => sessions.unqueue(sessionId, itemId),
@@ -2824,7 +3133,8 @@ export class AgentHost {
       'sessions.rename': ({ sessionId, title }) => sessions.rename(sessionId, title),
       'sessions.close': ({ sessionId }) => sessions.close(sessionId),
       'sessions.pin': ({ sessionId, pinned }) => sessions.pin(sessionId, pinned),
-      'sessions.archive': ({ sessionId }) => sessions.archive(sessionId),
+      'sessions.archive': ({ sessionId, subSessions }) =>
+        sessions.archive(sessionId, subSessions ?? true),
       'sessions.unarchive': ({ sessionId }) => sessions.unarchive(sessionId),
       'sessions.markUnread': ({ sessionId, unread }) => sessions.markUnread(sessionId, unread),
       'sessions.delete': async ({ sessionId }) => {
@@ -3284,6 +3594,11 @@ export class AgentHost {
       'devices.answerAccess': ({ sessionId, entryId, decision }, { device }) => {
         sessions.answerDeviceAccess(sessionId, entryId, decision, fromDevice(device))
       },
+      'surfaces.answerAccess': ({ sessionId, entryId, decision }, { device }) => {
+        sessions.answerSurfaceAccess(sessionId, entryId, decision, fromDevice(device))
+      },
+      'terminals.revokeAccess': ({ sessionId, terminalId }) =>
+        this.revokeTerminal(sessionId, terminalId),
       'devices.revokeAccess': ({ sessionId, deviceId }) => {
         this.artifactService.revokeDevice(sessionId, deviceId)
         sessions.deviceAccessRevoked(sessionId, deviceId)

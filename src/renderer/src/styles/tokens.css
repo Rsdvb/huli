@@ -55,6 +55,15 @@
     0 0 0 0.5px rgb(0 0 0 / 6%), 0 1px 1px -1px rgb(0 0 0 / 10%), 0 1px 2px 0 rgb(0 0 0 / 5%);
   --thread-float-shadow: 0 0 0 0.5px rgb(0 0 0 / 10%), 0 6px 16px -6px rgb(0 0 0 / 20%);
   --thread-pill-shadow: 0 6px 16px -6px rgb(0 0 0 / 30%);
+  /* The first Cmd+Q's HUD: dark glass in every mode, its countdown the dark mode's control blue. */
+  --hud-bg: rgb(30 30 32 / 78%);
+  --hud-edge: transparent;
+  --hud-shadow: inset 0 0 0 0.5px var(--hud-edge), 0 12px 32px -8px rgb(0 0 0 / 35%);
+  --hud-ink: #ffffff;
+  --hud-text: rgb(255 255 255 / 78%);
+  --hud-key: rgb(255 255 255 / 14%);
+  --hud-key-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 18%), 0 1px 0 rgb(0 0 0 / 25%);
+  --hud-countdown: rgb(91 154 255 / 42%);
 
   --text-primary: #1f1f1f;
   --text-secondary: #5c5c5c;
@@ -475,6 +484,16 @@
   --pane-added: var(--ansi-green);
   --pane-phone: #0d0d0f;
   --pane-phone-edge: #2a2a2e;
+  /* Who uses a tab of the side panel: the agent, a step it asks of the user, the user who took it
+     over. Hues and rest tints are picked so every pair stays apart between breaths. */
+  --pane-agent: #f2581b;
+  --pane-agent-ink: #b33f0e;
+  --pane-asks: #a855f7;
+  --pane-asks-ink: #7e22ce;
+  --pane-you: #0ea5e9;
+  --pane-you-ink: #0369a1;
+  --pane-breath: 16%;
+  --pane-breath-glow: 45%;
 
   /* shell: the window frame, AffectUI's App Shell: its rows, cards, lines and shadows. */
   --shell-tray: #f4f4f4;
@@ -713,6 +732,8 @@
     --thread-card-shadow: 0 0 0 0.5px rgb(255 255 255 / 10%), 0 1px 2px rgb(0 0 0 / 40%);
     --thread-float-shadow: 0 0 0 0.5px rgb(255 255 255 / 14%), 0 6px 16px -6px rgb(0 0 0 / 60%);
     --thread-pill-shadow: 0 6px 16px -6px rgb(0 0 0 / 60%);
+    --hud-bg: rgb(52 52 56 / 72%);
+    --hud-edge: rgb(255 255 255 / 10%);
 
     --text-primary: #e6e6e7;
     --text-secondary: #ababad;
@@ -905,6 +926,14 @@
     --pane-added: var(--ansi-green);
     --pane-phone: #0d0d0f;
     --pane-phone-edge: #2a2a2e;
+    --pane-agent: #ff6a2b;
+    --pane-agent-ink: #ffa47a;
+    --pane-asks: #c084fc;
+    --pane-asks-ink: #e4c8ff;
+    --pane-you: #38bdf8;
+    --pane-you-ink: #a5e0fb;
+    --pane-breath: 18%;
+    --pane-breath-glow: 55%;
 
     /* shell: the window frame, AffectUI's App Shell: its rows, cards, lines and shadows. */
     --shell-tray: #1d1d20;
@@ -1100,6 +1129,8 @@
   --thread-card-shadow: 0 0 0 0.5px rgb(255 255 255 / 10%), 0 1px 2px rgb(0 0 0 / 40%);
   --thread-float-shadow: 0 0 0 0.5px rgb(255 255 255 / 14%), 0 6px 16px -6px rgb(0 0 0 / 60%);
   --thread-pill-shadow: 0 6px 16px -6px rgb(0 0 0 / 60%);
+  --hud-bg: rgb(52 52 56 / 72%);
+  --hud-edge: rgb(255 255 255 / 10%);
 
   --text-primary: #e6e6e7;
   --text-secondary: #ababad;
@@ -1291,6 +1322,14 @@
   --pane-added: var(--ansi-green);
   --pane-phone: #0d0d0f;
   --pane-phone-edge: #2a2a2e;
+  --pane-agent: #ff6a2b;
+  --pane-agent-ink: #ffa47a;
+  --pane-asks: #c084fc;
+  --pane-asks-ink: #e4c8ff;
+  --pane-you: #38bdf8;
+  --pane-you-ink: #a5e0fb;
+  --pane-breath: 18%;
+  --pane-breath-glow: 55%;
 
   /* shell: the window frame, AffectUI's App Shell: its rows, cards, lines and shadows. */
   --shell-tray: #1d1d20;

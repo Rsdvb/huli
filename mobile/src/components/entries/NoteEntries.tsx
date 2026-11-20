@@ -84,7 +84,13 @@ export function ControlNoteEntry(props: { entry: Of<'control_note'>; sessionId: 
   const text =
     entry.event === 'paused'
       ? `你点了 ${entry.app}，${agent} 暂停了`
-      : `你用了${SURFACE[entry.surface]} ${spanText(entry.durationMs)}，然后交还`
+      : entry.event === 'used'
+        ? entry.surface === 'terminal'
+          ? `${agent} 开始使用你的终端「${entry.name}」`
+          : entry.surface === 'browser'
+            ? `${agent} 开始使用你的标签页「${entry.name}」`
+            : `${agent} 开始使用「${entry.name}」`
+        : `你用了${SURFACE[entry.surface]} ${spanText(entry.durationMs)}，然后交还`
   return <QuietLine icon={E.cursor} text={text} />
 }
 
