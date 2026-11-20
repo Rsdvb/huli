@@ -78,6 +78,16 @@ const SIZES: Record<MarkdownSize, { fontSize: number; lineHeight: number; gap: n
   body: { fontSize: 16, lineHeight: 24, gap: 12 },
   compact: { fontSize: 15, lineHeight: 22, gap: 8 },
 }
+/** Room between a list's items. */
+const ITEM_GAP: Record<MarkdownSize, number> = { body: 8, compact: 5 }
+
+/**
+ * The room above a part of a long reply (splitReply), as the whole reply left it there: between
+ * two blocks, or between two items of a list cut there.
+ */
+export function partGap(joint: 'block' | 'item', size: MarkdownSize = 'body'): number {
+  return joint === 'item' ? ITEM_GAP[size] : SIZES[size].gap
+}
 
 /** Blocks longer than this many lines start folded, showing FOLDED_LINES of them. */
 const FOLD_OVER = 20
@@ -608,17 +618,20 @@ function Blocks(props: {
   tail?: ReactNode
   /** What leads the first paragraph, such as a sent prompt's command. */
   head?: ReactNode
+  /** The blocks go on from others above, as a later part of a long reply. */
+  continues?: boolean
 }) {
   const { look, depth } = props
   const gap = SIZES[look.size].gap
   const last = props.blocks.length - 1
+  const from = props.continues ? 1 : 0
   return (
     <View style={{ gap }}>
       {props.blocks.map((block, index) => (
         <BlockItem
           key={index}
           block={block}
-          index={index}
+          index={from + index}
           look={look}
           depth={depth}
           tail={index === last ? props.tail : undefined}
@@ -720,7 +733,7 @@ const BlockItem = memo(function BlockItem(props: {
         : 18
       const itemLast = block.items.length - 1
       return (
-        <View style={{ gap: look.size === 'body' ? 8 : 5 }}>
+        <View style={{ gap: ITEM_GAP[look.size] }}>
           {block.items.map((item, i) => (
             <View key={i} style={styles.item}>
               <View style={{ width: marker }}>
@@ -835,6 +848,8 @@ export const Markdown = memo(function Markdown(props: {
   chips?: MarkdownChips
   /** What leads the text, such as a sent prompt's command. */
   head?: ReactNode
+  /** The text goes on from a part above it, as a later part of a long reply does. */
+  continues?: boolean
 }) {
   const t = useSessionTokens()
   const refs = useFileRefs()
@@ -875,7 +890,16 @@ export const Markdown = memo(function Markdown(props: {
       </View>
     )
   }
-  return <Blocks blocks={parsed} look={look} depth={0} tail={tail} head={props.head} />
+  return (
+    <Blocks
+      blocks={parsed}
+      look={look}
+      depth={0}
+      tail={tail}
+      head={props.head}
+      {...(props.continues ? { continues: true } : {})}
+    />
+  )
 })
 
 const styles = StyleSheet.create({
