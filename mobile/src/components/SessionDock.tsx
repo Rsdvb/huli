@@ -14,6 +14,9 @@ import type {
   UserContent,
 } from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
+import type { LimitPause, LimitPauseAction, Stall, StallAction } from '@shared/supervisor'
+import { whenText } from '../ui/session/limits'
+import { useMinute } from '../ui/session/now'
 import { useAgent, useConnected, useMaybeLink } from '../host'
 import { setPrefs, usePrefs } from '../prefs'
 import { hostErrorText } from '../hostErrors'
@@ -120,6 +123,185 @@ export function HeldStrip(props: { by: OutsideKind; busy: boolean }) {
     >
       <Icon icon={G.terminal} size={15} color={c.textTertiary} />
       <Text style={[styles.heldText, { color: c.text }]}>{heldText(props.by, props.busy)}</Text>
+    </Reanimated.View>
+  )
+}
+
+const MINUTE = 60_000
+
+/** One of a supervisor strip's buttons, sending what it says to the computer. */
+function StripButton(props: {
+  label: string
+  busy: boolean
+  disabled: boolean
+  strong?: boolean
+  onPress(): void
+}) {
+  const { c, s } = useSessionTokens()
+  return (
+    <PressScale
+      scale={0.96}
+      onPress={props.onPress}
+      disabled={props.disabled}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      accessibilityState={{ disabled: props.disabled, busy: props.busy }}
+      style={[
+        styles.actionPill,
+        {
+          backgroundColor: props.strong ? s.accentSoft : c.fill,
+          opacity: props.disabled && !props.busy ? 0.5 : 1,
+        },
+      ]}
+    >
+      {props.busy ? <ActivityIndicator size="small" color={c.textSecondary} /> : null}
+      <Text style={[styles.action, { color: props.strong ? c.accent : c.text }]}>
+        {props.label}
+      </Text>
+    </PressScale>
+  )
+}
+
+/** A strip's request to the computer: one at a time, with its failure said under the strip. */
+function useStripAction<A extends string>(
+  send: (action: A) => Promise<unknown>,
+  /** The strip goes once the session drops what it showed: a success stays busy until then. */
+  holdAfter: boolean,
+) {
+  const [busy, setBusy] = useState<A | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const act = (action: A) => {
+    if (busy !== null) return
+    haptic.tap()
+    setBusy(action)
+    setError(null)
+    send(action)
+      .then(() => {
+        if (!holdAfter) setBusy(null)
+      })
+      .catch((failed: unknown) => {
+        setError(hostErrorText(failed))
+        setBusy(null)
+      })
+  }
+  return { busy, error, act }
+}
+
+/**
+ * Over the composer while a turn its agent's plan limit stopped waits to go on by itself, as the
+ * desktop's: when the plan comes back and when the session goes on, with 取消, which leaves it
+ * stopped, and 立即重试.
+ */
+export function LimitPauseStrip(props: { sessionId: string; pause: LimitPause }) {
+  const { c, s } = useSessionTokens()
+  const link = useMaybeLink()
+  const connected = useConnected()
+  const now = useMinute()
+  const { pause } = props
+  const { busy, error, act } = useStripAction<LimitPauseAction>(
+    (action) =>
+      link
+        ? link.request('sessions.limitPause', { sessionId: props.sessionId, action })
+        : Promise.reject(new Error('')),
+    true,
+  )
+  const left = Math.max(0, pause.resumeAt - now)
+  const wait = left < MINUTE ? '马上' : `${Math.ceil(left / MINUTE)} 分钟后`
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.held, { backgroundColor: s.dockCard, borderColor: c.border }]}
+      accessibilityLiveRegion="polite"
+    >
+      <Icon icon={G.timer} size={15} color={c.warning} />
+      <View style={styles.stripBody}>
+        <Text style={[styles.heldText, { color: c.text }]}>
+          {pause.resetsAt === null
+            ? `额度恢复时间未知，${whenText(pause.resumeAt, now)} 再查一次`
+            : `额度 ${whenText(pause.resetsAt, now)} 恢复后自动继续`}
+        </Text>
+        <Text style={[styles.stripSmall, { color: c.textTertiary }]}>
+          {pause.resetsAt === null ? `额度有空余后自动继续 · ${wait}再查` : `${wait}继续`}
+        </Text>
+        {error ? <Text style={[styles.stripSmall, { color: c.danger }]}>{error}</Text> : null}
+        <View style={styles.stripActions}>
+          <StripButton
+            label="取消"
+            busy={busy === 'cancel'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('cancel')}
+          />
+          <StripButton
+            label="立即重试"
+            strong
+            busy={busy === 'now'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('now')}
+          />
+        </View>
+      </View>
+    </Reanimated.View>
+  )
+}
+
+/**
+ * Over the composer while the running turn has said nothing for a while, as the desktop's: for how
+ * long, with 继续等, 重试, which stops it and goes on again, and 停止. It goes by itself once the
+ * turn says something again.
+ */
+export function StallStrip(props: { sessionId: string; stall: Stall }) {
+  const { c, s } = useSessionTokens()
+  const link = useMaybeLink()
+  const connected = useConnected()
+  const now = useMinute()
+  const { busy, error, act } = useStripAction<StallAction>(
+    (action) =>
+      link
+        ? link.request('sessions.stall', { sessionId: props.sessionId, action })
+        : Promise.reject(new Error('')),
+    false,
+  )
+  const minutes = Math.max(1, Math.floor((now - props.stall.since) / MINUTE))
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.held, { backgroundColor: s.dockCard, borderColor: c.border }]}
+      accessibilityLiveRegion="polite"
+    >
+      <Icon icon={G.timer} size={15} color={c.warning} />
+      <View style={styles.stripBody}>
+        <Text style={[styles.heldText, { color: c.text }]}>可能卡住了</Text>
+        <Text style={[styles.stripSmall, { color: c.textTertiary }]}>
+          {props.stall.reason === 'retrying'
+            ? `一直在重试，已经 ${minutes} 分钟没有输出`
+            : `已经 ${minutes} 分钟没有输出`}
+        </Text>
+        {error ? <Text style={[styles.stripSmall, { color: c.danger }]}>{error}</Text> : null}
+        <View style={styles.stripActions}>
+          <StripButton
+            label="继续等"
+            busy={busy === 'wait'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('wait')}
+          />
+          <StripButton
+            label="重试"
+            busy={busy === 'retry'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('retry')}
+          />
+          <StripButton
+            label="停止"
+            strong
+            busy={busy === 'stop'}
+            disabled={busy !== null || !connected}
+            onPress={() => act('stop')}
+          />
+        </View>
+      </View>
     </Reanimated.View>
   )
 }
@@ -511,6 +693,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   heldText: { flex: 1, fontSize: 14, lineHeight: 20 },
+  stripBody: { flex: 1, minWidth: 0, gap: 2 },
+  stripSmall: { fontSize: 12.5, lineHeight: 17 },
+  stripActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',

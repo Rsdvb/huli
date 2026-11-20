@@ -106,6 +106,8 @@ import { useSessionPane } from '../../components/SessionPane'
 import {
   HeldStrip,
   heldConfirmText,
+  LimitPauseStrip,
+  StallStrip,
   ModeButton,
   ModelChip,
   QueueStack,
@@ -925,6 +927,11 @@ export default function SessionScreen() {
   // A program outside that has the session open and at work writes to it, so nothing goes from
   // here until it is done; one that has it open but idle lets a message go once the user agrees.
   const heldOutside = session?.heldOutside === true
+  // The supervisor's: a turn its plan limit stopped waits to go on by itself, and a running turn
+  // that has said nothing for a while may be stuck. The thread's view says so first, the
+  // summary where the thread is not read yet.
+  const limitPause = session ? (session.limitPause ?? null) : (summary?.limitPause ?? null)
+  const stall = session ? (session.stall ?? null) : (summary?.stall ?? null)
   const openOutside = session?.openOutside ?? null
   // Why Send does nothing now, for the line over the text.
   const unsendable =
@@ -1255,12 +1262,16 @@ export default function SessionScreen() {
             onCountChange={setAttachCount}
             top={(holds) =>
               pendingSwitch ||
+              limitPause ||
+              stall ||
               heldOutside ||
               openOutside ||
               suggestion ||
               (cacheNoticeShown && holds) ||
               (predicted && !holds) ? (
                 <>
+                  {limitPause ? <LimitPauseStrip sessionId={id} pause={limitPause} /> : null}
+                  {stall ? <StallStrip sessionId={id} stall={stall} /> : null}
                   {heldOutside || openOutside ? (
                     <HeldStrip by={openOutside ?? 'terminal'} busy={heldOutside} />
                   ) : null}
