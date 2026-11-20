@@ -14,7 +14,7 @@ import type {
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { replayedBlock } from '../acp/mapper'
-import { hasMessage, t } from '../i18n'
+import { currentLocale, hasMessage, t } from '../i18n'
 import { planMarkdown, planRevision } from '../plan-revision'
 import { isRowlessCall, isRowWhenFailed } from '../plan-tool'
 import { ANSWERS_OPTION } from '../question-answers'
@@ -269,6 +269,32 @@ function dynamicContent(item: Item<'dynamicToolCall'>): ToolContent[] {
   )
 }
 
+/** Huli: a `/goal` as Codex reports it. */
+interface ThreadGoal {
+  objective: string
+  status: string
+  tokensUsed?: number
+  tokenBudget?: number | null
+  timeUsedSeconds?: number
+}
+
+const GOAL_STATES: ReadonlySet<string> = new Set([
+  'active',
+  'paused',
+  'blocked',
+  'usageLimited',
+  'budgetLimited',
+  'complete',
+])
+
+/** Huli: a time spent in whole units: "45 s", "12 min", "3 h 5 min". */
+function spentTime(seconds: number): string {
+  if (seconds < 60) return t('codex.goal.seconds', { count: Math.max(0, Math.round(seconds)) })
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return t('codex.goal.minutes', { count: minutes })
+  return t('codex.goal.hours', { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
+}
+
 /** Huli: notifications that say the model's stream runs again after a retry. */
 const PROGRESS: ReadonlySet<string> = new Set([
   'item/started',
@@ -407,6 +433,8 @@ export class ThreadMapper {
   private sentAt: number | null = null
   /** When the request running now first showed output, if it has. */
   private firstOutputAt: number | null = null
+  /** Huli: the notice of the session's goal in its latest state. */
+  private goal: { id: string; status: string } | null = null
   /** Huli: the stream Codex reconnects now, and the notice that says so. */
   private retry: { id: string; attempts: number } | null = null
 
@@ -492,6 +520,18 @@ export class ThreadMapper {
       case 'item/autoApprovalReview/started':
       case 'item/autoApprovalReview/completed':
         this.review(ctx, out, p, method.endsWith('completed'))
+        break
+      case 'thread/goal/updated':
+        this.goalUpdated(ctx, out, p.goal as ThreadGoal | undefined)
+        break
+      case 'thread/goal/cleared':
+        this.goal = null
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: ctx.nextId(),
+          severity: 'info',
+          title: t('codex.goal.cleared'),
+        })
         break
       case 'autoApprovalReview/strictReviewRequired':
         addEntry(ctx, out, {
@@ -603,6 +643,33 @@ export class ThreadMapper {
       ? t('codex.notice.reconnected', { count: retry.attempts })
       : t('codex.notice.reconnectFailed', { count: retry.attempts })
     upsertNotice(ctx, out, retry.id, through ? 'info' : 'warning', title)
+  }
+
+  /**
+   * Huli: the session's `/goal` as Codex pursues it: a notice when its state changes, naming the
+   * goal, which then keeps the tokens and time it has used up to date.
+   */
+  private goalUpdated(ctx: MapperContext, out: MapperOutput, goal: ThreadGoal | undefined): void {
+    if (!goal || typeof goal.objective !== 'string') return
+    const status = GOAL_STATES.has(goal.status) ? goal.status : 'active'
+    const title = t(`codex.goal.${status}` as 'codex.goal.active', {
+      objective: oneLine(goal.objective),
+    })
+    const tokens = new Intl.NumberFormat(currentLocale()).format(goal.tokensUsed ?? 0)
+    const budget =
+      typeof goal.tokenBudget === 'number'
+        ? t('codex.goal.budget', {
+            budget: new Intl.NumberFormat(currentLocale()).format(goal.tokenBudget),
+          })
+        : ''
+    const description = t('codex.goal.used', {
+      tokens,
+      budget,
+      time: spentTime(goal.timeUsedSeconds ?? 0),
+    })
+    const severity = status === 'blocked' || status.endsWith('Limited') ? 'warning' : 'info'
+    if (this.goal?.status !== status) this.goal = { id: ctx.nextId(), status }
+    upsertNotice(ctx, out, this.goal.id, severity, title, description)
   }
 
   /** One item of the thread's history, as `session/load` replays one. */

@@ -376,6 +376,51 @@ describe('sub-agent calls', () => {
   })
 })
 
+describe('the goal', () => {
+  const goal = (status: string, tokensUsed: number, timeUsedSeconds: number): [string, unknown] => [
+    'thread/goal/updated',
+    {
+      threadId: 'thread-1',
+      turnId: null,
+      goal: {
+        threadId: 'thread-1',
+        objective: 'Make the suite pass',
+        status,
+        tokensUsed,
+        tokenBudget: 200_000,
+        timeUsedSeconds,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    },
+  ]
+
+  it('shows its state, keeps its use up to date, and says when it changed or was cleared', () => {
+    const { entries, unknown } = run([
+      goal('active', 1_200, 30),
+      goal('active', 45_000, 600),
+      goal('budgetLimited', 200_000, 3_900),
+      ['thread/goal/cleared', { threadId: 'thread-1' }],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      {
+        kind: 'notice',
+        severity: 'info',
+        title: 'Goal: Make the suite pass',
+        description: '45,000 tokens used of 200,000 · 10 minutes',
+      },
+      {
+        kind: 'notice',
+        severity: 'warning',
+        title: 'Goal out of budget: Make the suite pass',
+        description: '200,000 tokens used of 200,000 · 1 h 5 min',
+      },
+      { kind: 'notice', title: 'Goal cleared' },
+    ])
+  })
+})
+
 describe('a lost stream', () => {
   const lost = (attempt: number, willRetry = true): [string, unknown] => [
     'error',

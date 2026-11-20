@@ -769,6 +769,22 @@
         "shutdown": "Closed",
         "notFound": "Not found"
       }
+    },
+    "goal": {
+      "active": "Goal: {{objective}}",
+      "paused": "Goal paused: {{objective}}",
+      "blocked": "Goal blocked: {{objective}}",
+      "usageLimited": "Goal paused at the usage limit: {{objective}}",
+      "budgetLimited": "Goal out of budget: {{objective}}",
+      "complete": "Goal reached: {{objective}}",
+      "cleared": "Goal cleared",
+      "used": "{{tokens}} tokens used{{budget}} · {{time}}",
+      "budget": " of {{budget}}",
+      "seconds_one": "{{count}} second",
+      "seconds_other": "{{count}} seconds",
+      "minutes_one": "{{count}} minute",
+      "minutes_other": "{{count}} minutes",
+      "hours": "{{hours}} h {{minutes}} min"
     }
   },
   "dsh": {

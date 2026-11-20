@@ -759,6 +759,20 @@
         "shutdown": "已关闭",
         "notFound": "找不到"
       }
+    },
+    "goal": {
+      "active": "目标：{{objective}}",
+      "paused": "目标已暂停：{{objective}}",
+      "blocked": "目标受阻：{{objective}}",
+      "usageLimited": "目标因用量上限暂停：{{objective}}",
+      "budgetLimited": "目标预算已用完：{{objective}}",
+      "complete": "目标已达成：{{objective}}",
+      "cleared": "目标已清除",
+      "used": "已用 {{tokens}} tokens{{budget}} · {{time}}",
+      "budget": "（预算 {{budget}}）",
+      "seconds_other": "{{count}} 秒",
+      "minutes_other": "{{count}} 分钟",
+      "hours": "{{hours}} 小时 {{minutes}} 分钟"
     }
   },
   "dsh": {

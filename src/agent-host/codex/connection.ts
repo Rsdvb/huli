@@ -177,8 +177,6 @@ const QUIET = new Set([
   'thread/unarchived',
   'thread/deleted',
   'thread/compacted',
-  'thread/goal/updated',
-  'thread/goal/cleared',
   'item/fileChange/outputDelta',
   'remoteControl/status/changed',
   'turn/moderationMetadata',
