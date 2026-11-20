@@ -81,6 +81,17 @@ function openLink(href: string, refs: FileRefsContext | null) {
   if (/^(https?:|mailto:)/i.test(href)) void Linking.openURL(href).catch(() => {})
 }
 
+/**
+ * A run with a background, padded and spaced so that a line never ends in a space of its own: iOS
+ * draws a space a line ends in out to the line's end, so code that wrapped left an empty block of
+ * its tint at the end of the line before. Its spaces are non-breaking, each after a zero-width
+ * space where the line may break, and a zero-width space before it lets the line break there too.
+ */
+function tinted(text: string): string {
+  return `\u00A0${text.replace(/ /g, '\u200B\u00A0')}\u00A0`
+}
+const BREAK = '\u200B'
+
 /** A chip's words: a file's name and lines, a folder with its slash, a link's host and path. */
 function chipWords(chip: Chip): string {
   if (chip.kind === 'link') {
@@ -100,7 +111,7 @@ function ChipRuns(props: { text: string; look: Look }): ReactNode {
   const out: ReactNode[] = []
   let at = 0
   for (const chip of found) {
-    if (chip.from > at) out.push(props.text.slice(at, chip.from))
+    out.push(`${props.text.slice(at, chip.from)}${BREAK}`)
     out.push(
       <Text
         key={chip.from}
@@ -109,7 +120,9 @@ function ChipRuns(props: { text: string; look: Look }): ReactNode {
         accessibilityLabel={props.text.slice(chip.from, chip.to)}
         style={{ color: c.tint, backgroundColor: s.inlineCode, fontWeight: '500' }}
       >
-        {` ${chip.kind === 'link' ? '' : chip.kind === 'folder' ? '▸ ' : '@'}${chipWords(chip)} `}
+        {tinted(
+          `${chip.kind === 'link' ? '' : chip.kind === 'folder' ? '▸ ' : '@'}${chipWords(chip)}`,
+        )}
       </Text>,
     )
     at = chip.to
@@ -139,7 +152,8 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
         const ref = knownFileRef(node.v, look.refs)
         if (ref && look.refs) {
           const refs = look.refs
-          return (
+          return [
+            BREAK,
             <Text
               key={i}
               onPress={() => openFile(refs.sessionId, ref.path, ref.line)}
@@ -151,11 +165,12 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
                 color: c.tint,
               }}
             >
-              {` ${node.v} `}
-            </Text>
-          )
+              {tinted(node.v)}
+            </Text>,
+          ]
         }
-        return (
+        return [
+          BREAK,
           <Text
             key={i}
             // In Huli's orange on its soft tint, as Kettu sets inline code: plain text on gray read
@@ -167,9 +182,9 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
               color: c.accent,
             }}
           >
-            {` ${node.v} `}
-          </Text>
-        )
+            {tinted(node.v)}
+          </Text>,
+        ]
       }
       case 'strong':
         return (
