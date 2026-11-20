@@ -32,6 +32,15 @@ export function durationText(ms: number, tenths = false): string {
   return h % 24 ? `${Math.floor(h / 24)} 天 ${h % 24} 小时` : `${Math.floor(h / 24)} 天`
 }
 
+/**
+ * How long something running has gone, for a count redrawn every 15 seconds: whole seconds through
+ * its first minute, then `durationText` to the minute, so no shown second jumps by fifteen.
+ */
+export function elapsedText(ms: number): string {
+  const at = Math.max(0, ms)
+  return durationText(at < 60_000 ? at - (at % 1000) : at - (at % 60_000))
+}
+
 /** `durationText`, by the name the session screens first gave it. */
 export const spanText = (ms: number): string => durationText(ms)
 

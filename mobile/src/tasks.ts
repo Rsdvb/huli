@@ -24,6 +24,7 @@ import { call } from './git'
 import { useConnected, useMaybeLink, withinRefreshLimit } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
+import { elapsedText } from './ui/session/format'
 import { useQuarterMinute } from './ui/session/now'
 
 export const LANG = 'zh-CN'
@@ -243,16 +244,8 @@ export function sourceText(entry: WireWorkflowEntry): string {
 
 export { usableWorkflow }
 
-/** How long something has gone: 12 秒, 5 分钟, 2 小时 3 分, 3 天. */
-export function spanText(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s} 秒`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m} 分钟`
-  const h = Math.floor(m / 60)
-  if (h < 48) return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`
-  return `${Math.floor(h / 24)} 天`
-}
+/** How long a task or a step has gone, on the clock that ticks every 15 seconds. */
+export const spanText = elapsedText
 
 /** The time every 15 seconds while `on`, for a clock that counts up, on the screen's shared clock. */
 export function useTick(on: boolean): number {

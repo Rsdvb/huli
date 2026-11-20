@@ -1,5 +1,6 @@
 import type { SessionSummary } from '@shared/agent-host'
 import { hostErrorText } from './hostErrors'
+import { durationText } from './ui/session/format'
 import type { Theme } from './theme'
 
 export function needsYou(s: SessionSummary): boolean {
@@ -160,9 +161,5 @@ export function greeting(now = new Date()): string {
   return '晚上好'
 }
 
-export function duration(ms: number): string {
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s} 秒`
-  const m = Math.floor(s / 60)
-  return m < 60 ? `${m} 分 ${s % 60} 秒` : `${Math.floor(m / 60)} 小时 ${m % 60} 分`
-}
+/** How long a run worked, the one way the app says a duration. */
+export const duration = durationText

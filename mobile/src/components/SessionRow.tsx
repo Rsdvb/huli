@@ -19,6 +19,7 @@ import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
 import { Skeleton } from '../ui/Skeleton'
 import { Spinner } from '../ui/StepMarks'
+import { elapsedText } from '../ui/session/format'
 import { useQuarterMinute, useSecond } from '../ui/session/now'
 import {
   motion,
@@ -75,16 +76,6 @@ export function subagentCounts(sessions: Iterable<SessionSummary>): Map<string, 
 }
 
 /** How long a running turn has gone, as the row's time column shows it. */
-export function elapsedText(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s} 秒`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m} 分钟`
-  const h = Math.floor(m / 60)
-  if (h < 24) return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`
-  const d = Math.floor(h / 24)
-  return h % 24 ? `${d} 天 ${h % 24} 小时` : `${d} 天`
-}
 
 /**
  * How long a running turn has gone, on the screen's shared clocks: each second through its first
