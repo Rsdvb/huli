@@ -485,8 +485,8 @@
     },
     "notice": {
       "retrying": "正在重试（{{attempt}}/{{max}}）· {{reason}}",
-      "retried": "重试 {{count}} 次后已恢复 · {{reason}}",
-      "retryFailed": "重试 {{count}} 次后仍然失败 · {{reason}}",
+      "retried_other": "重试 {{count}} 次后已恢复 · {{reason}}",
+      "retryFailed_other": "重试 {{count}} 次后仍然失败 · {{reason}}",
       "commandOutput": "命令输出",
       "mcpFailed_other": "MCP 服务器 {{names}} 没能启动",
       "mcpFailedHint": "在它启动之前，这个会话用不了它的工具。",
@@ -646,7 +646,11 @@
       }
     },
     "notice": {
-      "rerouted": "Codex 从 {{from}} 换到了 {{to}}"
+      "rerouted": "Codex 从 {{from}} 换到了 {{to}}",
+      "reconnecting": "重新连接中（{{attempt}}/{{max}}）…",
+      "reconnectingPlain": "重新连接中…",
+      "reconnected_other": "重试 {{count}} 次后已重新连接",
+      "reconnectFailed_other": "重试 {{count}} 次后仍未连上"
     },
     "command": {
       "plan": {

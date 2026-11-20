@@ -276,6 +276,45 @@ describe('commands', () => {
   })
 })
 
+describe('a lost stream', () => {
+  const lost = (attempt: number, willRetry = true): [string, unknown] => [
+    'error',
+    {
+      ...at,
+      willRetry,
+      error: {
+        message: `Reconnecting... ${attempt}/5 (stream disconnected before completion)`,
+        codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+      },
+    },
+  ]
+
+  it('shows one notice that counts the attempts, then says the stream came back', () => {
+    const { entries, unknown } = run([
+      lost(1),
+      lost(2),
+      ['item/agentMessage/delta', { ...at, itemId: 'm', delta: 'Hi' }],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries).toMatchObject([
+      {
+        kind: 'notice',
+        id: 'n:retry:turn-1',
+        severity: 'info',
+        title: 'Reconnected after 2 retries',
+      },
+      { kind: 'agent', markdown: 'Hi' },
+    ])
+  })
+
+  it('says so when the turn failed while it retried', () => {
+    const { entries } = run([lost(1), lost(5, false)])
+    expect(entries).toMatchObject([
+      { kind: 'notice', severity: 'warning', title: 'Could not reconnect after 1 retry' },
+    ])
+  })
+})
+
 describe('auto-review', () => {
   const action = { type: 'command', command: 'rm -rf build', cwd: '/p', source: 'shell' }
   const review = (status: string, extra: Record<string, unknown> = {}): [string, unknown] => [

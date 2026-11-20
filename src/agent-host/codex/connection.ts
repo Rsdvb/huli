@@ -1177,6 +1177,8 @@ export class CodexConnection implements AgentConnection {
         return
       case 'error':
         this.turnError(p)
+        // Huli: the thread shows that Codex reconnects, and whether it got through.
+        if (typeof p.threadId === 'string') this.deliver(p.threadId, { method, params })
         return
       case 'deprecationNotice':
       case 'configWarning':

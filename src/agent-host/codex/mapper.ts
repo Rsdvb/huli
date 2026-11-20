@@ -251,6 +251,30 @@ function dynamicContent(item: Item<'dynamicToolCall'>): ToolContent[] {
   )
 }
 
+/** Huli: notifications that say the model's stream runs again after a retry. */
+const PROGRESS: ReadonlySet<string> = new Set([
+  'item/started',
+  'item/agentMessage/delta',
+  'item/reasoning/summaryTextDelta',
+  'item/reasoning/textDelta',
+  'item/plan/delta',
+  'thread/tokenUsage/updated',
+])
+
+/** Huli: adds a notice of Kite's own, or changes it once it shows. */
+function upsertNotice(
+  ctx: MapperContext,
+  out: MapperOutput,
+  id: string,
+  severity: 'info' | 'warning' | 'error',
+  title: string,
+  description?: string,
+): void {
+  const changes = { severity, title, ...(description !== undefined ? { description } : {}) }
+  if (ctx.thread.byId[id]?.kind === 'notice') out.patches.push({ op: 'entry.update', id, changes })
+  else addEntry(ctx, out, { kind: 'notice', id, ...changes })
+}
+
 /** Huli: an action Codex's auto-review looks at, as its notifications describe it. */
 type ReviewAction =
   | { type: 'command'; command: string; cwd: string }
@@ -342,13 +366,19 @@ export class ThreadMapper {
   private sentAt: number | null = null
   /** When the request running now first showed output, if it has. */
   private firstOutputAt: number | null = null
+  /** Huli: the stream Codex reconnects now, and the notice that says so. */
+  private retry: { id: string; attempts: number } | null = null
 
   /** Maps one notification; null for one this mapper does not take. */
   notification(method: string, params: unknown, ctx: MapperContext): MapperOutput | null {
     const out = output()
     const p = params as Record<string, unknown>
     if (!ctx.replaying) this.timeOutput(ctx, out, method, p)
+    if (this.retry && method !== 'error' && PROGRESS.has(method)) this.reconnected(ctx, out, true)
     switch (method) {
+      case 'error':
+        this.streamError(ctx, out, p)
+        break
       case 'item/started':
         this.item(ctx, out, p.item as ThreadItem, false)
         break
@@ -492,6 +522,40 @@ export class ThreadMapper {
             ? { status: 'completed' as const }
             : {}),
     })
+  }
+
+  /**
+   * Huli: Codex lost the model's stream and retries it: one notice counts the attempts while it
+   * does, and then says whether it got through. Other errors end the turn, which says why.
+   */
+  private streamError(ctx: MapperContext, out: MapperOutput, p: Record<string, unknown>): void {
+    const error = (p.error ?? {}) as { message?: string }
+    const message = typeof error.message === 'string' ? error.message.trim() : ''
+    if (p.willRetry !== true) {
+      if (this.retry) this.reconnected(ctx, out, false)
+      return
+    }
+    const counted = /(\d+)\s*\/\s*(\d+)/.exec(message)
+    const retry = (this.retry ??= {
+      id: `n:retry:${String(p.turnId ?? ctx.nextId())}`,
+      attempts: 0,
+    })
+    retry.attempts = counted ? Number(counted[1]) : retry.attempts + 1
+    const title = counted
+      ? t('codex.notice.reconnecting', { attempt: counted[1], max: counted[2] })
+      : t('codex.notice.reconnectingPlain')
+    upsertNotice(ctx, out, retry.id, 'warning', title, message || undefined)
+  }
+
+  /** Huli: the stream Codex retried came back, or the turn failed while it retried. */
+  private reconnected(ctx: MapperContext, out: MapperOutput, through: boolean): void {
+    const retry = this.retry
+    if (!retry) return
+    this.retry = null
+    const title = through
+      ? t('codex.notice.reconnected', { count: retry.attempts })
+      : t('codex.notice.reconnectFailed', { count: retry.attempts })
+    upsertNotice(ctx, out, retry.id, through ? 'info' : 'warning', title)
   }
 
   /** One item of the thread's history, as `session/load` replays one. */

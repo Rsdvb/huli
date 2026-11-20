@@ -488,8 +488,10 @@
     },
     "notice": {
       "retrying": "Retrying ({{attempt}}/{{max}}) · {{reason}}",
-      "retried": "Went through after {{count}} retries · {{reason}}",
-      "retryFailed": "Still failing after {{count}} retries · {{reason}}",
+      "retried_one": "Went through after 1 retry · {{reason}}",
+      "retried_other": "Went through after {{count}} retries · {{reason}}",
+      "retryFailed_one": "Still failing after 1 retry · {{reason}}",
+      "retryFailed_other": "Still failing after {{count}} retries · {{reason}}",
       "commandOutput": "Command output",
       "mcpFailed_one": "MCP server {{names}} could not start",
       "mcpFailed_other": "MCP servers {{names}} could not start",
@@ -651,7 +653,13 @@
       }
     },
     "notice": {
-      "rerouted": "Codex switched from {{from}} to {{to}}"
+      "rerouted": "Codex switched from {{from}} to {{to}}",
+      "reconnecting": "Reconnecting ({{attempt}}/{{max}})…",
+      "reconnectingPlain": "Reconnecting…",
+      "reconnected_one": "Reconnected after 1 retry",
+      "reconnected_other": "Reconnected after {{count}} retries",
+      "reconnectFailed_one": "Could not reconnect after 1 retry",
+      "reconnectFailed_other": "Could not reconnect after {{count}} retries"
     },
     "command": {
       "plan": {
