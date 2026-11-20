@@ -5,6 +5,7 @@ import type { ToolContent } from '@shared/thread'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { basename, dirname } from '@renderer/lib/format'
 import { Clamp } from '../clamp'
+import { ConfirmedLink } from '../link-confirm'
 import { Markdown } from '../markdown'
 import { CarriedImage } from '../media/carried-image'
 import { CarriedMedia } from '../media/carried-media'
@@ -92,8 +93,21 @@ export function ContentBlock({
           />
         )
       }
+      // Huli: a web resource a tool linked opens, after the link's confirmation.
+      if (content.ref.kind === 'link' && /^https?:\/\//i.test(content.ref.uri)) {
+        return (
+          <div className="text-xs">
+            <ConfirmedLink url={content.ref.uri}>
+              {content.ref.name || content.ref.uri}
+            </ConfirmedLink>
+          </div>
+        )
+      }
       return (
-        <div className="text-xs text-muted-foreground">
+        <div
+          className="text-xs text-muted-foreground"
+          title={content.ref.kind === 'link' ? content.ref.uri : undefined}
+        >
           {content.ref.kind === 'link'
             ? content.ref.name || content.ref.uri
             : content.ref.kind === 'unsupported'

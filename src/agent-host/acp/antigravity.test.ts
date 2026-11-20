@@ -346,6 +346,75 @@ describe("agy's tool calls", () => {
     ])
     connection.close()
   })
+
+  it("title agy's own tools it sends untitled and keep what any call says it does", async () => {
+    // As agy 1.5.12 sends them: its own tools as "Run <name>", Kettu's with a `toolSummary`.
+    const calls = [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call_1',
+        name: 'send_message',
+        status: 'completed',
+        kind: 'other',
+        title: 'Run send_message',
+        rawInput: { Message: 'Carry on with the rest.', Recipient: 'c34bb3a8-1b3a-42f8' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call_2',
+        name: 'manage_subagents',
+        status: 'completed',
+        kind: 'other',
+        title: 'Run manage_subagents',
+        rawInput: { Action: 'list' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call_3',
+        name: 'mcp_kettu_list_sessions',
+        status: 'completed',
+        kind: 'other',
+        title: 'Run mcp_kettu_list_sessions',
+        rawInput: { limit: 5, toolSummary: '  List the\nrecent sessions ' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call_4',
+        name: 'search_web',
+        status: 'completed',
+        kind: 'search',
+        title: '"vaultwarden arm64" on Web',
+        rawInput: { query: 'vaultwarden arm64' },
+      },
+    ]
+    const { connection } = connect('1.5.12', async (client, sessionId) => {
+      for (const value of calls) {
+        await client.notify(methods.client.session.update, update(sessionId, value))
+      }
+    })
+    await connection.initialize('1.0.0')
+    const { sessionId } = await connection.newSession('/tmp/agy-probe')
+    const { target, entries } = threadTarget()
+    connection.register(sessionId, target)
+    await connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+
+    const rows = entries().map((entry) => {
+      if (entry.kind !== 'tool') return entry.kind
+      const { title, content, description } = entry
+      return { title, content, description }
+    })
+    expect(rows).toEqual([
+      {
+        title: 'Message c34bb3a8',
+        content: [{ type: 'markdown', markdown: 'Carry on with the rest.' }],
+        description: undefined,
+      },
+      { title: 'Manage subagents: list', content: [], description: undefined },
+      { title: 'mcp__kettu__list_sessions', content: [], description: 'List the recent sessions' },
+      { title: '"vaultwarden arm64" on Web', content: [], description: undefined },
+    ])
+    connection.close()
+  })
 })
 
 describe("agy's Plan mode", () => {

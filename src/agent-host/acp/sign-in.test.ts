@@ -113,12 +113,12 @@ const until = (done: () => boolean): Promise<void> =>
   })
 
 describe('signing in through the client', () => {
-  it('declares the delegated sign-in and URL elicitation', async () => {
+  it('declares the delegated sign-in and form and URL elicitation', async () => {
     const { connection, recorded } = connect(async () => ({}))
     await connection.initialize('1.0.0')
     expect(recorded.capabilities._meta?.['browser-auth-delegated']).toBe(true)
     expect(recorded.capabilities.elicitation?.url).toEqual({})
-    expect(recorded.capabilities.elicitation?.form).toBeUndefined()
+    expect(recorded.capabilities.elicitation?.form).toEqual({})
     connection.close()
   })
 

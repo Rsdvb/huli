@@ -15,6 +15,7 @@ import type { SessionSummary } from '@shared/agent-host'
 import type { BrowserOriginDecision } from '@shared/browser'
 import type { ComputerAppDecision } from '@shared/computer-use'
 import { relaySummary, type RemoteStatus } from '@shared/remote/status'
+import { toolTitle } from '@shared/tool-names'
 import type { TrayTarget } from '@shared/tray'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { BrandIcon } from '@renderer/components/brand'
@@ -107,7 +108,7 @@ function requestTarget(
   if (tool.toolKind === 'execute') {
     return { text: tool.rawInput ?? tool.title.replace(/^run\s+/i, ''), code: true }
   }
-  return { text: tool.title, code: false }
+  return { text: toolTitle(tool.title, i18n.language), code: false }
 }
 
 /** The panel under Motion's reduce-motion rule, which follows the setting as the window does. */
@@ -329,7 +330,7 @@ function toolLine(tool: PendingTool, projectPath: string): string {
     const verb = i18n.t(`session:tool.verb.${VERB_KEY[tool.toolKind as keyof typeof VERB_KEY]}`)
     return `${verb} ${relativePath(location, projectPath)}`
   }
-  return tool.title
+  return toolTitle(tool.title, i18n.language)
 }
 
 function waitingLine(summary: SessionSummary, detail: SessionDetail | undefined): string {

@@ -3214,7 +3214,11 @@ export class AgentHost {
           throw new HostError('not_found', `No setup waits in ${entryId}`)
         }
       },
-      'agentHistory.list': ({ agentId, cursor }) => this.agentHistory.list(agentId, cursor ?? null),
+      'agentHistory.list': ({ agentId, cursor, folder }) =>
+        this.agentHistory.list(agentId, cursor ?? null, folder ?? null),
+      'agentHistory.planCopy': ({ agentId, folder, sessionIds }) =>
+        this.agentHistory.planCopy(agentId, folder, sessionIds),
+      'agentHistory.copy': ({ token }) => this.agentHistory.copy(token),
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),

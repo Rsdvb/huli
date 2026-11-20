@@ -384,6 +384,8 @@ export type ThreadEntry =
       stopReason: StopReason
       durationMs: number
       after?: string | null // the agent's entry before it, to put it back after a replay
+      /** Huli: for a turn its model refused, why, as the agent reported it. */
+      refusal?: TurnRefusal
     }
   | TakeoverEntry // Kettu's own record of another agent taking the session over
   | GitEntry // Kettu's own observation of the repository, see the git design
@@ -399,6 +401,16 @@ export type ThreadEntry =
   | ProblemReportEntry // Kettu's own record of a problem report an agent drafted, and its outcome
   | MemoryWriteEntry // Kettu's own record of an agent's write to Kettu's memory, and its answer
   | MarketPublishEntry // Kettu's own record of a publish to the Kettu Marketplace, and its outcome
+
+/**
+ * Huli: why a model refused a turn: the explanation its provider gave, to show and never parse, the
+ * category of the refusal, and the model; each null when the agent did not say.
+ */
+export interface TurnRefusal {
+  explanation: string | null
+  category: string | null
+  model: string | null
+}
 
 /**
  * Where another agent took the session over: from here on its turns are that agent's. `turns` of
@@ -802,6 +814,33 @@ export interface ToolEntry {
    * where the harness did not pass it on, such as Claude Code for a call that returned an error.
    */
   structured?: Record<string, unknown>
+  /**
+   * Huli: set on a call that never ran because it was denied, which is `cancelled` rather than
+   * failed: by whom, and the reason the denying side gave.
+   */
+  denied?: ToolDenial
+  /** Huli: the exit code a command ended with, when the agent reports one apart from its output. */
+  exitCode?: number
+  /** Huli: the agent's automatic review of the call before it ran, such as Codex's auto-review. */
+  review?: ToolReview
+  /** Huli: the latest progress a running call reported, such as an MCP tool's; kept once it ends. */
+  progress?: string
+}
+
+/** Huli: what an agent's automatic review made of a call: its verdict, the risk it saw, and why. */
+export interface ToolReview {
+  status: 'reviewing' | 'approved' | 'denied' | 'timed_out' | 'aborted'
+  risk: 'low' | 'medium' | 'high' | 'critical' | null
+  rationale: string | null
+}
+
+/**
+ * Who denied a call: the user, the agent's automatic review (Codex's auto-review, Claude Code's
+ * auto mode), its permission mode, a permission rule, or a hook.
+ */
+export interface ToolDenial {
+  by: 'user' | 'review' | 'mode' | 'rule' | 'hook'
+  reason?: string
 }
 
 export type ToolContent =
@@ -819,6 +858,8 @@ export interface PendingPermission {
   plan?: { markdown: string; previous: string | null }
   // An MCP server's request: a form to fill in, or a page to open.
   elicitation?: PendingElicitation
+  // Huli: why the agent asks, in its words: the check or rule that made it ask, what allowing grants.
+  reason?: string
 }
 
 export interface PermissionOption {
@@ -1150,7 +1191,9 @@ export function turnText(state: Pick<ThreadState, 'order' | 'byId'>, startId: st
 }
 
 /** The id the agent gave a message, from its entry id (`m:<messageId>`); null when it gave none. */
-export function entryMessageId(id: string): string | null {
+export function entryMessageId(id: string | null | undefined): string | null {
+  // A transcript whose assistant records lack `message.id` gives entries no id to read.
+  if (typeof id !== 'string') return null
   return id.startsWith('m:') ? id.slice(2).replace(/#(agent|thought|user)$/, '') : null
 }
 

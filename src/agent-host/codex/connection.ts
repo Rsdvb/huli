@@ -49,7 +49,7 @@ import type { AgentTransport } from '../driver'
 import type { Env } from '../find-command'
 import { t } from '../i18n'
 import { planMarkdown } from '../plan-revision'
-import { mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
+import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
 import { mapAccount, mapPlanExtras, mapRateLimits } from './account'
 import { isAsyncQuestion, type AsyncQuestionItem } from './async-questions'
@@ -177,16 +177,93 @@ const QUIET = new Set([
   'thread/unarchived',
   'thread/deleted',
   'thread/compacted',
-  'thread/goal/updated',
-  'thread/goal/cleared',
   'item/fileChange/outputDelta',
-  'item/mcpToolCall/progress',
-  'item/commandExecution/terminalInteraction',
   'remoteControl/status/changed',
   'turn/moderationMetadata',
   // Kettu's own `thread/revert` answers first, and the host takes the turns out then.
   'thread/reverted',
+  // Huli: Codex 0.170's, for features Kite does not use.
+  'thread/section/changed',
+  'thread/attachment/updated',
+  'thread/prediction/updated',
+  'thread/queue/changed',
+  'project/changed',
+  'thread/project/updated',
+  'thread/environment/connected',
+  'thread/environment/disconnected',
+  'command/exec/outputDelta',
+  'mcpServer/oauthLogin/completed',
+  'mcpServer/event/stream/notification',
+  'account/gatewayOAuth/changed',
+  'account/login/completed',
+  'app/list/updated',
+  'fs/changed',
+  'model/verification',
+  'model/safetyBuffering/updated',
+  'modelProvider/authRecoveryStarted',
+  'modelProvider/authRecoveryCompleted',
+  'windowsSandbox/setupCompleted',
 ])
+
+/** Huli: families of Codex 0.170's notifications for features Kite does not use. */
+const QUIET_FAMILIES = ['thread/realtime/', 'process/', 'fuzzyFileSearch/', 'externalAgentConfig/']
+
+const quiet = (method: string): boolean =>
+  QUIET.has(method) || QUIET_FAMILIES.some((family) => method.startsWith(family))
+
+/** Huli: how many warnings about Codex itself the connection keeps to show in new sessions. */
+const NOTICES_KEPT = 50
+
+/** Huli: a notice Kite writes for a warning of Codex's. */
+interface CodexNotice {
+  severity: 'info' | 'warning' | 'error'
+  title: string
+  description?: string
+}
+
+/** Huli: a warning about Codex itself as a notice, or null for one with nothing to say. */
+function codexWarning(method: string, p: Record<string, unknown>): CodexNotice | null {
+  const text = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+  switch (method) {
+    case 'configWarning': {
+      const summary = text(p.summary)
+      if (!summary) return null
+      const description = [text(p.details), text(p.path)].filter(Boolean).join('\n')
+      return {
+        severity: 'warning',
+        title: t('codex.notice.config', { summary }),
+        ...(description ? { description } : {}),
+      }
+    }
+    case 'deprecationNotice': {
+      const summary = text(p.summary)
+      if (!summary) return null
+      const details = text(p.details)
+      return { severity: 'info', title: summary, ...(details ? { description: details } : {}) }
+    }
+    case 'windows/worldWritableWarning': {
+      if (p.failedScan === true)
+        return { severity: 'warning', title: t('codex.notice.worldWritableScan') }
+      const paths = Array.isArray(p.samplePaths)
+        ? p.samplePaths.filter((one) => typeof one === 'string')
+        : []
+      const more = typeof p.extraCount === 'number' && p.extraCount > 0 ? p.extraCount : 0
+      return {
+        severity: 'warning',
+        title: t('codex.notice.worldWritable'),
+        description: [
+          ...paths,
+          ...(more > 0 ? [t('codex.notice.andMore', { count: more })] : []),
+        ].join('\n'),
+      }
+    }
+    default: {
+      const message = text(p.message)
+      return message ? { severity: 'warning', title: message } : null
+    }
+  }
+}
 
 // Opted out of at `initialize`, so they never cross the pipe.
 const OPTED_OUT = ['turn/moderationMetadata']
@@ -444,6 +521,10 @@ export class CodexConnection implements AgentConnection {
   private skillRoots: string | null = null
   private account: AgentAccount | null = null
   private readonly startup = new McpStartup()
+  /** Huli: warnings about Codex itself, by key, with the thread each concerns, null for all. */
+  private readonly notices = new Map<string, { threadId: string | null; notice: CodexNotice }>()
+  /** Huli: the warnings each session has shown. */
+  private readonly noticed = new Map<string, Set<string>>()
 
   constructor(
     transport: AgentTransport,
@@ -1043,7 +1124,50 @@ export class CodexConnection implements AgentConnection {
       this.pending.delete(sessionId)
       for (const update of early.updates) this.toTarget(sessionId, target, update)
     }
+    this.showNotices(sessionId)
     void this.publishCommands(sessionId)
+  }
+
+  /**
+   * Huli: a warning about Codex itself or one of its MCP servers, such as a bad config.toml, shown
+   * once in each session it concerns: every one's for a warning of no thread's, now and as they
+   * open.
+   */
+  private codexNotice(threadId: string | null, key: string, notice: CodexNotice | null): void {
+    if (!notice) return
+    const scoped = threadId === null ? key : `${threadId}:${key}`
+    if (this.notices.has(scoped)) return
+    this.notices.set(scoped, { threadId, notice })
+    if (this.notices.size > NOTICES_KEPT) this.notices.delete(this.notices.keys().next().value!)
+    for (const id of threadId === null ? this.targets.keys() : [threadId]) this.showNotices(id)
+  }
+
+  private showNotices(threadId: string): void {
+    const target = this.targets.get(threadId)
+    if (!target || this.threads.get(threadId)?.hidden) return
+    const seen = this.noticed.get(threadId) ?? new Set<string>()
+    this.noticed.set(threadId, seen)
+    for (const [key, { threadId: owner, notice }] of this.notices) {
+      if ((owner !== null && owner !== threadId) || seen.has(key)) continue
+      seen.add(key)
+      const ctx = target.context()
+      const out: MapperOutput = { patches: [], effects: [] }
+      addEntry(ctx, out, { kind: 'notice', id: ctx.nextId(), ...notice })
+      target.apply(out)
+    }
+  }
+
+  /** Huli: an MCP server that could not start, for its thread or every one. */
+  private mcpFailed(update: McpServerStartupNotification): void {
+    if (update.status !== 'failed') return
+    const reauthenticate = update.failureReason === 'reauthenticationRequired'
+    this.codexNotice(update.threadId ?? null, `mcp:${update.name}:${update.error ?? ''}`, {
+      severity: 'warning',
+      title: t(reauthenticate ? 'codex.notice.mcpNeedsAuth' : 'codex.notice.mcpFailed', {
+        name: update.name,
+      }),
+      ...(update.error ? { description: update.error } : {}),
+    })
   }
 
   unregister(sessionId: string, target?: SessionTarget): void {
@@ -1175,18 +1299,32 @@ export class CodexConnection implements AgentConnection {
         return
       case 'mcpServer/startupStatus/updated':
         this.startup.record(params as McpServerStartupNotification)
+        this.mcpFailed(params as McpServerStartupNotification)
         return
       case 'error':
         this.turnError(p)
+        // Huli: the thread shows that Codex reconnects, and whether it got through.
+        if (typeof p.threadId === 'string') this.deliver(p.threadId, { method, params })
         return
       case 'deprecationNotice':
       case 'configWarning':
         this.hooks.log('warn', `Codex: ${String(p.summary ?? p.message ?? method)}`)
+        this.codexNotice(null, method, codexWarning(method, p))
         return
+      case 'windows/worldWritableWarning':
+        this.codexNotice(null, method, codexWarning(method, p))
+        return
+      case 'warning':
+        // A warning about one thread goes to its mapper; one about Codex itself to every thread.
+        if (typeof p.threadId !== 'string') {
+          this.codexNotice(null, `warning:${String(p.message)}`, codexWarning(method, p))
+          return
+        }
+        break
     }
     const threadId = typeof p.threadId === 'string' ? p.threadId : null
     if (!threadId) {
-      if (!QUIET.has(method)) this.hooks.ignored(null, `notification ${method}`)
+      if (!quiet(method)) this.hooks.ignored(null, `notification ${method}`)
       return
     }
     switch (method) {
@@ -1212,7 +1350,7 @@ export class CodexConnection implements AgentConnection {
         break
       }
     }
-    if (!QUIET.has(method)) this.deliver(threadId, { method, params })
+    if (!quiet(method)) this.deliver(threadId, { method, params })
     if (method === 'item/started' || method === 'item/completed') {
       const item = p.item as ThreadItem
       if (isAsyncQuestion(item)) void this.askAsync(threadId, item)
