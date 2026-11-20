@@ -484,7 +484,8 @@
     "notice": {
       "retrying": "Retrying ({{attempt}}/{{max}}) · {{reason}}",
       "retried": "Went through after {{count}} retries · {{reason}}",
-      "retryFailed": "Still failing after {{count}} retries · {{reason}}"
+      "retryFailed": "Still failing after {{count}} retries · {{reason}}",
+      "commandOutput": "Command output"
     },
     "retryReason": {
       "overloaded": "service overloaded",

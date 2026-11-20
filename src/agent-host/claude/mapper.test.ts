@@ -170,6 +170,66 @@ describe('a retried request', () => {
   })
 })
 
+describe("Claude Code's own lines", () => {
+  it("shows a command's output once, though Claude Code also writes it as its message", () => {
+    const run = new Run().feed(
+      system('local_command_output', { content: 'Session: 12% used\nWeek: 40% used' }),
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg-usage',
+          model: '<synthetic>',
+          content: [{ type: 'text', text: 'Session: 12% used\nWeek: 40% used' }],
+        },
+        parent_tool_use_id: null,
+        uuid: 'uuid-usage',
+        session_id: SESSION,
+      },
+    )
+    expect(run.entries()).toMatchObject([
+      {
+        kind: 'notice',
+        severity: 'info',
+        title: 'Command output',
+        description: 'Session: 12% used\nWeek: 40% used',
+      },
+    ])
+  })
+
+  it("shows a hook's block reason and a Stop hook's denial, not a transcript-only line", () => {
+    const run = new Run().feed(
+      system('informational', { content: 'only in the transcript', level: 'info', uuid: 'a' }),
+      system('informational', {
+        content: 'UserPromptSubmit hook blocked the prompt\nNo secrets in prompts',
+        level: 'warning',
+        uuid: 'b',
+      }),
+      system('informational', {
+        content: 'Stop hook prevented continuation',
+        level: 'notice',
+        prevent_continuation: true,
+        uuid: 'c',
+      }),
+    )
+    expect(notices(run)).toMatchObject([
+      {
+        severity: 'warning',
+        title: 'UserPromptSubmit hook blocked the prompt',
+        description: 'No secrets in prompts',
+      },
+      { severity: 'warning', title: 'Stop hook prevented continuation' },
+    ])
+  })
+
+  it('replaces a notification by its key', () => {
+    const run = new Run().feed(
+      system('notification', { key: 'ide', text: 'IDE disconnected', priority: 'low' }),
+      system('notification', { key: 'ide', text: 'IDE connected', priority: 'high' }),
+    )
+    expect(notices(run)).toMatchObject([{ severity: 'warning', title: 'IDE connected' }])
+  })
+})
+
 describe('a call that did not run', () => {
   it('is cancelled, not failed, when the user stopped it', () => {
     const run = new Run().feed(

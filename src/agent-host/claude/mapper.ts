@@ -25,6 +25,7 @@ import {
 import {
   addEntry,
   commandDescription,
+  lastEntry,
   messageEntryId,
   rateLimitEffects,
   rawInputText,
@@ -504,7 +505,15 @@ export class ClaudeMapper {
       if (block.type === 'text') {
         const value = (block as { text: string }).text
         if (!value || (!replaying && this.streamed.delete(`${messageId}:agent`))) continue
-        deliveries.push({ sessionId, map: (ctx) => this.chunk(ctx, 'agent', messageId, value) })
+        const own = message.message.model === SYNTHETIC_MODEL
+        deliveries.push({
+          sessionId,
+          // Huli: a command's output that came as output first shows once.
+          map: (ctx) =>
+            own && latestReply(ctx) === toLf(value).trim()
+              ? output()
+              : this.chunk(ctx, 'agent', messageId, value),
+        })
       } else if (block.type === 'thinking') {
         const value = (block as { thinking: string }).thinking
         if (!value || (!replaying && this.streamed.delete(`${messageId}:thought`))) continue
@@ -1096,6 +1105,12 @@ export class ClaudeMapper {
           },
         ]
       }
+      case 'local_command_output':
+        return this.commandOutput(message)
+      case 'informational':
+        return this.informational(message)
+      case 'notification':
+        return this.notified(message)
       case 'task_started':
         return this.taskStarted(message)
       case 'task_notification':
@@ -1151,6 +1166,65 @@ export class ClaudeMapper {
             t('claude.notice.retryFailed', params),
           ),
     ]
+  }
+
+  /**
+   * Huli: what a command Claude Code runs itself printed, such as /usage. A Claude Code that also
+   * writes it as its own message shows it once.
+   */
+  private commandOutput(message: SystemMessage): Delivery[] {
+    const text = typeof message.content === 'string' ? toLf(message.content).trim() : ''
+    if (text === '') return []
+    const id = `n:output:${String(message.uuid ?? Date.now())}`
+    return [
+      {
+        sessionId: this.sessionId,
+        map: (ctx) => {
+          if (latestReply(ctx) === text) return output()
+          return noticeDelivery(
+            this.sessionId,
+            id,
+            'info',
+            t('claude.notice.commandOutput'),
+            text,
+          ).map(ctx)
+        },
+      },
+    ]
+  }
+
+  /**
+   * Huli: a line Claude Code shows the user, such as the reason a hook blocked a prompt or that a
+   * Stop hook kept the turn from going on; those for its transcript view alone stay out. Lines
+   * about one tool call replace each other.
+   */
+  private informational(message: SystemMessage): Delivery[] {
+    const text = typeof message.content === 'string' ? toLf(message.content).trim() : ''
+    const level = message.level
+    if (text === '' || level === 'info') return []
+    const key = typeof message.tool_use_id === 'string' ? message.tool_use_id : String(message.uuid)
+    const severity =
+      level === 'warning' || message.prevent_continuation === true ? 'warning' : 'info'
+    const [title, ...rest] = text.split('\n')
+    const description = rest.join('\n').trim()
+    return [
+      noticeDelivery(
+        this.route(message as { agent_id?: string }),
+        `n:info:${key}`,
+        severity,
+        title!.trim(),
+        description === '' ? undefined : description,
+      ),
+    ]
+  }
+
+  /** Huli: a notification Claude Code queues for the user; one of the same key replaces it. */
+  private notified(message: SystemMessage): Delivery[] {
+    const text = typeof message.text === 'string' ? toLf(message.text).trim() : ''
+    if (text === '') return []
+    const key = typeof message.key === 'string' ? message.key : String(message.uuid)
+    const urgent = message.priority === 'high' || message.priority === 'immediate'
+    return [noticeDelivery(this.sessionId, `n:note:${key}`, urgent ? 'warning' : 'info', text)]
   }
 
   private taskStarted(message: SystemMessage): Delivery[] {
@@ -1584,6 +1658,14 @@ function retryReason(message: SystemMessage): string {
   return status === null
     ? t('claude.retryReason.connection')
     : t('claude.retryReason.status', { status })
+}
+
+/** Huli: the text of the thread's latest entry: a reply's, or the output a notice holds. */
+function latestReply(ctx: MapperContext): string | null {
+  const entry = lastEntry(ctx.thread)
+  if (entry?.kind === 'agent') return entry.markdown.trim()
+  if (entry?.kind === 'notice') return entry.description?.trim() ?? null
+  return null
 }
 
 /** Huli: adds a notice of Kite's own, or changes it once it shows. */
