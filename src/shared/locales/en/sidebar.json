@@ -230,7 +230,9 @@
     "archivedSome": "Archived {{done}} of {{total}} sessions. {{error}}",
     "deleteCount": "Delete {{count}}…",
     "moreFor": "More for {{title}}",
-    "deleteKeepsAppCopy": "{{agent}} keeps its own copy, which Kettu can’t delete."
+    "deleteKeepsAppCopy": "{{agent}} keeps its own copy, which Kettu can’t delete.",
+    "deleteRemovesAgentCopy_one": "It’s also deleted from {{agent}}’s own local history, so the official app and CLI won’t show it anymore.",
+    "deleteRemovesAgentCopy_other": "They’re also deleted from {{agent}}’s own local history, so the official app and CLI won’t show them anymore."
   },
   "work": {
     "turn": "Current turn",

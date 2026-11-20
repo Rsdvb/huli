@@ -211,7 +211,8 @@
     "archivedSome": "{{total}} 个会话中已归档 {{done}} 个。{{error}}",
     "deleteCount": "删除 {{count}} 个…",
     "moreFor": "{{title}} 的更多操作",
-    "deleteKeepsAppCopy": "{{agent}} 自己保留的那份，Kettu 删不掉。"
+    "deleteKeepsAppCopy": "{{agent}} 自己保留的那份，Kettu 删不掉。",
+    "deleteRemovesAgentCopy_other": "也会从 {{agent}} 自己的本地历史里删除，官方客户端和应用里不会再显示。"
   },
   "work": {
     "turn": "当前这一轮",
