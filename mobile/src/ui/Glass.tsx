@@ -1,8 +1,8 @@
 // The app's glass, one primitive for every control that floats over content. On iOS 26 and later
 // it is the system's own Liquid Glass (expo-glass-effect): it bends what is under it, reacts to the
 // finger when interactive, and melts into its neighbors inside a `GlassGroup`. Older iOS gets the
-// frosted blur the app used before, Android a translucent fill, and Reduce Transparency an opaque
-// surface on either.
+// frosted blur the app used before, Android a translucent fill, and Reduce Transparency, Low Power
+// Mode and surfaces over moving content (SolidSurfaces) an opaque surface on either.
 
 import {
   createContext,
@@ -18,6 +18,7 @@ import {
   AccessibilityInfo,
   Platform,
   Pressable,
+  Settings,
   StyleSheet,
   View,
   type ColorValue,
@@ -36,6 +37,7 @@ import {
   isLiquidGlassAvailable,
 } from 'expo-glass-effect'
 import type { SFSymbol } from 'expo-symbols'
+import { HuliSystem } from '../../modules/huli-system'
 import { haptic } from './haptics'
 import { PRESS_IN, PRESS_OUT, spring, useReducedMotion } from './motion'
 import { SystemButton } from './SystemButton'
@@ -61,6 +63,45 @@ export function useReduceTransparency(): boolean {
   return on
 }
 
+// A build whose native module predates the call reads it as off.
+let lowPower =
+  typeof HuliSystem?.isLowPowerMode === 'function' ? HuliSystem.isLowPowerMode() : false
+const lowPowerListeners = new Set<(on: boolean) => void>()
+HuliSystem?.addListener('onLowPowerMode', ({ on }) => {
+  lowPower = on
+  for (const listener of lowPowerListeners) listener(on)
+})
+
+/** Whether Low Power Mode is on (iOS), kept current. */
+export function useLowPowerMode(): boolean {
+  const [on, setOn] = useState(lowPower)
+  useEffect(() => {
+    lowPowerListeners.add(setOn)
+    setOn(lowPower)
+    return () => {
+      lowPowerListeners.delete(setOn)
+    }
+  }, [])
+  return on
+}
+
+// For measuring only: `-huliGlass glass` among the launch arguments keeps Liquid Glass where the
+// app draws solid surfaces, so the simulator run can compare the two. A phone's user cannot pass
+// launch arguments.
+const KEEP_GLASS = Platform.OS === 'ios' && Settings.get('huliGlass') === 'glass'
+
+/**
+ * Surfaces over content that changes all the time, as a session's conversation while a reply
+ * streams in and scrolls: there glass is drawn solid, since Liquid Glass and blur sample and bend
+ * what moves under them again on every frame, and a glass control on the composer's glass doubled
+ * that. The tab bar and the system's own bars keep their glass.
+ */
+const OverMotion = createContext(false)
+
+export function SolidSurfaces(props: { children: ReactNode }) {
+  return <OverMotion.Provider value>{props.children}</OverMotion.Provider>
+}
+
 /** How glass is drawn here and now. */
 export type GlassMode = 'liquid' | 'blur' | 'fill' | 'solid'
 
@@ -76,11 +117,25 @@ export function GlassOverBlur(props: { children: ReactNode }) {
 
 export function useGlassMode(): GlassMode {
   const reduce = useReduceTransparency()
+  const lowPower = useLowPowerMode()
+  const overMotion = useContext(OverMotion)
   const overBlur = useContext(OverBlur)
   if (reduce) return 'solid'
+  if ((overMotion || lowPower) && !KEEP_GLASS) return 'solid'
   if (overBlur && !LIQUID_GLASS && Platform.OS === 'ios') return 'fill'
   if (LIQUID_GLASS) return 'liquid'
   return Platform.OS === 'ios' ? 'blur' : 'fill'
+}
+
+/**
+ * Whether controls float on their own, as iOS 26 lays a screen out, rather than in a frosted bar:
+ * with Liquid Glass, and with the solid surfaces that stand in for it over moving content or in
+ * Low Power Mode. Reduce Transparency keeps the bar.
+ */
+export function useFloatingControls(): boolean {
+  const mode = useGlassMode()
+  const reduce = useReduceTransparency()
+  return mode === 'liquid' || (mode === 'solid' && LIQUID_GLASS && !reduce)
 }
 
 export type GlassShape = 'circle' | 'capsule' | 'rounded'

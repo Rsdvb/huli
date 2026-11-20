@@ -1,6 +1,7 @@
 // Huli's bridge to the iOS system integrations that need the app: the links Siri, Shortcuts, the
 // Control Center controls, Spotlight and Handoff leave for it, the active computer's sessions in
-// Spotlight, and the open session as the current activity (Handoff and Siri suggestions).
+// Spotlight, the open session as the current activity (Handoff and Siri suggestions), and whether
+// Low Power Mode is on, under which the app draws its glass solid.
 // JavaScript takes a waiting link at start, on "onOpenURL" and when the app comes to the front,
 // and opens it as any huli:// link (src/system/bridge.tsx).
 
@@ -11,12 +12,13 @@ import UniformTypeIdentifiers
 
 public final class HuliSystemModule: Module {
   private var observer: NSObjectProtocol?
+  private var powerObserver: NSObjectProtocol?
   private var activity: NSUserActivity?
 
   public func definition() -> ModuleDefinition {
     Name("HuliSystem")
 
-    Events("onOpenURL")
+    Events("onOpenURL", "onLowPowerMode")
 
     OnCreate {
       self.observer = NotificationCenter.default.addObserver(
@@ -24,13 +26,24 @@ public final class HuliSystemModule: Module {
       ) { [weak self] _ in
         self?.sendEvent("onOpenURL")
       }
+      self.powerObserver = NotificationCenter.default.addObserver(
+        forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+      ) { [weak self] _ in
+        self?.sendEvent(
+          "onLowPowerMode", ["on": ProcessInfo.processInfo.isLowPowerModeEnabled])
+      }
     }
 
     OnDestroy {
-      if let observer = self.observer {
+      for observer in [self.observer, self.powerObserver].compactMap({ $0 }) {
         NotificationCenter.default.removeObserver(observer)
       }
       self.observer = nil
+      self.powerObserver = nil
+    }
+
+    Function("isLowPowerMode") { () -> Bool in
+      ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
     Function("takeOpenURL") { () -> String? in

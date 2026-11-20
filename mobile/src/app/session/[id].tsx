@@ -140,7 +140,7 @@ import { copyText, haptic } from '../../ui/session/feedback'
 import { FileRefs } from '../../ui/session/fileRefs'
 import { relativePath } from '../../ui/session/format'
 import { G } from '../../ui/session/icons'
-import { GlassCapsule } from '../../ui/Glass'
+import { GlassCapsule, SolidSurfaces } from '../../ui/Glass'
 import { NATIVE_MENUS, NativeMenu } from '../../ui/session/NativeMenu'
 import { GlassHeader, useHeaderHeight } from '../../ui/session/GlassHeader'
 import { tokensText, toneColor, usageTone } from '../../ui/session/limits'
@@ -279,7 +279,16 @@ const live = (status: string | undefined) =>
 // Phases in which the agent thinks or writes rather than works in the app it uses.
 const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval'])
 
+// Its glass is drawn solid: the conversation under it changes as replies stream in and it scrolls.
 export default function SessionScreen() {
+  return (
+    <SolidSurfaces>
+      <Session />
+    </SolidSurfaces>
+  )
+}
+
+function Session() {
   countRender('SessionScreen')
   const params = useLocalSearchParams<{ id: string }>()
   // On iPad the same screen shows as the pane beside the session list (SessionPane.tsx).
@@ -517,10 +526,8 @@ export default function SessionScreen() {
     })
   }
 
-  // Every agent forks, at any reply: one that cannot do it itself gets the computer's copy of the
-  // thread, which the computer decides.
-  const forkAtMessage = !!agent
-  const canFork = !!agent
+  const forkAtMessage = !!agent?.capabilities.forkAtMessage
+  const canFork = forkAtMessage || !!agent?.capabilities.forkSession
   const forking = useRef(false)
   const fork = useCallback(
     (entryId: string | null, worktree?: 'same') => {
