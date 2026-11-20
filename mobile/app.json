@@ -64,6 +64,7 @@
       "./plugins/withWidgets",
       "./plugins/withSystem",
       "./plugins/withShareExtension",
+      "./plugins/withDirectLinks",
       [
         "expo-share-intent",
         {
