@@ -329,6 +329,27 @@ describe("a result's other blocks", () => {
   })
 })
 
+describe('a live compaction', () => {
+  it('shows the summary Claude Code goes on from', () => {
+    const summary =
+      'This session is being continued from a previous conversation. Summary: fixed the build.'
+    const run = new Run().feed(
+      system('status', { status: 'compacting', uuid: 'c1' }),
+      system('compact_boundary', { uuid: 'c2' }),
+      {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: summary }] },
+        parent_tool_use_id: null,
+        uuid: 'u-summary',
+        session_id: SESSION,
+      },
+    )
+    expect(run.entries()).toMatchObject([
+      { kind: 'compaction', id: 'c:c1', status: 'completed', summary },
+    ])
+  })
+})
+
 describe('a refusal', () => {
   it('says the request went to the fallback model, and why the first refused', () => {
     const run = new Run().feed(

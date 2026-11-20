@@ -225,6 +225,8 @@ export class ClaudeMapper {
   /** What the session was last told about `working`; null before anything ran. */
   private told: { running: boolean; listed: boolean } | null = null
   private compacting: string | null = null
+  /** Huli: the compaction whose summary has not come yet. */
+  private compacted: string | null = null
   /** In a replay: the subagents its history started, whose own histories follow. */
   readonly replayed: ReplayedSubagent[] = []
   /** In a subagent's replay: its parent, whose prompt its first message is. */
@@ -789,6 +791,7 @@ export class ClaudeMapper {
       deliveries.push({ sessionId, map: (ctx) => this.toolResult(ctx, block, structured) })
     }
     // Live, the host added the user's own message when it sent it; others are Claude Code's.
+    if (!replaying && !message.parent_tool_use_id) deliveries.push(...this.liveSummary(blocks))
     if (!replaying || message.parent_tool_use_id) return deliveries
     const content = blocks.filter((block) => !isToolResult(block))
     if (content.length === 0 || !message.uuid) return deliveries
@@ -798,6 +801,34 @@ export class ClaudeMapper {
       map: (ctx) => this.replayedUser(ctx, uuid, content),
     })
     return deliveries
+  }
+
+  /**
+   * Huli: the summary a live compaction wrote, which Claude Code sends as the message the
+   * conversation goes on from: the row of that compaction shows it, as a replayed one does.
+   */
+  private liveSummary(blocks: readonly ContentBlock[]): Delivery[] {
+    const id = this.compacted
+    if (id === null) return []
+    const text = blocks
+      .flatMap((block) => (block.type === 'text' ? [(block as { text: string }).text] : []))
+      .join('\n')
+    if (!COMPACT_SUMMARY.test(text)) return []
+    this.compacted = null
+    const summary = toLf(text)
+    return [
+      {
+        sessionId: this.sessionId,
+        map: (ctx) => {
+          const out = output()
+          const entry = ctx.thread.byId[id]
+          if (entry?.kind === 'compaction' && entry.summary === '') {
+            out.patches.push({ op: 'entry.update', id, changes: { summary } })
+          }
+          return out
+        },
+      },
+    ]
   }
 
   private toolResult(
@@ -1130,6 +1161,7 @@ export class ClaudeMapper {
       case 'compact_boundary': {
         const id = this.compacting ?? `c:${String(message.uuid ?? Date.now())}`
         this.compacting = null
+        this.compacted = id
         return [
           {
             sessionId: parent,
