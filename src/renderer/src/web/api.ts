@@ -414,6 +414,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
         return askPath('project', useProjectsStore.getState().projects[0]?.path ?? null)
       },
       chooseAgentFolder: () => askPath('agentFolder', null),
+      chooseHistoryFolder: () => askPath('agentFolder', null),
       chooseAgentBinary: (harnessId) =>
         askPath(
           'agentProgram',

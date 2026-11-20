@@ -830,5 +830,13 @@
     "notJson": "{{agent}} 的设置文件 {{file}} 不是有效的 JSON。请先在文件里改好，或直接在文件里做这项修改。",
     "notJsonAt": "{{agent}} 的设置文件 {{file}} 不是有效的 JSON（第 {{line}} 行）。请先在文件里改好，或直接在文件里做这项修改。",
     "notObject": "{{agent}} 的设置文件 {{file}} 里不是一个 JSON 对象。请先在文件里改好，或直接在文件里做这项修改。"
+  },
+  "agentHistory": {
+    "notFolder": "{{folder}} 不是这台电脑上的文件夹。",
+    "noSessionsIn": "{{folder}} 里没有 {{agent}} 的会话。请选择它的配置文件夹，或其中存放会话的文件夹。",
+    "ownFolder": "这是 {{agent}} 自己的文件夹，列表里已经有它的会话。请选择另一个，比如备份。",
+    "folderUnsupported": "{{agent}} 不能列出其他文件夹里的会话。",
+    "listAgain": "这个文件夹的列表已过期，请重新选择该文件夹。",
+    "planGone": "复制等待太久，已经取消。请重新导入，再看一遍要写入的文件。"
   }
 }

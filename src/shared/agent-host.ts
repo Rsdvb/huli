@@ -31,7 +31,7 @@ import type { ContextBreakdown, ContextEstimates } from './context'
 import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
-import type { AgentHistoryPage } from './agent-history'
+import type { AgentHistoryPage, HistoryCopyOutcome, HistoryCopyPlan } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type {
   CatalogServer,
@@ -1765,8 +1765,21 @@ export interface HostContract {
   // Huli: an agent's past sessions of every folder it ran in, for the import from the agents, which
   // imports the chosen ones with `sessions.import`. A window's alone: it names every folder.
   'agentHistory.list': {
-    params: { agentId: AgentId; cursor?: string }
+    // `folder`: another folder of the agent's kind to list instead of its own, such as a backup
+    // of Claude Code's configuration folder or a Codex home copied from another computer.
+    params: { agentId: AgentId; cursor?: string; folder?: string }
     result: AgentHistoryPage
+  }
+  // Huli: the files copying the chosen sessions of a `folder` that `agentHistory.list` read
+  // writes into the agent's own folder, for the user to confirm; nothing is written yet.
+  'agentHistory.planCopy': {
+    params: { agentId: AgentId; folder: string; sessionIds: string[] }
+    result: HistoryCopyPlan
+  }
+  // Huli: runs a plan, once; the chosen folder is only read.
+  'agentHistory.copy': {
+    params: { token: string }
+    result: { items: HistoryCopyOutcome[] }
   }
   // Huli: the agents' network through the user's proxy subscriptions, for this computer's windows
   // alone: a paired device may call none of these, and `agentNetwork.changed` reaches no device.
@@ -2115,6 +2128,8 @@ export const HOST_METHODS = [
   'computer.show',
   'computer.declineSetup',
   'agentHistory.list',
+  'agentHistory.planCopy',
+  'agentHistory.copy',
   'agentNetwork.status',
   'agentNetwork.addSubscription',
   'agentNetwork.importSubscription',

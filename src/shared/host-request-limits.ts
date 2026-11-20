@@ -296,6 +296,8 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'computer.show': AGENT_MS,
   'computer.declineSetup': HOST_MS,
   'agentHistory.list': AGENT_MS,
+  'agentHistory.planCopy': NONE,
+  'agentHistory.copy': NONE,
   'agentNetwork.status': HOST_MS,
   'agentNetwork.addSubscription': AGENT_MS,
   'agentNetwork.importSubscription': AGENT_MS,
