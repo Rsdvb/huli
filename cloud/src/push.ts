@@ -213,12 +213,18 @@ export class PushGateway {
     }
     const apns = this.options.apns
     if (!apns) return this.refuse(response, 'apns')
-    const result = await apns.send(apnsMessage(parsed, apns.topic, this.now()))
+    const message = apnsMessage(parsed, apns.topic, this.now())
+    const result = await apns.send(message)
     if (result.ok) {
       store.bindPush(target, family.account)
       return sendJson(response, this.options.origin.startsWith('https:'), 200, {})
     }
-    this.log(`huli-cloud: APNs refused a push: ${result.status} ${result.reason}`)
+    // Which kind and server, never the token: a refused alert and a refused Live Activity mean
+    // different things to fix.
+    this.log(
+      `huli-cloud: APNs refused a push: ${result.status} ${result.reason} ` +
+        `(${message.headers['apns-push-type']}, ${parsed.environment})`,
+    )
     if (result.gone) store.dropPush(target, family.account)
     this.refuse(response, result.gone ? 'unregistered' : 'apns')
   }
