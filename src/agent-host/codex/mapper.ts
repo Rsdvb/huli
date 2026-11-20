@@ -19,6 +19,7 @@ import { planMarkdown, planRevision } from '../plan-revision'
 import { isRowlessCall, isRowWhenFailed } from '../plan-tool'
 import { ANSWERS_OPTION } from '../question-answers'
 import { parseReplayedText } from '../replayed-content'
+import { blockRef, blockText } from '../mcp-content'
 import { resultMarkdown } from '../result-text'
 import { SERVICE_NAME } from '../service-name'
 import { workflowToolStructured } from '../workflow/tools'
@@ -224,23 +225,40 @@ function agentToolTitle(tool: string): string {
 function mcpContent(item: Item<'mcpToolCall'>): ToolContent[] {
   if (item.error) return [{ type: 'markdown', markdown: item.error.message }]
   const content: ToolContent[] = []
+  const texts: string[] = []
   for (const block of item.result?.content ?? []) {
-    if (typeof block !== 'object' || block === null || Array.isArray(block)) continue
-    const value = block as Record<string, unknown>
-    if (value.type === 'text' && typeof value.text === 'string') {
-      content.push({ type: 'markdown', markdown: resultMarkdown(toLf(value.text)) })
-    } else if (
-      value.type === 'image' &&
-      typeof value.data === 'string' &&
-      typeof value.mimeType === 'string'
-    ) {
-      content.push({
-        type: 'ref',
-        ref: { kind: 'image', mimeType: value.mimeType, data: value.data },
-      })
+    // Huli: resources, links to them and sounds too, which were dropped.
+    const text = blockText(block)
+    if (text !== null) {
+      texts.push(text)
+      content.push({ type: 'markdown', markdown: resultMarkdown(toLf(text)) })
+      continue
     }
+    const ref = blockRef(block)
+    if (ref) content.push({ type: 'ref', ref })
+  }
+  // Huli: the structured result, unless a text block already holds it as JSON.
+  const structured = item.result?.structuredContent
+  if (
+    structured !== null &&
+    structured !== undefined &&
+    !texts.some((text) => sameJson(text, structured))
+  ) {
+    content.push({
+      type: 'markdown',
+      markdown: resultMarkdown(JSON.stringify(structured)),
+    })
   }
   return content
+}
+
+/** Whether text is the JSON of a value. */
+function sameJson(text: string, value: unknown): boolean {
+  try {
+    return JSON.stringify(JSON.parse(text)) === JSON.stringify(value)
+  } catch {
+    return false
+  }
 }
 
 function dynamicContent(item: Item<'dynamicToolCall'>): ToolContent[] {
@@ -414,6 +432,12 @@ export class ThreadMapper {
           const start = printed === '' || printed.endsWith('\n') ? '' : '\n'
           const typed = p.stdin.replace(/\n$/, '')
           this.appendOutput(ctx, out, p.itemId as string, `${start}› ${typed}\n`)
+        }
+        break
+      case 'item/mcpToolCall/progress':
+        // Huli: an MCP tool's own word on how far it got, on its running row.
+        if (typeof p.message === 'string' && p.message.trim() !== '') {
+          this.updateTool(ctx, out, p.itemId as string, { progress: p.message.trim() })
         }
         break
       case 'item/fileChange/patchUpdated':
@@ -1015,6 +1039,7 @@ export class ThreadMapper {
       ...(changes.structured !== undefined ? { structured: changes.structured } : {}),
       ...(changes.denied !== undefined ? { denied: changes.denied } : {}),
       ...(changes.review !== undefined ? { review: changes.review } : {}),
+      ...(changes.progress !== undefined ? { progress: changes.progress } : {}),
       ...(changes.exitCode !== undefined ? { exitCode: changes.exitCode } : {}),
     }
     addEntry(ctx, out, entry)

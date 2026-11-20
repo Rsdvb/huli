@@ -276,6 +276,59 @@ describe('commands', () => {
   })
 })
 
+describe('MCP results', () => {
+  const call = (result: unknown, status = 'completed') => ({
+    type: 'mcpToolCall',
+    id: 'mcp-1',
+    server: 'github',
+    tool: 'get_pr',
+    status,
+    arguments: { number: 7 },
+    result,
+    error: null,
+  })
+
+  it('keeps links, sounds and the structured result, and shows progress on the running row', () => {
+    const { entries, unknown } = run([
+      started(call(null, 'inProgress')),
+      ['item/mcpToolCall/progress', { ...at, itemId: 'mcp-1', message: 'Fetching reviews 2/5' }],
+    ])
+    expect(unknown).toEqual([])
+    expect(entries[0]).toMatchObject({ status: 'in_progress', progress: 'Fetching reviews 2/5' })
+    const done = run([
+      completed(
+        call({
+          content: [
+            { type: 'resource_link', uri: 'https://github.com/o/r/pull/7', name: 'PR 7' },
+            { type: 'audio', data: 'AAAA', mimeType: 'audio/wav' },
+          ],
+          structuredContent: { number: 7, state: 'open' },
+        }),
+      ),
+    ]).entries[0]
+    expect(done).toMatchObject({
+      content: [
+        { type: 'ref', ref: { kind: 'link', uri: 'https://github.com/o/r/pull/7', name: 'PR 7' } },
+        { type: 'ref', ref: { kind: 'audio', mimeType: 'audio/wav', data: 'AAAA' } },
+        { type: 'markdown', markdown: '```json\n{\n  "number": 7,\n  "state": "open"\n}\n```' },
+      ],
+    })
+  })
+
+  it('leaves out a structured result its text already holds as JSON', () => {
+    const { entries } = run([
+      completed(
+        call({
+          content: [{ type: 'text', text: '{"state":"open"}' }],
+          structuredContent: { state: 'open' },
+        }),
+      ),
+    ])
+    expect(entries[0]).toMatchObject({ content: [{ type: 'markdown' }] })
+    expect(entries[0]?.kind === 'tool' && entries[0].content).toHaveLength(1)
+  })
+})
+
 describe('a lost stream', () => {
   const lost = (attempt: number, willRetry = true): [string, unknown] => [
     'error',

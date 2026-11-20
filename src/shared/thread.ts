@@ -823,6 +823,8 @@ export interface ToolEntry {
   exitCode?: number
   /** Huli: the agent's automatic review of the call before it ran, such as Codex's auto-review. */
   review?: ToolReview
+  /** Huli: the latest progress a running call reported, such as an MCP tool's; kept once it ends. */
+  progress?: string
 }
 
 /** Huli: what an agent's automatic review made of a call: its verdict, the risk it saw, and why. */
