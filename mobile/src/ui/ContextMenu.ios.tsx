@@ -21,7 +21,8 @@ import { menuGroups, type MenuItem, type MenuNode } from './menu'
 /** Whether long presses open the system's context menu here: always on iOS. */
 export const SYSTEM_MENUS = true
 
-const off = (on: boolean | undefined) => (on ? [disabledModifier(true)] : undefined)
+const OFF = [disabledModifier(true)]
+const off = (on: boolean | undefined) => (on ? OFF : undefined)
 
 function Item(props: { item: MenuItem; depth: number }) {
   const { item } = props
@@ -149,17 +150,22 @@ export function TapMenu(props: {
   disabled?: boolean
   children: (open: (() => void) | undefined) => ReactElement
 }) {
-  if (props.disabled || props.items.length === 0) return props.children(undefined)
+  // Disabled, the control stays in the same views, under a menu that cannot open, so it is not
+  // mounted again as that changes.
+  const shown = !props.disabled && props.items.length > 0
   return (
     <Host matchContents ignoreSafeArea="all">
       <Menu
+        {...(shown ? {} : { modifiers: OFF })}
         label={
           <RNHostView matchContents>
             <View pointerEvents="none">{props.children(undefined)}</View>
           </RNHostView>
         }
       >
-        <Nodes nodes={props.items} depth={0} {...(props.title ? { title: props.title } : {})} />
+        {shown ? (
+          <Nodes nodes={props.items} depth={0} {...(props.title ? { title: props.title } : {})} />
+        ) : null}
       </Menu>
     </Host>
   )
