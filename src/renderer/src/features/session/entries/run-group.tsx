@@ -1,4 +1,12 @@
-import { memo, startTransition, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { IconSvgElement } from '@hugeicons/react'
@@ -102,7 +110,10 @@ export const RunGroup = memo(function RunGroup({
       return entryIds.map((id) => byId?.[id])
     }),
   )
-  const shown = entries.filter((entry): entry is ThreadEntry => entry !== undefined)
+  const shown = useMemo(
+    () => entries.filter((entry): entry is ThreadEntry => entry !== undefined),
+    [entries],
+  )
   // Loads the counts of every edit's diffs, which the line then reads from the cache.
   const diffs = useMemo(
     () =>
@@ -134,11 +145,25 @@ export const RunGroup = memo(function RunGroup({
       startTransition(() => setShownSteps(Number.POSITIVE_INFINITY))
     }
   }, [shownSteps])
+  // A folded step's stub, kept by its entry: the line reads its props, and the same element lets
+  // React pass over the steps that did not change instead of rendering all of them on every update.
+  const [stubs] = useState(() => new WeakMap<ThreadEntry, ReactElement | null>())
   const card = (entry: ThreadEntry, index: number, folded: boolean) => {
+    if (folded) {
+      let stub = stubs.get(entry)
+      if (stub === undefined) {
+        const facts = stepFacts(sessionId, entry)
+        if (facts) {
+          const { glyph, ...rest } = facts
+          stub = <StepStub key={entry.id} {...rest} icon={<Icon icon={glyph} size={14} />} />
+        } else stub = null
+        stubs.set(entry, stub)
+      }
+      return stub
+    }
     const facts = stepFacts(sessionId, entry)
     if (!facts) return null
     const { glyph, ...rest } = facts
-    if (folded) return <StepStub key={entry.id} {...rest} icon={<Icon icon={glyph} size={14} />} />
     return (
       <OpenedStep
         key={entry.id}

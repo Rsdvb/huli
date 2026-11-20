@@ -423,8 +423,12 @@ export function runSummary(steps: RunStep[]): {
     for (const diff of step.diffs ?? []) if (diff.oldText === null) created.add(diff.path)
   }
   const byPart = new Map<RunPart, Unit[]>()
-  for (const unit of steps.flatMap((step) => unitsOf(step, created))) {
-    byPart.set(unit.part, [...(byPart.get(unit.part) ?? []), unit])
+  for (const step of steps) {
+    for (const unit of unitsOf(step, created)) {
+      const units = byPart.get(unit.part)
+      if (units) units.push(unit)
+      else byPart.set(unit.part, [unit])
+    }
   }
   const named = byPart.size > 1 ? [...byPart].filter(([part]) => part !== 'thought') : [...byPart]
   const parts = named.flatMap(([part, units]): SummaryPart[] =>
