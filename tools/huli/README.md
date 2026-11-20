@@ -328,6 +328,53 @@ followed. The log names the paths removed, never contents.
   (`row.deleteRemovesAgentCopy`), keeping `row.deleteKeepsAppCopy` for an agent whose copy stays;
   `FAKE_AGENT_UUID_IDS` in `tools/fake-agent`.
 
+### Doubao (豆包)
+
+ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,
+free with a Doubao account; Windows x64, macOS arm64 and Linux x64 only. Kite runs the user's own
+install: npm installs a launcher whose install script downloads the native program into
+`%LOCALAPPDATA%\doubao_cli\app\current` (Application Support, or `XDG_DATA_HOME`/`~/.local/share`),
+and Kite runs that program itself, never cmd.exe or the PowerShell shim. The install plan is
+`npm install -g --allow-scripts=@bytedance/doubao-cli @bytedance/doubao-cli` (`allowScripts` in
+`binary-install.ts`), since npm 11 blocks the install script.
+
+- One process per turn: `doubao -C <folder> [--resume <id>] -p - --output-format stream-json
+--model <id> --effort <level> --permission-mode <mode>`, the prompt on stdin. Stop ends the
+  process tree; the next turn resumes the conversation. The stream has text deltas, whole
+  messages (again when completed or replaced), tool calls and results, and a result with the
+  confirmations the CLI refused; no thoughts and no token counts.
+- `-p` cannot answer the CLI's confirmations: it rejects each one itself. The mode menu offers the
+  CLI's own modes and says so: 沙箱 (`ask_always`, the default: a sandbox that writes only in the
+  folder), 拒绝风险操作 (`ask_risky`: no sandbox, risky actions refused) and 完全访问
+  (`always_allow`). A refused call shows as denied, and the turn ends with a notice that lists
+  what was refused.
+- Every `doubao` process uses one shared service per account, the child of whichever process
+  started it; ending that process's tree (Stop, or the host reaping an exited process) ends every
+  other run. So `doubao/gate.ts` runs one turn or sign-in at a time per account, and a read
+  (listing, export, models, status) alone or beside a turn already at work. A waiting turn shows
+  「豆包同一时间只能运行一个会话，前面还有 N 个」 until it starts.
+- Doubao names a conversation only once its first turn runs: a session Kite creates gets an id of
+  its own (`doubao-…`), mapped to the conversation in `harnesses/.extensions/doubao/
+conversations.json`, so it resumes after a restart and lists as imported.
+- Sign-in: `doubao login --qr=png` in the host; each `QR_IMAGE=<path>` picture goes to the asking
+  client as `agents.signInImage` (Settings' agent page, a session's sign-in, the phone's agent
+  page) until the CLI exits. `auth status` reads the sign-in, `logout` signs out.
+- Import: `--list --all --json` lists every unarchived conversation, from every folder and device;
+  one with no folder (the app's, another device's) comes under the home folder. Its history comes
+  from `--export` (each turn's question and answer, as text), and it continues with `--resume`.
+- The models and levels come from `model list --json`, kept 10 minutes.
+
+Huli's own files: `src/agent-host/doubao/` (+ tests and scrubbed `fixtures/` of real 2.37.2
+output), `src/agent-host/agents/doubao.ts`, `src/agent-host/testing/fake-doubao.ts`, and the marks
+`components/agents/marks/doubao.tsx` (a neutral bean, not ByteDance's logo). Hooks: `catalog.ts`,
+`drivers.ts`, `installed-cli.ts` (`resolve` gets the agent's environment), `binary-install.ts`,
+`agent-details.ts`, `connection.ts` and `agents.ts` (`SignInClient.showImage`), `host.ts` and
+`src/shared/agent-host.ts` (`agents.signInImage`), `src/shared/agents.ts` (the harness,
+`always_allow` as full access), `stores/agents.ts`, `app/bootstrap.ts`,
+`features/session/sign-in.tsx`, `features/settings/agent-parts.tsx` and `agents-section.tsx`,
+`locales/*/host.json` (`doubao`) and `session.json` (`signIn.scan*`); on the phone
+`mobile/src/app/settings/agent.tsx`, `agentName.ts`, `manage/agents.ts` and `ui/agent-marks.tsx`.
+
 Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy
