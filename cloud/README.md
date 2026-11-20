@@ -160,7 +160,7 @@ powershell -ExecutionPolicy Bypass -File tools\huli\deploy-cloud.ps1 -BuildOnly 
 3. 校验并解开网页版到 `/var/www/huli-app`（旧的存成 `/var/www/huli-app.prev`）；
 4. 重写 systemd 单元（加了 `LimitNOFILE=4096`）并重启 `huli-cloud`，检查 `/healthz` 和 `/v1`；
 5. 用现有的 ACME webroot 申请 `app.huli.132-145-200-0.sslip.io` 的证书（80 端口的 default_server 已经提供 `/.well-known/acme-challenge/`）；
-6. nginx：huli 站点加 `location /v1/hosts/`（WebSocket 升级头、读写超时 120 秒、不缓冲）；新站点 `huli-app`（静态文件、CSP 等安全头见 `snippets/huli-app-headers.conf`）；`nginx -t` 后 reload；
+6. nginx：huli 站点加 `location /v1/hosts`（不带结尾斜杠，否则 nginx 把列表请求 301 掉）（WebSocket 升级头、读写超时 120 秒、不缓冲）；新站点 `huli-app`（静态文件、CSP 等安全头见 `snippets/huli-app-headers.conf`）；`nginx -t` 后 reload；
 7. 隐私政策页加上中转的说明；最后从服务器上自测 `https://…/healthz`、`/v1`、`/v1/regions` 和网页版首页。
 
 另外：`nginx -t` 不通过时，先把这次改之前的站点文件和 snippet 放回去再退出，nginx 不 reload；每晚 3:41 备份 `state.json` 到 `/var/backups/huli-cloud/`（保留两周），里面有 TOTP 密钥和密码哈希，所以只有 root 能读（文件 600、目录 700），要拷下来用 sudo，以前留下的组可读的备份也在这次改成 600；更新文件上传用户 `huli-upload` 的公钥只从部署目录里的 `huli_upload.pub` 读（目录和文件属于 root 或执行 sudo 的用户、别人不能写，内容只有一行 SSH 公钥），不再读 `/tmp/huli_upload.pub`，写入时仍带 `restrict` 和只能 rrsync 到更新目录的限制。

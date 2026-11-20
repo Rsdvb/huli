@@ -269,7 +269,9 @@ server {
         default_type text/html;
         alias /var/www/huli-static/privacy.html;
     }
-    location /v1/hosts/ {
+    # No trailing slash: nginx answers a bare /v1/hosts (the account's host list) with a 301 to
+    # /v1/hosts/ when the prefix ends in one, and clients do not follow it.
+    location /v1/hosts {
         proxy_pass http://127.0.0.1:3010;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
