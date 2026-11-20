@@ -8,6 +8,7 @@ appId: io.github.rsdvb.huli
     stopApp: true
     arguments:
       huliNoAsk: 'YES'
+      huliDev: 'YES'
 - tapOn: '会话'
 - tapOn: '新会话'
 - waitForAnimationToEnd

@@ -42,6 +42,8 @@ import {
   pickerStyle,
   tag,
 } from '@expo/ui/swift-ui/modifiers'
+import { devMode } from '../../dev/devMode'
+import { keepResult } from '../../dev/FrameMeter'
 import type { MenuEntry, MenuPage, MenuRow, MenuSource } from './Popover'
 
 /** Whether menus are the system's here: always on iOS. */
@@ -54,7 +56,9 @@ const DISABLED_MENU = [menuOrder('fixed'), disabled(true)]
 const PALETTE = pickerStyle('palette')
 
 // An open menu that never said it closed is let go after this long, so it cannot stay stale.
-const OPEN_AT_MOST = 30_000
+const OPEN_AT_MOST = 15_000
+
+const DEV = devMode()
 
 /** The screen's latest actions, by the path of the row in the menu. */
 type Actions = Map<string, (value?: string) => void>
@@ -366,11 +370,16 @@ export function NativeMenu(props: {
 
   // Held as it opened while it is open, which its content's appearing and going say.
   const [open, setOpen] = useState(false)
+  const root = source?.root ?? ''
+  const traced = useRef(false)
   useEffect(() => {
+    // The simulator flows check when a menu says it opened and closed (FrameMeter's file).
+    if (DEV && (open || traced.current)) keepResult({ label: 'menu', root, open, at: Date.now() })
+    traced.current = true
     if (!open) return
     const timer = setTimeout(() => setOpen(false), OPEN_AT_MOST)
     return () => clearTimeout(timer)
-  }, [open])
+  }, [open, root])
   const seen = useMemo(() => [onAppear(() => setOpen(true)), onDisappear(() => setOpen(false))], [])
   const content = useMemo(() => {
     const current = latest.current
