@@ -53,7 +53,16 @@ import type {
 import { isClaudeRowlessCall, isClaudeRowWhenFailed } from '../plan-tool'
 import { SERVICE_NAME } from '../service-name'
 import { workflowToolStructured } from '../workflow/tools'
-import { PLAN_TOOLS, resultContent, startsBackgroundWork, SUBAGENT_TOOLS, toolView } from './tools'
+import {
+  isServerToolResult,
+  PLAN_TOOLS,
+  resultContent,
+  serverResultView,
+  startsBackgroundWork,
+  SUBAGENT_TOOLS,
+  toolView,
+  type ServerToolResult,
+} from './tools'
 
 /** When a main-thread request went out and started its output, and its output tokens. */
 interface RequestTiming {
@@ -523,6 +532,8 @@ export class ClaudeMapper {
         deliveries.push({ sessionId, map: (ctx) => this.chunk(ctx, 'thought', messageId, value) })
       } else if (isToolUse(block)) {
         deliveries.push({ sessionId, map: (ctx) => this.toolUse(ctx, block, sessionId, true) })
+      } else if (isServerToolResult(block)) {
+        deliveries.push({ sessionId, map: (ctx) => this.serverToolResult(ctx, block) })
       }
     }
     const usage = message.message.usage
@@ -662,7 +673,12 @@ export class ClaudeMapper {
     asked = false,
   ): MapperOutput {
     const out = output()
-    const { name } = block
+    // Huli: an MCP tool the API calls itself names its server apart.
+    const server = (block as { server_name?: unknown }).server_name
+    const name =
+      block.type === 'mcp_tool_use' && typeof server === 'string' && server !== ''
+        ? `mcp__${server}__${block.name}`
+        : block.name
     this.tools.set(block.id, { name, input: block.input, sessionId })
     // The host wrote the plan or the report from the call itself; a call that waits for an answer keeps its row.
     if (isClaudeRowlessCall(name) && !asked) return out
@@ -723,6 +739,26 @@ export class ClaudeMapper {
       ...(view.question !== undefined ? { question: view.question } : {}),
     }
     addEntry(ctx, out, entry)
+    return out
+  }
+
+  /**
+   * Huli: the result of a tool the API ran itself, which comes in the assistant's message rather
+   * than as a tool result, so the call's row would otherwise run on until the turn cancelled it.
+   */
+  private serverToolResult(ctx: MapperContext, block: ServerToolResult): MapperOutput {
+    const out = output()
+    const id = `t:${block.tool_use_id}`
+    const entry = ctx.thread.byId[id]
+    if (entry?.kind !== 'tool') return out
+    const view = serverResultView(block)
+    const changes = {
+      status: view.failed ? ('failed' as const) : ('completed' as const),
+      ...(view.content.length > 0 ? { content: view.content } : {}),
+      ...(view.exitCode !== undefined ? { exitCode: view.exitCode } : {}),
+    }
+    out.patches.push({ op: 'entry.update', id, changes })
+    toolEffects(out, block.tool_use_id, id, entry.status, { ...entry, ...changes })
     return out
   }
 

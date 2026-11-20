@@ -479,7 +479,8 @@
       "question": "Question",
       "loadSkill": "Load skill",
       "loadSkillNamed": "Load skill: {{skill}}",
-      "tool": "Tool"
+      "tool": "Tool",
+      "codeExecution": "Run code"
     },
     "notice": {
       "retrying": "Retrying ({{attempt}}/{{max}}) · {{reason}}",

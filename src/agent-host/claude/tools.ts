@@ -181,6 +181,17 @@ export function toolView(name: string, raw: unknown, cwd: string): ToolView {
         content: text(input.prompt) ? [markdown(String(input.prompt))] : [],
       })
     }
+    // Huli: the API's own tools, which Claude runs on Anthropic's side.
+    case 'web_search':
+      return toolView('WebSearch', input, cwd)
+    case 'web_fetch':
+      return toolView('WebFetch', input, cwd)
+    case 'code_execution':
+    case 'bash_code_execution':
+      return view(
+        text(input.command) ?? text(input.code) ?? t('claude.tool.codeExecution'),
+        'execute',
+      )
     case 'WebSearch': {
       const query = text(input.query)
       return view(
@@ -329,6 +340,77 @@ export function resultContent(
       return [...(shown ? [markdown(shown)] : []), ...images]
     }
   }
+}
+
+/** Huli: a result block of a tool the API runs itself, such as `web_search_tool_result`. */
+export interface ServerToolResult {
+  type: string
+  tool_use_id: string
+  content?: unknown
+  is_error?: boolean
+}
+
+/** Huli: whether a block of an assistant message is the result of one of the API's own tools. */
+export function isServerToolResult(block: ContentBlock): block is ServerToolResult {
+  return (
+    block.type !== 'tool_result' &&
+    block.type.endsWith('_tool_result') &&
+    typeof (block as { tool_use_id?: unknown }).tool_use_id === 'string'
+  )
+}
+
+/**
+ * Huli: what a call of one of the API's own tools shows once its result block came: the pages a
+ * search found, the page a fetch read, what code printed and its exit code, an MCP tool's text.
+ */
+export function serverResultView(block: ServerToolResult): {
+  failed: boolean
+  content: ToolContent[]
+  exitCode?: number
+} {
+  const value = block.content
+  const fields = asInput(value)
+  const error = typeof fields.type === 'string' && fields.type.endsWith('_error')
+  if (error) {
+    const code = text(fields.error_code) ?? text(fields.error_message) ?? ''
+    return { failed: true, content: code ? [markdown(fenced(code))] : [] }
+  }
+  if (block.type === 'web_search_tool_result' && Array.isArray(value)) {
+    const lines = value.flatMap((item) => {
+      const result = asInput(item)
+      const url = text(result.url)
+      if (!url) return []
+      const title = (text(result.title) ?? url).replace(/[[\]]/g, '')
+      return [`- [${title}](${url})`]
+    })
+    return { failed: false, content: lines.length > 0 ? [markdown(lines.join('\n'))] : [] }
+  }
+  if (block.type === 'web_fetch_tool_result') {
+    const url = text(fields.url)
+    const title = text(asInput(fields.content).title)
+    return { failed: false, content: url ? [markdown(`[${title ?? url}](${url})`)] : [] }
+  }
+  if (typeof fields.stdout === 'string' || typeof fields.stderr === 'string') {
+    const printed = [fields.stdout, fields.stderr].filter(
+      (part) => typeof part === 'string' && part !== '',
+    )
+    const code = typeof fields.return_code === 'number' ? fields.return_code : undefined
+    return {
+      failed: code !== undefined && code !== 0,
+      content: printed.length > 0 ? [markdown(fenced(toLf(printed.join('\n')), 'console'))] : [],
+      ...(code !== undefined ? { exitCode: code } : {}),
+    }
+  }
+  const texts =
+    typeof value === 'string'
+      ? [value]
+      : Array.isArray(value)
+        ? value.flatMap((item) =>
+            asInput(item).type === 'text' ? [String(asInput(item).text)] : [],
+          )
+        : []
+  const shown = resultMarkdown(toLf(texts.join('\n')))
+  return { failed: block.is_error === true, content: shown ? [markdown(shown)] : [] }
 }
 
 /** The tool the turn's own work keeps running after its call ended. */

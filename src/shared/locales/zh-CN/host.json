@@ -476,7 +476,8 @@
       "question": "问题",
       "loadSkill": "加载技能",
       "loadSkillNamed": "加载技能：{{skill}}",
-      "tool": "工具"
+      "tool": "工具",
+      "codeExecution": "运行代码"
     },
     "notice": {
       "retrying": "正在重试（{{attempt}}/{{max}}）· {{reason}}",

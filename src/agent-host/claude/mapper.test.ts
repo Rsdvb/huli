@@ -230,6 +230,69 @@ describe("Claude Code's own lines", () => {
   })
 })
 
+describe("the API's own tools", () => {
+  const message = (id: string, content: unknown[]) => ({
+    type: 'assistant',
+    message: { id, model: 'claude-opus-5', content },
+    parent_tool_use_id: null,
+    uuid: `uuid-${id}`,
+    session_id: SESSION,
+  })
+
+  it('completes a web search with the pages it found, and code with its output', () => {
+    const run = new Run().feed(
+      message('m1', [
+        { type: 'server_tool_use', id: 'srv_1', name: 'web_search', input: { query: 'vitest' } },
+      ]),
+      message('m1', [
+        {
+          type: 'web_search_tool_result',
+          tool_use_id: 'srv_1',
+          content: [{ type: 'web_search_result', url: 'https://vitest.dev', title: 'Vitest' }],
+        },
+      ]),
+      message('m2', [
+        {
+          type: 'server_tool_use',
+          id: 'srv_2',
+          name: 'bash_code_execution',
+          input: { command: 'exit 3' },
+        },
+        {
+          type: 'bash_code_execution_tool_result',
+          tool_use_id: 'srv_2',
+          content: { type: 'bash_code_execution_result', stdout: 'hi', stderr: '', return_code: 3 },
+        },
+      ]),
+    )
+    expect(run.entry('t:srv_1')).toMatchObject({
+      status: 'completed',
+      title: 'Search "vitest"',
+      content: [{ type: 'markdown', markdown: '- [Vitest](https://vitest.dev)' }],
+    })
+    expect(run.entry('t:srv_2')).toMatchObject({
+      status: 'failed',
+      toolKind: 'execute',
+      exitCode: 3,
+    })
+  })
+
+  it('names an MCP tool the API calls by its server, and fails it on an error', () => {
+    const run = new Run().feed(
+      message('m1', [
+        { type: 'mcp_tool_use', id: 'mcp_1', name: 'get_pr', server_name: 'github', input: {} },
+        {
+          type: 'mcp_tool_result',
+          tool_use_id: 'mcp_1',
+          is_error: true,
+          content: [{ type: 'text', text: 'Not found' }],
+        },
+      ]),
+    )
+    expect(run.entry('t:mcp_1')).toMatchObject({ title: 'mcp__github__get_pr', status: 'failed' })
+  })
+})
+
 describe('a refusal', () => {
   it('says the request went to the fallback model, and why the first refused', () => {
     const run = new Run().feed(
