@@ -8,7 +8,6 @@ import { pathToFileURL } from 'node:url'
 import { app, type BrowserWindow, dialog, shell } from 'electron'
 import { ARTIFACT_ENTRY } from '@shared/artifact-files'
 import { CANVAS_FILE } from '@shared/canvas-doc'
-import { isImagePath } from '@shared/artifact-document'
 import {
   type ArtifactExportFormat,
   type ArtifactTypeInfo,
@@ -164,6 +163,8 @@ export class ArtifactFiles {
     const type = found.type
     if (!isExportFormat(type.name, format)) throw new Error('Not a format this type exports to')
     const name = safeName(found.title, wanted.id)
+    // The document module brings a Markdown parser, which main loads only for an export.
+    const { isImagePath } = await import('@shared/artifact-document')
     const folder = format === 'md' && found.files.some((file) => isImagePath(file.path))
     const extension = EXPORT_EXTENSIONS[format]
     const options: Electron.SaveDialogOptions = folder
