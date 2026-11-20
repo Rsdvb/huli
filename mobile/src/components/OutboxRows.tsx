@@ -12,6 +12,12 @@ import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { UserMessage } from './UserMessage'
 
+/**
+ * An action's 16pt line takes touches 44pt tall, and only a little to each side: 重试 and 撤回 sit
+ * a dot apart, and wider slops overlapped, so a tap between them could land on the wrong one.
+ */
+const ACTION_SLOP = { top: 14, bottom: 14, left: 4, right: 4 }
+
 /** What a waiting message shows as, its kept files as attachments of their own. */
 function contentOf(item: OutboxItem): UserContent[] {
   const content: UserContent[] = item.text ? [{ type: 'text', text: item.text }] : []
@@ -61,7 +67,7 @@ function Status(props: {
         haptic.tap()
         onPress()
       }}
-      hitSlop={8}
+      hitSlop={ACTION_SLOP}
       accessibilityRole="button"
       accessibilityLabel={label}
     >
