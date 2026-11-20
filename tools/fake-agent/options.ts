@@ -12,6 +12,7 @@ export const SCENARIOS = [
   'error',
   'auth-required',
   'out-of-credit',
+  'refusal',
   'large-history',
   'slow-start',
   'all-updates',
@@ -76,6 +77,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   },
   'out-of-credit': {
     description: 'Fails the turn as a provider out of credit does; the retry answers',
+  },
+  refusal: {
+    description: 'The model declines to go on, as Claude ends a turn with stop_reason refusal',
+    hint: '--plain: without a word of its own first',
   },
   'large-history': {
     description: 'Makes reopening this session replay 1,000 entries',

@@ -39,12 +39,19 @@
     "moveMore": "移动了 {{names}} 及另外 {{more}} 个文件",
     "failed": "{{failed}} 项失败"
   },
+  "refusal": {
+    "title": "模型拒绝继续",
+    "body": "模型主动停止了这次回复，API 没有给出原因。可以重试、换个说法，或在下方输入框里换一个模型。",
+    "saidBody": "模型主动停止了这次回复，除了它自己说的，API 没有给出其他原因。可以换个说法、再试一次，或在下方输入框里换一个模型。",
+    "again": "重试",
+    "rephrase": "修改后再发"
+  },
   "stopReason": {
     "endTurn": "用时 {{duration}}",
     "cancelled": "已取消",
     "maxTokens": "已达到 token 上限而停止",
     "maxTurnRequests": "已达到请求次数上限而停止",
-    "refusal": "Agent 拒绝了请求",
+    "refusal": "模型拒绝继续",
     "withTime": "{{reason}} · {{time}}"
   },
   "tool": {

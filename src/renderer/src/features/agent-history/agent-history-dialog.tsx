@@ -1,13 +1,27 @@
 // Huli: choosing which of an agent's past sessions to import, across every folder it ran in, and
 // the import's progress and outcome. Each chosen one goes through `sessions.import`, as the
-// sidebar's Import sessions does it. Huli's own; see tools/huli/README.md.
+// sidebar's Import sessions does it. One of another folder of the agent's kind, as a backup or a
+// copy from another computer, is first copied into the agent's own folder once the user has seen
+// the files that writes. Huli's own; see tools/huli/README.md.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight01Icon, Search01Icon } from '@hugeicons/core-free-icons'
+import {
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  Cancel01Icon,
+  Folder01Icon,
+  Search01Icon,
+} from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionSummary } from '@shared/agent-host'
-import type { AgentHistoryPage, AgentHistorySession } from '@shared/agent-history'
+import type {
+  AgentHistoryPage,
+  AgentHistorySession,
+  HistoryCopyItem,
+  HistoryCopyOutcome,
+  HistoryCopyPlan,
+} from '@shared/agent-history'
 import { harnessOf, type AgentId } from '@shared/agents'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
@@ -21,6 +35,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@renderer/components/ui/dropdown-menu'
 import { Input } from '@renderer/components/ui/input'
 import { Progress } from '@renderer/components/ui/progress'
 import { Skeleton } from '@renderer/components/ui/skeleton'
@@ -30,17 +53,22 @@ import { readiness } from '@renderer/features/agents/readiness'
 import { MemoryImportDialog } from '@renderer/features/settings/memory-rows'
 import { mediumAgo } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
+import { isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { openSession } from '@renderer/stores/view'
 import {
   eachLimited,
+  forgetFolder,
   groupsOf,
   matches,
+  recentFolders,
   recentKeys,
+  rememberFolder,
   selectable,
   sessionKey,
+  sourceKey,
   withKeys,
   type HistoryGroup,
   type HistoryList,
@@ -52,10 +80,32 @@ const IMPORTS = 3
 const SHOWN_PER_FOLDER = 200
 const RECENT_DAYS = 30
 
+interface Failure {
+  key: string
+  title: string
+  message: string
+}
+
 interface Outcome {
   imported: SessionSummary[]
-  failed: { key: string; title: string; message: string }[]
+  failed: Failure[]
+  /** Huli: sessions of another folder that were not copied, and why. */
+  skipped: Failure[]
   stopped: number
+}
+
+/** A chosen session, with the folder it is listed from; null for the agent's own. */
+interface Chosen {
+  agentId: AgentId
+  folder: string | null
+  key: string
+  session: AgentHistorySession
+}
+
+/** Huli: the plans of the copies from other folders, which the user confirms. */
+interface Confirming {
+  plans: { agentId: AgentId; folder: string; plan: HistoryCopyPlan }[]
+  chosen: Chosen[]
 }
 
 /** An agent's whole history to pick from; mounted with each opening, so it starts afresh. */
@@ -84,6 +134,12 @@ function listsEverywhere(agentId: AgentId, listSessions: boolean): boolean {
   return harness === 'claude-code' || harness === 'codex' || listSessions
 }
 
+/** Huli: the agents whose sessions another folder of theirs can be read for. */
+function readsFolders(agentId: AgentId): boolean {
+  const harness = harnessOf(agentId)
+  return !isWeb && (harness === 'claude-code' || harness === 'codex')
+}
+
 function AgentHistoryBody({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(['agentHistory', 'common'])
   const agents = useAgentsStore(
@@ -98,11 +154,20 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
   )
   const [lists, setLists] = useState<Record<string, HistoryList>>({})
   const [chosenAgent, setChosenAgent] = useState<AgentId | null>(null)
+  // Huli: the other folder each agent's tab lists, when one is chosen.
+  const [folders, setFolders] = useState<Partial<Record<AgentId, string>>>({})
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const [running, setRunning] = useState(false)
-  const [progress, setProgress] = useState<{ done: number; total: number; title: string | null }>({
+  const [planning, setPlanning] = useState(false)
+  const [confirming, setConfirming] = useState<Confirming | null>(null)
+  const [progress, setProgress] = useState<{
+    done: number
+    total: number
+    title: string | null
+    copying?: boolean
+  }>({
     done: 0,
     total: 0,
     title: null,
@@ -111,57 +176,74 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
   const [memoryOpen, setMemoryOpen] = useState(false)
   const alive = useRef(true)
   const stopping = useRef(false)
+  // The latest listing of each source; an earlier one drops its pages.
+  const runs = useRef(new Map<string, number>())
+
+  const load = (agentId: AgentId, folder: string | null): void => {
+    const key = sourceKey(agentId, folder)
+    const run = (runs.current.get(key) ?? 0) + 1
+    runs.current.set(key, run)
+    const live = () => alive.current && runs.current.get(key) === run
+    if (folder !== null) {
+      setLists((l) => {
+        const next = { ...l }
+        delete next[key]
+        return next
+      })
+    }
+    void (async () => {
+      let cursor: string | null = null
+      let first = true
+      do {
+        try {
+          const page: AgentHistoryPage = await host('agentHistory.list', {
+            agentId,
+            ...(cursor ? { cursor } : {}),
+            ...(folder !== null ? { folder } : {}),
+          })
+          if (!live()) return
+          if (first && folder !== null) rememberFolder(harnessOf(agentId), folder)
+          first = false
+          cursor = page.nextCursor
+          const more = cursor !== null
+          setLists((l) => {
+            const before = l[key]
+            return {
+              ...l,
+              [key]: {
+                sessions: [...(before?.sessions ?? []), ...page.sessions],
+                hidden: {
+                  subagents: (before?.hidden.subagents ?? 0) + page.hidden.subagents,
+                  empty: (before?.hidden.empty ?? 0) + page.hidden.empty,
+                },
+                loading: more,
+                error: null,
+                ...(page.source !== undefined ? { source: page.source } : {}),
+              },
+            }
+          })
+        } catch (error) {
+          if (!live()) return
+          setLists((l) => ({
+            ...l,
+            [key]: {
+              sessions: l[key]?.sessions ?? [],
+              hidden: l[key]?.hidden ?? { subagents: 0, empty: 0 },
+              loading: false,
+              error: errorMessage(error),
+            },
+          }))
+          return
+        }
+      } while (cursor !== null)
+    })()
+  }
 
   // Every agent's pages load one after another as the dialog opens, for the counts on its tab.
   useEffect(() => {
     alive.current = true
-    // A listing of an earlier mount of this effect drops its pages.
-    let live = true
-    for (const agent of agents) {
-      void (async () => {
-        let cursor: string | null = null
-        do {
-          try {
-            const page: AgentHistoryPage = await host('agentHistory.list', {
-              agentId: agent.id,
-              ...(cursor ? { cursor } : {}),
-            })
-            if (!live) return
-            cursor = page.nextCursor
-            const more = cursor !== null
-            setLists((l) => {
-              const before = l[agent.id]
-              return {
-                ...l,
-                [agent.id]: {
-                  sessions: [...(before?.sessions ?? []), ...page.sessions],
-                  hidden: {
-                    subagents: (before?.hidden.subagents ?? 0) + page.hidden.subagents,
-                    empty: (before?.hidden.empty ?? 0) + page.hidden.empty,
-                  },
-                  loading: more,
-                  error: null,
-                },
-              }
-            })
-          } catch (error) {
-            if (!live) return
-            setLists((l) => ({
-              ...l,
-              [agent.id]: {
-                sessions: l[agent.id]?.sessions ?? [],
-                hidden: l[agent.id]?.hidden ?? { subagents: 0, empty: 0 },
-                loading: false,
-                error: errorMessage(error),
-              },
-            }))
-            return
-          }
-        } while (cursor !== null)
-      })()
-    }
+    for (const agent of agents) load(agent.id, null)
     return () => {
-      live = false
       alive.current = false
     }
     // The agents are read as the dialog opens.
@@ -174,28 +256,49 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     return harness === 'claude-code' || harness === 'codex' || !lists[a.id]?.error
   })
   const shown = shownAgents.find((a) => a.id === chosenAgent)?.id ?? shownAgents[0]?.id ?? null
-  const list = shown ? lists[shown] : undefined
+  const shownName = shownAgents.find((a) => a.id === shown)?.name ?? shown ?? ''
+  const folder = shown ? (folders[shown] ?? null) : null
+  const source = shown ? sourceKey(shown, folder) : null
+  const list = source ? lists[source] : undefined
   const filtered = useMemo(
     () => (list ? list.sessions.filter((s) => matches(s, query.trim())) : []),
     [list, query],
   )
   const groups = useMemo(() => groupsOf(filtered), [filtered])
-  const visibleKeys = shown
-    ? filtered.filter(selectable).map((s) => sessionKey(shown, s.acpSessionId))
+  const visibleKeys = source
+    ? filtered.filter(selectable).map((s) => sessionKey(source, s.acpSessionId))
     : []
-  const toImport = shownAgents.flatMap((agent) =>
-    (lists[agent.id]?.sessions ?? [])
-      .filter((s) => selectable(s) && selected.has(sessionKey(agent.id, s.acpSessionId)))
-      .map((s) => ({ agentId: agent.id, session: s })),
+  const toImport: Chosen[] = shownAgents.flatMap((agent) =>
+    [null, folders[agent.id] ?? null]
+      .filter((from, index) => index === 0 || from !== null)
+      .flatMap((from) => {
+        const key = sourceKey(agent.id, from)
+        return (lists[key]?.sessions ?? [])
+          .filter((s) => selectable(s) && selected.has(sessionKey(key, s.acpSessionId)))
+          .map((s) => ({
+            agentId: agent.id,
+            folder: from,
+            key: sessionKey(key, s.acpSessionId),
+            session: s,
+          }))
+      }),
   )
 
-  const markImported = (agentId: AgentId, acpSessionId: string): void =>
+  const chooseFolder = async (agentId: AgentId, picked?: string): Promise<void> => {
+    const chosen = picked ?? (await window.kettu.dialogs.chooseHistoryFolder())
+    if (!chosen || !alive.current) return
+    setFolders((f) => ({ ...f, [agentId]: chosen }))
+    setExpanded(new Set())
+    load(agentId, chosen)
+  }
+
+  const markImported = (key: string, acpSessionId: string): void =>
     setLists((l) => {
-      const current = l[agentId]
+      const current = l[key]
       if (!current) return l
       return {
         ...l,
-        [agentId]: {
+        [key]: {
           ...current,
           sessions: current.sessions.map((s) =>
             s.acpSessionId === acpSessionId ? { ...s, imported: true, outside: undefined } : s,
@@ -204,21 +307,20 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
       }
     })
 
-  const run = async (): Promise<void> => {
-    const items = toImport
-    if (items.length === 0 || running) return
-    stopping.current = false
-    setRunning(true)
-    setOutcome(null)
+  const runImports = async (items: Chosen[], before: Pick<Outcome, 'failed' | 'skipped'>) => {
     let done = 0
     setProgress({ done, total: items.length, title: null })
-    const result: Outcome = { imported: [], failed: [], stopped: 0 }
+    const result: Outcome = {
+      imported: [],
+      failed: [...before.failed],
+      skipped: before.skipped,
+      stopped: 0,
+    }
     await eachLimited(
       items,
       IMPORTS,
       () => alive.current && !stopping.current,
-      async ({ agentId, session }) => {
-        const key = sessionKey(agentId, session.acpSessionId)
+      async ({ agentId, folder: from, key, session }) => {
         setProgress((p) => ({ ...p, title: session.title }))
         try {
           const summary = await host('sessions.import', {
@@ -231,7 +333,8 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
           useSessionsStore.getState().upsert(summary)
           result.imported.push(summary)
           if (!alive.current) return
-          markImported(agentId, session.acpSessionId)
+          markImported(sourceKey(agentId, from), session.acpSessionId)
+          if (from !== null) markImported(sourceKey(agentId, null), session.acpSessionId)
           setSelected((s) => withKeys(s, [key], false))
         } catch (error) {
           result.failed.push({
@@ -250,6 +353,98 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     setRunning(false)
   }
 
+  const start = async (): Promise<void> => {
+    const items = toImport
+    if (items.length === 0 || running || planning) return
+    stopping.current = false
+    setOutcome(null)
+    const fromFolders = items.filter((item) => item.folder !== null)
+    if (fromFolders.length === 0) {
+      setRunning(true)
+      await runImports(items, { failed: [], skipped: [] })
+      return
+    }
+    // Huli: what the copies from other folders write is shown before any of it is.
+    setPlanning(true)
+    try {
+      const bySource = new Map<string, Chosen[]>()
+      for (const item of fromFolders) {
+        const key = sourceKey(item.agentId, item.folder)
+        bySource.set(key, [...(bySource.get(key) ?? []), item])
+      }
+      const plans: Confirming['plans'] = []
+      for (const group of bySource.values()) {
+        const { agentId, folder: from } = group[0]!
+        const plan = await host('agentHistory.planCopy', {
+          agentId,
+          folder: from!,
+          sessionIds: group.map((item) => item.session.acpSessionId),
+        })
+        plans.push({ agentId, folder: from!, plan })
+      }
+      if (alive.current) setConfirming({ plans, chosen: items })
+    } catch (error) {
+      toast(errorMessage(error), undefined, { tone: 'warning' })
+    } finally {
+      if (alive.current) setPlanning(false)
+    }
+  }
+
+  const agentName = (agentId: AgentId): string =>
+    agents.find((a) => a.id === agentId)?.name ?? agentId
+
+  const confirmCopy = async (): Promise<void> => {
+    const current = confirming
+    if (!current || running) return
+    setConfirming(null)
+    setRunning(true)
+    setProgress({ done: 0, total: 0, title: null, copying: true })
+    const failed: Failure[] = []
+    const skipped: Failure[] = []
+    const ready = new Set<string>()
+    const titleOf = (key: string): string =>
+      current.chosen.find((item) => item.key === key)?.session.title ?? t('common:untitledSession')
+    for (const { agentId, folder: from, plan } of current.plans) {
+      const source = sourceKey(agentId, from)
+      const action = new Map(plan.items.map((item) => [item.acpSessionId, item.action]))
+      let outcomes: HistoryCopyOutcome[]
+      try {
+        outcomes = (await host('agentHistory.copy', { token: plan.token })).items
+      } catch (error) {
+        for (const item of plan.items) {
+          const key = sessionKey(source, item.acpSessionId)
+          failed.push({ key, title: titleOf(key), message: errorMessage(error) })
+        }
+        continue
+      }
+      for (const item of outcomes) {
+        const key = sessionKey(source, item.acpSessionId)
+        if (item.status === 'copied' || item.status === 'present') ready.add(key)
+        else if (item.status === 'failed') {
+          failed.push({ key, title: titleOf(key), message: item.message ?? '' })
+        } else {
+          const why = action.get(item.acpSessionId)
+          const agent = agentName(agentId)
+          skipped.push({
+            key,
+            title: titleOf(key),
+            message:
+              why === 'missing'
+                ? t('result.missingFolder')
+                : item.message === 'changed'
+                  ? t('result.changed', { agent })
+                  : t('result.conflict', { agent }),
+          })
+        }
+      }
+    }
+    if (!alive.current) return
+    await runImports(
+      current.chosen.filter((item) => item.folder === null || ready.has(item.key)),
+      { failed, skipped },
+    )
+  }
+
   const latest = outcome?.imported.reduce<SessionSummary | null>(
     (best, s) => (!best || s.updatedAt > best.updatedAt ? s : best),
     null,
@@ -266,14 +461,46 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
         list.hidden.empty > 0 ? t('dialog.hiddenEmpty', { count: list.hidden.empty }) : null,
       ].filter(Boolean)
     : []
+  const busy = running || planning
+  const copyCount = confirming
+    ? confirming.chosen.filter(
+        (item) =>
+          item.folder === null ||
+          confirming.plans.some(
+            (p) =>
+              p.agentId === item.agentId &&
+              p.folder === item.folder &&
+              p.plan.items.some(
+                (i) =>
+                  i.acpSessionId === item.session.acpSessionId &&
+                  i.action !== 'conflict' &&
+                  i.action !== 'missing',
+              ),
+          ),
+      ).length
+    : 0
 
   return (
     <>
       <DialogHeader className="gap-1.5 px-5.5 pt-5">
-        <DialogTitle>{t('dialog.title')}</DialogTitle>
-        <DialogDescription>{t('dialog.description')}</DialogDescription>
+        <DialogTitle>
+          {confirming
+            ? new Set(confirming.plans.map((p) => p.agentId)).size === 1
+              ? t('confirm.title', { agent: agentName(confirming.plans[0]!.agentId) })
+              : t('confirm.titleMany')
+            : t('dialog.title')}
+        </DialogTitle>
+        <DialogDescription>
+          {confirming
+            ? t('confirm.description', {
+                target: [...new Set(confirming.plans.map((p) => p.plan.target))].join(', '),
+              })
+            : t('dialog.description')}
+        </DialogDescription>
       </DialogHeader>
-      {shownAgents.length === 0 || !shown ? (
+      {confirming ? (
+        <CopyPlanView confirming={confirming} agentName={agentName} />
+      ) : shownAgents.length === 0 || !shown || !source ? (
         <p className="flex-1 px-5.5 pt-3.5 text-ui text-secondary">{t('dialog.noAgents')}</p>
       ) : (
         <>
@@ -284,7 +511,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                 className="justify-start gap-1.5 rounded-none bg-transparent p-0 shadow-none group-data-horizontal/tabs:h-auto"
               >
                 {shownAgents.map((agent) => {
-                  const agentList = lists[agent.id]
+                  const agentList = lists[sourceKey(agent.id, folders[agent.id] ?? null)]
                   return (
                     <TabsTrigger
                       key={agent.id}
@@ -304,6 +531,24 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                 })}
               </TabsList>
             </Tabs>
+            {readsFolders(shown) && (
+              <SourceRow
+                agentId={shown}
+                agentName={shownName}
+                folder={folder}
+                readFrom={list?.source ?? null}
+                locked={busy}
+                onChoose={(picked) => void chooseFolder(shown, picked)}
+                onOwn={() => {
+                  setFolders((f) => {
+                    const next = { ...f }
+                    delete next[shown]
+                    return next
+                  })
+                  setExpanded(new Set())
+                }}
+              />
+            )}
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-tertiary">
@@ -320,12 +565,12 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={running || !list}
+                disabled={busy || !list}
                 onClick={() =>
                   setSelected((s) =>
                     withKeys(
                       withKeys(s, visibleKeys, false),
-                      recentKeys(shown, filtered, RECENT_DAYS, Date.now()),
+                      recentKeys(source, filtered, RECENT_DAYS, Date.now()),
                       true,
                     ),
                   )
@@ -336,7 +581,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={running || !list}
+                disabled={busy || !list}
                 onClick={() => setSelected((s) => withKeys(s, visibleKeys, true))}
               >
                 {t('dialog.all')}
@@ -344,13 +589,13 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={running || !list}
+                disabled={busy || !list}
                 onClick={() => setSelected((s) => withKeys(s, visibleKeys, false))}
               >
                 {t('dialog.none')}
               </Button>
             </div>
-            {list && (
+            {list && !list.error && (
               <p className="truncate text-hint text-tertiary" title={statusParts.join('\n')}>
                 {list.loading
                   ? t('dialog.listing', { count: list.sessions.length })
@@ -372,9 +617,9 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
               <p className="py-2 text-ui text-danger">{list.error}</p>
             ) : list.sessions.length === 0 && !list.loading ? (
               <p className="py-2 text-ui text-secondary">
-                {t('dialog.noSessions', {
-                  agent: shownAgents.find((a) => a.id === shown)?.name ?? shown,
-                })}
+                {folder !== null
+                  ? t('dialog.noFolderSessions')
+                  : t('dialog.noSessions', { agent: shownName })}
               </p>
             ) : groups.length === 0 && !list.loading ? (
               <p className="py-2 text-ui text-secondary">{t('dialog.noMatch')}</p>
@@ -383,10 +628,11 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                 <FolderList
                   key={group.key}
                   agentId={shown}
+                  source={source}
                   group={group}
                   open={query.trim() !== '' || expanded.has(group.key)}
                   selected={selected}
-                  locked={running}
+                  locked={busy}
                   onToggle={() => setExpanded((e) => withKeys(e, [group.key], !e.has(group.key)))}
                   onSelect={(keys, on) => setSelected((s) => withKeys(s, keys, on))}
                 />
@@ -399,18 +645,20 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
         {running && (
           <div className="flex flex-col gap-1.5" aria-live="polite">
             <span className="truncate text-hint text-secondary">
-              {progress.title
-                ? t('dialog.importingTitle', {
-                    done: Math.min(progress.done + 1, progress.total),
-                    total: progress.total,
-                    title: progress.title,
-                  })
-                : t('dialog.importing', { done: progress.done, total: progress.total })}
+              {progress.copying
+                ? t('dialog.copying')
+                : progress.title
+                  ? t('dialog.importingTitle', {
+                      done: Math.min(progress.done + 1, progress.total),
+                      total: progress.total,
+                      title: progress.title,
+                    })
+                  : t('dialog.importing', { done: progress.done, total: progress.total })}
             </span>
             <Progress value={progress.total > 0 ? (progress.done / progress.total) * 100 : 0} />
           </div>
         )}
-        {!running && outcome && (
+        {!running && outcome && !confirming && (
           <OutcomeView
             outcome={outcome}
             onMemory={() => setMemoryOpen(true)}
@@ -424,45 +672,304 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
             }
           />
         )}
-        <p className="text-hint text-tertiary">{t('dialog.readOnly')}</p>
+        {!confirming && (
+          <p className="text-hint text-tertiary">
+            {folder !== null ? t('dialog.folderNote', { agent: shownName }) : t('dialog.readOnly')}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-2 px-5.5 py-4.5">
         <span className="flex-1" />
-        {running ? (
-          <Button
-            variant="outline"
-            onClick={() => {
-              stopping.current = true
-            }}
-          >
-            {t('dialog.stop')}
-          </Button>
+        {confirming ? (
+          <>
+            <Button variant="outline" onClick={() => setConfirming(null)}>
+              {t('confirm.back')}
+            </Button>
+            <Button disabled={copyCount === 0} onClick={() => void confirmCopy()}>
+              {t('confirm.run', { count: copyCount })}
+            </Button>
+          </>
         ) : (
-          <Button variant="outline" onClick={onClose}>
-            {outcome ? t('dialog.close') : t('common:actions.cancel')}
-          </Button>
+          <>
+            {running ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  stopping.current = true
+                }}
+              >
+                {t('dialog.stop')}
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={onClose}>
+                {outcome ? t('dialog.close') : t('common:actions.cancel')}
+              </Button>
+            )}
+            <Button disabled={busy || toImport.length === 0} onClick={() => void start()}>
+              {busy ? (
+                <>
+                  <Spinner className="size-3.5" />
+                  {planning ? t('dialog.planning') : t('dialog.importNone')}
+                </>
+              ) : toImport.length > 0 ? (
+                t('dialog.import', { count: toImport.length })
+              ) : (
+                t('dialog.importNone')
+              )}
+            </Button>
+          </>
         )}
-        <Button disabled={running || toImport.length === 0} onClick={() => void run()}>
-          {running ? (
-            <>
-              <Spinner className="size-3.5" />
-              {t('dialog.importNone')}
-            </>
-          ) : toImport.length > 0 ? (
-            t('dialog.import', { count: toImport.length })
-          ) : (
-            t('dialog.importNone')
-          )}
-        </Button>
       </div>
       <MemoryImportDialog open={memoryOpen} onOpenChange={setMemoryOpen} />
     </>
   )
 }
 
+/**
+ * Huli: where the tab's sessions come from, the agent's own folder or another one, with the
+ * folders chosen last to go back to.
+ */
+function SourceRow({
+  agentId,
+  agentName,
+  folder,
+  readFrom,
+  locked,
+  onChoose,
+  onOwn,
+}: {
+  agentId: AgentId
+  agentName: string
+  folder: string | null
+  readFrom: string | null
+  locked: boolean
+  onChoose: (folder?: string) => void
+  onOwn: () => void
+}) {
+  const { t } = useTranslation('agentHistory')
+  const harness = harnessOf(agentId)
+  // Read on each render: a folder listed for the first time joins them.
+  const [, forgotten] = useState(0)
+  const recent = recentFolders(harness)
+  const others = recent.filter((item) => item !== folder)
+  const label = folder === null ? t('dialog.ownFolder', { agent: agentName }) : shortFolder(folder)
+  return (
+    <div className="flex h-8 min-w-0 items-center gap-2 rounded-lg bg-subtle px-2.5">
+      <span className="flex-none text-hint text-tertiary">{t('dialog.source')}</span>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-hint',
+          folder !== null ? 'text-foreground' : 'text-secondary',
+        )}
+        title={readFrom ? t('dialog.readFrom', { folder: readFrom }) : (folder ?? label)}
+      >
+        {label}
+      </span>
+      {folder !== null && (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          disabled={locked}
+          aria-label={t('dialog.backToOwn', { agent: agentName })}
+          title={t('dialog.backToOwn', { agent: agentName })}
+          onClick={onOwn}
+        >
+          <Icon icon={Cancel01Icon} size={12} />
+        </Button>
+      )}
+      {others.length === 0 && folder === null ? (
+        <Button variant="ghost" size="xs" disabled={locked} onClick={() => onChoose()}>
+          <Icon icon={Folder01Icon} size={13} />
+          {t('dialog.chooseFolder')}
+        </Button>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={locked}
+            render={
+              <Button variant="ghost" size="xs">
+                <Icon icon={Folder01Icon} size={13} />
+                {t('dialog.chooseFolder')}
+                <Icon icon={ArrowDown01Icon} size={11} />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className="w-80 max-w-(--available-width)">
+            {others.length > 0 && (
+              <>
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{t('dialog.recentFolders')}</DropdownMenuLabel>
+                  {others.map((item) => (
+                    <DropdownMenuItem key={item} title={item} onClick={() => onChoose(item)}>
+                      <Icon icon={Folder01Icon} size={14} />
+                      <span className="min-w-0 flex-1 truncate text-hint">{shortFolder(item)}</span>
+                      <button
+                        type="button"
+                        className="flex-none rounded-sm text-tertiary hover:text-foreground"
+                        aria-label={t('dialog.forgetFolder')}
+                        title={t('dialog.forgetFolder')}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          forgetFolder(harness, item)
+                          forgotten((n) => n + 1)
+                        }}
+                      >
+                        <Icon icon={Cancel01Icon} size={11} />
+                      </button>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            <DropdownMenuItem onClick={() => onChoose()}>
+              <Icon icon={Folder01Icon} size={14} />
+              {t('dialog.chooseFolder')}
+            </DropdownMenuItem>
+            {folder !== null && (
+              <DropdownMenuItem onClick={onOwn}>
+                {t('dialog.backToOwn', { agent: agentName })}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  )
+}
+
+/** A folder by its last steps, which tell one from another, the rest elided. */
+function shortFolder(folder: string): string {
+  const parts = folder.split(/[\\/]/).filter(Boolean)
+  if (parts.length <= 3) return folder
+  const separator = folder.includes('\\') ? '\\' : '/'
+  return `…${separator}${parts.slice(-3).join(separator)}`
+}
+
+/** Huli: the files the copies from other folders write, each session's under its title. */
+function CopyPlanView({
+  confirming,
+  agentName,
+}: {
+  confirming: Confirming
+  agentName: (agentId: AgentId) => string
+}) {
+  const { t } = useTranslation(['agentHistory', 'common'])
+  const total = confirming.plans.reduce(
+    (sum, { plan }) =>
+      sum + plan.items.reduce((n, item) => n + item.files.length + item.moreFiles, 0),
+    0,
+  )
+  return (
+    <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2 px-5.5">
+      <p className="text-hint text-secondary">{t('confirm.total', { count: total })}</p>
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-subtle">
+        {confirming.plans.map(({ agentId, folder, plan }) => (
+          <section key={`${agentId}\n${folder}`} aria-label={folder}>
+            {plan.items.map((item) => (
+              <PlanItem
+                key={item.acpSessionId}
+                agentId={agentId}
+                agent={agentName(agentId)}
+                target={plan.target}
+                item={item}
+              />
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function relativeTo(target: string, file: string): string {
+  return file.startsWith(target) ? file.slice(target.length).replace(/^[\\/]/, '') : file
+}
+
+/**
+ * The folder a session's files go in, the one holding its transcript or rollout, so the list
+ * names each file by what tells it apart rather than by the long project folder they share.
+ */
+function planFolder(item: HistoryCopyItem): string | null {
+  const first = item.files[0] ?? item.backup
+  if (!first) return null
+  const parts = first.split(/[\\/]/)
+  const at = parts.findIndex(
+    (part) => part.startsWith(item.acpSessionId) || part.startsWith('rollout-'),
+  )
+  if (at <= 0) return null
+  return first.slice(0, parts.slice(0, at).join('/').length)
+}
+
+function PlanItem({
+  agentId,
+  agent,
+  target,
+  item,
+}: {
+  agentId: AgentId
+  agent: string
+  target: string
+  item: HistoryCopyItem
+}) {
+  const { t } = useTranslation(['agentHistory', 'common'])
+  const left = item.action === 'conflict' || item.action === 'missing'
+  const folder = planFolder(item)
+  const name = (file: string) => (folder ? relativeTo(folder, file) : relativeTo(target, file))
+  return (
+    <div className="flex flex-col gap-1 border-b border-subtle px-3 py-2.5 last:border-b-0">
+      <div className="flex min-w-0 items-center gap-2">
+        <AgentMark agent={agentId} size={14} />
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-control font-medium',
+            left ? 'text-tertiary' : 'text-foreground',
+          )}
+          title={item.cwd}
+        >
+          {item.title ?? t('common:untitledSession')}
+        </span>
+        <span
+          className={cn(
+            'flex-none text-meta',
+            item.action === 'newer' ? 'text-warning' : left ? 'text-tertiary' : 'text-secondary',
+          )}
+        >
+          {t(`confirm.action.${item.action}`, { agent })}
+        </span>
+      </div>
+      {folder && (item.files.length > 0 || item.backup) && (
+        <p className="truncate pl-5.5 text-meta text-tertiary" title={folder}>
+          {relativeTo(target, folder)}
+        </p>
+      )}
+      {item.files.length > 0 ? (
+        <ul className="flex flex-col gap-0.5 pl-8 font-mono text-meta text-secondary">
+          {item.files.map((file) => (
+            <li key={file} className="truncate" title={file}>
+              {name(file)}
+            </li>
+          ))}
+          {item.moreFiles > 0 && (
+            <li className="text-tertiary">{t('confirm.more', { count: item.moreFiles })}</li>
+          )}
+        </ul>
+      ) : (
+        !left && <p className="pl-5.5 text-meta text-tertiary">{t('confirm.nothing', { agent })}</p>
+      )}
+      {item.backup && (
+        <p className="truncate pl-8 text-meta text-tertiary" title={item.backup}>
+          {t('confirm.backup', { file: name(item.backup) })}
+        </p>
+      )}
+    </div>
+  )
+}
+
 /** A folder's heading, which selects its sessions and shows or hides them, and its sessions. */
 function FolderList({
   agentId,
+  source,
   group,
   open,
   selected,
@@ -471,6 +978,8 @@ function FolderList({
   onSelect,
 }: {
   agentId: AgentId
+  /** The listing's `sourceKey`, which the selection's keys start with. */
+  source: string
   group: HistoryGroup
   open: boolean
   selected: ReadonlySet<string>
@@ -479,7 +988,7 @@ function FolderList({
   onSelect: (keys: string[], on: boolean) => void
 }) {
   const { t } = useTranslation('agentHistory')
-  const keys = group.sessions.filter(selectable).map((s) => sessionKey(agentId, s.acpSessionId))
+  const keys = group.sessions.filter(selectable).map((s) => sessionKey(source, s.acpSessionId))
   const chosen = keys.filter((key) => selected.has(key)).length
   const on = keys.length > 0 && chosen === keys.length
   const missing = group.sessions.every((s) => s.missing)
@@ -536,9 +1045,9 @@ function FolderList({
               key={session.acpSessionId}
               agentId={agentId}
               session={session}
-              checked={selected.has(sessionKey(agentId, session.acpSessionId))}
+              checked={selected.has(sessionKey(source, session.acpSessionId))}
               locked={locked}
-              onSelect={(next) => onSelect([sessionKey(agentId, session.acpSessionId)], next)}
+              onSelect={(next) => onSelect([sessionKey(source, session.acpSessionId)], next)}
             />
           ))}
           {group.sessions.length > rows.length && (
@@ -650,6 +1159,18 @@ function OutcomeView({
   return (
     <div className="flex max-h-44 flex-col gap-1.5 overflow-y-auto text-hint" role="status">
       <p className="text-foreground">{lines.join(' ')}</p>
+      {outcome.skipped.length > 0 && (
+        <>
+          <p className="text-secondary">{t('result.skipped', { count: outcome.skipped.length })}</p>
+          <ul className="flex max-h-24 flex-col gap-0.5 overflow-y-auto text-secondary">
+            {outcome.skipped.map((skip) => (
+              <li key={skip.key} className="truncate" title={skip.message}>
+                {t('result.failure', { title: skip.title, message: skip.message })}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {outcome.failed.length > 0 && (
         <>
           <p className="text-danger">{t('result.failed', { count: outcome.failed.length })}</p>

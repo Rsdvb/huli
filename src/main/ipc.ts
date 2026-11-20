@@ -571,6 +571,18 @@ export function registerIpcHandlers({
     return path
   })
 
+  // Huli: the folder is only read, and hidden ones show, as `.claude` and `.codex` are.
+  handle('dialog:choose-history-folder', 0, async ({ window }) => {
+    const options: Electron.OpenDialogOptions = {
+      title: t('dialogs.chooseHistoryFolder'),
+      properties: ['openDirectory', 'showHiddenFiles', 'dontAddToRecent'],
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
   handle('dialog:choose-shell', 0, async ({ window }) => {
     const path = await chooseProgram(window, t('dialogs.chooseShell'))
     if (path) settings.setShellPath(path)

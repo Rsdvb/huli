@@ -49,12 +49,19 @@
     "moveMore": "Moved {{names}} and {{more}} more",
     "failed": "{{failed}} failed"
   },
+  "refusal": {
+    "title": "The model declined to continue",
+    "body": "It stopped this reply on its own, and the API gives no reason. Try the message again, rephrase it, or pick another model in the composer below.",
+    "saidBody": "It stopped this reply on its own, and the API gives no reason beyond what it said. Rephrase the message, try it again, or pick another model in the composer below.",
+    "again": "Try again",
+    "rephrase": "Edit message"
+  },
   "stopReason": {
     "endTurn": "Worked for {{duration}}",
     "cancelled": "Cancelled",
     "maxTokens": "Stopped at the token limit",
     "maxTurnRequests": "Stopped at the request limit",
-    "refusal": "Declined",
+    "refusal": "The model declined to continue",
     "withTime": "{{reason}} · {{time}}"
   },
   "tool": {

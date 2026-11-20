@@ -1559,6 +1559,15 @@ const screenshots: Scenario = async (turn) => {
   return 'end_turn'
 }
 
+/** Huli: a turn the model stops on its own, saying why first unless `--plain`. */
+const refusal: Scenario = async (turn) => {
+  if (!turn.options.plain) {
+    const said = "I'm sorry, but I can't continue with this request."
+    if (!(await stream(turn, said, { messageId: turn.messageId() }))) return 'cancelled'
+  }
+  return 'refusal'
+}
+
 export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   'basic-turn': basicTurn,
   'long-stream': longStream,
@@ -1571,6 +1580,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   error,
   'auth-required': authRequired,
   'out-of-credit': outOfCredit,
+  refusal,
   'large-history': largeHistory,
   'slow-start': slowStart,
   'all-updates': allUpdates,

@@ -193,6 +193,52 @@
 .kettu-frame.ui-as-app > .ui-as-side > .ui-as-side__head {
   flex: none;
 }
+/* Huli: the list's scrollbar, which App Shell hides for good, shows while the pointer is over the
+   sidebar or the keyboard is in it, thin, draggable and in the theme's thumb color, and hides at
+   rest. Windows draws it with the scrollbar pseudo-elements (globals.css) in a gutter the list
+   keeps whether it scrolls or not, so the rows never change width; the gutter reaches into the
+   sidebar's right padding up to the resize handle, which starts 6px before the sidebar's edge and
+   would take the thumb's drags. macOS keeps its overlay scrollbar, as the system shows it. */
+.kettu-frame .ui-as-side__nav.ui-as-side__nav {
+  --side-scrollbar: 6px;
+  --side-scrollbar-inset: 1px;
+  /* App Shell's 8px of right padding less the handle's 6px. */
+  --side-scrollbar-reach: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.kettu-frame .ui-as-side:is(:hover, :has(:focus-visible)) .ui-as-side__nav.ui-as-side__nav,
+:root[data-platform='darwin'] .kettu-frame .ui-as-side__nav.ui-as-side__nav {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+:root[data-platform='win32'] .kettu-frame .ui-as-side__nav.ui-as-side__nav {
+  margin-right: calc(-1 * var(--side-scrollbar-reach));
+  scrollbar-gutter: stable;
+}
+:root[data-platform='win32'] .kettu-frame .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar {
+  display: block;
+  width: var(--side-scrollbar);
+}
+:root[data-platform='win32']
+  .kettu-frame
+  .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar-thumb {
+  border-width: var(--side-scrollbar-inset);
+  background-color: transparent;
+}
+:root[data-platform='win32']
+  .kettu-frame
+  .ui-as-side:is(:hover, :has(:focus-visible))
+  .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+}
+:root[data-platform='win32']
+  .kettu-frame
+  .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar-thumb:hover,
+:root[data-platform='win32']
+  .kettu-frame
+  .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar-thumb:active {
+  border-width: 0;
+}
 /* Short enough that the search sits 12px under the corner's buttons (their bottom at 49px), as
    far as the list starts under it; App Shell's 50px left it floating halfway. */
 .kettu-frame.ui-as-app:not(.kettu-band) > .ui-as-side > .ui-as-side__head[data-chrome='mac'] {

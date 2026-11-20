@@ -27,6 +27,7 @@ import { Spinner } from '@renderer/components/ui/spinner'
 import { AIAnswer, type AnswerSource } from '@renderer/components/affect/ai-answer'
 import { dayTime } from '@renderer/features/routines/model'
 import { PANEL, stopReasonText } from './helpers'
+import { RefusalEnd } from './refusal-end'
 import { cn } from '@renderer/lib/utils'
 import { useRoutinesStore } from '@renderer/stores/routines'
 import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
@@ -112,7 +113,21 @@ export const UserEntry = memo(function UserEntry({
         </span>
       )}
       {first && routine && <RoutineSent routine={routine} />}
-      <UserActions content={entry.content} at={entry.at} steered={entry.steered} end={end} />
+      <UserActions
+        content={entry.content}
+        at={entry.at}
+        steered={entry.steered}
+        end={end?.stopReason === 'refusal' ? undefined : end}
+      />
+      {/* Huli: a refusal says what happened and what to try, beside the message it ended. */}
+      {end?.stopReason === 'refusal' && endId && (
+        <RefusalEnd
+          sessionId={sessionId}
+          entryId={endId}
+          durationMs={end.durationMs}
+          className="mt-2"
+        />
+      )}
     </div>
   )
 })
@@ -389,6 +404,16 @@ export const TurnEndEntry = memo(function TurnEndEntry({ sessionId, entryId }: E
   const entry = useEntry(sessionId, entryId, 'turn_end')
   const animation = useEntryAnimation(sessionId, entryId)
   if (!entry) return null
+  if (entry.stopReason === 'refusal') {
+    return (
+      <RefusalEnd
+        sessionId={sessionId}
+        entryId={entryId}
+        durationMs={entry.durationMs}
+        className={animation}
+      />
+    )
+  }
   if (entry.stopReason !== 'end_turn') {
     return (
       <TurnEndTag

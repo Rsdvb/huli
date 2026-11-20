@@ -5,12 +5,29 @@
 // asked without a folder. Nothing of the agents' is ever written. Huli's own; see
 // tools/huli/README.md.
 
+import { randomUUID } from 'node:crypto'
 import type { Dirent } from 'node:fs'
-import { open, readdir, stat } from 'node:fs/promises'
+import { open, readdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
-import type { AgentHistoryPage, AgentHistorySession } from '@shared/agent-history'
+import type {
+  AgentHistoryPage,
+  AgentHistorySession,
+  HistoryCopyOutcome,
+  HistoryCopyPlan,
+} from '@shared/agent-history'
 import { harnessOf, type AgentId } from '@shared/agents'
 import type { Platform } from '@shared/platform'
+import {
+  folderSource,
+  LISTED_FILES,
+  planCopy,
+  runCopy,
+  scanCodexRollouts,
+  writtenFiles,
+  type FolderHarness,
+  type FolderScan,
+  type PlannedCopy,
+} from './agent-history-folder'
 import { agentError, type AgentRuntime } from './agents'
 import type { ListedEverywhere } from './connection'
 import { HostError, invalidParams } from './errors'
@@ -292,10 +309,25 @@ export async function scanClaudeHistory(
   cache: Map<string, Cached>,
   log: LogFn,
 ): Promise<ClaudeScan> {
-  const root = path.join(configDir, 'projects')
+  return scanClaudeProjects(path.join(configDir, 'projects'), platform, cache, log)
+}
+
+/**
+ * Huli: the sessions under a `projects` folder `root`, as `scanClaudeHistory`; `only` names the
+ * one project folder under it to read, for a chosen folder that is a project's.
+ */
+export async function scanClaudeProjects(
+  root: string,
+  platform: Platform,
+  cache: Map<string, Cached>,
+  log: LogFn,
+  only: string | null = null,
+): Promise<ClaudeScan> {
   const files: { file: string; folder: string }[] = []
   let oldSubagents = 0
-  const folders = (await entries(root)).filter((entry) => entry.isDirectory())
+  const folders = (await entries(root)).filter(
+    (entry) => entry.isDirectory() && (only === null || entry.name === only),
+  )
   await eachLimited(folders, READS, async (entry) => {
     for (const child of await entries(path.join(root, entry.name)).catch(() => [])) {
       if (!child.isFile()) continue
@@ -306,6 +338,7 @@ export async function scanClaudeHistory(
   })
   const seen = new Set<string>()
   const byId = new Map<string, ClaudeRead>()
+  const fileOf = new Map<string, string>()
   const copies = new Map<string, number>()
   await eachLimited(files, READS, async ({ file, folder }) => {
     seen.add(file)
@@ -328,6 +361,7 @@ export async function scanClaudeHistory(
         (item.fit === other.fit && (item.updatedAt ?? 0) > (other.updatedAt ?? 0))
       ) {
         byId.set(item.sessionId, item)
+        fileOf.set(item.sessionId, file)
       }
     } catch (error) {
       log('warn', `Could not read Claude Code transcript ${file}: ${(error as Error).message}`)
@@ -340,7 +374,7 @@ export async function scanClaudeHistory(
   })
   items.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
   const copied = new Set([...copies].filter(([, count]) => count > 1).map(([id]) => id))
-  return { items, oldSubagents, copied }
+  return { items, oldSubagents, copied, files: fileOf }
 }
 
 export interface ClaudeScan {
@@ -350,6 +384,8 @@ export interface ClaudeScan {
   oldSubagents: number
   /** Huli: the sessions with a transcript in more than one project folder. */
   copied: ReadonlySet<string>
+  /** Huli: the transcript each listed session was read from. */
+  files: ReadonlyMap<string, string>
 }
 
 /** A session an agent listed across its folders, in the import's terms. */
@@ -413,19 +449,76 @@ export interface AgentHistoryDeps {
   }
   isDirectory?(folder: string): Promise<boolean>
   log: LogFn
+  now?(): number
 }
 
 type Kept = Partial<Pick<SessionRecord, KeptField>>
+
+/** Huli: a chosen folder's last listing, which its later pages and its copy plans come from. */
+interface FolderListing extends FolderScan {
+  oldSubagents: number
+  /** The folder its sessions were read from, inside the chosen one. */
+  source: string
+}
+
+/** Huli: how long a copy plan waits for the user's confirmation. */
+const PLAN_MS = 15 * 60 * 1000
+/** Huli: the chosen folders' listings and the plans kept at once. */
+const KEPT_FOLDERS = 4
+const KEPT_PLANS = 8
+
+function pageOf<T>(items: readonly T[], cursor: string | null) {
+  const offset = cursor === null ? 0 : Math.max(0, Number(cursor) || 0)
+  const end = offset + CLAUDE_PAGE
+  return {
+    offset,
+    items: items.slice(offset, end),
+    nextCursor: end < items.length ? String(end) : null,
+  }
+}
+
+function keepAtMost<K, V>(map: Map<K, V>, limit: number): void {
+  while (map.size > limit) map.delete(map.keys().next().value!)
+}
+
+/** Whether `child` is `parent` or inside it, compared as the platform compares paths. */
+async function inside(child: string, parent: string, platform: Platform): Promise<boolean> {
+  const real = async (value: string) =>
+    (await realpath(value).catch(() => path.resolve(value))).replace(/[\\/]+$/, '')
+  let [a, b] = await Promise.all([real(child), real(parent)])
+  if (platform === 'win32') {
+    a = a.toLowerCase()
+    b = b.toLowerCase()
+  }
+  return a === b || a.startsWith(`${b}${path.sep}`)
+}
 
 export class AgentHistory {
   private readonly claudeCache = new Map<string, Map<string, Cached>>()
   /** A Claude Code agent's last scan, which its later pages are cut from. */
   private readonly scans = new Map<AgentId, ClaudeScan>()
   private readonly kept = new Map<string, Kept>()
+  private readonly folders = new Map<string, FolderListing>()
+  private readonly plans = new Map<
+    string,
+    { agentId: AgentId; created: number; copies: PlannedCopy[] }
+  >()
 
   constructor(private readonly deps: AgentHistoryDeps) {}
 
-  async list(agentId: AgentId, cursor: string | null): Promise<AgentHistoryPage> {
+  private now(): number {
+    return this.deps.now?.() ?? Date.now()
+  }
+
+  /**
+   * An agent's past sessions; Huli: with `folder`, those of another folder of the agent's kind
+   * rather than its own, which an import copies into its own with `planCopy` and `copy`.
+   */
+  async list(
+    agentId: AgentId,
+    cursor: string | null,
+    folder: string | null = null,
+  ): Promise<AgentHistoryPage> {
     const { agents } = this.deps
     if (!agents.has(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
     agents.assertEnabled(agentId)
@@ -433,7 +526,15 @@ export class AgentHistory {
     let nextCursor: string | null
     let oldSubagents = 0
     let copied: ReadonlySet<string> = new Set()
-    if (harnessOf(agentId) === 'claude-code') {
+    let source: string | undefined
+    if (folder !== null) {
+      const listing = await this.folderListing(agentId, folder, cursor === null)
+      const page = pageOf(listing.items, cursor)
+      items = page.items
+      nextCursor = page.nextCursor
+      oldSubagents = page.offset === 0 ? listing.oldSubagents : 0
+      source = listing.source
+    } else if (harnessOf(agentId) === 'claude-code') {
       ;({ items, nextCursor, oldSubagents, copied } = await this.claudePage(agentId, cursor))
     } else {
       const runtime = await agents.ensureReady(agentId)
@@ -456,9 +557,10 @@ export class AgentHistory {
     const gone = await this.goneFolders(items)
     const result = historyPage(items, this.deps.sessions.agentSessionIds(agentId), gone, nextCursor)
     result.hidden.subagents += oldSubagents
+    if (source !== undefined) result.source = source
     for (const session of result.sessions) this.keep(agentId, session)
     const outsideCopy = this.deps.sessions.outsideCopy?.bind(this.deps.sessions)
-    if (outsideCopy) {
+    if (outsideCopy && folder === null) {
       const twice = result.sessions.filter((s) => s.imported && copied.has(s.acpSessionId))
       await eachLimited(twice, READS, async (session) => {
         const state = await outsideCopy(agentId, session.acpSessionId).catch(() => null)
@@ -466,6 +568,164 @@ export class AgentHistory {
       })
     }
     return result
+  }
+
+  /**
+   * Huli: what copying the chosen sessions of a folder `list` read writes into the agent's own
+   * folder, for the user to confirm; `copy` runs it. Nothing is written yet.
+   */
+  async planCopy(
+    agentId: AgentId,
+    folder: string,
+    sessionIds: readonly string[],
+  ): Promise<HistoryCopyPlan> {
+    const { agents } = this.deps
+    if (!agents.has(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
+    agents.assertEnabled(agentId)
+    const harness = this.folderHarness(agentId)
+    const listing = this.folders.get(`${agentId}\n${folder}`)
+    if (!listing) throw new HostError('not_found', t('agentHistory.listAgain'))
+    const target = agents.configFolder(agentId)
+    if (!target) {
+      throw new HostError(
+        'agent_unavailable',
+        t('session.cannotList', { agent: agents.name(agentId) }),
+      )
+    }
+    const byId = new Map(listing.items.map((item) => [item.sessionId, item]))
+    const chosen = [...new Set(sessionIds)].flatMap((id) => {
+      const item = byId.get(id)
+      const file = listing.files.get(id)
+      return item && file ? [{ item, file }] : []
+    })
+    if (chosen.length === 0) throw invalidParams('None of these sessions is in the folder listed')
+    const gone = await this.goneFolders(chosen.map((entry) => entry.item))
+    const now = this.now()
+    const planned = new Map<string, PlannedCopy>()
+    await eachLimited(chosen, READS, async ({ item, file }) => {
+      planned.set(
+        item.sessionId,
+        await planCopy({ harness, target, session: item, file, missing: gone.has(item.cwd), now }),
+      )
+    })
+    const copies = chosen.map((entry) => planned.get(entry.item.sessionId)!)
+    for (const [token, plan] of this.plans) {
+      if (now - plan.created > PLAN_MS) this.plans.delete(token)
+    }
+    const token = randomUUID()
+    this.plans.set(token, { agentId, created: now, copies })
+    keepAtMost(this.plans, KEPT_PLANS)
+    return {
+      token,
+      target,
+      items: copies.map((copy) => {
+        const files = writtenFiles(copy)
+        return {
+          acpSessionId: copy.acpSessionId,
+          title: copy.title,
+          cwd: copy.cwd,
+          action: copy.action,
+          files: files.slice(0, LISTED_FILES),
+          moreFiles: Math.max(0, files.length - LISTED_FILES),
+          backup: copy.replaced?.backup ?? null,
+        }
+      }),
+    }
+  }
+
+  /** Huli: runs a plan `planCopy` made, once. */
+  async copy(token: string): Promise<{ items: HistoryCopyOutcome[] }> {
+    const plan = this.plans.get(token)
+    this.plans.delete(token)
+    if (!plan || this.now() - plan.created > PLAN_MS) {
+      throw new HostError('not_found', t('agentHistory.planGone'))
+    }
+    this.deps.agents.assertEnabled(plan.agentId)
+    const items: HistoryCopyOutcome[] = []
+    for (const copy of plan.copies) items.push(await runCopy(copy))
+    const written = items.reduce((sum, item) => sum + item.written, 0)
+    this.deps.log(
+      'info',
+      `Copied ${written} files of ${items.length} sessions from another folder into ${plan.agentId}'s own`,
+    )
+    for (const item of items) {
+      if (item.status === 'failed') {
+        this.deps.log('warn', `Could not copy session ${item.acpSessionId}: ${item.message ?? ''}`)
+      }
+    }
+    return { items }
+  }
+
+  private folderHarness(agentId: AgentId): FolderHarness {
+    const harness = harnessOf(agentId)
+    if (harness === 'claude-code' || harness === 'codex') return harness
+    throw new HostError(
+      'agent_unavailable',
+      t('agentHistory.folderUnsupported', { agent: this.deps.agents.name(agentId) }),
+    )
+  }
+
+  /** A chosen folder's sessions, read again when `fresh`. */
+  private async folderListing(
+    agentId: AgentId,
+    folder: string,
+    fresh: boolean,
+  ): Promise<FolderListing> {
+    const key = `${agentId}\n${folder}`
+    const kept = fresh ? undefined : this.folders.get(key)
+    if (kept) return kept
+    const harness = this.folderHarness(agentId)
+    const agent = this.deps.agents.name(agentId)
+    const info = await stat(folder).catch(() => null)
+    if (!info?.isDirectory()) {
+      throw new HostError('not_found', t('agentHistory.notFolder', { folder }))
+    }
+    const source = await folderSource(folder, harness)
+    if (!source) throw new HostError('not_found', t('agentHistory.noSessionsIn', { agent, folder }))
+    const own = this.deps.agents.configFolder(agentId)
+    if (own && (await inside(source.root, own, this.deps.platform))) {
+      throw new HostError('invalid_params', t('agentHistory.ownFolder', { agent }))
+    }
+    const started = Date.now()
+    let listing: FolderListing
+    if (source.harness === 'claude-code') {
+      const scan = await scanClaudeProjects(
+        source.root,
+        this.deps.platform,
+        this.cacheFor(`folder\n${source.root}`),
+        this.deps.log,
+        source.only,
+      )
+      listing = {
+        items: scan.items,
+        files: scan.files,
+        oldSubagents: scan.oldSubagents,
+        source: source.only === null ? source.root : path.join(source.root, source.only),
+      }
+    } else {
+      const scan = await scanCodexRollouts(source, this.deps.log)
+      listing = { ...scan, oldSubagents: 0, source: source.root }
+    }
+    this.deps.log(
+      'info',
+      `Listed ${listing.items.length} ${agent} sessions of another folder in ${Date.now() - started} ms`,
+    )
+    if (listing.items.length === 0 && listing.oldSubagents === 0) {
+      throw new HostError('not_found', t('agentHistory.noSessionsIn', { agent, folder }))
+    }
+    this.folders.delete(key)
+    this.folders.set(key, listing)
+    keepAtMost(this.folders, KEPT_FOLDERS)
+    return listing
+  }
+
+  private cacheFor(key: string): Map<string, Cached> {
+    let cache = this.claudeCache.get(key)
+    if (!cache) {
+      cache = new Map()
+      this.claudeCache.set(key, cache)
+    }
+    return cache
   }
 
   /**
@@ -494,25 +754,24 @@ export class AgentHistory {
           t('session.cannotList', { agent: this.deps.agents.name(agentId) }),
         )
       }
-      let cache = this.claudeCache.get(configDir)
-      if (!cache) {
-        cache = new Map()
-        this.claudeCache.set(configDir, cache)
-      }
       const started = Date.now()
-      scan = await scanClaudeHistory(configDir, this.deps.platform, cache, this.deps.log)
+      scan = await scanClaudeHistory(
+        configDir,
+        this.deps.platform,
+        this.cacheFor(configDir),
+        this.deps.log,
+      )
       this.deps.log(
         'info',
         `Listed ${scan.items.length} Claude Code sessions of every folder in ${Date.now() - started} ms`,
       )
       this.scans.set(agentId, scan)
     }
-    const offset = cursor === null ? 0 : Math.max(0, Number(cursor) || 0)
-    const end = offset + CLAUDE_PAGE
+    const page = pageOf(scan.items, cursor)
     return {
-      items: scan.items.slice(offset, end),
-      nextCursor: end < scan.items.length ? String(end) : null,
-      oldSubagents: offset === 0 ? scan.oldSubagents : 0,
+      items: page.items,
+      nextCursor: page.nextCursor,
+      oldSubagents: page.offset === 0 ? scan.oldSubagents : 0,
       copied: scan.copied,
     }
   }

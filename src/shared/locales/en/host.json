@@ -153,7 +153,7 @@
       "cancelled": "Cancelled",
       "max_tokens": "Stopped at the token limit",
       "max_turn_requests": "Stopped at the request limit",
-      "refusal": "The agent refused"
+      "refusal": "The model declined to continue"
     },
     "wantsToRun": "Wants to run {{command}}",
     "wantsToEdit": "Wants to edit {{target}}",
@@ -834,5 +834,13 @@
     "notJson": "{{agent}}’s settings file {{file}} is not valid JSON. Fix it there, or make this change in it yourself.",
     "notJsonAt": "{{agent}}’s settings file {{file}} is not valid JSON (line {{line}}). Fix it there, or make this change in it yourself.",
     "notObject": "{{agent}}’s settings file {{file}} does not hold a JSON object. Fix it there, or make this change in it yourself."
+  },
+  "agentHistory": {
+    "notFolder": "{{folder}} is not a folder here.",
+    "noSessionsIn": "No {{agent}} sessions in {{folder}}. Choose its configuration folder, or the folder of its sessions in it.",
+    "ownFolder": "This is {{agent}}’s own folder, which the list shows already. Choose another one, such as a backup.",
+    "folderUnsupported": "{{agent}} cannot list the sessions of another folder.",
+    "listAgain": "That folder’s list is out of date. Choose the folder again.",
+    "planGone": "The copy waited too long and was dropped. Import again to see the files once more."
   }
 }
