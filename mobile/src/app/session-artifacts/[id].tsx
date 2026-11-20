@@ -2,7 +2,7 @@
 // changed. Each opens full screen on the phone.
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { FlatList, StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { ArtifactSummary } from '@shared/artifacts'
 import { artifactKind, KIND_TEXT, openArtifact } from '../../artifacts'
@@ -15,6 +15,7 @@ import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
 import { PressScale } from '../../ui/session/Press'
 import { StateView } from '../../ui/session/StateView'
+import { usePullRefresh } from '../../ui/PullRefresh'
 
 /** What it is, as the Artifacts tab names it, with its pages when it has more than one. */
 function kindText(artifact: ArtifactSummary): string {
@@ -32,7 +33,7 @@ export default function SessionArtifacts() {
 
   const load = useCallback(() => {
     setError(null)
-    call(link, 'artifacts.list', {}).then(
+    return call(link, 'artifacts.list', {}).then(
       (all) =>
         setList(
           all
@@ -43,7 +44,10 @@ export default function SessionArtifacts() {
     )
   }, [link, id])
 
-  useEffect(load, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
+  const pull = usePullRefresh(load)
 
   let body: ReactElement
   if (!list) {
@@ -55,9 +59,7 @@ export default function SessionArtifacts() {
       <FlatList
         data={list}
         keyExtractor={(a) => a.id}
-        refreshControl={
-          <RefreshControl refreshing={false} onRefresh={load} tintColor={c.textSecondary} />
-        }
+        refreshControl={pull}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32, gap: 10 }}
         renderItem={({ item }) => (
           <PressScale

@@ -6,10 +6,44 @@
 // spinner below the header through the content inset, so only Android, which pads the content
 // instead, moves it down: on iOS the offset put it a header lower, over the list's rows.
 
-import { useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { Platform, RefreshControl } from 'react-native'
 import type { CollapsingHeader } from './ScrollHeader'
 import { useTokens } from './tokens'
+
+/** The longest a pull waits for a reload that does not say when it ends. */
+const SETTLE_LIMIT = 10_000
+
+/**
+ * For a reload that says nothing of when it ends: a promise that settles once `watched`, what the
+ * reload brings, next changes, or after a limit, so the pull's spinner lasts as long as the read.
+ */
+export function useNextChange(watched: unknown): () => Promise<void> {
+  const waiters = useRef<(() => void)[]>([])
+  useEffect(() => {
+    const settled = waiters.current
+    waiters.current = []
+    for (const settle of settled) settle()
+  }, [watched])
+  useEffect(
+    () => () => {
+      for (const settle of waiters.current) settle()
+    },
+    [],
+  )
+  return useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(settle, SETTLE_LIMIT)
+        function settle() {
+          clearTimeout(timer)
+          resolve()
+        }
+        waiters.current.push(settle)
+      }),
+    [],
+  )
+}
 
 /**
  * The refresh control for `refreshControl`, spinning while `run` runs; none without `run`. With

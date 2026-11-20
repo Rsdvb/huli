@@ -2,15 +2,7 @@
 // with a search over the whole project; a file opens in a plain viewer.
 
 import { useMemo, useState, type ReactElement } from 'react'
-import {
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { matchFiles, useProjectFiles } from '../../files'
 import { sessionFolder } from '../../git'
@@ -20,6 +12,7 @@ import { GlassHeader } from '../../ui/session/GlassHeader'
 import { FileMark, G, Icon, TOOL_ICONS } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
 import { StateView } from '../../ui/session/StateView'
+import { useNextChange, usePullRefresh } from '../../ui/PullRefresh'
 
 interface Item {
   path: string
@@ -56,6 +49,11 @@ export default function FilesScreen() {
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const files = useProjectFiles(link, folder, true)
   const [query, setQuery] = useState('')
+  const read = useNextChange(files.list ?? files.error)
+  const pull = usePullRefresh(() => {
+    files.reload()
+    return read()
+  })
 
   const items = useMemo((): Item[] => {
     if (!files.list) return []
@@ -92,9 +90,7 @@ export default function FilesScreen() {
         keyExtractor={(item) => item.path}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl refreshing={false} onRefresh={files.reload} tintColor={c.textSecondary} />
-        }
+        refreshControl={pull}
         ListHeaderComponent={
           <View style={[styles.search, { backgroundColor: c.fill }]}>
             <Icon icon={TOOL_ICONS.search} size={15} color={c.textTertiary} />
