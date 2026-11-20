@@ -22,7 +22,7 @@ import { useNow } from '@renderer/lib/use-now'
 import { quotaText } from '../plan-quota'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { levelsOf, splitName, type SelectOption } from './levels'
-import { mainModels, shownValue, splitModels } from './model-list'
+import { mainModels, shownValue, splitModels, twin } from './model-list'
 import { usePhoneWindow } from '@renderer/features/shell/narrow'
 import { modelRating } from './model-ratings'
 import { isSelect } from './options'
@@ -96,10 +96,11 @@ export function ModelMenu({
   const mark = <AgentMark agent={agentId} hostId={hostId} size={16} />
   const row = (choice: SelectOption['choices'][number], older?: boolean): PickerModel => {
     const rating = modelRating(choice, older)
+    const description = choice.description ?? (twin(choices, choice) ? choice.group : undefined)
     return {
       id: choice.value,
       name: splitName(choice.name)[1],
-      ...(choice.description ? { description: choice.description } : {}),
+      ...(description ? { description } : {}),
       icon: mark,
       ...(rating ?? {}),
     }

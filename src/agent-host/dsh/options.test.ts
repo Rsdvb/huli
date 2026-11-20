@@ -193,6 +193,29 @@ describe('dsh listed models', () => {
     ])
   })
 
+  it('names DeepSeek’s two routes apart when both list a model under one group', () => {
+    const both: ListedModel[] = ['deepseek-official', 'deepseek-account'].map((provider) => ({
+      provider,
+      group: 'DeepSeek',
+      model: 'deepseek-v4-pro',
+      name: 'DeepSeek V4 Pro',
+      efforts: DEEPSEEK,
+      effort: 'high',
+    }))
+    const choices = listedModelChoices([...both, LISTED[3]!], NO_ROUTES, 'deepseek-account')
+    expect(choices.map((choice) => [choice.value, choice.group, choice.name])).toEqual([
+      ['deepseek-official/deepseek-v4-pro', 'DeepSeek API key', 'DeepSeek API key/DeepSeek V4 Pro'],
+      ['deepseek-v4-pro', 'DeepSeek account', 'DeepSeek V4 Pro'],
+      ['my-gateway/plain', 'My Gateway', 'My Gateway/plain'],
+    ])
+    // The menus show the groups apart once the models carry them.
+    const model = configOptions(
+      { model: 'deepseek-v4-pro', effort: 'high', preset: 'workspace-write', plan: false },
+      choices,
+    ).find((option) => option.id === CONFIG.model)
+    expect(new Set(model?.choices?.map((choice) => choice.group)).size).toBe(3)
+  })
+
   it('offers each model the levels dsh gives it, the provider’s own as Default', () => {
     const choices = listedModelChoices(LISTED, NO_ROUTES, 'deepseek-official')
     expect(choices.map((choice) => [choice.efforts, choice.effort])).toEqual([

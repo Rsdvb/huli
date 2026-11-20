@@ -51,6 +51,17 @@ export function modelName(name: string): string {
   return name.slice(name.lastIndexOf('/') + 1)
 }
 
+/** Another listed model of the same name, as one model on two routes is; its group then tells them apart. */
+function twin(
+  choices: readonly { name: string; shownAs?: string }[],
+  choice: { name: string },
+): boolean {
+  const name = modelName(choice.name)
+  return choices.some(
+    (other) => other !== choice && !other.shownAs && modelName(other.name) === name,
+  )
+}
+
 const MAIN_MODELS = 4
 
 /** The current models and the older ones under More models; the first four when none is older. */
@@ -230,9 +241,11 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
         lead,
         ...(locked
           ? { subtitle: BETWEEN_TURNS }
-          : roomy && modelBlurb(choice)
-            ? { subtitle: modelBlurb(choice)! }
-            : {}),
+          : choice.group && twin(model.choices, choice)
+            ? { subtitle: choice.group }
+            : roomy && modelBlurb(choice)
+              ? { subtitle: modelBlurb(choice)! }
+              : {}),
         checked: choice.value === current?.value,
         disabled: locked,
         onPress: () => control.set(model, choice.value),

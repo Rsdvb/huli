@@ -22,6 +22,42 @@ const DEEPSEEK_EFFORT = 'high'
 const DEEPSEEK_PROVIDERS: readonly string[] = ['deepseek-official', 'deepseek-account']
 const DEEPSEEK_GROUP = 'DeepSeek'
 
+/** Which DeepSeek route a provider is, the account's or the API key's; null for another route. */
+function deepseekRoute(
+  provider: string | null,
+  signedIn: Provider | null,
+): 'account' | 'apiKey' | null {
+  const id = provider ?? signedIn ?? 'deepseek-official'
+  if (id === 'deepseek-account' || id === 'llm-deepseek-account') return 'account'
+  if (id === 'deepseek-official' || id === 'llm-deepseek') return 'apiKey'
+  return null
+}
+
+/**
+ * Huli: the account's route and the API key's both call their group DeepSeek, so the menus showed
+ * the same models twice under one name. A group that more than one route shares is named by route.
+ */
+function distinctGroups(choices: ModelChoice[], signedIn: Provider | null): ModelChoice[] {
+  const routes = new Map<string, Set<string>>()
+  for (const choice of choices) {
+    const seen = routes.get(choice.group) ?? new Set<string>()
+    seen.add(choice.provider ?? signedIn ?? '')
+    routes.set(choice.group, seen)
+  }
+  return choices.map((choice) => {
+    if ((routes.get(choice.group)?.size ?? 0) < 2) return choice
+    const route = deepseekRoute(choice.provider, signedIn)
+    const group = route
+      ? t(`dsh.account.${route}`)
+      : `${choice.group} (${choice.provider ?? signedIn ?? ''})`
+    const prefix = `${choice.group}/`
+    const name = choice.name.startsWith(prefix)
+      ? `${group}/${choice.name.slice(prefix.length)}`
+      : choice.name
+    return { ...choice, group, name }
+  })
+}
+
 /** The level that sends none, so another route's model runs at its endpoint's own. */
 export const DEFAULT_LEVEL = 'default'
 
@@ -122,7 +158,7 @@ export function modelChoices(routes: Routes, signedIn: Provider | null): ModelCh
       })
     }
   }
-  return choices
+  return distinctGroups(choices, signedIn)
 }
 
 /**
@@ -166,7 +202,7 @@ export function listedModelChoices(
       ),
     })
   }
-  return choices
+  return distinctGroups(choices, signedIn)
 }
 
 /** The choice a route and model of dsh's stand for, such as the ones its events name. */

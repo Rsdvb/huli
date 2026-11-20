@@ -47,3 +47,13 @@ export function numberedModel(main: Choices, key: string): Choices[number] | und
   const n = Number(key)
   return Number.isInteger(n) && n >= 1 && n <= MAIN_MODELS ? main[n - 1] : undefined
 }
+
+/**
+ * Whether another listed choice shows under the same name, as one model on two routes does once the
+ * route before the slash is dropped; the menu then names the choice's group under it.
+ */
+export function twin(choices: Choices, choice: Choices[number]): boolean {
+  const shown = (name: string): string => name.slice(name.lastIndexOf('/') + 1)
+  const name = shown(choice.name)
+  return choices.some((other) => other !== choice && !other.shownAs && shown(other.name) === name)
+}
