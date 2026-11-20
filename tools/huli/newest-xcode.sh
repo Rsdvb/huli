@@ -9,6 +9,5 @@ if [ -n "$newest" ]; then
 fi
 # Read in full first: cutting xcodebuild's output short makes it abort on the closed pipe.
 version="$(xcodebuild -version)"
-echo "${version%%$'
-'*}"
+sed -n 1p <<<"$version"
 echo "iOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
