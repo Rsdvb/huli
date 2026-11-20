@@ -6,7 +6,7 @@
 
 import { Platform, Share } from 'react-native'
 import { Directory, File, Paths } from 'expo-file-system'
-import { zipSync } from 'fflate'
+import { Zip, ZipDeflate } from 'fflate'
 import { artifactPathProblem, VERSION_FILES } from '@shared/artifact-files'
 import {
   EXPORT_EXTENSIONS,
@@ -47,6 +47,44 @@ function bytesOf(value: unknown): Uint8Array | null {
   if (ArrayBuffer.isView(value))
     return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
   return null
+}
+
+/** How much of a file is compressed before the JS thread is let go for a frame. */
+const ZIP_STEP = 256 * 1024
+
+/**
+ * The files as a zip, compressed a part at a time with a pause between parts: zipping a large
+ * artifact in one go held the JS thread, and so every touch and the busy banner, until it was done.
+ */
+async function zipInSteps(
+  files: readonly { path: string; bytes: Uint8Array }[],
+): Promise<Uint8Array> {
+  const parts: Uint8Array[] = []
+  let failure: Error | null = null
+  const zip = new Zip((error, chunk) => {
+    if (error) failure = error
+    else parts.push(chunk)
+  })
+  for (const file of files) {
+    const entry = new ZipDeflate(file.path, { level: 6 })
+    zip.add(entry)
+    let at = 0
+    do {
+      const end = Math.min(at + ZIP_STEP, file.bytes.length)
+      entry.push(file.bytes.subarray(at, end), end >= file.bytes.length)
+      at = end
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    } while (at < file.bytes.length)
+  }
+  zip.end()
+  if (failure) throw failure
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+  let offset = 0
+  for (const part of parts) {
+    out.set(part, offset)
+    offset += part.length
+  }
+  return out
 }
 
 async function hand(name: string, type: string, bytes: Uint8Array): Promise<void> {
@@ -91,7 +129,7 @@ export async function shareExport(
     return
   }
   // Markdown with its pictures: a folder, which travels as a zip.
-  const zip = zipSync(Object.fromEntries(checked.map((f) => [f.path, f.bytes])))
+  const zip = await zipInSteps(checked)
   await hand(fileName(title, 'zip'), 'application/zip', zip)
 }
 
@@ -102,6 +140,6 @@ export async function shareFiles(version: LoadedVersion): Promise<void> {
     await hand(fileName(version.title, 'html'), 'text/html', files[0]!.bytes)
     return
   }
-  const zip = zipSync(Object.fromEntries(files.map((f) => [f.path, f.bytes])))
+  const zip = await zipInSteps(files)
   await hand(fileName(version.title, 'zip'), 'application/zip', zip)
 }

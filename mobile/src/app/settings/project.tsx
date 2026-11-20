@@ -2,8 +2,8 @@
 // it from Huli, which leaves its folder where it is.
 
 import { useEffect, useState } from 'react'
-import { StyleSheet, Switch, Text, View } from 'react-native'
-import { router, useLocalSearchParams } from 'expo-router'
+import { Alert, StyleSheet, Switch, Text, View } from 'react-native'
+import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
 import { DEFAULT_BRANCH_TEMPLATE, type ProjectWorktreeSettings } from '@shared/git'
 import { useHost } from '../../host'
 import {
@@ -94,6 +94,23 @@ export default function ProjectPage() {
       )
     })()
 
+  // Leaving with changes not saved asks first, as a swipe back would drop them unseen.
+  const [leaving, setLeaving] = useState(false)
+  const allowLeaving = usePreventRemove(changed && !leaving, ({ repeat }) => {
+    haptic.warning()
+    Alert.alert('放弃没有保存的更改？', '这个项目的 worktree 设置改了还没保存。', [
+      { text: '继续编辑', style: 'cancel' },
+      {
+        text: '放弃更改',
+        style: 'destructive',
+        onPress: () => {
+          setLeaving(true)
+          repeat()
+        },
+      },
+    ])
+  })
+
   const save = async () => {
     if (!host.link || !loaded) return
     setError(null)
@@ -145,6 +162,9 @@ export default function ProjectPage() {
     )
     if (done) {
       void host.refresh().catch(() => {})
+      // The project is gone; its unsaved settings with it.
+      setLeaving(true)
+      allowLeaving()
       router.back()
     }
   }

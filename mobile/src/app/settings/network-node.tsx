@@ -60,6 +60,9 @@ function bySubscription(status: NetworkStatus) {
     .filter((group) => group.nodes.length > 0)
 }
 
+/** How many of a subscription's nodes show before 显示全部. */
+const NODES_SHOWN = 40
+
 export default function NetworkNodeScreen() {
   const { target: raw } = useLocalSearchParams<{ target?: string }>()
   const target = (raw ?? 'default') as 'default' | AgentId
@@ -69,6 +72,7 @@ export default function NetworkNodeScreen() {
   const read = useNetworkStatus()
   const { busy, run } = useActions()
   const [delays, setDelays] = useState<Record<string, number | null>>({})
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
   const status = read.value
   const forDefault = target === 'default'
   const title = forDefault ? '默认节点' : (host.agents.get(target)?.name ?? target)
@@ -86,7 +90,7 @@ export default function NetworkNodeScreen() {
     }
     const done = await run('pick', () => setPick(host.link!, target, next), '没能切换')
     if (done) {
-      reloadSoon(read)
+      reloadSoon()
       router.back()
     }
   }
@@ -205,11 +209,27 @@ export default function NetworkNodeScreen() {
           ) : status.nodes.length === 0 ? (
             <GroupNote>还没有节点。在电脑上添加或更新订阅。</GroupNote>
           ) : (
-            bySubscription(status).map(({ sub, nodes }) => (
-              <ListGroup key={sub.id} header={sub.name}>
-                {nodes.map(nodeRow)}
-              </ListGroup>
-            ))
+            bySubscription(status).map(({ sub, nodes }) => {
+              // A subscription of hundreds of nodes draws its first ones, and the rest on asking:
+              // drawn whole on a page that does not recycle its rows, it held up the screen.
+              const all = opened.has(sub.id) || nodes.length <= NODES_SHOWN
+              const chosen = nodes.find((n) => samePick(current, n))
+              const shown = all ? nodes : nodes.slice(0, NODES_SHOWN)
+              const extra = chosen && !shown.includes(chosen) ? [chosen] : []
+              return (
+                <ListGroup key={sub.id} header={sub.name}>
+                  {[...shown, ...extra].map(nodeRow)}
+                  {all ? null : (
+                    <ListRow
+                      key="more"
+                      title={`显示全部 ${nodes.length} 个节点`}
+                      action
+                      onPress={() => setOpened((was) => new Set(was).add(sub.id))}
+                    />
+                  )}
+                </ListGroup>
+              )
+            })
           )}
         </>
       )}

@@ -56,7 +56,7 @@ export default function Computers() {
             ))}
           </View>
           <Text style={[typeScale.footnote, styles.footer, { color: c.textTertiary }]}>
-            纸鸢一次只连一台电脑：会话、Artifacts、定时任务、用量和通知设置都跟着正在使用的那台。
+            纸鸢一次只连一台电脑：会话、Artifacts、例程、用量和通知设置都跟着正在使用的那台。
             每台电脑分别给这台手机发通知，点开通知会先切换到发出它的电脑。
           </Text>
         </View>

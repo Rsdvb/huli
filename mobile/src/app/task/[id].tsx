@@ -9,7 +9,6 @@ import {
   Animated,
   KeyboardAvoidingView,
   Platform,
-  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -47,19 +46,22 @@ import { NavBar } from '../../ui/NavBar'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { Clamp } from '../../ui/session/Clamp'
 import { Skeleton, SkeletonRows } from '../../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 
 export default function TaskPage() {
-  const { c } = useTokens()
   const { retry } = useHostActions()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(async () => {
+    retry()
+    await reload()
+  }, header)
   const insets = useSafeAreaInsets()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { summary, view, missing, error, reload } = useTask(id)
-  const [refreshing, setRefreshing] = useState(false)
   const [more, setMore] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [pinning, setPinning] = useState<string | null>(null)
@@ -165,18 +167,7 @@ export default function TaskPage() {
             paddingBottom: insets.bottom + space.xxxl,
             gap: space.lg,
           }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              tintColor={c.textSecondary}
-              progressViewOffset={header.height}
-              onRefresh={() => {
-                setRefreshing(true)
-                retry()
-                void reload().finally(() => setRefreshing(false))
-              }}
-            />
-          }
+          refreshControl={pull}
         >
           <Head task={summary} view={view} />
           <Asked view={view} />

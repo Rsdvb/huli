@@ -9,21 +9,21 @@
 // opens beside it, in the session screen itself.
 
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Platform, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { Alert, Platform, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import { folderOfSession, type SessionFolder } from '@shared/session-folders'
 import { forkSession, useSessionActions, type MenuExtras } from '../../components/SessionActions'
-import { SessionPaneProvider } from '../../components/SessionPane'
+import { listenForPane, SessionPaneProvider } from '../../components/SessionPane'
 import {
   SessionRow,
   SessionRowSkeleton,
   subagentCounts,
   type SubagentCount,
 } from '../../components/SessionRow'
-import { TaskRow } from '../../components/tasks/TaskRow'
+import { TaskRow, taskMenu } from '../../components/tasks/TaskRow'
 import {
   FilterNote,
   inFilter,
@@ -47,9 +47,11 @@ import {
   type Placed,
 } from '../../homeList'
 import {
+  getHost,
   sameFields,
   useActiveHost,
   useAgents,
+  useComputerId,
   useFolders,
   useHost,
   useHostActions,
@@ -81,7 +83,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
 import { IconButton } from '../../ui/IconButton'
 import { LIST_COLUMN, useWide } from '../../ui/layout'
-import { joinGroups, type MenuNode } from '../../ui/menu'
+import { joinGroups, offlineMenu, type MenuNode } from '../../ui/menu'
 import { showNotice } from '../../ui/NoticeBar'
 import { OsIcon } from '../../ui/OsIcon'
 import { Press } from '../../ui/Press'
@@ -92,6 +94,7 @@ import { FloatingHeader, useCollapsingHeader } from '../../ui/ScrollHeader'
 import { SectionHeader } from '../../ui/SectionHeader'
 import { haptic } from '../../ui/haptics'
 import { Pill } from '../../ui/Pill'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import {
   radius,
@@ -132,6 +135,10 @@ export default function Home() {
   const wide = useWide()
   const { c } = useTokens()
   const [selected, setSelected] = useState<string | null>(null)
+  const hostId = useComputerId()
+  const several = useHostSelector(severalComputers)
+  const scope = usePrefs().homeScope
+  const allMode = several && scope === 'all'
 
   // A session that went away on the computer leaves the pane.
   const gone = useHostSelector(
@@ -144,14 +151,23 @@ export default function Home() {
     if (gone) setSelected(null)
   }, [gone])
   const close = useCallback(() => setSelected(null), [])
+  // Wide, a session opened from search shows in the pane, beside the list, as a row's does.
+  useEffect(() => {
+    if (!wide) return
+    listenForPane(setSelected)
+    return () => listenForPane(null)
+  }, [wide])
 
+  // One computer's list mounts afresh with another, so none shows the last one's while its own
+  // loads; 全部电脑 lists them all and stays, as when a row opens another computer's session.
+  const listKey = allMode ? 'all' : (hostId ?? '')
   if (!wide) {
-    return <SessionList selected={null} onOpen={openScreen} />
+    return <SessionList key={listKey} selected={null} onOpen={openScreen} />
   }
   return (
     <View style={[styles.split, { backgroundColor: c.bg }]}>
       <View style={styles.column}>
-        <SessionList selected={selected} onOpen={setSelected} />
+        <SessionList key={listKey} selected={selected} onOpen={setSelected} />
       </View>
       <View style={[styles.divider, { backgroundColor: c.border }]} />
       <View style={styles.pane}>
@@ -178,6 +194,9 @@ export default function Home() {
 }
 
 const openScreen = (id: string) => router.push(`/session/${id}`)
+
+const offlineNotice = () =>
+  showNotice({ text: '电脑没有连上，连上后才能置顶或归档。', tone: 'warning' })
 
 /** What a row can do, the same functions for the list's whole life so rows can skip renders. */
 interface RowActions {
@@ -265,25 +284,26 @@ const HomeRow = memo(function HomeRow(props: HomeRowProps) {
       {...(selecting ? { check: props.check } : {})}
       onPress={() => (selecting ? actions.toggleCheck(placed) : actions.open(placed))}
       {...(longPress ? { onLongPress: longPress } : {})}
+      // Away from its computer the actions stay, greyed, and say why they cannot run.
       start={
-        props.connected && !selecting
-          ? {
+        selecting
+          ? undefined
+          : {
               label: s.pinnedAt !== null ? '取消置顶' : '置顶',
               icon: s.pinnedAt !== null ? 'unpin' : 'pin',
-              color: c.accent,
-              onPress: () => actions.togglePin(placed),
+              color: props.connected ? c.accent : c.textTertiary,
+              onPress: () => (props.connected ? actions.togglePin(placed) : offlineNotice()),
             }
-          : undefined
       }
       end={
-        props.connected && !selecting
-          ? {
+        selecting
+          ? undefined
+          : {
               label: '归档',
               icon: 'archive',
-              color: c.tint,
-              onPress: () => actions.archive(placed),
+              color: props.connected ? c.tint : c.textTertiary,
+              onPress: () => (props.connected ? actions.archive(placed) : offlineNotice()),
             }
-          : undefined
       }
     />
   )
@@ -295,7 +315,10 @@ const HomeRow = memo(function HomeRow(props: HomeRowProps) {
     )
   }
   return (
-    <ContextMenu items={props.connected ? actions.menu(placed) : []} title={sessionTitle(s)}>
+    <ContextMenu
+      items={props.connected ? actions.menu(placed) : offlineMenu()}
+      title={sessionTitle(s)}
+    >
       {(longPress) => row(longPress)}
     </ContextMenu>
   )
@@ -365,6 +388,8 @@ function GroupHeader(props: {
   )
 }
 
+const severalComputers = (d: HostData) => d.computers.hosts.length > 1
+
 const pickLink = (d: HostData) => ({
   state: d.state,
   loaded: d.loaded,
@@ -397,7 +422,6 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   const header = useCollapsingHeader()
   const insets = useSafeAreaInsets()
   const list = useRef<FlashListRef<HomeItem>>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [selection, setSelection] = useState<ReadonlySet<string> | null>(null)
   const activeId = active?.id ?? ''
@@ -423,6 +447,13 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     return computer ? linkFor(computer) : undefined
   })
   const folderActions = useFolderActions()
+  // Away, the pull tries the computer again and the sync line says how that goes; connected, it
+  // reads the lists again.
+  const pull = usePullRefresh(async () => {
+    retry()
+    if (allComputers) wakeFleet()
+    if (getHost().state.kind === 'connected') await refresh()
+  }, header)
   useScrollTopOnTabPress(
     (offset) => list.current?.scrollToOffset({ offset, animated: true }),
     header,
@@ -462,9 +493,17 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     }
     return out
   }, [byComputer])
-  placedOf.current = new Map(placedAll.map((p) => [p.session.id, p.computer]))
+  const placedMap = useMemo(
+    () => new Map(placedAll.map((p) => [p.session.id, p.computer])),
+    [placedAll],
+  )
+  placedOf.current = placedMap
 
-  const archivedCount = placedAll.filter((p) => p.session.archivedAt !== null).length
+  // The archived page lists the active computer's, so the count is of those alone.
+  const archivedCount = useMemo(
+    () => placedAll.filter((p) => p.computer === activeId && p.session.archivedAt !== null).length,
+    [placedAll, activeId],
+  )
   const listed = useMemo(
     () =>
       placedAll.filter(
@@ -1062,6 +1101,14 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       if (!connected && host.unreachable && host.state.kind !== 'stopped') return <Unreachable />
       return <SessionRowSkeleton />
     }
+    // 全部电脑: no computer is known to have none until each has answered or is known away.
+    if (
+      allComputers &&
+      ((!host.loaded && !host.unreachable && host.state.kind !== 'stopped') ||
+        [...fleet.values()].some((f) => !f.loaded && f.state === 'connecting'))
+    ) {
+      return <SessionRowSkeleton />
+    }
     if (shell.filter.kind !== 'all') {
       return (
         <EmptyState
@@ -1094,7 +1141,9 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         style={styles.archived}
       >
         <Icon name="archive" size={18} color={c.textSecondary} />
-        <Text style={[typeScale.callout, { color: c.textSecondary, flex: 1 }]}>已归档的会话</Text>
+        <Text style={[typeScale.callout, { color: c.textSecondary, flex: 1 }]} numberOfLines={1}>
+          {allComputers ? `「${computerName(active)}」已归档的会话` : '已归档的会话'}
+        </Text>
         <Text style={[typeScale.callout, styles.count, { color: c.textTertiary }]}>
           {archivedCount}
         </Text>
@@ -1106,20 +1155,54 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   // mounts again as it scrolls do not.
   const seen = useRef<Set<string> | null>(null)
   const fresh = useRef(new Set<string>())
-  const ids = items.flatMap((item) => (item.kind === 'session' ? [item.key] : []))
-  if (seen.current === null) {
-    if (ids.length > 0) seen.current = new Set(ids)
-  } else {
-    for (const sid of ids) {
-      if (!seen.current.has(sid)) {
-        seen.current.add(sid)
-        fresh.current.add(sid)
+  // Looked over only when the list changed, not on every render of the screen.
+  const seenItems = useRef<HomeItem[] | null>(null)
+  if (seenItems.current !== items) {
+    seenItems.current = items
+    const ids = items.flatMap((item) => (item.kind === 'session' ? [item.key] : []))
+    if (seen.current === null) {
+      if (ids.length > 0) seen.current = new Set(ids)
+    } else {
+      for (const sid of ids) {
+        if (!seen.current.has(sid)) {
+          seen.current.add(sid)
+          fresh.current.add(sid)
+        }
       }
     }
   }
   useEffect(() => {
     fresh.current.clear()
   })
+
+  // What the rows show beside `items`. A new array each render told the list its rows had changed
+  // every time the screen drew; this one changes only with what it holds.
+  const extraData = useMemo(
+    () => [
+      props.selected,
+      selection,
+      marks,
+      stale,
+      fleet,
+      connected,
+      agents,
+      taskViews,
+      taskTitles,
+      subagents,
+    ],
+    [
+      props.selected,
+      selection,
+      marks,
+      stale,
+      fleet,
+      connected,
+      agents,
+      taskViews,
+      taskTitles,
+      subagents,
+    ],
+  )
 
   const renderItem = ({ item }: { item: HomeItem }) => {
     if (item.kind === 'section') {
@@ -1184,13 +1267,19 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     }
     if (item.kind === 'task') {
       const t = item.task
+      // The same menu as in the 需求 list, as the desktop's needs-you rows have theirs.
       return (
-        <TaskRow
-          task={t}
-          view={taskViews.get(t.id)}
-          projectName={projectNames.get(projectKey(activeId, t.projectPath))}
-          onPress={() => router.push(`/task/${t.id}`)}
-        />
+        <ContextMenu items={taskMenu(t, connected ? activeLink : null)} title={t.title}>
+          {(longPress) => (
+            <TaskRow
+              task={t}
+              view={taskViews.get(t.id)}
+              projectName={projectNames.get(projectKey(activeId, t.projectPath))}
+              onPress={() => router.push(`/task/${t.id}`)}
+              {...(longPress ? { onLongPress: longPress } : {})}
+            />
+          )}
+        </ContextMenu>
       )
     }
     const p = item.placed
@@ -1221,7 +1310,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         <AnimatedFlashList
           ref={list}
           data={items}
-          extraData={[props.selected, selection, marks, stale]}
+          extraData={extraData}
           keyExtractor={itemKey}
           getItemType={itemType}
           renderItem={renderItem}
@@ -1231,21 +1320,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
             paddingTop: header.contentTop,
             paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + (selecting ? SELECT_BAR : 0),
           }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              tintColor={c.textSecondary}
-              progressViewOffset={header.height}
-              onRefresh={() => {
-                setRefreshing(true)
-                retry()
-                if (allComputers) wakeFleet()
-                void refresh()
-                  .catch(() => {})
-                  .finally(() => setRefreshing(false))
-              }}
-            />
-          }
+          refreshControl={pull}
           ListHeaderComponent={top}
           ListEmptyComponent={empty()}
           ListFooterComponent={footer ?? undefined}
@@ -1265,7 +1340,8 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
             label="全选"
             onPress={() => {
               haptic.select()
-              select(items.flatMap((item) => (item.kind === 'session' ? [item.key] : [])))
+              // Every session the list holds, folded groups and those past 显示全部 too.
+              select(listed.map(placedKey))
             }}
           />
         </FloatingHeader>

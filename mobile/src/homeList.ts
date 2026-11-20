@@ -108,7 +108,8 @@ export function homeItems(input: HomeInput): HomeItem[] {
   const pinned = take(
     live
       .filter((p) => !taken.has(placedKey(p)) && p.session.pinnedAt !== null)
-      .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0)),
+      // In the order they were pinned, as the desktop's sidebar and the 需求 list keep them.
+      .sort((a, b) => (a.session.pinnedAt ?? 0) - (b.session.pinnedAt ?? 0)),
   )
   if (pinned.length > 0) {
     out.push({ kind: 'section', key: '__pinned', title: '置顶', count: pinned.length })

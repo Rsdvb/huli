@@ -33,21 +33,28 @@ export function useSetupLog(sessionId: string, active: boolean, live: boolean): 
     let timer: ReturnType<typeof setTimeout> | undefined
     let log: string | null = null
     let end: number | undefined
+    // The next read waits for this one, so a slow link never has reads pile up.
+    const next = () => {
+      if (live && !stopped) timer = setTimeout(read, POLL_MS)
+    }
     const read = () => {
       call(link, 'worktrees.setupLog', {
         sessionId,
         ...(end === undefined ? {} : { from: end }),
-      }).then(
-        (got) => {
-          if (stopped) return
-          log = log !== null && end !== undefined && got.start === end ? log + got.log : got.log
-          end = got.end
-          setState({ log, error: null })
-        },
-        (error: unknown) =>
-          !stopped && setState((s) => ({ ...s, error: errorText(error, '读不到输出') })),
-      )
-      if (live) timer = setTimeout(read, POLL_MS)
+      })
+        .then(
+          (got) => {
+            if (stopped) return
+            log = keepTail(
+              log !== null && end !== undefined && got.start === end ? log + got.log : got.log,
+            )
+            end = got.end
+            setState({ log, error: null })
+          },
+          (error: unknown) =>
+            !stopped && setState((s) => ({ ...s, error: errorText(error, '读不到输出') })),
+        )
+        .finally(next)
     }
     read()
     return () => {
@@ -56,6 +63,17 @@ export function useSetupLog(sessionId: string, active: boolean, live: boolean): 
     }
   }, [link, sessionId, active, live])
   return state
+}
+
+/** The most of a setup's output kept on the phone: its end, which says how it went. */
+const LOG_KEEP = 200_000
+
+/** The log's last LOG_KEEP characters, from a line's start, rather than all of a long setup's. */
+function keepTail(log: string): string {
+  if (log.length <= LOG_KEEP) return log
+  const tail = log.slice(-LOG_KEEP)
+  const line = tail.indexOf('\n')
+  return `…\n${line >= 0 ? tail.slice(line + 1) : tail}`
 }
 
 function lastLines(text: string, count: number): string {
@@ -87,6 +105,9 @@ function useSetupActions(sessionId: string) {
   return { busy, error, run }
 }
 
+/** A 32pt button takes touches 44pt tall. */
+const SMALL_SLOP = { top: 6, bottom: 6, left: 0, right: 0 }
+
 function SmallButton(props: {
   label: string
   onPress(): void
@@ -101,6 +122,7 @@ function SmallButton(props: {
       disabled={props.disabled || props.busy}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!(props.disabled || props.busy), busy: !!props.busy }}
+      hitSlop={SMALL_SLOP}
       style={({ pressed }) => [
         styles.small,
         {
@@ -175,15 +197,20 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
   }
   if (state === 'setup-failed') {
     return (
-      <Pressable
-        onPress={open}
-        accessibilityRole="button"
-        style={[styles.line, { backgroundColor: s.dangerSoft }]}
-      >
-        <Icon icon={G.error} size={15} color={c.danger} />
-        <Text style={[styles.lineText, { color: c.text, flex: 1 }]} numberOfLines={1}>
-          worktree 没能准备好
-        </Text>
+      // The row opens the details and 重试 is a button beside it, not inside it: a button within a
+      // button was out of VoiceOver's reach.
+      <View style={[styles.line, { backgroundColor: s.dangerSoft }]}>
+        <Pressable
+          onPress={open}
+          accessibilityRole="button"
+          accessibilityLabel="worktree 没能准备好，查看详情"
+          style={styles.lineMain}
+        >
+          <Icon icon={G.error} size={15} color={c.danger} />
+          <Text style={[styles.lineText, { color: c.text, flex: 1 }]} numberOfLines={1}>
+            worktree 没能准备好
+          </Text>
+        </Pressable>
         <SmallButton
           label="重试"
           filled
@@ -191,8 +218,10 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
           disabled={actions.busy !== null}
           onPress={() => actions.run('retry')}
         />
-        <Icon icon={G.right} size={12} color={c.textTertiary} />
-      </Pressable>
+        <Pressable onPress={open} accessible={false} hitSlop={SMALL_SLOP}>
+          <Icon icon={G.right} size={12} color={c.textTertiary} />
+        </Pressable>
+      </View>
     )
   }
   if (state === 'missing' || state === 'removed') {
@@ -399,6 +428,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     minHeight: 40,
   },
+  lineMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
   lineText: { fontSize: 13, fontWeight: '500' },
   lineLog: { flex: 1, fontFamily: MONO, fontSize: 11.5 },
 })

@@ -13,7 +13,7 @@ import {
 } from 'react-native'
 import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { ScrollEdge, useGlassMode } from './Glass'
+import { GlassOverBlur, ScrollEdge, useGlassMode } from './Glass'
 import { space, useTokens } from './tokens'
 
 export const HEADER_BAR = 64
@@ -31,10 +31,20 @@ export interface CollapsingHeader {
     contentOffset?: { x: number; y: number }
     scrollIndicatorInsets?: { top: number }
     contentInsetAdjustmentBehavior: 'never'
+    onScrollBeginDrag: () => void
+    onScrollEndDrag: () => void
   }
   /** The content's top padding: the header on Android, where insets do not exist. */
   contentTop: number
+  /**
+   * The user's finger is on the scroll view, or left it a moment ago: a pull-to-refresh it fires
+   * now is the user's own (PullRefresh.tsx).
+   */
+  touched(): boolean
 }
+
+/** How long after the finger leaves a refresh still counts as pulled, as iOS may fire on release. */
+const PULL_GRACE_MS = 800
 
 /** `onScroll` also hears every scroll, on the JS thread, as for a minimizing tab bar. */
 export function useCollapsingHeader(options?: {
@@ -47,6 +57,7 @@ export function useCollapsingHeader(options?: {
   const listener = useRef(options?.onScroll)
   listener.current = options?.onScroll
   const listens = !!options?.onScroll
+  const drag = useRef({ on: false, endedAt: 0 })
   return useMemo(() => {
     const rest = ios ? -height : 0
     return {
@@ -75,8 +86,15 @@ export function useCollapsingHeader(options?: {
             }
           : {}),
         contentInsetAdjustmentBehavior: 'never',
+        onScrollBeginDrag: () => {
+          drag.current.on = true
+        },
+        onScrollEndDrag: () => {
+          drag.current = { on: false, endedAt: Date.now() }
+        },
       },
       contentTop: ios ? 0 : height,
+      touched: () => drag.current.on || Date.now() - drag.current.endedAt < PULL_GRACE_MS,
     }
   }, [height, insets.top, ios, scrollY, listens])
 }
@@ -114,7 +132,7 @@ export function FloatingHeader(props: { header: CollapsingHeader; children: Reac
         {mode !== 'liquid' && <View style={[styles.hairline, { backgroundColor: c.border }]} />}
       </Animated.View>
       <View style={[styles.bar, { marginTop: insets.top }]} pointerEvents="box-none">
-        {props.children}
+        {mode === 'blur' ? <GlassOverBlur>{props.children}</GlassOverBlur> : props.children}
       </View>
     </View>
   )

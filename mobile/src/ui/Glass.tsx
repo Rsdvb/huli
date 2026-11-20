@@ -4,7 +4,16 @@
 // frosted blur the app used before, Android a translucent fill, and Reduce Transparency an opaque
 // surface on either.
 
-import { useEffect, useId, useState, type ComponentRef, type ReactNode, type Ref } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useState,
+  type ComponentRef,
+  type ReactNode,
+  type Ref,
+} from 'react'
 import {
   AccessibilityInfo,
   Platform,
@@ -55,9 +64,21 @@ export function useReduceTransparency(): boolean {
 /** How glass is drawn here and now. */
 export type GlassMode = 'liquid' | 'blur' | 'fill' | 'solid'
 
+/**
+ * Glass over a bar that is frosted already, as the floating header's controls before iOS 26: a
+ * blur drawn over a blur costs the GPU twice and muddies both, so such glass is a fill instead.
+ */
+const OverBlur = createContext(false)
+
+export function GlassOverBlur(props: { children: ReactNode }) {
+  return <OverBlur.Provider value>{props.children}</OverBlur.Provider>
+}
+
 export function useGlassMode(): GlassMode {
   const reduce = useReduceTransparency()
+  const overBlur = useContext(OverBlur)
   if (reduce) return 'solid'
+  if (overBlur && !LIQUID_GLASS && Platform.OS === 'ios') return 'fill'
   if (LIQUID_GLASS) return 'liquid'
   return Platform.OS === 'ios' ? 'blur' : 'fill'
 }

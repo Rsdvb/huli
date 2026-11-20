@@ -222,6 +222,11 @@ export function SyncCard(props: {
         <Text style={[styles.hintText, { color: c.textTertiary }]}>
           {hintText(plan.hint, status)}
         </Text>
+      ) : !plan.pull.enabled && plan.pull.reason ? (
+        // A greyed 拉取 says why, as a greyed 推送 does above.
+        <Text style={[styles.hintText, { color: c.textTertiary }]}>
+          {reasonText(plan.pull.reason, status)}
+        </Text>
       ) : null}
     </Card>
   )

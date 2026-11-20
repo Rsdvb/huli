@@ -4,15 +4,7 @@
 // the branch's commits. A file opens to its diff; the branch opens the branch picker.
 
 import { useMemo, type ReactElement } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { ChangedFile } from '@shared/git'
 import {
@@ -35,7 +27,7 @@ import {
 import { useGitSteps } from '../../components/git/useGitSteps'
 import { WorktreeCard } from '../../components/git/WorktreeCard'
 import { sessionFolder, useChanges, useCurrentPr, useGitRunning, useGitTools } from '../../git'
-import { useConnected, useHasSessions, useLink, useSession } from '../../host'
+import { useConnected, useHasSessions, useLink, useProjects, useSession } from '../../host'
 import { joinGroups, type MenuNode } from '../../ui/menu'
 import { baseName } from '../../ui/session/format'
 import { GI } from '../../ui/session/gitIcons'
@@ -44,6 +36,7 @@ import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
 import { RoundButton } from '../../ui/session/Press'
 import { StateView } from '../../ui/session/StateView'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { Counts } from '../../ui/session/TurnChanges'
 
 export default function ChangesScreen() {
@@ -52,9 +45,11 @@ export default function ChangesScreen() {
   const hasSessions = useHasSessions()
   const link = useLink()
   const summary = useSession(id)
+  const projectName = useProjects().find((p) => p.path === summary?.projectPath)?.name
   const folder = summary && !summary.scratch ? sessionFolder(summary) : null
   const changes = useChanges(link, folder)
   const { status, files, error } = changes
+  const pull = usePullRefresh(changes.reload)
   const connected = useConnected()
   const tools = useGitTools(link, connected)
   const gh = tools?.gh.state ?? null
@@ -167,13 +162,7 @@ export default function ChangesScreen() {
           />
         )}
         ItemSeparatorComponent={Separator}
-        refreshControl={
-          <RefreshControl
-            refreshing={false}
-            onRefresh={changes.reload}
-            tintColor={c.textSecondary}
-          />
-        }
+        refreshControl={pull}
         ListHeaderComponent={
           <View style={styles.header}>
             {summary.worktree ? <WorktreeCard sessionId={id} worktree={summary.worktree} /> : null}
@@ -255,7 +244,7 @@ export default function ChangesScreen() {
         title="改动"
         subtitle={
           summary && !summary.scratch
-            ? `${baseName(summary.projectPath)}${summary.worktree ? ' · 工作树' : ''}`
+            ? `${projectName ?? baseName(summary.projectPath)}${summary.worktree ? ' · worktree' : ''}`
             : null
         }
         right={

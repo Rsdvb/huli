@@ -4,11 +4,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { GlassCapsule } from './Glass'
+import { Glass } from './Glass'
 import { useReduceMotion } from './Press'
+import { HEADER_BAR } from './ScrollHeader'
 import { G, Icon } from './session/icons'
 import { useSessionTokens } from './session/palette'
-import { motion } from './tokens'
+import { motion, size as sizes, space, type as typeScale } from './tokens'
 
 export interface Notice {
   text: string
@@ -17,6 +18,9 @@ export interface Notice {
 }
 
 const SHOWN_MS = 6000
+
+/** The action's text grows to a 44pt target over the capsule's height. */
+const ACTION_SLOP = { top: 13, bottom: 13, left: 10, right: 10 }
 
 let current: (Notice & { id: number }) | null = null
 let count = 0
@@ -75,7 +79,7 @@ export function NoticeBar() {
     notice.tone === 'warning' ? c.warning : notice.tone === 'success' ? c.success : c.tint
   const icon = notice.tone === 'warning' ? G.warning : notice.tone === 'success' ? G.done : G.info
   return (
-    <View pointerEvents="box-none" style={[styles.dock, { top: insets.top + 64 }]}>
+    <View pointerEvents="box-none" style={[styles.dock, { top: insets.top + HEADER_BAR }]}>
       <Animated.View
         accessibilityLiveRegion="polite"
         style={{
@@ -86,14 +90,15 @@ export function NoticeBar() {
           maxWidth: '92%',
         }}
       >
-        <GlassCapsule height={44} elevated style={styles.capsule}>
+        {/* A capsule on one line; two lines grow it into a rounded card rather than clip. */}
+        <Glass shape="rounded" radius={sizes.hit / 2} elevated style={styles.capsule}>
           <Icon icon={icon} size={15} color={color} />
           <Text style={[styles.text, { color: c.text }]} numberOfLines={2}>
             {notice.text}
           </Text>
           {notice.action ? (
             <Pressable
-              hitSlop={10}
+              hitSlop={ACTION_SLOP}
               accessibilityRole="button"
               onPress={() => {
                 const action = notice.action
@@ -105,7 +110,7 @@ export function NoticeBar() {
               <Text style={[styles.actionText, { color: c.tint }]}>{notice.action.label}</Text>
             </Pressable>
           ) : null}
-        </GlassCapsule>
+        </Glass>
       </Animated.View>
     </View>
   )
@@ -113,8 +118,15 @@ export function NoticeBar() {
 
 const styles = StyleSheet.create({
   dock: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 50 },
-  capsule: { gap: 8, paddingHorizontal: 16 },
-  text: { fontSize: 14, lineHeight: 19, fontWeight: '500', flexShrink: 1 },
-  action: { paddingLeft: 6 },
-  actionText: { fontSize: 14, fontWeight: '600' },
+  capsule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: sizes.hit,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.xs,
+  },
+  text: { ...typeScale.subhead, flexShrink: 1 },
+  action: { paddingLeft: space.xs },
+  actionText: { ...typeScale.subhead, fontWeight: '600' },
 })

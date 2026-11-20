@@ -1,8 +1,7 @@
 // The workflow library on the computer, read-only: those waiting for the user's approval first,
 // then those that can start tasks, then those that cannot. A workflow opens its page.
 
-import { useState } from 'react'
-import { Animated, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { WireWorkflowEntry } from '@shared/workflow'
@@ -14,6 +13,7 @@ import { ListGroup, ListRow } from '../ui/ListRow'
 import { NavBar } from '../ui/NavBar'
 import { Screen } from '../ui/Screen'
 import { useCollapsingHeader } from '../ui/ScrollHeader'
+import { usePullRefresh } from '../ui/PullRefresh'
 import { SkeletonRows } from '../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
@@ -21,9 +21,9 @@ export default function Workflows() {
   const { c } = useTokens()
   const host = useHost()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(() => library.reload(), header)
   const insets = useSafeAreaInsets()
   const library = useWorkflowLibrary()
-  const [refreshing, setRefreshing] = useState(false)
 
   const waiting = library.entries.filter((e) => {
     const p = entryProblem(e)
@@ -115,17 +115,7 @@ export default function Workflows() {
           paddingBottom: insets.bottom + space.xxxl,
           gap: space.xl,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              void library.reload().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         <View style={styles.title}>
           <LargeTitle

@@ -4,26 +4,23 @@
 // and ready-made examples to start from. A task or a routine opens its page.
 
 import { useMemo, useRef, useState, type ComponentRef, type ReactNode } from 'react'
-import {
-  Alert,
-  Animated,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { Alert, Animated, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { RoutineView } from '@shared/routines'
 import { DEFAULT_SCHEDULE, DEFAULT_SCOPE } from '@shared/routines'
 import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
-import { ListSyncNote } from '../../components/SyncNote'
+import { ListSyncNote, OfflineNote } from '../../components/SyncNote'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { TasksView } from '../../components/tasks/TasksView'
-import { useAgents, useHostActions, useHostState, useMaybeLink, useProjects } from '../../host'
+import {
+  useAgents,
+  useComputerId,
+  useHostActions,
+  useHostState,
+  useMaybeLink,
+  useProjects,
+} from '../../host'
 import {
   confirmDeleteRoutine,
   routineExamples,
@@ -44,7 +41,9 @@ import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
+import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
+import { PendingSwitch } from '../../ui/PendingSwitch'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { Skeleton } from '../../ui/Skeleton'
 import { SwipeRow } from '../../ui/SwipeRow'
@@ -52,17 +51,23 @@ import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '
 
 export default function TasksTab() {
   const view = useTasksTabView()
+  // Each computer's lists mount afresh, so none shows another's while its own load.
+  const hostId = useComputerId() ?? ''
   const switcher = (
     <SegmentedControl
       segments={[
         { key: 'tasks', label: '需求' },
-        { key: 'routines', label: '定时' },
+        { key: 'routines', label: '例程' },
       ]}
       value={view}
       onChange={setTasksTabView}
     />
   )
-  return view === 'tasks' ? <TasksView switcher={switcher} /> : <Routines switcher={switcher} />
+  return view === 'tasks' ? (
+    <TasksView key={hostId} switcher={switcher} />
+  ) : (
+    <Routines key={hostId} switcher={switcher} />
+  )
 }
 
 function Routines(props: { switcher: ReactNode }) {
@@ -74,10 +79,13 @@ function Routines(props: { switcher: ReactNode }) {
   const projects = useProjects()
   const shell = useShell()
   const header = useCollapsingHeader()
+  const pull = usePullRefresh(async () => {
+    retry()
+    await load()
+  }, header)
   const insets = useSafeAreaInsets()
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
   const { data, error, syncedAt, load } = useRoutineList()
-  const [refreshing, setRefreshing] = useState(false)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [seed, setSeed] = useState<EditorSeed | null>(null)
@@ -131,14 +139,16 @@ function Routines(props: { switcher: ReactNode }) {
     })
   }
 
-  const toggle = (r: RoutineView, enabled: boolean) => {
-    if (!link) return
+  const toggle = async (r: RoutineView, enabled: boolean): Promise<boolean> => {
+    if (!link) return false
     haptic.select()
-    link
-      .request('routines.update', { routineId: r.id, changes: { enabled } })
-      .catch((failure: unknown) =>
-        Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure)),
-      )
+    try {
+      await link.request('routines.update', { routineId: r.id, changes: { enabled } })
+      return true
+    } catch (failure) {
+      Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure))
+      return false
+    }
   }
 
   const place = (r: RoutineView) =>
@@ -188,6 +198,7 @@ function Routines(props: { switcher: ReactNode }) {
                 name={agent?.name}
                 size={36}
                 badge={r.activeRun ? 'live' : r.unseen.failed > 0 ? 'error' : null}
+                ring={c.surface}
               />
             </View>
             <View style={styles.body}>
@@ -231,11 +242,10 @@ function Routines(props: { switcher: ReactNode }) {
                 )}
               </View>
             </View>
-            <Switch
+            <PendingSwitch
               value={r.enabled}
               disabled={!connected || r.state === 'done'}
-              onValueChange={(on) => toggle(r, on)}
-              trackColor={{ true: c.success }}
+              onChange={(on) => toggle(r, on)}
               accessibilityLabel={r.enabled ? `关闭 ${r.name}` : `开启 ${r.name}`}
             />
           </Press>
@@ -247,7 +257,7 @@ function Routines(props: { switcher: ReactNode }) {
   const intro = (
     <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
       <View style={styles.introText}>
-        <Text style={[typeScale.headline, { color: c.text }]}>定时任务按计划运行一条提示词</Text>
+        <Text style={[typeScale.headline, { color: c.text }]}>例程按计划运行一条提示词</Text>
         <Text style={[typeScale.callout, { color: c.textSecondary }]}>
           每次运行都会在电脑上开一个会话，只在你给的权限内干活，做完告诉你。
         </Text>
@@ -261,7 +271,7 @@ function Routines(props: { switcher: ReactNode }) {
         style={styles.newRow}
       >
         <Icon name="plus" size={22} color={c.tint} />
-        <Text style={[typeScale.body, { color: c.tint }]}>新建定时任务</Text>
+        <Text style={[typeScale.body, { color: c.tint }]}>新建例程</Text>
       </Press>
     </View>
   )
@@ -271,7 +281,7 @@ function Routines(props: { switcher: ReactNode }) {
       return (
         <EmptyState
           icon="history"
-          title="连上电脑后才能看定时任务"
+          title="连上电脑后才能看例程"
           message="纸鸢正在连接你的电脑。"
           action={{ label: '立即重连', onPress: () => retry() }}
         />
@@ -282,7 +292,7 @@ function Routines(props: { switcher: ReactNode }) {
         <EmptyState
           tone="error"
           icon="warning"
-          title="没能读到定时任务"
+          title="没能读到例程"
           message={error}
           action={{ label: '重试', onPress: () => void load() }}
         />
@@ -313,7 +323,7 @@ function Routines(props: { switcher: ReactNode }) {
     if (visible.length > 0) {
       return (
         <>
-          <SectionHeader title="你的定时任务" count={visible.length} />
+          <SectionHeader title="你的例程" count={visible.length} />
           <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
             {visible.map(routineRow)}
           </View>
@@ -321,13 +331,13 @@ function Routines(props: { switcher: ReactNode }) {
       )
     }
     if (words) {
-      return <EmptyState icon="search" title={`没有定时任务包含「${query.trim()}」`} />
+      return <EmptyState icon="search" title={`没有例程包含「${query.trim()}」`} />
     }
     if (shell.filter.kind !== 'all' && data.routines.length > 0) {
       return (
         <EmptyState
           icon="folder"
-          title="这个项目里没有定时任务"
+          title="这个项目里没有例程"
           action={{ label: '查看全部项目', onPress: () => shell.setFilter({ kind: 'all' }) }}
         />
       )
@@ -350,20 +360,10 @@ function Routines(props: { switcher: ReactNode }) {
           paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
           gap: space.md,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={c.textSecondary}
-            progressViewOffset={header.height}
-            onRefresh={() => {
-              setRefreshing(true)
-              retry()
-              void load().finally(() => setRefreshing(false))
-            }}
-          />
-        }
+        refreshControl={pull}
       >
         {props.switcher}
+        {data ? <OfflineNote what="开关、新建和运行例程" /> : null}
         {data ? <ListSyncNote error={error} syncedAt={syncedAt} onRetry={load} /> : null}
         {searching ? (
           <View style={[styles.searchBox, { backgroundColor: c.fill }]}>
@@ -388,7 +388,7 @@ function Routines(props: { switcher: ReactNode }) {
           <View style={[styles.problem, { backgroundColor: c.removedBg }]}>
             <Icon name="warning" size={16} color={c.danger} />
             <Text style={[typeScale.footnote, styles.body, { color: c.text }]}>
-              定时任务文件读不了：{data.problem.reason}
+              例程文件读不了：{data.problem.reason}
               {data.problem.backup ? `。原文件已另存为 ${data.problem.backup}。` : ''}
             </Text>
           </View>
@@ -431,7 +431,7 @@ function Routines(props: { switcher: ReactNode }) {
               ))}
             </View>
             <Text style={[typeScale.footnote, styles.footnote, { color: c.textTertiary }]}>
-              定时任务在电脑上的纸鸢开着时按电脑的时间运行。Agent
+              例程在电脑上的纸鸢开着时按电脑的时间运行。Agent
               接近套餐限额时，它会先暂停，或按设置换用有额度的 Agent。
             </Text>
           </>

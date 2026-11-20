@@ -54,13 +54,21 @@ export function useProjectFiles(
   return { list: folder ? list : null, error, reload }
 }
 
-/** The paths whose name or path holds the query, names that start with it first. */
-export function matchFiles(paths: readonly string[], query: string, limit = 40): string[] {
+/**
+ * The paths whose name or path holds the query, names that start with it first. `lowered`, the
+ * paths in lower case in the same order, spares a long list lowering every path on each keystroke.
+ */
+export function matchFiles(
+  paths: readonly string[],
+  query: string,
+  limit = 40,
+  lowered?: readonly string[],
+): string[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
   const scored: { path: string; score: number }[] = []
-  for (const path of paths) {
-    const lower = path.toLowerCase()
+  for (const [at, path] of paths.entries()) {
+    const lower = lowered?.[at] ?? path.toLowerCase()
     const name = lower.slice(lower.lastIndexOf('/') + 1)
     const score = name.startsWith(needle)
       ? 0
