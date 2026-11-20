@@ -15,12 +15,11 @@ import { ContextMenu } from '../ui/ContextMenu'
 import type { MenuNode } from '../ui/menu'
 import { copyText } from '../ui/session/feedback'
 import { foldersOf, openFile, parseFileRef, useFileRefs } from '../ui/session/fileRefs'
+import { clockTime } from '../ui/session/format'
 import { G, Icon } from '../ui/session/icons'
-import { useMinute } from '../ui/session/now'
 import { useSessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
-import { agoText } from '../ui/session/work'
 import { RefTiles } from './CarriedRefs'
 import { Markdown, type MarkdownChips } from './Markdown'
 import { PictureStrip, pictureOf, type Picture } from './Pictures'
@@ -41,11 +40,6 @@ function copiedText(content: readonly UserContent[]): string {
     .map((c) => (c.type === 'text' ? c.text : c.ref.kind === 'link' ? c.ref.uri : ''))
     .filter(Boolean)
     .join('\n')
-}
-
-function Ago(props: { at: number; color: string }) {
-  const now = useMinute()
-  return <Text style={[styles.meta, { color: props.color }]}>{agoText(props.at, now)}</Text>
 }
 
 export const UserMessage = memo(function UserMessage(props: {
@@ -217,7 +211,10 @@ export const UserMessage = memo(function UserMessage(props: {
               <Text style={[styles.meta, { color: c.textTertiary }]}>已插入当前对话</Text>
             </View>
           )}
-          {props.at !== undefined && <Ago at={props.at} color={c.textTertiary} />}
+          {/* A clock time, as the turn's footer says when it ended: the two read together. */}
+          {props.at !== undefined && (
+            <Text style={[styles.meta, { color: c.textTertiary }]}>{clockTime(props.at)}</Text>
+          )}
         </View>
       )}
       {note && <Text style={[styles.meta, { color: c.textTertiary }]}>{note}</Text>}
