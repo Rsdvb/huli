@@ -1,0 +1,144 @@
+# The session's floating and waiting parts with the fake agent: a long Chinese reply (inline code
+# that wraps), the plan's pill over it while a plan runs and again after a fling, the model menu
+# held open while its numbers would change, a permission card answered, and a sub-agent's badge
+# menu on the session list. The status line shows under the composer throughout.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/chinese'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- takeScreenshot: c01-chinese
+# The plan's pill over the reply, while its steps run.
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/plan --step 2500'
+- tapOn: '发送'
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- extendedWaitUntil:
+    visible:
+      text: '计划：.*'
+    timeout: 20000
+    optional: true
+- takeScreenshot: c02-plan-pill
+- swipe:
+    start: 50%, 25%
+    end: 50%, 75%
+    duration: 120
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: c03-plan-pill-after-fling
+- tapOn:
+    text: '计划：.*'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1000
+    optional: true
+- takeScreenshot: c04-plan-menu
+- tapOn:
+    point: 50%,92%
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 30000
+    optional: true
+# The model menu, held open: what it shows must not move under the finger.
+- tapOn:
+    text: '模型：.*'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: c05-model-menu
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- takeScreenshot: c06-model-menu-later
+- tapOn:
+    point: 50%,12%
+    optional: true
+- waitForAnimationToEnd
+# A permission card above the composer, answered once.
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/permission'
+- tapOn: '发送'
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- extendedWaitUntil:
+    visible: '允许一次'
+    timeout: 20000
+    optional: true
+- takeScreenshot: c07-permission
+- tapOn:
+    text: '允许一次'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: c08-permission-answered
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 30000
+    optional: true
+# A sub-agent that waits for permission, then its badge's menu on the session list.
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/subagent'
+- tapOn: '发送'
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
+- takeScreenshot: c09-subagent-waiting
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn:
+    text: '.*个子 Agent.*'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: c10-subagent-menu
+- tapOn:
+    point: 50%,95%
+    optional: true
