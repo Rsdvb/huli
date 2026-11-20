@@ -66,7 +66,7 @@ export default function SessionArtifacts() {
             onPress={() => openArtifact(item.id)}
             scale={0.98}
             accessibilityRole="button"
-            accessibilityLabel={`${item.title}，${kindText(item)}，第 ${item.version} 版`}
+            accessibilityLabel={`${item.title}，${kindText(item)}，v${item.version}`}
             accessibilityHint="打开"
             style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.border }]}
           >
@@ -78,7 +78,7 @@ export default function SessionArtifacts() {
                 {item.title}
               </Text>
               <Text style={[styles.meta, { color: c.textSecondary }]} numberOfLines={1}>
-                {[kindText(item), `第 ${item.version} 版`, formatBytes(item.size)]
+                {[kindText(item), `v${item.version}`, formatBytes(item.size)]
                   .filter(Boolean)
                   .join(' · ')}
               </Text>

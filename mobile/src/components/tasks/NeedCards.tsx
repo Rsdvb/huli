@@ -117,7 +117,7 @@ function ReviewCard(props: { view: TaskView; roundId: string }) {
         <DocumentChip
           artifactId={round.document.artifactId}
           title={round.document.title}
-          detail={`第 ${round.document.version} 版 · 点按打开`}
+          detail={`v${round.document.version} · 点按打开`}
         />
       ) : null}
       {comments > 0 ? (
