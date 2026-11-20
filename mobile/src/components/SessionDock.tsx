@@ -201,13 +201,7 @@ export function ModeButton(props: {
           disabled={props.disabled}
           accessibilityRole="button"
           accessibilityLabel={`权限模式：${mode.name}`}
-          style={[
-            styles.modePill,
-            {
-              backgroundColor: c.fill,
-              opacity: props.disabled ? 0.38 : mode.locked ? 0.5 : 1,
-            },
-          ]}
+          style={[styles.modePill, { backgroundColor: c.fill, opacity: props.disabled ? 0.38 : 1 }]}
         >
           {icon}
           <Text style={[styles.modeText, { color: full ? c.danger : c.text }]} numberOfLines={1}>
@@ -215,11 +209,13 @@ export function ModeButton(props: {
           </Text>
         </PressScale>
       ) : (
+        // A mode locked for the turn still opens its menu, which says so: the button is not
+        // dimmed as if it would not.
         <RoundButton
           onPress={props.onPress}
           disabled={props.disabled}
           accessibilityLabel={`权限模式：${mode.name}`}
-          style={mode.locked ? { opacity: 0.5 } : null}
+          {...(mode.locked ? { accessibilityHint: '仅在两轮对话之间可更改' } : {})}
         >
           {icon}
         </RoundButton>

@@ -1247,7 +1247,12 @@ export default function SessionScreen() {
               },
             })}
             left={
-              <NativeMenu source={{ root: 'mode', pages }} disabled={!connected}>
+              // The button and its menu are disabled alike: it looked disabled while setting
+              // an option or starting, and still opened.
+              <NativeMenu
+                source={{ root: 'mode', pages }}
+                disabled={!connected || config.setting !== null || starting}
+              >
                 <ModeButton
                   mode={
                     shownMode
