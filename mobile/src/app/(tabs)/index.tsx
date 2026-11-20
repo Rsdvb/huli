@@ -1289,7 +1289,8 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
             label="全选"
             onPress={() => {
               haptic.select()
-              select(items.flatMap((item) => (item.kind === 'session' ? [item.key] : [])))
+              // Every session the list holds, folded groups and those past 显示全部 too.
+              select(listed.map(placedKey))
             }}
           />
         </FloatingHeader>
