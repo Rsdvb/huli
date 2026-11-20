@@ -31,7 +31,7 @@ import { SectionHeader } from '../../ui/SectionHeader'
 import { Skeleton } from '../../ui/Skeleton'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../shell'
-import { ListSyncNote } from '../SyncNote'
+import { ListSyncNote, OfflineNote } from '../SyncNote'
 import { TaskRow } from './TaskRow'
 
 type Section = 'waiting' | 'running' | 'done' | 'dropped'
@@ -171,6 +171,7 @@ export function TasksView(props: { switcher: ReactNode }) {
   const top = (
     <View style={styles.top}>
       {props.switcher}
+      {tasks.length > 0 ? <OfflineNote what="开始、置顶和取消需求" /> : null}
       {tasks.length > 0 ? (
         <ListSyncNote error={error} syncedAt={syncedAt} onRetry={reload} />
       ) : null}

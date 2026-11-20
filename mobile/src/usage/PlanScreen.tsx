@@ -10,7 +10,7 @@ import type { AgentStatus, PlanLimit } from '@shared/agent-host'
 import type { UsageStatus, UsageSummary } from '@shared/usage'
 import { useActiveHost, useAgents, useHostState, useMaybeLink, withinRefreshLimit } from '../host'
 import { ManagePage } from '../manage/kit'
-import { clockOf, errorText } from '../sessions'
+import { errorText } from '../sessions'
 import { ConcentricRings } from '../ui/charts'
 import { EmptyState } from '../ui/EmptyState'
 import { haptic } from '../ui/haptics'
@@ -26,6 +26,7 @@ import {
   limitColor,
   limitPool,
   planName,
+  readText,
   tokensText,
   whenText,
   windowName,
@@ -329,13 +330,15 @@ function Note(props: {
           style={styles.readAt}
         >
           <Text style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}>
-            {props.observed > 0 ? `读取于 ${clockOf(props.observed)}` : '还没读过'}
+            {props.observed > 0 ? readText(props.observed) : '还没读过'}
+            {/* Away from the computer it cannot read again: say so rather than grey the icon. */}
+            {props.onRefresh ? '' : ' · 未连接'}
           </Text>
           {props.refreshing ? (
             <ActivityIndicator size="small" color={c.textTertiary} />
-          ) : (
+          ) : props.onRefresh ? (
             <Icon name="refresh" size={14} color={c.textTertiary} />
-          )}
+          ) : null}
         </Press>
       </View>
       {props.error ? (

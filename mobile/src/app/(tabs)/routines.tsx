@@ -10,7 +10,7 @@ import { router } from 'expo-router'
 import type { RoutineView } from '@shared/routines'
 import { DEFAULT_SCHEDULE, DEFAULT_SCOPE } from '@shared/routines'
 import { RoutineEditor, type EditorSeed } from '../../components/RoutineEditor'
-import { ListSyncNote } from '../../components/SyncNote'
+import { ListSyncNote, OfflineNote } from '../../components/SyncNote'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../components/shell'
 import { TasksView } from '../../components/tasks/TasksView'
 import {
@@ -362,6 +362,7 @@ function Routines(props: { switcher: ReactNode }) {
         refreshControl={pull}
       >
         {props.switcher}
+        {data ? <OfflineNote what="开关、新建和运行例程" /> : null}
         {data ? <ListSyncNote error={error} syncedAt={syncedAt} onRetry={load} /> : null}
         {searching ? (
           <View style={[styles.searchBox, { backgroundColor: c.fill }]}>

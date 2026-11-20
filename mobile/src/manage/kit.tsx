@@ -24,7 +24,7 @@ import type { HostLink } from '@shared/remote/link'
 import type { SettingsPatch } from '@shared/settings'
 import { admin } from '../admin'
 import { useConnected, useHostActions, useMaybeLink, withinRefreshLimit } from '../host'
-import { ListSyncNote } from '../components/SyncNote'
+import { ListSyncNote, OfflineNote } from '../components/SyncNote'
 import { errorText } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
 import { EmptyState } from '../ui/EmptyState'
@@ -279,6 +279,7 @@ export function ManagePage(props: {
         }}
         refreshControl={refreshControl}
       >
+        <OfflineNote what="修改这一页" />
         <ListSyncNote error={failure} syncedAt={null} onRetry={pull} />
         {props.intro ? (
           <Text style={[typeScale.footnote, styles.intro, { color: c.textSecondary }]}>
