@@ -82,7 +82,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { Icon } from '../../ui/Icon'
 import { IconButton } from '../../ui/IconButton'
 import { LIST_COLUMN, useWide } from '../../ui/layout'
-import { joinGroups, type MenuNode } from '../../ui/menu'
+import { joinGroups, offlineMenu, type MenuNode } from '../../ui/menu'
 import { showNotice } from '../../ui/NoticeBar'
 import { OsIcon } from '../../ui/OsIcon'
 import { Press } from '../../ui/Press'
@@ -181,6 +181,9 @@ export default function Home() {
 
 const openScreen = (id: string) => router.push(`/session/${id}`)
 
+const offlineNotice = () =>
+  showNotice({ text: '电脑没有连上，连上后才能置顶或归档。', tone: 'warning' })
+
 /** What a row can do, the same functions for the list's whole life so rows can skip renders. */
 interface RowActions {
   open(p: Placed): void
@@ -267,25 +270,26 @@ const HomeRow = memo(function HomeRow(props: HomeRowProps) {
       {...(selecting ? { check: props.check } : {})}
       onPress={() => (selecting ? actions.toggleCheck(placed) : actions.open(placed))}
       {...(longPress ? { onLongPress: longPress } : {})}
+      // Away from its computer the actions stay, greyed, and say why they cannot run.
       start={
-        props.connected && !selecting
-          ? {
+        selecting
+          ? undefined
+          : {
               label: s.pinnedAt !== null ? '取消置顶' : '置顶',
               icon: s.pinnedAt !== null ? 'unpin' : 'pin',
-              color: c.accent,
-              onPress: () => actions.togglePin(placed),
+              color: props.connected ? c.accent : c.textTertiary,
+              onPress: () => (props.connected ? actions.togglePin(placed) : offlineNotice()),
             }
-          : undefined
       }
       end={
-        props.connected && !selecting
-          ? {
+        selecting
+          ? undefined
+          : {
               label: '归档',
               icon: 'archive',
-              color: c.tint,
-              onPress: () => actions.archive(placed),
+              color: props.connected ? c.tint : c.textTertiary,
+              onPress: () => (props.connected ? actions.archive(placed) : offlineNotice()),
             }
-          : undefined
       }
     />
   )
@@ -297,7 +301,10 @@ const HomeRow = memo(function HomeRow(props: HomeRowProps) {
     )
   }
   return (
-    <ContextMenu items={props.connected ? actions.menu(placed) : []} title={sessionTitle(s)}>
+    <ContextMenu
+      items={props.connected ? actions.menu(placed) : offlineMenu()}
+      title={sessionTitle(s)}
+    >
       {(longPress) => row(longPress)}
     </ContextMenu>
   )

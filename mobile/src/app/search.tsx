@@ -41,6 +41,7 @@ import { errorText, folder, listTime, sessionTitle } from '../sessions'
 import { computerName } from '../store'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { ContextMenu } from '../ui/ContextMenu'
+import { offlineMenu } from '../ui/menu'
 import { EmptyState } from '../ui/EmptyState'
 import { haptic } from '../ui/haptics'
 import { Icon, type IconName } from '../ui/Icon'
@@ -382,7 +383,7 @@ export default function Search() {
     loadArtifacts,
   ])
 
-  const sessionMenu = (s: SessionSummary) => (connected ? actions.menu(s) : [])
+  const sessionMenu = (s: SessionSummary) => (connected ? actions.menu(s) : offlineMenu())
 
   const openSession = (id: string) => {
     haptic.tap()
