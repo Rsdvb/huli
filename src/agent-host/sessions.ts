@@ -823,6 +823,10 @@ interface Live {
   contextOwed: boolean
   contextRevision: number
   contextFailures: number
+  /** Counts the patches that can change which plan is the latest, or its steps. */
+  planRevision: number
+  /** The latest plan entry as found in `order` at `revision`; null before a look. */
+  planFound: { order: readonly string[]; revision: number; id: string | null } | null
   contextReadAt: number
   /** The agent that asked for this session to be archived once its running turn ends. */
   archiveAfterTurn: string | null
@@ -912,21 +916,38 @@ function waitingEntries(live: Live): ThreadEntry[] {
     })
 }
 
-/** The latest plan's progress; null without a plan, or for one without steps. */
-function planProgress({ order, byId }: ThreadState): PlanProgress | null {
-  for (let i = order.length - 1; i >= 0; i--) {
-    const entry = byId[order[i]!]
-    if (entry?.kind !== 'plan') continue
-    const { items } = entry
-    if (items.length === 0) return null
-    const index = items.findIndex((item) => item.status === 'in_progress')
-    return {
-      done: items.filter((item) => item.status === 'completed').length,
-      total: items.length,
-      current: index === -1 ? null : { index, text: firstLine(items[index]!.content) },
+/**
+ * The latest plan's progress; null without a plan, or for one without steps. The plan found last
+ * is kept until a patch that can change it, since every update of a turn reads it.
+ */
+function planProgress(live: Live): PlanProgress | null {
+  const { order, byId } = live.thread
+  const found = live.planFound
+  let id: string | null = null
+  if (
+    found?.order === order &&
+    found.revision === live.planRevision &&
+    (found.id === null || byId[found.id]?.kind === 'plan')
+  ) {
+    id = found.id
+  } else {
+    for (let i = order.length - 1; i >= 0; i--) {
+      if (byId[order[i]!]?.kind !== 'plan') continue
+      id = order[i]!
+      break
     }
+    live.planFound = { order, revision: live.planRevision, id }
   }
-  return null
+  const entry = id === null ? undefined : byId[id]
+  if (entry?.kind !== 'plan') return null
+  const { items } = entry
+  if (items.length === 0) return null
+  const index = items.findIndex((item) => item.status === 'in_progress')
+  return {
+    done: items.filter((item) => item.status === 'completed').length,
+    total: items.length,
+    current: index === -1 ? null : { index, text: firstLine(items[index]!.content) },
+  }
 }
 
 /** The longest step title a summary carries. */
@@ -1608,7 +1629,7 @@ export class SessionManager {
       pinnedAt: record.pinnedAt ?? null,
       archivedAt: record.archivedAt ?? null,
       acpSessionId: record.acpSessionId || null,
-      plan: live ? planProgress(live.thread) : null,
+      plan: live ? planProgress(live) : null,
       turnStartedAt: live?.thread.session.turnStartedAt ?? null,
       working: live ? this.shownWork(live) : null,
       limitPause: record.limitPause ?? null,
@@ -1816,7 +1837,7 @@ export class SessionManager {
       phase = PROGRESS_PHASES[work.phase]
       step = progressText(work.step)
     }
-    const plan = planProgress(live.thread)
+    const plan = planProgress(live)
     return {
       title: progressText(record.customTitle ?? session.title ?? record.title),
       agent: this.deps.agents.name(record.agentId) || null,
@@ -1888,6 +1909,7 @@ export class SessionManager {
       this.deps.diagnostics.log('error', `Session ${live.id}: ${error.message}`)
       return false
     }
+    if (changesPlan(live.thread, patch)) live.planRevision++
     this.track(live, patch)
     live.queue.push(patch)
     return true
@@ -3878,6 +3900,8 @@ export class SessionManager {
       contextOwed: false,
       contextRevision: 0,
       contextFailures: 0,
+      planRevision: 0,
+      planFound: null,
       contextReadAt: 0,
       archiveAfterTurn: null,
       sendNext: false,
