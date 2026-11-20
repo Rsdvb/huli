@@ -126,7 +126,7 @@ import {
   type HostData,
 } from '../../host'
 import { setMuted, useMuted } from '../../push/muted'
-import { folder } from '../../sessions'
+import { folder, sessionTitle } from '../../sessions'
 import { hostErrorText } from '../../hostErrors'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
 import { useThread, useThreadSelector } from '../../thread'
@@ -604,7 +604,8 @@ export default function SessionScreen() {
     ],
   )
 
-  const title = session?.title ?? summary?.title ?? '会话'
+  // Named as the session list names it: an untitled one is 新会话 there and here.
+  const title = sessionTitle({ title: session?.title ?? summary?.title ?? null })
   const project = summary ? (summary.scratch ? '无项目' : folder(summary.projectPath)) : null
 
   /** Asks before a switch stops background work the session's own agent runs. */
