@@ -33,21 +33,28 @@ export function useSetupLog(sessionId: string, active: boolean, live: boolean): 
     let timer: ReturnType<typeof setTimeout> | undefined
     let log: string | null = null
     let end: number | undefined
+    // The next read waits for this one, so a slow link never has reads pile up.
+    const next = () => {
+      if (live && !stopped) timer = setTimeout(read, POLL_MS)
+    }
     const read = () => {
       call(link, 'worktrees.setupLog', {
         sessionId,
         ...(end === undefined ? {} : { from: end }),
-      }).then(
-        (got) => {
-          if (stopped) return
-          log = log !== null && end !== undefined && got.start === end ? log + got.log : got.log
-          end = got.end
-          setState({ log, error: null })
-        },
-        (error: unknown) =>
-          !stopped && setState((s) => ({ ...s, error: errorText(error, '读不到输出') })),
-      )
-      if (live) timer = setTimeout(read, POLL_MS)
+      })
+        .then(
+          (got) => {
+            if (stopped) return
+            log = keepTail(
+              log !== null && end !== undefined && got.start === end ? log + got.log : got.log,
+            )
+            end = got.end
+            setState({ log, error: null })
+          },
+          (error: unknown) =>
+            !stopped && setState((s) => ({ ...s, error: errorText(error, '读不到输出') })),
+        )
+        .finally(next)
     }
     read()
     return () => {
@@ -56,6 +63,17 @@ export function useSetupLog(sessionId: string, active: boolean, live: boolean): 
     }
   }, [link, sessionId, active, live])
   return state
+}
+
+/** The most of a setup's output kept on the phone: its end, which says how it went. */
+const LOG_KEEP = 200_000
+
+/** The log's last LOG_KEEP characters, from a line's start, rather than all of a long setup's. */
+function keepTail(log: string): string {
+  if (log.length <= LOG_KEEP) return log
+  const tail = log.slice(-LOG_KEEP)
+  const line = tail.indexOf('\n')
+  return `…\n${line >= 0 ? tail.slice(line + 1) : tail}`
 }
 
 function lastLines(text: string, count: number): string {

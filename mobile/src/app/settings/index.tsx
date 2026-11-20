@@ -12,11 +12,12 @@ import { admin } from '../../admin'
 import { RenameDialog } from '../../components/RenameDialog'
 import { Sheet } from '../../components/Sheet'
 import { useUpdateRows } from '../../components/UpdateRows'
-import { APP_VERSION, currentRoute, type CurrentRoute } from '../../connection'
+import { APP_VERSION } from '../../connection'
 import { useCloudStatus } from '../../cloud'
 import { useHost } from '../../host'
 import { computerName } from '../../store'
 import { ON_DEVICE, THIS_DEVICE } from '../../system/device'
+import { useCurrentRoute } from '../../system/route'
 import { routeName, routesNote } from '../../linkInfo'
 import { LIVE_SUPPORTED, useLiveAllowed } from '../../live/activities'
 import { authenticate, useBiometryName } from '../../lock'
@@ -84,18 +85,12 @@ export default function Settings() {
   const liveAllowed = useLiveAllowed()
   const updateRows = useUpdateRows()
   const routines = useRoutineList()
-  const [current, setCurrent] = useState<CurrentRoute | null>(() => currentRoute())
+  // The route can change under a kept link, as when the phone leaves the Wi-Fi.
+  const current = useCurrentRoute(true, host.state)
   const [sheet, setSheet] = useState<'theme' | 'language' | null>(null)
   const [renaming, setRenaming] = useState(false)
   const connected = host.state.kind === 'connected'
   const welcome = host.state.kind === 'connected' ? host.state.welcome : null
-
-  // The route can change under a kept link, as when the phone leaves the Wi-Fi.
-  useEffect(() => {
-    setCurrent(currentRoute())
-    const timer = setInterval(() => setCurrent(currentRoute()), 2000)
-    return () => clearInterval(timer)
-  }, [host.state])
 
   const version =
     Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? APP_VERSION
