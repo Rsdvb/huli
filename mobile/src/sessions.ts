@@ -1,4 +1,5 @@
 import type { SessionSummary } from '@shared/agent-host'
+import { hostErrorText } from './hostErrors'
 import type { Theme } from './theme'
 
 export function needsYou(s: SessionSummary): boolean {
@@ -58,9 +59,9 @@ export function sessionTitle(s: { title: string | null } | undefined): string {
   return s?.title?.trim() || '新会话'
 }
 
+/** A failed request in the user's words: what the computer's code means, never its English. */
 export function errorText(error: unknown): string {
-  const message = (error as { message?: unknown } | null)?.message
-  return typeof message === 'string' && message ? message : '请稍后再试。'
+  return hostErrorText(error)
 }
 
 export function ago(ms: number): string {

@@ -12,6 +12,7 @@ import type {
 } from '@shared/agent-host'
 import type { ChangedFile, GitOperation, GitStatus, GitTools, PullRequest } from '@shared/git'
 import type { HostLink } from '@shared/remote/link'
+import { hostErrorText } from './hostErrors'
 import type { GitKind, GitRequest } from './gitRules'
 
 export function call<M extends HostMethod>(
@@ -24,8 +25,7 @@ export function call<M extends HostMethod>(
 }
 
 export function errorText(error: unknown, fallback: string): string {
-  const message = (error as { message?: unknown } | null)?.message
-  return typeof message === 'string' && message ? message : fallback
+  return hostErrorText(error, fallback)
 }
 
 /** The folder a session works in: its worktree's when it has one, else its project's. */
@@ -215,8 +215,9 @@ export async function runGit(
     receive(link, folder, operation.status)
     return { ok: true, operation }
   } catch (error) {
-    const code = (error as { code?: unknown } | null)?.code
-    return { ok: false, log: errorText(error, ''), busy: code === 'busy' }
+    const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown }
+    // The log is git's own output, kept as it came under the sheet's Chinese line.
+    return { ok: false, log: typeof message === 'string' ? message : '', busy: code === 'busy' }
   } finally {
     setRunning(folder, null)
   }
