@@ -25,6 +25,7 @@ import { admin } from '../../admin'
 import { RenameDialog } from '../../components/RenameDialog'
 import { Sheet, type SheetItem } from '../../components/Sheet'
 import { useHost } from '../../host'
+import { platformOf } from '../../linkInfo'
 import { currentLimits, harnessVersion, percent, readiness, stateText } from '../../manage/agents'
 import {
   agentChoice,
@@ -57,6 +58,7 @@ import {
   useRead,
   type Read,
 } from '../../manage/kit'
+import { trashName } from '../../system/device'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
@@ -320,7 +322,12 @@ function AgentBody({ status }: { status: AgentStatus }) {
               },
               {
                 key: 'trash',
-                label: '移除，并把它的配置目录移到废纸篓',
+                label: `移除，并把它的配置目录移到${trashName(
+                  platformOf(
+                    host.host,
+                    host.state.kind === 'connected' ? host.state.welcome.host.platform : undefined,
+                  ),
+                )}`,
                 destructive: true,
                 onPress: () => void remove(true),
               },

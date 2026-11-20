@@ -16,6 +16,7 @@ import { useHost } from '../../host'
 import { hostPort, osName, platformOf, ROUTE_NAMES, routesNote } from '../../linkInfo'
 import { ago } from '../../sessions'
 import { computerName } from '../../store'
+import { THIS_DEVICE } from '../../system/device'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { Icon } from '../../ui/Icon'
@@ -105,7 +106,7 @@ export default function Computer() {
           {computer.label ? <ListRow title="电脑自己的名称" value={computer.name} /> : null}
           <ListRow title="系统" value={osName(platform)} />
           {welcome ? <ListRow title="电脑上的纸鸢" value={welcome.host.version} /> : null}
-          <ListRow title="这台 iPhone 在电脑上叫" value={computer.deviceName || '—'} />
+          <ListRow title={`${THIS_DEVICE}在电脑上叫`} value={computer.deviceName || '—'} />
           {!active ? (
             <ListRow
               title="上次在线"

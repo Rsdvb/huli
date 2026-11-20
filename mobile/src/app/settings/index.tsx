@@ -16,6 +16,7 @@ import { APP_VERSION, currentRoute, type CurrentRoute } from '../../connection'
 import { useCloudStatus } from '../../cloud'
 import { useHost } from '../../host'
 import { computerName } from '../../store'
+import { ON_DEVICE, THIS_DEVICE } from '../../system/device'
 import { routeName, routesNote } from '../../linkInfo'
 import { LIVE_SUPPORTED, useLiveAllowed } from '../../live/activities'
 import { authenticate, useBiometryName } from '../../lock'
@@ -112,21 +113,21 @@ export default function Settings() {
       setPrefs({ lock: on })
     } else if (result.error === 'passcode_not_set' || result.error === 'not_available') {
       haptic.warning()
-      Alert.alert('这台 iPhone 没有设置密码', '先在系统设置里设置锁屏密码，才能用它锁定纸鸢。')
+      Alert.alert(`${THIS_DEVICE}没有设置密码`, '先在系统设置里设置锁屏密码，才能用它锁定纸鸢。')
     }
   }
 
   const accountCard = (() => {
     if (account.kind === 'signed-in') {
-      return { title: account.email, body: '电脑已登录 Kite Cloud，通知经它送到这台 iPhone。' }
+      return { title: account.email, body: `电脑已登录 Kite Cloud，通知经它送到${THIS_DEVICE}。` }
     }
     if (account.kind === 'signed-out') {
       return {
         title: '未登录 Kite Cloud',
-        body: '在电脑上的纸鸢里登录 Kite Cloud 后，这台 iPhone 才能收到通知。',
+        body: `在电脑上的纸鸢里登录 Kite Cloud 后，${THIS_DEVICE}才能收到通知。`,
       }
     }
-    return { title: '纸鸢', body: '在 iPhone 上看你电脑上的 Agent 在做什么，随时接着聊。' }
+    return { title: '纸鸢', body: `${ON_DEVICE}看你电脑上的 Agent 在做什么，随时接着聊。` }
   })()
 
   const route = connected ? (current ? routeName(current) : '已连接') : '未连接'
@@ -174,7 +175,7 @@ export default function Settings() {
         </ListGroup>
 
         <ListGroup
-          header="这台 iPhone"
+          header={THIS_DEVICE}
           footer={
             prefs.lock
               ? `离开纸鸢后它会锁定，再打开时需要${biometry}。`
@@ -288,7 +289,7 @@ export default function Settings() {
 
         <ListGroup
           header="电脑"
-          footer="定时任务按计划在你的电脑上运行，无论这台 iPhone 是否连得上。"
+          footer={`定时任务按计划在你的电脑上运行，无论${THIS_DEVICE}是否连得上。`}
         >
           <ListRow
             title="已配对的电脑"
@@ -472,7 +473,7 @@ export default function Settings() {
       />
       <RenameDialog
         visible={renaming}
-        heading="这台 iPhone 的名称"
+        heading={`${THIS_DEVICE}的名称`}
         placeholder="名称"
         noReset
         maxLength={64}

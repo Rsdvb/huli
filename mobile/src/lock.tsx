@@ -7,7 +7,7 @@
 // dialog, a modal screen) draws its own LockLayer too; they share this one state.
 
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { AppState, StyleSheet, Text, View } from 'react-native'
+import { AppState, Platform, StyleSheet, Text, View } from 'react-native'
 import * as LocalAuthentication from 'expo-local-authentication'
 import { getPrefs, prefsReady, setPrefs } from './prefs'
 import { haptic } from './ui/haptics'
@@ -109,18 +109,24 @@ export async function unlock(): Promise<void> {
 
 /** What unlocks the app on this phone, in the system's words. */
 export function useBiometryName(): string {
-  const [name, setName] = useState('面容 ID')
+  const [name, setName] = useState(Platform.OS === 'ios' ? '面容 ID' : '指纹')
   useEffect(() => {
     let live = true
     void LocalAuthentication.supportedAuthenticationTypesAsync()
       .then((types) => {
         if (!live) return
         const T = LocalAuthentication.AuthenticationType
+        // Face ID and Touch ID are Apple's names; Android says 人脸解锁 and 指纹.
+        const ios = Platform.OS === 'ios'
         setName(
           types.includes(T.FACIAL_RECOGNITION)
-            ? '面容 ID'
+            ? ios
+              ? '面容 ID'
+              : '人脸解锁'
             : types.includes(T.FINGERPRINT)
-              ? '触控 ID'
+              ? ios
+                ? '触控 ID'
+                : '指纹'
               : '密码',
         )
       })
