@@ -3,7 +3,7 @@
 // year's activity, the filters, the trend, the breakdown by model or project, the facts and the
 // token composition, as the computer counts them.
 
-import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
 import { ActivityIndicator, Animated, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useIsFocused, useLocalSearchParams } from 'expo-router'
@@ -55,6 +55,7 @@ import {
   Activity,
   Breakdown,
   EmptyNote,
+  CHART_GRID,
   Facts,
   Filters,
   Footnote,
@@ -272,12 +273,16 @@ export default function UsageScreen() {
 
   // Series slots follow the agent's place in the summary's own agent list, so a period with fewer
   // agents never repaints the rest.
-  const colorOf = (agentId: string) => {
-    const order: readonly string[] = read?.summary.agents ?? []
-    const slot = Math.max(0, order.indexOf(agentId))
-    return agentColor(agentId, c.series[slot % c.series.length]!)
-  }
-  const nameOf = (agentId: string) => agents.get(agentId)?.name ?? agentId
+  // The same functions while what they read holds, so the charts' memos can hold too.
+  const order = read?.summary.agents
+  const colorOf = useCallback(
+    (agentId: string) => {
+      const slot = Math.max(0, ((order ?? []) as readonly string[]).indexOf(agentId))
+      return agentColor(agentId, c.series[slot % c.series.length]!)
+    },
+    [order, c.series],
+  )
+  const nameOf = useCallback((agentId: string) => agents.get(agentId)?.name ?? agentId, [agents])
 
   // The plan window nearest its limit, for the summary's second line.
   const tightest = (() => {
@@ -692,7 +697,7 @@ export default function UsageScreen() {
                 <BarChart
                   values={hourly}
                   height={120}
-                  grid={[0.5, 1]}
+                  grid={CHART_GRID}
                   emphasis={busiest}
                   selected={hour}
                   onSelect={setHour}

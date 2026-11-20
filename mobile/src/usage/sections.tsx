@@ -118,6 +118,7 @@ export function Activity(props: {
     () => days.filter((d) => d.day >= heat.from && d.day < heat.to),
     [days, heat.from, heat.to],
   )
+  const dayStarts = useMemo(() => heatDays.map((d) => d.day), [heatDays])
   const values = useMemo(
     () => heatDays.map((d) => metricValue(d.parts, metric, scope) ?? 0),
     [heatDays, metric, scope],
@@ -186,7 +187,7 @@ export function Activity(props: {
         </View>
       ) : null}
       <Heatmap
-        days={heatDays.map((d) => d.day)}
+        days={dayStarts}
         levels={levels}
         frame={dayCount(range) > 1 ? range : null}
         accessibilityLabel={`活动，过去一年每天的${METRIC_NAMES[kind]}。${facts}`}
@@ -379,6 +380,9 @@ function tickIndices(unit: TrendUnit, n: number): number[] {
   return out
 }
 
+/** The faint lines of a bar chart, at half and all of its tallest bar. */
+export const CHART_GRID = [0.5, 1]
+
 export function Trend(props: {
   unit: TrendUnit | null
   bars: TrendBar[]
@@ -400,6 +404,20 @@ export function Trend(props: {
     setSelected(null)
   }
   const { unit, bars, kind } = props
+  // The same bars while the read holds, so the chart's memoized bars skip a redraw.
+  const { series, colorOf } = props
+  const stacked = useMemo(
+    () =>
+      bars.map((bar) => ({
+        key: String(bar.from),
+        segments: series.map((agentId) => ({
+          key: agentId,
+          value: bar.byAgent[agentId] ?? 0,
+          color: colorOf(agentId),
+        })),
+      })),
+    [bars, series, colorOf],
+  )
   const chosen = selected !== null && selected < bars.length ? selected : null
   const total = bars.reduce((sum, bar) => sum + bar.total, 0)
   const peak = bars.reduce<number | null>(
@@ -420,15 +438,8 @@ export function Trend(props: {
       <>
         <StackedBarChart
           height={150}
-          grid={[0.5, 1]}
-          bars={bars.map((bar) => ({
-            key: String(bar.from),
-            segments: props.series.map((agentId) => ({
-              key: agentId,
-              value: bar.byAgent[agentId] ?? 0,
-              color: props.colorOf(agentId),
-            })),
-          }))}
+          grid={CHART_GRID}
+          bars={stacked}
           ticks={Object.fromEntries(
             tickIndices(unit, bars.length).map((i) => [i, tickText(unit, bars[i]!.from)]),
           )}
