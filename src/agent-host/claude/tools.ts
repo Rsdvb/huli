@@ -4,6 +4,7 @@
 import path from 'node:path'
 import type { ContentRef, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
 import { t } from '../i18n'
+import { blockRef as otherRef, blockText as otherText } from '../mcp-content'
 import { resultMarkdown } from '../result-text'
 import { toLf } from '../session-updates'
 import type { ContentBlock, ToolResultBlock } from './sdk'
@@ -259,7 +260,17 @@ export function resultParts(result: ToolResultBlock): { text: string; refs: Cont
     if (block.type === 'text') texts.push((block as { text: string }).text)
     else {
       const ref = blockRef(block)
-      if (ref) refs.push(ref)
+      if (ref) {
+        refs.push(ref)
+        continue
+      }
+      // Huli: a resource, a document, a search result, a tool a search found, a sound.
+      const other = otherText(block)
+      if (other !== null) texts.push(other)
+      else {
+        const shown = otherRef(block)
+        if (shown) refs.push(shown)
+      }
     }
   }
   return { text: texts.join('\n'), refs }

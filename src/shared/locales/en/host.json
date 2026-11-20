@@ -397,7 +397,9 @@
     "unknown": "Unknown content",
     "terminal": "Terminal {{id}}",
     "unknownTool": "Unknown tool content",
-    "toolCall": "Tool call"
+    "toolCall": "Tool call",
+    "toolReference": "Found tool: {{name}}",
+    "document": "Document: {{name}}"
   },
   "antigravity": {
     "plan": {

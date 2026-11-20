@@ -293,6 +293,42 @@ describe("the API's own tools", () => {
   })
 })
 
+describe("a result's other blocks", () => {
+  it('keeps resources, links, documents, search results and the tools a search found', () => {
+    const run = new Run().feed(
+      toolCall('t1', 'mcp__docs__fetch', { id: 'a' }),
+      toolResult('t1', [
+        { type: 'resource', resource: { uri: 'file:///notes.md', text: 'Notes body' } },
+        { type: 'resource_link', uri: 'https://docs.dev/guide', name: 'guide', title: 'Guide' },
+        {
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' },
+          title: 'Spec',
+        },
+        {
+          type: 'search_result',
+          source: 'https://a.dev',
+          title: 'A',
+          content: [{ type: 'text', text: 'About A' }],
+        },
+        { type: 'tool_reference', tool_name: 'mcp__kettu__browser_click' },
+      ]),
+    )
+    const entry = run.entry('t:t1')
+    expect(entry).toMatchObject({ status: 'completed' })
+    const content = entry?.kind === 'tool' ? entry.content : []
+    expect(content[0]).toMatchObject({ type: 'markdown' })
+    const markdown = content[0]?.type === 'markdown' ? content[0].markdown : ''
+    expect(markdown).toContain('Notes body')
+    expect(markdown).toContain('[A](https://a.dev)')
+    expect(markdown).toContain('Found tool: Kite · Browser click')
+    expect(content.slice(1)).toEqual([
+      { type: 'ref', ref: { kind: 'link', uri: 'https://docs.dev/guide', name: 'Guide' } },
+      { type: 'ref', ref: { kind: 'unsupported', label: 'Document: Spec' } },
+    ])
+  })
+})
+
 describe('a refusal', () => {
   it('says the request went to the fallback model, and why the first refused', () => {
     const run = new Run().feed(

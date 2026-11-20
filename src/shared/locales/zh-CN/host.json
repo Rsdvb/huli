@@ -394,7 +394,9 @@
     "unknown": "未知内容",
     "terminal": "终端 {{id}}",
     "unknownTool": "未知工具内容",
-    "toolCall": "工具调用"
+    "toolCall": "工具调用",
+    "toolReference": "找到工具：{{name}}",
+    "document": "文档：{{name}}"
   },
   "antigravity": {
     "plan": {
