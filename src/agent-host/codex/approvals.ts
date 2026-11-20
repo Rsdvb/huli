@@ -13,7 +13,7 @@ import type {
 import { commandSteps, unsafeArgvPrefix, unsafeCommand } from '../command-safety'
 import type { OptionAnswer, PermissionAnswer, PermissionRequest } from '../connection'
 import { formFields, isWebUrl } from '../elicitation'
-import { t } from '../i18n'
+import { hasMessage, t } from '../i18n'
 import { answerWords } from '../question-answers'
 import type { MapperContext, MapperOutput } from '../session-updates'
 import { replyText, type AsyncQuestionItem, type QuestionReply } from './async-questions'
@@ -23,6 +23,7 @@ import type {
   CommandExecutionApprovalDecision,
   CommandExecutionRequestApprovalParams,
   FileChangeRequestApprovalParams,
+  FileSystemSandboxEntry,
   McpServerElicitationRequestParams,
   PermissionsRequestApprovalParams,
   RequestId,
@@ -74,9 +75,36 @@ function permissionsText(permissions: AdditionalPermissions | null | undefined):
   for (const file of permissions?.fileSystem?.write ?? []) {
     lines.push(t('codex.approval.write', { path: file }))
   }
+  // Huli: Codex 0.170 lists paths with their access instead, globs and special places among them.
+  for (const entry of permissions?.fileSystem?.entries ?? []) {
+    const path = sandboxPath(entry.path)
+    if (path === null) continue
+    if (entry.access === 'read') lines.push(t('codex.approval.read', { path }))
+    else if (entry.access === 'write') lines.push(t('codex.approval.write', { path }))
+    else if (entry.access === 'deny') lines.push(t('codex.approval.deny', { path }))
+  }
   return lines.length > 0
     ? [{ type: 'markdown', markdown: lines.map((l) => `- ${l}`).join('\n') }]
     : []
+}
+
+/** Huli: a path of a sandbox entry as the card names it: the path, the glob, or the place. */
+function sandboxPath(path: FileSystemSandboxEntry['path'] | null | undefined): string | null {
+  switch (path?.type) {
+    case 'path':
+      return path.path
+    case 'glob_pattern':
+      return path.pattern
+    case 'special': {
+      const { kind, subpath } = path.value
+      if (kind === 'unknown') return path.value.path ?? null
+      const key = `codex.approval.place.${kind}`
+      const place = hasMessage(key) ? t(key as 'codex.approval.place.root') : kind
+      return subpath ? `${place}/${subpath}` : place
+    }
+    default:
+      return null
+  }
 }
 
 /**

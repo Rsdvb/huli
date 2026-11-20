@@ -603,7 +603,15 @@
       "write": "写入 {{path}}",
       "permissionsTitle": "更多权限",
       "elicitationTitle": "{{server}} 请求继续",
-      "allowEdit": "允许这次修改"
+      "allowEdit": "允许这次修改",
+      "deny": "禁止访问 {{path}}",
+      "place": {
+        "root": "整个文件系统",
+        "minimal": "每个命令都需要的系统文件",
+        "project_roots": "项目文件夹",
+        "tmpdir": "临时文件夹",
+        "slash_tmp": "/tmp"
+      }
     },
     "tool": {
       "readFile": "读取文件 '{{path}}'",

@@ -608,7 +608,15 @@
       "write": "Write {{path}}",
       "permissionsTitle": "More permissions",
       "elicitationTitle": "{{server}} asks to continue",
-      "allowEdit": "Allow this edit"
+      "allowEdit": "Allow this edit",
+      "deny": "No access to {{path}}",
+      "place": {
+        "root": "the whole file system",
+        "minimal": "the system files every command needs",
+        "project_roots": "the project's folders",
+        "tmpdir": "the temporary folder",
+        "slash_tmp": "/tmp"
+      }
     },
     "tool": {
       "readFile": "Read file '{{path}}'",

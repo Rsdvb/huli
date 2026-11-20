@@ -550,7 +550,24 @@ export interface NetworkPolicyAmendment {
 
 export interface AdditionalPermissions {
   network?: { enabled?: boolean | null } | null
-  fileSystem?: { read?: string[] | null; write?: string[] | null } | null
+  fileSystem?: {
+    read?: string[] | null
+    write?: string[] | null
+    /** Since Codex 0.170, in place of `read` and `write`: each path with its access. */
+    entries?: FileSystemSandboxEntry[] | null
+  } | null
+}
+
+/** A path, a glob or one of the sandbox's special places, and what may be done there. */
+export interface FileSystemSandboxEntry {
+  access: 'read' | 'write' | 'deny'
+  path:
+    | { type: 'path'; path: string }
+    | { type: 'glob_pattern'; pattern: string }
+    | {
+        type: 'special'
+        value: { kind: string; path?: string; subpath?: string | null }
+      }
 }
 
 export interface CommandExecutionRequestApprovalParams {

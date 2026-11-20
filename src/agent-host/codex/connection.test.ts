@@ -1252,6 +1252,45 @@ describe('approvals', () => {
     expect(await answer).toEqual({ permissions, scope: 'turn' })
     expect(t.entry('t:perm-1')).toMatchObject({ toolKind: 'other' })
   })
+
+  it("lists Codex 0.170's file system entries, globs and special places among them", async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    const t = threadTarget((request) => ({ optionId: request.options[0]!.id }))
+    connection.register('thread-1', t.target)
+    const permissions = {
+      fileSystem: {
+        entries: [
+          { access: 'read', path: { type: 'path', path: '/data/in.csv' } },
+          { access: 'write', path: { type: 'glob_pattern', pattern: 'out/**' } },
+          { access: 'deny', path: { type: 'special', value: { kind: 'root' } } },
+          { access: 'write', path: { type: 'special', value: { kind: 'tmpdir' } } },
+        ],
+      },
+    }
+    const { answer } = server.request('item/permissions/requestApproval', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'perm-2',
+      cwd: '/project',
+      reason: null,
+      permissions,
+    })
+    expect(await answer).toEqual({ permissions, scope: 'turn' })
+    expect(t.entry('t:perm-2')).toMatchObject({
+      content: [
+        {
+          type: 'markdown',
+          markdown: [
+            '- Read /data/in.csv',
+            '- Write out/**',
+            '- No access to the whole file system',
+            '- Write the temporary folder',
+          ].join(String.fromCharCode(10)),
+        },
+      ],
+    })
+  })
 })
 
 describe('a question Codex asks without waiting', () => {
