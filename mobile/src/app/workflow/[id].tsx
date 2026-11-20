@@ -34,6 +34,7 @@ import { Clamp } from '../../ui/session/Clamp'
 import { MONO } from '../../ui/session/palette'
 import { SkeletonRows } from '../../ui/Skeleton'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
+import { agentLabel } from '../../agentName'
 
 interface Read {
   entry: WireWorkflowEntry
@@ -232,7 +233,7 @@ function Approval(props: {
     entry.approval === 'changed'
       ? '批准这个版本之前，它不能开始需求。再看一遍每一步和它的文件，然后决定。'
       : origin?.kind === 'agent'
-        ? `${host.agents.get(origin.agentId)?.name ?? origin.agentId} 在一个会话里用 create_workflow 写了它。 ${check}`
+        ? `${agentLabel(origin.agentId, host.agents.get(origin.agentId)?.name)} 在一个会话里用 create_workflow 写了它。 ${check}`
         : origin?.kind === 'community'
           ? `从插件市场添加，发布者 ${origin.handle}，版本 ${origin.version}。 ${check}`
           : origin?.kind === 'github'

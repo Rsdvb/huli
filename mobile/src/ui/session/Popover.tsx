@@ -70,6 +70,8 @@ export interface MenuRow {
   checked?: boolean
   destructive?: boolean
   disabled?: boolean
+  /** A line that tells, as a menu's head: not a button, yet drawn at full strength. */
+  info?: boolean
   /** Opens this page of the menu. */
   page?: string
   /** A switch at the row's end; pressing the row flips it, and the menu stays open. */
@@ -637,8 +639,8 @@ function Row(props: { row: MenuRow; onPush(page: string): void; onClose(): void 
   return (
     <Pressable
       onPress={press}
-      disabled={row.disabled}
-      accessibilityRole={row.toggle !== undefined ? 'switch' : 'menuitem'}
+      disabled={row.disabled || row.info}
+      accessibilityRole={row.info ? 'text' : row.toggle !== undefined ? 'switch' : 'menuitem'}
       accessibilityState={{
         disabled: !!row.disabled,
         ...(row.checked !== undefined ? { checked: row.checked } : {}),
@@ -647,7 +649,7 @@ function Row(props: { row: MenuRow; onPush(page: string): void; onClose(): void 
       accessibilityLabel={[row.label, row.subtitle, row.detail].filter(Boolean).join('，')}
       style={({ pressed }) => [
         styles.row,
-        (pressed || row.checked) && { backgroundColor: s.menuActive },
+        (pressed || row.checked) && !row.info && { backgroundColor: s.menuActive },
         row.disabled && { opacity: 0.4 },
       ]}
     >

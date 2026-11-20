@@ -84,7 +84,8 @@ function subtitleOf(row: MenuRow): string {
 function Row(props: { row: MenuRow; built: Built; depth: number; path: string }) {
   const { row, built, path } = props
   const press = () => act(built, path)
-  const mods = off(row.disabled)
+  // The system draws a row that is no button as a disabled one, its menus' own way for a head.
+  const mods = off(row.disabled || row.info)
   const sf = row.icon?.sf
   const subtitle = subtitleOf(row)
   if (row.page && !row.disabled) {
@@ -327,7 +328,7 @@ function readMenu(
     }
     if (!row) continue
     out.push(
-      `${entry.key}|${row.label}|${row.icon?.sf ?? ''}|${subtitleOf(row)}|${String(row.checked)}|${String(row.toggle)}|${row.disabled ? 1 : 0}|${row.destructive ? 1 : 0}|${row.page ?? ''}`,
+      `${entry.key}|${row.label}|${row.icon?.sf ?? ''}|${subtitleOf(row)}|${String(row.checked)}|${String(row.toggle)}|${row.disabled || row.info ? 1 : 0}|${row.destructive ? 1 : 0}|${row.page ?? ''}`,
     )
     if (row.page && !row.disabled) {
       const popover = source.popover

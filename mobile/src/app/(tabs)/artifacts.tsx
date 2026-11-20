@@ -50,6 +50,7 @@ import {
   type as typeScale,
   useTokens,
 } from '../../ui/tokens'
+import { agentLabel } from '../../agentName'
 
 type Sort = 'updated' | 'created' | 'name'
 
@@ -420,7 +421,7 @@ function ArtifactsTab() {
     },
     ...agents.map((id) => ({
       key: id,
-      label: hostAgents.get(id)?.name ?? id,
+      label: agentLabel(id, hostAgents.get(id)?.name),
       checked: agentId === id,
       onPress: () => {
         haptic.select()
