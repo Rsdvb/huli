@@ -1177,6 +1177,8 @@ export class ClaudeMapper {
           },
         ]
       }
+      case 'session_writes_lost':
+        return this.writesLost(message)
       case 'permission_denied':
         return this.permissionDenied(message)
       case 'model_refusal_fallback':
@@ -1379,6 +1381,28 @@ export class ClaudeMapper {
         'info',
         t(`claude.notice.${key}`, { from: from || '?', to }),
         refusal.explanation ?? undefined,
+      ),
+    ]
+  }
+
+  /**
+   * Huli: Claude Code could not save part of the session, as the disk was full: a resume may miss
+   * what it lost, so the thread says so.
+   */
+  private writesLost(message: SystemMessage): Delivery[] {
+    const lost = Array.isArray(message.lost) ? (message.lost as unknown[]) : []
+    const why = message.error_code === 'EDQUOT' ? 'quota' : 'full'
+    const parts = [
+      lost.includes('transcript') ? t('claude.notice.writesLost.transcript') : null,
+      lost.includes('global_config') ? t('claude.notice.writesLost.config') : null,
+    ].filter((part): part is string => part !== null)
+    return [
+      noticeDelivery(
+        this.sessionId,
+        `n:lost:${String(message.uuid ?? Date.now())}`,
+        'error',
+        t(`claude.notice.writesLost.${why}`),
+        parts.length > 0 ? parts.join(' ') : undefined,
       ),
     ]
   }

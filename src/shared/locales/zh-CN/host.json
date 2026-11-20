@@ -491,7 +491,13 @@
       "mcpNeedsAuth_other": "MCP 服务器 {{names}} 需要登录",
       "mcpNeedsAuthHint": "在终端里的 Claude Code 中用 /mcp 登录；登录前用不了它的工具。",
       "refusalFallback": "{{from}} 拒绝了请求，Claude Code 改用 {{to}} 重试",
-      "refusalFallbackLocal": "{{from}} 拒绝了一条回复，Claude Code 改用 {{to}} 重试了这一条"
+      "refusalFallbackLocal": "{{from}} 拒绝了一条回复，Claude Code 改用 {{to}} 重试了这一条",
+      "writesLost": {
+        "full": "磁盘已满，Claude Code 没能保存这个会话的全部内容",
+        "quota": "磁盘配额已用完，Claude Code 没能保存这个会话的全部内容",
+        "transcript": "这次对话有一部分没有写进会话记录，之后恢复会话时可能会缺失。",
+        "config": "对 Claude Code 设置文件 ~/.claude.json 的更改没有保存。"
+      }
     },
     "retryReason": {
       "overloaded": "服务繁忙",

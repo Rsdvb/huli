@@ -350,6 +350,26 @@ describe('a live compaction', () => {
   })
 })
 
+describe('lost writes', () => {
+  it('say the disk was full and what of the session Claude Code could not save', () => {
+    const run = new Run().feed(
+      system('session_writes_lost', {
+        error_code: 'ENOSPC',
+        lost: ['transcript'],
+        transcript_session_ids: [SESSION],
+      }),
+    )
+    expect(notices(run)).toMatchObject([
+      {
+        severity: 'error',
+        title: 'The disk is full, so Claude Code could not save all of this session',
+        description:
+          'Part of this conversation is missing from its history, so resuming it may lose it.',
+      },
+    ])
+  })
+})
+
 describe('a refusal', () => {
   it('says the request went to the fallback model, and why the first refused', () => {
     const run = new Run().feed(
