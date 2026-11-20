@@ -493,7 +493,7 @@ export function PlanSettled(props: { entry: ToolEntry }) {
         <View style={styles.moved}>
           <Icon icon={G.right} size={11} color={c.textTertiary} weight="semibold" />
           <Text style={[styles.small, { color: c.textSecondary }]}>
-            模式从 <Text style={{ fontWeight: '700' }}>{planMode ?? 'Plan'}</Text> 改为{' '}
+            模式从 <Text style={{ fontWeight: '700' }}>{planMode ?? '计划模式'}</Text> 改为{' '}
             <Text style={{ fontWeight: '700' }}>{mode}</Text>
           </Text>
         </View>

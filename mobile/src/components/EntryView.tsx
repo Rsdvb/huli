@@ -157,6 +157,13 @@ function AnsweredTool(props: { entry: ToolEntry }) {
   )
 }
 
+/** A question of the agent's that waits, by its words or the agent's name. */
+function AskingLine(props: { question: string | undefined }) {
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
+  const agent = useAgentName(sessionId)
+  return <WaitingLine icon={G.hand} text={props.question ?? `${agent} 在问你`} />
+}
+
 /** A small line of the host's own record, with an icon and, when it leads somewhere, a chevron. */
 function Note(props: {
   icon: IconSpec
@@ -258,7 +265,7 @@ export const EntryView = memo(function EntryView(props: {
       const waiting = !!entry.permission && !entry.permissionResult
       if (waiting && entry.permission?.plan) return <PlanWaitingLine entry={entry} />
       if (waiting && (entry.permission?.questions?.length || entry.question !== undefined)) {
-        return <WaitingLine icon={G.hand} text={entry.question ?? 'Agent 在问你'} />
+        return <AskingLine question={entry.question} />
       }
       if (waiting) return <ToolRow entry={entry} />
       if (workflowCardOf(entry)) return <WorkflowToolCard entry={entry} />
