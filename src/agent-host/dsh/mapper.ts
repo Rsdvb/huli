@@ -10,20 +10,31 @@ import type {
   ToolContent,
   ToolEntry,
   ToolKind,
+  UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { fenced } from '../session-updates'
 import { t } from '../i18n'
 import { isClaudeRowlessCall, isClaudeRowWhenFailed } from '../plan-tool'
+import { appendContent, imageCount, replayedAttachment } from '../replayed-content'
+import { EMBEDDED_FILE } from './history'
 import {
   addEntry,
   commandDescription,
   toLf,
   toolEffects,
+  withoutAhead,
   type MapperContext,
   type MapperOutput,
 } from '../session-updates'
-import type { ContentBlock, EventData, FileChangeMeta, SessionEvent, TodoItem } from './protocol'
+import type {
+  ContentBlock,
+  EventData,
+  FileChangeMeta,
+  SessionEvent,
+  TodoItem,
+  WireMessage,
+} from './protocol'
 
 /** Output a tool printed, its start cut once it grows past this. */
 const OUTPUT_LIMIT = 64 * 1024
@@ -215,6 +226,12 @@ export function toolFacts(name: string, args: Record<string, unknown>, cwd: stri
   }
 }
 
+/** A `file:` URI for a path as the prompt wrote it, `/C:/x` from a Windows link included. */
+function fileUri(file: string): string {
+  const slashed = file.replace(/\\/g, '/')
+  return `file://${encodeURI(slashed.startsWith('/') ? slashed : `/${slashed}`)}`
+}
+
 function isFileChange(meta: unknown): meta is FileChangeMeta {
   if (typeof meta !== 'object' || meta === null) return false
   const value = meta as Record<string, unknown>
@@ -296,6 +313,101 @@ export class SessionMapper {
       }
     }
     return found
+  }
+
+  /**
+   * A message the user wrote, from a session's history: its text without what Kettu sent ahead
+   * of it, a file Kettu embedded as its attachment again, and images with the bytes dsh kept of
+   * them, by attachment id as base64. Null for a message with nothing to show.
+   */
+  prompt(
+    message: WireMessage,
+    ctx: MapperContext,
+    images: ReadonlyMap<string, string>,
+  ): MapperOutput | null {
+    const out = output()
+    const id = ctx.nextId()
+    let content: UserContent[] = []
+    let attachments = 0
+    const attach = (fields: Parameters<typeof replayedAttachment>[2]): string => {
+      const attachment = replayedAttachment(id, ++attachments, fields)
+      content = [...content, { type: 'ref', ref: { kind: 'attachment', attachment } }]
+      return attachment.id
+    }
+    for (const block of message.content ?? []) {
+      switch (block.type) {
+        case 'text': {
+          const typed = withoutAhead(block.text)
+          const file = EMBEDDED_FILE.exec(typed)
+          if (file) {
+            attach({
+              type: 'file',
+              name: path.posix.basename(file[1]!.replace(/\\/g, '/')) || file[1]!,
+              uri: fileUri(file[1]!),
+              mimeType: null,
+              size: null,
+              sent: 'embedded',
+            })
+          } else if (typed.trim() !== '') {
+            const joined = content[content.length - 1]?.type === 'text' ? `\n\n${typed}` : typed
+            content = appendContent(content, [{ type: 'text', text: joined }])
+          }
+          break
+        }
+        case 'image': {
+          const ref = block.attachment
+          const attachmentId = attach({
+            type: 'image',
+            name: ref.name ?? t('content.image', { number: imageCount(content) + 1 }),
+            uri: null,
+            mimeType: ref.mediaType,
+            size: typeof ref.bytes === 'number' ? ref.bytes : null,
+            sent: 'image',
+          })
+          const data = images.get(ref.attachmentId)
+          if (data) {
+            out.effects.push({
+              kind: 'replayImage',
+              entryId: id,
+              attachmentId,
+              mimeType: ref.mediaType,
+              data,
+            })
+          }
+          break
+        }
+        case 'file':
+          attach({
+            type: 'file',
+            name: block.attachment.name,
+            uri: null,
+            mimeType: null,
+            size: typeof block.attachment.bytes === 'number' ? block.attachment.bytes : null,
+            sent: 'embedded',
+          })
+          break
+      }
+    }
+    if (content.length === 0) return null
+    addEntry(ctx, out, { kind: 'user', id, content })
+    return out
+  }
+
+  /**
+   * After a replay, the calls the history holds no result for, as a session dsh stopped mid-turn
+   * leaves them, end as cancelled.
+   */
+  closeOpen(ctx: MapperContext): MapperOutput {
+    const out = output()
+    for (const callId of this.calls.keys()) {
+      const id = `t:${callId}`
+      const entry = ctx.thread.byId[id]
+      if (entry?.kind !== 'tool' || (entry.status !== 'in_progress' && entry.status !== 'pending'))
+        continue
+      out.patches.push({ op: 'entry.update', id, changes: { status: 'cancelled' } })
+      toolEffects(out, callId, id, entry.status, { ...entry, status: 'cancelled' })
+    }
+    return out
   }
 
   /** Maps one event; null for one this mapper does not take. */
@@ -488,7 +600,8 @@ export class SessionMapper {
       for (const diff of diffs) {
         content.push({
           type: 'diff',
-          path: diff.path,
+          // dsh before format 4 wrote an edit's path as the model gave it.
+          path: absolute(this.cwd, diff.path),
           oldText: diff.oldText,
           newText: diff.newText,
         })

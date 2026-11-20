@@ -870,6 +870,10 @@
     "subagent": {
       "failed": "子智能体结束：{{reason}}"
     },
+    "history": {
+      "newerFormat": "这个会话由更新版本的 DeepSeek Harness 保存（格式 {{version}}），当前版本还读不了。",
+      "olderFormat": "这个会话由早期版本的 DeepSeek Harness 保存（格式 {{version}}），这里读不了它的记录。"
+    },
     "auth": {
       "account": "DeepSeek 账号",
       "accountDescription": "运行 `dsh web`，在它的网页里登录 DeepSeek"

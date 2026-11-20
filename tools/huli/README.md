@@ -123,7 +123,7 @@ Huli's own files:
 Hooks into upstream files, one or two lines each:
 
 - `src/agent-host/connection.ts` (`ListedEverywhere`, the optional `listAllSessions`), its
-  implementations in `codex/connection.ts` and `acp/connection.ts`.
+  implementations in `codex/connection.ts`, `acp/connection.ts` and `dsh/connection.ts`.
 - `src/agent-host/sessions.ts` (`agentSessionIds`; `importSession` takes an optional `kept`, the
   title, times, pin and archive, and the `KeptField` type), `src/agent-host/host.ts` (the handler,
   and `sessions.import` taking over a listed session's title and times through `keptFor`; the
@@ -615,6 +615,11 @@ one once upstream fixes the same thing:
   its own output.
 - `src/agent-host/sessions.ts` (`planProgress`): the latest plan is looked up again only after a
   patch that can change it, not by scanning the whole thread on every update.
+- `src/agent-host/dsh/` (`history.ts`, and `listSessions`, `listAllSessions` and `loadSession` in
+  `connection.ts`): DeepSeek Harness offers its sessions for import, read from dsh's own logs
+  (`$DSH_HOME/sessions/--<folder>--/<id>/session.v4.jsonl.zstd`; format 3 lifted, others left
+  out), and an import replays the user's messages, replies, thoughts, tool calls with their
+  results, the plan and subagents' sessions before it resumes in dsh.
 - `src/renderer/src/app/crash-screen.tsx`: a render error shows a recoverable screen.
 - `features/files/change-badge.tsx` (U for untracked), `features/routines/routines.css` (the
   state column's width).
