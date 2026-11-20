@@ -21,7 +21,8 @@ import { menuGroups, type MenuItem, type MenuNode } from './menu'
 /** Whether long presses open the system's context menu here: always on iOS. */
 export const SYSTEM_MENUS = true
 
-const off = (on: boolean | undefined) => (on ? [disabledModifier(true)] : undefined)
+const OFF = [disabledModifier(true)]
+const off = (on: boolean | undefined) => (on ? OFF : undefined)
 
 function Item(props: { item: MenuItem; depth: number }) {
   const { item } = props
@@ -100,7 +101,9 @@ function Nodes(props: { nodes: readonly MenuNode[]; depth: number; title?: strin
 /**
  * A view whose long press opens the system's context menu, the view itself lifting as its preview.
  * `children` gets the long press to wire on Android; here it gets none, so the view's own press
- * still works and only the system's long press opens the menu.
+ * still works and only the system's long press opens the menu. With no items, or disabled, the
+ * view stays in the same views with no menu, which SwiftUI opens none for: drawn bare, it was
+ * mounted again as its menu came, as a reply's does when it is done.
  */
 export function ContextMenu(props: {
   items: readonly MenuNode[]
@@ -115,7 +118,7 @@ export function ContextMenu(props: {
   fit?: 'width' | 'content'
   children: (longPress: (() => void) | undefined) => ReactElement
 }) {
-  if (props.disabled || props.items.length === 0) return props.children(undefined)
+  const shown = !props.disabled && props.items.length > 0
   return (
     <Host style={props.style} ignoreSafeArea="all">
       <SystemContextMenu>
@@ -127,9 +130,11 @@ export function ContextMenu(props: {
             {props.children(undefined)}
           </RNHostView>
         </SystemContextMenu.Trigger>
-        <SystemContextMenu.Items>
-          <Nodes nodes={props.items} depth={0} {...(props.title ? { title: props.title } : {})} />
-        </SystemContextMenu.Items>
+        {shown ? (
+          <SystemContextMenu.Items>
+            <Nodes nodes={props.items} depth={0} {...(props.title ? { title: props.title } : {})} />
+          </SystemContextMenu.Items>
+        ) : null}
       </SystemContextMenu>
     </Host>
   )
@@ -145,17 +150,22 @@ export function TapMenu(props: {
   disabled?: boolean
   children: (open: (() => void) | undefined) => ReactElement
 }) {
-  if (props.disabled || props.items.length === 0) return props.children(undefined)
+  // Disabled, the control stays in the same views, under a menu that cannot open, so it is not
+  // mounted again as that changes.
+  const shown = !props.disabled && props.items.length > 0
   return (
     <Host matchContents ignoreSafeArea="all">
       <Menu
+        {...(shown ? {} : { modifiers: OFF })}
         label={
           <RNHostView matchContents>
             <View pointerEvents="none">{props.children(undefined)}</View>
           </RNHostView>
         }
       >
-        <Nodes nodes={props.items} depth={0} {...(props.title ? { title: props.title } : {})} />
+        {shown ? (
+          <Nodes nodes={props.items} depth={0} {...(props.title ? { title: props.title } : {})} />
+        ) : null}
       </Menu>
     </Host>
   )

@@ -7,7 +7,8 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
-import { call, errorText, sessionFolder } from '../git'
+import { call, sessionFolder } from '../git'
+import { hostErrorText } from '../hostErrors'
 import { PictureStrip, pictureOf, type Picture } from '../components/Pictures'
 import { useLink, useSession } from '../host'
 import { SessionRows } from '../ui/session/context'
@@ -55,7 +56,8 @@ function Block(props: { label: string; text: string; tone?: 'plain' | 'muted' })
         </PressScale>
         <PressScale
           onPress={() =>
-            void copyText(props.text).then(() => {
+            void copyText(props.text, null).then((ok) => {
+              if (!ok) return
               setCopied(true)
               setTimeout(() => setCopied(false), 1500)
             })
@@ -89,6 +91,9 @@ function Block(props: { label: string; text: string; tone?: 'plain' | 'muted' })
   )
 }
 
+/** How often at most a running call is read again while it changes. */
+const READ_EVERY = 400
+
 export default function ToolScreen() {
   const { sessionId, entryId } = useLocalSearchParams<{ sessionId: string; entryId: string }>()
   const { c } = useSessionTokens()
@@ -97,15 +102,19 @@ export default function ToolScreen() {
   const root = summary && !summary.scratch ? sessionFolder(summary) : null
   const [entry, setEntry] = useState<ThreadEntry | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
   const load = useCallback(() => {
-    call(link, 'sessions.entry', { sessionId, entryId }).then(
-      (next) => {
-        setEntry(next)
-        setError(null)
-      },
-      (failed: unknown) => setError(errorText(failed, '没能读取这次调用。')),
-    )
+    setLoading(true)
+    call(link, 'sessions.entry', { sessionId, entryId })
+      .then(
+        (next) => {
+          setEntry(next)
+          setError(null)
+        },
+        (failed: unknown) => setError(hostErrorText(failed, '没能读取这次调用。')),
+      )
+      .finally(() => setLoading(false))
   }, [link, sessionId, entryId])
 
   useEffect(load, [load])
@@ -113,17 +122,28 @@ export default function ToolScreen() {
   // While it runs, each change of it in the session's patches reads it again.
   const tool = entry?.kind === 'tool' ? entry : null
   const settled = tool !== null && tool.status !== 'pending' && tool.status !== 'in_progress'
+  // A call that streams its output changes many times a second: it is read again at most every
+  // READ_EVERY, once the changes since the last read are in.
   useEffect(() => {
     if (settled) return
-    return link.onHostEvent((raw) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = link.onHostEvent((raw) => {
       const event = raw as HostEvent
       if (event.type !== 'session.patches' || event.batch.sessionId !== sessionId) return
-      if (event.batch.patches.some((p) => 'id' in p && p.id === entryId)) load()
+      if (timer || !event.batch.patches.some((p) => 'id' in p && p.id === entryId)) return
+      timer = setTimeout(() => {
+        timer = null
+        load()
+      }, READ_EVERY)
     })
+    return () => {
+      off()
+      if (timer) clearTimeout(timer)
+    }
   }, [link, sessionId, entryId, settled, load])
 
   let body: ReactElement
-  if (error && !entry) {
+  if (error && !entry && !loading) {
     body = <StateView text={error} tone="danger" retry={load} />
   } else if (!entry) {
     body = <StateView loading />

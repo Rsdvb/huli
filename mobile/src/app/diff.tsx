@@ -7,7 +7,8 @@ import { StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { DiffView } from '../components/DiffView'
 import { diffTexts, handedDiff, type Diff } from '../diff'
-import { call, errorText, sessionFolder, useChanges } from '../git'
+import { call, sessionFolder, useChanges } from '../git'
+import { hostErrorText } from '../hostErrors'
 import { useConnected, useHasSessions, useLink, useSession } from '../host'
 import { baseName, dirName, relativePath } from '../ui/session/format'
 import { GlassHeader } from '../ui/session/GlassHeader'
@@ -77,7 +78,7 @@ export default function DiffScreen() {
         await nextFrame()
         if (live) setShown({ kind: 'diff', diff: diffTexts(file.oldText, file.newText) })
       } catch (error) {
-        if (live) setShown({ kind: 'error', text: errorText(error, '读不到这个文件的改动') })
+        if (live) setShown({ kind: 'error', text: hostErrorText(error, '读不到这个文件的改动。') })
       }
     })()
     return () => {
@@ -116,7 +117,15 @@ export default function DiffScreen() {
       ) : !shown ? (
         <StateView loading />
       ) : shown.kind === 'error' ? (
-        <StateView text={shown.text} tone="danger" retry={() => setAttempt((n) => n + 1)} />
+        <StateView
+          text={shown.text}
+          tone="danger"
+          retry={() => {
+            // The spinner shows while it reads again, not the error it had.
+            setShown(null)
+            setAttempt((n) => n + 1)
+          }}
+        />
       ) : shown.kind === 'note' ? (
         <StateView text={shown.text} />
       ) : shown.diff.rows.length === 0 ? (

@@ -8,6 +8,7 @@ import { call } from '../../git'
 import { useLink } from '../../host'
 import { haptic } from '../../ui/session/feedback'
 import { useSessionTokens } from '../../ui/session/palette'
+import { useDisclosure } from '../../ui/session/disclosure'
 import { useAgentName } from './AccessEntries'
 import { AskCard, E, kit, QuietLine, useSender } from './kit'
 
@@ -354,7 +355,7 @@ function LinkCard(props: {
 export function ElicitationSettled(props: { entry: ToolEntry }) {
   const { entry } = props
   const { c } = useSessionTokens()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(`elicitation:${entry.id}`)
   const asked = entry.elicitation!
   const result = entry.permissionResult
   const accepted =

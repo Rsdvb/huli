@@ -37,7 +37,7 @@ export function useDisclosure(
   key: string,
   initial = false,
 ): [boolean, (next: boolean | ((was: boolean) => boolean)) => void] {
-  const { sessionId } = useSessionRows()
+  const { sessionId } = useSessionRows((r) => ({ sessionId: r.sessionId }))
   const full = `${sessionId}\n${key}`
   const open = useSyncExternalStore(
     useCallback((listener: () => void) => subscribe(full, listener), [full]),

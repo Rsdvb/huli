@@ -73,6 +73,17 @@ export function SubagentMenu(props: { parentId: string; children: ReactElement }
                   running > 0 ? `这个会话的子 Agent · ${running} 个运行中` : '这个会话的子 Agent',
               },
               ...listed.map(row),
+              // The switch alone read as a menu that failed to load: say what is hidden.
+              ...(listed.length === 0
+                ? [
+                    {
+                      key: 'none',
+                      label: '没有在运行的子 Agent',
+                      ...(all.length > 0 ? { subtitle: `${all.length} 个已结束` } : {}),
+                      disabled: true,
+                    },
+                  ]
+                : []),
               { kind: 'divider', key: 'end' },
               {
                 key: 'finished',

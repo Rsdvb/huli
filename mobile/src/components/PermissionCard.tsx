@@ -217,7 +217,7 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
       {preview.length > 0 && (
         <View style={[styles.preview, { backgroundColor: c.fill }]}>
           <Text style={[styles.previewTitle, { color: c.textTertiary }]}>
-            涉及的内容 <Text style={{ fontVariant: ['tabular-nums'] }}>{preview.length}</Text>
+            涉及的内容 · <Text style={{ fontVariant: ['tabular-nums'] }}>{preview.length}</Text> 项
           </Text>
           {shown.map((item) => {
             const edit = item.edit
@@ -445,7 +445,8 @@ const styles = StyleSheet.create({
   },
   cwd: { fontSize: 11.5, alignSelf: 'flex-end' },
   optionNote: { fontSize: 12, lineHeight: 17, marginTop: 8 },
-  row: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  // Four answers do not fit a phone's width on one line: they wrap, 拒绝 included.
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
   text: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,

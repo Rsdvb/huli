@@ -44,6 +44,12 @@ export function GlassHeader(props: {
   /** Where a menu the title opens is anchored. */
   titleAnchor?: RefObject<ViewHandle | null>
   right?: ReactNode
+  /**
+   * How far below the bar what else floats there reaches, such as the session's chips and plan
+   * pill: the scroll edge fades the content under them too, as iOS's reaches under every control
+   * at the top, so their words never sit on the conversation's.
+   */
+  below?: number
 }) {
   const { c, scheme } = useSessionTokens()
   const insets = useSafeAreaInsets()
@@ -95,7 +101,13 @@ export function GlassHeader(props: {
         props.floating && !liquid && !blur ? { backgroundColor: c.glass } : null,
       ]}
     >
-      {liquid && <ScrollEdge color={c.bg} height={top + HEADER_BAR + 12} />}
+      {liquid && (
+        <ScrollEdge
+          color={c.bg}
+          height={top + HEADER_BAR + 12 + (props.below ?? 0)}
+          {...(props.below ? { solid: 0.8 } : {})}
+        />
+      )}
       {blur && (
         <BlurView
           style={StyleSheet.absoluteFill}

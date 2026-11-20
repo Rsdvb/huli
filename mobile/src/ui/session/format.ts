@@ -15,14 +15,25 @@ export function clockTime(ms: number): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${time}`
 }
 
-/** "14 分钟 43 秒". */
-export function spanText(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
+/**
+ * How long something took, the one way the session screens say it, as the desktop's Chinese does:
+ * 「12 秒」「1 分 3 秒」「1 小时 5 分」「2 天 3 小时」. With `tenths`, for a step's time, under a
+ * minute it says tenths of a second: 「0.4 秒」「12.3 秒」.
+ */
+export function durationText(ms: number, tenths = false): string {
+  const at = Math.max(0, ms)
+  if (tenths && at < 60_000) return `${(Math.floor(at / 100) / 10).toFixed(1)} 秒`
+  const s = Math.round(at / 1000)
   if (s < 60) return `${s} 秒`
   const m = Math.floor(s / 60)
-  if (m < 60) return s % 60 ? `${m} 分钟 ${s % 60} 秒` : `${m} 分钟`
-  return `${Math.floor(m / 60)} 小时 ${m % 60} 分钟`
+  if (m < 60) return s % 60 ? `${m} 分 ${s % 60} 秒` : `${m} 分`
+  const h = Math.floor(m / 60)
+  if (h < 24) return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`
+  return h % 24 ? `${Math.floor(h / 24)} 天 ${h % 24} 小时` : `${Math.floor(h / 24)} 天`
 }
+
+/** `durationText`, by the name the session screens first gave it. */
+export const spanText = (ms: number): string => durationText(ms)
 
 /** "1:05", for a clock that ticks. */
 export function tickText(ms: number): string {
