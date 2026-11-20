@@ -7,5 +7,8 @@ newest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -E 'Xcode_[0-9.]+\.
 if [ -n "$newest" ]; then
   sudo xcode-select -s "$newest/Contents/Developer"
 fi
-xcodebuild -version | head -1
-xcrun --sdk iphoneos --show-sdk-version | sed 's/^/iOS SDK /'
+# Read in full first: cutting xcodebuild's output short makes it abort on the closed pipe.
+version="$(xcodebuild -version)"
+echo "${version%%$'
+'*}"
+echo "iOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
