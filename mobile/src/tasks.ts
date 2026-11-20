@@ -484,7 +484,7 @@ export function confirmCancel(link: HostLink, task: TaskSummary): void {
   Alert.alert(
     `取消“${task.title}”？`,
     task.branch
-      ? '正在做的步骤会停下。它们的会话、需求的 worktree 和分支都留着。'
+      ? '正在做的步骤会停下。它们的会话、需求的工作树和分支都留着。'
       : '正在做的步骤会停下。它们的会话留着，做过什么还能看。',
     [
       { text: '继续做', style: 'cancel' },
@@ -508,7 +508,7 @@ export function confirmDelete(link: HostLink, task: TaskSummary, done?: () => vo
   Alert.alert(
     `删除“${task.title}”？`,
     task.branch
-      ? `需求和它各步骤的会话删除后无法恢复。分支 ${task.branch} 和它的 worktree 会留着。`
+      ? `需求和它各步骤的会话删除后无法恢复。分支 ${task.branch} 和它的工作树会留着。`
       : '需求和它各步骤的会话删除后无法恢复。',
     [
       { text: '取消', style: 'cancel' },

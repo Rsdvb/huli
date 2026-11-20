@@ -148,7 +148,7 @@ export default function MarketPlugin() {
           icon="puzzle"
           title="找不到这个插件"
           message="它可能已从插件市场下架，或者已被卸载。"
-          action={{ label: '返回 Marketplace', onPress: () => router.back() }}
+          action={{ label: '返回插件市场', onPress: () => router.back() }}
         />
       </ManagePage>
     )

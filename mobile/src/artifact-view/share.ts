@@ -38,7 +38,7 @@ function fileName(title: string, extension: string): string {
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 80)
-      .replace(/[. ]+$/, '') || 'Artifact'
+      .replace(/[. ]+$/, '') || '产物'
   return `${base}.${extension}`
 }
 

@@ -528,7 +528,7 @@ function CacheBlock(props: {
   const color = left <= 0 ? c.textTertiary : left <= 60_000 ? c.warning : c.tint
   return (
     <View style={styles.cache}>
-      <Text style={[styles.section, { color: c.textSecondary }]}>Prompt cache</Text>
+      <Text style={[styles.section, { color: c.textSecondary }]}>提示词缓存</Text>
       <View style={styles.cacheRow}>
         <UsageRing
           percent={(left / expiry.ttl) * 100}

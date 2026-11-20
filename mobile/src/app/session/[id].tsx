@@ -883,7 +883,7 @@ function Session() {
     !running &&
     pendingSwitch === null &&
     (cachePhase === 'warm' || cachePhase === 'ending')
-      ? `在这里改动会重写约 ${tokensText(reread)} token 的 prompt cache`
+      ? `在这里改动会重写约 ${tokensText(reread)} token 的提示词缓存`
       : null
 
   const starting = status === 'starting'

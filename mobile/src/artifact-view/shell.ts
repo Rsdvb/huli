@@ -41,7 +41,7 @@ body.fixed iframe{transform-origin:0 0;position:absolute;left:0;top:0}
 #pick{position:absolute;inset:0;display:none;background:rgba(0,0,0,0.04)}
 body.picking #pick{display:block}
 </style></head>
-<body class="${fixed ? 'fixed' : 'fluid'}"><div id="stage"><iframe id="frame" sandbox="${SANDBOX}" allow="" referrerpolicy="no-referrer" title="Artifact"></iframe><div id="pick"></div></div>
+<body class="${fixed ? 'fixed' : 'fluid'}"><div id="stage"><iframe id="frame" sandbox="${SANDBOX}" allow="" referrerpolicy="no-referrer" title="产物"></iframe><div id="pick"></div></div>
 <script>(()=>{
 const NONCE=${json(options.nonce)},PAGE=${json(options.page)},FIXED=${fixed},W=${size.width},H=${size.height},LIMIT=${RUNTIME_MESSAGE_BYTES};
 const bridge=window.ReactNativeWebView;

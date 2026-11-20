@@ -103,7 +103,7 @@ export function CacheNotice(props: { estimate: boolean; used: number; onDismiss(
       <Icon icon={G.timer} size={15} color={c.warning} />
       <View style={styles.body}>
         <Text style={[styles.title, { color: c.text }]}>
-          {props.estimate ? '提示缓存可能已过期' : '提示缓存已过期'}
+          {props.estimate ? '提示词缓存可能已过期' : '提示词缓存已过期'}
         </Text>
         <Text style={[styles.small, { color: c.textSecondary }]}>
           {props.estimate

@@ -336,7 +336,7 @@ export default function McpSettings() {
               )
             ) : kept.length === 0 ? (
               <GroupNote>
-                纸鸢还没有保存任何 MCP 服务器。可以在电脑上纸鸢的 Marketplace 里安装。
+                纸鸢还没有保存任何 MCP 服务器。可以在电脑上纸鸢的插件市场里安装。
               </GroupNote>
             ) : (
               <ListGroup>

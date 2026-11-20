@@ -221,7 +221,7 @@ export function StatusLine(props: {
             props.branch === 'loading'
               ? '分支：正在读取'
               : props.worktree
-                ? `在分支 ${props.branch} 的 worktree 里工作`
+                ? `在分支 ${props.branch} 的工作树里工作`
                 : `分支：${props.branch}`
           }
         >
@@ -337,7 +337,7 @@ function CacheChip(props: { expiry: KnownExpiry; onPress(): void }) {
       onPress={props.onPress}
       hitSlop={10}
       accessibilityRole="button"
-      accessibilityLabel={`Prompt cache：${
+      accessibilityLabel={`提示词缓存：${
         phase === 'expired' ? (expiry.estimate ? '可能已过期' : '已过期') : `剩余 ${time}`
       }`}
       style={({ pressed }) => [styles.chip, { opacity: pressed ? 0.55 : 1 }]}

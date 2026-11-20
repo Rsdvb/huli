@@ -147,7 +147,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         ? [
             {
               key: 'fork',
-              label: worktree ? '在新 worktree 中分叉' : '分叉',
+              label: worktree ? '在新工作树中分叉' : '分叉',
               icon: G.fork,
               onPress: () => ctx.onFork(),
             },
@@ -155,7 +155,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
               ? [
                   {
                     key: 'fork-same',
-                    label: '在同一个 worktree 中分叉',
+                    label: '在当前工作树中分叉',
                     icon: G.fork,
                     onPress: () => ctx.onFork('same'),
                   },

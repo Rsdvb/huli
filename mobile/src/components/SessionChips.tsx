@@ -176,7 +176,7 @@ export function SessionChips(props: {
         ) : null}
         {summary.worktree ? (
           <Chip
-            label={`在分支 ${summary.worktree.branch} 的 worktree 里工作`}
+            label={`在分支 ${summary.worktree.branch} 的工作树里工作`}
             onPress={() => router.push({ pathname: '/changes/[id]', params: { id: summary.id } })}
           >
             <Icon icon={G.fork} size={13} color={c.tint} />

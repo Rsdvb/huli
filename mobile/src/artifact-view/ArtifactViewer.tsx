@@ -301,7 +301,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
       : view?.kind === 'canvas'
         ? 'canvas'
         : 'web'
-  const title = loaded?.title ?? summary?.title ?? cached?.title ?? 'Artifact'
+  const title = loaded?.title ?? summary?.title ?? cached?.title ?? '产物'
   const shownNumber = loaded?.version ?? cached?.version ?? null
   const old = pinned !== null && latest !== null && pinned < latest
   const openCount = comments.threads?.filter((t) => t.resolvedAt === null).length ?? 0

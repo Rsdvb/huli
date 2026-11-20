@@ -190,7 +190,7 @@ export default function StartTask() {
           message={
             waiting > 0
               ? `${waiting} 个工作流在等你批准。批准之后，它才能开始需求。`
-              : '在任意会话里让 Agent 帮你写一个，或在电脑上的 Marketplace 里添加。'
+              : '在任意会话里让 Agent 帮你写一个，或在电脑上的插件市场里添加。'
           }
           action={{ label: '查看工作流', onPress: () => router.push('/workflows') }}
         />
@@ -367,7 +367,7 @@ export default function StartTask() {
             {!connected
               ? '连上电脑后才能开始。'
               : (problem ??
-                `Pace：${PACE_TEXT[pace]} · Auto 的步骤开始时才选人。在 Git 仓库里，需求在自己的 worktree 和分支上进行。`)}
+                `Pace：${PACE_TEXT[pace]} · Auto 的步骤开始时才选人。在 Git 仓库里，需求在自己的工作树和分支上进行。`)}
           </Text>
         </Animated.ScrollView>
       </KeyboardAvoidingView>

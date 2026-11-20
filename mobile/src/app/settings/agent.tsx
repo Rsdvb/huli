@@ -708,7 +708,7 @@ function EnableGroup({ status }: { status: AgentStatus }) {
       footer={
         off
           ? '已停用：不会启动，也不在选 Agent 的地方列出；会话、登录和配置都留着。'
-          : '可以在新会话和 Routine 里选它。'
+          : '可以在新会话和定时任务里选它。'
       }
     >
       <SwitchRow
@@ -1213,8 +1213,8 @@ function ClaudeSettingsGroup({ agentId }: { agentId: AgentId }) {
         ) : null}
       </ListGroup>
       <ListGroup
-        header="提示缓存时长"
-        footer="Claude Code 让对话的提示缓存保持多久。Auto：订阅账号在限额内用 1 小时，API key 和云服务商用 5 分钟；1 小时的缓存写入收费更高。项目自己的设置在该项目里优先，改动从下一个会话起生效。"
+        header="提示词缓存时长"
+        footer="Claude Code 让对话的提示词缓存保持多久。Auto：订阅账号在限额内用 1 小时，API key 和云服务商用 5 分钟；1 小时的缓存写入收费更高。项目自己的设置在该项目里优先，改动从下一个会话起生效。"
       >
         <ListRow
           title="时长"
@@ -1229,7 +1229,7 @@ function ClaudeSettingsGroup({ agentId }: { agentId: AgentId }) {
           disabled={disabled}
           onPress={() =>
             setPicker({
-              title: '提示缓存时长',
+              title: '提示词缓存时长',
               items: [
                 { key: AUTO, label: 'Auto', value: null },
                 { key: '5m', label: '5 分钟', value: '5m' as const },

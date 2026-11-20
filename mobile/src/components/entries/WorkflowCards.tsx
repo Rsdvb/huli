@@ -511,7 +511,7 @@ function pickLine(check: string, pick: PickCall['picks'][number], who: string): 
     case 'model':
       return pick.model ? `${who} 有 ${pick.model}` : `${who} 有这个模型`
     case 'effort':
-      return pick.effort ? `${pick.effort} 是它支持的 effort` : '它支持这个 effort'
+      return pick.effort ? `${pick.effort} 是它支持的推理强度` : '它支持这个推理强度'
     case 'tools':
       return '这一步的工具可以交给它'
     case 'limit':

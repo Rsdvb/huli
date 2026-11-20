@@ -234,7 +234,7 @@ function Approval(props: {
       : origin?.kind === 'agent'
         ? `${host.agents.get(origin.agentId)?.name ?? origin.agentId} 在一个会话里用 create_workflow 写了它。 ${check}`
         : origin?.kind === 'community'
-          ? `从 Marketplace 添加，发布者 ${origin.handle}，版本 ${origin.version}。 ${check}`
+          ? `从插件市场添加，发布者 ${origin.handle}，版本 ${origin.version}。 ${check}`
           : origin?.kind === 'github'
             ? `从 GitHub 上的 ${/github\.com\/([^/]+\/[^/]+)/i.exec(origin.url)?.[1] ?? 'GitHub'} 添加。 ${check}`
             : origin?.kind === 'file'

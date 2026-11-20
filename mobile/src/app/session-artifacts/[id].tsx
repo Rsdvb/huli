@@ -97,7 +97,7 @@ export default function SessionArtifacts() {
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <GlassHeader title="Artifacts" subtitle={sessionTitle(summary)} />
+      <GlassHeader title="产物" subtitle={sessionTitle(summary)} />
       {body}
     </View>
   )

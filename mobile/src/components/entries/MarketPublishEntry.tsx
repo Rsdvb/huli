@@ -28,7 +28,7 @@ type Entry = Extract<ThreadEntry, { kind: 'market_publish' }>
 const KIND = { skill: 'Skill', plugin: '插件', 'mcp-server': 'MCP 服务器', workflow: '工作流' }
 const VISIBILITY = { public: '所有人', private: '只有我', unlisted: '已下架' }
 const VISIBILITY_HINT = {
-  public: '列进 Marketplace，登录 Kite Cloud 的人都能看到。',
+  public: '列进插件市场，登录 Kite Cloud 的人都能看到。',
   private: '不列出，只有登录你账号的电脑能装。',
 }
 const ADDS_GROUP: Record<string, string> = {
@@ -80,7 +80,7 @@ function outcomeText(entry: Entry): { text: string; done: boolean; busy: boolean
     case 'ended':
       return { text: '这一轮先结束了', done: false, busy: false }
     case 'interrupted':
-      return { text: 'Marketplace 回复之前纸鸢停止了', done: false, busy: false }
+      return { text: '插件市场回复之前纸鸢停止了', done: false, busy: false }
     default:
       return { text: '没有及时回答', done: false, busy: false }
   }
@@ -94,7 +94,7 @@ export function MarketPublishEntry(props: { entry: Entry; sessionId: string; pla
   const { c } = useSessionTokens()
   if (waiting) {
     if (props.place === 'thread') {
-      return <WaitingLine icon={E.store} text={`发布到 Marketplace · ${entry.item.name}`} />
+      return <WaitingLine icon={E.store} text={`发布到插件市场 · ${entry.item.name}`} />
     }
     return <PublishCard entry={entry} sessionId={props.sessionId} />
   }
@@ -181,12 +181,12 @@ function PublishCard(props: { entry: Entry; sessionId: string }) {
   }
 
   const title = unlist
-    ? `把 ${entry.item.name} 从 Marketplace 下架？`
+    ? `把 ${entry.item.name} 从插件市场下架？`
     : newVersion
       ? `发布 ${entry.item.name} 的 ${entry.version ?? ''}？`
-      : '发布到 Marketplace？'
+      : '发布到插件市场？'
   const body = unlist
-    ? '它会从 Marketplace 里去掉。已经装了的人照常能用，也照常收到新版本。'
+    ? '它会从插件市场里去掉。已经装了的人照常能用，也照常收到新版本。'
     : newVersion && entry.installs > 0
       ? `${entry.installs} 人装着它，他们下次更新时拿到 ${entry.version ?? ''}。`
       : '点发布之前什么都不上传。以后的新版本还会再问你。'

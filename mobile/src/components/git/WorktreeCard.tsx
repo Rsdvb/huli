@@ -146,7 +146,7 @@ export function SetupOutputSheet(props: { sessionId: string; visible: boolean; o
   const { c, s } = useSessionTokens()
   const { log, error } = useSetupLog(props.sessionId, props.visible, props.visible)
   return (
-    <BottomSheet visible={props.visible} onClose={props.onClose} title="worktree 准备的输出">
+    <BottomSheet visible={props.visible} onClose={props.onClose} title="工作树准备的输出">
       {error ? (
         <Text style={[styles.body, { color: c.danger }]}>没能读取输出：{error}</Text>
       ) : log === null ? (
@@ -180,7 +180,7 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
       <View style={[styles.line, { backgroundColor: s.dockCard }]} accessibilityRole="summary">
         <ActivityIndicator size="small" color={c.textSecondary} />
         <Text style={[styles.lineText, { color: c.textSecondary }]}>
-          {state === 'creating' ? '正在建 worktree…' : '正在准备 worktree…'}
+          {state === 'creating' ? '正在建工作树…' : '正在准备工作树…'}
         </Text>
         <Text style={[styles.lineLog, { color: c.textTertiary }]} numberOfLines={1}>
           {actions.error ?? last}
@@ -203,12 +203,12 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
         <Pressable
           onPress={open}
           accessibilityRole="button"
-          accessibilityLabel="worktree 没能准备好，查看详情"
+          accessibilityLabel="工作树没能准备好，查看详情"
           style={styles.lineMain}
         >
           <Icon icon={G.error} size={15} color={c.danger} />
           <Text style={[styles.lineText, { color: c.text, flex: 1 }]} numberOfLines={1}>
-            worktree 没能准备好
+            工作树没能准备好
           </Text>
         </Pressable>
         <SmallButton
@@ -230,8 +230,8 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
         <Icon icon={G.info} size={14} color={c.tint} />
         <Text style={[styles.lineText, { color: c.textSecondary, flex: 1 }]}>
           {state === 'missing'
-            ? `worktree 的文件夹在纸鸢之外被删掉了。发下一条消息时会按分支 ${branch} 重建。`
-            : `worktree 的文件夹已删除。发下一条消息时会按分支 ${branch} 重建。`}
+            ? `工作树的文件夹在纸鸢之外被删掉了。发下一条消息时会按分支 ${branch} 重建。`
+            : `工作树的文件夹已删除。发下一条消息时会按分支 ${branch} 重建。`}
         </Text>
       </View>
     )
@@ -241,7 +241,7 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
       <View style={[styles.line, { backgroundColor: s.dockCard }]}>
         <Icon icon={G.info} size={14} color={c.textTertiary} />
         <Text style={[styles.lineText, { color: c.textSecondary, flex: 1 }]}>
-          这个会话的 worktree 和分支都已删除，不能再继续对话。
+          这个会话的工作树和分支都已删除，不能再继续对话。
         </Text>
       </View>
     )
@@ -250,13 +250,13 @@ export function WorktreeLine(props: { sessionId: string; worktree: SessionWorktr
 }
 
 const STATE_TEXT: Record<SessionWorktree['state'], string> = {
-  creating: '正在建 worktree…',
-  setup: '正在准备 worktree…',
-  'setup-failed': 'worktree 没能准备好',
+  creating: '正在建工作树…',
+  setup: '正在准备工作树…',
+  'setup-failed': '工作树没能准备好',
   ready: '就绪',
   missing: '文件夹在纸鸢之外被删掉了',
   removed: '文件夹已删除',
-  gone: 'worktree 和分支都已删除',
+  gone: '工作树和分支都已删除',
 }
 
 /** The changes screen's worktree part: where, how it stands, and what removing it would lose. */
@@ -281,7 +281,7 @@ export function WorktreeCard(props: { sessionId: string; worktree: SessionWorktr
     setInspectError(null)
     call(link, 'worktrees.inspect', { sessionId }).then(
       (read) => alive && setInspection(read),
-      (error: unknown) => alive && setInspectError(errorText(error, '没能检查 worktree')),
+      (error: unknown) => alive && setInspectError(errorText(error, '没能检查工作树')),
     )
     return () => {
       alive = false
@@ -303,7 +303,7 @@ export function WorktreeCard(props: { sessionId: string; worktree: SessionWorktr
       <View style={styles.head}>
         <Icon icon={G.fork} size={15} color={c.tint} />
         <Text style={[styles.title, { color: c.text }]} numberOfLines={1}>
-          在分支 {worktree.branch} 的 worktree 里工作
+          在分支 {worktree.branch} 的工作树里工作
         </Text>
       </View>
       <ContextMenu
@@ -349,7 +349,7 @@ export function WorktreeCard(props: { sessionId: string; worktree: SessionWorktr
       {failed ? (
         <Text style={[styles.body, { color: c.textSecondary }]}>
           {worktree.failure ? `${failureText(worktree.failure)} ` : ''}
-          第一条消息会等 worktree 准备好再发给 Agent。
+          第一条消息会等工作树准备好再发给 Agent。
         </Text>
       ) : null}
       {detail ? (
@@ -362,7 +362,7 @@ export function WorktreeCard(props: { sessionId: string; worktree: SessionWorktr
       {facts.length > 0 ? (
         <Text style={[styles.body, { color: c.textSecondary }]}>{facts.join(' · ')}</Text>
       ) : inspectError ? (
-        <Text style={[styles.body, { color: c.danger }]}>没能检查 worktree：{inspectError}</Text>
+        <Text style={[styles.body, { color: c.danger }]}>没能检查工作树：{inspectError}</Text>
       ) : null}
       {failed || preparing || worktree.state === 'ready' ? (
         <View style={styles.buttons}>
