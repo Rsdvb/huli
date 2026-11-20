@@ -66,8 +66,9 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
   const text = texts[at]!
   const answered = picked.length > 0 || text.trim() !== ''
 
-  const respond = (answers: QuestionAnswer[]) =>
-    void sender.send('respond', () =>
+  // 跳过 and 提交 send under keys of their own, so only the one tapped turns.
+  const respond = (answers: QuestionAnswer[], key: 'skip' | 'submit') =>
+    void sender.send(key, () =>
       link.request('permissions.respond', {
         sessionId,
         requestId: permission.requestId,
@@ -84,17 +85,20 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
     })
   const next = () => {
     haptic.tap()
-    if (last) respond(collect())
+    if (last) respond(collect(), 'submit')
     else setAt(at + 1)
   }
   const skip = () => {
     haptic.tap()
-    if (questions.length === 1) return respond([])
+    if (questions.length === 1) return respond([], 'skip')
     // This one stays unanswered; the last skip sends what the others got.
     setChoices((all) => all.map((x, i) => (i === at ? [] : x)))
     setTexts((all) => all.map((x, i) => (i === at ? '' : x)))
     if (last) {
-      respond(collect().filter((answer) => answer.question !== at))
+      respond(
+        collect().filter((answer) => answer.question !== at),
+        'skip',
+      )
     } else setAt(at + 1)
   }
   const pick = (oi: number) => {
@@ -134,6 +138,23 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
         <Text style={[styles.asks, { color: c.text }]} numberOfLines={1}>
           {agent} <Text style={{ fontWeight: '400' }}>在问</Text>
         </Text>
+        {at > 0 ? (
+          <PressScale
+            scale={0.96}
+            onPress={() => {
+              haptic.tap()
+              setAt(at - 1)
+            }}
+            disabled={sending}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="上一个问题"
+            style={[styles.back, { opacity: sending ? 0.5 : 1 }]}
+          >
+            <Icon icon={G.back} size={12} color={c.tint} weight="semibold" />
+            <Text style={[styles.backText, { color: c.tint }]}>上一个</Text>
+          </PressScale>
+        ) : null}
         {questions.length > 1 ? (
           <Text style={[styles.progress, { color: c.textTertiary }]}>
             {at + 1}/{questions.length}
@@ -249,7 +270,11 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
             { backgroundColor: c.fill, borderColor: c.border, opacity: sending ? 0.5 : 1 },
           ]}
         >
-          <Icon icon={E.undo} size={15} color={c.text} style={{ transform: [{ scaleX: -1 }] }} />
+          {sender.busy === 'skip' ? (
+            <ActivityIndicator size="small" color={c.text} />
+          ) : (
+            <Icon icon={E.undo} size={15} color={c.text} style={{ transform: [{ scaleX: -1 }] }} />
+          )}
           <Text style={[styles.buttonText, { color: c.text }]}>跳过</Text>
         </PressScale>
         <PressScale
@@ -268,7 +293,7 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
             },
           ]}
         >
-          {sender.busy !== null ? (
+          {sender.busy === 'submit' ? (
             <ActivityIndicator size="small" color={c.onAccent} />
           ) : (
             <Icon
@@ -304,6 +329,8 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   asks: { flex: 1, fontSize: 16, lineHeight: 21, fontWeight: '600' },
   progress: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  back: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  backText: { fontSize: 13, fontWeight: '600' },
   header: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   question: { fontSize: 16, lineHeight: 23, fontWeight: '600' },
   hint: { fontSize: 12.5, lineHeight: 17 },
