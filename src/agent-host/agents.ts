@@ -112,6 +112,7 @@ import { outsideClaudeProcesses } from './agent-reset/outside'
 import { resetPlan, type ResetPlan } from './agent-reset/plan'
 import { applyReset, keptNames, resetLog, resolvePlan } from './agent-reset/reset'
 import { systemSecretStore, type SecretStore } from './agent-reset/secrets'
+import { removesCopies, type AgentCopies } from './agent-copies'
 import type { AgentTrees } from './agent-trees'
 import { decideUpdate, fetchLatest, type LatestOptions } from './agent-updates'
 import {
@@ -404,6 +405,8 @@ export interface AgentManagerDeps extends DriverOverrides {
   envKeyIsSet?(agentId: AgentId, variable: string): boolean
   /** Huli: the credential store a reset checks and clears; the system's by default. */
   secretStore?: SecretStore
+  /** Huli: removes what the agent keeps of a hidden session it never prompted. */
+  copies?: Pick<AgentCopies, 'discardUnprompted'>
 }
 
 /** An install that was stopped on purpose, which leaves the agent as it was rather than failed. */
@@ -4228,10 +4231,12 @@ export class AgentManager {
     folder: string | undefined,
   ): Promise<ConfigOption[] | null> {
     const agentId = slot.id
-    const remove = (sessionId: string): Promise<void> =>
-      runtime.connection.removeHidden(sessionId, (message) =>
+    const remove = async (sessionId: string): Promise<void> => {
+      await runtime.connection.removeHidden(sessionId, (message) =>
         log(`could not remove the session its options were read in: ${message}`),
       )
+      this.deps.copies?.discardUnprompted(agentId, sessionId)
+    }
     const dir = folder ?? this.deps.reportsDir
     if (!folder) await mkdir(dir, { recursive: true })
     const opening = runtime.connection.newSession(dir, { hidden: 'options' })
@@ -5301,6 +5306,7 @@ export class AgentManager {
       ...(slot.balances.length ? { balances: slot.balances } : {}),
       ...(limitsReason ? { limitsReason } : {}),
       ...(slot.def.sharesSignIn ? { sharesSignIn: true } : {}),
+      deletesCopy: (capabilities?.deleteSession ?? false) || removesCopies(slot.def.id),
       ...(slot.def.movedAccounts
         ? {
             movedAccounts: {

@@ -183,6 +183,8 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
   const run = randomUUID().slice(0, 8)
 
   const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${++counter}`
+  // Huli: sessions named by a UUID, as agy and Claude Code name theirs.
+  const sessionId = (): string => (env.FAKE_AGENT_UUID_IDS ? randomUUID() : nextId('fake'))
 
   const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     new Promise((resolve) => {
@@ -715,7 +717,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       const gate = env.FAKE_AGENT_NEW_SESSION_GATE
       while (gate && !existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 10))
       if (oneSession) endOthers()
-      const session = newSession(nextId('fake'), ctx.params.cwd, ctx.params.mcpServers)
+      const session = newSession(sessionId(), ctx.params.cwd, ctx.params.mcpServers)
       Object.assign(session, projectDefaults(ctx.params.cwd))
       if (takesSystemPrompt) session.systemPrompt = systemPromptAppend(ctx.params._meta)
       setTimeout(() => announceCommands(ctx.client, session.id), 0)
@@ -797,7 +799,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       const source = sessions.get(ctx.params.sessionId)
       if (!source) throw RequestError.resourceNotFound(ctx.params.sessionId)
       const end = forkEnd(source, ctx.params._meta)
-      const fork = newSession(nextId('fake'), ctx.params.cwd, ctx.params.mcpServers ?? [])
+      const fork = newSession(sessionId(), ctx.params.cwd, ctx.params.mcpServers ?? [])
       fork.title = source.title
       fork.turnStarts = source.turnStarts.filter((start) => start < end)
       fork.turns = end < source.history.length ? fork.turnStarts.length : source.turns

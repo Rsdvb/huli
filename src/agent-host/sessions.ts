@@ -161,6 +161,7 @@ import {
 } from './attention'
 import type { MarketAnswer, MarketAsk } from './marketplace/publish-tools'
 import type { SettingsAnswer, SettingsAsk } from './settings/tools'
+import type { AgentCopies } from './agent-copies'
 import { MODE_OPTION as AGY_MODE_OPTION } from './acp/agy-plan'
 import { parseContextReport } from './acp/claude-reports'
 import {
@@ -573,6 +574,8 @@ export interface SessionManagerDeps {
   memory?: SessionMemoryDeps
   /** The prepared sessions not yet adopted or removed, kept for the host after a crash. */
   prepared?: PreparedRecords
+  /** Huli: removes what an agent keeps of a session past its own delete; without it nothing is. */
+  copies?: Pick<AgentCopies, 'removeDeleted' | 'discardUnprompted'>
   /** What to watch for changes to the agent's options in a folder; without it nothing is. */
   settingsTargets?: (agentId: AgentId, folder: string) => WatchTarget[]
   /** The host's settings, read as a turn starts for whether a title is to be written. */
@@ -5328,6 +5331,7 @@ export class SessionManager {
     if (connected && runtime && !agentGone) {
       await this.removeUnlisted(live.id, runtime, acpSessionId)
       this.deps.prepared?.remove(agentId, acpSessionId)
+      this.deps.copies?.discardUnprompted(agentId, acpSessionId)
     }
     if (prepared.scratch) await this.deps.scratch.removeIfEmpty(projectPath)
   }
@@ -5337,6 +5341,7 @@ export class SessionManager {
     for (const left of this.deps.prepared?.takeLeftovers(runtime.agentId) ?? []) {
       await this.removeUnlisted(`left by an earlier run in ${left.cwd}`, runtime, left.acpSessionId)
       this.deps.prepared?.remove(left.agentId, left.acpSessionId)
+      this.deps.copies?.discardUnprompted(left.agentId, left.acpSessionId)
     }
   }
 
@@ -11539,6 +11544,7 @@ export class SessionManager {
       acpSessionId: string
       runtime: AgentRuntime
     }[] = []
+    const owners: { agentId: AgentId; acpSessionId: string }[] = []
     for (const item of all) {
       if (item.origin === 'subagent') continue
       // Every agent that had the session keeps a session of its own for it.
@@ -11548,6 +11554,7 @@ export class SessionManager {
       ].filter((owner) => owner.acpSessionId !== '')
       for (const { agentId, acpSessionId } of owned) {
         if (!this.deps.agents.has(agentId)) continue
+        owners.push({ agentId, acpSessionId })
         try {
           const runtime = await this.deps.agents.ensureReady(agentId)
           if (runtime.init.capabilities.deleteSession) {
@@ -11559,13 +11566,17 @@ export class SessionManager {
       }
     }
     // The agent deletes the session's log too, so what it holds is counted first.
-    await this.deps.usage?.syncAgents([...new Set(deleting.map(({ agentId }) => agentId))])
+    await this.deps.usage?.syncAgents([...new Set(owners.map(({ agentId }) => agentId))])
     for (const { item, acpSessionId, runtime } of deleting) {
       try {
         await runtime.connection.deleteSession(acpSessionId)
       } catch (error) {
         this.deleteFailed(item, error)
       }
+    }
+    // Huli: what the agents keep past their own delete, or keep for want of one.
+    for (const { agentId, acpSessionId } of owners) {
+      await this.deps.copies?.removeDeleted(agentId, acpSessionId).catch(() => {})
     }
     void this.deps.attachments?.release(queuedAttachments(all))
     for (const item of all) this.forget(item.id)

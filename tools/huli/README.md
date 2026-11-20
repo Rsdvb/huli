@@ -289,6 +289,45 @@ system identifier (MachineGuid, MAC addresses, hardware ids).
   instead, so its reset reaches none of the owner's entries.
 - Tests: `src/agent-host/agent-reset/*.test.ts`, and the requests in `validate.test.ts`.
 
+### Deleting the agent's own copy
+
+A session deleted in Kite is deleted from the agent's own history too, so neither its own CLI and
+app nor Import from agents bring it back. `src/agent-host/agent-copies.ts` (+ `.test.ts`,
+`agent-copies-host.test.ts`) removes what the agent keeps past its own delete, only names that are
+exactly the session's id, inside the agent's own folder; a link is removed as a link and never
+followed. The log names the paths removed, never contents.
+
+- Claude Code: the SDK's `deleteSession` (0.3.326) removes `<id>.jsonl` and `<id>/` from one
+  project folder only. Kite then removes, under the agent's configuration folder, `<id>.jsonl`,
+  `<id>/` and its own `<id>.jsonl.kite-bak-*` backups in every `projects/*/` (copies the Claude
+  app left when it continued the session elsewhere), and Claude Code 2.1's per-session
+  `file-history/<id>/`, `session-env/<id>/`, `tasks/<id>/`, `uploads/<id>/`, `todos/<id>*.json` and
+  `debug/<id>.txt`. `history.jsonl` (prompt history, shared lines) stays.
+- Codex: `thread/delete` (0.171) removes the rollout, its state rows and its `session_index.jsonl`
+  entries itself; nothing is left to import, so Kite adds nothing.
+- Antigravity (agy 1.5.13, no `session/delete`): in `~/.gemini/antigravity-cli` and the app's
+  `~/.gemini/antigravity`, under the home folder agy runs with (`USERPROFILE`/`HOME` of its
+  environment), `conversations/<id>.db` with its `-wal`/`-shm`, `brain/<id>/`,
+  `annotations/<id>.pbtxt`, its row in `conversation_summaries.db` (through SQLite), its entries in
+  the summary stores agy syncs that database from at every start (`jetbox_summaries_proto.pb`, the
+  app's `agyhub_summaries_proto.pb`: maps keyed by the id as field 1, dropped entry by entry, a
+  file of another shape left alone) and in `cache/conversation_metadata.json`; the same for its
+  sub-agents' conversations (rows naming it as parent with `nesting_depth > 0`). agy lists only
+  conversations whose `.db` is there. `implicit/` holds editor activity under ids of its own and
+  stays. A `.db` another agy process holds open cannot be removed on Windows: that conversation is
+  left whole and tried again 6 s later (past the session router's kill), then 20 s later, and once
+  more as the host stops after its agents; a pass after a removal also catches a summary agy wrote
+  back as its process exited. Checked against agy's own `session/list` on a copy of `~/.gemini`.
+- A prepared session (New session) or a hidden options session of agy that Kite lets go before its
+  first prompt leaves an empty conversation; it goes the same way, unless agy's summary shows
+  steps.
+- Hooks: `Sessions.delete` and `dropPrepared`/`removeLeftovers` in `src/agent-host/sessions.ts`,
+  `readInHiddenSession` and `deletesCopy` in `agents.ts`, the service in `host.ts` (flushed at
+  shutdown), `AgentStatus.deletesCopy` in `src/shared/agent-host.ts`; the delete confirmations in
+  `features/sidebar/session-menu.tsx` and `mobile/src/components/DeleteSessionDialog.tsx` say so
+  (`row.deleteRemovesAgentCopy`), keeping `row.deleteKeepsAppCopy` for an agent whose copy stays;
+  `FAKE_AGENT_UUID_IDS` in `tools/fake-agent`.
+
 Generated before a build (not hand edits, never committed):
 
 - `node tools/huli/rebrand.mjs` swaps the display name Kettu to Kite, and to 纸鸢 in Chinese copy

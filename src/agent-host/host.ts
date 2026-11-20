@@ -80,6 +80,7 @@ import type {
   UserContent,
 } from '@shared/thread'
 import { AgentFiles } from './agent-files'
+import { AgentCopies } from './agent-copies'
 import { agentOptionsFile, AgentOptionsStore, startModeIn } from './agent-options'
 import { listedModels } from './claude/user-settings'
 import { STOP_TIMINGS } from './agent-process'
@@ -489,6 +490,8 @@ export class AgentHost {
   private readonly execRunner: ExecRunner
   private readonly files: FilesService
   private readonly agentFiles: AgentFiles
+  /** Huli: what agents keep of the sessions deleted here. */
+  private readonly copies: AgentCopies
   private readonly sessionFiles: SessionFiles
   /** Grants for the media a thread names and the Files pane opens, which main serves. */
   private readonly media: MediaService
@@ -977,6 +980,13 @@ export class AgentHost {
       ...(options.usageTimings ? { timings: options.usageTimings } : {}),
     })
     const adaptersDir = harnessesFolder(options)
+    this.copies = new AgentCopies({
+      platform,
+      configFolder: (agentId) => this.agents.configFolder(agentId),
+      env: (agentId) => this.env.agentEnv(agentId),
+      homeDir: options.homeDir ?? os.homedir(),
+      log,
+    })
     this.agents = new AgentManager({
       catalog,
       platform,
@@ -1017,6 +1027,7 @@ export class AgentHost {
       envKeyIsSet: (agentId, variable) =>
         typeof this.agentEnvKeys[agentId]?.[variable] === 'string',
       ...(options.secretStore ? { secretStore: options.secretStore } : {}),
+      copies: this.copies,
     })
     const routineHooks: RoutineSessionHooksRef = { current: null }
     const taskHooks: TaskSessionHooksRef = { current: null }
@@ -1185,6 +1196,7 @@ export class AgentHost {
       settings: () => this.settings,
       ...(options.sessionTimings ? { timings: options.sessionTimings } : {}),
       prepared: this.preparedRecords,
+      copies: this.copies,
       settingsTargets: (agentId, folder) =>
         settingsTargets(
           agentId,
@@ -2754,6 +2766,7 @@ export class AgentHost {
         this.marketBundles.flush(),
         this.publishDrafts.flush(),
         this.sessionFolders.flush(),
+        this.copies.flush(),
         this.threads?.close(),
         this.usage.close(),
       ])
