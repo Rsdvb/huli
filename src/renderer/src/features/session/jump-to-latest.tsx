@@ -3,6 +3,7 @@ import { memo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { StopReason, ThreadState } from '@shared/thread'
+import type { TurnPhase } from '@shared/turn-phase'
 import {
   MessageScrollerButton,
   useMessageScrollerScrollable,
@@ -44,6 +45,9 @@ interface Ending {
 
 const NO_ENDING: Ending = { kind: null, stopReason: null, durationMs: 0 }
 
+/** The phase the button carries while the end is in view, and it is hidden. */
+const AT_END: TurnPhase = { phase: 'working', count: 1 }
+
 /**
  * How the latest turn ended, from the thread's last entries: with new content to read, with an
  * error, or neither, as when the user cancelled it.
@@ -83,10 +87,14 @@ export const JumpToLatest = memo(function JumpToLatest({
 }) {
   const { t } = useTranslation('session')
   const { end: below } = useMessageScrollerScrollable()
+  // Hidden while the end is in view, it follows the turn only while it shows: in a burst of tool
+  // calls the phase changed many times a second, and each change rewrote and restarted its dots.
   const { phase, count } = useThreadsStore(
-    useShallow((s) => turnPhase(s.replicas[sessionId]?.state)),
+    useShallow((s) => (below ? turnPhase(s.replicas[sessionId]?.state) : AT_END)),
   )
-  const ending = useThreadsStore(useShallow((s) => turnEnding(s.replicas[sessionId]?.state)))
+  const ending = useThreadsStore(
+    useShallow((s) => (below ? turnEnding(s.replicas[sessionId]?.state) : NO_ENDING)),
+  )
 
   const [wasWorking, setWasWorking] = useState(working)
   const [unseen, setUnseen] = useState(false)
