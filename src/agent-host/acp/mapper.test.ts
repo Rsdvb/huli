@@ -30,6 +30,8 @@ import {
   mapPermissionToolCall,
   mapSessionUpdate,
   mapTokenTotals,
+  RESOURCE_TEXT_LIMIT,
+  resourceMarkdown,
 } from './mapper'
 import {
   allowedLimit,
@@ -117,7 +119,7 @@ describe('message chunks', () => {
     expect(entries[2]).toMatchObject({ kind: 'agent', markdown: 'No id still' })
   })
 
-  it('keeps images and links as attachments and other content as unsupported refs', () => {
+  it('keeps images and links as attachments and an embedded text in the message', () => {
     const { entries } = run([
       text('See', 'a'),
       {
@@ -142,14 +144,70 @@ describe('message chunks', () => {
       },
     ])
     expect(entries[0]).toMatchObject({
-      markdown: 'See',
+      markdown: 'See\n\n`n.txt`\n\n```\nn\n```\n\n',
       attachments: [
         { kind: 'image', mimeType: 'image/png', data: 'AA' },
         { kind: 'link', uri: 'file:///x.md', name: 'X' },
         { kind: 'audio', mimeType: 'audio/wav', data: 'AA', size: 1, name: null },
-        { kind: 'unsupported', label: 'Embedded resource file:///n.txt' },
       ],
     })
+  })
+
+  it('names the session a call works with: a subagent the thread shows, or its id', () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 's1',
+        title: 'Task',
+        status: 'in_progress',
+        content: [
+          { type: 'session', sessionId: 'acp-parent' },
+          { type: 'session', sessionId: 'acp-other' },
+        ],
+      } as SessionUpdate,
+    ])
+    expect(entries[0]).toMatchObject({
+      content: [
+        {
+          type: 'ref',
+          ref: { kind: 'unsupported', label: 'Works with a subagent, whose card is in the thread' },
+        },
+        { type: 'ref', ref: { kind: 'unsupported', label: 'Works with session acp-other' } },
+      ],
+    })
+  })
+
+  it("shows an embedded resource's text in a call's result, fenced past its own fences", () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'r1',
+        title: 'Read notes',
+        status: 'completed',
+        content: [
+          {
+            type: 'content',
+            content: {
+              type: 'resource',
+              resource: { uri: 'file:///w/notes%20a.md', text: 'a\r\n```js\nx\n```\n' },
+            },
+          },
+          {
+            type: 'content',
+            content: { type: 'resource', resource: { uri: 'file:///w/b.png', blob: 'AAAA' } },
+          },
+        ],
+      },
+    ])
+    expect(entries[0]).toMatchObject({
+      content: [
+        { type: 'markdown', markdown: '`notes a.md`\n\n````\na\n```js\nx\n```\n````' },
+        { type: 'ref', ref: { kind: 'unsupported', label: 'Embedded resource file:///w/b.png' } },
+      ],
+    })
+    const long = 'x'.repeat(RESOURCE_TEXT_LIMIT + 10)
+    const shown = resourceMarkdown({ type: 'resource', resource: { uri: 'file:///l', text: long } })
+    expect(shown).toBe('`l`\n\n```\n' + 'x'.repeat(RESOURCE_TEXT_LIMIT) + '\n…\n```')
   })
 
   it('keeps sounds and clips with their bytes, from audio blocks and resource blobs', () => {

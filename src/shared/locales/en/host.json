@@ -396,12 +396,27 @@
     "text": "Text",
     "unknown": "Unknown content",
     "terminal": "Terminal {{id}}",
+    "subagent": "Works with a subagent, whose card is in the thread",
+    "session": "Works with session {{id}}",
     "unknownTool": "Unknown tool content",
     "toolCall": "Tool call"
   },
   "antigravity": {
     "plan": {
       "title": "Plan"
+    },
+    "tool": {
+      "sendMessage": "Message {{to}}",
+      "mainAgent": "the main agent",
+      "manageSubagents": "Manage subagents",
+      "manageSubagentsAction": "Manage subagents: {{action}}",
+      "manageTask": "Manage a background task",
+      "manageTaskAction": "Manage a background task: {{action}}",
+      "defineSubagent": "Define a subagent",
+      "defineSubagentNamed": "Define the subagent {{name}}",
+      "generateImage": "Generate an image",
+      "schedule": "Set a timer",
+      "finish": "Finish"
     },
     "mode": {
       "default": {
