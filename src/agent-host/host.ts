@@ -697,6 +697,12 @@ export class AgentHost {
           log,
         })
       : null
+    // Huli: main's backup waits while the thread database opens, which migrates it to this
+    // version's schema; a longer move of the data can hold it the same way.
+    if (this.threads) {
+      options.send({ type: 'host:migrating', running: true })
+      void this.threads.ready.then(() => options.send({ type: 'host:migrating', running: false }))
+    }
     this.artifacts = new ArtifactStore({
       threads: this.threads,
       contentDir,

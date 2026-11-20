@@ -141,6 +141,7 @@ export type SettingsSection =
   | 'devices'
   | 'computer-use'
   | 'agent-network'
+  | 'backup'
   | 'advanced'
   | 'about'
 

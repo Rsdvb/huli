@@ -19,7 +19,8 @@
     "hosts": "主机",
     "devices": "移动设备",
     "computer-use": "Computer use",
-    "agent-network": "Agent 网络"
+    "agent-network": "Agent 网络",
+    "backup": "备份"
   },
   "page": {
     "title": "设置",
@@ -1220,7 +1221,8 @@
     "hostsWeb": "这个页面连着的电脑。会话、项目和 Agent 都在那台电脑上，这里只管这个浏览器怎么连它。",
     "devices": "Agent 不用先问就能使用的模拟器和手机。",
     "computer-use": "让 Agent 读取并操作这台电脑上的桌面应用，同一时间只用一个应用、只给一个会话。",
-    "agent-network": "让每个 Agent 的流量经由你的机场订阅里的节点出去，绝不绕开它。"
+    "agent-network": "让每个 Agent 的流量经由你的机场订阅里的节点出去，绝不绕开它。",
+    "backup": "每天把 Kettu 自己的数据备份一份，存在这台电脑上，丢失后可以恢复。"
   },
   "archived": {
     "description": "{{project}} · {{when}}归档",
@@ -2282,5 +2284,72 @@
       "description": "设为某块网卡的 Agent 只从这块网卡联网，网卡断开或不存在时就没有网络。",
       "keywords": "网卡 适配器 tun vpn wlan 以太网 绑定"
     }
+  },
+  "backup": {
+    "groups": {
+      "schedule": "每日备份",
+      "folder": "备份存放位置",
+      "restore": "恢复"
+    },
+    "enabled": {
+      "name": "每天备份",
+      "description": "每天把 Kettu 的会话、设置、记忆、Artifact 和附件备份成一个文件。电脑关着错过的那天，下次 Kettu 运行时补做一次。",
+      "keywords": "备份 每日 定时 保存 数据 归档 backup"
+    },
+    "time": {
+      "name": "时间",
+      "description": "每日备份开始的时间，按这台电脑的时区。",
+      "keywords": "备份 时间 几点 定时 backup"
+    },
+    "keep": {
+      "name": "保留份数",
+      "description": "文件夹里超过这个数时，最旧的一份会被删除。",
+      "option_other": "{{count}} 份",
+      "keywords": "备份 保留 份数 数量 清理 backup"
+    },
+    "status": {
+      "name": "上次备份",
+      "never": "还没有备份",
+      "running": "正在备份…",
+      "done_other": "{{when}}，{{size}}，{{count}} 个文件",
+      "next": "下次 {{when}}",
+      "off": "每日备份已关闭",
+      "now": "立即备份",
+      "keywords": "备份 上次 状态 立即 backup"
+    },
+    "folder": {
+      "name": "备份文件夹",
+      "description": "每份备份是一个 zip 文件，以备份时间命名。",
+      "stored_other": "这里有 {{count}} 份备份，共 {{size}}。",
+      "choose": "选择…",
+      "reset": "恢复默认位置",
+      "open": "打开备份文件夹",
+      "keywords": "备份 文件夹 位置 目录 硬盘 文档 backup"
+    },
+    "problem": {
+      "destination-missing": "找不到备份文件夹。请接上它所在的硬盘，或换一个文件夹。",
+      "destination-unwritable": "Kettu 无法写入备份文件夹，请换一个文件夹。",
+      "no-space": "备份文件夹所在的磁盘已满。",
+      "migrating": "Kettu 正在把数据迁移到新格式，备份会等迁移完成再进行。",
+      "failed": "上次备份没有完成。"
+    },
+    "restore": {
+      "name": "从备份恢复",
+      "description": "用一份备份替换 Kettu 现在的数据；替换前会先把现在的数据另存为一份备份。",
+      "button": "从备份恢复…",
+      "keywords": "备份 恢复 还原 回滚 导入 restore",
+      "title": "恢复这份备份？",
+      "made_other": "{{file}}，{{date}} 由 Kettu {{version}} 备份：{{count}} 个文件，{{size}}。",
+      "replaces": "它会替换 Kettu 现在的会话、设置、记忆、Artifact 和附件，备份之后新增的内容会丢失；不过恢复前会先把现在的数据另存一份到备份文件夹。",
+      "keeps": "已配对的设备、Kettu 账号的登录、插件市场的密钥和代理订阅从不放进备份，会保持现状。",
+      "restart": "正在运行的 Agent 会停止，Kettu 会重启以完成恢复。",
+      "confirm": "恢复并重启",
+      "invalid": "这个文件不能用来恢复：{{message}}",
+      "restoring": "Kettu 正在重启以恢复备份…",
+      "done": "{{when}}已从 {{from}} 恢复",
+      "safety": "被替换的数据保存在备份文件夹里的 {{safety}}。",
+      "failed": "没能从 {{from}} 恢复"
+    },
+    "note": "不包含：这台电脑的密钥和配对、Kettu 账号的登录、插件市场的密钥和代理订阅（它们含有机密）；以及缓存、日志和搜索索引（Kettu 会重建）。"
   }
 }

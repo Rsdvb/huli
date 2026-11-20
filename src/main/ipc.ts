@@ -50,6 +50,7 @@ import type { AgentHost } from './agent-host'
 import { grantClipboardFiles, grantPaths } from './attachments'
 import type { Artifacts } from './artifacts'
 import type { Avatars } from './avatars'
+import type { BackupService } from './backup/service'
 import { ReportError, type Reports } from './report'
 import type { BrowserViews } from './browser/views'
 import type { SiteIcons } from './browser/site-icons'
@@ -1044,6 +1045,25 @@ export function registerTrayIpc(panel: TrayPanel): void {
   })
   on('tray:resize', (event, height) => {
     if (panel.owns(event.sender)) panel.resize(height)
+  })
+}
+
+/**
+ * Huli: the daily backup. The page never names a path: the folder and the file to restore come
+ * from main's dialogs, and a restore takes the token the pick gave.
+ */
+export function registerBackupIpc(backup: BackupService): void {
+  handle('backup:status', 0, () => backup.status())
+  handle('backup:run', 0, () => {
+    actionLog.info('backup.run')
+    return backup.runNow()
+  })
+  handle('backup:choose-folder', 0, ({ window }) => backup.chooseFolder(window))
+  handle('backup:open-folder', 0, () => backup.openFolder())
+  handle('backup:pick-restore', 0, ({ window }) => backup.pickRestore(window))
+  handle('backup:restore', 1, (_, token) => {
+    actionLog.info('backup.restore')
+    backup.restore(token)
   })
 }
 

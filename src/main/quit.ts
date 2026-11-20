@@ -54,6 +54,8 @@ export class QuitFlow {
   private background = false
   /** How a restart starts the next run, asked for once it goes ahead. */
   private relaunch: (() => Electron.RelaunchOptions) | null = null
+  /** What a restart does between stopping and starting again. */
+  private afterStop: (() => Promise<void>) | null = null
 
   constructor(private readonly deps: QuitDeps) {
     app.on('before-quit', (event) => {
@@ -72,10 +74,15 @@ export class QuitFlow {
     return this.background || this.deps.settings().general.background
   }
 
-  /** Quits and starts Kettu again with `relaunch`'s arguments, asking first as quitting does. */
-  restart(relaunch: () => Electron.RelaunchOptions): void {
+  /**
+   * Quits and starts Kettu again with `relaunch`'s arguments, asking first as quitting does.
+   * Huli: `afterStop` runs once the hosts stopped and the state is flushed, before the new start,
+   * as a restore of the data folder needs.
+   */
+  restart(relaunch: () => Electron.RelaunchOptions, afterStop?: () => Promise<void>): void {
     if (this.phase !== 'idle') return
     this.relaunch = relaunch
+    this.afterStop = afterStop ?? null
     this.request('restart')
   }
 
@@ -224,6 +231,13 @@ export class QuitFlow {
     const started = performance.now()
     await this.deps.shutDown()
     log.info(`Hosts stopped and state flushed in ${(performance.now() - started).toFixed(1)} ms`)
+    if (reason === 'restart' && this.afterStop) {
+      try {
+        await this.afterStop()
+      } catch (error) {
+        log.error('The step between stopping and starting again failed', error)
+      }
+    }
     this.phase = 'done'
     if (reason === 'update') {
       setTimeout(() => app.quit(), INSTALL_FALLBACK_MS).unref()

@@ -135,6 +135,37 @@ export interface SettingsFile {
   // the self-hosted mode, in which no process of this computer reaches them.
   cloud: { enabled: boolean }
   onboarding: OnboardingState
+  // Huli: the daily backup of this computer's data folder; see tools/huli/README.md.
+  backup: BackupSettings
+}
+
+/**
+ * Huli: the daily backup. `time` is the local time of day it runs, `keep` how many backups the
+ * folder holds, and `folder` one picked in a native dialog; null for the default in Documents.
+ */
+export interface BackupSettings {
+  enabled: boolean
+  time: string
+  keep: number
+  folder: string | null
+}
+
+/** Huli: how many backups the folder may be set to keep. */
+export const BACKUP_KEEP_MIN = 1
+export const BACKUP_KEEP_MAX = 60
+
+/** Huli: a local time of day as `HH:MM`, 24-hour. */
+export function isBackupTime(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+}
+
+export function isBackupKeep(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= BACKUP_KEEP_MIN &&
+    value <= BACKUP_KEEP_MAX
+  )
 }
 
 /** Devices connecting over TCP on the same network or a VPN, without the relay. */
@@ -336,6 +367,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   // connect directly over the network or a VPN such as Tailscale.
   cloud: { enabled: false },
   onboarding: { done: false, step: 'welcome' },
+  backup: { enabled: true, time: '03:00', keep: 7, folder: null },
 }
 
 /** The zoom one step in (1) or out (-1), held at the ends; 0 returns to the default. */
@@ -396,6 +428,13 @@ export interface SettingsPatch {
     terminal?: boolean
     relay?: boolean
     discoverable?: boolean
+  }
+  // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
+  backup?: {
+    enabled?: boolean
+    time?: string
+    keep?: number
+    folder?: null
   }
 }
 

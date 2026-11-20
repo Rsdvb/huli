@@ -57,7 +57,14 @@
     "exportTheme": "Export Theme",
     "chooseAgentFolder": "Choose Agent Folder",
     "chooseEditor": "Choose Editor",
-    "chooseSshKey": "Choose SSH Key File"
+    "chooseSshKey": "Choose SSH Key File",
+    "chooseBackupFolder": "Choose Backup Folder",
+    "chooseBackup": "Choose a Backup to Restore",
+    "backupFiles": "Kettu Backups"
+  },
+  "backup": {
+    "restoreFailed": "Could not restore from the backup",
+    "restartAnyway": "Restart"
   },
   "quit": {
     "titleQuit": "Quit {{name}}?",
