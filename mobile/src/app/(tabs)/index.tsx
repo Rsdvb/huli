@@ -489,7 +489,10 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   }, [byComputer])
   placedOf.current = new Map(placedAll.map((p) => [p.session.id, p.computer]))
 
-  const archivedCount = placedAll.filter((p) => p.session.archivedAt !== null).length
+  // The archived page lists the active computer's, so the count is of those alone.
+  const archivedCount = placedAll.filter(
+    (p) => p.computer === activeId && p.session.archivedAt !== null,
+  ).length
   const listed = useMemo(
     () =>
       placedAll.filter(
@@ -1119,7 +1122,9 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         style={styles.archived}
       >
         <Icon name="archive" size={18} color={c.textSecondary} />
-        <Text style={[typeScale.callout, { color: c.textSecondary, flex: 1 }]}>已归档的会话</Text>
+        <Text style={[typeScale.callout, { color: c.textSecondary, flex: 1 }]} numberOfLines={1}>
+          {allComputers ? `「${computerName(active)}」已归档的会话` : '已归档的会话'}
+        </Text>
         <Text style={[typeScale.callout, styles.count, { color: c.textTertiary }]}>
           {archivedCount}
         </Text>
