@@ -287,6 +287,21 @@
 .ks-answer .markdown {
   color: var(--thread-ink);
 }
+/* Huli: a running turn's row of work, its label and its status change at every step, and each
+   change replayed an entrance of 260 to 460 ms; together they kept the window drawing at the
+   display's rate about half the time a turn ran. They now change at once; new entries still rise
+   in once. */
+.ks-thread
+  :is(
+    .ui-tcc-group__stack .ui-tcc__icon,
+    .ui-tcc-group__title,
+    .ui-tcc-group__label,
+    .ui-tcc__status,
+    .ui-ansc__label-text
+  ) {
+  animation: none;
+}
+
 /* The fox's caret after the last word while the message streams. */
 .ks-answer
   .ui-ansc[data-phase='writing']

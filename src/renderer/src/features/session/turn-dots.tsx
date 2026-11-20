@@ -48,7 +48,7 @@ export function TurnDots({
       data-turn-dots
       aria-hidden
       className={cn(
-        'relative inline-block size-3 shrink-0 animate-in fill-current text-(--thread-fox) animation-duration-(--duration-base) fade-in',
+        'relative inline-block size-3 shrink-0 fill-current text-(--thread-fox)',
         className,
       )}
     >
