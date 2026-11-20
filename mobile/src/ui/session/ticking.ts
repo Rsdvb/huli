@@ -1,15 +1,8 @@
 // The clock that sheets and lines counting down to a reset go by.
 
-import { useEffect, useState } from 'react'
+import { useQuarterMinute } from './now'
 
-/** The time now, read again every 15 seconds while `on`. */
+/** The time now, read again every 15 seconds while `on`, on the screen's shared clock. */
 export function useTicking(on: boolean): number {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    if (!on) return
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 15_000)
-    return () => clearInterval(timer)
-  }, [on])
-  return now
+  return useQuarterMinute(on)
 }

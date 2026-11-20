@@ -24,6 +24,7 @@ import { call } from './git'
 import { useConnected, useMaybeLink, withinRefreshLimit } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
+import { useQuarterMinute } from './ui/session/now'
 
 export const LANG = 'zh-CN'
 
@@ -253,16 +254,9 @@ export function spanText(ms: number): string {
   return `${Math.floor(h / 24)} 天`
 }
 
-/** Re-renders every `everyMs` while `on`, for a clock that counts up. */
-export function useTick(on: boolean, everyMs = 15_000): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!on) return
-    setNow(Date.now())
-    const id = setInterval(() => setNow(Date.now()), everyMs)
-    return () => clearInterval(id)
-  }, [on, everyMs])
-  return now
+/** The time every 15 seconds while `on`, for a clock that counts up, on the screen's shared clock. */
+export function useTick(on: boolean): number {
+  return useQuarterMinute(on)
 }
 
 // The list, one store per link.
