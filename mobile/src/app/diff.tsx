@@ -117,7 +117,15 @@ export default function DiffScreen() {
       ) : !shown ? (
         <StateView loading />
       ) : shown.kind === 'error' ? (
-        <StateView text={shown.text} tone="danger" retry={() => setAttempt((n) => n + 1)} />
+        <StateView
+          text={shown.text}
+          tone="danger"
+          retry={() => {
+            // The spinner shows while it reads again, not the error it had.
+            setShown(null)
+            setAttempt((n) => n + 1)
+          }}
+        />
       ) : shown.kind === 'note' ? (
         <StateView text={shown.text} />
       ) : shown.diff.rows.length === 0 ? (
