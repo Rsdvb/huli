@@ -61,6 +61,7 @@ import {
   type ThreadPage,
   type ThreadWrite,
 } from './model'
+import { hasMedia, mediaDirOf, putMedia, readMedia, removeMedia, sweepMedia } from './media'
 import type { ThreadDbStatus, ThreadErrorCode } from './protocol'
 import {
   declarationAt,
@@ -71,7 +72,7 @@ import {
   type RuntimeStatements,
 } from './runtime-db'
 
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 // `turn` is the position of the entry that opened the entry's turn, so a page that starts at a
 // turn is one range of the primary key.
@@ -227,6 +228,27 @@ const WORKFLOW_TASKS = `
   ) STRICT, WITHOUT ROWID;
 `
 
+// The bytes of large media live in files of their own, one per content (`media.ts`), which `media`
+// records with the type the file is named by. Each session names what it holds by the hash its
+// entries give, `media_hash` being the content's: null once the user cleared the bytes away. The
+// `blobs` table before this kept the bytes in the file, once per session; the thread worker moves
+// its rows out in the background, so a database of version 9 opens at once.
+const MEDIA = `
+  CREATE TABLE media (
+    hash TEXT PRIMARY KEY,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID;
+  CREATE TABLE session_media (
+    session_id TEXT NOT NULL REFERENCES threads (session_id) ON DELETE CASCADE,
+    hash       TEXT NOT NULL,
+    mime       TEXT NOT NULL,
+    media_hash TEXT REFERENCES media (hash),
+    PRIMARY KEY (session_id, hash)
+  ) STRICT, WITHOUT ROWID;
+  CREATE INDEX session_media_by_media ON session_media (media_hash);
+`
+
 /** What brings a database of the version before each key up to it; a new one runs them all. */
 const MIGRATIONS: Record<number, string> = {
   2: ARTIFACTS,
@@ -237,6 +259,7 @@ const MIGRATIONS: Record<number, string> = {
   7: RUNTIME_TABLES,
   8: ARTIFACT_TYPES,
   9: WORKFLOW_TASKS,
+  10: MEDIA,
 }
 
 /** The tables of a database at schema `version`, as a new one made then had them. */
@@ -270,10 +293,19 @@ function githubLinks(markdown: string): string[] {
   return links
 }
 
-// The content refs that carry bytes, which a large one keeps in the blobs table.
+// The content refs that carry bytes, which a large one keeps in a media file.
 const CARRIED_KINDS: ReadonlySet<string> = new Set(['image', 'audio', 'video'])
+// How a stored entry or session view names bytes it keeps apart, as JSON.stringify writes it.
+const NAMED_BLOB = /"blob":"([0-9a-f]{64})"/g
 
 export type ThreadDbLog = (level: 'info' | 'warn' | 'error', message: string) => void
+
+/** What a clear of pictures took: from how many sessions, how many, and the bytes given back. */
+export interface ClearedImages {
+  sessions: number
+  images: number
+  bytes: number
+}
 
 export class ThreadDbError extends Error {
   constructor(
@@ -477,11 +509,51 @@ function prepareAll(db: DatabaseSync) {
         next_pos = excluded.next_pos,
         updated_at = excluded.updated_at`),
     deleteThread: sql('DELETE FROM threads WHERE session_id = ?'),
-    insertBlob: sql(
-      'INSERT OR IGNORE INTO blobs (session_id, hash, mime, data) VALUES (?, ?, ?, ?)',
+    // The bytes of version 9, until the worker moves them into files.
+    legacyBlob: sql('SELECT mime, data FROM blobs WHERE session_id = ? AND hash = ?'),
+    legacyBatch: sql('SELECT session_id, hash, mime, data FROM blobs LIMIT ?'),
+    legacyLeft: sql('SELECT COUNT(*) AS n, COALESCE(SUM(length(data)), 0) AS bytes FROM blobs'),
+    deleteLegacy: sql('DELETE FROM blobs WHERE session_id = ? AND hash = ?'),
+    mediaRow: sql('SELECT mime, size FROM media WHERE hash = ?'),
+    insertMedia: sql('INSERT OR IGNORE INTO media (hash, mime, size) VALUES (?, ?, ?)'),
+    deleteMedia: sql('DELETE FROM media WHERE hash = ?'),
+    mediaUsed: sql('SELECT 1 AS used FROM session_media WHERE media_hash = ? LIMIT 1'),
+    allMedia: sql('SELECT hash, mime FROM media'),
+    unusedMedia: sql(`
+      SELECT hash, mime FROM media
+      WHERE NOT EXISTS (SELECT 1 FROM session_media r WHERE r.media_hash = media.hash)`),
+    mediaTotals: sql('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM media'),
+    // A clear leaves the name with no content, so the thread tells a cleared picture from a lost one.
+    putRef: sql(`
+      INSERT INTO session_media (session_id, hash, mime, media_hash) VALUES (?, ?, ?, ?)
+      ON CONFLICT (session_id, hash) DO UPDATE SET
+        mime = excluded.mime, media_hash = excluded.media_hash`),
+    ref: sql(`
+      SELECT r.mime, r.media_hash, m.mime AS file_mime FROM session_media r
+      LEFT JOIN media m ON m.hash = r.media_hash
+      WHERE r.session_id = ? AND r.hash = ?`),
+    refsOf: sql('SELECT hash, mime, media_hash FROM session_media WHERE session_id = ?'),
+    deleteRef: sql('DELETE FROM session_media WHERE session_id = ? AND hash = ?'),
+    mediaOf: sql(
+      'SELECT DISTINCT media_hash AS hash FROM session_media WHERE session_id = ? AND media_hash IS NOT NULL',
     ),
-    blob: sql('SELECT mime, data FROM blobs WHERE session_id = ? AND hash = ?'),
-    hasBlob: sql('SELECT 1 AS found FROM blobs WHERE session_id = ? AND hash = ?'),
+    // The pictures of a session a clear takes away, with the bytes only they hold.
+    imagesOf: sql(`
+      SELECT r.hash, r.mime, r.media_hash, m.size FROM session_media r
+      JOIN media m ON m.hash = r.media_hash
+      WHERE r.session_id = ? AND r.mime LIKE 'image/%'`),
+    legacyImagesOf: sql(
+      "SELECT hash, mime, length(data) AS size FROM blobs WHERE session_id = ? AND mime LIKE 'image/%'",
+    ),
+    namingEntries: sql(
+      `SELECT json FROM entries WHERE session_id = ? AND instr(json, '"blob":"') > 0`,
+    ),
+    imageKept: sql(`
+      SELECT 1 AS kept FROM session_media WHERE media_hash = ?1
+        AND NOT (mime LIKE 'image/%' AND session_id IN (SELECT value FROM json_each(?2)))
+      LIMIT 1`),
+    sessionJson: sql('SELECT session_json FROM threads WHERE session_id = ?'),
+    settledThreads: sql('SELECT session_id FROM threads WHERE updated_at < ? ORDER BY session_id'),
     // `entries.json`, since json_each has a hidden column of that name.
     mentions: sql(`SELECT 1 FROM entries WHERE session_id = ?1 AND (
       (kind = 'agent' AND instr(json_extract(json, '$.markdown'), ?2) > 0)
@@ -625,13 +697,19 @@ export class ThreadDb {
   recoveries = 0
   /** Opened only to read, beside the connection that writes and recovers. */
   private reader = false
+  /** Where the threads' media files are, beside the database. */
+  readonly mediaDir: string
+  /** False once the media folder could not follow a damaged database aside. */
+  private mediaSweeps = true
 
   private constructor(
     private readonly file: string,
     private readonly log: ThreadDbLog,
     private readonly now: () => number,
     private readonly contentDir: string | null,
-  ) {}
+  ) {
+    this.mediaDir = mediaDirOf(file)
+  }
 
   /**
    * Opens the file, creating it, or moving a damaged one aside and starting empty. Artifacts keep
@@ -750,6 +828,18 @@ export class ThreadDb {
         )
       }
     }
+    const media = `${this.mediaDir}.corrupt-${stamp}`
+    try {
+      if (moveContent(this.mediaDir, media)) {
+        this.log('error', `The threads' media was moved to ${path.basename(media)}`)
+      }
+    } catch (moveError) {
+      this.mediaSweeps = false
+      this.log(
+        'error',
+        `The threads' media could not be moved aside (${(moveError as Error).message}); the sweep leaves it alone this run`,
+      )
+    }
     this.status = 'recovered'
     this.recoveries++
     this.connect()
@@ -793,7 +883,10 @@ export class ThreadDb {
       if (resultCode(error) === SQLITE_CONSTRAINT) {
         throw new ThreadDbError((error as Error).message, 'conflict')
       }
-      if (isFull(error, path.dirname(this.file))) {
+      if (
+        (error as NodeJS.ErrnoException | null)?.code === 'ENOSPC' ||
+        isFull(error, path.dirname(this.file))
+      ) {
         throw new ThreadDbError((error as Error).message, 'full')
       }
       throw error
@@ -857,21 +950,21 @@ export class ThreadDb {
     if (typeof value === 'object' && value !== null) {
       value = mapRefs(value as Record<string, unknown>, (ref) => {
         if (typeof ref.blob !== 'string') return ref
+        const gone = (cleared: boolean) => {
+          if (!cleared)
+            this.log('warn', `Media ${String(ref.blob)} of session ${sessionId} is missing`)
+          return { kind: 'unsupported', label: String(ref.mimeType) }
+        }
         if (images === 'refs' && ref.kind === 'image') {
-          if (sql.hasBlob.get(sessionId, ref.blob)) {
-            return { kind: 'image', mimeType: ref.mimeType, blob: ref.blob }
-          }
-          this.log('warn', `Media ${ref.blob} of session ${sessionId} is missing`)
-          return { kind: 'unsupported', label: String(ref.mimeType) }
+          const held = this.holds(sql, sessionId, ref.blob)
+          if (held === true) return { kind: 'image', mimeType: ref.mimeType, blob: ref.blob }
+          return gone(held === 'cleared')
         }
-        const blob = sql.blob.get(sessionId, ref.blob)
-        if (!blob) {
-          this.log('warn', `Media ${ref.blob} of session ${sessionId} is missing`)
-          return { kind: 'unsupported', label: String(ref.mimeType) }
-        }
+        const blob = this.readBlob(sql, sessionId, ref.blob)
+        if (blob === null || blob === 'cleared') return gone(blob === 'cleared')
         const restored: Record<string, unknown> = {
           ...ref,
-          data: Buffer.from(blob.data as Uint8Array).toString('base64'),
+          data: Buffer.from(blob.data).toString('base64'),
         }
         delete restored.blob
         return restored
@@ -1108,7 +1201,88 @@ export class ThreadDb {
 
   // Writing.
 
-  /** The entry's JSON, with large images, sounds and clips moved into the session's blobs. */
+  // Media.
+
+  /**
+   * Keeps the bytes the session names `hash`, in the file of their content unless one holds them
+   * already. `known` is their SHA-256 when the caller just took it; bytes are hashed again
+   * otherwise, so a name a client chose never makes another session's bytes its own.
+   */
+  private putBlob(
+    sql: Statements,
+    sessionId: string,
+    hash: string,
+    mime: string,
+    data: Uint8Array,
+    known?: string,
+  ): void {
+    const media = known ?? contentHash(data)
+    const row = sql.mediaRow.get(media)
+    // The first type the bytes came with names their file.
+    const fileMime = row ? String(row.mime) : mime
+    putMedia(this.mediaDir, media, fileMime, data)
+    if (!row) sql.insertMedia.run(media, mime, data.length)
+    sql.putRef.run(sessionId, hash, mime, media)
+  }
+
+  /**
+   * The bytes the session keeps under `hash`: from their file, or from the table of version 9
+   * until they are moved. `cleared` when the user cleared them away, null when there are none.
+   */
+  private readBlob(
+    sql: Statements,
+    sessionId: string,
+    hash: string,
+  ): { mime: string; data: Uint8Array } | 'cleared' | null {
+    const ref = sql.ref.get(sessionId, hash)
+    if (ref) {
+      if (ref.media_hash === null) return 'cleared'
+      if (ref.file_mime === null) return null
+      const data = readMedia(this.mediaDir, String(ref.media_hash), String(ref.file_mime))
+      return data ? { mime: String(ref.mime), data } : null
+    }
+    const legacy = sql.legacyBlob.get(sessionId, hash)
+    return legacy ? { mime: String(legacy.mime), data: legacy.data as Uint8Array } : null
+  }
+
+  /** Whether the session keeps bytes under `hash` that can be read, as `readBlob` would find. */
+  private holds(sql: Statements, sessionId: string, hash: string): boolean | 'cleared' {
+    const ref = sql.ref.get(sessionId, hash)
+    if (ref) {
+      if (ref.media_hash === null) return 'cleared'
+      if (ref.file_mime === null) return false
+      return hasMedia(this.mediaDir, String(ref.media_hash), String(ref.file_mime))
+    }
+    return sql.legacyBlob.get(sessionId, hash) !== undefined
+  }
+
+  /**
+   * Removes the rows of these contents that no session names any more, and returns their files,
+   * which go once the transaction holding this commits.
+   */
+  private unused(sql: Statements, hashes: Iterable<string>): { hash: string; mime: string }[] {
+    const files: { hash: string; mime: string }[] = []
+    for (const hash of new Set(hashes)) {
+      if (sql.mediaUsed.get(hash)) continue
+      const row = sql.mediaRow.get(hash)
+      if (!row) continue
+      sql.deleteMedia.run(hash)
+      files.push({ hash, mime: String(row.mime) })
+    }
+    return files
+  }
+
+  private dropFiles(files: readonly { hash: string; mime: string }[]): void {
+    if (files.length === 0 || !this.mediaSweeps) return
+    try {
+      removeMedia(this.mediaDir, files)
+    } catch (error) {
+      // The sweep removes what is left.
+      this.log('warn', `Could not remove media files: ${(error as Error).message}`)
+    }
+  }
+
+  /** The entry's JSON, with large images, sounds and clips moved into the session's media. */
   private storedJson(sql: Statements, sessionId: string, entry: ThreadEntry): string {
     const stored = mapRefs(entry as unknown as Record<string, unknown>, (ref) => {
       if (
@@ -1120,7 +1294,7 @@ export class ThreadDb {
       }
       const bytes = Buffer.from(ref.data, 'base64')
       const hash = createHash('sha256').update(bytes).digest('hex')
-      sql.insertBlob.run(sessionId, hash, String(ref.mimeType), bytes)
+      this.putBlob(sql, sessionId, hash, String(ref.mimeType), bytes, hash)
       const moved: Record<string, unknown> = { ...ref, blob: hash }
       delete moved.data
       return moved
@@ -1135,14 +1309,22 @@ export class ThreadDb {
    */
   write(sessionId: string, change: ThreadWrite): void {
     this.guard((sql, db) => {
-      this.transaction(db, () => {
+      const files = this.transaction(db, () => {
         // Writing whole drops the session's bytes with its rows; those its entries name stay.
         const kept: StoredBlob[] = []
+        const keptRefs: Row[] = []
+        let held: string[] = []
         // So do the outline's titles, whose positions keep their messages.
         let titles: Row[] = []
         if (change.replace) {
+          held = sql.mediaOf.all(sessionId).map((row) => String(row.hash))
           for (const hash of storedBlobs(change.entries.map(({ entry }) => entry))) {
-            const row = sql.blob.get(sessionId, hash)
+            const ref = sql.ref.get(sessionId, hash)
+            if (ref) {
+              keptRefs.push({ hash, mime: ref.mime, media_hash: ref.media_hash })
+              continue
+            }
+            const row = sql.legacyBlob.get(sessionId, hash)
             if (row) kept.push({ hash, mime: String(row.mime), data: row.data as Uint8Array })
           }
           titles = sql.titles.all(sessionId)
@@ -1164,8 +1346,11 @@ export class ThreadDb {
           nextPos,
           this.now(),
         )
+        for (const ref of keptRefs) {
+          sql.putRef.run(sessionId, String(ref.hash), String(ref.mime), ref.media_hash ?? null)
+        }
         for (const blob of [...kept, ...(change.blobs ?? [])]) {
-          sql.insertBlob.run(sessionId, blob.hash, blob.mime, blob.data)
+          this.putBlob(sql, sessionId, blob.hash, blob.mime, blob.data)
         }
         const entries = [...change.entries].sort((a, b) => a.pos - b.pos)
         for (const { pos, entry } of entries) {
@@ -1192,15 +1377,17 @@ export class ThreadDb {
         for (const { pos, title } of titles) {
           if (sql.userAt.get(sessionId, pos)) sql.putTitle.run(sessionId, pos, title)
         }
+        return this.unused(sql, held)
       })
+      this.dropFiles(files)
     }, undefined)
   }
 
   /** The bytes a session keeps under this hash, as for a sent attachment; null when none. */
   blob(sessionId: string, hash: string): StoredBlob | null {
     return this.guard((sql) => {
-      const row = sql.blob.get(sessionId, hash)
-      return row ? { hash, mime: String(row.mime), data: row.data as Uint8Array } : null
+      const blob = this.readBlob(sql, sessionId, hash)
+      return blob && blob !== 'cleared' ? { hash, mime: blob.mime, data: blob.data } : null
     }, null)
   }
 
@@ -1212,14 +1399,215 @@ export class ThreadDb {
     return this.guard((sql) => sql.mentions.get(sessionId, text) !== undefined, false)
   }
 
-  /** Drops the threads of these sessions, with their images, and returns the space. */
+  /** Drops the threads of these sessions, with the media no other session names, and the space. */
   remove(sessionIds: readonly string[]): void {
     this.guard((sql, db) => {
-      this.transaction(db, () => {
-        for (const sessionId of sessionIds) sql.deleteThread.run(sessionId)
+      const files = this.transaction(db, () => {
+        const held: string[] = []
+        for (const sessionId of sessionIds) {
+          for (const row of sql.mediaOf.all(sessionId)) held.push(String(row.hash))
+          sql.deleteThread.run(sessionId)
+        }
+        return this.unused(sql, held)
       })
+      this.dropFiles(files)
       db.exec('PRAGMA incremental_vacuum')
     }, undefined)
+  }
+
+  // Keeping the media in step.
+
+  /** How many rows and bytes the table of version 9 still holds. */
+  legacyLeft(): { rows: number; bytes: number } {
+    return this.guard(
+      (sql) => {
+        const row = sql.legacyLeft.get()
+        return { rows: Number(row?.n ?? 0), bytes: Number(row?.bytes ?? 0) }
+      },
+      { rows: 0, bytes: 0 },
+    )
+  }
+
+  /**
+   * Moves rows of the table of version 9 into media files, up to `rows` of them or until `bytes`
+   * are moved, in one transaction, so a crash leaves each row either moved or where it was.
+   * Returns what it moved.
+   */
+  moveLegacy(rows: number, bytes: number): { rows: number; bytes: number } {
+    if (this.reader) return { rows: 0, bytes: 0 }
+    return this.guard(
+      (sql, db) =>
+        this.transaction(db, () => {
+          let moved = 0
+          let size = 0
+          for (const row of sql.legacyBatch.all(rows)) {
+            const data = row.data as Uint8Array
+            const sessionId = String(row.session_id)
+            const hash = String(row.hash)
+            this.putBlob(sql, sessionId, hash, String(row.mime), data)
+            sql.deleteLegacy.run(sessionId, hash)
+            moved++
+            size += data.length
+            if (size >= bytes) break
+          }
+          return { rows: moved, bytes: size }
+        }),
+      { rows: 0, bytes: 0 },
+    )
+  }
+
+  /**
+   * Gives back up to `pages` free pages of the file to the disk, and returns how many free ones
+   * are left. A database made before incremental vacuuming was on is vacuumed whole instead,
+   * once, which turns it on.
+   */
+  shrink(pages: number): number {
+    if (this.reader) return 0
+    return this.guard((_, db) => {
+      const mode = Number(db.prepare('PRAGMA auto_vacuum').get()?.auto_vacuum ?? 0)
+      if (mode !== 2) {
+        db.exec('PRAGMA auto_vacuum = INCREMENTAL; VACUUM')
+        return 0
+      }
+      db.exec(`PRAGMA incremental_vacuum(${Math.max(1, Math.floor(pages))})`)
+      return Number(db.prepare('PRAGMA freelist_count').get()?.freelist_count ?? 0)
+    }, 0)
+  }
+
+  /** Folds the WAL into the file and cuts it back, as after a shrink; false when a reader held it. */
+  checkpoint(): boolean {
+    if (this.reader) return false
+    return this.guard((_, db) => {
+      const row = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
+      return Number(row?.busy ?? 0) === 0
+    }, false)
+  }
+
+  /** The threads last written before `before`, which no session is changing now. */
+  settledThreads(before: number): string[] {
+    return this.guard(
+      (sql) => sql.settledThreads.all(before).map((row) => String(row.session_id)),
+      [],
+    )
+  }
+
+  /**
+   * Drops the session's names of media that none of its entries, nor its stored view, names any
+   * more, as after an entry changed; the bytes go once no session names them. Returns how many.
+   */
+  pruneMedia(sessionId: string): number {
+    if (this.reader) return 0
+    return this.guard((sql, db) => {
+      const refs = sql.refsOf.all(sessionId)
+      if (refs.length === 0) return 0
+      const named = new Set<string>()
+      const collect = (json: string) => {
+        for (const match of json.matchAll(NAMED_BLOB)) named.add(match[1]!)
+      }
+      for (const row of sql.namingEntries.all(sessionId)) collect(String(row.json))
+      collect(String(sql.sessionJson.get(sessionId)?.session_json ?? ''))
+      const stale = refs.filter((ref) => !named.has(String(ref.hash)))
+      if (stale.length === 0) return 0
+      const files = this.transaction(db, () => {
+        for (const ref of stale) sql.deleteRef.run(sessionId, String(ref.hash))
+        return this.unused(
+          sql,
+          stale.flatMap((ref) => (ref.media_hash === null ? [] : [String(ref.media_hash)])),
+        )
+      })
+      this.dropFiles(files)
+      return stale.length
+    }, 0)
+  }
+
+  /**
+   * Removes the media rows no session names, and every file in the media folder no row names, a
+   * crash's leftovers included. Does nothing while the database is not open, since it cannot
+   * tell which files are named.
+   */
+  sweepMedia(): { files: number; bytes: number } {
+    if (this.reader) return { files: 0, bytes: 0 }
+    return this.guard(
+      (sql, db) => {
+        const files = this.transaction(db, () => {
+          const unused = sql.unusedMedia.all().map((row) => String(row.hash))
+          return this.unused(sql, unused)
+        })
+        this.dropFiles(files)
+        if (!this.mediaSweeps) return { files: 0, bytes: 0 }
+        const named = new Map(sql.allMedia.all().map((row) => [String(row.hash), String(row.mime)]))
+        return sweepMedia(this.mediaDir, named)
+      },
+      { files: 0, bytes: 0 },
+    )
+  }
+
+  /** What the threads keep: their media files, and the bytes still in the table of version 9. */
+  mediaTotals(): { files: number; bytes: number; legacy: number } {
+    return this.guard(
+      (sql) => {
+        const row = sql.mediaTotals.get()
+        return {
+          files: Number(row?.n ?? 0),
+          bytes: Number(row?.bytes ?? 0),
+          legacy: Number(sql.legacyLeft.get()?.bytes ?? 0),
+        }
+      },
+      { files: 0, bytes: 0, legacy: 0 },
+    )
+  }
+
+  /**
+   * Clears away the pictures of these sessions, leaving their entries to show that they were;
+   * the bytes go once no other session names them. With `dryRun`, only tells what it would clear:
+   * how many pictures, and the bytes that would come back.
+   */
+  clearImages(sessionIds: readonly string[], dryRun: boolean): ClearedImages {
+    const count = (sql: Statements): ClearedImages => {
+      const contents = new Map<string, number>()
+      let sessions = 0
+      let images = 0
+      let legacy = 0
+      for (const sessionId of new Set(sessionIds)) {
+        const before = images
+        for (const row of sql.imagesOf.all(sessionId)) {
+          images++
+          contents.set(String(row.media_hash), Number(row.size))
+        }
+        for (const row of sql.legacyImagesOf.all(sessionId)) {
+          images++
+          legacy += Number(row.size)
+        }
+        if (images > before) sessions++
+      }
+      // Bytes another session's name or a sound of the same content keeps stay.
+      const ids = JSON.stringify([...new Set(sessionIds)])
+      let bytes = legacy
+      for (const [hash, size] of contents) if (!sql.imageKept.get(hash, ids)) bytes += size
+      return { sessions, images, bytes }
+    }
+    const none: ClearedImages = { sessions: 0, images: 0, bytes: 0 }
+    if (dryRun || this.reader) return this.guard((sql) => count(sql), none)
+    return this.guard((sql, db) => {
+      const total = count(sql)
+      const files = this.transaction(db, () => {
+        const held: string[] = []
+        for (const sessionId of sessionIds) {
+          for (const row of sql.imagesOf.all(sessionId)) {
+            held.push(String(row.media_hash))
+            sql.putRef.run(sessionId, String(row.hash), String(row.mime), null)
+          }
+          for (const row of sql.legacyImagesOf.all(sessionId)) {
+            sql.deleteLegacy.run(sessionId, String(row.hash))
+            sql.putRef.run(sessionId, String(row.hash), String(row.mime), null)
+          }
+        }
+        return this.unused(sql, held)
+      })
+      this.dropFiles(files)
+      db.exec('PRAGMA incremental_vacuum')
+      return total
+    }, none)
   }
 
   // Artifacts.
