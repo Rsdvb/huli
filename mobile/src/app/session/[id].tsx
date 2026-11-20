@@ -124,7 +124,6 @@ import {
   useHostState,
   useLink,
   useLinkDown,
-  useSession,
   type HostData,
 } from '../../host'
 import { setMuted, useMuted } from '../../push/muted'
@@ -172,6 +171,23 @@ import { devMode } from '../../dev/devMode'
 import { FrameMeter } from '../../dev/FrameMeter'
 
 const pickLists = (d: HostData) => ({ loaded: d.loaded, fromCache: d.fromCache })
+
+/**
+ * Two summaries of the session that draw the screen alike: the computer sends one with each change
+ * while a turn runs, a new time and what the turn does now each time, which the screen shows from
+ * the thread instead. Drawn again for each of those, the whole screen and its composer redrew a
+ * few times a second.
+ */
+function sameSummary(a: SessionSummary | undefined, b: SessionSummary | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  for (const key in a) {
+    if (key === 'updatedAt' || key === 'working') continue
+    if (a[key as keyof SessionSummary] !== b[key as keyof SessionSummary]) return false
+  }
+  for (const key in b) if (!(key in a)) return false
+  return true
+}
 
 // The developer's frame meter over the real screen, for the simulator flows that measure it.
 const DEV = devMode()
@@ -291,7 +307,10 @@ export default function SessionScreen() {
   const view = useThread(link, id, hostState)
   const changes = useSessionChanges(id)
   const actions = useSessionActions('session', () => (pane ? pane.close() : router.back()))
-  const summary = useSession(id)
+  const summary = useHostSelector(
+    useCallback((d: HostData) => d.sessions.get(id), [id]),
+    sameSummary,
+  )
   const session = useThreadSelector(view, selectSession)
   const hasThread = useThreadSelector(view, selectHasThread)
   const config = useSessionConfig(id, session)
@@ -405,7 +424,10 @@ export default function SessionScreen() {
   const handBack = session?.computer?.control === 'you'
   // A worktree that is not ready says so above the composer, as the desktop's does.
   const worktreeWaits = !!summary?.worktree && summary.worktree.state !== 'ready'
-  const parentKnown = !!useSession(summary?.parentId)
+  const parentId = summary?.parentId ?? null
+  const parentKnown = useHostSelector(
+    useCallback((d: HostData) => parentId !== null && d.sessions.has(parentId), [parentId]),
+  )
   const chips = hasChips(summary, parentKnown)
 
   // The files of the folder the session's tools read or edited, newest first.
@@ -418,11 +440,23 @@ export default function SessionScreen() {
     sameItems,
   )
 
-  const children = useHostSelector(
-    useCallback((d: HostData) => [...d.sessions.values()].filter((s) => s.parentId === id), [id]),
-    sameItems,
+  // Counted only: the sub-sessions' own summaries change with each of their turns' steps.
+  const { count: childCount, running: childrenRunning } = useHostSelector(
+    useCallback(
+      (d: HostData) => {
+        let count = 0
+        let running = 0
+        for (const s of d.sessions.values()) {
+          if (s.parentId !== id) continue
+          count++
+          if (live(s.status)) running++
+        }
+        return { count, running }
+      },
+      [id],
+    ),
+    sameFields,
   )
-  const childrenRunning = children.filter((s) => live(s.status)).length
 
   // What the ⋯ menu counts is read as it opens, and again as the session changes while it is
   // open, once those changes pause. It is always our popover, so nothing is read while it is shut.
@@ -970,8 +1004,8 @@ export default function SessionScreen() {
           detail:
             childrenRunning > 0
               ? `${childrenRunning} 个运行中`
-              : children.length > 0
-                ? `${children.length} 个`
+              : childCount > 0
+                ? `${childCount} 个`
                 : '没有',
           onPress: () => router.push({ pathname: '/subagents/[id]', params: { id } }),
         },
