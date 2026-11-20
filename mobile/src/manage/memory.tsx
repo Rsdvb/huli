@@ -1,7 +1,7 @@
 // What Settings › 记忆 and an entry's page share: the host's reasons for refusing a memory request in
 // the user's words, who wrote an entry, and the editor sheet for a new or changed entry.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MemoryEntry, MemoryScope } from '@shared/memory'
 import { MEMORY_BODY_CHARS, MEMORY_DESCRIPTION_CHARS, MEMORY_TITLE_CHARS } from '@shared/memory'
 import type { HostLink } from '@shared/remote/link'
@@ -76,12 +76,18 @@ export function EntryEditor(props: {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [body, setBody] = useState('')
+  // The fields start from the entry as the sheet opens, or as another entry comes into it; a newer
+  // copy of the same entry, read again when any memory changes, leaves what is being typed alone.
+  const latest = useRef(props.entry)
+  latest.current = props.entry
+  const entryId = props.entry?.id ?? null
   useEffect(() => {
     if (!props.visible) return
-    setTitle(props.entry?.title ?? '')
-    setDescription(props.entry?.description ?? '')
-    setBody(props.entry?.body ?? '')
-  }, [props.visible, props.entry])
+    const entry = latest.current
+    setTitle(entry?.title ?? '')
+    setDescription(entry?.description ?? '')
+    setBody(entry?.body ?? '')
+  }, [props.visible, entryId])
   return (
     <FormSheet
       visible={props.visible}
