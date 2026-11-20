@@ -141,6 +141,7 @@ export function PlanUsageSheet(props: {
     if (!props.visible || !connected || !agent || !canReadLimits(agent)) return
     read(agent, false)
     // Once per opening, not on every push of the agent's status.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.visible, connected, agent?.id, read])
 
   const others = usableAgents(agents)

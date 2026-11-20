@@ -326,8 +326,9 @@ export function Composer(props: ComposerProps) {
 
   useEffect(() => {
     mounted.current = true
-    // The same map for the composer's life.
+    // The same map and set for the composer's life.
     const going = uploads.current
+    const kept = carried.current
     return () => {
       mounted.current = false
       // An upload under way would only be forgotten once it got there.
@@ -335,7 +336,7 @@ export function Composer(props: ComposerProps) {
       going.clear()
       // A draft keeps what the computer holds for it; without one, the computer forgets it.
       for (const item of latest.current) {
-        if (carried.current.has(item.key)) continue
+        if (kept.has(item.key)) continue
         if (item.local && computer) dropFile(computer, item.local.file)
         if (!item.attachment) continue
         if (draftKey && item.status === 'ready') continue
@@ -552,6 +553,7 @@ export function Composer(props: ComposerProps) {
       enqueue(item.key, item.source)
     }
     // The tiles are read when the link comes back, not on each change of them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected])
 
   /** Adds what was picked, as many as there is room for; the keys name mention's items. */

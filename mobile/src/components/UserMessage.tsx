@@ -61,11 +61,17 @@ export const UserMessage = memo(function UserMessage(props: {
   }))
   const refs = useFileRefs()
   const text = textOf(content)
-  const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
-  const attachments = carried.flatMap((ref): Attachment[] =>
-    ref.kind === 'attachment' ? [ref.attachment] : [],
-  )
-  const pictures = carried.map(pictureOf).filter((each): each is Picture => each !== null)
+  // Read from the content once, so what follows them changes only with it.
+  const { carried, attachments, pictures } = useMemo(() => {
+    const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
+    return {
+      carried,
+      attachments: carried.flatMap((ref): Attachment[] =>
+        ref.kind === 'attachment' ? [ref.attachment] : [],
+      ),
+      pictures: carried.map(pictureOf).filter((each): each is Picture => each !== null),
+    }
+  }, [content])
 
   // Mentions resolve against what the message carried, then the project's files.
   const mentions = /[@＠]/.test(text)
@@ -75,8 +81,7 @@ export const UserMessage = memo(function UserMessage(props: {
         attachments,
         mentions && refs?.known ? { files: refs.known, folders: foldersOf(refs.known) } : null,
       ),
-    // The attachments change only with the content.
-    [content, mentions, refs?.known],
+    [attachments, mentions, refs?.known],
   )
   const chips = useMemo<MarkdownChips>(
     () => ({
@@ -108,7 +113,7 @@ export const UserMessage = memo(function UserMessage(props: {
         }
       },
     }),
-    [resolve, sessionId, refs?.root],
+    [resolve, attachments, sessionId, refs?.root],
   )
 
   // A file a mention names is its chip in the text; pictures stay above as thumbnails.

@@ -153,6 +153,7 @@ export function ContextSheet(props: {
       void link.request('agents.refreshLimits', { agentId: agent.id, ask: true }).catch(() => {})
     }
     // Read once each time the sheet opens; later snapshots come with the host's pushes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.visible, props.connected])
 
   // Opened mid-turn, the breakdown waits for the turn's end, then is read while still shown.
