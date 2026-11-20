@@ -13,6 +13,7 @@ import {
   type ToolEntry,
   type ToolKind,
 } from '@shared/thread'
+import { toolTitle } from '@shared/tool-names'
 import { basename, duration, shownPath } from '@renderer/lib/format'
 import { errorCode, host } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
@@ -66,7 +67,12 @@ export function toolLabel(
     const target = entry.rawInput ?? entry.title.replace(/^run\s+/i, '')
     return { verb: i18n.t(`${verbs}.run`), target, kind: 'command' }
   }
-  return { verb: null, target: entry.title, kind: 'title' }
+  return { verb: null, target: shownToolTitle(entry.title), kind: 'title' }
+}
+
+/** Huli: a call's own title in words, where the agent named it only by its tool. */
+export function shownToolTitle(title: string): string {
+  return toolTitle(title, i18n.language)
 }
 
 /** An option's answer; `note` goes with an option that takes one, such as keeping on planning. */

@@ -35,6 +35,7 @@ import {
   type RequestsSystem,
 } from '@shared/model-requests'
 import type { SessionView } from '@shared/thread'
+import { toolTitle } from '@shared/tool-names'
 import { Button } from '@renderer/components/ui/button'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -58,6 +59,7 @@ import {
   tokens,
   usd,
 } from '@renderer/lib/format'
+import { i18n } from '@renderer/lib/i18n'
 import { cn } from '@renderer/lib/utils'
 import { panelSession } from '@renderer/stores/view'
 import { REQUESTS_ICON } from './icon'
@@ -646,7 +648,7 @@ function SystemRow({
 function ToolChange({ change }: { change: RequestsSystem['changes'][number] }) {
   const { t } = useTranslation('requests')
   const time = change.at === null ? '' : clockTime(change.at)
-  const names = (list: string[]) => list.map((name) => name.replace(/^mcp__.+?__/, '')).join(', ')
+  const names = (list: string[]) => list.map((name) => toolTitle(name, i18n.language)).join(', ')
   return (
     <>
       {change.added.length > 0 && t('system.added', { tools: names(change.added), time })}
@@ -783,6 +785,11 @@ function RequestRow({
  * What a request did in one line: a glyph for each kind of thing, then the words of its main one,
  * the first tool call or else the reply or the thinking, and how many more calls it made.
  */
+/** Huli: a call of a tool the host names only by its tool, in words. */
+function actionLabel(action: ModelRequest['actions'][number]): string {
+  return action.kind === 'tool' ? toolTitle(action.label, i18n.language) : action.label
+}
+
 function ActionSummary({ actions }: { actions: ModelRequest['actions'] }) {
   const { t } = useTranslation('requests')
   const calls = actions.filter((a) => a.kind !== 'thinking' && a.kind !== 'reply')
@@ -794,8 +801,8 @@ function ActionSummary({ actions }: { actions: ModelRequest['actions'] }) {
     main.kind === 'thinking' || main.kind === 'reply'
       ? t(`action.${main.kind}`)
       : main.count > 1 && calls.length === 1
-        ? `${main.label} ×${main.count}`
-        : main.label
+        ? `${actionLabel(main)} ×${main.count}`
+        : actionLabel(main)
   return (
     <>
       <span className="kr-glyphs" aria-hidden>
@@ -976,7 +983,11 @@ function Line({
 function PartLine({ part }: { part: RequestPart }) {
   const { t } = useTranslation('requests')
   const label =
-    part.kind === 'tool-call' || part.kind === 'attachment' ? part.label : t(`part.${part.kind}`)
+    part.kind === 'tool-call'
+      ? toolTitle(part.label, i18n.language)
+      : part.kind === 'attachment'
+        ? part.label
+        : t(`part.${part.kind}`)
   return (
     <Line
       icon={PART_GLYPH[part.kind]}

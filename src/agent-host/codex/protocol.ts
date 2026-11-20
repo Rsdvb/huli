@@ -302,6 +302,8 @@ export type ThreadItem = ItemTimes &
         type: 'dynamicToolCall'
         id: string
         tool: string
+        /** Since Codex 0.170: the namespace the tool was registered under. */
+        namespace?: string | null
         arguments: JsonValue
         status: 'inProgress' | 'completed' | 'failed'
         contentItems:

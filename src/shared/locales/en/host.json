@@ -565,7 +565,11 @@
         "sendInput": "Message subagent",
         "resumeAgent": "Resume subagent",
         "wait": "Wait for subagents",
-        "closeAgent": "Close subagent"
+        "closeAgent": "Close subagent",
+        "sendMessage": "Message subagent",
+        "followupTask": "Give subagent a follow-up task",
+        "interruptAgent": "Interrupt subagent",
+        "listAgents": "List subagents"
       }
     },
     "notice": {

@@ -408,7 +408,10 @@ export class ThreadMapper {
       case 'dynamicToolCall': {
         const raw = rawInputText(item.arguments)
         this.tool(ctx, out, item.id, {
-          title: item.tool,
+          // Huli: named as an MCP tool is, so the clients show its namespace and name in words.
+          title: item.namespace
+            ? t('codex.tool.mcp', { server: item.namespace, tool: item.tool })
+            : item.tool,
           toolKind: 'other',
           status: done ? toolStatus(item.status) : 'in_progress',
           ...(done ? { content: dynamicContent(item) } : {}),

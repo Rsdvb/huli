@@ -562,7 +562,11 @@
         "sendInput": "给子 Agent 发消息",
         "resumeAgent": "恢复子 Agent",
         "wait": "等待子 Agent",
-        "closeAgent": "关闭子 Agent"
+        "closeAgent": "关闭子 Agent",
+        "sendMessage": "给子 Agent 发消息",
+        "followupTask": "给子 Agent 追加任务",
+        "interruptAgent": "打断子 Agent",
+        "listAgents": "列出子 Agent"
       }
     },
     "notice": {
