@@ -2,7 +2,7 @@
 // it carried, its work folded into runs of quiet lines that open, an answered request as one line,
 // a plan's answer, the turn's changes and footer, and the host's own records as small notes.
 
-import { memo, useRef } from 'react'
+import { memo, useMemo, useRef } from 'react'
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { openArtifact } from '../artifacts'
@@ -52,45 +52,53 @@ import { UserMessage } from './UserMessage'
 
 type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
+const NO_MENU: MenuNode[] = []
+
 function Reply(props: { entry: Of<'agent'>; writing: boolean }) {
   const { entry, writing } = props
   const { fork, forkAtMessage } = useSessionRows()
-  // A reply still being written has no menu yet; its text is not done.
-  const menu: MenuNode[] =
-    entry.markdown && !writing
-      ? joinGroups([
-          [
-            {
-              key: 'copy',
-              label: '复制',
-              icon: 'doc.on.doc',
-              onPress: () => void copyText(plainText(entry.markdown)),
-            },
-            {
-              key: 'select',
-              label: '选择文本',
-              icon: 'character.cursor.ibeam',
-              onPress: () => selectText({ text: plainText(entry.markdown) }),
-            },
-            {
-              key: 'markdown',
-              label: '复制为 Markdown',
-              icon: 'doc.plaintext',
-              onPress: () => void copyText(entry.markdown),
-            },
-          ],
-          fork
-            ? [
-                {
-                  key: 'fork',
-                  label: '从这里分叉',
-                  icon: 'arrow.triangle.branch',
-                  onPress: () => fork(forkAtMessage ? entry.id : null),
-                },
-              ]
-            : [],
-        ])
-      : []
+  // A reply still being written has no menu yet; its text is not done. Built once per text, so
+  // a redraw of the row hands the system's menu the same items.
+  const markdown = entry.markdown
+  const entryId = entry.id
+  const menu = useMemo<MenuNode[]>(
+    () =>
+      markdown && !writing
+        ? joinGroups([
+            [
+              {
+                key: 'copy',
+                label: '复制',
+                icon: 'doc.on.doc',
+                onPress: () => void copyText(plainText(markdown)),
+              },
+              {
+                key: 'select',
+                label: '选择文本',
+                icon: 'character.cursor.ibeam',
+                onPress: () => selectText({ text: plainText(markdown) }),
+              },
+              {
+                key: 'markdown',
+                label: '复制为 Markdown',
+                icon: 'doc.plaintext',
+                onPress: () => void copyText(markdown),
+              },
+            ],
+            fork
+              ? [
+                  {
+                    key: 'fork',
+                    label: '从这里分叉',
+                    icon: 'arrow.triangle.branch',
+                    onPress: () => fork(forkAtMessage ? entryId : null),
+                  },
+                ]
+              : [],
+          ])
+        : NO_MENU,
+    [markdown, writing, fork, forkAtMessage, entryId],
+  )
   if (!entry.markdown && !writing && entry.attachments.length === 0) return null
   return (
     <View style={{ gap: 8 }}>
