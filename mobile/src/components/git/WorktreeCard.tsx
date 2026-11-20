@@ -87,6 +87,9 @@ function useSetupActions(sessionId: string) {
   return { busy, error, run }
 }
 
+/** A 32pt button takes touches 44pt tall. */
+const SMALL_SLOP = { top: 6, bottom: 6, left: 0, right: 0 }
+
 function SmallButton(props: {
   label: string
   onPress(): void
@@ -101,6 +104,7 @@ function SmallButton(props: {
       disabled={props.disabled || props.busy}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!(props.disabled || props.busy), busy: !!props.busy }}
+      hitSlop={SMALL_SLOP}
       style={({ pressed }) => [
         styles.small,
         {

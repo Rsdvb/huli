@@ -682,6 +682,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
                   setPicked(null)
                   setFile(null)
                 }}
+                hitSlop={CHIP_SLOP}
                 style={[styles.chip, { backgroundColor: c.fillStrong }]}
               >
                 <Text style={[styles.chipText, { color: c.text }]}>回到首页</Text>
@@ -696,6 +697,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
               <PressScale
                 onPress={() => restore(pinned!)}
                 disabled={!connected}
+                hitSlop={CHIP_SLOP}
                 style={[styles.chip, { backgroundColor: c.fillStrong }]}
               >
                 <Text style={[styles.chipText, { color: c.text }]}>恢复这个版本</Text>
@@ -705,6 +707,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
                   setPicked(null)
                   setPinned(null)
                 }}
+                hitSlop={CHIP_SLOP}
                 style={[styles.chip, { backgroundColor: c.accent }]}
               >
                 <Text style={[styles.chipText, { color: c.onAccent }]}>看最新</Text>
@@ -848,6 +851,9 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
     </View>
   )
 }
+
+/** A 34pt chip takes touches 44pt tall. */
+const CHIP_SLOP = { top: 5, bottom: 5, left: 0, right: 0 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },

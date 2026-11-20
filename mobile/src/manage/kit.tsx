@@ -396,6 +396,7 @@ export function Button(props: {
       accessibilityRole="button"
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       accessibilityState={{ busy: !!props.busy, disabled: !!props.disabled }}
+      hitSlop={BUTTON_SLOP}
       containerStyle={props.wide ? styles.wide : undefined}
       style={[styles.button, { backgroundColor: background }]}
     >
@@ -412,6 +413,9 @@ export function Button(props: {
     </Press>
   )
 }
+
+/** A 36pt button takes touches 44pt tall. */
+const BUTTON_SLOP = { top: 4, bottom: 4, left: 0, right: 0 }
 
 /** Buttons side by side, wrapping when they do not fit. */
 export function Buttons(props: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
