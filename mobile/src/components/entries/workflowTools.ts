@@ -4,6 +4,7 @@
 
 import { useSyncExternalStore } from 'react'
 import * as SecureStore from 'expo-secure-store'
+import { File, Paths } from 'expo-file-system'
 import {
   isPace,
   type CheckLine,
@@ -204,22 +205,48 @@ export function workflowCardOf(entry: ToolEntry): WorkflowTool | null {
   return entry.status === 'completed' || entry.status === 'failed' ? tool : null
 }
 
-// What the user answered to a suggestion on this phone, kept in the Keychain beside the prefs.
+// What the user answered to a suggestion on this phone, kept in a file of the app's documents. The
+// Keychain, where they were kept first, takes values of a couple of kilobytes, which held only 24;
+// the desktop keeps 200, so a suggestion answered there and here reads the same for as long.
 
 export type SuggestionAnswer = { kind: 'started'; taskId: string } | { kind: 'declined' }
 
 const ITEM = 'huli.suggestions'
-// Few are kept: the Keychain holds small values, and an old suggestion is long settled.
-const KEPT = 24
+const KEPT = 200
 
 let answers: Record<string, SuggestionAnswer> = {}
 const listeners = new Set<() => void>()
 
-void SecureStore.getItemAsync(ITEM)
-  .then((stored) => {
-    const parsed = stored ? (JSON.parse(stored) as unknown) : null
-    if (isFields(parsed)) answers = { ...(parsed as Record<string, SuggestionAnswer>), ...answers }
-  })
+function answersFile(): File {
+  return new File(Paths.document, 'huli-suggestions.json')
+}
+
+async function writeAnswers(): Promise<void> {
+  const file = answersFile()
+  if (!file.exists) file.create()
+  await file.write(JSON.stringify(answers))
+}
+
+function readAnswers(raw: string | null): Record<string, SuggestionAnswer> {
+  try {
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null
+    return isFields(parsed) ? (parsed as Record<string, SuggestionAnswer>) : {}
+  } catch {
+    return {}
+  }
+}
+
+void (async () => {
+  const file = answersFile()
+  const kept = file.exists ? readAnswers(await file.text()) : {}
+  // Those the Keychain held move to the file once.
+  const old = readAnswers(await SecureStore.getItemAsync(ITEM).catch(() => null))
+  answers = { ...old, ...kept, ...answers }
+  if (Object.keys(old).length > 0) {
+    await writeAnswers()
+    await SecureStore.deleteItemAsync(ITEM).catch(() => {})
+  }
+})()
   .catch(() => {})
   .finally(() => {
     for (const listener of listeners) listener()
@@ -231,7 +258,9 @@ export function answerSuggestion(sessionId: string, entryId: string, answer: Sug
   const entries = Object.entries({ ...answers, [keyOf(sessionId, entryId)]: answer })
   answers = Object.fromEntries(entries.slice(-KEPT))
   for (const listener of listeners) listener()
-  void SecureStore.setItemAsync(ITEM, JSON.stringify(answers)).catch(() => {})
+  void Promise.resolve()
+    .then(writeAnswers)
+    .catch(() => {})
 }
 
 export function useSuggestionAnswer(sessionId: string, entryId: string): SuggestionAnswer | null {
