@@ -86,7 +86,7 @@ export default function NetworkNodeScreen() {
     }
     const done = await run('pick', () => setPick(host.link!, target, next), '没能切换')
     if (done) {
-      reloadSoon(read)
+      reloadSoon()
       router.back()
     }
   }
