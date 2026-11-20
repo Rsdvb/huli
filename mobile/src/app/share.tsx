@@ -1,7 +1,8 @@
 // The share sheet: what another app shared to Huli, a line to go with it if the user wants, and
 // where it goes, a recent session or a new one. Photos and files take the composer's path
 // (prepare, then attachments.add); the message goes with them by sessions.queue, or by
-// sessions.create for a new session, which then opens.
+// sessions.create for a new session, which then opens. Out of the computer's reach it says so,
+// with a retry, and can leave the message in the outbox (outbox.ts) to go once the computer is back.
 
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -33,8 +34,10 @@ import {
   type PendingAttachment,
   type PickedSource,
 } from '../attachments'
-import { useHost } from '../host'
+import { useComputerId, useHost } from '../host'
 import { LockLayer } from '../lock'
+import { keepFile, queueMessage, type NewSessionPlan, type OutboxAttachment } from '../outbox'
+import { computerName } from '../store'
 import { errorText, folder, listTime, sessionTitle } from '../sessions'
 import { discardShared, loadShared, type SharedBundle, type SharedItem } from '../share/inbox'
 import { haptic } from '../ui/session/feedback'
@@ -45,6 +48,7 @@ import { PressScale } from '../ui/session/Press'
 
 const NEW = '__new'
 const MAX_ROWS = 30
+const HINT_SLOP = { top: 14, bottom: 14, left: 10, right: 10 }
 
 type FileItem = Extract<SharedItem, { kind: 'image' | 'file' }>
 
@@ -56,6 +60,53 @@ function messageOf(typed: string, items: SharedItem[]): string {
     item.kind === 'text' ? [item.text.trim()] : item.kind === 'url' ? [item.url] : [],
   )
   return [typed.trim(), ...shared].filter(Boolean).join('\n\n')
+}
+
+/** A shared file as the composer would have picked it: a photo scaled and re-encoded, a GIF not. */
+function sourceOf(item: FileItem): PickedSource {
+  const photo = item.kind === 'image' && isPhoto(item.mimeType)
+  return {
+    kind: photo ? 'image' : 'file',
+    uri: item.uri,
+    name: item.name,
+    mimeType: item.mimeType,
+    size: photo ? null : item.size,
+  }
+}
+
+/**
+ * Keeps the shared files on the phone and the message in the outbox, to go to the computer once it
+ * is reachable, as a message written while it was away does.
+ */
+async function keep(
+  computer: string,
+  items: SharedItem[],
+  text: string,
+  target: { sessionId: string } | { create: NewSessionPlan },
+): Promise<void> {
+  const attachments: OutboxAttachment[] = []
+  for (const item of items.filter(isFile).slice(0, ATTACHMENT_LIMIT)) {
+    const source = sourceOf(item)
+    const refused = tooLarge(source.name, source.size)
+    if (refused) throw new Error(refused)
+    const prepared = await prepare(source)
+    const { body } = prepared
+    const kept = await keepFile(
+      computer,
+      body instanceof Uint8Array ? body : { uri: body.uri },
+      prepared.name,
+    )
+    attachments.push({
+      kind: 'file',
+      file: kept.file,
+      name: prepared.name,
+      mimeType: prepared.mimeType,
+      thumb: prepared.thumb,
+      size: preparedSize(prepared),
+    })
+  }
+  if (!text && attachments.length === 0) throw new Error('没有可以发送的内容。')
+  queueMessage(computer, target, { text, attachments })
 }
 
 /** Uploads the files one at a time, as the composer does, and sends the message with them. */
@@ -72,15 +123,7 @@ async function send(
     for (const [index, item] of files.entries()) {
       const which = files.length > 1 ? ` ${index + 1}/${files.length}` : ''
       progress(`正在上传${which}…`)
-      // A picture is scaled and re-encoded as the composer's are; a GIF goes as it is.
-      const photo = item.kind === 'image' && isPhoto(item.mimeType)
-      const source: PickedSource = {
-        kind: photo ? 'image' : 'file',
-        uri: item.uri,
-        name: item.name,
-        mimeType: item.mimeType,
-        size: photo ? null : item.size,
-      }
+      const source = sourceOf(item)
       const refused = tooLarge(source.name, source.size)
       if (refused) throw new Error(refused)
       const prepared = await prepare(source)
@@ -186,12 +229,45 @@ export default function Share() {
     [host.projects],
   )
 
+  const computer = useComputerId()
   const connected = host.state.kind === 'connected'
   const sending = progress !== null
-  const canSend = Boolean(bundle && host.link && connected && target && !sending)
+  // Away from the computer, the message can wait in the outbox instead; a new session needs an
+  // agent to start with, known from the cache.
+  const canKeep = !connected && !!computer && (target !== NEW || !!agent)
+  const canSend = Boolean(bundle && target && !sending && (connected ? host.link : canKeep))
+
+  const keepForLater = async () => {
+    if (!bundle || !target || !computer) return
+    const chosen =
+      target === NEW
+        ? agent
+          ? { create: { agentId: agent.id, projectPath: project?.path ?? null } }
+          : null
+        : { sessionId: target }
+    if (!chosen) return
+    haptic.pick()
+    setProgress('正在保存…')
+    try {
+      await keep(computer, bundle.items, messageOf(typed, bundle.items), chosen)
+      discardShared(bundle.id)
+      haptic.success()
+      // A session's message waits at its end; a new session waits as a card on New session.
+      if ('sessionId' in chosen) {
+        router.replace({ pathname: '/session/[id]', params: { id: chosen.sessionId } })
+      } else {
+        router.replace('/new')
+      }
+    } catch (error) {
+      Alert.alert('没能保存', errorText(error))
+    } finally {
+      setProgress(null)
+    }
+  }
 
   const submit = async () => {
     const link = host.link
+    if (!connected) return keepForLater()
     if (!bundle || !link || !target) return
     const chosen =
       target === NEW
@@ -378,7 +454,26 @@ export default function Share() {
           ]}
         >
           {!connected ? (
-            <Text style={[styles.hint, { color: c.textTertiary }]}>正在连接电脑…</Text>
+            <View style={styles.away}>
+              <Text style={[styles.hint, { color: c.textTertiary }]}>
+                {host.unreachable
+                  ? `连不上「${computerName(host.host)}」，可以先存着，连上后自动发出`
+                  : '正在连接电脑…'}
+              </Text>
+              {host.unreachable && host.state.kind !== 'stopped' ? (
+                <Pressable
+                  onPress={() => {
+                    haptic.pick()
+                    host.retry()
+                  }}
+                  hitSlop={HINT_SLOP}
+                  accessibilityRole="button"
+                  accessibilityLabel="重试连接"
+                >
+                  <Text style={[styles.hint, styles.retry, { color: c.accent }]}>重试</Text>
+                </Pressable>
+              ) : null}
+            </View>
           ) : !target ? (
             <Text style={[styles.hint, { color: c.textTertiary }]}>选一个会话，或者新会话</Text>
           ) : null}
@@ -393,7 +488,9 @@ export default function Share() {
             ]}
           >
             {sending ? <ActivityIndicator color={c.onAccent} /> : null}
-            <Text style={[styles.sendText, { color: c.onAccent }]}>{progress ?? '发送'}</Text>
+            <Text style={[styles.sendText, { color: c.onAccent }]}>
+              {progress ?? (connected ? '发送' : '连上后发送')}
+            </Text>
           </PressScale>
         </View>
       </KeyboardAvoidingView>
@@ -506,7 +603,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
-  hint: { fontSize: 13, textAlign: 'center' },
+  hint: { fontSize: 13, textAlign: 'center', flexShrink: 1 },
+  away: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 },
+  retry: { fontWeight: '600' },
   send: {
     height: 48,
     borderRadius: 999,
