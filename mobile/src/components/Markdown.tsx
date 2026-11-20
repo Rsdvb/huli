@@ -30,7 +30,14 @@ import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { textKey, useDisclosure } from '../ui/session/disclosure'
 import { ContextMenu } from '../ui/ContextMenu'
 import { copyText } from '../ui/session/feedback'
-import { knownFileRef, openFile, useFileRefs, type FileRefsContext } from '../ui/session/fileRefs'
+import {
+  knownFileRef,
+  openFile,
+  parseFileRef,
+  useFileRefs,
+  type FileRefsContext,
+} from '../ui/session/fileRefs'
+import { showNotice } from '../ui/NoticeBar'
 import { highlight } from '../ui/session/highlight'
 import { G, Icon } from '../ui/session/icons'
 import { keepBlocks, parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
@@ -70,15 +77,21 @@ const FOLDED_LINES = 7
 
 const SCHEME = /^[a-z][a-z\d+.-]*:/i
 
-/** Opens a link: a file of the session's folder on the file screen, a web address in the browser. */
+/**
+ * Opens a link: a file of the session's folder on the file screen, a web address in the browser.
+ * A link that looks tappable never does nothing: one that leads nowhere the phone can go says so.
+ */
 function openLink(href: string, refs: FileRefsContext | null) {
-  const local = href !== '' && !href.startsWith('#') && (!SCHEME.test(href) || /^file:/i.test(href))
+  if (href === '' || href.startsWith('#')) return
+  const local = !SCHEME.test(href) || /^file:/i.test(href)
   if (local || /^[a-z]:[\\/]/i.test(href)) {
-    const ref = knownFileRef(href, refs)
+    // A file of the folder opens even before the folder's list came, which may never come.
+    const ref = knownFileRef(href, refs) ?? (refs?.root ? parseFileRef(href, refs.root) : null)
     if (ref && refs) openFile(refs.sessionId, ref.path, ref.line)
+    else showNotice({ text: '这个文件不在会话的文件夹里，请在电脑上查看' })
     return
   }
-  if (/^(https?:|mailto:)/i.test(href)) void Linking.openURL(href).catch(() => {})
+  void Linking.openURL(href).catch(() => showNotice({ text: '手机上打不开这个链接' }))
 }
 
 /**
