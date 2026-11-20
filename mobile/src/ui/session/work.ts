@@ -415,6 +415,12 @@ interface Seen {
 
 const bySession = new Map<string, { state: ThreadState; tools: Map<string, Seen> }>()
 
+// The times of calls that finished while their session was shown, kept when it is left, so they
+// show again on its next visit. A call still running then is let go: it ended out of sight, so
+// its time is not known. The sessions left longest ago go first.
+const left = new Map<string, Map<string, Seen>>()
+const LEFT_KEPT = 20
+
 // Statuses change near the thread's end, so a patch is read no further back.
 const LOOKBACK = 64
 
@@ -425,7 +431,8 @@ const isRunning = (entry: ToolEntry) =>
 export function observeTools(sessionId: string, state: ThreadState): void {
   const known = bySession.get(sessionId)
   if (known?.state === state) return
-  const tools = known?.tools ?? new Map<string, Seen>()
+  const tools = known?.tools ?? left.get(sessionId) ?? new Map<string, Seen>()
+  left.delete(sessionId)
   const { order, byId } = state
   const from = known ? Math.max(0, order.length - LOOKBACK) : 0
   const now = Date.now()
@@ -435,7 +442,7 @@ export function observeTools(sessionId: string, state: ThreadState): void {
     const seen = tools.get(entry.id)
     const running = isRunning(entry)
     if (!known) {
-      tools.set(entry.id, { running })
+      if (!seen) tools.set(entry.id, { running })
       continue
     }
     if (!seen) {
@@ -450,9 +457,22 @@ export function observeTools(sessionId: string, state: ThreadState): void {
   bySession.set(sessionId, { state, tools })
 }
 
-/** Forgets a session the phone no longer shows, so it starts over as if loaded first. */
+/**
+ * Leaves a session the phone no longer shows: it starts over as if loaded first, keeping the
+ * times of the calls it saw finish.
+ */
 export function forgetTools(sessionId: string): void {
+  const known = bySession.get(sessionId)
   bySession.delete(sessionId)
+  if (!known) return
+  const finished = new Map<string, Seen>()
+  for (const [id, seen] of known.tools) {
+    if (seen.start !== undefined && seen.end !== undefined) finished.set(id, seen)
+  }
+  if (finished.size === 0) return
+  left.delete(sessionId)
+  left.set(sessionId, finished)
+  if (left.size > LEFT_KEPT) left.delete(left.keys().next().value!)
 }
 
 /** When a tool call started and how long it took, as far as this phone saw it. */
