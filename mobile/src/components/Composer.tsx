@@ -15,6 +15,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useDeferredValue,
   useMemo,
   useRef,
   useState,
@@ -1331,6 +1332,18 @@ function MentionList(props: {
   const link = useLink()
   const { c } = useSessionTokens()
   const files = useProjectFiles(link, props.folder, props.folder !== null)
+  // The shallowest files, for a bare `@`, sorted once per list rather than on every keystroke.
+  const shallow = useMemo(() => {
+    const paths = files.list?.paths
+    if (!paths) return []
+    return paths
+      .map((path) => ({ path, depth: path.split('/').length }))
+      .sort((a, b) => a.depth - b.depth)
+      .slice(0, 30)
+      .map((each) => each.path)
+  }, [files.list])
+  // Typing stays quick: the search follows the query a render behind when the list is long.
+  const deferred = useDeferredValue(props.query)
   let body: ReactNode
   if (!props.folder) {
     body = <PickerNote text="选择一个项目后才能提及其中的文件" />
@@ -1345,13 +1358,9 @@ function MentionList(props: {
     )
   } else {
     const paths = files.list.paths
-    const query = props.query.trim()
+    const query = deferred.trim()
     const used = query ? [] : props.used.slice(0, 12)
-    const found = query
-      ? matchFiles(paths, query, 40)
-      : used.length > 0
-        ? used
-        : [...paths].sort((a, b) => a.split('/').length - b.split('/').length).slice(0, 30)
+    const found = query ? matchFiles(paths, query, 40) : used.length > 0 ? used : shallow
     body =
       found.length === 0 ? (
         <PickerNote text={query ? '没有匹配的文件' : '项目里没有文件'} />

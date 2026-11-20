@@ -222,6 +222,10 @@ const pickKeyboard = (state: { isVisible: boolean; height: number }) =>
 // The sessions whose user agreed to go on here while a program outside has them open, once each.
 const outsideAgreed = new Set<string>()
 
+// When, after the screen settles, the folder's files are read, and how long they are kept.
+const FILES_AFTER = 1500
+const FILES_KEPT = 10 * 60_000
+
 // How long Stop waits for the turn to end before it can be asked again.
 const STOP_WAIT = 15_000
 
@@ -329,8 +333,15 @@ export default function SessionScreen() {
 
   useEffect(() => () => forgetTools(id), [id])
 
-  // The folder's files, for the references in replies and prompts that open them.
-  const projectFiles = useProjectFiles(link, changes.folder, connected)
+  // The folder's files, for the references in replies and prompts that open them. A project
+  // lists up to 50,000, read only once the screen has opened and settled, and kept ten minutes
+  // for the next session in the folder, as only whether a file is there matters here.
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(true), FILES_AFTER)
+    return () => clearTimeout(timer)
+  }, [])
+  const projectFiles = useProjectFiles(link, changes.folder, connected && settled, FILES_KEPT)
   const known = useMemo(
     () => (projectFiles.list ? new Set(projectFiles.list.paths) : null),
     [projectFiles.list],
