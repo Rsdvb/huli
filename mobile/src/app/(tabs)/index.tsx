@@ -1090,6 +1090,14 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       if (!connected && host.unreachable && host.state.kind !== 'stopped') return <Unreachable />
       return <SessionRowSkeleton />
     }
+    // 全部电脑: no computer is known to have none until each has answered or is known away.
+    if (
+      allComputers &&
+      ((!host.loaded && !host.unreachable && host.state.kind !== 'stopped') ||
+        [...fleet.values()].some((f) => !f.loaded && f.state === 'connecting'))
+    ) {
+      return <SessionRowSkeleton />
+    }
     if (shell.filter.kind !== 'all') {
       return (
         <EmptyState
