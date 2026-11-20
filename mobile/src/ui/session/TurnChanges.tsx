@@ -1,8 +1,8 @@
 // A turn's edits as one card: how many files and lines it changed, and a row per file that opens
 // to a preview of its change or, tapped, to the whole diff.
 
-import { memo, useMemo, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { memo, useMemo } from 'react'
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { ToolEntry } from '@shared/thread'
 import { handDiff } from '../../diff'
@@ -10,7 +10,8 @@ import { useSessionRows } from './context'
 import { relativePath } from './format'
 import { FileMark, G, Icon } from './icons'
 import { MONO, useSessionTokens } from './palette'
-import { gentle } from './Press'
+import { useDisclosure } from './disclosure'
+import { useOpenFade } from './Press'
 import { fileChanges, mergedDiff, type FileChange } from './turns'
 
 const PREVIEW_ROWS = 14
@@ -86,44 +87,57 @@ function Preview(props: { change: FileChange }) {
   )
 }
 
-function FileRow(props: { change: FileChange; root: string | null; first: boolean }) {
+function FileRow(props: {
+  change: FileChange
+  root: string | null
+  first: boolean
+  /** The turn's, so the row stays open as the list mounts it again. */
+  turn: string
+}) {
   const { c } = useSessionTokens()
-  const [open, setOpen] = useState(false)
   const { change } = props
-  const toggle = () => {
-    gentle()
-    setOpen((v) => !v)
-  }
+  const [open, setOpen] = useDisclosure(`change:${props.turn}:${change.path}`)
+  const shown = useOpenFade(open)
+  // The chevron and the rest of the line are buttons side by side: nested in the line, a tap on
+  // the chevron could open the diff instead.
   return (
     <View
       style={
         !props.first ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border } : null
       }
     >
-      <Pressable
-        onPress={() => openChange(change)}
-        accessibilityRole="button"
-        accessibilityLabel={`${change.path}，增加 ${change.insertions} 行，删除 ${change.deletions} 行`}
-        style={({ pressed }) => [styles.file, pressed && { backgroundColor: c.fill }]}
-      >
-        <Pressable onPress={toggle} hitSlop={10} accessibilityLabel={open ? '收起' : '展开预览'}>
+      <View style={styles.file}>
+        <Pressable
+          onPress={() => setOpen((v) => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={open ? '收起预览' : '展开预览'}
+          accessibilityState={{ expanded: open }}
+          style={({ pressed }) => [styles.chevron, pressed && { opacity: 0.55 }]}
+        >
           <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
             <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
           </View>
         </Pressable>
-        <FileMark path={change.path} size={15} />
-        <Text style={[styles.path, { color: c.text }]} numberOfLines={1} ellipsizeMode="head">
-          {relativePath(change.path, props.root)}
-        </Text>
-        {change.created && (
-          <Text style={[styles.tag, { color: c.added, backgroundColor: c.addedBg }]}>新建</Text>
-        )}
-        <Counts insertions={change.insertions} deletions={change.deletions} />
-      </Pressable>
+        <Pressable
+          onPress={() => openChange(change)}
+          accessibilityRole="button"
+          accessibilityLabel={`${change.path}，增加 ${change.insertions} 行，删除 ${change.deletions} 行`}
+          style={({ pressed }) => [styles.fileMain, pressed && { backgroundColor: c.fill }]}
+        >
+          <FileMark path={change.path} size={15} />
+          <Text style={[styles.path, { color: c.text }]} numberOfLines={1} ellipsizeMode="head">
+            {relativePath(change.path, props.root)}
+          </Text>
+          {change.created && (
+            <Text style={[styles.tag, { color: c.added, backgroundColor: c.addedBg }]}>新建</Text>
+          )}
+          <Counts insertions={change.insertions} deletions={change.deletions} />
+        </Pressable>
+      </View>
       {open && (
-        <View style={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+        <Animated.View style={{ paddingHorizontal: 12, paddingBottom: 12, opacity: shown }}>
           <Preview change={change} />
-        </View>
+        </Animated.View>
       )}
     </View>
   )
@@ -143,7 +157,13 @@ export const TurnChanges = memo(function TurnChanges(props: { tools: ToolEntry[]
         <Counts insertions={insertions} deletions={deletions} size={14} />
       </View>
       {changes.map((change, i) => (
-        <FileRow key={change.path} change={change} root={root} first={i === 0} />
+        <FileRow
+          key={change.path}
+          change={change}
+          root={root}
+          first={i === 0}
+          turn={props.tools[0]!.id}
+        />
       ))}
     </View>
   )
@@ -160,13 +180,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   title: { fontSize: 15, lineHeight: 20, fontWeight: '600' },
-  file: {
+  file: { flexDirection: 'row', alignItems: 'stretch', minHeight: 46 },
+  chevron: { width: 40, alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
+  fileMain: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingLeft: 14,
     paddingRight: 16,
-    minHeight: 46,
   },
   path: { flex: 1, fontSize: 14, lineHeight: 19 },
   tag: {
