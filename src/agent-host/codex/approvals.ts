@@ -17,7 +17,8 @@ import { hasMessage, t } from '../i18n'
 import { answerWords } from '../question-answers'
 import type { MapperContext, MapperOutput } from '../session-updates'
 import { replyText, type AsyncQuestionItem, type QuestionReply } from './async-questions'
-import { commandFacts, fenced, type ThreadMapper } from './mapper'
+import { fenced } from '../session-updates'
+import { commandFacts, type ThreadMapper } from './mapper'
 import type {
   AdditionalPermissions,
   CommandExecutionApprovalDecision,
