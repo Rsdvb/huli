@@ -39,6 +39,7 @@ import {
 } from '../ui/session/fileRefs'
 import { showNotice } from '../ui/NoticeBar'
 import { highlight } from '../ui/session/highlight'
+import { useReducedMotion } from '../ui/motion'
 import { G, Icon } from '../ui/session/icons'
 import { keepBlocks, parseBlocks, inline, type Block, type Inline } from '../ui/session/markdown'
 import { MONO, useSessionTokens, type SessionTokens } from '../ui/session/palette'
@@ -145,11 +146,14 @@ function ChipRuns(props: { text: string; look: Look }): ReactNode {
 }
 
 function Caret(props: { color: string }) {
+  const reduce = useReducedMotion()
   const [on, setOn] = useState(true)
   useEffect(() => {
+    // Under Reduce Motion it stands still, as the system's own caret does.
+    if (reduce) return setOn(true)
     const timer = setInterval(() => setOn((v) => !v), 530)
     return () => clearInterval(timer)
-  }, [])
+  }, [reduce])
   return <Text style={{ color: on ? props.color : 'transparent' }}> ▍</Text>
 }
 
