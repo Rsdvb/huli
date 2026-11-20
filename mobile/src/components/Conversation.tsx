@@ -144,7 +144,9 @@ export function Conversation(props: {
   )
 
   // New rows while the user reads further up mark the way back down.
-  const newest = rows[rows.length - 1]?.key
+  // A reply growing past another of its parts is the same reply.
+  const endRow = rows[rows.length - 1]
+  const newest = endRow?.type === 'reply' ? endRow.entry.id : endRow?.key
   const seenNewest = useRef(newest)
   useEffect(() => {
     if (newest !== seenNewest.current && away) setFresh(true)
