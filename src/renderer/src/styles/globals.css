@@ -548,8 +548,7 @@
     text-rendering: optimizeLegibility;
     scrollbar-color: var(--scrollbar-thumb) transparent;
     scrollbar-width: thin;
-    /* The window is the desk the sheets lie on, painted here alone: on macOS it is translucent, and
-       a second layer would thicken it. */
+    /* The window is the desk the sheets lie on, painted here alone. */
     background-color: var(--bg-desk);
   }
   /* Interface text is --ui-size; the root stays 16 px so Tailwind's rem scale is unchanged. */
@@ -1013,9 +1012,7 @@
   .animate-attention,
   .animate-breathe,
   .shimmer,
-  [data-caret],
-  [data-sd-animate],
-  [data-sd-animate-marker]::marker {
+  [data-caret] {
     animation: none !important;
   }
   /* The jump button's dots hold their frame and change at once; it neither nudges nor shakes. */
@@ -1049,9 +1046,7 @@
   & .animate-attention,
   & .animate-breathe,
   & .shimmer,
-  & [data-caret],
-  & [data-sd-animate],
-  & [data-sd-animate-marker]::marker {
+  & [data-caret] {
     animation: none !important;
   }
   & [data-jump-dots] circle {
@@ -1067,17 +1062,13 @@
   }
 }
 
-/* Huli: while the window is hidden or another window has the focus (app/window-front.ts), the
-   running marks' loops hold their frame and pick up from it when the window comes back. */
-:root[data-window-away] {
-  & [data-jump-dots] circle,
-  & .ui-ansc__shimmer,
-  & .ui-ansc__shimmer > span,
-  & .ui-tcc__glint,
-  & .ui-tcc__glint > span,
-  & .ks-answer .markdown-chunk ::after {
-    animation-play-state: paused !important;
-  }
+/* Huli: the running labels' light sweeps ("Writing", "Using tools") stand still. Every loop of the
+   window steps a few times a second (app/window-front.ts), which reads as a stutter for a sweep;
+   run at the display's rate, a sweep alone kept the window drawing every frame while a turn ran.
+   The turn's dots carry the motion. */
+.ui-ansc__shimmer,
+.ui-tcc__glint {
+  display: none;
 }
 
 /* Another color mode (lib/color-mode.ts): every color changes in the same frame, so elements' own
@@ -1099,13 +1090,6 @@
    cuts its sheets. */
 [data-slot='resizable-panel-group'][data-sliding] > [data-panel] {
   transition: flex-grow var(--duration-slow) var(--ease-out-quart);
-}
-
-/* Huli: a streamed word's reveal (markdown-impl.tsx) leaves nothing behind once it ends; its last
-   frame is the word's own style. Streamdown fills both ways, which kept a finished opacity on
-   every word of the live chunk, hundreds of effects that each frame composited. */
-.markdown-chunk [data-sd-animate] {
-  animation-fill-mode: backwards;
 }
 
 /* Agent prose, rendered by Streamdown, set to the thread's measurements. These rules are not in a layer, so they win over the utility

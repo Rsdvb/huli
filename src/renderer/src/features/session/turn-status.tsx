@@ -184,7 +184,7 @@ export const TurnStatus = memo(function TurnStatus({
           phase
         }
         title={text}
-        className="min-w-0 animate-in truncate animation-duration-(--duration-base) fade-in slide-in-from-bottom-1"
+        className="min-w-0 truncate"
       >
         {text}
       </span>

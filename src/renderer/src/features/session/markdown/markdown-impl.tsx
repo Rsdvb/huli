@@ -1,6 +1,5 @@
 import 'streamdown/styles.css'
 import {
-  createContext,
   isValidElement,
   lazy,
   memo,
@@ -20,11 +19,9 @@ import { createCodePlugin } from '@streamdown/code'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
-  Block,
   defaultComponents,
   defaultRehypePlugins,
   Streamdown,
-  type BlockProps,
   type Components,
   type ExtraProps,
   type StreamdownProps,
@@ -333,7 +330,6 @@ function MarkdownImpl({
             key={i}
             markdown={chunk}
             live={live}
-            reveal={live && i === chunks.length - 1}
             components={customComponents}
             remarkPlugins={customRemarkPlugins}
           />
@@ -344,54 +340,18 @@ function MarkdownImpl({
 }
 
 /**
- * affectUI's answer: streamed words fade in. A short stagger and backlog keep the words up with an
- * agent's pace; Streamdown's 40 ms per word falls behind any real stream. Its 4 ms floor per word
- * is patched out, so text that arrives at once all starts within the backlog instead of leaving
- * the rest blank for seconds (each CJK character is a word).
- *
- * Huli: opacity alone, which the compositor runs; the blur this had beside it cannot be
- * composited, so every word in its reveal repainted the reply on the main thread each frame.
+ * A chunk of the text. Huli: streamed words show as they arrive, without affectUI's fade: each
+ * word's fade ran on the main thread for 420 ms, so with words arriving all the time a streaming
+ * reply restyled and repainted at the display's rate, not at the stream's.
  */
-const REVEAL = {
-  animation: 'fadeIn',
-  duration: 420,
-  easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-  sep: 'word',
-  stagger: 10,
-  maxBacklogMs: 200,
-} as const
-
-/** Whether the chunk still shows the text it mounted with, which was there before it. */
-const MountedTextContext = createContext(false)
-
-/**
- * Streamdown's block. Streamdown reveals every word of a block it first renders with the reveal
- * on; here text that was already there, a chunk's when it mounts or a block's when the reveal
- * starts on it, counts as shown, so entering a session mid-reply reveals only what comes after.
- */
-function RevealBlock(props: BlockProps) {
-  const mountedText = useContext(MountedTextContext)
-  const plugin = props.animatePlugin ?? null
-  const [born] = useState(plugin)
-  const [seeded, setSeeded] = useState<typeof plugin>(null)
-  if (plugin && plugin !== seeded && (plugin !== born || mountedText)) {
-    plugin.setPrevContentLength(Number.MAX_SAFE_INTEGER)
-    setSeeded(plugin)
-  }
-  return <Block {...props} />
-}
-
-/** `reveal`: the chunk the stream is writing, whose new words rise in; settled ones stay plain. */
 const Chunk = memo(function Chunk({
   markdown,
   live,
-  reveal,
   components: customComponents,
   remarkPlugins: customRemarkPlugins,
 }: Pick<MarkdownProps, 'components' | 'remarkPlugins'> & {
   markdown: string
   live: boolean
-  reveal: boolean
 }) {
   const mergedComponents = useMemo(
     () => (customComponents ? { ...components, ...customComponents } : components),
@@ -404,32 +364,28 @@ const Chunk = memo(function Chunk({
   const source = useMemo(() => spacedImages(markdown), [markdown])
   const themes = useCodeThemes()
   const plugins = useMemo(() => pluginsFor(themes), [themes])
-  const [mountedWith] = useState(markdown)
   return (
     <LiveContext value={live}>
       {/* The last-block rules in globals.css name the chunks by this class. */}
-      <MountedTextContext value={markdown === mountedWith}>
-        <Streamdown
-          className="markdown-chunk"
-          mode="streaming"
-          parseIncompleteMarkdown={live}
-          isAnimating={live}
-          animated={reveal ? REVEAL : false}
-          BlockComponent={RevealBlock}
-          skipHtml
-          plugins={plugins}
-          remarkPlugins={mergedRemarkPlugins}
-          rehypePlugins={rehypePlugins}
-          components={mergedComponents}
-          linkSafety={linkSafety}
-          controls={controls}
-          codeBlockMaxHeight={0}
-          tableMaxHeight={0}
-          lineNumbers={false}
-        >
-          {source}
-        </Streamdown>
-      </MountedTextContext>
+      <Streamdown
+        className="markdown-chunk"
+        mode="streaming"
+        parseIncompleteMarkdown={live}
+        isAnimating={live}
+        animated={false}
+        skipHtml
+        plugins={plugins}
+        remarkPlugins={mergedRemarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={mergedComponents}
+        linkSafety={linkSafety}
+        controls={controls}
+        codeBlockMaxHeight={0}
+        tableMaxHeight={0}
+        lineNumbers={false}
+      >
+        {source}
+      </Streamdown>
     </LiveContext>
   )
 })
