@@ -436,7 +436,9 @@ export function useLongThread(options: {
     view: {
       store,
       cached: false,
+      cacheRead: true,
       error: null,
+      retry: () => {},
       hasOlder,
       loadingOlder,
       loadOlder,

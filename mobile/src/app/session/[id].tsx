@@ -151,7 +151,7 @@ import { OutboxRows, useHasOutbox } from '../../components/OutboxRows'
 import { queueMessage, withdrawItem, type OutboxMessage } from '../../outbox'
 import { useSessionTokens } from '../../ui/session/palette'
 import { usePopover, type MenuPage, type ViewHandle } from '../../ui/session/Popover'
-import { RoundButton } from '../../ui/session/Press'
+import { PressScale, RoundButton } from '../../ui/session/Press'
 import { Icon } from '../../ui/session/Icon'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
@@ -971,10 +971,12 @@ export default function SessionScreen() {
 
   const outbox = useMemo(() => <OutboxRows sessionId={id} onWithdraw={withdraw} />, [id, withdraw])
   let body
-  if (view.error) {
+  if (view.error && !hasThread) {
+    // A read that failed with nothing kept to show: why, and a way to try again, which it also
+    // does by itself a while later.
     body = (
       <View style={{ flex: 1, paddingBottom: dockHeight }}>
-        <StateView text={view.error} tone="danger" />
+        <StateView text={view.error} tone="danger" retry={view.retry} />
       </View>
     )
   } else if (!hasThread && hasOutbox && !connected) {
@@ -996,9 +998,21 @@ export default function SessionScreen() {
       </ScrollView>
     )
   } else if (!hasThread) {
+    // Away from the computer with nothing kept of it, it says so rather than spin until it is back.
     body = (
       <View style={{ flex: 1, paddingBottom: dockHeight }}>
-        <StateView loading />
+        {connected || !view.cacheRead ? (
+          <StateView loading />
+        ) : (
+          <StateView
+            icon={G.wifiOff}
+            text={
+              hostState.kind === 'reconnecting'
+                ? '正在重新连接电脑，连上后就能打开这个会话。'
+                : '和电脑断开了。手机上没有这个会话的记录，连上电脑后才能打开。'
+            }
+          />
+        )}
       </View>
     )
   } else {
@@ -1356,7 +1370,25 @@ export default function SessionScreen() {
           }
         />
       ) : null}
-      {linkDown && hasThread && (
+      {hasThread && view.error && !linkDown ? (
+        <View style={[styles.banner, { top: headerHeight + 8 + (chips ? CHIPS_HEIGHT : 0) }]}>
+          <PressScale
+            onPress={view.retry}
+            accessibilityRole="button"
+            accessibilityLabel={`${view.error}，重试`}
+            accessibilityLiveRegion="polite"
+          >
+            <GlassCapsule height={34} elevated style={styles.bannerPill}>
+              <Icon icon={G.warning} size={14} color={c.warning} />
+              <Text style={[styles.bannerText, { color: c.textSecondary }]} numberOfLines={1}>
+                没能读到最新内容
+              </Text>
+              <Text style={[styles.bannerText, { color: c.tint }]}>重试</Text>
+            </GlassCapsule>
+          </PressScale>
+        </View>
+      ) : null}
+      {linkDown && (hasThread || hasOutbox) && (
         <View
           pointerEvents="none"
           style={[styles.banner, { top: headerHeight + 8 + (chips ? CHIPS_HEIGHT : 0) }]}
