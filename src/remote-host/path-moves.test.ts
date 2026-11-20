@@ -57,11 +57,11 @@ function late(transport: Transport, ms: number, sendMs = 0): Transport {
 }
 
 /**
- * A host on the relay at MAIN, which it hears through 100 ms late and sends through `sendsLate` ms
- * late, and with `regions` also on HK, which it hears at once; the device then ranks both, MAIN
- * first.
+ * A host on the relay at MAIN, which it hears through `mainLate` ms late and sends through
+ * `sendsLate` ms late, and with `regions` also on HK, which it hears at once; the device then ranks
+ * both, MAIN first.
  */
-async function setup({ regions = false, sendsLate = 0 } = {}) {
+async function setup({ regions = false, sendsLate = 0, mainLate = 100 } = {}) {
   const relays = new FakeRelays()
   relays.accounts.set('host-token', 'account')
   relays.accounts.set('laptop-token', 'account')
@@ -103,7 +103,7 @@ async function setup({ regions = false, sendsLate = 0 } = {}) {
         server.accept(
           socket.url.startsWith(HK.replace('https', 'wss'))
             ? transport
-            : late(transport, 100, sendsLate),
+            : late(transport, mainLate, sendsLate),
           'relay',
         ),
       ),
@@ -289,7 +289,9 @@ describe('a device moving its session between paths', () => {
     'moves to a faster relay region, and off one that drains, losing and repeating nothing',
     { timeout: 60_000 },
     async () => {
-      const t = await setup({ regions: true })
+      // Far enough apart that a busy machine's timer delays, as under the full suite, cannot
+      // make MAIN time as fast as HK.
+      const t = await setup({ regions: true, mainLate: 400 })
       t.client.start()
       await expect.poll(() => t.connection(), { timeout: 15_000 }).toMatchObject({ relay: MAIN })
       expect(t.connection()).toMatchObject({ region: 'Main' })
