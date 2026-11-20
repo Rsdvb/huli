@@ -507,9 +507,11 @@ export const Thread = memo(function Thread({
           ref={viewport}
           onScroll={nearStart}
           aria-label={t('thread.label')}
+          // Transparent rather than invisible: visibility is inherited, so showing the thread again
+          // restyled every element in it, and ran each button's transition.
           className={cn(
             'outline-none [scroll-timeline:--scroll-fade-top_y]',
-            returnPending && 'invisible',
+            returnPending && 'opacity-0',
           )}
         >
           <MessageScrollerContent
