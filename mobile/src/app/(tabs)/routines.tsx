@@ -4,16 +4,7 @@
 // and ready-made examples to start from. A task or a routine opens its page.
 
 import { useMemo, useRef, useState, type ComponentRef, type ReactNode } from 'react'
-import {
-  Alert,
-  Animated,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { Alert, Animated, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import type { RoutineView } from '@shared/routines'
@@ -52,6 +43,7 @@ import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
 import { usePullRefresh } from '../../ui/PullRefresh'
 import { SectionHeader } from '../../ui/SectionHeader'
+import { PendingSwitch } from '../../ui/PendingSwitch'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { Skeleton } from '../../ui/Skeleton'
 import { SwipeRow } from '../../ui/SwipeRow'
@@ -147,14 +139,16 @@ function Routines(props: { switcher: ReactNode }) {
     })
   }
 
-  const toggle = (r: RoutineView, enabled: boolean) => {
-    if (!link) return
+  const toggle = async (r: RoutineView, enabled: boolean): Promise<boolean> => {
+    if (!link) return false
     haptic.select()
-    link
-      .request('routines.update', { routineId: r.id, changes: { enabled } })
-      .catch((failure: unknown) =>
-        Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure)),
-      )
+    try {
+      await link.request('routines.update', { routineId: r.id, changes: { enabled } })
+      return true
+    } catch (failure) {
+      Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure))
+      return false
+    }
   }
 
   const place = (r: RoutineView) =>
@@ -247,11 +241,10 @@ function Routines(props: { switcher: ReactNode }) {
                 )}
               </View>
             </View>
-            <Switch
+            <PendingSwitch
               value={r.enabled}
               disabled={!connected || r.state === 'done'}
-              onValueChange={(on) => toggle(r, on)}
-              trackColor={{ true: c.success }}
+              onChange={(on) => toggle(r, on)}
               accessibilityLabel={r.enabled ? `关闭 ${r.name}` : `开启 ${r.name}`}
             />
           </Press>

@@ -2,7 +2,7 @@
 // works), its prompt, its runs (each opens its session), editing and deleting it.
 
 import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, Animated, StyleSheet, Switch, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { RoutineView, RunPage, RunSwitch, RunView } from '@shared/routines'
@@ -27,6 +27,7 @@ import { IconButton } from '../../ui/IconButton'
 import { LargeTitle } from '../../ui/LargeTitle'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { NavBar } from '../../ui/NavBar'
+import { PendingSwitch } from '../../ui/PendingSwitch'
 import { Pill } from '../../ui/Pill'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
@@ -174,14 +175,16 @@ export default function RoutinePage() {
     ])
   }
 
-  const toggle = (enabled: boolean) => {
-    if (!host.link) return
+  const toggle = async (enabled: boolean): Promise<boolean> => {
+    if (!host.link) return false
     haptic.select()
-    host.link
-      .request('routines.update', { routineId: routine.id, changes: { enabled } })
-      .catch((failure: unknown) =>
-        Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure)),
-      )
+    try {
+      await host.link.request('routines.update', { routineId: routine.id, changes: { enabled } })
+      return true
+    } catch (failure) {
+      Alert.alert(enabled ? '没能开启' : '没能关闭', errorText(failure))
+      return false
+    }
   }
 
   // Which agent ran it in place of the routine's, and why.
@@ -300,11 +303,10 @@ export default function RoutinePage() {
           <ListRow
             title="开启"
             trailing={
-              <Switch
+              <PendingSwitch
                 value={routine.enabled}
                 disabled={!connected}
-                onValueChange={toggle}
-                trackColor={{ true: c.success }}
+                onChange={toggle}
                 accessibilityLabel="开启这个定时任务"
               />
             }
