@@ -198,6 +198,7 @@ function Routines(props: { switcher: ReactNode }) {
                 name={agent?.name}
                 size={36}
                 badge={r.activeRun ? 'live' : r.unseen.failed > 0 ? 'error' : null}
+                ring={c.surface}
               />
             </View>
             <View style={styles.body}>
