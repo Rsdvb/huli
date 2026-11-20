@@ -32,7 +32,7 @@ import { Skeleton } from '../../ui/Skeleton'
 import { radius, space, TAB_BAR_CLEARANCE, type as typeScale, useTokens } from '../../ui/tokens'
 import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../shell'
 import { ListSyncNote, OfflineNote } from '../SyncNote'
-import { TaskRow } from './TaskRow'
+import { TaskRow, taskMenu } from './TaskRow'
 
 type Section = 'waiting' | 'running' | 'done' | 'dropped'
 
@@ -134,39 +134,7 @@ export function TasksView(props: { switcher: ReactNode }) {
     )
   }
 
-  const menuOf = (t: TaskSummary): MenuNode[] => [
-    {
-      key: 'open',
-      label: '打开',
-      icon: 'arrow.up.right.square',
-      onPress: () => router.push(`/task/${t.id}`),
-    },
-    {
-      key: 'pin',
-      label: t.pinnedAt !== null ? '取消置顶' : '置顶',
-      icon: t.pinnedAt !== null ? 'pin.slash' : 'pin',
-      disabled: !connected,
-      onPress: () => link && togglePin(link, t),
-    },
-    { kind: 'divider', key: 'danger' },
-    t.status === 'running'
-      ? {
-          key: 'cancel',
-          label: '取消需求…',
-          icon: 'xmark.circle',
-          destructive: true,
-          disabled: !connected,
-          onPress: () => link && confirmCancel(link, t),
-        }
-      : {
-          key: 'delete',
-          label: '删除…',
-          icon: 'trash',
-          destructive: true,
-          disabled: !connected,
-          onPress: () => link && confirmDelete(link, t),
-        },
-  ]
+  const menuOf = (t: TaskSummary): MenuNode[] => taskMenu(t, connected ? link : null)
 
   const top = (
     <View style={styles.top}>

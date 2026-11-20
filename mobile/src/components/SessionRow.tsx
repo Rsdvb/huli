@@ -323,6 +323,18 @@ export const SessionRow = memo(function SessionRow(props: {
               </Text>
             </>
           )}
+          {/* As the desktop's sidebar marks it: the session works in a worktree, on this branch. */}
+          {s.worktree ? (
+            <View style={styles.mark} accessibilityLabel={`worktree ${s.worktree.branch}`}>
+              <Icon name="branch" size={12} color={c.textTertiary} />
+              <Text
+                style={[typeScale.footnote, styles.markName, { color: c.textTertiary }]}
+                numberOfLines={1}
+              >
+                {s.worktree.branch}
+              </Text>
+            </View>
+          ) : null}
           {props.mark ? (
             <View style={styles.mark}>
               <OsIcon

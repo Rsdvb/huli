@@ -23,7 +23,7 @@ import {
   subagentCounts,
   type SubagentCount,
 } from '../../components/SessionRow'
-import { TaskRow } from '../../components/tasks/TaskRow'
+import { TaskRow, taskMenu } from '../../components/tasks/TaskRow'
 import {
   FilterNote,
   inFilter,
@@ -1261,13 +1261,19 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     }
     if (item.kind === 'task') {
       const t = item.task
+      // The same menu as in the 需求 list, as the desktop's needs-you rows have theirs.
       return (
-        <TaskRow
-          task={t}
-          view={taskViews.get(t.id)}
-          projectName={projectNames.get(projectKey(activeId, t.projectPath))}
-          onPress={() => router.push(`/task/${t.id}`)}
-        />
+        <ContextMenu items={taskMenu(t, connected ? activeLink : null)} title={t.title}>
+          {(longPress) => (
+            <TaskRow
+              task={t}
+              view={taskViews.get(t.id)}
+              projectName={projectNames.get(projectKey(activeId, t.projectPath))}
+              onPress={() => router.push(`/task/${t.id}`)}
+              {...(longPress ? { onLongPress: longPress } : {})}
+            />
+          )}
+        </ContextMenu>
       )
     }
     const p = item.placed
