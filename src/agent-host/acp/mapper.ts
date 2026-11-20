@@ -247,7 +247,11 @@ function blocksText(blocks: readonly acp.ContentBlock[]): string {
   return blocks.map((block) => (block.type === 'text' ? block.text : '')).join('')
 }
 
-export function toolContent(item: acp.ToolCallContent): ToolContent {
+/**
+ * A call's content as the entry keeps it. A session it names, such as a subagent it started or
+ * waits on, shows by that: its card stands in the thread, which `ctx` tells known from not.
+ */
+export function toolContent(item: acp.ToolCallContent, ctx?: MapperContext): ToolContent {
   switch (item.type) {
     case 'content': {
       if (item.content.type === 'text') {
@@ -271,6 +275,16 @@ export function toolContent(item: acp.ToolCallContent): ToolContent {
         type: 'ref',
         ref: { kind: 'unsupported', label: t('content.terminal', { id: item.terminalId }) },
       }
+    case 'session': {
+      const known = ctx?.sessionIdFor(item.sessionId) != null
+      return {
+        type: 'ref',
+        ref: {
+          kind: 'unsupported',
+          label: known ? t('content.subagent') : t('content.session', { id: item.sessionId }),
+        },
+      }
+    }
     default:
       return { type: 'ref', ref: { kind: 'unsupported', label: t('content.unknownTool') } }
   }
@@ -460,7 +474,7 @@ function mapToolCall(
   if (update.title != null) changes.title = update.title
   if (update.kind != null) changes.toolKind = toolKind(update.kind)
   if (update.status != null) changes.status = update.status
-  if (update.content != null) changes.content = update.content.map(toolContent)
+  if (update.content != null) changes.content = update.content.map((item) => toolContent(item, ctx))
   if (update.locations != null) changes.locations = toolLocations(update.locations)
   const raw = rawInputText(update.rawInput)
   if (raw !== undefined) changes.rawInput = raw

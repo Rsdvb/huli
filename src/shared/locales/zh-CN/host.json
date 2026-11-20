@@ -393,6 +393,8 @@
     "text": "文本",
     "unknown": "未知内容",
     "terminal": "终端 {{id}}",
+    "subagent": "与子代理协作，卡片见对话中",
+    "session": "与会话 {{id}} 协作",
     "unknownTool": "未知工具内容",
     "toolCall": "工具调用"
   },

@@ -396,6 +396,8 @@
     "text": "Text",
     "unknown": "Unknown content",
     "terminal": "Terminal {{id}}",
+    "subagent": "Works with a subagent, whose card is in the thread",
+    "session": "Works with session {{id}}",
     "unknownTool": "Unknown tool content",
     "toolCall": "Tool call"
   },

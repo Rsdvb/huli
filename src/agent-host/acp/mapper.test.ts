@@ -153,6 +153,30 @@ describe('message chunks', () => {
     })
   })
 
+  it('names the session a call works with: a subagent the thread shows, or its id', () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 's1',
+        title: 'Task',
+        status: 'in_progress',
+        content: [
+          { type: 'session', sessionId: 'acp-parent' },
+          { type: 'session', sessionId: 'acp-other' },
+        ],
+      } as SessionUpdate,
+    ])
+    expect(entries[0]).toMatchObject({
+      content: [
+        {
+          type: 'ref',
+          ref: { kind: 'unsupported', label: 'Works with a subagent, whose card is in the thread' },
+        },
+        { type: 'ref', ref: { kind: 'unsupported', label: 'Works with session acp-other' } },
+      ],
+    })
+  })
+
   it("shows an embedded resource's text in a call's result, fenced past its own fences", () => {
     const { entries } = run([
       {
