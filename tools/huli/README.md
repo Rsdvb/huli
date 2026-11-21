@@ -53,6 +53,7 @@ Code (kept small so upstream merges stay clean):
 | `features/session/entries/refusal-end.tsx` and its uses, `locales/*/session.json` (`refusal`), `tools/fake-agent` (`/refusal`)           | a turn the model declined (`stop_reason: "refusal"`) says the API gives no reason, quotes the model's own explanation when a longer reply holds one, and on the latest turn offers Try again (the same message through the queue; the host's retry resends only failed turns) and Edit message                      |
 | `styles/affect.css` (the sidebar list's scrollbar)                                                                                       | App Shell hides the sidebar's scrollbar for good; it shows thin while the pointer or the keyboard is in the sidebar and hides at rest, on Windows in a gutter clear of the resize handle; macOS keeps its overlay scrollbar                                                                                         |
 | `src/agent-host/{agents,sessions,host,start,validate}.ts`, `src/shared/{agent-host,host-request-limits}.ts`, `agents-section.tsx`        | an agent's page offers Reset environment…, its sign-in, ids and caches removed and its history and settings kept (see Agent reset)                                                                                                                                                                                  |
+| `src/agent-host/{agents,host,validate}.ts`, `src/shared/{agent-host,host-request-limits}.ts`, `agents-section.tsx`, `app/bootstrap.ts`   | an agent's Remove… also offers to uninstall its program from the computer and to delete its own data there (see Removing an agent from the computer)                                                                                                                                                                |
 | `app/window-front.ts`, `turn-dots.tsx`, `styles/globals.css`                                                                             | every loop of the window (the turn dots, any CSS animation that repeats forever) is held paused and stepped every 120 ms from one timer, only while on screen with the window visible and focused; the running labels' light sweeps stand still                                                                     |
 | `features/session/markdown/markdown-impl.tsx`                                                                                            | streamed words show as they arrive, without affectUI's per-word fade                                                                                                                                                                                                                                                |
 | `features/session/thread.tsx`                                                                                                            | a thread resting at its end for 3 s with more than 72 items rendered keeps only the newest 24 (`TrimAtEnd`)                                                                                                                                                                                                         |
@@ -322,6 +323,49 @@ system identifier (MachineGuid, MAC addresses, hardware ids).
   test copy (`KITE_TEST_WINDOW=background`, unpackaged) uses names in `<data>/test-secrets.json`
   instead, so its reset reaches none of the owner's entries.
 - Tests: `src/agent-host/agent-reset/*.test.ts`, and the requests in `validate.test.ts`.
+
+### Removing an agent from the computer
+
+Settings › Agents › an agent › Remove… takes the agent out of Kite as before, and offers two more
+options: uninstall its program from the computer the way it was installed, and (off by default)
+delete its own data there. The host's `agents.removalPreview` plans both, with sizes; the dialog
+lists every command, folder and file, and `agents.removeFromComputer` takes the steps the user
+saw, by id (`part:kind:path`), which the host plans again and runs only where they match, so no
+path or command a client sends is ever used (`src/agent-host/validate.ts` checks both). Like the
+reset, a run is refused while a session of the agent works; otherwise its sessions are let go and
+its process stopped, every process of the harness for its program, and each step's start and end
+go to the asking port as `agents.removalProgress`. Files and folders go to the system's trash
+through main (`host:trash-call`) unless the user unticks it; the daemon has none, so a step fails
+there and the dialog's Try again runs it without. The agent leaves Kite when the dialog closes, and
+an uninstall marks the harness `uninstalled`, as Settings › Harness's own uninstall does.
+
+- Program (`agent-removal/program.ts`): Kite's own installs for the harness, `<harnesses>/<id>`,
+  always go. The user's program goes by where it lives (its path and its launcher's, a `.cmd`
+  shim's target on Windows): `npm uninstall -g --prefix <the prefix it lives under> <package>`
+  (npm's `.cmd` on Windows, through cmd.exe, so a prefix with `%`, `!`, `"` or a control character
+  is refused), `brew uninstall [--cask]` by its keg or cask folder, `winget uninstall --id <id> -e`
+  by its `WinGet\Packages\<id>_` folder, `uv cache clean` for uvx, and the files a vendor's own
+  installer wrote, where its docs or script say which: Claude Code `~/.local/bin/claude(.exe)` and
+  `~/.local/share/claude` (the docs' Uninstall; on macOS and Linux the launcher only when it links
+  into it), Codex's install.sh `$CODEX_HOME/packages/standalone` and its links in the bin folder
+  (never `packages/app-server-daemon`), agy's install.sh/install.ps1 `~/.local/bin/agy` or
+  `%LOCALAPPDATA%\agy\bin\agy.exe`, OpenCode 2's `~/.opencode/bin/opencode` and `opencode2`, and
+  Doubao's runtime `<data>/doubao_cli/app` beside its npm package. Anything else (a program the
+  user built or moved, a copy inside an app such as Antigravity's `agy`) is left, with its path and
+  how to remove it by hand. Nothing is offered while other agents run on the same harness.
+- Data (`agent-removal/data.ts`): the reset's folders taken whole, with the credential store
+  entries the reset names: Claude Code's folder, `.claude.json` and its backups (its
+  `.device-keys.json` kept while other Claude agents remain); Codex's folder but `packages` and, on
+  Windows, its sandbox accounts' files; agy's `~/.gemini/antigravity-cli` (the Antigravity app's
+  folder, sign-in and older token kept); dsh's folder (never `~/.agents`); Doubao's data folder but
+  its program; Pi, Cline, DimCode, Codebuddy and OpenCode's XDG folders; an added agent's own
+  folder. Others have none Kite knows, so nothing is deleted. The dialog says where Claude's apps
+  and the Codex app share the folder. Kite's own sessions of the agent stay.
+- `agent-removal/guard.ts` checks every path as it is planned and again as it goes: inside the
+  agent's folders, never a drive's root, the home folder or above Kite's data, the harnesses and
+  the system's folders, and never at or above another agent's folder.
+- Tests: `src/agent-host/agent-removal/*.test.ts` (fake disks of each platform, temp folders, a
+  fake npm through cmd.exe), and the requests in `validate.test.ts`.
 
 ### Deleting the agent's own copy
 
