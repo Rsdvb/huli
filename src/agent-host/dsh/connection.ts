@@ -65,6 +65,7 @@ import type {
   SubagentStartedNotification,
   WireMessage,
 } from './protocol'
+import { knownProfile, reportedRoute, routeAccount } from './account'
 import { credentialsStamp, dshHome, readProvider, type Provider } from './credentials'
 import {
   DshFormatError,
@@ -398,8 +399,12 @@ export class DshConnection implements AgentConnection {
   private listedFor: string | null = null
   private listedDue = 0
   private listing: Promise<void> | null = null
+  /** The listing that runs was started for a changed sign-in or routes, so the list kept is old. */
+  private relisting = false
   /** A listing ended, with a list or without: only then is a home known to offer no model. */
   private settled = false
+  /** The home last read, whose account the reports name. */
+  private folder: string | null = null
   private readonly stopListing = new AbortController()
   private readonly platform = process.platform as Platform
 
@@ -504,6 +509,7 @@ export class DshConnection implements AgentConnection {
     ])
     this.routes = routes
     this.signedIn = signedIn
+    this.folder = folder
     // What dsh lists follows its routes and the keys it holds for them.
     const home = `${signedIn}\n${stamp}\n${routes.yaml}`
     const kept = LISTINGS.get(folder)
@@ -514,6 +520,8 @@ export class DshConnection implements AgentConnection {
       this.settled = true
     }
     if (!this.listing && !this.done && (home !== this.listedFor || Date.now() >= this.listedDue)) {
+      // A sign-in made since the last list changes what dsh offers: what follows waits for it.
+      this.relisting = this.listedFor !== null && this.listedFor.split('\n')[0] !== `${signedIn}`
       this.listedFor = home
       this.listing = this.list(folder, home)
         .catch(() => {
@@ -523,6 +531,7 @@ export class DshConnection implements AgentConnection {
         })
         .finally(() => {
           this.listing = null
+          this.relisting = false
         })
     }
     this.apply()
@@ -591,20 +600,16 @@ export class DshConnection implements AgentConnection {
       listed.length > 0
         ? listedModelChoices(listed, this.routes, this.signedIn)
         : modelChoices(this.routes, this.signedIn)
-    // Another route's own key is the user's to set in dsh, so a home with one counts as signed in.
-    const routed = listed.length > 0 || this.routes.groups.length > 0
-    const kind = this.signedIn ?? (routed ? 'gateway' : this.settled ? 'none' : null)
+    const kind = reportedRoute({
+      signedIn: this.signedIn,
+      listed,
+      routes: this.routes,
+      settled: this.settled,
+    })
     if (kind === null || kind === this.reported) return
     this.reported = kind
-    this.hooks.account(
-      kind === 'deepseek-account'
-        ? { kind: 'account', label: t('dsh.account.account'), email: null }
-        : kind === 'deepseek-official'
-          ? { kind: 'api_key', label: t('dsh.account.apiKey'), email: null }
-          : kind === 'gateway'
-            ? { kind: 'gateway', label: t('dsh.account.gateway'), email: null }
-            : { kind: 'none', label: '', email: null },
-    )
+    // The host reads the account's profile; the same line is reported here as it shows there.
+    this.hooks.account(routeAccount(kind, this.folder ? knownProfile(this.folder) : null))
   }
 
   /** Keeps the session on a model the home lists, and on a level that model has. */
@@ -667,9 +672,9 @@ export class DshConnection implements AgentConnection {
   async newSession(cwd: string, options: SessionOptions = {}): Promise<OpenedSession> {
     this.assertOpen()
     await this.refresh()
-    // A session goes by dsh's own list: the first waits for it, as does Kettu's own read of the
-    // options, which is also how it learns that a sign-in was made.
-    if (options.hidden || this.listed === null) await this.listSoon()
+    // A session goes by dsh's own list: the first waits for it, as does one after a sign-in and
+    // Kettu's own read of the options, which is also how it learns that a sign-in was made.
+    if (options.hidden || this.listed === null || this.relisting) await this.listSoon()
     if (options.hidden && this.reported === 'none') {
       throw new AgentRequestError('auth_required', 'DeepSeek Harness has no model to run on')
     }
@@ -686,7 +691,7 @@ export class DshConnection implements AgentConnection {
   ): Promise<SessionSetup> {
     this.assertOpen()
     await this.refresh()
-    if (this.listed === null) await this.listSoon()
+    if (this.listed === null || this.relisting) await this.listSoon()
     const existing = this.sessions.get(sessionId)
     if (existing) {
       existing.options = options

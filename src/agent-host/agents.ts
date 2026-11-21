@@ -131,12 +131,8 @@ import {
   writeCodebuddyKey,
   type ApiKeyInput,
 } from './api-key'
-import {
-  clearApiKey as clearDshKey,
-  readApiKey as readDshKey,
-  readProvider as readDshProvider,
-  writeApiKey as writeDshKey,
-} from './dsh/credentials'
+import { DshAccounts, type DshReadReason } from './dsh/account'
+import { clearApiKey as clearDshKey, writeApiKey as writeDshKey } from './dsh/credentials'
 import { readClaudeSettings, writeClaudeSetting, type ListedModel } from './claude/user-settings'
 import { readCodebuddySite, shellOverrides, writeCodebuddySite } from './codebuddy/user-settings'
 import {
@@ -204,7 +200,7 @@ import { CliVersions, type CliProbe, type CliVersion } from './installed-cli'
 import { OpenCodeClient } from './opencode/client'
 import { OpenCodeConnection } from './opencode/connection'
 import type { OpenCodeSessions } from './model-requests/opencode'
-import { readProviderUsage, type ProviderUsage } from './opencode/provider-usage'
+import type { ProviderUsage } from './opencode/provider-usage'
 import { claudeJsonPath, readClaudeProfile } from './plan-tier'
 import { QUIT_REASON, type ToolOptions } from './process-tree'
 import { formatCommand } from './quote'
@@ -510,10 +506,9 @@ class Slot {
   providersRun: Promise<void> | null = null
   providersReadAt = 0
   providerActionRun: Promise<void> | null = null
-  /** DeepSeek Harness's balance at DeepSeek, for an agent on an API key. */
+  /** DeepSeek Harness's balance at DeepSeek, on its account sign-in or an API key. */
   balance: ProviderUsage | null = null
   balanceRun: Promise<void> | null = null
-  balanceReadAt = 0
   limits = new Map<string, PlanLimit>()
   balances: ProviderBalance[] = []
   /** Kettu handed the harness an API key for this agent, which it never reads back. */
@@ -708,6 +703,8 @@ export class AgentManager {
   private manifestReadAt: number | null = null
   private limitsTimer: ReturnType<typeof setInterval> | null = null
   private stopped = false
+  /** DeepSeek Harness's sign-in and balance, read from its home without starting it. */
+  private readonly dshAccounts: DshAccounts
   private readonly cliVersions: CliVersions
   /** The update command for each harness's user program, and what it was worked out for. */
   private readonly cliCommands = new Map<Harness, string>()
@@ -735,6 +732,11 @@ export class AgentManager {
     }
     this.bundledManifest = bundledManifest?.ok ? bundledManifest.manifest : null
     this.cliVersions = deps.cliVersions ?? new CliVersions({ platform: deps.platform })
+    this.dshAccounts = new DshAccounts({
+      log: (level, message) => deps.diagnostics.log(level, `DeepSeek Harness: ${message}`),
+      dueMs: this.timings.limitsMs,
+      platform: deps.platform,
+    })
     for (const def of deps.catalog) {
       const h = new Harness(def)
       this.harnesses.set(def.id, h)
@@ -2249,6 +2251,13 @@ export class AgentManager {
       }
     }, this.timings.limitsBackgroundMs)
     this.limitsTimer.unref?.()
+    // DeepSeek Harness's sign-in is in its home's files, read and watched from the start.
+    for (const slot of this.slots.values()) {
+      if (slot.def.id !== 'deepseek' || !this.has(slot.id) || this.isDisabled(slot.id)) continue
+      this.refreshBalance(slot, 'files').catch((error: unknown) => {
+        this.deps.diagnostics.log('warn', `${slot.name}: ${(error as Error).message}`)
+      })
+    }
   }
 
   /**
@@ -3392,6 +3401,7 @@ export class AgentManager {
    */
   async stopAll(): Promise<void> {
     this.stopped = true
+    this.dshAccounts.close()
     if (this.updateTimer) clearTimeout(this.updateTimer)
     this.updateTimer = null
     if (this.registryTimer) clearTimeout(this.registryTimer)
@@ -3575,7 +3585,9 @@ export class AgentManager {
     if (!this.has(agentId) || this.isDisabled(agentId)) return
     const slot = this.slot(agentId)
     if (slot.def.id === 'opencode') return this.refreshProviders(slot, options?.force === true)
-    if (slot.def.id === 'deepseek') return this.refreshBalance(slot, options?.force === true)
+    if (slot.def.id === 'deepseek') {
+      return this.refreshBalance(slot, options?.force === true ? 'forced' : 'due')
+    }
     if (!this.hasLimits(agentId)) return
     await this.detectAll()
     const ask = options?.ask === true
@@ -4355,9 +4367,11 @@ export class AgentManager {
     if (this.isDisabled(agentId)) return
     if (slot.def.id === 'opencode') return this.refreshProviders(slot, options?.force === true)
     if (slot.def.id === 'deepseek') {
-      // A model route set up in dsh's own pages tells Kettu nothing.
+      // Its home's files tell a DeepSeek sign-in or key; a route set up in dsh's own pages to
+      // another provider only dsh itself tells, in a hidden session.
+      await this.refreshBalance(slot, options?.force === true ? 'forced' : 'due')
       if (options?.force === true && slot.signIn === 'required') await this.checkSignIn(slot)
-      return this.refreshBalance(slot, options?.force === true)
+      return
     }
     const force = options?.force === true
     if (!slot.def.reportsAccount) {
@@ -4492,36 +4506,61 @@ export class AgentManager {
     }
   }
 
-  private async refreshBalance(slot: Slot, force: boolean): Promise<void> {
-    if (slot.balanceRun) return slot.balanceRun
-    if (!force && Date.now() - slot.balanceReadAt < this.timings.limitsMs) return
-    slot.balanceRun = this.limitedRead(slot, this.readBalance(slot)).finally(() => {
+  /**
+   * Reads DeepSeek Harness's sign-in from its home's files and, when one is due, its balance from
+   * DeepSeek (see `DshAccounts.read`). A change of the files while a read runs is read after it.
+   */
+  private refreshBalance(slot: Slot, reason: DshReadReason): Promise<void> {
+    if (slot.balanceRun) {
+      if (reason !== 'files') return slot.balanceRun
+      return slot.balanceRun.catch(() => {}).then(() => this.refreshBalance(slot, reason))
+    }
+    slot.balanceRun = this.limitedRead(slot, this.readBalance(slot, reason)).finally(() => {
       slot.balanceRun = null
     })
     return slot.balanceRun
   }
 
   /**
-   * Asks DeepSeek for the balance of the key the agent's dsh home holds. The key is read for this
-   * one request to DeepSeek's own endpoint and never kept; the account sign-in has no balance.
+   * The route the agent's dsh home signs in on, as its account line, and the balance DeepSeek
+   * holds for it. The token or key goes to DeepSeek's own endpoints alone and is never kept. The
+   * home is watched from the first read on, since a sign-in in dsh's page or a terminal tells
+   * Kettu nothing.
    */
-  private async readBalance(slot: Slot): Promise<void> {
+  private async readBalance(slot: Slot, reason: DshReadReason): Promise<void> {
     await this.detectAll()
-    const env = { ...this.deps.env.agentEnv(slot.id), DSH_HOME: this.dshFolder(slot) }
-    const key = (await readDshProvider(env)) === 'deepseek-official' ? await readDshKey(env) : null
-    const now = Date.now()
-    const previous = slot.balance
-    if (!key) {
-      slot.balance = null
-    } else {
-      const usage = await readProviderUsage({ providerId: 'deepseek', key, now })
-      // A failed read keeps the last balance, marked as old by its time.
-      slot.balance =
-        usage.state === 'error' && previous && previous.balances.length > 0
-          ? { ...usage, balances: previous.balances, observedAt: previous.observedAt }
-          : usage
+    if (slot.h.detection?.state === 'not-installed') return
+    const home = this.dshFolder(slot)
+    this.dshAccounts.watch(slot.id, home, () => {
+      if (this.slots.get(slot.id) !== slot || !this.has(slot.id)) {
+        this.dshAccounts.forget(slot.id)
+        return
+      }
+      if (this.isDisabled(slot.id) || this.stopped) return
+      this.refreshBalance(slot, 'files').catch((error: unknown) => {
+        this.deps.diagnostics.log('warn', `${slot.name}: ${(error as Error).message}`)
+      })
+    })
+    const read = await this.dshAccounts.read(slot.id, {
+      env: { ...this.deps.env.agentEnv(slot.id), DSH_HOME: home },
+      home,
+      version: runningVersion(slot),
+      reason,
+      account: slot.account,
+      balance: slot.balance,
+    })
+    const before = slot.account
+    const account = read.account
+    if (
+      account &&
+      (before?.kind !== account.kind ||
+        before.label !== account.label ||
+        before.email !== account.email ||
+        slot.signIn !== (account.kind === 'none' ? 'required' : 'signed-in'))
+    ) {
+      this.setAccount(slot, account)
     }
-    slot.balanceReadAt = now
+    if (read.balance !== undefined) slot.balance = read.balance
     this.emit(slot)
   }
 
@@ -5393,6 +5432,7 @@ export class AgentManager {
         ...(this.driver(slot).reads?.contextEstimates ? { contextEstimates: true } : {}),
         account:
           slot.def.id === 'opencode' ||
+          slot.def.id === 'deepseek' ||
           (slot.def.reportsAccount ?? false) ||
           (capabilities?.authStatus ?? false),
         mcpHttp: capabilities?.mcpHttp ?? null,

@@ -899,8 +899,14 @@
     },
     "account": {
       "account": "DeepSeek account",
+      "named": "DeepSeek account ({{name}})",
       "apiKey": "DeepSeek API key",
       "gateway": "Custom model provider"
+    },
+    "balance": {
+      "failed": "Could not read the DeepSeek balance.",
+      "refused": "DeepSeek no longer accepts this sign-in. Sign in again.",
+      "refusedKey": "DeepSeek does not accept this API key."
     },
     "mode": {
       "name": "Mode",

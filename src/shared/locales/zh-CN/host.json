@@ -882,8 +882,14 @@
     },
     "account": {
       "account": "DeepSeek 账号",
+      "named": "DeepSeek 账号（{{name}}）",
       "apiKey": "DeepSeek API key",
       "gateway": "自定义模型服务商"
+    },
+    "balance": {
+      "failed": "没能读取 DeepSeek 的余额。",
+      "refused": "DeepSeek 不再接受这次登录，请重新登录。",
+      "refusedKey": "DeepSeek 不接受这个 API key。"
     },
     "mode": {
       "name": "模式",
