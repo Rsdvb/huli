@@ -92,9 +92,15 @@ function updatedNoticeDismissed(status: UpdateStatus): boolean {
   return false
 }
 
+/** Huli: how long the card that says the app was updated shows before it closes itself. */
+export const UPDATED_NOTICE_MS = 30 * 60_000
+
 export async function initUpdates(): Promise<void> {
   window.kettu.updates.onChanged((status) => useUpdatesStore.setState({ status }))
   const status = await window.kettu.updates.getStatus()
   const updatedDismissed = updatedNoticeDismissed(status)
   useUpdatesStore.setState(updatedDismissed ? { status, updatedDismissed } : { status })
+  if (status.updatedFrom && !updatedDismissed) {
+    setTimeout(() => useUpdatesStore.setState({ updatedDismissed: true }), UPDATED_NOTICE_MS)
+  }
 }
