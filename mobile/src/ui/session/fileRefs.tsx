@@ -1,9 +1,12 @@
 // File references in what a session shows, as the desktop's file-refs.ts reads them: `src/x.ts`,
 // `./src/x.ts:12`, `src/x.ts#L12`, or an absolute path or a `file:` URI inside the session's
-// folder. A reference that names one of the folder's files opens it on the file screen.
+// folder. A reference that names one of the folder's files opens it on the file screen, or in the
+// system's viewer when it is a document.
 
 import { createContext, useContext } from 'react'
 import { router } from 'expo-router'
+import { opensInViewer } from '../../preview/kinds'
+import { previewFile } from '../../preview/preview'
 import { relativePath } from './format'
 
 export interface FileRef {
@@ -94,8 +97,24 @@ export function foldersOf(files: ReadonlySet<string>): ReadonlySet<string> {
   return folders
 }
 
-/** Opens a file of a session's folder on the file screen, at a line when one is named. */
+/**
+ * A path a tool or an edit names, as one of the folder's files relative to it, with `/`; null for
+ * one outside the folder. A relative path is the folder's already.
+ */
+export function folderFile(path: string, root: string | null): string | null {
+  if (!root || !path) return null
+  const inside = relativePath(path, root)
+  if (inside === path && (/^[\\/]/.test(path) || /^[a-z]:[\\/]/i.test(path))) return null
+  const value = inside.replace(/\\/g, '/').replace(/^(\.\/)+/, '')
+  return value && !value.split('/').includes('..') ? value : null
+}
+
+/**
+ * Opens a file of a session's folder: a document, picture or recording in the system's viewer,
+ * anything else on the file screen, at a line when one is named.
+ */
 export function openFile(sessionId: string, path: string, line: number | null = null): void {
+  if (opensInViewer(path)) return previewFile({ sessionId, path })
   router.push({
     pathname: '/file',
     params: { id: sessionId, path, ...(line !== null ? { line: String(line) } : {}) },

@@ -30,7 +30,15 @@ import type {
 } from './agent-network'
 import type { ControlOutcome, SurfaceAccessDecision } from './control'
 import type { ContextBreakdown, ContextEstimates } from './context'
-import type { DeviceFileContent, FileContent, FileList, FileSearch, FileWritten } from './files'
+import type {
+  DeviceFileContent,
+  FileBytes,
+  FileBytesParams,
+  FileContent,
+  FileList,
+  FileSearch,
+  FileWritten,
+} from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { IdleReleaseState } from './idle-release'
 import type {
@@ -1690,6 +1698,8 @@ export interface HostContract {
   'files.agentFolder': { params: { sessionId: string }; result: string | null }
   // A file of that folder, by its absolute path; read-only and never media.
   'files.readAgentFile': { params: { sessionId: string; path: string }; result: FileContent }
+  // Huli: a part of a file's bytes, which a device downloads to preview a document.
+  'files.readBytes': { params: FileBytesParams; result: FileBytes }
   // A null `version` overwrites whatever the file holds.
   'files.write': {
     params: { projectPath: string; path: string; text: string; version: string | null }
@@ -2306,6 +2316,7 @@ export const HOST_METHODS = [
   'files.search',
   'files.agentFolder',
   'files.readAgentFile',
+  'files.readBytes',
   'files.write',
   'files.create',
   'files.rename',

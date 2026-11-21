@@ -1,0 +1,79 @@
+# A computer's documents on Android (run.sh with FLOWS=preview). The fake agent writes a PDF, a
+# Word document and a 24 MB PDF into the session's folder (/documents). The Files browser hands the
+# PDF to the app that opens it, or says no app does and offers the share sheet; the large one shows
+# its download first.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '(允许|Allow)'
+    optional: true
+- tapOn: '会话'
+- openLink: huli://new
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/documents'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '.*kite-report\.pdf.*'
+    timeout: 120000
+# Maestro's hideKeyboard goes back from the session here, so the keyboard stays up.
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- takeScreenshot: a01-reply
+- tapOn: '文件、改动、产物、终端和子会话'
+- tapOn:
+    text: '文件(，\d+)?'
+- tapOn: '文件夹 report'
+- waitForAnimationToEnd
+- takeScreenshot: a02-files
+- tapOn: '文件 kite-report.pdf'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 6000
+    optional: true
+- takeScreenshot: a03-pdf
+- runFlow:
+    when:
+      visible: '分享'
+    commands:
+      - tapOn: '分享'
+      - extendedWaitUntil:
+          visible: 'PAUSE_NEVER'
+          timeout: 4000
+          optional: true
+      - takeScreenshot: a04-share
+      - pressKey: back
+- runFlow:
+    when:
+      notVisible: '文件 kite-large.pdf'
+    commands:
+      - pressKey: back
+      - waitForAnimationToEnd
+- tapOn: '文件 kite-large.pdf'
+- extendedWaitUntil:
+    visible:
+      text: '正在从电脑下载.*'
+    timeout: 15000
+    optional: true
+- takeScreenshot: a05-downloading
+- extendedWaitUntil:
+    notVisible:
+      text: '正在从电脑下载.*'
+    timeout: 180000
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
+- takeScreenshot: a06-large

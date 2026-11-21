@@ -18,7 +18,13 @@ import { PARAMS_MAX, type ParamValue } from '@shared/artifact-params'
 import type { BrowserCallAnswer, BrowserOriginAnswer, BrowserOriginDecision } from '@shared/browser'
 import { isControlOutcome, isSurfaceAccessDecision } from '@shared/control'
 import { isComputerAppDecision } from '@shared/computer-use'
-import { FILE_READ_LIMIT } from '@shared/files'
+import {
+  FILE_BYTES_LIMIT,
+  FILE_BYTES_PART,
+  FILE_READ_LIMIT,
+  type FileBytesParams,
+  type FileStamp,
+} from '@shared/files'
 import { IMAGE_CLEAR_DAYS } from '@shared/data-usage'
 import {
   isMemoryScope,
@@ -812,6 +818,45 @@ function routineChanges(value: unknown, platform: Platform): RoutineChanges {
 
 function sessionId(o: Fields): string {
   return string(o, 'sessionId', ID_CHARS)
+}
+
+/** Huli: a file's size and time, as a `files.readBytes` expects to find it. */
+function fileStamp(value: unknown): FileStamp {
+  if (!isRecord(value)) throw invalidParams('expect must be an object')
+  const { mtimeMs } = value
+  if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs)) {
+    throw invalidParams('expect.mtimeMs must be a number')
+  }
+  return { size: count(value, 'size'), mtimeMs }
+}
+
+/**
+ * Huli: a `files.readBytes`: a project's file by its relative path or a session's agent's own file
+ * by its absolute path, never both, and a part of at most FILE_BYTES_PART bytes that starts within
+ * the largest file it reads. The host checks where the path leads, as for `files.read`.
+ */
+function fileBytes(params: unknown, platform: Platform): FileBytesParams {
+  const o = fields(params)
+  const inProject = o.projectPath !== undefined
+  if (inProject === (o.sessionId !== undefined)) {
+    throw invalidParams('Give a projectPath or a sessionId')
+  }
+  const offset = count(o, 'offset')
+  const length = count(o, 'length')
+  if (offset > FILE_BYTES_LIMIT) throw invalidParams(`offset is past ${FILE_BYTES_LIMIT} bytes`)
+  if (length > FILE_BYTES_PART) throw invalidParams(`length is more than ${FILE_BYTES_PART} bytes`)
+  const part = {
+    offset,
+    length,
+    ...(o.expect === undefined ? {} : { expect: fileStamp(o.expect) }),
+  }
+  return inProject
+    ? {
+        projectPath: absolutePath(o, 'projectPath', platform),
+        path: relativePath(o, 'path', platform),
+        ...part,
+      }
+    : { sessionId: sessionId(o), path: absolutePath(o, 'path', platform), ...part }
 }
 
 function optionalFlag(o: Fields, key: string): boolean | undefined {
@@ -2430,6 +2475,7 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), path: absolutePath(o, 'path', platform) }
     },
+    'files.readBytes': (params) => fileBytes(params, platform),
     'files.write': (params) => {
       const o = fields(params)
       // An empty file is text too, so `string` does not fit; the host checks the size in bytes.

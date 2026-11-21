@@ -556,6 +556,53 @@ session's menus, in its folder. 复制继续会话的命令 copies the same resu
   `host-request-limits.ts`, `features/agents/agent-terminal.ts`, `agents-section.tsx`,
   `project-menu.tsx`, `session-menu(-model).ts(x)` and `locales/*/{host,settings,sidebar}.json`.
 
+### File preview on the phone
+
+A document an agent made on the computer opens on the phone with a tap: PDF, Word, Excel and
+PowerPoint files, Keynote, Pages and Numbers, RTF, OpenDocument, EPUB, pictures, audio, video and
+zip archives, in Quick Look on iOS and in the app that opens it on Android. Text and code keep the
+app's own viewer.
+
+- `files.readBytes` (`src/shared/files.ts`, `src/agent-host/files.ts`, `agent-files.ts`): up to
+  4 MiB (`FILE_BYTES_PART`) of a file from an offset, with the file's size and mtime and the part's
+  SHA-256, of files up to 100 MiB (`FILE_BYTES_LIMIT`); a larger one answers `too-large` and is
+  not read. A project's file is checked as `files.read` checks one (relative, no `..`, its real
+  path inside the project, so no link leads out), an agent's own file as `files.readAgentFile`
+  does, and `validate.ts` takes one or the other, never both. With `expect`, the first part's
+  stamp, a file that changed since answers `changed`, as one that changed while a part was read
+  does. Paired devices may call it, as nothing in `allow-list.ts` keeps it from them; the result's
+  bytes reach a device as a byte stream inside the encrypted channel, over the network, Tailscale
+  or the relay alike, and the request log counts it among the reads.
+- `src/shared/file-download.ts`: a client's download through it, 1 MiB at a time with three parts
+  asked ahead, each checked against its hash, offset and length before it is written in order; a
+  file that changes meanwhile starts over, twice at most.
+- `mobile/src/preview/`: `preview.ts` downloads into the cache through expo-file-system's
+  `FileHandle` (never the whole file in memory) with expo-crypto's SHA-256, then opens it with
+  expo-file-system's own `File.preview()`, Quick Look's `QLPreviewController` on iOS and an
+  `ACTION_VIEW` intent on a `content://` URI on Android, and a PDF Quick Look declines in a web
+  view of the copy (`app/pdf.tsx`); it shares through React Native's `Share` on iOS and
+  `HuliShare` on Android. `cache.ts` keeps each copy under a hash of the computer, the
+  folder and the path (`<cache>/huli-preview/`): one whose size and mtime the computer still
+  reports opens at once, and while the computer cannot be reached (or takes over 4 s to say) it
+  opens with a note that it may be old; copies not opened for a week go, then the oldest past
+  512 MB. `kinds.ts` names the extensions that open in the viewer and their MIME types.
+  `PreviewSheet.tsx` is the sheet a download that takes over 350 ms shows, with its progress and
+  取消, and why a file could not open, with 重试 or 用其他 App 打开 / 分享.
+- `mobile/modules/huli-system/android/` (`HuliShareModule.kt`): Android's share sheet for a file
+  by expo-file-system's content URI, which React Native's `Share` cannot hand over there.
+- Where a file opens: `openFile` (`ui/session/fileRefs.tsx`) sends a document to the viewer and
+  anything else to the file screen, so file links and paths in replies and prompts, mentions and
+  carried references follow it. A tool call's card lists the files it read or wrote
+  (`toolFiles`), the turn's changed files open the file at the end of their row, the Files browser
+  and the changes list open documents and offer 用系统预览打开 and 用其他 App 打开 / 分享 on a long
+  press, the file screen offers the viewer for a binary, media or too-large file and sharing for
+  any, and a binary diff offers the viewer. The session screen reads its folder's files again as a
+  turn ends, so a file the turn made is a link in its reply; a session with no project lists the
+  files of its own folder, as the desktop does.
+- Tests: `validate.test.ts`, `files.test.ts`, `agent-files.test.ts` and `file-download.test.ts`.
+  The fake agent's `/documents` writes a PDF, a Word document and a 24 MB PDF for the simulator's
+  `60-preview` and `61-preview-word` flows and the emulator's `preview` (see Workflows).
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,
@@ -996,8 +1043,12 @@ disables every other workflow after each merge, new ones included.
   flows under `tools/huli/ios/sim/flows` (or those named in its `flows` input) while recording the
   screen. Two names in `flows` sample the app's processes instead: `measure`, what it costs in
   resting states (`measure.sh`), and `long-reply`, a session with a finished 120 KB reply opened
-  afresh (`long-reply.sh`). The screenshots, recordings and logs are the run's `huli-sim`
-  artifact, kept for a day.
+  afresh (`long-reply.sh`). A flow whose header says `# Ends: both appearances` is shot at its
+  end in dark and in light (`<flow>-dark.png`, `<flow>-light.png`), as the system's own screens,
+  such as Quick Look, follow the system's appearance rather than the app's theme. The screenshots,
+  recordings and logs are the run's `huli-sim` artifact, kept for a day. With `platform` android
+  it builds a release for an x86_64 emulator on Linux and measures it (`tools/huli/android/run.sh`),
+  or runs the flows of `tools/huli/android/flows` that `flows` names (`huli-emu`).
   It uses no secrets and never runs on a push or pull request.
 
 The monitor's alerts are GitHub's notifications: the owner keeps this repository watched

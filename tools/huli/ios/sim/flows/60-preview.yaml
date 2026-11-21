@@ -1,0 +1,106 @@
+# A computer's documents on the phone. The fake agent writes a PDF, a Word document and a 24 MB PDF
+# into the session's folder (/documents). The Files browser opens the PDF in Quick Look, the large
+# one after its download shows its progress, a long press hands the Word document to the share
+# sheet, and the PDF opens again from the copy kept. It ends on the PDF in Quick Look.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/documents'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: v01-reply
+# The session's files: its report folder, and the PDF in Quick Look.
+- tapOn: '文件、改动、产物、终端和子会话'
+- tapOn:
+    text: '文件(，\d+)?'
+- tapOn: '文件夹 report'
+- waitForAnimationToEnd
+- takeScreenshot: v02-files
+- tapOn: '文件 kite-report.pdf'
+- extendedWaitUntil:
+    visible:
+      text: '(Done|完成|Close)'
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: v03-pdf
+- tapOn:
+    text: '(Done|完成|Close)'
+- waitForAnimationToEnd
+# The large one: the sheet shows how its download goes, then Quick Look.
+- tapOn: '文件 kite-large.pdf'
+- extendedWaitUntil:
+    visible:
+      text: '正在从电脑下载.*'
+    timeout: 10000
+    optional: true
+- takeScreenshot: v04-downloading
+- extendedWaitUntil:
+    visible:
+      text: '(Done|完成|Close)'
+    timeout: 180000
+- waitForAnimationToEnd
+- takeScreenshot: v05-large
+- tapOn:
+    text: '(Done|完成|Close)'
+- waitForAnimationToEnd
+# A long press offers the Word document to other apps; the share sheet fills in slowly here.
+- longPressOn: '文件 kite-notes.docx'
+- tapOn: '用其他 App 打开 / 分享'
+- extendedWaitUntil:
+    visible:
+      text: '(Copy|Save to Files|拷贝|存储到“文件”)'
+    timeout: 45000
+    optional: true
+- takeScreenshot: v06-share
+# The app started afresh, past the share sheet: the PDF again, unchanged on the computer, opens at
+# once from the copy kept.
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn: '会话'
+- tapOn:
+    text: '.*Fake agent: documents.*'
+    index: 0
+- waitForAnimationToEnd
+- tapOn: '文件、改动、产物、终端和子会话'
+- tapOn:
+    text: '文件(，\d+)?'
+- tapOn: '文件夹 report'
+- waitForAnimationToEnd
+- tapOn: '文件 kite-report.pdf'
+- extendedWaitUntil:
+    visible:
+      text: '(Done|完成|Close)'
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: v07-pdf-again

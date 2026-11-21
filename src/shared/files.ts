@@ -51,3 +51,40 @@ export const FILE_LIST_LIMIT = 50_000
 export const FILE_READ_LIMIT = 1024 * 1024
 export const FILE_SEARCH_LIMIT = 500
 export const FILE_MATCH_CHARS = 300
+
+/**
+ * Huli: the largest file `files.readBytes` reads, as a phone's preview of a document downloads it,
+ * a part at a time.
+ */
+export const FILE_BYTES_LIMIT = 100 * 1024 * 1024
+/** Huli: the most bytes one `files.readBytes` returns. */
+export const FILE_BYTES_PART = 4 * 1024 * 1024
+
+/** A file as it was when read: its size and when it last changed, in ms since the epoch. */
+export interface FileStamp {
+  size: number
+  mtimeMs: number
+}
+
+/**
+ * Huli: what `files.readBytes` reads: a project's file by its path relative to the project, checked
+ * as `files.read` checks one, or a file of the session's agent's own folder by its absolute path,
+ * as `files.readAgentFile` takes it; `length` bytes from `offset`, at most FILE_BYTES_PART. With
+ * `expect`, the stamp of the file's first part, a file that has changed since is not read.
+ */
+export type FileBytesParams = ({ projectPath: string } | { sessionId: string }) & {
+  path: string
+  offset: number
+  length: number
+  expect?: FileStamp
+}
+
+/**
+ * Huli: a `files.readBytes`. `part`: the file's stamp and `bytes` from `offset`, fewer than asked
+ * only where the file ends, with their SHA-256 in hex; a length of 0 reads the stamp alone.
+ * `changed`: the file no longer has the stamp the request expected, or changed while being read.
+ */
+export type FileBytes =
+  | ({ kind: 'part'; name: string; offset: number; sha256: string; bytes: ArrayBuffer } & FileStamp)
+  | ({ kind: 'changed'; name: string } & FileStamp)
+  | { kind: 'too-large'; name: string; size: number; limit: number }

@@ -784,6 +784,67 @@ describe('createValidators', () => {
       path: 'C:\\a\\plan.md',
     })
 
+    // Huli: a part of a file's bytes, for a device's preview: a project's file by its relative path,
+    // or an agent's own file by its absolute path, never both, in parts of at most 4 MiB.
+    const bytes = posix['files.readBytes']
+    const part = { offset: 0, length: 1024 }
+    expect(bytes({ projectPath: '/p', path: 'out/report.pdf', ...part, extra: 1 })).toEqual({
+      projectPath: '/p',
+      path: 'out/report.pdf',
+      ...part,
+    })
+    const stamp = { size: 10, mtimeMs: 1_700_000_000_123.5 }
+    expect(
+      bytes({
+        sessionId: 's',
+        path: '/Users/me/.gemini/a.pdf',
+        offset: 4,
+        length: 0,
+        expect: stamp,
+      }),
+    ).toEqual({
+      sessionId: 's',
+      path: '/Users/me/.gemini/a.pdf',
+      offset: 4,
+      length: 0,
+      expect: stamp,
+    })
+    expect(bytes({ projectPath: '/p', path: 'a.pdf', offset: 0, length: 4 * 1024 * 1024 })).toEqual(
+      { projectPath: '/p', path: 'a.pdf', offset: 0, length: 4 * 1024 * 1024 },
+    )
+    rejects(() => bytes({ projectPath: '/p', sessionId: 's', path: 'a.pdf', ...part }))
+    rejects(() => bytes({ path: 'a.pdf', ...part }))
+    rejects(() => bytes({ projectPath: '/p', path: '/etc/passwd', ...part }))
+    rejects(() => bytes({ projectPath: '/p', path: '\\Windows\\a.ini', ...part }))
+    rejects(() => bytes({ projectPath: '/p', path: 'a\0b.pdf', ...part }))
+    rejects(() => bytes({ projectPath: '/p', path: '', ...part }))
+    rejects(() => bytes({ projectPath: 'p', path: 'a.pdf', ...part }))
+    rejects(() => bytes({ sessionId: 's', path: 'a.pdf', ...part }))
+    rejects(() => bytes({ sessionId: '', path: '/a.pdf', ...part }))
+    rejects(() => bytes({ projectPath: '/p', path: 'a.pdf', offset: 0 }))
+    rejects(() => bytes({ projectPath: '/p', path: 'a.pdf', offset: -1, length: 1 }))
+    rejects(() => bytes({ projectPath: '/p', path: 'a.pdf', offset: 0.5, length: 1 }))
+    rejects(() => bytes({ projectPath: '/p', path: 'a.pdf', offset: '0', length: 1 }))
+    rejects(() =>
+      bytes({ projectPath: '/p', path: 'a.pdf', offset: 0, length: 4 * 1024 * 1024 + 1 }),
+    )
+    rejects(() =>
+      bytes({ projectPath: '/p', path: 'a.pdf', offset: 100 * 1024 * 1024 + 1, length: 1 }),
+    )
+    rejects(() => bytes({ projectPath: '/p', path: 'a.pdf', ...part, expect: { size: 1 } }))
+    rejects(() => bytes({ projectPath: '/p', path: 'a.pdf', ...part, expect: { mtimeMs: 1 } }))
+    rejects(() =>
+      bytes({ projectPath: '/p', path: 'a.pdf', ...part, expect: { size: 1, mtimeMs: NaN } }),
+    )
+    rejects(() => bytes({ projectPath: '/p', path: 'a.pdf', ...part, expect: 'stamp' }))
+    rejects(() => windows['files.readBytes']({ projectPath: 'C:\\p', path: 'C:\\a.pdf', ...part }))
+    rejects(() =>
+      windows['files.readBytes']({ projectPath: 'C:\\p', path: '\\\\server\\share\\a', ...part }),
+    )
+    expect(forbiddenToDevices('files.readBytes', { projectPath: '/p', path: 'a', ...part })).toBe(
+      false,
+    )
+
     const search = posix['files.search']
     expect(search({ projectPath: '/p', query: 'needle', extra: 1 })).toEqual({
       projectPath: '/p',

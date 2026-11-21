@@ -60,6 +60,7 @@ describe('AgentFiles', () => {
       homeDir: home,
       session: (id) => sessions[id] ?? null,
       read: (real, shown) => files().readAllowed(real, shown),
+      bytes: (real, name, part) => files().bytesAllowed(real, name, part),
     })
   const code = (promise: Promise<unknown>) =>
     promise.then(
@@ -152,6 +153,24 @@ describe('AgentFiles', () => {
   it('refuses a path that is not absolute', async () => {
     expect(await code(service().read('s1', 'plan.md'))).toBe('invalid_params')
     expect(await code(service().read('s1', `${mine}${path.sep}plan\0.md`))).toBe('invalid_params')
+  })
+
+  it("Huli: reads a file's bytes with the same checks as its text", async () => {
+    const svc = service()
+    const whole = { offset: 0, length: 1024 }
+    const read = await svc.readBytes('s1', path.join(mine, 'plan.md'), whole)
+    expect(read).toMatchObject({ kind: 'part', name: 'plan.md', size: 7, offset: 0 })
+    expect(read.kind === 'part' && Buffer.from(read.bytes).toString()).toBe('# Plan\n')
+    const bytes = (file: string) => code(svc.readBytes('s1', file, whole))
+    expect(await bytes(path.join(theirs, 'plan.md'))).toBe('forbidden')
+    expect(await bytes(path.join(home, 'secret.txt'))).toBe('forbidden')
+    expect(await bytes(path.join(project, 'README.md'))).toBe('forbidden')
+    expect(await bytes(`${mine}${path.sep}..${path.sep}agy-2${path.sep}plan.md`)).toBe('forbidden')
+    expect(await bytes(path.join(mine, 'missing.md'))).toBe('not_found')
+    expect(await bytes('plan.md')).toBe('invalid_params')
+    expect(await code(svc.readBytes('cc', path.join(mine, 'plan.md'), whole))).toBe('forbidden')
+    await linkFolder(theirs, path.join(mine, 'other'))
+    expect(await bytes(path.join(mine, 'other', 'plan.md'))).toBe('forbidden')
   })
 
   it('leaves no way to write one: the project write cannot reach it', async () => {

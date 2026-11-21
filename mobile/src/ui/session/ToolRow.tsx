@@ -12,10 +12,12 @@ import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { ShellBlock, StepSection } from '../../components/entries/ShellBlock'
 import { Markdown } from '../../components/Markdown'
 import { handDiff } from '../../diff'
+import { opensInViewer } from '../../preview/kinds'
 import { Clamp, clampedText, useClampOpen } from './Clamp'
 import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
 import { plainText } from './feedback'
+import { folderFile, openFile } from './fileRefs'
 import { durationText, relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
 import { useSecond } from './now'
@@ -290,9 +292,51 @@ export function StepCard(props: { open: boolean; line: ReactNode; children?: Rea
   )
 }
 
-/** Whether a call has details to open: content, or a command too long for its line. */
-function hasBody(entry: ToolEntry, label: ToolLabel): boolean {
-  return entry.content.length > 0 || !!entry.description || label.kind === 'command'
+/** Whether a call has details to open: content, a file to open, or a command too long for its line. */
+function hasBody(entry: ToolEntry, label: ToolLabel, root: string | null): boolean {
+  return (
+    entry.content.length > 0 ||
+    !!entry.description ||
+    label.kind === 'command' ||
+    toolFiles(entry, root).length > 0
+  )
+}
+
+/**
+ * The files of the session's folder a finished call read or wrote, each once, which its card
+ * opens: a document in the system's viewer, any other file on the file screen. A text file whose
+ * edit the card shows already opens from its diff.
+ */
+export function toolFiles(entry: ToolEntry, root: string | null): string[] {
+  if (entry.status !== 'completed' || entry.toolKind === 'delete') return []
+  const edited = new Set(toolEdits(entry).map((edit) => folderFile(edit.path, root)))
+  const paths = new Set<string>()
+  for (const location of entry.locations) {
+    const path = folderFile(location.path, root)
+    if (path && (opensInViewer(path) || !edited.has(path))) paths.add(path)
+  }
+  return [...paths]
+}
+
+/** A file the call names, which opens it. */
+export function FileLine(props: { path: string; sessionId: string }) {
+  const { c } = useSessionTokens()
+  const viewer = opensInViewer(props.path)
+  return (
+    <Pressable
+      onPress={() => openFile(props.sessionId, props.path)}
+      accessibilityRole="button"
+      accessibilityLabel={`打开 ${props.path}`}
+      style={({ pressed }) => [styles.edit, { backgroundColor: pressed ? c.fillStrong : c.fill }]}
+    >
+      <FileMark path={props.path} size={13} />
+      <Text style={[styles.editPath, { color: c.text }]} numberOfLines={1} ellipsizeMode="head">
+        {props.path}
+      </Text>
+      <Text style={[styles.fullText, { color: c.tint }]}>{viewer ? '预览' : '打开'}</Text>
+      <Icon icon={G.right} size={11} color={c.tint} weight="semibold" />
+    </Pressable>
+  )
 }
 
 export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: string }) {
@@ -316,7 +360,7 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
   const note =
     props.note ??
     (typeof result === 'object' && result?.by === 'routine' ? '由定时任务允许' : undefined)
-  const body = hasBody(entry, label)
+  const body = hasBody(entry, label, root)
   const toggle = () => {
     setOpen((v) => !v)
   }
@@ -408,6 +452,7 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
   const content = output === null ? entry.content : entry.content.slice(1)
   const path = entry.locations[0]?.path
   const edits = toolEdits(entry)
+  const files = toolFiles(entry, root)
   let edit = 0
   return (
     <View>
@@ -485,6 +530,15 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
           </Text>
         )
       })}
+      {files.length > 0 ? (
+        <StepSection label={files.length > 1 ? `文件 · ${files.length}` : '文件'}>
+          <View style={{ gap: 6 }}>
+            {files.map((file) => (
+              <FileLine key={file} path={file} sessionId={sessionId} />
+            ))}
+          </View>
+        </StepSection>
+      ) : null}
       <Pressable
         onPress={() => router.push({ pathname: '/tool', params: { sessionId, entryId: entry.id } })}
         hitSlop={6}

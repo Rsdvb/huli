@@ -1,10 +1,17 @@
 // The files of the folder a session works in, read-only: one folder at a time, its folders first,
-// with a search over the whole project; a file opens in a plain viewer.
+// with a search over the whole project; a file opens in a plain viewer, or a document in the
+// system's viewer, and a long press hands one to another app.
 
 import { useDeferredValue, useMemo, useState, type ReactElement } from 'react'
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { matchFiles, useProjectFiles } from '../../files'
+import { opensInViewer } from '../../preview/kinds'
+import { previewFile } from '../../preview/preview'
+import { SHARE_LABEL } from '../../preview/PreviewSheet'
+import { ContextMenu } from '../../ui/ContextMenu'
+import type { MenuNode } from '../../ui/menu'
+import { openFile } from '../../ui/session/fileRefs'
 import { sessionFolder } from '../../git'
 import { useLink, useSession } from '../../host'
 import { baseName } from '../../ui/session/format'
@@ -46,7 +53,8 @@ export default function FilesScreen() {
   const { c, s } = useSessionTokens()
   const link = useLink()
   const summary = useSession(id)
-  const folder = summary && !summary.scratch ? sessionFolder(summary) : null
+  // A session started with no project has a folder of its own, where its files are.
+  const folder = summary ? sessionFolder(summary) : null
   const files = useProjectFiles(link, folder, true)
   const [query, setQuery] = useState('')
   const read = useNextChange(files.list ?? files.error)
@@ -73,8 +81,26 @@ export default function FilesScreen() {
 
   const open = (item: Item) => {
     if (item.folder) router.push({ pathname: '/files/[id]', params: { id, dir: item.path } })
-    else router.push({ pathname: '/file', params: { id, path: item.path } })
+    else openFile(id, item.path)
   }
+  const fileMenu = (path: string): MenuNode[] => [
+    ...(opensInViewer(path)
+      ? []
+      : [
+          {
+            key: 'preview',
+            label: '用系统预览打开',
+            icon: 'eye' as const,
+            onPress: () => previewFile({ sessionId: id, path }),
+          },
+        ]),
+    {
+      key: 'share',
+      label: SHARE_LABEL,
+      icon: 'square.and.arrow.up',
+      onPress: () => previewFile({ sessionId: id, path }, 'share'),
+    },
+  ]
 
   let body: ReactElement
   if (!summary) {
@@ -112,44 +138,49 @@ export default function FilesScreen() {
           </View>
         }
         renderItem={({ item, index }) => (
-          <Pressable
-            onPress={() => open(item)}
-            accessibilityRole="button"
-            accessibilityLabel={`${item.folder ? '文件夹' : '文件'} ${baseName(item.path)}`}
-            style={({ pressed }) => [
-              styles.row,
-              {
-                backgroundColor: pressed ? c.fill : s.dockCard,
-                borderTopLeftRadius: index === 0 ? 16 : 0,
-                borderTopRightRadius: index === 0 ? 16 : 0,
-                borderBottomLeftRadius: index === items.length - 1 ? 16 : 0,
-                borderBottomRightRadius: index === items.length - 1 ? 16 : 0,
-              },
-            ]}
-          >
-            {item.folder ? (
-              <View style={{ width: 21, alignItems: 'center' }}>
-                <Icon icon={G.folder} size={17} color={c.tint} />
-              </View>
-            ) : (
-              <FileMark path={item.path} size={17} />
+          <ContextMenu items={item.folder ? [] : fileMenu(item.path)} title={baseName(item.path)}>
+            {(longPress) => (
+              <Pressable
+                onPress={() => open(item)}
+                {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.folder ? '文件夹' : '文件'} ${baseName(item.path)}`}
+                style={({ pressed }) => [
+                  styles.row,
+                  {
+                    backgroundColor: pressed ? c.fill : s.dockCard,
+                    borderTopLeftRadius: index === 0 ? 16 : 0,
+                    borderTopRightRadius: index === 0 ? 16 : 0,
+                    borderBottomLeftRadius: index === items.length - 1 ? 16 : 0,
+                    borderBottomRightRadius: index === items.length - 1 ? 16 : 0,
+                  },
+                ]}
+              >
+                {item.folder ? (
+                  <View style={{ width: 21, alignItems: 'center' }}>
+                    <Icon icon={G.folder} size={17} color={c.tint} />
+                  </View>
+                ) : (
+                  <FileMark path={item.path} size={17} />
+                )}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.name, { color: c.text }]} numberOfLines={1}>
+                    {baseName(item.path)}
+                  </Text>
+                  {item.where ? (
+                    <Text
+                      style={[styles.where, { color: c.textTertiary }]}
+                      numberOfLines={1}
+                      ellipsizeMode="head"
+                    >
+                      {item.where}
+                    </Text>
+                  ) : null}
+                </View>
+                <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
+              </Pressable>
             )}
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[styles.name, { color: c.text }]} numberOfLines={1}>
-                {baseName(item.path)}
-              </Text>
-              {item.where ? (
-                <Text
-                  style={[styles.where, { color: c.textTertiary }]}
-                  numberOfLines={1}
-                  ellipsizeMode="head"
-                >
-                  {item.where}
-                </Text>
-              ) : null}
-            </View>
-            <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
-          </Pressable>
+          </ContextMenu>
         )}
         ItemSeparatorComponent={() => (
           <View style={{ backgroundColor: s.dockCard }}>

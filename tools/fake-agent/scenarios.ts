@@ -44,6 +44,7 @@ import {
 import { artifacts } from './artifacts.ts'
 import { browser, deviceTool, openSite } from './browser.ts'
 import { computer } from './computer.ts'
+import { documents } from './documents.ts'
 import type { ScenarioName } from './options.ts'
 import type { Scenario, Turn } from './turn.ts'
 
@@ -1631,6 +1632,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   content,
   media,
   screenshots,
+  documents,
 }
 
 export const compact: Scenario = async (turn) => {

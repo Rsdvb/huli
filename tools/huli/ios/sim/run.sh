@@ -96,6 +96,16 @@ for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
     failed=1
     tail -15 "$RESULTS/$name.log"
   fi
+  # A flow that ends on a screen to see in both appearances says so, as the system's own viewers
+  # follow the system's appearance rather than the app's theme.
+  if grep -q '^# Ends: both appearances' "$flow"; then
+    xcrun simctl ui "$UDID" appearance dark
+    sleep 2
+    xcrun simctl io "$UDID" screenshot "$RESULTS/$name-dark.png"
+    xcrun simctl ui "$UDID" appearance light
+    sleep 2
+    xcrun simctl io "$UDID" screenshot "$RESULTS/$name-light.png"
+  fi
   sleep 1
   kill -INT "$REC" || true
   wait "$REC" 2>/dev/null || true

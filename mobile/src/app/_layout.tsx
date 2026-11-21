@@ -13,6 +13,7 @@ import { HostProvider } from '../host'
 import { LinkBridge } from '../links'
 import { LiveBridge } from '../live/bridge'
 import { LockLayer } from '../lock'
+import { PreviewSheet } from '../preview/PreviewSheet'
 import { PushBridge } from '../push/bridge'
 import { ShareIntake } from '../share/intake'
 import { SystemBridge } from '../system/bridge'
@@ -131,6 +132,7 @@ export default function Layout() {
             <NoticeBar />
             <SelectTextHost />
             <MenuSheetHost />
+            <PreviewSheet />
             <LockLayer />
           </HostProvider>
         </SafeAreaProvider>

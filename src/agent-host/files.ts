@@ -20,15 +20,18 @@ import {
 } from 'node:fs/promises'
 import path from 'node:path'
 import {
+  FILE_BYTES_LIMIT,
   FILE_LIST_LIMIT,
   FILE_MATCH_CHARS,
   FILE_READ_LIMIT,
   FILE_SEARCH_LIMIT,
   type DeviceFileContent,
+  type FileBytes,
   type FileContent,
   type FileList,
   type FileMatch,
   type FileSearch,
+  type FileStamp,
   type FileWritten,
 } from '@shared/files'
 import type { MediaFile, MediaGrant } from '@shared/media'
@@ -50,6 +53,15 @@ export interface FilesLimits {
   folders: number
   /** Entries read on disk to find empty folders among the ones git names untracked. */
   folderScan: number
+  /** Huli: the largest file `readBytes` reads. */
+  bytes: number
+}
+
+/** Huli: the part of a file `readBytes` reads, and the stamp the file must still have. */
+export interface BytesPart {
+  offset: number
+  length: number
+  expect?: FileStamp
 }
 
 const DEFAULT_LIMITS: FilesLimits = {
@@ -61,6 +73,7 @@ const DEFAULT_LIMITS: FilesLimits = {
   depth: 20,
   folders: 5_000,
   folderScan: 20_000,
+  bytes: FILE_BYTES_LIMIT,
 }
 
 const GIT_MAX_BUFFER = 64 * 1024 * 1024
@@ -129,11 +142,12 @@ function isBinary(bytes: Buffer): boolean {
   return bytes.subarray(0, BINARY_PROBE_BYTES).includes(0)
 }
 
-export async function readBytes(handle: FileHandle, length: number): Promise<Buffer> {
+/** Up to `length` bytes from `position`, fewer only where the file ends. */
+export async function readBytes(handle: FileHandle, length: number, position = 0): Promise<Buffer> {
   const buffer = Buffer.allocUnsafe(length)
   let filled = 0
   while (filled < length) {
-    const { bytesRead } = await handle.read(buffer, filled, length - filled, filled)
+    const { bytesRead } = await handle.read(buffer, filled, length - filled, position + filled)
     if (bytesRead === 0) break
     filled += bytesRead
   }
@@ -355,6 +369,59 @@ export class FilesService {
    */
   async readAllowed(real: string, shown: string): Promise<FileContent> {
     return this.content(real, shown, await this.fileStat(real, shown))
+  }
+
+  /**
+   * Huli: `length` bytes of the file at `relativePath` from `offset`, checked as `read` checks a
+   * path, for a device that downloads it to preview; a file larger than the limit is not read.
+   */
+  async readBytes(root: string, relativePath: string, part: BytesPart): Promise<FileBytes> {
+    const relative = this.normalize(relativePath)
+    const real = await this.resolveInside(root, relative)
+    return this.bytesAllowed(real, nameOf(relative), part)
+  }
+
+  /**
+   * Huli: `readBytes` of the regular file at `real`, a real path the caller has allowed, under the
+   * name `name`. The stamp is read before and after the bytes through the same handle, so a part
+   * of a file that changed meanwhile is never handed out as the file's.
+   */
+  async bytesAllowed(real: string, name: string, part: BytesPart): Promise<FileBytes> {
+    let handle: FileHandle
+    try {
+      handle = await open(real, 'r')
+    } catch (error) {
+      throw this.fsError(error, name)
+    }
+    try {
+      const before = await handle.stat()
+      if (!before.isFile()) throw invalidParams(`${name} is not a file`)
+      const stamp = { size: before.size, mtimeMs: before.mtimeMs }
+      if (stamp.size > this.limits.bytes) {
+        return { kind: 'too-large', name, size: stamp.size, limit: this.limits.bytes }
+      }
+      const expected = part.expect
+      if (expected && (expected.size !== stamp.size || expected.mtimeMs !== stamp.mtimeMs)) {
+        return { kind: 'changed', name, ...stamp }
+      }
+      if (part.offset > stamp.size) throw invalidParams('offset is past the end of the file')
+      const length = Math.min(part.length, stamp.size - part.offset)
+      const bytes = await readBytes(handle, length, part.offset)
+      const after = await handle.stat()
+      if (bytes.length < length || after.size !== stamp.size || after.mtimeMs !== stamp.mtimeMs) {
+        return { kind: 'changed', name, size: after.size, mtimeMs: after.mtimeMs }
+      }
+      return {
+        kind: 'part',
+        name,
+        ...stamp,
+        offset: part.offset,
+        sha256: versionOf(bytes),
+        bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length) as ArrayBuffer,
+      }
+    } finally {
+      await handle.close()
+    }
   }
 
   private async content(real: string, shown: string, info: Stats): Promise<FileContent> {

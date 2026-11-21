@@ -5,9 +5,10 @@
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { harnessOf, type AgentId } from '@shared/agents'
-import type { FileContent } from '@shared/files'
+import type { FileBytes, FileContent } from '@shared/files'
 import type { Platform } from '@shared/platform'
 import { HostError, invalidParams, notFound } from './errors'
+import type { BytesPart } from './files'
 import { isAbsolutePath, isInside } from './paths'
 
 // An agent's id of its session as one folder's name: no separator, and not `.` or `..`.
@@ -38,6 +39,8 @@ export interface AgentFilesDeps {
   session(sessionId: string): { agentId: AgentId; agentSessionId: string } | null
   /** Reads the regular file at `real`, a real path allowed here, under the name `shown`. */
   read(real: string, shown: string): Promise<FileContent>
+  /** Huli: a part of the bytes of the regular file at `real`, a real path allowed here. */
+  bytes(real: string, name: string, part: BytesPart): Promise<FileBytes>
 }
 
 export class AgentFiles {
@@ -60,6 +63,19 @@ export class AgentFiles {
    * and at its real path. Never media, since nothing grants it, and never editable.
    */
   async read(sessionId: string, file: string): Promise<FileContent> {
+    const content = await this.deps.read(await this.locate(sessionId, file), file)
+    return content.kind === 'text' ? { ...content, editable: false } : content
+  }
+
+  /** Huli: a part of the bytes of the file `read` would read, checked the same way. */
+  async readBytes(sessionId: string, file: string, part: BytesPart): Promise<FileBytes> {
+    const real = await this.locate(sessionId, file)
+    const paths = this.deps.platform === 'win32' ? path.win32 : path.posix
+    return this.deps.bytes(real, paths.basename(file), part)
+  }
+
+  /** The real path of the absolute `file`, when it lies in the session's own folder. */
+  private async locate(sessionId: string, file: string): Promise<string> {
     const { platform } = this.deps
     if (file.includes('\0')) throw invalidParams('path contains a NUL character')
     if (!isAbsolutePath(file, platform)) throw invalidParams('path must be an absolute path')
@@ -82,7 +98,6 @@ export class AgentFiles {
       throw error
     }
     if (!isInside(real, base, platform)) throw refused
-    const content = await this.deps.read(real, file)
-    return content.kind === 'text' ? { ...content, editable: false } : content
+    return real
   }
 }
