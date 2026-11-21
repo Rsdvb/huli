@@ -55,6 +55,8 @@ interface Spots {
 }
 
 const NONE: Spots = { pins: [], editor: null }
+/** How long the pointer stays on a row's number before the + comes to it. */
+const REST_MS = 120
 const MARK = 'data-note'
 
 /** The gutter's number cells, one per drawn row, in the diff's shadow root. */
@@ -177,41 +179,60 @@ export function NotesLayer({
     setSpots((current) => (sameSpots(current, placed.spots) ? current : placed.spots))
   }, [scroller, fileDiff, notes, editing, rendered])
 
-  // A + by the number the pointer is on. The library's own + is not used: it follows the pointer
-  // over every row, code too, into the row's number cell, and each move lays out the diff's whole
-  // grid again, over 100 ms on a diff of thousands of lines. This one moves only in the gutter,
-  // on a layer of its own, and nothing renders for it.
+  // A + by the number the pointer rests on. The library's own + is not used: it follows the
+  // pointer over every row, code too, into the row's number cell, and each move lays out the diff's
+  // whole grid again, over 100 ms on a diff of thousands of lines. This one moves only in the
+  // gutter, on a layer of its own, and nothing renders for it.
   const plus = useRef<HTMLButtonElement>(null)
   const hovered = useRef<{ line: number; side: SelectedLineRange['side'] } | null>(null)
   useEffect(() => {
     const box = scroller.current
     const button = plus.current
     if (!box || !button) return
+    // Where the pointer rests: the + moves there once it has stayed on a row a moment, since on a
+    // diff of thousands of rows every move of it costs the compositor over 10 ms.
     let shownCell: HTMLElement | null = null
-    const hide = (): void => {
-      shownCell = null
-      if (button.dataset.shown !== 'false') button.dataset.shown = 'false'
-    }
-    const move = (event: PointerEvent): void => {
-      if (event.pointerType !== 'mouse' || button.contains(event.target as Node)) return
-      const cell = numberCellOf(event)
-      if (cell === shownCell) return
+    let restingCell: HTMLElement | null = null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const place = (): void => {
+      timer = undefined
+      const cell = restingCell
       const line = cell && cellLine(cell)
-      if (!cell || !line) return hide()
+      if (!cell || !line) {
+        shownCell = null
+        if (button.dataset.shown !== 'false') button.dataset.shown = 'false'
+        return
+      }
+      if (cell === shownCell) return
       shownCell = cell
       const at = cell.getBoundingClientRect()
       const origin = box.getBoundingClientRect()
       const x = Math.round(at.right - origin.left - 4)
       const y = Math.round(at.top - origin.top + box.scrollTop + (at.height - 18) / 2)
       button.style.transform = `translate(${x}px, ${y}px)`
-      button.dataset.shown = 'true'
+      if (button.dataset.shown !== 'true') button.dataset.shown = 'true'
       hovered.current = line
     }
+    const move = (event: PointerEvent): void => {
+      if (event.pointerType !== 'mouse' || button.contains(event.target as Node)) return
+      const cell = numberCellOf(event)
+      if (cell === restingCell) return
+      restingCell = cell
+      clearTimeout(timer)
+      timer = setTimeout(place, REST_MS)
+    }
+    const leave = (event: PointerEvent): void => {
+      if (button.contains(event.relatedTarget as Node | null)) return
+      clearTimeout(timer)
+      restingCell = null
+      place()
+    }
     box.addEventListener('pointermove', move, { passive: true })
-    box.addEventListener('pointerleave', hide, { passive: true })
+    box.addEventListener('pointerleave', leave, { passive: true })
     return () => {
+      clearTimeout(timer)
       box.removeEventListener('pointermove', move)
-      box.removeEventListener('pointerleave', hide)
+      box.removeEventListener('pointerleave', leave)
     }
   }, [scroller])
   const commentHere = () => {
