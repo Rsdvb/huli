@@ -46,6 +46,7 @@ import { keepResult } from '../dev/FrameMeter'
 import type { WritableStore } from '../select'
 import { useThreadSelector, type ThreadView } from '../thread'
 import { countRender } from '../ui/renders'
+import { RevealContext, type AnchorTarget } from '../ui/session/anchors'
 import { haptic } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 import { rowBuilder, type Row } from '../ui/session/turns'
@@ -63,6 +64,8 @@ const FLING = 1.2
 const GUESS = 90
 // How far past the screen rows are drawn ahead of a fling.
 const DRAW_AHEAD = 500
+// Room left above a heading an `#anchor` link scrolls to.
+const ANCHOR_ROOM = 8
 
 const NO_ROWS: Row[] = []
 const DEV = devMode()
@@ -210,6 +213,24 @@ export function Conversation(props: {
     void list.current?.scrollToEnd({ animated: true })
   }, [])
 
+  // A reply's `#anchor` link: its heading comes to just under the floating header.
+  const { paddingTop } = props
+  const reveal = useCallback(
+    (target: AnchorTarget) => {
+      const scroller = list.current?.getNativeScrollRef()
+      if (!scroller) return
+      target.measureInWindow((_x, y) => {
+        scroller.measureInWindow((_left: number, top: number) => {
+          const now = list.current
+          if (!now) return
+          const offset = now.getState().scroll + y - top - paddingTop - ANCHOR_ROOM
+          void now.scrollToOffset({ offset: Math.max(0, offset), animated: true })
+        })
+      })
+    },
+    [paddingTop],
+  )
+
   // The way back down floats over the dock, and rises with it and the keyboard on the UI thread.
   const keyboard = useReanimatedKeyboardAnimation()
   const { dock, keyboardOverlap } = props
@@ -252,7 +273,7 @@ export function Conversation(props: {
   )
 
   return (
-    <>
+    <RevealContext value={reveal}>
       <KeyboardAwareLegendList
         ref={list}
         contentInsetEndAdjustment={dock}
@@ -326,7 +347,7 @@ export function Conversation(props: {
           onPress={toBottom}
         />
       </Reanimated.View>
-    </>
+    </RevealContext>
   )
 }
 
