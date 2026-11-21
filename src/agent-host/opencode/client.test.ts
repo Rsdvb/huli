@@ -223,8 +223,8 @@ describe('OpenCodeClient.providers', () => {
       ],
     })
     const { fetch, calls } = fetcher({
-      'https://openrouter.ai/api/v1/credits': () =>
-        json({ data: { total_credits: 5, total_usage: 1 } }),
+      'https://openrouter.ai/api/v1/key': () =>
+        json({ data: { limit: 5, limit_remaining: 4, limit_reset: null, budgets: [] } }),
     })
     const client = new OpenCodeClient({
       program: '/bin/opencode',
@@ -237,7 +237,7 @@ describe('OpenCodeClient.providers', () => {
     const providers = await client.providers()
     expect(providers[0]?.usage).toMatchObject({
       state: 'ready',
-      balances: [{ label: 'Balance', amount: 4, currency: 'USD' }],
+      limits: [{ window: 'key_limit', amount: { used: 1, total: 5, unit: 'USD' } }],
     })
     expect(providers[0]?.accounts[0]).toEqual({
       id: 'cred_or',

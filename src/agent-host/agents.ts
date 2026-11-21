@@ -318,6 +318,12 @@ const READ_ANTIGRAVITY_LIMITS = false
 /** How often a read the user asks for may run agy, however many views ask within it. */
 const ASKED_READ_MS = 60_000
 
+/**
+ * Huli: how soon a refresh the user presses asks OpenCode's providers' vendors again with their
+ * keys, however often it is pressed; a read nobody asked for waits `limitsMs`.
+ */
+const PROVIDERS_FORCED_MS = 10_000
+
 /** Huli: why a waiting `authenticate` was let go: a check found the agent signed in already. */
 const SIGNED_IN_ELSEWHERE = new Error('The agent is signed in')
 
@@ -4683,7 +4689,8 @@ export class AgentManager {
     await this.detectAll()
     if (slot.h.detection?.state !== 'available' || !slot.h.detection.spec) return
     if (slot.providersRun) return slot.providersRun
-    if (!force && Date.now() - slot.providersReadAt < this.timings.limitsMs) return
+    const gap = force ? PROVIDERS_FORCED_MS : this.timings.limitsMs
+    if (Date.now() - slot.providersReadAt < gap) return
     slot.providersRun = this.limitedRead(slot, this.readProviders(slot)).finally(() => {
       slot.providersRun = null
     })
@@ -5512,6 +5519,7 @@ export class AgentManager {
     slot.account = null
     slot.limits.clear()
     slot.limitsReadAt = 0
+    slot.providersReadAt = 0
     slot.limitsError = null
     slot.resets = null
     slot.resetsError = null

@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import { failedUsage, readProviderUsage, unsupportedUsage, USAGE_ERROR } from './provider-usage'
+import deepSeekBalance from '../vendor-usage/fixtures/deepseek-user-balance.json'
+import openRouterKey from '../vendor-usage/fixtures/openrouter-key.json'
+import siliconFlowUser from '../vendor-usage/fixtures/siliconflow-user-info.json'
+import {
+  failedUsage,
+  parseOpenRouterKey,
+  parseSiliconFlowUser,
+  readProviderUsage,
+  unsupportedUsage,
+  USAGE_ERROR,
+} from './provider-usage'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -65,5 +75,108 @@ describe('readProviderUsage', () => {
 
   it('uses one generic error text', () => {
     expect(USAGE_ERROR).toBe('Usage could not be read.')
+  })
+})
+
+// Huli: the vendors' documented replies, scrubbed, and where each key may go.
+describe('provider balances and key limits', () => {
+  const NOW = Date.parse('2026-11-21T04:30:00Z')
+  const KEY = 'sk-provider-key-secret-0123456789'
+
+  function asked(fetch: typeof globalThis.fetch): [string, RequestInit][] {
+    return (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][]
+  }
+
+  it("reads an ordinary OpenRouter key's own limit from /api/v1/key, never /credits", async () => {
+    const fetch = fetchOnce(openRouterKey)
+    const usage = await readProviderUsage({ providerId: 'openrouter', key: KEY, now: NOW, fetch })
+    expect(usage).toEqual({
+      state: 'ready',
+      limits: [
+        {
+          window: 'monthly',
+          label: 'Monthly',
+          usedPercent: 26.25,
+          resetsAt: Date.parse('2026-12-01T00:00:00Z'),
+          state: 'ok',
+          observedAt: NOW,
+          amount: { used: 5.25, total: 20, unit: 'USD' },
+        },
+      ],
+      balances: [],
+      observedAt: NOW,
+      error: null,
+    })
+    const [[url, init]] = asked(fetch)
+    expect(url).toBe('https://openrouter.ai/api/v1/key')
+    expect(init.redirect).toBe('error')
+    expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${KEY}`)
+  })
+
+  it('shows nothing for an OpenRouter key without a limit, and fails on another shape', () => {
+    const unlimited = { data: { ...openRouterKey.data, limit: null, limit_remaining: null } }
+    expect(parseOpenRouterKey(unlimited, NOW)).toEqual({
+      state: 'ready',
+      limits: [],
+      balances: [],
+      observedAt: NOW,
+      error: null,
+    })
+    expect(parseOpenRouterKey({ data: { total_credits: 10, total_usage: 2 } }, NOW)).toBeNull()
+    const noBudget = { data: { ...openRouterKey.data, limit_reset: null, budgets: [] } }
+    expect(parseOpenRouterKey(noBudget, NOW)?.limits[0]).toMatchObject({
+      window: 'key_limit',
+      label: 'Key limit',
+      resetsAt: null,
+    })
+  })
+
+  it("reads SiliconFlow's balance on each site from /v1/user/info, its granted part apart", async () => {
+    for (const [providerId, host, currency] of [
+      ['siliconflow-cn', 'api.siliconflow.cn', 'CNY'],
+      ['siliconflow', 'api.siliconflow.com', 'USD'],
+    ] as const) {
+      const fetch = fetchOnce(siliconFlowUser)
+      const usage = await readProviderUsage({ providerId, key: KEY, now: NOW, fetch })
+      expect(usage.balances).toEqual([{ label: 'Balance', amount: 88.88, currency, granted: 0.88 }])
+      const [[url, init]] = asked(fetch)
+      expect(url).toBe(`https://${host}/v1/user/info`)
+      expect(init.redirect).toBe('error')
+    }
+  })
+
+  it('tells no granted part when the SiliconFlow amounts do not add up, and refuses errors', () => {
+    const odd = { ...siliconFlowUser, data: { ...siliconFlowUser.data, balance: '3.00' } }
+    expect(parseSiliconFlowUser(odd, 'CNY', NOW)?.balances).toEqual([
+      { label: 'Balance', amount: 88.88, currency: 'CNY' },
+    ])
+    expect(parseSiliconFlowUser({ code: 30001, status: false }, 'CNY', NOW)).toBeNull()
+    expect(parseSiliconFlowUser({ code: 20000, status: true, data: {} }, 'CNY', NOW)).toBeNull()
+  })
+
+  it('reads the granted part of an OpenCode DeepSeek key as DeepSeek Harness does', async () => {
+    const fetch = fetchOnce(deepSeekBalance)
+    const usage = await readProviderUsage({ providerId: 'deepseek', key: KEY, now: NOW, fetch })
+    expect(usage.balances).toEqual([
+      { label: 'Balance', amount: 110, currency: 'CNY', granted: 10 },
+      { label: 'Balance', amount: 5, currency: 'USD' },
+    ])
+    expect(asked(fetch)[0]![0]).toBe('https://api.deepseek.com/user/balance')
+  })
+
+  it('never puts a key into a result, whatever the vendor answers', async () => {
+    for (const providerId of ['openrouter', 'siliconflow', 'siliconflow-cn', 'deepseek']) {
+      for (const body of [{ error: { message: `bad key ${KEY}` } }, { data: { label: KEY } }]) {
+        for (const status of [200, 401, 500]) {
+          const usage = await readProviderUsage({
+            providerId,
+            key: KEY,
+            now: NOW,
+            fetch: fetchOnce(body, status),
+          })
+          expect(JSON.stringify(usage)).not.toContain(KEY)
+        }
+      }
+    }
   })
 })
