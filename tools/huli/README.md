@@ -383,7 +383,7 @@ followed. The log names the paths removed, never contents.
 - A prepared session (New session) or a hidden options session of agy that Kite lets go before its
   first prompt leaves an empty conversation; it goes the same way, unless agy's summary shows
   steps.
-- Hooks: `Sessions.delete` (and `wasDeleted`, `listImportable`, `importSession` for the deleted
+- Hooks: `Sessions.delete` (and `deletedIds`, `listImportable`, `importSession` for the deleted
   ones) and `dropPrepared`/`removeLeftovers` in `src/agent-host/sessions.ts`,
   `readInHiddenSession` and `deletesCopy` in `agents.ts`, the service in `host.ts` (flushed at
   shutdown), `AgentStatus.deletesCopy` in `src/shared/agent-host.ts`; the delete confirmations in

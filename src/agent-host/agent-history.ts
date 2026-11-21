@@ -457,8 +457,8 @@ export interface AgentHistoryDeps {
     agentSessionIds(agentId: AgentId): Set<string>
     /** Huli: how another folder's copy of an imported session's transcript stands to its own. */
     outsideCopy?(agentId: AgentId, acpSessionId: string): Promise<'newer' | 'fork' | null>
-    /** Huli: deleted here while the agent keeps its copy, so it is not offered again. */
-    wasDeleted?(agentId: AgentId, acpSessionId: string): boolean
+    /** Huli: the ids of those deleted here while the agent keeps its copy: not offered again. */
+    deletedIds?(agentId: AgentId): ReadonlySet<string>
   }
   /** Huli: the Claude desktop app's data folders that hold its index of Code sessions. */
   desktopFolders?(): Promise<string[]>
@@ -583,10 +583,8 @@ export class AgentHistory {
     }
     // Huli: one deleted here whose agent keeps its copy stays deleted; another folder's is a
     // backup the user chose, so it is offered.
-    const wasDeleted = this.deps.sessions.wasDeleted?.bind(this.deps.sessions)
-    if (wasDeleted && folder === null) {
-      items = items.filter((item) => !wasDeleted(agentId, item.sessionId))
-    }
+    const deleted = folder === null ? this.deps.sessions.deletedIds?.(agentId) : undefined
+    if (deleted && deleted.size > 0) items = items.filter((item) => !deleted.has(item.sessionId))
     const gone = await this.goneFolders(items)
     const result = historyPage(items, this.deps.sessions.agentSessionIds(agentId), gone, nextCursor)
     result.hidden.subagents += oldSubagents

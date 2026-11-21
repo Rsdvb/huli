@@ -92,6 +92,16 @@ export class DeletedSessions {
     return this.byKey.has(keyOf(agentId, acpSessionId))
   }
 
+  /** The ids kept out for any of `agentIds`, for a listing to leave out in one pass. */
+  idsOf(agentIds: readonly AgentId[]): Set<string> {
+    const agents = new Set(agentIds)
+    const ids = new Set<string>()
+    for (const entry of this.byKey.values()) {
+      if (agents.has(entry.agentId)) ids.add(entry.acpSessionId)
+    }
+    return ids
+  }
+
   /** Keeps a deleted session from being offered again. */
   add(agentId: AgentId, acpSessionId: string): void {
     if (acpSessionId === '') return

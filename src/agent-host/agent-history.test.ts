@@ -256,7 +256,7 @@ describe('AgentHistory', () => {
       },
       sessions: {
         agentSessionIds: () => new Set(options.imported ?? []),
-        wasDeleted: (_agentId, id) => (options.deleted ?? []).includes(id),
+        deletedIds: () => new Set(options.deleted ?? []),
       },
       isDirectory: async (folder) => !(options.gone ?? []).includes(folder),
       log: () => {},

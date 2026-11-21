@@ -580,7 +580,7 @@ export interface SessionManagerDeps {
   /** Huli: removes what an agent keeps of a session past its own delete; without it nothing is. */
   copies?: Pick<AgentCopies, 'removeDeleted' | 'discardUnprompted'>
   /** Huli: the deleted sessions whose agent keeps a copy, never offered for import again. */
-  deleted?: Pick<DeletedSessions, 'load' | 'flush' | 'has' | 'add' | 'forget'>
+  deleted?: Pick<DeletedSessions, 'load' | 'flush' | 'idsOf' | 'add' | 'forget'>
   /** What to watch for changes to the agent's options in a folder; without it nothing is. */
   settingsTargets?: (agentId: AgentId, folder: string) => WatchTarget[]
   /** The host's settings, read as a turn starts for whether a title is to be written. */
@@ -1487,10 +1487,9 @@ export class SessionManager {
     return undefined
   }
 
-  /** Huli: whether a session deleted here, whose agent keeps its copy, is to stay out of imports. */
-  wasDeleted(agentId: AgentId, acpSessionId: string): boolean {
-    const deleted = this.deps.deleted
-    return !!deleted && this.sharingHistory(agentId).some((id) => deleted.has(id, acpSessionId))
+  /** Huli: the agent's sessions deleted here whose copy it keeps, which stay out of imports. */
+  deletedIds(agentId: AgentId): Set<string> {
+    return this.deps.deleted?.idsOf(this.sharingHistory(agentId)) ?? new Set()
   }
 
   private recordOf(sessionId: string): SessionRecord {
@@ -11880,7 +11879,8 @@ export class SessionManager {
       throw agentError(error)
     }
     // Huli: one deleted here whose agent keeps it stays deleted.
-    const listed = page.sessions.filter((item) => !this.wasDeleted(agentId, item.sessionId))
+    const deleted = this.deletedIds(agentId)
+    const listed = page.sessions.filter((item) => !deleted.has(item.sessionId))
     for (const item of listed) this.remember(agentId, item)
     const recent = await this.outsideStates(
       agentId,

@@ -39,6 +39,7 @@ describe('the deleted sessions file', () => {
     expect(again.has('fake-agent', 'fake-2')).toBe(false)
     // The same id of another agent is another session.
     expect(again.has('doubao', 'fake-1')).toBe(false)
+    expect(again.idsOf(['fake-agent', 'codex'])).toEqual(new Set(['fake-1']))
     const written = JSON.parse(
       await readFile(path.join(dir, 'state', 'deleted-sessions.json'), 'utf8'),
     ) as unknown
