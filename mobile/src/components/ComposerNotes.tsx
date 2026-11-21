@@ -1,13 +1,24 @@
 // Notes over a session's composer, as the desktop shows them at the box's top edge: the agent
 // picked to take the session over with the next message (composer/switch-strip.tsx), the prompt
 // cache that expired while a message is being written (composer/cache-notice.tsx), another
-// agent to pick while the chosen one's plan is used up (composer/quota-strip.tsx), and the prompt
-// the agent predicts comes next, which the desktop shows faint in the empty box.
+// agent to pick while the chosen one's plan is used up (composer/quota-strip.tsx), the prompt
+// the agent predicts comes next, which the desktop shows faint in the empty box, and what New
+// session's agent needs first with the way to it on the phone (new-session.tsx's NoAgentLine).
 
-import { Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native'
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native'
 import Reanimated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import type { Fallback, PlanQuota } from '@shared/plan-quota'
 import type { ConfigOption } from '@shared/thread'
+import { NODE_MANUAL_URL, nodeTaskText, useEnvironment, useNodeInstall } from '../manage/node'
+import { openUrl } from '../system/openUrl'
 import { haptic } from '../ui/session/feedback'
 import { fallbackText, quotaText, tokensText } from '../ui/session/limits'
 import { G, Icon } from '../ui/session/icons'
@@ -214,6 +225,110 @@ export function PromptSuggestionChip(props: { text: string; onUse(): void; onDis
   )
 }
 
+interface NoteAction {
+  label: string
+  onPress(): void
+  busy?: boolean
+}
+
+/**
+ * What the chosen agent needs before New session can start, and one tap to where the phone does
+ * it: its sign-in, its update, Node.js. Send stays off meanwhile; the box says why.
+ */
+export function NeedNote(props: { text: string; action: NoteAction; extra?: NoteAction }) {
+  const { c, s } = useSessionTokens()
+  const button = (action: NoteAction, primary: boolean) => (
+    <Pressable
+      key={action.label}
+      onPress={() => {
+        haptic.tap()
+        action.onPress()
+      }}
+      disabled={action.busy}
+      accessibilityRole="button"
+      accessibilityState={{ busy: !!action.busy }}
+      hitSlop={primary ? undefined : TEXT_SLOP}
+      style={({ pressed }) =>
+        primary
+          ? [
+              styles.undo,
+              styles.busyRow,
+              { borderColor: c.border, backgroundColor: pressed ? c.fill : 'transparent' },
+            ]
+          : null
+      }
+    >
+      {action.busy ? <ActivityIndicator size="small" color={c.textSecondary} /> : null}
+      <Text
+        style={
+          primary
+            ? [styles.undoText, { color: c.text }]
+            : [styles.small, { color: c.textSecondary }]
+        }
+      >
+        {action.label}
+      </Text>
+    </Pressable>
+  )
+  return (
+    <Reanimated.View
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(140)}
+      style={[styles.note, { backgroundColor: s.dockCard, borderColor: c.border }]}
+      accessibilityLiveRegion="polite"
+    >
+      <View style={styles.head}>
+        <Icon icon={G.info} size={15} color={c.textTertiary} />
+        <View style={styles.body}>
+          <Text style={[styles.text, { color: c.text }]}>{props.text}</Text>
+        </View>
+      </View>
+      <View style={styles.actions}>
+        {button(props.action, true)}
+        {props.extra ? button(props.extra, false) : null}
+      </View>
+    </Reanimated.View>
+  )
+}
+
+/** New session's note while every agent waits for Node.js: Kite's own install, from here. */
+export function NodeNeedNote() {
+  const state = useNodeInstall(useEnvironment())
+  const { node, task } = state
+  if (!node) return null
+  const manual = { label: '手动安装', onPress: () => openUrl(NODE_MANUAL_URL) }
+  if (!node.installable) {
+    return <NeedNote text="这台电脑没有纸鸢能装的 Node.js，请手动安装。" action={manual} />
+  }
+  if (state.running && task) {
+    return (
+      <NeedNote
+        text={`${nodeTaskText(task)}，装好后就能开始。`}
+        action={{
+          label: state.stopping ? '正在停止…' : '停止安装',
+          onPress: state.stop,
+          busy: state.stopping,
+        }}
+      />
+    )
+  }
+  return (
+    <NeedNote
+      text={
+        state.failure
+          ? `Node.js 安装失败：${state.failure}`
+          : '纸鸢可以在电脑上装好 Node.js，装在自己的文件夹里，不改系统设置。'
+      }
+      action={{
+        label: state.failure ? '重试' : '一键安装 Node.js',
+        onPress: state.install,
+        busy: state.starting,
+      }}
+      extra={manual}
+    />
+  )
+}
+
 /** A small text or icon button's touch, grown to about 44pt tall. */
 const TEXT_SLOP = { top: 14, bottom: 14, left: space.sm, right: space.sm }
 
@@ -240,6 +355,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   undoText: { fontSize: 13, fontWeight: '600' },
+  busyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   chip: {
     alignSelf: 'flex-start',
     maxWidth: '100%',
