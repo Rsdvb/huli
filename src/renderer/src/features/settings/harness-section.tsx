@@ -1781,10 +1781,26 @@ function nodeLine(t: SettingsT, node: NodeRuntimeInfo): string {
  * where the user's is missing or too old, updated, removed, or chosen over the user's.
  */
 function NodeRuntimeLines({ node }: { node: NodeRuntimeInfo }) {
-  const { request } = useHostScope()
-  const { t } = useTranslation(['settings', 'agents'])
-  const [act, busy, error] = useAction()
+  const { request, useAgentsStore } = useHostScope()
+  const { t } = useTranslation(['settings', 'agents', 'common'])
+  const [act, , error] = useAction()
   const [choosing, setChoosing] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
+  const remove = () => {
+    setConfirming(false)
+    setRemoving(true)
+    setRemoveError(null)
+    request('environment.removeNode', undefined)
+      .catch((e: unknown) => {
+        // The host keeps a failed removal's reason as its task, which the line above shows.
+        if (useAgentsStore.getState().environment?.node?.task?.state !== 'failed') {
+          setRemoveError(errorMessage(e))
+        }
+      })
+      .finally(() => setRemoving(false))
+  }
   const kite = node.kite
   const lacking = node.using === null || (node.using === 'system' && !node.system?.suitable)
   const running = node.task?.state === 'running'
@@ -1805,15 +1821,29 @@ function NodeRuntimeLines({ node }: { node: NodeRuntimeInfo }) {
               manual={false}
             />
             {!running && (
-              <SetButton
-                variant="ghost"
-                loading={busy}
-                onClick={() => act(() => request('environment.removeNode', undefined))}
-              >
+              <SetButton variant="ghost" loading={removing} onClick={() => setConfirming(true)}>
                 {t('agents.environment.node.remove')}
               </SetButton>
             )}
           </span>
+          <AlertDialog open={confirming} onOpenChange={setConfirming}>
+            <AlertDialogContent className="sm:max-w-120">
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {t('agents.environment.node.removeTitle', { version: kite.version })}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t('agents.environment.node.removeBody')}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={remove}>
+                  {t('agents.environment.node.remove')}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <span className="flex min-w-0 items-center gap-2.5">
             <SettingSwitch
               label={t('agents.environment.node.preferKite')}
@@ -1840,7 +1870,7 @@ function NodeRuntimeLines({ node }: { node: NodeRuntimeInfo }) {
       {lacking && !kite && node.installable && (
         <p className="ui-sg-hint">{t('agents:node.hint')}</p>
       )}
-      <ControlError error={error} wrap />
+      <ControlError error={error ?? removeError} wrap />
     </div>
   )
 }

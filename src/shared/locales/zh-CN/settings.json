@@ -749,7 +749,9 @@
         "update": "更新",
         "remove": "移除",
         "preferKite": "始终用纸鸢的 Node.js",
-        "preferKiteHint": "关掉时，系统的 Node.js 够新就用系统的。"
+        "preferKiteHint": "关掉时，系统的 Node.js 够新就用系统的。",
+        "removeTitle": "移除纸鸢的 Node.js {{version}}？",
+        "removeBody": "Agent 会改用系统的 Node.js。系统的 Node.js 没有或太旧时，需要它的 Agent 要等重新安装 Node.js 后才能用。"
       }
     },
     "cli": {

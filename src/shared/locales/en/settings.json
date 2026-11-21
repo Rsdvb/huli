@@ -757,7 +757,9 @@
         "update": "Update",
         "remove": "Remove",
         "preferKite": "Always use Kite’s Node.js",
-        "preferKiteHint": "When off, your own Node.js is used while it is new enough."
+        "preferKiteHint": "When off, your own Node.js is used while it is new enough.",
+        "removeTitle": "Remove Kite’s Node.js {{version}}?",
+        "removeBody": "Agents move to your own Node.js. Where it is missing or too old, the agents that need Node.js cannot start until it is installed again."
       }
     },
     "cli": {
