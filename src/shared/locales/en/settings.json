@@ -2430,7 +2430,7 @@
     "groups": {
       "main": "Agent network",
       "subscriptions": "Subscriptions",
-      "default": "Default node",
+      "default": "Default way out",
       "agents": "Agents",
       "interfaces": "This computer's interfaces"
     },
@@ -2454,13 +2454,13 @@
       "exited": "mihomo stopped, so agents that use a node have no network until it runs again. Kettu restarts it."
     },
     "interface": {
-      "name": "Network interface",
-      "description": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. Leave it empty to use the one found.",
+      "name": "Nodes' network interface",
+      "description": "Only where your subscriptions' nodes dial out, around any TUN a proxy client or VPN set up; it does not decide where agents go. Leave it empty to use the one found.",
       "placeholder": "Such as Ethernet, Wi-Fi or en0",
       "invalid": "Enter an interface name without #",
       "keywords": "interface adapter nic ethernet wifi tun bypass",
-      "descriptionFound": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. Leave it empty to use the one found: {{name}}.",
-      "descriptionNone": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. None was found, so name one here.",
+      "descriptionFound": "Only where your subscriptions' nodes dial out, around any TUN a proxy client or VPN set up; it does not decide where agents go. Leave it empty to use the one found: {{name}}.",
+      "descriptionNone": "Only where your subscriptions' nodes dial out, around any TUN a proxy client or VPN set up; it does not decide where agents go. None was found, so name one here.",
       "auto": "Automatic",
       "autoFound": "Automatic ({{name}})",
       "autoHint": "Kite picks a connected physical interface and follows network changes.",
@@ -2505,13 +2505,13 @@
       "save": "Save"
     },
     "default": {
-      "name": "Default node",
-      "description": "Agents that follow the default go through this node.",
+      "name": "Default way out",
+      "description": "Agents that follow the default leave this way: a node of your subscriptions, or one of this computer's interfaces, such as a proxy client's TUN.",
       "none": "None: no network",
       "test": "Test latency",
       "noNodes": "No nodes yet",
       "notRunning": "Nodes show while the agent network runs.",
-      "keywords": "default node latency ping speed test"
+      "keywords": "default way out exit node interface tun latency ping speed test"
     },
     "delay": {
       "ms": "{{ms}} ms",
@@ -2544,7 +2544,8 @@
       "check": "Check exit IP",
       "interface": "Interface exit {{ip}} ({{country}})",
       "interfaceIpOnly": "Interface exit {{ip}}",
-      "interfaceUnreachable": "Interface exit: can’t connect"
+      "interfaceUnreachable": "Interface exit: can’t connect",
+      "noDefault": "No default way out set: no network"
     },
     "import": {
       "title": "Import a subscription file",

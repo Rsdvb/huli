@@ -2392,7 +2392,7 @@
     "groups": {
       "main": "Agent 网络",
       "subscriptions": "订阅",
-      "default": "默认节点",
+      "default": "默认出口",
       "agents": "Agent",
       "interfaces": "电脑的网卡"
     },
@@ -2416,13 +2416,13 @@
       "exited": "mihomo 已停止，在它重新运行之前，用节点的 Agent 都无法联网。Kettu 会重启它。"
     },
     "interface": {
-      "name": "网卡",
-      "description": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。留空则用自动找到的那块。",
+      "name": "节点用的网卡",
+      "description": "只管订阅里的节点从哪块网卡连出去，可绕开代理客户端或 VPN 建立的 TUN；不决定 Agent 走哪里。留空则用自动找到的那块。",
       "placeholder": "如 以太网、WLAN 或 en0",
       "invalid": "网卡名称不能包含 #",
       "keywords": "网卡 适配器 以太网 wifi tun 绕过",
-      "descriptionFound": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。留空则用自动找到的：{{name}}。",
-      "descriptionNone": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。没有自动找到，请在这里填写。",
+      "descriptionFound": "只管订阅里的节点从哪块网卡连出去，可绕开代理客户端或 VPN 建立的 TUN；不决定 Agent 走哪里。留空则用自动找到的：{{name}}。",
+      "descriptionNone": "只管订阅里的节点从哪块网卡连出去，可绕开代理客户端或 VPN 建立的 TUN；不决定 Agent 走哪里。没有自动找到，请在这里填写。",
       "auto": "自动",
       "autoFound": "自动（{{name}}）",
       "autoHint": "纸鸢挑一块已连接的物理网卡，网络变了会跟着换。",
@@ -2467,13 +2467,13 @@
       "save": "保存"
     },
     "default": {
-      "name": "默认节点",
-      "description": "跟随默认的 Agent 经由这个节点联网。",
+      "name": "默认出口",
+      "description": "跟随默认的 Agent 都从这里出去：订阅里的一个节点，或电脑的一块网卡（比如代理客户端的 TUN）。",
       "none": "无：不联网",
       "test": "测速",
       "noNodes": "还没有节点",
       "notRunning": "Agent 网络运行时才列出节点。",
-      "keywords": "默认 节点 延迟 测速"
+      "keywords": "默认 出口 节点 网卡 tun 延迟 测速"
     },
     "delay": {
       "ms": "{{ms}} ms",
@@ -2506,7 +2506,8 @@
       "check": "检测出口 IP",
       "interface": "网卡出口 {{ip}}（{{country}}）",
       "interfaceIpOnly": "网卡出口 {{ip}}",
-      "interfaceUnreachable": "网卡出口：无法连接"
+      "interfaceUnreachable": "网卡出口：无法连接",
+      "noDefault": "没有设置默认出口：不联网"
     },
     "import": {
       "title": "从文件导入订阅",

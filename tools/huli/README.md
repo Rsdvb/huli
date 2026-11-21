@@ -823,8 +823,11 @@ HTTPS system proxy is reported as unsupported rather than gone around.
 
 Huli's own files:
 
-- `src/shared/agent-network.ts`: the settings' part (on, default node, each agent's choice, the
-  interface), the status and node types, `NODE_NO_PROXY`.
+- `src/shared/agent-network.ts`: the settings' part (on, the default way out, each agent's
+  choice, the interface nodes dial out on), the status and node types, `NODE_NO_PROXY`. The
+  default (`defaultNode`, Settings' 默认出口) is a node or one interface, as with no subscription
+  an agent's way out may be a proxy client's TUN; `agentRoute` gives an agent that follows an
+  interface default that interface, so it is bound just as one that chose it.
 - `src/agent-host/node-proxy/`: `config.ts` (the configuration, pure, + `config.test.ts`),
   `api.ts` (mihomo's REST API on 127.0.0.1 with a random secret), `interface.ts`, `files.ts`
   (`agent-network/subscriptions.json`, which alone holds the links, and

@@ -19,6 +19,7 @@ import {
   MAX_SUBSCRIPTION_BYTES,
   SUBSCRIPTION_NAME_CHARS,
   type AgentNetworkChoice,
+  type DefaultRoute,
   type AgentNetworkStatus,
   type ExitIp,
   type NetworkInterfaceView,
@@ -596,6 +597,20 @@ function nodeLabel(ref: { subscription: string; node: string }, subs: Subscripti
   return sub ? `${sub.name} | ${ref.node}` : ref.node
 }
 
+/** The default in words: a node, an interface with its live state, or null for none. */
+function defaultLabel(
+  chosen: DefaultRoute | null,
+  subs: SubscriptionView[],
+  interfaces: NetworkInterfaceView[],
+  t: TFunction<'settings'>,
+): string | null {
+  if (!chosen) return null
+  return 'interface' in chosen
+    ? interfaceLabel(chosen.interface, interfaces, t)
+    : nodeLabel(chosen, subs)
+}
+
+/** The default way out: none, one of this computer's interfaces, or a node. */
 export function DefaultNodeControl({ label }: { label: string }) {
   const { t } = useTranslation('settings')
   const chosen = useSettingsStore((s) => s.settings.agentNetwork.defaultNode)
@@ -603,11 +618,35 @@ export function DefaultNodeControl({ label }: { label: string }) {
   const running = useAgentNetworkStore((s) => s.status?.state === 'running')
   const testing = useAgentNetworkStore((s) => s.testing)
   const options = useNodeOptions()
+  const interfaces = useInterfaces()
+  // Shown, so the interfaces to pick from are read and stay live.
+  useLiveInterfaces(true)
   const [error, setError] = useState<string | null>(null)
-  const value = chosen ? `node:${nodeKey(chosen)}` : 'none'
-  const all = [{ value: 'none', label: t('network.default.none') }, ...options]
-  if (chosen && !options.some((o) => o.value === value)) {
-    all.push({ value, label: t('network.choice.gone', { node: nodeLabel(chosen, subs) }) })
+  const value = !chosen
+    ? 'none'
+    : 'interface' in chosen
+      ? `interface:${chosen.interface}`
+      : `node:${nodeKey(chosen)}`
+  // The connected ones alone, a proxy client's TUN as good a way out as Wi-Fi; one chosen and now
+  // down still shows below as the current value.
+  const listed = interfaces.filter((item) => item.up)
+  const all: { value: string; label: string; hint?: string }[] = [
+    { value: 'none', label: t('network.default.none') },
+    ...listed.map((item) => ({
+      value: `interface:${item.name}`,
+      label: interfaceLabel(item.name, interfaces, t),
+      ...(item.description ? { hint: item.description } : {}),
+    })),
+    ...options,
+  ]
+  if (chosen && !all.some((o) => o.value === value)) {
+    all.push({
+      value,
+      label:
+        'interface' in chosen
+          ? interfaceLabel(chosen.interface, interfaces, t)
+          : t('network.choice.gone', { node: nodeLabel(chosen, subs) }),
+    })
   }
   return (
     <>
@@ -630,7 +669,12 @@ export function DefaultNodeControl({ label }: { label: string }) {
         className="w-60"
         onChange={(next) => {
           setError(null)
-          const ref = next === 'none' ? null : nodeOfKey(next.slice('node:'.length))
+          const ref: DefaultRoute | null =
+            next === 'none'
+              ? null
+              : next.startsWith('interface:')
+                ? { interface: next.slice('interface:'.length) }
+                : nodeOfKey(next.slice('node:'.length))
           update({ agentNetwork: { defaultNode: ref } }).catch((e: unknown) =>
             setError(errorMessage(e)),
           )
@@ -696,11 +740,12 @@ export function NetworkChoiceSelect({
         : 'interface' in choice
           ? 'interface'
           : `node:${nodeKey(choice)}`
+  const followed = defaultLabel(network.defaultNode, subs, interfaces, t)
   const all: { value: string; label: string; hint?: string }[] = [
     {
       value: 'default',
-      label: network.defaultNode
-        ? t('network.choice.followNamed', { node: nodeLabel(network.defaultNode, subs) })
+      label: followed
+        ? t('network.choice.followNamed', { node: followed })
         : t('network.choice.follow'),
     },
     ...options,
@@ -934,10 +979,20 @@ function exitText(exit: ExitIp | null, t: TFunction<'settings'>): string {
     : t(`network.exit.${via}IpOnly`, { ip: exit.ip })
 }
 
-/** Where the agent's traffic last left from, or that it could not get out. */
+/**
+ * Where the agent's traffic last left from, or that it could not get out; for one that follows a
+ * default not set, that there is none to follow.
+ */
 export function ExitLine({ agentId }: { agentId: AgentId }) {
   const { t } = useTranslation('settings')
   const exit = useExitIp(agentId)
+  const unset = useSettingsStore(
+    (s) =>
+      s.settings.agentNetwork.enabled &&
+      s.settings.agentNetwork.agents[agentId] === undefined &&
+      s.settings.agentNetwork.defaultNode === null,
+  )
+  if (unset) return <span className="text-danger">{t('network.exit.noDefault')}</span>
   return <span className={exit && !exit.ip ? 'text-danger' : undefined}>{exitText(exit, t)}</span>
 }
 
