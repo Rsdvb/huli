@@ -246,6 +246,7 @@ import { createValidators } from './validate'
 import { AgentHistory } from './agent-history'
 import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
+import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
@@ -1077,6 +1078,7 @@ export class AgentHost {
       worktrees: this.worktrees,
       file: sessionsFile(options.userDataPath, log),
       returned: returnedFile(options.userDataPath, log),
+      deleted: new DeletedSessions(deletedSessionsFile(options.userDataPath, log)),
       projectMcp: new ProjectMcpAnswers(projectMcpFile(options.userDataPath, log)),
       projectHooks: new ProjectHooksAnswers(projectHooksFile(options.userDataPath, log)),
       portOpen: (portId) => this.hub.has(portId),
@@ -3157,10 +3159,10 @@ export class AgentHost {
       'sessions.prepare': (params, { portId }) => sessions.prepare(params, portId),
       'sessions.discard': ({ sessionId }) => sessions.discard(sessionId),
       // Huli: one listed by the import from the agents keeps its title and times.
-      'sessions.import': (params) =>
+      'sessions.import': ({ source, ...params }) =>
         sessions.importSession(
           params,
-          this.agentHistory.keptFor(params.agentId, params.acpSessionId),
+          this.agentHistory.keptFor(params.agentId, params.acpSessionId, source ?? null),
         ),
       'sessions.open': async ({ sessionId }, { device }) =>
         digestsFor(device, await sessions.open(sessionId, imagesFor(device))),

@@ -9,16 +9,22 @@ import { randomUUID } from 'node:crypto'
 import type { Dirent } from 'node:fs'
 import { open, readdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
-import type {
-  AgentHistoryPage,
-  AgentHistorySession,
-  HistoryCopyOutcome,
-  HistoryCopyPlan,
-  HistorySource,
+import {
+  CANNOT_LIST,
+  type AgentHistoryPage,
+  type AgentHistorySession,
+  type HistoryCopyOutcome,
+  type HistoryCopyPlan,
+  type HistorySource,
 } from '@shared/agent-history'
 import { harnessOf, type AgentId } from '@shared/agents'
 import type { Platform } from '@shared/platform'
-import { locateTranscript, readDesktopIndex, type DesktopSession } from './claude-desktop'
+import {
+  locateTranscript,
+  readDesktopIndex,
+  type DesktopSession,
+  type DesktopTranscript,
+} from './claude-desktop'
 import {
   folderSource,
   LISTED_FILES,
@@ -31,7 +37,7 @@ import {
   type PlannedCopy,
 } from './agent-history-folder'
 import { agentError, type AgentRuntime } from './agents'
-import type { ListedEverywhere } from './connection'
+import { AgentRequestError, type ListedEverywhere } from './connection'
 import { HostError, invalidParams } from './errors'
 import { t } from './i18n'
 import type { KeptField } from './sessions'
@@ -447,9 +453,12 @@ export interface AgentHistoryDeps {
     ensureReady(agentId: AgentId): Promise<Pick<AgentRuntime, 'connection' | 'init'>>
   }
   sessions: {
+    /** The ids here of the agent's sessions, and of the agents' that share its history. */
     agentSessionIds(agentId: AgentId): Set<string>
     /** Huli: how another folder's copy of an imported session's transcript stands to its own. */
     outsideCopy?(agentId: AgentId, acpSessionId: string): Promise<'newer' | 'fork' | null>
+    /** Huli: deleted here while the agent keeps its copy, so it is not offered again. */
+    wasDeleted?(agentId: AgentId, acpSessionId: string): boolean
   }
   /** Huli: the Claude desktop app's data folders that hold its index of Code sessions. */
   desktopFolders?(): Promise<string[]>
@@ -466,6 +475,12 @@ interface FolderListing extends FolderScan {
   /** The folder its sessions were read from, inside the chosen one. */
   source: string
 }
+
+/**
+ * Huli: what an ACP agent answers `session/list` without a folder with when it lists only a
+ * folder's sessions: JSON-RPC's invalid params and method not found.
+ */
+const NO_FOLDER_REFUSED: ReadonlySet<number> = new Set([-32602, -32601])
 
 /** Huli: how long a copy plan waits for the user's confirmation. */
 const PLAN_MS = 15 * 60 * 1000
@@ -551,19 +566,26 @@ export class AgentHistory {
       const runtime = await agents.ensureReady(agentId)
       const connection = runtime.connection
       if (!runtime.init.capabilities.listSessions || !connection.listAllSessions) {
-        throw new HostError(
-          'agent_unavailable',
-          t('session.cannotList', { agent: agents.name(agentId) }),
-        )
+        throw this.cannotList(agentId)
       }
       let page
       try {
         page = await connection.listAllSessions(cursor)
       } catch (error) {
+        // Huli: an ACP agent that lists only a folder's sessions says so by refusing no folder.
+        if (error instanceof AgentRequestError && NO_FOLDER_REFUSED.has(error.code ?? 0)) {
+          throw this.cannotList(agentId)
+        }
         throw agentError(error)
       }
       items = page.sessions.map(historyItemOf)
       nextCursor = page.nextCursor
+    }
+    // Huli: one deleted here whose agent keeps its copy stays deleted; another folder's is a
+    // backup the user chose, so it is offered.
+    const wasDeleted = this.deps.sessions.wasDeleted?.bind(this.deps.sessions)
+    if (wasDeleted && folder === null) {
+      items = items.filter((item) => !wasDeleted(agentId, item.sessionId))
     }
     const gone = await this.goneFolders(items)
     const result = historyPage(items, this.deps.sessions.agentSessionIds(agentId), gone, nextCursor)
@@ -597,12 +619,7 @@ export class AgentHistory {
     const listing = this.folders.get(`${agentId}\n${folder}`)
     if (!listing) throw new HostError('not_found', t('agentHistory.listAgain'))
     const target = agents.configFolder(agentId)
-    if (!target) {
-      throw new HostError(
-        'agent_unavailable',
-        t('session.cannotList', { agent: agents.name(agentId) }),
-      )
-    }
+    if (!target) throw this.cannotList(agentId)
     const byId = new Map(listing.items.map((item) => [item.sessionId, item]))
     const chosen = [...new Set(sessionIds)].flatMap((id) => {
       const item = byId.get(id)
@@ -741,40 +758,87 @@ export class AgentHistory {
 
   /**
    * What an import of a listed session takes over from the listing: its title and times. Nothing
-   * for one this host has not listed.
+   * for one this host has not listed. Huli: with `source`, chosen among the Claude desktop app's
+   * sessions, the app's title, times and archive win over its transcript's; chosen from the
+   * agent's own listing, they are not applied.
    */
-  keptFor(agentId: AgentId, acpSessionId: string): Kept {
+  keptFor(agentId: AgentId, acpSessionId: string, source: HistorySource | null = null): Kept {
     const key = `${agentId}\n${acpSessionId}`
-    // Huli: the Claude desktop app's title, times and archive win over its transcript's.
-    return { ...this.kept.get(key), ...this.desktopKept.get(key) }
+    const desktop = source === 'claude-desktop' ? this.desktopKept.get(key) : undefined
+    return { ...this.kept.get(key), ...desktop }
+  }
+
+  private cannotList(agentId: AgentId): HostError {
+    return new HostError(
+      'agent_unavailable',
+      t('session.cannotList', { agent: this.deps.agents.name(agentId) }),
+      { reason: CANNOT_LIST },
+    )
+  }
+
+  /**
+   * Huli: the Claude Code agents that could import the Claude desktop app's sessions, one for each
+   * configuration folder, `agentId` first; a disabled one is left out unless it is `agentId`.
+   */
+  private desktopCandidates(agentId: AgentId): { agentId: AgentId; configDir: string }[] {
+    const { agents, platform } = this.deps
+    const candidates: { agentId: AgentId; configDir: string }[] = []
+    const seen = new Set<string>()
+    for (const id of [agentId, ...(agents.ids?.() ?? []).filter((other) => other !== agentId)]) {
+      if (harnessOf(id) !== 'claude-code') continue
+      if (id !== agentId) {
+        try {
+          agents.assertEnabled(id)
+        } catch {
+          continue
+        }
+      }
+      const configDir = agents.configFolder(id)
+      if (!configDir) continue
+      const resolved = path.resolve(configDir)
+      const key = platform === 'win32' ? resolved.toLowerCase() : resolved
+      if (seen.has(key)) continue
+      seen.add(key)
+      candidates.push({ agentId: id, configDir })
+    }
+    return candidates
   }
 
   /**
    * Huli: the Claude desktop app's Code sessions, from its own index, each as the Claude Code
    * session whose transcript the agent's folder holds. One the app deleted is not listed; one it
    * archived, one in its scratch folder and one whose transcript is gone are marked. Sessions that
-   * run the same Claude Code session are listed once, the latest.
+   * run the same Claude Code session are listed once, the latest. The app runs Claude Code with a
+   * configuration folder its own settings may name, which are not read: of the Claude Code agents
+   * here, the one whose folder holds the most of its transcripts imports them.
    */
-  private async desktopPage(agentId: AgentId): Promise<AgentHistoryPage> {
-    const { agents } = this.deps
-    const configDir = harnessOf(agentId) === 'claude-code' ? agents.configFolder(agentId) : null
-    if (!configDir) {
-      throw new HostError(
-        'agent_unavailable',
-        t('session.cannotList', { agent: agents.name(agentId) }),
-      )
-    }
+  private async desktopPage(asked: AgentId): Promise<AgentHistoryPage> {
+    const candidates = this.desktopCandidates(asked)
+    if (candidates.length === 0) throw this.cannotList(asked)
     const started = Date.now()
     const index = await readDesktopIndex((await this.deps.desktopFolders?.()) ?? [])
-    const projects = path.join(configDir, 'projects')
-    const here = new Set<string>()
-    for (const id of agents.ids?.() ?? [agentId]) {
-      if (harnessOf(id) !== 'claude-code') continue
-      for (const acp of this.deps.sessions.agentSessionIds(id)) here.add(acp)
+    let best: {
+      agentId: AgentId
+      located: Map<string, DesktopTranscript | null>
+      found: number
+    } | null = null
+    for (const { agentId: candidate, configDir } of candidates) {
+      const projects = path.join(configDir, 'projects')
+      const located = new Map<string, DesktopTranscript | null>()
+      let found = 0
+      await eachLimited(index.sessions, READS, async (session) => {
+        const transcript = await locateTranscript(session, projects).catch(() => null)
+        located.set(session.id, transcript)
+        if (transcript?.found) found++
+      })
+      if (!best || found > best.found) best = { agentId: candidate, located, found }
+      if (found === index.sessions.length) break
     }
+    const agentId = best!.agentId
+    const here = this.deps.sessions.agentSessionIds(agentId)
     const rows = new Map<string, { row: AgentHistorySession; session: DesktopSession }>()
-    await eachLimited(index.sessions, READS, async (session) => {
-      const transcript = await locateTranscript(session, projects).catch(() => null)
+    for (const session of index.sessions) {
+      const transcript = best!.located.get(session.id) ?? null
       const acpSessionId = transcript?.acpSessionId ?? session.id
       const folder = transcript?.folder ?? session.cwd
       const row: AgentHistorySession = {
@@ -798,7 +862,7 @@ export class AgentHistory {
         (other.unavailable === true && row.unavailable === undefined) ||
         (other.unavailable === row.unavailable && (row.updatedAt ?? 0) > (other.updatedAt ?? 0))
       if (better) rows.set(acpSessionId, { row, session })
-    })
+    }
     const listed = [...rows.values()].sort(
       (a, b) => (b.row.updatedAt ?? 0) - (a.row.updatedAt ?? 0),
     )
@@ -817,6 +881,7 @@ export class AgentHistory {
       nextCursor: null,
       hidden: { subagents: 0, empty: 0 },
       ...(index.folders.length > 0 ? { source: index.folders.join('\n') } : {}),
+      agentId,
     }
   }
 
@@ -850,12 +915,7 @@ export class AgentHistory {
     let scan = cursor === null ? undefined : this.scans.get(agentId)
     if (!scan) {
       const configDir = this.deps.agents.configFolder(agentId)
-      if (!configDir) {
-        throw new HostError(
-          'agent_unavailable',
-          t('session.cannotList', { agent: this.deps.agents.name(agentId) }),
-        )
-      }
+      if (!configDir) throw this.cannotList(agentId)
       const started = Date.now()
       scan = await scanClaudeHistory(
         configDir,

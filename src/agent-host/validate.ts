@@ -1785,11 +1785,16 @@ export function createValidators(platform: Platform): Validators {
     'sessions.discard': (params) => ({ sessionId: sessionId(fields(params)) }),
     'sessions.import': (params) => {
       const o = fields(params)
+      if (o.source !== undefined && o.source !== 'claude-desktop') {
+        throw invalidParams('source must be claude-desktop')
+      }
       return {
         agentId: agentId(o),
         projectPath: absolutePath(o, 'projectPath', platform),
         acpSessionId: string(o, 'acpSessionId', ACP_ID_CHARS),
         ...(o.fork === true ? { fork: true } : {}),
+        // Huli: the Claude desktop app's listing, whose title and times it takes.
+        ...(o.source !== undefined ? { source: 'claude-desktop' as const } : {}),
       }
     },
     'sessions.open': session,

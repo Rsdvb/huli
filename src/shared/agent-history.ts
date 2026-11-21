@@ -1,6 +1,8 @@
 // Huli: the import from the agents, which lists every past session of an agent across all the
 // folders it ran in. Huli's own; see tools/huli/README.md.
 
+import type { AgentId } from './agents'
+
 /** One of the agent's own sessions, as Settings › General › Import from agents lists it. */
 export interface AgentHistorySession {
   /** The agent's own id, which `sessions.import` takes. */
@@ -32,6 +34,14 @@ export interface AgentHistorySession {
 /** Huli: the sessions `agentHistory.list` reads from another app's index instead of the agent. */
 export type HistorySource = 'claude-desktop'
 
+/**
+ * Huli: the `reason` in the data of a listing's error, of `agentHistory.list` or
+ * `agents.listSessions`, when the agent cannot list such sessions at all: its dialogs then leave
+ * it out rather than show an error to retry. An agent not started at its version yet is listed
+ * to find out.
+ */
+export const CANNOT_LIST = 'cannot_list'
+
 export interface AgentHistoryPage {
   sessions: AgentHistorySession[]
   nextCursor: string | null
@@ -39,6 +49,11 @@ export interface AgentHistoryPage {
   hidden: { subagents: number; empty: number }
   /** For a listing of another folder: the folder its sessions were read from, inside the chosen one. */
   source?: string
+  /**
+   * Huli: for the Claude desktop app's sessions, the Claude Code agent that imports them, whose
+   * configuration folder holds their transcripts; it may be another than the one asked.
+   */
+  agentId?: AgentId
 }
 
 /**

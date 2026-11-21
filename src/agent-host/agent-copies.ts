@@ -18,6 +18,12 @@
 // Codex 0.171's `thread/delete` removes the rollout, its state rows and its name index entries
 // itself, so Codex needs nothing here.
 //
+// DeepSeek Harness (dsh 0.2.2) has no delete in its SDK or ACP mode. It keeps a session as
+// `sessions/--<project>--/<id>/` under its home, and a projection rebuilt from it in
+// `storages/session_projcache/sessions/<id>.json`; its workspace registry
+// (`storages/workspace.json`) drops a session whose log is gone as it loads. The subagents'
+// sessions a session's log names go with it.
+//
 // Only names that are exactly the session's id are touched, inside the agent's own folder. A link
 // is removed as a link and never followed, and a folder reached through one is not looked into.
 
@@ -27,6 +33,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { harnessOf, type AgentId, type HarnessId } from '@shared/agents'
 import type { Platform } from '@shared/platform'
+import { encodeSegment, logIn, readLinks, sessionsRoot } from './dsh/history'
 import { getEnv, type Env } from './find-command'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -39,7 +46,7 @@ const MAX_CONVERSATIONS = 256
 const RETRY_MS = [6_000, 20_000]
 
 /** The harnesses whose copy of a deleted session Kite removes itself. */
-const REMOVES: ReadonlySet<HarnessId> = new Set(['claude-code', 'antigravity'])
+const REMOVES: ReadonlySet<HarnessId> = new Set(['claude-code', 'antigravity', 'deepseek'])
 
 /** Whether Kite removes what the agent keeps of a session it deletes, past the agent's own delete. */
 export function removesCopies(harness: HarnessId): boolean {
@@ -54,6 +61,10 @@ export interface CopyRemoval {
 }
 
 const empty = (): CopyRemoval => ({ removed: [], held: [], failed: [] })
+
+/** Whether a removal left nothing behind: no part held open or failed. */
+const whole = (result: CopyRemoval): boolean =>
+  result.held.length === 0 && result.failed.length === 0
 
 function reasonOf(error: unknown): string {
   const code = (error as NodeJS.ErrnoException | undefined)?.code
@@ -138,6 +149,62 @@ export async function claudeCopyPaths(folder: string, sessionId: string): Promis
 export async function removeClaudeCopies(folder: string, sessionId: string): Promise<CopyRemoval> {
   const result = empty()
   for (const file of await claudeCopyPaths(folder, sessionId)) await removePath(file, result)
+  return result
+}
+
+// dsh.
+
+/** dsh's session ids: its own `session-<uuid>`, and anything else it names safely. */
+const DSH_ID = /^[\w.~-]{1,256}$/
+
+/**
+ * What dsh keeps of session `sessionId` under its home `home`: its folder in every project folder
+ * and its projection, and the same of the subagents' sessions its log names, down every level.
+ */
+export async function dshCopyPaths(home: string, sessionId: string): Promise<string[]> {
+  if (!DSH_ID.test(sessionId)) return []
+  const root = sessionsRoot(home)
+  const projections = path.join(home, 'storages', 'session_projcache', 'sessions')
+  const projects = (await realFolder(root))
+    ? (await readdir(root, { withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(root, entry.name))
+    : []
+  const found: string[] = []
+  const seen = new Set<string>()
+  const queue: { id: string; parent: string | null }[] = [{ id: sessionId, parent: null }]
+  while (queue.length > 0 && seen.size < MAX_CONVERSATIONS) {
+    const { id, parent } = queue.shift()!
+    if (seen.has(id) || !DSH_ID.test(id)) continue
+    seen.add(id)
+    const name = encodeSegment(id)
+    const folders: string[] = []
+    for (const project of projects) {
+      const folder = path.join(project, name)
+      if (await realFolder(folder)) folders.push(folder)
+    }
+    const children: string[] = []
+    let owned = parent === null
+    for (const folder of folders) {
+      const log = await logIn(folder)
+      const links = log ? await readLinks(log).catch(() => null) : null
+      // A subagent's folder goes only when its own log says it is that parent's.
+      if (parent !== null && links?.header.parentSession !== parent) continue
+      owned = true
+      found.push(folder)
+      if (links) children.push(...links.children)
+    }
+    if (!owned) continue
+    const projection = `${name}.json`.toLowerCase()
+    found.push(...(await namesIn(projections, (file) => file === projection)))
+    for (const child of children) queue.push({ id: child, parent: id })
+  }
+  return found
+}
+
+export async function removeDshCopies(home: string, sessionId: string): Promise<CopyRemoval> {
+  const result = empty()
+  for (const file of await dshCopyPaths(home, sessionId)) await removePath(file, result)
   return result
 }
 
@@ -506,29 +573,39 @@ export class AgentCopies {
   constructor(private readonly deps: AgentCopiesDeps) {}
 
   /**
-   * After the agent's own delete, removes what it keeps of `agentSessionId` past it. Never throws:
-   * what could not be removed is logged, and agy's held conversations are tried again later.
+   * After the agent's own delete, removes what it keeps of `agentSessionId` past it. Resolves to
+   * whether all of it went, false when a part stayed (agy's held conversations are tried again
+   * later), and null for an agent Kite removes nothing of. Never throws: what could not be
+   * removed is logged.
    */
-  async removeDeleted(agentId: AgentId, agentSessionId: string): Promise<void> {
+  async removeDeleted(agentId: AgentId, agentSessionId: string): Promise<boolean | null> {
     try {
       switch (harnessOf(agentId)) {
         case 'claude-code': {
           const folder = this.deps.configFolder(agentId)
-          if (!folder) return
-          this.report(agentId, agentSessionId, await removeClaudeCopies(folder, agentSessionId))
-          return
+          if (!folder) return false
+          const result = await removeClaudeCopies(folder, agentSessionId)
+          this.report(agentId, agentSessionId, result)
+          return whole(result)
+        }
+        case 'deepseek': {
+          const home = this.deps.configFolder(agentId)
+          if (!home) return false
+          const result = await removeDshCopies(home, agentSessionId)
+          this.report(agentId, agentSessionId, result)
+          return whole(result)
         }
         case 'antigravity':
-          await this.agyPass(agentId, agentSessionId, false, [], 0)
-          return
+          return await this.agyPass(agentId, agentSessionId, false, [], 0)
         default:
-          return
+          return null
       }
     } catch (error) {
       this.deps.log(
         'warn',
         `Could not remove ${agentId}'s copy of session ${agentSessionId}: ${reasonOf(error)}`,
       )
+      return false
     }
   }
 
@@ -576,7 +653,8 @@ export class AgentCopies {
   }
 
   // The agy process of the session may still be exiting, holding its database or writing its
-  // summary back as it goes, so a pass that found something is followed by later ones.
+  // summary back as it goes, so a pass that found something is followed by later ones. Resolves
+  // to whether this pass left none of it.
   private async agyPass(
     agentId: AgentId,
     conversationId: string,
@@ -584,8 +662,8 @@ export class AgentCopies {
     known: readonly string[],
     attempt: number,
     flushing = false,
-  ): Promise<void> {
-    if (this.disposed && !flushing) return
+  ): Promise<boolean> {
+    if (this.disposed && !flushing) return false
     const key = `${agentId}\n${conversationId.toLowerCase()}`
     const waiting = this.pending.get(key)
     if (waiting) {
@@ -601,13 +679,13 @@ export class AgentCopies {
       unprompted,
       known: [...new Set([...known, ...(waiting?.known ?? [])])],
     })
-    if (pass.kept) return
+    if (pass.kept) return false
     const delays = this.deps.retryMs ?? RETRY_MS
     const last = attempt >= delays.length || this.disposed
     this.report(agentId, conversationId, pass, !last)
-    if (pass.touched.length === 0 || last) return
+    if (pass.touched.length === 0 || last) return whole(pass)
     // After the router's kill a pass that found nothing held is the last.
-    if (attempt > 0 && pass.held.length === 0) return
+    if (attempt > 0 && pass.held.length === 0) return whole(pass)
     const next = attempt + 1
     const timer = setTimeout(() => {
       this.pending.delete(key)
@@ -623,6 +701,7 @@ export class AgentCopies {
       known: pass.touched,
       timer,
     })
+    return whole(pass)
   }
 
   private report(agentId: AgentId, sessionId: string, result: CopyRemoval, again = false): void {

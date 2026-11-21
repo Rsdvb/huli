@@ -425,6 +425,30 @@ export async function findLog(
   return null
 }
 
+/**
+ * Huli: a log's header and the subagents' sessions its `subagent/catalog` rows name, for removing
+ * a session with its subagents'. Null for a log that is not a session's.
+ */
+export async function readLinks(
+  log: DshLog,
+): Promise<{ header: DshHeader; children: string[] } | null> {
+  let header: DshHeader | null = null
+  const children: string[] = []
+  let first = true
+  await eachRow(log, (bytes) => {
+    if (first) {
+      first = false
+      header = headerOf(bytes, log)
+      return header !== null
+    }
+    if (rowStart(bytes)?.type !== 'subagent/catalog') return
+    const childId = text(record(record(parse(bytes))?.data)?.childId)
+    if (childId && !children.includes(childId)) children.push(childId)
+  })
+  const found = header as DshHeader | null
+  return found ? { header: found, children } : null
+}
+
 /** Rows that only rebuild a model request or record its stream, which no thread shows. */
 const UNREAD = new Set(['system/message', 'assistant/attempt'])
 

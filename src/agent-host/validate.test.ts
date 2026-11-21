@@ -93,6 +93,15 @@ describe('createValidators', () => {
     expect(posix['sessions.import']({ ...base, fork: 'yes' })).toEqual(base)
   })
 
+  it("Huli: takes the Claude desktop app's listing as an import's source, and no other", () => {
+    const base = { agentId: 'claude-code', projectPath: '/p', acpSessionId: 'id' }
+    expect(posix['sessions.import']({ ...base, source: 'claude-desktop' })).toEqual({
+      ...base,
+      source: 'claude-desktop',
+    })
+    expect(() => posix['sessions.import']({ ...base, source: 'elsewhere' })).toThrow()
+  })
+
   it('archives a whole tree unless asked, as a boolean, to leave the sub-sessions', () => {
     const archive = posix['sessions.archive']
     expect(archive({ sessionId: 's' })).toEqual({ sessionId: 's' })

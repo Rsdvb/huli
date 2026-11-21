@@ -5313,6 +5313,7 @@ export class AgentManager {
       ...(limitsReason ? { limitsReason } : {}),
       ...(slot.def.sharesSignIn ? { sharesSignIn: true } : {}),
       deletesCopy: (capabilities?.deleteSession ?? false) || removesCopies(slot.def.id),
+      ...(capabilities ? {} : { capabilitiesUnknown: true as const }),
       ...(slot.def.movedAccounts
         ? {
             movedAccounts: {

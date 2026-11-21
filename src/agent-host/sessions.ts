@@ -1,6 +1,7 @@
 // Live sessions: the authoritative thread state, prompts, permissions, cancellation, the
 // session lifecycle, sub-sessions, and the session index.
 
+import { CANNOT_LIST } from '@shared/agent-history'
 import type { AgentResetBusy } from '@shared/agent-reset'
 import type { DeviceAccessAnswer, DeviceAccessDecision } from '@shared/device-agent'
 import type { PublishVisibility } from '@shared/market-publish'
@@ -162,6 +163,7 @@ import {
 import type { MarketAnswer, MarketAsk } from './marketplace/publish-tools'
 import type { SettingsAnswer, SettingsAsk } from './settings/tools'
 import type { AgentCopies } from './agent-copies'
+import type { DeletedSessions } from './deleted-sessions'
 import { MODE_OPTION as AGY_MODE_OPTION } from './acp/agy-plan'
 import { parseContextReport } from './acp/claude-reports'
 import {
@@ -577,6 +579,8 @@ export interface SessionManagerDeps {
   prepared?: PreparedRecords
   /** Huli: removes what an agent keeps of a session past its own delete; without it nothing is. */
   copies?: Pick<AgentCopies, 'removeDeleted' | 'discardUnprompted'>
+  /** Huli: the deleted sessions whose agent keeps a copy, never offered for import again. */
+  deleted?: Pick<DeletedSessions, 'load' | 'flush' | 'has' | 'add' | 'forget'>
   /** What to watch for changes to the agent's options in a folder; without it nothing is. */
   settingsTargets?: (agentId: AgentId, folder: string) => WatchTarget[]
   /** The host's settings, read as a turn starts for whether a title is to be written. */
@@ -1367,6 +1371,7 @@ export class SessionManager {
     this.returned = (await this.deps.returned.load()).messages
     await this.deps.projectMcp?.load()
     await this.deps.projectHooks?.load()
+    await this.deps.deleted?.load()
   }
 
   async flush(): Promise<void> {
@@ -1375,6 +1380,7 @@ export class SessionManager {
       this.deps.returned.flush(),
       this.deps.projectMcp?.flush(),
       this.deps.projectHooks?.flush(),
+      this.deps.deleted?.flush(),
     ])
   }
 
@@ -1435,18 +1441,56 @@ export class SessionManager {
     }
   }
 
-  /** Huli: the agent's own ids of its sessions here, earlier ones included, for the bulk import. */
+  /**
+   * Huli: the agent's own ids of its sessions here, earlier ones included, for the bulk import;
+   * with those of the agents that share its history (`sharingHistory`).
+   */
   agentSessionIds(agentId: AgentId): Set<string> {
+    const agents = new Set(this.sharingHistory(agentId))
     const ids = new Set<string>()
     const add = (record: SessionRecord): void => {
-      if (record.agentId === agentId && record.acpSessionId) ids.add(record.acpSessionId)
+      if (agents.has(record.agentId) && record.acpSessionId) ids.add(record.acpSessionId)
       for (const item of record.earlier ?? []) {
-        if (item.agentId === agentId) ids.add(item.acpSessionId)
+        if (agents.has(item.agentId)) ids.add(item.acpSessionId)
       }
     }
     for (const live of this.live.values()) add(live.record)
     for (const record of this.records.values()) add(record)
     return ids
+  }
+
+  /**
+   * Huli: the agents whose sessions are `agentId`'s own, the agent first: for Claude Code, every
+   * Claude Code agent that reads the same configuration folder, whose transcripts they share, so
+   * a session one of them has is here for all; for another, the agent alone.
+   */
+  sharingHistory(agentId: AgentId): AgentId[] {
+    if (harnessOf(agentId) !== 'claude-code') return [agentId]
+    const { agents, platform } = this.deps
+    const folder = agents.configFolder(agentId)
+    if (!folder) return [agentId]
+    const key = pathKey(folder, platform)
+    const others = agents.ids().filter((id) => {
+      if (id === agentId || harnessOf(id) !== 'claude-code') return false
+      const other = agents.configFolder(id)
+      return other !== null && pathKey(other, platform) === key
+    })
+    return [agentId, ...others]
+  }
+
+  /** Huli: the session here that runs the agent's own session, by any agent sharing its history. */
+  private findShared(agentId: AgentId, acpSessionId: string): SessionRecord | undefined {
+    for (const id of this.sharingHistory(agentId)) {
+      const record = this.findByAcp(id, acpSessionId)
+      if (record) return record
+    }
+    return undefined
+  }
+
+  /** Huli: whether a session deleted here, whose agent keeps its copy, is to stay out of imports. */
+  wasDeleted(agentId: AgentId, acpSessionId: string): boolean {
+    const deleted = this.deps.deleted
+    return !!deleted && this.sharingHistory(agentId).some((id) => deleted.has(id, acpSessionId))
   }
 
   private recordOf(sessionId: string): SessionRecord {
@@ -11590,13 +11634,13 @@ export class SessionManager {
     const all = [...this.descendants(sessionId), record]
     await this.closeAll(all, false)
     this.deps.events.ended(all.map((item) => item.id))
+    // Huli: `deleted`, the agent's own delete went through.
+    const owners: { agentId: AgentId; acpSessionId: string; deleted: boolean }[] = []
     const deleting: {
       item: SessionRecord
-      agentId: AgentId
-      acpSessionId: string
+      owner: (typeof owners)[number]
       runtime: AgentRuntime
     }[] = []
-    const owners: { agentId: AgentId; acpSessionId: string }[] = []
     for (const item of all) {
       if (item.origin === 'subagent') continue
       // Every agent that had the session keeps a session of its own for it.
@@ -11606,12 +11650,11 @@ export class SessionManager {
       ].filter((owner) => owner.acpSessionId !== '')
       for (const { agentId, acpSessionId } of owned) {
         if (!this.deps.agents.has(agentId)) continue
-        owners.push({ agentId, acpSessionId })
+        const owner = { agentId, acpSessionId, deleted: false }
+        owners.push(owner)
         try {
           const runtime = await this.deps.agents.ensureReady(agentId)
-          if (runtime.init.capabilities.deleteSession) {
-            deleting.push({ item, agentId, acpSessionId, runtime })
-          }
+          if (runtime.init.capabilities.deleteSession) deleting.push({ item, owner, runtime })
         } catch (error) {
           this.deleteFailed(item, error)
         }
@@ -11619,16 +11662,20 @@ export class SessionManager {
     }
     // The agent deletes the session's log too, so what it holds is counted first.
     await this.deps.usage?.syncAgents([...new Set(owners.map(({ agentId }) => agentId))])
-    for (const { item, acpSessionId, runtime } of deleting) {
+    for (const { item, owner, runtime } of deleting) {
       try {
-        await runtime.connection.deleteSession(acpSessionId)
+        await runtime.connection.deleteSession(owner.acpSessionId)
+        owner.deleted = true
       } catch (error) {
         this.deleteFailed(item, error)
       }
     }
-    // Huli: what the agents keep past their own delete, or keep for want of one.
-    for (const { agentId, acpSessionId } of owners) {
-      await this.deps.copies?.removeDeleted(agentId, acpSessionId).catch(() => {})
+    // Huli: what the agents keep past their own delete, or keep for want of one; a session whose
+    // copy stays is not offered for import again.
+    for (const { agentId, acpSessionId, deleted } of owners) {
+      const removed =
+        (await this.deps.copies?.removeDeleted(agentId, acpSessionId).catch(() => false)) ?? null
+      if (removed === null ? !deleted : !removed) this.deps.deleted?.add(agentId, acpSessionId)
     }
     void this.deps.attachments?.release(queuedAttachments(all))
     for (const item of all) this.forget(item.id)
@@ -11822,6 +11869,8 @@ export class SessionManager {
       throw new HostError(
         'agent_unavailable',
         t('session.cannotList', { agent: this.deps.agents.name(agentId) }),
+        // Huli: the dialog leaves out an agent it asked before it knew.
+        { reason: CANNOT_LIST },
       )
     }
     let page
@@ -11830,22 +11879,24 @@ export class SessionManager {
     } catch (error) {
       throw agentError(error)
     }
-    for (const item of page.sessions) this.remember(agentId, item)
+    // Huli: one deleted here whose agent keeps it stays deleted.
+    const listed = page.sessions.filter((item) => !this.wasDeleted(agentId, item.sessionId))
+    for (const item of listed) this.remember(agentId, item)
     const recent = await this.outsideStates(
       agentId,
       canonical,
-      page.sessions.filter((item) => this.isRecent(item.updatedAt)).map((item) => item.sessionId),
+      listed.filter((item) => this.isRecent(item.updatedAt)).map((item) => item.sessionId),
     )
+    // Huli: here already by any agent sharing its history, as the import from the agents says.
+    const here = this.agentSessionIds(agentId)
     return {
-      sessions: page.sessions.map((item) => {
+      sessions: listed.map((item) => {
         const state = recent.get(item.sessionId)
         return {
           acpSessionId: item.sessionId,
           title: item.title,
           updatedAt: item.updatedAt,
-          imported:
-            this.findByAcp(agentId, item.sessionId) !== undefined ||
-            this.takenEarlier(agentId, item.sessionId),
+          imported: here.has(item.sessionId),
           ...(state ? { cache: state.cache, held: state.held } : {}),
         }
       }),
@@ -11914,7 +11965,8 @@ export class SessionManager {
     if (!this.deps.agents.has(params.agentId))
       throw invalidParams(`Unknown agent ${params.agentId}`)
     this.deps.agents.assertEnabled(params.agentId)
-    const existing = this.findByAcp(params.agentId, params.acpSessionId)
+    // Huli: one an agent sharing its history runs here is that session.
+    const existing = this.findShared(params.agentId, params.acpSessionId)
     if (existing && !params.fork) {
       // Huli: importing one that is here already brings in what another folder carried on.
       // A live one does so through its reload, once its own Claude Code is not at work.
@@ -11923,7 +11975,10 @@ export class SessionManager {
       return this.summary(existing.id)
     }
     const projectPath = await this.deps.projects.resolveDirectory(params.projectPath)
-    if (this.takenEarlier(params.agentId, params.acpSessionId) && !params.fork) {
+    const taken = this.sharingHistory(params.agentId).some((id) =>
+      this.takenEarlier(id, params.acpSessionId),
+    )
+    if (taken && !params.fork) {
       throw new HostError('busy', t('session.alreadyInSession'))
     }
     const claude = harnessOf(params.agentId) === 'claude-code'
@@ -11979,6 +12034,8 @@ export class SessionManager {
     }
     this.stampConfig(record)
     this.records.set(record.id, record)
+    // Huli: one imported again by its id is no longer kept out of the imports as deleted.
+    this.deps.deleted?.forget(params.agentId, params.acpSessionId)
     this.saveIndex()
     this.writeIndexNow()
     this.touch(record.id)
@@ -12010,6 +12067,8 @@ export class SessionManager {
             ? 'session.heldOutsideOther'
             : 'session.heldOutside',
       ),
+      // Huli: the import from the agents offers a copy of it, as the sidebar's does.
+      { reason: 'held' },
     )
   }
 
