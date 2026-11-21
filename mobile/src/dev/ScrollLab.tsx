@@ -2,6 +2,8 @@
 // code block sits in, so one run tells which wrapper keeps a sideways swipe from scrolling.
 // Launched with `-huliDevScroll <mode>`, where mode is `plain` (a vertical ScrollView), `list`
 // (the conversation's keyboard-aware Legend List) or either with `-nogh` (no gesture root view).
+// On iOS the Pressable one (2) never moves, whatever holds it: the reason the code block and the
+// reply take a long press through LongPressView, a plain view where no long press is wired.
 
 import { useState, type ReactElement } from 'react'
 import { Platform, Pressable, ScrollView, Settings, StyleSheet, Text, View } from 'react-native'
