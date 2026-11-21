@@ -192,6 +192,61 @@ export interface ModelMenuContext {
   onUsage?: () => void
   /** What a change of model, effort or fast mode costs while the prompt cache is warm. */
   cacheNote?: string | null
+  /** Huli: the API profile the session runs with, whose row leads to the `profiles` page. */
+  profile?: { label: string; disabled?: boolean; hint?: string } | null
+}
+
+/** Huli: the name a session's API profile goes by; the agent's own sign-in for null. */
+export function profileLabel(agent: AgentStatus | undefined, profileId: string | null): string {
+  return agent?.profiles?.items.find((p) => p.id === profileId)?.name ?? '自己的登录'
+}
+
+/**
+ * Huli: the agent's API profiles and its own sign-in, to run a session with; the chosen one is
+ * checked and the default named.
+ */
+export function profilesPage(
+  agent: AgentStatus | undefined,
+  current: string | null,
+  onChoose: (profileId: string | null) => void,
+): MenuPage {
+  const profiles = agent?.profiles
+  const defaultId = profiles?.defaultId ?? null
+  return {
+    title: 'API 配置',
+    entries: [
+      {
+        key: 'profile:own',
+        label: `${agent?.harnessName ?? 'Agent'} 自己的登录`,
+        ...(defaultId === null ? { subtitle: '默认' } : {}),
+        checked: current === null,
+        onPress: () => onChoose(null),
+      },
+      ...(profiles?.items ?? []).map((profile) => ({
+        key: `profile:${profile.id}`,
+        label: profile.name,
+        subtitle: [PRESET_NAMES[profile.preset], profile.id === defaultId ? '默认' : null]
+          .filter(Boolean)
+          .join(' · '),
+        checked: current === profile.id,
+        onPress: () => onChoose(profile.id),
+      })),
+    ],
+    footer: '在电脑的「设置 › 智能体」里添加或修改 API 配置',
+  }
+}
+
+const PRESET_NAMES: Record<string, string> = {
+  zhipu: '智谱 GLM 编程套餐',
+  zai: 'Z.ai GLM 编程套餐（国际）',
+  kimi: 'Kimi（月之暗面）',
+  'kimi-intl': 'Kimi（月之暗面国际站）',
+  deepseek: 'DeepSeek',
+  bailian: '阿里云百炼 Coding Plan',
+  ark: '火山方舟 Coding Plan',
+  minimax: 'MiniMax',
+  'minimax-intl': 'MiniMax（国际站）',
+  custom: '自定义',
 }
 
 /** The select options the composer has no control of its own for, which the menu lists as Options. */
@@ -312,6 +367,19 @@ export function modelPage(control: ConfigControl, context: ModelMenuContext): Me
       icon: G.sliders,
       ...(on.length > 0 ? { detail: on.map((o) => optionName(o.name)).join('、') } : {}),
       page: `option:${ALL_OPTIONS}`,
+    })
+  }
+
+  if (context.profile) {
+    entries.push({ kind: 'divider', key: 'profiles-rule' })
+    entries.push({
+      key: 'profiles',
+      label: 'API 配置',
+      icon: G.layers,
+      detail: context.profile.label,
+      ...(context.profile.hint ? { subtitle: context.profile.hint } : {}),
+      disabled: !!context.profile.disabled,
+      page: 'profiles',
     })
   }
 

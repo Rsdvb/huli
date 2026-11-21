@@ -38,6 +38,8 @@ export interface NewSessionPlan {
   projectPath: string | null
   parentId?: string
   options?: Record<string, string | boolean>
+  /** Huli: the API profile picked; null for the agent's own sign-in, absent for its default. */
+  profileId?: string | null
 }
 
 export interface OutboxItem {
@@ -569,6 +571,7 @@ async function send(link: HostLink, computer: string, item: OutboxItem): Promise
     projectPath: plan.projectPath,
     ...(plan.parentId ? { parentId: plan.parentId } : {}),
     ...(plan.options ? { options: plan.options } : {}),
+    ...(plan.profileId !== undefined ? { profileId: plan.profileId } : {}),
     ...(content.length > 0 ? { prompt: content } : {}),
   })) as SessionSummary
   setItems(computer, (items) => items.filter((each) => each.id !== item.id))

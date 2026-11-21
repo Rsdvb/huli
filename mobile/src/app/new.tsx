@@ -27,6 +27,8 @@ import {
   modelPage,
   moreModelsPage,
   optionPage,
+  profileLabel,
+  profilesPage,
   startConfig,
   startNotices,
   startValues,
@@ -108,6 +110,23 @@ export default function NewSession() {
       : chosenProject
   const project = projects.find((p) => p.path === projectPath)
   const [picks, setPicks] = useState<Record<string, string | boolean>>({})
+  // Huli: the API profile the session starts with: the agent's default until another is picked;
+  // undefined for an agent whose sessions take none.
+  const [profilePick, setProfilePick] = useState<{ agentId: string; id: string | null } | null>(
+    null,
+  )
+  const profiles = agent?.profiles
+  const picked =
+    profilePick?.agentId === agentId &&
+    (profilePick.id === null || profiles?.items.some((p) => p.id === profilePick.id))
+      ? profilePick.id
+      : undefined
+  const profileId =
+    profiles && profiles.items.length > 0
+      ? picked !== undefined
+        ? picked
+        : profiles.defaultId
+      : undefined
   const [usageOpen, setUsageOpen] = useState(false)
   const [attachCount, setAttachCount] = useState(0)
   const connected = state.kind === 'connected'
@@ -207,6 +226,7 @@ export default function NewSession() {
       projectPath,
       ...(parent ? { parentId: parent.id } : {}),
       ...(Object.keys(values).length > 0 ? { options: values } : {}),
+      ...(profileId !== undefined ? { profileId } : {}),
       ...(prompt.length > 0 ? { prompt } : {}),
     })) as SessionSummary
     router.replace(`/session/${summary.id}`)
@@ -226,6 +246,7 @@ export default function NewSession() {
           projectPath,
           ...(parentId ? { parentId } : {}),
           ...(Object.keys(values).length > 0 ? { options: values } : {}),
+          ...(profileId !== undefined ? { profileId } : {}),
         },
       },
       message,
@@ -304,6 +325,7 @@ export default function NewSession() {
             agent,
             c,
             switchAgent: agents.length > 1 ? { disabled: false } : null,
+            profile: profileId !== undefined ? { label: profileLabel(agent, profileId) } : null,
             onUsage: () => {
               menu.close()
               setUsageOpen(true)
@@ -316,6 +338,12 @@ export default function NewSession() {
         )
       case 'more':
         return moreModelsPage(control, agentId ?? '')
+      case 'profiles':
+        return profilesPage(agent, profileId ?? null, (id) => {
+          haptic.pick()
+          if (agentId) setProfilePick({ agentId, id })
+          menu.close()
+        })
       case 'agents':
         return agentsPage(agentMenu)
       case 'projects':
