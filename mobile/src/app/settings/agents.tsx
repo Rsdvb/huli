@@ -9,6 +9,7 @@ import { KEY_ONLY_ADDED_HARNESSES, MULTI_AGENT_HARNESSES, type CodebuddySite } f
 import { AGENT_NAME_CHARS, type SettingsPatch } from '@shared/settings'
 import type { AgentId, HarnessId } from '@shared/thread'
 import { admin } from '../../admin'
+import { hostErrorText } from '../../hostErrors'
 import { useAgents, useHostActions, useListsLoaded, useMaybeLink } from '../../host'
 import {
   addableHarnesses,
@@ -19,6 +20,7 @@ import {
   harnessStatuses,
   harnessVersion,
   installKind,
+  keyProblem,
   readiness,
   stateText,
   usableAgents,
@@ -30,6 +32,7 @@ import {
   FieldLabel,
   FieldNote,
   FormSheet,
+  GroupNote,
   ManagePage,
   ReadState,
   Tag,
@@ -233,6 +236,11 @@ export default function Agents() {
               <ListRow key="warning" title="环境" subtitle={environment.value.warning} />
             ) : null}
           </ListGroup>
+
+          <GroupNote>
+            要把 Claude Code、Codex 等以前在电脑上留下的会话搬进纸鸢，请在电脑上的纸鸢里打开 设置 ›
+            通用 › 从各 Agent 导入。
+          </GroupNote>
         </>
       )}
     </ManagePage>
@@ -251,7 +259,13 @@ function AgentRow({ status, statuses }: { status: AgentStatus; statuses: AgentSt
   const identity =
     r.kind === 'failed' || r.kind === 'missing'
       ? r.message
-      : email || planName(account) || (r.kind === 'sign-in' ? '需要你登录' : '未提供账号信息')
+      : email ||
+        planName(account) ||
+        (r.kind === 'sign-in'
+          ? '需要你登录'
+          : status.readingSignIn
+            ? '正在读取登录…'
+            : '未提供账号信息')
   const line = [status.name === status.harnessName ? null : status.harnessName, plan, identity]
     .filter(Boolean)
     .join(' · ')
@@ -362,6 +376,9 @@ function AddAgentSheet(props: {
   const [login, setLogin] = useState<Login>('terminal')
   const [site, setSite] = useState<CodebuddySite>('international')
   const [key, setKey] = useState({ key: '', baseUrl: '', model: '' })
+  // The agent this sheet already added, when a step after it failed: trying again takes up from
+  // that step rather than adding another agent.
+  const [made, setMade] = useState<{ harness: HarnessId; id: AgentId; name: string } | null>(null)
 
   // Starts over only as the sheet opens: the harnesses can change while it is up, and what the
   // user typed must survive that.
@@ -376,6 +393,7 @@ function AddAgentSheet(props: {
     setLogin('terminal')
     setSite('international')
     setKey({ key: '', baseUrl: '', model: '' })
+    setMade(null)
   }, [props.visible, props.harnesses])
 
   const chosen = props.harnesses.find((h) => h.harnessId === harness) ?? props.harnesses[0]
@@ -395,33 +413,64 @@ function AddAgentSheet(props: {
     (useDefault || multiple) &&
     (useDefault || mode === 'terminal' || key.key.trim().length > 0)
 
+  const again = made !== null && !useDefault && made.harness === chosen?.harnessId ? made : null
+
   const submit = async () => {
     if (!link || !chosen) throw new Error('电脑没有连上。')
-    const id = useDefault
-      ? chosen.harnessId
-      : await admin(link, 'settings.addAgent', {
-          harnessId: chosen.harnessId,
-          name: trimmed,
-          folder: null,
-        })
+    const withKey = !useDefault && mode === 'api-key'
+    // Checked first: the host checks the key only once the agent exists, and in English.
+    const problem = withKey ? keyProblem(key, providers) : null
+    if (problem) throw new Error(problem)
+    let id: AgentId
     if (useDefault) {
+      id = chosen.harnessId
       await admin(link, 'settings.update', {
         patch: {
           agents: { [chosen.harnessId]: { enabled: true, hidden: false } },
         } as SettingsPatch,
       })
-    }
-    await waitListed(link, id)
-    if (keyOnly) {
-      await call(link, 'agents.setCodebuddySite', { agentId: id, change: { site } })
-    }
-    if (!useDefault && mode === 'api-key') {
-      await call(link, 'agents.setApiKey', {
-        agentId: id,
-        key: key.key.trim(),
-        ...(providers && key.baseUrl.trim() ? { baseUrl: key.baseUrl.trim() } : {}),
-        ...(providers && key.model.trim() ? { model: key.model.trim() } : {}),
+    } else if (again) {
+      id = again.id
+      if (again.name !== trimmed) {
+        await admin(link, 'settings.renameAgent', { agentId: id, name: trimmed }).catch(
+          (failure: unknown) => {
+            // Removed meanwhile, so the next try adds it afresh.
+            if ((failure as { code?: string }).code === 'not_found') setMade(null)
+            throw failure
+          },
+        )
+        setMade({ ...again, name: trimmed })
+      }
+    } else {
+      id = await admin(link, 'settings.addAgent', {
+        harnessId: chosen.harnessId,
+        name: trimmed,
+        folder: null,
       })
+      setMade({ harness: chosen.harnessId, id, name: trimmed })
+    }
+    let step = '等电脑列出它'
+    try {
+      await waitListed(link, id)
+      if (keyOnly) {
+        step = '设置站点'
+        await call(link, 'agents.setCodebuddySite', { agentId: id, change: { site } })
+      }
+      if (withKey) {
+        step = '保存 API key'
+        await call(link, 'agents.setApiKey', {
+          agentId: id,
+          key: key.key.trim(),
+          ...(providers && key.baseUrl.trim() ? { baseUrl: key.baseUrl.trim() } : {}),
+          ...(providers && key.model.trim() ? { model: key.model.trim() } : {}),
+        })
+      }
+    } catch (failure) {
+      if (useDefault) throw failure
+      throw new Error(
+        `「${trimmed}」已经添加了，但${step}没有完成：${hostErrorText(failure)}\n再点「继续添加」只做没完成的步骤，不会再添加一个。`,
+        { cause: failure },
+      )
     }
     await refreshLists().catch(() => {})
     props.onAdded(id)
@@ -484,7 +533,7 @@ function AddAgentSheet(props: {
       title="添加 Agent"
       message="选择一个 Harness 和配置。已经在用的登录可以继续使用。"
       onClose={props.onClose}
-      submitLabel="添加 Agent"
+      submitLabel={again ? '继续添加' : '添加 Agent'}
       canSubmit={valid}
       onSubmit={submit}
       maxHeight={720}
