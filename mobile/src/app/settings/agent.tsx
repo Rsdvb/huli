@@ -105,6 +105,10 @@ export default function AgentScreen() {
   return <AgentBody status={status} />
 }
 
+// Huli: uninstalling the agent's program and deleting its data list each folder and command with
+// sizes, which the computer's Settings shows; the phone only removes the agent.
+const ON_COMPUTER = '要同时从电脑上卸载它，或删除它在电脑上的数据，请在电脑上的纸鸢里移除。'
+
 /** Whether the sign-in method finishes on the phone, on the computer, or in a terminal there. */
 function methodWhere(method: AgentAuthMethod): 'phone' | 'computer' | 'terminal' | 'env' {
   if (method.type === 'env') return 'env'
@@ -264,7 +268,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
         status.isDefault
           ? `它使用终端里 ${status.harnessName} 的配置，这不会改动；Harness 也不会被卸载。`
           : '它的配置目录是你选的，原样保留。'
-      }`,
+      }\n\n${ON_COMPUTER}`,
       confirm: '移除',
     })
     if (go) await remove(false)
@@ -352,7 +356,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
           <Sheet
             visible={removing}
             title={`移除 ${status.name}？`}
-            message="它的会话仍留在列表里，标明 Agent 已移除，不能再继续。这个目录是纸鸢新建的，里面有它的登录凭据和 Harness 的会话记录。"
+            message={`它的会话仍留在列表里，标明 Agent 已移除，不能再继续。这个目录是纸鸢新建的，里面有它的登录凭据和 Harness 的会话记录。\n\n${ON_COMPUTER}`}
             items={[
               {
                 key: 'keep',

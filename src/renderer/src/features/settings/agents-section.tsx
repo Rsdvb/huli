@@ -48,7 +48,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
-import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@renderer/components/ui/radio-group'
 import { toast } from '@renderer/components/ui/toast'
@@ -103,6 +102,7 @@ import {
   UsageGroup,
 } from './agent-parts'
 import { NetworkChoiceRow } from './agent-network-rows'
+import { RemoveAgentDialog } from './agent-remove'
 import { ResetRow } from './agent-reset'
 import { BalanceGroup } from './agent-balance'
 import { AgentProviders } from './agent-providers'
@@ -1547,7 +1547,7 @@ function DangerGroup({ status }: { status: AgentStatus }) {
           </DangerButton>
         </RowFrame>
       </RowGroup>
-      <RemoveDialog status={status} open={removing} onOpenChange={setRemoving} />
+      <RemoveAgentDialog status={status} open={removing} onOpenChange={setRemoving} />
     </section>
   )
 }
@@ -1595,72 +1595,6 @@ function useScopedDot(status: AgentStatus | null): AgentColor | null {
   const { useSettingsStore } = useHostScope()
   const id = status?.color ? status.id : null
   return useSettingsStore((s) => (id ? agentColor(s.settings.addedAgents, id) : null))
-}
-
-function RemoveDialog({
-  status,
-  open,
-  onOpenChange,
-}: {
-  status: AgentStatus
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const { api } = useHostScope()
-  const { t } = useTranslation(['settings', 'common'])
-  const created = !!status.configDir?.created
-  const [trash, setTrash] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const remove = async (): Promise<void> => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      await api.settings.removeAgent(status.id, created && trash)
-      onOpenChange(false)
-      openAgentSettings(null)
-    } catch (e) {
-      setError(errorMessage(e))
-      setBusy(false)
-    }
-  }
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className={CONFIRM}>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('agents.remove.title', { name: status.name })}</AlertDialogTitle>
-          <AlertDialogDescription>{t('agents.remove.body')}</AlertDialogDescription>
-        </AlertDialogHeader>
-        {created ? (
-          <label className="flex items-start gap-2.5 rounded-code bg-subtle px-3 py-2.5 text-left">
-            <Checkbox
-              checked={trash}
-              onCheckedChange={(value) => setTrash(value === true)}
-              className="mt-0.5"
-            />
-            <span className="flex flex-col gap-px">
-              <span className="text-ui font-medium text-primary">{t('agents.remove.trash')}</span>
-              <span className="text-xs text-secondary">{t('agents.remove.trashHint')}</span>
-            </span>
-          </label>
-        ) : status.isDefault ? (
-          <p className="text-xs text-secondary">
-            {t('agents.remove.keepsDefault', { name: status.harnessName })}
-          </p>
-        ) : (
-          <p className="text-xs text-secondary">{t('agents.remove.keepsFolder')}</p>
-        )}
-        {error && <p className="text-xs text-danger">{error}</p>}
-        <AlertDialogFooter>
-          <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={busy} onClick={() => void remove()}>
-            {t('agents.remove.button')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  )
 }
 
 function RenameDialog({

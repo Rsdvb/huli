@@ -989,11 +989,75 @@
       "button": "移除",
       "title": "移除 {{name}}？",
       "body": "它的会话仍留在列表里，标明智能体已移除，不能再继续。",
-      "trash": "把它的配置目录移到废纸篓",
-      "trashHint": "这个目录是 Kettu 新建的，里面有它的登录凭据和 Harness 的会话记录。",
-      "keepsFolder": "它的配置目录是你选的，原样保留。",
-      "keepsDefault": "它使用终端里 {{name}} 的配置，这不会改动；Harness 也不会被卸载。",
-      "buttonEllipsis": "移除…"
+      "buttonEllipsis": "移除…",
+      "loadFailed": "读不到它在这台电脑上装了什么、存了什么",
+      "checkAgain": "再检查",
+      "busy_other": "{{count}} 个会话正在运行，先停下或等它们做完",
+      "program": {
+        "name": "同时从电脑上卸载",
+        "hint": "按它当初的安装方式卸载它的程序，再删掉 Kettu 为它装的包。",
+        "via": "它是用{{method}}装的，按同样的方式卸载。",
+        "viaKite": "它是用{{method}}装的：按同样的方式卸载，再删掉 Kettu 为它装的包。",
+        "kiteOnly": "删掉 Kettu 为它装的包。",
+        "methods": {
+          "npm": " npm ",
+          "brew": " Homebrew ",
+          "winget": " WinGet ",
+          "native": "官方安装程序",
+          "uvx": " uvx "
+        },
+        "nothing": "Kettu 没有为它装东西，也没找到它自己的程序。",
+        "blocked": "{{agents}} 也在用 {{harness}}，卸载会让它们没法用。要卸载，先移除它们。",
+        "manual": {
+          "unknown": "看不出 {{path}} 是怎么装的，所以不会动它。不用了的话，按你当初的安装方式卸载它。",
+          "tool": "{{path}} 是用{{method}}装的，但这台电脑上找不到这个工具，所以不会动它。可以自己在终端里运行：",
+          "unsafe": "{{path}} 的路径里有命令行会改写的字符，Kettu 不会替你运行卸载命令，请在终端里自己卸载它。",
+          "app": "{{path}} 是某个应用自带的，卸载那个应用时才会一起删掉，这里不会动它。"
+        },
+        "notes": {
+          "claude-apps": "Claude 桌面版和 IDE 插件带着各自的 Claude Code，不受影响。",
+          "codex-app": "Codex 桌面版带着它自己的 codex，不受影响。",
+          "antigravity-app": "Antigravity 应用带着它自己的 agy，不受影响。",
+          "path-left": "安装程序加进 PATH 或 shell 配置的那一行不会改；程序删掉后，那一行不碍事。"
+        }
+      },
+      "data": {
+        "name": "同时删除它在电脑上的数据",
+        "hint": "它的登录、设置、缓存和它自己的会话记录，删了就找不回来。",
+        "unknown": "Kettu 不清楚 {{name}} 把数据放在哪，所以什么都不会删。",
+        "nothing": "这台电脑上没有它的数据。",
+        "kept": "这些留着：",
+        "keptReason": {
+          "app": "{{harness}} 应用也在用",
+          "agents": "别的智能体也在用",
+          "program": "这是它的程序，选“同时从电脑上卸载”才会删",
+          "sandbox": "Codex 在 Windows 上建的沙箱账户要用"
+        },
+        "notes": {
+          "claude-apps": "Claude 桌面版和 IDE 插件也用这个目录：它们还装着的话，下次运行时会重新建它，也要重新登录。",
+          "codex-app": "Codex 桌面版也用这个目录：它在这台电脑上的登录和会话记录会一起删掉。",
+          "antigravity-app": "Antigravity 应用也用这份登录和 ~/.gemini 里别的文件夹，那些都留着；要退出登录，用“重置环境”。",
+          "codebuddy-sign-in": "它在浏览器或微信里的登录存在别处，Kettu 不清楚在哪，不会动。",
+          "picked-folder": "这是你给它选的目录，里面的东西会全部删掉。"
+        }
+      },
+      "kite": "{{path}}（Kettu 为它装的）",
+      "contents": "{{path}} 里的内容（{{names}} 除外）",
+      "trashWindows": "移到回收站，不直接删除",
+      "trashMac": "移到废纸篓，不直接删除",
+      "trashLinux": "移到回收站，不直接删除",
+      "trashHint": "卸载命令删掉的东西和系统里存的登录凭据会直接删掉。",
+      "sessionsStay": "Kettu 里它的会话都留着，可以照常查看；要删，在会话列表里单独删除。",
+      "total": "共 {{size}}",
+      "confirmProgram": "卸载并移除",
+      "confirmData": "删除数据并移除",
+      "confirmBoth": "卸载、删除数据并移除",
+      "done": "完成",
+      "finished_other": "{{count}} 项都完成了",
+      "finishedHint": "点“完成”后，它会从 Kettu 移除。",
+      "partly_other": "{{count}} 项完成，{{failed}} 项没做成",
+      "partlyHint": "没做成的还在电脑上，原因写在后面；关掉占用它的程序后可以自己删掉。点“完成”后，它会从 Kettu 移除。",
+      "afterHint": "以后要再用 {{name}}，在“添加智能体”里重新添加；卸载了的话，先在 Harness 里重新安装。"
     },
     "turnedOff": "已停用",
     "enable": {

@@ -38,6 +38,8 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'agents.clearApiKey': AGENT_MS,
   'agents.resetPreview': AGENT_MS,
   'agents.reset': NONE,
+  'agents.removalPreview': AGENT_MS,
+  'agents.removeFromComputer': NONE,
   'agents.install': NONE,
   'agents.uninstall': NONE,
   'agents.cancelTask': HOST_MS,

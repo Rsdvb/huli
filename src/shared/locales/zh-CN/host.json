@@ -308,7 +308,10 @@
     "disabled": "{{agent}} 已停用。到设置 › 智能体里启用后才能使用。",
     "uninstall": {
       "busy": "{{agent}} 正在安装或更新，等它完成后才能卸载。"
-    }
+    },
+    "removing": "正在从这台电脑移除 {{agent}}，完成后再试",
+    "removeBusy_other": "这个 Agent 有 {{count}} 个会话正在运行，先停下或等它们做完再移除",
+    "removeShared": "{{agents}} 也在用 {{harness}}，卸载会让它们没法用。先移除它们，或只移除这个 Agent。"
   },
   "detect": {
     "noVersion": "没有适合这台电脑的 {{agent}} 版本，所以无法安装。",

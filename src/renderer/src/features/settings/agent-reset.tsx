@@ -18,6 +18,7 @@ import { bytes } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { DangerButton, SetButton, Skel } from './controls'
+import { shortPath, type Places } from './host-places'
 import { entryText } from './model'
 import { Notice, RowFrame, RowText } from './rows'
 import {
@@ -46,29 +47,6 @@ type Phase =
   | { kind: 'ready'; preview: AgentResetPreview }
   | { kind: 'running'; preview: AgentResetPreview }
   | { kind: 'done'; result: AgentResetResult; places: Places }
-
-/** Where the host's paths are shortened: the agent's folder, then the home folder as `~`. */
-interface Places {
-  folder: string | null
-  home: string | null
-}
-
-function under(target: string, base: string): string | null {
-  for (const sep of ['/', '\\']) {
-    const prefix = base.endsWith(sep) ? base : base + sep
-    if (target.startsWith(prefix)) return target.slice(prefix.length)
-  }
-  return null
-}
-
-/** The path as the list shows it: from the agent's folder inside it, else from `~`. */
-function shortPath(target: string, places: Places): string {
-  const inFolder = places.folder ? under(target, places.folder) : null
-  if (inFolder !== null) return inFolder
-  const inHome = places.home ? under(target, places.home) : null
-  if (inHome !== null) return `~${target.includes('\\') ? '\\' : '/'}${inHome}`
-  return target
-}
 
 /** The folder a path is in, for keys taken out of several files there, such as backups. */
 function parentOf(target: string): string {

@@ -1,6 +1,7 @@
 // The contract between the renderer and the agent host, over the agent host port.
 
 import type { CodebuddyShellOverride, CodebuddySite, PromptCacheTtl } from './agents'
+import type { AgentRemovalPreview, AgentRemovalProgress, AgentRemovalResult } from './agent-removal'
 import type { AgentResetCategory, AgentResetPreview, AgentResetResult } from './agent-reset'
 import type { DeviceAccessDecision } from './device-agent'
 import type { ArtifactConsentAsk, ArtifactConsentRow, RuntimeAnswer } from './artifact-capabilities'
@@ -1006,6 +1007,15 @@ export interface HostContract {
   'agents.reset': {
     params: { agentId: AgentId; categories: AgentResetCategory[] }
     result: AgentResetResult
+  }
+  // Huli: what removing the agent may also take off the host: its program and its own data.
+  'agents.removalPreview': { params: { agentId: AgentId }; result: AgentRemovalPreview }
+  // Huli: takes the steps of that plan named by id, as the host plans them again; refuses while
+  // a session of the agent works. Each step's start and end go to the asking port as
+  // `agents.removalProgress`.
+  'agents.removeFromComputer': {
+    params: { agentId: AgentId; steps: string[]; trash: boolean }
+    result: AgentRemovalResult
   }
   'agents.install': {
     params: { agentId: AgentId; method?: AgentInstallMethod['id'] }
@@ -2071,6 +2081,8 @@ export const HOST_METHODS = [
   'agents.clearApiKey',
   'agents.resetPreview',
   'agents.reset',
+  'agents.removalPreview',
+  'agents.removeFromComputer',
   'agents.install',
   'agents.uninstall',
   'agents.cancelTask',
@@ -2396,6 +2408,8 @@ export type HostEvent =
       agentId: AgentId
       image: { mimeType: 'image/png'; data: string } | null
     }
+  // Huli: to the port whose `agents.removeFromComputer` runs: a step started or ended.
+  | { type: 'agents.removalProgress'; progress: AgentRemovalProgress }
   // A plan window crossed 90% or ran out, said once per account, window and reset period.
   | { type: 'agents.limitAlert'; alert: PlanAlert }
   | { type: 'projects.changed'; projects: Project[] }

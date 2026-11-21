@@ -5,6 +5,7 @@
 import { mkdir, readFile, realpath, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import type { AgentRemovalPreview, AgentRemovalResult, RemovalStep } from '@shared/agent-removal'
 import type {
   AgentAccount,
   AgentAuthMethod,
@@ -114,6 +115,13 @@ import { outsideClaudeProcesses } from './agent-reset/outside'
 import { resetPlan, type ResetPlan } from './agent-reset/plan'
 import { applyReset, keptNames, resetLog, resolvePlan } from './agent-reset/reset'
 import { systemSecretStore, type SecretStore } from './agent-reset/secrets'
+import {
+  prepareRemoval,
+  runRemoval,
+  type PreparedRemoval,
+  type RemovalFacts,
+} from './agent-removal/removal'
+import { removalLog } from './agent-removal/run'
 import { removesCopies, type AgentCopies } from './agent-copies'
 import type { AgentTrees } from './agent-trees'
 import { decideUpdate, fetchLatest, type LatestOptions } from './agent-updates'
@@ -171,7 +179,7 @@ import type { Diagnostics } from './diagnostics'
 import type { AgentDriver, AgentTransport } from './driver'
 import { driverOf, preferredProtocol, protocolFor, type DriverOverrides } from './drivers'
 import { HostError, invalidParams } from './errors'
-import { getEnv, isExecutableFile, type Env } from './find-command'
+import { findCommand, getEnv, isExecutableFile, type Env } from './find-command'
 import {
   fetchManifest,
   isBroken,
@@ -577,6 +585,8 @@ class Slot {
   /** Huli: a reset of its environment runs; past its sign-out, `hold` keeps the agent stopped. */
   resetting = false
   resetHold = false
+  /** Huli: it is being removed from its host, which `resetHold` keeps it stopped for. */
+  removing = false
   idleTimer: ReturnType<typeof setTimeout> | null = null
   progressTimer: ReturnType<typeof setTimeout> | null = null
   lastStatus = ''
@@ -1138,7 +1148,8 @@ export class AgentManager {
     const slot = this.registeredSlot(agentId)
     this.assertEnabled(agentId)
     if (slot.resetHold) {
-      throw new HostError('busy', t('agent.resetting', { agent: slot.name }))
+      const key = slot.removing ? 'agent.removing' : 'agent.resetting'
+      throw new HostError('busy', t(key, { agent: slot.name }))
     }
     const { h } = slot
     await this.detectAll()
@@ -1801,19 +1812,8 @@ export class AgentManager {
     await this.stopAutoUpdate(h)
     for (const slot of this.agentsOf(h)) await this.stopProcess(slot)
     await rm(path.join(this.deps.adaptersDir, h.def.id), { recursive: true, force: true })
-    // What the stopped processes reported belongs to the install that is gone.
-    for (const slot of this.agentsOf(h)) slot.init = null
+    this.forgetInstall(h)
     this.deps.diagnostics.event(h.def.id, 'uninstall', 'removed what Kettu installed')
-    h.latest = null
-    h.skipped = null
-    h.cliSkipped = null
-    h.task = null
-    h.detection = null
-    h.installedCli = null
-    h.ran = null
-    h.stay = null
-    h.failed = null
-    h.moved = null
     if (!program) return { command: null, error: null }
     await this.deps.env.ready()
     const run = await runProgram({
@@ -1828,6 +1828,22 @@ export class AgentManager {
       command: program.command,
       error: programFailure(program.command, run, this.timings.installMs),
     }
+  }
+
+  /** Forgets what the harness's install that is gone reported, and the updates found for it. */
+  private forgetInstall(h: Harness): void {
+    // What the stopped processes reported belongs to the install that is gone.
+    for (const slot of this.agentsOf(h)) slot.init = null
+    h.latest = null
+    h.skipped = null
+    h.cliSkipped = null
+    h.task = null
+    h.detection = null
+    h.installedCli = null
+    h.ran = null
+    h.stay = null
+    h.failed = null
+    h.moved = null
   }
 
   /** How to remove the user's own program, when its install route has a safe opposite. */
@@ -5021,6 +5037,7 @@ export class AgentManager {
   ): Promise<AgentResetResult> {
     const slot = this.registeredSlot(agentId)
     if (slot.resetting) throw new HostError('busy', t('agent.resetting', { agent: slot.name }))
+    if (slot.removing) throw new HostError('busy', t('agent.removing', { agent: slot.name }))
     slot.resetting = true
     const wanted = new Set(categories)
     const result: AgentResetResult = { removed: [], failed: [] }
@@ -5082,6 +5099,180 @@ export class AgentManager {
       if (wanted.has('credentials')) slot.signInMethod = null
       await this.credentialsChanged(slot)
       void this.readSignInMethod(slot)
+    }
+  }
+
+  // Huli: removing the agent from its host too: its program the way it was installed, and its
+  // own data. The plans are in agent-removal/.
+
+  private async removalFacts(slot: Slot): Promise<RemovalFacts> {
+    const { platform } = this.deps
+    const { h } = slot
+    const env = this.deps.env.agentEnv(slot.id)
+    const home = os.homedir()
+    const p = platform === 'win32' ? path.win32 : path.posix
+    const lookup = {
+      platform,
+      env,
+      isExecutable: (file: string) => isExecutableFile(file, platform),
+    }
+    const find = (name: string): Promise<string | null> => findCommand(name, lookup)
+    const { launch } = h.def
+    const command = h.def.cli?.command ?? (launch.kind === 'binary' ? launch.command : null)
+    const [launcher, brew, winget, uv] = await Promise.all([
+      command ? find(command) : null,
+      platform === 'win32' ? null : find('brew'),
+      platform === 'win32' ? find('winget') : null,
+      launch.kind === 'uvx' ? find('uv') : null,
+    ])
+    const registered = [...this.slots.values()].filter((o) => o !== slot && this.has(o.id))
+    const siblings = registered.filter((o) => o.h === h).map((o) => o.name)
+    const chosen = this.chosenFolder(slot)
+    const system = (names: string[]): string[] =>
+      names.flatMap((name) => {
+        const value = getEnv(env, name, platform)
+        return value && p.isAbsolute(value) ? [value] : []
+      })
+    const protect = [
+      home,
+      this.deps.adaptersDir,
+      path.dirname(this.deps.reportsDir),
+      os.tmpdir(),
+      ...['.local', '.config', '.cache', p.join('.local', 'bin'), p.join('.local', 'share')].map(
+        (name) => p.join(home, name),
+      ),
+      ...(platform === 'win32'
+        ? system(['SystemRoot', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData', 'APPDATA'])
+        : ['/usr', '/etc', '/opt', '/var', '/Applications', '/Library', '/System']),
+      ...system(['LOCALAPPDATA']),
+    ]
+    return {
+      program: {
+        harness: h.def.id,
+        launch,
+        ...(h.def.installs ? { installs: h.def.installs } : {}),
+        platform,
+        home,
+        env,
+        kiteRoot: this.deps.adaptersDir,
+        program: this.userProgram(h)?.path ?? null,
+        launcher,
+        tools: { npm: this.deps.env.nodeProbe().npmPath, brew, winget, uv },
+        others: siblings,
+      },
+      data: {
+        harness: h.def.id,
+        platform,
+        home,
+        getEnv: (name) => getEnv(env, name, platform),
+        chosen,
+        picked: slot.added ? !slot.added.created : chosen !== null,
+        others: siblings,
+      },
+      protect,
+      otherFolders: registered.flatMap((o) => this.configFolder(o.id) ?? []),
+    }
+  }
+
+  private async prepareRemoval(slot: Slot): Promise<PreparedRemoval> {
+    return prepareRemoval(await this.removalFacts(slot), {
+      secrets: this.secretStore(),
+      log: (message) => this.deps.diagnostics.log('warn', message),
+    })
+  }
+
+  /** What removing the agent from its host may take there now, for Settings to list. */
+  async removalPreview(agentId: AgentId): Promise<Omit<AgentRemovalPreview, 'busy'>> {
+    const slot = this.registeredSlot(agentId)
+    await this.detectAll()
+    const prepared = await this.prepareRemoval(slot)
+    const folder = slot.def.id === 'claude-code' ? this.configFolder(slot.id) : null
+    const ownLabel = this.deps.settings().claudeTestEntrypoint
+    const outside = folder
+      ? await outsideClaudeProcesses(
+          folder,
+          (pid, entrypoint) =>
+            (ownLabel !== null && entrypoint === ownLabel) || this.deps.trees?.owns(pid) === true,
+        )
+      : 0
+    return { ...prepared.preview, outside }
+  }
+
+  /**
+   * Takes the steps of the removal plan that `steps` names, with every session of the agent let
+   * go (`release`) and its process stopped, or for its program every process of its harness. The
+   * plan is made again here, so only what it still names runs. Each failure is reported with its
+   * step and the rest goes on; only paths and commands are logged.
+   */
+  async removeFromComputer(
+    agentId: AgentId,
+    steps: readonly string[],
+    options: {
+      trash: ((paths: string[]) => Promise<void>) | null
+      release(): Promise<void>
+      progress(step: RemovalStep, state: 'running' | 'done' | 'failed', error?: string): void
+    },
+  ): Promise<AgentRemovalResult> {
+    const slot = this.registeredSlot(agentId)
+    const { h } = slot
+    if (slot.resetting || slot.removing) {
+      throw new HostError('busy', t('agent.removing', { agent: slot.name }))
+    }
+    slot.removing = true
+    try {
+      await this.detectAll()
+      const prepared = await this.prepareRemoval(slot)
+      const wanted = new Set(steps)
+      const uninstalls = prepared.steps.some(
+        ({ step }) => step.part === 'program' && wanted.has(step.id),
+      )
+      const blocked = prepared.preview.program.blocked
+      if (uninstalls && blocked) {
+        throw invalidParams(
+          t('agent.removeShared', { agents: blocked.join(', '), harness: h.def.name }),
+        )
+      }
+      if (uninstalls) this.assertNoInstall(h)
+      slot.resetHold = true
+      await options.release()
+      if (uninstalls) {
+        await this.stopAutoUpdate(h)
+        for (const each of this.agentsOf(h)) await this.stopProcess(each)
+      } else {
+        await this.stopProcess(slot)
+      }
+      await this.deps.env.ready()
+      const { platform } = this.deps
+      const result = await runRemoval(prepared, steps, {
+        secrets: this.secretStore(),
+        trash: options.trash,
+        run: async (program, args) => {
+          const run = await (this.deps.runProgram ?? runProgram)({
+            program,
+            args,
+            cwd: os.homedir(),
+            env: this.deps.env.agentEnv(slot.id),
+            platform,
+            timeoutMs: this.timings.installMs,
+          })
+          const name = path.basename(program).replace(/\.(?:cmd|exe)$/i, '')
+          return programFailure(name, run, this.timings.installMs)
+        },
+        progress: options.progress,
+        log: (message) => this.deps.diagnostics.log('warn', message),
+      })
+      if (result.done.some((step) => step.part === 'program')) {
+        this.cliVersions.clear()
+        this.forgetInstall(h)
+      }
+      this.deps.diagnostics.log(
+        'info',
+        `Removed ${slot.name} from this computer: ${removalLog(result)}`,
+      )
+      return result
+    } finally {
+      slot.removing = false
+      slot.resetHold = false
     }
   }
 
