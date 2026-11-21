@@ -1,4 +1,5 @@
 import type { AgentStatus, PlanLimit, ProviderBalance } from '@shared/agent-host'
+import { limitHolds } from '@shared/plan-limits'
 import type { AgentId } from '@shared/thread'
 import { joinPlanTier, planTier } from '@renderer/features/account/model'
 import { planName } from '@renderer/features/tray/model'
@@ -66,7 +67,7 @@ export function cardRings(limits: readonly PlanLimit[], now: number): CardRing[]
       a.index - b.index,
   )
   return rings.map(({ limit }) => {
-    const stale = limit.resetsAt !== null && limit.resetsAt <= now
+    const stale = !limitHolds(limit, now)
     const level = stale ? 'ok' : limitLevel(limit)
     return {
       limit,

@@ -897,6 +897,7 @@
     "direct": "{{vendor}} · 直接以 ACP 模式运行",
     "ownInterface": "{{vendor}} · 经它自己的接口连接",
     "usageUpdated": "{{ago}}读取",
+    "usageNoReset": "未提供重置时间",
     "refreshUsage": "重新读取套餐用量",
     "versionGroup": "版本",
     "ownInstaller": "由它自己的安装程序更新，不经过 Kettu。",

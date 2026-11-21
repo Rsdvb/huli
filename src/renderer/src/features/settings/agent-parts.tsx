@@ -403,7 +403,9 @@ export function UsageGroup({
                 text={
                   <RowText
                     name={limitLabel(limit)}
-                    description={limit.resetsAt ? planReset(limit.resetsAt, now) : undefined}
+                    description={
+                      limit.resetsAt ? planReset(limit.resetsAt, now) : t('agents.usageNoReset')
+                    }
                   />
                 }
               >

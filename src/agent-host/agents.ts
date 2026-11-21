@@ -71,6 +71,7 @@ import {
 import { readAntigravityUsage } from './antigravity-usage'
 import { signsInWithKeyOnly } from '@shared/agents'
 import type { AgentProcess, NodeRuntime } from '@shared/host-control'
+import { limitOutlived } from '@shared/plan-limits'
 import type { Platform } from '@shared/platform'
 import { agentColor, type AddedAgent, type HostSettings } from '@shared/settings'
 import {
@@ -4471,8 +4472,12 @@ export class AgentManager {
       const slot = this.slots.get(agentId)
       if (!slot || !entry) continue
       slot.account = entry.account
-      // A window an earlier run kept under one of Claude Code's other names is read again.
-      const kept = entry.limits.filter((limit) => planWindow(limit.window) === limit.window)
+      // A window an earlier run kept under one of Claude Code's other names is read again, and
+      // one without a reset whose reading is a period old is from a period gone by.
+      const now = Date.now()
+      const kept = entry.limits.filter(
+        (limit) => planWindow(limit.window) === limit.window && !limitOutlived(limit, now),
+      )
       slot.limits = new Map(kept.map((limit) => [limit.window, limit]))
       slot.initRecord = entry.init ?? null
       slot.apiKey = entry.apiKey === true
@@ -5837,7 +5842,8 @@ export class AgentManager {
             },
           }
         : {}),
-      limits: [...slot.limits.values()],
+      // A window without a reset that was not read again for its whole period is gone.
+      limits: [...slot.limits.values()].filter((limit) => !limitOutlived(limit, Date.now())),
       ...(slot.limitsError ? { limitsError: slot.limitsError } : {}),
       ...(slot.resets ? { resets: slot.resets } : {}),
       ...(slot.resetsError ? { resetsError: slot.resetsError } : {}),

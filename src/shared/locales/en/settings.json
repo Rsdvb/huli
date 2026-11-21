@@ -905,6 +905,7 @@
     "direct": "{{vendor}} · runs in ACP mode itself",
     "ownInterface": "{{vendor}} · through its own interface",
     "usageUpdated": "Read {{ago}}",
+    "usageNoReset": "No reset time given",
     "refreshUsage": "Read plan usage again",
     "versionGroup": "Version",
     "ownInstaller": "Updated by its own installer, not by Kettu.",

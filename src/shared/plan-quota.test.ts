@@ -51,6 +51,20 @@ describe('planQuota', () => {
     expect(planQuota(status, NOW)).toMatchObject({ kind: 'out', resetsAt: null })
   })
 
+  it('lets a used-up window without a reset go once its reading is a period old', () => {
+    const DAY = 24 * HOUR
+    const monthly = limit('monthly', 100, { resetsAt: null, observedAt: NOW - 30 * DAY })
+    expect(planQuota(agent('qoder', { limits: [monthly] }), NOW)).toMatchObject({ kind: 'out' })
+    const old = { ...monthly, observedAt: NOW - 32 * DAY }
+    expect(planQuota(agent('qoder', { limits: [old] }), NOW)).toEqual({ kind: 'unknown' })
+    // OpenCode names a provider's window after the provider, and a window Kite does not know
+    // lasts a month.
+    const fiveHour = limit('zai:five_hour', 100, { resetsAt: null, observedAt: NOW - 6 * HOUR })
+    expect(planQuota(agent('opencode', { limits: [fiveHour] }), NOW)).toEqual({ kind: 'unknown' })
+    const odd = limit('budget_x', 100, { resetsAt: null, observedAt: NOW - 20 * DAY })
+    expect(planQuota(agent('opencode', { limits: [odd] }), NOW)).toMatchObject({ kind: 'out' })
+  })
+
   it('runs on extra usage once the windows are used up and credits are left', () => {
     const status = agent('codex', {
       limits: [limit('seven_day', 100)],

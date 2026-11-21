@@ -61,7 +61,7 @@ it('drops the plan windows kept from before once an agent goes through a gateway
     usedPercent: 50,
     resetsAt: null,
     state: 'ok',
-    observedAt: 1,
+    observedAt: Date.now(),
   }
   await writeFile(
     path.join(dir, 'state', 'agents.json'),
@@ -83,4 +83,37 @@ it('drops the plan windows kept from before once an agent goes through a gateway
   await window.request('sessions.create', { agentId: 'fake-agent', projectPath: host.project })
   await window.until(() => fakeStatus(window)?.account?.kind === 'gateway')
   expect(fakeStatus(window)?.limits).toEqual([])
+})
+
+/** Writes what an earlier run remembered of the fake agent, and starts a host on it. */
+async function hostRemembering(entry: Record<string, unknown>): Promise<TestPort> {
+  const dir = await tempFolder('kettu-remembered-')
+  await mkdir(path.join(dir, 'state'), { recursive: true })
+  await writeFile(
+    path.join(dir, 'state', 'agents.json'),
+    JSON.stringify({ version: 1, agents: { 'fake-agent': entry } }),
+  )
+  const host = await startTestHost({ userDataPath: dir })
+  hosts.push(host)
+  return host.connect()
+}
+
+const fakeOf = async (window: TestPort): Promise<AgentStatus | undefined> =>
+  (await window.request('agents.list', undefined)).find((agent) => agent.id === 'fake-agent')
+
+it('lets a kept window without a reset go once its reading is a period old', async () => {
+  const DAY = 24 * 3_600_000
+  const monthly = (observedAt: number) => ({
+    window: 'monthly',
+    label: 'Monthly',
+    usedPercent: 100,
+    resetsAt: null,
+    state: 'reached',
+    observedAt,
+  })
+  const account = { kind: 'account', label: 'Fake Pro', email: 'developer@example.com' }
+  const old = await hostRemembering({ account, limits: [monthly(Date.now() - 40 * DAY)] })
+  expect((await fakeOf(old))?.limits).toEqual([])
+  const recent = await hostRemembering({ account, limits: [monthly(Date.now() - 3 * DAY)] })
+  expect((await fakeOf(recent))?.limits).toMatchObject([{ window: 'monthly', state: 'reached' }])
 })

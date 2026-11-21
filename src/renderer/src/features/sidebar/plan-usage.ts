@@ -1,4 +1,5 @@
 import type { AgentStatus, PlanLimit } from '@shared/agent-host'
+import { limitHolds } from '@shared/plan-limits'
 import type { AgentId } from '@shared/thread'
 import { backTime, resetTime } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
@@ -10,10 +11,11 @@ const DAY = 24 * HOUR
 
 /**
  * The window to show for an agent: a reached one first, then the fullest. A window whose reset
- * time has passed is skipped, because its percentage is from before the reset.
+ * time has passed is skipped, because its percentage is from before the reset, and so is one
+ * without a reset time once its reading is a period old.
  */
 export function tightestLimit(limits: readonly PlanLimit[], now: number): PlanLimit | null {
-  const current = limits.filter((l) => l.resetsAt === null || l.resetsAt > now)
+  const current = limits.filter((l) => limitHolds(l, now))
   const reached = current.find((l) => l.state === 'reached')
   if (reached) return reached
   const known = current.filter((l) => l.usedPercent !== null)
