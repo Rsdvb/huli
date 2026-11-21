@@ -95,16 +95,18 @@ export function interfaceText(status: NetworkStatus, name: string): string {
   return found ? `网卡：${name}（未连接）` : `网卡：${name}（已不存在）`
 }
 
+/** The default way out in words: a node, an interface, or none. */
 export function defaultText(status: NetworkStatus): string {
-  return status.defaultNode ? nodeName(status, status.defaultNode) : '无：不联网'
+  const chosen = status.defaultNode
+  if (!chosen) return '无：不联网'
+  return 'interface' in chosen ? interfaceText(status, chosen.interface) : nodeName(status, chosen)
 }
 
 /** An agent's choice in words. */
 export function choiceText(status: NetworkStatus, choice: AgentNetworkChoice | 'default'): string {
   if (choice === 'system') return '系统网络'
-  if (choice === 'default') {
-    return status.defaultNode ? `跟随默认（${nodeName(status, status.defaultNode)}）` : '跟随默认'
-  }
+  if (choice === 'default')
+    return status.defaultNode ? `跟随默认（${defaultText(status)}）` : '跟随默认'
   if ('interface' in choice) return interfaceText(status, choice.interface)
   return nodeName(status, choice)
 }
@@ -182,8 +184,8 @@ export async function setPick(
   pick: NetworkPick,
 ): Promise<void> {
   if (target === 'default') {
-    const node =
-      pick === null || pick === 'default' || pick === 'system' || 'interface' in pick ? null : pick
+    // A computer of this version takes an interface as the default too.
+    const node = pick === null || pick === 'default' || pick === 'system' ? null : pick
     await admin(link, 'settings.setDefaultNode', { node })
     return
   }

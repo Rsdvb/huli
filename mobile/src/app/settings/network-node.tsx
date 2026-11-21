@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { NodeRef } from '@shared/agent-network'
+import { isOlderApp } from '@shared/remote/app-version'
 import type { AgentId } from '@shared/thread'
 import { useHost } from '../../host'
 import {
@@ -63,6 +64,9 @@ function bySubscription(status: NetworkStatus) {
 /** How many of a subscription's nodes show before 显示全部. */
 const NODES_SHOWN = 40
 
+/** The first version whose computer takes an interface as the default way out. */
+const DEFAULT_INTERFACE_SINCE = '0.20261121.44'
+
 export default function NetworkNodeScreen() {
   const { target: raw } = useLocalSearchParams<{ target?: string }>()
   const target = (raw ?? 'default') as 'default' | AgentId
@@ -75,7 +79,11 @@ export default function NetworkNodeScreen() {
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
   const status = read.value
   const forDefault = target === 'default'
-  const title = forDefault ? '默认节点' : (host.agents.get(target)?.name ?? target)
+  // A computer from before this takes only a node as the default.
+  const hostVersion = host.state.kind === 'connected' ? host.state.welcome.host.version : null
+  const canDefaultInterface =
+    hostVersion !== null && !isOlderApp(hostVersion, DEFAULT_INTERFACE_SINCE)
+  const title = forDefault ? '默认出口' : (host.agents.get(target)?.name ?? target)
 
   const current: NetworkPick = !status
     ? null
@@ -181,10 +189,14 @@ export default function NetworkNodeScreen() {
             )}
           </ListGroup>
 
-          {!forDefault && (
+          {(!forDefault || canDefaultInterface) && (
             <ListGroup
               header="选择网卡"
-              footer="Agent 的流量和域名解析只从选定的网卡出去，比如代理软件的 TUN 或 WLAN。网卡断开或不存在时它就没有网络，不会改走别的网卡。"
+              footer={
+                forDefault
+                  ? '跟随默认的 Agent 只从选定的网卡出去，比如代理软件的 TUN 或 WLAN。网卡断开或不存在时它们没有网络，不会改走别的网卡。'
+                  : 'Agent 的流量和域名解析只从选定的网卡出去，比如代理软件的 TUN 或 WLAN。网卡断开或不存在时它就没有网络，不会改走别的网卡。'
+              }
             >
               {interfaceRows(status, current).length === 0 ? (
                 <GroupNote>没有读到电脑的网卡。</GroupNote>
