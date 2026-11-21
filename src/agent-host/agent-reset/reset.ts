@@ -32,7 +32,7 @@ function isMissing(error: unknown): boolean {
 }
 
 /** The bytes under `target`, without following links. */
-async function sizeOf(target: string): Promise<number> {
+export async function sizeOf(target: string): Promise<number> {
   let total = 0
   let counted = 0
   const visit = async (at: string): Promise<void> => {
