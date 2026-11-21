@@ -1,9 +1,11 @@
 // The rows of the home list, from the sessions of one computer or of all of them: 需要你处理, 正在
 // 运行 and 置顶 first, then the user's folders and the projects as groups that fold and show their
 // latest few (按项目分组), or one list by time (按时间). A session shows once, in the first part that
-// takes it. Pure, so the screen only renders what this returns.
+// takes it. Runs of one best-of-N group (同时交给几个 Agent) are one row, where their loudest run
+// would be, that opens to the runs. Pure, so the screen only renders what this returns.
 
 import type { SessionSummary } from '@shared/agent-host'
+import type { SessionGroupRef } from '@shared/session-groups'
 import { shownFolders, type SessionFolder } from '@shared/session-folders'
 import type { TaskSummary } from '@shared/workflow'
 import type { HomeGrouping } from './prefs'
@@ -32,9 +34,19 @@ export interface Group {
 export type HomeItem =
   | { kind: 'section'; key: string; title: string; count: number; waiting?: boolean }
   | { kind: 'group'; key: string; group: Group }
-  | { kind: 'session'; key: string; placed: Placed }
+  // `run`: a best-of-N run shown under its open group's row.
+  | { kind: 'session'; key: string; placed: Placed; run?: true }
+  | { kind: 'bestOf'; key: string; bestOf: BestOf }
   | { kind: 'task'; key: string; task: TaskSummary }
   | { kind: 'more'; key: string; group: string; hidden: number; total: number }
+
+/** A best-of-N group in the list: its runs listed here, oldest first, and whether it is open. */
+export interface BestOf {
+  computer: string
+  group: SessionGroupRef
+  runs: Placed[]
+  open: boolean
+}
 
 /** How many of a group's sessions show until it is opened all the way. */
 export const GROUP_PREVIEW = 3
@@ -56,10 +68,13 @@ export interface HomeInput {
   expanded: ReadonlySet<string>
   /** Empty folders show too, as places to drop into, unless a project filter is on. */
   showEmptyFolders: boolean
+  /** Best-of-N groups opened to their runs, by `bestOfKey`. */
+  openBestOf?: ReadonlySet<string>
 }
 
 export const placedKey = (p: Placed) => `${p.computer}\0${p.session.id}`
 export const projectKey = (computer: string, path: string) => `${computer}\0${path}`
+export const bestOfKey = (computer: string, groupId: string) => `bestOf:${computer}\0${groupId}`
 
 function isRunning(s: SessionSummary): boolean {
   return s.status === 'running' || s.status === 'starting'
@@ -68,21 +83,78 @@ function isRunning(s: SessionSummary): boolean {
 const byOrder = (a: Placed, b: Placed) => listOrder(a.session, b.session)
 const byTime = (a: Placed, b: Placed) => b.session.updatedAt - a.session.updatedAt
 
+/**
+ * The runs of each best-of-N group with two or more of them listed and not archived, by
+ * `bestOfKey`, and the run that stands for the group in the list: one that waits for the user,
+ * else one that runs, else the latest.
+ */
+function bestOfGroups(sessions: readonly Placed[]): Map<string, { runs: Placed[]; lead: Placed }> {
+  const runs = new Map<string, Placed[]>()
+  for (const p of sessions) {
+    const group = p.session.group
+    if (!group || p.session.archivedAt !== null) continue
+    const key = bestOfKey(p.computer, group.id)
+    runs.set(key, [...(runs.get(key) ?? []), p])
+  }
+  const rank = (p: Placed) => (needsYou(p.session) ? 2 : isRunning(p.session) ? 1 : 0)
+  const out = new Map<string, { runs: Placed[]; lead: Placed }>()
+  for (const [key, list] of runs) {
+    if (list.length < 2) continue
+    const lead = list.reduce((a, b) =>
+      rank(b) > rank(a) || (rank(b) === rank(a) && b.session.updatedAt > a.session.updatedAt)
+        ? b
+        : a,
+    )
+    out.set(key, {
+      runs: [...list].sort((a, b) => a.session.createdAt - b.session.createdAt),
+      lead,
+    })
+  }
+  return out
+}
+
 export function homeItems(input: HomeInput): HomeItem[] {
   const out: HomeItem[] = []
   const taken = new Set<string>()
   const ownWait = (p: Placed) =>
     needsYou(p.session) && !(p.session.task && input.taskIds.has(p.session.task.taskId))
-  const sessionItem = (p: Placed): HomeItem => ({
-    kind: 'session',
-    key: placedKey(p),
-    placed: p,
-  })
+  const groups = bestOfGroups(input.sessions)
+  const leads = new Map<string, string>()
+  const inGroup = new Set<string>()
+  for (const [key, { runs, lead }] of groups) {
+    leads.set(placedKey(lead), key)
+    for (const run of runs) if (run !== lead) inGroup.add(placedKey(run))
+  }
+  // A group's lead stands for its runs in every part below; the others are not listed apart.
+  const sessions = input.sessions.filter((p) => !inGroup.has(placedKey(p)))
+  const sessionItems = (p: Placed): HomeItem[] => {
+    const key = leads.get(placedKey(p))
+    const group = key ? groups.get(key) : undefined
+    if (!key || !group || !p.session.group) {
+      return [{ kind: 'session', key: placedKey(p), placed: p }]
+    }
+    const open = input.openBestOf?.has(key) ?? false
+    const head: HomeItem = {
+      kind: 'bestOf',
+      key,
+      bestOf: { computer: p.computer, group: p.session.group, runs: group.runs, open },
+    }
+    if (!open) return [head]
+    return [
+      head,
+      ...group.runs.map((run): HomeItem => ({
+        kind: 'session',
+        key: placedKey(run),
+        placed: run,
+        run: true,
+      })),
+    ]
+  }
   const take = (list: Placed[]) => {
     for (const p of list) taken.add(placedKey(p))
     return list
   }
-  const live = input.sessions.filter((p) => p.session.archivedAt === null)
+  const live = sessions.filter((p) => p.session.archivedAt === null)
 
   const needing = take(live.filter(ownWait).sort(byOrder))
   if (needing.length + input.tasks.length > 0) {
@@ -94,7 +166,7 @@ export function homeItems(input: HomeInput): HomeItem[] {
       waiting: true,
     })
     for (const t of input.tasks) out.push({ kind: 'task', key: `task:${t.id}`, task: t })
-    for (const p of needing) out.push(sessionItem(p))
+    for (const p of needing) out.push(...sessionItems(p))
   }
 
   const running = take(
@@ -102,7 +174,7 @@ export function homeItems(input: HomeInput): HomeItem[] {
   )
   if (running.length > 0) {
     out.push({ kind: 'section', key: '__running', title: '正在运行', count: running.length })
-    for (const p of running) out.push(sessionItem(p))
+    for (const p of running) out.push(...sessionItems(p))
   }
 
   const pinned = take(
@@ -113,16 +185,16 @@ export function homeItems(input: HomeInput): HomeItem[] {
   )
   if (pinned.length > 0) {
     out.push({ kind: 'section', key: '__pinned', title: '置顶', count: pinned.length })
-    for (const p of pinned) out.push(sessionItem(p))
+    for (const p of pinned) out.push(...sessionItems(p))
   }
 
-  const rest = input.sessions.filter((p) => !taken.has(placedKey(p)))
+  const rest = sessions.filter((p) => !taken.has(placedKey(p)))
 
   if (input.grouping === 'time') {
     const list = [...rest].sort(byTime)
     if (list.length > 0) {
       out.push({ kind: 'section', key: '__recent', title: '最近', count: list.length })
-      for (const p of list) out.push(sessionItem(p))
+      for (const p of list) out.push(...sessionItems(p))
     }
     return out
   }
@@ -133,7 +205,7 @@ export function homeItems(input: HomeInput): HomeItem[] {
     if (group.collapsed) return
     const all = input.expanded.has(group.key)
     const shown = all ? list : list.slice(0, GROUP_PREVIEW)
-    for (const p of shown) out.push(sessionItem(p))
+    for (const p of shown) out.push(...sessionItems(p))
     if (list.length > shown.length) {
       out.push({
         kind: 'more',
