@@ -43,7 +43,8 @@ export function ResetRow({ status }: { status: AgentStatus }) {
 
 type Phase =
   | { kind: 'loading' }
-  | { kind: 'failed'; error: string }
+  // Huli: `run`, the reset itself failed, not the read of what it would remove.
+  | { kind: 'failed'; error: string; run?: true }
   | { kind: 'ready'; preview: AgentResetPreview }
   | { kind: 'running'; preview: AgentResetPreview }
   | { kind: 'done'; result: AgentResetResult; places: Places }
@@ -130,7 +131,7 @@ function ResetDialog({ status, onClose }: { status: AgentStatus; onClose: () => 
       }
       setPhase({ kind: 'done', result, places: { folder: current.folder, home: current.home } })
     } catch (error) {
-      setPhase({ kind: 'failed', error: errorMessage(error) })
+      setPhase({ kind: 'failed', error: errorMessage(error), run: true })
     }
   }
 
@@ -151,7 +152,7 @@ function ResetDialog({ status, onClose }: { status: AgentStatus; onClose: () => 
           {phase.kind === 'failed' && (
             <Notice
               variant="error"
-              title={t('agents.resetEnv.failed')}
+              title={t(phase.run ? 'agents.resetEnv.runFailed' : 'agents.resetEnv.failed')}
               action={
                 <SetButton variant="secondary" onClick={load}>
                   {t('common:actions.retry')}
@@ -303,12 +304,17 @@ function CategoryBlock({
   return (
     <div className="k-reset-group">
       <label className="flex items-start gap-2.5 text-left">
-        <Checkbox
-          checked={checked && !empty}
-          disabled={disabled || empty}
-          onCheckedChange={(value) => onChange(value === true)}
-          className="mt-0.5"
-        />
+        {/* Huli: nothing to tick where nothing would be removed. */}
+        {empty ? (
+          <span aria-hidden className="mt-0.5 size-4 shrink-0" />
+        ) : (
+          <Checkbox
+            checked={checked}
+            disabled={disabled}
+            onCheckedChange={(value) => onChange(value === true)}
+            className="mt-0.5"
+          />
+        )}
         <span className="flex flex-col gap-px">
           <span className="text-ui font-medium text-primary">
             {t(`agents.resetEnv.${category}.name`)}

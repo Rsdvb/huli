@@ -386,8 +386,8 @@
     "usage": "用量",
     "window": {
       "fiveHour": "5 小时",
-      "sevenDay": "7 天",
-      "monthly": "本月"
+      "sevenDay": "每周",
+      "monthly": "每月"
     }
   },
   "rename": {

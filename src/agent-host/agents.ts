@@ -4777,8 +4777,7 @@ export class AgentManager {
       slot.signIn = connected.length > 0 ? 'signed-in' : 'unknown'
       if (wasRequired && connected.length > 0) this.hooks.signedIn(slot.id)
     } catch {
-      slot.providersError =
-        'Could not read OpenCode providers. Check the installed OpenCode version and try again.'
+      slot.providersError = t('agent.providersUnreadable')
       throw new HostError('agent_unavailable', slot.providersError)
     } finally {
       this.emit(slot)

@@ -811,7 +811,8 @@
       "follow": {
         "claude-code": "跟随 Claude Code",
         "codex": "跟随 Codex（自动审查）",
-        "deepseek": "跟随 DeepSeek Harness"
+        "deepseek": "跟随 DeepSeek Harness",
+        "doubao": "跟随豆包（沙箱）"
       },
       "unused": "这个智能体用过之后才能选择。",
       "unoffered": "{{mode}}（已不再提供）",
@@ -1101,7 +1102,9 @@
       "loginKeyHintOpenAi": "OpenAI 的 API key。",
       "loginKeyHintDeepSeek": "DeepSeek 的 API key。",
       "loginKeyHintCodebuddy": "上面所选站点的 API key。",
-      "submit": "添加智能体"
+      "submit": "添加智能体",
+      "notListed": "已添加「{{name}}」，但 10 秒内没看到它出现，请再试一次。",
+      "made": "已添加「{{name}}」。改好下面的问题后再点「添加智能体」，不会再新建一个。"
     },
     "key": {
       "row": "API key",
@@ -1132,10 +1135,24 @@
         "doubao": "豆包（火山方舟）",
         "doubaoIntl": "豆包（BytePlus 国际站）"
       },
-      "envSet": "已设置。Kettu 保存它，只在 {{name}} 启动时交给它。"
+      "envSet": "已设置。Kettu 保存它，只在 {{name}} 启动时交给它。",
+      "accepted": "{{name}} 已用这个 key 登录。",
+      "checking": "正在检查 key…",
+      "rejected": "{{name}} 没能用这个 key 登录。检查 key 是否正确，或换一个。",
+      "clearConfirm": {
+        "title": "清除 {{name}} 的 API key？",
+        "body": "清除后 {{name}} 不再用这个 key，需要重新登录或设置 key。",
+        "bodyCodex": "会运行 `codex logout`：{{name}} 的 ChatGPT 登录和终端里的 Codex 也会一起退出。"
+      },
+      "problem": {
+        "key": "API key 不能为空，也不能有空格。",
+        "keyOnly": "这个 Harness 只接受 API key。",
+        "baseUrl": "Base URL 必须是 http 或 https 地址。",
+        "model": "模型名不能有空格。"
+      }
     },
-    "needsSignInLine": "需要你登录",
-    "signInPill": "登录",
+    "needsSignInLine": "需要登录",
+    "signInPill": "需要登录",
     "notCreatedLine": "尚未创建。",
     "createdByKettu": "由 Kettu 创建",
     "chosenInKettu": "在 Kettu 中选定",
@@ -1321,8 +1338,23 @@
       "kiteKey": "Kettu 保存的 {{name}}",
       "partly": "删掉了 {{count}} 项，{{failed}} 项没删掉",
       "finished_other": "已重置，删掉了 {{count}} 项。",
-      "afterHint": "下次启动时它会重新生成需要的文件。需要的话再登录一次。"
-    }
+      "afterHint": "下次启动时它会重新生成需要的文件。需要的话再登录一次。",
+      "runFailed": "重置没有完成"
+    },
+    "notSignedIn": "未登录",
+    "signInStarting": "正在打开 {{name}} 的登录…",
+    "signInStartingHint": "正在等智能体给出登录网页或二维码，可以随时取消。",
+    "usageReadFailed": "没能读取套餐用量：{{error}}",
+    "signInRowHintItself": "由 {{name}} 自己登录，Kettu 不经手凭据。",
+    "signInInTerminal": "在终端中登录",
+    "signOutConfirm": {
+      "title": "退出 {{name}} 的登录？",
+      "body": "退出后，要重新登录才能用 {{name}}。",
+      "bodyCli": "{{name}} 和终端里的 `{{command}}` 用同一个目录，它也会一起退出登录。退出后，要重新登录才能用 {{name}}。"
+    },
+    "signInDone": "{{name}} 已登录",
+    "signInNotDone": "{{name}} 还没有登录",
+    "backToAgent": "回到它的设置"
   },
   "about": {
     "version": {
@@ -2441,7 +2473,8 @@
       "pickInterface": "选择网卡…",
       "interface": "网卡：{{name}}",
       "interfaceDown": "网卡：{{name}}（未连接）",
-      "interfaceGone": "网卡：{{name}}（已不存在）"
+      "interfaceGone": "网卡：{{name}}（已不存在）",
+      "openNetwork": "打开 Agent 网络设置"
     },
     "exit": {
       "node": "节点出口 {{ip}}（{{country}}）",

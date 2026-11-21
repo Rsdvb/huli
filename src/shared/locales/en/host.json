@@ -70,7 +70,7 @@
       "title": "Earlier history is not available",
       "description": "{{agent}} cannot replay sessions, so this one continues without its history."
     },
-    "signInNeeded": "{{agent}} needs you to sign in",
+    "signInNeeded": "{{agent}} needs sign-in",
     "closedBeforeSent": {
       "title": "The session closed before your message was sent",
       "description": "It waits in the queue until you resume it."
@@ -336,7 +336,8 @@
       "baseUrl": "The base URL must be an http or https address.",
       "model": "The model must be one word without spaces.",
       "none": "{{agent}} takes no API key from Kettu."
-    }
+    },
+    "providersUnreadable": "Could not read OpenCode providers. Check the installed OpenCode version and try again."
   },
   "detect": {
     "noVersion": "No version of {{agent}} fits this computer, so it cannot be installed.",

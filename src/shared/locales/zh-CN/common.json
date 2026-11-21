@@ -57,7 +57,10 @@
     "annual": "每年",
     "overage": "额外用量",
     "weeklyOf": "每周 · {{model}}",
-    "fiveHourOf": "5 小时 · {{model}}"
+    "fiveHourOf": "5 小时 · {{model}}",
+    "weekly": "每周",
+    "on_demand": "按需用量",
+    "other_models": "其他模型"
   },
   "planWindowInText": {
     "seven_day_opus": "Opus 每周",

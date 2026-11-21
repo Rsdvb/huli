@@ -10,12 +10,12 @@ import {
   Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import type { AgentStatus, AgentTask, PlanLimit } from '@shared/agent-host'
+import type { AgentAuthMethod, AgentStatus, AgentTask, PlanLimit } from '@shared/agent-host'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { useRefresh } from '@renderer/components/refresh'
 import { planReset } from '@renderer/features/sidebar/plan-usage'
 import { addDays, dayOf, monthStartOf } from '@renderer/features/usage/model'
-import { limitLabel, mediumAgo, money, planBalance } from '@renderer/lib/format'
+import { balanceLabel, limitLabel, mediumAgo, money, planBalance } from '@renderer/lib/format'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
@@ -24,7 +24,7 @@ import { useNow } from '@renderer/lib/use-now'
 import { openSignInPage, usePlanReadings } from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { openHarnessSettings } from '@renderer/stores/view'
-import { limitsReadable, percent, useAction } from './agent-helpers'
+import { asksForKey, limitsReadable, percent, useAction } from './agent-helpers'
 import { CommandLine, ControlError, IconAction, Meter, SetButton, Spin } from './controls'
 import { Group, GroupLabel, Notice, RowFrame, RowGroup, RowShell, RowText } from './rows'
 import { agentCost } from './spend'
@@ -99,8 +99,10 @@ export function SignInNotice({
   busy,
   page,
   image = null,
+  pending = false,
   remote,
   onTerminal,
+  onApiKey,
   onAuthenticate,
   onCancel,
 }: {
@@ -110,13 +112,33 @@ export function SignInNotice({
   page: string | null
   /** Huli: the picture to scan the sign-in this window started shows, as a data URL. */
   image?: string | null
+  /** Huli: a sign-in this window started waits for the agent's page or picture. */
+  pending?: boolean
   /** This window is a device of the agent's host, which sees no browser the agent opens there. */
   remote: boolean
   onTerminal?: (command: string) => void
+  /** Huli: sets the key the page keeps for the agent, for a method that asks for one in a terminal. */
+  onApiKey?: () => void
   onAuthenticate: (methodId: string) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation(['settings', 'session', 'common'])
+  if (image === null && page === null && pending) {
+    return (
+      <Notice
+        variant="info"
+        icon={<Spin />}
+        title={t('agents.signInStarting', { name: status.name })}
+        action={
+          <SetButton variant="ghost" onClick={onCancel}>
+            {t('common:actions.cancel')}
+          </SetButton>
+        }
+      >
+        {t('agents.signInStartingHint')}
+      </Notice>
+    )
+  }
   if (image !== null) {
     return (
       <Notice
@@ -152,6 +174,7 @@ export function SignInNotice({
             <SetButton onClick={() => openSignInPage(page)}>
               {t('session:signIn.openPageAgain')}
             </SetButton>
+            <CopyLinkButton url={page} />
             <SetButton variant="ghost" onClick={onCancel}>
               {t('common:actions.cancel')}
             </SetButton>
@@ -162,7 +185,10 @@ export function SignInNotice({
       </Notice>
     )
   }
-  const inTerminal = status.authMethods.filter((m) => m.type === 'terminal' && m.command)
+  const byKey = (m: AgentAuthMethod): boolean => !!onApiKey && asksForKey(status, m)
+  const inTerminal = status.authMethods.filter(
+    (m) => m.type === 'terminal' && m.command && !byKey(m),
+  )
   const first = inTerminal[0]
   // A method that opens a browser where the agent runs cannot be finished from here.
   const elsewhere = status.authMethods.find((m) => remote && m.type === 'agent' && !m.delegated)
@@ -171,7 +197,7 @@ export function SignInNotice({
     (m) =>
       m !== first &&
       m.type !== 'env' &&
-      (onTerminal || m.type !== 'terminal') &&
+      (onTerminal || m.type !== 'terminal' || byKey(m)) &&
       !(remote && m.type === 'agent' && !m.delegated),
   )
   return (
@@ -197,7 +223,12 @@ export function SignInNotice({
             {others.length > 0 && (
               <span className="k-end k-wrap">
                 {others.map((method) =>
-                  method.type === 'terminal' && method.command ? (
+                  // Huli: a key typed in a terminal shows as it is typed; the page keeps it instead.
+                  onApiKey && asksForKey(status, method) ? (
+                    <SetButton key={method.id} title={method.description} onClick={onApiKey}>
+                      {method.name}
+                    </SetButton>
+                  ) : method.type === 'terminal' && method.command ? (
                     <SetButton key={method.id} onClick={() => onTerminal?.(method.command!)}>
                       {method.name}
                     </SetButton>
@@ -228,6 +259,26 @@ export function SignInNotice({
         </>
       )}
     </Notice>
+  )
+}
+
+/** Huli: copies a sign-in page's address, to open it in another browser or on another device. */
+function CopyLinkButton({ url }: { url: string }) {
+  const { t } = useTranslation('session')
+  const [copied, setCopied] = useState(false)
+  return (
+    <SetButton
+      variant="ghost"
+      icon={<Icon icon={copied ? Tick02Icon : Copy01Icon} size={14} />}
+      onClick={() => {
+        void navigator.clipboard.writeText(url).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+    >
+      {t(copied ? 'signIn.linkCopied' : 'signIn.copyLink')}
+    </SetButton>
   )
 }
 
@@ -359,14 +410,17 @@ export function UsageGroup({
   const [act, busy, error] = useAction()
   const refresh = useRefresh()
   const [refreshError, setRefreshError] = useState<string | null>(null)
-  // The account's newest reading, which may be another host's.
-  const limits = newestLimits(usePlanReadings(), status)
+  // The account's newest reading, which may be another host's. Huli: none of an account an
+  // earlier run remembered shows while the sign-in is read again.
+  const readings = usePlanReadings()
+  const limits = status.readingSignIn ? [] : newestLimits(readings, status)
   const observed = Math.max(0, ...limits.map((l) => l.observedAt)) || null
   const limitsReason = status.limitsReason
     ? t(`agents.usageReasons.${status.limitsReason}` as 'agents.usageReasons.vendor-disallows')
     : null
   // A read this page asked for, else the host's record of the last read, whoever asked for it.
-  const readError = error ?? refreshError ?? status.limitsError ?? null
+  const failed = error ?? refreshError ?? status.limitsError ?? null
+  const readError = failed && t('agents.usageReadFailed', { error: failed })
   const actions =
     limits.length > 0 && limitsReadable(status) ? (
       <>
@@ -424,7 +478,7 @@ export function UsageGroup({
         </RowGroup>
       ) : limitsReason ? (
         <p className="k-reading">{limitsReason}</p>
-      ) : reading && status.capabilities.reports ? (
+      ) : (reading || status.readingSignIn) && status.capabilities.reports ? (
         <p className="k-reading">{t('agents.readingUsage')}</p>
       ) : status.signIn === 'required' && status.capabilities.reports ? (
         <p className="k-reading">{t('agents.usageAfterSignIn', { name: status.name })}</p>
@@ -464,13 +518,7 @@ function BalanceRows({ status }: { status: AgentStatus }) {
       key={`${balance.label}/${balance.currency}`}
       text={
         <RowText
-          name={
-            balance.label === 'Extra usage'
-              ? t('usage:limits.extraUsage')
-              : balance.label === 'Prepaid balance'
-                ? t('usage:limits.prepaidBalance')
-                : balance.label
-          }
+          name={balanceLabel(balance.label)}
           description={
             balance.label === 'Extra usage' ? t('agents.resetCredits.balanceHint') : undefined
           }

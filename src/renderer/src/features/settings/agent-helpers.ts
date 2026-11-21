@@ -1,8 +1,14 @@
 // What the Agent and Harness sections of Settings both use that is not a component: who makes each
 // harness, a button's request state, and reading an agent's account, usage and version.
 
-import { useEffect, useState } from 'react'
-import type { AgentOptions, AgentStatus, PlanLimit, SessionSummary } from '@shared/agent-host'
+import { useCallback, useEffect, useState } from 'react'
+import type {
+  AgentAuthMethod,
+  AgentOptions,
+  AgentStatus,
+  PlanLimit,
+  SessionSummary,
+} from '@shared/agent-host'
 import { isStartMode } from '@shared/agents'
 import type { AgentId, HarnessId } from '@shared/thread'
 import { errorMessage } from '@renderer/lib/host'
@@ -24,7 +30,13 @@ export const VENDORS: Partial<Record<HarnessId, string>> = {
   doubao: 'ByteDance',
 }
 
-export function useAction(): [(run: () => Promise<unknown>) => void, boolean, string | null] {
+/** A button's request: run it, whether it runs, its error, and putting that error away. */
+export function useAction(): [
+  (run: () => Promise<unknown>) => void,
+  boolean,
+  string | null,
+  () => void,
+] {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const act = (run: () => Promise<unknown>) => {
@@ -34,7 +46,16 @@ export function useAction(): [(run: () => Promise<unknown>) => void, boolean, st
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setBusy(false))
   }
-  return [act, busy, error]
+  const clear = useCallback(() => setError(null), [])
+  return [act, busy, error, clear]
+}
+
+/**
+ * Huli: a sign-in method that asks for an API key in a terminal, as `codex login --with-api-key`
+ * does, for an agent whose key the page can set instead; the terminal would show the key.
+ */
+export function asksForKey(status: AgentStatus, method: AgentAuthMethod): boolean {
+  return status.apiKey !== null && method.type === 'terminal' && method.id === 'api-key'
 }
 
 export function limitsReadable(status: AgentStatus): boolean {

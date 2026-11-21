@@ -173,7 +173,7 @@
     "neverRead": "读不到套餐用量。",
     "lastRead": "上次读取：{{ago}}",
     "backIn": "{{time}}后恢复",
-    "weeklyOf": "7 天 · {{model}}",
+    "weeklyOf": "每周 · {{model}}",
     "fiveHourOf": "5 小时 · {{model}}",
     "short": {
       "minutes": "{{count}} 分钟",
@@ -190,7 +190,9 @@
     },
     "showMore_other": "再显示 {{count}} 个",
     "showFewer": "收起",
-    "near_other": "· {{count}} 个接近上限"
+    "near_other": "· {{count}} 个接近上限",
+    "balance": "余额",
+    "addOnCredits": "附加额度"
   },
   "activity": {
     "title": "活动",
