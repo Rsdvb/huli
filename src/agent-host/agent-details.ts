@@ -264,8 +264,9 @@ export function configLocations(
     }
     case 'cursor': {
       const moved = variable('CURSOR_CONFIG_DIR')
-      // Cursor's docs give XDG_CONFIG_HOME a folder of its own only on Linux and BSD.
-      const xdg = platform === 'darwin' || platform === 'win32' ? null : variable('XDG_CONFIG_HOME')
+      // Cursor's docs give XDG_CONFIG_HOME a folder of its own only on Linux and BSD, but the CLI
+      // (cursor-config's paths.js in 2026.11.19's packages for each system) takes it everywhere.
+      const xdg = variable('XDG_CONFIG_HOME')
       const folder = moved ?? (xdg ? p.join(xdg, 'cursor') : p.join(home, '.cursor'))
       // The CLI documents only project rules and AGENTS.md, so no global instructions file shows.
       return [
@@ -289,13 +290,16 @@ export function configLocations(
     case 'amp': {
       const xdg = variable('XDG_CONFIG_HOME')
       const folder = p.join(xdg ?? p.join(home, '.config'), 'amp')
+      const file = variable('AMP_SETTINGS_FILE')
       return [
         { id: 'folder', candidates: [folder], env: xdg ? 'XDG_CONFIG_HOME' : null },
-        {
-          id: 'settings',
-          candidates: [p.join(folder, 'settings.json'), p.join(folder, 'settings.jsonc')],
-          env: null,
-        },
+        file
+          ? { id: 'settings', candidates: [file], env: 'AMP_SETTINGS_FILE' }
+          : {
+              id: 'settings',
+              candidates: [p.join(folder, 'settings.json'), p.join(folder, 'settings.jsonc')],
+              env: null,
+            },
         {
           id: 'instructions',
           candidates: [p.join(folder, 'AGENTS.md'), p.join(p.dirname(folder), 'AGENTS.md')],
@@ -305,19 +309,19 @@ export function configLocations(
       ]
     }
     case 'goose': {
+      // goose's paths.rs takes etcetera's app strategy, XDG's on macOS too, which ignores a
+      // relative XDG_CONFIG_HOME.
       const rootValue = getEnv('GOOSE_PATH_ROOT')
       const root =
         rootValue && rootValue.trim() !== '' && p.isAbsolute(rootValue) ? rootValue : null
-      const xdg = platform === 'win32' ? null : variable('XDG_CONFIG_HOME')
+      const xdgValue = platform === 'win32' ? undefined : getEnv('XDG_CONFIG_HOME')
+      const xdg = xdgValue && p.isAbsolute(xdgValue) ? xdgValue : null
       const appData = platform === 'win32' ? variable('APPDATA') : null
       let folder: string
       let env: string | null
       if (root) {
         folder = p.join(root, 'config')
         env = 'GOOSE_PATH_ROOT'
-      } else if (platform === 'darwin') {
-        folder = p.join(home, 'Library', 'Application Support', 'Block', 'goose')
-        env = null
       } else if (platform === 'win32') {
         folder = p.join(appData ?? p.join(home, 'AppData', 'Roaming'), 'Block', 'goose', 'config')
         env = appData ? 'APPDATA' : null
@@ -417,27 +421,60 @@ export function configLocations(
       )
     }
     case 'omp': {
-      const folder = p.join(home, '.omp')
+      // OMP's packages/utils/src/dirs.ts: its root is `~/<PI_CONFIG_DIR or .omp>`, its agent
+      // folder `agent` in it, a profile's in `profiles/<name>` (OMP_PROFILE, else PI_PROFILE),
+      // else PI_CODING_AGENT_DIR; settings.ts reads config.yml, then config.yaml, from there.
+      const name = getEnv('PI_CONFIG_DIR') || '.omp'
+      const root = p.join(home, name)
+      const profileVariable = getEnv('OMP_PROFILE') !== undefined ? 'OMP_PROFILE' : 'PI_PROFILE'
+      const profileName = getEnv(profileVariable)?.trim()
+      const profile = profileName && profileName !== 'default' ? profileName : null
+      const moved = profile ? null : variable('PI_CODING_AGENT_DIR')
+      const folder = profile
+        ? p.join(root, 'profiles', profile, 'agent')
+        : (moved ?? p.join(root, 'agent'))
+      const env = profile
+        ? profileVariable
+        : moved
+          ? 'PI_CODING_AGENT_DIR'
+          : name !== '.omp'
+            ? 'PI_CONFIG_DIR'
+            : null
       return [
-        { id: 'folder', candidates: [folder], env: null },
+        { id: 'folder', candidates: [folder], env },
         {
           id: 'settings',
-          candidates: [p.join(folder, 'config.yml'), p.join(folder, 'agent', 'config.yml')],
+          candidates: [p.join(folder, 'config.yml'), p.join(folder, 'config.yaml')],
           env: null,
         },
+        { id: 'instructions', candidates: [p.join(folder, 'AGENTS.md')], env: null },
       ]
     }
     case 'hermes': {
-      const folder = p.join(home, '.hermes')
+      // hermes_constants.py: HERMES_HOME, else `%LOCALAPPDATA%\hermes` on Windows, `~/.hermes`.
+      const moved = variable('HERMES_HOME')
+      const localAppData = platform === 'win32' ? variable('LOCALAPPDATA') : null
+      const folder =
+        moved ??
+        (platform === 'win32'
+          ? p.join(localAppData ?? p.join(home, 'AppData', 'Local'), 'hermes')
+          : p.join(home, '.hermes'))
       return [
-        { id: 'folder', candidates: [folder], env: null },
+        {
+          id: 'folder',
+          candidates: [folder],
+          env: moved ? 'HERMES_HOME' : localAppData ? 'LOCALAPPDATA' : null,
+        },
         { id: 'settings', candidates: [p.join(folder, 'config.yaml')], env: null },
       ]
     }
     case 'muse': {
-      const folder = p.join(home, '.config', 'muse')
+      // Muse Code's own config root on every system: `$XDG_CONFIG_HOME/muse`, else
+      // `~/.config/muse` (its docs, its binaries' messages and its launchers).
+      const xdg = variable('XDG_CONFIG_HOME')
+      const folder = p.join(xdg ?? p.join(home, '.config'), 'muse')
       return [
-        { id: 'folder', candidates: [folder], env: null },
+        { id: 'folder', candidates: [folder], env: xdg ? 'XDG_CONFIG_HOME' : null },
         { id: 'settings', candidates: [p.join(folder, 'settings.json')], env: null },
       ]
     }
