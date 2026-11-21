@@ -297,8 +297,11 @@ export function ContextButton({
   const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
   const limit = trayLimit(holding)
-  // An account of another kind has no plan; an unknown one shows the limits the agent reports.
-  const subscribed = account ? account.kind === 'account' : limits.length > 0
+  // An account of another kind has no plan; an unknown one shows the limits the agent reports, and
+  // so does one through other providers, such as OpenCode's, whose windows are theirs.
+  const subscribed = account
+    ? account.kind === 'account' || (account.kind === 'external' && limits.length > 0)
+    : limits.length > 0
   const cached = useUsageStore((s) => s.context[sessionId])
   // A closed session's own report is the one stored with it: only the host pushes newer ones.
   const pushed = closed ? undefined : context
@@ -772,7 +775,9 @@ function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAc
   const { t } = useTranslation(['composer', 'common'])
   const now = useNow()
   const view = useLimitView()
-  const plan = account?.label ? joinPlanTier(account.label, account.tier) : null
+  // Another provider's account names its providers, not a plan.
+  const plan =
+    account?.kind === 'account' && account.label ? joinPlanTier(account.label, account.tier) : null
   return (
     <div className="kettu-ctx__plan">
       <div className="kettu-ctx__plan-head">
