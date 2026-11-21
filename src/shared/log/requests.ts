@@ -58,6 +58,7 @@ const READS = new Set([
   'page',
   'pullRequest',
   'read',
+  'readBytes',
   'readFirstOptions',
   'readOptions',
   'replay',

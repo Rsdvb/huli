@@ -246,6 +246,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'files.search': AGENT_MS,
   'files.agentFolder': HOST_MS,
   'files.readAgentFile': AGENT_MS,
+  'files.readBytes': AGENT_MS,
   'files.write': AGENT_MS,
   'files.create': AGENT_MS,
   'files.rename': AGENT_MS,

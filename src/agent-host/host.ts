@@ -609,6 +609,7 @@ export class AgentHost {
       homeDir: options.homeDir ?? os.homedir(),
       session: (sessionId) => this.sessions.agentSession(sessionId),
       read: (real, shown) => this.files.readAllowed(real, shown),
+      bytes: (real, name, part) => this.files.bytesAllowed(real, name, part),
     })
     this.sessionFiles = new SessionFiles({
       platform,
@@ -3433,6 +3434,13 @@ export class AgentHost {
         this.filesCall(projectPath, (root) => this.files.search(root, query)),
       'files.agentFolder': ({ sessionId }) => this.agentFiles.folder(sessionId),
       'files.readAgentFile': ({ sessionId, path }) => this.agentFiles.read(sessionId, path),
+      'files.readBytes': (params) => {
+        const { path, offset, length, expect } = params
+        const part = { offset, length, ...(expect ? { expect } : {}) }
+        return 'sessionId' in params
+          ? this.agentFiles.readBytes(params.sessionId, path, part)
+          : this.filesCall(params.projectPath, (root) => this.files.readBytes(root, path, part))
+      },
       'files.write': ({ projectPath, path, text, version }) =>
         this.filesCall(projectPath, (root) => this.files.write(root, path, text, version)),
       'files.create': ({ projectPath, path, kind }) =>
