@@ -27,6 +27,8 @@ export interface RemovalStep {
   store?: AgentSecretStore
   /** Its size on disk; null for what has none, such as a command without a folder to measure. */
   bytes: number | null
+  /** The last lines a command printed, once it ran. */
+  output?: string
 }
 
 /** How the user's own program was installed, as far as the host can tell from where it lives. */
@@ -49,19 +51,71 @@ export type ProgramNote = 'claude-apps' | 'codex-app' | 'antigravity-app' | 'pat
 /**
  * Who else uses the data: Claude's apps use ~/.claude and the Codex app ~/.codex too; the
  * Antigravity app shares agy's sign-in. `codebuddy-sign-in`: its browser sign-in lives where Kite
- * does not know; `picked-folder`: the folder is one the user picked for the agent.
+ * does not know; `picked-folder`: the folder is one the user picked for the agent;
+ * `keychain-left`: what it keeps in the system's credential store stays. The `*-uninstall` notes
+ * say what the vendor's own uninstall command takes beyond the agent's data, such as its program or
+ * what an app of the vendor shares; `cursor-editor`: only the CLI's own files go from the folder
+ * the Cursor editor uses too.
  */
 export type DataNote =
-  'claude-apps' | 'codex-app' | 'antigravity-app' | 'codebuddy-sign-in' | 'picked-folder'
+  | 'claude-apps'
+  | 'codex-app'
+  | 'antigravity-app'
+  | 'codebuddy-sign-in'
+  | 'picked-folder'
+  | 'keychain-left'
+  | 'devin-uninstall'
+  | 'hermes-uninstall'
+  | 'kilo-uninstall'
+  | 'nova-uninstall'
+  | 'codewhale-uninstall'
+  | 'cursor-editor'
+
+/** The other programs that use a folder of an agent, which Kite therefore leaves. */
+export type RemovalSharer =
+  | 'amp'
+  | 'augment'
+  | 'autohand-squad'
+  | 'bob-ide'
+  | 'coco-desktop'
+  | 'compass-sass'
+  | 'copilot'
+  | 'corust'
+  | 'crow'
+  | 'devin-desktop'
+  | 'dirac'
+  | 'factory-app'
+  | 'gemini'
+  | 'goose-desktop'
+  | 'grok-cli'
+  | 'harn'
+  | 'hermes-desktop'
+  | 'hermes-relayer'
+  | 'junie-ide'
+  | 'kilo-apps'
+  | 'kimchi'
+  | 'kimi-apps'
+  | 'minimax-desktop'
+  | 'minionx'
+  | 'omp-gui'
+  | 'poolside-assistant'
+  | 'qoder-ide'
+  | 'qoder-cn-ide'
+  | 'qwen-apps'
+  | 'stakpak-tab'
+  | 'vibe-apps'
+  | 'vtcode-desktop'
 
 /**
  * What stays, and why: a vendor's app or other agents use it too, it is the program (which
- * uninstalling removes), or it belongs to the Windows sandbox accounts Codex made.
+ * uninstalling removes), it belongs to the Windows sandbox accounts Codex made, other programs
+ * (`with`) use it too, or it may hold the user's own work, such as worktrees with changes.
  */
 export interface RemovalKept {
   path: string
-  reason: 'app' | 'agents' | 'program' | 'sandbox'
+  reason: 'app' | 'agents' | 'program' | 'sandbox' | 'shared' | 'work'
   store?: AgentSecretStore
+  with?: RemovalSharer
 }
 
 export interface AgentRemovalPreview {
