@@ -9,6 +9,8 @@ export interface AgentList {
   nextCursor: string | null
   loading: boolean
   error: string | null
+  /** Huli: the agent cannot list its sessions at all, as one not started yet may say. */
+  cannotList?: boolean
 }
 
 export type AgentLists = Partial<Record<AgentId, AgentList>>

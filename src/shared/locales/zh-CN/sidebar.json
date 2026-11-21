@@ -257,7 +257,8 @@
     "held": "正在终端里使用",
     "heldTip": "先在终端里退出，或者复制一份",
     "cacheLeft_other": "缓存还剩 {{count}} 分钟",
-    "fork": "复制一份"
+    "fork": "复制一份",
+    "noRecentSessions": "{{agent}} 最近的会话里没有这个文件夹的。"
   },
   "waiting": {
     "title_other": "{{count}} 个等你处理",

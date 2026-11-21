@@ -295,7 +295,8 @@ export function useGeneralSection(): SectionDef {
         group: thread,
         render: () => <OutlineSummaries label={t('general.outlineSummaries.name')} />,
       },
-      agentHistory,
+      // Huli: the import from the agents is a window's alone; a paired device may not list.
+      ...(isWeb ? [] : [agentHistory]),
       {
         id: 'open-at-login',
         setting: 'general.open-at-login',

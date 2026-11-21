@@ -8,7 +8,7 @@
   },
   "dialog": {
     "title": "Import from agents",
-    "description": "The agent's past sessions on this computer, by the folder each ran in. Imported ones go under that folder's project and pick up where they left off.",
+    "description": "Each agent's past sessions on this computer, by the folder each ran in. Imported ones go under that folder's project and pick up where they left off.",
     "agents": "Agents",
     "noAgents": "No agent here can list its sessions across folders.",
     "search": "Search titles and folders",
@@ -48,7 +48,7 @@
     "importingTitle": "Importing {{done}} of {{total}}: {{title}}",
     "stop": "Stop",
     "close": "Close",
-    "readOnly": "The agents' own files are only read. Subagents come back under their session when it is opened here. A Claude Code session a terminal has open is not imported; close it there first.",
+    "readOnly": "The agents' own files are only read. Subagents come back under their session when it is opened here.",
     "source": "Sessions from",
     "ownFolder": "{{agent}}'s own folder",
     "chooseFolder": "Choose folder…",
@@ -59,7 +59,14 @@
     "noFolderSessions": "No sessions to import in this folder.",
     "planning": "Checking what to copy…",
     "copying": "Copying files…",
-    "forgetFolder": "Forget this folder"
+    "forgetFolder": "Forget this folder",
+    "readOnlyHeld": " A Claude Code session a terminal has open is not imported as it is: close it there first, or fork a copy once it fails.",
+    "listFailed": "Could not list {{agent}}'s sessions",
+    "listFailedShort": "Could not list sessions",
+    "listSignIn": "{{agent}} needs you to sign in before it lists its sessions",
+    "moreFailed": "Could not list the rest: {{message}}",
+    "signIn": "Sign in",
+    "stopping": "Stopping…"
   },
   "desktop": {
     "tab": "Claude desktop",
@@ -113,6 +120,8 @@
     "skipped_other": "{{count}} left alone:",
     "conflict": "{{agent}}'s own folder has another version of it",
     "changed": "its file in {{agent}}'s folder changed meanwhile",
-    "missingFolder": "the folder it ran in is not on this computer"
+    "missingFolder": "the folder it ran in is not on this computer",
+    "fork": "Fork a copy",
+    "forkTip": "A terminal still has it open, so a copy of it comes in; the original is left as it is."
   }
 }

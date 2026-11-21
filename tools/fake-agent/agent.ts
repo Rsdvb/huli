@@ -821,6 +821,15 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       return { sessionId: fork.id, ...sessionSetup(fork) }
     })
     .onRequest(methods.agent.session.list, (ctx) => {
+      // Huli: FAKE_AGENT_LIST_FAILS `auth` refuses every listing for a sign-in, `later` every
+      // page after the first, as the imports' errors are seen.
+      const fails = env.FAKE_AGENT_LIST_FAILS
+      if (fails === 'auth') {
+        throw RequestError.authRequired(undefined, 'Sign in to list the fake agent’s sessions')
+      }
+      if (fails === 'later' && ctx.params.cursor) {
+        throw RequestError.invalidRequest(undefined, 'The fake agent could not read that page')
+      }
       const cwd = ctx.params.cwd ?? null
       const day = 24 * 3600 * 1000
       const known: SessionInfo[] = [...sessions.values()].map((session) => ({
