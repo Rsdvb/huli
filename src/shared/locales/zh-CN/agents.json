@@ -38,5 +38,27 @@
     "done": "已安装 Node.js {{version}}",
     "upToDate": "Node.js {{version}} 已是最新",
     "hint": "装在纸鸢自己的文件夹里，不需要管理员权限，不改系统设置。"
+  },
+  "profiles": {
+    "own": "{{name}} 自己的登录",
+    "ownShort": "自己的登录",
+    "menu": "API 配置",
+    "default": "默认",
+    "switching": "正在切换 API 配置…",
+    "switchHint": "从下一轮起生效",
+    "preset": {
+      "zhipu": "智谱 GLM 编程套餐",
+      "zai": "Z.ai GLM 编程套餐（国际）",
+      "kimi": "Kimi（月之暗面）",
+      "kimi-intl": "Kimi（月之暗面国际站）",
+      "deepseek": "DeepSeek",
+      "bailian": "阿里云百炼 Coding Plan",
+      "ark": "火山方舟 Coding Plan",
+      "minimax": "MiniMax",
+      "minimax-intl": "MiniMax（国际站）",
+      "custom": "自定义"
+    },
+    "betweenTurns": "在两轮之间切换",
+    "gone": "配置已删除"
   }
 }

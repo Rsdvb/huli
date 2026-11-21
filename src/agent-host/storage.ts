@@ -10,6 +10,7 @@ import type {
   VersionMoveReason,
 } from '@shared/agent-host'
 import { GITHUB_PULL_REQUEST_URL, type ProjectWorktreeSettings } from '@shared/git'
+import { isProfileId } from '@shared/provider-profiles'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
 import {
@@ -329,6 +330,7 @@ export interface SessionRecord {
   leftSubSessions?: string[]
   startedBy?: string // the session whose agent started it through start_session
   configDir?: string // the configuration folder picked for its agent when it was created
+  profileId?: string // Huli: the agent's API provider profile it runs with; absent for its own sign-in
   pullRequests?: string[] // the pull requests it opened, oldest first, by their github.com URL
   /** The agents that had the session before its current one took over, oldest first. */
   earlier?: EarlierAgent[]
@@ -997,6 +999,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...leftSubSessionsOf(item.leftSubSessions),
       ...(isString(item.startedBy) ? { startedBy: item.startedBy } : {}),
       ...(isString(item.configDir) && item.configDir !== '' ? { configDir: item.configDir } : {}),
+      ...(isProfileId(item.profileId) ? { profileId: item.profileId } : {}),
       ...pullRequestsOf(item.pullRequests),
       ...earlierOf(item.earlier),
       ...carryOf(item.carry),

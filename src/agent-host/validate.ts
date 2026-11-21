@@ -62,6 +62,7 @@ import {
   type WorktreeInspection,
 } from '@shared/git'
 import type { Platform } from '@shared/platform'
+import { isProfileId } from '@shared/provider-profiles'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
 import {
@@ -192,6 +193,14 @@ function string(o: Fields, key: string, max: number): string {
 
 function optionalString(o: Fields, key: string, max: number): string | undefined {
   return o[key] === undefined ? undefined : string(o, key, max)
+}
+
+/** Huli: an API provider profile's id, or null for the agent's own sign-in; undefined when absent. */
+function optionalProfile(o: Fields): string | null | undefined {
+  const value = o.profileId
+  if (value === undefined || value === null) return value
+  if (!isProfileId(value)) throw invalidParams('profileId must be a profile id or null')
+  return value
 }
 
 // Huli: a removal step's id, `part:kind:path`, as the host's plan names it.
@@ -1853,7 +1862,9 @@ export function createValidators(platform: Platform): Validators {
       const parentId = optionalString(o, 'parentId', ID_CHARS)
       const preparedId = optionalString(o, 'preparedId', ID_CHARS)
       const options = o.options === undefined ? undefined : configValues(o.options)
+      const profileId = optionalProfile(o)
       return {
+        ...(profileId !== undefined ? { profileId } : {}),
         agentId: agentId(o),
         // null: no project, so the host makes a scratch folder.
         projectPath: o.projectPath === null ? null : absolutePath(o, 'projectPath', platform),
@@ -1871,7 +1882,9 @@ export function createValidators(platform: Platform): Validators {
       if (o.replace !== undefined && typeof o.replace !== 'boolean') {
         throw invalidParams('replace must be a boolean')
       }
+      const profileId = optionalProfile(o)
       return {
+        ...(profileId !== undefined ? { profileId } : {}),
         agentId: agentId(o),
         projectPath: o.projectPath === null ? null : absolutePath(o, 'projectPath', platform),
         ...(parentId !== undefined ? { parentId } : {}),
@@ -1880,6 +1893,12 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'sessions.discard': (params) => ({ sessionId: sessionId(fields(params)) }),
+    'sessions.setProfile': (params) => {
+      const o = fields(params)
+      const profileId = optionalProfile(o)
+      if (profileId === undefined) throw invalidParams('profileId must be a profile id or null')
+      return { sessionId: sessionId(o), profileId }
+    },
     'sessions.import': (params) => {
       const o = fields(params)
       if (o.source !== undefined && o.source !== 'claude-desktop') {

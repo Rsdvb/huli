@@ -94,6 +94,7 @@ import { NetworkChoiceRow } from './agent-network-rows'
 import { RemoveAgentDialog } from './agent-remove'
 import { ResetRow } from './agent-reset'
 import { BalanceGroup } from './agent-balance'
+import { ProfilesGroup } from './agent-profiles'
 import { AgentProviders } from './agent-providers'
 import {
   currentLimits,
@@ -1252,6 +1253,8 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             </RowGroup>
           </section>
         )}
+
+        {!providerMode && status.profiles && <ProfilesGroup status={status} />}
 
         {status.disabled ? null : providerMode ? (
           <SpendGroup status={status} providers />

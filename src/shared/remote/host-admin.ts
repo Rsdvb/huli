@@ -7,6 +7,7 @@ import type { HostToMain } from '../host-control'
 import type { AppInfo, RemotePairingEvent } from '../ipc'
 import type { AgentNetworkChoice, DefaultRoute } from '../agent-network'
 import type { MarketKeysPatch, MarketKeyState } from '../marketplace'
+import type { ProfileDraft } from '../provider-profiles'
 import {
   DEFAULT_SETTINGS,
   type AgentColor,
@@ -225,6 +226,10 @@ export interface HostAdminContract {
     params: { agentId: string; variable: string; value: string | null }
     result: void
   }
+  // Huli: the host's API provider profiles, as the window's `profiles` calls.
+  'profiles.save': { params: { draft: ProfileDraft }; result: string }
+  'profiles.remove': { params: { agentId: string; profileId: string }; result: void }
+  'profiles.setDefault': { params: { agentId: string; profileId: string | null }; result: void }
   'remote.status': { params: undefined; result: RemoteStatus }
   /** Opens a pairing code whose progress goes to this device alone; null while remote access is off. */
   'remote.pair': { params: undefined; result: number | null }
@@ -318,6 +323,9 @@ const METHODS: Record<HostAdminMethod, true> = {
   'settings.setAgentNetwork': true,
   'marketplace.setKeys': true,
   'marketplace.setAgentEnv': true,
+  'profiles.save': true,
+  'profiles.remove': true,
+  'profiles.setDefault': true,
   'remote.status': true,
   'remote.pair': true,
   'remote.closePairing': true,

@@ -183,6 +183,9 @@ export interface HostAdminDeps {
   marketKeys: {
     set(patch: unknown): Promise<MarketKeyState>
     setAgentEnv(agentId: string, variable: string, value: string | null): Promise<void>
+    saveProfile(draft: unknown): Promise<string>
+    removeProfile(agentId: unknown, profileId: unknown): Promise<void>
+    setDefaultProfile(agentId: unknown, profileId: unknown): Promise<void>
   }
   /** An artifact version's preview as a data URL; null where the host cannot capture, as the daemon. */
   thumbnail: ((id: unknown, version: unknown, layout: unknown) => Promise<string | null>) | null
@@ -405,6 +408,16 @@ export class HostAdmin {
           throw new TypeError('The agent environment key request is invalid')
         }
         return this.deps.marketKeys.setAgentEnv(agentId, variable, value)
+      }
+      case 'profiles.save':
+        return this.deps.marketKeys.saveProfile(fields(params).draft)
+      case 'profiles.remove': {
+        const { agentId, profileId } = fields(params)
+        return this.deps.marketKeys.removeProfile(agentId, profileId)
+      }
+      case 'profiles.setDefault': {
+        const { agentId, profileId } = fields(params)
+        return this.deps.marketKeys.setDefaultProfile(agentId, profileId)
       }
       case 'remote.status':
         return this.deps.remoteStatus()

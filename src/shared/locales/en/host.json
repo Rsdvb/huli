@@ -54,6 +54,14 @@
     "worktreeGone": "This session's worktree and its branch were removed, so it can't continue.",
     "worktreeInterrupted": "The worktree's preparation was interrupted. Run it again or go on without it.",
     "untitled": "Untitled session",
+    "profile": {
+      "unsupported": "This agent's sessions take no API profile.",
+      "unknown": "This agent has no such API profile. It may have been removed.",
+      "gone": "The API profile this session ran with was removed. Pick another in the model menu to continue.",
+      "prepared": "A new session takes its API profile when it is prepared.",
+      "betweenTurns": "The API profile changes between turns.",
+      "keyRefused": "The provider refused the API profile's key. Check the key in Settings › Agents."
+    },
     "subagent": {
       "noPrompt": "A subagent session takes its instructions from its parent",
       "noFork": "A subagent session cannot be forked",

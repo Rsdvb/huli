@@ -349,6 +349,21 @@ describe('the host files', () => {
     })
   })
 
+  // Huli: the API provider profile a session runs with, by id; one that is not an id is dropped.
+  it('keeps the API profile a session runs with', () => {
+    const profiled: SessionRecord = { ...session, profileId: 'p-1' }
+    expect(parseSessionsFile({ sessions: [profiled] })).toEqual({
+      version: 1,
+      sessions: [profiled],
+    })
+    for (const profileId of ['', 'Has Spaces', 3, null]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, profileId }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
   it('keeps the agents that had a session before its current one', () => {
     const switched: SessionRecord = {
       ...session,

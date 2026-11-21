@@ -257,6 +257,7 @@ import type {
 } from './storage'
 import { readUvxVersion, uvxFetchArgs, writeUvxVersion } from './uvx-install'
 import { compareVersions, versionAtLeast } from './versions'
+import type { AgentProfiles, ProfileBalance } from '@shared/provider-profiles'
 
 /** The process a process driver speaks over. */
 export interface LaunchedAgent extends AgentRun {
@@ -458,6 +459,10 @@ export interface AgentManagerDeps extends DriverOverrides {
   /** The environment the agent's own process starts with, from the one it would have. */
   launchEnv?(agentId: AgentId, env: Env): Env
   envKeyIsSet?(agentId: AgentId, variable: string): boolean
+  /** Huli: the agent's API provider profiles as clients see them, and their vendors' balances. */
+  profiles?(agentId: AgentId): { view: AgentProfiles | null; balances: ProfileBalance[] }
+  /** Huli: reads the balances of the agent's profiles whose vendor has an API, as the user looks. */
+  readProfileBalances?(agentId: AgentId, force: boolean): void
   /** Huli: the credential store a reset checks and clears; the system's by default. */
   secretStore?: SecretStore
   /** Huli: removes what the agent keeps of a hidden session it never prompted. */
@@ -667,6 +672,17 @@ export function otherAccount(before: AgentAccount, next: AgentAccount): boolean 
 }
 
 /** Huli: drops the plan's windows, balances and reset credits an account read. */
+/** Huli: the status fields of an agent's profiles, for an agent whose sessions take them. */
+function profilesOf(
+  profiles: { view: AgentProfiles | null; balances: ProfileBalance[] } | undefined,
+): Pick<AgentStatus, 'profiles' | 'profileBalances'> {
+  if (!profiles?.view) return {}
+  return {
+    profiles: profiles.view,
+    ...(profiles.balances.length > 0 ? { profileBalances: profiles.balances } : {}),
+  }
+}
+
 function forgetReadings(slot: Slot): void {
   slot.limits.clear()
   slot.limitsReadAt = 0
@@ -3817,6 +3833,10 @@ export class AgentManager {
   ): Promise<void> {
     if (!this.has(agentId) || this.isDisabled(agentId)) return
     const slot = this.slot(agentId)
+    // Huli: what a profile's key has left is read when the user looks, as the usage page does.
+    if (options?.ask || options?.force) {
+      this.deps.readProfileBalances?.(agentId, options.force === true)
+    }
     if (slot.def.id === 'opencode') return this.refreshProviders(slot, options?.force === true)
     if (slot.def.id === 'deepseek') {
       return this.refreshBalance(slot, options?.force === true ? 'forced' : 'due')
@@ -5618,6 +5638,12 @@ export class AgentManager {
     if (slot.runtime && this.hooks.liveSessions(slot.id) === 0) await this.stopProcess(slot)
   }
 
+  /** Huli: the agent's profiles or their balances changed, which its status shows. */
+  profilesChanged(agentId: AgentId): void {
+    const slot = this.slots.get(agentId)
+    if (slot) this.emit(slot)
+  }
+
   async agentEnvChanged(agentId: AgentId): Promise<void> {
     const slot = this.registeredSlot(agentId)
     const key = slot.def.keySignIn
@@ -6036,6 +6062,7 @@ export class AgentManager {
         slot.def.id === 'codebuddy'
           ? { set: slot.apiKey, providers: slot.def.id === 'claude-code' }
           : null,
+      ...profilesOf(this.deps.profiles?.(agentId)),
       state: slot.state,
       // Kettu's own install names its release when the program reports no version of its own.
       version: init?.version ?? h.binaryVersion ?? installed?.version ?? null,

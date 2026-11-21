@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowDown01Icon, ArrowReloadHorizontalIcon, Clock01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
+import { balanceVendor } from '@shared/provider-profiles'
 import type { AgentId } from '@shared/thread'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
@@ -25,7 +26,7 @@ import { shownPercent } from '@renderer/lib/plan-limit'
 import type { LimitWay } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
 import { agentsOn, isInstalled, useAgentsStore, usePlanReadings } from '@renderer/stores/agents'
-import { planLimitWays, readLimitsThrough } from '@renderer/stores/usage'
+import { planLimitWays, readLimitsThrough, refreshLimits } from '@renderer/stores/usage'
 import {
   useHostName,
   useShownHostAgents,
@@ -71,6 +72,24 @@ function HostPlanLimits({ used }: { used: Readonly<Record<string, readonly Agent
     Object.fromEntries([...toRead.keys()].map((key) => [key, 'reading' as const])),
   )
   const [open, setOpen] = useState(false)
+  // Huli: the balances of the API profiles whose vendor tells them, read as the page opens; the
+  // host reads each agent's at most once a minute.
+  const [profileReads] = useState(() =>
+    away
+      ? []
+      : shownHosts.flatMap(({ hostId, agents }) =>
+          agents
+            .filter((agent) => agent.profiles?.items.some((p) => balanceVendor(p) !== null))
+            .map((agent) => ({ hostId, agentId: agent.id })),
+        ),
+  )
+  useEffect(() => {
+    for (const { hostId, agentId } of profileReads) {
+      refreshLimits(agentId, hostId, true).catch((error: unknown) =>
+        console.warn(`Could not read the API profiles' balances: ${errorMessage(error)}`),
+      )
+    }
+  }, [profileReads])
   useEffect(() => {
     for (const [key, ways] of toRead) {
       // The user opened the page: a read they asked for.
@@ -214,9 +233,11 @@ function PlanCard({ card, named, now }: { card: UsageCard; named: boolean; now: 
         <div className="k-u-plan__body">
           <span aria-hidden className="k-u-rings--empty" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="k-u-plan__none" data-failed={failed || undefined}>
-              {failed ? t('limits.neverRead') : t('limits.notYet')}
-            </span>
+            {(!card.balanceOnly || failed) && (
+              <span className="k-u-plan__none" data-failed={failed || undefined}>
+                {failed ? t('limits.neverRead') : t('limits.notYet')}
+              </span>
+            )}
             {balanceRows}
           </span>
         </div>

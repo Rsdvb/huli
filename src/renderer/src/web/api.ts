@@ -337,6 +337,11 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       setAgentEnv: (agentId, variable, value) =>
         admin('marketplace.setAgentEnv', { agentId, variable, value }),
     },
+    profiles: {
+      save: (draft) => admin('profiles.save', { draft }),
+      remove: (agentId, profileId) => admin('profiles.remove', { agentId, profileId }),
+      setDefault: (agentId, profileId) => admin('profiles.setDefault', { agentId, profileId }),
+    },
     remote: {
       status: () => admin('remote.status'),
       pair: () => admin('remote.pair'),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDataTransferHorizontalIcon } from '@hugeicons/core-free-icons'
+import { ApiIcon, ArrowDataTransferHorizontalIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { cacheExpiry, knownExpiry } from '@shared/prompt-cache'
@@ -30,7 +30,7 @@ import {
   useAgentSwitchStore,
 } from '@renderer/stores/agent-switch'
 import { agentsOn, useAgentsStore, usePlanReadings } from '@renderer/stores/agents'
-import { hostOfSession } from '@renderer/stores/sessions'
+import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import { AgentMarkHost } from '@renderer/components/agents/agent-mark-host'
 import { AgentMenu } from '@renderer/features/session/new-session/agent-menu'
 import { readFirstOptions } from '@renderer/features/session/new-session/prepared'
@@ -65,6 +65,7 @@ import { PromptBox } from './prompt-box'
 import { CACHE_NOTICE_MIN_TOKENS, CacheNotice } from './cache-notice'
 import { QueueButton, SendButton, StopButton } from './send-button'
 import { SessionPlace } from './session-place'
+import { ProfileChip } from './profile-chip'
 import { SwitchConfirm } from './switch-confirm'
 import { SwitchStrip } from './switch-strip'
 import { QuotaStrip } from './quota-strip'
@@ -119,6 +120,7 @@ export function Composer({
   mustSwitch?: boolean
 }) {
   const { t } = useTranslation(['composer', 'session'])
+  const { t: ta } = useTranslation('agents')
   const sessionId = session.id
   // Another agent picked to take the session over with the next message, shown as its own.
   const pending = useAgentSwitchStore((s) => s.pending[sessionId] ?? null)
@@ -337,6 +339,42 @@ export function Composer({
     )
   }
   const modeControl = useModeControl(mode, set)
+
+  // Huli: the API profile the session runs with; a change between turns starts its agent again.
+  const profileId = useSessionsStore((s) => s.byId[sessionId]?.profileId ?? null)
+  const profiles = agent?.profiles
+  const profileTrigger = useRef<HTMLButtonElement>(null)
+  const [switchingProfile, setSwitchingProfile] = useState(false)
+  const chooseProfile = (next: string | null): void => {
+    setConfigError(null)
+    setSwitchingProfile(true)
+    host('sessions.setProfile', { sessionId, profileId: next })
+      .catch((e: unknown) => setConfigError(errorMessage(e)))
+      .finally(() => setSwitchingProfile(false))
+  }
+  // One that failed or waits for a sign-in may change too: another profile is its way on.
+  const profileIdle = idle || status === 'failed' || status === 'auth_required'
+  const profileHint = switchingProfile
+    ? ta('profiles.switching')
+    : profileIdle
+      ? null
+      : ta('profiles.betweenTurns')
+  const profileAction =
+    profiles && profiles.items.length > 0 && !pending && !mustSwitch
+      ? [
+          {
+            id: 'api-profile',
+            label: `${ta('profiles.menu')} · ${
+              profiles.items.find((p) => p.id === profileId)?.name ?? ta('profiles.ownShort')
+            }`,
+            icon: <Glyph icon={ApiIcon} />,
+            disabled: profileHint !== null,
+            ...(profileHint ? { hint: profileHint } : {}),
+            // The menu closes first; the tray's chip then opens its own.
+            onSelect: () => setTimeout(() => profileTrigger.current?.click(), 0),
+          },
+        ]
+      : []
 
   // A session shown, started or done with its turn focuses its composer, in the pane in focus
   // only, when the focus is nowhere else, as after New session's composer gave way to it.
@@ -798,6 +836,7 @@ export function Composer({
               source={agent?.version ? `${agent.harnessName} ${agent.version}` : null}
               cacheNote={cacheNote}
               actions={[
+                ...profileAction,
                 {
                   id: 'switch-agent',
                   label: t('switchAgent.menu'),
@@ -826,6 +865,16 @@ export function Composer({
             <span className="kettu-tray__group">
               <SessionPlace sessionId={sessionId} projectPath={session.projectPath} />
               <BranchTrayLink projectPath={folder} />
+              {!pending && !mustSwitch && (
+                <ProfileChip
+                  agentId={session.agentId}
+                  hostId={hostId}
+                  value={profileId}
+                  onChange={chooseProfile}
+                  disabledHint={profileHint}
+                  triggerRef={profileTrigger}
+                />
+              )}
             </span>
             {shownError && (
               <p className="kettu-tray__error" role="alert" title={shownError}>

@@ -4191,3 +4191,60 @@ describe("Claude Code's predicted next prompt", () => {
     expect(target.thread.session.suggestion).toBeNull()
   })
 })
+
+// Huli: a session run with an API provider profile.
+describe('API provider profiles', () => {
+  const KEY = 'sk-profile-SECRET-0123456789abcd'
+  const provider = {
+    profileId: 'p1',
+    model: 'glm-5.3[1m]',
+    plain: {
+      ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
+      ANTHROPIC_MODEL: 'glm-5.3[1m]',
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_API_KEY: '',
+    },
+    secret: { ANTHROPIC_AUTH_TOKEN: KEY },
+  }
+  const shown = (value: unknown): string =>
+    JSON.stringify(value, (_key, item: unknown) => (typeof item === 'function' ? '[fn]' : item))
+
+  it('puts the address on the flag layer and the key only over the control channel', async () => {
+    const s = await setup()
+    await s.connection.newSession('/repo', { provider })
+    const query = s.sdk.last
+    // The flag layer outranks settings.json, whose own key it sets empty.
+    expect(query.options.settings?.env).toEqual(provider.plain)
+    // Neither the command line's settings nor the process's environment holds the key.
+    expect(shown(query.options)).not.toContain('SECRET')
+    expect(shown(s.spawned)).not.toContain('SECRET')
+    const applied = query.calls.filter((call) => call.method === 'applyFlagSettings')
+    expect(applied).toEqual([
+      {
+        method: 'applyFlagSettings',
+        args: [{ env: { ...provider.plain, ANTHROPIC_AUTH_TOKEN: KEY } }],
+      },
+    ])
+    // A profile's session says nothing of the agent's own account.
+    expect(s.accounts).toEqual([])
+  })
+
+  it('opens a session on its own sign-in without a flag layer for the profile', async () => {
+    const s = await setup()
+    await s.connection.newSession('/repo')
+    expect(s.sdk.last.options.settings?.env).toBeUndefined()
+    expect(s.sdk.last.calls.some((call) => call.method === 'applyFlagSettings')).toBe(false)
+  })
+
+  it('stops the query when the key cannot be handed over', async () => {
+    const s = await setup()
+    const start = s.sdk.query.bind(s.sdk)
+    s.sdk.query = (params) => {
+      const query = start(params)
+      query.applyFlagSettings = () => Promise.reject(new Error('refused'))
+      return query
+    }
+    await expect(s.connection.newSession('/repo', { provider })).rejects.toThrow('refused')
+    expect(s.sdk.last.closed).toBe(true)
+  })
+})

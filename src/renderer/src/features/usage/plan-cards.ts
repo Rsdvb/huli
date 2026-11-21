@@ -120,6 +120,8 @@ export interface UsageCard {
   places: CardPlace[]
   /** Its reset credits; null for an account that holds none, which shows nothing of them. */
   resets: CardResets | null
+  /** Huli: an API profile's balance, which has no plan windows to wait for. */
+  balanceOnly?: true
 }
 
 /** How the page's own read of a card's limits went, by the card's key. */
@@ -146,6 +148,27 @@ export function usageCards(
     const usedHere = used[hostId ?? ''] ?? []
     for (const agent of agents) {
       const place = { hostId, agentId: agent.id, agentName: agent.name }
+      // Huli: what each API profile's key has left, from its vendor, as a card of its own.
+      for (const read of agent.profileBalances ?? []) {
+        const profile = agent.profiles?.items.find((item) => item.id === read.profileId)
+        if (!profile || (read.balances.length === 0 && !read.error)) continue
+        cards.push({
+          key: ownKey(hostId, `${agent.id}:profile:${profile.id}`),
+          agentId: agent.id,
+          hostId,
+          name: profile.name,
+          email: null,
+          plan: null,
+          tier: null,
+          rings: [],
+          balances: read.balances,
+          state: read.error && read.balances.length === 0 ? 'failed' : 'ready',
+          readAt: read.observedAt,
+          places: [place],
+          resets: null,
+          balanceOnly: true,
+        })
+      }
       // A provider with only a balance, such as DeepSeek's, shows it in Settings, not as a card.
       const providers = (agent.providers ?? []).filter(
         (provider) => (provider.usage?.limits.length ?? 0) > 0 || provider.usage?.state === 'error',

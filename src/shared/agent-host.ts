@@ -117,6 +117,7 @@ import type {
   WorktreeInspection,
 } from './git'
 import type { PortConnectionState } from './port-rpc'
+import type { AgentProfiles, ProfileBalance } from './provider-profiles'
 import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type {
@@ -430,6 +431,11 @@ export interface AgentStatus {
   color?: AgentColor // an added agent's dot on its mark; absent for a harness's default agent
   // Whether Kettu handed this agent's harness an API key; null for a harness that takes none.
   apiKey: { set: boolean; providers: boolean } | null
+  // Huli: its API provider profiles, without their keys; absent for an agent whose sessions take
+  // none, and from older hosts.
+  profiles?: AgentProfiles
+  // Huli: the balances the vendors of its profiles report, by profile, where a vendor has an API.
+  profileBalances?: ProfileBalance[]
   state: AgentState
   // From `initialize`, a binary agent's `--version`, or the `requires` program's (Pi's `pi`); for
   // Kettu's own install of a program that reports none, the release it installed.
@@ -831,6 +837,9 @@ export interface SessionSummary {
   prs?: SessionPullRequest[] // opened in it, then its branch's; absent from older hosts
   cache: PromptCache | null // the main thread's prompt cache as its last turn or request left it
   model: string | null // the model option then, for an estimate of the cache's lifetime
+  // Huli: the API provider profile it runs with, by id among its agent's; null or absent for the
+  // agent's own sign-in.
+  profileId?: string | null
   pinnedAt: number | null // when the user pinned it; a top-level session only
   archivedAt: number | null // when the user archived it; off the sidebar while set
   acpSessionId: string | null // the harness's own id for it, which its CLI resumes; null until known
@@ -1281,6 +1290,9 @@ export interface HostContract {
       preparedId?: string
       // A new worktree, cut from `base`, to work in; `branch` is the user's name for its branch.
       worktree?: { base: string; branch?: string }
+      // Huli: the agent's API provider profile it runs with; null for the agent's own sign-in,
+      // absent for the agent's default.
+      profileId?: string | null
     }
     result: SessionSummary
   }
@@ -1368,10 +1380,15 @@ export interface HostContract {
       parentId?: string
       options?: Record<string, string | boolean>
       replace?: boolean
+      // Huli: as for sessions.create.
+      profileId?: string | null
     }
     result: SessionSummary
   }
   'sessions.discard': { params: { sessionId: string }; result: void }
+  // Huli: the API provider profile the session runs with from its next turn, between turns; null
+  // for its agent's own sign-in. Its agent starts again on the session's history.
+  'sessions.setProfile': { params: { sessionId: string; profileId: string | null }; result: void }
   // `fork`: a copy of the session is imported instead, for one another program still has open.
   'sessions.import': {
     // Huli: `source`, chosen among the Claude desktop app's sessions, so it takes the app's title,
@@ -2210,6 +2227,7 @@ export const HOST_METHODS = [
   'sessions.create',
   'sessions.prepare',
   'sessions.discard',
+  'sessions.setProfile',
   'sessions.import',
   'sessions.open',
   'sessions.snapshot',

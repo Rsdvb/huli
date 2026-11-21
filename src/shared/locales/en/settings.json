@@ -1424,7 +1424,51 @@
     },
     "signInDone": "{{name}} is signed in",
     "signInNotDone": "{{name}} is not signed in yet",
-    "backToAgent": "Back to its settings"
+    "backToAgent": "Back to its settings",
+    "profiles": {
+      "group": "API profiles",
+      "hint": "Run sessions on another provider's API key. New sessions start with the default, and a session can switch in its model menu. Kite keeps the keys encrypted on this computer and never shows them again.",
+      "ownHint": "Its account, or the API key in its own settings",
+      "makeDefault": "Make default",
+      "add": "Add API profile",
+      "edit": "Edit {{name}}",
+      "remove": "Remove {{name}}",
+      "keyEnd": "Key …{{end}}",
+      "balance": "Balance {{amount}}",
+      "balanceFailed": "Could not read the balance",
+      "balancesRefresh": "Read the balances again",
+      "dialog": {
+        "addTitle": "New API profile",
+        "editTitle": "Edit {{name}}",
+        "description": "Pick a provider and paste its API key: the address and models come from the provider's own Claude Code guide.",
+        "provider": "Provider",
+        "name": "Name",
+        "key": "API key",
+        "keyKeep": "Empty keeps the key ending in {{end}}",
+        "keyKeepNoEnd": "Empty keeps the saved key",
+        "getKey": "Get a key",
+        "baseUrl": "Base URL",
+        "model": "Model",
+        "modelHint": "Empty uses Claude Code's own default",
+        "fastModel": "Fast model",
+        "fastModelHint": "For quick work; empty uses the model",
+        "makeDefault": "New sessions use this profile",
+        "save": "Save"
+      },
+      "removeConfirm": {
+        "title": "Remove {{name}}?",
+        "body": "Its key is deleted from this computer. A session that ran with it continues once it picks another profile.",
+        "action": "Remove"
+      },
+      "problem": {
+        "name": "Give it a name of at most 40 characters.",
+        "preset": "Pick a provider.",
+        "baseUrl": "The base URL must be an http or https address.",
+        "model": "A model name cannot hold spaces.",
+        "key": "The key cannot hold spaces.",
+        "keyMissing": "Paste the provider's API key."
+      }
+    }
   },
   "about": {
     "version": {

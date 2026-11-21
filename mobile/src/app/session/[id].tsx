@@ -67,6 +67,8 @@ import {
   modelPage,
   moreModelsPage,
   optionPage,
+  profileLabel,
+  profilesPage,
   startConfig,
   usableAgents,
   type AgentMenuProps,
@@ -329,6 +331,11 @@ function Session() {
   const running = status === 'running' || status === 'awaiting_permission'
   const agentId = session?.agentId ?? summary?.agentId ?? ''
   const agent = agents.get(agentId)
+  // Huli: the API profile it runs with, named where its agent keeps profiles.
+  const profileShown =
+    agent?.profiles && agent.profiles.items.length > 0
+      ? profileLabel(agent, summary?.profileId ?? null)
+      : null
   const connected = hostState.kind === 'connected'
   // The session's agent is gone from the computer: a message goes only once another is picked.
   const mustSwitch =
@@ -1079,8 +1086,33 @@ function Session() {
             setUsageOpen(true)
           },
           cacheNote,
+          profile: profileShown
+            ? {
+                label: profileShown,
+                ...(status === 'ready' ||
+                status === 'closed' ||
+                status === 'failed' ||
+                status === 'auth_required'
+                  ? {}
+                  : { disabled: true, hint: '在两轮之间才能换' }),
+              }
+            : null,
         })
       }
+      case 'profiles':
+        return profilesPage(agent, summary?.profileId ?? null, (profileId) => {
+          menu.close()
+          if (profileId === (summary?.profileId ?? null)) return
+          haptic.pick()
+          void link
+            .request('sessions.setProfile', { sessionId: id, profileId })
+            .catch((error: unknown) =>
+              showNotice({
+                text: error instanceof Error ? error.message : '没能切换 API 配置',
+                tone: 'warning',
+              }),
+            )
+        })
       case 'more':
         return moreModelsPage(control, pendingSwitch?.agentId ?? agentId)
       case 'agents':
@@ -1457,7 +1489,7 @@ function Session() {
           (pinned && hasThread ? PLAN_PILL_ROOM + (linkDown ? 42 : 0) : 0)
         }
         title={title}
-        subtitle={[agent?.name, project].filter(Boolean).join(' · ')}
+        subtitle={[agent?.name, profileShown, project].filter(Boolean).join(' · ')}
         titleAnchor={titleAnchor}
         {...(summary ? { titleMenu: { root: 'title', pages } } : {})}
         {...(summary

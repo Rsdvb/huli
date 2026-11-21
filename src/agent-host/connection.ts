@@ -420,6 +420,16 @@ export interface SessionOptions {
   systemPromptAppend?: string
   /** The session is a routine's run, which an agent's budget for routine runs holds. */
   routine?: boolean
+  /**
+   * Huli: the API provider profile the session runs with, for an agent that takes one: `plain`
+   * may go on a command line, `secret` must not; `model` is the profile's main model.
+   */
+  provider?: {
+    profileId: string
+    model: string | null
+    plain: Record<string, string>
+    secret: Record<string, string>
+  }
 }
 
 /** Kettu's memory as a session starts with it. */

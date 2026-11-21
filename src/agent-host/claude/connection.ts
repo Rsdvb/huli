@@ -966,10 +966,13 @@ export class ClaudeConnection implements AgentConnection {
     const mode: PermissionMode = modes.includes(wanted as PermissionMode)
       ? (wanted as PermissionMode)
       : 'default'
-    const mainModel =
-      typeof settings.values.model === 'string'
-        ? settings.values.model
-        : (this.env.ANTHROPIC_MODEL ?? null)
+    // Huli: a profile's variables outrank the settings files, as the flag layer below sets them.
+    const provider = options.provider
+    const ownModel = typeof settings.values.model === 'string' ? settings.values.model : null
+    const mainModel = provider
+      ? (provider.model ?? ownModel)
+      : (ownModel ?? this.env.ANTHROPIC_MODEL ?? null)
+    const env: Env = provider ? { ...this.env, ...provider.plain } : this.env
     const input = new Input()
     const windowOf = (model: string): number | null =>
       contextWindow(session.compact, model, ownWindow(session.totals, model))
@@ -995,7 +998,7 @@ export class ClaudeConnection implements AgentConnection {
       turn: null,
       resumed: how.resume,
       totals: undefined,
-      compact: settings.known ? compactWindows(settings.values, this.env) : NO_COMPACT_WINDOWS,
+      compact: settings.known ? compactWindows(settings.values, env) : NO_COMPACT_WINDOWS,
       states: false,
       busy: false,
       jobs: 0,
@@ -1034,6 +1037,11 @@ export class ClaudeConnection implements AgentConnection {
     // Through the SDK, Claude Code starts the servers of a folder's .mcp.json without asking.
     session.held = bare ? [] : await this.heldServers(cwd, options)
     if (session.held.length > 0) flags.disabledMcpjsonServers = session.held
+    // Huli: the profile's address and models, with its key's variable and the agent's own sign-in
+    // set empty: the command line, which other users can read, carries no key, and nothing of the
+    // agent's own settings reaches the profile's provider. The key follows over the control
+    // channel once the query has started, before any request.
+    if (provider) flags.env = provider.plain
     const servers = bare ? [] : (options.mcpServers ?? [])
     // The SDK writes this option onto Claude Code's command line, which other users can read, so a
     // server that holds a key comes only through the control channel once the query has started.
@@ -1164,8 +1172,20 @@ export class ClaudeConnection implements AgentConnection {
       query.close()
       throw this.closedError()
     }
+    if (provider) {
+      try {
+        await query.applyFlagSettings({ env: { ...provider.plain, ...provider.secret } })
+      } catch (error) {
+        session.query = null
+        input.close()
+        query.close()
+        void reading
+        throw new AgentRequestError('agent_error', errorText(error))
+      }
+    }
     if (servers.some((server) => server.secret)) this.addSecretServers(session, query, servers)
-    this.reportAccount(init.account)
+    // Huli: a profile's session tells nothing of the agent's own account.
+    if (!provider) this.reportAccount(init.account)
     session.models = init.models ?? []
     session.choices.model = settingsModel(session.models, mainModel)
     if (typeof settings.values.effortLevel === 'string') {
