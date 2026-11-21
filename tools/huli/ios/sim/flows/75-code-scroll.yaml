@@ -1,6 +1,6 @@
-# A reply's code block scrolls sideways: its lines run past the screen, and a swipe left on the code
-# shows their ends. iOS's context menu once held the whole block and took the swipe; it now holds
-# the block's head alone, whose long press still opens the menu.
+# A reply's code block and table scroll sideways: their lines run past the screen, and a swipe left
+# shows their ends. iOS's context menu once held the whole reply and took the swipe; a reply with
+# such a block now opens its menu as the sheet, and a code block's own menu sits on its head.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -48,11 +48,10 @@ appId: io.github.rsdvb.huli
     duration: 600
 - waitForAnimationToEnd
 - takeScreenshot: k02b-table-swiped
-# The head's long press still opens the menu.
+# A long press on the reply still opens its menu, as the sheet.
 - longPressOn:
-    text: 'ts'
+    point: 50%, 40%
 - extendedWaitUntil:
-    visible: '选择文本'
+    visible: '复制为 Markdown'
     timeout: 4000
-    optional: true
-- takeScreenshot: k03-code-menu
+- takeScreenshot: k03-reply-menu
