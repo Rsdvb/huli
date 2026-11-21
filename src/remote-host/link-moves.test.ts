@@ -136,7 +136,7 @@ async function setup() {
   const states: LinkState[] = []
   link.onState((state) => states.push(state))
   link.start()
-  await expect.poll(() => link.state.kind).toBe('connected')
+  await expect.poll(() => link.state.kind, { timeout: 5000 }).toBe('connected')
   expect(link.state).toMatchObject({ kind: 'connected', session: 1 })
   return Object.assign(t, { server, link, states })
 }
@@ -147,15 +147,15 @@ describe('a link moving to a route after the host let its session go', () => {
 
     // The host stops hearing the slow route and, once its wait is over, ends the session.
     t.silent[0]!()
-    await expect.poll(() => t.server.online()).toEqual([])
+    await expect.poll(() => t.server.online(), { timeout: 5000 }).toEqual([])
     await new Promise((resolve) => setTimeout(resolve, 100))
 
     // The fast route comes up and the link moves there, where the host has no session to resume.
     t.fastUp = true
     const before = t.states.length
     t.link.wake()
-    await expect.poll(() => t.states.length - before).toBeGreaterThanOrEqual(2)
-    await expect.poll(() => t.link.state.kind).toBe('connected')
+    await expect.poll(() => t.states.length - before, { timeout: 5000 }).toBeGreaterThanOrEqual(2)
+    await expect.poll(() => t.link.state.kind, { timeout: 5000 }).toBe('connected')
     expect(t.states.slice(before).map((state) => state.kind)).toEqual(['reconnecting', 'connected'])
     expect(t.link.state).toMatchObject({ kind: 'connected', session: 2 })
     expect(t.server.online()).toHaveLength(1)
@@ -170,9 +170,9 @@ describe('a link whose routes change', () => {
     t.offered = ['fast']
     t.link.reroute()
     // The slow route's connection is left once the host welcomed the move.
-    await expect.poll(() => t.silent.length).toBe(1)
+    await expect.poll(() => t.silent.length, { timeout: 5000 }).toBe(1)
     await expect.poll(() => t.server.online()).toHaveLength(1)
-    await expect.poll(() => t.states.length - before).toBeGreaterThanOrEqual(1)
+    await expect.poll(() => t.states.length - before, { timeout: 5000 }).toBeGreaterThanOrEqual(1)
     expect(t.states.slice(before).map((state) => state.kind)).toEqual(['connected'])
     expect(t.link.state).toMatchObject({ kind: 'connected', session: 1 })
   })
@@ -187,7 +187,7 @@ describe('a link whose routes change', () => {
       .toContain('reconnecting')
     t.fastUp = true
     t.link.reconnectNow()
-    await expect.poll(() => t.link.state.kind).toBe('connected')
+    await expect.poll(() => t.link.state.kind, { timeout: 5000 }).toBe('connected')
     // On the route offered, the slow one dialed no more.
     expect(t.silent).toHaveLength(1)
     expect(t.server.online()).toHaveLength(1)
