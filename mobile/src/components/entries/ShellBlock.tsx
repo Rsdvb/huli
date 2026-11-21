@@ -12,7 +12,7 @@ import {
   type ToolEntry,
 } from '@shared/thread'
 import { agentIdOf, useSessionField } from '../../ui/session/sessionField'
-import { ContextMenu } from '../../ui/ContextMenu'
+import { ContextMenu, SYSTEM_MENUS } from '../../ui/ContextMenu'
 import type { MenuNode } from '../../ui/menu'
 import { copyText } from '../../ui/session/feedback'
 import { useDisclosure } from '../../ui/session/disclosure'
@@ -160,6 +160,48 @@ export function StepSection(props: {
         },
       ]
     : []
+  const head = (
+    <View style={styles.head}>
+      <Text style={[styles.label, { color: c.textSecondary }]}>
+        {props.label}
+        {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
+      </Text>
+      {text !== undefined ? (
+        <Pressable
+          onPress={() =>
+            void copyText(text, null).then((ok) => {
+              if (!ok) return
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            })
+          }
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
+          style={({ pressed }) => [
+            styles.copy,
+            { borderColor: c.border, backgroundColor: pressed ? c.fillStrong : c.fill },
+          ]}
+        >
+          <Icon
+            icon={copied ? G.copied : G.copy}
+            size={14}
+            color={copied ? c.success : c.textSecondary}
+          />
+        </Pressable>
+      ) : null}
+    </View>
+  )
+  // iOS's context menu takes the pans of what it holds, so there it holds the head alone and the
+  // command and output still scroll sideways; Android's sheet holds the whole section.
+  if (SYSTEM_MENUS) {
+    return (
+      <View style={[styles.section, { borderTopColor: c.border }]}>
+        <ContextMenu items={menu}>{() => head}</ContextMenu>
+        {props.children}
+      </View>
+    )
+  }
   return (
     <ContextMenu items={menu}>
       {(longPress) => (
@@ -168,36 +210,7 @@ export function StepSection(props: {
           delayLongPress={350}
           style={[styles.section, { borderTopColor: c.border }]}
         >
-          <View style={styles.head}>
-            <Text style={[styles.label, { color: c.textSecondary }]}>
-              {props.label}
-              {props.extra ? <Text style={{ color: c.danger }}> · {props.extra}</Text> : null}
-            </Text>
-            {text !== undefined ? (
-              <Pressable
-                onPress={() =>
-                  void copyText(text, null).then((ok) => {
-                    if (!ok) return
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 1500)
-                  })
-                }
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={copied ? '已复制' : `复制${props.label}`}
-                style={({ pressed }) => [
-                  styles.copy,
-                  { borderColor: c.border, backgroundColor: pressed ? c.fillStrong : c.fill },
-                ]}
-              >
-                <Icon
-                  icon={copied ? G.copied : G.copy}
-                  size={14}
-                  color={copied ? c.success : c.textSecondary}
-                />
-              </Pressable>
-            ) : null}
-          </View>
+          {head}
           {props.children}
         </Pressable>
       )}

@@ -1,0 +1,57 @@
+# A reply's code block and table scroll sideways: their lines run past the screen, and a swipe left
+# shows their ends. iOS's context menu once held the whole reply and took the swipe; a reply with
+# such a block now opens its menu as the sheet, and a code block's own menu sits on its head.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/chinese'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+# The drag above put the list at the reply's top; the code lies below.
+- scrollUntilVisible:
+    element:
+      text: '(?s).*export function issueToken.*'
+    direction: DOWN
+    centerElement: true
+    timeout: 30000
+- takeScreenshot: k01-code
+# By the screen, not the element: the code's text is wider than the screen, so its centre, where a
+# swipe on it would start, lies past the right edge.
+- swipe:
+    start: 85%, 36%
+    end: 10%, 36%
+    duration: 600
+- waitForAnimationToEnd
+- takeScreenshot: k02-code-swiped
+# A table beside it, which no menu holds, for comparison.
+- swipe:
+    start: 85%, 60%
+    end: 10%, 60%
+    duration: 600
+- waitForAnimationToEnd
+- takeScreenshot: k02b-table-swiped
+# A long press on the reply still opens its menu, as the sheet.
+- longPressOn:
+    text: '同一个请求里.*'
+- extendedWaitUntil:
+    visible: '复制为 Markdown'
+    timeout: 4000
+- takeScreenshot: k03-reply-menu

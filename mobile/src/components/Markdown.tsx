@@ -20,7 +20,8 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { cacheFor } from '../ui/memory'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { textKey, useDisclosure } from '../ui/session/disclosure'
-import { ContextMenu } from '../ui/ContextMenu'
+import { ContextMenu, SYSTEM_MENUS } from '../ui/ContextMenu'
+import type { MenuNode } from '../ui/menu'
 import { copyText } from '../ui/session/feedback'
 import {
   knownFileRef,
@@ -323,90 +324,105 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
   }
   const refs = props.look.refs
   const fileRef = file ? knownFileRef(file, refs) : null
+  const menu: MenuNode[] = [
+    { key: 'copy', label: '复制代码', icon: 'doc.on.doc', onPress: copy },
+    {
+      key: 'select',
+      label: '选择文本',
+      icon: 'character.cursor.ibeam',
+      onPress: () => selectText({ text: props.text.replace(/\n$/, ''), mono: true }),
+    },
+  ]
+  const head = (
+    <View style={[styles.codeHead, { borderBottomColor: s.codeBorder }]}>
+      <Text
+        style={[
+          styles.codeLang,
+          { color: fileRef ? c.tint : c.textSecondary, flexShrink: 1 },
+          file ? { textTransform: 'none' } : null,
+        ]}
+        numberOfLines={1}
+        ellipsizeMode="head"
+        {...(fileRef && refs
+          ? { onPress: () => openFile(refs.sessionId, fileRef.path, firstLine ?? fileRef.line) }
+          : {})}
+      >
+        {file ?? (language || '代码')}
+      </Text>
+      <PressScale
+        onPress={copy}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel="复制代码"
+        style={styles.codeCopy}
+      >
+        <Icon
+          icon={copied ? G.copied : G.copy}
+          size={13}
+          color={copied ? c.success : c.textSecondary}
+        />
+        <Text style={[styles.codeLang, { color: copied ? c.success : c.textSecondary }]}>
+          {copied ? '已复制' : '复制'}
+        </Text>
+      </PressScale>
+    </View>
+  )
+  const body = (longPress: (() => void) | undefined) => (
+    <Pressable
+      onLongPress={longPress}
+      delayLongPress={350}
+      style={[styles.codeRow, { backgroundColor: s.code }]}
+    >
+      {firstLine !== null && (
+        <Text style={[styles.codeText, styles.gutter, { color: c.textTertiary }]}>
+          {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
+        </Text>
+      )}
+      {/* The rest of the row and no wider, so lines longer than it scroll rather than run past
+          the block's edge, where it clips them. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.codeScroll}
+        contentContainerStyle={[styles.codeBody, firstLine !== null && { paddingLeft: 8 }]}
+      >
+        <Text style={[styles.codeText, { color: c.text }]}>
+          {tokens
+            ? tokens.map((token, i) =>
+                token.kind === 'plain' ? (
+                  token.text
+                ) : (
+                  <Text
+                    key={i}
+                    style={{
+                      color: s.syntax[token.kind],
+                      fontStyle: token.kind === 'comment' ? 'italic' : 'normal',
+                    }}
+                  >
+                    {token.text}
+                  </Text>
+                ),
+              )
+            : shown}
+        </Text>
+      </ScrollView>
+    </Pressable>
+  )
   return (
     <View style={[styles.code, { backgroundColor: s.code, borderColor: s.codeBorder }]}>
-      <View style={[styles.codeHead, { borderBottomColor: s.codeBorder }]}>
-        <Text
-          style={[
-            styles.codeLang,
-            { color: fileRef ? c.tint : c.textSecondary, flexShrink: 1 },
-            file ? { textTransform: 'none' } : null,
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="head"
-          {...(fileRef && refs
-            ? { onPress: () => openFile(refs.sessionId, fileRef.path, firstLine ?? fileRef.line) }
-            : {})}
-        >
-          {file ?? (language || '代码')}
-        </Text>
-        <PressScale
-          onPress={copy}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="复制代码"
-          style={styles.codeCopy}
-        >
-          <Icon
-            icon={copied ? G.copied : G.copy}
-            size={13}
-            color={copied ? c.success : c.textSecondary}
-          />
-          <Text style={[styles.codeLang, { color: copied ? c.success : c.textSecondary }]}>
-            {copied ? '已复制' : '复制'}
-          </Text>
-        </PressScale>
-      </View>
-      <ContextMenu
-        items={[
-          { key: 'copy', label: '复制代码', icon: 'doc.on.doc', onPress: copy },
-          {
-            key: 'select',
-            label: '选择文本',
-            icon: 'character.cursor.ibeam',
-            onPress: () => selectText({ text: props.text.replace(/\n$/, ''), mono: true }),
-          },
-        ]}
-      >
-        {(longPress) => (
-          <Pressable
-            onLongPress={longPress}
-            delayLongPress={350}
-            style={[styles.codeRow, { backgroundColor: s.code }]}
-          >
-            {firstLine !== null && (
-              <Text style={[styles.codeText, styles.gutter, { color: c.textTertiary }]}>
-                {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
-              </Text>
-            )}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={[styles.codeBody, firstLine !== null && { paddingLeft: 8 }]}
-            >
-              <Text style={[styles.codeText, { color: c.text }]}>
-                {tokens
-                  ? tokens.map((token, i) =>
-                      token.kind === 'plain' ? (
-                        token.text
-                      ) : (
-                        <Text
-                          key={i}
-                          style={{
-                            color: s.syntax[token.kind],
-                            fontStyle: token.kind === 'comment' ? 'italic' : 'normal',
-                          }}
-                        >
-                          {token.text}
-                        </Text>
-                      ),
-                    )
-                  : shown}
-              </Text>
-            </ScrollView>
-          </Pressable>
-        )}
-      </ContextMenu>
+      {/* iOS's context menu takes the pans of what it holds, so there it holds the head alone
+          and the code still scrolls sideways; Android's sheet holds the code. */}
+      {SYSTEM_MENUS ? (
+        <>
+          <ContextMenu items={menu}>{() => head}</ContextMenu>
+          {body(undefined)}
+        </>
+      ) : (
+        <>
+          {head}
+          <ContextMenu items={menu}>{(longPress) => body(longPress)}</ContextMenu>
+        </>
+      )}
       {foldable && (
         <Pressable
           onPress={() => {
@@ -910,6 +926,7 @@ const styles = StyleSheet.create({
   codeCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 },
   codeBody: { paddingHorizontal: 12, paddingVertical: 10 },
   codeRow: { flexDirection: 'row' },
+  codeScroll: { flex: 1 },
   gutter: {
     paddingLeft: 10,
     paddingVertical: 10,

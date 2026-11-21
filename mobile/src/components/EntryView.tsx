@@ -9,7 +9,8 @@ import { openArtifact } from '../artifacts'
 import { countRender } from '../ui/renders'
 import { useSessionRows } from '../ui/session/context'
 import { useDisclosure } from '../ui/session/disclosure'
-import { ContextMenu } from '../ui/ContextMenu'
+import { ContextMenu, SYSTEM_MENUS } from '../ui/ContextMenu'
+import { openMenuSheet } from '../ui/MenuSheet'
 import { joinGroups, type MenuNode } from '../ui/menu'
 import { copyText, plainText } from '../ui/session/feedback'
 import { G, Icon, type IconSpec } from '../ui/session/icons'
@@ -55,6 +56,12 @@ type Of<K extends ThreadEntry['kind']> = Extract<ThreadEntry, { kind: K }>
 
 const NO_MENU: MenuNode[] = []
 
+/** A code block or a table: the reply's parts that scroll sideways. */
+const SIDEWAYS = /^ {0,3}(?:```|~~~)|^\s*\|?\s*:?-{3,}:?\s*\|/m
+
+function scrollsSideways(markdown: string): boolean {
+  return SIDEWAYS.test(markdown)
+}
 /**
  * A reply, or one part of a long one, which the conversation draws as rows of their own. Each part
  * opens the reply's menu; the last carries what the reply carried, and while the reply is written,
@@ -115,17 +122,32 @@ function Reply(props: { entry: Of<'agent'>; writing: boolean; part?: ReplyPart }
   return (
     <View style={{ gap: 8 }}>
       {text || (writing && last) ? (
-        <ContextMenu items={menu}>
-          {(longPress) => (
-            <Pressable onLongPress={longPress} delayLongPress={400}>
-              <Markdown
-                markdown={text}
-                streaming={writing && last}
-                {...(part && part.index > 0 ? { continues: true } : {})}
-              />
-            </Pressable>
-          )}
-        </ContextMenu>
+        SYSTEM_MENUS && scrollsSideways(text) ? (
+          // iOS's context menu takes the pans of what it holds, so a reply whose code or table
+          // scrolls sideways opens its menu as the sheet instead.
+          <Pressable
+            onLongPress={menu.length > 0 ? () => openMenuSheet(undefined, menu) : undefined}
+            delayLongPress={400}
+          >
+            <Markdown
+              markdown={text}
+              streaming={writing && last}
+              {...(part && part.index > 0 ? { continues: true } : {})}
+            />
+          </Pressable>
+        ) : (
+          <ContextMenu items={menu}>
+            {(longPress) => (
+              <Pressable onLongPress={longPress} delayLongPress={400}>
+                <Markdown
+                  markdown={text}
+                  streaming={writing && last}
+                  {...(part && part.index > 0 ? { continues: true } : {})}
+                />
+              </Pressable>
+            )}
+          </ContextMenu>
+        )
       ) : null}
       {last && entry.attachments.length > 0 && <CarriedRefs refs={entry.attachments} />}
     </View>
