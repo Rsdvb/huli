@@ -445,6 +445,44 @@ the start's read), `ProviderBalance.granted` in `src/shared/agent-host.ts`, `age
 `mobile/src/ui/session/limits.ts`, and `dsh.account`/`dsh.balance`, `agents.balance`/`agents.phone`
 and `controls.balance` in the locales.
 
+### Plan usage and balances
+
+What the agent page, the model menu, the usage page and the session's usage show beyond upstream's
+reads (checked on 2026-11-21):
+
+- OpenCode's providers, with the key OpenCode stores, over HTTPS to the listed vendor only (no
+  redirects, a bounded reply, one generic error), at most every minute and every 10 s when the user
+  presses refresh: OpenRouter's `GET https://openrouter.ai/api/v1/key`, the key's own limit as a
+  window (its `/api/v1/credits` takes a management key, which OpenCode never holds); SiliconFlow's
+  `GET https://api.siliconflow.cn/v1/user/info` (`siliconflow-cn`, yuan) and `api.siliconflow.com`
+  (`siliconflow`, dollars), `totalBalance` with `balance` as the granted part when the parts add
+  up; DeepSeek's `/user/balance` through dsh's parser, its granted part kept; Z.AI's and Zhipu's
+  quota rows, the newer `CREDIT_LIMIT` ones too (`vendor-usage/glm.ts`).
+- GLM Agent (glm-acp-agent 1.16.0 and later): its own ACP extension `_glm/usage`, which it
+  advertises in its capabilities and answers with the key it keeps, so Kite never reads that key.
+  Its 5-hour and weekly windows show; the MCP allowance is left out, as a used-up one stops no model.
+- Copilot: `account.getQuota`'s `quotaSnapshots` (`entitlementRequests`, `usedRequests`,
+  `resetDate`), as `@github/copilot-sdk` types it, and GitHub's own `quota_snapshots` and
+  `quota_reset_date`.
+- Claude Code: a limits read that fails on a subscription is a `LimitsReadFailed`, which the page
+  shows, instead of no windows that kept the last ones as current.
+- A window without a reset date (Junie's, Qoder's, Auggie's monthly ones) holds for one period from
+  when it was read, a month when the period is not known (`limitHolds` in
+  `src/shared/plan-limits.ts`), then leaves the status, the plan quota and the restart's windows.
+- The balances beside the windows and DeepSeek Harness's balance are kept in `state/agents.json`
+  with when they were read, and show as an earlier run's (`balancesStale`, a `stale` balance) until
+  a read replaces them; a sign-out, a gateway or new credentials clear them with the windows.
+
+Huli's own files: `src/agent-host/vendor-usage/glm.ts` (+ test) and the scrubbed fixtures
+`openrouter-key.json`, `siliconflow-user-info.json`, `copilot-get-quota.json`, `glm-usage.json`
+and `zai-quota-limit.json`. Hooks: `opencode/provider-usage.ts`, `vendor-usage/copilot.ts`,
+`agents.ts` (`readGlmLimits`, `setBalances`, `PROVIDERS_FORCED_MS`, the restore), `agents/glm.ts`,
+`claude/connection.ts`, `connection.ts` (`LimitsReadFailed`), `storage.ts` (`RememberedBalances`),
+`dsh/account.ts`, `src/shared/agent-host.ts` (`balancesAt`, `balancesStale`, `stale`),
+`src/shared/plan-quota.ts`, `agent-parts.tsx`, `agent-balance.tsx`, `agent-providers.tsx`,
+`composer/usage.tsx`, the renderer's window filters, and `agent.glmUsage`/`agent.limitsReadFailed`
+and `agents.usageNoReset`/`agents.balance.kept` in the locales.
+
 ### Agents in a terminal
 
 An agent's own CLI, its interactive UI rather than the protocol Kite speaks, runs in a terminal of
