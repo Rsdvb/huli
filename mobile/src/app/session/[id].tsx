@@ -100,6 +100,7 @@ import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { WorktreeLine } from '../../components/git/WorktreeCard'
 import { toggleMuted, useSessionActions } from '../../components/SessionActions'
 import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionChips'
+import { NotesStrip, useHasDraftNotes } from '../../components/DiffNotes'
 import { sessionMenuPages } from '../../components/SessionMenu'
 import { useSessionPane } from '../../components/SessionPane'
 import {
@@ -757,6 +758,8 @@ function Session() {
   // Out of the computer's reach a message waits on the phone, shown as the newest, and goes through
   // the same queue once the link is back. Handing the session to another agent needs the computer.
   const computerId = useComputerId()
+  // Comments on the session's diffs, written on the diff screen, wait over the composer.
+  const hasNotes = useHasDraftNotes(computerId, id)
   const queue = (message: OutboxMessage) => {
     if (computerId) queueMessage(computerId, { sessionId: id }, message)
   }
@@ -1276,6 +1279,7 @@ function Session() {
             }
             onCountChange={setAttachCount}
             top={(holds) =>
+              hasNotes ||
               pendingSwitch ||
               limitPause ||
               stall ||
@@ -1285,6 +1289,9 @@ function Session() {
               (cacheNoticeShown && holds) ||
               (predicted && !holds) ? (
                 <>
+                  {hasNotes && computerId ? (
+                    <NotesStrip computer={computerId} sessionId={id} />
+                  ) : null}
                   {limitPause ? <LimitPauseStrip sessionId={id} pause={limitPause} /> : null}
                   {stall ? <StallStrip sessionId={id} stall={stall} /> : null}
                   {heldOutside || openOutside ? (

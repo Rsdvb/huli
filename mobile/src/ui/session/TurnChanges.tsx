@@ -36,7 +36,8 @@ export function Counts(props: { insertions: number; deletions: number; size?: nu
   )
 }
 
-function openChange(change: FileChange) {
+/** The turn's change to a file on the diff screen, whose lines take comments for the session. */
+function openChange(change: FileChange, sessionId: string) {
   const diff = mergedDiff(change)
   const first = change.edits[0]!
   const last = change.edits[change.edits.length - 1]!
@@ -44,18 +45,19 @@ function openChange(change: FileChange) {
     pathname: '/diff',
     params: {
       key: handDiff({ path: change.path, oldText: first.oldText, newText: last.newText, diff }),
+      ...(sessionId ? { id: sessionId } : {}),
     },
   })
 }
 
-function Preview(props: { change: FileChange }) {
+function Preview(props: { change: FileChange; sessionId: string }) {
   const { c } = useSessionTokens()
   const diff = useMemo(() => mergedDiff(props.change), [props.change])
   const rows = diff.rows.slice(0, PREVIEW_ROWS)
   const more = diff.rows.length - rows.length
   return (
     <Pressable
-      onPress={() => openChange(props.change)}
+      onPress={() => openChange(props.change, props.sessionId)}
       style={[styles.preview, { backgroundColor: c.fill }]}
     >
       {rows.map((row, i) =>
@@ -124,7 +126,7 @@ function FileRow(props: {
           </View>
         </Pressable>
         <Pressable
-          onPress={() => openChange(change)}
+          onPress={() => openChange(change, props.sessionId)}
           accessibilityRole="button"
           accessibilityLabel={`${change.path}，增加 ${change.insertions} 行，删除 ${change.deletions} 行`}
           style={({ pressed }) => [styles.fileMain, pressed && { backgroundColor: c.fill }]}
@@ -151,7 +153,7 @@ function FileRow(props: {
       </View>
       {open && (
         <Animated.View style={{ paddingHorizontal: 12, paddingBottom: 12, opacity: shown }}>
-          <Preview change={change} />
+          <Preview change={change} sessionId={props.sessionId} />
         </Animated.View>
       )}
     </View>

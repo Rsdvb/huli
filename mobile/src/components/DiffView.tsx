@@ -1,6 +1,8 @@
 // A unified diff: one fixed-height row per line in a virtualized list, wide enough for its longest
 // line and scrolled sideways as a whole, so line numbers stay beside their lines. Rows grow with
-// the system's text size up to the dense cap, as the file viewer's do (app/file.tsx).
+// the system's text size up to the dense cap, as the file viewer's do (app/file.tsx). Where lines
+// take comments, a tap picks a line or stretches the pick, a long press comments, and the rows a
+// comment covers carry a bar by their numbers; only the rows whose state changed draw again.
 
 import { memo, useCallback, useMemo, useState } from 'react'
 import {
@@ -37,18 +39,25 @@ interface Colors {
   del: string
   text: string
   muted: string
+  pickBg: string
+  note: string
 }
 
 const SCALE = FONT_SCALE.dense
 
 const Row = memo(function Row(props: {
   row: DiffRow
+  index: number
   colors: Colors
   gutter: number
   height: number
   sign: number
+  picked: boolean
+  noted: boolean
+  onPress: ((index: number) => void) | undefined
+  onLongPress: ((index: number) => void) | undefined
 }) {
-  const { row, colors, gutter, height } = props
+  const { row, colors, gutter, height, index, onPress, onLongPress } = props
   if (row.kind === 'hunk') {
     return (
       <View style={[styles.row, { height, backgroundColor: colors.hunkBg }]}>
@@ -62,19 +71,27 @@ const Row = memo(function Row(props: {
       </View>
     )
   }
-  const bg = row.kind === 'add' ? colors.addBg : row.kind === 'del' ? colors.delBg : undefined
+  const bg = props.picked
+    ? colors.pickBg
+    : row.kind === 'add'
+      ? colors.addBg
+      : row.kind === 'del'
+        ? colors.delBg
+        : undefined
   const sign = row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '
   const signColor = row.kind === 'add' ? colors.add : colors.del
-  return (
-    <View style={[styles.row, { height }, bg ? { backgroundColor: bg } : null]}>
+  const numberColor = props.noted ? colors.note : colors.muted
+  const cells = (
+    <>
+      {props.noted ? <View style={[styles.noteBar, { backgroundColor: colors.note }]} /> : null}
       <Text
-        style={[styles.text, styles.number, { width: gutter, color: colors.muted }]}
+        style={[styles.text, styles.number, { width: gutter, color: numberColor }]}
         maxFontSizeMultiplier={SCALE}
       >
         {row.old ?? ''}
       </Text>
       <Text
-        style={[styles.text, styles.number, { width: gutter, color: colors.muted }]}
+        style={[styles.text, styles.number, { width: gutter, color: numberColor }]}
         maxFontSizeMultiplier={SCALE}
       >
         {row.new ?? ''}
@@ -92,13 +109,38 @@ const Row = memo(function Row(props: {
       >
         {row.text}
       </Text>
-    </View>
+    </>
+  )
+  const style = [styles.row, { height }, bg ? { backgroundColor: bg } : null]
+  if (!onPress) return <View style={style}>{cells}</View>
+  return (
+    <Pressable
+      style={style}
+      onPress={() => onPress(index)}
+      {...(onLongPress ? { onLongPress: () => onLongPress(index), delayLongPress: 350 } : {})}
+      accessibilityRole="button"
+      accessibilityState={{ selected: props.picked }}
+    >
+      {cells}
+    </Pressable>
   )
 })
 
-export function DiffView(props: { diff: Diff }) {
-  const { diff } = props
-  const { c } = useSessionTokens()
+const NONE: ReadonlySet<number> = new Set()
+
+export function DiffView(props: {
+  diff: Diff
+  /** The rows picked to comment on, first and last, by index into the diff's rows. */
+  picked?: readonly [number, number] | null
+  /** The rows a comment in the draft covers. */
+  noted?: ReadonlySet<number>
+  onPressRow?: (index: number) => void
+  onLongPressRow?: (index: number) => void
+  /** Room under the last row for a bar laid over the list's bottom. */
+  bottomInset?: number
+}) {
+  const { diff, picked = null, noted = NONE, onPressRow, onLongPressRow } = props
+  const { c, s } = useSessionTokens()
   const window = useWindowDimensions()
   const insets = useSafeAreaInsets()
   // React Native scales a line height with its text, so the styles keep the unscaled one.
@@ -117,8 +159,10 @@ export function DiffView(props: { diff: Diff }) {
       del: c.removed,
       text: c.text,
       muted: c.textTertiary,
+      pickBg: s.accentSoft,
+      note: c.accent,
     }),
-    [c],
+    [c, s],
   )
   const rows = useMemo(() => diff.rows.slice(0, limit), [diff.rows, limit])
   const gutter = Math.ceil(String(Math.max(diff.lastLine, 9)).length * advance) + PAD
@@ -128,12 +172,26 @@ export function DiffView(props: { diff: Diff }) {
   )
   const left = diff.rows.length - rows.length
 
+  const first = picked?.[0] ?? -1
+  const last = picked?.[1] ?? -1
   const renderItem = useCallback<ListRenderItem<DiffRow>>(
-    ({ item }) => (
-      <Row row={item} colors={colors} gutter={gutter} height={rowHeight} sign={signWidth} />
+    ({ item, index }) => (
+      <Row
+        row={item}
+        index={index}
+        colors={colors}
+        gutter={gutter}
+        height={rowHeight}
+        sign={signWidth}
+        picked={index >= first && index <= last}
+        noted={noted.has(index)}
+        onPress={item.kind === 'hunk' ? undefined : onPressRow}
+        onLongPress={item.kind === 'hunk' ? undefined : onLongPressRow}
+      />
     ),
-    [colors, gutter, rowHeight, signWidth],
+    [colors, gutter, rowHeight, signWidth, first, last, noted, onPressRow, onLongPressRow],
   )
+  const bottom = props.bottomInset ?? 0
 
   return (
     <View style={{ flex: 1 }}>
@@ -151,6 +209,7 @@ export function DiffView(props: { diff: Diff }) {
           keyExtractor={(_, index) => String(index)}
           renderItem={renderItem}
           getItemLayout={(_, index) => ({ length: rowHeight, offset: rowHeight * index, index })}
+          extraData={renderItem}
           initialNumToRender={40}
           maxToRenderPerBatch={60}
           windowSize={11}
@@ -160,7 +219,7 @@ export function DiffView(props: { diff: Diff }) {
                 style={{
                   width: window.width,
                   padding: space.lg,
-                  paddingBottom: space.lg + insets.bottom,
+                  paddingBottom: space.lg + insets.bottom + bottom,
                 }}
               >
                 <Pressable
@@ -176,7 +235,7 @@ export function DiffView(props: { diff: Diff }) {
                 </Pressable>
               </View>
             ) : (
-              <View style={{ height: space.xl + insets.bottom }} />
+              <View style={{ height: space.xl + insets.bottom + bottom }} />
             )
           }
         />
@@ -191,6 +250,7 @@ const styles = StyleSheet.create({
   number: { textAlign: 'right', paddingRight: PAD },
   sign: { textAlign: 'center', marginRight: space.xs },
   ruler: { position: 'absolute', opacity: 0, left: 0, top: 0 },
+  noteBar: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   more: {
     alignSelf: 'flex-start',
     borderRadius: 999,
