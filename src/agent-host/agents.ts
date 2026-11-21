@@ -201,6 +201,8 @@ import {
 import { HostedRun, type HostedRunHooks } from './hosted-run'
 import { t } from './i18n'
 import { CliVersions, type CliProbe, type CliVersion } from './installed-cli'
+import { routeFor } from './node-proxy/download'
+import { httpTransport, ownProxyVariables, type Transport } from './node-runtime/transport'
 import { OpenCodeClient } from './opencode/client'
 import { OpenCodeConnection } from './opencode/connection'
 import type { OpenCodeSessions } from './model-requests/opencode'
@@ -373,6 +375,11 @@ export interface AgentManagerDeps extends DriverOverrides {
   fetchRegistry?(options: RegistryFetchOptions): Promise<RegistryAgents>
   /** Reads the body of Kettu's harness compatibility manifest from its download service. */
   fetchManifest?(options: ManifestFetchOptions): Promise<string>
+  /**
+   * Huli: the archives', the listing's and the manifest's requests; by default Kite's own, through
+   * Advanced › Proxy or the environment's proxy, as its Node.js install goes.
+   */
+  downloads?: Transport
   /** The keys the manifest's signature is checked against; the bundled ones by default. */
   manifestKeys?: readonly string[]
   /** What the manifest's requests say they are, which tells the service the app from the daemon. */
@@ -709,6 +716,7 @@ export class AgentManager {
   private limitsTimer: ReturnType<typeof setInterval> | null = null
   private stopped = false
   private readonly cliVersions: CliVersions
+  private readonly downloads: Transport
   /** The update command for each harness's user program, and what it was worked out for. */
   private readonly cliCommands = new Map<Harness, string>()
   private readonly cliCommandKeys = new Map<Harness, string>()
@@ -735,6 +743,9 @@ export class AgentManager {
     }
     this.bundledManifest = bundledManifest?.ok ? bundledManifest.manifest : null
     this.cliVersions = deps.cliVersions ?? new CliVersions({ platform: deps.platform })
+    this.downloads =
+      deps.downloads ??
+      httpTransport(() => routeFor(ownProxyVariables((name) => deps.env.get(name))))
     for (const def of deps.catalog) {
       const h = new Harness(def)
       this.harnesses.set(def.id, h)
@@ -2308,6 +2319,7 @@ export class AgentManager {
   private readRegistry(signal?: AbortSignal): Promise<RegistryAgents> {
     return (this.deps.fetchRegistry ?? fetchRegistry)({
       timeoutMs: this.timings.updateViewMs,
+      transport: this.downloads,
       ...(signal ? { signal } : {}),
     })
   }
@@ -2363,6 +2375,7 @@ export class AgentManager {
     try {
       body = await (this.deps.fetchManifest ?? fetchManifest)({
         timeoutMs: this.timings.updateViewMs,
+        transport: this.downloads,
         ...(signal ? { signal } : {}),
         ...(this.deps.userAgent ? { userAgent: this.deps.userAgent } : {}),
       })
@@ -2767,6 +2780,7 @@ export class AgentManager {
           ...(entry.bare ? { bare: true as const } : {}),
           platform,
           timeoutMs,
+          transport: this.downloads,
           signal,
           onOutput,
         })
@@ -3141,6 +3155,7 @@ export class AgentManager {
           ...(archive.bare ? { bare: true as const } : {}),
           platform,
           timeoutMs,
+          transport: this.downloads,
           signal,
           onOutput,
         })

@@ -9,7 +9,7 @@ import valid from 'semver/functions/valid'
 import validRange from 'semver/ranges/valid'
 import { verifySignature } from '../main/update-sources'
 import KEYS from '../main/update-keys.json'
-import { readLimited } from './registry'
+import { HttpStatusError, TooLargeError, type Transport } from './node-runtime/transport'
 
 export const MANIFEST_URL = 'https://download.kettu.sh/harnesses.json'
 
@@ -206,6 +206,8 @@ export function inNpmRange(version: string, range: string): boolean {
 
 export interface ManifestFetchOptions {
   timeoutMs: number
+  /** Kite's own requests, through Advanced › Proxy or the environment's proxy. */
+  transport: Transport
   signal?: AbortSignal
   /** What the request says it is, which tells the service the app from the daemon. */
   userAgent?: string
@@ -218,24 +220,24 @@ export async function fetchManifest(options: ManifestFetchOptions): Promise<stri
   const url = options.url ?? MANIFEST_URL
   const timeout = AbortSignal.timeout(options.timeoutMs)
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
-  let response: Response
   try {
-    response = await fetch(url, {
+    return await options.transport.text(url, {
       signal,
-      redirect: 'error',
+      maxBytes: MAX_BODY,
+      // The service serves it where it is asked; a redirect is not followed.
+      maxRedirects: 0,
       ...(options.userAgent ? { headers: { 'User-Agent': options.userAgent } } : {}),
     })
   } catch (error) {
+    if (error instanceof HttpStatusError) {
+      throw new Error(`${url} answered ${error.status}`, { cause: error })
+    }
+    if (error instanceof TooLargeError) {
+      throw new Error(`${url} sent more than a manifest`, { cause: error })
+    }
     if (timeout.aborted) {
       throw new Error(`${url} did not answer within ${options.timeoutMs} ms`, { cause: error })
     }
     throw new Error(`${url} could not be reached: ${(error as Error).message}`, { cause: error })
   }
-  if (!response.ok) {
-    void response.body?.cancel()
-    throw new Error(`${url} answered ${response.status}`)
-  }
-  const text = await readLimited(response, MAX_BODY)
-  if (text === null) throw new Error(`${url} sent more than a manifest`)
-  return text
 }

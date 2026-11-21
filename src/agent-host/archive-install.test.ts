@@ -12,10 +12,13 @@ import {
 } from './archive-install'
 import { detectAgent, type AgentDefinition, type DetectContext } from './catalog'
 import { orderInstalls, type VersionChoice } from './harness-versions'
+import { httpTransport } from './node-runtime/transport'
 import { tempFolder } from './testing/temp'
 
 const PROGRAM = '#!/bin/sh\necho tool\n'
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
+/** Straight to the test's server, with no proxy. */
+const direct = httpTransport(() => () => null)
 
 let server: Server | null = null
 
@@ -72,6 +75,7 @@ describe('an update from a registry archive', () => {
       bare: true,
       platform: process.platform,
       timeoutMs: 10_000,
+      transport: direct,
     })
     expect(update.version).toBe('1.1.0')
     const installs = await listArchiveInstalls(root, 'harn')
@@ -97,6 +101,7 @@ describe('an update from a registry archive', () => {
         bare: true,
         platform: process.platform,
         timeoutMs: 10_000,
+        transport: direct,
       }),
     ).rejects.toThrow(/does not match its SHA-256/)
     expect(await readdir(path.join(root, 'harn'))).toEqual(['1.0.0'])

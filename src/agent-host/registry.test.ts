@@ -9,7 +9,10 @@ import {
   registryRelease,
   type RegistryAgents,
 } from './registry'
+import { httpTransport } from './node-runtime/transport'
 
+/** Straight to the test's server, with no proxy. */
+const direct = httpTransport(() => () => null)
 const HASH = 'ab'.repeat(32)
 const RELEASE = 'https://github.com/burin-labs/harn/releases/download/v0.10.201'
 
@@ -274,7 +277,7 @@ describe('reading the listing', () => {
 
   it('reads the agents of the listing by id', async () => {
     const url = await serve(200, JSON.stringify(LISTING))
-    const read = await fetchRegistry({ url, timeoutMs: 5_000 })
+    const read = await fetchRegistry({ url, timeoutMs: 5_000, transport: direct })
     expect([...read.keys()]).toContain('harn')
     expect(registryRelease(read, uvx('fast-agent'), 'darwin', 'arm64')).toEqual({
       kind: 'uvx',
@@ -284,12 +287,16 @@ describe('reading the listing', () => {
 
   it('rejects a listing it cannot read', async () => {
     const url = await serve(200, '<html>maintenance</html>')
-    await expect(fetchRegistry({ url, timeoutMs: 5_000 })).rejects.toThrow(/could not be read/)
+    await expect(fetchRegistry({ url, timeoutMs: 5_000, transport: direct })).rejects.toThrow(
+      /could not be read/,
+    )
     expect(parseRegistry({ version: '1.0.0' })).toBeNull()
   })
 
   it('rejects an answer that is not a success', async () => {
     const url = await serve(503, '{}')
-    await expect(fetchRegistry({ url, timeoutMs: 5_000 })).rejects.toThrow(/HTTP 503/)
+    await expect(fetchRegistry({ url, timeoutMs: 5_000, transport: direct })).rejects.toThrow(
+      /HTTP 503/,
+    )
   })
 })

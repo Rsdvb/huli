@@ -306,6 +306,7 @@
       "downloadFailed": "The download of {{url}} answered HTTP {{status}}.",
       "downloadError": "{{name}} could not be downloaded: {{reason}}",
       "downloadTimedOut": "{{name}} did not finish downloading within {{seconds}} s.",
+      "downloadStalled": "The download of {{name}} stalled: nothing arrived for {{seconds}} s. Check Settings › Advanced › Proxy, then try again.",
       "hashMismatch": "The downloaded file does not match its SHA-256: expected {{expected}}, got {{actual}}.",
       "extracting": "Extracting the archive…"
     },
