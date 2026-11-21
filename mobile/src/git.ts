@@ -104,12 +104,12 @@ function acquire(link: HostLink, folder: string): Watch {
     off: () => {},
   }
   byFolder.set(folder, watch)
-  let connected = false
+  let session = 0
   const offState = link.onState((state) => {
-    const now = state.kind === 'connected'
-    // A new connection is a new port on the computer, which watches nothing yet.
-    if (now && !connected) void read(watch)
-    connected = now
+    const now = state.kind === 'connected' ? state.session : 0
+    // A new session on the computer is a new port there, which watches nothing yet.
+    if (now && now !== session) void read(watch)
+    session = now
   })
   const offEvents = link.onHostEvent((raw) => {
     const event = raw as HostEvent

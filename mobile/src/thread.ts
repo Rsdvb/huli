@@ -103,7 +103,9 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const failures = useRef(0)
   const openRef = useRef<() => Promise<void>>(async () => {})
-  const connected = state.kind === 'connected'
+  // A new session on the computer watches nothing yet, as after a move it could not resume: the
+  // thread is watched and read afresh there.
+  const hostSession = state.kind === 'connected' ? state.session : 0
 
   // Until the computer sends the thread, the cache's copy from an earlier visit shows, read-only.
   // The copy in memory is already shown, and the file holds no more than it.
@@ -271,7 +273,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   // work and the computer counts it as not shown; back in front, it is read afresh.
   const inFront = useInFront()
   useEffect(() => {
-    if (!connected || !inFront) return
+    if (!hostSession || !inFront) return
     failures.current = 0
     // A counter, not a node: the cleanup moves on whatever value it holds by then.
     const generations = generation
@@ -283,7 +285,16 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       void link.request('sessions.unwatch', { sessionId }).catch(() => {})
       void link.request('sessions.show', { sessionIds: [] }).catch(() => {})
     }
-  }, [connected, inFront, open, link, sessionId])
+  }, [hostSession, inFront, open, link, sessionId])
+
+  // The computer dropped patches this phone fell behind on: the thread is read again.
+  useEffect(
+    () =>
+      link.onMessage((message) => {
+        if (message.type === 'resync' && live.current) void openRef.current()
+      }),
+    [link],
+  )
 
   const loadOlder = useCallback(() => {
     if (older === null || loadingOlder || !store.get()) return

@@ -74,6 +74,8 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
   const link = host.link
   const computer = host.host?.id ?? ''
   const connected = host.state.kind === 'connected'
+  // A new session on the computer watches nothing yet: the artifact is watched again there.
+  const hostSession = host.state.kind === 'connected' ? host.state.session : 0
   const insets = useSafeAreaInsets()
   const window = useWindowDimensions()
   const headerHeight = useHeaderHeight()
@@ -187,7 +189,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
   const summaryShown = useWhenShown(() => loadSummary())
   // Watching makes this phone one of its viewers, and brings its new versions and who edits it.
   useEffect(() => {
-    if (!link || !connected) return
+    if (!link || !hostSession) return
     void link.request('artifacts.watch', { id }).catch(() => {})
     const off = link.onHostEvent((value) => {
       const event = value as HostEvent
@@ -207,7 +209,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
       off()
       void link.request('artifacts.unwatch', { id }).catch(() => {})
     }
-  }, [link, connected, id, pinned, say, reloadShown, summaryShown])
+  }, [link, hostSession, id, pinned, say, reloadShown, summaryShown])
 
   // The note that the latest is now shown, once the new version is in.
   useEffect(() => {
