@@ -33,17 +33,24 @@ appId: io.github.rsdvb.huli
     centerElement: true
     timeout: 30000
 - takeScreenshot: k01-code
+# By the screen, not the element: the code's text is wider than the screen, so its centre, where a
+# swipe on it would start, lies past the right edge.
 - swipe:
-    from:
-      text: '(?s).*export function issueToken.*'
-    direction: LEFT
+    start: 85%, 36%
+    end: 10%, 36%
     duration: 600
 - waitForAnimationToEnd
 - takeScreenshot: k02-code-swiped
+# A table beside it, which no menu holds, for comparison.
+- swipe:
+    start: 85%, 60%
+    end: 10%, 60%
+    duration: 600
+- waitForAnimationToEnd
+- takeScreenshot: k02b-table-swiped
 # The head's long press still opens the menu.
 - longPressOn:
-    text: '复制'
-    index: 0
+    text: 'ts'
 - extendedWaitUntil:
     visible: '选择文本'
     timeout: 4000
