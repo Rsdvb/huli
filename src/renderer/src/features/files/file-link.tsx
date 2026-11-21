@@ -44,15 +44,17 @@ function copyText(text: string) {
 }
 
 /**
- * A file link's menu: the Files pane, the editor and the file manager, and its paths. The editor
- * and the file manager open files of this computer only.
+ * A file's menu, for its links and the lists of changed files: the Files pane, the editor and the
+ * file manager, and its paths. The editor and the file manager open files of this computer only,
+ * and not a file that is `gone`, as a deleted one.
  */
-function FileLinkMenu({
+export function FileLinkMenu({
   trigger,
   projectPath,
   absolute,
   relative,
   onOpen,
+  gone = false,
 }: {
   trigger: ReactElement
   projectPath: string
@@ -60,18 +62,22 @@ function FileLinkMenu({
   absolute: string
   /** Relative to the project; null for a file outside it. */
   relative: string | null
-  onOpen: () => void
+  /** Opens it in the Files pane; without it the menu has no such item. */
+  onOpen?: () => void
+  gone?: boolean
 }) {
   const { t } = useTranslation('files')
-  const local = !isWeb && hostOfPath(projectPath) === null
+  const local = !isWeb && hostOfPath(projectPath) === null && !gone
   return (
     <ContextMenu>
       <ContextMenuTrigger render={trigger} />
       <ContextMenuContent className="min-w-56">
-        <ContextMenuItem onClick={onOpen}>
-          <HugeiconsIcon icon={SidebarRightIcon} strokeWidth={1.9} aria-hidden />
-          {t('link.openInPanel')}
-        </ContextMenuItem>
+        {onOpen && (
+          <ContextMenuItem onClick={onOpen}>
+            <HugeiconsIcon icon={SidebarRightIcon} strokeWidth={1.9} aria-hidden />
+            {t('link.openInPanel')}
+          </ContextMenuItem>
+        )}
         {local && (
           <ContextMenuItem onClick={() => outside(openInEditor, absolute)}>
             <HugeiconsIcon icon={CodeIcon} strokeWidth={1.9} aria-hidden />

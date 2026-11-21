@@ -49,10 +49,12 @@ import { openGitDialog, useGitStore } from '@renderer/stores/git'
 import { ChangeBadge } from './change-badge'
 import { useFileChanges, type FileChanges, type ProjectChange } from './changes'
 import { columnOf, saveColumn } from './column'
+import { FileLinkMenu } from './file-link'
 import { FileTree, type TreeEdit } from './file-tree'
 import { DiffPreview } from './diff-preview'
 import { FilePreview } from './file-preview'
 import { openInEditor } from './open-in-editor'
+import { hostFilePath } from './operations'
 import { FileTabs } from './file-tabs'
 import { FileTypeIcon } from './file-type-icon'
 import { UnsavedPrompt } from './unsaved-prompt'
@@ -417,6 +419,7 @@ function ChangesList({
           <ChangeRow
             key={change.path}
             change={change}
+            projectPath={projectPath}
             selected={change.path === selectedPath}
             tabIndex={tabIndex}
             onOpen={() => showChange(projectPath, changes, change.path, true)}
@@ -428,37 +431,50 @@ function ChangesList({
   )
 }
 
+/** A changed file; its menu opens it in the editor or the file manager and copies its path. */
 function ChangeRow({
   change,
+  projectPath,
   selected,
   tabIndex,
   onOpen,
   onKeep,
 }: {
   change: ProjectChange
+  projectPath: string
   selected: boolean
   tabIndex: number | undefined
   onOpen: () => void
   onKeep: () => void
 }) {
   const folder = folderOf(change.path)
+  const deleted = change.file.status === 'deleted'
   return (
-    <button
-      type="button"
-      tabIndex={tabIndex}
-      className="kp-node kp-node--change"
-      aria-current={selected || undefined}
-      title={change.file.oldPath ? `${change.file.oldPath} → ${change.path}` : change.path}
-      onClick={onOpen}
-      onDoubleClick={change.file.status === 'deleted' ? undefined : onKeep}
-    >
-      <FileTypeIcon path={change.path} className="size-4" />
-      <span className="kp-node__name">
-        <span>{nameOf(change.path)}</span>
-        {folder && <small>{folder}</small>}
-      </span>
-      <ChangeBadge status={change.file.status} />
-    </button>
+    <FileLinkMenu
+      projectPath={projectPath}
+      absolute={hostFilePath(projectPath, change.path)}
+      relative={change.path}
+      {...(deleted ? {} : { onOpen: onKeep })}
+      gone={deleted}
+      trigger={
+        <button
+          type="button"
+          tabIndex={tabIndex}
+          className="kp-node kp-node--change"
+          aria-current={selected || undefined}
+          title={change.file.oldPath ? `${change.file.oldPath} → ${change.path}` : change.path}
+          onClick={onOpen}
+          onDoubleClick={change.file.status === 'deleted' ? undefined : onKeep}
+        >
+          <FileTypeIcon path={change.path} className="size-4" />
+          <span className="kp-node__name">
+            <span>{nameOf(change.path)}</span>
+            {folder && <small>{folder}</small>}
+          </span>
+          <ChangeBadge status={change.file.status} />
+        </button>
+      }
+    />
   )
 }
 

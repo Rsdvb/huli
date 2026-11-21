@@ -9,10 +9,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@renderer/components/ui/collapsible'
+import { FileLinkMenu } from '@renderer/features/files/file-link'
 import { FileTypeIcon } from '@renderer/features/files/file-type-icon'
+import { hostFilePath } from '@renderer/features/files/operations'
 import { relativePath, shownPath } from '@renderer/lib/format'
+import { hostPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
-import { openDiff } from '@renderer/stores/files'
+import { openDiff, openFile } from '@renderer/stores/files'
 import { openGitDialog, useGitStore } from '@renderer/stores/git'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { turnChanges } from '../turn-work'
@@ -154,7 +157,10 @@ function Counts({ insertions, deletions }: { insertions: number; deletions: numb
   )
 }
 
-/** A changed file; a click unfolds its diffs under it. */
+/**
+ * A changed file; a click unfolds its diffs under it, and its menu opens it in the Files pane, the
+ * editor or the file manager and copies its path.
+ */
 function ChangeRow({
   change,
   projectPath,
@@ -167,19 +173,28 @@ function ChangeRow({
   const stats = useDiffStats(change.diffs)
   const shown = shownPath(change.path, projectPath)
   const cut = shown.lastIndexOf('/') + 1
+  const relative = within(change.path, projectPath)
   return (
     <Collapsible>
-      <CollapsibleTrigger
-        className={cn('ks-file focus-ring', counting && 'invisible')}
-        title={shown}
-      >
-        <FileTypeIcon path={change.path} className="size-4" />
-        <span className="ks-file__name">
-          <span className="ks-file__dir">{shown.slice(0, cut)}</span>
-          {shown.slice(cut)}
-        </span>
-        {stats && <Counts insertions={stats.insertions} deletions={stats.deletions} />}
-      </CollapsibleTrigger>
+      <FileLinkMenu
+        projectPath={projectPath}
+        absolute={relative === null ? hostPath(change.path) : hostFilePath(projectPath, relative)}
+        relative={relative}
+        {...(relative === null ? {} : { onOpen: () => openFile(projectPath, relative) })}
+        trigger={
+          <CollapsibleTrigger
+            className={cn('ks-file focus-ring', counting && 'invisible')}
+            title={shown}
+          >
+            <FileTypeIcon path={change.path} className="size-4" />
+            <span className="ks-file__name">
+              <span className="ks-file__dir">{shown.slice(0, cut)}</span>
+              {shown.slice(cut)}
+            </span>
+            {stats && <Counts insertions={stats.insertions} deletions={stats.deletions} />}
+          </CollapsibleTrigger>
+        }
+      />
       <CollapsibleContent className={PANEL} keepMounted={false}>
         <div className="flex flex-col gap-2 px-1.5 pt-1 pb-2">
           {change.diffs.map((diff, index) => (
