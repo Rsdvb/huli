@@ -3,6 +3,7 @@
 
 import { canonicalClaudeModel } from '@shared/agents'
 import type { ConfigOption } from '@shared/thread'
+import { effortLevelName } from '../effort'
 import { t } from '../i18n'
 import type { ModelInfo, PermissionMode } from './sdk'
 
@@ -70,13 +71,6 @@ export function ultracodeOption(
     indicator: true,
     idleOnly: true,
   }
-}
-
-function titleCase(level: string): string {
-  return level
-    .split(/[_-]/)
-    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
-    .join(' ')
 }
 
 /** The model a value names, the default model's entry for `default`. */
@@ -150,8 +144,8 @@ export function buildConfig(
   const options: ConfigOption[] = [
     {
       id: OPTION_IDS.mode,
-      name: 'Mode',
-      description: 'Session permission mode',
+      name: t('claude.option.mode'),
+      description: t('claude.option.modeDescription'),
       category: 'mode',
       type: 'select',
       value: choices.mode,
@@ -189,8 +183,8 @@ export function buildConfig(
     }
     options.push({
       id: OPTION_IDS.model,
-      name: 'Model',
-      description: 'AI model to use',
+      name: t('claude.option.model'),
+      description: t('claude.option.modelDescription'),
       category: 'model',
       type: 'select',
       value: choices.model,
@@ -203,21 +197,21 @@ export function buildConfig(
     // A session at its default shows the level that default runs at; there is no Default level.
     options.push({
       id: OPTION_IDS.effort,
-      name: 'Effort',
-      description: 'Available effort levels for this model',
+      name: t('claude.option.effort'),
+      description: t('claude.option.effortDescription'),
       category: 'thought_level',
       type: 'select',
       value: levels.includes(choices.effort)
         ? choices.effort
         : effortInEffect(current, levels, inherited),
-      choices: levels.map((level) => ({ value: level, name: titleCase(level) })),
+      choices: levels.map((level) => ({ value: level, name: effortLevelName(level) })),
     })
   }
   if (current?.supportsFastMode) {
     options.push({
       id: OPTION_IDS.fast,
-      name: 'Fast mode',
-      description: 'Faster responses on supported models',
+      name: t('claude.option.fast'),
+      description: t('claude.option.fastDescription'),
       category: 'model_config',
       type: 'boolean',
       value: choices.fast,

@@ -3,6 +3,7 @@
 // no session settings of its own between turns: every turn sends them.
 
 import type { ConfigOption } from '@shared/thread'
+import { effortLevelName } from '../effort'
 import { t } from '../i18n'
 import type {
   ApprovalsReviewer,
@@ -107,7 +108,9 @@ export function speedTiers(model: Model | undefined): Tier[] {
   if (!model) return []
   const tiers = (model.serviceTiers ?? []).filter((tier) => tier.id && tier.id !== 'default')
   if (tiers.length > 0) return tiers
-  return model.additionalSpeedTiers?.includes('fast') ? [{ id: 'fast', name: 'Fast' }] : []
+  return model.additionalSpeedTiers?.includes('fast')
+    ? [{ id: 'fast', name: t('codex.option.fastTier') }]
+    : []
 }
 
 /** The tier a turn on `model` runs with: the one chosen when it has it, else its first faster one. */
@@ -236,7 +239,7 @@ export function buildConfig(settings: Settings, models: readonly Model[]): Confi
       value: settings.effort,
       choices: efforts.map((effort) => ({
         value: effort.reasoningEffort,
-        name: capitalize(effort.reasoningEffort),
+        name: effortLevelName(effort.reasoningEffort),
         ...(effort.description ? { description: effort.description } : {}),
       })),
     })

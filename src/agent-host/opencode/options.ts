@@ -2,6 +2,7 @@
 // sends for the same choices, so a session keeps its stored options whichever way it runs.
 
 import type { ConfigOption } from '@shared/thread'
+import { effortLevelName } from '../effort'
 import { t } from '../i18n'
 import type { AgentInfo, CommandInfo, ModelInfo, ModelRef } from './protocol'
 
@@ -39,9 +40,7 @@ export function modes(agents: readonly AgentInfo[]): AgentInfo[] {
 }
 
 function titled(id: string): string {
-  return id === DEFAULT_EFFORT
-    ? t('opencode.option.defaultEffort')
-    : id.charAt(0).toUpperCase() + id.slice(1)
+  return id === DEFAULT_EFFORT ? t('opencode.option.defaultEffort') : effortLevelName(id)
 }
 
 function byName(a: string, b: string): number {

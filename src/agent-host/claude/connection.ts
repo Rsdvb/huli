@@ -655,17 +655,25 @@ export class ClaudeConnection implements AgentConnection {
       },
       // A browser on another machine cannot finish the sign-in, so there Claude Code's own runs.
       authMethods: remote
-        ? [terminal('claude-login', 'Log in with Claude', 'Run `claude` and then /login', [])]
+        ? [
+            terminal(
+              'claude-login',
+              t('claude.auth.login.name'),
+              t('claude.auth.login.description'),
+              [],
+            ),
+          ]
         : [
-            terminal('claude-ai-login', 'Claude Subscription', 'Use Claude subscription', [
-              'auth',
-              'login',
-              '--claudeai',
-            ]),
+            terminal(
+              'claude-ai-login',
+              t('claude.auth.subscription.name'),
+              t('claude.auth.subscription.description'),
+              ['auth', 'login', '--claudeai'],
+            ),
             terminal(
               'console-login',
-              'Anthropic Console',
-              'Use Anthropic Console (API usage billing)',
+              t('claude.auth.console.name'),
+              t('claude.auth.console.description'),
               ['auth', 'login', '--console'],
             ),
           ],
