@@ -247,6 +247,41 @@ describe('DeepSeek Harness sign-in from its files', () => {
     expect(JSON.stringify(failed)).not.toContain(TOKEN)
   })
 
+  it("keeps an earlier run's balance, marked so, when the first read fails on its route", async () => {
+    await writeFile(file(), keyFile(KEY))
+    fetch.mockImplementation(async () => new Response('{}', { status: 503 }))
+    const kept = {
+      state: 'ready' as const,
+      limits: [],
+      balances: [{ label: 'Balance', amount: 7.5, currency: 'CNY' }],
+      observedAt: now - 3_600_000,
+      error: null,
+      stale: true as const,
+    }
+    const onKey = routeAccount('deepseek-official', null)
+    const read = await accounts.read('deepseek', input({ account: onKey, balance: kept }))
+    expect(read.balance).toMatchObject({
+      state: 'error',
+      balances: kept.balances,
+      observedAt: kept.observedAt,
+      stale: true,
+    })
+    // One kept for the account sign-in is not the key's.
+    const onAccount = routeAccount('deepseek-account', null)
+    const other = new DshAccounts({
+      log: () => {},
+      dueMs: 60_000,
+      platform: process.platform === 'win32' ? 'win32' : 'linux',
+      now: () => now,
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    const elsewhere = await other.read('deepseek', input({ account: onAccount, balance: kept }))
+    other.close()
+    expect(elsewhere.balance).toMatchObject({ state: 'error', balances: [], observedAt: 0 })
+    expect(elsewhere.balance).not.toHaveProperty('stale')
+    expect(JSON.stringify([read, elsewhere])).not.toContain(KEY)
+  })
+
   it('sends a grant some other Platform issued nowhere', async () => {
     await writeFile(file(), grantFile(TOKEN, 'https://example.invalid'))
     const read = await accounts.read('deepseek', input())

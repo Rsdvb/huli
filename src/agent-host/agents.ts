@@ -249,6 +249,7 @@ import type {
   AgentUpdatesFile,
   HarnessManifestFile,
   RegistryListingFile,
+  RememberedBalances,
   RememberedInit,
 } from './storage'
 import { readUvxVersion, uvxFetchArgs, writeUvxVersion } from './uvx-install'
@@ -554,6 +555,9 @@ class Slot {
   balanceRun: Promise<void> | null = null
   limits = new Map<string, PlanLimit>()
   balances: ProviderBalance[] = []
+  /** Huli: when `balances` were read, and whether an earlier run did and none since. */
+  balancesAt = 0
+  balancesStale = false
   /** Kettu handed the harness an API key for this agent, which it never reads back. */
   apiKey = false
   /** The capabilities of the last `initialize`, from this run or an earlier one. */
@@ -635,19 +639,40 @@ function exitText(agent: string, info: ExitInfo): string {
   return t('agent.exit.code', { agent, code: String(info.code) })
 }
 
+/** Huli: the balances a read gave, now; an earlier run's kept ones are replaced. */
+function setBalances(slot: Slot, balances: ProviderBalance[], now: number): void {
+  slot.balances = balances
+  slot.balancesAt = balances.length > 0 ? now : 0
+  slot.balancesStale = false
+}
+
+/** Huli: balances worth keeping for the next run; none while there are none, or no time. */
+function keptBalances(
+  balances: readonly ProviderBalance[],
+  observedAt: number,
+): RememberedBalances | undefined {
+  return balances.length > 0 && observedAt > 0 ? { items: [...balances], observedAt } : undefined
+}
+
 // A signed-out account is not kept: whether it is still signed out shows once the agent runs.
 function rememberedEntry(slot: Slot): AgentsFile['agents'][AgentId] | null {
   const account = slot.account?.kind === 'none' ? null : slot.account
   const limits = [...slot.limits.values()]
   const init = slot.initRecord
   const signIn = slot.answeredSignIn
-  return account || limits.length > 0 || init || slot.apiKey || signIn
+  const balances = keptBalances(slot.balances, slot.balancesAt)
+  const balance = slot.balance
+    ? keptBalances(slot.balance.balances, slot.balance.observedAt)
+    : undefined
+  return account || limits.length > 0 || init || slot.apiKey || signIn || balances || balance
     ? {
         account,
         limits,
         ...(init ? { init } : {}),
         ...(slot.apiKey ? { apiKey: true } : {}),
         ...(signIn ? { signIn } : {}),
+        ...(balances ? { balances } : {}),
+        ...(balance ? { balance } : {}),
       }
     : null
 }
@@ -1091,6 +1116,7 @@ export class AgentManager {
       const slot = this.home(h)
       slot.account = null
       slot.limits.clear()
+      setBalances(slot, [], 0)
       this.hooks.configChanged(slot.id)
     }
     // Turned on again, automatic updates take the target from the version the user moved to.
@@ -3593,7 +3619,10 @@ export class AgentManager {
       before?.kind === named.kind && before.label === named.label && before.email === named.email
     slot.account = same && before.tier ? { ...named, tier: before.tier } : named
     // A gateway has no plan: windows kept from a sign-in before it would show as its limits.
-    if (named.kind === 'gateway') slot.limits.clear()
+    if (named.kind === 'gateway') {
+      slot.limits.clear()
+      setBalances(slot, [], 0)
+    }
     slot.signIn = named.kind === 'none' ? 'required' : 'signed-in'
     this.emit(slot)
     if (wasRequired && slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
@@ -3843,7 +3872,7 @@ export class AgentManager {
     slot.limits.clear()
     for (const limit of merged) slot.limits.set(limit.window, limit)
     const extras = connection.planExtras?.()
-    if (extras) slot.balances = extras.balances
+    if (extras) setBalances(slot, extras.balances, now)
     this.emit(slot)
     // The windows do not wait for the reset credits, which arrive in a status of their own.
     if (slot.def.id === 'codex') void this.readResets(slot)
@@ -4200,14 +4229,14 @@ export class AgentManager {
     slot.signIn = 'required'
     slot.account = null
     slot.limits.clear()
-    slot.balances = []
+    setBalances(slot, [], 0)
     slot.resets = null
     slot.resetsError = null
     this.emit(slot)
   }
 
   private applyVendorUsage(slot: Slot, usage: VendorUsage, now: number): void {
-    slot.balances = usage.balances
+    setBalances(slot, usage.balances, now)
     if (usage.tier) {
       slot.account = slot.account
         ? { ...slot.account, label: usage.tier }
@@ -4486,6 +4515,22 @@ export class AgentManager {
       slot.initRecord = entry.init ?? null
       slot.apiKey = entry.apiKey === true
       slot.answeredSignIn = entry.signIn ?? null
+      // Huli: the balances last read show as an earlier run's until they are read again.
+      if (entry.balances) {
+        slot.balances = entry.balances.items
+        slot.balancesAt = entry.balances.observedAt
+        slot.balancesStale = true
+      }
+      if (entry.balance && slot.def.id === 'deepseek') {
+        slot.balance = {
+          state: 'ready',
+          limits: [],
+          balances: entry.balance.items,
+          observedAt: entry.balance.observedAt,
+          error: null,
+          stale: true,
+        }
+      }
       slot.remembered = rememberedJson(slot)
       if (slot.def.id === 'antigravity') this.decideSignIn(slot)
       this.emit(slot)
@@ -4983,6 +5028,7 @@ export class AgentManager {
     slot.signIn = 'required'
     slot.account = null
     slot.limits.clear()
+    setBalances(slot, [], 0)
     slot.answeredSignIn = null
     this.emit(slot)
     void this.readSignInMethod(slot)
@@ -5568,6 +5614,7 @@ export class AgentManager {
   private async credentialsChanged(slot: Slot): Promise<void> {
     slot.account = null
     slot.limits.clear()
+    setBalances(slot, [], 0)
     slot.limitsReadAt = 0
     slot.providersReadAt = 0
     slot.limitsError = null
@@ -5833,7 +5880,13 @@ export class AgentManager {
           }
         : {}),
       ...(slot.def.id === 'deepseek' ? { balance: slot.balance } : {}),
-      ...(slot.balances.length ? { balances: slot.balances } : {}),
+      ...(slot.balances.length
+        ? {
+            balances: slot.balances,
+            ...(slot.balancesAt > 0 ? { balancesAt: slot.balancesAt } : {}),
+            ...(slot.balancesStale ? { balancesStale: true as const } : {}),
+          }
+        : {}),
       ...(limitsReason ? { limitsReason } : {}),
       ...(slot.def.sharesSignIn ? { sharesSignIn: true } : {}),
       deletesCopy: (capabilities?.deleteSession ?? false) || removesCopies(slot.def.id),

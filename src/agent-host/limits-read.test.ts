@@ -117,3 +117,21 @@ it('lets a kept window without a reset go once its reading is a period old', asy
   const recent = await hostRemembering({ account, limits: [monthly(Date.now() - 3 * DAY)] })
   expect((await fakeOf(recent))?.limits).toMatchObject([{ window: 'monthly', state: 'reached' }])
 })
+
+it("shows the balances an earlier run read as that run's until they are read again", async () => {
+  const credits = { label: 'Extra usage', amount: 62_500, currency: 'credits' }
+  const window = await hostRemembering({
+    account: { kind: 'account', label: 'Fake Pro', email: 'developer@example.com' },
+    limits: [],
+    balances: { items: [credits], observedAt: 1_000 },
+  })
+  expect(await fakeOf(window)).toMatchObject({
+    balances: [credits],
+    balancesAt: 1_000,
+    balancesStale: true,
+  })
+  await window.request('agents.refreshLimits', { agentId: 'fake-agent', force: true })
+  const read = await fakeOf(window)
+  expect(read?.limits.length).toBeGreaterThan(0)
+  expect(read?.balancesStale).toBeUndefined()
+})
