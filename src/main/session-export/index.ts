@@ -14,7 +14,6 @@ import type { ExportFormat, SessionExportRequest } from '@shared/session-export'
 import { t } from '../i18n'
 import { createLogger } from '../log'
 import { maskSecrets } from './mask'
-import pageWorkerPath from './page-worker?modulePath'
 import type { PageReply, PageRequest } from './page-worker'
 import { parseExportRequest, pointAssets } from './request'
 
@@ -102,9 +101,10 @@ async function writePdf(file: string, request: SessionExportRequest): Promise<vo
 }
 
 /** The page to print, written by a worker of its own, so main never parses nor draws maths. */
-function renderPage(request: PageRequest): Promise<string> {
+async function renderPage(request: PageRequest): Promise<string> {
+  const { default: workerPath } = await import('./page-worker?modulePath')
   return new Promise((resolve, reject) => {
-    const worker = new Worker(pageWorkerPath, { workerData: request })
+    const worker = new Worker(workerPath, { workerData: request })
     worker.once('message', (reply: PageReply) => {
       if (reply.ok) resolve(reply.page)
       else reject(new Error(reply.error))
