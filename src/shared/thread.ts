@@ -375,8 +375,9 @@ export type ThreadEntry =
       title: string
       description?: string
       // The notice ends the turn: the agent exited mid-turn, its model provider is out of credit,
-      // or the turn of a message failed otherwise.
-      cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed'
+      // or the turn of a message failed otherwise. Huli: `sign_in`, the agent asks to sign in
+      // first, which the session's own card offers while the notice stays.
+      cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed' | 'sign_in'
       model?: string // out_of_credit: the session's model when the turn failed
       // turn_failed: the agent's plan refused the turn because a usage window ran out.
       planLimit?: true

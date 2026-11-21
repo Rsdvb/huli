@@ -736,7 +736,7 @@
     "picker": {
       "search": "Search agents",
       "noMatch": "No matching agents",
-      "signedOut": "Signed out · sign in to use",
+      "signedOut": "Needs sign-in",
       "failed": "Failed to start",
       "needsUpdate": "Too old · click to update",
       "versionBroken": "{{version}} does not work with Kettu",
@@ -744,7 +744,8 @@
       "limitUsed": "{{percent}}% of {{limit}} limit",
       "limitLeft": "{{percent}}% of {{limit}} limit left",
       "limitReached": "{{limit}} limit reached",
-      "manage": "Manage agents…"
+      "manage": "Manage agents…",
+      "needsNode": "Needs Node.js · click to install"
     },
     "modelMenu": {
       "label": "Model",
@@ -798,7 +799,11 @@
       "textOnly": "A task takes text only: remove the attachments to send it.",
       "stepAgents": "Only Claude Code and Codex agents work on workflow steps: choose one of them.",
       "previewFoot": "Pace: {{pace}} · Auto steps are picked when they start"
-    }
+    },
+    "signInFirst": "Sign in to {{agent}} first",
+    "signInNotice": "{{agent}} needs sign-in",
+    "signInNoticeHint": "Sign in, and your message can be sent.",
+    "signInUnsure": "Kettu can’t tell yet whether {{agent}} is signed in; you can send to find out."
   },
   "signIn": {
     "title": "Sign in to {{agent}}",
@@ -820,7 +825,10 @@
     "onComputer": "This opens a browser on the computer {{agent}} runs on, so sign in there, then retry.",
     "scanTitle": "Scan to sign in",
     "scanHint": "Scan this QR code with the {{agent}} app on your phone, then confirm there.",
-    "scanAlt": "Sign-in QR code"
+    "scanAlt": "Sign-in QR code",
+    "copyLink": "Copy link",
+    "linkCopied": "Copied",
+    "reading": "Reading how it signs in…"
   },
   "takeover": {
     "title": "{{agent}} took over",

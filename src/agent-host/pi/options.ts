@@ -3,6 +3,8 @@
 // stored sessions and remembered choices already hold.
 
 import type { ConfigOption } from '@shared/thread'
+import { effortLevelName } from '../effort'
+import { t } from '../i18n'
 import type { PiModel } from './protocol'
 
 export const CONFIG = { model: 'model', level: 'thought_level' } as const
@@ -76,8 +78,8 @@ export function configOptions(choices: Choices): ConfigOption[] {
     const models = known || !choices.model ? shown : [choices.model, ...shown]
     options.push({
       id: CONFIG.model,
-      name: 'Model',
-      description: 'Select the model for this session',
+      name: t('pi.option.model'),
+      description: t('pi.option.modelDescription'),
       category: 'model',
       type: 'select',
       value: current ?? modelValue(models[0]!),
@@ -92,12 +94,12 @@ export function configOptions(choices: Choices): ConfigOption[] {
     : [...choices.levels, choices.level]
   options.push({
     id: CONFIG.level,
-    name: 'Thinking',
-    description: 'Set the reasoning effort for this session',
+    name: t('pi.option.thinking'),
+    description: t('pi.option.thinkingDescription'),
     category: 'thought_level',
     type: 'select',
     value: choices.level,
-    choices: levels.map((level) => ({ value: level, name: `Thinking: ${level}` })),
+    choices: levels.map((level) => ({ value: level, name: effortLevelName(level) })),
   })
   return options
 }

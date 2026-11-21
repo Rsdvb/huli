@@ -10,12 +10,13 @@
   },
   "state": {
     "ready": "就绪",
-    "signIn": "登录后开始",
+    "signIn": "需要登录",
     "installing": "正在安装…",
     "starting": "正在启动…",
     "failed": "失败",
     "notAvailable": "不可用",
-    "needsUpdate": "需要更新"
+    "needsUpdate": "需要更新",
+    "checkingSignIn": "正在检查登录…"
   },
   "node": {
     "title": "需要 Node.js",

@@ -70,7 +70,7 @@
       "title": "更早的历史记录不可用",
       "description": "{{agent}} 无法回放会话，这个会话将在没有历史记录的情况下继续。"
     },
-    "signInNeeded": "{{agent}} 需要你登录",
+    "signInNeeded": "{{agent}} 需要登录",
     "closedBeforeSent": {
       "title": "会话在消息发出前已关闭",
       "description": "消息会留在队列中，点击「继续」后才会发出。"
@@ -132,7 +132,8 @@
     "fullAccessNotCarried": {
       "title": "没有带上完全访问",
       "description": "这个会话在 Kettu 外面是完全访问。Kettu 不以完全访问接上会话，这里改成了「{{mode}}」。"
-    }
+    },
+    "signInNeededBody": "登录后，这条消息会重新发送。"
   },
   "attention": {
     "browserOrigin": "想打开 {{site}}",
@@ -321,7 +322,24 @@
     },
     "removing": "正在从这台电脑移除 {{agent}}，完成后再试",
     "removeBusy_other": "这个 Agent 有 {{count}} 个会话正在运行，先停下或等它们做完再移除",
-    "removeShared": "{{agents}} 也在用 {{harness}}，卸载会让它们没法用。先移除它们，或只移除这个 Agent。"
+    "removeShared": "{{agents}} 也在用 {{harness}}，卸载会让它们没法用。先移除它们，或只移除这个 Agent。",
+    "unknownUsageReply": "厂商返回的用量信息 Kettu 读不懂",
+    "unknownAccountReply": "{{agent}} 返回的账号信息 Kettu 读不懂",
+    "signInTimedOut": "登录 {{agent}} 等了太久，已停止。请再试一次。",
+    "method": {
+      "subscription": "用订阅登录",
+      "deviceCode": "用设备码登录",
+      "terminal": "在终端中登录",
+      "opencode": "登录模型厂商"
+    },
+    "apiKey": {
+      "key": "API key 不能为空，也不能有空格。",
+      "keyOnly": "这个 Harness 只接受 API key。",
+      "baseUrl": "Base URL 必须是 http 或 https 地址。",
+      "model": "模型名不能有空格。",
+      "none": "{{agent}} 不接受 Kettu 给的 API key。"
+    },
+    "providersUnreadable": "读不到 OpenCode 的厂商。请检查装的 OpenCode 版本，再试一次。"
   },
   "detect": {
     "noVersion": "没有适合这台电脑的 {{agent}} 版本，所以无法安装。",
@@ -564,6 +582,35 @@
       "noResponse": "没有响应",
       "connection": "连接失败",
       "status": "HTTP {{status}}"
+    },
+    "auth": {
+      "subscription": {
+        "name": "Claude 订阅",
+        "description": "用 Claude 订阅登录"
+      },
+      "console": {
+        "name": "Anthropic Console",
+        "description": "用 Anthropic Console 登录，按 API 用量计费"
+      },
+      "login": {
+        "name": "登录 Claude",
+        "description": "运行 `claude`，再输入 /login"
+      }
+    },
+    "account": {
+      "gateway": "自定义模型网关",
+      "apiKey": "Anthropic API key",
+      "none": "未登录"
+    },
+    "option": {
+      "mode": "模式",
+      "modeDescription": "这个会话的授权模式",
+      "model": "模型",
+      "modelDescription": "要用的 AI 模型",
+      "effort": "推理强度",
+      "effortDescription": "这个模型能用的推理强度",
+      "fast": "快速模式",
+      "fastDescription": "支持的模型回复更快"
     }
   },
   "codex": {
@@ -585,7 +632,8 @@
       "fastDescription": "1.5 倍速度，用量更多",
       "speed": "速度",
       "speedDescription": "Codex 给这个模型开放的速度档，越快用量越多",
-      "speedStandard": "标准"
+      "speedStandard": "标准",
+      "fastTier": "快速"
     },
     "mode": {
       "read-only": {
@@ -1035,6 +1083,12 @@
     },
     "changelog": {
       "missing": "找不到更新日志：无法定位 pi 的安装包。"
+    },
+    "option": {
+      "model": "模型",
+      "modelDescription": "这个会话用的模型",
+      "thinking": "推理强度",
+      "thinkingDescription": "这个会话的推理强度"
     }
   },
   "cline": {
@@ -1265,5 +1319,15 @@
     "notStarted": "这个会话在 Agent 那边还没有对话，没有可以继续的内容。",
     "running": "这个会话正在这里运行。先停止它，再到终端中继续。",
     "subagent": "子 Agent 的会话在它的上级会话里继续。"
+  },
+  "effortLevel": {
+    "none": "关",
+    "off": "关",
+    "minimal": "最低",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "xhigh": "很高",
+    "max": "最高"
   }
 }

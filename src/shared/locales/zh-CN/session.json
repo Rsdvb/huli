@@ -717,7 +717,7 @@
     "picker": {
       "search": "搜索智能体",
       "noMatch": "没有匹配的智能体",
-      "signedOut": "已退出 · 登录后使用",
+      "signedOut": "需要登录",
       "failed": "启动失败",
       "needsUpdate": "版本太旧 · 点击更新",
       "versionBroken": "{{version}} 和 Kettu 不能一起用",
@@ -725,7 +725,8 @@
       "limitUsed": "已用 {{limit}}限额的 {{percent}}%",
       "limitLeft": "{{limit}}限额剩余 {{percent}}%",
       "limitReached": "已达 {{limit}}限额",
-      "manage": "管理智能体…"
+      "manage": "管理智能体…",
+      "needsNode": "需要 Node.js · 点击去安装"
     },
     "modelMenu": {
       "label": "模型",
@@ -779,7 +780,11 @@
       "textOnly": "需求只能是文字：去掉附件后再发出。",
       "stepAgents": "工作流的步骤只能由 Claude Code 和 Codex 的智能体来做：请选其中一个。",
       "previewFoot": "Pace：{{pace}} · Auto 的步骤开始时才选人"
-    }
+    },
+    "signInFirst": "先登录 {{agent}}",
+    "signInNotice": "{{agent}} 需要登录",
+    "signInNoticeHint": "登录后就能发送消息。",
+    "signInUnsure": "Kettu 还确认不了 {{agent}} 是否已登录，可以直接发送试试。"
   },
   "signIn": {
     "title": "登录 {{agent}}",
@@ -801,7 +806,10 @@
     "onComputer": "这种方式会在 {{agent}} 所在的电脑上打开浏览器，请到那台电脑上登录，然后重试。",
     "scanTitle": "扫码登录",
     "scanHint": "用手机上的{{agent}} App 扫这个二维码，然后在手机上确认。",
-    "scanAlt": "登录二维码"
+    "scanAlt": "登录二维码",
+    "copyLink": "复制链接",
+    "linkCopied": "已复制",
+    "reading": "正在读取登录方式…"
   },
   "takeover": {
     "title": "由 {{agent}} 接手",

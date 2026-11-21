@@ -4,6 +4,7 @@ import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '@shared/agent-host'
+import type { AgentId } from '@shared/thread'
 import { newSession } from '@renderer/app/actions'
 import { retryHostState } from '@renderer/app/bootstrap'
 import { FolderClosedMark } from '@renderer/components/affect/app-shell'
@@ -52,7 +53,13 @@ import {
   useSessionsStore,
 } from '@renderer/stores/sessions'
 import { listedTasks, pinnedTasks, useTasksStore } from '@renderer/stores/tasks'
-import { openSettings, PINNED_GROUP, showAllRows, useViewStore } from '@renderer/stores/view'
+import {
+  openAgentSettings,
+  openSettings,
+  PINNED_GROUP,
+  showAllRows,
+  useViewStore,
+} from '@renderer/stores/view'
 import { StarCard } from '@renderer/features/github-star/star-prompts'
 import { useUngroupDrop } from '@renderer/features/session-folders/drag'
 import { SessionFolderDialogs } from '@renderer/features/session-folders/folder-dialogs'
@@ -671,12 +678,12 @@ function moveRowFocus(event: KeyboardEvent<HTMLDivElement>): void {
  * one update card for Kettu and the harnesses, never stacked.
  */
 export function SidebarNotices() {
-  const { signIn } = useNotices()
+  const { signIn, signInIds } = useNotices()
   const { card, items, batch } = useUpdates()
   return (
     <>
       {isWeb && !window.isSecureContext && <InsecureCard />}
-      {signIn.length > 0 && <SignInCard names={signIn} />}
+      {signIn.length > 0 && <SignInCard names={signIn} ids={signInIds} />}
       {card && <UpdateCardView card={card} items={items} batch={batch} />}
       <StarCard blocked={(isWeb && !window.isSecureContext) || signIn.length > 0 || !!card} />
     </>
@@ -684,7 +691,7 @@ export function SidebarNotices() {
 }
 
 /** An agent needs sign-in: something to do, so it takes the warning color, and it cannot be dismissed. */
-function SignInCard({ names }: { names: string[] }) {
+function SignInCard({ names, ids }: { names: string[]; ids: AgentId[] }) {
   const { t } = useTranslation('sidebar')
   const label = signInLabel(names)
   return (
@@ -693,7 +700,8 @@ function SignInCard({ names }: { names: string[] }) {
       text={label}
       label={label}
       detail={t('footer.signInDetail')}
-      onOpen={() => openSettings('agents')}
+      // Huli: one agent's page, else the list of agents.
+      onOpen={() => (ids.length === 1 ? openAgentSettings(ids[0]!) : openSettings('agents'))}
     />
   )
 }

@@ -306,6 +306,8 @@ export interface AgentTimings {
   signInPollMs: number
   /** Huli: how long such a sign-in is checked again after it started or was last asked about. */
   signInWatchMs: number
+  /** Huli: how long a sign-in through the agent may wait for its page, picture or end. */
+  signInMs: number
   /** How long one `npm view` of the update check may take. */
   updateViewMs: number
   /** How long after the host starts a due update check waits, so it stays out of startup. */
@@ -339,6 +341,9 @@ const PROVIDERS_FORCED_MS = 10_000
 /** Huli: why a waiting `authenticate` was let go: a check found the agent signed in already. */
 const SIGNED_IN_ELSEWHERE = new Error('The agent is signed in')
 
+/** Huli: why a sign-in was stopped: it waited `signInMs` without an end. */
+const SIGN_IN_TIMED_OUT = new Error('The sign-in took too long')
+
 export const AGENT_TIMINGS: AgentTimings = {
   idleMs: 5 * 60_000,
   initializeMs: 30_000,
@@ -352,6 +357,7 @@ export const AGENT_TIMINGS: AgentTimings = {
   optionsMs: 30_000,
   signInPollMs: 4_000,
   signInWatchMs: 3 * 60_000,
+  signInMs: 5 * 60_000,
   updateViewMs: 20_000,
   updateDelayMs: 60_000,
   updateIntervalMs: 24 * 60 * 60_000,
@@ -644,6 +650,30 @@ function exitText(agent: string, info: ExitInfo): string {
   if (info.error) return t('agent.exit.error', { agent, error: info.error })
   if (info.signal) return t('agent.exit.signal', { agent, signal: info.signal })
   return t('agent.exit.code', { agent, code: String(info.code) })
+}
+
+/**
+ * Huli: whether `next` is another account than `before`: another kind of sign-in, or another
+ * address. An address one of them does not name yet, as a sign-in read before the plan, is no
+ * change.
+ */
+export function otherAccount(before: AgentAccount, next: AgentAccount): boolean {
+  if (before.kind === 'none') return false
+  if (before.kind !== next.kind) return true
+  const a = before.email?.trim().toLowerCase()
+  const b = next.email?.trim().toLowerCase()
+  return !!a && !!b && a !== b
+}
+
+/** Huli: drops the plan's windows, balances and reset credits an account read. */
+function forgetReadings(slot: Slot): void {
+  slot.limits.clear()
+  slot.limitsReadAt = 0
+  slot.limitsError = null
+  setBalances(slot, [], 0)
+  slot.resets = null
+  slot.resetsError = null
+  slot.resetsReadAt = 0
 }
 
 /** Huli: the balances a read gave, now; an earlier run's kept ones are replaced. */
@@ -3685,6 +3715,9 @@ export class AgentManager {
       slot.limits.clear()
       setBalances(slot, [], 0)
     }
+    // Huli: the plan's windows and balances belong to the account that read them; signed out, or
+    // signed in as another, they are not this agent's any more.
+    if (named.kind === 'none' || (before && otherAccount(before, named))) forgetReadings(slot)
     slot.signIn = named.kind === 'none' ? 'required' : 'signed-in'
     this.emit(slot)
     if (wasRequired && slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
@@ -3786,7 +3819,10 @@ export class AgentManager {
       .then(
         () => this.limitsReadEnded(slot, null),
         (error: unknown) => {
-          this.limitsReadEnded(slot, agentError(error).message)
+          // Huli: signed out is the sign-in's to say, in the user's language; the agent's own
+          // words for it would stay on the page once it signs in again.
+          const failed = agentError(error)
+          this.limitsReadEnded(slot, failed.code === 'auth_required' ? null : failed.message)
           throw error
         },
       )
@@ -3879,8 +3915,7 @@ export class AgentManager {
         if (hiddenSession) await connection.closeSession(hiddenSession).catch(() => {})
       }
       const usage = parseMistralAccount(reply, now)
-      if (!usage)
-        throw this.limitsError(slot, new Error('The vendor returned an unknown usage reply'))
+      if (!usage) throw this.limitsError(slot, new Error(t('agent.unknownUsageReply')))
       this.applyVendorUsage(slot, usage, now)
       return
     }
@@ -3905,7 +3940,10 @@ export class AgentManager {
         usage = await readAuggieAccount(command.command, args, env, os.homedir(), now)
       }
       if (!usage)
-        throw this.limitsError(slot, new Error(`${slot.name} returned an unknown account reply`))
+        throw this.limitsError(
+          slot,
+          new Error(t('agent.unknownAccountReply', { agent: slot.name })),
+        )
       this.applyVendorUsage(slot, usage, now)
       return
     }
@@ -4248,8 +4286,7 @@ export class AgentManager {
       throw error
     }
     const usage = parseGrokBilling(reply, now)
-    if (!usage)
-      throw this.limitsError(slot, new Error('The vendor returned an unknown usage reply'))
+    if (!usage) throw this.limitsError(slot, new Error(t('agent.unknownUsageReply')))
     this.applyVendorUsage(slot, usage, now)
     if (slot.signIn !== 'signed-in') this.signedIn(slot.id)
   }
@@ -4904,8 +4941,7 @@ export class AgentManager {
       slot.signIn = connected.length > 0 ? 'signed-in' : 'unknown'
       if (wasRequired && connected.length > 0) this.hooks.signedIn(slot.id)
     } catch {
-      slot.providersError =
-        'Could not read OpenCode providers. Check the installed OpenCode version and try again.'
+      slot.providersError = t('agent.providersUnreadable')
       throw new HostError('agent_unavailable', slot.providersError)
     } finally {
       this.emit(slot)
@@ -5020,27 +5056,44 @@ export class AgentManager {
       showImage?(image: SignInImage | null): void
     },
   ): Promise<void> {
-    const runtime = await this.ensureReady(agentId)
-    const method = runtime.init.authMethods.find((m) => m.id === methodId)
-    if (!method) throw invalidParams(`${this.name(agentId)} has no sign-in method ${methodId}`)
-    if (method.type === 'env') {
-      throw invalidParams(
-        t('agent.keyInSettings', { method: method.name, agent: this.name(agentId) }),
-      )
-    }
-    if (method.type !== 'agent') {
-      throw invalidParams(`${method.name} runs in a terminal; use its command instead`)
-    }
     const slot = this.slot(agentId)
-    if (client.device && !handsOverPage(slot.def, methodId)) {
-      throw new HostError('forbidden', t('agent.signInOnComputer', { agent: slot.name }))
-    }
+    // Huli: a sign-in can be cancelled, and gives up after `signInMs`, from the start, before the
+    // agent has started or handed over its page or picture.
     slot.signInAbort?.abort()
     const abort = new AbortController()
     slot.signInAbort = abort
-    // Huli: an agent that finishes in the browser, or keeps no answer for it, is found signed in.
-    this.watchSignIn(slot)
+    const timer = setTimeout(() => abort.abort(SIGN_IN_TIMED_OUT), this.timings.signInMs)
+    timer.unref?.()
+    const stopped = (): HostError =>
+      new HostError(
+        'agent_error',
+        t(
+          abort.signal.reason === SIGN_IN_TIMED_OUT
+            ? 'agent.signInTimedOut'
+            : 'agent.signInCancelled',
+          {
+            agent: slot.name,
+          },
+        ),
+      )
     try {
+      const runtime = await this.ensureReady(agentId)
+      if (abort.signal.aborted) throw stopped()
+      const method = runtime.init.authMethods.find((m) => m.id === methodId)
+      if (!method) throw invalidParams(`${this.name(agentId)} has no sign-in method ${methodId}`)
+      if (method.type === 'env') {
+        throw invalidParams(
+          t('agent.keyInSettings', { method: method.name, agent: this.name(agentId) }),
+        )
+      }
+      if (method.type !== 'agent') {
+        throw invalidParams(`${method.name} runs in a terminal; use its command instead`)
+      }
+      if (client.device && !handsOverPage(slot.def, methodId)) {
+        throw new HostError('forbidden', t('agent.signInOnComputer', { agent: slot.name }))
+      }
+      // Huli: an agent that finishes in the browser, or keeps no answer for it, is found signed in.
+      this.watchSignIn(slot)
       await runtime.connection.authenticate(methodId, {
         openLink: client.openLink,
         ...(client.showImage ? { showImage: client.showImage } : {}),
@@ -5049,12 +5102,11 @@ export class AgentManager {
       })
     } catch (error) {
       if (abort.signal.reason !== SIGNED_IN_ELSEWHERE) {
-        if (abort.signal.aborted) {
-          throw new HostError('agent_error', t('agent.signInCancelled', { agent: slot.name }))
-        }
+        if (abort.signal.aborted) throw stopped()
         throw agentError(error)
       }
     } finally {
+      clearTimeout(timer)
       if (slot.signInAbort === abort) {
         slot.signInAbort = null
         this.sessionsChanged(agentId)
@@ -5089,11 +5141,14 @@ export class AgentManager {
     const slot = this.slot(agentId)
     slot.signIn = 'required'
     slot.account = null
-    slot.limits.clear()
-    setBalances(slot, [], 0)
+    forgetReadings(slot)
     slot.answeredSignIn = null
+    // Huli: `codex logout` removes the auth.json that held the key Kettu handed it.
+    if (slot.def.id === 'codex') slot.apiKey = false
     this.emit(slot)
     void this.readSignInMethod(slot)
+    // A key Kettu wrote into Claude Code's settings still signs it in after its own sign-out.
+    if (slot.def.id === 'claude-code' && slot.apiKey) this.signInChanged(slot)
   }
 
   // Huli: resetting the agent's environment, back to what a fresh install finds, its history and
@@ -5497,7 +5552,7 @@ export class AgentManager {
     } else if (slot.def.id === 'codebuddy') {
       await writeCodebuddyKey(this.settingsFile(slot), checked)
     } else {
-      throw invalidParams(`${slot.def.name} takes no API key from Kettu`)
+      throw invalidParams(t('agent.apiKey.none', { agent: slot.def.name }))
     }
     this.deps.diagnostics.event(agentId, 'api key', 'set')
     slot.apiKey = true
@@ -5512,7 +5567,7 @@ export class AgentManager {
     else if (slot.def.id === 'codex') await this.runCodexLogin(slot, ['logout'])
     else if (slot.def.id === 'deepseek') await clearDshKey(this.dshFolder(slot))
     else if (slot.def.id === 'codebuddy') await clearCodebuddyKey(this.settingsFile(slot))
-    else throw invalidParams(`${slot.def.name} takes no API key from Kettu`)
+    else throw invalidParams(t('agent.apiKey.none', { agent: slot.def.name }))
     this.deps.diagnostics.event(agentId, 'api key', 'cleared')
     slot.apiKey = false
     await this.credentialsChanged(slot)
@@ -5675,17 +5730,50 @@ export class AgentManager {
   /** The account and limits belong to the old credentials; an idle process goes with them. */
   private async credentialsChanged(slot: Slot): Promise<void> {
     slot.account = null
-    slot.limits.clear()
-    setBalances(slot, [], 0)
-    slot.limitsReadAt = 0
+    forgetReadings(slot)
     slot.providersReadAt = 0
-    slot.limitsError = null
-    slot.resets = null
-    slot.resetsError = null
-    slot.resetsReadAt = 0
     slot.signIn = 'unknown'
+    const reads = this.readsSignInAgain(slot)
+    if (reads) slot.readingSignIn = true
     if (slot.runtime && this.hooks.liveSessions(slot.id) === 0) await this.stopProcess(slot)
     this.emit(slot)
+    if (reads) this.signInChanged(slot)
+  }
+
+  /** Huli: whether a change of the agent's credentials has its sign-in read again. */
+  private readsSignInAgain(slot: Slot): boolean {
+    return !this.stopped && this.has(slot.id) && !this.isDisabled(slot.id) && !slot.resetHold
+  }
+
+  /**
+   * Huli: after a key was set or cleared, a reset, or a sign-out a key outlives, the agent's
+   * sign-in is read again at once, and shows as being read meanwhile, not as ready: unknown
+   * reads as ready, which a cleared key or a reset is not.
+   */
+  private signInChanged(slot: Slot): void {
+    if (!this.readsSignInAgain(slot)) {
+      if (slot.readingSignIn) {
+        slot.readingSignIn = false
+        this.emit(slot)
+      }
+      return
+    }
+    if (!slot.readingSignIn) {
+      slot.readingSignIn = true
+      this.emit(slot)
+    }
+    void this.readSignIn(slot.id)
+      .catch((error: unknown) =>
+        this.deps.diagnostics.log(
+          'warn',
+          `${slot.name}: could not read its sign-in again: ${(error as Error).message}`,
+        ),
+      )
+      .finally(() => {
+        if (!slot.readingSignIn) return
+        slot.readingSignIn = false
+        this.emit(slot)
+      })
   }
 
   /** The configuration folder `env` gives the agent; null for an agent whose folder is fixed. */
@@ -5832,7 +5920,7 @@ export class AgentManager {
     if (slot.def.id === 'qwen' && this.has(agentId)) {
       authMethods.push({
         id: 'qwen-terminal-login',
-        name: 'Sign in with a subscription',
+        name: t('agent.method.subscription'),
         type: 'terminal',
         command: formatCommand({ ...display, args: [] }, platform),
       })
@@ -5842,7 +5930,7 @@ export class AgentManager {
       const launched = slot.def.launch.kind === 'package' ? (slot.def.launch.args ?? []) : []
       authMethods.push({
         id: 'grok-device-login',
-        name: 'Sign in with a device code',
+        name: t('agent.method.deviceCode'),
         type: 'terminal',
         command: formatCommand(
           {
@@ -5861,7 +5949,7 @@ export class AgentManager {
       // Its own method only uses a sign-in made with its CLI, which runs in a terminal.
       authMethods.push({
         id: 'cursor-terminal-login',
-        name: 'Sign in in a terminal',
+        name: t('agent.method.terminal'),
         type: 'terminal',
         command: formatCommand(
           { ...display, args: [...display.args.filter((arg) => arg !== 'acp'), 'login'] },
@@ -5876,7 +5964,7 @@ export class AgentManager {
     if (slot.def.id === 'opencode' && this.has(agentId)) {
       authMethods.push({
         id: 'opencode-login',
-        name: 'OpenCode login',
+        name: t('agent.method.opencode'),
         type: 'terminal',
         command: formatCommand({ ...display, args: ['auth', 'login'] }, platform),
       })
@@ -5892,6 +5980,9 @@ export class AgentManager {
     const cliVersion = this.cliUpdateVersion(h)
     const cliCommand = cliVersion ? (this.cliCommands.get(h) ?? null) : null
     const cliCommandName = slot.def.cli?.command
+    // Huli: what an earlier sign-in read, the account, its plan and balances, stays kept for when
+    // it signs in again, but is not shown as this agent's while it is signed out.
+    const signedOut = slot.signIn === 'required'
     return {
       id: slot.id,
       name: slot.name,
@@ -5934,15 +6025,15 @@ export class AgentManager {
       ...(slot.readingSignIn ? { readingSignIn: true as const } : {}),
       authMethods,
       canLogout: capabilities?.logout ?? false,
-      account: slot.account,
+      account: signedOut ? null : slot.account,
       ...(slot.def.id === 'opencode'
         ? {
             providers: slot.providers,
             providersError: slot.providersError,
           }
         : {}),
-      ...(slot.def.id === 'deepseek' ? { balance: slot.balance } : {}),
-      ...(slot.balances.length
+      ...(slot.def.id === 'deepseek' ? { balance: signedOut ? null : slot.balance } : {}),
+      ...(slot.balances.length && !signedOut
         ? {
             balances: slot.balances,
             ...(slot.balancesAt > 0 ? { balancesAt: slot.balancesAt } : {}),
@@ -5963,10 +6054,12 @@ export class AgentManager {
           }
         : {}),
       // A window without a reset that was not read again for its whole period is gone.
-      limits: [...slot.limits.values()].filter((limit) => !limitOutlived(limit, Date.now())),
-      ...(slot.limitsError ? { limitsError: slot.limitsError } : {}),
-      ...(slot.resets ? { resets: slot.resets } : {}),
-      ...(slot.resetsError ? { resetsError: slot.resetsError } : {}),
+      limits: signedOut
+        ? []
+        : [...slot.limits.values()].filter((limit) => !limitOutlived(limit, Date.now())),
+      ...(slot.limitsError && !signedOut ? { limitsError: slot.limitsError } : {}),
+      ...(slot.resets && !signedOut ? { resets: slot.resets } : {}),
+      ...(slot.resetsError && !signedOut ? { resetsError: slot.resetsError } : {}),
       detail: slot.detail ?? h.adapterNote,
       installNotice: slot.def.install.notice ? t(slot.def.install.notice) : null,
       installUrl:

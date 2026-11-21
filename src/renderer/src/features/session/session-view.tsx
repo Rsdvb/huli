@@ -51,7 +51,7 @@ import {
   StartingAgent,
   ThreadSkeleton,
 } from './session-states'
-import { SignIn } from './sign-in'
+import { SessionSignIn, SignIn } from './sign-in'
 import { SubagentBar } from './subagent-bar'
 import { Thread } from './thread'
 import { ThreadWidthGrips } from './thread-width-grips'
@@ -255,19 +255,13 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                   />
                 ) : null}
                 {session && status === 'auth_required' && !empty && (
-                  <Alert variant="warning" className="has-data-[slot=alert-action]:pr-36">
-                    <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={1.9} aria-hidden />
-                    <AlertTitle>{t('view.signInToContinue', { agent: name })}</AlertTitle>
-                    <AlertDescription>{t('view.historyStays')}</AlertDescription>
-                    <AlertAction className="flex gap-1.5">
-                      <Button size="xs" variant="outline" onClick={retry}>
-                        {t('common:actions.retry')}
-                      </Button>
-                      <Button size="xs" onClick={() => openAgents(summary.agentId)}>
-                        {t('view.signIn')}
-                      </Button>
-                    </AlertAction>
-                  </Alert>
+                  <SessionSignIn
+                    agentId={summary.agentId}
+                    hostId={hostId}
+                    panel={summary.id}
+                    name={name}
+                    onRetry={retry}
+                  />
                 )}
                 {agentRemoved && (
                   <Alert variant="warning">

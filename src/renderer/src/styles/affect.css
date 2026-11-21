@@ -6300,6 +6300,20 @@ li[data-row-exit='dust'] > * {
   text-overflow: ellipsis;
   color: var(--danger);
 }
+/* Huli: New session with a signed-out agent: its sign-in, in place. */
+.kettu-start__signin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px 10px 14px;
+  border-radius: 14px;
+  background: var(--composer-panel);
+  box-shadow: inset 0 0 0 0.5px var(--composer-line);
+}
 /* New session without an agent: the install guide. */
 .kettu-guide {
   display: flex;

@@ -58,7 +58,10 @@
     "annual": "Annual",
     "overage": "Extra usage",
     "weeklyOf": "Weekly · {{model}}",
-    "fiveHourOf": "5-hour · {{model}}"
+    "fiveHourOf": "5-hour · {{model}}",
+    "weekly": "Weekly",
+    "on_demand": "On-demand",
+    "other_models": "Other models"
   },
   "planWindowInText": {
     "seven_day_opus": "Opus weekly",

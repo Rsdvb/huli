@@ -22,7 +22,9 @@ import { Skeleton } from '@renderer/components/ui/skeleton'
 import { SettingsGlyph } from '@renderer/features/account/avatar'
 import { useHostLabel } from '@renderer/features/sidebar/host-label'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
-import { errorMessage } from '@renderer/lib/host'
+import { needsNode } from '@renderer/features/agents/node-runtime'
+import { openHostSettingsItem } from '@renderer/features/settings/host-sections'
+import { errorMessage, hostAt } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
@@ -69,7 +71,12 @@ export function AgentPicker({
   const statuses = useAgentsStore(
     useShallow((s) => {
       const { order, byId } = agentsOn(s, hostId)
-      return menuAgents(usableAgents(order, byId), true)
+      const usable = usableAgents(order, byId)
+      // Huli: an agent that waits for Node.js is listed too, where a click leads to its install.
+      const waiting = usable.filter(
+        (a) => needsNode(a) && !a.disabled && !a.hidden && a.registered !== false,
+      )
+      return [...menuAgents(usable, true), ...waiting]
     }),
   )
   // This computer's agents are read after launch: until then the list is loading, not empty.
@@ -82,6 +89,13 @@ export function AgentPicker({
   const onOpenChange = (next: boolean) => {
     setOpen(next)
     if (!next) return
+    // Huli: an agent signed in outside Kettu since is found so as the menu opens.
+    for (const status of statuses) {
+      if (status.signIn !== 'required' || status.disabled) continue
+      hostAt(hostId, 'agents.readSignIn', { agentId: status.id }).catch((error: unknown) =>
+        console.warn(`Could not read the sign-in: ${errorMessage(error)}`),
+      )
+    }
     for (const status of statuses) {
       if (status.state !== 'ready' || !status.capabilities.reports) continue
       refreshLimits(status.id, hostId).catch((error: unknown) =>
@@ -105,6 +119,13 @@ export function AgentPicker({
         onValueChange={(id: AgentId | null, details) => {
           if (!id) return
           const status = byId.get(id)
+          // Huli: one that waits for Node.js is not chosen either: its page installs Node.js.
+          if (status && needsNode(status)) {
+            setOpen(false)
+            if (hostId === null) openAgentSettings(status.id)
+            else openHostSettingsItem(hostId, 'agents', status.id)
+            return
+          }
           // An agent whose own program is too old is not chosen: a click updates it.
           if (status && agentNeed(status) === 'update') {
             if (status.cli?.update) {
@@ -178,7 +199,9 @@ export function AgentPicker({
               {(id: AgentId) => {
                 const status = byId.get(id)
                 if (!status) return null
-                const line = agentLine(status, now, newestLimits(readings, status), limitView)
+                const line = needsNode(status)
+                  ? { text: t('newSession.picker.needsNode'), tone: 'attention' as const }
+                  : agentLine(status, now, newestLimits(readings, status), limitView)
                 return (
                   <ComboboxItem
                     key={id}

@@ -823,7 +823,8 @@
       "follow": {
         "claude-code": "Follow Claude Code",
         "codex": "Follow Codex (Auto review)",
-        "deepseek": "Follow DeepSeek Harness"
+        "deepseek": "Follow DeepSeek Harness",
+        "doubao": "Follow Doubao (Sandbox)"
       },
       "unused": "Available once this agent has been used.",
       "unoffered": "{{mode}} (no longer offered)",
@@ -1120,7 +1121,9 @@
       "loginKeyHintOpenAi": "An OpenAI API key.",
       "loginKeyHintDeepSeek": "A DeepSeek API key.",
       "loginKeyHintCodebuddy": "An API key from the site above.",
-      "submit": "Add agent"
+      "submit": "Add agent",
+      "notListed": "“{{name}}” was added, but Kettu didn’t see it within 10 seconds. Try again.",
+      "made": "“{{name}}” was added. Fix what’s below and choose Add agent again; no second agent is made."
     },
     "key": {
       "row": "API key",
@@ -1151,10 +1154,24 @@
         "doubao": "Doubao (Volcano Engine Ark)",
         "doubaoIntl": "Doubao (BytePlus)"
       },
-      "envSet": "Set. Kettu keeps it and passes it only to {{name}} when it starts."
+      "envSet": "Set. Kettu keeps it and passes it only to {{name}} when it starts.",
+      "accepted": "{{name}} signed in with the key.",
+      "checking": "Checking the key…",
+      "rejected": "{{name}} didn’t sign in with this key. Check that it’s right, or set another.",
+      "clearConfirm": {
+        "title": "Clear {{name}}’s API key?",
+        "body": "{{name}} stops using this key and needs another sign-in or key.",
+        "bodyCodex": "This runs `codex logout`, which also signs {{name}} out of ChatGPT and signs Codex out in a terminal."
+      },
+      "problem": {
+        "key": "The API key must be one word without spaces.",
+        "keyOnly": "This harness takes only an API key.",
+        "baseUrl": "The base URL must be an http or https address.",
+        "model": "The model must be one word without spaces."
+      }
     },
-    "needsSignInLine": "needs you to sign in",
-    "signInPill": "Sign in",
+    "needsSignInLine": "Needs sign-in",
+    "signInPill": "Needs sign-in",
     "notCreatedLine": "Not created yet.",
     "createdByKettu": "created by Kettu",
     "chosenInKettu": "chosen in Kettu",
@@ -1346,8 +1363,23 @@
       "partly": "Removed {{count}}; {{failed}} could not be removed",
       "finished_one": "Reset. 1 item removed.",
       "finished_other": "Reset. {{count}} items removed.",
-      "afterHint": "It makes the files it needs again on its next start. Sign in again if you need to."
-    }
+      "afterHint": "It makes the files it needs again on its next start. Sign in again if you need to.",
+      "runFailed": "The reset did not finish"
+    },
+    "notSignedIn": "Not signed in",
+    "signInStarting": "Opening {{name}}’s sign-in…",
+    "signInStartingHint": "Waiting for the agent to hand over its sign-in page or code. You can cancel at any time.",
+    "usageReadFailed": "Could not read the plan usage: {{error}}",
+    "signInRowHintItself": "{{name}} signs in by itself; Kettu never handles the credentials.",
+    "signInInTerminal": "Sign in in a terminal",
+    "signOutConfirm": {
+      "title": "Sign out of {{name}}?",
+      "body": "{{name}} can’t be used until you sign in again.",
+      "bodyCli": "{{name}} shares its folder with `{{command}}` in a terminal, which signs out too. {{name}} can’t be used until you sign in again."
+    },
+    "signInDone": "{{name}} is signed in",
+    "signInNotDone": "{{name}} is not signed in yet",
+    "backToAgent": "Back to its settings"
   },
   "about": {
     "version": {
@@ -2497,7 +2529,8 @@
       "pickInterface": "Choose an interface…",
       "interface": "Interface: {{name}}",
       "interfaceDown": "Interface: {{name}} (disconnected)",
-      "interfaceGone": "Interface: {{name}} (gone)"
+      "interfaceGone": "Interface: {{name}} (gone)",
+      "openNetwork": "Open Agent network"
     },
     "exit": {
       "node": "Node exit {{ip}} ({{country}})",

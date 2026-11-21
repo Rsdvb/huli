@@ -14,6 +14,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentAccount, AgentStatus } from '@shared/agent-host'
+import { apiKeyProblem } from '@shared/api-key'
 import {
   CODEBUDDY_SITES,
   isFullAccessMode,
@@ -32,8 +33,7 @@ import {
   type AgentColor,
 } from '@shared/settings'
 import { MULTI_AGENT_HARNESSES, type AgentId, type HarnessId } from '@shared/thread'
-import { newSession } from '@renderer/app/actions'
-import { emitAppEvent } from '@renderer/app/events'
+import { onAppEvent } from '@renderer/app/events'
 import { AgentMark, AgentTile } from '@renderer/components/agents/agent-mark'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { useRefresh } from '@renderer/components/refresh'
@@ -51,14 +51,13 @@ import {
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@renderer/components/ui/radio-group'
 import { toast } from '@renderer/components/ui/toast'
+import { signInTerminal as openSignInTerminal } from '@renderer/features/agents/agent-sign-in'
 import { AgentStateLine } from '@renderer/features/agents/agent-state'
 import { startAgentInTerminal, useStartsInTerminal } from '@renderer/features/agents/agent-terminal'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { readiness, type AgentReadiness } from '@renderer/features/agents/readiness'
-import { focusedPane } from '@renderer/features/split/layout'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
-import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
 import { isWeb } from '@renderer/lib/platform'
 import { useNow } from '@renderer/lib/use-now'
@@ -73,26 +72,16 @@ import {
   addableHarnesses,
   cancelAgentSignIn,
   signInAgent,
+  useAgentsStore,
   usePlanReadings,
   useSignInImage,
   useSignInPage,
+  useSignInStarted,
   type AgentsStoreHook,
 } from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
-import { useProjectsStore } from '@renderer/stores/projects'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
-import { createTerminal } from '@renderer/stores/terminals'
-import {
-  closeSettings,
-  newSessionPanel,
-  openAgentSettings,
-  openHarnessSettings,
-  openMarketplace,
-  panelOf,
-  sessionsShown,
-  toggleTerminal,
-  useViewStore,
-} from '@renderer/stores/view'
+import { openAgentSettings, openHarnessSettings, openMarketplace } from '@renderer/stores/view'
 import {
   Fact,
   ListMeter,
@@ -109,8 +98,8 @@ import { AgentProviders } from './agent-providers'
 import {
   currentLimits,
   FOLLOW_AGENT,
+  asksForKey,
   harnessVersion,
-  signInFolder,
   startModeView,
   useAction,
   useAgentReads,
@@ -128,6 +117,7 @@ import {
   SettingSelect,
   SettingSwitch,
   Skel,
+  Spin,
 } from './controls'
 import { ClaudeSettingsRows } from './claude-settings-rows'
 import { CodebuddySettingsRows } from './codebuddy-settings-rows'
@@ -159,13 +149,13 @@ import { useApply } from './use-apply'
 const ADDED_WAIT_MS = 10_000
 
 /** Resolves once the host lists the agent, which follows the settings change that added it. */
-function listed(agents: AgentsStoreHook, agentId: AgentId): Promise<void> {
+function listed(agents: AgentsStoreHook, agentId: AgentId, name: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const known = agents.getState().byId[agentId]
     if (known && known.registered !== false) return resolve()
     const timer = setTimeout(() => {
       stop()
-      reject(new Error(`${agentId} did not appear`))
+      reject(new Error(i18n.t('settings:agents.add.notListed', { name })))
     }, ADDED_WAIT_MS)
     const stop = agents.subscribe((state) => {
       const status = state.byId[agentId]
@@ -178,42 +168,54 @@ function listed(agents: AgentsStoreHook, agentId: AgentId): Promise<void> {
 }
 
 /**
- * Runs the agent's terminal sign-in in the built-in terminal of the side panel in view, when it
- * works in a folder of this computer, else of New session in one; copies the command without one.
+ * Runs the agent's terminal sign-in in a built-in terminal, which closes Settings; Huli: with the
+ * way back to the agent's page once it is done.
  */
 function signInTerminal(status: AgentStatus, command: string): void {
-  const view = useViewStore.getState()
-  const focused = focusedPane(view.layout).view
-  const here =
-    sessionsShown(view.main) && focused.projectPath && hostOfPath(focused.projectPath) === null
-      ? { projectPath: focused.projectPath, panel: panelOf(focused) }
-      : null
-  const projectPath =
-    here?.projectPath ??
-    signInFolder({
-      selected: view.projectPath,
-      projects: useProjectsStore.getState().projects,
-      sessions: useSessionsStore.getState().byId,
-    })
-  if (!projectPath) {
-    void navigator.clipboard.writeText(command).then(
-      () => {
-        toast(i18n.t('settings:agents.signInCopied'))
-        emitAppEvent({ kind: 'sign-in-started', agentId: status.id, hostId: null })
-      },
-      () => toast(i18n.t('settings:agents.signInCopyFailed'), undefined, { tone: 'warning' }),
+  if (openSignInTerminal(status, command)) offerWayBack(status)
+}
+
+/** Huli: how long a terminal sign-in is followed for the way back to the agent's page. */
+const WAY_BACK_MS = 10 * 60_000
+
+/** Huli: how long after its terminal is done the sign-in is given to show. */
+const WAY_BACK_GRACE_MS = 3_000
+
+/**
+ * Huli: Settings closed for a terminal sign-in. Once the agent is found signed in, or its terminal
+ * is done without that, a toast says so with the way back to the agent's page.
+ */
+function offerWayBack(status: AgentStatus): void {
+  const { id, name } = status
+  const signedIn = (): boolean => useAgentsStore.getState().byId[id]?.signIn === 'signed-in'
+  const before = signedIn()
+  let done = false
+  const finish = (ok: boolean): void => {
+    if (done) return
+    done = true
+    stop()
+    toast(
+      i18n.t(ok ? 'settings:agents.signInDone' : 'settings:agents.signInNotDone', { name }),
+      { label: i18n.t('settings:agents.backToAgent'), onClick: () => openAgentSettings(id) },
+      { tone: ok ? 'success' : 'warning' },
     )
-    return
   }
-  closeSettings()
-  if (!here) newSession(projectPath)
-  const panel = here?.panel ?? newSessionPanel(projectPath)
-  toggleTerminal(panel, true)
-  void createTerminal(projectPath, panel, undefined, {
-    text: command,
-    run: true,
-    signInAgent: status.id,
+  const unsubscribe = useAgentsStore.subscribe(() => {
+    if (!before && signedIn()) finish(true)
   })
+  const unlisten = onAppEvent((event) => {
+    if (event.kind !== 'sign-in-finished' || event.agentId !== id || event.hostId !== null) return
+    setTimeout(() => finish(signedIn()), WAY_BACK_GRACE_MS)
+  })
+  const timer = setTimeout(() => {
+    done = true
+    stop()
+  }, WAY_BACK_MS)
+  function stop(): void {
+    unsubscribe()
+    unlisten()
+    clearTimeout(timer)
+  }
 }
 
 function useAddable(): AgentStatus[] {
@@ -372,6 +374,14 @@ export function AgentsFooter() {
 
 type Login = 'terminal' | 'api-key'
 
+/** Huli: the agent a try of Add agent made: its id and name, its harness and folder choice. */
+interface Made {
+  id: AgentId
+  name: string
+  harness: AgentStatus
+  folder: 'default' | 'new' | 'existing'
+}
+
 /**
  * Adding an agent: its harness, its name, its folder (a new one or an existing one picked in the
  * dialog), and how it signs in: in a terminal, or with an API key the harness keeps.
@@ -396,10 +406,13 @@ function AddAgentDialog({
   const [key, setKey] = useState({ baseUrl: '', key: '', model: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const chosen = harnesses.find((h) => h.harnessId === harness) ?? harnesses[0]
-  const canUseDefault = chosen?.registered === false
+  // Huli: the agent a try made before a later step failed, which a retry goes on with instead of
+  // making another; its harness and folder stay as they were.
+  const [made, setMade] = useState<Made | null>(null)
+  const chosen = made?.harness ?? harnesses.find((h) => h.harnessId === harness) ?? harnesses[0]
+  const canUseDefault = made ? made.folder === 'default' : chosen?.registered === false
   const multiple = !!chosen && MULTI_AGENT_HARNESSES.includes(chosen.harnessId)
-  const selectedFolder = folder === 'default' && !canUseDefault ? 'new' : folder
+  const selectedFolder = made?.folder ?? (folder === 'default' && !canUseDefault ? 'new' : folder)
   const useDefault = selectedFolder === 'default'
   const trimmed = useDefault ? (chosen?.harnessName ?? '') : name.trim()
   const tooLong = [...trimmed].length > AGENT_NAME_CHARS
@@ -424,6 +437,7 @@ function AddAgentDialog({
     setKey({ baseUrl: '', key: '', model: '' })
     setError(null)
     setBusy(false)
+    setMade(null)
   }
 
   const pick = async (): Promise<void> => {
@@ -441,22 +455,35 @@ function AddAgentDialog({
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!valid || busy || !chosen) return
+    // Huli: a key the host would refuse is refused before the agent is made.
+    const problem = !useDefault && loginMode === 'api-key' ? keyProblem(key, providers) : null
+    if (problem) return setError(problem)
     setBusy(true)
     setError(null)
     try {
-      const id = useDefault
-        ? chosen.harnessId
-        : await api.settings.addAgent(
-            chosen.harnessId,
-            trimmed,
-            selectedFolder === 'new' ? null : picked,
-          )
+      let id: AgentId
+      if (made) {
+        id = made.id
+        if (!useDefault && made.name !== trimmed) {
+          await api.settings.renameAgent(id, trimmed)
+          setMade({ ...made, name: trimmed })
+        }
+      } else {
+        id = useDefault
+          ? chosen.harnessId
+          : await api.settings.addAgent(
+              chosen.harnessId,
+              trimmed,
+              selectedFolder === 'new' ? null : picked,
+            )
+        setMade({ id, name: trimmed, harness: chosen, folder: selectedFolder })
+      }
       if (useDefault) {
         await useSettingsStore.getState().update({
           agents: { [chosen.harnessId]: { enabled: true, hidden: false } },
         })
       }
-      await listed(useAgentsStore, id)
+      await listed(useAgentsStore, id, trimmed)
       if (keyOnly) {
         await request('agents.setCodebuddySite', { agentId: id, change: { site } })
       }
@@ -491,12 +518,18 @@ function AddAgentDialog({
             {t('agents.add.description')}
           </SettingsDialogHeader>
           <SettingsDialogBody>
+            {made && (
+              <p className="kettu-sd__hint" role="status" data-wrap="">
+                {t('agents.add.made', { name: made.name })}
+              </p>
+            )}
             <SettingsField label={t('agents.add.harness')}>
               <SettingSelect
                 label={t('agents.add.harness')}
                 className="k-select--full"
                 value={chosen?.harnessId ?? harness}
-                options={harnesses.map((h) => ({
+                disabled={made !== null}
+                options={(made ? [made.harness] : harnesses).map((h) => ({
                   value: h.harnessId,
                   label: h.harnessName,
                   icon: <AgentMark agent={h.harnessId} size={16} />,
@@ -537,6 +570,7 @@ function AddAgentDialog({
               <RadioGroup
                 aria-label={t('agents.add.folder')}
                 value={selectedFolder}
+                disabled={made !== null}
                 onValueChange={(next) => setFolder(next as typeof folder)}
                 className="kettu-sd__choices"
               >
@@ -548,6 +582,11 @@ function AddAgentDialog({
                     description={t('agents.add.folderDefaultHint', {
                       name: chosen?.harnessName ?? '',
                     })}
+                    // Huli: which folder that is, where the harness keeps one.
+                    extra={
+                      useDefault &&
+                      chosen?.configDir?.runs && <PathText path={chosen.configDir.runs} />
+                    }
                   />
                 )}
                 {multiple && (
@@ -694,6 +733,19 @@ interface KeyValue {
   model: string
 }
 
+/** Huli: why the key typed cannot be handed over, as the host would refuse it; null when it can. */
+function keyProblem(value: KeyValue, providers: boolean): string | null {
+  const problem = apiKeyProblem(
+    {
+      key: value.key,
+      ...(providers && value.baseUrl.trim() ? { baseUrl: value.baseUrl } : {}),
+      ...(providers && value.model.trim() ? { model: value.model } : {}),
+    },
+    providers,
+  )
+  return problem && i18n.t(`settings:agents.key.problem.${problem}`)
+}
+
 // Providers whose Anthropic-compatible address Claude Code takes, filled in with one click. Volcano
 // Engine Ark's Coding Plan (Doubao), as its documentation gives it: no /v3 on the path.
 const PROVIDER_PRESETS = [
@@ -817,7 +869,9 @@ function AgentSubtitle({ status }: { status: AgentStatus }) {
   const { t } = useTranslation('settings')
   const hasOthers = useHasOtherAgents(status)
   const [renaming, setRenaming] = useState(false)
-  const account = status.account?.kind === 'none' ? null : status.account
+  // Huli: an account an earlier run remembered is not named while the sign-in is read again.
+  const account =
+    status.account?.kind === 'none' || status.readingSignIn === true ? null : status.account
   return (
     <>
       {/* As tall as the rename button, whether or not it shows. */}
@@ -855,6 +909,17 @@ function AgentPageLine({ status }: { status: AgentStatus }) {
         <span aria-hidden className="k-dot" />
         <span className="k-name">
           {t('agents.turnedOff')} · {harness}
+        </span>
+      </>
+    )
+  }
+  // Huli: while the sign-in is read, the agent is not known to be ready.
+  if (ready && status.readingSignIn) {
+    return (
+      <>
+        <span aria-hidden className="ui-ss-spinner" />
+        <span className="k-name">
+          {t('agents:state.checkingSignIn')} · {harness}
         </span>
       </>
     )
@@ -939,31 +1004,44 @@ function AgentEnvKeyRow({
 function AgentPageBody({ status }: { status: AgentStatus }) {
   const { hostId, request } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
-  const [act, busy, error] = useAction()
+  const [act, busy, error, clearError] = useAction()
   const r = readiness(status)
   const reading = useAgentReads(status, { force: status.signIn === 'required' })
   const signInReading = useSignInRead(status)
   const refreshAccount = useRefresh()
   const [accountError, setAccountError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
+  const [keyOpen, setKeyOpen] = useState(false)
   const signOut = () => act(() => request('agents.logout', { agentId: status.id }))
   const running = status.state === 'ready'
   const providerMode = status.providers !== undefined
-  const terminalSignIn = status.authMethods.find((m) => m.type === 'terminal' && m.command)
+  const off = status.disabled === true
+  const terminalSignIn = status.authMethods.find(
+    (m) => m.type === 'terminal' && m.command && !asksForKey(status, m),
+  )
   const signInPage = useSignInPage(hostId, status.id)
   const signInImage = useSignInImage(hostId, status.id)
+  const signInStarted = useSignInStarted(hostId, status.id)
   const remote = isWeb || hostId !== null
+  // Huli: an error of a sign-in tried while the agent was off is gone once it is on again.
+  useEffect(() => clearError(), [off, clearError])
   // Huli: the methods show as soon as the agent's start names them. A sign-in started here shows
   // while it waits, and an agent that tells whether it is signed in only once a session starts
   // offers its sign-in without saying it needs one.
   const readingMethods =
     status.readingSignIn === true ||
     (signInReading && status.signIn === 'unknown' && status.authMethods.length === 0)
-  const waiting = (signInPage !== null || signInImage !== null) && status.signIn !== 'signed-in'
+  const waiting =
+    (signInPage !== null || signInImage !== null || signInStarted) && status.signIn !== 'signed-in'
   const unsure = r.kind === 'ready' && status.signIn === 'unknown' && !readingMethods
-  const pageSignIns = unsure
-    ? status.authMethods.filter((m) => m.type === 'agent' && !(remote && !m.delegated))
-    : []
+  const pageSignIns =
+    unsure && !off
+      ? status.authMethods.filter((m) => m.type === 'agent' && !(remote && !m.delegated))
+      : []
+  // Huli: an agent that signs in only through its own page or picture has no terminal to name.
+  const signsInItself =
+    !terminalSignIn && status.authMethods.some((m) => m.type === 'agent' || m.type === 'env')
+  const askSignOut = () => setSigningOut(true)
   const startsInTerminal = useStartsInTerminal(status, hostId)
 
   const actions = (
@@ -1020,22 +1098,27 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             {t('agents.keyOnly.note', { name: status.harnessName })}
           </p>
         )}
-        {!providerMode && (r.kind === 'sign-in' || waiting) && status.authMethods.length > 0 && (
-          <div>
-            <SignInNotice
-              status={status}
-              busy={busy}
-              page={signInPage}
-              image={signInImage}
-              remote={remote}
-              {...(hostId === null && {
-                onTerminal: (command: string) => signInTerminal(status, command),
-              })}
-              onAuthenticate={(methodId) => act(() => signInAgent(hostId, status.id, methodId))}
-              onCancel={() => act(() => cancelAgentSignIn(hostId, status.id))}
-            />
-          </div>
-        )}
+        {!providerMode &&
+          !off &&
+          (r.kind === 'sign-in' || waiting) &&
+          status.authMethods.length > 0 && (
+            <div>
+              <SignInNotice
+                status={status}
+                busy={busy}
+                page={signInPage}
+                image={signInImage}
+                pending={signInStarted}
+                remote={remote}
+                {...(hostId === null && {
+                  onTerminal: (command: string) => signInTerminal(status, command),
+                })}
+                {...(status.apiKey && { onApiKey: () => setKeyOpen(true) })}
+                onAuthenticate={(methodId) => act(() => signInAgent(hostId, status.id, methodId))}
+                onCancel={() => act(() => cancelAgentSignIn(hostId, status.id))}
+              />
+            </div>
+          )}
         {error && (
           <p className="ui-sg-hint k-error" data-wrap="">
             {error}
@@ -1080,19 +1163,31 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             <RowGroup>
               {/* A subscription's label is its plan; the other kinds name how the agent signs in. */}
               <Fact
-                name={t(status.account?.kind === 'account' ? 'agents.plan' : 'agents.loginMethod')}
-                pending={readingMethods ? t('agents.readingSignIn') : null}
+                name={t(
+                  status.account?.kind === 'account' && !readingMethods
+                    ? 'agents.plan'
+                    : 'agents.loginMethod',
+                )}
+                pending={
+                  readingMethods
+                    ? t('agents.readingSignIn')
+                    : status.signIn === 'required'
+                      ? t('agents.notSignedIn')
+                      : null
+                }
               >
-                {status.account?.kind === 'none' ? null : status.account?.label}
+                {status.account?.kind === 'none' || readingMethods ? null : status.account?.label}
               </Fact>
-              {status.account?.email && (
+              {status.account?.email && !readingMethods && (
                 <Fact
                   name={t(status.account.email.includes('@') ? 'agents.email' : 'agents.phone')}
                 >
                   {status.account.email}
                 </Fact>
               )}
-              {status.apiKey && <ApiKeyRow status={status} />}
+              {status.apiKey && (
+                <ApiKeyRow status={status} open={keyOpen} onOpenChange={setKeyOpen} />
+              )}
               {status.authMethods
                 .filter((method) => method.type === 'env')
                 .flatMap((method) =>
@@ -1105,49 +1200,55 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
                     />
                   )),
                 )}
-              {((terminalSignIn && hostId === null) ||
-                pageSignIns.length > 0 ||
-                (status.canLogout && status.signIn === 'signed-in')) && (
-                <RowFrame
-                  text={
-                    <RowText
-                      name={t('agents.signInRow')}
-                      description={t(unsure ? 'agents.signInUnknownHint' : 'agents.signInRowHint', {
-                        name: status.name,
-                      })}
-                    />
-                  }
-                >
-                  {!waiting &&
-                    pageSignIns.map((method) => (
-                      <SetButton
-                        key={method.id}
-                        disabled={busy}
-                        title={method.description}
-                        onClick={() => act(() => signInAgent(hostId, status.id, method.id))}
-                      >
-                        {method.name}
+              {!off &&
+                ((terminalSignIn && hostId === null) ||
+                  pageSignIns.length > 0 ||
+                  (status.canLogout && status.signIn === 'signed-in')) && (
+                  <RowFrame
+                    text={
+                      <RowText
+                        name={t('agents.signInRow')}
+                        description={t(
+                          unsure
+                            ? 'agents.signInUnknownHint'
+                            : signsInItself
+                              ? 'agents.signInRowHintItself'
+                              : 'agents.signInRowHint',
+                          { name: status.name },
+                        )}
+                      />
+                    }
+                  >
+                    {!waiting &&
+                      pageSignIns.map((method) => (
+                        <SetButton
+                          key={method.id}
+                          disabled={busy}
+                          title={method.description}
+                          onClick={() => act(() => signInAgent(hostId, status.id, method.id))}
+                        >
+                          {method.name}
+                        </SetButton>
+                      ))}
+                    {status.canLogout && status.signIn === 'signed-in' && !off && (
+                      <SetButton variant="ghost" disabled={busy} onClick={askSignOut}>
+                        {t('agents.signOut')}
                       </SetButton>
-                    ))}
-                  {status.canLogout && status.signIn === 'signed-in' && !status.disabled && (
-                    <SetButton
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => (status.sharesSignIn ? setSigningOut(true) : signOut())}
-                    >
-                      {t('agents.signOut')}
-                    </SetButton>
-                  )}
-                  {terminalSignIn?.command && hostId === null && (
-                    <SetButton
-                      icon={<Icon icon={ComputerTerminal01Icon} size={14} />}
-                      onClick={() => signInTerminal(status, terminalSignIn.command!)}
-                    >
-                      {t('agents.signInAgain')}
-                    </SetButton>
-                  )}
-                </RowFrame>
-              )}
+                    )}
+                    {terminalSignIn?.command && hostId === null && !off && (
+                      <SetButton
+                        icon={<Icon icon={ComputerTerminal01Icon} size={14} />}
+                        onClick={() => signInTerminal(status, terminalSignIn.command!)}
+                      >
+                        {t(
+                          status.signIn === 'signed-in'
+                            ? 'agents.signInAgain'
+                            : 'agents.signInInTerminal',
+                        )}
+                      </SetButton>
+                    )}
+                  </RowFrame>
+                )}
             </RowGroup>
           </section>
         )}
@@ -1169,15 +1270,28 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
 
         <DangerGroup status={status} />
       </div>
-      {/* Signing out of an agent that shares its sign-in signs its vendor's own apps out too. */}
+      {/* Signing out of an agent that shares its sign-in signs its vendor's own apps out too;
+          Huli: a default agent shares its folder with its CLI in a terminal, which signs out too. */}
       <AlertDialog open={signingOut} onOpenChange={setSigningOut}>
         <AlertDialogContent className={CONFIRM}>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t('agents.signOutShared.title', { name: status.name })}
+              {t(
+                status.sharesSignIn ? 'agents.signOutShared.title' : 'agents.signOutConfirm.title',
+                {
+                  name: status.name,
+                },
+              )}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t('agents.signOutShared.body', { name: status.name })}
+              {status.sharesSignIn
+                ? t('agents.signOutShared.body', { name: status.name })
+                : status.isDefault && status.cli?.command
+                  ? t('agents.signOutConfirm.bodyCli', {
+                      name: status.name,
+                      command: status.cli.command,
+                    })
+                  : t('agents.signOutConfirm.body', { name: status.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1275,12 +1389,42 @@ function EnableGroup({ status }: { status: AgentStatus }) {
 }
 
 /** Whether Kettu handed the harness a key, and setting, replacing or clearing it. */
-function ApiKeyRow({ status }: { status: AgentStatus }) {
-  const { request } = useHostScope()
-  const { t } = useTranslation('settings')
-  const [open, setOpen] = useState(false)
+function ApiKeyRow({
+  status,
+  open,
+  onOpenChange: setOpen,
+}: {
+  status: AgentStatus
+  /** Huli: the dialog that sets the key, which the sign-in card opens too. */
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { request, useAgentsStore } = useHostScope()
+  const { t } = useTranslation(['settings', 'common'])
   const [act, busy, error] = useAction()
+  const [clearing, setClearing] = useState(false)
+  // Huli: a key just saved is checked by reading the sign-in again, which says whether it took.
+  const [check, setCheck] = useState<'checking' | 'rejected' | null>(null)
   const set = !!status.apiKey?.set
+  const checkKey = (): void => {
+    setCheck('checking')
+    request('agents.readSignIn', { agentId: status.id })
+      .catch(() => {})
+      .then(() => {
+        const signIn = useAgentsStore.getState().byId[status.id]?.signIn
+        if (signIn === 'required') return setCheck('rejected')
+        setCheck(null)
+        if (signIn === 'signed-in') {
+          toast(t('agents.key.accepted', { name: status.name }), undefined, { tone: 'success' })
+        }
+      })
+  }
+  const note =
+    check === 'checking'
+      ? t('agents.key.checking')
+      : check === 'rejected'
+        ? t('agents.key.rejected', { name: status.name })
+        : null
   return (
     <RowFrame
       id="api-key"
@@ -1304,19 +1448,58 @@ function ApiKeyRow({ status }: { status: AgentStatus }) {
       }
     >
       <ControlError error={error} />
-      <SetButton onClick={() => setOpen(true)}>
+      {note && (
+        <span
+          role="status"
+          className={check === 'rejected' ? 'k-value k-error' : 'k-value k-muted'}
+          data-wrap=""
+        >
+          {check === 'checking' && <Spin />}
+          {note}
+        </span>
+      )}
+      <SetButton
+        onClick={() => {
+          setCheck(null)
+          setOpen(true)
+        }}
+      >
         {t(set ? 'agents.key.replace' : 'agents.key.setButton')}
       </SetButton>
       {set && (
-        <SetButton
-          variant="ghost"
-          disabled={busy}
-          onClick={() => act(() => request('agents.clearApiKey', { agentId: status.id }))}
-        >
+        <SetButton variant="ghost" disabled={busy} onClick={() => setClearing(true)}>
           {t('agents.key.clear')}
         </SetButton>
       )}
-      <ApiKeyDialog status={status} open={open} onOpenChange={setOpen} />
+      <ApiKeyDialog status={status} open={open} onOpenChange={setOpen} onSaved={checkKey} />
+      {/* Huli: clearing the key signs the agent out; Codex's runs `codex logout`. */}
+      <AlertDialog open={clearing} onOpenChange={setClearing}>
+        <AlertDialogContent className={CONFIRM}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('agents.key.clearConfirm.title', { name: status.name })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {status.harnessId === 'codex'
+                ? t('agents.key.clearConfirm.bodyCodex', { name: status.name })
+                : t('agents.key.clearConfirm.body', { name: status.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                setClearing(false)
+                setCheck(null)
+                act(() => request('agents.clearApiKey', { agentId: status.id }))
+              }}
+            >
+              {t('agents.key.clear')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </RowFrame>
   )
 }
@@ -1325,10 +1508,13 @@ function ApiKeyDialog({
   status,
   open,
   onOpenChange,
+  onSaved,
 }: {
   status: AgentStatus
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Huli: the key was handed to the harness. */
+  onSaved?: () => void
 }) {
   const { request } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
@@ -1345,6 +1531,8 @@ function ApiKeyDialog({
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!value.key.trim() || busy) return
+    const problem = keyProblem(value, providers)
+    if (problem) return setError(problem)
     setBusy(true)
     setError(null)
     try {
@@ -1355,6 +1543,7 @@ function ApiKeyDialog({
         ...(providers && value.model.trim() ? { model: value.model.trim() } : {}),
       })
       close()
+      onSaved?.()
     } catch (e) {
       setError(errorMessage(e))
       setBusy(false)
@@ -1501,7 +1690,7 @@ function StartModeRow({ status }: { status: AgentStatus }) {
               {
                 value: FOLLOW_AGENT,
                 label: t(
-                  `agents.startMode.follow.${status.harnessId === 'codex' || status.harnessId === 'deepseek' ? status.harnessId : 'claude-code'}`,
+                  `agents.startMode.follow.${status.harnessId === 'codex' || status.harnessId === 'deepseek' || status.harnessId === 'doubao' ? status.harnessId : 'claude-code'}`,
                 ),
               },
               ...view.choices.map((choice) => ({

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  AlertCircleIcon,
   ComputerTerminal01Icon,
   Key01Icon,
   Login03Icon,
@@ -12,6 +13,7 @@ import { signsInWithKeyOnly } from '@shared/agents'
 import type { AgentId } from '@shared/thread'
 import { emitAppEvent, onAppEvent } from '@renderer/app/events'
 import { AgentTile } from '@renderer/components/agents/agent-mark'
+import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
 import { Button } from '@renderer/components/ui/button'
 import {
   Empty,
@@ -22,6 +24,8 @@ import {
   EmptyTitle,
 } from '@renderer/components/ui/empty'
 import { Spinner } from '@renderer/components/ui/spinner'
+import { useSignInRecheck, useSignInWait } from '@renderer/features/agents/agent-sign-in'
+import { SignInActions } from '@renderer/features/agents/sign-in-actions'
 import { CopyButton } from '@renderer/features/git/branch-popover'
 import { openHostSettingsItem } from '@renderer/features/settings/host-sections'
 import { errorMessage } from '@renderer/lib/host'
@@ -35,9 +39,73 @@ import {
   useAgentsStore,
   useSignInImage,
   useSignInPage,
+  useSignInStarted,
 } from '@renderer/stores/agents'
 
 const NO_METHODS: AgentAuthMethod[] = []
+
+/**
+ * Huli: under the thread of a session that waits for the agent's sign-in: the agent's own sign-in
+ * in place, and what a sign-in started here waits for. The session tries again once the agent is
+ * found signed in; the host retries it, and a terminal sign-in that ends here does too.
+ */
+export function SessionSignIn({
+  agentId,
+  hostId,
+  panel,
+  name,
+  onRetry,
+}: {
+  agentId: AgentId
+  hostId: string | null
+  /** The side panel a terminal sign-in opens in. */
+  panel: string
+  name: string
+  onRetry: () => void
+}) {
+  const { t } = useTranslation('session')
+  const wait = useSignInWait(hostId, agentId, name)
+  const image = useSignInImage(hostId, agentId)
+  useSignInRecheck(hostId, agentId)
+  useEffect(
+    () =>
+      onAppEvent((event) => {
+        if (
+          event.kind === 'sign-in-finished' &&
+          event.agentId === agentId &&
+          event.hostId === hostId
+        ) {
+          onRetry()
+        }
+      }),
+    [agentId, hostId, onRetry],
+  )
+  return (
+    <Alert variant="warning">
+      <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={1.9} aria-hidden />
+      <AlertTitle>{t('view.signInToContinue', { agent: name })}</AlertTitle>
+      <AlertDescription>{wait ?? t('view.historyStays')}</AlertDescription>
+      {image !== null && (
+        <img
+          src={image}
+          alt={t('signIn.scanAlt')}
+          className="mt-2 size-36 rounded-lg [image-rendering:pixelated] group-has-[>svg]/alert:col-start-2"
+          draggable={false}
+        />
+      )}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 group-has-[>svg]/alert:col-start-2">
+        <SignInActions
+          agentId={agentId}
+          hostId={hostId}
+          onTerminal={(command) =>
+            emitAppEvent({ kind: 'sign-in-terminal', panel, command, agentId })
+          }
+          onRetry={onRetry}
+        />
+      </div>
+    </Alert>
+  )
+}
 
 /** Huli: how soon the window coming back tries the session again while a sign-in page is open. */
 const RETRY_ON_RETURN_MS = 5_000
@@ -56,7 +124,7 @@ export function SignIn({
   panel: string | null
   onRetry: () => void
 }) {
-  const { t } = useTranslation(['session', 'common'])
+  const { t } = useTranslation(['session', 'common', 'settings'])
   const declared = useAgentsStore(
     (s) => agentsOn(s, hostId).byId[agentId]?.authMethods ?? NO_METHODS,
   )
@@ -82,10 +150,16 @@ export function SignIn({
   const [error, setError] = useState<string | null>(null)
   const page = useSignInPage(hostId, agentId)
   const image = useSignInImage(hostId, agentId)
+  // Huli: a sign-in started here that waits for the agent's page or picture, and the read of how
+  // the agent signs in, which its first start this run names.
+  const started = useSignInStarted(hostId, agentId)
+  const opening = started && page === null && image === null
+  const reading = useAgentsStore((s) => agentsOn(s, hostId).byId[agentId]?.readingSignIn === true)
+  useSignInRecheck(hostId, agentId)
   // A device, or this window on another host: an agent method that hands over no page opens its
   // browser on the computer the agent runs on.
   const remote = isWeb || hostId !== null
-  const listed = page === null && image === null ? methods : NO_METHODS
+  const listed = page === null && image === null && !opening ? methods : NO_METHODS
 
   useEffect(
     () =>
@@ -193,6 +267,7 @@ export function SignIn({
               <Button variant="outline" size="compact" onClick={() => openSignInPage(page)}>
                 {t('signIn.openPageAgain')}
               </Button>
+              <CopyButton text={page} label={t('signIn.copyLink')} size="icon-compact" />
               <Button
                 variant="outline"
                 size="compact"
@@ -207,9 +282,38 @@ export function SignIn({
             </div>
           </div>
         )}
-        {methods.length === 0 && (
-          <p className="text-ui text-muted-foreground">{t('signIn.noMethods', { agent: name })}</p>
+        {opening && (
+          <div className="flex w-full flex-col gap-2 rounded-xl bg-card p-3 text-left shadow-card">
+            <span className="flex items-center gap-1.5 text-ui font-medium">
+              <Spinner className="size-3" />
+              {t('settings:agents.signInStarting', { name })}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                variant="outline"
+                size="compact"
+                onClick={() =>
+                  void cancelAgentSignIn(hostId, agentId).catch((e: unknown) =>
+                    setError(errorMessage(e)),
+                  )
+                }
+              >
+                {t('common:actions.cancel')}
+              </Button>
+            </div>
+          </div>
         )}
+        {methods.length === 0 &&
+          (reading ? (
+            <p className="flex items-center gap-1.5 text-ui text-muted-foreground">
+              <Spinner className="size-3" />
+              {t('signIn.reading')}
+            </p>
+          ) : (
+            <p className="text-ui text-muted-foreground">
+              {t('signIn.noMethods', { agent: name })}
+            </p>
+          ))}
         {listed.map((method) =>
           method.type === 'terminal' && method.command ? (
             <div

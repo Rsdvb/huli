@@ -111,11 +111,11 @@
     "contextPercentStale": "上次读取的上下文用量为 {{percent}}%，正在重试",
     "shortWindow": {
       "five_hour": "5 小时",
-      "seven_day": "7 天",
-      "seven_day_opus": "7 天 Opus",
-      "seven_day_sonnet": "7 天 Sonnet",
-      "monthly": "30 天",
-      "annual": "1 年"
+      "seven_day": "每周",
+      "seven_day_opus": "每周 Opus",
+      "seven_day_sonnet": "每周 Sonnet",
+      "monthly": "每月",
+      "annual": "每年"
     },
     "context": {
       "parts": {

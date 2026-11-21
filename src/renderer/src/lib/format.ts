@@ -207,6 +207,20 @@ export function limitLabel(limit: Pick<PlanLimit, 'window' | 'label'>): string {
     : limit.label
 }
 
+// Huli: the balances vendors report under these English names, by their names in the catalogs.
+const BALANCE_LABELS: Record<string, string> = {
+  Balance: 'usage:limits.balance',
+  'Extra usage': 'usage:limits.extraUsage',
+  'Prepaid balance': 'usage:limits.prepaidBalance',
+  'Add-on credits': 'usage:limits.addOnCredits',
+}
+
+/** A balance's name: Kettu's for the ones it knows, else the vendor's own. */
+export function balanceLabel(label: string): string {
+  const key = BALANCE_LABELS[label]
+  return key ? i18n.t(key as 'usage:limits.balance') : label
+}
+
 /**
  * A window's name inside a sentence: "Fable weekly", since "Weekly · Fable limit reached" reads as
  * two windows.

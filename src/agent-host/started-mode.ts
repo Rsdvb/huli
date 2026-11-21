@@ -3,7 +3,7 @@
 // starter's rank and the rank of the mode its agent would start in, never to full access, so a
 // session cannot do through one it starts what it could not do itself without asking.
 
-import { ANTIGRAVITY_FULL_ACCESS, type HarnessId } from '@shared/agents'
+import { ANTIGRAVITY_FULL_ACCESS, isFullAccessMode, type HarnessId } from '@shared/agents'
 import { availableModes, modeDescription, modeName } from './claude/config'
 import type { PermissionMode } from './claude/sdk'
 import { DEFAULT_MODE as CODEX_DEFAULT, MODES as CODEX_MODES, type ModeId } from './codex/config'
@@ -77,6 +77,19 @@ const PLAN_MODE = 'plan'
 
 export function isRanked(harness: HarnessId): harness is RankedHarness {
   return Object.hasOwn(RANKS, harness)
+}
+
+/**
+ * Huli: the start mode a session another session's agent starts takes: the whole of it for a
+ * harness whose modes are ranked, which the hold narrows once the session opens; for one whose
+ * modes are not, such as Doubao's, none that is full access.
+ */
+export function startedStartMode(
+  harness: HarnessId,
+  start: Record<string, string>,
+): Record<string, string> {
+  if (isRanked(harness)) return start
+  return Object.fromEntries(Object.entries(start).filter(([, mode]) => !isFullAccessMode(mode)))
 }
 
 /** A mode's rank, or null for one Kettu does not know. */

@@ -16,6 +16,15 @@ export function AgentStateLine({ status, className }: { status: AgentStatus; cla
   const base = cn('k-state', className)
   switch (r.kind) {
     case 'ready':
+      // Huli: its sign-in is being read, so it is not known to be ready yet.
+      if (status.readingSignIn) {
+        return (
+          <span className={base}>
+            <span aria-hidden className="ui-ss-spinner" />
+            {t('state.checkingSignIn')}
+          </span>
+        )
+      }
       return (
         <Tooltip>
           <TooltipTrigger

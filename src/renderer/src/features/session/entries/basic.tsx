@@ -282,7 +282,12 @@ const NOTICE_ICON = { info: InformationCircleIcon, warning: Alert02Icon, error: 
 export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: EntryProps) {
   const entry = useEntry(sessionId, entryId, 'notice')
   const animation = useEntryAnimation(sessionId, entryId)
+  // Huli: while the session waits for the sign-in, its card under the thread says so and offers it.
+  const waitsForSignIn = useThreadsStore(
+    (s) => s.replicas[sessionId]?.state?.session.status === 'auth_required',
+  )
   if (!entry) return null
+  if (entry.cause === 'sign_in' && waitsForSignIn) return null
   if (entry.cause === 'agent_stopped') {
     return (
       <CutTurnEnd

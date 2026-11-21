@@ -1,4 +1,5 @@
 import { useShallow } from 'zustand/react/shallow'
+import type { AgentId } from '@shared/thread'
 import { updateCardLabel, type UpdateCard } from '@renderer/features/updates/card-model'
 import { useUpdates } from '@renderer/features/updates/use-updates'
 import { i18n } from '@renderer/lib/i18n'
@@ -8,6 +9,8 @@ import { useAgentsStore } from '@renderer/stores/agents'
 export interface Notices {
   /** The agents that need sign-in, by name. */
   signIn: string[]
+  /** Huli: the same agents, by id, so one notice opens its agent's page. */
+  signInIds?: AgentId[]
   /** The one update card, for Kettu and the harnesses alike. */
   update: UpdateCard | null
 }
@@ -43,19 +46,21 @@ export function noticeSummary({ signIn, update }: Notices): NoticeSummary | null
 }
 
 /** The sign-in and update notices, from the agents and the updater, and their summary. */
-export function useNotices(): Notices & { summary: NoticeSummary | null } {
-  const signIn = useAgentsStore(
+export function useNotices(): Notices & {
+  signInIds: AgentId[]
+  summary: NoticeSummary | null
+} {
+  const signInIds = useAgentsStore(
     useShallow((s) =>
-      s.order
-        .filter(
-          (id) =>
-            s.byId[id]?.registered !== false &&
-            !s.byId[id]?.disabled &&
-            s.byId[id]?.signIn === 'required',
-        )
-        .map((id) => s.byId[id]!.name),
+      s.order.filter(
+        (id) =>
+          s.byId[id]?.registered !== false &&
+          !s.byId[id]?.disabled &&
+          s.byId[id]?.signIn === 'required',
+      ),
     ),
   )
+  const signIn = useAgentsStore(useShallow((s) => signInIds.map((id) => s.byId[id]?.name ?? id)))
   const notices: Notices = { signIn, update: useUpdates().card }
-  return { ...notices, summary: noticeSummary(notices) }
+  return { ...notices, signInIds, summary: noticeSummary(notices) }
 }

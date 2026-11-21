@@ -16,7 +16,7 @@ import { useRefresh } from '@renderer/components/refresh'
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { toast } from '@renderer/components/ui/toast'
 import { currentLocale } from '@renderer/lib/i18n'
-import { mediumAgo, money } from '@renderer/lib/format'
+import { balanceLabel, mediumAgo, money } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
@@ -372,10 +372,8 @@ function ProviderUsage({
                 : usage.state === 'error'
                   ? 'agents.providers.usage.failed'
                   : 'agents.providers.usage.none'
-          const message =
-            usage?.state === 'error'
-              ? (usage.error ?? t(state, { name: provider.name }))
-              : t(state, { name: provider.name })
+          // Huli: the host's reason is English; it stays in the tooltip.
+          const message = t(state, { name: provider.name })
           return (
             <RowFrame key={provider.id} text={<RowText name={provider.name} />}>
               <span
@@ -413,16 +411,17 @@ function ProviderUsageNotes({
             : usage.state === 'unsupported'
               ? t('agents.providers.usage.unsupported', { name: provider.name })
               : usage.state === 'error'
-                ? (usage.error ?? t('agents.providers.usage.failed', { name: provider.name }))
+                ? t('agents.providers.usage.failed', { name: provider.name })
                 : null
         if (!text) return null
         return (
           <p
             key={provider.id}
             className={usage?.state === 'error' ? 'ui-sg-hint k-error' : 'ui-sg-hint'}
+            title={usage?.error ?? undefined}
             data-wrap=""
           >
-            {usage?.state === 'error' ? `${provider.name}: ${text}` : text}
+            {text}
           </p>
         )
       })}
@@ -454,7 +453,7 @@ export function ProviderBalances({ providers }: { providers: readonly AgentProvi
             key={`${provider.id}-${balance.label}-${index}`}
             text={
               <RowText
-                name={balance.label}
+                name={balanceLabel(balance.label)}
                 description={[
                   provider.name,
                   balance.granted

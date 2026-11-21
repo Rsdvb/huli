@@ -376,6 +376,17 @@ export function useSignInImage(hostId: string | null, agentId: AgentId): string 
   })
 }
 
+/**
+ * Huli: whether a sign-in this window started still waits, before or after the agent handed over
+ * its page or picture; false once it ended or was cancelled.
+ */
+export function useSignInStarted(hostId: string | null, agentId: AgentId): boolean {
+  return useStartedSignIns((state) => {
+    const started = state.started[signInKey(hostId, agentId)]
+    return !!started && !started.cancelled
+  })
+}
+
 /** Opens a sign-in page in a new tab of the browser, the system's on the desktop. */
 export function openSignInPage(url: string): void {
   window.open(url, '_blank', 'noreferrer')

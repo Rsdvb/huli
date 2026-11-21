@@ -3,14 +3,12 @@
 // `codex login --with-api-key`. Kettu keeps no copy and never reads one back; only the keys it
 // writes are touched.
 
+import { apiKeyProblem, type ApiKeyInput } from '@shared/api-key'
+import { invalidParams } from './errors'
+import { t } from './i18n'
 import { isObject, readSettings, writeSettings } from './settings-file'
 
-/** What the user typed; `baseUrl` and `model` only for Claude Code. */
-export interface ApiKeyInput {
-  key: string
-  baseUrl?: string
-  model?: string
-}
+export type { ApiKeyInput }
 
 // The variables Claude Code reads from its settings.json `env`, as its documentation names them.
 const CLAUDE_KEYS = [
@@ -23,36 +21,16 @@ const CLAUDE_KEYS = [
 // The variable Codebuddy Code reads its key from in its settings.json `env`.
 const CODEBUDDY_KEYS = ['CODEBUDDY_API_KEY'] as const
 
-const MAX_KEY_CHARS = 4096
-const MAX_URL_CHARS = 2048
-const MAX_MODEL_CHARS = 256
-
-/** Checks what was typed, so nothing that is not a key, a URL or a model name is written. */
+/**
+ * Checks what was typed, so nothing that is not a key, a URL or a model name is written; a refusal
+ * says why in the user's language.
+ */
 export function checkApiKey(input: ApiKeyInput, allowProvider: boolean): ApiKeyInput {
-  const key = input.key.trim()
-  if (key.length === 0 || key.length > MAX_KEY_CHARS || /\s/.test(key)) {
-    throw new Error('The API key must be one word without spaces')
-  }
-  const checked: ApiKeyInput = { key }
+  const problem = apiKeyProblem(input, allowProvider)
+  if (problem) throw invalidParams(t(`agent.apiKey.${problem}`))
   const baseUrl = input.baseUrl?.trim()
   const model = input.model?.trim()
-  if (!allowProvider && (baseUrl || model)) {
-    throw new Error('This harness takes only an API key')
-  }
-  if (baseUrl) {
-    const url = URL.parse(baseUrl)
-    if (baseUrl.length > MAX_URL_CHARS || !url || !['http:', 'https:'].includes(url.protocol)) {
-      throw new Error('The base URL must be an http or https address')
-    }
-    checked.baseUrl = baseUrl
-  }
-  if (model) {
-    if (model.length > MAX_MODEL_CHARS || /\s/.test(model)) {
-      throw new Error('The model must be one word without spaces')
-    }
-    checked.model = model
-  }
-  return checked
+  return { key: input.key.trim(), ...(baseUrl ? { baseUrl } : {}), ...(model ? { model } : {}) }
 }
 
 /**

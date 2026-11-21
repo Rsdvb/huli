@@ -350,8 +350,8 @@
     "estimateHours_other": "estimated {{count}}-hour cache"
   },
   "footer": {
-    "signInOne": "{{name}} needs you to sign in",
-    "signInMany": "{{count}} agents need you to sign in",
+    "signInOne": "{{name}} needs sign-in",
+    "signInMany": "{{count}} agents need sign-in",
     "signInDetail": "Open Settings › Agents to sign in",
     "noticesName": "Notices: {{list}}",
     "listSeparator": ", "

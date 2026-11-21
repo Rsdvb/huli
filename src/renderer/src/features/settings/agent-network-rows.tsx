@@ -54,6 +54,7 @@ import {
 } from '@renderer/stores/agent-network'
 import { useAgentsStore } from '@renderer/stores/agents'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { openSettings } from '@renderer/stores/view'
 import {
   CONFIRM,
   ControlError,
@@ -667,7 +668,15 @@ function setChoice(agentId: AgentId, choice: AgentNetworkChoice | null) {
 }
 
 /** Follow the default, a node, one network interface, or the system's network, for one agent. */
-export function NetworkChoiceSelect({ agentId, label }: { agentId: AgentId; label: string }) {
+export function NetworkChoiceSelect({
+  agentId,
+  label,
+  disabled = false,
+}: {
+  agentId: AgentId
+  label: string
+  disabled?: boolean
+}) {
   const { t } = useTranslation('settings')
   const network = useSettingsStore((s) => s.settings.agentNetwork)
   const subs = useAgentNetworkStore((s) => s.status?.subscriptions ?? NO_SUBSCRIPTIONS)
@@ -714,6 +723,7 @@ export function NetworkChoiceSelect({ agentId, label }: { agentId: AgentId; labe
         label={label}
         value={value}
         options={all}
+        disabled={disabled}
         className="w-60"
         onChange={(next) => {
           setError(null)
@@ -960,19 +970,27 @@ export function NetworkChoiceRow({ agentId }: { agentId: AgentId }) {
             description={
               <>
                 {t('network.choice.description')}
-                <br />
-                <ExitLine agentId={agentId} />
+                {/* Huli: with the network off there is no exit of its own to check. */}
+                {enabled && (
+                  <>
+                    <br />
+                    <ExitLine agentId={agentId} />
+                  </>
+                )}
               </>
             }
           />
         }
       >
-        <ExitCheckAction agentId={agentId} />
-        <NetworkChoiceSelect agentId={agentId} label={name} />
+        {enabled && <ExitCheckAction agentId={agentId} />}
+        <NetworkChoiceSelect agentId={agentId} label={name} disabled={!enabled} />
       </RowLine>
       {!enabled && (
         <p role="status" className="k-row-note" data-wrap="">
-          {t('network.choice.off')}
+          {t('network.choice.off')}{' '}
+          <button type="button" className="k-link" onClick={() => openSettings('agent-network')}>
+            {t('network.choice.openNetwork')}
+          </button>
         </p>
       )}
     </RowShell>

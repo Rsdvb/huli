@@ -10,12 +10,13 @@
   },
   "state": {
     "ready": "Ready",
-    "signIn": "Sign in to start",
+    "signIn": "Needs sign-in",
     "installing": "Installing…",
     "starting": "Starting…",
     "failed": "Failed",
     "notAvailable": "Not available",
-    "needsUpdate": "Needs update"
+    "needsUpdate": "Needs update",
+    "checkingSignIn": "Checking sign-in…"
   },
   "node": {
     "title": "Needs Node.js",
