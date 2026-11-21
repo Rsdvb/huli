@@ -208,7 +208,7 @@ import {
   nodeRuntimesFolder,
   NodeRuntimeService,
 } from './node-runtime/service'
-import { httpTransport } from './node-runtime/transport'
+import { httpTransport, ownProxyVariables } from './node-runtime/transport'
 import { ComputerUse } from './computer/service'
 import { SessionFiles } from './session-files'
 import { SessionManager, type SessionTimings } from './sessions'
@@ -2815,13 +2815,7 @@ export class AgentHost {
 
   /** The proxy variables of Kite's own requests: Advanced › Proxy, else the environment's. */
   private ownProxy(): ProxyVariables {
-    const read = (name: string) => this.env.get(name) ?? this.env.get(name.toLowerCase()) ?? null
-    return {
-      http: read('HTTP_PROXY'),
-      https: read('HTTPS_PROXY'),
-      all: read('ALL_PROXY'),
-      noProxy: read('NO_PROXY'),
-    }
+    return ownProxyVariables((name) => this.env.get(name))
   }
 
   /**

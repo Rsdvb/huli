@@ -278,6 +278,7 @@
       "none": "{{agent}} 没有可安装的更新",
       "noNpm": "检查更新需要 npm，但在 PATH 中找不到 npm。",
       "checkFailed": "无法检查更新。{{reason}}",
+      "checkPartlyFailed": "{{total}} 项更新检查中有 {{failed}} 项失败。{{reason}}",
       "offline": "无法连接 npm 仓库。",
       "timeout": "npm 没有在 {{seconds}} 秒内响应。",
       "noVersion": "npm 没有给出 {{package}} 的版本。",
@@ -299,6 +300,7 @@
       "downloadFailed": "下载 {{url}} 时返回了 HTTP {{status}}。",
       "downloadError": "无法下载 {{name}}：{{reason}}",
       "downloadTimedOut": "{{name}} 没有在 {{seconds}} 秒内下载完成。",
+      "downloadStalled": "{{name}} 下载卡住了：{{seconds}} 秒没有收到数据。请看看 设置 › 高级 › 代理，再重试。",
       "hashMismatch": "下载的文件与其 SHA-256 不符：应为 {{expected}}，实际为 {{actual}}。",
       "extracting": "正在解压…"
     },

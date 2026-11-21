@@ -758,6 +758,10 @@ profiles.
   tar (Windows' own `System32\tar.exe`, which reads `.zip`; Git's GNU tar takes `C:` for a host),
   with only paths Kite made as arguments and no shell, its `node --version` must say the version,
   and the folder is renamed into place last. A stall of 30 s fails the download.
+- The harnesses' own downloads go the same way (`transport.ts`, `AgentManager`'s `downloads`):
+  a release archive from the ACP Registry, the Registry's listing and the harness manifest, which
+  upstream fetches with Node's bare `fetch`, past every proxy. An archive that receives nothing
+  for 30 s fails at once, not at its 15-minute limit. Tests: `src/agent-host/downloads.test.ts`.
 - Which runs: `EnvironmentService` (`shell-env.ts`) probes the user's node on PATH, then
   `chooseNode` picks it while it meets the agents' needs, else Kite's; `kite` in
   `state/node-runtime.json` (`环境` › 始终用纸鸢的 Node.js) takes Kite's whenever installed.

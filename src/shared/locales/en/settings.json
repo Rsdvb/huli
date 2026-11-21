@@ -745,6 +745,7 @@
       "inherited": "Inherited from how Kettu was started.",
       "fallback": "Using a fallback PATH.",
       "reload": "Reload environment",
+      "redetect": "Detect again",
       "keywords": "PATH shell node npm environment variables",
       "node": {
         "usingSystem": "Agents use your Node.js {{version}}.",
@@ -756,7 +757,9 @@
         "update": "Update",
         "remove": "Remove",
         "preferKite": "Always use Kite’s Node.js",
-        "preferKiteHint": "When off, your own Node.js is used while it is new enough."
+        "preferKiteHint": "When off, your own Node.js is used while it is new enough.",
+        "removeTitle": "Remove Kite’s Node.js {{version}}?",
+        "removeBody": "Agents move to your own Node.js. Where it is missing or too old, the agents that need Node.js cannot start until it is installed again."
       }
     },
     "cli": {
@@ -2194,6 +2197,12 @@
     "sdkOnFirstUse": "SDK installs on first use",
     "cliUpdateBody": "You have {{current}}. The update runs the way you installed {{name}}; the command shows below.",
     "cliUpdateBodySdk": "You have {{current}}. The update runs the way you installed {{name}}, and moves Claude Agent SDK to the version that matches; the command shows below.",
+    "cliUpdateWaiting": {
+      "short": "Waits for sessions",
+      "title": "{{name}} {{version}} updates once its sessions end",
+      "body_one": "The update replaces {{name}}’s program, so it waits for its running session to end.",
+      "body_other": "The update replaces {{name}}’s program, so it waits for its {{count}} running sessions to end."
+    },
     "reinstall": "{{name}}",
     "reinstallBody": "Delete Kettu’s install and install it again.",
     "programName": "{{command}}",
@@ -2208,6 +2217,7 @@
     "adapterNote": "The adapter Kettu runs {{name}} through, on your Node.js.",
     "programNote": "{{name}} itself, which Kettu runs on your Node.js.",
     "usedBy": "Used by",
+    "usedByNone": "No agent uses it yet",
     "listSeparator": ", ",
     "manageAgents": "Manage in Agents",
     "versionOut": "{{version}} is out",

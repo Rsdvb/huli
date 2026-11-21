@@ -207,6 +207,8 @@ import {
 import { HostedRun, type HostedRunHooks } from './hosted-run'
 import { t } from './i18n'
 import { CliVersions, type CliProbe, type CliVersion } from './installed-cli'
+import { routeFor } from './node-proxy/download'
+import { httpTransport, ownProxyVariables, type Transport } from './node-runtime/transport'
 import { OpenCodeClient } from './opencode/client'
 import { OpenCodeConnection } from './opencode/connection'
 import type { OpenCodeSessions } from './model-requests/opencode'
@@ -397,6 +399,11 @@ export interface AgentManagerDeps extends DriverOverrides {
   fetchRegistry?(options: RegistryFetchOptions): Promise<RegistryAgents>
   /** Reads the body of Kettu's harness compatibility manifest from its download service. */
   fetchManifest?(options: ManifestFetchOptions): Promise<string>
+  /**
+   * Huli: the archives', the listing's and the manifest's requests; by default Kite's own, through
+   * Advanced › Proxy or the environment's proxy, as its Node.js install goes.
+   */
+  downloads?: Transport
   /** The keys the manifest's signature is checked against; the bundled ones by default. */
   manifestKeys?: readonly string[]
   /** What the manifest's requests say they are, which tells the service the app from the daemon. */
@@ -747,6 +754,7 @@ export class AgentManager {
   /** DeepSeek Harness's sign-in and balance, read from its home without starting it. */
   private readonly dshAccounts: DshAccounts
   private readonly cliVersions: CliVersions
+  private readonly downloads: Transport
   /** The update command for each harness's user program, and what it was worked out for. */
   private readonly cliCommands = new Map<Harness, string>()
   private readonly cliCommandKeys = new Map<Harness, string>()
@@ -778,6 +786,9 @@ export class AgentManager {
       dueMs: this.timings.limitsMs,
       platform: deps.platform,
     })
+    this.downloads =
+      deps.downloads ??
+      httpTransport(() => routeFor(ownProxyVariables((name) => deps.env.get(name))))
     for (const def of deps.catalog) {
       const h = new Harness(def)
       this.harnesses.set(def.id, h)
@@ -1654,6 +1665,7 @@ export class AgentManager {
     const version = request.version ?? adapter.version
     // The SDK never brings the CLI of its own: only the user's runs.
     const withoutCli = !!h.def.cli
+    if (h.task?.kind === 'install' && h.task.state === 'failed') h.task = null
     slot.state = 'installing'
     slot.detail = null
     slot.progress.clear()
@@ -1779,6 +1791,27 @@ export class AgentManager {
         `${h.def.name}: could not remove older versions: ${(error as Error).message}`,
       ),
     )
+  }
+
+  /**
+   * Kettu's own package did not install, and no install of it is left to run. The harness stays
+   * installable, as it was before, and the failure becomes its failed install task with npm's
+   * output, so every window and device shows why and installs again from it. A `failed` state
+   * would hold until a restart, and its retry is an agent's, which a harness without one refuses.
+   */
+  private packageInstallFailed(slot: Slot, message: string): void {
+    const { h } = slot
+    const detection = h.detection
+    const adapter = detection?.state === 'available' ? detection.adapter : null
+    const command = adapter
+      ? this.packageUpdateCommand(h, { adapterVersion: adapter.version, cliVersion: null }) ||
+        `${adapter.package}@${adapter.version}`
+      : h.def.name
+    slot.state = detection?.state ?? 'available'
+    slot.detail = null
+    h.taskOutput.clear()
+    h.taskOutput.push(slot.progress.toString())
+    h.task = { kind: 'install', state: 'failed', command, method: null, error: message }
   }
 
   /** Refuses a second install or update while one runs. */
@@ -1953,9 +1986,9 @@ export class AgentManager {
           home.detail = null
           return
         }
-        home.state = 'failed'
-        home.detail = (error as Error).message
-        throw new HostError('agent_unavailable', home.detail, { agentId, state: 'failed' })
+        const message = (error as Error).message
+        this.packageInstallFailed(home, message)
+        throw new HostError('agent_error', message, { agentId })
       } finally {
         this.emit(home)
       }
@@ -2366,6 +2399,13 @@ export class AgentManager {
       await before
       await this.detectAll()
       if (this.stopped) return { checked: 0, failures: [] }
+      // The user's check reads every program again, so one updated outside Kettu shows its new
+      // version: a CLI's launcher can keep its size and time across versions, as npm's do, which
+      // is all the version cache looks at.
+      if (all) {
+        this.cliVersions.clear()
+        await Promise.all([...this.harnesses.values()].map((h) => this.detect(h)))
+      }
       const abort = new AbortController()
       this.updateAbort = abort
       const now = Date.now()
@@ -2390,6 +2430,7 @@ export class AgentManager {
   private readRegistry(signal?: AbortSignal): Promise<RegistryAgents> {
     return (this.deps.fetchRegistry ?? fetchRegistry)({
       timeoutMs: this.timings.updateViewMs,
+      transport: this.downloads,
       ...(signal ? { signal } : {}),
     })
   }
@@ -2445,6 +2486,7 @@ export class AgentManager {
     try {
       body = await (this.deps.fetchManifest ?? fetchManifest)({
         timeoutMs: this.timings.updateViewMs,
+        transport: this.downloads,
         ...(signal ? { signal } : {}),
         ...(this.deps.userAgent ? { userAgent: this.deps.userAgent } : {}),
       })
@@ -2705,6 +2747,17 @@ export class AgentManager {
     if (failures.length === checked) {
       throw new HostError('agent_error', t('agent.update.checkFailed', { reason: failures[0] }))
     }
+    // What was found shows; the check still says it was not whole, rather than all up to date.
+    if (failures.length > 0) {
+      throw new HostError(
+        'agent_error',
+        t('agent.update.checkPartlyFailed', {
+          failed: String(failures.length),
+          total: String(checked),
+          reason: failures[0],
+        }),
+      )
+    }
     return this.statuses()
   }
 
@@ -2849,6 +2902,7 @@ export class AgentManager {
           ...(entry.bare ? { bare: true as const } : {}),
           platform,
           timeoutMs,
+          transport: this.downloads,
           signal,
           onOutput,
         })
@@ -2969,6 +3023,14 @@ export class AgentManager {
       plan.command,
       async (signal, onOutput) => {
         diagnostics.event(h.def.id, 'update', plan.command)
+        // Windows cannot replace a program that runs, so an agent no session uses stops first.
+        await Promise.all(
+          this.agentsOf(h).map((slot) =>
+            slot.runtime && this.hooks.liveSessions(slot.id) === 0
+              ? this.stopProcess(slot)
+              : undefined,
+          ),
+        )
         const result = await (this.deps.runProgram ?? runProgram)({
           program: run.program,
           args: run.args,
@@ -3108,9 +3170,8 @@ export class AgentManager {
           home.detail = null
           throw new HostError('agent_error', message, { agentId })
         }
-        home.state = 'failed'
-        home.detail = message
-        throw new HostError('agent_unavailable', home.detail, { agentId, state: 'failed' })
+        this.packageInstallFailed(home, message)
+        throw new HostError('agent_error', message, { agentId })
       } finally {
         this.emit(home)
       }
@@ -3223,6 +3284,7 @@ export class AgentManager {
           ...(archive.bare ? { bare: true as const } : {}),
           platform,
           timeoutMs,
+          transport: this.downloads,
           signal,
           onOutput,
         })

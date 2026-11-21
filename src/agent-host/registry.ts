@@ -6,6 +6,7 @@ import type { Platform } from '@shared/platform'
 import { archiveKey, type ArchiveEntry } from './binary-install'
 import type { AgentDefinition } from './catalog'
 import { t } from './i18n'
+import { HttpStatusError, TooLargeError, type Transport } from './node-runtime/transport'
 
 /** The listing, at the address the registry's documentation gives clients. */
 export const REGISTRY_URL = 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json'
@@ -196,31 +197,11 @@ export function listingEntries(agents: RegistryAgents): unknown[] {
 
 export interface RegistryFetchOptions {
   timeoutMs: number
+  /** Kite's own requests, through Advanced › Proxy or the environment's proxy. */
+  transport: Transport
   signal?: AbortSignal
   /** The listing's address; the registry's own by default. */
   url?: string
-}
-
-/** The body, refused once it grows past `maxBytes`, what a listing can be by default. */
-export async function readLimited(
-  response: Response,
-  maxBytes = MAX_BYTES,
-): Promise<string | null> {
-  if (!response.body) return null
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > maxBytes) {
-      await reader.cancel()
-      return null
-    }
-    chunks.push(value)
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks))
 }
 
 /** Reads the listing; rejects with a reason the user can read. */
@@ -228,32 +209,27 @@ export async function fetchRegistry(options: RegistryFetchOptions): Promise<Regi
   const url = options.url ?? REGISTRY_URL
   const timeout = AbortSignal.timeout(options.timeoutMs)
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
-  const failure = (): Error => {
-    if (options.signal?.aborted) return new Error(t('agent.update.stopped'))
-    if (timeout.aborted) {
-      return new Error(
-        t('agent.update.registryTimeout', { seconds: String(options.timeoutMs / 1000) }),
-      )
-    }
-    return new Error(t('agent.update.registryOffline'))
-  }
-  let response: Response
-  try {
-    response = await fetch(url, { signal, redirect: 'follow' })
-  } catch {
-    throw failure()
-  }
-  if (!response.ok) {
-    void response.body?.cancel()
-    throw new Error(
-      t('agent.binaryInstall.downloadFailed', { url, status: String(response.status) }),
-    )
-  }
   let text: string | null
   try {
-    text = await readLimited(response)
-  } catch {
-    throw failure()
+    text = await options.transport.text(url, { signal, maxBytes: MAX_BYTES })
+  } catch (error) {
+    if (options.signal?.aborted) throw new Error(t('agent.update.stopped'), { cause: error })
+    if (error instanceof HttpStatusError) {
+      throw new Error(
+        t('agent.binaryInstall.downloadFailed', { url, status: String(error.status) }),
+        { cause: error },
+      )
+    }
+    if (timeout.aborted) {
+      throw new Error(
+        t('agent.update.registryTimeout', { seconds: String(options.timeoutMs / 1000) }),
+        { cause: error },
+      )
+    }
+    if (!(error instanceof TooLargeError)) {
+      throw new Error(t('agent.update.registryOffline'), { cause: error })
+    }
+    text = null
   }
   let agents: RegistryAgents | null
   try {

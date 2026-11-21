@@ -6,6 +6,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
 import type { AgentInstallMethod, AgentStatus, AgentTask } from '@shared/agent-host'
+import { OWN_INTERFACE_HARNESSES } from '@shared/agents'
 import type { SettingsPatch } from '@shared/settings'
 import type { AgentId } from '@shared/thread'
 import { admin } from '../../admin'
@@ -107,7 +108,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
   const vendor = VENDORS[harness]
   const adapter = status.package?.name.split('/').at(-1)
   const connection = vendor
-    ? status.package?.isSdk || harness === 'codex' || harness === 'deepseek'
+    ? status.package?.isSdk || OWN_INTERFACE_HARNESSES.includes(harness)
       ? `${vendor} · 经它自己的接口连接`
       : adapter
         ? `${vendor} · 经 ${adapter} 连接`

@@ -99,7 +99,7 @@ export function NodeInstallAction(props: {
 }) {
   const { scope, look = 'settings', manual = true, variant = 'primary', className } = props
   const { t } = useTranslation('agents')
-  const { node, task, running, install, cancel, failure } = useNodeInstall(scope)
+  const { node, task, running, install, cancel, dismiss, failure } = useNodeInstall(scope)
   if (!node?.installable) return manual ? <ManualNodeLink look={look} /> : null
   const label =
     failure && task?.kind !== 'remove' ? t('node.retry') : (props.label ?? t('node.install'))
@@ -128,7 +128,12 @@ export function NodeInstallAction(props: {
           data-wrap=""
           data-selectable=""
         >
-          {t(task?.kind === 'remove' ? 'node.removeFailed' : 'node.failed', { error: failure })}
+          {t(task?.kind === 'remove' ? 'node.removeFailed' : 'node.failed', { error: failure })}{' '}
+          {look === 'settings' && (
+            <button type="button" className="k-link" onClick={dismiss}>
+              {t('node.dismiss')}
+            </button>
+          )}
         </span>
       )}
     </span>
