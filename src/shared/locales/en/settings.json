@@ -968,6 +968,11 @@
     "signInRow": "Sign-in",
     "signInRowHint": "The harness signs in itself, in a terminal; Kettu never sees the credentials.",
     "signInAgain": "Sign in again in terminal",
+    "terminal": {
+      "start": "Start in terminal",
+      "startHint": "Runs the agent’s own CLI in a terminal, in the folder you work in, or one you pick",
+      "openProject": "Open a session or project on that computer first, then start the agent in its folder."
+    },
     "empty": {
       "title": "No agents yet",
       "description": "Add your first agent to get started. If its harness is not installed, Kettu helps you install it first.",

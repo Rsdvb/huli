@@ -959,6 +959,11 @@
     "signInRow": "登录",
     "signInRowHint": "由 Harness 自己在终端里登录，Kettu 不经手凭据。",
     "signInAgain": "在终端中重新登录",
+    "terminal": {
+      "start": "在终端中启动",
+      "startHint": "在终端里运行这个 Agent 自己的 CLI，用你正在工作的文件夹，或者另选一个",
+      "openProject": "先打开那台电脑上的一个会话或项目，再在它的文件夹里启动这个 Agent。"
+    },
     "empty": {
       "title": "还没有智能体",
       "description": "添加第一个智能体开始使用。如果它的 Harness 还没安装，Kettu 会先帮你安装。",

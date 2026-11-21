@@ -1,5 +1,6 @@
 import {
   Archive01Icon,
+  CommandLineIcon,
   ComputerTerminal01Icon,
   Download04Icon,
   FolderMinusIcon,
@@ -10,18 +11,26 @@ import {
   PinOffIcon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '@shared/agent-host'
 import { newSession } from '@renderer/app/actions'
+import { AgentMark } from '@renderer/components/agents/agent-mark'
 import {
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '@renderer/components/ui/dropdown-menu'
+import { startAgentInProject } from '@renderer/features/agents/agent-terminal'
 import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
 import { openWorktreeSettings } from '@renderer/features/worktrees/worktree-settings-model'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { fileManagerName, formatShortcut, isWeb } from '@renderer/lib/platform'
+import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
 import { openSettings } from '@renderer/stores/view'
@@ -84,6 +93,7 @@ export function ProjectMenuItems({
             {t('project.menu.openInTerminal')}
           </DropdownMenuItem>
         )}
+        {terminal && <StartAgentMenu projectPath={project.path} disabled={!!gone} />}
         {revealable && (
           <DropdownMenuItem
             disabled={gone}
@@ -118,5 +128,49 @@ export function ProjectMenuItems({
         </DropdownMenuItem>
       </DropdownMenuGroup>
     </>
+  )
+}
+
+/**
+ * Huli: Start agent in terminal, a submenu of this computer's agents whose own CLI is installed and
+ * has an interactive UI, each started in the project's folder; none shows without one.
+ */
+function StartAgentMenu({ projectPath, disabled }: { projectPath: string; disabled: boolean }) {
+  const { t } = useTranslation('sidebar')
+  const agents = useAgentsStore(
+    useShallow((s) => {
+      const { order, byId } = agentsOn(s, null)
+      return usableAgents(order, byId).filter(
+        (a) => isInstalled(a) && !a.hidden && !a.disabled && !!a.terminal,
+      )
+    }),
+  )
+  if (agents.length === 0) return null
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger disabled={disabled}>
+        <MenuGlyph icon={CommandLineIcon} />
+        {t('project.menu.startAgent')}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-59">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t('project.menu.startAgentLabel')}</DropdownMenuLabel>
+          {agents.map((agent) => (
+            <DropdownMenuItem
+              key={agent.id}
+              onClick={() => void startAgentInProject(agent, projectPath)}
+            >
+              <AgentMark agent={agent.id} size={15} hostId={null} />
+              <span className="min-w-0 flex-1 truncate">{agent.harnessName}</span>
+              {agent.name !== agent.harnessName && (
+                <span className="max-w-24 shrink-0 truncate pl-4 text-hint text-tertiary">
+                  {agent.name}
+                </span>
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   )
 }
