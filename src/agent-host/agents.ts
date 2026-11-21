@@ -4161,12 +4161,26 @@ export class AgentManager {
       method = await this.askAntigravitySignIn(slot)
     }
     const read = antigravityLimitsRead(method)
-    if (read === 'none') return
+    // Asked for, a read that cannot run says why, so the page has more to show than nothing.
+    if (read === 'none') {
+      if (!ask) return
+      throw new HostError('agent_error', t('agent.antigravityNoGooglePlan', { agent: slot.name }))
+    }
     if (read === 'unknown') {
       throw new HostError('agent_error', t('agent.antigravityNoPlan', { agent: slot.name }))
     }
     const version = slot.init?.version ?? slot.h.binaryVersion
-    if (!versionAtLeast(version, ANTIGRAVITY_USAGE_VERSION)) return
+    if (!versionAtLeast(version, ANTIGRAVITY_USAGE_VERSION)) {
+      if (!ask) return
+      throw new HostError(
+        'agent_error',
+        t('agent.antigravityOldVersion', {
+          agent: slot.name,
+          version: version ?? '?',
+          needed: ANTIGRAVITY_USAGE_VERSION,
+        }),
+      )
+    }
     const command = this.display(slot)
     const base = this.deps.env.agentEnv(slot.id)
     const env = { ...(this.deps.launchEnv?.(slot.id, base) ?? base), ...command.env }

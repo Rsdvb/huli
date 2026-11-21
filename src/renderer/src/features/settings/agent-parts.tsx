@@ -11,6 +11,8 @@ import {
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { AgentAuthMethod, AgentStatus, AgentTask, PlanLimit } from '@shared/agent-host'
+import { harnessOf } from '@shared/agents'
+import type { HarnessId } from '@shared/thread'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { useRefresh } from '@renderer/components/refresh'
 import { planReset } from '@renderer/features/sidebar/plan-usage'
@@ -394,6 +396,11 @@ export function SpendGroup({
   )
 }
 
+/**
+ * Huli: the harnesses whose running sessions report their plan limits; for the others, such as
+ * Google Antigravity, whose limits only a read finds, the page offers that read while it runs too.
+ */
+const LIMITS_FROM_SESSIONS: ReadonlySet<HarnessId> = new Set(['claude-code', 'codex'])
 export function UsageGroup({
   status,
   reading,
@@ -492,7 +499,8 @@ export function UsageGroup({
         <p className="k-reading">{t('agents.readingUsage')}</p>
       ) : status.signIn === 'required' && status.capabilities.reports ? (
         <p className="k-reading">{t('agents.usageAfterSignIn', { name: status.name })}</p>
-      ) : limitsReadable(status) && (!running || readError) ? (
+      ) : limitsReadable(status) &&
+        (!running || readError || !LIMITS_FROM_SESSIONS.has(harnessOf(status.id))) ? (
         <RowGroup>
           <RowFrame text={<RowText name={t('agents.planLimits')} />}>
             <ControlError error={readError} />

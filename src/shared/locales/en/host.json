@@ -265,6 +265,8 @@
     "antigravitySignedOut": "{{agent}} is signed out. Sign in again in a terminal to read its plan limits.",
     "antigravityLimitsFailed": "{{agent}} could not read its plan limits: {{error}}",
     "antigravityNoPlan": "{{agent}} named no Google plan, so it has no plan limits to read. If you use it with a Google account, sign in again in a terminal.",
+    "antigravityNoGooglePlan": "{{agent}} is signed in with an API key or a Google Cloud project, whose usage shows in Google AI Studio or the Google Cloud console rather than here.",
+    "antigravityOldVersion": "{{agent}}'s agy {{version}} is too old to report plan limits; update it to {{needed}} or later.",
     "limitsReadFailed": "{{agent}} couldn't read the plan limits this time. Try again later.",
     "glmUsage": {
       "missingCredentials": "{{agent}} has no Z.AI API key yet. Set Z_AI_API_KEY, or run glm-acp-agent --setup once, to read the plan's usage.",
