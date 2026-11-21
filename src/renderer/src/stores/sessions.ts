@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Project, SessionSummary } from '@shared/agent-host'
 import type { TaskSummary } from '@shared/workflow'
+import type { SessionGroupRef } from '@shared/session-groups'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
@@ -402,26 +403,82 @@ function sameNode(a: SessionNode, b: SessionNode): boolean {
 export type SidebarRow =
   | { kind: 'session'; id: string; node: SessionNode }
   | { kind: 'task'; id: string; task: TaskSummary }
+  // Huli: a best-of-N group's runs listed here, two or more, oldest first; `id` is the group's.
+  | { kind: 'group'; id: string; group: SessionGroupRef; runs: SessionNode[] }
 
-/** A group's sessions and tasks in one list, by `order` of each. */
+/**
+ * A group's sessions and tasks in one list, by `order` of each. Runs of one best-of-N group make
+ * one row while two or more of them are listed; a run left alone is a session's row again.
+ */
 export function sidebarRows(
   nodes: readonly SessionNode[],
   tasks: readonly TaskSummary[],
   order: (row: SidebarRow) => number,
 ): SidebarRow[] {
-  return [
-    ...nodes.map((node): SidebarRow => ({ kind: 'session', id: node.summary.id, node })),
-    ...tasks.map((task): SidebarRow => ({ kind: 'task', id: task.id, task })),
-  ].sort((a, b) => order(a) - order(b))
+  const runs = new Map<string, SessionNode[]>()
+  for (const node of nodes) {
+    const group = node.summary.group
+    if (group) runs.set(group.id, [...(runs.get(group.id) ?? []), node])
+  }
+  const rows: SidebarRow[] = []
+  for (const node of nodes) {
+    const group = node.summary.group
+    const together = group ? runs.get(group.id) : undefined
+    if (!group || !together || together.length < 2) {
+      rows.push({ kind: 'session', id: node.summary.id, node })
+    } else if (together[0] === node) {
+      const sorted = [...together].sort((a, b) => a.summary.createdAt - b.summary.createdAt)
+      rows.push({ kind: 'group', id: group.id, group, runs: sorted })
+    }
+  }
+  for (const task of tasks) rows.push({ kind: 'task', id: task.id, task })
+  return rows.sort((a, b) => order(a) - order(b))
 }
 
 /** Latest activity first, as a project's group lists its rows. */
 export const byActivity = (row: SidebarRow): number =>
-  -(row.kind === 'session' ? row.node.summary.updatedAt : row.task.updatedAt)
+  -(row.kind === 'session'
+    ? row.node.summary.updatedAt
+    : row.kind === 'group'
+      ? Math.max(...row.runs.map((run) => run.summary.updatedAt))
+      : row.task.updatedAt)
 
 /** In the order they were pinned, as Pinned lists its rows. */
 export const byPin = (row: SidebarRow): number =>
-  (row.kind === 'session' ? row.node.summary.pinnedAt : row.task.pinnedAt) ?? 0
+  (row.kind === 'session'
+    ? row.node.summary.pinnedAt
+    : row.kind === 'group'
+      ? Math.min(...row.runs.map((run) => run.summary.pinnedAt ?? Infinity))
+      : row.task.pinnedAt) ?? 0
+
+/**
+ * Huli: whether a best-of-N group's row shows its runs: as the user left it, else while its page
+ * or one of its runs is in front.
+ */
+export function groupExpanded(
+  view: { main: MainView; expandedParents: Record<string, boolean> },
+  row: { id: string; runs: readonly SessionNode[] },
+): boolean {
+  const own = view.expandedParents[row.id]
+  if (own !== undefined) return own
+  const { main } = view
+  if (main.kind === 'group') return main.groupId === row.id
+  if (main.kind === 'session') return row.runs.some((run) => run.summary.id === main.sessionId)
+  return false
+}
+
+/** Huli: the runs of a best-of-N group the window knows of, oldest first. */
+export function groupRuns(byId: Record<string, SessionSummary>, groupId: string): SessionSummary[] {
+  return Object.values(byId)
+    .filter((s) => s.group?.id === groupId)
+    .sort((a, b) => a.createdAt - b.createdAt)
+}
+
+/** Huli: a best-of-N group's title from any of its runs, or null when none is known. */
+export function groupTitle(byId: Record<string, SessionSummary>, groupId: string): string | null {
+  for (const s of Object.values(byId)) if (s.group?.id === groupId) return s.group.title
+  return null
+}
 
 /** The sessions in sidebar order, flattened, for Mod+Shift+[ and ]. */
 export function flattenTree(nodes: SessionNode[], expanded: (id: string) => boolean): string[] {
@@ -483,12 +540,17 @@ export function visibleOrder(
     rows.flatMap((row) =>
       row.kind === 'session'
         ? flattenTree([row.node], open ? expanded : () => false)
-        : [
-            row.id,
-            ...(open && taskExpanded(view, row.id, byId)
-              ? startedSteps(row.task).map((step) => step.id)
-              : []),
-          ],
+        : row.kind === 'group'
+          ? [
+              row.id,
+              ...(open && groupExpanded(view, row) ? row.runs.map((run) => run.summary.id) : []),
+            ]
+          : [
+              row.id,
+              ...(open && taskExpanded(view, row.id, byId)
+                ? startedSteps(row.task).map((step) => step.id)
+                : []),
+            ],
     )
   const projectRows = (project: Project): string[] =>
     view.collapsedProjects[project.path]
@@ -556,7 +618,9 @@ export function sidebarTabStop(
       ? view.main.sessionId
       : view.main.kind === 'task'
         ? view.main.taskId
-        : null
+        : view.main.kind === 'group'
+          ? view.main.groupId
+          : null
   if (front !== null && order.includes(front)) return { kind: 'session', id: front }
   const hosts = view.hosts ?? [null]
   const shown = (node: SessionNode) => hosts.includes(hostOfSession(node.summary))

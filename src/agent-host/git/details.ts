@@ -4,7 +4,7 @@
 import { constants } from 'node:fs'
 import { lstat, open, readlink, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import type { CommitDetails, FileDiff, LogCommit } from '@shared/git'
+import type { ChangedFile, CommitDetails, FileDiff, LogCommit } from '@shared/git'
 import type { Platform } from '@shared/platform'
 import { pathKey } from '../paths'
 import { expectOk, GIT_TIMEOUT_MS, type Exec, type ExecResult } from './exec'
@@ -213,6 +213,90 @@ export async function readFileDiff(
         : blobSide(exec, root, 'HEAD', before, true)
       : blobSide(exec, root, `${ref}^`, before),
     ref === null ? diskSide(root, path) : blobSide(exec, root, ref, path),
+  ])
+  return {
+    path,
+    oldText: oldSide.text,
+    newText: newSide.text,
+    binary: oldSide.binary || newSide.binary,
+    tooLarge: oldSide.tooLarge || newSide.tooLarge,
+  }
+}
+
+const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
+
+function checkBase(base: string): string {
+  if (!OBJECT_ID.test(base)) throw new Error(`Not a commit id: ${base}`)
+  return base
+}
+
+/** The lines of a file not yet tracked, as a diff would count them; null for a binary or big one. */
+async function untrackedLines(root: string, path: string): Promise<number | null> {
+  const side = await diskSide(root, path).catch(() => MISSING)
+  if (side.text === null) return null
+  if (side.text === '') return 0
+  const breaks = side.text.split('\n').length - 1
+  return side.text.endsWith('\n') ? breaks : breaks + 1
+}
+
+/**
+ * Huli: a worktree's changes against the commit `base` it was cut from, at most 500 files: what
+ * its branch committed since, what it has not committed and the files it added untracked, each
+ * with its line counts, and how many commits the branch made.
+ */
+export async function readChangesSince(
+  exec: Exec,
+  root: string,
+  base: string,
+): Promise<{
+  files: ChangedFile[]
+  commits: number
+  truncated: boolean
+}> {
+  const since = checkBase(base)
+  const [names, numbers, others, count] = await Promise.all([
+    git(exec, root, ['diff', '--no-ext-diff', '-z', '-M', '--name-status', since, '--']),
+    git(exec, root, ['diff', '--no-ext-diff', '-z', '-M', '--numstat', since, '--']),
+    git(exec, root, ['ls-files', '--others', '--exclude-standard', '-z']),
+    git(exec, root, ['rev-list', '--count', `${since}..HEAD`]),
+  ])
+  const tracked = withLineCounts(
+    parseNameStatus(expectOk('git diff', names).stdout),
+    parseNumstat(expectOk('git diff', numbers).stdout),
+  )
+  const untracked = expectOk('git ls-files', others).stdout.split('\0').filter(Boolean)
+  const all = tracked.length + untracked.length
+  const added = await Promise.all(
+    untracked.slice(0, Math.max(0, CHANGES_LIMIT - tracked.length)).map(async (path) => ({
+      path,
+      oldPath: null,
+      status: 'untracked' as const,
+      insertions: await untrackedLines(root, path),
+      deletions: 0,
+    })),
+  )
+  const files = [...tracked.slice(0, CHANGES_LIMIT), ...added]
+  return {
+    files,
+    commits: Number(expectOk('git rev-list', count).stdout.trim()) || 0,
+    truncated: all > files.length,
+  }
+}
+
+/** Huli: a file's two sides between the commit `base` and the worktree, as `readChangesSince` lists it. */
+export async function readFileDiffSince(
+  exec: Exec,
+  root: string,
+  base: string,
+  path: string,
+  oldPath: string | null,
+): Promise<FileDiff> {
+  const since = checkBase(base)
+  insideRoot(root, path)
+  if (oldPath !== null) insideRoot(root, oldPath)
+  const [oldSide, newSide] = await Promise.all([
+    blobSide(exec, root, since, oldPath ?? path, true),
+    diskSide(root, path),
   ])
   return {
     path,

@@ -674,6 +674,18 @@ export class Attachments {
     return pathToFileURL(file).href
   }
 
+  /**
+   * Huli: a record of its own for the same bytes or granted path, for another session's first
+   * message to send and release while this one's stays; the bytes stay while either holds them.
+   */
+  copy(id: string): Attachment {
+    const record: AttachmentRecord = { ...this.get(id), id: randomUUID(), addedAt: this.now() }
+    delete record.heldAt
+    this.records.set(record.id, record)
+    this.save()
+    return attachmentOf(record)
+  }
+
   async remove(id: string): Promise<void> {
     this.get(id)
     await this.release([id])

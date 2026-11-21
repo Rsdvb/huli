@@ -78,6 +78,7 @@ import { RenameScope } from './rename-scope'
 import { limitRows, rowInSight, ROWS_SHOWN } from './row-limit'
 import { SessionRow } from './session-row'
 import { TaskRow } from './task-row'
+import { RunGroupRow } from './run-group-row'
 
 /**
  * The sidebar's list under its menu, in App Shell's look: Pinned, then the projects as folders
@@ -306,7 +307,13 @@ function ProjectGroup({
   const open = useViewStore((s) => !s.collapsedProjects[key])
   const allShown = useViewStore((s) => !!s.allRowsShown[key])
   const shownId = useViewStore((s) =>
-    s.main.kind === 'session' ? s.main.sessionId : s.main.kind === 'task' ? s.main.taskId : null,
+    s.main.kind === 'session'
+      ? s.main.sessionId
+      : s.main.kind === 'task'
+        ? s.main.taskId
+        : s.main.kind === 'group'
+          ? s.main.groupId
+          : null,
   )
   const [moreOpen, setMoreOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -516,6 +523,8 @@ function GroupRow({
 }) {
   return row.kind === 'session' ? (
     <SessionRow node={row.node} tabStopId={tabStopId} indent={indent} showHost={showHost} />
+  ) : row.kind === 'group' ? (
+    <RunGroupRow group={row.group} runs={row.runs} tabStopId={tabStopId} indent={indent} />
   ) : (
     <TaskRow task={row.task} tabStopId={tabStopId} indent={indent} showHost={showHost} />
   )

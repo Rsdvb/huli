@@ -31,6 +31,7 @@ import { GroupRenameHints } from './rename-hints'
 import { RenameScope } from './rename-scope'
 import { SessionRow } from './session-row'
 import { TaskRow } from './task-row'
+import { RunGroupRow } from './run-group-row'
 
 // Its rows' group, for the rename keys at its end; no project path looks like it.
 const NEEDS_YOU_GROUP = 'needs-you'
@@ -95,6 +96,8 @@ export function NeedsYouGroup({
             {rows.map((row) =>
               row.kind === 'session' ? (
                 <SessionRow key={row.id} node={row.node} tabStopId={null} showHost />
+              ) : row.kind === 'group' ? (
+                <RunGroupRow key={row.id} group={row.group} runs={row.runs} tabStopId={null} />
               ) : (
                 <TaskRow key={row.id} task={row.task} tabStopId={null} showHost flat />
               ),

@@ -62,6 +62,7 @@ import {
   type WorktreeInspection,
 } from '@shared/git'
 import type { Platform } from '@shared/platform'
+import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
 import {
   MAX_WORKFLOW_STEPS,
@@ -433,6 +434,27 @@ function worktreeRequest(value: unknown): { base: string; branch?: string } {
   const o = fields(value)
   const branch = o.branch === undefined ? undefined : checkWorktreeBranch(string(o, 'branch', 100))
   return { base: baseRef(o, 'base'), ...(branch === undefined ? {} : { branch }) }
+}
+
+/** Huli: a best-of-N group's runs, each an agent and the values it starts with. */
+function groupRuns(value: unknown): GroupRunStart[] {
+  if (!Array.isArray(value) || value.length < GROUP_RUNS_MIN || value.length > GROUP_RUNS_MAX) {
+    throw invalidParams(`runs must be a list of ${GROUP_RUNS_MIN} to ${GROUP_RUNS_MAX} runs`)
+  }
+  return value.map((item) => {
+    const o = fields(item)
+    const options = o.options === undefined ? undefined : configValues(o.options)
+    return { agentId: agentId(o), ...(options === undefined ? {} : { options }) }
+  })
+}
+
+/** Huli: the runs of one group, at most as many as a group holds. */
+function groupSessions(o: Fields): string[] {
+  const value = o.sessionIds
+  if (!Array.isArray(value) || value.length === 0 || value.length > GROUP_RUNS_MAX) {
+    throw invalidParams(`sessionIds must be a list of 1 to ${GROUP_RUNS_MAX} sessions`)
+  }
+  return [...new Set(value.map((id) => sessionId({ sessionId: id })))]
 }
 
 const WORKFLOW_ID = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -2006,6 +2028,28 @@ export function createValidators(platform: Platform): Validators {
       }
       return { sessionId: sessionId(o), branch: o.branch, expected: inspection(o.expected) }
     },
+    'groups.start': (params) => {
+      const o = fields(params)
+      const prompt = promptContent(o.prompt)
+      if (prompt.length === 0) throw invalidParams('prompt must not be empty')
+      return {
+        projectPath: absolutePath(o, 'projectPath', platform),
+        base: baseRef(o, 'base'),
+        prompt,
+        runs: groupRuns(o.runs),
+      }
+    },
+    'groups.changes': session,
+    'groups.fileDiff': (params) => {
+      const o = fields(params)
+      return {
+        sessionId: sessionId(o),
+        path: gitPath(o, 'path'),
+        oldPath: o.oldPath === null || o.oldPath === undefined ? null : gitPath(o, 'oldPath'),
+      }
+    },
+    'groups.keep': session,
+    'groups.discard': (params) => ({ sessionIds: groupSessions(fields(params)) }),
     'worktrees.retrySetup': session,
     'worktrees.skipSetup': session,
     'worktrees.setupLog': (params) => {

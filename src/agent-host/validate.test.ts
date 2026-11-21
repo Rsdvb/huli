@@ -1749,6 +1749,45 @@ describe('worktree requests', () => {
     )
   })
 
+  it('starts a best-of-N group of 2 to 4 runs from one base and refuses the rest', () => {
+    const prompt = [{ type: 'text', text: 'Fix the clock' }]
+    const run = { agentId: 'codex', options: { model: 'gpt-5' } }
+    const start = (params: Record<string, unknown>) =>
+      posix['groups.start']({
+        projectPath: '/repo',
+        base: 'main',
+        prompt,
+        runs: [run, run],
+        ...params,
+      })
+    expect(start({})).toEqual({ projectPath: '/repo', base: 'main', prompt, runs: [run, run] })
+    expect(start({ runs: [{ agentId: 'codex' }, run, run, run] }).runs).toHaveLength(4)
+    for (const runs of [[run], [run, run, run, run, run], 'codex', [run, { agentId: 'nope' }]]) {
+      rejects(() => start({ runs }))
+    }
+    rejects(() => start({ runs: [run, { agentId: 'codex', options: { model: {} } }] }))
+    for (const base of ['-x', '--all', 'main~1', 'HEAD:path', '']) rejects(() => start({ base }))
+    rejects(() => start({ prompt: [] }))
+    rejects(() => start({ projectPath: 'repo' }))
+  })
+
+  it("reads a run's file diff and sets runs aside only by path and session", () => {
+    expect(posix['groups.fileDiff']({ sessionId: 's', path: 'src/a.ts', oldPath: null })).toEqual({
+      sessionId: 's',
+      path: 'src/a.ts',
+      oldPath: null,
+    })
+    for (const path of ['/etc/passwd', '../x', 'a\0b']) {
+      rejects(() => posix['groups.fileDiff']({ sessionId: 's', path, oldPath: null }))
+    }
+    expect(posix['groups.discard']({ sessionIds: ['a', 'b', 'a'] })).toEqual({
+      sessionIds: ['a', 'b'],
+    })
+    rejects(() => posix['groups.discard']({ sessionIds: [] }))
+    rejects(() => posix['groups.discard']({ sessionIds: ['a', 'b', 'c', 'd', 'e'] }))
+    rejects(() => posix['groups.keep']({}))
+  })
+
   it('reads the setup output whole or from an offset', () => {
     expect(posix['worktrees.setupLog']({ sessionId: 's' })).toEqual({ sessionId: 's' })
     expect(posix['worktrees.setupLog']({ sessionId: 's', from: 1200 })).toEqual({

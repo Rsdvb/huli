@@ -24,6 +24,7 @@ import {
   type SubagentCount,
 } from '../../components/SessionRow'
 import { TaskRow, taskMenu } from '../../components/tasks/TaskRow'
+import { BestOfRow } from '../../components/BestOfRow'
 import {
   FilterNote,
   inFilter,
@@ -423,6 +424,16 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
   const insets = useSafeAreaInsets()
   const list = useRef<FlashListRef<HomeItem>>(null)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  // Best-of-N groups opened to their runs, by their list key; closed on every launch.
+  const [openBestOf, setOpenBestOf] = useState<ReadonlySet<string>>(new Set())
+  const toggleBestOf = useCallback((key: string) => {
+    setOpenBestOf((was) => {
+      const next = new Set(was)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
   const [selection, setSelection] = useState<ReadonlySet<string> | null>(null)
   const activeId = active?.id ?? ''
   const several = host.computers.length > 1
@@ -565,6 +576,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         collapsed,
         expanded,
         showEmptyFolders: shell.filter.kind === 'all',
+        openBestOf,
       }),
     [
       listed,
@@ -576,6 +588,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       collapsed,
       expanded,
       shell.filter,
+      openBestOf,
     ],
   )
 
@@ -1265,6 +1278,13 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         </Press>
       )
     }
+    if (item.kind === 'bestOf') {
+      return (
+        <View style={styles.groupPad}>
+          <BestOfRow bestOf={item.bestOf} onToggle={() => toggleBestOf(item.key)} />
+        </View>
+      )
+    }
     if (item.kind === 'task') {
       const t = item.task
       // The same menu as in the 需求 list, as the desktop's needs-you rows have theirs.
@@ -1285,7 +1305,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     const p = item.placed
     const s = p.session
     const here = p.computer === activeId
-    return (
+    const row = (
       <HomeRow
         placed={p}
         taskTitle={s.task && here ? taskTitles.get(s.task.taskId) : undefined}
@@ -1302,6 +1322,8 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         actions={rowActions}
       />
     )
+    // A best-of-N run sits under its group's row.
+    return item.run ? <View style={styles.run}>{row}</View> : row
   }
 
   return (
@@ -1506,6 +1528,7 @@ const styles = StyleSheet.create({
   placeholder: { flex: 1, justifyContent: 'center' },
   pad: { paddingHorizontal: space.xl },
   groupPad: { paddingHorizontal: space.md },
+  run: { paddingLeft: space.xl },
   group: {
     flexDirection: 'row',
     alignItems: 'center',

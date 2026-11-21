@@ -9,7 +9,7 @@ import { hostScope, LOCAL_SCOPE } from '@renderer/stores/host-scope'
 import { otherHosts, useHostsStore } from '@renderer/stores/hosts'
 import { useRemoteStore } from '@renderer/stores/remote'
 import { useRoutinesStore } from '@renderer/stores/routines'
-import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
+import { groupTitle, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { useTasksStore } from '@renderer/stores/tasks'
 import type { HistoryPlace, SettingsPlace } from '@renderer/stores/view'
 import { useWindowScope, windowHost } from '@renderer/stores/window-host'
@@ -51,6 +51,10 @@ export function placeTitle(place: HistoryPlace): string {
     }
     case 'task':
       return useTasksStore.getState().summaries[place.taskId]?.title ?? t('history.places.task')
+    case 'group':
+      return (
+        groupTitle(useSessionsStore.getState().byId, place.groupId) ?? t('history.places.group')
+      )
     case 'artifact': {
       const { list, deleted } = useArtifactsStore.getState()
       const found = [...(list ?? []), ...(deleted ?? [])].find((a) => a.id === place.id)
@@ -77,6 +81,7 @@ export function usePlaceTitle(place: HistoryPlace): string {
   )
   useArtifactsStore((s) => (place.kind === 'artifact' ? s.list : null))
   useTasksStore((s) => (place.kind === 'task' ? s.summaries[place.taskId]?.title : null))
+  useSessionsStore((s) => (place.kind === 'group' ? groupTitle(s.byId, place.groupId) : null))
   useWindowScope().useMarketplaceStore((s) =>
     place.kind === 'marketplace' && place.item ? s.catalog : null,
   )
