@@ -39,7 +39,7 @@ import { Icon } from '../../ui/Icon'
 import { Press } from '../../ui/Press'
 import { Screen } from '../../ui/Screen'
 import { useCollapsingHeader } from '../../ui/ScrollHeader'
-import { useWhenShown } from '../../ui/focus'
+import { useOnShown } from '../../ui/focus'
 import { usePullRefresh } from '../../ui/PullRefresh'
 import { Skeleton } from '../../ui/Skeleton'
 import {
@@ -136,15 +136,41 @@ function ArtifactsTab() {
     if (connected) void load()
   }, [connected, load])
 
-  // A change made while another tab shows is read once this one shows again.
-  const loadShown = useWhenShown(() => void load())
+  // One read at a time. A change heard during a read reads once more after it, however many
+  // came; the tab coming into view during one needs nothing more.
+  const latestLoad = useRef(load)
+  latestLoad.current = load
+  const reading = useRef(false)
+  const again = useRef(false)
+  const reload = useCallback((changed: boolean) => {
+    if (reading.current) {
+      if (changed) again.current = true
+      return
+    }
+    reading.current = true
+    void (async () => {
+      try {
+        do {
+          again.current = false
+          await latestLoad.current()
+        } while (again.current)
+      } finally {
+        reading.current = false
+      }
+    })()
+  }, [])
+
+  // Each change to the list (a new version is one too) reads it again, whichever tab shows, so
+  // the tab is current when it comes into view; coming into view reads it as well.
   useEffect(() => {
     if (!link) return
     return link.onHostEvent((raw: unknown) => {
-      const event = raw as HostEvent
-      if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') loadShown()
+      if ((raw as HostEvent).type === 'artifacts.changed') reload(true)
     })
-  }, [link, loadShown])
+  }, [link, reload])
+  useOnShown(() => {
+    if (connected) reload(false)
+  })
 
   const agentOf = useCallback(
     (a: ArtifactSummary) => sessionAgents.get(a.sessionId) ?? null,
