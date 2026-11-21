@@ -257,6 +257,17 @@ export class SideQuestionUnsupported extends Error {
   }
 }
 
+/**
+ * Huli: `readLimits` could not read the plan's windows while signed in to a plan, which the
+ * connection logged; distinct from a plan that has no windows to read.
+ */
+export class LimitsReadFailed extends Error {
+  constructor(message = 'The plan limits could not be read') {
+    super(message)
+    this.name = 'LimitsReadFailed'
+  }
+}
+
 /** The agent message a fork ends at. */
 export interface ForkPoint {
   messageId: string // the agent message's own id

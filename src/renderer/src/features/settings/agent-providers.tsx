@@ -455,7 +455,19 @@ export function ProviderBalances({ providers }: { providers: readonly AgentProvi
             text={
               <RowText
                 name={balance.label}
-                description={`${provider.name} · ${t('agents.providers.usage.observed', { ago: mediumAgo(provider.usage!.observedAt, now) })}`}
+                description={[
+                  provider.name,
+                  balance.granted
+                    ? t('agents.balance.granted', {
+                        amount: balanceText({ ...balance, amount: balance.granted }),
+                      })
+                    : null,
+                  t('agents.providers.usage.observed', {
+                    ago: mediumAgo(provider.usage!.observedAt, now),
+                  }),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               />
             }
           >

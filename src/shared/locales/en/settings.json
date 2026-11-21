@@ -784,7 +784,8 @@
       "reading": "Reading the balance…",
       "afterSignIn": "Once {{name}} is signed in to a DeepSeek account or has an API key, its balance shows here.",
       "gateway": "With another model provider, its own console shows the balance.",
-      "stale": "Showing the balance read {{ago}}."
+      "stale": "Showing the balance read {{ago}}.",
+      "kept": "This balance is from the last run. Refresh to update it."
     },
     "planLimits": "Plan limits",
     "usageNotReported": "{{name}} does not report plan usage.",
@@ -908,6 +909,7 @@
     "direct": "{{vendor}} · runs in ACP mode itself",
     "ownInterface": "{{vendor}} · through its own interface",
     "usageUpdated": "Read {{ago}}",
+    "usageNoReset": "No reset time given",
     "refreshUsage": "Read plan usage again",
     "versionGroup": "Version",
     "ownInstaller": "Updated by its own installer, not by Kettu.",

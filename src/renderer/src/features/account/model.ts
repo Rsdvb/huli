@@ -1,5 +1,6 @@
 import type { AccountStatus } from '@shared/account'
 import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
+import { limitHolds } from '@shared/plan-limits'
 import type { AgentId } from '@shared/thread'
 import type { UpdateStatus } from '@shared/updates'
 import { planName } from '@renderer/features/tray/model'
@@ -95,7 +96,7 @@ function cardWindows(limits: readonly PlanLimit[], now: number): CardWindow[] {
     if (!window || limit.usedPercent === null) continue
     const id = scoped ? limit.window : window
     if (rings.some((ring) => ring.id === id)) continue
-    const stale = limit.resetsAt !== null && limit.resetsAt <= now
+    const stale = !limitHolds(limit, now)
     rings.push({
       id,
       window,

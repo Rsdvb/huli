@@ -264,6 +264,14 @@
     "antigravitySignedOut": "{{agent}} is signed out. Sign in again in a terminal to read its plan limits.",
     "antigravityLimitsFailed": "{{agent}} could not read its plan limits: {{error}}",
     "antigravityNoPlan": "{{agent}} named no Google plan, so it has no plan limits to read. If you use it with a Google account, sign in again in a terminal.",
+    "limitsReadFailed": "{{agent}} couldn't read the plan limits this time. Try again later.",
+    "glmUsage": {
+      "missingCredentials": "{{agent}} has no Z.AI API key yet. Set Z_AI_API_KEY, or run glm-acp-agent --setup once, to read the plan's usage.",
+      "unsupportedEndpoint": "{{agent}} uses a custom endpoint, where the GLM Coding Plan's usage can't be read.",
+      "authenticationFailed": "Z.AI didn't accept {{agent}}'s API key. Check your Coding Plan key.",
+      "requestFailed": "{{agent}} couldn't read the GLM Coding Plan's usage this time. Try again later.",
+      "invalidResponse": "{{agent}} sent a GLM Coding Plan usage reply Kettu can't read."
+    },
     "initializeTimeout": "{{agent}} did not answer initialize within {{seconds}} s.",
     "exit": {
       "code": "{{agent}} exited with code {{code}}",

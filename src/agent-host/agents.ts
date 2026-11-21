@@ -42,6 +42,13 @@ import { parseMistralAccount } from './vendor-usage/mistral-vibe'
 import { KeychainRefused, parseCursorAbout, type CursorSignIn } from './vendor-usage/cursor'
 import { readAuggieAccount } from './vendor-usage/auggie'
 import { readCopilotQuota } from './vendor-usage/copilot'
+import {
+  GLM_USAGE_METHOD,
+  GLM_USAGE_VERSION,
+  offersGlmUsage,
+  parseGlmUsage,
+  type GlmUnavailable,
+} from './vendor-usage/glm'
 import { readKiloProfile } from './vendor-usage/kilo'
 import { readQoderUsage } from './vendor-usage/qoder'
 import { storedSignInReader } from './vendor-usage/readers'
@@ -64,6 +71,7 @@ import {
 import { readAntigravityUsage } from './antigravity-usage'
 import { signsInWithKeyOnly } from '@shared/agents'
 import type { AgentProcess, NodeRuntime } from '@shared/host-control'
+import { limitOutlived } from '@shared/plan-limits'
 import type { Platform } from '@shared/platform'
 import { agentColor, type AddedAgent, type HostSettings } from '@shared/settings'
 import {
@@ -169,6 +177,7 @@ import {
 import { OAUTH_ACCOUNT_LABEL } from './claude/reports'
 import {
   AgentRequestError,
+  LimitsReadFailed,
   type AgentConnection,
   type AgentInit,
   type AuthMethodInfo,
@@ -242,6 +251,7 @@ import type {
   AgentUpdatesFile,
   HarnessManifestFile,
   RegistryListingFile,
+  RememberedBalances,
   RememberedInit,
 } from './storage'
 import { readUvxVersion, uvxFetchArgs, writeUvxVersion } from './uvx-install'
@@ -319,6 +329,12 @@ const READ_ANTIGRAVITY_LIMITS = false
 
 /** How often a read the user asks for may run agy, however many views ask within it. */
 const ASKED_READ_MS = 60_000
+
+/**
+ * Huli: how soon a refresh the user presses asks OpenCode's providers' vendors again with their
+ * keys, however often it is pressed; a read nobody asked for waits `limitsMs`.
+ */
+const PROVIDERS_FORCED_MS = 10_000
 
 /** Huli: why a waiting `authenticate` was let go: a check found the agent signed in already. */
 const SIGNED_IN_ELSEWHERE = new Error('The agent is signed in')
@@ -546,6 +562,9 @@ class Slot {
   balanceRun: Promise<void> | null = null
   limits = new Map<string, PlanLimit>()
   balances: ProviderBalance[] = []
+  /** Huli: when `balances` were read, and whether an earlier run did and none since. */
+  balancesAt = 0
+  balancesStale = false
   /** Kettu handed the harness an API key for this agent, which it never reads back. */
   apiKey = false
   /** The capabilities of the last `initialize`, from this run or an earlier one. */
@@ -627,19 +646,40 @@ function exitText(agent: string, info: ExitInfo): string {
   return t('agent.exit.code', { agent, code: String(info.code) })
 }
 
+/** Huli: the balances a read gave, now; an earlier run's kept ones are replaced. */
+function setBalances(slot: Slot, balances: ProviderBalance[], now: number): void {
+  slot.balances = balances
+  slot.balancesAt = balances.length > 0 ? now : 0
+  slot.balancesStale = false
+}
+
+/** Huli: balances worth keeping for the next run; none while there are none, or no time. */
+function keptBalances(
+  balances: readonly ProviderBalance[],
+  observedAt: number,
+): RememberedBalances | undefined {
+  return balances.length > 0 && observedAt > 0 ? { items: [...balances], observedAt } : undefined
+}
+
 // A signed-out account is not kept: whether it is still signed out shows once the agent runs.
 function rememberedEntry(slot: Slot): AgentsFile['agents'][AgentId] | null {
   const account = slot.account?.kind === 'none' ? null : slot.account
   const limits = [...slot.limits.values()]
   const init = slot.initRecord
   const signIn = slot.answeredSignIn
-  return account || limits.length > 0 || init || slot.apiKey || signIn
+  const balances = keptBalances(slot.balances, slot.balancesAt)
+  const balance = slot.balance
+    ? keptBalances(slot.balance.balances, slot.balance.observedAt)
+    : undefined
+  return account || limits.length > 0 || init || slot.apiKey || signIn || balances || balance
     ? {
         account,
         limits,
         ...(init ? { init } : {}),
         ...(slot.apiKey ? { apiKey: true } : {}),
         ...(signIn ? { signIn } : {}),
+        ...(balances ? { balances } : {}),
+        ...(balance ? { balance } : {}),
       }
     : null
 }
@@ -1087,6 +1127,7 @@ export class AgentManager {
       const slot = this.home(h)
       slot.account = null
       slot.limits.clear()
+      setBalances(slot, [], 0)
       this.hooks.configChanged(slot.id)
     }
     // Turned on again, automatic updates take the target from the version the user moved to.
@@ -3640,7 +3681,10 @@ export class AgentManager {
       before?.kind === named.kind && before.label === named.label && before.email === named.email
     slot.account = same && before.tier ? { ...named, tier: before.tier } : named
     // A gateway has no plan: windows kept from a sign-in before it would show as its limits.
-    if (named.kind === 'gateway') slot.limits.clear()
+    if (named.kind === 'gateway') {
+      slot.limits.clear()
+      setBalances(slot, [], 0)
+    }
     slot.signIn = named.kind === 'none' ? 'required' : 'signed-in'
     this.emit(slot)
     if (wasRequired && slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
@@ -3800,6 +3844,7 @@ export class AgentManager {
           'kilo',
           'auggie',
           'antigravity',
+          'glm',
         ].includes(slot.def.id) ||
         storedSignInReader(slot.def.id) !== null ||
         this.driver(slot).reads?.limits === true)
@@ -3820,6 +3865,7 @@ export class AgentManager {
     const runtime = await this.ensureReady(slot.id)
     const { connection } = runtime
     if (slot.def.id === 'grok') return this.readGrokLimits(slot, runtime, force)
+    if (slot.def.id === 'glm') return this.readGlmLimits(slot, runtime)
     if (connection.request && slot.def.id === 'mistral-vibe') {
       const now = Date.now()
       const version = runtime.init.version ?? slot.h.binaryVersion
@@ -3876,6 +3922,9 @@ export class AgentManager {
     try {
       limits = await connection.readLimits()
     } catch (error) {
+      if (error instanceof LimitsReadFailed) {
+        throw new HostError('agent_error', t('agent.limitsReadFailed', { agent: slot.name }))
+      }
       throw this.limitsError(slot, error)
     }
     const now = Date.now()
@@ -3885,7 +3934,7 @@ export class AgentManager {
     slot.limits.clear()
     for (const limit of merged) slot.limits.set(limit.window, limit)
     const extras = connection.planExtras?.()
-    if (extras) slot.balances = extras.balances
+    if (extras) setBalances(slot, extras.balances, now)
     this.emit(slot)
     // The windows do not wait for the reset credits, which arrive in a status of their own.
     if (slot.def.id === 'codex') void this.readResets(slot)
@@ -4205,19 +4254,51 @@ export class AgentManager {
     if (slot.signIn !== 'signed-in') this.signedIn(slot.id)
   }
 
+  /**
+   * GLM Agent's Coding Plan quota from its own `_glm/usage`, which it reads with the key it keeps,
+   * so Kite never reads that key. Windows it kept from an earlier read show, with why the last one
+   * failed; a refused or missing key leaves none.
+   */
+  private async readGlmLimits(slot: Slot, runtime: AgentRuntime): Promise<void> {
+    const { connection } = runtime
+    if (!connection.request || !versionAtLeast(runningVersion(slot), GLM_USAGE_VERSION)) return
+    if (!offersGlmUsage(runtime.init.raw)) return
+    let reply: unknown
+    try {
+      reply = await connection.request<unknown>(GLM_USAGE_METHOD, {})
+    } catch (error) {
+      throw this.limitsError(slot, error)
+    }
+    const now = Date.now()
+    const read = parseGlmUsage(reply, now)
+    if (!read) throw new HostError('agent_error', glmUnavailable('invalidResponse', slot.name))
+    if (read.limits.length > 0) {
+      this.applyVendorUsage(slot, { limits: read.limits, balances: [] }, now)
+    } else if (
+      read.unavailable === 'authenticationFailed' ||
+      read.unavailable === 'missingCredentials'
+    ) {
+      slot.limits.clear()
+      this.emit(slot)
+    }
+    if (read.unavailable) {
+      throw new HostError('agent_error', glmUnavailable(read.unavailable, slot.name))
+    }
+  }
+
   /** The agent says it is signed out: its account and the plan it read are gone. */
   private signedOut(slot: Slot): void {
     slot.signIn = 'required'
     slot.account = null
     slot.limits.clear()
-    slot.balances = []
+    setBalances(slot, [], 0)
     slot.resets = null
     slot.resetsError = null
     this.emit(slot)
   }
 
   private applyVendorUsage(slot: Slot, usage: VendorUsage, now: number): void {
-    slot.balances = usage.balances
+    setBalances(slot, usage.balances, now)
     if (usage.tier) {
       slot.account = slot.account
         ? { ...slot.account, label: usage.tier }
@@ -4486,12 +4567,32 @@ export class AgentManager {
       const slot = this.slots.get(agentId)
       if (!slot || !entry) continue
       slot.account = entry.account
-      // A window an earlier run kept under one of Claude Code's other names is read again.
-      const kept = entry.limits.filter((limit) => planWindow(limit.window) === limit.window)
+      // A window an earlier run kept under one of Claude Code's other names is read again, and
+      // one without a reset whose reading is a period old is from a period gone by.
+      const now = Date.now()
+      const kept = entry.limits.filter(
+        (limit) => planWindow(limit.window) === limit.window && !limitOutlived(limit, now),
+      )
       slot.limits = new Map(kept.map((limit) => [limit.window, limit]))
       slot.initRecord = entry.init ?? null
       slot.apiKey = entry.apiKey === true
       slot.answeredSignIn = entry.signIn ?? null
+      // Huli: the balances last read show as an earlier run's until they are read again.
+      if (entry.balances) {
+        slot.balances = entry.balances.items
+        slot.balancesAt = entry.balances.observedAt
+        slot.balancesStale = true
+      }
+      if (entry.balance && slot.def.id === 'deepseek') {
+        slot.balance = {
+          state: 'ready',
+          limits: [],
+          balances: entry.balance.items,
+          observedAt: entry.balance.observedAt,
+          error: null,
+          stale: true,
+        }
+      }
       slot.remembered = rememberedJson(slot)
       if (slot.def.id === 'antigravity') this.decideSignIn(slot)
       this.emit(slot)
@@ -4745,7 +4846,8 @@ export class AgentManager {
     await this.detectAll()
     if (slot.h.detection?.state !== 'available' || !slot.h.detection.spec) return
     if (slot.providersRun) return slot.providersRun
-    if (!force && Date.now() - slot.providersReadAt < this.timings.limitsMs) return
+    const gap = force ? PROVIDERS_FORCED_MS : this.timings.limitsMs
+    if (Date.now() - slot.providersReadAt < gap) return
     slot.providersRun = this.limitedRead(slot, this.readProviders(slot)).finally(() => {
       slot.providersRun = null
     })
@@ -4988,6 +5090,7 @@ export class AgentManager {
     slot.signIn = 'required'
     slot.account = null
     slot.limits.clear()
+    setBalances(slot, [], 0)
     slot.answeredSignIn = null
     this.emit(slot)
     void this.readSignInMethod(slot)
@@ -5573,7 +5676,9 @@ export class AgentManager {
   private async credentialsChanged(slot: Slot): Promise<void> {
     slot.account = null
     slot.limits.clear()
+    setBalances(slot, [], 0)
     slot.limitsReadAt = 0
+    slot.providersReadAt = 0
     slot.limitsError = null
     slot.resets = null
     slot.resetsError = null
@@ -5837,7 +5942,13 @@ export class AgentManager {
           }
         : {}),
       ...(slot.def.id === 'deepseek' ? { balance: slot.balance } : {}),
-      ...(slot.balances.length ? { balances: slot.balances } : {}),
+      ...(slot.balances.length
+        ? {
+            balances: slot.balances,
+            ...(slot.balancesAt > 0 ? { balancesAt: slot.balancesAt } : {}),
+            ...(slot.balancesStale ? { balancesStale: true as const } : {}),
+          }
+        : {}),
       ...(limitsReason ? { limitsReason } : {}),
       ...(slot.def.sharesSignIn ? { sharesSignIn: true } : {}),
       deletesCopy: (capabilities?.deleteSession ?? false) || removesCopies(slot.def.id),
@@ -5851,7 +5962,8 @@ export class AgentManager {
             },
           }
         : {}),
-      limits: [...slot.limits.values()],
+      // A window without a reset that was not read again for its whole period is gone.
+      limits: [...slot.limits.values()].filter((limit) => !limitOutlived(limit, Date.now())),
       ...(slot.limitsError ? { limitsError: slot.limitsError } : {}),
       ...(slot.resets ? { resets: slot.resets } : {}),
       ...(slot.resetsError ? { resetsError: slot.resetsError } : {}),
@@ -6221,6 +6333,11 @@ function settledWithin(promise: Promise<void>, ms: number): Promise<void> {
 /** Whether an agent method hands its sign-in page to the client, rather than opening a browser here. */
 function handsOverPage(def: AgentDefinition, methodId: string): boolean {
   return methodId === DELEGATED_SIGN_IN || (def.pageSignIns?.includes(methodId) ?? false)
+}
+
+/** Why GLM Agent could not read its quota, in the user's words. */
+function glmUnavailable(reason: GlmUnavailable, agent: string): string {
+  return t(`agent.glmUsage.${reason}`, { agent })
 }
 
 /** Maps a failed request to the agent to the port error the renderer acts on. */

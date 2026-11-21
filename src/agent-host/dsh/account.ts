@@ -259,12 +259,18 @@ export class DshAccounts {
           ? `DeepSeek's balance was not read: ${error.message}`
           : "DeepSeek's balance was not read",
       )
-      const last = fresh && input.balance ? input.balance : null
+      // A balance an earlier run kept stands for the same route until a read replaces it.
+      const kept =
+        input.balance?.stale === true && input.account?.kind === account(null).kind
+          ? input.balance
+          : null
+      const last = fresh && input.balance ? input.balance : kept
       balance = {
         state: 'error',
         limits: [],
         balances: last?.balances ?? [],
         observedAt: last?.observedAt ?? 0,
+        ...(last?.stale ? { stale: true as const } : {}),
         error: t(
           !refused
             ? 'dsh.balance.failed'

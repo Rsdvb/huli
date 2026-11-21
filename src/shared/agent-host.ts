@@ -259,6 +259,8 @@ export interface AgentProvider {
     balances: ProviderBalance[]
     observedAt: number
     error: string | null
+    /** Huli: kept from an earlier run of the host and not read again since. */
+    stale?: true
   } | null
 }
 
@@ -455,6 +457,10 @@ export interface AgentStatus {
    */
   balance?: AgentProvider['usage']
   balances?: ProviderBalance[]
+  /** Huli: when `balances` were read; absent without them, and on older hosts. */
+  balancesAt?: number
+  /** Huli: `balances` are an earlier run's, not read again since. */
+  balancesStale?: true
   limitsReason?: LimitsReason
   /** Its sign-in and session history are shared with the vendor's own apps (Antigravity). */
   sharesSignIn?: boolean

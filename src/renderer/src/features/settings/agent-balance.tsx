@@ -92,6 +92,11 @@ export function BalanceGroup({ status, reading }: { status: AgentStatus; reading
       ) : (
         !failed && empty && <p className="k-reading">{empty}</p>
       )}
+      {usage?.stale && !failed && !refreshError && balances.length > 0 && (
+        <p className="ui-sg-hint" data-wrap="">
+          {t('agents.balance.kept')}
+        </p>
+      )}
       {(refreshError ?? failed) && (
         <p className="ui-sg-hint k-error" data-wrap="">
           {refreshError ??

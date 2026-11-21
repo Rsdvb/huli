@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "checkedAt": "2026-11-21T04:29:30.000Z",
+  "stale": false,
+  "windows": [
+    {
+      "id": "credit_limit-3-5",
+      "label": "5-hour Model quota",
+      "kind": "session",
+      "windowDurationMins": 300,
+      "usedPercent": 25,
+      "used": 500,
+      "limit": 2000,
+      "remaining": 1500,
+      "unit": "credits",
+      "resetsAt": "2026-11-21T08:00:00.000Z"
+    },
+    {
+      "id": "credit_limit-6-1",
+      "label": "1-week Model quota",
+      "kind": "weekly",
+      "windowDurationMins": 10080,
+      "usedPercent": 12.5,
+      "used": 1250,
+      "limit": 10000,
+      "remaining": 8750,
+      "unit": "credits",
+      "resetsAt": "2026-11-24T00:00:00.000Z"
+    },
+    {
+      "id": "time_limit-5-1",
+      "label": "MCP quota",
+      "kind": "other",
+      "usedPercent": 100,
+      "used": 1000,
+      "limit": 1000,
+      "remaining": 0,
+      "unit": "calls",
+      "resetsAt": "2026-12-01T00:00:00.000Z"
+    }
+  ]
+}
