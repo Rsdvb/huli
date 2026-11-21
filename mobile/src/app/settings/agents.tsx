@@ -66,14 +66,13 @@ export default function Agents() {
     ['environment.changed'],
   )
 
-  const latest = useRef({ refresh: refreshLists, setEnvironment: environment.set })
-  latest.current = { refresh: refreshLists, setEnvironment: environment.set }
+  const latest = useRef(environment.set)
+  latest.current = environment.set
   useEffect(() => {
     if (!link) return
     return link.onHostEvent((raw) => {
       const event = raw as HostEvent
-      if (event.type === 'agent.removed') void latest.current.refresh().catch(() => {})
-      if (event.type === 'environment.changed') latest.current.setEnvironment(() => event.info)
+      if (event.type === 'environment.changed') latest.current(() => event.info)
     })
   }, [link])
 

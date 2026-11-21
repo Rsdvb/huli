@@ -1,9 +1,10 @@
 // What each agent's new sessions start with, from `agents.options`: the options its last new session
 // reported (the host lists them only in answer to a session's start), for New session's controls
-// and for the default model the Switch agent page names.
+// and for the default model the Switch agent page names. Kept current by `agent.options`, which the
+// host sends whenever an agent's options change, and by `agent.removed`.
 
 import { useCallback, useEffect, useState } from 'react'
-import type { AgentOptions } from '@shared/agent-host'
+import type { AgentOptions, HostEvent } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import { call, errorText } from './git'
 
@@ -30,6 +31,25 @@ export function useAgentOptions(link: HostLink, enabled: boolean): AgentOptionsV
       live = false
     }
   }, [link, enabled, round])
+
+  useEffect(() => {
+    if (!enabled) return
+    return link.onHostEvent((raw) => {
+      const event = raw as HostEvent
+      if (event.type === 'agent.options') {
+        const entry = event.options
+        setOptions((list) =>
+          list === null ? list : [...list.filter((o) => o.agentId !== entry.agentId), entry],
+        )
+      } else if (event.type === 'agent.removed') {
+        setOptions((list) =>
+          list?.some((o) => o.agentId === event.agentId)
+            ? list.filter((o) => o.agentId !== event.agentId)
+            : list,
+        )
+      }
+    })
+  }, [link, enabled])
 
   const reload = useCallback(() => setRound((n) => n + 1), [])
   return { options, error, reload }
