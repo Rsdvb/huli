@@ -22,6 +22,8 @@ export type AppEvent =
   // A new terminal starting in `folder`, relative to the side panel's project.
   | { kind: 'open-terminal'; panel: string; folder: string }
   | { kind: 'sign-in-terminal'; panel: string; command: string; agentId: string }
+  // Huli: a sign-in command started, in a terminal or copied for one, on the host `hostId`.
+  | { kind: 'sign-in-started'; agentId: string; hostId: string | null }
   // The sign-in command's terminal exited, on the host `hostId` (null for this computer).
   | { kind: 'sign-in-finished'; agentId: string; hostId: string | null }
 

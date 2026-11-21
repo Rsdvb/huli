@@ -456,6 +456,17 @@ export function bootstrap(): Promise<unknown> {
   // The terminal command exiting is the only signal a sign-in finished. Read the account again,
   // including when the last attempt had marked it required.
   onAppEvent((event) => {
+    // Huli: the host checks the sign-in every few seconds meanwhile, since the command may stay
+    // open past it or run in a terminal of the user's own.
+    if (event.kind === 'sign-in-started') {
+      void hostAt(event.hostId, 'agents.readSignIn', {
+        agentId: event.agentId as AgentId,
+        watch: true,
+      }).catch((error: unknown) =>
+        console.warn(`Could not watch the sign-in: ${errorMessage(error)}`),
+      )
+      return
+    }
     if (event.kind !== 'sign-in-finished') return
     void hostAt(event.hostId, 'agents.refreshAccount', {
       agentId: event.agentId as AgentId,

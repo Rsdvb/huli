@@ -32,6 +32,7 @@ import {
 } from '@shared/settings'
 import { MULTI_AGENT_HARNESSES, type AgentId, type HarnessId } from '@shared/thread'
 import { newSession } from '@renderer/app/actions'
+import { emitAppEvent } from '@renderer/app/events'
 import { AgentMark, AgentTile } from '@renderer/components/agents/agent-mark'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { useRefresh } from '@renderer/components/refresh'
@@ -111,6 +112,7 @@ import {
   useAction,
   useAgentReads,
   useHasOtherAgents,
+  useSignInRead,
   VENDORS,
 } from './agent-helpers'
 import {
@@ -193,7 +195,10 @@ function signInTerminal(status: AgentStatus, command: string): void {
     })
   if (!projectPath) {
     void navigator.clipboard.writeText(command).then(
-      () => toast(i18n.t('settings:agents.signInCopied')),
+      () => {
+        toast(i18n.t('settings:agents.signInCopied'))
+        emitAppEvent({ kind: 'sign-in-started', agentId: status.id, hostId: null })
+      },
       () => toast(i18n.t('settings:agents.signInCopyFailed'), undefined, { tone: 'warning' }),
     )
     return
@@ -935,6 +940,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
   const [act, busy, error] = useAction()
   const r = readiness(status)
   const reading = useAgentReads(status, { force: status.signIn === 'required' })
+  const signInReading = useSignInRead(status)
   const refreshAccount = useRefresh()
   const [accountError, setAccountError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
@@ -944,6 +950,18 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
   const terminalSignIn = status.authMethods.find((m) => m.type === 'terminal' && m.command)
   const signInPage = useSignInPage(hostId, status.id)
   const signInImage = useSignInImage(hostId, status.id)
+  const remote = isWeb || hostId !== null
+  // Huli: the methods show as soon as the agent's start names them. A sign-in started here shows
+  // while it waits, and an agent that tells whether it is signed in only once a session starts
+  // offers its sign-in without saying it needs one.
+  const readingMethods =
+    status.readingSignIn === true ||
+    (signInReading && status.signIn === 'unknown' && status.authMethods.length === 0)
+  const waiting = (signInPage !== null || signInImage !== null) && status.signIn !== 'signed-in'
+  const unsure = r.kind === 'ready' && status.signIn === 'unknown' && !readingMethods
+  const pageSignIns = unsure
+    ? status.authMethods.filter((m) => m.type === 'agent' && !(remote && !m.delegated))
+    : []
 
   const actions = (
     <>
@@ -990,14 +1008,14 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             {t('agents.keyOnly.note', { name: status.harnessName })}
           </p>
         )}
-        {!providerMode && r.kind === 'sign-in' && status.authMethods.length > 0 && (
+        {!providerMode && (r.kind === 'sign-in' || waiting) && status.authMethods.length > 0 && (
           <div>
             <SignInNotice
               status={status}
               busy={busy}
               page={signInPage}
               image={signInImage}
-              remote={isWeb || hostId !== null}
+              remote={remote}
               {...(hostId === null && {
                 onTerminal: (command: string) => signInTerminal(status, command),
               })}
@@ -1051,6 +1069,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
               {/* A subscription's label is its plan; the other kinds name how the agent signs in. */}
               <Fact
                 name={t(status.account?.kind === 'account' ? 'agents.plan' : 'agents.loginMethod')}
+                pending={readingMethods ? t('agents.readingSignIn') : null}
               >
                 {status.account?.kind === 'none' ? null : status.account?.label}
               </Fact>
@@ -1071,12 +1090,29 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
                   )),
                 )}
               {((terminalSignIn && hostId === null) ||
+                pageSignIns.length > 0 ||
                 (status.canLogout && status.signIn === 'signed-in')) && (
                 <RowFrame
                   text={
-                    <RowText name={t('agents.signInRow')} description={t('agents.signInRowHint')} />
+                    <RowText
+                      name={t('agents.signInRow')}
+                      description={t(unsure ? 'agents.signInUnknownHint' : 'agents.signInRowHint', {
+                        name: status.name,
+                      })}
+                    />
                   }
                 >
+                  {!waiting &&
+                    pageSignIns.map((method) => (
+                      <SetButton
+                        key={method.id}
+                        disabled={busy}
+                        title={method.description}
+                        onClick={() => act(() => signInAgent(hostId, status.id, method.id))}
+                      >
+                        {method.name}
+                      </SetButton>
+                    ))}
                   {status.canLogout && status.signIn === 'signed-in' && !status.disabled && (
                     <SetButton
                       variant="ghost"

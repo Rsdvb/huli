@@ -763,6 +763,7 @@
     "loginMethod": "登录方式",
     "email": "邮箱",
     "notReported": "未提供",
+    "readingSignIn": "正在读取登录方式…",
     "planLimits": "套餐限额",
     "usageNotReported": "{{name}} 不提供套餐用量。",
     "resetCredits": {
@@ -958,6 +959,7 @@
     "harness": "Harness",
     "signInRow": "登录",
     "signInRowHint": "由 Harness 自己在终端里登录，Kettu 不经手凭据。",
+    "signInUnknownHint": "{{name}} 要到会话开始时才告诉 Kettu 是否已登录；还没登录的话，可以在这里登录。",
     "signInAgain": "在终端中重新登录",
     "empty": {
       "title": "还没有智能体",

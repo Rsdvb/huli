@@ -404,6 +404,8 @@ export class AcpConnection implements AgentConnection {
   private signIn: SignInClient | null = null
   /** The sign-in each `authenticate` in flight runs for, by its JSON-RPC id as a string. */
   private readonly signInRequests = new Map<string, SignInClient>()
+  /** Huli: the sign-ins whose page is open, by the id of the elicitation that opened it. */
+  private readonly signInPages = new Map<string, SignInClient>()
   /** Sessions with a prompt in flight. */
   private readonly prompting = new Set<string>()
   /** agy's plan files, by session. */
@@ -484,13 +486,19 @@ export class AcpConnection implements AgentConnection {
         if (page && signIn) {
           if (signIn.signal.aborted) return { action: 'cancel' }
           signIn.openLink(page.url)
+          const { elicitationId } = ctx.params as { elicitationId?: unknown }
+          if (typeof elicitationId === 'string') this.signInPages.set(elicitationId, signIn)
           return { action: 'accept' }
         }
         return this.elicit(ctx.params, ctx.signal)
       })
       // A sign-in's own `authenticate` answers once it is done; a session's page is done here.
+      // Huli: a sign-in's page done tells its sign-in, for an agent that never answers it.
       .onNotification(methods.client.elicitation.complete, (ctx) => {
-        this.pageDone(ctx.params.elicitationId)
+        const signIn = this.signInPages.get(ctx.params.elicitationId)
+        this.signInPages.delete(ctx.params.elicitationId)
+        if (signIn) signIn.pageDone?.()
+        else this.pageDone(ctx.params.elicitationId)
       })
       .onNotification(
         'auth/status_update',
@@ -1592,6 +1600,9 @@ export class AcpConnection implements AgentConnection {
       if (this.signIn === client) this.signIn = null
       for (const [id, signIn] of this.signInRequests) {
         if (signIn === client) this.signInRequests.delete(id)
+      }
+      for (const [id, signIn] of this.signInPages) {
+        if (signIn === client) this.signInPages.delete(id)
       }
     }
   }

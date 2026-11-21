@@ -39,6 +39,9 @@ import {
 
 const NO_METHODS: AgentAuthMethod[] = []
 
+/** Huli: how soon the window coming back tries the session again while a sign-in page is open. */
+const RETRY_ON_RETURN_MS = 5_000
+
 /** The agent's sign-in methods, in place of a session that cannot start without them. */
 export function SignIn({
   agentId,
@@ -97,6 +100,24 @@ export function SignIn({
       }),
     [agentId, hostId, onRetry],
   )
+
+  // Huli: back from the browser its page opened in, the session tries again, which is how an agent
+  // that never answers its sign-in tells it is done.
+  useEffect(() => {
+    if (page === null) return
+    let last = Date.now()
+    const again = (): void => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < RETRY_ON_RETURN_MS) return
+      last = Date.now()
+      onRetry()
+    }
+    window.addEventListener('focus', again)
+    document.addEventListener('visibilitychange', again)
+    return () => {
+      window.removeEventListener('focus', again)
+      document.removeEventListener('visibilitychange', again)
+    }
+  }, [page, onRetry])
 
   const authenticate = async (method: AgentAuthMethod) => {
     setBusy(method.id)

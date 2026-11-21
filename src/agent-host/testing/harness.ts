@@ -325,6 +325,34 @@ export interface TestHost {
   stop(): Promise<void>
 }
 
+/** The settings a test host starts with by default: the agents named enabled. */
+export function testSettings(agentIds: readonly AgentId[]): HostSettings {
+  return {
+    locale: 'en',
+    agents: Object.fromEntries(agentIds.map((id) => [id, { enabled: true }])),
+    addedAgents: DEFAULT_SETTINGS.addedAgents,
+    disabledAgents: DEFAULT_SETTINGS.disabledAgents,
+    proxy: DEFAULT_SETTINGS.proxy,
+    git: DEFAULT_SETTINGS.git,
+    mcp: DEFAULT_SETTINGS.mcp,
+    marketplace: DEFAULT_SETTINGS.marketplace,
+    startModes: DEFAULT_SETTINGS.startModes,
+    idleSessions: DEFAULT_SETTINGS.idleSessions,
+    usage: { fromComputer: false },
+    sessionTitles: true,
+    claudeTestEntrypoint: null,
+    claudeRuns: {},
+    promptSuggestions: true,
+    lightModel: { mode: 'small' },
+    initialSetupDone: true,
+    defaultAgent: null,
+    computerUse: DEFAULT_SETTINGS.computerUse,
+    agentNetwork: DEFAULT_SETTINGS.agentNetwork,
+    // Tests never reach Kettu's download service.
+    downloadService: false,
+  }
+}
+
 /** A whole agent host on a temp data directory, with the fake agent and no other agent found. */
 export async function startTestHost(options: TestHostOptions = {}): Promise<TestHost> {
   const dir = options.userDataPath ?? (await tempFolder('kettu-host-'))
@@ -347,37 +375,14 @@ export async function startTestHost(options: TestHostOptions = {}): Promise<Test
     platform: process.platform,
     nodeRuntime: { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
     fakeAgentPath: FAKE_AGENT_MAIN,
-    settings: options.settings ?? {
-      locale: 'en',
-      agents: Object.fromEntries(
-        [
-          'fake-agent',
-          ...(options.fakeAppServer ? ['codex'] : []),
-          ...(options.fakeAs ?? []),
-          ...(options.fakeThroughRouter?.agentIds ?? []),
-        ].map((id) => [id, { enabled: true }]),
-      ),
-      addedAgents: DEFAULT_SETTINGS.addedAgents,
-      disabledAgents: DEFAULT_SETTINGS.disabledAgents,
-      proxy: DEFAULT_SETTINGS.proxy,
-      git: DEFAULT_SETTINGS.git,
-      mcp: DEFAULT_SETTINGS.mcp,
-      marketplace: DEFAULT_SETTINGS.marketplace,
-      startModes: DEFAULT_SETTINGS.startModes,
-      idleSessions: DEFAULT_SETTINGS.idleSessions,
-      usage: { fromComputer: false },
-      sessionTitles: true,
-      claudeTestEntrypoint: null,
-      claudeRuns: {},
-      promptSuggestions: true,
-      lightModel: { mode: 'small' },
-      initialSetupDone: true,
-      defaultAgent: null,
-      computerUse: DEFAULT_SETTINGS.computerUse,
-      agentNetwork: DEFAULT_SETTINGS.agentNetwork,
-      // Tests never reach Kettu's download service.
-      downloadService: false,
-    },
+    settings:
+      options.settings ??
+      testSettings([
+        'fake-agent',
+        ...(options.fakeAppServer ? ['codex' as const] : []),
+        ...(options.fakeAs ?? []),
+        ...(options.fakeThroughRouter?.agentIds ?? []),
+      ]),
     baseEnv: { ...process.env, ...options.agentEnv },
     send: (message) => sent.push(structuredClone(message)),
     git: options.git ?? null,

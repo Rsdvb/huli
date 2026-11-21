@@ -771,6 +771,7 @@
     "loginMethod": "Login method",
     "email": "Email",
     "notReported": "Not reported",
+    "readingSignIn": "Reading how it signs in…",
     "planLimits": "Plan limits",
     "usageNotReported": "{{name}} does not report plan usage.",
     "resetCredits": {
@@ -967,6 +968,7 @@
     "harness": "Harness",
     "signInRow": "Sign-in",
     "signInRowHint": "The harness signs in itself, in a terminal; Kettu never sees the credentials.",
+    "signInUnknownHint": "{{name}} tells Kettu whether it is signed in only once a session starts; if it is not yet, sign in here.",
     "signInAgain": "Sign in again in terminal",
     "empty": {
       "title": "No agents yet",

@@ -417,6 +417,12 @@ export interface AgentStatus {
   // nothing is installed, and absent on older hosts.
   release?: { version: string; registry: boolean } | null
   signIn: 'unknown' | 'signed-in' | 'required'
+  /**
+   * Huli: the host is starting the agent to learn what it signs in with and whether it is signed
+   * in, before a session needs them (just added or turned on, or its page opened). Absent
+   * otherwise, and on older hosts.
+   */
+  readingSignIn?: true
   authMethods: AgentAuthMethod[]
   canLogout: boolean
   account: AgentAccount | null // what the agent reports through `_auth/status_update`
@@ -1016,6 +1022,10 @@ export interface HostContract {
     result: void
   }
   'agents.refreshAccount': { params: { agentId: AgentId; force?: boolean }; result: void }
+  // Huli: what the agent signs in with and whether it is signed in, starting it when this run has
+  // not; with `watch`, a signed-out agent is checked again every few seconds for a few minutes,
+  // for a sign-in that waits on a browser or a terminal. Older hosts lack it.
+  'agents.readSignIn': { params: { agentId: AgentId; watch?: boolean }; result: void }
   'agents.listSessions': {
     params: { agentId: AgentId; projectPath: string; cursor?: string }
     result: { sessions: ImportableSession[]; nextCursor: string | null }
@@ -2036,6 +2046,7 @@ export const HOST_METHODS = [
   'agents.codebuddySettings',
   'agents.setCodebuddySite',
   'agents.refreshAccount',
+  'agents.readSignIn',
   'agents.listSessions',
   'agents.options',
   'agents.lightAgents',
