@@ -87,6 +87,34 @@ describe('createValidators', () => {
     rejects(() => posix['agents.resetPreview']({}))
   })
 
+  it('takes the ids of removal steps, each once, and whether to use the trash', () => {
+    const remove = windows['agents.removeFromComputer']
+    const steps = ['program:command:npm.cmd uninstall -g x', 'data:folder:C:\\Users\\me\\.dsh']
+    expect(posix['agents.removalPreview']({ agentId: 'deepseek', paths: ['/'] })).toEqual({
+      agentId: 'deepseek',
+    })
+    expect(remove({ agentId: 'deepseek', steps, trash: true, run: 'rm -rf /' })).toEqual({
+      agentId: 'deepseek',
+      steps,
+      trash: true,
+    })
+    rejects(() => remove({ agentId: 'deepseek', steps }))
+    rejects(() => remove({ agentId: 'deepseek', steps, trash: 'yes' }))
+    rejects(() => remove({ agentId: 'deepseek', steps: [], trash: false }))
+    rejects(() => remove({ agentId: 'deepseek', steps: 'data:folder:/x', trash: false }))
+    rejects(() => remove({ agentId: 'deepseek', steps: [...steps, steps[0]], trash: false }))
+    rejects(() => remove({ agentId: 'deepseek', steps: ['/home/me/.dsh'], trash: false }))
+    rejects(() => remove({ agentId: 'deepseek', steps: ['data:script:/x'], trash: false }))
+    rejects(() => remove({ agentId: 'deepseek', steps: ['data:folder:'], trash: false }))
+    rejects(() => remove({ agentId: 'deepseek', steps: ['data:file:/x\nrm'], trash: false }))
+    rejects(() => remove({ agentId: 'deepseek', steps: ['data:file:/x\0'], trash: false }))
+    const long = `data:file:/${'x'.repeat(5000)}`
+    rejects(() => remove({ agentId: 'deepseek', steps: [long], trash: false }))
+    const many = Array.from({ length: 65 }, (_, i) => `data:file:/${i}`)
+    rejects(() => remove({ agentId: 'deepseek', steps: many, trash: false }))
+    rejects(() => remove({ agentId: 'nobody', steps, trash: false }))
+  })
+
   it('takes a fork for an import only when asked', () => {
     const base = { agentId: 'claude-code', projectPath: '/p', acpSessionId: 'id' }
     expect(posix['sessions.import']({ ...base, fork: true })).toEqual({ ...base, fork: true })

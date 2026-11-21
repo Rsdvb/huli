@@ -2998,6 +2998,25 @@ export class AgentHost {
         }
         return agents.reset(agentId, categories, () => sessions.releaseAgent(agentId))
       },
+      'agents.removalPreview': async ({ agentId }) => ({
+        ...(await agents.removalPreview(agentId)),
+        busy: sessions.busyWith(agentId),
+      }),
+      'agents.removeFromComputer': async ({ agentId, steps, trash }, ctx) => {
+        const busy = sessions.busyWith(agentId)
+        if (busy.length > 0) {
+          throw new HostError('busy', t('agent.removeBusy', { count: busy.length }), { busy })
+        }
+        return agents.removeFromComputer(agentId, steps, {
+          trash: trash ? (paths) => this.trash(paths) : null,
+          release: () => sessions.releaseAgent(agentId),
+          progress: (step, state, error) =>
+            this.hub.send([ctx.portId], {
+              type: 'agents.removalProgress',
+              progress: { agentId, stepId: step.id, state, ...(error ? { error } : {}) },
+            }),
+        })
+      },
       'agents.install': ({ agentId, method }) => agents.install(agentId, method),
       'agents.uninstall': ({ agentId, removeProgram }) =>
         agents.uninstall(agentId, removeProgram === true),

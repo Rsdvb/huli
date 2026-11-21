@@ -2,6 +2,7 @@
 // params object with only the known fields, or throws `invalid_params` before anything runs.
 
 import type { AgentInstallMethod, HostMethod, HostParams } from '@shared/agent-host'
+import { MAX_REMOVAL_STEPS } from '@shared/agent-removal'
 import { AGENT_RESET_CATEGORIES, type AgentResetCategory } from '@shared/agent-reset'
 import { MAX_TERMINAL_COMMAND, replyCommandProblem } from '@shared/terminal-agent'
 import { COMMENT_CHARS, THREAD_ID, type CommentAnchor } from '@shared/artifact-comments'
@@ -184,6 +185,24 @@ function string(o: Fields, key: string, max: number): string {
 
 function optionalString(o: Fields, key: string, max: number): string | undefined {
   return o[key] === undefined ? undefined : string(o, key, max)
+}
+
+// Huli: a removal step's id, `part:kind:path`, as the host's plan names it.
+const REMOVAL_STEP = /^(?:program|data):(?:command|folder|file|contents|secret):[^\0\r\n]+$/
+const REMOVAL_STEP_CHARS = 4096
+
+/** Huli: the ids of the removal steps a run takes, each once. */
+function removalSteps(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_REMOVAL_STEPS) {
+    throw invalidParams(`steps must name 1 to ${MAX_REMOVAL_STEPS} steps`)
+  }
+  for (const item of value) {
+    if (typeof item !== 'string' || item.length > REMOVAL_STEP_CHARS || !REMOVAL_STEP.test(item)) {
+      throw invalidParams('steps must be the ids of the removal plan’s steps')
+    }
+  }
+  if (new Set(value).size !== value.length) throw invalidParams('steps must name each step once')
+  return value as string[]
 }
 
 function agentId(o: Fields, key = 'agentId'): AgentId {
@@ -1371,6 +1390,12 @@ export function createValidators(platform: Platform): Validators {
         throw invalidParams('categories must be credentials, identifiers or caches, each once')
       }
       return { agentId: agentId(o), categories }
+    },
+    'agents.removalPreview': agent,
+    'agents.removeFromComputer': (params) => {
+      const o = fields(params)
+      if (typeof o.trash !== 'boolean') throw invalidParams('trash must be a boolean')
+      return { agentId: agentId(o), steps: removalSteps(o.steps), trash: o.trash }
     },
     'agents.install': (params) => {
       const o = fields(params)
