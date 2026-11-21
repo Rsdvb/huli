@@ -1,8 +1,8 @@
 # The phone's agent pages, in light and then in dark: the Agent list with its environment rows and
 # the note that import is on the computer, the add-agent sheet, the fake agent's page and its
-# reset page; signed out, its sign-in card, the agent menu's row that leads there and New
-# session's note; then signed in again through its page sign-in, which opens Safari for 8 s.
-# Run last: it signs the fake agent out and back in.
+# reset page; signed out, its sign-in card and New session's note that leads to it; then signed
+# in again through its page sign-in, which opens Safari for 8 s. Run last: it signs the fake agent
+# out and back in.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -14,9 +14,10 @@ appId: io.github.rsdvb.huli
     optional: true
 - tapOn: '会话'
 - tapOn: '账户与设置'
-- tapOn:
-    text: 'Agent'
-    index: 0
+- scrollUntilVisible:
+    element: 'Agent'
+    centerElement: true
+- tapOn: 'Agent'
 - extendedWaitUntil:
     visible: 'Fake agent'
     timeout: 20000
@@ -26,23 +27,26 @@ appId: io.github.rsdvb.huli
     optional: true
 - scroll
 - takeScreenshot: g02-agents-environment
-# The add-agent sheet.
+# The add-agent sheet, closed again by its backdrop.
 - scrollUntilVisible:
     element: '添加 Agent'
     direction: UP
+    centerElement: true
     optional: true
 - tapOn:
     text: '添加 Agent'
-    index: 0
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: g03-add-agent
-- swipe:
-    start: 50%, 40%
-    end: 50%, 95%
-    duration: 400
+- tapOn:
+    point: 50%,6%
+    optional: true
 - waitForAnimationToEnd
 # The fake agent's page and its reset page.
+- scrollUntilVisible:
+    element: 'Fake agent'
+    direction: UP
+    optional: true
 - tapOn:
     text: 'Fake agent'
     index: 0
@@ -53,6 +57,7 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: g04-agent
 - scrollUntilVisible:
     element: '重置环境…'
+    centerElement: true
 - takeScreenshot: g05-agent-bottom
 - tapOn: '重置环境…'
 - extendedWaitUntil:
@@ -68,6 +73,7 @@ appId: io.github.rsdvb.huli
 - scrollUntilVisible:
     element: '退出登录'
     direction: UP
+    centerElement: true
     optional: true
 - tapOn:
     text: '退出登录'
@@ -81,10 +87,14 @@ appId: io.github.rsdvb.huli
     direction: UP
     optional: true
 - takeScreenshot: g08-signed-out
+- scroll
+- takeScreenshot: g09-signed-out-more
+# Back to the tabs: the agent page, the Agent list, then Settings.
 - tapOn: '返回'
-- tapOn:
-    text: '(返回|关闭)'
-    optional: true
+- waitForAnimationToEnd
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '(返回|关闭)'
 - waitForAnimationToEnd
 # New session: what the agent needs and the way to it.
 - tapOn: '会话'
@@ -94,12 +104,12 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 2000
     optional: true
-- takeScreenshot: g09-new-session-sign-in
+- takeScreenshot: g10-new-session-sign-in
 - tapOn:
     text: '去登录'
     optional: true
 - waitForAnimationToEnd
-- takeScreenshot: g10-from-new-session
+- takeScreenshot: g11-from-new-session
 # Signed in again: the page sign-in opens Safari, and the agent signs in 8 s later.
 - tapOn:
     text: 'Sign in in a browser'
@@ -114,11 +124,11 @@ appId: io.github.rsdvb.huli
     visible: '已就绪'
     timeout: 30000
     optional: true
-- takeScreenshot: g11-signed-in-again
+- takeScreenshot: g12-signed-in-again
 - tapOn: '返回'
-- tapOn:
-    text: '(返回|关闭)'
-    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: g13-new-session-ready
+- tapOn: '(返回|关闭)'
 - waitForAnimationToEnd
 # The same in dark.
 - tapOn: '会话'
@@ -128,49 +138,43 @@ appId: io.github.rsdvb.huli
 - tapOn: '主题'
 - tapOn: '深色'
 - waitForAnimationToEnd
-- tapOn:
-    text: '(返回|关闭)'
-    optional: true
-- waitForAnimationToEnd
-- tapOn: '会话'
-- tapOn: '账户与设置'
 - scrollUntilVisible:
     element: 'Agent'
-    direction: UP
-    optional: true
-- tapOn:
-    text: 'Agent'
-    index: 0
+    centerElement: true
+- tapOn: 'Agent'
 - extendedWaitUntil:
     visible: 'Fake agent'
     timeout: 20000
-- takeScreenshot: g12-agents-dark
+- takeScreenshot: g14-agents-dark
 - scrollUntilVisible:
     element: '重新加载环境'
     optional: true
 - scroll
-- takeScreenshot: g13-agents-environment-dark
+- takeScreenshot: g15-agents-environment-dark
 - scrollUntilVisible:
     element: 'Fake agent'
     direction: UP
+    optional: true
 - tapOn:
     text: 'Fake agent'
     index: 0
 - waitForAnimationToEnd
-- takeScreenshot: g14-agent-dark
+- takeScreenshot: g16-agent-dark
 - scrollUntilVisible:
     element: '重置环境…'
+    centerElement: true
 - tapOn: '重置环境…'
 - extendedWaitUntil:
     visible: '退出登录和凭据'
     timeout: 20000
     optional: true
-- takeScreenshot: g15-reset-dark
+- takeScreenshot: g17-reset-dark
 - tapOn: '返回'
 - waitForAnimationToEnd
 - scrollUntilVisible:
     element: '退出登录'
     direction: UP
+    centerElement: true
     optional: true
 - tapOn:
     text: '退出登录'
@@ -183,11 +187,12 @@ appId: io.github.rsdvb.huli
     element: '登录 Fake agent 后才能使用'
     direction: UP
     optional: true
-- takeScreenshot: g16-signed-out-dark
+- takeScreenshot: g18-signed-out-dark
 - tapOn: '返回'
-- tapOn:
-    text: '(返回|关闭)'
-    optional: true
+- waitForAnimationToEnd
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '(返回|关闭)'
 - waitForAnimationToEnd
 - tapOn: '会话'
 - tapOn: '新会话'
@@ -196,7 +201,7 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 2000
     optional: true
-- takeScreenshot: g17-new-session-sign-in-dark
+- takeScreenshot: g19-new-session-sign-in-dark
 - tapOn:
     text: '去登录'
     optional: true
@@ -214,11 +219,10 @@ appId: io.github.rsdvb.huli
     visible: '已就绪'
     timeout: 30000
     optional: true
-- takeScreenshot: g18-signed-in-again-dark
+- takeScreenshot: g20-signed-in-again-dark
 - tapOn: '返回'
-- tapOn:
-    text: '(返回|关闭)'
-    optional: true
+- waitForAnimationToEnd
+- tapOn: '(返回|关闭)'
 - waitForAnimationToEnd
 # Back to the light theme, as a later flow expects.
 - tapOn: '会话'
