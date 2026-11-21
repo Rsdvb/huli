@@ -129,6 +129,7 @@ import {
   type PreparedRemoval,
   type RemovalFacts,
 } from './agent-removal/removal'
+import type { AgentCli } from './agent-removal/data'
 import { removalLog } from './agent-removal/run'
 import { removesCopies, type AgentCopies } from './agent-copies'
 import type { AgentTrees } from './agent-trees'
@@ -2268,6 +2269,21 @@ export class AgentManager {
       return null
     }
     return { path: detection.spec.command, version: h.binaryVersion }
+  }
+
+  /**
+   * The agent's CLI as its vendor's own commands run, such as its uninstall: the program a binary
+   * agent starts, or Node.js and a package's entry; null when none can run.
+   */
+  private ownCli(h: Harness): AgentCli | null {
+    const detection = h.detection
+    if (detection?.state !== 'available' || !detection.spec) return null
+    const { launch } = h.def
+    const { spec } = detection
+    if (launch.kind === 'binary') return { program: spec.command, args: [] }
+    if (launch.kind !== 'package' || launch.library || launch.perSession) return null
+    const entry = spec.args[0]
+    return entry ? { program: spec.command, args: [entry] } : null
   }
 
   /**
@@ -5402,6 +5418,7 @@ export class AgentManager {
         chosen,
         picked: slot.added ? !slot.added.created : chosen !== null,
         others: siblings,
+        cli: this.ownCli(h),
       },
       protect,
       otherFolders: registered.flatMap((o) => this.configFolder(o.id) ?? []),
@@ -5490,7 +5507,10 @@ export class AgentManager {
             timeoutMs: this.timings.installMs,
           })
           const name = path.basename(program).replace(/\.(?:cmd|exe)$/i, '')
-          return programFailure(name, run, this.timings.installMs)
+          return {
+            error: programFailure(name, run, this.timings.installMs),
+            output: run.output.lastLines(6).join('\n'),
+          }
         },
         progress: options.progress,
         log: (message) => this.deps.diagnostics.log('warn', message),

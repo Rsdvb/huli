@@ -390,10 +390,12 @@ function PlanBody({
           <StepList steps={preview.data.steps} places={places} progress={progress} />
         )}
         {preview.data.steps.length === 0 && (
-          <p className="k-reset-none">
-            {preview.data.known
-              ? t('agents.remove.data.nothing')
-              : t('agents.remove.data.unknown', { name: status.harnessName })}
+          <p className="k-reset-none" data-wrap="">
+            {preview.data.kept.some((item) => item.reason === 'shared')
+              ? t('agents.remove.data.shared', { name: status.harnessName })
+              : preview.data.known
+                ? t('agents.remove.data.nothing')
+                : t('agents.remove.data.unknown', { name: status.harnessName })}
           </p>
         )}
         {preview.data.kept.length > 0 && (
@@ -574,7 +576,10 @@ function KeptList({
             ? t(`agents.resetEnv.store.${item.store}`, { name: item.path })
             : shortPath(item.path, places)}
           {' · '}
-          {t(`agents.remove.data.keptReason.${item.reason}`, { harness })}
+          {t(`agents.remove.data.keptReason.${item.reason}`, {
+            harness,
+            with: item.with ? t(`agents.remove.data.sharers.${item.with}`) : '',
+          })}
         </span>
       ))}
     </div>
@@ -616,6 +621,19 @@ function ResultBody({
           progress={Object.fromEntries(result.done.map((step) => [step.id, DONE]))}
         />
       )}
+      {result.done
+        .filter((step) => step.output)
+        .map((step) => (
+          <div key={step.id} className="k-reset-none flex flex-col gap-1" data-wrap="">
+            <span>{t('agents.remove.output', { command: step.path })}</span>
+            <code
+              className="font-mono break-all whitespace-pre-wrap text-secondary"
+              data-selectable=""
+            >
+              {step.output}
+            </code>
+          </div>
+        ))}
       {failed > 0 && (
         <ul className="k-reset-items">
           {result.failed.map(({ step, error }) => (

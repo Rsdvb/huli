@@ -119,7 +119,7 @@ describe('agent removal on disk', () => {
     const result = await runRemoval(prepared, ids(prepared.preview.program.steps), {
       secrets: memorySecrets([]),
       trash: null,
-      run: async () => 'not asked',
+      run: async () => ({ error: 'not asked', output: '' }),
       progress: (step, state) => progress.push(`${state} ${step.kind}`),
       log: () => {},
     })
@@ -171,7 +171,7 @@ describe('agent removal on disk', () => {
       trash: async (paths) => {
         trashed.push(...paths)
       },
-      run: async () => null,
+      run: async () => ({ error: null, output: '' }),
       progress: () => {},
       log: () => {},
     })
@@ -222,7 +222,7 @@ describe('agent removal on disk', () => {
       {
         secrets: memorySecrets([]),
         trash: null,
-        run: async () => 'npm exited with code 1.',
+        run: async () => ({ error: 'npm exited with code 1.', output: 'npm error x' }),
         progress: () => {},
         log: () => {},
       },

@@ -114,8 +114,8 @@ export async function resolveSteps(
 export interface RunContext extends ResolveContext {
   /** Moves the paths to the system's trash; null to delete them for good. */
   trash: ((paths: string[]) => Promise<void>) | null
-  /** Runs a command step's program, resolving to why it failed or null. */
-  run(program: string, args: string[]): Promise<string | null>
+  /** Runs a command step's program: why it failed or null, and the last lines it printed. */
+  run(program: string, args: string[]): Promise<{ error: string | null; output: string }>
   progress(step: RemovalStep, state: 'running' | 'done' | 'failed', error?: string): void
 }
 
@@ -136,18 +136,21 @@ async function prune(folders: readonly string[]): Promise<void> {
   }
 }
 
-async function runStep(resolved: ResolvedStep, ctx: RunContext): Promise<void> {
+/** Takes one step; a command's output when it printed any. */
+async function runStep(resolved: ResolvedStep, ctx: RunContext): Promise<string | undefined> {
   const { planned } = resolved
   const p = pathsOf(ctx.platform)
   const check = (target: string): void => {
     const refused = removalRefusal(target, ctx.guard(planned.part))
     if (refused) throw new Error(`${target} is ${refused}`)
   }
+  let output: string | undefined
   switch (planned.kind) {
     case 'command': {
       if (!planned.run) throw new Error('Nothing to run')
-      const failure = await ctx.run(planned.run.program, planned.run.args)
-      if (failure) throw new Error(failure)
+      const ran = await ctx.run(planned.run.program, planned.run.args)
+      if (ran.error) throw new Error(ran.error)
+      output = ran.output.trim() || undefined
       break
     }
     case 'secret':
@@ -169,6 +172,7 @@ async function runStep(resolved: ResolvedStep, ctx: RunContext): Promise<void> {
     }
   }
   if (planned.prune) await prune(planned.prune)
+  return output
 }
 
 /** Runs the steps in order; each failure is its step's alone, and the rest goes on. */
@@ -180,8 +184,8 @@ export async function runSteps(
   for (const resolved of steps) {
     ctx.progress(resolved.step, 'running')
     try {
-      await runStep(resolved, ctx)
-      result.done.push(resolved.step)
+      const output = await runStep(resolved, ctx)
+      result.done.push(output ? { ...resolved.step, output } : resolved.step)
       ctx.progress(resolved.step, 'done')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

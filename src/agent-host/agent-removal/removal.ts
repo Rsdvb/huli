@@ -71,7 +71,12 @@ export async function prepareRemoval(
         notes: data.notes,
       },
     },
-    steps: [...programSteps, ...dataSteps],
+    // A vendor's own data command runs with its program, so before anything removes the program.
+    steps: [
+      ...dataSteps.filter(({ step }) => step.kind === 'command'),
+      ...programSteps,
+      ...dataSteps.filter(({ step }) => step.kind !== 'command'),
+    ],
     guard,
   }
 }
