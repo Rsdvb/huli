@@ -20,6 +20,7 @@ import type {
   NodeRuntimeInfo,
   VersionMoveReason,
 } from '@shared/agent-host'
+import { OWN_INTERFACE_HARNESSES } from '@shared/agents'
 import type { HarnessId } from '@shared/thread'
 import { AgentTile } from '@renderer/components/agents/agent-mark'
 import { Icon } from '@renderer/components/affect/app-shell'
@@ -616,7 +617,7 @@ function HarnessPageLine({ status }: { status: AgentStatus }) {
   const vendor = VENDORS[status.harnessId]
   const adapter = status.package?.name.split('/').at(-1)
   const connection = vendor
-    ? status.package?.isSdk || status.harnessId === 'codex' || status.harnessId === 'deepseek'
+    ? status.package?.isSdk || OWN_INTERFACE_HARNESSES.includes(status.harnessId)
       ? t('agents.ownInterface', { vendor })
       : adapter
         ? t('agents.via', { vendor, adapter })
