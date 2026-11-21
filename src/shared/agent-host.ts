@@ -367,6 +367,8 @@ export interface AgentCli {
 
 export interface InstalledCli {
   path: string // as the adapter runs it, after resolving shims
+  /** Huli: the command found on PATH when the adapter runs another file in its place. */
+  launcher?: string
   version: string | null
   variable: string | null // set by this variable in the environment, which then decides alone
   problem: InstalledCliProblem | null // why it cannot run
@@ -376,6 +378,22 @@ export type InstalledCliProblem =
   | { kind: 'unsupported' } // cannot run without a shell
   | { kind: 'failed'; reason: string } // its version could not be read
   | { kind: 'too-old'; minimum: string }
+
+/** Huli: how an agent's own CLI runs in a terminal (`AgentStatus.terminal`). */
+export interface AgentTerminal {
+  /** Starts the CLI's interactive UI, for a terminal opened in the folder it works in. */
+  command: string
+  /** The CLI resumes the agent's sessions by their id. */
+  resumes: boolean
+}
+
+/** Huli: the lines that resume a session in its agent's own CLI (`sessions.terminalCommand`). */
+export interface SessionTerminalCommand {
+  /** For a terminal opened in the session's folder; once asked with `run`, its terminal host runs it. */
+  command: string
+  /** The same after a change to the session's folder, to paste into any terminal of its host. */
+  copy: string
+}
 
 /** A way Kettu can install a harness's program, such as OpenCode, in the order it prefers them. */
 export interface AgentInstallMethod {
@@ -459,6 +477,13 @@ export interface AgentStatus {
   installNotice?: string | null // the vendor installer's effects, shown before installation
   progress: string[] // latest npm output or stderr lines while installing or starting
   launchCommand: string // as shown in Settings › Agents, quoted for the platform
+  /**
+   * Huli: the agent's own CLI in a terminal, quoted for the host's shell: the line that starts its
+   * interactive UI in a terminal opened in a folder, which the terminal host may run, and whether
+   * it resumes one of the agent's sessions there (`sessions.terminalCommand`). Absent when its CLI
+   * has no such UI or is not found, and on older hosts.
+   */
+  terminal?: AgentTerminal
   binaryOverride: string | null // the program picked in Settings, if any
   binaryCommand: string | null // the command a binary agent's launch runs; null for the others
   // Where that program was found: on PATH, the one picked in Settings or Kettu's install; null
@@ -1492,6 +1517,14 @@ export interface HostContract {
   // title null: back to the agent's title.
   'sessions.rename': { params: { sessionId: string; title: string | null }; result: void }
   'sessions.close': { params: { sessionId: string }; result: void }
+  /**
+   * Huli: the lines that resume the session in its agent's own CLI, for a terminal of its host.
+   * With `run`, the host lets the session go first and lets its terminal host run the line.
+   */
+  'sessions.terminalCommand': {
+    params: { sessionId: string; run?: boolean }
+    result: SessionTerminalCommand
+  }
   'sessions.pin': { params: { sessionId: string; pinned: boolean }; result: void }
   /**
    * `subSessions: false` archives the session alone, its sub-sessions staying in the list on their
@@ -2166,6 +2199,7 @@ export const HOST_METHODS = [
   'sessions.refreshModels',
   'sessions.rename',
   'sessions.close',
+  'sessions.terminalCommand',
   'sessions.pin',
   'sessions.archive',
   'sessions.unarchive',

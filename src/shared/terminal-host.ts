@@ -77,9 +77,10 @@ export interface TerminalContract {
 }
 
 /**
- * Text typed into a new terminal once its shell is ready, without pressing Enter unless
- * `run` is set. From a port, `run` is only accepted for a sign-in command the agent host built;
- * the agent's commands and the code blocks the user runs from a reply come over main's channel.
+ * Text typed into a new terminal once its shell is ready, without pressing Enter unless `run` is
+ * set. From a port, `run` is only accepted for a line the agent host built and allows: a sign-in,
+ * or Huli's start or resume of an agent's own CLI. The agent's commands and the code blocks the
+ * user runs from a reply come over main's channel.
  */
 export interface TerminalCommand {
   text: string

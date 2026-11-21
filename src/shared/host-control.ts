@@ -342,7 +342,9 @@ export type HostToMain =
   | { type: 'host:artifacts-changed' }
   /** Sessions archived or deleted, whose terminals end. */
   | { type: 'host:sessions-ended'; sessionIds: string[] }
-  | { type: 'host:auth-commands'; commands: string[] } // terminal sign-in commands it built
+  // The lines it built that a terminal may run as given: sign-ins, and Huli's starts and resumes of
+  // the agents' own CLIs.
+  | { type: 'host:auth-commands'; commands: string[] }
   | {
       type: 'host:attention'
       sessionId: string

@@ -400,6 +400,49 @@ the start's read), `ProviderBalance.granted` in `src/shared/agent-host.ts`, `age
 `mobile/src/ui/session/limits.ts`, and `dsh.account`/`dsh.balance`, `agents.balance`/`agents.phone`
 and `controls.balance` in the locales.
 
+### Agents in a terminal
+
+An agent's own CLI, its interactive UI rather than the protocol Kite speaks, runs in a terminal of
+Kite's: 在终端中启动 on an agent's page (in the folder the pane in focus works in, else one picked
+with Open project's dialog), 在终端中启动 Agent › in a project's menu, and 在终端中继续 in a
+session's menus, in its folder. 复制继续会话的命令 copies the same resume after
+`Set-Location -LiteralPath '<folder>';` on a Windows host (PowerShell, whose 5.1 has no `&&`) or
+`cd '<folder>' &&` elsewhere, by the host's platform.
+
+- The agent host writes every line (`src/agent-host/agent-terminal.ts`): the user's CLI as found on
+  PATH (`InstalledCli.launcher`, npm's `.cmd` shim on Windows, where PowerShell refuses the `.ps1`;
+  Doubao's launcher, which offers its updates), a package Kite installed as `node <entry>`, a
+  program as detection found it; the arguments the definition's `terminal` names, from each CLI's
+  reference (checked on 2026-11-21); the configuration folder's variable as the sign-in sets it, a
+  session's own folder (`configDir`) for a resume, and an added agent's `addedEnv`. A resume id
+  is one line of an id's characters (or Pi's session file), and a line with a control character is
+  never written.
+- It runs only lines the agent host allows: `host:auth-commands` now lists each agent's start
+  (`AgentStatus.terminal`) beside the sign-ins, and `sessions.terminalCommand` with `run` adds that
+  resume for 2 minutes (`TerminalGrants`, the newest 32); the terminal host presses Enter only for
+  a line on the list exactly, typing any other without it. The request takes a session id alone,
+  refuses a sub-agent's session and one at work here, and lets the session go first, so two
+  processes never hold it.
+- Resumes: Claude Code `--resume <id>`, Codex `resume <id>`, Doubao `--resume <conversation>`,
+  Gemini CLI and Qwen Code `--resume <id>`, OpenCode `--session <id>`, agy `--conversation <id>`,
+  Pi `--session <file>`. Starts only: DeepSeek Harness (`dsh --profile web`: dsh ships no terminal
+  UI, so its own web UI opens in the browser), Copilot, Cursor, Kimi, Kilo, goose (`goose session`),
+  Grok, Droid, Cline, Auggie, Codebuddy and Qoder, whose resume ids no source ties to their ACP
+  sessions'.
+- A Claude Code session resumed so is followed shown or not until its CLI lets it go (`inTerminal`
+  in `sessions.ts`): held while the CLI works, open in a terminal while it waits, and what it wrote
+  comes in as each turn ends, as for any terminal's. Kite follows no other agent's CLI: their turns
+  go on in the agent's own history, which Kite's thread shows only after an import.
+- The fake agent's `--terminal [--resume <id>]` (`tools/fake-agent/terminal.ts`) stands in for a
+  CLI. It runs on the `node` of the terminal's PATH (`nodeOnPath`): Electron's own is a Windows GUI
+  program, which PowerShell does not wait for, so the shell would take its input.
+- Tests: `agent-terminal.test.ts`, the allow-list in `terminals.test.ts`, `validate.test.ts`.
+- Hooks: `catalog.ts` (`TerminalCli`), the agents' definitions, `agents.ts` (`terminalOf`,
+  `resumeCommand`, `sendRunnable`), `installed-cli.ts`, `sessions.ts` (`terminalTarget`,
+  `resumingInTerminal`), `host.ts`, `validate.ts`, `src/shared/agent-host.ts`,
+  `host-request-limits.ts`, `features/agents/agent-terminal.ts`, `agents-section.tsx`,
+  `project-menu.tsx`, `session-menu(-model).ts(x)` and `locales/*/{host,settings,sidebar}.json`.
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,

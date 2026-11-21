@@ -15,6 +15,7 @@ import type {
   AgentState,
   AgentStatus,
   AgentTask,
+  AgentTerminal,
   AgentUpdate,
   ClaudeSettingChange,
   ClaudeSettings,
@@ -26,6 +27,7 @@ import type {
   ProviderBalance,
   ResetsError,
   ResetSpendCode,
+  SessionTerminalCommand,
   VersionMoveReason,
 } from '@shared/agent-host'
 import {
@@ -204,6 +206,15 @@ import type { ProviderUsage } from './opencode/provider-usage'
 import { claudeJsonPath, readClaudeProfile } from './plan-tier'
 import { QUIT_REASON, type ToolOptions } from './process-tree'
 import { formatCommand } from './quote'
+import { ConversationIds } from './doubao/ids'
+import { findSessionFile, piFolders } from './pi/session-files'
+import {
+  inFolder,
+  terminalLine,
+  terminalProgram,
+  terminalWords,
+  TerminalGrants,
+} from './agent-terminal'
 import {
   fetchRegistry,
   followsRegistry,
@@ -704,6 +715,8 @@ export class AgentManager {
   private readonly timings: AgentTimings
   private detected: Promise<void> | null = null
   private lastAuthCommands = '[]'
+  /** Huli: the resumes of sessions in their agent's CLI that a terminal may run now. */
+  private readonly terminalGrants = new TerminalGrants(() => this.sendRunnable())
   private updateCheck: Promise<UpdateCheck> | null = null
   private updateCheckAll = false
   private updateAbort: AbortController | null = null
@@ -3452,6 +3465,7 @@ export class AgentManager {
     this.registryTimer = null
     if (this.limitsTimer) clearInterval(this.limitsTimer)
     this.limitsTimer = null
+    this.terminalGrants.dispose()
     for (const slot of this.slots.values()) {
       if (slot.resetsRetry) clearTimeout(slot.resetsRetry)
       slot.resetsRetry = null
@@ -5598,6 +5612,7 @@ export class AgentManager {
       progress:
         slot.state === 'starting' || slot.state === 'installing' ? slot.progress.lastLines(5) : [],
       launchCommand: formatCommand(display, platform),
+      ...this.terminalOf(slot, folderEnv),
       binaryOverride: harnessSettings?.binaryPath ?? null,
       binaryCommand: launch.kind === 'binary' ? launch.command : null,
       binaryPath:
@@ -5785,17 +5800,98 @@ export class AgentManager {
       h.rememberedUpdate = update
       this.rememberUpdates()
     }
-    const commands = this.statuses().flatMap((s) => [
-      ...s.authMethods.flatMap((method) => (method.command ? [method.command] : [])),
-      ...(s.providers ?? []).flatMap((provider) =>
-        provider.loginCommand ? [provider.loginCommand] : [],
-      ),
-    ])
+    this.sendRunnable()
+  }
+
+  /**
+   * Tells the terminal host the lines it may run as they are given: the sign-ins, and Huli's starts
+   * of the agents' CLIs and the resumes asked for, every one built here.
+   */
+  private sendRunnable(): void {
+    const commands = [
+      ...new Set([
+        ...this.statuses().flatMap((s) => [
+          ...s.authMethods.flatMap((method) => (method.command ? [method.command] : [])),
+          ...(s.providers ?? []).flatMap((provider) =>
+            provider.loginCommand ? [provider.loginCommand] : [],
+          ),
+          ...(s.terminal ? [s.terminal.command] : []),
+        ]),
+        ...this.terminalGrants.lines(),
+      ]),
+    ]
     const commandsJson = JSON.stringify(commands)
     if (commandsJson !== this.lastAuthCommands) {
       this.lastAuthCommands = commandsJson
       this.deps.authCommands(commands)
     }
+  }
+
+  /**
+   * Huli: the line that starts the agent's own CLI's interactive UI in a terminal, with the
+   * variables of its configuration folder as its sign-in has them; nothing for an agent turned off
+   * or without such a CLI.
+   */
+  private terminalOf(slot: Slot, folderEnv: Record<string, string>): { terminal?: AgentTerminal } {
+    if (!this.has(slot.id) || this.isDisabled(slot.id)) return {}
+    const program = terminalProgram(slot.def, slot.h.detection)
+    const env = { ...(slot.added ? slot.def.addedEnv : {}), ...folderEnv }
+    const words = program && terminalWords(slot.def, program, env)
+    const command = words && terminalLine(words, this.deps.platform)
+    return command ? { terminal: { command, resumes: !!slot.def.terminal?.resume } } : {}
+  }
+
+  /**
+   * Huli: the lines that resume a session in the agent's own CLI, in the configuration folder it
+   * was made in; with `run`, its line is one a terminal may run for a while.
+   */
+  async resumeCommand(
+    agentId: AgentId,
+    session: { acpSessionId: string; configDir: string | null; folder: string },
+    run: boolean,
+  ): Promise<SessionTerminalCommand> {
+    const slot = this.registeredSlot(agentId)
+    await this.detectAll()
+    const program = this.isDisabled(agentId) ? null : terminalProgram(slot.def, slot.h.detection)
+    if (!program || !slot.def.terminal?.resume) {
+      throw new HostError('restricted', t('terminal.noResume', { agent: slot.name }))
+    }
+    const id = await this.cliSessionId(slot, session.acpSessionId, session.folder)
+    if (id === null) throw new HostError('not_found', t('terminal.notStarted'))
+    // An added agent's sessions are all in its own folder, recorded or not.
+    const folder = session.configDir ?? (slot.added ? this.chosenFolder(slot) : null)
+    const variable = slot.def.configVariable
+    const env = {
+      ...(slot.added ? slot.def.addedEnv : {}),
+      ...(folder && variable ? { [variable]: folder } : {}),
+    }
+    const words = terminalWords(slot.def, program, env, id)
+    const command = words && terminalLine(words, this.deps.platform)
+    if (!command) throw new HostError('restricted', t('terminal.noResume', { agent: slot.name }))
+    if (run) this.terminalGrants.grant(command)
+    return { command, copy: inFolder(session.folder, command, this.deps.platform) }
+  }
+
+  /**
+   * What the agent's CLI resumes a session by: Doubao's conversation behind a session of Kite's
+   * id, Pi's session file, else the agent's own id; null when the agent has none for it yet.
+   */
+  private async cliSessionId(
+    slot: Slot,
+    acpSessionId: string,
+    folder: string,
+  ): Promise<string | null> {
+    if (slot.def.id === 'doubao') {
+      const kept = path.join(this.deps.adaptersDir, EXTENSIONS_FOLDER, slot.def.id)
+      return new ConversationIds(kept).conversationOf(acpSessionId)
+    }
+    if (slot.def.id === 'pi') {
+      // Pi writes a session's file once it is first prompted, in a folder named for its cwd.
+      const folders = await piFolders(this.deps.env.agentEnv(slot.id), this.deps.platform)
+      const real = await realpath(folder).catch(() => folder)
+      return findSessionFile(folders, real, acpSessionId).catch(() => null)
+    }
+    return acpSessionId || null
   }
 
   /**

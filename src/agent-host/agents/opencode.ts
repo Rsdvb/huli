@@ -28,4 +28,7 @@ export const OPENCODE: AgentDefinition = {
     npm: '@opencode/cli',
   },
   cli: OPENCODE_CLI,
+  // Huli: `opencode`, and `--session <ses_...>`, the id its server and ACP name sessions by
+  // (2.3.2's CLI reference and source, checked on 2026-11-21).
+  terminal: { args: [], resume: (id) => ['--session', id] },
 }

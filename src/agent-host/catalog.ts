@@ -196,6 +196,23 @@ export interface AgentDefinition {
   keySignIn?: { method: string; variable: string }
   /** Its sign-in runs the program itself in a terminal, in place of the declared `replaces`. */
   terminalSignIn?: { replaces: readonly string[] }
+  /** Huli: its own CLI's interactive UI, which a terminal of Kite's runs (`agent-terminal.ts`). */
+  terminal?: TerminalCli
+}
+
+/**
+ * Huli: how an agent's own CLI runs interactively, in place of the protocol Kettu speaks to it:
+ * the arguments after its program that start its UI, and those that resume a session by the id the
+ * CLI knows it by. Only arguments its vendor documents, checked against its help or source.
+ */
+export interface TerminalCli {
+  args: readonly string[]
+  resume?: (id: string) => string[]
+  /**
+   * A script runs with the `node` on the terminal's PATH rather than Electron's own Node.js, a
+   * Windows GUI program that no shell there waits for, so its input would go to the shell.
+   */
+  nodeOnPath?: true
 }
 
 /**

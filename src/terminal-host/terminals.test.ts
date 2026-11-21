@@ -285,6 +285,63 @@ describe('terminals the user opens', () => {
   const allow = (terminalId: string, allowed: boolean, sessionId = 's1') =>
     ({ kind: 'allow', sessionId, terminalId, allowed }) as const
 
+  it('runs only the lines the agent host allows, exactly as it wrote them', async () => {
+    const { manager, ptys } = host()
+    const resume = 'CLAUDE_CONFIG_DIR=/home/a/c /home/a/.local/bin/claude --resume 3f2c'
+    manager.setAuthCommands([resume, '/opt/goose session'])
+    const run = (text: string) =>
+      manager.create('window', { ...size, command: { text, run: true } })
+    await run(resume)
+    await run(`${resume}; rm -rf ~`)
+    await run(`${resume} `)
+    for (const pty of ptys) await promptShown(pty)
+    expect(ptys.map((pty) => pty.written)).toEqual([
+      [`${resume}\r`],
+      [`${resume}; rm -rf ~`],
+      [`${resume} `],
+    ])
+    // A resume no longer allowed, as after its time ran out, is only typed.
+    manager.setAuthCommands(['/opt/goose session'])
+    await run(resume)
+    await promptShown(ptys[3]!)
+    expect(ptys[3]!.written).toEqual([resume])
+  })
+
+  it('types an allowed line without Enter when the port did not ask to run it', async () => {
+    const { manager, ptys } = host()
+    manager.setAuthCommands(['/opt/goose session'])
+    await manager.create('window', { ...size, command: { text: '/opt/goose session', run: false } })
+    await promptShown(ptys[0]!)
+    expect(ptys[0]!.written).toEqual(['/opt/goose session'])
+  })
+
+  it('hands an allowed PowerShell line to Windows PowerShell from the shell Settings chose', async () => {
+    const pty = new FakePty()
+    const projects = new ProjectRegistry('win32', async (path) => path)
+    projects.set(['C:\\work\\app'])
+    const manager = new TerminalManager({
+      platform: 'win32',
+      appVersion: '0.0.0',
+      env: { SystemRoot: 'C:\\Windows' },
+      projects,
+      findOnPath: async () => null,
+      loadPty: async () => () => pty,
+      sink: { data: () => {}, replay: () => {}, info: () => {}, removed: () => {} },
+    })
+    const line = "$env:CODEX_HOME = 'C:\\Users\\Ann\\codex'; C:\\npm\\codex.cmd resume 3f2c"
+    manager.setAuthCommands([line])
+    manager.setShellPath('C:\\Windows\\System32\\cmd.exe')
+    await manager.create('window', {
+      projectPath: 'C:\\work\\app',
+      cols: 80,
+      rows: 24,
+      command: { text: line, run: true },
+    })
+    pty.emit('C:\\work\\app>')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(pty.written).toEqual([`powershell -NoProfile -Command "${line}"\r`])
+  })
+
   it("asks first, then lets the session's agent use it once allowed", async () => {
     const { manager, ptys } = host()
     const user = await manager.create('window', { ...size, sessionId: 's1' })

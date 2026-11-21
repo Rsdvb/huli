@@ -12,5 +12,11 @@ export function fakeAgent(script: string): AgentDefinition {
     },
     reportsAccount: true,
     pageSignIns: ['fake-page-login'],
+    // Huli: a stand-in for an agent's interactive CLI, to check its terminal start and resume.
+    terminal: {
+      args: ['--terminal'],
+      resume: (id) => ['--terminal', '--resume', id],
+      nodeOnPath: true,
+    },
   }
 }

@@ -22,6 +22,8 @@ export const CODEX: AgentDefinition = {
   },
   reportsAccount: true,
   cli: CODEX_CLI,
+  // Huli: `codex` and `codex resume <id>`, a thread's id being its session's.
+  terminal: { args: [], resume: (id) => ['resume', id] },
   configVariable: CONFIG_VARIABLES.codex,
   mcpConfig: { project: '.codex/config.toml', listCommand: '/mcp' },
   // No confirmed prices: the ranks follow the families' sizes, smallest first.

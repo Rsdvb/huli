@@ -1,12 +1,14 @@
 // Runs the fake agent over stdio: `node tools/fake-agent/main.ts`, or with Electron's own
-// Node.js through ELECTRON_RUN_AS_NODE=1. `--login` performs the terminal sign-in instead, and
-// `--one-session` keeps one live session per process, as pi-acp 0.0.34 does.
+// Node.js through ELECTRON_RUN_AS_NODE=1. `--login` performs the terminal sign-in instead,
+// `--terminal` stands in for an agent's interactive CLI (Huli), and `--one-session` keeps one live
+// session per process, as pi-acp 0.0.34 does.
 
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { Readable, Writable } from 'node:stream'
 import { ndJsonStream } from '@agentclientprotocol/sdk/unstable'
 import { createFakeAgent, loginMarkerPath } from './agent.ts'
+import { runInTerminal } from './terminal.ts'
 
 const env = process.env
 
@@ -19,6 +21,8 @@ if (process.argv.includes('--login')) {
   process.stdout.write('Signed in to the fake agent. You can go back to Kettu.\n')
   process.exit(0)
 }
+
+if (process.argv.includes('--terminal')) await runInTerminal(process.argv)
 
 if (env.FAKE_AGENT_IGNORE_SIGTERM === '1')
   process.on('SIGTERM', () => log('fake-agent: ignoring SIGTERM'))

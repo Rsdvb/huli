@@ -1265,5 +1265,11 @@
       "title_other": "Waiting for {{count}} other Doubao sessions",
       "description": "Doubao runs one session at a time, so this message goes once the sessions before it are done."
     }
+  },
+  "terminal": {
+    "noResume": "{{agent}}’s own CLI cannot resume this session in a terminal.",
+    "notStarted": "This session has no conversation in its agent yet, so there is nothing to resume.",
+    "running": "This session is running here. Stop it first, then continue it in the terminal.",
+    "subagent": "A sub-agent’s session goes on in its parent’s."
   }
 }

@@ -5,6 +5,7 @@
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
 import {
   Add01Icon,
+  CommandLineIcon,
   ComputerTerminal01Icon,
   Edit02Icon,
   FolderOpenIcon,
@@ -52,6 +53,7 @@ import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@renderer/components/ui/radio-group'
 import { toast } from '@renderer/components/ui/toast'
 import { AgentStateLine } from '@renderer/features/agents/agent-state'
+import { startAgentInTerminal, useStartsInTerminal } from '@renderer/features/agents/agent-terminal'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { readiness, type AgentReadiness } from '@renderer/features/agents/readiness'
 import { focusedPane } from '@renderer/features/split/layout'
@@ -962,9 +964,19 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
   const pageSignIns = unsure
     ? status.authMethods.filter((m) => m.type === 'agent' && !(remote && !m.delegated))
     : []
+  const startsInTerminal = useStartsInTerminal(status, hostId)
 
   const actions = (
     <>
+      {startsInTerminal && (
+        <SetButton
+          icon={<Icon icon={CommandLineIcon} size={14} />}
+          title={t('agents.terminal.startHint')}
+          onClick={() => void startAgentInTerminal(status, hostId)}
+        >
+          {t('agents.terminal.start')}
+        </SetButton>
+      )}
       {r.kind === 'failed' && (
         <SetButton
           loading={busy}

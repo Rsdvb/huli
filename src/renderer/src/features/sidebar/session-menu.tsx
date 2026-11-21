@@ -4,6 +4,7 @@ import {
   ArrowMoveDownRightIcon,
   Clock01Icon,
   CodeIcon,
+  CommandLineIcon,
   ComputerIcon,
   FolderRemoveIcon,
   ComputerTerminal01Icon,
@@ -105,7 +106,6 @@ import {
   MULTI_ACCELERATORS,
   multiSessionMenuGroups,
   QUICK_DELETE,
-  resumeCommand,
   runSessionMenuAccelerator,
   sessionMenuGroups,
   settle,
@@ -121,6 +121,7 @@ import { dissolveRows } from './row-dust'
 import { markReturning } from './row-exit'
 import { sessionPullRequests } from './session-prs'
 import { sessionFolder } from '@renderer/lib/session-folder'
+import { copyResumeCommand, resumeInTerminal } from '@renderer/features/agents/agent-terminal'
 import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
 import { askExport, canExport } from '@renderer/features/session/export/export'
 import {
@@ -248,7 +249,11 @@ export function SessionMenuItems({
   const running = isRunning(summary)
   // Only this computer's folders open in its file manager and its editors.
   const local = !isWeb && hostOfPath(summary.projectPath) === null
-  const resume = resumeCommand(summary, hostPath(sessionFolder(summary)))
+  // Huli: its host writes the command, for any agent whose own CLI resumes its sessions.
+  const resume = useAgentsStore((s) => {
+    const agent = agentsOn(s, hostId).byId[summary.agentId]
+    return !!agent?.terminal?.resumes && !agent.disabled && !!summary.acpSessionId
+  })
   const { id } = summary
   const subSessions = useListedSubSessions([id])
 
@@ -488,13 +493,20 @@ export function SessionMenuItems({
             {shortcut}
           </DropdownMenuItem>
         )
+      case 'resumeInTerminal':
+        return (
+          <DropdownMenuItem key={name} {...props} onClick={() => void resumeInTerminal(summary)}>
+            <MenuGlyph icon={CommandLineIcon} />
+            {t('row.resumeInTerminal')}
+          </DropdownMenuItem>
+        )
       case 'copyResume':
         return (
           resume && (
             <DropdownMenuItem
               key={name}
               {...props}
-              onClick={() => copyWithToast(resume, t('row.copiedResume'))}
+              onClick={() => void copyResumeCommand(summary, t('row.copiedResume'))}
             >
               {place === 'more' ? (
                 <MenuGlyph icon={Copy01Icon} />
@@ -600,7 +612,8 @@ export function SessionMenuItems({
     place,
     local,
     terminal,
-    resume: resume !== null,
+    resume,
+    terminalResume: terminal && !running,
     rename: onRename !== undefined,
     worktree: hasLiveWorktree(summary),
     removeWorktree: canRemoveWorktree(summary),

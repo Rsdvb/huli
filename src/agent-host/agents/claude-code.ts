@@ -33,6 +33,8 @@ export const CLAUDE_CODE: AgentDefinition = {
   },
   reportsAccount: true,
   cli: CLAUDE_CLI,
+  // Huli: `claude` and `claude --resume <id>`, as its CLI reference lists them.
+  terminal: { args: [], resume: (id) => ['--resume', id] },
   configVariable: CONFIG_VARIABLES['claude-code'],
   mcpConfig: { project: '.mcp.json' },
   modelNotes: [

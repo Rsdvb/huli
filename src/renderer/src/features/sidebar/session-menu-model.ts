@@ -1,6 +1,5 @@
 import type { KeyboardEvent } from 'react'
 import type { BaseUIEvent } from '@base-ui/react/types'
-import { isDefaultAgent } from '@shared/agents'
 import type { SessionSummary } from '@shared/agent-host'
 
 export type SessionMenuItem =
@@ -19,6 +18,7 @@ export type SessionMenuItem =
   | 'openInEditor'
   | 'showInFolder'
   | 'openTerminal'
+  | 'resumeInTerminal'
   | 'copyResume'
   | 'copySessionId'
   | 'export'
@@ -73,8 +73,10 @@ export interface SessionMenuContext {
   local: boolean
   /** The terminal may open in its folder. */
   terminal: boolean
-  /** Its harness has a command that resumes it. */
+  /** Its agent's own CLI resumes it, by a command its host writes. */
   resume: boolean
+  /** Huli: and a terminal of its host may do it now, the session not at work here. */
+  terminalResume?: boolean
   /** The menu's place has a title field to rename it in; true when left out. */
   rename?: boolean
   /** It works in a worktree Kettu made that a fork can share. */
@@ -99,6 +101,7 @@ export function sessionMenuGroups(
     local,
     terminal,
     resume,
+    terminalResume = false,
     rename = true,
     worktree = false,
     removeWorktree = false,
@@ -134,7 +137,7 @@ export function sessionMenuGroups(
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
           own,
-          ['openInEditor', 'showInFolder', 'openTerminal'],
+          ['openInEditor', 'showInFolder', 'openTerminal', 'resumeInTerminal'],
           ['copyResume', 'copySessionId', 'export'],
           ending,
         ]
@@ -148,6 +151,7 @@ export function sessionMenuGroups(
             ...((summary.prs?.length ?? (summary.pr ? 1 : 0)) > 0
               ? (['pullRequest'] as const)
               : []),
+            'resumeInTerminal',
             'copyResume',
             'showInFolder',
             'export',
@@ -158,6 +162,7 @@ export function sessionMenuGroups(
     ...(local ? [] : (['openInEditor', 'showInFolder'] as const)),
     ...(terminal ? [] : (['openTerminal'] as const)),
     ...(resume ? [] : (['copyResume'] as const)),
+    ...(resume && terminalResume ? [] : (['resumeInTerminal'] as const)),
     ...(rename ? [] : (['rename'] as const)),
     ...(exportable ? [] : (['export'] as const)),
   ])
@@ -235,39 +240,6 @@ export async function settle(
  */
 export function canDeleteAtOnce(files: readonly (number | null)[], withChildren: boolean): boolean {
   return !withChildren && files.every((count) => count === 0)
-}
-
-/**
- * The command that resumes the session in its harness's own CLI, run from its folder as its host
- * writes it, quoted for that host's shell by the path's form; null for a harness without one, or
- * an added agent, whose CLI reads another config folder.
- */
-export function resumeCommand(
-  summary: Pick<SessionSummary, 'agentId' | 'acpSessionId'>,
-  folder: string,
-): string | null {
-  const id = summary.acpSessionId
-  if (!id || !isDefaultAgent(summary.agentId)) return null
-  const windows = /^[a-z]:[\\/]/i.test(folder) || folder.startsWith('\\\\')
-  const quote = windows ? quoteWindows : quotePosix
-  // cmd's cd keeps the shell's drive and refuses a network path; pushd does neither.
-  const cd = `${windows ? 'pushd' : 'cd'} ${quote(folder)} && `
-  switch (summary.agentId) {
-    case 'claude-code':
-      return `${cd}claude --resume ${quote(id)}`
-    case 'codex':
-      return `${cd}codex resume ${quote(id)}`
-    default:
-      return null
-  }
-}
-
-function quotePosix(arg: string): string {
-  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`
-}
-
-function quoteWindows(arg: string): string {
-  return /^[\w@%+=:,./\\-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '""')}"`
 }
 
 /** Whether a key press is the shortcut, written in `formatShortcut`'s notation. */

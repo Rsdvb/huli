@@ -15,4 +15,7 @@ export const KILO: AgentDefinition = {
     archive: {},
     npm: '@kilocode/cli',
   },
+  // Huli: `kilo`, its own UI, as its CLI reference starts it; no source ties the ids it
+  // resumes to its ACP sessions', so none resumes there.
+  terminal: { args: [] },
 }

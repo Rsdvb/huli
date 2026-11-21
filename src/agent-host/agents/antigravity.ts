@@ -28,6 +28,9 @@ export const ANTIGRAVITY: AgentDefinition = {
     order: ['script'],
   },
   cli: AGY_CLI,
+  // Huli: `agy`, and `--conversation <id>` (1.5.13's CLI reference), a session's id being the
+  // conversation's, as `conversations/<id>.db` shows (see agent-copies.ts).
+  terminal: { args: [], resume: (id) => ['--conversation', id] },
   sharesSignIn: true,
   // `authenticate` with this method switches agy to the key in its environment; the key alone
   // does not (agy 1.5.9).
