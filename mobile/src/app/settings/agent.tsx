@@ -521,7 +521,11 @@ function AgentBody({ status }: { status: AgentStatus }) {
             }
           />
           {status.account?.email ? (
-            <ListRow key="email" title="邮箱" value={status.account.email} />
+            <ListRow
+              key="email"
+              title={status.account.email.includes('@') ? '邮箱' : '手机号'}
+              value={status.account.email}
+            />
           ) : null}
           {status.capabilities.account ? (
             <ListRow
@@ -610,7 +614,17 @@ function AgentBody({ status }: { status: AgentStatus }) {
         <ListGroup header="余额">
           {status.balance.balances.map((balance) => {
             const text = balanceText(balance)
-            return <ListRow key={balance.label} title={text.name} value={text.value} />
+            const granted = balance.granted
+              ? balanceText({ ...balance, amount: balance.granted }).value
+              : null
+            return (
+              <ListRow
+                key={`${balance.label}/${balance.currency}`}
+                title={text.name}
+                subtitle={granted ? `其中赠送 ${granted}` : undefined}
+                value={text.value}
+              />
+            )
           })}
         </ListGroup>
       ) : null}

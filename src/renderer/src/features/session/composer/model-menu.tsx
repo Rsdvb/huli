@@ -15,7 +15,7 @@ import { ShimmerText } from '@renderer/components/affect/shimmer-loader'
 import { joinPlanTier } from '@renderer/features/account/model'
 import { tightestLimit } from '@renderer/features/sidebar/plan-usage'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
-import { limitPhrase } from '@renderer/lib/format'
+import { limitPhrase, planBalance } from '@renderer/lib/format'
 import { limitPercent } from '@renderer/lib/plan-limit'
 import { formatShortcut } from '@renderer/lib/platform'
 import { useNow } from '@renderer/lib/use-now'
@@ -52,6 +52,7 @@ export function ModelMenu({
   account,
   limits,
   balances,
+  wallet,
   source,
   actions,
   cacheNote = null,
@@ -70,6 +71,8 @@ export function ModelMenu({
   limits: readonly PlanLimit[]
   /** The agent's balances, which say whether extra usage pays on once the plan is used up. */
   balances?: readonly ProviderBalance[]
+  /** The balance a harness bills from instead of a plan, such as DeepSeek's, named with no plan. */
+  wallet?: readonly ProviderBalance[]
   /** The harness and version the models come from. */
   source: string | null
   /** Rows after the switches, such as Switch agent. */
@@ -150,15 +153,17 @@ export function ModelMenu({
   const limit = tightestLimit(limits, now)
   const plan = account?.label ? joinPlanTier(account.label, account.tier) : null
   const usedUp = quotaText(planQuota({ balances, limits }, now), now)
+  const left = (wallet ?? []).map((b) => planBalance(b.amount, b.currency)).join(' / ')
   const note = [
     account?.email,
     plan,
     usedUp ??
-      (limit?.usedPercent != null &&
-        t(limitView === 'left' ? 'controls.limitLeft' : 'controls.limitUsed', {
-          percent: limitPercent(limit, limitView),
-          limit: limitPhrase(limit),
-        })),
+      (limit?.usedPercent != null
+        ? t(limitView === 'left' ? 'controls.limitLeft' : 'controls.limitUsed', {
+            percent: limitPercent(limit, limitView),
+            limit: limitPhrase(limit),
+          })
+        : left && t('controls.balance', { amount: left })),
   ]
     .filter(Boolean)
     .join(' · ')

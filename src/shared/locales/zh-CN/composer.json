@@ -47,6 +47,7 @@
     "selected": "已选择 {{label}}",
     "limitUsed": "已用 {{limit}}限额的 {{percent}}%",
     "limitLeft": "{{limit}}限额剩余 {{percent}}%",
+    "balance": "余额 {{amount}}",
     "effortHint": "强度越高，思考越久，消耗的套餐额度也越多 · {{shortcut}}",
     "modelSettings": "模型设置",
     "speed": "速度",

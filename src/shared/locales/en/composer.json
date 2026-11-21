@@ -47,6 +47,7 @@
     "selected": "{{label}} selected",
     "limitUsed": "{{percent}}% of {{limit}} limit",
     "limitLeft": "{{percent}}% of {{limit}} limit left",
+    "balance": "{{amount}} balance",
     "effortHint": "Higher thinks longer, uses more of your plan · {{shortcut}}",
     "modelSettings": "Model settings",
     "speed": "Speed",
