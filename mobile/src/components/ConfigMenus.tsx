@@ -198,7 +198,8 @@ export interface ModelMenuContext {
 
 /** Huli: the name a session's API profile goes by; the agent's own sign-in for null. */
 export function profileLabel(agent: AgentStatus | undefined, profileId: string | null): string {
-  return agent?.profiles?.items.find((p) => p.id === profileId)?.name ?? '自己的登录'
+  if (profileId === null) return '自己的登录'
+  return agent?.profiles?.items.find((p) => p.id === profileId)?.name ?? '配置已删除'
 }
 
 /**

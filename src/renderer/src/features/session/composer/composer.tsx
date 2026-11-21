@@ -352,9 +352,11 @@ export function Composer({
       .catch((e: unknown) => setConfigError(errorMessage(e)))
       .finally(() => setSwitchingProfile(false))
   }
+  // One that failed or waits for a sign-in may change too: another profile is its way on.
+  const profileIdle = idle || status === 'failed' || status === 'auth_required'
   const profileHint = switchingProfile
     ? ta('profiles.switching')
-    : idle
+    : profileIdle
       ? null
       : ta('profiles.betweenTurns')
   const profileAction =

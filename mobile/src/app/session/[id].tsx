@@ -1089,7 +1089,10 @@ function Session() {
           profile: profileShown
             ? {
                 label: profileShown,
-                ...(status === 'ready' || status === 'closed'
+                ...(status === 'ready' ||
+                status === 'closed' ||
+                status === 'failed' ||
+                status === 'auth_required'
                   ? {}
                   : { disabled: true, hint: '在两轮之间才能换' }),
               }

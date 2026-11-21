@@ -58,6 +58,7 @@
       "minimax-intl": "MiniMax（国际站）",
       "custom": "自定义"
     },
-    "betweenTurns": "在两轮之间切换"
+    "betweenTurns": "在两轮之间切换",
+    "gone": "配置已删除"
   }
 }

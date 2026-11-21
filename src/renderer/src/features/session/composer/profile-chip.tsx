@@ -31,7 +31,9 @@ export function ProfileChip({
   const profiles = status?.profiles
   if (!status || !profiles || profiles.items.length === 0) return null
   const chosen = profiles.items.find((p) => p.id === value)
-  const label = chosen?.name ?? t('profiles.ownShort')
+  // A profile removed since the session took it: its next turn waits for another.
+  const gone = value !== null && !chosen
+  const label = chosen?.name ?? t(gone ? 'profiles.gone' : 'profiles.ownShort')
   const items = [
     { label: t('profiles.menu'), heading: true },
     {
@@ -43,7 +45,9 @@ export function ProfileChip({
     ...profiles.items.map((profile) => ({
       label: profile.name,
       description: [
-        t(`profiles.preset.${profile.preset}`),
+        ...(t(`profiles.preset.${profile.preset}`) === profile.name
+          ? []
+          : [t(`profiles.preset.${profile.preset}`)]),
         ...(profile.id === profiles.defaultId ? [t('profiles.default')] : []),
       ].join(' · '),
       checked: value === profile.id,
@@ -67,6 +71,7 @@ export function ProfileChip({
                 aria-label={`${t('profiles.menu')}: ${label}`}
                 aria-disabled={disabledHint ? true : undefined}
                 className="ui-as-tray-link kettu-tray-link--agent"
+                data-tone={gone ? 'warn' : undefined}
                 onClick={() => !disabledHint && toggle()}
               />
             }

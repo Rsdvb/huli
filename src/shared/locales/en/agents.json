@@ -58,6 +58,7 @@
       "minimax-intl": "MiniMax (international)",
       "custom": "Custom"
     },
-    "betweenTurns": "Changes between turns"
+    "betweenTurns": "Changes between turns",
+    "gone": "Profile removed"
   }
 }
