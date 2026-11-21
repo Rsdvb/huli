@@ -12,8 +12,8 @@ const BY_CODE: Record<string, string> = {
   restricted: '这台手机不能这样做。',
   forbidden: '这台手机不能这样做。',
   terminal_not_allowed: '电脑没有开放终端。',
-  agent_unavailable: '这个 Agent 现在用不了，请在电脑上查看。',
-  auth_required: 'Agent 需要登录，请在电脑上登录后再试。',
+  agent_unavailable: '这个 Agent 现在用不了，可以到 设置 › Agent 里看看。',
+  auth_required: 'Agent 需要登录，可以在 设置 › Agent 里登录后再试。',
   conflict: '情况已经变了，请再试一次。',
   invalid_params: '电脑没有接受这个请求，可能要把电脑和手机上的纸鸢都更新一下。',
   unknown_method: '电脑上的纸鸢还不支持这样做，请更新它。',
@@ -29,6 +29,11 @@ const WITH_DETAIL: Record<string, string> = {
 
 const CJK = /[㐀-鿿]/
 
+/** Whether the text is written in Chinese, as the host writes for a Chinese reader. */
+export function hasChinese(text: string): boolean {
+  return CJK.test(text)
+}
+
 function field(error: unknown, name: 'code' | 'message'): string | null {
   if (typeof error !== 'object' || error === null) return null
   const value = (error as Record<string, unknown>)[name]
@@ -37,15 +42,17 @@ function field(error: unknown, name: 'code' | 'message'): string | null {
 
 /**
  * A failed request in words for the user: the host's own words when they are Chinese already,
- * else what its code means, else `fallback`.
+ * else what its code means, else `fallback`. `lead` says what failed in place of the line that a
+ * code carrying the host's own words gets, such as 「安装没有完成。」 for an install.
  */
-export function hostErrorText(error: unknown, fallback = '请稍后再试。'): string {
+export function hostErrorText(error: unknown, fallback = '请稍后再试。', lead?: string): string {
   const code = field(error, 'code')
   const message = field(error, 'message')
   if (message && CJK.test(message)) return message
   if (code && BY_CODE[code]) return BY_CODE[code]
   if (code && WITH_DETAIL[code]) {
-    return message ? `${WITH_DETAIL[code]}\n${message}` : WITH_DETAIL[code]
+    const line = lead ?? WITH_DETAIL[code]
+    return message ? `${line}\n${message}` : line
   }
   // A failure of the phone's own, such as no network, says so in the system's words.
   if (error instanceof TypeError && message) return `网络出错了：${message}`

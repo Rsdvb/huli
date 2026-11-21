@@ -25,6 +25,7 @@ import type { SettingsPatch } from '@shared/settings'
 import { admin } from '../admin'
 import { useConnected, useHostActions, useMaybeLink, withinRefreshLimit } from '../host'
 import { ListSyncNote, OfflineNote } from '../components/SyncNote'
+import { hostErrorText } from '../hostErrors'
 import { errorText } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
 import { EmptyState } from '../ui/EmptyState'
@@ -163,18 +164,32 @@ export function useHostSettings(): Read<HostSettingsPart> & {
 /** Whether the computer is connected now. */
 export { useConnected }
 
+/** What an action throws when the user stopped it, which is no failure to show. */
+export class Stopped extends Error {}
+
 /**
  * Runs actions by key, marking each busy while it runs: a failure warns and shows why under
- * `failTitle`; a success gives the success haptic. Resolves true when it succeeded.
+ * `failTitle`, unless it is `Stopped`; a success gives the success haptic. Resolves true when it
+ * succeeded.
  */
 export function useActions(): {
   busy: (key: string) => boolean
-  run: (key: string, action: () => Promise<unknown>, failTitle: string) => Promise<boolean>
+  run: (
+    key: string,
+    action: () => Promise<unknown>,
+    failTitle: string,
+    lead?: string,
+  ) => Promise<boolean>
 } {
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set())
   const running = useRef(new Set<string>())
   const run = useCallback(
-    async (key: string, action: () => Promise<unknown>, failTitle: string): Promise<boolean> => {
+    async (
+      key: string,
+      action: () => Promise<unknown>,
+      failTitle: string,
+      lead?: string,
+    ): Promise<boolean> => {
       if (running.current.has(key)) return false
       running.current.add(key)
       setBusy(new Set(running.current))
@@ -183,7 +198,7 @@ export function useActions(): {
         haptic.success()
         return true
       } catch (failure) {
-        fail(failTitle, failure)
+        if (!(failure instanceof Stopped)) fail(failTitle, failure, lead)
         return false
       } finally {
         running.current.delete(key)
@@ -195,10 +210,10 @@ export function useActions(): {
   return { busy: (key) => busy.has(key), run }
 }
 
-/** Says an action failed, and why. */
-export function fail(title: string, failure: unknown): void {
+/** Says an action failed, and why; `lead` as `hostErrorText` takes it. */
+export function fail(title: string, failure: unknown, lead?: string): void {
   haptic.warning()
-  Alert.alert(title, errorText(failure))
+  Alert.alert(title, hostErrorText(failure, undefined, lead))
 }
 
 /** Asks before something that cannot be taken back; resolves whether the user went ahead. */
