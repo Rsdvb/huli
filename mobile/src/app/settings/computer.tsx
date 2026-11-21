@@ -11,6 +11,7 @@ import {
   useComputerLine,
   useReach,
 } from '../../components/ComputerSheet'
+import { useCloudStatus } from '../../cloud'
 import { pickedRoute, routeKind, usableAddresses } from '../../connection'
 import { rerouteFleet } from '../../fleet'
 import { useHost } from '../../host'
@@ -43,6 +44,8 @@ export default function Computer() {
   const route = useCurrentRoute(!!active, host.state)
   const welcome = active && host.state.kind === 'connected' ? host.state.welcome : null
   const connected = welcome !== null
+  // The relay takes the phone's own Kite Cloud sign-in too.
+  const signedIn = useCloudStatus().state === 'signed-in'
 
   if (!computer) {
     return (
@@ -115,7 +118,7 @@ export default function Computer() {
           {ROUTE_PICKS.map((option) => {
             const offered =
               option.pick === 'relay'
-                ? !!computer.relay
+                ? !!computer.relay && signedIn
                 : option.pick === 'direct'
                   ? addresses.length > 0
                   : true
@@ -126,9 +129,11 @@ export default function Computer() {
                 subtitle={
                   offered
                     ? option.subtitle
-                    : option.pick === 'relay'
-                      ? '这台电脑没有登录 Kite Cloud'
-                      : '电脑没有给出地址'
+                    : option.pick === 'direct'
+                      ? '电脑没有给出地址'
+                      : !computer.relay
+                        ? '这台电脑没有登录 Kite Cloud'
+                        : '手机还没登录 Kite Cloud'
                 }
                 disabled={!offered}
                 trailing={

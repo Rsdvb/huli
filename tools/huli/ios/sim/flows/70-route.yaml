@@ -1,6 +1,7 @@
 # The way the phone reaches the computer: Settings › 连接 › 线路 opens the computer's page, whose
 # 线路 group picks 自动, 只走直连 or 只走中转, the last off while the computer has no Kite Cloud
-# relay, as here; in light, then in dark. Leaves 自动 and the light theme picked.
+# relay or the phone is not signed in to it, as here; in light, then in dark. Leaves 自动 and the
+# light theme picked.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -34,7 +35,7 @@ appId: io.github.rsdvb.huli
 - tapOn: '自动'
 - waitForAnimationToEnd
 - tapOn: '返回'
-# The same in dark.
+# The same in dark. The theme page goes back to home.
 - scrollUntilVisible:
     element: '主题'
     direction: UP
@@ -45,6 +46,8 @@ appId: io.github.rsdvb.huli
     text: '(返回|关闭)'
     optional: true
 - waitForAnimationToEnd
+- tapOn: '会话'
+- tapOn: '账户与设置'
 - scrollUntilVisible:
     element: '线路'
     centerElement: true
