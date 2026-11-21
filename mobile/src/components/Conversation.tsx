@@ -213,23 +213,22 @@ export function Conversation(props: {
     void list.current?.scrollToEnd({ animated: true })
   }, [])
 
-  // A reply's `#anchor` link: its heading comes to just under the floating header.
-  const { paddingTop } = props
-  const reveal = useCallback(
-    (target: AnchorTarget) => {
-      const scroller = list.current?.getNativeScrollRef()
-      if (!scroller) return
-      target.measureInWindow((_x, y) => {
-        scroller.measureInWindow((_left: number, top: number) => {
-          const now = list.current
-          if (!now) return
-          const offset = now.getState().scroll + y - top - paddingTop - ANCHOR_ROOM
-          void now.scrollToOffset({ offset: Math.max(0, offset), animated: true })
-        })
+  // A reply's `#anchor` link: its heading comes to just under the floating header. The same
+  // function for the list's life, as every reply's text takes it.
+  const headerRoom = useRef(props.paddingTop)
+  headerRoom.current = props.paddingTop
+  const reveal = useCallback((target: AnchorTarget) => {
+    const scroller = list.current?.getNativeScrollRef()
+    if (!scroller) return
+    target.measureInWindow((_x, y) => {
+      scroller.measureInWindow((_left: number, top: number) => {
+        const now = list.current
+        if (!now) return
+        const offset = now.getState().scroll + y - top - headerRoom.current - ANCHOR_ROOM
+        void now.scrollToOffset({ offset: Math.max(0, offset), animated: true })
       })
-    },
-    [paddingTop],
-  )
+    })
+  }, [])
 
   // The way back down floats over the dock, and rises with it and the keyboard on the UI thread.
   const keyboard = useReanimatedKeyboardAnimation()
