@@ -28,7 +28,18 @@ import { RenameDialog } from '../../components/RenameDialog'
 import { Sheet, type SheetItem } from '../../components/Sheet'
 import { useHost } from '../../host'
 import { platformOf } from '../../linkInfo'
-import { currentLimits, harnessVersion, percent, readiness, stateText } from '../../manage/agents'
+import {
+  currentLimits,
+  harnessVersion,
+  hostText,
+  keyProblem,
+  methodText,
+  needsNode,
+  percent,
+  readiness,
+  shellName,
+  stateText,
+} from '../../manage/agents'
 import {
   agentChoice,
   agentExit,
@@ -52,6 +63,7 @@ import {
   Notice,
   ReadState,
   SkeletonGroup,
+  Stopped,
   SwitchRow,
   Tag,
   useActions,
@@ -60,6 +72,7 @@ import {
   useRead,
   type Read,
 } from '../../manage/kit'
+import { NodeNotice } from '../../manage/node'
 import { trashName } from '../../system/device'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { EmptyState } from '../../ui/EmptyState'
@@ -74,8 +87,10 @@ import {
   resetText,
   windowName,
 } from '../../ui/session/limits'
+import { useComputer } from '../../ui/session/computer'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 import { openUrl } from '../../system/openUrl'
+import { shareImage } from '../../system/shareImage'
 
 export default function AgentScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>()
@@ -129,6 +144,10 @@ function AgentBody({ status }: { status: AgentStatus }) {
   const [page, setPage] = useState<string | null>(null)
   // Huli: the picture to scan, such as Doubao's QR code, while the sign-in waits for it.
   const [image, setImage] = useState<string | null>(null)
+  // A sign-in the user cancelled rejects; that is no failure to show.
+  const cancelled = useRef(false)
+  const shell = shellName(useComputer().platform)
+  const waitsForNode = needsNode(status)
   const id = status.id
   const r = readiness(status)
   const state = stateText(status)
@@ -199,11 +218,15 @@ function AgentBody({ status }: { status: AgentStatus }) {
   const authenticate = (method: AgentAuthMethod) => {
     const link = host.link
     if (!link) return
+    cancelled.current = false
     void run(
       'sign-in',
       async () => {
         try {
           await call(link, 'agents.authenticate', { agentId: id, methodId: method.id })
+        } catch (failure) {
+          if (cancelled.current) throw new Stopped()
+          throw failure
         } finally {
           setPage(null)
           setImage(null)
@@ -214,6 +237,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
   }
 
   const cancelSignIn = () => {
+    cancelled.current = true
     setPage(null)
     setImage(null)
     if (host.link) void call(host.link, 'agents.cancelSignIn', { agentId: id }).catch(() => {})
@@ -409,7 +433,9 @@ function AgentBody({ status }: { status: AgentStatus }) {
           {r.message}
         </Notice>
       ) : null}
-      {r.kind === 'missing' ? (
+      {r.kind === 'missing' && waitsForNode ? (
+        <NodeNotice title={r.message} />
+      ) : r.kind === 'missing' ? (
         <Notice
           tone="warning"
           title={r.message}
@@ -454,11 +480,24 @@ function AgentBody({ status }: { status: AgentStatus }) {
             tone="info"
             busy
             title="扫码登录"
-            actions={<Button label="取消" tone="plain" onPress={cancelSignIn} />}
+            actions={
+              <>
+                <Button
+                  label="保存或发送二维码"
+                  icon="download"
+                  onPress={() =>
+                    void shareImage(image, `${status.harnessName}登录二维码`).catch(
+                      (failure: unknown) => fail('没能保存二维码', failure),
+                    )
+                  }
+                />
+                <Button label="取消" tone="plain" onPress={cancelSignIn} />
+              </>
+            }
           >
             <View style={styles.gap}>
               <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                {`用${status.name} App 扫这个二维码，然后在手机上确认。`}
+                {`用${status.harnessName} App 扫这个二维码，再在 App 里确认登录。`}
               </Text>
               <Image
                 source={{ uri: image }}
@@ -466,6 +505,9 @@ function AgentBody({ status }: { status: AgentStatus }) {
                 contentFit="contain"
                 accessibilityLabel="登录二维码"
               />
+              <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+                {`${status.harnessName} App 就装在这台手机上的话，它扫不到这块屏幕上的码：可以把二维码存进相册或发到另一台设备，在那里打开再扫；也可以在电脑上的纸鸢里登录，用这台手机扫电脑屏幕上的码。`}
+              </Text>
             </View>
           </Notice>
         ) : page !== null ? (
@@ -492,7 +534,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
                   {onPhone.map((method) => (
                     <Button
                       key={method.id}
-                      label={method.name}
+                      label={methodText(method).name}
                       tone="primary"
                       busy={busy('sign-in')}
                       disabled={!connected}
@@ -514,13 +556,18 @@ function AgentBody({ status }: { status: AgentStatus }) {
               )}
               {terminal.map((method) => (
                 <View key={method.id} style={styles.gap}>
-                  {method.description ? (
+                  {terminal.length > 1 || methodText(method).description ? (
                     <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                      {method.description}
+                      {[
+                        terminal.length > 1 ? methodText(method).name : null,
+                        methodText(method).description,
+                      ]
+                        .filter(Boolean)
+                        .join('：')}
                     </Text>
                   ) : null}
                   <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                    由 Harness 自己在终端里登录，纸鸢不经手凭据。在电脑的终端里运行：
+                    {`由 Harness 自己在终端里登录，纸鸢不经手凭据。在电脑的 ${shell} 里运行：`}
                   </Text>
                   <Code>{method.command!}</Code>
                   <View style={styles.row}>
@@ -540,7 +587,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
               ))}
               {elsewhere ? (
                 <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                  {`${elsewhere.name}会在 ${status.name} 所在的电脑上打开浏览器，请到那台电脑上登录。`}
+                  {`${methodText(elsewhere).name}会在 ${status.name} 所在的电脑上打开浏览器，请到那台电脑上登录。`}
                 </Text>
               ) : null}
             </View>
@@ -864,7 +911,9 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
   const host = useHost()
   const connected = useConnected()
   const { busy, run } = useActions()
-  const limits = currentLimits(status.limits)
+  // What was read before the agent signed out belongs to the account it had then.
+  const signedOut = status.signIn === 'required'
+  const limits = signedOut ? [] : currentLimits(status.limits)
   const observed = Math.max(0, ...limits.map((l) => l.observedAt)) || null
   const readable = canReadLimits(status)
   const refresh = () =>
@@ -916,9 +965,13 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
       <ListGroup
         header="套餐用量"
         footer={
-          status.limitsError ??
-          (observed && limits.length > 0 ? readText(observed) : undefined) ??
-          undefined
+          signedOut
+            ? undefined
+            : status.limitsError
+              ? hostText(status.limitsError, '没能读取套餐用量，稍后会再试。')
+              : observed && limits.length > 0
+                ? readText(observed)
+                : undefined
         }
       >
         {limits.length > 0 ? (
@@ -985,8 +1038,9 @@ function Providers({ status }: { status: AgentStatus }) {
     <ListGroup
       header="厂商"
       footer={
-        status.providersError ??
-        '在电脑上的纸鸢里添加厂商、登录或填写 key；这里只显示它们的状态和用量。'
+        status.providersError
+          ? hostText(status.providersError, '没能读取厂商的状态。')
+          : '在电脑上的纸鸢里添加厂商、登录或填写 key；这里只显示它们的状态和用量。'
       }
     >
       {providers.length === 0 ? (
@@ -1026,7 +1080,9 @@ function ApiKeySheet(props: { status: AgentStatus; visible: boolean; onClose(): 
     ? `key 交给 Claude Code，存进这个 Agent 配置目录里的 settings.json；纸鸢不留副本，也不读回。终端里用这个目录运行 ${status.cli?.command ?? ''} 也能用。`
     : status.harnessId === 'codebuddy'
       ? 'key 交给 Codebuddy Code，存进这个 Agent 配置目录里的 settings.json；纸鸢不留副本，也不读回。要在这个 Agent 用的站点上创建 key：国际站在 codebuddy.ai/profile/keys，国内站在 copilot.tencent.com/profile。'
-      : 'key 经 Codex 自己的 codex login 保存；纸鸢不留副本。要接别的服务商，在这个目录的 config.toml 里自己配。'
+      : status.harnessId === 'deepseek'
+        ? 'key 交给 DeepSeek Harness，存进它自己文件夹里的 .credentials.yaml；纸鸢不留副本，也不读回。key 在 platform.deepseek.com 的 API keys 页面创建。'
+        : 'key 经 Codex 自己的 codex login 保存；纸鸢不留副本。要接别的服务商，在这个目录的 config.toml 里自己配。'
   const warning = status.isDefault
     ? status.cli?.command
       ? `这是终端里 ${status.harnessName} 也在用的目录，终端里的 ${status.cli.command} 也会改用这个 key。`
@@ -1041,6 +1097,8 @@ function ApiKeySheet(props: { status: AgentStatus; visible: boolean; onClose(): 
       submitLabel="保存"
       canSubmit={value.key.trim().length > 0}
       onSubmit={async () => {
+        const problem = keyProblem(value, providers)
+        if (problem) throw new Error(problem)
         await call(host.link!, 'agents.setApiKey', {
           agentId: status.id,
           key: value.key.trim(),
