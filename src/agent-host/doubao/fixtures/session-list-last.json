@@ -1,0 +1,24 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "result": {
+    "type": "session_list",
+    "count": 2,
+    "sessions": [
+      {
+        "session_id": "10000000000025552",
+        "title": "整理旧的构建脚本",
+        "updated_at": "2026-10-02T09:14:05+08:00",
+        "cwd": "C:\\work\\kite-doubao-old"
+      },
+      {
+        "session_id": "10000000000026662",
+        "title": "新对话",
+        "updated_at": "2026-09-30T18:40:11+08:00"
+      }
+    ],
+    "next_cursor": "",
+    "has_more": false
+  }
+}
