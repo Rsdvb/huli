@@ -25,10 +25,11 @@ appId: io.github.rsdvb.huli
     start: 50%, 30%
     end: 50%, 92%
     duration: 500
+# The drag above put the list at the reply's top; the code lies below.
 - scrollUntilVisible:
     element:
       text: '(?s).*export function issueToken.*'
-    direction: UP
+    direction: DOWN
     centerElement: true
     timeout: 30000
 - takeScreenshot: k01-code
