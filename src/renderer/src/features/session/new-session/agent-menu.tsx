@@ -3,6 +3,7 @@ import { ArrowRight01Icon, Search01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentStatus } from '@shared/agent-host'
+import { limitHolds } from '@shared/plan-limits'
 import { planQuota, type PlanQuota } from '@shared/plan-quota'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
@@ -678,7 +679,7 @@ function UsageNote({ limits, now }: { limits: AgentStatus['limits']; now: number
   if (!limit) return null
   const level = limitLevel(limit)
   const percent = limitPercent(limit, view)
-  const current = limits.filter((l) => l.resetsAt === null || l.resetsAt > now)
+  const current = limits.filter((l) => limitHolds(l, now))
   return (
     <Tooltip>
       <TooltipTrigger

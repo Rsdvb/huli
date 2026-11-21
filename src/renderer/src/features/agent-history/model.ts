@@ -13,8 +13,16 @@ export interface HistoryList {
   /** More pages are coming. */
   loading: boolean
   error: string | null
+  /** Huli: the error asks for the agent's sign-in. */
+  signIn?: boolean
+  /** Huli: the page that failed, which a retry goes on from; null when the first one did. */
+  failedCursor?: string | null
+  /** Huli: the agent cannot list such sessions at all, so it has no tab. */
+  cannotList?: boolean
   /** For another folder's listing: the folder its sessions were read from. */
   source?: string
+  /** Huli: of the Claude desktop app's listing, the Claude Code agent that imports it. */
+  agentId?: AgentId
 }
 
 export interface HistoryGroup {

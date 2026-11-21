@@ -22,13 +22,14 @@ function statusOf(window: TestPort, agentId: AgentId = 'fake-agent'): AgentStatu
   )?.status
 }
 
+// Read a minute ago, resetting in a day: still current, as an undated window read long ago is not.
 const WEEK: PlanLimit = {
   window: 'seven_day',
   label: 'Weekly',
   usedPercent: 40,
-  resetsAt: null,
+  resetsAt: Date.now() + 24 * 60 * 60_000,
   state: 'ok',
-  observedAt: 1,
+  observedAt: Date.now() - 60_000,
 }
 
 /** A data folder whose agents file remembers the fake agent signed in as `email`, with a plan. */

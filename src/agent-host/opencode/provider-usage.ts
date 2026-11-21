@@ -2,7 +2,9 @@
 // vendors whose keys it stores. Secrets stay in the request headers and never reach a result.
 
 import type { AgentProvider, PlanLimit, ProviderBalance } from '@shared/agent-host'
-import { readBody } from '../vendor-usage/common'
+import { amountLimit, readBody } from '../vendor-usage/common'
+import { DEEPSEEK_API, parseDeepSeekKeyBalance } from '../vendor-usage/deepseek'
+import { parseGlmQuotaLimits } from '../vendor-usage/glm'
 import { parseKimiCodeUsage } from '../vendor-usage/kimi-code'
 import { parseMiniMaxRemains } from '../vendor-usage/minimax-code'
 
@@ -177,24 +179,56 @@ function goEndpoint(): Endpoint {
   }
 }
 
+/** DeepSeek's public `/user/balance`, read as DeepSeek Harness reads it: the granted part kept. */
 function deepSeekEndpoint(): Endpoint {
   return {
-    url: 'https://api.deepseek.com/user/balance',
+    url: `${DEEPSEEK_API}/user/balance`,
     headers: bearer,
     parse(body, now) {
-      const root = record(body)
-      const infos = root ? list(root.balance_infos) : null
-      if (!infos) return null
-      const balances: ProviderBalance[] = []
-      for (const item of infos) {
-        const info = record(item)
-        const amount = num(info?.total_balance)
-        const currency = text(info?.currency)
-        if (amount === null || !currency) continue
-        balances.push({ label: 'Balance', amount, currency })
-      }
+      const balances = parseDeepSeekKeyBalance(body)
+      if (!balances) return null
       return balances.length > 0 ? readyUsage(now, [], balances) : failedUsage(now)
     },
+  }
+}
+
+const cents = (amount: number): number => Math.round(amount * 100) / 100
+
+/**
+ * SiliconFlow's `/v1/user/info`, whose amounts are decimal strings: `totalBalance` all of it,
+ * `chargeBalance` the topped-up part and `balance` the rest, which its console calls granted. Its
+ * docs give the fields no meaning, so the granted part is told only when the three add up.
+ */
+export function parseSiliconFlowUser(
+  body: unknown,
+  currency: string,
+  now: number,
+): ProviderUsage | null {
+  const root = record(body)
+  if (!root || root.status === false) return null
+  const code = num(root.code)
+  if (code !== null && code !== 20000) return null
+  const data = record(root.data)
+  const total = num(data?.totalBalance)
+  if (total === null) return null
+  const paid = num(data?.chargeBalance)
+  const rest = num(data?.balance)
+  const granted =
+    paid !== null && rest !== null && rest > 0 && Math.abs(paid + rest - total) < 0.005 ? rest : 0
+  const balance: ProviderBalance = {
+    label: 'Balance',
+    amount: cents(total),
+    currency,
+    ...(granted > 0 ? { granted: cents(granted) } : {}),
+  }
+  return readyUsage(now, [], [balance])
+}
+
+function siliconFlowEndpoint(host: string, currency: string): Endpoint {
+  return {
+    url: `https://${host}/v1/user/info`,
+    headers: bearer,
+    parse: (body, now) => parseSiliconFlowUser(body, currency, now),
   }
 }
 
@@ -215,19 +249,47 @@ function moonshotEndpoint(host: string, currency: string): Endpoint {
   }
 }
 
+const OPENROUTER_RESETS = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+} as const satisfies Record<string, string>
+
+/**
+ * The key's own spending limit, from `/api/v1/key`, which any key may read. The account's credits
+ * are only `/api/v1/credits`', which takes a management key that serves no model, so OpenCode
+ * never holds one. A key without a limit has nothing to show.
+ */
+export function parseOpenRouterKey(body: unknown, now: number): ProviderUsage | null {
+  const data = record(record(body)?.data)
+  if (!data) return null
+  if (data.limit === null) return readyUsage(now, [])
+  const total = num(data.limit)
+  const left = num(data.limit_remaining)
+  if (total === null || left === null) return null
+  if (total <= 0) return readyUsage(now, [])
+  const reset = text(data.limit_reset)
+  const period =
+    reset !== null && Object.hasOwn(OPENROUTER_RESETS, reset)
+      ? (reset as keyof typeof OPENROUTER_RESETS)
+      : null
+  const budget = (list(data.budgets) ?? []).map(record).find((item) => item?.scope === 'key_limit')
+  const used = Math.max(0, total - left)
+  return readyUsage(now, [
+    amountLimit(
+      period ?? 'key_limit',
+      period ? OPENROUTER_RESETS[period] : 'Key limit',
+      used,
+      total,
+      'USD',
+      now,
+      budget ? instant(budget.resets_at) : null,
+    ),
+  ])
+}
+
 function openRouterEndpoint(): Endpoint {
-  return {
-    url: 'https://openrouter.ai/api/v1/credits',
-    headers: bearer,
-    parse(body, now) {
-      const root = record(body)
-      const data = root ? record(root.data) : null
-      const credits = num(data?.total_credits)
-      const used = num(data?.total_usage)
-      if (credits === null || used === null) return null
-      return readyUsage(now, [], [{ label: 'Balance', amount: credits - used, currency: 'USD' }])
-    },
-  }
+  return { url: 'https://openrouter.ai/api/v1/key', headers: bearer, parse: parseOpenRouterKey }
 }
 
 function glmEndpoint(host: string): Endpoint {
@@ -236,43 +298,8 @@ function glmEndpoint(host: string): Endpoint {
     url: `https://${host}/api/monitor/usage/quota/limit`,
     headers: (key) => ({ authorization: key }),
     parse(body, now) {
-      const root = record(body)
-      if (!root) return null
-      if (root.success === false) return null
-      const code = num(root.code)
-      if (code !== null && code !== 200) return null
-      const data = record(root.data)
-      const items = data ? list(data.limits) : null
-      if (!items) return null
-      const limits: PlanLimit[] = []
-      for (const item of items) {
-        const row = record(item)
-        if (!row) continue
-        const used = percent(row.percentage)
-        if (used === null) continue
-        const type = text(row.type)
-        const unit = num(row.unit)
-        let window = 'glm'
-        let label = 'Usage'
-        if (type === 'TIME_LIMIT') {
-          window = 'tool_calls'
-          label = 'Tool calls'
-        } else if (type === 'TOKENS_LIMIT') {
-          if (unit === 3) {
-            window = 'five_hour'
-            label = '5-hour'
-          } else if (unit === 6) {
-            window = 'seven_day'
-            label = 'Weekly'
-          } else {
-            window = `tokens_${unit ?? 'other'}`
-            label = 'Tokens'
-          }
-        } else if (type) {
-          window = `glm_${type.toLowerCase()}`
-        }
-        limits.push(limit(window, label, used, instant(row.nextResetTime), now))
-      }
+      const limits = parseGlmQuotaLimits(body, now)
+      if (!limits) return null
       return limits.length > 0 ? readyUsage(now, limits) : unsupportedUsage(now)
     },
   }
@@ -309,6 +336,8 @@ const ENDPOINTS: Record<string, Endpoint> = {
   moonshotai: moonshotEndpoint('api.moonshot.ai', 'USD'),
   'moonshotai-cn': moonshotEndpoint('api.moonshot.cn', 'CNY'),
   openrouter: openRouterEndpoint(),
+  siliconflow: siliconFlowEndpoint('api.siliconflow.com', 'USD'),
+  'siliconflow-cn': siliconFlowEndpoint('api.siliconflow.cn', 'CNY'),
   zai: glmEndpoint('api.z.ai'),
   'zai-coding-plan': glmEndpoint('api.z.ai'),
   zhipuai: glmEndpoint('open.bigmodel.cn'),

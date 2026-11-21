@@ -42,6 +42,13 @@ import { parseMistralAccount } from './vendor-usage/mistral-vibe'
 import { KeychainRefused, parseCursorAbout, type CursorSignIn } from './vendor-usage/cursor'
 import { readAuggieAccount } from './vendor-usage/auggie'
 import { readCopilotQuota } from './vendor-usage/copilot'
+import {
+  GLM_USAGE_METHOD,
+  GLM_USAGE_VERSION,
+  offersGlmUsage,
+  parseGlmUsage,
+  type GlmUnavailable,
+} from './vendor-usage/glm'
 import { readKiloProfile } from './vendor-usage/kilo'
 import { readQoderUsage } from './vendor-usage/qoder'
 import { storedSignInReader } from './vendor-usage/readers'
@@ -64,6 +71,7 @@ import {
 import { readAntigravityUsage } from './antigravity-usage'
 import { signsInWithKeyOnly } from '@shared/agents'
 import type { AgentProcess, NodeRuntime } from '@shared/host-control'
+import { limitOutlived } from '@shared/plan-limits'
 import type { Platform } from '@shared/platform'
 import { agentColor, type AddedAgent, type HostSettings } from '@shared/settings'
 import {
@@ -169,6 +177,7 @@ import {
 import { OAUTH_ACCOUNT_LABEL } from './claude/reports'
 import {
   AgentRequestError,
+  LimitsReadFailed,
   type AgentConnection,
   type AgentInit,
   type AuthMethodInfo,
@@ -207,6 +216,8 @@ import {
 import { HostedRun, type HostedRunHooks } from './hosted-run'
 import { t } from './i18n'
 import { CliVersions, type CliProbe, type CliVersion } from './installed-cli'
+import { routeFor } from './node-proxy/download'
+import { httpTransport, ownProxyVariables, type Transport } from './node-runtime/transport'
 import { OpenCodeClient } from './opencode/client'
 import { OpenCodeConnection } from './opencode/connection'
 import type { OpenCodeSessions } from './model-requests/opencode'
@@ -240,6 +251,7 @@ import type {
   AgentUpdatesFile,
   HarnessManifestFile,
   RegistryListingFile,
+  RememberedBalances,
   RememberedInit,
 } from './storage'
 import { readUvxVersion, uvxFetchArgs, writeUvxVersion } from './uvx-install'
@@ -319,6 +331,12 @@ const READ_ANTIGRAVITY_LIMITS = false
 
 /** How often a read the user asks for may run agy, however many views ask within it. */
 const ASKED_READ_MS = 60_000
+
+/**
+ * Huli: how soon a refresh the user presses asks OpenCode's providers' vendors again with their
+ * keys, however often it is pressed; a read nobody asked for waits `limitsMs`.
+ */
+const PROVIDERS_FORCED_MS = 10_000
 
 /** Huli: why a waiting `authenticate` was let go: a check found the agent signed in already. */
 const SIGNED_IN_ELSEWHERE = new Error('The agent is signed in')
@@ -403,6 +421,11 @@ export interface AgentManagerDeps extends DriverOverrides {
   fetchRegistry?(options: RegistryFetchOptions): Promise<RegistryAgents>
   /** Reads the body of Kettu's harness compatibility manifest from its download service. */
   fetchManifest?(options: ManifestFetchOptions): Promise<string>
+  /**
+   * Huli: the archives', the listing's and the manifest's requests; by default Kite's own, through
+   * Advanced › Proxy or the environment's proxy, as its Node.js install goes.
+   */
+  downloads?: Transport
   /** The keys the manifest's signature is checked against; the bundled ones by default. */
   manifestKeys?: readonly string[]
   /** What the manifest's requests say they are, which tells the service the app from the daemon. */
@@ -545,6 +568,9 @@ class Slot {
   balanceRun: Promise<void> | null = null
   limits = new Map<string, PlanLimit>()
   balances: ProviderBalance[] = []
+  /** Huli: when `balances` were read, and whether an earlier run did and none since. */
+  balancesAt = 0
+  balancesStale = false
   /** Kettu handed the harness an API key for this agent, which it never reads back. */
   apiKey = false
   /** The capabilities of the last `initialize`, from this run or an earlier one. */
@@ -644,10 +670,25 @@ function forgetReadings(slot: Slot): void {
   slot.limits.clear()
   slot.limitsReadAt = 0
   slot.limitsError = null
-  slot.balances = []
+  setBalances(slot, [], 0)
   slot.resets = null
   slot.resetsError = null
   slot.resetsReadAt = 0
+}
+
+/** Huli: the balances a read gave, now; an earlier run's kept ones are replaced. */
+function setBalances(slot: Slot, balances: ProviderBalance[], now: number): void {
+  slot.balances = balances
+  slot.balancesAt = balances.length > 0 ? now : 0
+  slot.balancesStale = false
+}
+
+/** Huli: balances worth keeping for the next run; none while there are none, or no time. */
+function keptBalances(
+  balances: readonly ProviderBalance[],
+  observedAt: number,
+): RememberedBalances | undefined {
+  return balances.length > 0 && observedAt > 0 ? { items: [...balances], observedAt } : undefined
 }
 
 // A signed-out account is not kept: whether it is still signed out shows once the agent runs.
@@ -656,13 +697,19 @@ function rememberedEntry(slot: Slot): AgentsFile['agents'][AgentId] | null {
   const limits = [...slot.limits.values()]
   const init = slot.initRecord
   const signIn = slot.answeredSignIn
-  return account || limits.length > 0 || init || slot.apiKey || signIn
+  const balances = keptBalances(slot.balances, slot.balancesAt)
+  const balance = slot.balance
+    ? keptBalances(slot.balance.balances, slot.balance.observedAt)
+    : undefined
+  return account || limits.length > 0 || init || slot.apiKey || signIn || balances || balance
     ? {
         account,
         limits,
         ...(init ? { init } : {}),
         ...(slot.apiKey ? { apiKey: true } : {}),
         ...(signIn ? { signIn } : {}),
+        ...(balances ? { balances } : {}),
+        ...(balance ? { balance } : {}),
       }
     : null
 }
@@ -777,6 +824,7 @@ export class AgentManager {
   /** DeepSeek Harness's sign-in and balance, read from its home without starting it. */
   private readonly dshAccounts: DshAccounts
   private readonly cliVersions: CliVersions
+  private readonly downloads: Transport
   /** The update command for each harness's user program, and what it was worked out for. */
   private readonly cliCommands = new Map<Harness, string>()
   private readonly cliCommandKeys = new Map<Harness, string>()
@@ -808,6 +856,9 @@ export class AgentManager {
       dueMs: this.timings.limitsMs,
       platform: deps.platform,
     })
+    this.downloads =
+      deps.downloads ??
+      httpTransport(() => routeFor(ownProxyVariables((name) => deps.env.get(name))))
     for (const def of deps.catalog) {
       const h = new Harness(def)
       this.harnesses.set(def.id, h)
@@ -1106,6 +1157,7 @@ export class AgentManager {
       const slot = this.home(h)
       slot.account = null
       slot.limits.clear()
+      setBalances(slot, [], 0)
       this.hooks.configChanged(slot.id)
     }
     // Turned on again, automatic updates take the target from the version the user moved to.
@@ -1684,6 +1736,7 @@ export class AgentManager {
     const version = request.version ?? adapter.version
     // The SDK never brings the CLI of its own: only the user's runs.
     const withoutCli = !!h.def.cli
+    if (h.task?.kind === 'install' && h.task.state === 'failed') h.task = null
     slot.state = 'installing'
     slot.detail = null
     slot.progress.clear()
@@ -1809,6 +1862,27 @@ export class AgentManager {
         `${h.def.name}: could not remove older versions: ${(error as Error).message}`,
       ),
     )
+  }
+
+  /**
+   * Kettu's own package did not install, and no install of it is left to run. The harness stays
+   * installable, as it was before, and the failure becomes its failed install task with npm's
+   * output, so every window and device shows why and installs again from it. A `failed` state
+   * would hold until a restart, and its retry is an agent's, which a harness without one refuses.
+   */
+  private packageInstallFailed(slot: Slot, message: string): void {
+    const { h } = slot
+    const detection = h.detection
+    const adapter = detection?.state === 'available' ? detection.adapter : null
+    const command = adapter
+      ? this.packageUpdateCommand(h, { adapterVersion: adapter.version, cliVersion: null }) ||
+        `${adapter.package}@${adapter.version}`
+      : h.def.name
+    slot.state = detection?.state ?? 'available'
+    slot.detail = null
+    h.taskOutput.clear()
+    h.taskOutput.push(slot.progress.toString())
+    h.task = { kind: 'install', state: 'failed', command, method: null, error: message }
   }
 
   /** Refuses a second install or update while one runs. */
@@ -1983,9 +2057,9 @@ export class AgentManager {
           home.detail = null
           return
         }
-        home.state = 'failed'
-        home.detail = (error as Error).message
-        throw new HostError('agent_unavailable', home.detail, { agentId, state: 'failed' })
+        const message = (error as Error).message
+        this.packageInstallFailed(home, message)
+        throw new HostError('agent_error', message, { agentId })
       } finally {
         this.emit(home)
       }
@@ -2396,6 +2470,13 @@ export class AgentManager {
       await before
       await this.detectAll()
       if (this.stopped) return { checked: 0, failures: [] }
+      // The user's check reads every program again, so one updated outside Kettu shows its new
+      // version: a CLI's launcher can keep its size and time across versions, as npm's do, which
+      // is all the version cache looks at.
+      if (all) {
+        this.cliVersions.clear()
+        await Promise.all([...this.harnesses.values()].map((h) => this.detect(h)))
+      }
       const abort = new AbortController()
       this.updateAbort = abort
       const now = Date.now()
@@ -2420,6 +2501,7 @@ export class AgentManager {
   private readRegistry(signal?: AbortSignal): Promise<RegistryAgents> {
     return (this.deps.fetchRegistry ?? fetchRegistry)({
       timeoutMs: this.timings.updateViewMs,
+      transport: this.downloads,
       ...(signal ? { signal } : {}),
     })
   }
@@ -2475,6 +2557,7 @@ export class AgentManager {
     try {
       body = await (this.deps.fetchManifest ?? fetchManifest)({
         timeoutMs: this.timings.updateViewMs,
+        transport: this.downloads,
         ...(signal ? { signal } : {}),
         ...(this.deps.userAgent ? { userAgent: this.deps.userAgent } : {}),
       })
@@ -2735,6 +2818,17 @@ export class AgentManager {
     if (failures.length === checked) {
       throw new HostError('agent_error', t('agent.update.checkFailed', { reason: failures[0] }))
     }
+    // What was found shows; the check still says it was not whole, rather than all up to date.
+    if (failures.length > 0) {
+      throw new HostError(
+        'agent_error',
+        t('agent.update.checkPartlyFailed', {
+          failed: String(failures.length),
+          total: String(checked),
+          reason: failures[0],
+        }),
+      )
+    }
     return this.statuses()
   }
 
@@ -2879,6 +2973,7 @@ export class AgentManager {
           ...(entry.bare ? { bare: true as const } : {}),
           platform,
           timeoutMs,
+          transport: this.downloads,
           signal,
           onOutput,
         })
@@ -2999,6 +3094,14 @@ export class AgentManager {
       plan.command,
       async (signal, onOutput) => {
         diagnostics.event(h.def.id, 'update', plan.command)
+        // Windows cannot replace a program that runs, so an agent no session uses stops first.
+        await Promise.all(
+          this.agentsOf(h).map((slot) =>
+            slot.runtime && this.hooks.liveSessions(slot.id) === 0
+              ? this.stopProcess(slot)
+              : undefined,
+          ),
+        )
         const result = await (this.deps.runProgram ?? runProgram)({
           program: run.program,
           args: run.args,
@@ -3138,9 +3241,8 @@ export class AgentManager {
           home.detail = null
           throw new HostError('agent_error', message, { agentId })
         }
-        home.state = 'failed'
-        home.detail = message
-        throw new HostError('agent_unavailable', home.detail, { agentId, state: 'failed' })
+        this.packageInstallFailed(home, message)
+        throw new HostError('agent_error', message, { agentId })
       } finally {
         this.emit(home)
       }
@@ -3253,6 +3355,7 @@ export class AgentManager {
           ...(archive.bare ? { bare: true as const } : {}),
           platform,
           timeoutMs,
+          transport: this.downloads,
           signal,
           onOutput,
         })
@@ -3608,7 +3711,10 @@ export class AgentManager {
       before?.kind === named.kind && before.label === named.label && before.email === named.email
     slot.account = same && before.tier ? { ...named, tier: before.tier } : named
     // A gateway has no plan: windows kept from a sign-in before it would show as its limits.
-    if (named.kind === 'gateway') slot.limits.clear()
+    if (named.kind === 'gateway') {
+      slot.limits.clear()
+      setBalances(slot, [], 0)
+    }
     // Huli: the plan's windows and balances belong to the account that read them; signed out, or
     // signed in as another, they are not this agent's any more.
     if (named.kind === 'none' || (before && otherAccount(before, named))) forgetReadings(slot)
@@ -3774,6 +3880,7 @@ export class AgentManager {
           'kilo',
           'auggie',
           'antigravity',
+          'glm',
         ].includes(slot.def.id) ||
         storedSignInReader(slot.def.id) !== null ||
         this.driver(slot).reads?.limits === true)
@@ -3794,6 +3901,7 @@ export class AgentManager {
     const runtime = await this.ensureReady(slot.id)
     const { connection } = runtime
     if (slot.def.id === 'grok') return this.readGrokLimits(slot, runtime, force)
+    if (slot.def.id === 'glm') return this.readGlmLimits(slot, runtime)
     if (connection.request && slot.def.id === 'mistral-vibe') {
       const now = Date.now()
       const version = runtime.init.version ?? slot.h.binaryVersion
@@ -3852,6 +3960,9 @@ export class AgentManager {
     try {
       limits = await connection.readLimits()
     } catch (error) {
+      if (error instanceof LimitsReadFailed) {
+        throw new HostError('agent_error', t('agent.limitsReadFailed', { agent: slot.name }))
+      }
       throw this.limitsError(slot, error)
     }
     const now = Date.now()
@@ -3861,7 +3972,7 @@ export class AgentManager {
     slot.limits.clear()
     for (const limit of merged) slot.limits.set(limit.window, limit)
     const extras = connection.planExtras?.()
-    if (extras) slot.balances = extras.balances
+    if (extras) setBalances(slot, extras.balances, now)
     this.emit(slot)
     // The windows do not wait for the reset credits, which arrive in a status of their own.
     if (slot.def.id === 'codex') void this.readResets(slot)
@@ -4180,19 +4291,51 @@ export class AgentManager {
     if (slot.signIn !== 'signed-in') this.signedIn(slot.id)
   }
 
+  /**
+   * GLM Agent's Coding Plan quota from its own `_glm/usage`, which it reads with the key it keeps,
+   * so Kite never reads that key. Windows it kept from an earlier read show, with why the last one
+   * failed; a refused or missing key leaves none.
+   */
+  private async readGlmLimits(slot: Slot, runtime: AgentRuntime): Promise<void> {
+    const { connection } = runtime
+    if (!connection.request || !versionAtLeast(runningVersion(slot), GLM_USAGE_VERSION)) return
+    if (!offersGlmUsage(runtime.init.raw)) return
+    let reply: unknown
+    try {
+      reply = await connection.request<unknown>(GLM_USAGE_METHOD, {})
+    } catch (error) {
+      throw this.limitsError(slot, error)
+    }
+    const now = Date.now()
+    const read = parseGlmUsage(reply, now)
+    if (!read) throw new HostError('agent_error', glmUnavailable('invalidResponse', slot.name))
+    if (read.limits.length > 0) {
+      this.applyVendorUsage(slot, { limits: read.limits, balances: [] }, now)
+    } else if (
+      read.unavailable === 'authenticationFailed' ||
+      read.unavailable === 'missingCredentials'
+    ) {
+      slot.limits.clear()
+      this.emit(slot)
+    }
+    if (read.unavailable) {
+      throw new HostError('agent_error', glmUnavailable(read.unavailable, slot.name))
+    }
+  }
+
   /** The agent says it is signed out: its account and the plan it read are gone. */
   private signedOut(slot: Slot): void {
     slot.signIn = 'required'
     slot.account = null
     slot.limits.clear()
-    slot.balances = []
+    setBalances(slot, [], 0)
     slot.resets = null
     slot.resetsError = null
     this.emit(slot)
   }
 
   private applyVendorUsage(slot: Slot, usage: VendorUsage, now: number): void {
-    slot.balances = usage.balances
+    setBalances(slot, usage.balances, now)
     if (usage.tier) {
       slot.account = slot.account
         ? { ...slot.account, label: usage.tier }
@@ -4461,12 +4604,32 @@ export class AgentManager {
       const slot = this.slots.get(agentId)
       if (!slot || !entry) continue
       slot.account = entry.account
-      // A window an earlier run kept under one of Claude Code's other names is read again.
-      const kept = entry.limits.filter((limit) => planWindow(limit.window) === limit.window)
+      // A window an earlier run kept under one of Claude Code's other names is read again, and
+      // one without a reset whose reading is a period old is from a period gone by.
+      const now = Date.now()
+      const kept = entry.limits.filter(
+        (limit) => planWindow(limit.window) === limit.window && !limitOutlived(limit, now),
+      )
       slot.limits = new Map(kept.map((limit) => [limit.window, limit]))
       slot.initRecord = entry.init ?? null
       slot.apiKey = entry.apiKey === true
       slot.answeredSignIn = entry.signIn ?? null
+      // Huli: the balances last read show as an earlier run's until they are read again.
+      if (entry.balances) {
+        slot.balances = entry.balances.items
+        slot.balancesAt = entry.balances.observedAt
+        slot.balancesStale = true
+      }
+      if (entry.balance && slot.def.id === 'deepseek') {
+        slot.balance = {
+          state: 'ready',
+          limits: [],
+          balances: entry.balance.items,
+          observedAt: entry.balance.observedAt,
+          error: null,
+          stale: true,
+        }
+      }
       slot.remembered = rememberedJson(slot)
       if (slot.def.id === 'antigravity') this.decideSignIn(slot)
       this.emit(slot)
@@ -4720,7 +4883,8 @@ export class AgentManager {
     await this.detectAll()
     if (slot.h.detection?.state !== 'available' || !slot.h.detection.spec) return
     if (slot.providersRun) return slot.providersRun
-    if (!force && Date.now() - slot.providersReadAt < this.timings.limitsMs) return
+    const gap = force ? PROVIDERS_FORCED_MS : this.timings.limitsMs
+    if (Date.now() - slot.providersReadAt < gap) return
     slot.providersRun = this.limitedRead(slot, this.readProviders(slot)).finally(() => {
       slot.providersRun = null
     })
@@ -5567,6 +5731,7 @@ export class AgentManager {
   private async credentialsChanged(slot: Slot): Promise<void> {
     slot.account = null
     forgetReadings(slot)
+    slot.providersReadAt = 0
     slot.signIn = 'unknown'
     const reads = this.readsSignInAgain(slot)
     if (reads) slot.readingSignIn = true
@@ -5868,10 +6033,17 @@ export class AgentManager {
           }
         : {}),
       ...(slot.def.id === 'deepseek' ? { balance: signedOut ? null : slot.balance } : {}),
-      ...(slot.balances.length && !signedOut ? { balances: slot.balances } : {}),
+      ...(slot.balances.length && !signedOut
+        ? {
+            balances: slot.balances,
+            ...(slot.balancesAt > 0 ? { balancesAt: slot.balancesAt } : {}),
+            ...(slot.balancesStale ? { balancesStale: true as const } : {}),
+          }
+        : {}),
       ...(limitsReason ? { limitsReason } : {}),
       ...(slot.def.sharesSignIn ? { sharesSignIn: true } : {}),
       deletesCopy: (capabilities?.deleteSession ?? false) || removesCopies(slot.def.id),
+      ...(capabilities ? {} : { capabilitiesUnknown: true as const }),
       ...(slot.def.movedAccounts
         ? {
             movedAccounts: {
@@ -5881,7 +6053,10 @@ export class AgentManager {
             },
           }
         : {}),
-      limits: signedOut ? [] : [...slot.limits.values()],
+      // A window without a reset that was not read again for its whole period is gone.
+      limits: signedOut
+        ? []
+        : [...slot.limits.values()].filter((limit) => !limitOutlived(limit, Date.now())),
       ...(slot.limitsError && !signedOut ? { limitsError: slot.limitsError } : {}),
       ...(slot.resets && !signedOut ? { resets: slot.resets } : {}),
       ...(slot.resetsError && !signedOut ? { resetsError: slot.resetsError } : {}),
@@ -6251,6 +6426,11 @@ function settledWithin(promise: Promise<void>, ms: number): Promise<void> {
 /** Whether an agent method hands its sign-in page to the client, rather than opening a browser here. */
 function handsOverPage(def: AgentDefinition, methodId: string): boolean {
   return methodId === DELEGATED_SIGN_IN || (def.pageSignIns?.includes(methodId) ?? false)
+}
+
+/** Why GLM Agent could not read its quota, in the user's words. */
+function glmUnavailable(reason: GlmUnavailable, agent: string): string {
+  return t(`agent.glmUsage.${reason}`, { agent })
 }
 
 /** Maps a failed request to the agent to the port error the renderer acts on. */

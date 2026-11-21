@@ -208,7 +208,7 @@ import {
   nodeRuntimesFolder,
   NodeRuntimeService,
 } from './node-runtime/service'
-import { httpTransport } from './node-runtime/transport'
+import { httpTransport, ownProxyVariables } from './node-runtime/transport'
 import { ComputerUse } from './computer/service'
 import { SessionFiles } from './session-files'
 import { SessionManager, type SessionTimings } from './sessions'
@@ -246,6 +246,7 @@ import { createValidators } from './validate'
 import { AgentHistory } from './agent-history'
 import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
+import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
@@ -1077,6 +1078,7 @@ export class AgentHost {
       worktrees: this.worktrees,
       file: sessionsFile(options.userDataPath, log),
       returned: returnedFile(options.userDataPath, log),
+      deleted: new DeletedSessions(deletedSessionsFile(options.userDataPath, log)),
       projectMcp: new ProjectMcpAnswers(projectMcpFile(options.userDataPath, log)),
       projectHooks: new ProjectHooksAnswers(projectHooksFile(options.userDataPath, log)),
       portOpen: (portId) => this.hub.has(portId),
@@ -2815,13 +2817,7 @@ export class AgentHost {
 
   /** The proxy variables of Kite's own requests: Advanced › Proxy, else the environment's. */
   private ownProxy(): ProxyVariables {
-    const read = (name: string) => this.env.get(name) ?? this.env.get(name.toLowerCase()) ?? null
-    return {
-      http: read('HTTP_PROXY'),
-      https: read('HTTPS_PROXY'),
-      all: read('ALL_PROXY'),
-      noProxy: read('NO_PROXY'),
-    }
+    return ownProxyVariables((name) => this.env.get(name))
   }
 
   /**
@@ -3178,10 +3174,10 @@ export class AgentHost {
       'sessions.prepare': (params, { portId }) => sessions.prepare(params, portId),
       'sessions.discard': ({ sessionId }) => sessions.discard(sessionId),
       // Huli: one listed by the import from the agents keeps its title and times.
-      'sessions.import': (params) =>
+      'sessions.import': ({ source, ...params }) =>
         sessions.importSession(
           params,
-          this.agentHistory.keptFor(params.agentId, params.acpSessionId),
+          this.agentHistory.keptFor(params.agentId, params.acpSessionId, source ?? null),
         ),
       'sessions.open': async ({ sessionId }, { device }) =>
         digestsFor(device, await sessions.open(sessionId, imagesFor(device))),

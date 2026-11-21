@@ -4,6 +4,7 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { ImportableSession, Project } from '@shared/agent-host'
+import { CANNOT_LIST } from '@shared/agent-history'
 import type { AgentId, PromptCache } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
@@ -60,12 +61,17 @@ export function ImportSessionsDialog({
   const agents = useAgentsStore(
     useShallow((s) =>
       usableAgents(s.order, s.byId).filter(
-        (a) => !a.disabled && a.capabilities.listSessions && readiness(a).kind !== 'missing',
+        // Huli: one not started at its version yet is asked, and left out once it says it cannot.
+        (a) =>
+          !a.disabled &&
+          (a.capabilities.listSessions || a.capabilitiesUnknown === true) &&
+          readiness(a).kind !== 'missing',
       ),
     ),
   )
-  const agentIds = agents.map((a) => a.id)
   const [lists, setLists] = useState<AgentLists>({})
+  const shownAgents = agents.filter((a) => !lists[a.id]?.cannotList)
+  const agentIds = shownAgents.map((a) => a.id)
   const [chosen, setChosen] = useState<AgentId | null>(null)
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
   // The session being imported, and why the ones that failed did.
@@ -105,6 +111,8 @@ export function ImportSessionsDialog({
             nextCursor: null,
             loading: false,
             error: errorMessage(error),
+            cannotList:
+              (error as { data?: { reason?: unknown } } | null)?.data?.reason === CANNOT_LIST,
           },
         }))
       })
@@ -225,7 +233,7 @@ export function ImportSessionsDialog({
           <DialogTitle>{t('import.title', { project: project.name })}</DialogTitle>
           <DialogDescription>{t('import.description')}</DialogDescription>
         </DialogHeader>
-        {agents.length === 0 || !shown ? (
+        {shownAgents.length === 0 || !shown ? (
           <div className="flex min-h-0 flex-1 items-center justify-center border-y border-subtle px-5.5">
             <p className="text-ui text-secondary">{t('import.noAgents')}</p>
           </div>
@@ -241,7 +249,7 @@ export function ImportSessionsDialog({
               aria-label={t('import.agents')}
               className="w-56 shrink-0 scroll-fade-y justify-start overflow-y-auto overscroll-contain p-2 group-data-vertical/tabs:h-auto phone:max-h-30 phone:w-full"
             >
-              {agents.map((agent) => (
+              {shownAgents.map((agent) => (
                 <SourceRow
                   key={agent.id}
                   agentId={agent.id}
@@ -258,7 +266,7 @@ export function ImportSessionsDialog({
             >
               <SessionList
                 agentId={shown}
-                agentName={agents.find((a) => a.id === shown)?.name ?? ''}
+                agentName={shownAgents.find((a) => a.id === shown)?.name ?? ''}
                 list={shownList}
                 keys={keys}
                 selected={selected}
@@ -412,9 +420,19 @@ function SessionList({
     )
   }
   if (list.sessions.length === 0) {
+    // Huli: a page without the folder's sessions, as an agent that lists every folder's together
+    // may give, still leads to the older ones.
+    const cursor = list.nextCursor
     return (
-      <div className="flex flex-1 items-center justify-center px-6 text-center">
-        <p className="text-ui text-secondary">{t('import.noSessions', { agent: agentName })}</p>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-ui text-secondary">
+          {t(cursor ? 'import.noRecentSessions' : 'import.noSessions', { agent: agentName })}
+        </p>
+        {cursor && (
+          <Button variant="outline" size="sm" onClick={() => onMore(cursor)}>
+            {t('import.showMore')}
+          </Button>
+        )}
       </div>
     )
   }

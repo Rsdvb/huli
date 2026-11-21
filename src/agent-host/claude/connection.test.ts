@@ -17,6 +17,7 @@ import type { LaunchSpec } from '../catalog'
 import { CLAUDE_CODE } from '../catalog'
 import {
   AgentRequestError,
+  LimitsReadFailed,
   SideQuestionUnsupported,
   type PermissionAnswer,
   type PermissionRequest,
@@ -2830,6 +2831,20 @@ describe('sessions', () => {
       env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:3425', ANTHROPIC_AUTH_TOKEN: 'token' },
       apiKeyHelper: '/usr/local/bin/key',
     })
+  })
+
+  it('tells a failed plan limits read on a subscription from a plan with none', async () => {
+    const s = await setup()
+    expect((await s.connection.readLimits!()).map((limit) => limit.window)).toEqual([
+      'five_hour',
+      'seven_day',
+      'seven_day_opus',
+    ])
+    s.sdk.usageError = new Error('usage endpoint 529')
+    await expect(s.connection.readLimits!()).rejects.toBeInstanceOf(LimitsReadFailed)
+    // On a key there is no plan whose windows a failure would leave unread.
+    s.sdk.account = { apiKeySource: 'user', apiProvider: 'firstParty' }
+    await expect(s.connection.readLimits!()).resolves.toEqual([])
   })
 
   it('collects the text of a hidden turn', async () => {

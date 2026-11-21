@@ -11,6 +11,7 @@ import { countdown, inlineReset, planReset } from '@renderer/features/sidebar/pl
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { useShortWindow } from '@renderer/hooks/use-short-window'
 import {
+  balanceLabel,
   limitLabel,
   longAgo,
   monthDayTime,
@@ -166,13 +167,7 @@ function PlanCard({ card, named, now }: { card: UsageCard; named: boolean; now: 
   const where = [...new Set(card.places.map((place) => hostName(place.hostId)))]
   const balanceRows = (card.balances ?? []).map((balance) => (
     <span key={`${balance.label}/${balance.currency}`} className="k-u-plan__balance">
-      <span>
-        {balance.label === 'Prepaid balance'
-          ? t('limits.prepaidBalance')
-          : balance.label === 'Extra usage'
-            ? t('limits.extraUsage')
-            : balance.label}
-      </span>
+      <span>{balanceLabel(balance.label)}</span>
       <b>
         {planBalance(
           balance.amount,

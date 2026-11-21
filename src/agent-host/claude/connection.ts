@@ -23,6 +23,7 @@ import {
 } from '@shared/thread'
 import {
   AgentRequestError,
+  LimitsReadFailed,
   optionAnswer,
   SideQuestionUnsupported,
   type AgentConnection,
@@ -1223,6 +1224,11 @@ export class ClaudeConnection implements AgentConnection {
     this.context.hooks.account(account)
   }
 
+  /** The kind of the account last reported since `account` was cleared; null before one. */
+  private reportedKind(): AgentAccount['kind'] | null {
+    return this.account === null ? null : (JSON.parse(this.account) as AgentAccount).kind
+  }
+
   private publishCommands(session: Session): void {
     const commands = mapCommands(session.commands, session.terminal)
     this.deliver({
@@ -2365,7 +2371,11 @@ export class ClaudeConnection implements AgentConnection {
 
   // Reports.
 
-  /** The plan limits, and the account with them, which Settings reads together. */
+  /**
+   * The plan limits, and the account with them, which Settings reads together. A read that fails
+   * on a subscription is a `LimitsReadFailed`, so the page says so rather than showing the last
+   * windows as current; signed out or on a key, there is no plan to read.
+   */
   async readLimits(): Promise<PlanLimit[]> {
     // Reported again even when unchanged, since the reader may have forgotten it.
     this.account = null
@@ -2382,6 +2392,7 @@ export class ClaudeConnection implements AgentConnection {
         )
         const account = await this.authStatus()
         if (account) this.report(account)
+        if (account?.kind === 'account') throw new LimitsReadFailed()
         return []
       }
     }
@@ -2398,6 +2409,7 @@ export class ClaudeConnection implements AgentConnection {
         'warn',
         `Claude Code's plan limits could not be read: ${errorText(error)}`,
       )
+      if (this.reportedKind() === 'account') throw new LimitsReadFailed()
       return []
     } finally {
       if (temporary) await this.closeSession(temporary.id)

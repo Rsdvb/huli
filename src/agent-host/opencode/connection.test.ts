@@ -1051,6 +1051,33 @@ describe('sessions OpenCode has', () => {
     expect(setup.server.sent.at(-1)!.path).toBe(
       '/api/session?directory=%2Fwork%2Fapp&parentID=null&limit=100',
     )
+    // A cursor keeps the filters but not the page's size, which would fall back to 50.
+    await setup.connection.listSessions(CWD, 'more')
+    expect(setup.server.sent.at(-1)!.path).toBe('/api/session?cursor=more&limit=100')
+  })
+
+  it('Huli: lists every folder’s sessions without a directory, for the import from the agents', async () => {
+    const setup = await connect()
+    setup.server.on('GET', /^\/api\/session\?/, () => ({
+      data: [
+        { ...setup.server.info('ses_a'), title: 'A' },
+        { ...setup.server.info('ses_b'), location: { directory: '/work/other' } },
+        { ...setup.server.info('ses_child'), parentID: 'ses_a' },
+      ],
+      cursor: { next: 'more' },
+    }))
+    const page = await setup.connection.listAllSessions(null)
+    expect(setup.server.sent.at(-1)!.path).toBe('/api/session?parentID=null&limit=100')
+    expect(page.nextCursor).toBeNull()
+    expect(page.sessions.map((s) => [s.sessionId, s.cwd, s.title, s.subagent])).toEqual([
+      ['ses_a', CWD, 'A', false],
+      ['ses_b', '/work/other', 'T', false],
+    ])
+    expect(page.sessions[0]).toMatchObject({
+      createdAt: expect.any(String),
+      updatedAt: '1970-01-01T00:00:00.002Z',
+      prompted: true,
+    })
   })
 
   it('deletes a hidden session it made, and nothing for one that only listed options', async () => {

@@ -10,6 +10,7 @@ import type {
   SessionSummary,
 } from '@shared/agent-host'
 import { isStartMode } from '@shared/agents'
+import { limitHolds } from '@shared/plan-limits'
 import type { AgentId, HarnessId } from '@shared/thread'
 import { errorMessage } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
@@ -164,9 +165,12 @@ export function useSignInRead(status: AgentStatus): boolean {
   return reads !== null && read !== reads
 }
 
-/** The windows whose reset has not passed; an older reading of them no longer holds. */
+/**
+ * The windows whose reset has not passed, and those without one read within their period; an
+ * older reading of them no longer holds.
+ */
 export function currentLimits(limits: PlanLimit[], now: number): PlanLimit[] {
-  return limits.filter((l) => l.resetsAt === null || l.resetsAt > now)
+  return limits.filter((l) => limitHolds(l, now))
 }
 
 export function percent(limit: PlanLimit, view: LimitView): string {

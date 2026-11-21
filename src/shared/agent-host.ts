@@ -259,6 +259,8 @@ export interface AgentProvider {
     balances: ProviderBalance[]
     observedAt: number
     error: string | null
+    /** Huli: kept from an earlier run of the host and not read again since. */
+    stale?: true
   } | null
 }
 
@@ -455,6 +457,10 @@ export interface AgentStatus {
    */
   balance?: AgentProvider['usage']
   balances?: ProviderBalance[]
+  /** Huli: when `balances` were read; absent without them, and on older hosts. */
+  balancesAt?: number
+  /** Huli: `balances` are an earlier run's, not read again since. */
+  balancesStale?: true
   limitsReason?: LimitsReason
   /** Its sign-in and session history are shared with the vendor's own apps (Antigravity). */
   sharesSignIn?: boolean
@@ -463,6 +469,11 @@ export interface AgentStatus {
    * removing what it keeps on disk. Absent on older hosts.
    */
   deletesCopy?: boolean
+  /**
+   * Huli: its `capabilities` are not known yet, as for an agent not started at the version it
+   * runs now, so each reads false; the imports ask such an agent to list its sessions.
+   */
+  capabilitiesUnknown?: true
   /**
    * Accounts its vendor moved to another harness: that harness, who this one is still for, and
    * whether the agent refused its signed-in account as one of them (Gemini CLI to Antigravity).
@@ -1352,7 +1363,15 @@ export interface HostContract {
   'sessions.discard': { params: { sessionId: string }; result: void }
   // `fork`: a copy of the session is imported instead, for one another program still has open.
   'sessions.import': {
-    params: { agentId: AgentId; projectPath: string; acpSessionId: string; fork?: boolean }
+    // Huli: `source`, chosen among the Claude desktop app's sessions, so it takes the app's title,
+    // times and archive that `agentHistory.list` read with that source.
+    params: {
+      agentId: AgentId
+      projectPath: string
+      acpSessionId: string
+      fork?: boolean
+      source?: HistorySource
+    }
     result: SessionSummary
   }
   'sessions.open': {

@@ -14,7 +14,7 @@ import {
 } from './agent-history'
 import { listedEverywhere } from './codex/connection'
 import type { Thread } from './codex/protocol'
-import type { AgentConnection, ListedEverywhere } from './connection'
+import { AgentRequestError, type AgentConnection, type ListedEverywhere } from './connection'
 
 const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
@@ -237,6 +237,7 @@ describe('AgentHistory', () => {
       nextCursor: string | null
     }>
     gone?: string[]
+    deleted?: string[]
   }) {
     const connection = {
       ...(options.listAll ? { listAllSessions: options.listAll } : {}),
@@ -253,7 +254,10 @@ describe('AgentHistory', () => {
           init: { capabilities: { listSessions: true } } as never,
         }),
       },
-      sessions: { agentSessionIds: () => new Set(options.imported ?? []) },
+      sessions: {
+        agentSessionIds: () => new Set(options.imported ?? []),
+        deletedIds: () => new Set(options.deleted ?? []),
+      },
       isDirectory: async (folder) => !(options.gone ?? []).includes(folder),
       log: () => {},
     })
@@ -329,12 +333,51 @@ describe('AgentHistory', () => {
     expect(asked).toEqual([null, 'next'])
   })
 
+  it('leaves out a session deleted here whose agent keeps it, but not of another folder', async () => {
+    await transcript('-a', ID(1), [user('/a', 'one')])
+    await transcript('-a', ID(2), [user('/a', 'two')])
+    const list = history({ deleted: [ID(2)] })
+    expect((await list.list(CLAUDE, null)).sessions.map((s) => s.acpSessionId)).toEqual([ID(1)])
+    const listed = (sessions: ListedEverywhere[]) => async () => ({ sessions, nextCursor: null })
+    const acp = history({
+      deleted: ['gone'],
+      listAll: listed(
+        ['kept', 'gone'].map((sessionId) => ({
+          sessionId,
+          title: null,
+          cwd: '/a',
+          createdAt: null,
+          updatedAt: null,
+          subagent: false,
+          prompted: true,
+        })),
+      ),
+    })
+    expect((await acp.list(ACP, null)).sessions.map((s) => s.acpSessionId)).toEqual(['kept'])
+  })
+
+  it('says an ACP agent that lists only a folder’s sessions cannot list, and keeps other errors', async () => {
+    const refusing = (error: unknown) =>
+      history({
+        listAll: async () => {
+          throw error
+        },
+      })
+    await expect(
+      refusing(new AgentRequestError('agent_error', 'cwd is required', -32602)).list(ACP, null),
+    ).rejects.toMatchObject({ code: 'agent_unavailable', data: { reason: 'cannot_list' } })
+    await expect(
+      refusing(new AgentRequestError('auth_required', 'Sign in', -32000)).list(ACP, null),
+    ).rejects.toMatchObject({ code: 'auth_required' })
+  })
+
   it('refuses an unknown agent and one that cannot list without a folder', async () => {
     await expect(history({}).list('nope' as AgentId, null)).rejects.toMatchObject({
       code: 'invalid_params',
     })
     await expect(history({}).list(ACP, null)).rejects.toMatchObject({
       code: 'agent_unavailable',
+      data: { reason: 'cannot_list' },
     })
   })
 })

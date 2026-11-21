@@ -4,13 +4,9 @@
 // .tar.bz2 archives, and bare executables for a few entries, so the extraction is not the system
 // `tar`, which reads neither .zip nor, without bzip2, .tar.bz2 on Linux.
 
-import { createHash, randomBytes } from 'node:crypto'
-import { createWriteStream } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
-import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import type { Platform } from '@shared/platform'
 import type { AgentId } from '@shared/thread'
 import {
@@ -22,10 +18,13 @@ import {
 } from './adapter-install'
 import { staleInstalls } from './harness-versions'
 import { t } from './i18n'
+import { HttpStatusError, StalledError, type Transport } from './node-runtime/transport'
 
 const MIB = 1024 * 1024
 /** How many bytes a download grows between two progress lines. */
 const REPORT_BYTES = 4 * MIB
+/** A download that receives nothing for this long has stalled, well before its time limit. */
+export const ARCHIVE_STALL_MS = 30_000
 
 export interface ArchiveInstallOptions {
   /** `<userData>/agents`. */
@@ -44,6 +43,10 @@ export interface ArchiveInstallOptions {
   bare?: true
   platform: Platform
   timeoutMs: number
+  /** Kite's own requests, through Advanced › Proxy or the environment's proxy. */
+  transport: Transport
+  /** `ARCHIVE_STALL_MS` unless a test gives another. */
+  stallMs?: number
   signal?: AbortSignal
   onOutput?(text: string): void
 }
@@ -130,38 +133,22 @@ async function download(
   options.onOutput?.(
     `${t('agent.binaryInstall.downloadStart', { name: downloadName(options.url) })}\n`,
   )
-  let response: Response
-  try {
-    response = await fetch(options.url, { signal, redirect: 'follow' })
-  } catch (error) {
-    throw downloadFailure(options, timeout, error)
-  }
-  if (!response.ok || !response.body) {
-    void response.body?.cancel()
-    throw new Error(
-      t('agent.binaryInstall.downloadFailed', {
-        url: options.url,
-        status: String(response.status),
-      }),
-    )
-  }
-  const hash = createHash('sha256')
-  let bytes = 0
   let reported = 0
-  const source = Readable.fromWeb(response.body as WebReadableStream<Uint8Array>)
-  source.on('data', (chunk: Buffer) => {
-    hash.update(chunk)
-    bytes += chunk.length
-    if (bytes - reported < REPORT_BYTES) return
-    reported = bytes
-    options.onOutput?.(`${t('agent.binaryInstall.downloading', { size: formatSize(bytes) })}\n`)
-  })
+  let sha256: string
   try {
-    await pipeline(source, createWriteStream(file, { mode: 0o600 }))
+    const downloaded = await options.transport.file(options.url, file, {
+      signal,
+      stallMs: options.stallMs ?? ARCHIVE_STALL_MS,
+      onBytes: (bytes) => {
+        if (bytes - reported < REPORT_BYTES) return
+        reported = bytes
+        options.onOutput?.(`${t('agent.binaryInstall.downloading', { size: formatSize(bytes) })}\n`)
+      },
+    })
+    sha256 = downloaded.sha256
   } catch (error) {
     throw downloadFailure(options, timeout, error)
   }
-  const sha256 = hash.digest('hex')
   const expected = options.sha256?.toLowerCase()
   if (expected && sha256 !== expected) {
     throw new Error(t('agent.binaryInstall.hashMismatch', { expected, actual: sha256 }))
@@ -169,22 +156,35 @@ async function download(
   return { sha256 }
 }
 
-/** Why a download stopped: the user cancelled it, it ran past the limit, or the network failed. */
+/**
+ * Why a download stopped: the user cancelled it, it ran past the limit, nothing arrived for a
+ * while, the server refused it, or the network failed.
+ */
 function downloadFailure(
   options: ArchiveInstallOptions,
   timeout: AbortSignal,
   error: unknown,
 ): Error {
+  const name = downloadName(options.url)
   if (options.signal?.aborted) return new Error(t('agent.installStopped'))
   if (timeout.aborted) {
     return new Error(
       t('agent.binaryInstall.downloadTimedOut', {
-        name: downloadName(options.url),
+        name,
         seconds: formatSeconds(options.timeoutMs),
       }),
     )
   }
-  const name = downloadName(options.url)
+  if (error instanceof StalledError) {
+    return new Error(
+      t('agent.binaryInstall.downloadStalled', { name, seconds: formatSeconds(error.stallMs) }),
+    )
+  }
+  if (error instanceof HttpStatusError) {
+    return new Error(
+      t('agent.binaryInstall.downloadFailed', { url: options.url, status: String(error.status) }),
+    )
+  }
   return new Error(
     t('agent.binaryInstall.downloadError', { name, reason: (error as Error).message }),
   )

@@ -2,6 +2,7 @@
 // New session, the composer, a turn stopped at its limit and a routine's run all decide by.
 
 import type { AgentStatus, PlanLimit, ProviderBalance } from './agent-host'
+import { limitHolds } from './plan-limits'
 import type { AgentId } from './thread'
 
 /** The balance a vendor bills once the plan's windows run out, as the hosts label it. */
@@ -27,9 +28,6 @@ export function windowUsedUp(limit: Pick<PlanLimit, 'usedPercent' | 'state'>): b
   return limit.state === 'reached' || Math.round(limit.usedPercent ?? 0) >= 100
 }
 
-const current = (limit: PlanLimit, now: number): boolean =>
-  limit.resetsAt === null || limit.resetsAt > now
-
 /** Whether extra usage pays once the plan's windows run out: a positive balance or an open overage window. */
 export function hasExtraUsage(
   status: { balances?: readonly ProviderBalance[] | undefined },
@@ -37,23 +35,25 @@ export function hasExtraUsage(
   now: number,
 ): boolean {
   if ((status.balances ?? []).some((b) => b.label === EXTRA_USAGE && b.amount > 0)) return true
-  return limits.some((l) => l.window === OVERAGE_WINDOW && current(l, now) && !windowUsedUp(l))
+  return limits.some((l) => l.window === OVERAGE_WINDOW && limitHolds(l, now) && !windowUsedUp(l))
 }
 
 /**
  * Where the agent's plan stands by `limits`, its own unless a caller passes the windows that hold
- * back one model or a newer reading of the account. A window whose reset has passed is skipped.
+ * back one model or a newer reading of the account. A window whose reset has passed is skipped,
+ * and so is one without a reset once its reading is a period old.
  */
 export function planQuota(
   status: { balances?: readonly ProviderBalance[] | undefined; limits: readonly PlanLimit[] },
   now: number,
   limits: readonly PlanLimit[] = status.limits,
 ): PlanQuota {
-  const windows = limits.filter((l) => l.window !== OVERAGE_WINDOW && current(l, now))
+  const windows = limits.filter((l) => l.window !== OVERAGE_WINDOW && limitHolds(l, now))
   if (windows.length === 0) return { kind: 'unknown' }
   const out = windows.filter(windowUsedUp)
   if (out.length > 0) {
-    // The plan answers again once every used-up window has reset; one without a reset holds.
+    // The plan answers again once every used-up window has reset; one without a reset holds
+    // until its reading is a period old.
     const limit = out.reduce((a, b) =>
       a.resetsAt === null ? a : b.resetsAt === null || b.resetsAt > a.resetsAt ? b : a,
     )

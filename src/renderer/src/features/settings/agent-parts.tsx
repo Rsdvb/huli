@@ -414,7 +414,15 @@ export function UsageGroup({
   // earlier run remembered shows while the sign-in is read again.
   const readings = usePlanReadings()
   const limits = status.readingSignIn ? [] : newestLimits(readings, status)
-  const observed = Math.max(0, ...limits.map((l) => l.observedAt)) || null
+  // A balance alone shows too, as Junie's credits do without a plan window.
+  const balances = status.readingSignIn ? [] : (status.balances ?? [])
+  const shown = limits.length > 0 || balances.length > 0
+  const observed =
+    Math.max(
+      0,
+      ...limits.map((l) => l.observedAt),
+      balances.length > 0 ? (status.balancesAt ?? 0) : 0,
+    ) || null
   const limitsReason = status.limitsReason
     ? t(`agents.usageReasons.${status.limitsReason}` as 'agents.usageReasons.vendor-disallows')
     : null
@@ -422,7 +430,7 @@ export function UsageGroup({
   const failed = error ?? refreshError ?? status.limitsError ?? null
   const readError = failed && t('agents.usageReadFailed', { error: failed })
   const actions =
-    limits.length > 0 && limitsReadable(status) ? (
+    shown && limitsReadable(status) ? (
       <>
         {observed && (
           <span className="k-muted">
@@ -447,7 +455,7 @@ export function UsageGroup({
   return (
     <section className="k-group" aria-label={t('agents.usage')}>
       <GroupLabel group={{ id: 'usage', label: t('agents.usage'), actions }} />
-      {limits.length > 0 ? (
+      {shown ? (
         <RowGroup>
           {limits.map((limit) => {
             const level = limitLevel(limit)
@@ -457,7 +465,9 @@ export function UsageGroup({
                 text={
                   <RowText
                     name={limitLabel(limit)}
-                    description={limit.resetsAt ? planReset(limit.resetsAt, now) : undefined}
+                    description={
+                      limit.resetsAt ? planReset(limit.resetsAt, now) : t('agents.usageNoReset')
+                    }
                   />
                 }
               >
@@ -501,9 +511,14 @@ export function UsageGroup({
       ) : (
         <p className="k-reading">{t('agents.usageNotReported', { name: status.name })}</p>
       )}
-      {readError && limits.length > 0 && (
+      {readError && shown && (
         <p className="ui-sg-hint k-error" data-wrap="">
           {readError}
+        </p>
+      )}
+      {!readError && status.balancesStale && balances.length > 0 && (
+        <p className="ui-sg-hint" data-wrap="">
+          {t('agents.balance.kept')}
         </p>
       )}
     </section>

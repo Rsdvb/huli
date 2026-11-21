@@ -364,7 +364,7 @@ describe('listing the Claude desktop app’s sessions for an import', () => {
         isArchived: true,
         lastActivityAt: T - 3000,
       }),
-      // Here already under the session that wrote its last reply, in another Claude Code agent.
+      // Here already under the session that wrote its last reply, in an agent sharing its folder.
       [`local_${UUID(5)}.json`]: entry(5, {
         cwd: project,
         cliSessionId: CLI(6),
@@ -396,14 +396,16 @@ describe('listing the Claude desktop app’s sessions for an import', () => {
           throw new Error('not asked')
         },
       },
+      // As Sessions gives them: of the agent, and of the agents that share its folder.
       sessions: {
-        agentSessionIds: (id) => new Set(id === OTHER ? [CLI(5)] : []),
+        agentSessionIds: (id) => new Set(id === CLAUDE ? [CLI(5)] : []),
       },
       desktopFolders: async () => [data],
       log: () => {},
     })
     const page = await history.list(CLAUDE, null, null, 'claude-desktop')
     expect(page.source).toBe(data)
+    expect(page.agentId).toBe(CLAUDE)
     expect(page.nextCursor).toBeNull()
     expect(
       page.sessions.map((s) => ({
@@ -468,19 +470,69 @@ describe('listing the Claude desktop app’s sessions for an import', () => {
         unavailable: false,
       },
     ])
-    expect(history.keptFor(CLAUDE, CLI(1))).toEqual({
+    // Chosen in the Claude Code tab, the app's title, times and archive are not applied.
+    expect(history.keptFor(CLAUDE, CLI(4))).toEqual({})
+    expect(history.keptFor(CLAUDE, CLI(1), 'claude-desktop')).toEqual({
       title: 'Session 1',
       titleSource: 'agent',
       createdAt: 1794315627728,
       updatedAt: T,
     })
-    expect(history.keptFor(CLAUDE, CLI(2))).toEqual({
+    expect(history.keptFor(CLAUDE, CLI(2), 'claude-desktop')).toEqual({
       customTitle: '临时',
       createdAt: 1794315627728,
       updatedAt: T - 1000,
     })
-    expect(history.keptFor(CLAUDE, CLI(4))).toMatchObject({ archivedAt: T - 3000 })
-    expect(history.keptFor(CLAUDE, CLI(3))).toEqual({})
+    expect(history.keptFor(CLAUDE, CLI(4), 'claude-desktop')).toMatchObject({
+      archivedAt: T - 3000,
+    })
+    expect(history.keptFor(CLAUDE, CLI(3), 'claude-desktop')).toEqual({})
+  })
+
+  it('imports with the Claude Code agent whose folder holds the app’s transcripts', async () => {
+    const data = path.join(dir, 'Claude-Data', 'claude_q7')
+    const project = path.join(dir, 'project')
+    await mkdir(project, { recursive: true })
+    // The app runs Claude Code with the folder its own settings name: the second agent's.
+    await transcript(path.join(dir, 'work', 'projects'), project, CLI(1))
+    await transcript(path.join(dir, 'work', 'projects'), project, CLI(2))
+    await transcript(path.join(dir, 'claude', 'projects'), project, CLI(2))
+    await writeIndex(data, {
+      [`local_${UUID(1)}.json`]: entry(1, { cwd: project, isArchived: true }),
+      [`local_${UUID(2)}.json`]: entry(2, { cwd: project }),
+    })
+    const disabled = 'claude-code~off' as AgentId
+    const history = new AgentHistory({
+      platform: process.platform,
+      agents: {
+        has: () => true,
+        assertEnabled: (id) => {
+          if (id === disabled) throw new Error('disabled')
+        },
+        name: (id) => id,
+        configFolder: (id) =>
+          id === CLAUDE
+            ? path.join(dir, 'claude')
+            : id === OTHER || id === disabled
+              ? path.join(dir, 'work')
+              : null,
+        ids: () => [disabled, CLAUDE, OTHER],
+        ensureReady: async () => {
+          throw new Error('not asked')
+        },
+      },
+      sessions: { agentSessionIds: (id) => new Set(id === OTHER ? [CLI(2)] : []) },
+      desktopFolders: async () => [data],
+      log: () => {},
+    })
+    const page = await history.list(CLAUDE, null, null, 'claude-desktop')
+    expect(page.agentId).toBe(OTHER)
+    expect(page.sessions.map((s) => [s.acpSessionId, s.imported, s.unavailable ?? false])).toEqual([
+      [CLI(1), false, false],
+      [CLI(2), true, false],
+    ])
+    expect(history.keptFor(OTHER, CLI(1), 'claude-desktop')).toMatchObject({ archivedAt: T })
+    expect(history.keptFor(CLAUDE, CLI(1), 'claude-desktop')).toEqual({})
   })
 
   it('is for a Claude Code agent with a folder only', async () => {

@@ -259,6 +259,14 @@
     "antigravitySignedOut": "{{agent}} 已登出。请在终端里重新登录，才能读取套餐限额。",
     "antigravityLimitsFailed": "{{agent}} 没能读出套餐限额：{{error}}",
     "antigravityNoPlan": "{{agent}} 没有报出 Google 套餐，所以没有可读的套餐限额。如果你用的是 Google 账号，请在终端里重新登录。",
+    "limitsReadFailed": "{{agent}} 这次没能读到套餐限额，请稍后再试。",
+    "glmUsage": {
+      "missingCredentials": "{{agent}} 还没有 Z.AI API key。设置 Z_AI_API_KEY，或运行一次 glm-acp-agent --setup，才能读取套餐用量。",
+      "unsupportedEndpoint": "{{agent}} 用的是自定义接口地址，读不到 GLM Coding Plan 的用量。",
+      "authenticationFailed": "Z.AI 不接受 {{agent}} 的 API key，请检查 Coding Plan 的 key。",
+      "requestFailed": "{{agent}} 这次没能读到 GLM Coding Plan 的用量，请稍后再试。",
+      "invalidResponse": "{{agent}} 给出的 GLM Coding Plan 用量，Kettu 读不懂。"
+    },
     "initializeTimeout": "{{agent}} 没有在 {{seconds}} 秒内响应 initialize。",
     "exit": {
       "code": "{{agent}} 已退出，退出码 {{code}}",
@@ -279,6 +287,7 @@
       "none": "{{agent}} 没有可安装的更新",
       "noNpm": "检查更新需要 npm，但在 PATH 中找不到 npm。",
       "checkFailed": "无法检查更新。{{reason}}",
+      "checkPartlyFailed": "{{total}} 项更新检查中有 {{failed}} 项失败。{{reason}}",
       "offline": "无法连接 npm 仓库。",
       "timeout": "npm 没有在 {{seconds}} 秒内响应。",
       "noVersion": "npm 没有给出 {{package}} 的版本。",
@@ -300,6 +309,7 @@
       "downloadFailed": "下载 {{url}} 时返回了 HTTP {{status}}。",
       "downloadError": "无法下载 {{name}}：{{reason}}",
       "downloadTimedOut": "{{name}} 没有在 {{seconds}} 秒内下载完成。",
+      "downloadStalled": "{{name}} 下载卡住了：{{seconds}} 秒没有收到数据。请看看 设置 › 高级 › 代理，再重试。",
       "hashMismatch": "下载的文件与其 SHA-256 不符：应为 {{expected}}，实际为 {{actual}}。",
       "extracting": "正在解压…"
     },

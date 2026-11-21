@@ -737,6 +737,7 @@
       "inherited": "继承自 Kettu 的启动方式。",
       "fallback": "正在使用备用 PATH。",
       "reload": "重新加载环境",
+      "redetect": "重新检测",
       "keywords": "环境 环境变量 PATH shell node npm",
       "node": {
         "usingSystem": "Agent 使用系统的 Node.js {{version}}。",
@@ -748,7 +749,9 @@
         "update": "更新",
         "remove": "移除",
         "preferKite": "始终用纸鸢的 Node.js",
-        "preferKiteHint": "关掉时，系统的 Node.js 够新就用系统的。"
+        "preferKiteHint": "关掉时，系统的 Node.js 够新就用系统的。",
+        "removeTitle": "移除纸鸢的 Node.js {{version}}？",
+        "removeBody": "Agent 会改用系统的 Node.js。系统的 Node.js 没有或太旧时，需要它的 Agent 要等重新安装 Node.js 后才能用。"
       }
     },
     "cli": {
@@ -773,7 +776,8 @@
       "reading": "正在读取余额…",
       "afterSignIn": "{{name}} 登录 DeepSeek 账号或设置 API key 后，余额会显示在这里。",
       "gateway": "用其他模型服务商时，余额请到服务商那里查看。",
-      "stale": "显示的是{{ago}}读取的余额。"
+      "stale": "显示的是{{ago}}读取的余额。",
+      "kept": "显示的是上次运行时读到的余额，刷新后更新。"
     },
     "planLimits": "套餐限额",
     "usageNotReported": "{{name}} 不提供套餐用量。",
@@ -898,6 +902,7 @@
     "direct": "{{vendor}} · 直接以 ACP 模式运行",
     "ownInterface": "{{vendor}} · 经它自己的接口连接",
     "usageUpdated": "{{ago}}读取",
+    "usageNoReset": "未提供重置时间",
     "refreshUsage": "重新读取套餐用量",
     "versionGroup": "版本",
     "ownInstaller": "由它自己的安装程序更新，不经过 Kettu。",
@@ -2196,6 +2201,12 @@
     "sdkOnFirstUse": "SDK 首次使用时安装",
     "cliUpdateBody": "你装的是 {{current}}。更新按你装 {{name}} 的方式运行，命令在下面。",
     "cliUpdateBodySdk": "你装的是 {{current}}。更新按你装 {{name}} 的方式运行，Claude Agent SDK 一并换成对应的版本；命令在下面。",
+    "cliUpdateWaiting": {
+      "short": "等会话结束",
+      "title": "{{name}} {{version}} 等会话结束后更新",
+      "body_one": "更新会替换 {{name}} 的程序，所以要等它正在运行的会话结束。",
+      "body_other": "更新会替换 {{name}} 的程序，所以要等它正在运行的 {{count}} 个会话结束。"
+    },
     "reinstall": "{{name}}",
     "reinstallBody": "删掉 Kettu 装的这一份，重新安装。",
     "programName": "{{command}}",
@@ -2210,6 +2221,7 @@
     "adapterNote": "Kettu 经这个适配器运行 {{name}}，用你的 Node.js。",
     "programNote": "就是 {{name}} 本身，Kettu 用你的 Node.js 运行它。",
     "usedBy": "在用它的",
+    "usedByNone": "还没有 Agent 用它",
     "listSeparator": "、",
     "manageAgents": "在智能体里管理",
     "versionOut": "{{version}} 已发布",
@@ -2410,7 +2422,13 @@
       "invalid": "网卡名称不能包含 #",
       "keywords": "网卡 适配器 以太网 wifi tun 绕过",
       "descriptionFound": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。留空则用自动找到的：{{name}}。",
-      "descriptionNone": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。没有自动找到，请在这里填写。"
+      "descriptionNone": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。没有自动找到，请在这里填写。",
+      "auto": "自动",
+      "autoFound": "自动（{{name}}）",
+      "autoHint": "纸鸢挑一块已连接的物理网卡，网络变了会跟着换。",
+      "down": "未连接",
+      "tunnelHint": "代理或 VPN 建的虚拟网卡，选它就绕不开它们",
+      "missing": "现在找不到这块网卡"
     },
     "subscriptions": {
       "add": "添加订阅",

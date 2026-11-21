@@ -1,7 +1,7 @@
 // Huli: Kite's own Node.js as the window sees it: whether an agent waits for Node.js, what the
 // host says of its Node.js, and starting or stopping the host's install of it.
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentStatus, NodeRuntimeInfo, NodeTask } from '@shared/agent-host'
 import { toast } from '@renderer/components/ui/toast'
@@ -27,10 +27,13 @@ export function useNodeInstall(scope?: HostScope) {
   const { t } = useTranslation('agents')
   const node = useNodeRuntime(scope)
   const [error, setError] = useState<string | null>(null)
+  // A stop this window asked for ends the request with an error that is no failure to show.
+  const stopped = useRef(false)
   const task = node?.task ?? null
   const running = task?.state === 'running'
   const install = () => {
     setError(null)
+    stopped.current = false
     void request('environment.installNode', undefined).then(
       (result) => {
         toast(
@@ -47,7 +50,10 @@ export function useNodeInstall(scope?: HostScope) {
       },
       (failure: unknown) => {
         // The host keeps a failed install's reason as its task; the request's says the same.
-        if (useAgentsStore.getState().environment?.node?.task?.state !== 'failed') {
+        if (
+          !stopped.current &&
+          useAgentsStore.getState().environment?.node?.task?.state !== 'failed'
+        ) {
           setError(errorMessage(failure))
         }
       },
@@ -55,10 +61,18 @@ export function useNodeInstall(scope?: HostScope) {
   }
   const cancel = () => {
     setError(null)
+    stopped.current = true
     void request('environment.cancelNodeInstall', undefined).catch(() => {})
   }
+  /** Clears a failure: the host's failed install or removal, or a refusal this window heard. */
+  const dismiss = () => {
+    setError(null)
+    if (task?.state === 'failed') {
+      void request('environment.cancelNodeInstall', undefined).catch(() => {})
+    }
+  }
   const failure = task?.state === 'failed' ? task.error : error
-  return { node, task, running, install, cancel, failure }
+  return { node, task, running, install, cancel, dismiss, failure }
 }
 
 /** What the install is doing, in a few words. */

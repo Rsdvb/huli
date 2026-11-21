@@ -84,9 +84,21 @@ Huli's own files:
   in another folder when it moved a session is listed once, from the folder that fits. Its title
   is its custom title, else its AI title, else its first prompt. Codex's threads and an ACP
   agent's sessions come from the agent (`listAllSessions`: `thread/list` or `session/list` without
-  a `cwd`), since Codex keeps most rollouts zstd-compressed and indexes them itself. Sidechains,
+  a `cwd`), since Codex keeps most rollouts zstd-compressed and indexes them itself; so do
+  OpenCode's (2.3's `GET /api/session` without a `directory`), Pi's (every folder's session files),
+  Cline's (its SDK's `ClineCore.list`, unhydrated; one resumes without its history shown), Doubao's
+  and DeepSeek Harness's. Sidechains,
   subagents' threads and sessions without a message are counted and left out; one whose id a
-  session here has (`agentSessionIds`) is marked imported, one whose folder is gone missing.
+  session here has (`agentSessionIds`, with those of the Claude Code agents that read the same
+  configuration folder, `sharingHistory`; the sidebar's Import sessions and `sessions.import`
+  count the same) is marked imported, one whose folder is gone missing, and one deleted here whose
+  agent keeps its copy (`state/deleted-sessions.json`, below) is left out. An agent not started at
+  its version yet (`capabilitiesUnknown`) is asked too, in both imports, and left out once it
+  says it cannot list (`CANNOT_LIST` in the error's data, as for an ACP agent that refuses
+  `session/list` without a folder); one whose listing fails otherwise keeps its tab with the
+  agent's words, Retry, from the page that failed when some were listed, and Sign in for one that
+  asks for it. A Claude Code session a terminal holds fails with `reason: 'held'`, and the summary
+  offers 复制一份, a copy imported with `fork`.
   What was listed keeps its title and times for `sessions.import`, which imports each as the
   sidebar does (adding its project if needed). A window's alone (`WINDOW_ONLY`): it names every
   folder an agent ran in, which a paired device otherwise learns only by naming a folder.
@@ -128,8 +140,11 @@ Huli's own files:
   leave a session out, `archived-sessions.idx` (version 1 only) marks one archived. Each is listed
   as the Claude Code session whose transcript is in the project folder of the folder it runs in
   (of the two, the one written last), marked 找不到记录 without one, and imported through
-  `sessions.import` as any Claude Code session, the app's title, times and archive kept
-  (`keptFor` prefers them), deduped by the Claude Code session ids of every Claude Code agent here.
+  `sessions.import` as any Claude Code session by the Claude Code agent whose configuration folder
+  holds the most of them (the page's `agentId`; the app's own `CLAUDE_CONFIG_DIR` is in its
+  encrypted settings), deduped as that agent's own tab is. The app's title, times and archive are
+  kept only for a session chosen in this tab (`sessions.import` with `source: 'claude-desktop'`,
+  which `keptFor` reads); chosen in the agent's tab, it keeps its transcript's.
   A session in one of the app's scratch folders
   (`scratch-workspaces/<account>/<organization>/scratch-*`) is No project here, still running in
   that folder, so its transcript, resume and outside sync stay as they are: `Sessions` lets
@@ -154,7 +169,10 @@ Huli's own files:
 Hooks into upstream files, one or two lines each:
 
 - `src/agent-host/connection.ts` (`ListedEverywhere`, the optional `listAllSessions`), its
-  implementations in `codex/connection.ts`, `acp/connection.ts` and `dsh/connection.ts`.
+  implementations in `codex/connection.ts`, `acp/connection.ts`, `dsh/connection.ts`,
+  `doubao/connection.ts`, `opencode/connection.ts`, `pi/connection.ts` (`listAllSessionFiles`)
+  and `cline/connection.ts` (`session/list` of `cline/host-sessions.ts`).
+- `src/agent-host/agents.ts` (`capabilitiesUnknown` in the status), `src/shared/agent-host.ts`.
 - `src/agent-host/scratch.ts` (`adopt`), `src/agent-host/sessions.ts` (`adoptOutsideScratch`, and
   `importSession` adding no project for a scratch folder), `src/agent-host/host.ts` (the desktop
   app's folders, `adoptOutsideScratch` once loaded), for the Claude desktop app's sessions.
@@ -385,6 +403,16 @@ followed. The log names the paths removed, never contents.
   `debug/<id>.txt`. `history.jsonl` (prompt history, shared lines) stays.
 - Codex: `thread/delete` (0.171) removes the rollout, its state rows and its `session_index.jsonl`
   entries itself; nothing is left to import, so Kite adds nothing.
+- DeepSeek Harness (dsh 0.2.2, no delete in its SDK or ACP mode): under its home (`DSH_HOME` or
+  `~/.dsh`), `sessions/--<project>--/<id>/` in every project folder and
+  `storages/session_projcache/sessions/<id>.json`, and the same of the subagents' sessions its log's
+  `subagent/catalog` rows name, each only when its own header names that parent. Its workspace
+  registry (`storages/workspace.json`) drops a session whose log is gone as it loads, so it stays.
+- Doubao CLI (2.37.2) has no delete or archive and keeps every conversation on its servers, where
+  the app and `doubao --list` still show it. Such a session, and any whose copy stays (an ACP agent
+  without `session/delete`, a removal that failed), goes into `state/deleted-sessions.json`
+  (`deleted-sessions.ts`, + `.test.ts`: agent and id, at most 10,000, the oldest dropped first),
+  and neither import offers it again; importing it by its id (`sessions.import`) takes it back.
 - Antigravity (agy 1.5.13, no `session/delete`): in `~/.gemini/antigravity-cli` and the app's
   `~/.gemini/antigravity`, under the home folder agy runs with (`USERPROFILE`/`HOME` of its
   environment), `conversations/<id>.db` with its `-wal`/`-shm`, `brain/<id>/`,
@@ -401,7 +429,8 @@ followed. The log names the paths removed, never contents.
 - A prepared session (New session) or a hidden options session of agy that Kite lets go before its
   first prompt leaves an empty conversation; it goes the same way, unless agy's summary shows
   steps.
-- Hooks: `Sessions.delete` and `dropPrepared`/`removeLeftovers` in `src/agent-host/sessions.ts`,
+- Hooks: `Sessions.delete` (and `deletedIds`, `listImportable`, `importSession` for the deleted
+  ones) and `dropPrepared`/`removeLeftovers` in `src/agent-host/sessions.ts`,
   `readInHiddenSession` and `deletesCopy` in `agents.ts`, the service in `host.ts` (flushed at
   shutdown), `AgentStatus.deletesCopy` in `src/shared/agent-host.ts`; the delete confirmations in
   `features/sidebar/session-menu.tsx` and `mobile/src/components/DeleteSessionDialog.tsx` say so
@@ -444,6 +473,44 @@ the start's read), `ProviderBalance.granted` in `src/shared/agent-host.ts`, `age
 `model-menu.tsx`, `composer.tsx`, `new-session.tsx`, `mobile/src/app/settings/agent.tsx`,
 `mobile/src/ui/session/limits.ts`, and `dsh.account`/`dsh.balance`, `agents.balance`/`agents.phone`
 and `controls.balance` in the locales.
+
+### Plan usage and balances
+
+What the agent page, the model menu, the usage page and the session's usage show beyond upstream's
+reads (checked on 2026-11-21):
+
+- OpenCode's providers, with the key OpenCode stores, over HTTPS to the listed vendor only (no
+  redirects, a bounded reply, one generic error), at most every minute and every 10 s when the user
+  presses refresh: OpenRouter's `GET https://openrouter.ai/api/v1/key`, the key's own limit as a
+  window (its `/api/v1/credits` takes a management key, which OpenCode never holds); SiliconFlow's
+  `GET https://api.siliconflow.cn/v1/user/info` (`siliconflow-cn`, yuan) and `api.siliconflow.com`
+  (`siliconflow`, dollars), `totalBalance` with `balance` as the granted part when the parts add
+  up; DeepSeek's `/user/balance` through dsh's parser, its granted part kept; Z.AI's and Zhipu's
+  quota rows, the newer `CREDIT_LIMIT` ones too (`vendor-usage/glm.ts`).
+- GLM Agent (glm-acp-agent 1.16.0 and later): its own ACP extension `_glm/usage`, which it
+  advertises in its capabilities and answers with the key it keeps, so Kite never reads that key.
+  Its 5-hour and weekly windows show; the MCP allowance is left out, as a used-up one stops no model.
+- Copilot: `account.getQuota`'s `quotaSnapshots` (`entitlementRequests`, `usedRequests`,
+  `resetDate`), as `@github/copilot-sdk` types it, and GitHub's own `quota_snapshots` and
+  `quota_reset_date`.
+- Claude Code: a limits read that fails on a subscription is a `LimitsReadFailed`, which the page
+  shows, instead of no windows that kept the last ones as current.
+- A window without a reset date (Junie's, Qoder's, Auggie's monthly ones) holds for one period from
+  when it was read, a month when the period is not known (`limitHolds` in
+  `src/shared/plan-limits.ts`), then leaves the status, the plan quota and the restart's windows.
+- The balances beside the windows and DeepSeek Harness's balance are kept in `state/agents.json`
+  with when they were read, and show as an earlier run's (`balancesStale`, a `stale` balance) until
+  a read replaces them; a sign-out, a gateway or new credentials clear them with the windows.
+
+Huli's own files: `src/agent-host/vendor-usage/glm.ts` (+ test) and the scrubbed fixtures
+`openrouter-key.json`, `siliconflow-user-info.json`, `copilot-get-quota.json`, `glm-usage.json`
+and `zai-quota-limit.json`. Hooks: `opencode/provider-usage.ts`, `vendor-usage/copilot.ts`,
+`agents.ts` (`readGlmLimits`, `setBalances`, `PROVIDERS_FORCED_MS`, the restore), `agents/glm.ts`,
+`claude/connection.ts`, `connection.ts` (`LimitsReadFailed`), `storage.ts` (`RememberedBalances`),
+`dsh/account.ts`, `src/shared/agent-host.ts` (`balancesAt`, `balancesStale`, `stale`),
+`src/shared/plan-quota.ts`, `agent-parts.tsx`, `agent-balance.tsx`, `agent-providers.tsx`,
+`composer/usage.tsx`, the renderer's window filters, and `agent.glmUsage`/`agent.limitsReadFailed`
+and `agents.usageNoReset`/`agents.balance.kept` in the locales.
 
 ### Agents in a terminal
 
@@ -520,7 +587,9 @@ conversations.json`, so it resumes after a restart and lists as imported.
   client as `agents.signInImage` (Settings' agent page, a session's sign-in, the phone's agent
   page) until the CLI exits. `auth status` reads the sign-in, `logout` signs out.
 - Import: `--list --all --json` lists every unarchived conversation, from every folder and device;
-  one with no folder (the app's, another device's) comes under the home folder. Its history comes
+  one with no folder (the app's, another device's) comes under the home folder. The sidebar's
+  Import sessions reads `--list --limit 100 --json` pages on with `--cursor` until one is the
+  folder's, at most five a time (an empty `next_cursor` ends them). Its history comes
   from `--export` (each turn's question and answer, as text), and it continues with `--resume`.
 - The models and levels come from `model list --json`, kept 10 minutes.
 
@@ -758,6 +827,10 @@ profiles.
   tar (Windows' own `System32\tar.exe`, which reads `.zip`; Git's GNU tar takes `C:` for a host),
   with only paths Kite made as arguments and no shell, its `node --version` must say the version,
   and the folder is renamed into place last. A stall of 30 s fails the download.
+- The harnesses' own downloads go the same way (`transport.ts`, `AgentManager`'s `downloads`):
+  a release archive from the ACP Registry, the Registry's listing and the harness manifest, which
+  upstream fetches with Node's bare `fetch`, past every proxy. An archive that receives nothing
+  for 30 s fails at once, not at its 15-minute limit. Tests: `src/agent-host/downloads.test.ts`.
 - Which runs: `EnvironmentService` (`shell-env.ts`) probes the user's node on PATH, then
   `chooseNode` picks it while it meets the agents' needs, else Kite's; `kite` in
   `state/node-runtime.json` (`环境` › 始终用纸鸢的 Node.js) takes Kite's whenever installed.

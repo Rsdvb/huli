@@ -695,6 +695,40 @@ describe('the host files', () => {
     })
   })
 
+  it('keeps the balances last read with their time, and drops ones that do not parse', async () => {
+    const credits = { label: 'Extra usage', amount: 62_500, currency: 'credits' }
+    const wallet = { label: 'Balance', amount: 18.34, currency: 'CNY', granted: 6 }
+    const file = {
+      version: 1 as const,
+      agents: {
+        codex: { account: null, limits: [], balances: { items: [credits], observedAt: 9 } },
+        deepseek: { account: null, limits: [], balance: { items: [wallet], observedAt: 10 } },
+      },
+    }
+    const remembered = agentsFile(dir, log)
+    await remembered.load()
+    remembered.save(file)
+    await remembered.flush()
+    expect(await agentsFile(dir, log).load()).toEqual(file)
+    expect(
+      parseAgentsFile({
+        agents: {
+          codex: {
+            limits: [],
+            balances: { items: [{ ...credits, amount: 'lots' }], observedAt: 9 },
+          },
+          cline: { limits: [], balances: { items: [credits], observedAt: -1 } },
+          kimi: { limits: [], balances: { items: [credits, { label: 'Balance' }], observedAt: 3 } },
+        },
+      }),
+    ).toEqual({
+      version: 1,
+      agents: {
+        kimi: { account: null, limits: [], balances: { items: [credits], observedAt: 3 } },
+      },
+    })
+  })
+
   it('drops the time the archived Codex report threads were removed, which nothing runs anymore', () => {
     expect(parseAgentsFile({ agents: {}, codexReportThreadsRemovedAt: 7 })).toEqual({
       version: 1,

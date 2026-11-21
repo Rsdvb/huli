@@ -745,6 +745,7 @@
       "inherited": "Inherited from how Kettu was started.",
       "fallback": "Using a fallback PATH.",
       "reload": "Reload environment",
+      "redetect": "Detect again",
       "keywords": "PATH shell node npm environment variables",
       "node": {
         "usingSystem": "Agents use your Node.js {{version}}.",
@@ -756,7 +757,9 @@
         "update": "Update",
         "remove": "Remove",
         "preferKite": "Always use Kite’s Node.js",
-        "preferKiteHint": "When off, your own Node.js is used while it is new enough."
+        "preferKiteHint": "When off, your own Node.js is used while it is new enough.",
+        "removeTitle": "Remove Kite’s Node.js {{version}}?",
+        "removeBody": "Agents move to your own Node.js. Where it is missing or too old, the agents that need Node.js cannot start until it is installed again."
       }
     },
     "cli": {
@@ -781,7 +784,8 @@
       "reading": "Reading the balance…",
       "afterSignIn": "Once {{name}} is signed in to a DeepSeek account or has an API key, its balance shows here.",
       "gateway": "With another model provider, its own console shows the balance.",
-      "stale": "Showing the balance read {{ago}}."
+      "stale": "Showing the balance read {{ago}}.",
+      "kept": "This balance is from the last run. Refresh to update it."
     },
     "planLimits": "Plan limits",
     "usageNotReported": "{{name}} does not report plan usage.",
@@ -906,6 +910,7 @@
     "direct": "{{vendor}} · runs in ACP mode itself",
     "ownInterface": "{{vendor}} · through its own interface",
     "usageUpdated": "Read {{ago}}",
+    "usageNoReset": "No reset time given",
     "refreshUsage": "Read plan usage again",
     "versionGroup": "Version",
     "ownInstaller": "Updated by its own installer, not by Kettu.",
@@ -2226,6 +2231,12 @@
     "sdkOnFirstUse": "SDK installs on first use",
     "cliUpdateBody": "You have {{current}}. The update runs the way you installed {{name}}; the command shows below.",
     "cliUpdateBodySdk": "You have {{current}}. The update runs the way you installed {{name}}, and moves Claude Agent SDK to the version that matches; the command shows below.",
+    "cliUpdateWaiting": {
+      "short": "Waits for sessions",
+      "title": "{{name}} {{version}} updates once its sessions end",
+      "body_one": "The update replaces {{name}}’s program, so it waits for its running session to end.",
+      "body_other": "The update replaces {{name}}’s program, so it waits for its {{count}} running sessions to end."
+    },
     "reinstall": "{{name}}",
     "reinstallBody": "Delete Kettu’s install and install it again.",
     "programName": "{{command}}",
@@ -2240,6 +2251,7 @@
     "adapterNote": "The adapter Kettu runs {{name}} through, on your Node.js.",
     "programNote": "{{name}} itself, which Kettu runs on your Node.js.",
     "usedBy": "Used by",
+    "usedByNone": "No agent uses it yet",
     "listSeparator": ", ",
     "manageAgents": "Manage in Agents",
     "versionOut": "{{version}} is out",
@@ -2448,7 +2460,13 @@
       "invalid": "Enter an interface name without #",
       "keywords": "interface adapter nic ethernet wifi tun bypass",
       "descriptionFound": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. Leave it empty to use the one found: {{name}}.",
-      "descriptionNone": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. None was found, so name one here."
+      "descriptionNone": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. None was found, so name one here.",
+      "auto": "Automatic",
+      "autoFound": "Automatic ({{name}})",
+      "autoHint": "Kite picks a connected physical interface and follows network changes.",
+      "down": "Not connected",
+      "tunnelHint": "A virtual interface a proxy or VPN set up; picking it does not get around them",
+      "missing": "This interface is not found now"
     },
     "subscriptions": {
       "add": "Add subscription",

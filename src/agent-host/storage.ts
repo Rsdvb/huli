@@ -2,7 +2,13 @@
 
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
-import type { AgentAccount, AgentUpdate, PlanLimit, VersionMoveReason } from '@shared/agent-host'
+import type {
+  AgentAccount,
+  AgentUpdate,
+  PlanLimit,
+  ProviderBalance,
+  VersionMoveReason,
+} from '@shared/agent-host'
 import { GITHUB_PULL_REQUEST_URL, type ProjectWorktreeSettings } from '@shared/git'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
@@ -419,9 +425,19 @@ export interface AgentsFile {
         init?: RememberedInit
         apiKey?: true
         signIn?: string
+        /** Huli: the balances beside the plan's windows, such as Codex's credits, as last read. */
+        balances?: RememberedBalances
+        /** Huli: DeepSeek Harness's balance at DeepSeek, as last read. */
+        balance?: RememberedBalances
       }
     >
   >
+}
+
+/** Balances as a read gave them, shown as an earlier run's until they are read again. */
+export interface RememberedBalances {
+  items: ProviderBalance[]
+  observedAt: number
 }
 
 export interface RememberedInit {
@@ -1069,6 +1085,38 @@ function limitOf(value: unknown): PlanLimit | null {
   }
 }
 
+const isAmount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
+function balanceOf(value: unknown): ProviderBalance | null {
+  if (
+    !isRecord(value) ||
+    !isString(value.label) ||
+    value.label.length > 64 ||
+    !isAmount(value.amount) ||
+    !isString(value.currency) ||
+    value.currency.length > 16
+  ) {
+    return null
+  }
+  return {
+    label: value.label,
+    amount: value.amount,
+    currency: value.currency,
+    ...(isAmount(value.granted) ? { granted: value.granted } : {}),
+  }
+}
+
+/** Huli: remembered balances, at most a few, with when they were read; null when none parse. */
+function balancesOf(value: unknown): RememberedBalances | null {
+  if (!isRecord(value) || !Array.isArray(value.items) || !isTime(value.observedAt)) return null
+  const items = value.items
+    .slice(0, 16)
+    .map(balanceOf)
+    .filter((item): item is ProviderBalance => item !== null)
+  return items.length > 0 ? { items, observedAt: value.observedAt } : null
+}
+
 // A cache of what the agents report: an entry that does not parse is dropped, not the file.
 export function parseAgentsFile(data: Record<string, unknown>): AgentsFile | string {
   if (!isRecord(data.agents)) return 'agents is not an object'
@@ -1086,13 +1134,17 @@ export function parseAgentsFile(data: Record<string, unknown>): AgentsFile | str
       typeof entry.signIn === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(entry.signIn)
         ? entry.signIn
         : null
-    if (account || limits.length > 0 || init || apiKey || signIn) {
+    const balances = balancesOf(entry.balances)
+    const balance = balancesOf(entry.balance)
+    if (account || limits.length > 0 || init || apiKey || signIn || balances || balance) {
       agents[id] = {
         account,
         limits,
         ...(init ? { init } : {}),
         ...(apiKey ? { apiKey } : {}),
         ...(signIn ? { signIn } : {}),
+        ...(balances ? { balances } : {}),
+        ...(balance ? { balance } : {}),
       }
     }
   }

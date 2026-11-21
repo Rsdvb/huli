@@ -199,6 +199,27 @@ export interface SignInParams {
   provider: string
 }
 
+/** Huli: the sessions Cline's store holds, for the imports. */
+export interface ListParams {
+  /** The most to read, newest started first. */
+  limit: number
+}
+
+export interface ClineListed {
+  sessionId: string
+  cwd: string
+  title: string | null
+  /** ISO times. */
+  createdAt: string | null
+  updatedAt: string | null
+  /** Another session started it: a subagent's, or a team member's. */
+  subagent: boolean
+}
+
+export interface ListResult {
+  sessions: ClineListed[]
+}
+
 // What the process sends.
 
 export interface EventNotification {
@@ -245,6 +266,7 @@ export const METHOD = {
   cancel: 'session/cancel',
   set: 'session/set',
   close: 'session/close',
+  list: 'session/list',
   signIn: 'auth/sign-in',
   shutdown: 'shutdown',
   event: 'event',

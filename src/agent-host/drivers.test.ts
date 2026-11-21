@@ -1,8 +1,10 @@
 // Which interface an agent starts on when its harness has one of its own beside its protocol.
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { OWN_INTERFACE_HARNESSES } from '@shared/agents'
 import { CLINE } from './agents/cline'
 import { OPENCODE } from './agents/opencode'
+import { buildCatalog } from './catalog'
 import type { AgentConnection } from './connection'
 import { driverOf, preferredProtocol, protocolFor } from './drivers'
 import type { HostedDriver } from './driver'
@@ -121,5 +123,15 @@ describe('a start over the preferred interface', () => {
     })
     await window.until(() => window.entries(id).some((entry) => entry.kind === 'turn_end'))
     expect(window.entries(id).some((entry) => entry.kind === 'agent')).toBe(true)
+  })
+})
+
+describe('the harnesses the pages name as running on an interface of their own', () => {
+  it('are those whose protocol or preferred interface is not ACP, Claude Code’s SDK aside', () => {
+    const own = buildCatalog(null)
+      .filter((def) => (def.protocol ?? 'acp') !== 'acp' || def.preferred)
+      .map((def) => def.id)
+      .filter((id) => id !== 'claude-code')
+    expect([...own].sort()).toEqual([...OWN_INTERFACE_HARNESSES].sort())
   })
 })

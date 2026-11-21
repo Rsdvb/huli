@@ -121,6 +121,20 @@ export const MULTI_AGENT_HARNESSES: readonly HarnessId[] = [
 export const KEY_ONLY_ADDED_HARNESSES: readonly HarnessId[] = ['codebuddy']
 
 /**
+ * Huli: the harnesses Kettu drives through an interface of their own rather than ACP, as the
+ * catalog's `protocol` or `preferred` names it, so their page never says they run in ACP mode.
+ * Claude Code's is its SDK, which its package names.
+ */
+export const OWN_INTERFACE_HARNESSES: readonly HarnessId[] = [
+  'codex',
+  'deepseek',
+  'doubao',
+  'pi',
+  'opencode',
+  'cline',
+]
+
+/**
  * Harnesses whose default agent is registered without being added. Only the fake agent, which
  * exists in development builds, so the tools that drive the app have an agent to use.
  */

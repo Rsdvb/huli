@@ -16,6 +16,8 @@ import {
   type ClineProvider,
   type ClineSettings,
   type HelloResult,
+  type ListParams,
+  type ListResult,
   type ModelsParams,
   type ModelsResult,
   type OpenParams,
@@ -68,6 +70,10 @@ const AUTH_ERRORS = [
   'expired token',
   'authentication',
 ]
+/** Huli: the most sessions a listing reads; Cline's own history reads no more. */
+const LIST_LIMIT = 2_000
+/** Huli: the characters of a first prompt that stand for a session without a title. */
+const TITLE_CHARS = 80
 /** OpenAI's limit on a function name, which Cline's own MCP tool names keep to. */
 const TOOL_NAME_LIMIT = 64
 
@@ -126,6 +132,12 @@ export function messageOf(error: unknown): string {
   return String(error)
 }
 
+/** Huli: the start of a prompt's first line, as a title. */
+function firstLine(prompt: string | undefined): string | null {
+  const line = prompt?.trim().split(/\r?\n/, 1)[0]?.trim()
+  return line ? [...line].slice(0, TITLE_CHARS).join('') : null
+}
+
 function isAuthError(message: string): boolean {
   const text = message.toLowerCase()
   return AUTH_ERRORS.some((pattern) => text.includes(pattern))
@@ -170,6 +182,8 @@ export class Host {
         return this.set(params as SetParams)
       case METHOD.close:
         return this.close((params as { sessionId: string }).sessionId)
+      case METHOD.list:
+        return this.list(params as ListParams)
       case METHOD.signIn:
         return this.signIn(params as SignInParams)
       case METHOD.shutdown:
@@ -248,6 +262,36 @@ export class Host {
   private store(): Promise<SdkCore> {
     this.service ??= this.sdk.ClineCore.create({ clientName: 'kettu', backendMode: 'local' })
     return this.service
+  }
+
+  /**
+   * Huli: the sessions Cline's store holds, the latest started first, as its own `cline history`
+   * lists them, for the imports. Not hydrated: a title is the one Cline kept, else the start of
+   * the session's first prompt.
+   */
+  private async list({ limit }: ListParams): Promise<ListResult> {
+    const store = await this.store()
+    const rows = await store.list(Math.max(1, Math.min(Math.floor(limit), LIST_LIMIT)), {
+      hydrate: false,
+      includeSubagents: true,
+    })
+    return {
+      sessions: rows.flatMap((row) => {
+        const cwd = row.cwd || row.workspaceRoot
+        if (typeof row.sessionId !== 'string' || !row.sessionId || !cwd) return []
+        const title = row.metadata?.title?.trim() || firstLine(row.prompt)
+        return [
+          {
+            sessionId: row.sessionId,
+            cwd,
+            title: title || null,
+            createdAt: row.startedAt ?? null,
+            updatedAt: row.updatedAt ?? row.startedAt ?? null,
+            subagent: row.isSubagent === true || !!row.parentSessionId,
+          },
+        ]
+      }),
+    }
   }
 
   private require(sessionId: string): Session {

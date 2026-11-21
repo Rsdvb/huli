@@ -15,6 +15,46 @@ const words = (...texts: (string | undefined)[]): Set<string> =>
 const has = (own: Set<string>, name: string): boolean =>
   [...words(name)].every((word) => own.has(word))
 
+const HOUR_MS = 3_600_000
+const DAY_MS = 24 * HOUR_MS
+const COUNTED_MS = { minute: 60_000, hour: HOUR_MS, day: DAY_MS } as const
+
+/**
+ * Huli: how long a window counts use, by its name: five hours, a day, a week, a year, or a month
+ * for a monthly window and any Kite does not know. OpenCode's carry their provider before a colon.
+ */
+export function windowPeriod(window: string): number {
+  const own = window.slice(window.indexOf(':') + 1)
+  if (own === 'five_hour' || own === 'rolling' || own.startsWith('five_hour_')) return 5 * HOUR_MS
+  if (own === 'daily') return DAY_MS
+  if (own === 'seven_day' || own === 'weekly' || own.startsWith('seven_day_')) return 7 * DAY_MS
+  if (own === 'annual') return 366 * DAY_MS
+  const counted = /^(\d+)_(minute|hour|day)$/.exec(own)
+  if (counted) return Number(counted[1]) * COUNTED_MS[counted[2] as keyof typeof COUNTED_MS]
+  return 31 * DAY_MS
+}
+
+/**
+ * Huli: whether a window's reading still holds at `now`: until its reset, or, for one whose vendor
+ * names no reset, for one period from when it was read, after which its use belongs to a period
+ * gone by and its block no longer stands.
+ */
+export function limitHolds(
+  limit: Pick<PlanLimit, 'window' | 'resetsAt' | 'observedAt'>,
+  now: number,
+): boolean {
+  if (limit.resetsAt !== null) return limit.resetsAt > now
+  return now - limit.observedAt < windowPeriod(limit.window)
+}
+
+/** Huli: whether a window has no reset and its reading is a period old: it is shown no more. */
+export function limitOutlived(
+  limit: Pick<PlanLimit, 'window' | 'resetsAt' | 'observedAt'>,
+  now: number,
+): boolean {
+  return limit.resetsAt === null && !limitHolds(limit, now)
+}
+
 // A window named for a model or a group of models, such as Claude Code's `seven_day_opus` or
 // Antigravity's `five_hour_claude_and_gpt_models`.
 const SCOPED = /^(?:seven_day|five_hour)_(.+?)(?:_models)?$/

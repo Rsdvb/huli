@@ -61,6 +61,20 @@ export interface SdkSessionRecord {
   cwd: string
 }
 
+/** Huli: a session as Cline's history lists it (`SessionHistoryRecord`). */
+export interface SdkHistoryRecord {
+  sessionId: string
+  cwd?: string
+  workspaceRoot?: string
+  /** ISO times. */
+  startedAt?: string
+  updatedAt?: string
+  isSubagent?: boolean
+  parentSessionId?: string
+  prompt?: string
+  metadata?: { title?: string }
+}
+
 export interface SdkAgentResult {
   finishReason: string
   model?: { id?: string; provider?: string }
@@ -99,6 +113,11 @@ export interface SdkCore {
   abort(sessionId: string, reason?: unknown): Promise<void>
   dispose(reason?: string): Promise<void>
   get(sessionId: string): Promise<SdkSessionRecord | undefined>
+  /** Huli: the latest sessions by their start, at most `limit`. */
+  list(
+    limit?: number,
+    options?: { hydrate?: boolean; includeSubagents?: boolean },
+  ): Promise<SdkHistoryRecord[]>
   readMessages(sessionId: string): Promise<SdkMessage[]>
   readSessionCompactionState(sessionId: string): Promise<unknown>
   subscribe(listener: (event: SdkSessionEvent) => void): () => void
