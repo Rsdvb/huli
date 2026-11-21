@@ -2317,6 +2317,13 @@ export class AgentManager {
       await before
       await this.detectAll()
       if (this.stopped) return { checked: 0, failures: [] }
+      // The user's check reads every program again, so one updated outside Kettu shows its new
+      // version: a CLI's launcher can keep its size and time across versions, as npm's do, which
+      // is all the version cache looks at.
+      if (all) {
+        this.cliVersions.clear()
+        await Promise.all([...this.harnesses.values()].map((h) => this.detect(h)))
+      }
       const abort = new AbortController()
       this.updateAbort = abort
       const now = Date.now()
@@ -2657,6 +2664,17 @@ export class AgentManager {
     if (checked === 0) throw new HostError('agent_unavailable', t('agent.update.noNpm'))
     if (failures.length === checked) {
       throw new HostError('agent_error', t('agent.update.checkFailed', { reason: failures[0] }))
+    }
+    // What was found shows; the check still says it was not whole, rather than all up to date.
+    if (failures.length > 0) {
+      throw new HostError(
+        'agent_error',
+        t('agent.update.checkPartlyFailed', {
+          failed: String(failures.length),
+          total: String(checked),
+          reason: failures[0],
+        }),
+      )
     }
     return this.statuses()
   }

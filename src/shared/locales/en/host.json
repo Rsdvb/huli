@@ -285,6 +285,7 @@
       "none": "{{agent}} has no update to install",
       "noNpm": "Updates are checked with npm, and npm was not found on PATH.",
       "checkFailed": "Could not check for updates. {{reason}}",
+      "checkPartlyFailed": "{{failed}} of {{total}} update checks failed. {{reason}}",
       "offline": "The npm registry could not be reached.",
       "timeout": "npm did not answer within {{seconds}} s.",
       "noVersion": "npm named no version of {{package}}.",

@@ -278,6 +278,7 @@
       "none": "{{agent}} 没有可安装的更新",
       "noNpm": "检查更新需要 npm，但在 PATH 中找不到 npm。",
       "checkFailed": "无法检查更新。{{reason}}",
+      "checkPartlyFailed": "{{total}} 项更新检查中有 {{failed}} 项失败。{{reason}}",
       "offline": "无法连接 npm 仓库。",
       "timeout": "npm 没有在 {{seconds}} 秒内响应。",
       "noVersion": "npm 没有给出 {{package}} 的版本。",

@@ -325,7 +325,8 @@ describe("the version Kettu's compatibility manifest gives", () => {
       manifest: manifest(10, { recommended: '1.0.1' }),
     })
     expect(m.status().automatic).toBeNull()
-    await m.agents.checkUpdates()
+    // npm leaves the vendor's package unanswered, so the check says it was not whole.
+    await expect(m.agents.checkUpdates()).rejects.toThrow(/1 of 2 update checks failed/)
     await m.until(() => m.status().package?.version === '1.0.1')
     expect(m.installs).toEqual(['1.0.1'])
     expect(m.status().automatic).toMatchObject({

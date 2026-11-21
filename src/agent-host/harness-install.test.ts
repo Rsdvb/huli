@@ -1,17 +1,21 @@
-// Huli: a harness's install as the harness pages see it: a first install that fails leaves the
-// harness installable, its failure a task to retry. Installs are fakes that write to a temp folder.
+// Huli: a harness's install and update checks as the harness pages see them: a first install that
+// fails leaves the harness installable, its failure a task to retry, and the user's check reads a
+// program updated outside Kite again. Installs are fakes that write to a temp folder.
 
-import { mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '@shared/agent-host'
 import { DEFAULT_SETTINGS, type HostSettings } from '@shared/settings'
 import type { InstallOptions, InstalledAdapter } from './adapter-install'
 import { AgentManager, type AgentManagerDeps } from './agents'
+import { PI } from './agents/pi'
 import type { AgentDefinition } from './catalog'
 import { Diagnostics } from './diagnostics'
 import { parseBundled } from './harness-versions'
+import { CliVersions } from './installed-cli'
 import { parseRegistry } from './registry'
+import { TextRing } from './ring'
 import { EnvironmentService } from './shell-env'
 import { tempFolder } from './testing/temp'
 
@@ -155,5 +159,69 @@ describe('a first install of a harness that fails', () => {
     fail = false
     await agents.install('gemini')
     expect(status()).toMatchObject({ state: 'available', task: null, package: { installed: true } })
+  })
+})
+
+describe("the user's update check", () => {
+  it('reads again the version of a program updated outside Kite', async () => {
+    const root = await tempFolder('kite-outside-update-')
+    const program = path.join(root, process.platform === 'win32' ? 'pi.cmd' : 'pi')
+    await writeFile(program, '')
+    await chmod(program, 0o755)
+    let version = '0.90.0'
+    // The program's file keeps its size and time across versions, as an npm launcher does.
+    const cliVersions = new CliVersions({
+      platform: process.platform === 'win32' ? 'win32' : process.platform,
+      stat: async () => ({ size: 10, mtimeMs: 1 }),
+      run: async () => ({
+        code: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        output: new TextRing(1024),
+        stdout: `${version}\n`,
+      }),
+    })
+    const { agents, status } = await manager(
+      root,
+      PI,
+      hostSettings({ pi: { enabled: true, binaryPath: program } }),
+      {
+        cliVersions,
+        fetchLatest: async () => ({ adapterVersion: '0.91.0', cliVersion: null }),
+      },
+    )
+    const cliVersion = () => status().version
+
+    await agents.checkUpdates()
+    expect(cliVersion()).toBe('0.90.0')
+
+    version = '0.91.0'
+    await agents.checkUpdates()
+    expect(cliVersion()).toBe('0.91.0')
+  })
+})
+
+describe('an update check that fails in part', () => {
+  it('rejects, so it never reads as all up to date', async () => {
+    const root = await tempFolder('kite-partial-check-')
+    const program = path.join(root, process.platform === 'win32' ? 'pi.cmd' : 'pi')
+    await writeFile(program, '')
+    await chmod(program, 0o755)
+    const { agents } = await manager(
+      root,
+      PI,
+      hostSettings({ pi: { enabled: true, binaryPath: program } }),
+      {
+        probeCli: async () => ({ version: '0.90.0' }),
+        fetchLatest: async () => ({ adapterVersion: '0.90.0', cliVersion: null }),
+        fetchRegistry: async () => {
+          throw new Error('The ACP Registry could not be reached.')
+        },
+      },
+    )
+    await expect(agents.checkUpdates()).rejects.toThrow(
+      /1 of 2 update checks failed\. The ACP Registry could not be reached\./,
+    )
   })
 })
