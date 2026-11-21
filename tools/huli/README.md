@@ -362,6 +362,43 @@ followed. The log names the paths removed, never contents.
   (`row.deleteRemovesAgentCopy`), keeping `row.deleteKeepsAppCopy` for an agent whose copy stays;
   `FAKE_AGENT_UUID_IDS` in `tools/fake-agent`.
 
+### DeepSeek Harness's sign-in and balance
+
+dsh signs in through its own page (`dsh web`, which never exits), so neither the agent nor a
+finished terminal told Kite of a sign-in, and an agent page read while dsh was not running stayed
+at 「登录方式 — 未提供」. The agent host now reads the route itself from the home's files
+(`$DSH_HOME/.credentials.yaml`, else `~/.dsh`): at start, on the agent page, the model menu and the
+background limits read, and whenever the file changes (`dsh/credentials-watch.ts`, the home
+watched from its parent until dsh makes it). A DeepSeek account shows as 登录方式 DeepSeek 账号 with
+the phone or email DeepSeek masks, a key as DeepSeek API key, another provider's route as 自定义模型服务商,
+and neither as signed out, so the sidebar's notice and New session agree. DeepSeek's own routes,
+which dsh lists signed in or not, no longer count as another provider's (`reportedRoute`).
+
+The balance shows in 套餐用量, in the model menu's last row (`余额 ¥…`) and on the phone's 余额 group:
+
+- Account sign-in: what dsh's own `@deepseek-ai/dsh-deepseek-account` (0.2.2-rc.5) asks, `GET
+https://platform.deepseek.com/api/v0/users/get_user_summary` (`normal_wallets` topped up,
+  `bonus_wallets` granted, decimal strings) and, once per sign-in, `/auth-api/v0/users/current`
+  for the masked contact, with the grant's token in `x-dsh-auth-token` and dsh's client headers.
+  A grant whose issuer is not `https://platform.deepseek.com`, or dsh's mock one, is never sent.
+- API key: `GET https://api.deepseek.com/user/balance` with `Authorization: Bearer`.
+
+Both go through `askVendor` (HTTPS to the listed origin only, no redirects, a bounded reply,
+errors that quote nothing). The token and key are read for the request and dropped; only a short
+hash stays in memory to tell a new sign-in. A read is due at most once a minute (10 s when the
+user presses refresh); a file change reads DeepSeek only for a new sign-in. A refused token keeps
+the last balance with 「DeepSeek 不再接受这次登录」; dsh itself drops a refused grant, and the watch
+then signs the agent out.
+
+Huli's own files: `src/agent-host/dsh/account.ts`, `credentials-watch.ts`,
+`src/agent-host/vendor-usage/deepseek.ts` (+ tests and scrubbed `fixtures/deepseek-*.json`),
+`features/settings/agent-balance.tsx`. Hooks: `dsh/credentials.ts` (`readAccountGrant`, the home's
+`.env` key), `dsh/connection.ts`, `dsh/options.ts`, `agents.ts` (`refreshBalance`, `readBalance`,
+the start's read), `ProviderBalance.granted` in `src/shared/agent-host.ts`, `agents-section.tsx`,
+`model-menu.tsx`, `composer.tsx`, `new-session.tsx`, `mobile/src/app/settings/agent.tsx`,
+`mobile/src/ui/session/limits.ts`, and `dsh.account`/`dsh.balance`, `agents.balance`/`agents.phone`
+and `controls.balance` in the locales.
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,
