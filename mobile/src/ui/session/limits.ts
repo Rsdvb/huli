@@ -200,7 +200,9 @@ export function balanceText(balance: ProviderBalance): { name: string; value: st
       ? '预付余额'
       : balance.label === 'Extra usage'
         ? '额外用量'
-        : balance.label
+        : balance.label === 'Balance'
+          ? '余额'
+          : balance.label
   const value = /^[A-Z]{3}$/.test(balance.currency)
     ? moneyText(balance.amount, balance.currency)
     : `${Math.round(balance.amount * 100) / 100} ${AMOUNT_UNITS[balance.currency] ?? balance.currency}`

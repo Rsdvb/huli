@@ -102,7 +102,8 @@ import {
 } from './agent-parts'
 import { NetworkChoiceRow } from './agent-network-rows'
 import { ResetRow } from './agent-reset'
-import { AgentProviders, ProviderBalances } from './agent-providers'
+import { BalanceGroup } from './agent-balance'
+import { AgentProviders } from './agent-providers'
 import {
   currentLimits,
   FOLLOW_AGENT,
@@ -113,7 +114,6 @@ import {
   useAgentReads,
   useHasOtherAgents,
   useSignInRead,
-  VENDORS,
 } from './agent-helpers'
 import {
   CONFIRM,
@@ -1074,7 +1074,11 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
                 {status.account?.kind === 'none' ? null : status.account?.label}
               </Fact>
               {status.account?.email && (
-                <Fact name={t('agents.email')}>{status.account.email}</Fact>
+                <Fact
+                  name={t(status.account.email.includes('@') ? 'agents.email' : 'agents.phone')}
+                >
+                  {status.account.email}
+                </Fact>
               )}
               {status.apiKey && <ApiKeyRow status={status} />}
               {status.authMethods
@@ -1136,23 +1140,13 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
           </section>
         )}
 
-        {status.balance && !status.disabled && (
-          <ProviderBalances
-            providers={[
-              {
-                id: status.harnessId,
-                name: VENDORS[status.harnessId] ?? status.harnessName,
-                methods: [],
-                accounts: [],
-                loginCommand: '',
-                usage: status.balance,
-              },
-            ]}
-          />
-        )}
-
         {status.disabled ? null : providerMode ? (
           <SpendGroup status={status} providers />
+        ) : status.balance !== undefined ? (
+          <>
+            <BalanceGroup status={status} reading={reading} />
+            {status.account?.kind === 'api_key' && <SpendGroup status={status} />}
+          </>
         ) : status.account?.kind === 'api_key' ? (
           <SpendGroup status={status} />
         ) : (

@@ -40,6 +40,7 @@ import { runningWorkOf, workItems, type WorkItem } from '@renderer/features/side
 import { setPaneSelection, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { showSending, useThreadsStore } from '@renderer/stores/threads'
+import { refreshLimits } from '@renderer/stores/usage'
 import { useViewStore } from '@renderer/stores/view'
 import { askSide, openSideChat, sideQuestionOf } from '@renderer/stores/side-chat'
 import { awaitsAnswer, endedOnRejection } from '../turn-phase'
@@ -165,12 +166,19 @@ export function Composer({
   const phone = usePhoneWindow()
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   // The models the agent offers may have changed since the session started.
+  const hasWallet = agent?.balance !== undefined
   useEffect(() => {
     if (!modelMenuOpen) return
     host('sessions.refreshModels', { sessionId }).catch((error: unknown) =>
       console.warn(`Could not read the agent's models again: ${errorMessage(error)}`),
     )
-  }, [modelMenuOpen, sessionId])
+    // The menu names the balance, which the host reads again once its last read is a minute old.
+    if (hasWallet) {
+      refreshLimits(session.agentId, hostId).catch((error: unknown) =>
+        console.warn(`Could not read the balance: ${errorMessage(error)}`),
+      )
+    }
+  }, [modelMenuOpen, sessionId, hasWallet, session.agentId, hostId])
   const [configError, setConfigError] = useState<string | null>(null)
   const outOfCredit = useOutOfCredit(sessionId)
   const rejected = useThreadsStore((s) => endedOnRejection(s.replicas[sessionId]?.state))
@@ -786,6 +794,7 @@ export function Composer({
               account={agent?.account ?? null}
               limits={limits ?? []}
               balances={agent?.balances}
+              wallet={agent?.balance?.balances}
               source={agent?.version ? `${agent.harnessName} ${agent.version}` : null}
               cacheNote={cacheNote}
               actions={[

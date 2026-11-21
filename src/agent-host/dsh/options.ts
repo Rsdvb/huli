@@ -33,6 +33,11 @@ function deepseekRoute(
   return null
 }
 
+/** Whether a route is one of DeepSeek's own, which dsh lists whether or not it is signed in. */
+export function isDeepSeekRoute(provider: string): boolean {
+  return deepseekRoute(provider, null) !== null
+}
+
 /**
  * Huli: the account's route and the API key's both call their group DeepSeek, so the menus showed
  * the same models twice under one name. A group that more than one route shares is named by route.

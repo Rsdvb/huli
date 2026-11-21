@@ -770,8 +770,19 @@
     "plan": "Plan",
     "loginMethod": "Login method",
     "email": "Email",
+    "phone": "Phone",
     "notReported": "Not reported",
     "readingSignIn": "Reading how it signs in…",
+    "balance": {
+      "name": "Balance",
+      "nameIn": "Balance ({{currency}})",
+      "granted": "{{amount}} of it granted",
+      "refresh": "Read the balance again",
+      "reading": "Reading the balance…",
+      "afterSignIn": "Once {{name}} is signed in to a DeepSeek account or has an API key, its balance shows here.",
+      "gateway": "With another model provider, its own console shows the balance.",
+      "stale": "Showing the balance read {{ago}}."
+    },
     "planLimits": "Plan limits",
     "usageNotReported": "{{name}} does not report plan usage.",
     "resetCredits": {

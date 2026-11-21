@@ -629,7 +629,11 @@ function DraftComposer({
                 onSelect={pick}
                 onOpenChange={(open) => {
                   if (!open || !status) return
-                  if (status.state === 'ready' && status.capabilities.reports) {
+                  // A balance, such as DeepSeek's, is read from its vendor, the agent idle or not.
+                  if (
+                    (status.state === 'ready' && status.capabilities.reports) ||
+                    status.balance !== undefined
+                  ) {
                     refreshLimits(agentId, hostId).catch((error: unknown) =>
                       console.warn(`Could not read the plan limits: ${errorMessage(error)}`),
                     )
@@ -639,6 +643,7 @@ function DraftComposer({
                 account={status?.account ?? null}
                 limits={limits ?? []}
                 balances={status?.balances}
+                wallet={status?.balance?.balances}
                 source={status?.version ? `${status.harnessName} ${status.version}` : null}
               />
             )

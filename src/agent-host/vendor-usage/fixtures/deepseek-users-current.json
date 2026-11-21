@@ -1,0 +1,37 @@
+{
+  "code": 0,
+  "data": {
+    "biz_code": 0,
+    "biz_data": {
+      "id": "00000000-0000-4000-8000-000000000000",
+      "token": "scrubbed-session-token-in-the-reply",
+      "email": "",
+      "mobile_number": "138****0000",
+      "area_code": "+86",
+      "status": 0,
+      "is_api_banned": false,
+      "id_profile": {
+        "provider": "PHONE",
+        "id": "scrubbed",
+        "picture": "https://example.invalid/avatar.png",
+        "name": "Kite Tester",
+        "locale": "zh_CN",
+        "email": null
+      },
+      "feature_gates": {
+        "PAYMENT": true,
+        "ANTOM_ENABLED": false,
+        "APPLE_PAY_ENABLED": false,
+        "GOOGLE_PAY_ENABLED": false
+      },
+      "currency": "CNY",
+      "register_client_type": "WEB",
+      "identity_verification_id": null,
+      "business_verification_id": null,
+      "balance_alert": {
+        "CNY": { "enabled": false, "alert_bound": "0" },
+        "USD": { "enabled": false, "alert_bound": "0" }
+      }
+    }
+  }
+}
