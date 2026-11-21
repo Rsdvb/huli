@@ -61,13 +61,11 @@ appId: io.github.rsdvb.huli
     visible:
       text: '给 .* 发消息 回复.*'
     timeout: 120000
+# The links at the reply's end come up over the composer, which a tap through would hit instead.
 - swipe:
-    start: 50%, 30%
-    end: 50%, 92%
+    start: 50%, 65%
+    end: 50%, 20%
     duration: 500
-- tapOn:
-    text: '.*回到最新'
-    optional: true
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 1500
