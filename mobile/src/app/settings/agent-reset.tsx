@@ -1,4 +1,4 @@
-// Huli: Settings › Agent › an agent › 重置环境, as the desktop's dialog (agent-reset.tsx): signs the
+// Huli: Settings > Agent > an agent > Reset environment, as the desktop's dialog (agent-reset.tsx): signs the
 // agent out and removes the ids and caches it made on the computer, its history and settings
 // kept. The list is read from the computer as the page opens, so it names exactly what goes.
 

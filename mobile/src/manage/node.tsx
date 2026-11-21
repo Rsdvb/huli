@@ -257,7 +257,7 @@ export function NodeNotice(props: { title: string }) {
 }
 
 /**
- * Settings › Agent › 环境's rows for Node.js: what agents run on, the install's progress and Stop,
+ * Settings > Agent > Environment's rows for Node.js: what agents run on, the install's progress and Stop,
  * a failure, Install or Update, Remove and the choice to always use Kite's. Rows, not a
  * component, so the group draws its lines between them.
  */

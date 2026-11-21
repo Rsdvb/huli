@@ -43,7 +43,7 @@ function field(error: unknown, name: 'code' | 'message'): string | null {
 /**
  * A failed request in words for the user: the host's own words when they are Chinese already,
  * else what its code means, else `fallback`. `lead` says what failed in place of the line that a
- * code carrying the host's own words gets, such as 「安装没有完成。」 for an install.
+ * code carrying the host's own words gets, such as that an install did not finish.
  */
 export function hostErrorText(error: unknown, fallback = '请稍后再试。', lead?: string): string {
   const code = field(error, 'code')

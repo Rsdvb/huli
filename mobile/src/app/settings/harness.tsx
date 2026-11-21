@@ -21,7 +21,7 @@ import {
   METHOD_NAMES,
   needsNode,
   readiness,
-  shellName,
+  shellPlace,
   showsCurrent,
   startInstall,
   usableAgents,
@@ -96,7 +96,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
   const [uninstalling, setUninstalling] = useState(false)
   const [updated, setUpdated] = useState(false)
   const environment = useEnvironment()
-  const shell = shellName(useComputer().platform)
+  const shell = shellPlace(useComputer().platform)
   const harness = status.harnessId
   const name = status.harnessName
   const r = readiness(status)
@@ -435,7 +435,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
           <View style={styles.block}>
             <Text style={[typeScale.body, { color: c.text }]}>启动命令</Text>
             <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-              {`纸鸢这样启动它，按电脑的 ${shell} 写。`}
+              {`纸鸢这样启动它，写法用于${shell}。`}
             </Text>
             <Code>{status.launchCommand}</Code>
             <View style={styles.row}>
@@ -769,7 +769,7 @@ function InstallNotice(props: {
  */
 function InstallSheet(props: {
   status: AgentStatus
-  /** The shell the computer's commands are written for. */
+  /** Where the computer's commands run, as the copy names it. */
   shell: string
   visible: boolean
   onClose(): void
@@ -849,7 +849,7 @@ function InstallSheet(props: {
           <FieldNote>
             {method.id === 'archive'
               ? '纸鸢会为这台电脑下载并安装这个文件。'
-              : `也能复制到电脑的 ${props.shell} 里自己运行，装好后回来点“重新加载环境”。`}
+              : `也能复制到${props.shell}里自己运行，装好后回来点“重新加载环境”。`}
           </FieldNote>
         </>
       ) : null}

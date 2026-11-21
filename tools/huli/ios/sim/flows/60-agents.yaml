@@ -24,6 +24,7 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: g01-agents
 - scrollUntilVisible:
     element: '重新加载环境'
+    timeout: 60000
     optional: true
 - scroll
 - takeScreenshot: g02-agents-environment
@@ -45,7 +46,6 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: g04-agent
 - scrollUntilVisible:
     element: '重置环境…'
-    centerElement: true
 - takeScreenshot: g05-agent-bottom
 - tapOn: '重置环境…'
 - extendedWaitUntil:
@@ -136,6 +136,7 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: g14-agents-dark
 - scrollUntilVisible:
     element: '重新加载环境'
+    timeout: 60000
     optional: true
 - scroll
 - takeScreenshot: g15-agents-environment-dark
@@ -152,7 +153,6 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: g16-agent-dark
 - scrollUntilVisible:
     element: '重置环境…'
-    centerElement: true
 - tapOn: '重置环境…'
 - extendedWaitUntil:
     visible: '退出登录和凭据'

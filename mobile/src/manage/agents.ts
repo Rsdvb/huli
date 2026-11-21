@@ -305,11 +305,16 @@ export function methodText(method: AgentAuthMethod): { name: string; description
 }
 
 /**
- * The shell the host's commands are written for: PowerShell on Windows (whose 5.1 has no `&&`),
- * a POSIX shell elsewhere, as the host quotes them.
+ * Where the host's commands run, as copy says it: PowerShell on Windows (whose 5.1 has no `&&`),
+ * a POSIX shell's terminal elsewhere, as the host quotes them.
  */
-export function shellName(platform: string | null | undefined): string {
-  return platform === 'win32' ? 'PowerShell' : '终端'
+export function shellPlace(platform: string | null | undefined): string {
+  return platform === 'win32' ? '电脑的 PowerShell' : '电脑的终端'
+}
+
+/** A name followed by Chinese copy, set off by a space when it ends in a Latin letter or digit. */
+export function spaced(name: string): string {
+  return /[A-Za-z0-9]$/.test(name) ? `${name} ` : name
 }
 
 /**

@@ -37,7 +37,8 @@ import {
   needsNode,
   percent,
   readiness,
-  shellName,
+  shellPlace,
+  spaced,
   stateText,
 } from '../../manage/agents'
 import {
@@ -146,7 +147,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
   const [image, setImage] = useState<string | null>(null)
   // A sign-in the user cancelled rejects; that is no failure to show.
   const cancelled = useRef(false)
-  const shell = shellName(useComputer().platform)
+  const shell = shellPlace(useComputer().platform)
   const waitsForNode = needsNode(status)
   const id = status.id
   const r = readiness(status)
@@ -567,7 +568,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
                     </Text>
                   ) : null}
                   <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                    {`由 Harness 自己在终端里登录，纸鸢不经手凭据。在电脑的 ${shell} 里运行：`}
+                    {`由 Harness 自己在终端里登录，纸鸢不经手凭据。在${shell}里运行：`}
                   </Text>
                   <Code>{method.command!}</Code>
                   <View style={styles.row}>
@@ -587,7 +588,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
               ))}
               {elsewhere ? (
                 <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
-                  {`${methodText(elsewhere).name}会在 ${status.name} 所在的电脑上打开浏览器，请到那台电脑上登录。`}
+                  {`${spaced(methodText(elsewhere).name)}会在 ${status.name} 所在的电脑上打开浏览器，请到那台电脑上登录。`}
                 </Text>
               ) : null}
             </View>
