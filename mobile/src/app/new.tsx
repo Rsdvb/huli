@@ -31,6 +31,7 @@ import {
   startNotices,
   startValues,
   usableAgents,
+  waitingForNode,
   type AgentMenuProps,
   type ConfigControl,
 } from '../components/ConfigMenus'
@@ -51,7 +52,6 @@ import {
   useSession,
   type HostData,
 } from '../host'
-import { needsNode } from '../manage/agents'
 import { onCreated, queueMessage, withdrawItem, type OutboxMessage } from '../outbox'
 import { folder, greeting, listTime, sessionTitle } from '../sessions'
 import { HuliIcon } from '../ui/HuliMark'
@@ -153,18 +153,12 @@ export default function NewSession() {
   // Why Send does nothing now, said over the box rather than left to guess; the note over it leads
   // to where the phone fixes it.
   const need = agent ? agentNeed(agent) : null
-  const waitingForNode = useMemo(
-    () =>
-      [...agentMap.values()].filter(
-        (a) => a.registered !== false && !a.hidden && !a.disabled && !a.uninstalled && needsNode(a),
-      ),
-    [agentMap],
-  )
+  const waiting = useMemo(() => waitingForNode(agentMap), [agentMap])
   const unsendable =
     agents.length === 0
       ? loaded
-        ? waitingForNode.length > 0
-          ? `${waitingForNode.map((a) => a.name).join('、')} 需要 Node.js 才能开始。`
+        ? waiting.length > 0
+          ? `${waiting.map((a) => a.name).join('、')} 需要 Node.js 才能开始。`
           : '没有可用的 Agent，先添加或启用一个再开始。'
         : null
       : !agent
@@ -180,7 +174,7 @@ export default function NewSession() {
                 : null
   const needNote =
     agents.length === 0 ? (
-      !loaded ? null : waitingForNode.length > 0 ? (
+      !loaded ? null : waiting.length > 0 ? (
         <NodeNeedNote />
       ) : (
         <NeedNote
@@ -264,7 +258,8 @@ export default function NewSession() {
   })
 
   const agentMenu: AgentMenuProps = {
-    agents,
+    // Those waiting for Node.js too, whose rows lead to where it is installed.
+    agents: [...agents, ...waiting],
     current: agentId,
     currentModel: (model?.option.value as string | undefined) ?? null,
     options: options.options,

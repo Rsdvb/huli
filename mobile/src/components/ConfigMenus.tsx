@@ -7,6 +7,7 @@
 
 import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
+import { needsNode } from '../manage/agents'
 import type { AgentOptions, AgentStatus } from '@shared/agent-host'
 import { isFullAccessMode, isStartMode } from '@shared/agents'
 import { limitsForModel } from '@shared/plan-limits'
@@ -560,13 +561,14 @@ export function startValues(
 
 /**
  * What an agent needs before it can start, as the desktop's agent menu says it
- * (new-session/start-options.ts): its own program updated, its install to finish, a failed start
- * looked at, or a sign-in. The phone does all but the install's wait on the agent's or harness's
- * page, which `openNeed` opens.
+ * (new-session/start-options.ts): Node.js, its own program updated, its install to finish, a
+ * failed start looked at, or a sign-in. The phone does all but the install's wait on the agent's
+ * or harness's page, which `openNeed` opens.
  */
-export type AgentNeed = 'update' | 'installing' | 'failed' | 'sign-in' | null
+export type AgentNeed = 'node' | 'update' | 'installing' | 'failed' | 'sign-in' | null
 
 export function agentNeed(agent: AgentStatus): AgentNeed {
+  if (needsNode(agent)) return 'node'
   if (agent.cli?.installed?.problem?.kind === 'too-old') return 'update'
   if (agent.state === 'installing') return 'installing'
   if (agent.state === 'failed') return 'failed'
@@ -575,6 +577,7 @@ export function agentNeed(agent: AgentStatus): AgentNeed {
 
 /** What a menu row of an agent that needs something says, with where a tap takes it. */
 const NEED_ROW: Record<NonNullable<AgentNeed>, string> = {
+  node: '需要 Node.js · 点按去安装',
   update: '需要更新 · 点按去更新',
   installing: '正在安装…',
   failed: '出错 · 点按查看',
@@ -603,6 +606,13 @@ export function usableAgents(agents: Map<string, AgentStatus>): AgentStatus[] {
       !a.uninstalled &&
       (!['not-installed', 'node-missing', 'node-outdated'].includes(a.state) ||
         agentNeed(a) === 'update'),
+  )
+}
+
+/** The agents a menu leaves out while they wait for Node.js, which New session lists to install. */
+export function waitingForNode(agents: Map<string, AgentStatus>): AgentStatus[] {
+  return [...agents.values()].filter(
+    (a) => a.registered !== false && !a.hidden && !a.disabled && !a.uninstalled && needsNode(a),
   )
 }
 
