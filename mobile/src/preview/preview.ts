@@ -8,6 +8,7 @@ import { useSyncExternalStore } from 'react'
 import { Platform, Share } from 'react-native'
 import { CryptoDigestAlgorithm, digest } from 'expo-crypto'
 import { FileMode, type File } from 'expo-file-system'
+import { router } from 'expo-router'
 import { DownloadError, downloadFile } from '@shared/file-download'
 import type { FileBytes, FileStamp } from '@shared/files'
 import type { HostLink } from '@shared/remote/link'
@@ -296,12 +297,21 @@ async function show(of: Job, copy: Kept): Promise<void> {
   const mimeType = mimeTypeOf(copy.name)
   const viewable = await copy.file.canPreview({ mimeType }).catch(() => false)
   if (!live(of)) return
-  if (!viewable) return unviewable(of)
+  if (!viewable) return fallBack(of, copy, mimeType)
   try {
     await present(copy.file, copy.name, mimeType)
   } catch {
-    if (live(of)) unviewable(of)
+    if (live(of)) fallBack(of, copy, mimeType)
   }
+}
+
+/** Where Quick Look will not show a PDF, a web view of it; anything else, other apps. */
+function fallBack(of: Job, copy: Kept, mimeType: string): void {
+  if (Platform.OS !== 'ios' || mimeType !== 'application/pdf') return unviewable(of)
+  router.push({
+    pathname: '/pdf',
+    params: { uri: copy.file.uri, name: copy.name, id: of.target.sessionId, path: of.target.path },
+  })
 }
 
 async function present(file: File, title: string, mimeType: string): Promise<void> {
