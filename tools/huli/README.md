@@ -511,8 +511,9 @@ app's own viewer.
 - `mobile/src/preview/`: `preview.ts` downloads into the cache through expo-file-system's
   `FileHandle` (never the whole file in memory) with expo-crypto's SHA-256, then opens it with
   expo-file-system's own `File.preview()`, Quick Look's `QLPreviewController` on iOS and an
-  `ACTION_VIEW` intent on a `content://` URI on Android; it shares through React Native's `Share`
-  on iOS and `HuliShare` on Android. `cache.ts` keeps each copy under a hash of the computer, the
+  `ACTION_VIEW` intent on a `content://` URI on Android, and a PDF Quick Look declines in a web
+  view of the copy (`app/pdf.tsx`); it shares through React Native's `Share` on iOS and
+  `HuliShare` on Android. `cache.ts` keeps each copy under a hash of the computer, the
   folder and the path (`<cache>/huli-preview/`): one whose size and mtime the computer still
   reports opens at once, and while the computer cannot be reached (or takes over 4 s to say) it
   opens with a note that it may be old; copies not opened for a week go, then the oldest past

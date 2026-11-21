@@ -304,14 +304,16 @@ function hasBody(entry: ToolEntry, label: ToolLabel, root: string | null): boole
 
 /**
  * The files of the session's folder a finished call read or wrote, each once, which its card
- * opens: a document in the system's viewer, any other file on the file screen.
+ * opens: a document in the system's viewer, any other file on the file screen. A text file whose
+ * edit the card shows already opens from its diff.
  */
 export function toolFiles(entry: ToolEntry, root: string | null): string[] {
   if (entry.status !== 'completed' || entry.toolKind === 'delete') return []
+  const edited = new Set(toolEdits(entry).map((edit) => folderFile(edit.path, root)))
   const paths = new Set<string>()
   for (const location of entry.locations) {
     const path = folderFile(location.path, root)
-    if (path) paths.add(path)
+    if (path && (opensInViewer(path) || !edited.has(path))) paths.add(path)
   }
   return [...paths]
 }
