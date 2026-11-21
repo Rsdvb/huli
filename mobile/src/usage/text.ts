@@ -1,5 +1,6 @@
 // How the usage tab writes its numbers and dates: Chinese units, dollars, and short dates.
 
+import { dayPeriod } from '../ui/session/format'
 import { addDays, type MetricKind, type TrendUnit } from './model'
 
 export function grouped(n: number): string {
@@ -81,10 +82,8 @@ export function rangeText(from: number, to: number): string {
 
 /** "下午6时至7时" for an hour of the day. */
 export function hourName(hour: number): string {
-  const part =
-    hour < 6 ? '凌晨' : hour < 12 ? '上午' : hour < 13 ? '中午' : hour < 18 ? '下午' : '晚上'
   const h12 = (h: number) => (h % 12 === 0 ? 12 : h % 12)
-  return `${part}${h12(hour)}时至${h12(hour + 1)}时`
+  return `${dayPeriod(hour)}${h12(hour)}时至${h12(hour + 1)}时`
 }
 
 /** A trend bar's period: a day, a week, a month or an hour. */
@@ -121,16 +120,6 @@ export function priceDate(iso: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
   if (!match) return iso
   return dateText(new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime())
-}
-
-/** When the logs were last read: 刚刚, 5 分钟前, 3 小时前, or a date. */
-export function agoText(at: number, now = Date.now()): string {
-  const minutes = Math.floor((now - at) / 60_000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
-  return `${dateText(at)}`
 }
 
 /** A folder's last part, for a project row. */

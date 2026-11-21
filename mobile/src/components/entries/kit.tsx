@@ -27,7 +27,7 @@ import { useActiveHost, useHostState } from '../../host'
 import { hostErrorText } from '../../hostErrors'
 import { Spinner } from '../../ui/StepMarks'
 import { haptic } from '../../ui/session/feedback'
-import { clockTime } from '../../ui/session/format'
+import { momentText } from '../../ui/session/format'
 import { G, Icon, type IconSpec } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
 import { PressScale } from '../../ui/session/Press'
@@ -85,7 +85,7 @@ export function markAnswered(id: string): void {
 
 /** The words after an answered line's headline: when here, and where it was answered. */
 export function answeredDetail(at: number | null, device: FromDevice | undefined): string {
-  return [at !== null ? clockTime(at) : null, device ? `在 ${device.name} 上` : null]
+  return [at !== null ? momentText(at) : null, device ? `在 ${device.name} 上` : null]
     .filter(Boolean)
     .join(' · ')
 }

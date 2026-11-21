@@ -7,7 +7,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { UsageScope, UsageStatus, UsageSummary } from '@shared/usage'
 import { Sheet, type SheetItem } from '../components/Sheet'
-import { clockOf } from '../sessions'
+import { ago, momentText } from '../sessions'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { BottomSheet } from '../ui/BottomSheet'
 import { PartsBar, StackedBarChart, type TipContent } from '../ui/charts'
@@ -52,7 +52,6 @@ import {
 } from './model'
 import { modelTitle } from './modelTitle'
 import {
-  agoText,
   barText,
   basename,
   compact,
@@ -642,7 +641,7 @@ export function TopSessions(props: {
               sessionId !== null
                 ? session.title || '无标题会话'
                 : session.lastAt
-                  ? `终端里的会话 · ${dateText(session.lastAt)} ${clockOf(session.lastAt)}`
+                  ? `终端里的会话 · ${momentText(session.lastAt)}`
                   : '不是在纸鸢里运行的会话'
             const project =
               session.project !== null && !session.scratch ? basename(session.project) : '无项目'
@@ -849,11 +848,7 @@ export function Footnote(props: {
     ? '电脑上的用量记录打不开，数字可能不全。'
     : props.scope === 'computer'
       ? `读自 ${props.hostName} 上 Agent 的日志，${
-          props.status.scanning
-            ? '正在同步'
-            : synced !== null
-              ? `${agoText(synced)}同步`
-              : '还没同步过'
+          props.status.scanning ? '正在同步' : synced !== null ? `${ago(synced)}同步` : '还没同步过'
         }。`
       : '只统计在纸鸢里运行的对话。'
   return (

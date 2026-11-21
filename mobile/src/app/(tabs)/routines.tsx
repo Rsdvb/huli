@@ -30,9 +30,8 @@ import {
   scopeText,
   STATE_TEXT,
   useRoutineList,
-  whenText,
 } from '../../routines'
-import { errorText, folder } from '../../sessions'
+import { errorText, folder, momentText } from '../../sessions'
 import { setTasksTabView, useTasksTabView } from '../../tasks'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { EmptyState } from '../../ui/EmptyState'
@@ -225,7 +224,7 @@ function Routines(props: { switcher: ReactNode }) {
                       {RUN_TEXT[run.status]}
                       {r.activeRun
                         ? ''
-                        : ` · ${whenText(run.endedAt ?? run.startedAt ?? r.updatedAt)}`}
+                        : ` · ${momentText(run.endedAt ?? run.startedAt ?? r.updatedAt)}`}
                     </Text>
                   </>
                 ) : r.state === 'on' && r.nextRunAt !== null ? (
@@ -233,7 +232,7 @@ function Routines(props: { switcher: ReactNode }) {
                     style={[typeScale.footnote, styles.tabular, { color: c.textTertiary }]}
                     numberOfLines={1}
                   >
-                    下次 {whenText(r.nextRunAt)}
+                    下次 {momentText(r.nextRunAt)}
                   </Text>
                 ) : (
                   <Text style={[typeScale.footnote, { color: c.textTertiary }]}>

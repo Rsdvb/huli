@@ -62,22 +62,6 @@ export function scopeText(scope: PermissionScope): string {
   return scope.web ? `${LEVEL_TEXT[scope.level]}，可联网` : LEVEL_TEXT[scope.level]
 }
 
-/** A moment near now in words: 今天 上午9:00, 明天 …, 周三 …, 3月2日 …. */
-export function whenText(ms: number, now = Date.now()): string {
-  const day = (t: number) => {
-    const d = new Date(t)
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  }
-  const days = Math.round((day(ms) - day(now)) / 86_400_000)
-  const clock = clockOf(ms)
-  if (days === 0) return `今天 ${clock}`
-  if (days === 1) return `明天 ${clock}`
-  if (days === -1) return `昨天 ${clock}`
-  const d = new Date(ms)
-  if (Math.abs(days) < 7) return `周${DAY_NAMES[d.getDay()]} ${clock}`
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${clock}`
-}
-
 export const RUN_TEXT: Record<RunStatus, string> = {
   queued: '排队中',
   starting: '正在开始',

@@ -89,6 +89,7 @@ import {
   windowName,
 } from '../../ui/session/limits'
 import { useComputer } from '../../ui/session/computer'
+import { listTime } from '../../ui/session/format'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 import { openUrl } from '../../system/openUrl'
 import { shareImage } from '../../system/shareImage'
@@ -942,7 +943,7 @@ function UsageGroup({ status, reading }: { status: AgentStatus; reading: boolean
     if (!resets || !next) return
     const go = await confirm({
       title: '使用一张重置卡？',
-      message: `会立即重置正在计算的用量窗口，用掉后不能退回。${next.until === null ? '' : `用掉的是最早到期的一张（${new Date(next.until).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })} 到期）。`}现在还有 ${resets.count} 张。`,
+      message: `会立即重置正在计算的用量窗口，用掉后不能退回。${next.until === null ? '' : `用掉的是最早到期的一张（${listTime(next.until)}到期）。`}现在还有 ${resets.count} 张。`,
       confirm: '使用一张',
       destructive: false,
     })

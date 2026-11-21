@@ -385,22 +385,6 @@ export function compactCount(n: number): string {
   return `${trim(n / 100_000_000)}亿`
 }
 
-const MINUTE = 60_000
-const HOUR = 60 * MINUTE
-const DAY = 24 * HOUR
-
-/** "刚刚", "12 分钟前", "3 小时前", "昨天", "4 天前", then "10月3日". */
-export function agoText(at: number, now = Date.now()): string {
-  const delta = Math.max(0, now - at)
-  if (delta < MINUTE) return '刚刚'
-  if (delta < HOUR) return `${Math.floor(delta / MINUTE)} 分钟前`
-  if (delta < DAY) return `${Math.floor(delta / HOUR)} 小时前`
-  if (delta < 2 * DAY) return '昨天'
-  if (delta < 7 * DAY) return `${Math.floor(delta / DAY)} 天前`
-  const d = new Date(at)
-  return `${d.getMonth() + 1}月${d.getDate()}日`
-}
-
 // ---- When each tool call ran ----
 
 // When this phone saw each tool call start and finish. The thread carries no times for tool
