@@ -2416,7 +2416,13 @@
       "invalid": "Enter an interface name without #",
       "keywords": "interface adapter nic ethernet wifi tun bypass",
       "descriptionFound": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. Leave it empty to use the one found: {{name}}.",
-      "descriptionNone": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. None was found, so name one here."
+      "descriptionNone": "Nodes dial out on this interface, around any TUN a proxy client or VPN set up. None was found, so name one here.",
+      "auto": "Automatic",
+      "autoFound": "Automatic ({{name}})",
+      "autoHint": "Kite picks a connected physical interface and follows network changes.",
+      "down": "Not connected",
+      "tunnelHint": "A virtual interface a proxy or VPN set up; picking it does not get around them",
+      "missing": "This interface is not found now"
     },
     "subscriptions": {
       "add": "Add subscription",

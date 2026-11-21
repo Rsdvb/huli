@@ -2378,7 +2378,13 @@
       "invalid": "网卡名称不能包含 #",
       "keywords": "网卡 适配器 以太网 wifi tun 绕过",
       "descriptionFound": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。留空则用自动找到的：{{name}}。",
-      "descriptionNone": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。没有自动找到，请在这里填写。"
+      "descriptionNone": "节点从这块网卡连出去，绕开代理客户端或 VPN 建立的 TUN。没有自动找到，请在这里填写。",
+      "auto": "自动",
+      "autoFound": "自动（{{name}}）",
+      "autoHint": "纸鸢挑一块已连接的物理网卡，网络变了会跟着换。",
+      "down": "未连接",
+      "tunnelHint": "代理或 VPN 建的虚拟网卡，选它就绕不开它们",
+      "missing": "现在找不到这块网卡"
     },
     "subscriptions": {
       "add": "添加订阅",

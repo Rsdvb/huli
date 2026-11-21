@@ -60,7 +60,6 @@ import {
   IconAction,
   Pill,
   SetButton,
-  SetInput,
   SettingSelect,
   SettingSwitch,
 } from './controls'
@@ -121,14 +120,40 @@ export function InterfaceField({ label }: { label: string }) {
   const { t } = useTranslation('settings')
   const stored = useSettingsStore((s) => s.settings.agentNetwork.interface)
   const detected = useAgentNetworkStore((s) => s.status?.interface.detected ?? null)
-  // What is typed until the field is left; the stored name shows otherwise.
-  const [draft, setDraft] = useState<string | null>(null)
+  const interfaces = useInterfaces()
+  // Shown, so the list to pick from is read and stays live.
+  useLiveInterfaces(true)
   const [error, setError] = useState<string | null>(null)
-  const value = draft ?? stored ?? ''
-  const save = () => {
-    const trimmed = value.trim()
-    const next = trimmed === '' ? null : trimmed
-    setDraft(null)
+  // Physical and connected first, then disconnected, then the TUN and VPN ones a pick would not
+  // get around.
+  const rank = (item: NetworkInterfaceView) => (item.tunnel ? 2 : item.up ? 0 : 1)
+  const listed = [...interfaces].sort((a, b) => rank(a) - rank(b))
+  const hint = (item: NetworkInterfaceView) =>
+    [
+      item.description,
+      item.tunnel
+        ? t('network.interface.tunnelHint')
+        : item.up
+          ? null
+          : t('network.interface.down'),
+    ]
+      .filter(Boolean)
+      .join(' · ') || undefined
+  const options = [
+    {
+      value: '',
+      label: detected
+        ? t('network.interface.autoFound', { name: detected })
+        : t('network.interface.auto'),
+      hint: t('network.interface.autoHint'),
+    },
+    ...listed.map((item) => ({ value: item.name, label: item.name, hint: hint(item) })),
+    ...(stored !== null && !interfaces.some((item) => item.name === stored)
+      ? [{ value: stored, label: stored, hint: t('network.interface.missing') }]
+      : []),
+  ]
+  const choose = (value: string) => {
+    const next = value === '' ? null : value
     if (next === stored) return
     if (next !== null && !isInterfaceName(next)) {
       setError(t('network.interface.invalid'))
@@ -140,18 +165,7 @@ export function InterfaceField({ label }: { label: string }) {
   return (
     <>
       <ControlError error={error} />
-      <SetInput
-        aria-label={label}
-        value={value}
-        placeholder={detected ?? t('network.interface.placeholder')}
-        spellCheck={false}
-        autoComplete="off"
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={save}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) save()
-        }}
-      />
+      <SettingSelect label={label} value={stored ?? ''} options={options} onChange={choose} />
     </>
   )
 }
