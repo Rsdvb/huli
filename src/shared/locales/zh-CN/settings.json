@@ -737,6 +737,7 @@
       "inherited": "继承自 Kettu 的启动方式。",
       "fallback": "正在使用备用 PATH。",
       "reload": "重新加载环境",
+      "redetect": "重新检测",
       "keywords": "环境 环境变量 PATH shell node npm",
       "node": {
         "usingSystem": "Agent 使用系统的 Node.js {{version}}。",
@@ -2082,6 +2083,12 @@
     "sdkOnFirstUse": "SDK 首次使用时安装",
     "cliUpdateBody": "你装的是 {{current}}。更新按你装 {{name}} 的方式运行，命令在下面。",
     "cliUpdateBodySdk": "你装的是 {{current}}。更新按你装 {{name}} 的方式运行，Claude Agent SDK 一并换成对应的版本；命令在下面。",
+    "cliUpdateWaiting": {
+      "short": "等会话结束",
+      "title": "{{name}} {{version}} 等会话结束后更新",
+      "body_one": "更新会替换 {{name}} 的程序，所以要等它正在运行的会话结束。",
+      "body_other": "更新会替换 {{name}} 的程序，所以要等它正在运行的 {{count}} 个会话结束。"
+    },
     "reinstall": "{{name}}",
     "reinstallBody": "删掉 Kettu 装的这一份，重新安装。",
     "programName": "{{command}}",
@@ -2096,6 +2103,7 @@
     "adapterNote": "Kettu 经这个适配器运行 {{name}}，用你的 Node.js。",
     "programNote": "就是 {{name}} 本身，Kettu 用你的 Node.js 运行它。",
     "usedBy": "在用它的",
+    "usedByNone": "还没有 Agent 用它",
     "listSeparator": "、",
     "manageAgents": "在智能体里管理",
     "versionOut": "{{version}} 已发布",

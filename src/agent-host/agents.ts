@@ -2941,6 +2941,14 @@ export class AgentManager {
       plan.command,
       async (signal, onOutput) => {
         diagnostics.event(h.def.id, 'update', plan.command)
+        // Windows cannot replace a program that runs, so an agent no session uses stops first.
+        await Promise.all(
+          this.agentsOf(h).map((slot) =>
+            slot.runtime && this.hooks.liveSessions(slot.id) === 0
+              ? this.stopProcess(slot)
+              : undefined,
+          ),
+        )
         const result = await (this.deps.runProgram ?? runProgram)({
           program: run.program,
           args: run.args,

@@ -4,7 +4,12 @@ import type { AgentInstallMethod, AgentStatus } from '@shared/agent-host'
 import type { SettingsFile, SettingsPatch } from '@shared/settings'
 import type { HarnessId } from '@shared/thread'
 import { cliOutdated } from '@renderer/features/agents/readiness'
-import { usableAgents, type AgentsStoreHook } from '@renderer/stores/agents'
+import {
+  awaitsPackage,
+  usableAgents,
+  whilePending,
+  type AgentsStoreHook,
+} from '@renderer/stores/agents'
 
 /** The harness's program is missing, so it installs by one of its vendor's routes. */
 function programMissing(status: AgentStatus): boolean {
@@ -63,7 +68,9 @@ async function registerInstalled(
     status.uninstalled ||
     status.task ||
     agents.getState().taskErrors[harness] ||
-    status.state !== 'available'
+    status.state !== 'available' ||
+    // A stopped install leaves Kettu's package still to install, which no agent can run yet.
+    awaitsPackage(status)
   ) {
     return
   }
@@ -83,17 +90,21 @@ export async function startInstall(
   harness: HarnessId,
   method?: AgentInstallMethod['id'] | null,
 ): Promise<void> {
-  await settings
-    .getState()
-    .update({ agents: { [harness]: { uninstalled: false } } })
-    .catch(() => {})
-  await agents.getState().check(harness)
-  const status = agents.getState().byId[harness]
-  // A harness whose program is still on the machine is back without installing anything.
-  if (!status || status.uninstalled || status.task?.state === 'running') return
-  const kind = installKind(status)
-  if (kind === 'program' || kind === 'package') {
-    await agents.getState().install(harness, method ?? undefined)
-  }
+  // A second click while the first one's settings and detection run asks nothing again.
+  if (agents.getState().pending[harness]) return
+  await whilePending(agents, harness, 'install', async () => {
+    await settings
+      .getState()
+      .update({ agents: { [harness]: { uninstalled: false } } })
+      .catch(() => {})
+    await agents.getState().check(harness)
+    const status = agents.getState().byId[harness]
+    // A harness whose program is still on the machine is back without installing anything.
+    if (!status || status.uninstalled || status.task?.state === 'running') return
+    const kind = installKind(status)
+    if (kind === 'program' || kind === 'package') {
+      await agents.getState().install(harness, method ?? undefined)
+    }
+  })
   await registerInstalled(agents, settings, harness)
 }

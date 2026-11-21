@@ -17,11 +17,12 @@ import type {
   AgentInstallMethod,
   AgentStatus,
   AgentTask,
+  EnvironmentInfo,
   NodeRuntimeInfo,
   VersionMoveReason,
 } from '@shared/agent-host'
 import { OWN_INTERFACE_HARNESSES } from '@shared/agents'
-import type { HarnessId } from '@shared/thread'
+import { harnessOf, type HarnessId } from '@shared/thread'
 import { AgentTile } from '@renderer/components/agents/agent-mark'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { useRefresh } from '@renderer/components/refresh'
@@ -54,17 +55,22 @@ import {
 } from '@renderer/features/agents/readiness'
 import { adapterOnlyUpdate } from '@renderer/features/agents/updates'
 import { PANEL } from '@renderer/features/session/entries/helpers'
+import { updateOffer } from '@renderer/features/updates/agent-updates'
+import { forgetHarnessUpdate, updateHarnesses } from '@renderer/features/updates/harness-updates'
 import { mediumAgo } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { useNow } from '@renderer/lib/use-now'
 import {
   awaitsPackage,
   harnessStatuses,
+  hasProgram,
   isInstalled,
   usableAgents,
   type AgentsStoreHook,
 } from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
+import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
+import { useUpdatesStore } from '@renderer/stores/updates'
 import { openAgentSettings, openHarnessSettings } from '@renderer/stores/view'
 import {
   ConfigFrame,
@@ -137,8 +143,13 @@ function startUpdate(agents: AgentsStoreHook, harness: HarnessId): void {
   void agents.getState().update(harness)
 }
 
-function startCliUpdate(agents: AgentsStoreHook, harness: HarnessId): void {
-  void agents.getState().updateCli(harness)
+/**
+ * Updates the user's own program, which replaces what the harness's sessions run. This computer's
+ * waits for its running sessions to end, as the update card's does; another host's runs at once.
+ */
+function startCliUpdate(agents: AgentsStoreHook, harness: HarnessId, hostId: string | null): void {
+  if (hostId === null) updateHarnesses([harness])
+  else void agents.getState().updateCli(harness)
 }
 
 function cancelTask(agents: AgentsStoreHook, harness: HarnessId): void {
@@ -151,11 +162,31 @@ function retryTask(
   settings: SettingsHook,
   harness: HarnessId,
   task: AgentTask,
+  hostId: string | null,
 ): void {
   if (task.kind === 'update') {
-    if (task.method) startCliUpdate(agents, harness)
+    if (task.method) startCliUpdate(agents, harness, hostId)
     else startUpdate(agents, harness)
   } else void startInstall(agents, settings, harness, task.method)
+}
+
+/** Whether this computer's update of the harness waits for its running sessions to end. */
+function useWaitingUpdate(status: AgentStatus): boolean {
+  const { hostId } = useHostScope()
+  return useUpdatesStore((s) => hostId === null && s.harnessWaiting.includes(status.id))
+}
+
+/** How many of this computer's sessions of the harness have a turn running now. */
+function useRunningSessions(harness: HarnessId): number {
+  return useSessionsStore(
+    (s) =>
+      Object.values(s.byId).filter(
+        (session) =>
+          hostOfSession(session) === null &&
+          harnessOf(session.agentId) === harness &&
+          (session.status === 'running' || session.status === 'awaiting_permission'),
+      ).length,
+  )
 }
 
 function methodName(t: SettingsT, method: AgentInstallMethod['id']): string {
@@ -191,20 +222,30 @@ function PillClose({
  * Update, Install, or that it is up to date once a check has run.
  */
 function HarnessState({ status }: { status: AgentStatus }) {
-  const { useAgentsStore, useSettingsStore } = useHostScope()
+  const { hostId, useAgentsStore, useSettingsStore } = useHostScope()
   const { t } = useTranslation('settings')
   const updated = useAgentsStore((s) => s.updated[status.id])
   const taskError = useAgentsStore((s) => s.taskErrors[status.id])
+  const pending = useAgentsStore((s) => s.pending[status.id])
+  const waiting = useWaitingUpdate(status)
   const [installing, setInstalling] = useState(false)
   const task: AgentTask | null = status.task
   const harness = status.harnessId
-  if (task?.state === 'running' || status.state === 'installing') {
+  if (task?.state === 'running' || status.state === 'installing' || pending) {
     return (
       <span className="k-end k-muted">
         <Spin />
-        {t(task?.kind === 'update' ? 'agents.update.updating' : 'agents.install.installing')}
+        {t(
+          (task?.kind ?? pending) === 'update'
+            ? 'agents.update.updating'
+            : 'agents.install.installing',
+        )}
       </span>
     )
+  }
+  // A retry of a failed update waits like any other, so the failure no longer shows.
+  if (waiting) {
+    return <span className="k-end k-muted">{t('harnesses.cliUpdateWaiting.short')}</span>
   }
   if (task?.state === 'failed') {
     const updating = task.kind === 'update'
@@ -213,7 +254,7 @@ function HarnessState({ status }: { status: AgentStatus }) {
         <button
           type="button"
           title={task.error ?? undefined}
-          onClick={() => retryTask(useAgentsStore, useSettingsStore, harness, task)}
+          onClick={() => retryTask(useAgentsStore, useSettingsStore, harness, task, hostId)}
           className="k-badge-action"
         >
           <Icon icon={RefreshIcon} size={12} />
@@ -254,11 +295,23 @@ function HarnessState({ status }: { status: AgentStatus }) {
     )
   }
   const cliUpdate = status.cli?.update
-  const version = cliUpdate?.version ?? status.update?.cliVersion ?? status.update?.adapterVersion
+  // The version the page names: the program's, or the package's alone when only it moves.
+  const offer = updateOffer(status)
   if (cliUpdate || status.update) {
     return (
       <>
-        {version && <Pill tone="attention">{t('harnesses.versionOut', { version })}</Pill>}
+        {offer && (
+          <Pill tone="attention">
+            {t(
+              !offer.package?.versions
+                ? 'harnesses.versionOut'
+                : status.package?.isSdk
+                  ? 'agents.update.sdkReleased'
+                  : 'agents.update.adapterReleased',
+              { version: offer.to },
+            )}
+          </Pill>
+        )}
         <SetButton
           variant="primary"
           title={cliUpdate?.command}
@@ -297,7 +350,10 @@ function HarnessState({ status }: { status: AgentStatus }) {
       </>
     )
   }
-  return showsCurrent(status) ? <StateDot label={t('agents.update.upToDate')} /> : null
+  // A harness that fails to start is no picture of health, whatever its version.
+  return showsCurrent(status) && status.state !== 'failed' ? (
+    <StateDot label={t('agents.update.upToDate')} />
+  ) : null
 }
 
 /** A state in the success color's dot, such as Up to date. */
@@ -329,9 +385,12 @@ export function InstallDialog({
   const vendor = VENDORS[status.harnessId]
   const [check, checking, error] = useAction()
   const hasMethods = status.installMethods.length > 0
-  // Huli: Node.js is what is missing, which Kite installs itself.
+  // Huli: Node.js is what is missing, which Kite installs itself: the harness needs it, or npm is
+  // its one route left, as for Doubao, Kimi and MiniMax, whose installs run npm alone.
   const node = useNodeRuntime()
-  const nodeFix = needsNode(status) && !!node?.installable
+  const npmMissing = !method && status.installMethods.some((m) => m.id === 'npm')
+  const nodeFix = (needsNode(status) || npmMissing) && !!node?.installable
+  const environment = useAgentsStore((s) => s.environment)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <SettingsDialogContent className="sm:max-w-125">
@@ -456,7 +515,7 @@ export function InstallDialog({
               loading={checking}
               onClick={() => check(() => useAgentsStore.getState().reloadEnvironment())}
             >
-              {t('agents.environment.reload')}
+              {t(reloadLabel(environment))}
             </SetButton>
           )}
         </SettingsDialogFooter>
@@ -492,7 +551,7 @@ function ChooseElsewhere({ harness, onChosen }: { harness: HarnessId; onChosen: 
 /** One harness in the list: its version and how many agents use it, or what it needs first. */
 export function HarnessListItem({ status }: { status: AgentStatus }) {
   const { useAgentsStore } = useHostScope()
-  const { t } = useTranslation('settings')
+  const { t } = useTranslation(['settings', 'agents'])
   const taskError = useAgentsStore((s) => s.taskErrors[status.id])
   const agents = useAgentsStore(
     (s) => usableAgents(s.order, s.byId).filter((a) => a.harnessId === status.harnessId).length,
@@ -518,6 +577,8 @@ export function HarnessListItem({ status }: { status: AgentStatus }) {
     ) : kind === 'package' && status.package?.isSdk ? (
       // Beside the user's own CLI the SDK installs itself on the first start.
       [version, t('harnesses.sdkOnFirstUse')].filter(Boolean).join(' · ')
+    ) : needsNode(status) ? (
+      t('agents:node.title')
     ) : kind || awaitsPackage(status) ? (
       t('harnesses.groups.notInstalled')
     ) : r.kind === 'missing' || r.kind === 'failed' ? (
@@ -634,7 +695,15 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
   const r = readiness(status)
   const outdated = cliOutdated(status) !== null
   const installed = listedInstalled(status) || isInstalled(status) || outdated
+  // A missing program has no version yet, nor has Kettu's package while it waits or installs;
+  // only the SDK installs itself beside the user's program.
+  const pkg = status.package
+  const packageMissing = !!pkg && !pkg.installed && !pkg.isSdk
+  const onMachine = hasProgram(status) && !packageMissing
   const kind = installKind(status)
+  // Its first install runs from this page too, which no install kind covers while it runs.
+  const notice: InstallKind | null =
+    kind ?? (packageMissing && status.state === 'installing' ? 'package' : null)
   return (
     <div>
       <HarnessPageHeader status={status} />
@@ -664,7 +733,7 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
         {status.movedAccounts && <MovedAccountsNotice status={status} />}
         {status.failedVersion && <FailedVersionNotice status={status} />}
         {status.versionWarning && <VersionWarningNotice status={status} />}
-        <TaskNotice status={status} installed={installed} />
+        <TaskNotice status={status} installed={installed && onMachine} />
         {r.kind === 'failed' && !status.task && (
           <Notice
             variant="error"
@@ -683,9 +752,9 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
           </Notice>
         )}
         {status.uninstalled && <UninstalledNotice status={status} />}
-        {kind && <InstallNotice status={status} kind={kind} />}
+        {notice && <InstallNotice status={status} kind={notice} />}
 
-        <VersionGroup status={status} />
+        {onMachine && <VersionGroup status={status} />}
         <ProgramGroup status={status} />
         {status.package && <PackageGroup status={status} />}
         <AgentsGroup status={status} />
@@ -1025,13 +1094,15 @@ function FailedVersionNotice({ status }: { status: AgentStatus }) {
  * the update that does when there is one. Kettu never installs a chosen version of it.
  */
 function VersionWarningNotice({ status }: { status: AgentStatus }) {
-  const { useAgentsStore } = useHostScope()
+  const { hostId, useAgentsStore } = useHostScope()
   const { t } = useTranslation('settings')
+  const pending = useAgentsStore((s) => !!s.pending[status.id])
+  const waiting = useWaitingUpdate(status)
   const warning = status.versionWarning
   if (!warning) return null
   const name = status.harnessName
   const update = status.cli?.update ?? null
-  const busy = status.task?.state === 'running'
+  const busy = status.task?.state === 'running' || pending || waiting
   return (
     <Notice
       variant="warning"
@@ -1048,7 +1119,7 @@ function VersionWarningNotice({ status }: { status: AgentStatus }) {
         update && !busy ? (
           <SetButton
             variant="primary"
-            onClick={() => startCliUpdate(useAgentsStore, status.harnessId)}
+            onClick={() => startCliUpdate(useAgentsStore, status.harnessId, hostId)}
           >
             {t('harnesses.updateTo', { version: update.version })}
           </SetButton>
@@ -1070,10 +1141,13 @@ function VersionWarningNotice({ status }: { status: AgentStatus }) {
 
 /** An update on offer, under way, failed or just done, in one notice under the page's title. */
 function TaskNotice({ status, installed }: { status: AgentStatus; installed: boolean }) {
-  const { useAgentsStore } = useHostScope()
-  const { t } = useTranslation(['settings', 'common'])
+  const { hostId, useAgentsStore } = useHostScope()
+  const { t } = useTranslation(['settings', 'common', 'updates'])
   const updated = useAgentsStore((s) => s.updated[status.id])
   const taskError = useAgentsStore((s) => s.taskErrors[status.id])
+  const pending = useAgentsStore((s) => !!s.pending[status.id])
+  const waiting = useWaitingUpdate(status)
+  const running = useRunningSessions(status.harnessId)
   const [doneSeen, setDoneSeen] = useState(false)
   const [act, rechecking] = useAction()
   const name = status.harnessName
@@ -1103,7 +1177,26 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
         }
         more={<TaskLog task={task} />}
       >
-        {updating ? t('agents.update.progressBody') : (task.progress.at(-1) ?? task.command)}
+        {/* Only a package installs beside what runs; the user's own program is replaced. */}
+        {updating && !task.method
+          ? t('agents.update.progressBody')
+          : (task.progress.at(-1) ?? task.command)}
+      </Notice>
+    )
+  }
+  if (waiting) {
+    return (
+      <Notice
+        variant="info"
+        icon={<Spin />}
+        title={t('harnesses.cliUpdateWaiting.title', { name, version: next ?? '' })}
+        action={
+          <SetButton onClick={() => forgetHarnessUpdate(status.id)}>
+            {t('updates:harness.dontWait')}
+          </SetButton>
+        }
+      >
+        {t('harnesses.cliUpdateWaiting.body', { count: running, name })}
       </Notice>
     )
   }
@@ -1135,7 +1228,11 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
             : t('agents.update.noticeTitle', { name, version: cliUpdate.version })
         }
         action={
-          <SetButton variant="primary" onClick={() => startCliUpdate(useAgentsStore, harness)}>
+          <SetButton
+            variant="primary"
+            loading={pending}
+            onClick={() => startCliUpdate(useAgentsStore, harness, hostId)}
+          >
             {t('harnesses.updateTo', { version: cliUpdate.version })}
           </SetButton>
         }
@@ -1186,7 +1283,11 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
           { name, current },
         )}
         action={
-          <SetButton variant="primary" onClick={() => startUpdate(useAgentsStore, harness)}>
+          <SetButton
+            variant="primary"
+            loading={pending}
+            onClick={() => startUpdate(useAgentsStore, harness)}
+          >
             {t('harnesses.switchBack.button', { version: to })}
           </SetButton>
         }
@@ -1217,7 +1318,11 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
               : t('agents.update.noticeTitleAdapter', { name })
         }
         action={
-          <SetButton variant="primary" onClick={() => startUpdate(useAgentsStore, harness)}>
+          <SetButton
+            variant="primary"
+            loading={pending}
+            onClick={() => startUpdate(useAgentsStore, harness)}
+          >
             {t('agents.update.button')}
           </SetButton>
         }
@@ -1257,8 +1362,9 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
 
 /** A failed install or update: why, its log, and retry, copy or dismiss. */
 function FailedTaskNotice({ status, task }: { status: AgentStatus; task: AgentTask }) {
-  const { useAgentsStore, useSettingsStore } = useHostScope()
+  const { hostId, useAgentsStore, useSettingsStore } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
+  const pending = useAgentsStore((s) => !!s.pending[status.id])
   const updating = task.kind === 'update'
   return (
     <Notice
@@ -1271,7 +1377,10 @@ function FailedTaskNotice({ status, task }: { status: AgentStatus; task: AgentTa
           <span className="k-end k-wrap">
             <SetButton
               icon={<Icon icon={RefreshIcon} size={14} />}
-              onClick={() => retryTask(useAgentsStore, useSettingsStore, status.harnessId, task)}
+              loading={pending}
+              onClick={() =>
+                retryTask(useAgentsStore, useSettingsStore, status.harnessId, task, hostId)
+              }
             >
               {t('common:actions.retry')}
             </SetButton>
@@ -1280,9 +1389,9 @@ function FailedTaskNotice({ status, task }: { status: AgentStatus; task: AgentTa
         </>
       }
     >
-      {updating
-        ? t('agents.update.failedBody')
-        : task.error && <span data-selectable="">{task.error}</span>}
+      {task.error && <span data-selectable="">{task.error}</span>}
+      {updating &&
+        `${task.error && !/[。！？]$/.test(task.error) ? ' ' : ''}${t('agents.update.failedBody')}`}
     </Notice>
   )
 }
@@ -1291,6 +1400,7 @@ function FailedTaskNotice({ status, task }: { status: AgentStatus; task: AgentTa
 function UninstalledNotice({ status }: { status: AgentStatus }) {
   const { useAgentsStore, useSettingsStore } = useHostScope()
   const { t } = useTranslation('settings')
+  const pending = useAgentsStore((s) => !!s.pending[status.id])
   return (
     <Notice
       variant="info"
@@ -1299,6 +1409,7 @@ function UninstalledNotice({ status }: { status: AgentStatus }) {
       action={
         <SetButton
           variant="primary"
+          loading={pending}
           onClick={() => void startInstall(useAgentsStore, useSettingsStore, status.harnessId)}
         >
           {t('agents.install.button')}
@@ -1316,9 +1427,11 @@ function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKin
   const { t } = useTranslation(['settings', 'common'])
   const [open, setOpen] = useState(false)
   const [act, , error] = useAction()
+  // Asked for, before the host reports the install: its settings and detection run first.
+  const pending = useAgentsStore((s) => s.pending[status.id] === 'install')
   const task = status.task?.kind === 'install' ? status.task : null
   const name = status.harnessName
-  if (task?.state === 'running' || status.state === 'installing') {
+  if (task?.state === 'running' || status.state === 'installing' || pending) {
     const lines = task ? task.progress : status.progress
     return (
       <Notice
@@ -1503,6 +1616,7 @@ function ProgramGroup({ status }: { status: AgentStatus }) {
 function PackageGroup({ status }: { status: AgentStatus }) {
   const { useAgentsStore } = useHostScope()
   const { t } = useTranslation('settings')
+  const pending = useAgentsStore((s) => !!s.pending[status.id])
   const pkg = status.package
   if (!pkg) return null
   const range = `${pkg.version.split('.').slice(0, 2).join('.')}.x`
@@ -1523,7 +1637,8 @@ function PackageGroup({ status }: { status: AgentStatus }) {
                   ? t(pkg.isSdk ? 'harnesses.sdkLine' : 'harnesses.adapterLine', {
                       version: pkg.version,
                     })
-                  : t('agents.installsOnFirstUse')
+                  : // An adapter waits for Install; only the SDK installs itself on first use.
+                    t(pkg.isSdk ? 'agents.installsOnFirstUse' : 'harnesses.groups.notInstalled')
               }
             />
           }
@@ -1531,6 +1646,8 @@ function PackageGroup({ status }: { status: AgentStatus }) {
           {status.update && (
             <SetButton
               variant="primary"
+              loading={pending}
+              disabled={status.task?.state === 'running'}
               onClick={() => startUpdate(useAgentsStore, status.harnessId)}
             >
               {t(status.automatic?.back ? 'harnesses.switchBack.button' : 'harnesses.updateTo', {
@@ -1570,7 +1687,11 @@ function AgentsGroup({ status }: { status: AgentStatus }) {
           text={
             <RowText
               name={t('harnesses.usedBy')}
-              description={agents.join(t('harnesses.listSeparator'))}
+              description={
+                agents.length > 0
+                  ? agents.join(t('harnesses.listSeparator'))
+                  : t('harnesses.usedByNone')
+              }
             />
           }
         >
@@ -1581,6 +1702,16 @@ function AgentsGroup({ status }: { status: AgentStatus }) {
       </RowGroup>
     </section>
   )
+}
+
+/**
+ * What Reload environment is called. On Windows Kite keeps the environment it started with, PATH
+ * included, as the footer's warning says, so there it only detects the harnesses again.
+ */
+function reloadLabel(environment: EnvironmentInfo | null) {
+  return environment?.source === 'inherited'
+    ? 'agents.environment.redetect'
+    : 'agents.environment.reload'
 }
 
 export function EnvironmentFooter() {
@@ -1615,7 +1746,7 @@ export function EnvironmentFooter() {
                 .catch((e: unknown) => setError(errorMessage(e)))
             }}
           >
-            {t('agents.environment.reload')}
+            {t(reloadLabel(environment))}
           </button>
         </span>
       </p>

@@ -15,7 +15,7 @@ import {
   type AgentId,
   type HarnessId,
 } from '@shared/thread'
-import { errorMessage, host, hostAt, type HostRequest } from '@renderer/lib/host'
+import { errorCode, errorMessage, host, hostAt, type HostRequest } from '@renderer/lib/host'
 import { newestReadings, type PlanReading } from '@renderer/lib/plan-readings'
 import { useSettingsStore } from '@renderer/stores/settings'
 
@@ -41,6 +41,11 @@ export interface AgentsStore extends HostAgents {
    * that no longer applies, another task running, npm missing.
    */
   taskErrors: Partial<Record<AgentId, { kind: AgentTask['kind']; message: string }>>
+  /**
+   * Installs and updates the user asked for whose request is on its way, so their buttons show it
+   * before the host reports a task, and a second click does not ask again.
+   */
+  pending: Partial<Record<AgentId, AgentTask['kind']>>
   setAll(statuses: AgentStatus[]): void
   setOne(status: AgentStatus): void
   /** An added agent the user removed; its sessions stay. */
@@ -81,6 +86,7 @@ export function createAgentsStore(request: HostRequest): AgentsStoreHook {
     updateCheck: { running: false, finishedAt: null, error: null },
     updated: {},
     taskErrors: {},
+    pending: {},
     setAll(statuses) {
       set({ ...listOf(statuses), loaded: true })
     },
@@ -383,6 +389,21 @@ export function useSignInPage(hostId: string | null, agentId: AgentId): string |
   })
 }
 
+/** Runs `run` with the agent's install or update marked as asked for, as `pending` shows it. */
+export async function whilePending<T>(
+  store: AgentsStoreHook,
+  agentId: AgentId,
+  kind: AgentTask['kind'],
+  run: () => Promise<T>,
+): Promise<T> {
+  store.setState((state) => ({ pending: { ...state.pending, [agentId]: kind } }))
+  try {
+    return await run()
+  } finally {
+    store.setState((state) => ({ pending: without(state.pending, agentId) }))
+  }
+}
+
 /** Runs an install or update request; true when it finished, false when it failed. */
 async function taskRequest(
   store: AgentsStoreHook,
@@ -392,16 +413,20 @@ async function taskRequest(
 ): Promise<boolean> {
   const { setState, getState } = store
   setState((state) => ({ taskErrors: without(state.taskErrors, agentId) }))
-  try {
-    await request()
-    return true
-  } catch (e) {
-    if (getState().byId[agentId]?.task?.state !== 'failed') {
-      const message = errorMessage(e)
-      setState((state) => ({ taskErrors: { ...state.taskErrors, [agentId]: { kind, message } } }))
+  return whilePending(store, agentId, kind, async () => {
+    try {
+      await request()
+      return true
+    } catch (e) {
+      // Refused because the agent's install or update runs already: that task says the rest, and
+      // an error kept here would outlive it.
+      if (errorCode(e) !== 'busy' && getState().byId[agentId]?.task?.state !== 'failed') {
+        const message = errorMessage(e)
+        setState((state) => ({ taskErrors: { ...state.taskErrors, [agentId]: { kind, message } } }))
+      }
+      return false
     }
-    return false
-  }
+  })
 }
 
 /** The agent's name on the host named; a removed agent's sessions name its harness. */
