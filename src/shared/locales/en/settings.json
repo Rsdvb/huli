@@ -781,7 +781,8 @@
       "reading": "Reading the balance…",
       "afterSignIn": "Once {{name}} is signed in to a DeepSeek account or has an API key, its balance shows here.",
       "gateway": "With another model provider, its own console shows the balance.",
-      "stale": "Showing the balance read {{ago}}."
+      "stale": "Showing the balance read {{ago}}.",
+      "kept": "This balance is from the last run. Refresh to update it."
     },
     "planLimits": "Plan limits",
     "usageNotReported": "{{name}} does not report plan usage.",
