@@ -103,6 +103,22 @@ describe('createValidators', () => {
     rejects(() => archive({ sessionId: 's', subSessions: 'false' }))
   })
 
+  it('takes only a session and whether to run for its resume in a terminal, never a command', () => {
+    const resume = posix['sessions.terminalCommand']
+    expect(resume({ sessionId: 's' })).toEqual({ sessionId: 's' })
+    expect(resume({ sessionId: 's', run: true })).toEqual({ sessionId: 's', run: true })
+    // A line, a program or a folder a client names is dropped: the host writes the line itself.
+    expect(
+      resume({ sessionId: 's', run: true, command: 'rm -rf ~', cli: '/bin/sh', folder: '/' }),
+    ).toEqual({ sessionId: 's', run: true })
+    rejects(() => resume({ sessionId: 's', run: 'true' }))
+    rejects(() => resume({ sessionId: 's', run: 1 }))
+    rejects(() => resume({ run: true }))
+    rejects(() => resume({ sessionId: '' }))
+    rejects(() => resume({ sessionId: 'x'.repeat(257) }))
+    expect(forbiddenToDevices('sessions.terminalCommand', { sessionId: 's' })).toBe(false)
+  })
+
   it('takes a session and a bounded task id for a background task', () => {
     for (const method of ['sessions.stopTask', 'sessions.taskOutput'] as const) {
       expect(posix[method]({ sessionId: 's', taskId: 'b1', other: 1 })).toEqual({

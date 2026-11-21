@@ -1240,5 +1240,11 @@
       "title_other": "豆包同一时间只能运行一个会话，前面还有 {{count}} 个",
       "description": "前面的会话结束后，这条消息会自动发出。"
     }
+  },
+  "terminal": {
+    "noResume": "{{agent}} 自己的 CLI 不能在终端中继续这个会话。",
+    "notStarted": "这个会话在 Agent 那边还没有对话，没有可以继续的内容。",
+    "running": "这个会话正在这里运行。先停止它，再到终端中继续。",
+    "subagent": "子 Agent 的会话在它的上级会话里继续。"
   }
 }

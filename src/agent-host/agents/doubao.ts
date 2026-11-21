@@ -22,6 +22,9 @@ export const DOUBAO: AgentDefinition = {
   },
   installs: { npm: DOUBAO_PACKAGE, allowScripts: true },
   cli: DOUBAO_CLI,
+  // Huli: its launcher (`doubao.cmd` on Windows), which asks to update first as it does for the
+  // user, and `--resume <conversation>`, as each turn Kite runs resumes one.
+  terminal: { args: [], resume: (id) => ['--resume', id] },
   limitsReason: 'harness-does-not-offer',
   // Its QR code shows on the client that asked, where the phone that scans it may be.
   pageSignIns: [SIGN_IN_METHOD],

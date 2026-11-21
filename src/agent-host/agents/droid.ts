@@ -15,4 +15,7 @@ export const DROID: AgentDefinition = {
   // With URL elicitation declared, it sends its pairing page rather than opening a browser (0.251.0).
   pageSignIns: ['device-pairing'],
   install: { hint: 'detect.hint.node', url: 'https://nodejs.org/en/download' },
+  // Huli: `droid`, its own UI, as its CLI reference starts it; no source ties the ids it
+  // resumes to its ACP sessions', so none resumes there.
+  terminal: { args: [] },
 }

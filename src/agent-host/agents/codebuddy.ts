@@ -16,4 +16,7 @@ export const CODEBUDDY: AgentDefinition = {
   // Its browser and WeChat sign-in lives in a file under the user's application data, not in the
   // agent's folder. In memory, the process never reads it, so an added agent uses only its own key.
   addedEnv: { CODEBUDDY_CREDENTIALS_IN_MEMORY: '1' },
+  // Huli: `codebuddy`, its own UI, as its CLI reference starts it; no source ties the ids it
+  // resumes to its ACP sessions', so none resumes there.
+  terminal: { args: [] },
 }

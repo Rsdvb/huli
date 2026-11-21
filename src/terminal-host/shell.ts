@@ -31,9 +31,10 @@ export function programName(file: string, platform: Platform): string {
 }
 
 /**
- * A sign-in line the agent host wrote for PowerShell, Windows' default terminal shell, as the
- * terminal's own shell runs it: unchanged in PowerShell, else handed to Windows PowerShell, for a
- * shell Settings set to cmd.exe, Git Bash or another.
+ * A line the agent host wrote for PowerShell, Windows' default terminal shell (a sign-in, or Huli's
+ * start or resume of an agent's CLI), as the terminal's own shell runs it: unchanged in
+ * PowerShell, else handed to Windows PowerShell, for a shell Settings set to cmd.exe, Git Bash or
+ * another.
  */
 export function forWindowsShell(line: string, shellName: string): string {
   const name = shellName.toLowerCase()

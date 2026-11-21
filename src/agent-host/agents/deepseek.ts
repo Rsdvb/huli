@@ -22,4 +22,7 @@ export const DEEPSEEK: AgentDefinition = {
     url: 'https://github.com/deepseek-ai/deepseek-harness',
   },
   configVariable: CONFIG_VARIABLES.deepseek,
+  // Huli: dsh ships no terminal UI; `dsh --profile web` serves its own, in the browser it opens,
+  // from the terminal. Its sessions resume there, not by an argument (0.2.2's README).
+  terminal: { args: ['--profile', 'web'] },
 }

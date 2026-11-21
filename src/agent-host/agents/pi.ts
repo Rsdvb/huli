@@ -29,4 +29,7 @@ export const PI: AgentDefinition = {
   // questions on a terminal, so it is not a route.
   installs: { npm: '@earendil-works/pi-coding-agent', ignoreScripts: true },
   cli: PI_CLI,
+  // Huli: `pi`, and `--session <file>`, which interactive mode takes as RPC mode does (1.6.0's
+  // docs); the host finds the file, as another folder's session opens only by it.
+  terminal: { args: [], resume: (file) => ['--session', file] },
 }

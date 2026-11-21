@@ -3238,6 +3238,13 @@ export class AgentHost {
       'sessions.refreshModels': ({ sessionId }) => sessions.refreshModels(sessionId),
       'sessions.rename': ({ sessionId, title }) => sessions.rename(sessionId, title),
       'sessions.close': ({ sessionId }) => sessions.close(sessionId),
+      'sessions.terminalCommand': async ({ sessionId, run }) => {
+        const target = sessions.terminalTarget(sessionId)
+        const lines = await agents.resumeCommand(target.agentId, target, false)
+        if (!run) return lines
+        await sessions.resumingInTerminal(sessionId)
+        return agents.resumeCommand(target.agentId, target, true)
+      },
       'sessions.pin': ({ sessionId, pinned }) => sessions.pin(sessionId, pinned),
       'sessions.archive': ({ sessionId, subSessions }) =>
         sessions.archive(sessionId, subSessions ?? true),

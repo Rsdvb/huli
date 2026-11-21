@@ -862,6 +862,8 @@ const CACHE_TTL_MS = 5 * MINUTE
 const OUTSIDE_WINDOW_MS = 60 * MINUTE
 /** How often a shown Claude Code session is looked at for a program outside Kettu holding it. */
 const FOLLOW_MS = 3_000
+/** Huli: how long a session resumed in a terminal is followed before its CLI is seen holding it. */
+const TERMINAL_FOLLOW_MS = 60_000
 /** Huli: the longest wait a timer holds, about 24 days. */
 const MAX_TIMER_MS = 2 ** 31 - 1
 
@@ -1296,6 +1298,11 @@ export class SessionManager {
   /** Looks at the shown Claude Code sessions for a program outside Kettu that holds one. */
   private followTimer: ReturnType<typeof setInterval> | null = null
   private following = false
+  /**
+   * Huli: sessions resumed in a terminal of Kite's, followed shown or not until their CLI lets them
+   * go: since when, and whether it was seen holding one.
+   */
+  private readonly inTerminal = new Map<string, { since: number; seen: boolean }>()
   private readonly timings: SessionTimings
   private readonly now: () => number
   private requestCounter = 0
@@ -4685,16 +4692,66 @@ export class SessionManager {
     this.followShown([...next].filter((id) => !previous?.has(id)))
   }
 
-  /** The Claude Code sessions a port shows in front, which a program outside Kettu may share. */
+  /**
+   * The Claude Code sessions a port shows in front, which a program outside Kettu may share, and
+   * Huli's resumed in a terminal.
+   */
   private sharedShown(): string[] {
     const ids = new Set<string>()
-    for (const shown of this.shown.values()) {
+    for (const id of [...this.inTerminal.keys()]) {
+      if (!this.records.has(id)) this.inTerminal.delete(id)
+    }
+    for (const shown of [...this.shown.values(), this.inTerminal.keys()]) {
       for (const id of shown) {
         const record = this.records.get(id)
         if (record && this.sharedOutside(record)) ids.add(id)
       }
     }
     return [...ids]
+  }
+
+  /**
+   * Huli: where a session resumes in its agent's own CLI, and how its record stands: refused for a
+   * sub-agent's, one at work here, or one its agent has no id for yet.
+   */
+  terminalTarget(sessionId: string): {
+    agentId: AgentId
+    acpSessionId: string
+    configDir: string | null
+    folder: string
+  } {
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent') throw new HostError('restricted', t('terminal.subagent'))
+    const live = this.live.get(sessionId)
+    const reason = live ? this.holdReason(live) : null
+    // A session that failed or waits for a sign-in here has nothing at work.
+    if (reason !== null && reason !== 'failed' && reason !== 'auth_required') {
+      throw new HostError('restricted', t('terminal.running'))
+    }
+    if (!record.acpSessionId) throw new HostError('not_found', t('terminal.notStarted'))
+    return {
+      agentId: record.agentId,
+      acpSessionId: record.acpSessionId,
+      configDir: record.configDir ?? null,
+      folder: workDir(record),
+    }
+  }
+
+  /**
+   * Huli: a session about to resume in a terminal of Kite's: its own process lets it go, so two
+   * never hold it at once, and a Claude Code session is followed until the terminal's CLI lets it
+   * go, which brings in what it wrote.
+   */
+  async resumingInTerminal(sessionId: string): Promise<void> {
+    await this.settled(sessionId)
+    this.terminalTarget(sessionId)
+    const record = this.recordOf(sessionId)
+    if (this.live.get(sessionId)?.connection) {
+      await this.closeAll([...this.descendants(sessionId, 'subagent'), record], true)
+    }
+    if (!this.sharedOutside(record)) return
+    this.inTerminal.set(sessionId, { since: this.now(), seen: false })
+    this.followShown([sessionId])
   }
 
   /**
@@ -4747,6 +4804,22 @@ export class SessionManager {
     if (live && (live.thread.session.openOutside ?? null) !== by) {
       this.update(live, { openOutside: by })
     }
+    // Huli: a session resumed in a terminal of Kite's is looked at each pass for what it wrote,
+    // until its CLI, seen holding it, lets go, or a minute passes without it being seen.
+    const terminal = this.inTerminal.get(sessionId)
+    if (terminal) {
+      if (holder) terminal.seen = true
+      else if (terminal.seen || this.now() - terminal.since > TERMINAL_FOLLOW_MS) {
+        this.inTerminal.delete(sessionId)
+        queueMicrotask(() => this.followShown([]))
+      }
+    }
+    const looking = entered || terminal !== undefined
+    if (terminal && holder && !live) {
+      // Brought back closed, it says the terminal has it, and a message here asks first.
+      await this.revive(sessionId)
+      return
+    }
     if (holding && !held) {
       if (live?.connection && this.holdReason(live) === null) {
         // Its Claude Code holds a copy of the conversation the other program is about to change.
@@ -4761,7 +4834,7 @@ export class SessionManager {
     }
     if (holding) return
     if (live && held) this.update(live, { heldOutside: false })
-    if (!entered && !held && !holder) return
+    if (!looking && !held && !holder) return
     if (!(await this.writtenOutside(record))) return
     if (!live) {
       await this.revive(sessionId)

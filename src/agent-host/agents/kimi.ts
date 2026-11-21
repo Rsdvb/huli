@@ -11,4 +11,7 @@ export const KIMI: AgentDefinition = {
     url: 'https://github.com/MoonshotAI/kimi-code',
   },
   installs: { npm: '@moonshot-ai/kimi-code' },
+  // Huli: `kimi`, its own UI, as its CLI reference starts it; no source ties the ids it
+  // resumes to its ACP sessions', so none resumes there.
+  terminal: { args: [] },
 }

@@ -2007,6 +2007,11 @@ export function createValidators(platform: Platform): Validators {
       return { sessionId: sessionId(o), title: o.title === null ? null : string(o, 'title', 200) }
     },
     'sessions.close': session,
+    'sessions.terminalCommand': (params) => {
+      const o = fields(params)
+      const run = optionalFlag(o, 'run')
+      return { sessionId: sessionId(o), ...(run !== undefined ? { run } : {}) }
+    },
     'sessions.pin': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), pinned: flag(o, 'pinned') }

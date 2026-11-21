@@ -13,4 +13,7 @@ export const QODER: AgentDefinition = {
   // The package declares Node.js 20 or later, unlike the registry entry, which names none.
   requiresNode: '>=20',
   install: { hint: 'detect.hint.node', url: 'https://nodejs.org/en/download' },
+  // Huli: `qodercli`, its own UI, as its CLI reference starts it; no source ties the ids it
+  // resumes to its ACP sessions', so none resumes there.
+  terminal: { args: [] },
 }

@@ -336,7 +336,10 @@ export async function findInstalledCli(
     }
   }
   const answer = await ctx.probe(resolved.path, { ...ctx.env, ...resolved.env })
-  return { installed: answered({ path: resolved.path, variable: null }, answer), env: resolved.env }
+  const installed = answered({ path: resolved.path, variable: null }, answer)
+  // Huli: a terminal runs the command as found, such as npm's `.cmd` shim, as the user would.
+  if (found !== resolved.path) installed.launcher = found
+  return { installed, env: resolved.env }
 }
 
 /**
