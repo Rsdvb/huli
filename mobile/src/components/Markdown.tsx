@@ -20,7 +20,8 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { cacheFor } from '../ui/memory'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { textKey, useDisclosure } from '../ui/session/disclosure'
-import { ContextMenu, SYSTEM_MENUS } from '../ui/ContextMenu'
+import { ContextMenu } from '../ui/ContextMenu'
+import { LongPressView } from '../ui/LongPressView'
 import type { MenuNode } from '../ui/menu'
 import { copyText } from '../ui/session/feedback'
 import {
@@ -367,12 +368,8 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
       </PressScale>
     </View>
   )
-  const body = (longPress: (() => void) | undefined) => (
-    <Pressable
-      onLongPress={longPress}
-      delayLongPress={350}
-      style={[styles.codeRow, { backgroundColor: s.code }]}
-    >
+  const rowContent = (
+    <>
       {firstLine !== null && (
         <Text style={[styles.codeText, styles.gutter, { color: c.textTertiary }]}>
           {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
@@ -406,23 +403,19 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
             : shown}
         </Text>
       </ScrollView>
-    </Pressable>
+    </>
   )
+  const rowStyle = [styles.codeRow, { backgroundColor: s.code }]
   return (
     <View style={[styles.code, { backgroundColor: s.code, borderColor: s.codeBorder }]}>
-      {/* iOS's context menu takes the pans of what it holds, so there it holds the head alone
-          and the code still scrolls sideways; Android's sheet holds the code. */}
-      {SYSTEM_MENUS ? (
-        <>
-          <ContextMenu items={menu}>{() => head}</ContextMenu>
-          {body(undefined)}
-        </>
-      ) : (
-        <>
-          {head}
-          <ContextMenu items={menu}>{(longPress) => body(longPress)}</ContextMenu>
-        </>
-      )}
+      {head}
+      <ContextMenu items={menu}>
+        {(longPress) => (
+          <LongPressView onLongPress={longPress} delayLongPress={350} style={rowStyle}>
+            {rowContent}
+          </LongPressView>
+        )}
+      </ContextMenu>
       {foldable && (
         <Pressable
           onPress={() => {

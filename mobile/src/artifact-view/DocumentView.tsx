@@ -3,10 +3,11 @@
 // (src/renderer/src/viewers/document) shows the same text; editing stays on the computer.
 
 import { useMemo } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { CONTENT_ENTRIES } from '@shared/artifact-types'
 import { Markdown } from '../components/Markdown'
 import { ContextMenu } from '../ui/ContextMenu'
+import { LongPressView } from '../ui/LongPressView'
 import { copyText, plainText } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 import { selectText } from '../ui/session/SelectText'
@@ -89,12 +90,13 @@ export function DocumentView(props: { version: LoadedVersion; top: number; botto
           ]}
         >
           {(longPress) => (
-            <Pressable
-              {...(longPress ? { onLongPress: longPress, delayLongPress: 400 } : {})}
+            <LongPressView
+              onLongPress={longPress}
+              delayLongPress={400}
               style={[styles.page, { backgroundColor: c.bg }]}
             >
               <Markdown markdown={text} image={image} onLink={confirmLink} />
-            </Pressable>
+            </LongPressView>
           )}
         </ContextMenu>
       </View>

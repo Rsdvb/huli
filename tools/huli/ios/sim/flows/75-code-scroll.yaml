@@ -1,6 +1,6 @@
 # A reply's code block and table scroll sideways: their lines run past the screen, and a swipe left
-# shows their ends. iOS's context menu once held the whole reply and took the swipe; a reply with
-# such a block now opens its menu as the sheet, and a code block's own menu sits on its head.
+# shows their ends. A Pressable around them, even one with no handler, once kept them from moving
+# on iOS; there the system's context menu takes the long press, with no Pressable under it.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -48,7 +48,7 @@ appId: io.github.rsdvb.huli
     duration: 600
 - waitForAnimationToEnd
 - takeScreenshot: k02b-table-swiped
-# A long press on the reply still opens its menu, as the sheet.
+# A long press on the reply still opens its menu.
 - longPressOn:
     text: '同一个请求里.*'
 - extendedWaitUntil:

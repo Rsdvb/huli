@@ -12,7 +12,8 @@ import {
   type ToolEntry,
 } from '@shared/thread'
 import { agentIdOf, useSessionField } from '../../ui/session/sessionField'
-import { ContextMenu, SYSTEM_MENUS } from '../../ui/ContextMenu'
+import { ContextMenu } from '../../ui/ContextMenu'
+import { LongPressView } from '../../ui/LongPressView'
 import type { MenuNode } from '../../ui/menu'
 import { copyText } from '../../ui/session/feedback'
 import { useDisclosure } from '../../ui/session/disclosure'
@@ -192,27 +193,17 @@ export function StepSection(props: {
       ) : null}
     </View>
   )
-  // iOS's context menu takes the pans of what it holds, so there it holds the head alone and the
-  // command and output still scroll sideways; Android's sheet holds the whole section.
-  if (SYSTEM_MENUS) {
-    return (
-      <View style={[styles.section, { borderTopColor: c.border }]}>
-        <ContextMenu items={menu}>{() => head}</ContextMenu>
-        {props.children}
-      </View>
-    )
-  }
   return (
     <ContextMenu items={menu}>
       {(longPress) => (
-        <Pressable
+        <LongPressView
           onLongPress={longPress}
           delayLongPress={350}
           style={[styles.section, { borderTopColor: c.border }]}
         >
           {head}
           {props.children}
-        </Pressable>
+        </LongPressView>
       )}
     </ContextMenu>
   )
