@@ -769,6 +769,17 @@ function AgentBody({ status }: { status: AgentStatus }) {
 
       <NetworkGroup agentId={id} />
 
+      <ListGroup footer="退出登录，删掉它在电脑上生成的标识和缓存，让它回到刚装好时的样子。会话记录和设置都留着。">
+        <ListRow
+          title="重置环境…"
+          icon="restore"
+          plainIcon
+          chevron
+          disabled={!connected}
+          onPress={() => router.push({ pathname: '/settings/agent-reset', params: { id } })}
+        />
+      </ListGroup>
+
       <ListGroup footer="它的会话会留着，但不能再继续。新会话的模式和标志颜色在电脑上的纸鸢里设置。">
         <ListRow
           title="移除 Agent…"
