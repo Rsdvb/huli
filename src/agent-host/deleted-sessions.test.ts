@@ -95,7 +95,9 @@ async function promptedSession(window: TestPort, project: string): Promise<[stri
   })
   await window.untilEntry(id, (entry) => entry.kind === 'agent')
   await window.untilStatus(id, 'ready')
-  return [id, window.summary(id)!.acpSessionId]
+  const acp = window.summary(id)?.acpSessionId
+  if (!acp) throw new Error('The session has no agent session')
+  return [id, acp]
 }
 
 describe('deleting a session whose agent keeps it', () => {
