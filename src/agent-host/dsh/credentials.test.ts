@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
-import { clearApiKey, readApiKey, readProvider, writeApiKey } from './credentials'
+import { clearApiKey, readAccountGrant, readApiKey, readProvider, writeApiKey } from './credentials'
 
 let home: string
 const file = () => path.join(home, '.credentials.yaml')
@@ -75,5 +75,63 @@ describe('dsh credentials', () => {
     )
     expect(await readProvider(env)).toBe('deepseek-account')
     expect(await readApiKey(env)).toBe('sk-x')
+  })
+
+  // The layout dsh 0.2.2-rc.5 writes on a DeepSeek sign-in, with the records it keeps beside it.
+  const ACCOUNT_FILE = [
+    'version: 1',
+    'records:',
+    '  client-connection/browser-session:',
+    '    kind: grant',
+    '    payload:',
+    '      version: 1',
+    '      secret: browser-secret',
+    '  deepseek-account-platform/device:',
+    '    kind: grant',
+    '    payload:',
+    '      id: 00000000-0000-4000-8000-000000000000',
+    '  deepseek-account-platform/default:',
+    '    kind: grant',
+    '    payload:',
+    '      version: 1',
+    '      token: account-token-secret',
+    '      issuer: https://platform.deepseek.com',
+    '',
+  ].join('\n')
+
+  it('reads the account grant of a DeepSeek sign-in, and only a whole one', async () => {
+    const env = { DSH_HOME: home }
+    expect(await readAccountGrant(env)).toBeNull()
+    await writeFile(file(), ACCOUNT_FILE)
+    expect(await readProvider(env)).toBe('deepseek-account')
+    expect(await readAccountGrant(env)).toEqual({
+      token: 'account-token-secret',
+      issuer: 'https://platform.deepseek.com',
+    })
+    expect(await readApiKey(env)).toBeNull()
+    for (const broken of [
+      ACCOUNT_FILE.replace(
+        'kind: grant\n    payload:\n      version: 1\n      token',
+        'kind: other\n    payload:\n      version: 1\n      token',
+      ),
+      ACCOUNT_FILE.replace('      version: 1\n      token', '      version: 2\n      token'),
+      ACCOUNT_FILE.replace('token: account-token-secret', 'token: ""'),
+      'refs: [unclosed\n',
+    ]) {
+      await writeFile(file(), broken)
+      expect(await readAccountGrant(env)).toBeNull()
+    }
+  })
+
+  it('reads the key dsh runs with: the file’s, the environment’s, then the home’s .env', async () => {
+    const env = { DSH_HOME: home }
+    await writeFile(path.join(home, '.env'), 'OTHER=1\nexport DEEPSEEK_API_KEY="sk-dotenv"\n')
+    expect(await readProvider(env)).toBe('deepseek-official')
+    expect(await readApiKey(env)).toBe('sk-dotenv')
+    await writeFile(path.join(home, '.env'), 'DEEPSEEK_API_KEY=sk-plain # a note\n')
+    expect(await readApiKey(env)).toBe('sk-plain')
+    expect(await readApiKey({ ...env, DEEPSEEK_API_KEY: ' sk-env ' })).toBe('sk-env')
+    await writeFile(file(), 'version: 1\nrefs:\n  DEEPSEEK_API_KEY: sk-stored\n')
+    expect(await readApiKey({ ...env, DEEPSEEK_API_KEY: 'sk-env' })).toBe('sk-stored')
   })
 })

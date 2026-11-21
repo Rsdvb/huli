@@ -236,6 +236,8 @@ export interface ProviderBalance {
   label: string
   amount: number
   currency: string
+  /** Of `amount`, what the vendor granted rather than the user paid, as DeepSeek tells it. */
+  granted?: number
 }
 
 export interface AgentProvider {
@@ -422,7 +424,10 @@ export interface AgentStatus {
   account: AgentAccount | null // what the agent reports through `_auth/status_update`
   providers?: AgentProvider[]
   providersError?: string | null
-  /** A harness's balance at its vendor, read on its own: DeepSeek Harness on an API key. */
+  /**
+   * A harness's balance at its vendor, read on its own: DeepSeek Harness's, on its account sign-in
+   * or an API key. Null while there is none to show; absent for every other harness.
+   */
   balance?: AgentProvider['usage']
   balances?: ProviderBalance[]
   limitsReason?: LimitsReason

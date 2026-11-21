@@ -1,6 +1,7 @@
 // DeepSeek Harness's own credential file, `.credentials.yaml` in its home: which route the agent
 // signs in on, and the API key Kettu hands it to keep. Kettu keeps no copy; it writes only
-// `refs.DEEPSEEK_API_KEY` and leaves what else the file holds as it was.
+// `refs.DEEPSEEK_API_KEY` and leaves what else the file holds as it was. The key and the account
+// grant are read only for DeepSeek's own balance and account requests (vendor-usage/deepseek.ts).
 
 import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -35,7 +36,12 @@ function sections(text: string | null): {
   records: Record<string, unknown>
 } {
   if (!text) return { refs: {}, records: {} }
-  const value = parseDocument(text).toJS() as unknown
+  let value: unknown
+  try {
+    value = parseDocument(text).toJS() as unknown
+  } catch {
+    return { refs: {}, records: {} }
+  }
   if (typeof value !== 'object' || value === null) return { refs: {}, records: {} }
   const { refs, records } = value as { refs?: unknown; records?: unknown }
   const object = (part: unknown): Record<string, unknown> =>
@@ -48,6 +54,16 @@ function sections(text: string | null): {
 /** Whether a dotenv file names the key, without reading its value. */
 function namesKey(text: string | null): boolean {
   return !!text && new RegExp(`^\\s*(?:export\\s+)?${API_KEY}\\s*=\\s*\\S`, 'm').test(text)
+}
+
+/** The key's value in a dotenv file, unquoted; null when the file sets none. */
+function keyIn(text: string | null): string | null {
+  const line = text?.match(new RegExp(`^\\s*(?:export\\s+)?${API_KEY}\\s*=(.*)$`, 'm'))?.[1]
+  if (line === undefined) return null
+  const value = line.trim()
+  const quoted = /^(["'])(.*)\1$/.exec(value)
+  const key = quoted ? quoted[2]! : value.replace(/\s+#.*$/, '')
+  return key.trim() || null
 }
 
 /**
@@ -73,12 +89,33 @@ export async function credentialsStamp(env: Env): Promise<number> {
   )
 }
 
-/** The key the file holds, read for the one request that shows its balance and never kept. */
+/**
+ * The key dsh runs with, as it looks for one outside a project: the file's, the environment's,
+ * then the home's `.env`. Read for the one request that shows its balance and never kept.
+ */
 export async function readApiKey(env: Env): Promise<string | null> {
-  const { refs } = sections(await readText(path.join(dshHome(env), FILE)))
+  const home = dshHome(env)
+  const { refs } = sections(await readText(path.join(home, FILE)))
   const stored = refs[API_KEY]
   if (typeof stored === 'string' && stored !== '') return stored
-  return env[API_KEY]?.trim() || null
+  return env[API_KEY]?.trim() || keyIn(await readText(path.join(home, '.env')))
+}
+
+/**
+ * The account grant dsh's DeepSeek sign-in stored, `{ version: 1, token, issuer }`, read for the
+ * requests that show the account and its balance and never kept; null without a whole one.
+ */
+export async function readAccountGrant(
+  env: Env,
+): Promise<{ token: string; issuer: string } | null> {
+  const { records } = sections(await readText(path.join(dshHome(env), FILE)))
+  const record = records[ACCOUNT_RECORD]
+  if (typeof record !== 'object' || record === null) return null
+  const { kind, payload } = record as { kind?: unknown; payload?: unknown }
+  if (kind !== 'grant' || typeof payload !== 'object' || payload === null) return null
+  const { version, token, issuer } = payload as Record<string, unknown>
+  if (version !== 1 || typeof token !== 'string' || typeof issuer !== 'string') return null
+  return token.trim() ? { token: token.trim(), issuer } : null
 }
 
 /** Sets or removes the key in the file, keeping the rest; the file stays readable by its owner alone. */
