@@ -46,6 +46,7 @@ import {
   receiveSignInLink,
   useAgentsStore,
 } from '@renderer/stores/agents'
+import { receiveRemovalProgress } from '@renderer/stores/agent-removal'
 import {
   artifactsChanged,
   artifactsHostClosed,
@@ -163,6 +164,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'agents.signInImage':
       receiveSignInImage(hostId, event.agentId, event.image)
+      return
+    case 'agents.removalProgress':
+      receiveRemovalProgress(hostId, event.progress)
       return
     case 'agents.limitAlert':
       showLimitAlert(event.alert, hostId)

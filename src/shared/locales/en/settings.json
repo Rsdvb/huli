@@ -980,11 +980,78 @@
       "button": "Remove",
       "title": "Remove {{name}}?",
       "body": "Its sessions stay in the list and say the agent was removed; they cannot continue.",
-      "trash": "Move its folder to the trash",
-      "trashHint": "Kettu made the folder; it holds the agent’s sign-in and the harness’s own session records.",
-      "keepsFolder": "You picked its folder, so it stays as it is.",
-      "keepsDefault": "It uses {{name}}’s configuration in your terminal, which stays as it is. The harness is not uninstalled.",
-      "buttonEllipsis": "Remove…"
+      "buttonEllipsis": "Remove…",
+      "loadFailed": "Couldn’t read what it installed and keeps on this computer",
+      "checkAgain": "Check again",
+      "busy_one": "A session is working; stop it or let it finish",
+      "busy_other": "{{count}} sessions are working; stop them or let them finish",
+      "program": {
+        "name": "Also uninstall it from the computer",
+        "hint": "Uninstalls its program the way it was installed, and deletes the packages Kettu installed for it.",
+        "via": "Installed with {{method}}, and uninstalled the same way.",
+        "viaKite": "Installed with {{method}}: uninstalled the same way, and the packages Kettu installed for it deleted.",
+        "kiteOnly": "Deletes the packages Kettu installed for it.",
+        "methods": {
+          "npm": "npm",
+          "brew": "Homebrew",
+          "winget": "WinGet",
+          "native": "its official installer",
+          "uvx": "uvx"
+        },
+        "nothing": "Kettu installed nothing for it, and found no program of its own.",
+        "blocked": "{{agents}} also run on {{harness}}, which uninstalling would break. To uninstall, remove them first.",
+        "manual": {
+          "unknown": "Kettu can’t tell how {{path}} was installed, so it leaves it alone. If you no longer need it, uninstall it the way you installed it.",
+          "tool": "{{path}} was installed with {{method}}, which isn’t on this computer, so it stays. You can run this in a terminal:",
+          "unsafe": "The path of {{path}} holds characters the command line would rewrite, so Kettu won’t run its uninstall for you. Uninstall it in a terminal.",
+          "app": "{{path}} ships inside an app and goes when you uninstall that app; it stays here."
+        },
+        "notes": {
+          "claude-apps": "Claude’s desktop app and IDE extensions bring their own Claude Code and aren’t affected.",
+          "codex-app": "The Codex desktop app brings its own codex and isn’t affected.",
+          "antigravity-app": "The Antigravity app brings its own agy and isn’t affected.",
+          "path-left": "The line the installer added to PATH or your shell profile stays; it does no harm once the program is gone."
+        }
+      },
+      "data": {
+        "name": "Also delete its data on the computer",
+        "hint": "Its sign-in, settings, caches and its own session history. This can’t be undone.",
+        "unknown": "Kettu doesn’t know where {{name}} keeps its data, so nothing is deleted.",
+        "nothing": "It has no data on this computer.",
+        "kept": "These stay:",
+        "keptReason": {
+          "app": "the {{harness}} app uses it too",
+          "agents": "other agents use it too",
+          "program": "its program, which uninstalling removes",
+          "sandbox": "the sandbox accounts Codex made on Windows use it"
+        },
+        "notes": {
+          "claude-apps": "Claude’s desktop app and IDE extensions use this folder too: if they are still installed, they make it again on their next start and ask you to sign in again.",
+          "codex-app": "The Codex desktop app uses this folder too: its sign-in and session history on this computer go with it.",
+          "antigravity-app": "The Antigravity app shares the sign-in and the other folders in ~/.gemini, which stay; to sign out, use Reset environment.",
+          "codebuddy-sign-in": "Its browser or WeChat sign-in is kept elsewhere, where Kettu doesn’t know, and stays.",
+          "picked-folder": "You picked this folder for it; everything in it is deleted."
+        }
+      },
+      "kite": "{{path}} (installed by Kettu)",
+      "contents": "What {{path}} holds, except {{names}}",
+      "trashWindows": "Move to the Recycle Bin instead of deleting",
+      "trashMac": "Move to the Trash instead of deleting",
+      "trashLinux": "Move to the trash instead of deleting",
+      "trashHint": "What an uninstall command removes, and sign-ins in the system’s credential store, are deleted outright.",
+      "sessionsStay": "Its sessions stay in Kettu, where you can still read them; delete them in the session list if you like.",
+      "total": "{{size}} in all",
+      "confirmProgram": "Uninstall and remove",
+      "confirmData": "Delete data and remove",
+      "confirmBoth": "Uninstall, delete data and remove",
+      "done": "Done",
+      "finished_one": "The step is done",
+      "finished_other": "All {{count}} steps are done",
+      "finishedHint": "Once you click Done, it’s removed from Kettu.",
+      "partly_one": "{{count}} step done, {{failed}} not",
+      "partly_other": "{{count}} steps done, {{failed}} not",
+      "partlyHint": "What didn’t go is still on the computer, with why after it; close what holds it, then delete it yourself. Once you click Done, it’s removed from Kettu.",
+      "afterHint": "To use {{name}} again, add it in Add agent; if it was uninstalled, install it again in Harness first."
     },
     "turnedOff": "Turned off",
     "enable": {
