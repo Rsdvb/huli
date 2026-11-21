@@ -1,0 +1,50 @@
+# A reply's code block scrolls sideways: its lines run past the screen, and a swipe left on the code
+# shows their ends. iOS's context menu once held the whole block and took the swipe; it now holds
+# the block's head alone, whose long press still opens the menu.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/chinese'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- scrollUntilVisible:
+    element:
+      text: '(?s).*export function issueToken.*'
+    direction: UP
+    centerElement: true
+    timeout: 30000
+- takeScreenshot: k01-code
+- swipe:
+    from:
+      text: '(?s).*export function issueToken.*'
+    direction: LEFT
+    duration: 600
+- waitForAnimationToEnd
+- takeScreenshot: k02-code-swiped
+# The head's long press still opens the menu.
+- longPressOn:
+    text: '复制'
+    index: 0
+- extendedWaitUntil:
+    visible: '选择文本'
+    timeout: 4000
+    optional: true
+- takeScreenshot: k03-code-menu
