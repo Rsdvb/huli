@@ -1,8 +1,8 @@
 # The phone's agent pages, in light and then in dark: the Agent list with its environment rows and
-# the note that import is on the computer, the add-agent sheet, the fake agent's page and its
-# reset page; signed out, its sign-in card and New session's note that leads to it; then signed
-# in again through its page sign-in, which opens Safari for 8 s. Run last: it signs the fake agent
-# out and back in.
+# the note that import is on the computer, the fake agent's page and its reset page; signed out,
+# its sign-in card and New session's note that leads to it; then signed in again through its page
+# sign-in, which opens Safari for 8 s. Run last: it signs the fake agent out and back in. The
+# add-agent sheet is left out: the fake agent's harness takes one agent, so nothing can be added.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -27,26 +27,14 @@ appId: io.github.rsdvb.huli
     optional: true
 - scroll
 - takeScreenshot: g02-agents-environment
-# The add-agent sheet, closed again by its backdrop.
-- scrollUntilVisible:
-    element: '添加 Agent'
-    direction: UP
-    centerElement: true
-    optional: true
-- tapOn:
-    text: '添加 Agent'
-    optional: true
+# Back to the list's top by leaving it, since a scroll up its long list of harnesses can stall.
+- tapOn: '返回'
 - waitForAnimationToEnd
-- takeScreenshot: g03-add-agent
-- tapOn:
-    point: 50%,6%
-    optional: true
-- waitForAnimationToEnd
+- tapOn: 'Agent'
+- extendedWaitUntil:
+    visible: 'Fake agent'
+    timeout: 20000
 # The fake agent's page and its reset page.
-- scrollUntilVisible:
-    element: 'Fake agent'
-    direction: UP
-    optional: true
 - tapOn:
     text: 'Fake agent'
     index: 0
@@ -151,10 +139,12 @@ appId: io.github.rsdvb.huli
     optional: true
 - scroll
 - takeScreenshot: g15-agents-environment-dark
-- scrollUntilVisible:
-    element: 'Fake agent'
-    direction: UP
-    optional: true
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: 'Agent'
+- extendedWaitUntil:
+    visible: 'Fake agent'
+    timeout: 20000
 - tapOn:
     text: 'Fake agent'
     index: 0
