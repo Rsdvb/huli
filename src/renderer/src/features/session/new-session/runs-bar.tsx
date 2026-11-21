@@ -21,7 +21,7 @@ import { agentName, agentsOn, usableAgents, useAgentsStore } from '@renderer/sto
 import { addRun, removeRun, setRun, useBestOfN, type RunPick } from '@renderer/stores/best-of-n'
 import { readFirstOptions } from './prepared'
 import { modelOption } from './run-starts'
-import { menuAgents, menuModels } from './start-options'
+import { menuAgents, menuModels, startConfig } from './start-options'
 
 // A model's value is never empty, so the agent's own model takes the empty value.
 const OWN_MODEL = ''
@@ -97,11 +97,16 @@ function RunChip({
   removable: boolean
 }) {
   const { t } = useTranslation('session')
-  const config = useAgentOptionsStore((s) => optionsOn(s, hostId)[run.agentId]?.config)
+  const entry = useAgentOptionsStore((s) => optionsOn(s, hostId)[run.agentId])
+  const config = entry?.config
   const model = modelOption(config)
   const choices: Choices = model?.choices ?? []
   const { current, older } = menuModels(choices)
-  const shown = run.model ? (choices.find((c) => c.value === run.model)?.name ?? run.model) : null
+  // The agent's own model is the one a session would start with: its default or the last used.
+  const ownValue = entry ? modelOption(startConfig(entry, {}, { startMode: true }))?.value : null
+  const own =
+    typeof ownValue === 'string' ? (choices.find((c) => c.value === ownValue)?.name ?? null) : null
+  const shown = run.model ? (choices.find((c) => c.value === run.model)?.name ?? run.model) : own
   const usable = agents.some((a) => a.id === run.agentId)
   const name = agentName(run.agentId, hostId)
   return (
@@ -154,7 +159,9 @@ function RunChip({
             }}
           >
             <DropdownMenuRadioItem value={OWN_MODEL} closeOnClick>
-              <span className="truncate">{t('group.runs.ownModel')}</span>
+              <span className="truncate">
+                {own ? t('group.runs.ownModelNamed', { model: own }) : t('group.runs.ownModel')}
+              </span>
             </DropdownMenuRadioItem>
             {[...current, ...older].map((choice) => (
               <DropdownMenuRadioItem key={choice.value} value={choice.value} closeOnClick>

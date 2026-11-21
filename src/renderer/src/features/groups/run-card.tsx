@@ -11,11 +11,11 @@ import { Glyph } from '@renderer/features/shell/glyph'
 import { runningFor } from '@renderer/lib/format'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
-import { optionsOn, useAgentOptionsStore } from '@renderer/stores/agent-options'
 import { agentName } from '@renderer/stores/agents'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import { openSession } from '@renderer/stores/view'
 import { LineCounts } from './run-changes'
+import { useModelName } from './run-label'
 import type { ChangesState } from './use-run-changes'
 
 const PHASE_BADGE: Record<RunPhase, 'info' | 'attention' | 'success' | 'error'> = {
@@ -23,16 +23,6 @@ const PHASE_BADGE: Record<RunPhase, 'info' | 'attention' | 'success' | 'error'> 
   waiting: 'attention',
   done: 'success',
   failed: 'error',
-}
-
-/** The name of the model a run's agent ran with, as its options name it; null when unknown. */
-function useModelName(run: SessionSummary | undefined): string | null {
-  return useAgentOptionsStore((s) => {
-    if (!run?.model) return null
-    const config = optionsOn(s, hostOfSession(run))[run.agentId]?.config
-    const model = config?.find((o) => o.category === 'model' && o.type === 'select')
-    return model?.choices?.find((c) => c.value === run.model)?.name ?? run.model
-  })
 }
 
 /**
@@ -61,8 +51,10 @@ export const RunCard = memo(function RunCard({
   if (!run) return null
   const phase = runPhase(run)
   const kept = keptId === run.id
-  const canKeep = keptId === null && phase === 'done' && run.worktree?.state === 'ready'
   const stats = changes.changes
+  const changedNothing = !!stats && stats.files.length === 0 && stats.commits === 0
+  const canKeep =
+    keptId === null && phase === 'done' && run.worktree?.state === 'ready' && !changedNothing
   return (
     <article
       aria-label={agentName(run.agentId, hostOfSession(run))}
@@ -155,7 +147,13 @@ export const RunCard = memo(function RunCard({
             variant="outline"
             className="ml-auto"
             disabled={!canKeep}
-            title={canKeep ? undefined : t('group.card.keepWhenDone')}
+            title={
+              canKeep
+                ? undefined
+                : changedNothing
+                  ? t('group.changes.none')
+                  : t('group.card.keepWhenDone')
+            }
             onClick={onKeep}
           >
             {t('group.card.keep')}

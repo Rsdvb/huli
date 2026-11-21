@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { runPhase } from '@shared/session-groups'
@@ -27,13 +27,14 @@ import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { basename } from '@renderer/lib/format'
 import { errorMessage, host, hostAt } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
-import { agentName } from '@renderer/stores/agents'
 import { receiveGitStatus, useGitStore } from '@renderer/stores/git'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { groupRuns, useSessionsStore } from '@renderer/stores/sessions'
 import { openNewSession } from '@renderer/stores/view'
 import { GROUP_ICON } from './group-icon'
 import { RunCard } from './run-card'
+import { modelNameOf, runLabel, useModelName } from './run-label'
+import { useAgentOptionsStore } from '@renderer/stores/agent-options'
 import { RunChangesList } from './run-changes'
 import { useRunChanges } from './use-run-changes'
 
@@ -93,7 +94,7 @@ export default function GroupPage({ groupId }: { groupId: string }) {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-8 pt-5 pb-10">
           <p className="text-xs text-secondary">
             {t('group.page.summary', {
-              count: ids.length,
+              count: head.group?.size ?? ids.length,
               project: projectName,
               base: head.worktree?.base ?? 'HEAD',
             })}
@@ -195,11 +196,12 @@ function ShownChanges({ sessionId }: { sessionId: string }) {
   const path = run?.worktree?.path ?? null
   const phase = run ? runPhase(run) : 'done'
   const state = useRunChanges(sessionId, path, phase)
+  const model = useModelName(run)
   if (!run) return null
   return (
     <section aria-label={t('group.changes.title')} className="flex flex-col gap-2">
       <h2 className="text-ui font-medium text-primary">
-        {t('group.changes.of', { agent: agentName(run.agentId, hostOfPath(run.projectPath)) })}
+        {t('group.changes.of', { agent: runLabel(run, model) })}
       </h2>
       <div className="rounded-xl border border-default bg-surface p-1.5">
         <RunChangesList sessionId={sessionId} state={state} />
@@ -219,7 +221,8 @@ function KeptNote({
 }) {
   const { t } = useTranslation('session')
   const kept = useSessionsStore((s) => s.byId[keptId])
-  const name = kept ? agentName(kept.agentId, hostOfPath(kept.projectPath)) : ''
+  const model = useModelName(kept)
+  const name = kept ? runLabel(kept, model) : ''
   return (
     <div
       role="status"
@@ -253,7 +256,8 @@ function KeepDialog({
   const [error, setError] = useState<string | null>(null)
   const [shown, setShown] = useState(run)
   if (run && run !== shown) setShown(run)
-  const name = shown ? agentName(shown.agentId, hostOfPath(shown.projectPath)) : ''
+  const model = useModelName(shown)
+  const name = shown ? runLabel(shown, model) : ''
   const keep = async () => {
     if (!sessionId) return
     setBusy(true)
@@ -324,7 +328,7 @@ function DiscardDialog({
     useShallow((s) =>
       sessionIds.map((id) => {
         const run = s.byId[id]
-        return run ? agentName(run.agentId, hostOfPath(run.projectPath)) : id
+        return run ? runLabel(run, modelNameOf(useAgentOptionsStore.getState(), run)) : id
       }),
     ),
   )
@@ -341,7 +345,6 @@ function DiscardDialog({
       setBusy(false)
     }
   }
-  const list = useMemo(() => names.join('、'), [names])
   return (
     <AlertDialog
       open={open && sessionIds.length > 0}
@@ -356,7 +359,9 @@ function DiscardDialog({
           <AlertDialogTitle>
             {t('group.discard.title', { count: sessionIds.length })}
           </AlertDialogTitle>
-          <AlertDialogDescription>{t('group.discard.body', { runs: list })}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {t('group.discard.body', { runs: names })}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         {error && (
           <p role="alert" className="rounded-lg bg-danger-tint px-3 py-2 text-xs text-danger">
@@ -365,12 +370,7 @@ function DiscardDialog({
         )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{t('group.discard.cancel')}</AlertDialogCancel>
-          <Button
-            size="dialog"
-            variant="destructive"
-            disabled={busy}
-            onClick={() => void discard()}
-          >
+          <Button size="dialog" disabled={busy} onClick={() => void discard()}>
             {busy && <Spinner />}
             {t('group.discard.confirm')}
           </Button>

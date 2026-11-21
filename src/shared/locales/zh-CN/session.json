@@ -1624,6 +1624,7 @@
       "add": "添加",
       "edit": "修改第 {{n}} 个",
       "ownModel": "默认模型",
+      "ownModelNamed": "默认（{{model}}）",
       "agent": "Agent",
       "model": "模型",
       "readingModels": "正在读取模型…",
@@ -1692,7 +1693,7 @@
     "discard": {
       "action_other": "归档其他 {{count}} 个",
       "title_other": "归档其他 {{count}} 个运行？",
-      "body": "{{runs}} 会被归档，它们的工作树会删除。它们还没提交的改动会先提交到各自的分支，分支都保留，做过的工作不会丢。",
+      "body": "{{runs, list(style: narrow)}} 会被归档，它们的工作树会删除。它们还没提交的改动会先提交到各自的分支，分支都保留，做过的工作不会丢。",
       "cancel": "先不",
       "confirm": "归档并删除工作树",
       "done_other": "已归档其他 {{count}} 个运行。"
