@@ -39,7 +39,7 @@ appId: io.github.rsdvb.huli
 # The reply's own links, by where they lie, as the reply is one text to Maestro: the inline code
 # naming the PDF, then the link to the Word document.
 - tapOn:
-    point: 48%,62.7%
+    point: 48%,63%
     optional: true
 - extendedWaitUntil:
     visible:
@@ -52,7 +52,7 @@ appId: io.github.rsdvb.huli
     optional: true
 - waitForAnimationToEnd
 - tapOn:
-    point: 13%,65.3%
+    point: 13%,65%
     optional: true
 - extendedWaitUntil:
     visible:
