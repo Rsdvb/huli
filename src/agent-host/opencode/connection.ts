@@ -23,6 +23,7 @@ import {
   type AgentInit,
   type ConnectionHooks,
   type ForkPoint,
+  type ListedEverywhere,
   type ListedSession,
   type McpServer,
   type ModelTokens,
@@ -1075,23 +1076,59 @@ export class OpenCodeConnection implements AgentConnection {
     cwd: string,
     cursor: string | null,
   ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
+    const { items, nextCursor } = await this.sessionPage(
+      `directory=${encodeURIComponent(cwd)}&parentID=null`,
+      cursor,
+    )
+    return {
+      sessions: items.map((item) => ({
+        sessionId: item.id,
+        title: item.title ?? null,
+        updatedAt: new Date(item.time.updated).toISOString(),
+        cwd: item.location.directory,
+      })),
+      nextCursor,
+    }
+  }
+
+  /**
+   * Huli: every folder's sessions, for the import from the agents: without a `directory`, 2.3's
+   * `GET /api/session` lists the sessions of every directory its database holds.
+   */
+  async listAllSessions(
+    cursor: string | null,
+  ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }> {
+    const { items, nextCursor } = await this.sessionPage('parentID=null', cursor)
+    return {
+      sessions: items.map((item) => ({
+        sessionId: item.id,
+        title: item.title ?? null,
+        createdAt: new Date(item.time.created).toISOString(),
+        updatedAt: new Date(item.time.updated).toISOString(),
+        cwd: item.location.directory,
+        subagent: false,
+        prompted: true,
+      })),
+      nextCursor,
+    }
+  }
+
+  /** A page of sessions without their subagents' or the ones Kettu keeps hidden. */
+  private async sessionPage(
+    filter: string,
+    cursor: string | null,
+  ): Promise<{ items: SessionInfo[]; nextCursor: string | null }> {
+    // A cursor carries the filters but not the page's size, which is 50 unless asked.
     const query = cursor
-      ? `cursor=${encodeURIComponent(cursor)}`
-      : `directory=${encodeURIComponent(cwd)}&parentID=null&limit=${MESSAGE_PAGE}`
+      ? `cursor=${encodeURIComponent(cursor)}&limit=${MESSAGE_PAGE}`
+      : `${filter}&limit=${MESSAGE_PAGE}`
     const page = await this.call<{ data?: SessionInfo[]; cursor?: { next?: string | null } }>(
       'GET',
       `/api/session?${query}`,
     )
     const items = page?.data ?? []
     return {
-      sessions: items
-        .filter((item) => !item.parentID && this.sessions.get(item.id)?.hidden !== true)
-        .map((item) => ({
-          sessionId: item.id,
-          title: item.title ?? null,
-          updatedAt: new Date(item.time.updated).toISOString(),
-          cwd: item.location.directory,
-        })),
+      items: items.filter((item) => !item.parentID && this.sessions.get(item.id)?.hidden !== true),
       // OpenCode names a next page whenever it answers; only a full page has one.
       nextCursor: items.length >= MESSAGE_PAGE ? (page?.cursor?.next ?? null) : null,
     }

@@ -283,7 +283,48 @@ describe('the Doubao driver', () => {
     const page = await connection.listSessions(CWD, null)
     expect(page.sessions.map((session) => session.cwd)).toEqual([CWD])
     expect(page.nextCursor).toBe('eyJza2lwIjo0fQ')
-    expect(runs.at(-1)!.args).toEqual(['--list', '--limit', '50', '--json'])
+    expect(runs.at(-1)!.args).toEqual(['--list', '--limit', '100', '--json'])
+  })
+
+  it('reads on past the latest page for a folder whose conversations are older', async () => {
+    const OLD = 'C:\\work\\kite-doubao-old'
+    const { connection, runs } = await setup({
+      respond: (run) =>
+        run.args[0] === '--list'
+          ? {
+              lines: [
+                fixtureText(
+                  run.args.includes('--cursor') ? 'session-list-last.json' : 'session-list.json',
+                ),
+              ],
+            }
+          : null,
+    })
+    await connection.initialize()
+    const page = await connection.listSessions(OLD, null)
+    expect(page).toEqual({
+      sessions: [
+        {
+          sessionId: '10000000000025552',
+          title: '整理旧的构建脚本',
+          updatedAt: '2026-10-02T09:14:05+08:00',
+          cwd: OLD,
+        },
+      ],
+      nextCursor: null,
+    })
+    expect(runs.filter((run) => run.args[0] === '--list').map((run) => run.args)).toEqual([
+      ['--list', '--limit', '100', '--json'],
+      ['--list', '--limit', '100', '--json', '--cursor', 'eyJza2lwIjo0fQ'],
+    ])
+  })
+
+  it('stops after a few pages without the folder, and the next page goes on from there', async () => {
+    const { connection, runs } = await setup()
+    await connection.initialize()
+    const page = await connection.listSessions('C:\\work\\elsewhere', null)
+    expect(page).toEqual({ sessions: [], nextCursor: 'eyJza2lwIjo0fQ' })
+    expect(runs.filter((run) => run.args[0] === '--list')).toHaveLength(5)
   })
 
   it('loads an imported conversation’s history from its export', async () => {

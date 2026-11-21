@@ -58,7 +58,10 @@ const MODELS_MAX_AGE_MS = 10 * 60_000
 const MODELS_RETRY_MS = 60_000
 /** How long a new session waits for the models being read. */
 const MODELS_WAIT_MS = 20_000
-const LIST_PAGE = 50
+/** Conversations a page of the listing asks for. */
+const LIST_PAGE = 100
+/** Pages one listing of a folder reads at most while none of them is the folder's. */
+const LIST_RUNS = 5
 /** The largest QR code picture Kettu passes on. */
 const QR_BYTES = 2 * 1024 * 1024
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47])
@@ -597,21 +600,26 @@ export class DoubaoConnection implements AgentConnection {
     return Promise.reject(new AgentRequestError('agent_error', 'Doubao CLI keeps its sessions'))
   }
 
-  /** The conversations of `cwd` among the latest; one of no folder belongs to the home folder. */
+  /**
+   * The conversations of `cwd`, newest first; one of no folder belongs to the home folder. The
+   * listing has every folder's, so pages are read on with `--cursor` until one of `cwd`'s is
+   * found, or `LIST_RUNS` of them were read, which the next page goes on from.
+   */
   async listSessions(
     cwd: string,
     cursor: string | null,
   ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
-    const page = await this.listing(listArgs(LIST_PAGE, cursor))
-    const sessions = page.sessions
-      .filter((session) => samePath(session.cwd, cwd))
-      .map(({ sessionId, title, updatedAt, cwd: folder }) => ({
-        sessionId,
-        title,
-        updatedAt,
-        cwd: folder,
-      }))
-    return { sessions, nextCursor: page.nextCursor }
+    const sessions: ListedSession[] = []
+    let next = cursor
+    for (let run = 0; run < LIST_RUNS; run++) {
+      const page = await this.listing(listArgs(LIST_PAGE, next))
+      for (const { sessionId, title, updatedAt, cwd: folder } of page.sessions) {
+        if (samePath(folder, cwd)) sessions.push({ sessionId, title, updatedAt, cwd: folder })
+      }
+      next = page.nextCursor
+      if (sessions.length > 0 || next === null) break
+    }
+    return { sessions, nextCursor: next }
   }
 
   /** Every unarchived conversation of the account, from every folder and device. */

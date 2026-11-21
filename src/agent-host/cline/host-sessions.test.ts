@@ -3,10 +3,18 @@
 
 import { describe, expect, it } from 'vitest'
 import { Host, HostError, mcpToolName, type HostPeer } from './host-sessions'
-import { ERROR, METHOD, type OpenParams, type OpenResult, type TurnResult } from './protocol'
+import {
+  ERROR,
+  METHOD,
+  type ListResult,
+  type OpenParams,
+  type OpenResult,
+  type TurnResult,
+} from './protocol'
 import type {
   Sdk,
   SdkCoreOptions,
+  SdkHistoryRecord,
   SdkMessage,
   SdkModelInfo,
   SdkProviderSettings,
@@ -94,6 +102,10 @@ class FakeCore {
   async get(sessionId: string) {
     return this.world.rows[sessionId]
   }
+  async list(limit = 200, options: { hydrate?: boolean; includeSubagents?: boolean } = {}) {
+    this.world.listed.push({ limit, ...options })
+    return (this.world.history ?? []).slice(0, limit)
+  }
   async readMessages(sessionId: string): Promise<SdkMessage[]> {
     return this.started ? this.messages : (this.world.stored[sessionId] ?? [])
   }
@@ -115,6 +127,9 @@ interface World {
   lastUsed: string | null
   rows: Record<string, { sessionId: string; provider: string; model: string; cwd: string }>
   stored: Record<string, SdkMessage[]>
+  /** Huli: the sessions Cline's history lists, and how each listing asked. */
+  history?: SdkHistoryRecord[]
+  listed: { limit: number; hydrate?: boolean; includeSubagents?: boolean }[]
   /** The compaction the user chose in Cline; undefined for one who never chose. */
   compaction?: 'basic' | 'agentic' | 'off'
   script: Script
@@ -128,6 +143,7 @@ function world(overrides: Partial<World> = {}): World {
     lastUsed: 'anthropic',
     rows: {},
     stored: {},
+    listed: [],
     script: {},
     cores: [],
     down: [],
@@ -464,6 +480,58 @@ describe('Cline host sessions', () => {
     ])
     expect(result.providers.find((provider) => provider.id === 'cline')?.ready).toBe(true)
     expect(w.settings.cline?.apiKey).toBe('token')
+  })
+
+  it("lists Cline's stored sessions, unhydrated, with subagents marked and a title from the prompt", async () => {
+    const { host, w } = setup(
+      world({
+        history: [
+          {
+            sessionId: 's2',
+            cwd: '/work/app',
+            startedAt: '2026-11-20T10:00:00.000Z',
+            updatedAt: '2026-11-20T11:00:00.000Z',
+            metadata: { title: '  Named  ' },
+          },
+          {
+            sessionId: 's3',
+            workspaceRoot: '/work/other',
+            startedAt: '2026-11-19T10:00:00.000Z',
+            prompt: '\n Fix the build\nthen test',
+          },
+          { sessionId: 's4', cwd: '/work/app', parentSessionId: 's2' },
+          { sessionId: 's5', cwd: '' },
+        ],
+      }),
+    )
+    const listed = (await host.serve(METHOD.list, { limit: 5_000 })) as ListResult
+    expect(w.listed).toEqual([{ limit: 2_000, hydrate: false, includeSubagents: true }])
+    expect(listed.sessions).toEqual([
+      {
+        sessionId: 's2',
+        cwd: '/work/app',
+        title: 'Named',
+        createdAt: '2026-11-20T10:00:00.000Z',
+        updatedAt: '2026-11-20T11:00:00.000Z',
+        subagent: false,
+      },
+      {
+        sessionId: 's3',
+        cwd: '/work/other',
+        title: 'Fix the build',
+        createdAt: '2026-11-19T10:00:00.000Z',
+        updatedAt: '2026-11-19T10:00:00.000Z',
+        subagent: false,
+      },
+      {
+        sessionId: 's4',
+        cwd: '/work/app',
+        title: null,
+        createdAt: null,
+        updatedAt: null,
+        subagent: true,
+      },
+    ])
   })
 
   it('answers an unknown session and an unknown method as errors', async () => {

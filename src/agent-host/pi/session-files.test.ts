@@ -1,12 +1,13 @@
 // Where Kettu finds Pi's session files: by the session's id, wherever pi put the file.
 
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, utimes, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   findSessionFile,
   folderName,
+  listAllSessionFiles,
   listSessionFiles,
   piFolders,
   type PiFolders,
@@ -148,5 +149,49 @@ describe('listing the sessions of a folder', () => {
       },
     ])
     expect(await listSessionFiles(at, '/work/none')).toEqual([])
+  })
+})
+
+describe("Huli: listing every folder's sessions", () => {
+  it('lists the files of every folder, the latest written first, a page at a time', async () => {
+    const at = await folders()
+    const touch = async (file: string, seconds: number) => utimes(file, seconds, seconds)
+    const app = await write(path.join(at.sessions, folderName('/work/app')), 'a_one.jsonl', [
+      { ...header('one', '/work/app'), timestamp: '2026-11-18T09:00:00.000Z' },
+      {
+        type: 'message',
+        timestamp: '2026-11-18T10:00:00.000Z',
+        message: { role: 'user', content: 'Fix the login page' },
+      },
+    ])
+    const other = await write(path.join(at.sessions, folderName('/work/other')), 'b_two.jsonl', [
+      header('two', '/work/other'),
+    ])
+    // Directly in a sessions folder the user set, and a file that is no session's.
+    const flat = await write(at.sessions, 'c_three.jsonl', [header('three', '/work/flat')])
+    const junk = await write(at.sessions, 'notes.jsonl', [{ type: 'note' }])
+    await touch(app, 1_000)
+    await touch(other, 3_000)
+    await touch(flat, 2_000)
+    await touch(junk, 4_000)
+    const first = await listAllSessionFiles(at, 0, 3)
+    expect(first.more).toBe(true)
+    expect(first.sessions.map((s) => [s.sessionId, s.cwd])).toEqual([
+      ['two', '/work/other'],
+      ['three', '/work/flat'],
+    ])
+    const next = await listAllSessionFiles(at, 3, 3)
+    expect(next).toEqual({
+      sessions: [
+        {
+          sessionId: 'one',
+          title: 'Fix the login page',
+          updatedAt: '2026-11-18T10:00:00.000Z',
+          cwd: '/work/app',
+          createdAt: '2026-11-18T09:00:00.000Z',
+        },
+      ],
+      more: false,
+    })
   })
 })

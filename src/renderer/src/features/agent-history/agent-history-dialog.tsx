@@ -6,21 +6,24 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Alert02Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
   Folder01Icon,
   Search01Icon,
 } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { SessionSummary } from '@shared/agent-host'
-import type {
-  AgentHistoryPage,
-  AgentHistorySession,
-  HistoryCopyItem,
-  HistoryCopyOutcome,
-  HistoryCopyPlan,
+import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import {
+  CANNOT_LIST,
+  type AgentHistoryPage,
+  type AgentHistorySession,
+  type HistoryCopyItem,
+  type HistoryCopyOutcome,
+  type HistoryCopyPlan,
 } from '@shared/agent-history'
 import { harnessOf, type AgentId } from '@shared/agents'
 import { Icon } from '@renderer/components/affect/app-shell'
@@ -52,12 +55,12 @@ import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 import { readiness } from '@renderer/features/agents/readiness'
 import { MemoryImportDialog } from '@renderer/features/settings/memory-rows'
 import { mediumAgo } from '@renderer/lib/format'
-import { errorMessage, host } from '@renderer/lib/host'
+import { errorCode, errorMessage, host } from '@renderer/lib/host'
 import { isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useSessionsStore } from '@renderer/stores/sessions'
-import { openSession } from '@renderer/stores/view'
+import { openAgentSettings, openSession } from '@renderer/stores/view'
 import {
   DESKTOP_TAB,
   desktopSourceKey,
@@ -89,6 +92,8 @@ interface Failure {
   key: string
   title: string
   message: string
+  /** Huli: a terminal holds it, so a copy of it may be imported instead. */
+  held?: Chosen
 }
 
 interface Outcome {
@@ -105,6 +110,8 @@ interface Chosen {
   folder: string | null
   key: string
   session: AgentHistorySession
+  /** Huli: chosen in the Claude desktop app's tab, so it takes the app's title and archive. */
+  desktop?: true
 }
 
 /** Huli: the Claude Code agent that imports the Claude desktop app's sessions, on this computer. */
@@ -139,10 +146,18 @@ export function AgentHistoryDialog({
   )
 }
 
-/** Claude Code is read from its files and Codex lists every folder; another agent must say it can. */
-function listsEverywhere(agentId: AgentId, listSessions: boolean): boolean {
-  const harness = harnessOf(agentId)
-  return harness === 'claude-code' || harness === 'codex' || listSessions
+/**
+ * Claude Code is read from its files and Codex lists every folder; another agent must say it can.
+ * Huli: one not started at its version yet is asked, and left out once it says it cannot.
+ */
+function listsEverywhere(agent: AgentStatus): boolean {
+  const harness = harnessOf(agent.id)
+  return (
+    harness === 'claude-code' ||
+    harness === 'codex' ||
+    agent.capabilities.listSessions ||
+    agent.capabilitiesUnknown === true
+  )
 }
 
 /** Huli: the agents whose sessions another folder of theirs can be read for. */
@@ -156,10 +171,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
   const agents = useAgentsStore(
     useShallow((s) =>
       usableAgents(s.order, s.byId).filter(
-        (a) =>
-          !a.disabled &&
-          readiness(a).kind !== 'missing' &&
-          listsEverywhere(a.id, a.capabilities.listSessions),
+        (a) => !a.disabled && readiness(a).kind !== 'missing' && listsEverywhere(a),
       ),
     ),
   )
@@ -185,27 +197,40 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     title: null,
   })
   const [outcome, setOutcome] = useState<Outcome | null>(null)
+  // Huli: Stop was pressed, and the imports under way are finishing.
+  const [stopRequested, setStopRequested] = useState(false)
+  // Huli: the failed import whose copy is being made.
+  const [forking, setForking] = useState<string | null>(null)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const alive = useRef(true)
   const stopping = useRef(false)
   // The latest listing of each source; an earlier one drops its pages.
   const runs = useRef(new Map<string, number>())
 
-  const load = (agentId: AgentId, folder: string | null, desktop = false): void => {
+  /**
+   * Lists a source page after page. Huli: `from`, the page a listing failed at, goes on from it
+   * with what was listed kept; without it the listing starts over.
+   */
+  const load = (
+    agentId: AgentId,
+    folder: string | null,
+    desktop = false,
+    from: string | null = null,
+  ): void => {
     const key = desktop ? desktopSourceKey(agentId) : sourceKey(agentId, folder)
     const run = (runs.current.get(key) ?? 0) + 1
     runs.current.set(key, run)
     const live = () => alive.current && runs.current.get(key) === run
-    if (folder !== null) {
-      setLists((l) => {
-        const next = { ...l }
-        delete next[key]
-        return next
-      })
-    }
+    setLists((l) => {
+      const next = { ...l }
+      const before = l[key]
+      if (from === null) delete next[key]
+      else if (before) next[key] = { ...before, loading: true, error: null, failedCursor: null }
+      return next
+    })
     void (async () => {
-      let cursor: string | null = null
-      let first = true
+      let cursor: string | null = from
+      let first = from === null
       do {
         try {
           const page: AgentHistoryPage = await host('agentHistory.list', {
@@ -232,18 +257,25 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                 loading: more,
                 error: null,
                 ...(page.source !== undefined ? { source: page.source } : {}),
+                ...(page.agentId !== undefined ? { agentId: page.agentId } : {}),
               },
             }
           })
         } catch (error) {
           if (!live()) return
+          const failedAt = cursor
+          const reason = (error as { data?: { reason?: unknown } } | null)?.data?.reason
           setLists((l) => ({
             ...l,
             [key]: {
+              ...l[key],
               sessions: l[key]?.sessions ?? [],
               hidden: l[key]?.hidden ?? { subagents: 0, empty: 0 },
               loading: false,
               error: errorMessage(error),
+              signIn: errorCode(error) === 'auth_required',
+              failedCursor: failedAt,
+              cannotList: reason === CANNOT_LIST,
             },
           }))
           return
@@ -266,14 +298,15 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // An ACP agent that cannot list without a folder is left out once it says so.
-  const shownAgents = agents.filter((a) => {
-    const harness = harnessOf(a.id)
-    return harness === 'claude-code' || harness === 'codex' || !lists[a.id]?.error
-  })
-  // Huli: the Claude desktop app's tab, while its listing holds a session.
-  const desktopAgent = desktopAgentOf(shownAgents)
-  const desktopList = desktopAgent ? lists[desktopSourceKey(desktopAgent)] : undefined
+  // An agent that cannot list its sessions everywhere is left out once it says so, as one not
+  // started at its version yet may; Huli: one whose listing failed otherwise keeps its tab, with
+  // the error, a retry and its sign-in.
+  const shownAgents = agents.filter((a) => !lists[a.id]?.cannotList)
+  // Huli: the Claude desktop app's tab, while its listing holds a session. It is asked of the
+  // first Claude Code agent and imported by the one whose folder holds its transcripts.
+  const desktopAsked = desktopAgentOf(agents)
+  const desktopList = desktopAsked ? lists[desktopSourceKey(desktopAsked)] : undefined
+  const desktopAgent = desktopList?.agentId ?? desktopAsked
   const desktopShown = !!desktopList && !desktopList.error && desktopList.sessions.length > 0
   const onDesktop = desktopShown && chosenTab === DESKTOP_TAB
   const shown = onDesktop
@@ -283,7 +316,11 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     ? t('desktop.tab')
     : (shownAgents.find((a) => a.id === shown)?.name ?? shown ?? '')
   const folder = shown && !onDesktop ? (folders[shown] ?? null) : null
-  const source = shown ? (onDesktop ? desktopSourceKey(shown) : sourceKey(shown, folder)) : null
+  const source = shown
+    ? onDesktop && desktopAsked
+      ? desktopSourceKey(desktopAsked)
+      : sourceKey(shown, folder)
+    : null
   const list = source ? lists[source] : undefined
   const filtered = useMemo(
     () => (list ? list.sessions.filter((s) => matches(s, query.trim())) : []),
@@ -316,18 +353,19 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
   )
   // Huli: the desktop app's chosen ones first, so one chosen in both tabs comes in with its title.
   const fromDesktop: Chosen[] =
-    desktopAgent && desktopShown
+    desktopAsked && desktopAgent && desktopShown
       ? desktopList.sessions
           .filter(
             (s) =>
               selectable(s) &&
-              selected.has(sessionKey(desktopSourceKey(desktopAgent), s.acpSessionId)),
+              selected.has(sessionKey(desktopSourceKey(desktopAsked), s.acpSessionId)),
           )
           .map((s) => ({
             agentId: desktopAgent,
             folder: null,
-            key: sessionKey(desktopSourceKey(desktopAgent), s.acpSessionId),
+            key: sessionKey(desktopSourceKey(desktopAsked), s.acpSessionId),
             session: s,
+            desktop: true as const,
           }))
       : []
   const toImport: Chosen[] = [...fromDesktop, ...fromAgents].filter(
@@ -338,6 +376,13 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
           other.session.acpSessionId === item.session.acpSessionId,
       ) === index,
   )
+
+  // Huli: the shown tab's listing again, from the start or from the page that failed.
+  const reload = (from: string | null): void => {
+    if (!shown) return
+    if (onDesktop && desktopAsked) load(desktopAsked, null, true, from)
+    else load(shown, folder, false, from)
+  }
 
   const chooseFolder = async (agentId: AgentId, picked?: string): Promise<void> => {
     const chosen = picked ?? (await window.kettu.dialogs.chooseHistoryFolder())
@@ -352,7 +397,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     setLists((l) => {
       const next = { ...l }
       for (const [key, current] of Object.entries(l)) {
-        if (!ofAgent(key, agentId)) continue
+        if (!ofAgent(key, agentId) && current.agentId !== agentId) continue
         next[key] = {
           ...current,
           sessions: current.sessions.map((s) =>
@@ -376,7 +421,8 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
       items,
       IMPORTS,
       () => alive.current && !stopping.current,
-      async ({ agentId, key, session }) => {
+      async (item) => {
+        const { agentId, key, session } = item
         setProgress((p) => ({ ...p, title: session.title }))
         try {
           const summary = await host('sessions.import', {
@@ -385,6 +431,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
             acpSessionId: session.acpSessionId,
             // Huli: a fork another folder carried on comes in as a copy of its own.
             ...(session.imported && session.outside === 'fork' ? { fork: true } : {}),
+            ...(item.desktop ? { source: 'claude-desktop' as const } : {}),
           })
           useSessionsStore.getState().upsert(summary)
           result.imported.push(summary)
@@ -392,10 +439,12 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
           markImported(agentId, session.acpSessionId)
           setSelected((s) => withKeys(s, [key], false))
         } catch (error) {
+          const reason = (error as { data?: { reason?: unknown } } | null)?.data?.reason
           result.failed.push({
             key,
             title: session.title ?? t('common:untitledSession'),
             message: errorMessage(error),
+            ...(reason === 'held' ? { held: item } : {}),
           })
         }
         done++
@@ -408,10 +457,42 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
     setRunning(false)
   }
 
+  // Huli: one a terminal holds comes in as a copy of its own, as the sidebar's import offers.
+  const forkHeld = async (failure: Failure): Promise<void> => {
+    const item = failure.held
+    if (!item || forking) return
+    setForking(failure.key)
+    try {
+      const summary = await host('sessions.import', {
+        agentId: item.agentId,
+        projectPath: item.session.cwd,
+        acpSessionId: item.session.acpSessionId,
+        fork: true,
+        ...(item.desktop ? { source: 'claude-desktop' as const } : {}),
+      })
+      useSessionsStore.getState().upsert(summary)
+      if (!alive.current) return
+      setSelected((s) => withKeys(s, [item.key], false))
+      setOutcome(
+        (o) =>
+          o && {
+            ...o,
+            imported: [...o.imported, summary],
+            failed: o.failed.filter((f) => f.key !== failure.key),
+          },
+      )
+    } catch (error) {
+      toast(errorMessage(error), undefined, { tone: 'warning' })
+    } finally {
+      if (alive.current) setForking(null)
+    }
+  }
+
   const start = async (): Promise<void> => {
     const items = toImport
     if (items.length === 0 || running || planning) return
     stopping.current = false
+    setStopRequested(false)
     setOutcome(null)
     const fromFolders = items.filter((item) => item.folder !== null)
     if (fromFolders.length === 0) {
@@ -593,6 +674,14 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                           {agentList.loading ? '…' : ''}
                         </span>
                       )}
+                      {agentList?.error && (
+                        <HugeiconsIcon
+                          icon={Alert02Icon}
+                          strokeWidth={1.9}
+                          aria-label={t('dialog.listFailedShort')}
+                          className="size-3.5 text-danger"
+                        />
+                      )}
                     </TabsTrigger>
                   )
                 })}
@@ -671,7 +760,7 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                 {t('dialog.none')}
               </Button>
             </div>
-            {list && !list.error && (
+            {list && (!list.error || list.sessions.length > 0) && (
               <p className="truncate text-hint text-tertiary" title={statusTip}>
                 {list.loading
                   ? t('dialog.listing', { count: list.sessions.length })
@@ -689,8 +778,20 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
                   </div>
                 ))}
               </div>
-            ) : list.error ? (
-              <p className="py-2 text-ui text-danger">{list.error}</p>
+            ) : list.error && list.sessions.length === 0 ? (
+              <ListError
+                agentName={shownName}
+                list={list}
+                onRetry={() => reload(null)}
+                onSignIn={
+                  list.signIn && !onDesktop
+                    ? () => {
+                        onClose()
+                        openAgentSettings(shown)
+                      }
+                    : null
+                }
+              />
             ) : list.sessions.length === 0 && !list.loading ? (
               <p className="py-2 text-ui text-secondary">
                 {folder !== null
@@ -700,19 +801,45 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
             ) : groups.length === 0 && !list.loading ? (
               <p className="py-2 text-ui text-secondary">{t('dialog.noMatch')}</p>
             ) : (
-              groups.map((group) => (
-                <FolderList
-                  key={group.key}
-                  agentId={shown}
-                  source={source}
-                  group={group}
-                  open={query.trim() !== '' || expanded.has(group.key)}
-                  selected={selected}
-                  locked={busy}
-                  onToggle={() => setExpanded((e) => withKeys(e, [group.key], !e.has(group.key)))}
-                  onSelect={(keys, on) => setSelected((s) => withKeys(s, keys, on))}
-                />
-              ))
+              <>
+                {groups.map((group) => (
+                  <FolderList
+                    key={group.key}
+                    agentId={shown}
+                    source={source}
+                    group={group}
+                    open={query.trim() !== '' || expanded.has(group.key)}
+                    selected={selected}
+                    locked={busy}
+                    onToggle={() => setExpanded((e) => withKeys(e, [group.key], !e.has(group.key)))}
+                    onSelect={(keys, on) => setSelected((s) => withKeys(s, keys, on))}
+                  />
+                ))}
+                {list.error && (
+                  // Huli: a later page that failed keeps the ones listed, and goes on from it.
+                  <div className="flex items-center gap-2 py-2.5" role="alert">
+                    <HugeiconsIcon
+                      icon={Alert02Icon}
+                      strokeWidth={1.9}
+                      aria-hidden
+                      className="size-3.5 flex-none text-danger"
+                    />
+                    <span
+                      className="min-w-0 flex-1 truncate text-hint text-danger"
+                      title={list.error}
+                    >
+                      {t('dialog.moreFailed', { message: list.error })}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => reload(list.failedCursor ?? null)}
+                    >
+                      {t('common:actions.retry')}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>
@@ -737,6 +864,8 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
         {!running && outcome && !confirming && (
           <OutcomeView
             outcome={outcome}
+            forking={forking}
+            onFork={(failure) => void forkHeld(failure)}
             onMemory={() => setMemoryOpen(true)}
             onOpenLatest={
               latest
@@ -754,7 +883,9 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
               ? t('desktop.note')
               : folder !== null
                 ? t('dialog.folderNote', { agent: shownName })
-                : t('dialog.readOnly')}
+                : shown && harnessOf(shown) === 'claude-code'
+                  ? `${t('dialog.readOnly')}${t('dialog.readOnlyHeld')}`
+                  : t('dialog.readOnly')}
           </p>
         )}
       </div>
@@ -774,11 +905,20 @@ function AgentHistoryBody({ onClose }: { onClose: () => void }) {
             {running ? (
               <Button
                 variant="outline"
+                disabled={stopRequested}
                 onClick={() => {
                   stopping.current = true
+                  setStopRequested(true)
                 }}
               >
-                {t('dialog.stop')}
+                {stopRequested ? (
+                  <>
+                    <Spinner className="size-3.5" />
+                    {t('dialog.stopping')}
+                  </>
+                ) : (
+                  t('dialog.stop')
+                )}
               </Button>
             ) : (
               <Button variant="outline" onClick={onClose}>
@@ -1237,13 +1377,60 @@ function SessionRow({
   )
 }
 
+/**
+ * Huli: an agent's listing that failed: its tab stays, with the agent's own words, a retry and,
+ * for one that asks for it, its sign-in.
+ */
+function ListError({
+  agentName,
+  list,
+  onRetry,
+  onSignIn,
+}: {
+  agentName: string
+  list: HistoryList
+  onRetry: () => void
+  onSignIn: (() => void) | null
+}) {
+  const { t } = useTranslation(['agentHistory', 'common'])
+  return (
+    <div className="flex flex-col items-start gap-2 py-3" role="alert">
+      <p className="flex items-center gap-1.5 text-ui font-medium text-foreground">
+        <HugeiconsIcon
+          icon={Alert02Icon}
+          strokeWidth={1.9}
+          aria-hidden
+          className="size-4 text-danger"
+        />
+        {t(list.signIn ? 'dialog.listSignIn' : 'dialog.listFailed', { agent: agentName })}
+      </p>
+      <p className="max-w-full text-hint break-words text-secondary">{list.error}</p>
+      <div className="flex items-center gap-2 pt-1">
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          {t('common:actions.retry')}
+        </Button>
+        {onSignIn && (
+          <Button size="sm" onClick={onSignIn}>
+            {t('dialog.signIn')}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** What the import did: how many came over, how many a stop left, and which failed why. */
 function OutcomeView({
   outcome,
+  forking,
+  onFork,
   onMemory,
   onOpenLatest,
 }: {
   outcome: Outcome
+  /** Huli: the failure whose copy is being made. */
+  forking: string | null
+  onFork: (failure: Failure) => void
   onMemory: () => void
   onOpenLatest: (() => void) | null
 }) {
@@ -1272,8 +1459,23 @@ function OutcomeView({
           <p className="text-danger">{t('result.failed', { count: outcome.failed.length })}</p>
           <ul className="flex max-h-24 flex-col gap-0.5 overflow-y-auto text-danger">
             {outcome.failed.map((failure) => (
-              <li key={failure.key} className="truncate" title={failure.message}>
-                {t('result.failure', { title: failure.title, message: failure.message })}
+              <li key={failure.key} className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate" title={failure.message}>
+                  {t('result.failure', { title: failure.title, message: failure.message })}
+                </span>
+                {failure.held && (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="flex-none"
+                    disabled={forking !== null}
+                    title={t('result.forkTip')}
+                    onClick={() => onFork(failure)}
+                  >
+                    {forking === failure.key && <Spinner className="size-3" />}
+                    {t('result.fork')}
+                  </Button>
+                )}
               </li>
             ))}
           </ul>

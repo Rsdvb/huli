@@ -14,6 +14,7 @@ import {
   type AgentInit,
   type ConnectionHooks,
   type ForkPoint,
+  type ListedEverywhere,
   type ListedSession,
   type ModelTokens,
   type OpenedSession,
@@ -70,6 +71,7 @@ import type {
 import { PiClosed, PiCommandError, PiRpc } from './rpc'
 import {
   findSessionFile,
+  listAllSessionFiles,
   listSessionFiles,
   piFolders,
   removeSessionFile,
@@ -577,6 +579,19 @@ export class PiConnection implements AgentConnection {
     return {
       sessions: all.slice(start, start + PAGE_SIZE),
       nextCursor: start + PAGE_SIZE < all.length ? String(start + PAGE_SIZE) : null,
+    }
+  }
+
+  /** Huli: every folder's saved sessions, for the import from the agents. */
+  async listAllSessions(
+    cursor: string | null,
+  ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }> {
+    const offset = cursor ? Number.parseInt(cursor, 10) : 0
+    const start = Number.isFinite(offset) && offset > 0 ? offset : 0
+    const page = await listAllSessionFiles(await this.piFolders(), start, PAGE_SIZE)
+    return {
+      sessions: page.sessions.map((session) => ({ ...session, subagent: false, prompted: true })),
+      nextCursor: page.more ? String(start + PAGE_SIZE) : null,
     }
   }
 

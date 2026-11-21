@@ -4,17 +4,26 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   AgentCopies,
   agyFolders,
   claudeCopyPaths,
+  dshCopyPaths,
   removeAgyCopies,
   removeClaudeCopies,
+  removeDshCopies,
   withoutEntries,
 } from './agent-copies'
+import { fixture, testHome, type TestHome } from './dsh/testing'
 import { linkFolder } from './testing/links'
 import { tempFolder } from './testing/temp'
+
+const homes: TestHome[] = []
+
+afterEach(async () => {
+  await Promise.all(homes.splice(0).map((home) => home.remove()))
+})
 
 const ID = '3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f'
 const CHILD = '5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d'
@@ -162,6 +171,67 @@ function rowIds(file: string): string[] {
     db.close()
   }
 }
+
+describe("DeepSeek Harness's copies", () => {
+  const PARENT = '7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f'
+  const KID = '4bc9ed73-787d-40e6-83cb-71a91ee4c8a1'
+  const TOOLS = '3f2a9c1e-5b7d-4e8a-9c0b-1d2e3f4a5b6c'
+
+  async function dshHome() {
+    const home = await testHome()
+    homes.push(home)
+    const parent = path.dirname(await home.place(fixture('subagent-parent.v4')))
+    const kid = path.dirname(await home.place(fixture('subagent-child.v4')))
+    // A copy left in another project folder, as after the folder moved.
+    const moved = path.dirname(
+      await home.place(fixture('subagent-parent.v4'), { project: '--old--' }),
+    )
+    const other = path.dirname(await home.place(fixture('tools.v4')))
+    const projections = path.join(home.home, 'storages', 'session_projcache', 'sessions')
+    const views = [
+      await put(path.join(projections, `${PARENT}.json`)),
+      await put(path.join(projections, `${KID}.json`)),
+    ]
+    const kept = [other, await put(path.join(projections, `${TOOLS}.json`))]
+    const workspace = await put(path.join(home.home, 'storages', 'workspace.json'), '{}')
+    return { home, planned: [parent, moved, kid, ...views], kept: [...kept, workspace] }
+  }
+
+  it('plans the session in every project folder, its subagents and their projections', async () => {
+    const { home, planned } = await dshHome()
+    expect(sorted(await dshCopyPaths(home.home, PARENT))).toEqual(sorted(planned))
+  })
+
+  it('removes them and leaves the other sessions and the registry', async () => {
+    const { home, planned, kept } = await dshHome()
+    const result = await removeDshCopies(home.home, PARENT)
+    expect(result.failed).toEqual([])
+    expect(sorted(result.removed)).toEqual(sorted(planned))
+    for (const file of planned) expect(await exists(file)).toBe(false)
+    for (const file of kept) expect(await exists(file)).toBe(true)
+  })
+
+  it('follows no subagent whose own log names another parent, and takes no unsafe id', async () => {
+    const { home } = await dshHome()
+    // The child's log names PARENT, so asked for it alone its own folder goes, and nothing above.
+    const own = await dshCopyPaths(home.home, KID)
+    expect(own.every((file) => file.includes(KID))).toBe(true)
+    expect(await dshCopyPaths(home.home, '../sessions')).toEqual([])
+    expect(await dshCopyPaths(home.home, '')).toEqual([])
+  })
+
+  it("reports through the host's service whether all of it went", async () => {
+    const { home } = await dshHome()
+    const copies = new AgentCopies({
+      platform: process.platform === 'win32' ? 'win32' : 'linux',
+      configFolder: () => home.home,
+      env: () => ({}),
+      log: () => {},
+    })
+    expect(await copies.removeDeleted('deepseek', PARENT)).toBe(true)
+    expect(await copies.removeDeleted('doubao', '10000000000025552')).toBeNull()
+  })
+})
 
 describe("agy's copies", () => {
   async function agyHome({ steps = 4 }: { steps?: number } = {}) {

@@ -8,7 +8,7 @@
   },
   "dialog": {
     "title": "从各 Agent 导入",
-    "description": "这个 Agent 在这台电脑上的历史会话，按运行时所在的文件夹分组。导入后放在该文件夹的项目下，能接着之前的进度继续。",
+    "description": "各 Agent 在这台电脑上的历史会话，按运行时所在的文件夹分组。导入后放在该文件夹的项目下，能接着之前的进度继续。",
     "agents": "Agent",
     "noAgents": "这里没有能跨文件夹列出会话的 Agent。",
     "search": "搜索标题和文件夹",
@@ -41,7 +41,7 @@
     "importingTitle": "正在导入 {{done}}/{{total}}：{{title}}",
     "stop": "停止",
     "close": "关闭",
-    "readOnly": "只读取 Agent 自己的文件。子 Agent 会在这里打开它的会话时回到会话下面。终端里正开着的 Claude Code 会话不会导入，请先在那边关掉。",
+    "readOnly": "只读取 Agent 自己的文件。子 Agent 的会话会在这里打开它所属的会话时回到下面。",
     "source": "会话来源",
     "ownFolder": "{{agent}} 自己的文件夹",
     "chooseFolder": "选择文件夹…",
@@ -52,7 +52,14 @@
     "noFolderSessions": "这个文件夹里没有可导入的会话。",
     "planning": "正在检查要复制的文件…",
     "copying": "正在复制文件…",
-    "forgetFolder": "不再列出这个文件夹"
+    "forgetFolder": "不再列出这个文件夹",
+    "readOnlyHeld": "终端里正开着的 Claude Code 会话不会直接导入：先在那边关掉，或在导入失败后复制一份。",
+    "listFailed": "没能列出 {{agent}} 的会话",
+    "listFailedShort": "没能列出会话",
+    "listSignIn": "{{agent}} 要先登录才能列出会话",
+    "moreFailed": "后面的会话没能列出：{{message}}",
+    "signIn": "去登录",
+    "stopping": "正在停止…"
   },
   "desktop": {
     "tab": "Claude 桌面版",
@@ -97,6 +104,8 @@
     "skipped_other": "{{count}} 个没有动：",
     "conflict": "{{agent}} 自己的文件夹里有它的另一个版本",
     "changed": "它在 {{agent}} 文件夹里的文件刚刚被改过",
-    "missingFolder": "它运行时所在的文件夹不在这台电脑上"
+    "missingFolder": "它运行时所在的文件夹不在这台电脑上",
+    "fork": "复制一份",
+    "forkTip": "终端还开着它，所以导入它的一份副本，原来的会话保持不变"
   }
 }

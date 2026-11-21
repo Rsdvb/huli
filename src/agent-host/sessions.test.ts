@@ -45,6 +45,8 @@ function manager(
       sessionsChanged: () => {},
       restoreConfig: (_agentId: string, config: unknown[]) => config,
       status: () => ({ capabilities: null }),
+      configFolder: () => null,
+      ids: () => [],
       ...extra.agents,
     } as unknown as AgentManager,
     projects: {
@@ -93,6 +95,54 @@ describe('the session index', () => {
   })
 })
 
+describe('Huli: the agents that share a history', () => {
+  const FOLDERS: Record<string, string> = {
+    'claude-code': '/home/me/.claude',
+    'claude-code~work': '/home/me/.claude/',
+    'claude-code~other': '/home/me/.claude-other',
+    codex: '/home/me/.claude',
+  }
+  const shared = () =>
+    manager(
+      {},
+      {
+        agents: {
+          configFolder: (id: string) => FOLDERS[id] ?? null,
+          ids: () => Object.keys(FOLDERS),
+        },
+      },
+    )
+
+  it('takes a Claude Code session as here for every Claude Code agent reading its folder', async () => {
+    const { sessions } = shared()
+    await sessions.load()
+    const first = await sessions.importSession({
+      agentId: 'claude-code',
+      projectPath: '/repo',
+      acpSessionId: 'cli-1',
+    })
+    expect(sessions.sharingHistory('claude-code~work')).toEqual(['claude-code~work', 'claude-code'])
+    expect(sessions.agentSessionIds('claude-code~work').has('cli-1')).toBe(true)
+    expect(sessions.agentSessionIds('claude-code~other').has('cli-1')).toBe(false)
+    // Another harness's ids are its own, whatever its folder.
+    expect(sessions.sharingHistory('codex')).toEqual(['codex'])
+    expect(sessions.agentSessionIds('codex').has('cli-1')).toBe(false)
+    const again = await sessions.importSession({
+      agentId: 'claude-code~work',
+      projectPath: '/repo',
+      acpSessionId: 'cli-1',
+    })
+    expect(again.id).toBe(first.id)
+    const elsewhere = await sessions.importSession({
+      agentId: 'claude-code~other',
+      projectPath: '/repo',
+      acpSessionId: 'cli-1',
+    })
+    expect(elsewhere.id).not.toBe(first.id)
+    expect(sessions.list('/repo')).toHaveLength(2)
+  })
+})
+
 describe('importing a session from a terminal', () => {
   const last: LastRequest = {
     at: Date.parse('2026-11-16T10:00:00Z'),
@@ -121,7 +171,7 @@ describe('importing a session from a terminal', () => {
         projectPath: '/repo',
         acpSessionId: 'cli-1',
       }),
-    ).rejects.toMatchObject({ code: 'busy' })
+    ).rejects.toMatchObject({ code: 'busy', data: { reason: 'held' } })
     expect(sessions.list('/repo')).toEqual([])
   })
 

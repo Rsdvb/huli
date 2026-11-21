@@ -286,7 +286,8 @@
     "heldTip": "Exit it in the terminal first, or fork a copy.",
     "cacheLeft_one": "Cache {{count}} min left",
     "cacheLeft_other": "Cache {{count}} min left",
-    "fork": "Fork a copy"
+    "fork": "Fork a copy",
+    "noRecentSessions": "None of {{agent}}'s recent sessions are this folder's."
   },
   "waiting": {
     "title_one": "{{count}} waiting for you",
