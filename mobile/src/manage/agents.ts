@@ -2,6 +2,7 @@
 // whether it can run, what it needs first, its version, and installing a harness from the phone.
 
 import type {
+  AgentAuthMethod,
   AgentInstallMethod,
   AgentStatus,
   EnvironmentInfo,
@@ -11,6 +12,7 @@ import type { HostLink } from '@shared/remote/link'
 import type { SettingsPatch } from '@shared/settings'
 import type { HarnessId } from '@shared/thread'
 import { admin } from '../admin'
+import { hasChinese } from '../hostErrors'
 import { ago } from '../sessions'
 import { call } from './kit'
 
@@ -24,7 +26,7 @@ export const VENDORS: Partial<Record<HarnessId, string>> = {
   muse: 'Meta',
   codewhale: 'Codewhale',
   deepseek: 'DeepSeek',
-  doubao: '字节跳动',
+  doubao: 'ByteDance',
 }
 
 export const METHOD_NAMES: Record<AgentInstallMethod['id'], string> = {
@@ -43,6 +45,11 @@ export function usableAgents(agents: Iterable<AgentStatus>): AgentStatus[] {
 /** Each harness once, by its default agent's status. */
 export function harnessStatuses(agents: Iterable<AgentStatus>): AgentStatus[] {
   return [...agents].filter((s) => s.isDefault)
+}
+
+/** Waiting for Node.js: missing, or older than the agent needs, which Kite's own install fixes. */
+export function needsNode(status: Pick<AgentStatus, 'state'>): boolean {
+  return status.state === 'node-missing' || status.state === 'node-outdated'
 }
 
 export function isInstalled(status: AgentStatus): boolean {
@@ -131,6 +138,17 @@ export function stateText(status: AgentStatus): { text: string; tone: StateTone 
   const r = readiness(status)
   switch (r.kind) {
     case 'ready':
+      // An agent that has not said whether it is signed in may still need it.
+      if (status.signIn === 'unknown' && status.readingSignIn) {
+        return { text: '正在检查登录', tone: 'tint' }
+      }
+      if (
+        status.signIn === 'unknown' &&
+        status.authMethods.length > 0 &&
+        !signedInAccount(status)
+      ) {
+        return { text: '未确认登录', tone: 'neutral' }
+      }
       return { text: '已就绪', tone: 'success' }
     case 'sign-in':
       return { text: '需要登录', tone: 'warning' }
@@ -145,6 +163,11 @@ export function stateText(status: AgentStatus): { text: string; tone: StateTone 
         ? { text: '需要更新', tone: 'warning' }
         : { text: '不可用', tone: 'neutral' }
   }
+}
+
+/** An account the agent reported, which it has only once signed in. */
+function signedInAccount(status: AgentStatus): boolean {
+  return !!status.account && status.account.kind !== 'none'
 }
 
 /** Listed under Installed: it can run now, or one tap installs what it lacks. */
@@ -247,4 +270,71 @@ export async function startInstall(
   await admin(link, 'settings.update', {
     patch: { agents: { [harness]: { enabled: true } } } as SettingsPatch,
   }).catch(() => {})
+}
+
+/** The host's own words when they are Chinese, else `fallback`: an older or English host's. */
+export function hostText(text: string | null | undefined, fallback: string): string {
+  return text && hasChinese(text) ? text : fallback
+}
+
+/**
+ * Sign-in methods the host names in English, by id: Claude Code's, and those Kite adds for an
+ * agent whose own sign-in runs in a terminal. A name the host gives in Chinese is kept.
+ */
+const METHOD_TEXT: Record<string, { name: string; description?: string }> = {
+  'claude-ai-login': { name: 'Claude 订阅', description: '用 Claude 的订阅账号登录。' },
+  'console-login': {
+    name: 'Anthropic Console',
+    description: '用 Anthropic Console 账号登录，按 API 用量计费。',
+  },
+  'claude-login': { name: '用 Claude 登录', description: '在终端里运行 claude，再输入 /login。' },
+  'qwen-terminal-login': { name: '用订阅登录' },
+  'grok-device-login': { name: '用设备码登录' },
+  'cursor-terminal-login': { name: '在终端中登录' },
+  'opencode-login': { name: 'OpenCode 登录' },
+}
+
+/** A sign-in method's name and description as the phone shows them. */
+export function methodText(method: AgentAuthMethod): { name: string; description: string | null } {
+  const own = METHOD_TEXT[method.id]
+  const description = method.description?.trim() || null
+  return {
+    name: own ? hostText(method.name, own.name) : method.name,
+    description: own?.description ? hostText(description, own.description) : description,
+  }
+}
+
+/**
+ * Where the host's commands run, as copy says it: PowerShell on Windows (whose 5.1 has no `&&`),
+ * a POSIX shell's terminal elsewhere, as the host quotes them.
+ */
+export function shellPlace(platform: string | null | undefined): string {
+  return platform === 'win32' ? '电脑的 PowerShell' : '电脑的终端'
+}
+
+/** A name followed by Chinese copy, set off by a space when it ends in a Latin letter or digit. */
+export function spaced(name: string): string {
+  return /[A-Za-z0-9]$/.test(name) ? `${name} ` : name
+}
+
+/**
+ * Why the host would refuse an API key, checked before anything is changed: as `checkApiKey` in
+ * the host does, which answers in English after the agent was made. Null when it would take it.
+ */
+export function keyProblem(
+  input: { key: string; baseUrl?: string; model?: string },
+  providers: boolean,
+): string | null {
+  const key = input.key.trim()
+  if (key.length === 0) return '请填写 API key。'
+  if (/\s/.test(key)) return 'API key 里不能有空格或换行。'
+  if (key.length > 4096) return '这个 API key 太长了。'
+  const baseUrl = input.baseUrl?.trim() ?? ''
+  const model = input.model?.trim() ?? ''
+  if (!providers) return null
+  if (baseUrl && (baseUrl.length > 2048 || !/^https?:\/\/[^\s/?#]+/i.test(baseUrl))) {
+    return '服务地址要以 http:// 或 https:// 开头。'
+  }
+  if (model && (model.length > 256 || /\s/.test(model))) return '模型名里不能有空格。'
+  return null
 }

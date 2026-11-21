@@ -31,6 +31,7 @@ export const unstable_settings = { anchor: '(tabs)' }
 const MANAGE_PAGES = [
   'agents',
   'agent',
+  'agent-reset',
   'harness',
   'market',
   'market-plugin',

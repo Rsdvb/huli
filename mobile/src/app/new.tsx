@@ -22,6 +22,7 @@ import {
   agentsPage,
   canStart,
   modeLook,
+  openNeed,
   modePage,
   modelPage,
   moreModelsPage,
@@ -30,13 +31,14 @@ import {
   startNotices,
   startValues,
   usableAgents,
+  waitingForNode,
   type AgentMenuProps,
   type ConfigControl,
 } from '../components/ConfigMenus'
 import { NEW_SESSION_DRAFT } from '../drafts'
 import { PendingSessions } from '../components/OutboxRows'
 import { PlanUsageSheet } from '../components/PlanUsageSheet'
-import { QuotaSuggestion } from '../components/ComposerNotes'
+import { NeedNote, NodeNeedNote, QuotaSuggestion } from '../components/ComposerNotes'
 import { ModeButton, ModelChip, slotOf } from '../components/SessionDock'
 import { useChanges } from '../git'
 import {
@@ -148,24 +150,53 @@ export default function NewSession() {
     setPicks(modelId && modelValue !== null ? { [modelId]: modelValue } : {})
   }
 
-  // Why Send does nothing now, said over the box rather than left to guess.
+  // Why Send does nothing now, said over the box rather than left to guess; the note over it leads
+  // to where the phone fixes it.
   const need = agent ? agentNeed(agent) : null
+  const waiting = useMemo(() => waitingForNode(agentMap), [agentMap])
   const unsendable =
     agents.length === 0
       ? loaded
-        ? '没有可用的 Agent，先添加或启用一个再开始。'
+        ? waiting.length > 0
+          ? `${waiting.map((a) => a.name).join('、')} 需要 Node.js 才能开始。`
+          : '没有可用的 Agent，先添加或启用一个再开始。'
         : null
       : !agent
         ? '先选择 Agent'
         : need === 'sign-in'
-          ? `在 ${computer.name} 上登录 ${agent.name} 后才能使用。`
+          ? `登录 ${agent.name} 后才能使用。`
           : need === 'update'
-            ? `在 ${computer.name} 上更新 ${agent.name} 后才能用。`
+            ? `更新 ${agent.name} 后才能用。`
             : need === 'installing'
               ? `正在安装 ${agent.name}…`
               : need === 'failed'
                 ? (agent.detail ?? `${agent.name} 启动失败。`)
                 : null
+  const needNote =
+    agents.length === 0 ? (
+      !loaded ? null : waiting.length > 0 ? (
+        <NodeNeedNote />
+      ) : (
+        <NeedNote
+          text="可以在这台手机上添加或启用 Agent。"
+          action={{ label: '去设置', onPress: () => router.push('/settings/agents') }}
+        />
+      )
+    ) : agent && (need === 'sign-in' || need === 'update' || need === 'failed') ? (
+      <NeedNote
+        text={
+          need === 'sign-in'
+            ? `可以在这台手机上登录 ${agent.name}，不用去电脑。`
+            : need === 'update'
+              ? `可以在这台手机上更新 ${agent.harnessName}。`
+              : `可以在 ${agent.name} 的页面查看原因并重试。`
+        }
+        action={{
+          label: need === 'sign-in' ? '去登录' : need === 'update' ? '去更新' : '查看',
+          onPress: () => openNeed(agent, need),
+        }}
+      />
+    ) : null
   const notices = entry && agent ? startNotices(entry, picks, agent.name) : []
 
   const create = async (prompt: UserContent[]) => {
@@ -227,7 +258,8 @@ export default function NewSession() {
   })
 
   const agentMenu: AgentMenuProps = {
-    agents,
+    // Those waiting for Node.js too, whose rows lead to where it is installed.
+    agents: [...agents, ...waiting],
     current: agentId,
     currentModel: (model?.option.value as string | undefined) ?? null,
     options: options.options,
@@ -444,6 +476,7 @@ export default function NewSession() {
                     onDismiss={() => setKeptAgent(agentId)}
                   />
                 ) : null}
+                {needNote}
                 {notices.length > 0 ? (
                   <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
                     {notices.map((text) => (

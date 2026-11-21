@@ -6,6 +6,8 @@
 // options they hold.
 
 import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native'
+import { router } from 'expo-router'
+import { needsNode } from '../manage/agents'
 import type { AgentOptions, AgentStatus } from '@shared/agent-host'
 import { isFullAccessMode, isStartMode } from '@shared/agents'
 import { limitsForModel } from '@shared/plan-limits'
@@ -559,23 +561,36 @@ export function startValues(
 
 /**
  * What an agent needs before it can start, as the desktop's agent menu says it
- * (new-session/start-options.ts): its own program updated, its install to finish, a failed start
- * looked at, or a sign-in, none of which the phone can do.
+ * (new-session/start-options.ts): Node.js, its own program updated, its install to finish, a
+ * failed start looked at, or a sign-in. The phone does all but the install's wait on the agent's
+ * or harness's page, which `openNeed` opens.
  */
-export type AgentNeed = 'update' | 'installing' | 'failed' | 'sign-in' | null
+export type AgentNeed = 'node' | 'update' | 'installing' | 'failed' | 'sign-in' | null
 
 export function agentNeed(agent: AgentStatus): AgentNeed {
+  if (needsNode(agent)) return 'node'
   if (agent.cli?.installed?.problem?.kind === 'too-old') return 'update'
   if (agent.state === 'installing') return 'installing'
   if (agent.state === 'failed') return 'failed'
   return agent.signIn === 'required' ? 'sign-in' : null
 }
 
-export const NEED_TEXT: Record<NonNullable<AgentNeed>, string> = {
-  update: '需要更新',
+/** What a menu row of an agent that needs something says, with where a tap takes it. */
+const NEED_ROW: Record<NonNullable<AgentNeed>, string> = {
+  node: '需要 Node.js · 点按去安装',
+  update: '需要更新 · 点按去更新',
   installing: '正在安装…',
-  failed: '出错',
-  'sign-in': '需要登录',
+  failed: '出错 · 点按查看',
+  'sign-in': '需要登录 · 点按去登录',
+}
+
+/** Opens the page where the phone gives the agent what it needs: its own, or its harness's. */
+export function openNeed(agent: AgentStatus, need: NonNullable<AgentNeed>): void {
+  if (need === 'update' || need === 'installing') {
+    router.push({ pathname: '/settings/harness', params: { id: agent.harnessId } })
+  } else {
+    router.push({ pathname: '/settings/agent', params: { id: agent.id } })
+  }
 }
 
 /**
@@ -591,6 +606,13 @@ export function usableAgents(agents: Map<string, AgentStatus>): AgentStatus[] {
       !a.uninstalled &&
       (!['not-installed', 'node-missing', 'node-outdated'].includes(a.state) ||
         agentNeed(a) === 'update'),
+  )
+}
+
+/** The agents a menu leaves out while they wait for Node.js, which New session lists to install. */
+export function waitingForNode(agents: Map<string, AgentStatus>): AgentStatus[] {
+  return [...agents.values()].filter(
+    (a) => a.registered !== false && !a.hidden && !a.disabled && !a.uninstalled && needsNode(a),
   )
 }
 
@@ -643,11 +665,7 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
       // A used-up plan says when it comes back, or that extra usage pays on, in place of its share.
       const quota = planQuota(agent, Date.now())
       const usedUp = quotaText(quota)
-      const subtitle = need
-        ? NEED_TEXT[need]
-        : model
-          ? optionName(modelName(model.name))
-          : undefined
+      const subtitle = need ? NEED_ROW[need] : model ? optionName(modelName(model.name)) : undefined
       return {
         key: agent.id,
         label: agent.name,
@@ -682,8 +700,8 @@ export function agentsPage(props: AgentMenuProps): MenuPage {
         ...(need === null && models > 1
           ? { page: `agent:${agent.id}`, ...(agent.id === props.current ? { detail: '当前' } : {}) }
           : { checked: agent.id === props.current }),
-        disabled: need !== null,
-        onPress: () => props.onChoose(agent, null),
+        disabled: need === 'installing',
+        onPress: () => (need ? openNeed(agent, need) : props.onChoose(agent, null)),
       }
     }),
     error: props.error,

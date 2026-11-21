@@ -1,14 +1,15 @@
 // Settings › Agent: the agents on the computer with their state and account, the harnesses they run
 // on, installed or not, with updates and installs under way, and adding an agent.
 
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import type { AgentStatus, HostEvent, NodeRuntimeInfo, NodeTask } from '@shared/agent-host'
+import type { AgentStatus } from '@shared/agent-host'
 import { KEY_ONLY_ADDED_HARNESSES, MULTI_AGENT_HARNESSES, type CodebuddySite } from '@shared/agents'
 import { AGENT_NAME_CHARS, type SettingsPatch } from '@shared/settings'
 import type { AgentId, HarnessId } from '@shared/thread'
 import { admin } from '../../admin'
+import { hostErrorText } from '../../hostErrors'
 import { useAgents, useHostActions, useListsLoaded, useMaybeLink } from '../../host'
 import {
   addableHarnesses,
@@ -19,6 +20,7 @@ import {
   harnessStatuses,
   harnessVersion,
   installKind,
+  keyProblem,
   readiness,
   stateText,
   usableAgents,
@@ -30,14 +32,15 @@ import {
   FieldLabel,
   FieldNote,
   FormSheet,
+  GroupNote,
   ManagePage,
   ReadState,
   Tag,
   useActions,
   useConnected,
-  useRead,
   type Read,
 } from '../../manage/kit'
+import { nodeRows, useEnvironment, useNodeInstall } from '../../manage/node'
 import { ago } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { haptic } from '../../ui/haptics'
@@ -60,22 +63,8 @@ export default function Agents() {
   const [checkedAt, setCheckedAt] = useState<number | null>(null)
   const [adding, setAdding] = useState(false)
   const statuses = useMemo(() => [...agentMap.values()], [agentMap])
-  const environment = useRead(
-    connected ? 'agents-environment' : null,
-    (link) => call(link, 'agents.environment', undefined),
-    ['environment.changed'],
-  )
-
-  const latest = useRef({ refresh: refreshLists, setEnvironment: environment.set })
-  latest.current = { refresh: refreshLists, setEnvironment: environment.set }
-  useEffect(() => {
-    if (!link) return
-    return link.onHostEvent((raw) => {
-      const event = raw as HostEvent
-      if (event.type === 'agent.removed') void latest.current.refresh().catch(() => {})
-      if (event.type === 'environment.changed') latest.current.setEnvironment(() => event.info)
-    })
-  }, [link])
+  const environment = useEnvironment()
+  const node = useNodeInstall(environment)
 
   const refresh = async () => {
     try {
@@ -225,12 +214,20 @@ export default function Agents() {
               onPress={reloadEnvironment}
             />
             {environment.value?.node ? (
-              nodeRows({
-                node: environment.value.node,
+              nodeRows(node, {
                 connected,
-                busy,
-                run,
-                call: (method) => (link ? call(link, method, undefined) : Promise.resolve()),
+                onChoose: (kite) =>
+                  void run(
+                    'node-choice',
+                    async () => {
+                      if (!link) return
+                      await call(link, 'environment.setNodeChoice', {
+                        choice: kite ? 'kite' : 'auto',
+                      })
+                      await environment.reload()
+                    },
+                    '没能更改',
+                  ),
               })
             ) : environment.value?.nodeVersion ? (
               <ListRow key="node" title="Node.js" value={environment.value.nodeVersion} />
@@ -239,128 +236,15 @@ export default function Agents() {
               <ListRow key="warning" title="环境" subtitle={environment.value.warning} />
             ) : null}
           </ListGroup>
+
+          <GroupNote>
+            要把 Claude Code、Codex 等以前在电脑上留下的会话搬进纸鸢，请在电脑上的纸鸢里打开 设置 ›
+            通用 › 从各 Agent 导入。
+          </GroupNote>
         </>
       )}
     </ManagePage>
   )
-}
-
-const NODE_PHASES: Record<NodeTask['phase'], string> = {
-  checking: '正在查找最新版…',
-  downloading: '正在下载',
-  verifying: '正在校验…',
-  extracting: '正在解压…',
-  removing: '正在移除…',
-}
-
-/** Huli: what the Node.js agents run on says, the user's or Kite's own, with its version. */
-function nodeLine(node: NodeRuntimeInfo): string {
-  const required = node.required?.replace(/^>=\s*/, '') ?? ''
-  if (node.using === 'kite' && node.kite) return `纸鸢的 Node.js ${node.kite.version}`
-  if (!node.system) return '没有找到 Node.js，有些 Agent 需要它'
-  if (!node.system.version) return '系统的 Node.js 运行不了'
-  if (!node.system.suitable)
-    return `系统的 ${node.system.version} 太旧，有些 Agent 要 ${required} 或更高`
-  return `系统的 Node.js ${node.system.version}`
-}
-
-/**
- * Huli: the Node.js agents run on, and Kite's own: installed with one tap where the computer's is
- * missing or too old, its progress, updated or removed. The computer does the work. Rows, not a
- * component, so the group draws its lines between them.
- */
-function nodeRows(props: {
-  node: NodeRuntimeInfo
-  connected: boolean
-  busy: (key: string) => boolean
-  run: (key: string, action: () => Promise<unknown>, failTitle: string) => Promise<boolean>
-  call: (
-    method: 'environment.installNode' | 'environment.cancelNodeInstall' | 'environment.removeNode',
-  ) => Promise<unknown>
-}) {
-  const { node, connected, busy, run, call: ask } = props
-  const task = node.task
-  const running = task?.state === 'running'
-  const lacking = node.using === null || (node.using === 'system' && !node.system?.suitable)
-  const percent =
-    task?.phase === 'downloading' && task.progress !== null
-      ? ` ${Math.floor(task.progress * 100)}%`
-      : ''
-  const install = (title: string) => void run('node', () => ask('environment.installNode'), title)
-  const rows: ReactElement[] = [
-    <ListRow
-      key="node"
-      title="Node.js"
-      subtitle={nodeLine(node)}
-      value={node.using === 'kite' ? node.kite?.version : (node.system?.version ?? undefined)}
-    />,
-  ]
-  if (running && task) {
-    rows.push(
-      <ListRow
-        key="node-task"
-        title={
-          task.phase === 'downloading'
-            ? `${NODE_PHASES.downloading} ${task.version ?? 'Node.js'}${percent}`
-            : NODE_PHASES[task.phase]
-        }
-        subtitle={task.source ? `来自 ${task.source}` : undefined}
-        trailing={<Tag label={task.kind === 'remove' ? '正在移除' : '正在安装'} tone="tint" />}
-      />,
-    )
-    if (task.kind === 'install') {
-      rows.push(
-        <ListRow
-          key="node-stop"
-          title="停止安装"
-          icon="stop"
-          plainIcon
-          action
-          disabled={!connected}
-          onPress={() => void ask('environment.cancelNodeInstall').catch(() => {})}
-        />,
-      )
-    }
-  } else {
-    if (task?.state === 'failed' && task.error) {
-      rows.push(
-        <ListRow
-          key="node-failed"
-          title={task.kind === 'remove' ? 'Node.js 移除失败' : 'Node.js 安装失败'}
-          subtitle={task.error}
-          trailing={<Tag label="失败" tone="danger" />}
-        />,
-      )
-    }
-    if (node.installable && (lacking || node.kite)) {
-      rows.push(
-        <ListRow
-          key="node-install"
-          title={node.kite ? '更新纸鸢的 Node.js' : '一键安装 Node.js'}
-          subtitle={node.kite ? undefined : '装在纸鸢自己的文件夹里，不改系统设置'}
-          icon="download"
-          plainIcon
-          action
-          disabled={!connected || busy('node')}
-          onPress={() => install(node.kite ? '没能更新 Node.js' : '没能安装 Node.js')}
-        />,
-      )
-    }
-    if (node.kite) {
-      rows.push(
-        <ListRow
-          key="node-remove"
-          title="移除纸鸢的 Node.js"
-          icon="trash"
-          plainIcon
-          destructive
-          disabled={!connected || busy('node')}
-          onPress={() => void run('node', () => ask('environment.removeNode'), '没能移除 Node.js')}
-        />,
-      )
-    }
-  }
-  return rows
 }
 
 function AgentRow({ status, statuses }: { status: AgentStatus; statuses: AgentStatus[] }) {
@@ -375,7 +259,13 @@ function AgentRow({ status, statuses }: { status: AgentStatus; statuses: AgentSt
   const identity =
     r.kind === 'failed' || r.kind === 'missing'
       ? r.message
-      : email || planName(account) || (r.kind === 'sign-in' ? '需要你登录' : '未提供账号信息')
+      : email ||
+        planName(account) ||
+        (r.kind === 'sign-in'
+          ? '需要你登录'
+          : status.readingSignIn
+            ? '正在读取登录…'
+            : '未提供账号信息')
   const line = [status.name === status.harnessName ? null : status.harnessName, plan, identity]
     .filter(Boolean)
     .join(' · ')
@@ -486,6 +376,9 @@ function AddAgentSheet(props: {
   const [login, setLogin] = useState<Login>('terminal')
   const [site, setSite] = useState<CodebuddySite>('international')
   const [key, setKey] = useState({ key: '', baseUrl: '', model: '' })
+  // The agent this sheet already added, when a step after it failed: trying again takes up from
+  // that step rather than adding another agent.
+  const [made, setMade] = useState<{ harness: HarnessId; id: AgentId; name: string } | null>(null)
 
   // Starts over only as the sheet opens: the harnesses can change while it is up, and what the
   // user typed must survive that.
@@ -500,6 +393,7 @@ function AddAgentSheet(props: {
     setLogin('terminal')
     setSite('international')
     setKey({ key: '', baseUrl: '', model: '' })
+    setMade(null)
   }, [props.visible, props.harnesses])
 
   const chosen = props.harnesses.find((h) => h.harnessId === harness) ?? props.harnesses[0]
@@ -519,33 +413,64 @@ function AddAgentSheet(props: {
     (useDefault || multiple) &&
     (useDefault || mode === 'terminal' || key.key.trim().length > 0)
 
+  const again = made !== null && !useDefault && made.harness === chosen?.harnessId ? made : null
+
   const submit = async () => {
     if (!link || !chosen) throw new Error('电脑没有连上。')
-    const id = useDefault
-      ? chosen.harnessId
-      : await admin(link, 'settings.addAgent', {
-          harnessId: chosen.harnessId,
-          name: trimmed,
-          folder: null,
-        })
+    const withKey = !useDefault && mode === 'api-key'
+    // Checked first: the host checks the key only once the agent exists, and in English.
+    const problem = withKey ? keyProblem(key, providers) : null
+    if (problem) throw new Error(problem)
+    let id: AgentId
     if (useDefault) {
+      id = chosen.harnessId
       await admin(link, 'settings.update', {
         patch: {
           agents: { [chosen.harnessId]: { enabled: true, hidden: false } },
         } as SettingsPatch,
       })
-    }
-    await waitListed(link, id)
-    if (keyOnly) {
-      await call(link, 'agents.setCodebuddySite', { agentId: id, change: { site } })
-    }
-    if (!useDefault && mode === 'api-key') {
-      await call(link, 'agents.setApiKey', {
-        agentId: id,
-        key: key.key.trim(),
-        ...(providers && key.baseUrl.trim() ? { baseUrl: key.baseUrl.trim() } : {}),
-        ...(providers && key.model.trim() ? { model: key.model.trim() } : {}),
+    } else if (again) {
+      id = again.id
+      if (again.name !== trimmed) {
+        await admin(link, 'settings.renameAgent', { agentId: id, name: trimmed }).catch(
+          (failure: unknown) => {
+            // Removed meanwhile, so the next try adds it afresh.
+            if ((failure as { code?: string }).code === 'not_found') setMade(null)
+            throw failure
+          },
+        )
+        setMade({ ...again, name: trimmed })
+      }
+    } else {
+      id = await admin(link, 'settings.addAgent', {
+        harnessId: chosen.harnessId,
+        name: trimmed,
+        folder: null,
       })
+      setMade({ harness: chosen.harnessId, id, name: trimmed })
+    }
+    let step = '等电脑列出它'
+    try {
+      await waitListed(link, id)
+      if (keyOnly) {
+        step = '设置站点'
+        await call(link, 'agents.setCodebuddySite', { agentId: id, change: { site } })
+      }
+      if (withKey) {
+        step = '保存 API key'
+        await call(link, 'agents.setApiKey', {
+          agentId: id,
+          key: key.key.trim(),
+          ...(providers && key.baseUrl.trim() ? { baseUrl: key.baseUrl.trim() } : {}),
+          ...(providers && key.model.trim() ? { model: key.model.trim() } : {}),
+        })
+      }
+    } catch (failure) {
+      if (useDefault) throw failure
+      throw new Error(
+        `「${trimmed}」已经添加了，但${step}没有完成：${hostErrorText(failure)}\n再点「继续添加」只做没完成的步骤，不会再添加一个。`,
+        { cause: failure },
+      )
     }
     await refreshLists().catch(() => {})
     props.onAdded(id)
@@ -608,7 +533,7 @@ function AddAgentSheet(props: {
       title="添加 Agent"
       message="选择一个 Harness 和配置。已经在用的登录可以继续使用。"
       onClose={props.onClose}
-      submitLabel="添加 Agent"
+      submitLabel={again ? '继续添加' : '添加 Agent'}
       canSubmit={valid}
       onSubmit={submit}
       maxHeight={720}

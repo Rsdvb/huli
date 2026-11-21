@@ -792,6 +792,17 @@ export function HostProvider(props: { children: ReactNode }) {
         case 'agent.status':
           setHost((d) => ({ agents: withItem(d.agents, event.status) }))
           break
+        case 'agent.removed':
+          setHost((d) => {
+            if (!d.agents.has(event.agentId)) return {}
+            const next = new Map(d.agents)
+            next.delete(event.agentId)
+            return { agents: next }
+          })
+          // A harness's default agent comes back as an entry of the catalog, which only the
+          // list says.
+          void refresh().catch(() => {})
+          break
         case 'projects.changed':
           setHost((d) => (same(d.projects, event.projects) ? {} : { projects: event.projects }))
           break

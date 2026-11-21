@@ -20,7 +20,9 @@ import {
   isInstalled,
   listedInstalled,
   METHOD_NAMES,
+  needsNode,
   readiness,
+  shellPlace,
   showsCurrent,
   startInstall,
   usableAgents,
@@ -43,15 +45,16 @@ import {
   Tag,
   useActions,
   useConnected,
-  useRead,
   type Read,
 } from '../../manage/kit'
+import { NodeNotice, useEnvironment } from '../../manage/node'
 import { ago } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
 import { ListGroup, ListRow } from '../../ui/ListRow'
 import { Press } from '../../ui/Press'
+import { useComputer } from '../../ui/session/computer'
 import { radius, space, type as typeScale, useTokens } from '../../ui/tokens'
 import { openUrl } from '../../system/openUrl'
 
@@ -93,11 +96,8 @@ function HarnessBody({ status }: { status: AgentStatus }) {
   const [installing, setInstalling] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
   const [updated, setUpdated] = useState(false)
-  const environment = useRead(
-    'harness-environment',
-    (link) => call(link, 'agents.environment', undefined),
-    ['environment.changed'],
-  )
+  const environment = useEnvironment()
+  const shell = shellPlace(useComputer().platform)
   const harness = status.harnessId
   const name = status.harnessName
   const r = readiness(status)
@@ -128,7 +128,8 @@ function HarnessBody({ status }: { status: AgentStatus }) {
         await startInstall(host.link!, harness, method)
         await host.refresh()
       },
-      '安装失败',
+      `没能安装 ${name}`,
+      '安装没有完成。',
     )
 
   const update = () =>
@@ -138,7 +139,8 @@ function HarnessBody({ status }: { status: AgentStatus }) {
         await call(host.link!, 'agents.update', { agentId: harness })
         setUpdated(true)
       },
-      '更新失败',
+      `没能更新 ${name}`,
+      '更新没有完成。',
     )
 
   const updateCli = () =>
@@ -148,7 +150,8 @@ function HarnessBody({ status }: { status: AgentStatus }) {
         await call(host.link!, 'agents.updateCli', { agentId: harness })
         setUpdated(true)
       },
-      '更新失败',
+      `没能更新 ${name}`,
+      '更新没有完成。',
     )
 
   const cancelTask = () =>
@@ -232,6 +235,7 @@ function HarnessBody({ status }: { status: AgentStatus }) {
         <>
           <InstallSheet
             status={status}
+            shell={shell}
             visible={installing}
             onClose={() => setInstalling(false)}
             onInstall={(method) => install(method)}
@@ -362,7 +366,9 @@ function HarnessBody({ status }: { status: AgentStatus }) {
         </Notice>
       ) : null}
 
-      {kind ? (
+      {needsNode(status) && !status.task ? (
+        <NodeNotice title={r.kind === 'missing' ? r.message : '需要 Node.js'} />
+      ) : kind ? (
         <InstallNotice
           status={status}
           kind={kind}
@@ -429,6 +435,9 @@ function HarnessBody({ status }: { status: AgentStatus }) {
         <ListGroup header="高级">
           <View style={styles.block}>
             <Text style={[typeScale.body, { color: c.text }]}>启动命令</Text>
+            <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+              {`纸鸢这样启动它，写法用于${shell}。`}
+            </Text>
             <Code>{status.launchCommand}</Code>
             <View style={styles.row}>
               <Button
@@ -761,6 +770,8 @@ function InstallNotice(props: {
  */
 function InstallSheet(props: {
   status: AgentStatus
+  /** Where the computer's commands run, as the copy names it. */
+  shell: string
   visible: boolean
   onClose(): void
   onInstall(method: AgentInstallMethod['id']): void
@@ -839,7 +850,7 @@ function InstallSheet(props: {
           <FieldNote>
             {method.id === 'archive'
               ? '纸鸢会为这台电脑下载并安装这个文件。'
-              : '也能复制到你自己的终端里运行，装好后回来点“重新加载环境”。'}
+              : `也能复制到${props.shell}里自己运行，装好后回来点“重新加载环境”。`}
           </FieldNote>
         </>
       ) : null}

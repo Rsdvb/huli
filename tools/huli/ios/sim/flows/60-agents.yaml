@@ -1,0 +1,227 @@
+# The phone's agent pages, in light and then in dark: the Agent list with its environment rows and
+# the note that import is on the computer, the fake agent's page and its reset page; signed out,
+# its sign-in card and New session's note that leads to it; then signed in again through its page
+# sign-in, which opens Safari for 8 s. Run last: it signs the fake agent out and back in. The
+# add-agent sheet is left out: the fake agent's harness takes one agent, so nothing can be added.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: 'Agent'
+    centerElement: true
+- tapOn: 'Agent'
+- extendedWaitUntil:
+    visible: 'Fake agent'
+    timeout: 20000
+- takeScreenshot: g01-agents
+- scrollUntilVisible:
+    element: '重新加载环境'
+    timeout: 60000
+    optional: true
+- scroll
+- takeScreenshot: g02-agents-environment
+# Back to the list's top by leaving it, since a scroll up its long list of harnesses can stall.
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: 'Agent'
+- extendedWaitUntil:
+    visible: 'Fake agent'
+    timeout: 20000
+# The fake agent's page and its reset page.
+- tapOn:
+    text: 'Fake agent'
+    index: 0
+- extendedWaitUntil:
+    visible: '已就绪'
+    timeout: 20000
+    optional: true
+- takeScreenshot: g04-agent
+- scrollUntilVisible:
+    element: '重置环境…'
+- takeScreenshot: g05-agent-bottom
+- tapOn: '重置环境…'
+- extendedWaitUntil:
+    visible: '退出登录和凭据'
+    timeout: 20000
+    optional: true
+- takeScreenshot: g06-reset
+- scroll
+- takeScreenshot: g07-reset-bottom
+- tapOn: '返回'
+- waitForAnimationToEnd
+# Signed out: the sign-in card, with the shell its terminal command is written for.
+- scrollUntilVisible:
+    element: '退出登录'
+    direction: UP
+    centerElement: true
+    optional: true
+- tapOn:
+    text: '退出登录'
+    optional: true
+- extendedWaitUntil:
+    visible: '登录 Fake agent 后才能使用'
+    timeout: 20000
+    optional: true
+- scrollUntilVisible:
+    element: '登录 Fake agent 后才能使用'
+    direction: UP
+    optional: true
+- takeScreenshot: g08-signed-out
+- scroll
+- takeScreenshot: g09-signed-out-more
+# Back to the tabs: the agent page, the Agent list, then Settings.
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '(返回|关闭)'
+- waitForAnimationToEnd
+# New session: what the agent needs and the way to it.
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: g10-new-session-sign-in
+- tapOn:
+    text: '去登录'
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: g11-from-new-session
+# Signed in again: the page sign-in opens Safari, and the agent signs in 8 s later.
+- tapOn:
+    text: 'Sign in in a browser'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: '已就绪'
+    timeout: 30000
+    optional: true
+- takeScreenshot: g12-signed-in-again
+- tapOn: '返回'
+- waitForAnimationToEnd
+- takeScreenshot: g13-new-session-ready
+- tapOn: '(返回|关闭)'
+- waitForAnimationToEnd
+# The same in dark.
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '主题'
+- tapOn: '主题'
+- tapOn: '深色'
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element: 'Agent'
+    centerElement: true
+- tapOn: 'Agent'
+- extendedWaitUntil:
+    visible: 'Fake agent'
+    timeout: 20000
+- takeScreenshot: g14-agents-dark
+- scrollUntilVisible:
+    element: '重新加载环境'
+    timeout: 60000
+    optional: true
+- scroll
+- takeScreenshot: g15-agents-environment-dark
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: 'Agent'
+- extendedWaitUntil:
+    visible: 'Fake agent'
+    timeout: 20000
+- tapOn:
+    text: 'Fake agent'
+    index: 0
+- waitForAnimationToEnd
+- takeScreenshot: g16-agent-dark
+- scrollUntilVisible:
+    element: '重置环境…'
+- tapOn: '重置环境…'
+- extendedWaitUntil:
+    visible: '退出登录和凭据'
+    timeout: 20000
+    optional: true
+- takeScreenshot: g17-reset-dark
+- tapOn: '返回'
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element: '退出登录'
+    direction: UP
+    centerElement: true
+    optional: true
+- tapOn:
+    text: '退出登录'
+    optional: true
+- extendedWaitUntil:
+    visible: '登录 Fake agent 后才能使用'
+    timeout: 20000
+    optional: true
+- scrollUntilVisible:
+    element: '登录 Fake agent 后才能使用'
+    direction: UP
+    optional: true
+- takeScreenshot: g18-signed-out-dark
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '(返回|关闭)'
+- waitForAnimationToEnd
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- takeScreenshot: g19-new-session-sign-in-dark
+- tapOn:
+    text: '去登录'
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: 'Sign in in a browser'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: '已就绪'
+    timeout: 30000
+    optional: true
+- takeScreenshot: g20-signed-in-again-dark
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '(返回|关闭)'
+- waitForAnimationToEnd
+# Back to the light theme, as a later flow expects.
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '主题'
+- tapOn: '主题'
+- tapOn: '浅色'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(返回|关闭)'
+    optional: true
