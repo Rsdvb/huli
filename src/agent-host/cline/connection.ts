@@ -7,6 +7,7 @@ import type { ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { Platform } from '@shared/platform'
 import type { ConfigOption, QuestionAnswer, StopReason } from '@shared/thread'
 import {
   AgentRequestError,
@@ -14,6 +15,7 @@ import {
   type AgentConnection,
   type AgentInit,
   type ConnectionHooks,
+  type ListedEverywhere,
   type ListedSession,
   type McpServer,
   type OpenedSession,
@@ -28,6 +30,7 @@ import {
 import { messageStream, RpcClosed, RpcError, RpcPeer } from '../codex/rpc'
 import type { HostedContext } from '../driver'
 import { t } from '../i18n'
+import { samePath } from '../paths'
 import type { MapperContext, MapperOutput } from '../session-updates'
 import { SessionMapper, tokenTotals } from './mapper'
 import { configOptions, currentModel, settingsChange, type Choices } from './options'
@@ -36,10 +39,12 @@ import {
   METHOD,
   type ApprovalParams,
   type ApprovalResult,
+  type ClineListed,
   type ClineMcpServer,
   type ClineProvider,
   type EventNotification,
   type HelloResult,
+  type ListResult,
   type OpenParams,
   type OpenResult,
   type OpenUrlParams,
@@ -61,6 +66,20 @@ const OPTION = { allow: 'allow-once', always: 'allow-always', reject: 'reject' }
 /** An option id answering a question's choice, as a client without the card's questions sends. */
 const ANSWER = /^answer:(\d+)$/
 const OTHER_ANSWER = 'other'
+/** Huli: sessions a listing reads from Cline's store, and a page of them. */
+const LIST_LIMIT = 2_000
+const LIST_PAGE = 100
+
+/** Huli: a page of a listing, its cursor the offset of the next. */
+function pageOf<T>(
+  all: readonly T[],
+  cursor: string | null,
+): { items: T[]; nextCursor: string | null } {
+  const offset = cursor ? Number.parseInt(cursor, 10) : 0
+  const start = Number.isFinite(offset) && offset > 0 ? offset : 0
+  const end = start + LIST_PAGE
+  return { items: all.slice(start, end), nextCursor: end < all.length ? String(end) : null }
+}
 
 /** The SDK's process cannot serve the agent: its start fails, and the agent runs over ACP. */
 export class ClineSdkUnavailable extends Error {
@@ -357,7 +376,8 @@ export class ClineConnection implements AgentConnection {
       version,
       capabilities: {
         loadSession: false,
-        listSessions: false,
+        // Huli: Cline's store lists its sessions, which resume without their history shown.
+        listSessions: true,
         resumeSession: true,
         closeSession: true,
         deleteSession: false,
@@ -504,8 +524,42 @@ export class ClineConnection implements AgentConnection {
     return Promise.reject(new AgentRequestError('agent_error', 'Cline keeps its sessions'))
   }
 
-  async listSessions(): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
-    return { sessions: [], nextCursor: null }
+  /** Huli: a folder's own sessions in Cline's store, newest first; subagents' are not. */
+  async listSessions(
+    cwd: string,
+    cursor: string | null,
+  ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
+    const all = (await this.stored()).filter(
+      (item) => !item.subagent && samePath(item.cwd, cwd, process.platform as Platform),
+    )
+    const { items, nextCursor } = pageOf(all, cursor)
+    return {
+      sessions: items.map(({ sessionId, title, updatedAt, cwd: folder }) => ({
+        sessionId,
+        title,
+        updatedAt,
+        cwd: folder,
+      })),
+      nextCursor,
+    }
+  }
+
+  /** Huli: every folder's sessions in Cline's store, subagents' marked, for the imports. */
+  async listAllSessions(
+    cursor: string | null,
+  ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }> {
+    const { items, nextCursor } = pageOf(await this.stored(), cursor)
+    return {
+      sessions: items.map((item) => ({ ...item, prompted: true })),
+      nextCursor,
+    }
+  }
+
+  /** The sessions Cline's store holds, the latest started first, as many as it lists. */
+  private async stored(): Promise<ClineListed[]> {
+    this.assertOpen()
+    const listed = await this.call<ListResult>(METHOD.list, { limit: LIST_LIMIT })
+    return listed.sessions
   }
 
   async removeHidden(sessionId: string): Promise<void> {

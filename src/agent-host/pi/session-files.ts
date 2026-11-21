@@ -236,9 +236,25 @@ function lastTime(lines: readonly string[]): string | null {
   return null
 }
 
-async function describe(file: string, cwd: string): Promise<ListedSession | null> {
-  const header = parseHeader(await readHead(file))
-  if (!header || header.cwd !== cwd) return null
+/** When a header says its session started, as ISO; null when it does not. */
+function startedAt(line: string | null): string | null {
+  try {
+    const value = JSON.parse(line ?? '') as { timestamp?: unknown }
+    const at = typeof value.timestamp === 'string' ? Date.parse(value.timestamp) : NaN
+    return Number.isFinite(at) ? new Date(at).toISOString() : null
+  } catch {
+    return null
+  }
+}
+
+/** A session file as listed: for `cwd`'s sessions only, or with null, any folder's. */
+async function describe(
+  file: string,
+  cwd: string | null,
+): Promise<(ListedSession & { createdAt: string | null }) | null> {
+  const head = await readHead(file)
+  const header = parseHeader(head)
+  if (!header || (cwd !== null && header.cwd !== cwd)) return null
   let title: string | null = null
   let updatedAt: string | null = null
   try {
@@ -255,7 +271,7 @@ async function describe(file: string, cwd: string): Promise<ListedSession | null
   } catch {
     // Listed without what could not be read.
   }
-  return { sessionId: header.id, title, updatedAt, cwd: header.cwd }
+  return { sessionId: header.id, title, updatedAt, cwd: header.cwd, createdAt: startedAt(head) }
 }
 
 /**
@@ -278,9 +294,41 @@ export async function listSessionFiles(
   const listed = new Map<string, ListedSession>()
   for (const file of files) {
     const session = await describe(file, cwd)
-    if (session && !listed.has(session.sessionId)) listed.set(session.sessionId, session)
+    if (!session || listed.has(session.sessionId)) continue
+    const { sessionId, title, updatedAt, cwd: folder } = session
+    listed.set(sessionId, { sessionId, title, updatedAt, cwd: folder })
   }
   return [...listed.values()].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
+}
+
+/**
+ * Huli: every folder's saved sessions, for the import from the agents: the files directly in pi's
+ * sessions folder and in each folder in it, the latest written first, `limit` of them from
+ * `offset` on, each read as `listSessionFiles` reads one. A file that is no session's is left out.
+ */
+export async function listAllSessionFiles(
+  folders: PiFolders,
+  offset: number,
+  limit: number,
+): Promise<{ sessions: (ListedSession & { createdAt: string | null })[]; more: boolean }> {
+  const dirs = [folders.sessions, ...(await subfolders(folders.sessions))]
+  const files = (await Promise.all(dirs.map(jsonlFiles))).flat()
+  const dated = await Promise.all(
+    files.map(async (file) => ({
+      file,
+      at: await stat(file).then(
+        (info) => info.mtimeMs,
+        () => 0,
+      ),
+    })),
+  )
+  dated.sort((a, b) => b.at - a.at)
+  const sessions: (ListedSession & { createdAt: string | null })[] = []
+  for (const { file } of dated.slice(offset, offset + limit)) {
+    const session = await describe(file, null)
+    if (session) sessions.push(session)
+  }
+  return { sessions, more: offset + limit < dated.length }
 }
 
 /** Deletes a session's file; one that is gone already is no failure. */
