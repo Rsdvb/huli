@@ -1595,6 +1595,7 @@ export class AgentManager {
     const version = request.version ?? adapter.version
     // The SDK never brings the CLI of its own: only the user's runs.
     const withoutCli = !!h.def.cli
+    if (h.task?.kind === 'install' && h.task.state === 'failed') h.task = null
     slot.state = 'installing'
     slot.detail = null
     slot.progress.clear()
@@ -1720,6 +1721,27 @@ export class AgentManager {
         `${h.def.name}: could not remove older versions: ${(error as Error).message}`,
       ),
     )
+  }
+
+  /**
+   * Kettu's own package did not install, and no install of it is left to run. The harness stays
+   * installable, as it was before, and the failure becomes its failed install task with npm's
+   * output, so every window and device shows why and installs again from it. A `failed` state
+   * would hold until a restart, and its retry is an agent's, which a harness without one refuses.
+   */
+  private packageInstallFailed(slot: Slot, message: string): void {
+    const { h } = slot
+    const detection = h.detection
+    const adapter = detection?.state === 'available' ? detection.adapter : null
+    const command = adapter
+      ? this.packageUpdateCommand(h, { adapterVersion: adapter.version, cliVersion: null }) ||
+        `${adapter.package}@${adapter.version}`
+      : h.def.name
+    slot.state = detection?.state ?? 'available'
+    slot.detail = null
+    h.taskOutput.clear()
+    h.taskOutput.push(slot.progress.toString())
+    h.task = { kind: 'install', state: 'failed', command, method: null, error: message }
   }
 
   /** Refuses a second install or update while one runs. */
@@ -1889,9 +1911,9 @@ export class AgentManager {
           home.detail = null
           return
         }
-        home.state = 'failed'
-        home.detail = (error as Error).message
-        throw new HostError('agent_unavailable', home.detail, { agentId, state: 'failed' })
+        const message = (error as Error).message
+        this.packageInstallFailed(home, message)
+        throw new HostError('agent_error', message, { agentId })
       } finally {
         this.emit(home)
       }
@@ -3040,9 +3062,8 @@ export class AgentManager {
           home.detail = null
           throw new HostError('agent_error', message, { agentId })
         }
-        home.state = 'failed'
-        home.detail = message
-        throw new HostError('agent_unavailable', home.detail, { agentId, state: 'failed' })
+        this.packageInstallFailed(home, message)
+        throw new HostError('agent_error', message, { agentId })
       } finally {
         this.emit(home)
       }
