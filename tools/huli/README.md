@@ -324,6 +324,9 @@ system identifier (MachineGuid, MAC addresses, hardware ids).
   the list says whether it did) and the Secret Service with `secret-tool` (output thrown away). A
   test copy (`KITE_TEST_WINDOW=background`, unpackaged) uses names in `<data>/test-secrets.json`
   instead, so its reset reaches none of the owner's entries.
+- The phone's agent page opens the same list as a page of its own
+  (`mobile/src/app/settings/agent-reset.tsx`), which clears Kite's keys for the agent through
+  `marketplace.setAgentEnv`.
 - Tests: `src/agent-host/agent-reset/*.test.ts`, and the requests in `validate.test.ts`.
 
 ### Removing an agent from the computer
@@ -518,7 +521,11 @@ and Kite runs that program itself, never cmd.exe or the PowerShell shim. The ins
 conversations.json`, so it resumes after a restart and lists as imported.
 - Sign-in: `doubao login --qr=png` in the host; each `QR_IMAGE=<path>` picture goes to the asking
   client as `agents.signInImage` (Settings' agent page, a session's sign-in, the phone's agent
-  page) until the CLI exits. `auth status` reads the sign-in, `logout` signs out.
+  page) until the CLI exits. `auth status` reads the sign-in, `logout` signs out. The phone,
+  which usually runs the Doubao app that must scan it, offers to save or send the picture
+  (`mobile/src/system/shareImage.ts`, the share sheet's Save Image needing
+  `NSPhotoLibraryAddUsageDescription`) and says to scan it from another device or sign in on the
+  computer; Doubao documents no link that opens a sign-in in its app, so none is offered.
 - Import: `--list --all --json` lists every unarchived conversation, from every folder and device;
   one with no folder (the app's, another device's) comes under the home folder. Its history comes
   from `--export` (each turn's question and answer, as text), and it continues with `--resume`.
@@ -775,7 +782,8 @@ profiles.
   line while no agent can start, and the environment lines under Settings › Harness, which say
   which Node.js agents use and offer 更新, 移除 and the choice: 「一键安装 Node.js」 with its
   progress and error, and a small 「手动安装」 link to nodejs.org. The phone's 设置 › Agent › 环境
-  offers the same.
+  offers the same, and so do its agent and harness pages and New session wherever an agent waits
+  for Node.js (`mobile/src/manage/node.tsx`).
 
 Huli's own files: `src/agent-host/node-runtime/` (`release.ts`, `install.ts`, `transport.ts`,
 `service.ts`, `validate.ts`, with `release.test.ts`, `install.test.ts`, `environment.test.ts` and
