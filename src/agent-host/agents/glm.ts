@@ -2,7 +2,7 @@ import type { AgentDefinition } from '../catalog'
 
 export const GLM: AgentDefinition = {
   id: 'glm',
-  limitsReason: 'not-yet-supported',
+  // Its Coding Plan quota comes from its own `_glm/usage` (vendor-usage/glm.ts), from 1.16.0.
   name: 'GLM Agent',
   registryId: 'glm-acp-agent',
   launch: { kind: 'package', package: 'glm-acp-agent' },

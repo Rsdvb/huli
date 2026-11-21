@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import deepSeekBalance from '../vendor-usage/fixtures/deepseek-user-balance.json'
 import openRouterKey from '../vendor-usage/fixtures/openrouter-key.json'
 import siliconFlowUser from '../vendor-usage/fixtures/siliconflow-user-info.json'
+import zaiQuota from '../vendor-usage/fixtures/zai-quota-limit.json'
 import {
   failedUsage,
   parseOpenRouterKey,
@@ -164,8 +165,27 @@ describe('provider balances and key limits', () => {
     expect(asked(fetch)[0]![0]).toBe('https://api.deepseek.com/user/balance')
   })
 
+  it("reads Z.AI's credit windows for the coding plan providers, the key sent bare", async () => {
+    for (const [providerId, host] of [
+      ['zai-coding-plan', 'api.z.ai'],
+      ['zhipuai-coding-plan', 'open.bigmodel.cn'],
+    ] as const) {
+      const fetch = fetchOnce(zaiQuota)
+      const usage = await readProviderUsage({ providerId, key: KEY, now: NOW, fetch })
+      expect(usage.limits.map((limit) => limit.window)).toEqual([
+        'five_hour',
+        'seven_day',
+        'tool_calls',
+      ])
+      const [[url, init]] = asked(fetch)
+      expect(url).toBe(`https://${host}/api/monitor/usage/quota/limit`)
+      expect((init.headers as Record<string, string>).authorization).toBe(KEY)
+      expect(init.redirect).toBe('error')
+    }
+  })
+
   it('never puts a key into a result, whatever the vendor answers', async () => {
-    for (const providerId of ['openrouter', 'siliconflow', 'siliconflow-cn', 'deepseek']) {
+    for (const providerId of ['openrouter', 'siliconflow', 'siliconflow-cn', 'deepseek', 'zai']) {
       for (const body of [{ error: { message: `bad key ${KEY}` } }, { data: { label: KEY } }]) {
         for (const status of [200, 401, 500]) {
           const usage = await readProviderUsage({

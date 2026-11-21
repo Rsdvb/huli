@@ -42,6 +42,13 @@ import { parseMistralAccount } from './vendor-usage/mistral-vibe'
 import { KeychainRefused, parseCursorAbout, type CursorSignIn } from './vendor-usage/cursor'
 import { readAuggieAccount } from './vendor-usage/auggie'
 import { readCopilotQuota } from './vendor-usage/copilot'
+import {
+  GLM_USAGE_METHOD,
+  GLM_USAGE_VERSION,
+  offersGlmUsage,
+  parseGlmUsage,
+  type GlmUnavailable,
+} from './vendor-usage/glm'
 import { readKiloProfile } from './vendor-usage/kilo'
 import { readQoderUsage } from './vendor-usage/qoder'
 import { storedSignInReader } from './vendor-usage/readers'
@@ -3744,6 +3751,7 @@ export class AgentManager {
           'kilo',
           'auggie',
           'antigravity',
+          'glm',
         ].includes(slot.def.id) ||
         storedSignInReader(slot.def.id) !== null ||
         this.driver(slot).reads?.limits === true)
@@ -3764,6 +3772,7 @@ export class AgentManager {
     const runtime = await this.ensureReady(slot.id)
     const { connection } = runtime
     if (slot.def.id === 'grok') return this.readGrokLimits(slot, runtime, force)
+    if (slot.def.id === 'glm') return this.readGlmLimits(slot, runtime)
     if (connection.request && slot.def.id === 'mistral-vibe') {
       const now = Date.now()
       const version = runtime.init.version ?? slot.h.binaryVersion
@@ -4147,6 +4156,38 @@ export class AgentManager {
       throw this.limitsError(slot, new Error('The vendor returned an unknown usage reply'))
     this.applyVendorUsage(slot, usage, now)
     if (slot.signIn !== 'signed-in') this.signedIn(slot.id)
+  }
+
+  /**
+   * GLM Agent's Coding Plan quota from its own `_glm/usage`, which it reads with the key it keeps,
+   * so Kite never reads that key. Windows it kept from an earlier read show, with why the last one
+   * failed; a refused or missing key leaves none.
+   */
+  private async readGlmLimits(slot: Slot, runtime: AgentRuntime): Promise<void> {
+    const { connection } = runtime
+    if (!connection.request || !versionAtLeast(runningVersion(slot), GLM_USAGE_VERSION)) return
+    if (!offersGlmUsage(runtime.init.raw)) return
+    let reply: unknown
+    try {
+      reply = await connection.request<unknown>(GLM_USAGE_METHOD, {})
+    } catch (error) {
+      throw this.limitsError(slot, error)
+    }
+    const now = Date.now()
+    const read = parseGlmUsage(reply, now)
+    if (!read) throw new HostError('agent_error', glmUnavailable('invalidResponse', slot.name))
+    if (read.limits.length > 0) {
+      this.applyVendorUsage(slot, { limits: read.limits, balances: [] }, now)
+    } else if (
+      read.unavailable === 'authenticationFailed' ||
+      read.unavailable === 'missingCredentials'
+    ) {
+      slot.limits.clear()
+      this.emit(slot)
+    }
+    if (read.unavailable) {
+      throw new HostError('agent_error', glmUnavailable(read.unavailable, slot.name))
+    }
   }
 
   /** The agent says it is signed out: its account and the plan it read are gone. */
@@ -6166,6 +6207,11 @@ function settledWithin(promise: Promise<void>, ms: number): Promise<void> {
 /** Whether an agent method hands its sign-in page to the client, rather than opening a browser here. */
 function handsOverPage(def: AgentDefinition, methodId: string): boolean {
   return methodId === DELEGATED_SIGN_IN || (def.pageSignIns?.includes(methodId) ?? false)
+}
+
+/** Why GLM Agent could not read its quota, in the user's words. */
+function glmUnavailable(reason: GlmUnavailable, agent: string): string {
+  return t(`agent.glmUsage.${reason}`, { agent })
 }
 
 /** Maps a failed request to the agent to the port error the renderer acts on. */

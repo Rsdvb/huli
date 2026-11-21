@@ -4,6 +4,7 @@
 import type { AgentProvider, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import { amountLimit, readBody } from '../vendor-usage/common'
 import { DEEPSEEK_API, parseDeepSeekKeyBalance } from '../vendor-usage/deepseek'
+import { parseGlmQuotaLimits } from '../vendor-usage/glm'
 import { parseKimiCodeUsage } from '../vendor-usage/kimi-code'
 import { parseMiniMaxRemains } from '../vendor-usage/minimax-code'
 
@@ -297,43 +298,8 @@ function glmEndpoint(host: string): Endpoint {
     url: `https://${host}/api/monitor/usage/quota/limit`,
     headers: (key) => ({ authorization: key }),
     parse(body, now) {
-      const root = record(body)
-      if (!root) return null
-      if (root.success === false) return null
-      const code = num(root.code)
-      if (code !== null && code !== 200) return null
-      const data = record(root.data)
-      const items = data ? list(data.limits) : null
-      if (!items) return null
-      const limits: PlanLimit[] = []
-      for (const item of items) {
-        const row = record(item)
-        if (!row) continue
-        const used = percent(row.percentage)
-        if (used === null) continue
-        const type = text(row.type)
-        const unit = num(row.unit)
-        let window = 'glm'
-        let label = 'Usage'
-        if (type === 'TIME_LIMIT') {
-          window = 'tool_calls'
-          label = 'Tool calls'
-        } else if (type === 'TOKENS_LIMIT') {
-          if (unit === 3) {
-            window = 'five_hour'
-            label = '5-hour'
-          } else if (unit === 6) {
-            window = 'seven_day'
-            label = 'Weekly'
-          } else {
-            window = `tokens_${unit ?? 'other'}`
-            label = 'Tokens'
-          }
-        } else if (type) {
-          window = `glm_${type.toLowerCase()}`
-        }
-        limits.push(limit(window, label, used, instant(row.nextResetTime), now))
-      }
+      const limits = parseGlmQuotaLimits(body, now)
+      if (!limits) return null
       return limits.length > 0 ? readyUsage(now, limits) : unsupportedUsage(now)
     },
   }
