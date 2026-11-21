@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { ArrowLeft02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
@@ -50,6 +50,14 @@ export function PendingSessionView({ pending }: { pending: PendingSession }) {
   const retry = useCallback(() => retryPendingSession(), [])
   const gutter = useScrollbarGutter()
   const error = pending.error
+  // Huli: once the host finds the agent signed in, however it signed in, the session starts.
+  const signIn = status?.signIn
+  const signInBefore = useRef(signIn)
+  useEffect(() => {
+    const before = signInBefore.current
+    signInBefore.current = signIn
+    if (error?.code === 'auth_required' && signIn === 'signed-in' && before !== 'signed-in') retry()
+  }, [signIn, error?.code, retry])
 
   let body
   if (error?.code === 'auth_required') {

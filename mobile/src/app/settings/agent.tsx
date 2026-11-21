@@ -2,7 +2,7 @@
 // key, its plan usage, its configuration, and removing it.
 
 import { useEffect, useRef, useState } from 'react'
-import { Alert, StyleSheet, Text, View } from 'react-native'
+import { Alert, AppState, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import * as Clipboard from 'expo-clipboard'
 import { randomUUID } from 'expo-crypto'
@@ -153,6 +153,22 @@ function AgentBody({ status }: { status: AgentStatus }) {
     }
   }, [connected, host.link, id, forceRead])
 
+  // Huli: what it signs in with and whether it is, read by starting an agent the computer has not
+  // run yet; asked again each time the app comes back while it is not signed in.
+  const signedIn = status.signIn === 'signed-in'
+  useEffect(() => {
+    if (!connected || !host.link || status.disabled) return
+    call(host.link, 'agents.readSignIn', { agentId: id }).catch(() => {})
+  }, [connected, host.link, id, status.disabled])
+  useEffect(() => {
+    const link = host.link
+    if (!connected || !link || signedIn || status.disabled) return
+    const app = AppState.addEventListener('change', (next) => {
+      if (next === 'active') call(link, 'agents.readSignIn', { agentId: id }).catch(() => {})
+    })
+    return () => app.remove()
+  }, [connected, host.link, id, signedIn, status.disabled])
+
   useEffect(() => {
     if (!host.link) return
     return host.link.onHostEvent((raw) => {
@@ -261,6 +277,19 @@ function AgentBody({ status }: { status: AgentStatus }) {
   const envVars = methods
     .filter((m) => m.type === 'env')
     .flatMap((m) => (m.envVars ?? []).map((v) => ({ method: m.id, ...v })))
+  // Huli: an agent that tells whether it is signed in only once a session starts offers its
+  // sign-in without saying it needs one; a sign-in started here shows while it waits.
+  const unsure =
+    r.kind === 'ready' &&
+    status.signIn === 'unknown' &&
+    !status.readingSignIn &&
+    (terminal.length > 0 || onPhone.length > 0)
+  const waiting = (page !== null || image !== null) && status.signIn !== 'signed-in'
+  const offersSignIn = r.kind === 'sign-in' || unsure || waiting
+  const watchSignIn = (): void => {
+    if (host.link)
+      call(host.link, 'agents.readSignIn', { agentId: id, watch: true }).catch(() => {})
+  }
 
   const header = (
     <View style={[styles.hero, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -415,7 +444,7 @@ function AgentBody({ status }: { status: AgentStatus }) {
         </GroupNote>
       ) : null}
 
-      {!providerMode && r.kind === 'sign-in' && methods.length > 0 ? (
+      {!providerMode && offersSignIn && methods.length > 0 ? (
         image !== null ? (
           <Notice
             tone="info"
@@ -451,8 +480,8 @@ function AgentBody({ status }: { status: AgentStatus }) {
           </Notice>
         ) : (
           <Notice
-            tone="warning"
-            title={`登录 ${status.name} 后才能使用`}
+            tone={r.kind === 'sign-in' ? 'warning' : 'info'}
+            title={r.kind === 'sign-in' ? `登录 ${status.name} 后才能使用` : `登录 ${status.name}`}
             actions={
               onPhone.length > 0 ? (
                 <>
@@ -474,6 +503,11 @@ function AgentBody({ status }: { status: AgentStatus }) {
             }
           >
             <View style={styles.gap}>
+              {r.kind === 'sign-in' ? null : (
+                <Text style={[typeScale.footnote, { color: c.textSecondary }]}>
+                  {`${status.name} 要到会话开始时才告诉纸鸢是否已登录；还没登录的话，可以在这里登录。`}
+                </Text>
+              )}
               {terminal.map((method) => (
                 <View key={method.id} style={styles.gap}>
                   {method.description ? (
@@ -490,7 +524,11 @@ function AgentBody({ status }: { status: AgentStatus }) {
                       label="复制命令"
                       icon="copy"
                       onPress={() =>
-                        void Clipboard.setStringAsync(method.command!).then(() => haptic.success())
+                        void Clipboard.setStringAsync(method.command!).then(() => {
+                          haptic.success()
+                          // The computer checks every few seconds whether it signed in there.
+                          watchSignIn()
+                        })
                       }
                     />
                   </View>
@@ -514,9 +552,11 @@ function AgentBody({ status }: { status: AgentStatus }) {
             title={status.account?.kind === 'account' ? '套餐' : '登录方式'}
             value={
               status.account?.kind === 'none' || !status.account
-                ? reading && status.capabilities.account
-                  ? '正在读取账号…'
-                  : '未提供'
+                ? status.readingSignIn
+                  ? '正在读取登录方式…'
+                  : reading && status.capabilities.account
+                    ? '正在读取账号…'
+                    : '未提供'
                 : status.account.label
             }
           />

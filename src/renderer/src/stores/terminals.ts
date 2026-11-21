@@ -545,11 +545,9 @@ async function startTerminal(
         : {}),
     })
     if (options?.signInAgent) {
-      signIns.set(info.id, {
-        agentId: options.signInAgent,
-        hostId: hostOfPath(projectPath),
-        sawBusy: false,
-      })
+      const hostId = hostOfPath(projectPath)
+      signIns.set(info.id, { agentId: options.signInAgent, hostId, sawBusy: false })
+      emitAppEvent({ kind: 'sign-in-started', agentId: options.signInAgent, hostId })
     }
     upsert(info)
     return info

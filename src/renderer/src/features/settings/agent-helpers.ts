@@ -93,6 +93,56 @@ export function useAgentReads(status: AgentStatus, options?: { force?: boolean }
   return reading
 }
 
+/** Huli: how soon a window coming back asks the agent's sign-in again. */
+const SIGN_IN_AGAIN_MS = 2_000
+
+/**
+ * Huli: has the host learn what an agent signs in with and whether it is signed in while its page
+ * shows, starting it when this run has not, and asks again each time the window comes back while
+ * it is not signed in, such as from a browser or a terminal where it signed in. True while the
+ * page's first read runs. An older host that lacks the read leaves the page as it was.
+ */
+export function useSignInRead(status: AgentStatus): boolean {
+  const { request } = useHostScope()
+  // One that needs an install first is read once it is installed.
+  const startable =
+    isInstalled(status) &&
+    status.state !== 'installing' &&
+    status.package?.installed !== false &&
+    status.disabled !== true
+  const reads = startable ? status.id : null
+  const [read, setRead] = useState<AgentId | null>(null)
+  useEffect(() => {
+    if (reads === null) return
+    let current = true
+    request('agents.readSignIn', { agentId: reads })
+      .catch((e: unknown) => console.warn(`Could not read the sign-in: ${errorMessage(e)}`))
+      .finally(() => {
+        if (current) setRead(reads)
+      })
+    return () => {
+      current = false
+    }
+  }, [reads, request])
+  const signedIn = status.signIn === 'signed-in'
+  useEffect(() => {
+    if (signedIn || !startable) return
+    let last = 0
+    const again = (): void => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < SIGN_IN_AGAIN_MS) return
+      last = Date.now()
+      request('agents.readSignIn', { agentId: status.id }).catch(() => {})
+    }
+    window.addEventListener('focus', again)
+    document.addEventListener('visibilitychange', again)
+    return () => {
+      window.removeEventListener('focus', again)
+      document.removeEventListener('visibilitychange', again)
+    }
+  }, [status.id, request, signedIn, startable])
+  return reads !== null && read !== reads
+}
+
 /** The windows whose reset has not passed; an older reading of them no longer holds. */
 export function currentLimits(limits: PlanLimit[], now: number): PlanLimit[] {
   return limits.filter((l) => l.resetsAt === null || l.resetsAt > now)

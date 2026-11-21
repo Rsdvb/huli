@@ -488,14 +488,19 @@ function BalanceRows({ status }: { status: AgentStatus }) {
   ))
 }
 
-/** A name and its value; "Not reported" while the agent has not said. */
+/**
+ * A name and its value; "Not reported" while the agent has not said, or `pending` while it is
+ * being read.
+ */
 export function Fact({
   name,
   mono,
+  pending,
   children,
 }: {
   name: string
   mono?: boolean
+  pending?: string | null
   children: ReactNode
 }) {
   const { t } = useTranslation('settings')
@@ -510,7 +515,7 @@ export function Fact({
           {children}
         </span>
       ) : (
-        <span className="k-fact k-muted">{t('agents.notReported')}</span>
+        <span className="k-fact k-muted">{pending ?? t('agents.notReported')}</span>
       )}
     </RowFrame>
   )
