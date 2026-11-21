@@ -313,6 +313,7 @@ import {
   type ReturnedFile,
   type SessionRecord,
   type SessionsFile,
+  type StoredGroup,
   type WorktreeRecord,
 } from './storage'
 import { SUMMARY_RETRY_MS, writeTitles } from './outline-titles'
@@ -1708,6 +1709,14 @@ export class SessionManager {
       limitPause: record.limitPause ?? null,
       autoResume: this.autoResumes(record),
       stall: this.stalls.stallOf(record.id),
+      group: record.group
+        ? {
+            id: record.group.id,
+            title: record.group.title,
+            size: record.group.size,
+            kept: record.group.kept ?? null,
+          }
+        : null,
       ...(record.worktree ? { worktree: this.worktreeSummary(record.worktree) } : {}),
       ...(record.agentWorktree ? { agentWorktree: { ...record.agentWorktree } } : {}),
       ...(live?.prepared
@@ -4967,6 +4976,8 @@ export class SessionManager {
       title?: string
       /** A new worktree to work in, cut from `base`; a sub-session takes its parent's instead. */
       worktree?: { base: string; branch?: string }
+      /** Huli: the best-of-N group it is a run of. */
+      group?: StoredGroup
     },
     portId?: string,
   ): Promise<SessionSummary> {
@@ -5014,7 +5025,10 @@ export class SessionManager {
         ...(params.worktree.branch === undefined ? {} : { branch: params.worktree.branch }),
         text: (prompt && fallbackTitle(prompt)) ?? '',
       }
-      worktree = await manager.create(projectPath, request)
+      // One at a time in a project, so runs started together with one prompt take distinct names.
+      worktree = await this.oneWorktreeAtATime(projectPath, () =>
+        manager.create(projectPath, request),
+      )
       newWorktree = true
       if (prompt && !request.branch?.trim()) {
         this.nameBranch(params.agentId, projectPath, worktree, prompt, request, params.options)
@@ -5036,6 +5050,7 @@ export class SessionManager {
       origin: 'user',
       description: null,
       branch: null,
+      ...(params.group ? { group: { ...params.group } } : {}),
     }
     if (params.startedBy !== undefined) record.startedBy = params.startedBy
     const options = params.options ?? {}
@@ -11285,6 +11300,52 @@ export class SessionManager {
         'warn',
         `Could not remove the unused worktree ${worktree.path}: ${(error as Error).message}`,
       )
+    }
+  }
+
+  private readonly worktreesMaking = new Map<string, Promise<unknown>>()
+
+  /** Runs `make` after the worktree being made in the project, if any, has been. */
+  private oneWorktreeAtATime<T>(projectPath: string, make: () => Promise<T>): Promise<T> {
+    const key = pathKey(projectPath, this.deps.platform)
+    const before = this.worktreesMaking.get(key) ?? Promise.resolve()
+    const run = before.then(make, make)
+    const settled = run.catch(() => undefined)
+    this.worktreesMaking.set(key, settled)
+    void settled.then(() => {
+      if (this.worktreesMaking.get(key) === settled) this.worktreesMaking.delete(key)
+    })
+    return run
+  }
+
+  /** Huli: the records of a best-of-N group's runs, live or indexed, oldest first. */
+  groupRecords(groupId: string): SessionRecord[] {
+    const byId = new Map<string, SessionRecord>()
+    for (const record of this.records.values()) {
+      if (record.group?.id === groupId) byId.set(record.id, record)
+    }
+    for (const live of this.live.values()) {
+      if (live.record.group?.id === groupId && !live.prepared) byId.set(live.id, live.record)
+    }
+    return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  /** Huli: a best-of-N run's record; `not_found` for a session that is no run. */
+  groupRun(sessionId: string): SessionRecord & { group: StoredGroup } {
+    const record = this.recordOf(sessionId)
+    if (!record.group) throw notFound('This session is not a run of a group')
+    return record as SessionRecord & { group: StoredGroup }
+  }
+
+  /** Huli: marks the group's run the user kept on every run, then saves and announces them. */
+  markGroupKept(groupId: string, sessionId: string): void {
+    for (const record of this.groupRecords(groupId)) {
+      if (!record.group) continue
+      record.group = { ...record.group, kept: sessionId }
+      const live = this.live.get(record.id)
+      if (live) this.persist(live)
+      else this.saveIndex()
+      this.touch(record.id)
     }
   }
 

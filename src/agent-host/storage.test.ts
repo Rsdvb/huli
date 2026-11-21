@@ -308,6 +308,32 @@ describe('the host files', () => {
     })
   })
 
+  it("keeps a best-of-N run's group and drops one that does not read", () => {
+    const run: SessionRecord = {
+      ...session,
+      group: { id: 'g1', title: 'Fix the clock', size: 3, kept: 's2' },
+    }
+    expect(parseSessionsFile({ sessions: [run] })).toEqual({ version: 1, sessions: [run] })
+    const open = { ...session, group: { id: 'g1', title: 'Fix', size: 2, kept: '' } }
+    expect(parseSessionsFile({ sessions: [open] })).toEqual({
+      version: 1,
+      sessions: [{ ...session, group: { id: 'g1', title: 'Fix', size: 2 } }],
+    })
+    for (const group of [
+      'g1',
+      { id: '', title: 'x', size: 2 },
+      { id: 'g1', title: 7, size: 2 },
+      { id: 'g1', title: 'x', size: 0 },
+      { id: 'g1', title: 'x', size: 2.5 },
+      { id: 'g1', title: 'x'.repeat(501), size: 2 },
+    ]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, group }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
   it('keeps the sub-sessions a session archived alone left in the list', () => {
     const archived: SessionRecord = { ...session, archivedAt: 3, leftSubSessions: ['c1', 'c2'] }
     expect(parseSessionsFile({ sessions: [archived] })).toEqual({

@@ -44,6 +44,7 @@ export const SCENARIOS = [
   'media',
   'screenshots',
   'documents',
+  'write',
 ] as const
 
 export type ScenarioName = (typeof SCENARIOS)[number]
@@ -173,6 +174,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   documents: {
     description:
       "Writes a PDF, a Word document and a 24 MB PDF into the session's folder and names them, for the phone's preview",
+  },
+  write: {
+    description: "Writes the text and its model into a file of the session's folder, a real edit",
+    hint: '[file] [text]',
   },
 }
 

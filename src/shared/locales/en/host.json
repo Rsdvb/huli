@@ -1351,5 +1351,23 @@
     "high": "High",
     "xhigh": "Extra high",
     "max": "Max"
+  },
+  "groups": {
+    "untitled": "Best of N",
+    "keeping": "This group's run is being kept already.",
+    "alreadyKept": "A run of this group was kept already.",
+    "stillWorking": "This run is still working. Wait for it to finish, or stop it, before keeping it.",
+    "mainDetached": "The project's own checkout is on no branch, so nothing was merged. Switch it to a branch first.",
+    "mainBusy": "The project's own checkout is in the middle of a merge, rebase or other operation. Finish or abort it first.",
+    "mainChanged_one": "The project's own checkout has an uncommitted change ({{files}}). Commit or stash it before keeping this run.",
+    "mainChanged_other": "The project's own checkout has {{count}} uncommitted changes ({{files}}). Commit or stash them before keeping this run.",
+    "branchMoved": "This run's worktree is no longer on its branch {{branch}}, so it was not kept.",
+    "nothingToKeep": "This run changed nothing, so there is nothing to keep.",
+    "conflicts_one": "This run conflicts with the project's own checkout in {{files}}. Nothing was merged; resolve it by hand or keep another run.",
+    "conflicts_other": "This run conflicts with the project's own checkout in {{count}} files ({{files}}). Nothing was merged; resolve them by hand or keep another run.",
+    "mergeFailed": "Git could not merge this run: {{error}}",
+    "keptRun": "The run you kept is not set aside.",
+    "discardFailed": "Some runs could not be set aside: {{error}}",
+    "noWorktree": "This run's worktree is gone."
   }
 }
