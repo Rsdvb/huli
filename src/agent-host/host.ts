@@ -1048,9 +1048,13 @@ export class AgentHost {
         balances: this.profiles.balancesOf(agentId),
       }),
       readProfileBalances: (agentId, force) => {
-        void this.profiles.readBalances(agentId, force).then((changed) => {
-          if (changed) this.agents.profilesChanged(agentId)
-        })
+        void this.profiles.readBalances(agentId, force).then(
+          (changed) => {
+            if (changed) this.agents.profilesChanged(agentId)
+          },
+          (error: unknown) =>
+            this.diagnostics.log('warn', `Could not read the profiles' balances: ${String(error)}`),
+        )
       },
       ...(options.secretStore ? { secretStore: options.secretStore } : {}),
       copies: this.copies,
@@ -2029,12 +2033,14 @@ export class AgentHost {
   }
 
   /**
-   * Huli: main's API provider profiles, with their keys, in place of those before. A running
-   * session keeps what it started with until its agent starts again.
+   * Huli: main's API provider profiles, with their keys, in place of those before. An idle session
+   * on a profile that changed attaches anew; one at work keeps what it started with until then.
    */
   setProfiles(raw: unknown): void {
-    for (const agentId of this.profiles.set(raw)) {
-      if (this.agents.has(agentId)) this.agents.profilesChanged(agentId)
+    for (const { agentId, profileIds } of this.profiles.set(raw)) {
+      if (!this.agents.has(agentId)) continue
+      this.agents.profilesChanged(agentId)
+      if (profileIds.length > 0) this.sessions.profilesChanged(agentId, profileIds)
     }
   }
 

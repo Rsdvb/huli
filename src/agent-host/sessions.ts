@@ -6279,6 +6279,23 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Huli: profiles of the agent were edited or removed. Its prepared sessions on them, and its idle
+   * ones, let their agent go, so the next turn attaches with what the profile holds now, or stops
+   * on a profile that is gone; a session at work keeps its own until its agent goes.
+   */
+  profilesChanged(agentId: AgentId, profileIds: readonly string[]): void {
+    for (const live of [...this.live.values()]) {
+      const { profileId } = live.record
+      if (live.record.agentId !== agentId || profileId === undefined) continue
+      if (!profileIds.includes(profileId)) continue
+      if (live.prepared) void this.dropPrepared(live)
+      else if (live.connection && live.saved && this.holdReason(live) === null) {
+        this.release(live, 'its API profile changed')
+      }
+    }
+  }
+
   /** The agent's start mode changed: its prepared sessions started in the old one. */
   startModeChanged(agentId: AgentId): void {
     this.configChanged(agentId)
@@ -7433,7 +7450,13 @@ export class SessionManager {
     let breakdown: ContextBreakdown | null
     if (connection.readContext) {
       try {
-        breakdown = await connection.readContext(record.acpSessionId, workDir(record), {})
+        // Huli: a profile's session is read on its profile, so its history goes nowhere else.
+        const provider = this.providerOf(record)
+        breakdown = await connection.readContext(
+          record.acpSessionId,
+          workDir(record),
+          provider ? { provider } : {},
+        )
       } catch (error) {
         throw agentError(error)
       }
@@ -10731,8 +10754,9 @@ export class SessionManager {
     const live = this.live.get(sessionId)
     if (live?.prepared) throw invalidParams(t('session.profile.prepared'))
     if (live) {
+      // One that failed or waits for a sign-in may change too: another profile is its way on.
       const status = live.thread.session.status
-      const idle = !live.turn && (status === 'ready' || status === 'closed')
+      const idle = !live.turn && SWITCHABLE.has(status)
       if (!idle || (live.connection && (!live.saved || this.holdReason(live) !== null))) {
         throw new HostError('busy', t('session.profile.betweenTurns'))
       }
@@ -12653,6 +12677,14 @@ function modelOf(config: readonly ConfigOption[]): string | null {
   const option = config.find((o) => o.category === 'model' && typeof o.value === 'string')
   return typeof option?.value === 'string' ? option.value : null
 }
+
+/** Huli: the states a session's API profile may change in: none of a turn or a start. */
+const SWITCHABLE: ReadonlySet<SessionStatus> = new Set([
+  'ready',
+  'closed',
+  'failed',
+  'auth_required',
+])
 
 /** Which prepared session a request asks for: the agent, the folder and the parent. */
 function preparedKey(params: PrepareParams): string {

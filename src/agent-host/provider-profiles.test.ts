@@ -69,10 +69,10 @@ describe('the profiles the agent host holds', () => {
       },
       codex: { items: [deepseek], defaultId: null },
     })
-    expect(changed).toEqual(['claude-code'])
+    expect(changed).toEqual([{ agentId: 'claude-code', profileIds: [] }])
     expect(profiles.view('claude-code')?.items.map((p) => p.id)).toEqual(['p-ok'])
     expect(profiles.defaultOf('claude-code')).toBeNull()
-    expect(profiles.set(undefined)).toEqual(['claude-code'])
+    expect(profiles.set(undefined)).toEqual([{ agentId: 'claude-code', profileIds: ['p-ok'] }])
     expect(profiles.get('claude-code', 'p-ok')).toBeNull()
   })
 

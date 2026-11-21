@@ -77,10 +77,11 @@ export class ProviderProfiles {
   constructor(private readonly reach: BalanceReach = { now: Date.now }) {}
 
   /**
-   * Takes main's profiles in place of those before, dropping any that is not whole; resolves to
-   * the agents whose profiles changed. Undefined, from a parent older than profiles, keeps none.
+   * Takes main's profiles in place of those before, dropping any that is not whole; answers the
+   * agents whose profiles changed, with the profiles edited or removed. Undefined, from a parent
+   * older than profiles, keeps none.
    */
-  set(raw: unknown): AgentId[] {
+  set(raw: unknown): { agentId: AgentId; profileIds: string[] }[] {
     const next = new Map<AgentId, Held>()
     if (isRecord(raw)) {
       for (const [agentId, entry] of Object.entries(raw)) {
@@ -117,8 +118,18 @@ export class ProviderProfiles {
       // A changed key is read again at the next look.
       this.readAt.delete(agentId)
     }
+    const before = this.held
     this.held = next
-    return changed
+    return changed.map((agentId) => {
+      const now = next.get(agentId)?.items ?? []
+      const profileIds = (before.get(agentId)?.items ?? [])
+        .filter((was) => {
+          const kept = now.find((each) => each.id === was.id)
+          return !kept || JSON.stringify(kept) !== JSON.stringify(was)
+        })
+        .map((was) => was.id)
+      return { agentId, profileIds }
+    })
   }
 
   /** What the vendors last told of the agent's profiles' balances. */
