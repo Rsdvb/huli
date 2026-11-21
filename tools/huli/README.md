@@ -233,6 +233,38 @@ Hooks into upstream files, one or two lines each:
 The phone app (`mobile/`) shows them on its home list, with the system's context menus and the
 other paired computers' sessions (`mobile/src/fleet.ts`, `folders.tsx`, `homeList.ts`).
 
+### Best of N (同时交给几个 Agent)
+
+One message runs on 2 to 4 agents or models at once, after Cursor's `/best-of-n`. Each run is an
+ordinary session in a new worktree cut from the branch New session shows (the worktree's copy
+and setup command run as for any worktree session), and its record names its group
+(`group: { id, title, size, kept? }`, which every run carries alike), so no store of its own
+exists: the session list, its events and the phone get the groups for free.
+
+- `src/shared/session-groups.ts`: the group reference, `RunChanges`, `runPhase` (working,
+  waiting, done, failed) shared by the desktop and the phone.
+- `src/agent-host/groups/`: `groups.start` (the runs at once, each with its own copy of the
+  prompt's attachments, whose records a sent message releases; worktrees are made one at a time
+  per project so their names stay distinct), `groups.changes` and `groups.fileDiff` (a run against
+  its base commit, uncommitted and untracked files included, read only when asked), `groups.keep`
+  and `groups.discard`. Paired devices may call them all; the host checks everything.
+- Keep this merges the run's branch into the project's own checkout (`git merge --no-ff`, as a
+  task's parallel branches are merged), after committing what the run left uncommitted to that
+  branch. It is refused while the run works, once a run was kept, when that checkout is on no
+  branch, amid a merge or rebase, or has tracked changes; a merge that conflicts is aborted and
+  the run's commit taken back, so a refusal changes neither checkout.
+- Archiving the other runs (offered after a keep, and from the page's note) commits what each
+  left uncommitted to its branch, removes its worktree and archives it. Branches always stay, so
+  no run's work is lost; they are deleted by hand.
+- Desktop: the way-of-working menu's 同时交给几个 Agent and the runs' chips
+  (`features/session/new-session/runs-bar.tsx`, `run-starts.ts`, `stores/best-of-n.ts`), the
+  group page (`features/groups/`, a `group` page view), whose run cards read their changes again
+  on each git status event of their worktrees, and the sidebar's group row
+  (`features/sidebar/run-group-row.tsx`; `sidebarRows` folds two or more listed runs into it).
+- Phone: `mobile/src/homeList.ts` folds a group's runs into one row where its loudest run would
+  be (`components/BestOfRow.tsx`), opening to the runs' rows; a finished run's menu offers 保留这个.
+- The fake agent's `/write [file] [text]` makes a real edit, to compare runs with.
+
 ### Backup
 
 A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,
