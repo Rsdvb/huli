@@ -219,7 +219,9 @@ export function NotesLayer({
       if (cell === restingCell) return
       restingCell = cell
       clearTimeout(timer)
-      timer = setTimeout(place, REST_MS)
+      // Off the numbers it goes at once; onto them it waits for the pointer to rest.
+      if (cell === null) place()
+      else timer = setTimeout(place, REST_MS)
     }
     const leave = (event: PointerEvent): void => {
       if (button.contains(event.relatedTarget as Node | null)) return
