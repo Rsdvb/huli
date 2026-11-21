@@ -1,5 +1,6 @@
 // One file of a session's folder, read-only: its text in monospace with line numbers, scrolled
-// sideways rather than wrapped, and a button that copies it all.
+// sideways rather than wrapped, and a button that copies it all. A file that is no text, or too
+// long to show, opens in the system's viewer instead; any can go to another app.
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import {
@@ -15,6 +16,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { DeviceFileContent } from '@shared/files'
 import { formatBytes } from '../attachments'
+import { Button } from '../manage/kit'
+import { previewFile as preview } from '../preview/preview'
+import { SHARE_LABEL } from '../preview/PreviewSheet'
 import { call, errorText, sessionFolder } from '../git'
 import { sameFields, useHostSelector, useLink, type HostData } from '../host'
 import { ContextMenu } from '../ui/ContextMenu'
@@ -38,10 +42,8 @@ export default function FileScreen() {
     useCallback(
       (d: HostData) => {
         const summary = d.sessions.get(id)
-        return {
-          known: summary !== undefined,
-          folder: summary && !summary.scratch ? sessionFolder(summary) : null,
-        }
+        // A session started with no project has a folder of its own, where its files are.
+        return { known: summary !== undefined, folder: summary ? sessionFolder(summary) : null }
       },
       [id],
     ),
@@ -151,11 +153,30 @@ export default function FileScreen() {
   } else {
     const text =
       content.kind === 'too-large'
-        ? `这个文件有 ${formatBytes(content.size)}，超过了 ${formatBytes(content.limit)}，手机上不显示。`
+        ? `这个文件有 ${formatBytes(content.size)}，超过了 ${formatBytes(content.limit)}，这里不显示，可以用系统的预览打开。`
         : content.kind === 'binary'
-          ? `这是一个二进制文件（${formatBytes(content.size)}），没法当作文本显示。`
-          : '这是一个媒体文件，请在电脑上查看。'
-    body = <StateView text={text} icon={G.file} />
+          ? `这是一个二进制文件（${formatBytes(content.size)}），没法当作文本显示，可以用系统的预览打开。`
+          : '这是一个媒体文件，可以用系统的预览打开。'
+    body = (
+      <View style={styles.other}>
+        <StateView text={text} icon={G.file} />
+        <View style={[styles.otherButtons, { paddingBottom: insets.bottom + 24 }]}>
+          <Button
+            label="预览"
+            tone="primary"
+            icon="doc"
+            wide
+            onPress={() => preview({ sessionId: id, path }, 'view')}
+          />
+          <Button
+            label={SHARE_LABEL}
+            icon="external"
+            wide
+            onPress={() => preview({ sessionId: id, path }, 'share')}
+          />
+        </View>
+      </View>
+    )
   }
 
   return (
@@ -168,6 +189,14 @@ export default function FileScreen() {
         right={
           content?.kind === 'text' ? (
             <View style={styles.actions}>
+              <RoundButton
+                tone="glass"
+                size={44}
+                onPress={() => preview({ sessionId: id, path }, 'share')}
+                accessibilityLabel={SHARE_LABEL}
+              >
+                <Icon icon={G.share} size={17} color={c.text} />
+              </RoundButton>
               <RoundButton tone="glass" size={44} onPress={selectAll} accessibilityLabel="选择文本">
                 <Icon icon={G.select} size={17} color={c.text} />
               </RoundButton>
@@ -201,6 +230,8 @@ const EDGE = 10
 const styles = StyleSheet.create({
   frame: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
   actions: { flexDirection: 'row', gap: 8 },
+  other: { flex: 1 },
+  otherButtons: { paddingHorizontal: 24, gap: 10 },
   code: { paddingTop: EDGE, paddingRight: 16 },
   line: { flexDirection: 'row' },
   number: { fontFamily: MONO, fontSize: 12, lineHeight: LINE, textAlign: 'right', marginRight: 10 },

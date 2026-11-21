@@ -1,7 +1,8 @@
 // The git panel of the folder a session works in, its worktree's or its project's, as the desktop's
 // branch popover and git dialogs offer it: the worktree, the branch with Pull and Push (or Publish),
 // the commits a pull brings, the pull request, the uncommitted files with Commit and Discard, and
-// the branch's commits. A file opens to its diff; the branch opens the branch picker.
+// the branch's commits. A file opens to its diff, a document in the system's viewer; the branch
+// opens the branch picker.
 
 import { useMemo, type ReactElement } from 'react'
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native'
@@ -27,6 +28,9 @@ import {
 import { useGitSteps } from '../../components/git/useGitSteps'
 import { WorktreeCard } from '../../components/git/WorktreeCard'
 import { sessionFolder, useChanges, useCurrentPr, useGitRunning, useGitTools } from '../../git'
+import { opensInViewer } from '../../preview/kinds'
+import { previewFile } from '../../preview/preview'
+import { SHARE_LABEL } from '../../preview/PreviewSheet'
 import { useConnected, useHasSessions, useLink, useProjects, useSession } from '../../host'
 import { joinGroups, type MenuNode } from '../../ui/menu'
 import { baseName } from '../../ui/session/format'
@@ -67,11 +71,17 @@ export default function ChangesScreen() {
     return { insertions, deletions }
   }, [files])
 
-  const open = (file: ChangedFile) =>
+  const openDiff = (file: ChangedFile) =>
     router.push({
       pathname: '/diff',
       params: { id, path: file.path, ...(file.oldPath ? { oldPath: file.oldPath } : {}) },
     })
+  // A document is seen as it is now, which its diff cannot show; the menu still has the diff.
+  const open = (file: ChangedFile) => {
+    if (file.status !== 'deleted' && opensInViewer(file.path)) {
+      previewFile({ sessionId: id, path: file.path })
+    } else openDiff(file)
+  }
 
   const discard = (paths: string[]) => {
     const name = paths.length === 1 ? baseName(paths[0]!) : ''
@@ -95,12 +105,32 @@ export default function ChangesScreen() {
   const fileMenu = (file: ChangedFile): MenuNode[] =>
     joinGroups([
       [
+        ...(file.status === 'deleted'
+          ? []
+          : [
+              {
+                key: 'view',
+                label: opensInViewer(file.path) ? '预览' : '用系统预览打开',
+                icon: 'eye' as const,
+                onPress: () => previewFile({ sessionId: id, path: file.path }),
+              },
+            ]),
         {
           key: 'diff',
           label: '打开差异',
           icon: 'plus.forwardslash.minus',
-          onPress: () => open(file),
+          onPress: () => openDiff(file),
         },
+        ...(file.status === 'deleted'
+          ? []
+          : [
+              {
+                key: 'share',
+                label: SHARE_LABEL,
+                icon: 'square.and.arrow.up' as const,
+                onPress: () => previewFile({ sessionId: id, path: file.path }, 'share'),
+              },
+            ]),
         ...(blocked || file.status === 'conflicted'
           ? []
           : [

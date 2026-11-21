@@ -1,12 +1,14 @@
 // A turn's edits as one card: how many files and lines it changed, and a row per file that opens
-// to a preview of its change or, tapped, to the whole diff.
+// to a preview of its change or, tapped, to the whole diff, and opens the file itself at its end.
 
 import { memo, useMemo } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import type { ToolEntry } from '@shared/thread'
 import { handDiff } from '../../diff'
+import { opensInViewer } from '../../preview/kinds'
 import { useSessionRows } from './context'
+import { folderFile, openFile } from './fileRefs'
 import { relativePath } from './format'
 import { FileMark, G, Icon } from './icons'
 import { MONO, useSessionTokens } from './palette'
@@ -90,6 +92,7 @@ function Preview(props: { change: FileChange }) {
 function FileRow(props: {
   change: FileChange
   root: string | null
+  sessionId: string
   first: boolean
   /** The turn's, so the row stays open as the list mounts it again. */
   turn: string
@@ -97,6 +100,8 @@ function FileRow(props: {
   const { c } = useSessionTokens()
   const { change } = props
   const [open, setOpen] = useDisclosure(`change:${props.turn}:${change.path}`)
+  // The file as it is now, which a document is seen as better than through its diff.
+  const file = folderFile(change.path, props.root)
   const shown = useOpenFade(open)
   // The chevron and the rest of the line are buttons side by side: nested in the line, a tap on
   // the chevron could open the diff instead.
@@ -133,6 +138,16 @@ function FileRow(props: {
           )}
           <Counts insertions={change.insertions} deletions={change.deletions} />
         </Pressable>
+        {file ? (
+          <Pressable
+            onPress={() => openFile(props.sessionId, file)}
+            accessibilityRole="button"
+            accessibilityLabel={opensInViewer(file) ? `预览 ${file}` : `打开 ${file}`}
+            style={({ pressed }) => [styles.open, pressed && { opacity: 0.55 }]}
+          >
+            <Icon icon={G.eye} size={15} color={c.tint} />
+          </Pressable>
+        ) : null}
       </View>
       {open && (
         <Animated.View style={{ paddingHorizontal: 12, paddingBottom: 12, opacity: shown }}>
@@ -145,7 +160,7 @@ function FileRow(props: {
 
 export const TurnChanges = memo(function TurnChanges(props: { tools: ToolEntry[] }) {
   const { c, s } = useSessionTokens()
-  const { root } = useSessionRows((r) => ({ root: r.root }))
+  const { root, sessionId } = useSessionRows((r) => ({ root: r.root, sessionId: r.sessionId }))
   const changes = useMemo(() => fileChanges(props.tools), [props.tools])
   if (changes.length === 0) return null
   const insertions = changes.reduce((n, ch) => n + ch.insertions, 0)
@@ -161,6 +176,7 @@ export const TurnChanges = memo(function TurnChanges(props: { tools: ToolEntry[]
           key={change.path}
           change={change}
           root={root}
+          sessionId={sessionId}
           first={i === 0}
           turn={props.tools[0]!.id}
         />
@@ -189,6 +205,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingRight: 16,
   },
+  open: { width: 44, alignItems: 'center', justifyContent: 'center', marginLeft: -8 },
   path: { flex: 1, fontSize: 14, lineHeight: 19 },
   tag: {
     fontSize: 11,

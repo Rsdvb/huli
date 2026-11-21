@@ -19,7 +19,7 @@ import { MONO, useSessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
 import { selectText } from '../ui/session/SelectText'
 import { StateView } from '../ui/session/StateView'
-import { answerText, EditLine, target, VERBS } from '../ui/session/ToolRow'
+import { answerText, EditLine, FileLine, target, toolFiles, VERBS } from '../ui/session/ToolRow'
 import { toolTitle } from '../ui/session/toolNames'
 import { toolEdits } from '../ui/session/turns'
 import { fenceBody, numberedRead } from '../ui/session/work'
@@ -99,7 +99,7 @@ export default function ToolScreen() {
   const { c } = useSessionTokens()
   const link = useLink()
   const summary = useSession(sessionId)
-  const root = summary && !summary.scratch ? sessionFolder(summary) : null
+  const root = summary ? sessionFolder(summary) : null
   const [entry, setEntry] = useState<ThreadEntry | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -151,6 +151,7 @@ export default function ToolScreen() {
     body = <StateView text="这不是一次工具调用。" />
   } else {
     const edits = toolEdits(tool)
+    const files = toolFiles(tool, root)
     // What it returned as plain text: inside its fence, and a file read without the numbers
     // Claude Code puts before each line, so a copy is the file's own text.
     const outputs = tool.content.flatMap((part) =>
@@ -217,6 +218,14 @@ export default function ToolScreen() {
             <PictureStrip pictures={pictures} align="start" />
           </View>
         )}
+        {files.length > 0 && (
+          <View style={{ gap: 6 }}>
+            <Text style={[styles.label, { color: c.textSecondary }]}>文件</Text>
+            {files.map((file) => (
+              <FileLine key={file} path={file} sessionId={sessionId} />
+            ))}
+          </View>
+        )}
         {edits.length > 0 && (
           <View style={{ gap: 6 }}>
             <Text style={[styles.label, { color: c.textSecondary }]}>改动的文件</Text>
@@ -229,6 +238,7 @@ export default function ToolScreen() {
           outputs.length === 0 &&
           pictures.length === 0 &&
           edits.length === 0 &&
+          files.length === 0 &&
           !running && <Text style={[styles.description, { color: c.textTertiary }]}>没有输出</Text>}
       </ScrollView>
     )

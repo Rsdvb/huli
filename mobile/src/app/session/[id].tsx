@@ -115,7 +115,7 @@ import {
 } from '../../components/SessionDock'
 import { useProjectFiles } from '../../files'
 import { confirm } from '../../manage/kit'
-import { call } from '../../git'
+import { call, sessionFolder } from '../../git'
 import {
   sameFields,
   sameItems,
@@ -391,20 +391,29 @@ function Session() {
 
   // The folder's files, for the references in replies and prompts that open them. A project
   // lists up to 50,000, read only once the screen has opened and settled, and kept ten minutes
-  // for the next session in the folder, as only whether a file is there matters here.
+  // for the next session in the folder, as only whether a file is there matters here. Read again
+  // as a turn ends, so a file it made opens from the reply that names it. A session with no
+  // project has its files in a folder of its own.
+  const filesFolder = summary ? sessionFolder(summary) : null
   const [settled, setSettled] = useState(false)
   useEffect(() => {
     const timer = setTimeout(() => setSettled(true), FILES_AFTER)
     return () => clearTimeout(timer)
   }, [])
-  const projectFiles = useProjectFiles(link, changes.folder, connected && settled, FILES_KEPT)
+  const projectFiles = useProjectFiles(link, filesFolder, connected && settled, FILES_KEPT)
+  const reloadFiles = projectFiles.reload
+  const wasRunning = useRef(running)
+  useEffect(() => {
+    if (wasRunning.current && !running) reloadFiles()
+    wasRunning.current = running
+  }, [running, reloadFiles])
   const known = useMemo(
     () => (projectFiles.list ? new Set(projectFiles.list.paths) : null),
     [projectFiles.list],
   )
   const fileRefs = useMemo(
-    () => ({ sessionId: id, root: changes.folder, known }),
-    [id, changes.folder, known],
+    () => ({ sessionId: id, root: filesFolder, known }),
+    [id, filesFolder, known],
   )
   const { plan, ownTurn } = useThreadSelector(
     view,
@@ -444,10 +453,7 @@ function Session() {
   // The files of the folder the session's tools read or edited, newest first.
   const touched = useThreadSelector(
     view,
-    useCallback(
-      (thread: ThreadState | null) => touchedFiles(thread, changes.folder),
-      [changes.folder],
-    ),
+    useCallback((thread: ThreadState | null) => touchedFiles(thread, filesFolder), [filesFolder]),
     sameItems,
   )
 
@@ -664,7 +670,7 @@ function Session() {
   const context = useMemo<SessionRowsContext>(
     () => ({
       sessionId: id,
-      root: changes.folder,
+      root: filesFolder,
       fork: canFork ? fork : null,
       forkAtMessage,
       undo,
@@ -677,7 +683,7 @@ function Session() {
     }),
     [
       id,
-      changes.folder,
+      filesFolder,
       canFork,
       fork,
       forkAtMessage,
@@ -972,7 +978,7 @@ function Session() {
     const repo = !!changes.folder && changes.repo !== false
     return {
       entries: [
-        ...(changes.folder
+        ...(filesFolder
           ? [
               {
                 key: 'files',

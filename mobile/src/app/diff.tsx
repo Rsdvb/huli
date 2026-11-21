@@ -9,6 +9,9 @@ import { DiffView } from '../components/DiffView'
 import { diffTexts, handedDiff, type Diff } from '../diff'
 import { call, sessionFolder, useChanges } from '../git'
 import { hostErrorText } from '../hostErrors'
+import { Button } from '../manage/kit'
+import { previewFile } from '../preview/preview'
+import { SHARE_LABEL } from '../preview/PreviewSheet'
 import { useConnected, useHasSessions, useLink, useSession } from '../host'
 import { baseName, dirName, relativePath } from '../ui/session/format'
 import { GlassHeader } from '../ui/session/GlassHeader'
@@ -127,7 +130,26 @@ export default function DiffScreen() {
           }}
         />
       ) : shown.kind === 'note' ? (
-        <StateView text={shown.text} />
+        <View style={{ flex: 1 }}>
+          <StateView text={shown.text} />
+          {params.id && folder && !ref ? (
+            <View style={styles.noteButtons}>
+              <Button
+                label="预览文件"
+                tone="primary"
+                icon="doc"
+                wide
+                onPress={() => previewFile({ sessionId: params.id!, path })}
+              />
+              <Button
+                label={SHARE_LABEL}
+                icon="external"
+                wide
+                onPress={() => previewFile({ sessionId: params.id!, path }, 'share')}
+              />
+            </View>
+          ) : null}
+        </View>
       ) : shown.diff.rows.length === 0 ? (
         <StateView text="没有改动" />
       ) : (
@@ -163,4 +185,5 @@ const styles = StyleSheet.create({
   },
   bannerText: { flex: 1, fontSize: 12, lineHeight: 17 },
   sheet: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
+  noteButtons: { paddingHorizontal: 24, paddingBottom: 48, gap: 10 },
 })
