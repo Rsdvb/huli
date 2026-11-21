@@ -34,7 +34,11 @@ export interface SavedHost {
   pushId?: string
   /** Its id on Huli Cloud's relay and the relays it signs in to, once a code or a welcome said. */
   relay?: HostRelay
+  /** The way the user picked to reach it: its addresses alone or the relay alone; else both. */
+  route?: RoutePick
 }
+
+export type RoutePick = 'direct' | 'relay'
 
 export interface SavedComputers {
   active: string | null

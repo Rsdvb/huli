@@ -3,6 +3,7 @@
 import type { LinkState } from '@shared/remote/link'
 import type { DirectAddress } from '@shared/remote/protocol'
 import { routeKind, type CurrentRoute } from './connection'
+import type { RoutePick } from './store'
 
 /** `off`: not connected for a while, the computer likely off or Huli not running there. */
 export type LinkTone = 'ok' | 'busy' | 'down' | 'off'
@@ -69,8 +70,21 @@ export function routeName(route: CurrentRoute): string {
   return route.kind === 'relay' ? '中转' : ROUTE_NAMES[routeKind(route.address)]
 }
 
-/** What the 连接 and 地址 groups say of how the phone reaches a computer. */
-export function routesNote(relay: boolean): string {
+/** The ways the user can pick to reach a computer, as Settings lists them. */
+export const ROUTE_PICKS = [
+  { pick: null, title: '自动', subtitle: '哪条快走哪条，断了自动换' },
+  { pick: 'direct', title: '只走直连', subtitle: 'Tailscale 或局域网，不经过中转' },
+  { pick: 'relay', title: '只走中转', subtitle: '经 Kite Cloud 中转，Tailscale 不稳时用' },
+] as const satisfies readonly { pick: RoutePick | null; title: string; subtitle: string }[]
+
+/** What the 连接 and 地址 groups say of how the phone reaches a computer, by the way picked. */
+export function routesNote(relay: boolean, pick: RoutePick | null = null): string {
+  if (pick === 'relay') {
+    return '只经 Kite Cloud 中转，不试 Tailscale 和局域网地址；手机也要登录 Kite Cloud。内容在两端之间端到端加密，中转服务器也看不到。'
+  }
+  if (pick === 'direct') {
+    return '只试 Tailscale 和局域网地址，连上哪个用哪个，都连不上时不经中转。内容在两端之间端到端加密。'
+  }
   return relay
     ? '手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个；都连不上时经 Kite Cloud 中转。内容在两端之间端到端加密，中转服务器也看不到。'
     : '手机先试 Tailscale 地址，再试局域网地址，连上哪个用哪个。内容在两端之间端到端加密，不经过任何中转服务器。'

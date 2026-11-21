@@ -354,6 +354,24 @@ export class HostLink {
     this.wake()
   }
 
+  /**
+   * The routes changed, as when the user picked one: a session on a route no longer offered moves
+   * to one that is without a drop showing, or reconnects through them when none opens at once.
+   */
+  reroute(): void {
+    if (this.stopped) return
+    const session = this.session
+    if (!session) return this.reconnectNow()
+    if (this.routes().some((route) => route.key === session.route.key)) return
+    void (async () => {
+      // A comparison under way may move the session already; this one follows it.
+      while (this.comparing) await this.comparing
+      if (this.session !== session) return
+      const moved = await this.compare(true)
+      if (!moved && this.session === session) session.channel.close()
+    })()
+  }
+
   stop(): void {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)

@@ -28,6 +28,7 @@ import {
   loadDeviceKey,
   saveDeviceKey,
   toBase64,
+  type RoutePick,
   type SavedHost,
 } from './store'
 import { DEVICE, DEVICE_NAME, SYSTEM_VERSION } from './system/device'
@@ -109,13 +110,19 @@ function directOpen(into: Heard): boolean {
  * The relay as a route: dialed a moment after the direct addresses, unless one of them is open by
  * then; at once for a computer the phone has no usable address of.
  */
-function relayRoute(relay: HostRelay, addresses: DirectAddress[], into: Heard): LinkRoute {
+function relayRoute(
+  relay: HostRelay,
+  addresses: DirectAddress[],
+  into: Heard,
+  only = false,
+): LinkRoute {
   return {
     key: 'relay',
     relay: true,
     dial: afterGrace(() => dialRelayTo(relay).then((t) => tracked(null, t, into)), {
-      now: usableAddresses(addresses).length === 0,
-      direct: () => directOpen(into),
+      now: only || usableAddresses(addresses).length === 0,
+      // Picked as the only way, the relay is dialed even beside a direct connection, to move off it.
+      direct: () => !only && directOpen(into),
     }),
   }
 }
@@ -324,6 +331,13 @@ export async function pairWithAccount(
 
 const routeKey = (address: DirectAddress) => `${address.host}:${address.port}`
 
+/** The way picked to reach a computer while it offers that way; null for every way. */
+export function pickedRoute(host: SavedHost): RoutePick | null {
+  if (host.route === 'relay') return host.relay ? 'relay' : null
+  if (host.route === 'direct') return usableAddresses(host.addresses).length > 0 ? 'direct' : null
+  return null
+}
+
 /**
  * The addresses to try, the one the computer was last reached on first. Every route is dialed at
  * once, so this puts it first in line rather than making the others wait.
@@ -348,14 +362,20 @@ export function linkTo(
   side = false,
 ): HostLink {
   const into: Heard = side ? new Map() : heard
+  // The ways the user picked, read at each try, so a new pick holds from the next one on.
   const routes = (): LinkRoute[] => {
     const saved = current()
-    const direct: LinkRoute[] = triedAddresses(saved).map((address) => ({
-      key: routeKey(address),
-      relay: false,
-      dial: () => openSocket(address, undefined, into),
-    }))
-    return saved.relay ? [...direct, relayRoute(saved.relay, saved.addresses, into)] : direct
+    const pick = pickedRoute(saved)
+    const direct: LinkRoute[] =
+      pick === 'relay'
+        ? []
+        : triedAddresses(saved).map((address) => ({
+            key: routeKey(address),
+            relay: false,
+            dial: () => openSocket(address, undefined, into),
+          }))
+    if (!saved.relay || pick === 'direct') return direct
+    return [...direct, relayRoute(saved.relay, saved.addresses, into, pick === 'relay')]
   }
   return new HostLink({
     dial: () => dialAny(current().addresses, current().relay, into),

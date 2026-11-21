@@ -39,6 +39,7 @@ import {
   computerName,
   loadComputers,
   saveComputers,
+  type RoutePick,
   type SavedComputers,
   type SavedHost,
 } from './store'
@@ -82,6 +83,8 @@ export interface HostActions {
   switchTo(id: string): void
   /** The name this phone shows for a computer; null goes back to the computer's own. */
   rename(id: string, label: string | null): void
+  /** The way the phone reaches a computer from now on; null takes every way. */
+  setRoute(id: string, route: RoutePick | null): void
   /** Reads the lists again; settles within REFRESH_LIMIT, connected or not. */
   refresh(): Promise<void>
   /** The computer took a new name for this phone; kept until its next welcome says so too. */
@@ -839,6 +842,11 @@ export function HostProvider(props: { children: ReactNode }) {
       unpair,
       switchTo,
       rename: (id, label) => patchHost(id, { label: label?.trim() || undefined }),
+      setRoute: (id, route) => {
+        patchHost(id, { route: route ?? undefined })
+        const ready = getHost().ready
+        if (ready?.host.id === id) ready.link.reroute()
+      },
       refresh,
       renamedDevice: (name) => {
         const active = getHost().computers.active
