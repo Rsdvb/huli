@@ -132,10 +132,6 @@ function ArtifactsTab() {
     }
   }, [link])
 
-  useEffect(() => {
-    if (connected) void load()
-  }, [connected, load])
-
   // One read at a time. A change heard during a read reads once more after it, however many
   // came; the tab coming into view during one needs nothing more.
   const latestLoad = useRef(load)
@@ -171,6 +167,10 @@ function ArtifactsTab() {
   useOnShown(() => {
     if (connected) reload(false)
   })
+  // Once connected, and again over a new link, whatever a read under way had.
+  useEffect(() => {
+    if (connected) reload(true)
+  }, [connected, link, reload])
 
   const agentOf = useCallback(
     (a: ArtifactSummary) => sessionAgents.get(a.sessionId) ?? null,
