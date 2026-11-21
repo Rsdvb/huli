@@ -168,6 +168,10 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
   const forkConfig = env.FAKE_AGENT_FORK_CONFIG ?? 'keep'
   const resumeConfig = env.FAKE_AGENT_RESUME_CONFIG ?? 'keep'
   const takesSystemPrompt = env.FAKE_AGENT_SYSTEM_PROMPT === '1'
+  // FAKE_AGENT_WITHOUT leaves capabilities out: session ones, such as `close`, prompt ones
+  // (`image`, `embeddedContext`), `steering`, or `auth`: no `auth/status` and no pushes of its
+  // sign-in, like an agent that tells it only by refusing a session.
+  const without = new Set((env.FAKE_AGENT_WITHOUT ?? '').split(',').map((name) => name.trim()))
   // Not scaled: it stands for an agent that is slow to take a setting, whatever the pace.
   const setConfigMs = Number(env.FAKE_AGENT_SET_CONFIG_MS ?? '') || 0
   const settled = (): Promise<void> | undefined =>
@@ -218,7 +222,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
 
   const pushAuthStatus = (): void => {
     const client = connection?.client
-    if (!client) return
+    if (!client || without.has('auth')) return
     void client
       .notify(methods.client.auth.statusUpdate, {
         state: signedIn ? 'authenticated' : 'unauthenticated',
@@ -232,7 +236,8 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
 
   /**
    * Sends the sign-in page through the client, then stands for the browser flow the user finishes:
-   * FAKE_AGENT_PAGE_LOGIN_MS, not scaled, 8 s by default.
+   * FAKE_AGENT_PAGE_LOGIN_MS, not scaled, 8 s by default. With FAKE_AGENT_PAGE_LOGIN_UNANSWERED=1
+   * it says the page is done and is signed in, but never answers `authenticate` until cancelled.
    */
   const pageSignIn = async (
     client: AgentContext,
@@ -240,6 +245,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
     signal: AbortSignal,
   ): Promise<void> => {
     const elicitationId = nextId('sign-in')
+    let pageDone = false
     try {
       const answer = await client.request(
         methods.client.elicitation.create,
@@ -267,8 +273,18 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       if (signal.aborted) throw RequestError.requestCancelled()
       signedIn = true
       pushAuthStatus()
+      if (env.FAKE_AGENT_PAGE_LOGIN_UNANSWERED === '1') {
+        pageDone = true
+        void client.notify(methods.client.elicitation.complete, { elicitationId }).catch(() => {})
+        await new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        throw RequestError.requestCancelled()
+      }
     } finally {
-      void client.notify(methods.client.elicitation.complete, { elicitationId }).catch(() => {})
+      if (!pageDone) {
+        void client.notify(methods.client.elicitation.complete, { elicitationId }).catch(() => {})
+      }
     }
   }
 
@@ -576,9 +592,6 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
     }
   }
 
-  // FAKE_AGENT_WITHOUT leaves session capabilities out, such as `close`, prompt ones (`image`,
-  // `embeddedContext`) or `steering`.
-  const without = new Set((env.FAKE_AGENT_WITHOUT ?? '').split(',').map((name) => name.trim()))
   const sessionCapabilities = () =>
     Object.fromEntries(
       ['list', 'resume', 'close', 'delete', 'fork']
@@ -663,7 +676,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
           },
           mcpCapabilities: { http: !without.has('mcp'), sse: false },
           sessionCapabilities: sessionCapabilities(),
-          auth: { logout: {}, status: {} },
+          auth: without.has('auth') ? { logout: {} } : { logout: {}, status: {} },
           // Like agy's `_meta.antigravity.systemPrompt.append`, a new session's system prompt addition.
           ...(takesSystemPrompt
             ? { _meta: { antigravity: { systemPrompt: { append: true } } } }

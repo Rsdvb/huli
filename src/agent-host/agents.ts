@@ -275,6 +275,10 @@ export interface AgentTimings {
   limitsReadMs: number
   /** How long the hidden `session/new` that reads an agent's options may take. */
   optionsMs: number
+  /** Huli: how often a sign-in that waits on a browser or a terminal is checked again. */
+  signInPollMs: number
+  /** Huli: how long such a sign-in is checked again after it started or was last asked about. */
+  signInWatchMs: number
   /** How long one `npm view` of the update check may take. */
   updateViewMs: number
   /** How long after the host starts a due update check waits, so it stays out of startup. */
@@ -299,6 +303,9 @@ const READ_ANTIGRAVITY_LIMITS = false
 /** How often a read the user asks for may run agy, however many views ask within it. */
 const ASKED_READ_MS = 60_000
 
+/** Huli: why a waiting `authenticate` was let go: a check found the agent signed in already. */
+const SIGNED_IN_ELSEWHERE = new Error('The agent is signed in')
+
 export const AGENT_TIMINGS: AgentTimings = {
   idleMs: 5 * 60_000,
   initializeMs: 30_000,
@@ -310,6 +317,8 @@ export const AGENT_TIMINGS: AgentTimings = {
   limitsBackgroundMs: 5 * 60_000,
   limitsReadMs: 90_000,
   optionsMs: 30_000,
+  signInPollMs: 4_000,
+  signInWatchMs: 3 * 60_000,
   updateViewMs: 20_000,
   updateDelayMs: 60_000,
   updateIntervalMs: 24 * 60 * 60_000,
@@ -538,6 +547,15 @@ class Slot {
   progress = new TextRing(8 * 1024)
   /** Stops the sign-in in progress; the agent is not stopped for being idle while it runs. */
   signInAbort: AbortController | null = null
+  /** Huli: the read of its sign-in methods and state that `readSignIn` runs, while it runs. */
+  signInRead: Promise<void> | null = null
+  /** The hidden session that asks whether it is signed in, while one runs. */
+  signInCheck: Promise<boolean> | null = null
+  /** Huli: that read is starting the agent for the first time this run, which its page shows. */
+  readingSignIn = false
+  /** Huli: a waiting sign-in is checked again every `signInPollMs` until then. */
+  signInWatchUntil = 0
+  signInWatchTimer: ReturnType<typeof setTimeout> | null = null
   /** The key of its `keySignIn` changed, so its next start signs in with it. */
   keySignInPending = false
   /** The method a `sharesSignIn` agent is signed in with, as it and its files show; null unknown. */
@@ -1062,6 +1080,32 @@ export class AgentManager {
     // start gets, and waits for the next one.
     for (const slot of this.slots.values()) this.emit(slot)
     return removed
+  }
+
+  /**
+   * Huli: starts each agent just added or turned on, so what it signs in with and whether it is
+   * signed in show before a session needs them. The host calls it once it gave the agents their
+   * network, which their start takes.
+   */
+  readJoinedSignIns(previous: HostSettings, next: HostSettings): void {
+    const joined = new Set<AgentId>([
+      ...next.addedAgents
+        .filter((agent) => !previous.addedAgents.some((before) => before.id === agent.id))
+        .map((agent) => agent.id),
+      ...previous.disabledAgents.filter((agentId) => !next.disabledAgents.includes(agentId)),
+      ...[...this.harnesses.keys()].filter(
+        (id) => !registeredByDefault(id, previous.agents) && registeredByDefault(id, next.agents),
+      ),
+    ])
+    for (const agentId of joined) {
+      if (!this.has(agentId) || this.isDisabled(agentId)) continue
+      this.readSignIn(agentId).catch((error: unknown) => {
+        this.deps.diagnostics.log(
+          'warn',
+          `${this.name(agentId)}: its sign-in was not read: ${(error as Error).message}`,
+        )
+      })
+    }
   }
 
   // Lifecycle.
@@ -3401,6 +3445,7 @@ export class AgentManager {
     for (const slot of this.slots.values()) {
       if (slot.resetsRetry) clearTimeout(slot.resetsRetry)
       slot.resetsRetry = null
+      this.stopSignInWatch(slot)
     }
     this.updateAbort?.abort(QUIT_REASON)
     const slots = [...this.slots.values()]
@@ -3460,6 +3505,7 @@ export class AgentManager {
         })
       },
       authState: (state) => {
+        const wasRequired = slot.signIn === 'required'
         if (state === 'authenticated') slot.signIn = 'signed-in'
         else if (state === 'not_required') slot.signIn = 'signed-in'
         else if (state === 'unauthenticated') {
@@ -3467,6 +3513,8 @@ export class AgentManager {
           slot.account = null
         }
         this.emit(slot)
+        // Huli: the sessions that waited for the sign-in go on, as after any other sign-in.
+        if (wasRequired && slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
       },
       ignored: (sessionId, what) => diagnostics.ignored(agentId, sessionId, what),
       log: (level, message) => diagnostics.log(level, `${slot.name}: ${message}`),
@@ -4380,24 +4428,188 @@ export class AgentManager {
   /**
    * Asks a signed-out agent that reports no account whether it still is, in a hidden session: a
    * sign-in made in its terminal or files, such as Pi's providers, tells Kettu nothing otherwise.
+   * False when it could not ask: the agent cannot start, or opens no hidden session. Checks asked
+   * for meanwhile share it.
    */
-  private async checkSignIn(slot: Slot): Promise<void> {
+  private checkSignIn(slot: Slot): Promise<boolean> {
+    slot.signInCheck ??= this.checkSignInNow(slot).finally(() => {
+      slot.signInCheck = null
+    })
+    return slot.signInCheck
+  }
+
+  private async checkSignInNow(slot: Slot): Promise<boolean> {
     await this.detectAll()
-    if (!slot.runtime && (slot.h.detection?.state !== 'available' || !slot.h.detection.spec)) return
+    if (!slot.runtime && (slot.h.detection?.state !== 'available' || !slot.h.detection.spec)) {
+      return false
+    }
     await slot.optionsRun?.catch(() => {})
     const log = (message: string): void =>
       this.deps.diagnostics.log('warn', `${slot.name}: ${message}`)
     try {
       const runtime = await this.ensureReady(slot.id)
-      if (!runtime.connection.unpromptedSessions) return
+      if (!runtime.connection.unpromptedSessions) return false
       await this.readInHiddenSession(slot, runtime, log, undefined)
     } catch (error) {
-      // Still signed out: the notice stays, and opening the page is not an error.
-      if (error instanceof AgentRequestError && error.kind === 'auth_required') return
-      if (error instanceof HostError && error.code === 'auth_required') return
+      // Still signed out: the notice stays, and opening the page is not an error. One whose
+      // sign-in was not known yet now asks for it.
+      if (
+        (error instanceof AgentRequestError && error.kind === 'auth_required') ||
+        (error instanceof HostError && error.code === 'auth_required')
+      ) {
+        this.authRequired(slot.id)
+        return true
+      }
       throw agentError(error)
     }
     if (slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
+    return true
+  }
+
+  // Huli: an agent's sign-in learned before a session needs it, and a sign-in that waits on a
+  // browser or a terminal checked again until it is done.
+
+  /**
+   * What the agent signs in with and whether it is signed in, for its page and its sign-in: an
+   * agent this run has not started is started, which its `initialize` names the methods for, and
+   * one whose start told neither state, or that is signed out, is asked as a forced account read
+   * asks. Never installs; the process stops when idle as any other. With `watch`, a signed-out
+   * agent is asked again every `signInPollMs` for `signInWatchMs`, for a sign-in finished outside
+   * Kettu, such as in a terminal.
+   */
+  readSignIn(agentId: AgentId, options?: { watch?: boolean }): Promise<void> {
+    const slot = this.registeredSlot(agentId)
+    if (this.isDisabled(agentId) || slot.resetHold) return Promise.resolve()
+    if (options?.watch === true) this.watchSignIn(slot)
+    slot.signInRead ??= this.learnSignIn(slot).finally(() => {
+      slot.signInRead = null
+    })
+    return slot.signInRead
+  }
+
+  private async learnSignIn(slot: Slot): Promise<void> {
+    await this.detectAll()
+    const detection = slot.h.detection
+    const startable = detection?.state === 'available' && detection.spec !== null
+    if (!slot.runtime && (!startable || slot.state === 'failed')) return
+    const first = slot.init === null
+    if (first) {
+      slot.readingSignIn = true
+      this.emit(slot)
+    }
+    try {
+      if (first) await this.ensureReady(slot.id)
+      // Its start told the state: an account, `auth/status` or an `auth_required` of its own.
+      if (slot.signIn === 'signed-in' || (first && slot.signIn === 'required')) return
+      await this.askSignIn(slot)
+    } finally {
+      if (first) {
+        slot.readingSignIn = false
+        this.emit(slot)
+      }
+    }
+  }
+
+  /**
+   * Asks the agent whether it is signed in now, never in a session that would stay in its
+   * history: its `auth/status` where it has one, which needs no session, then as a forced account
+   * read does, its own sign-in read or a hidden session, since a running agent may not see a
+   * sign-in made in its terminal or files. False when the agent has no such way to be asked, and
+   * tells only by refusing a session of the user's. Never rejects.
+   */
+  private async askSignIn(slot: Slot): Promise<boolean> {
+    const log = (message: string): void =>
+      this.deps.diagnostics.log('warn', `${slot.name}: its sign-in check failed: ${message}`)
+    try {
+      const runtime = this.runtime(slot.id)
+      const readAuthStatus = runtime?.init.capabilities.authStatus
+        ? runtime.connection.readAuthStatus?.bind(runtime.connection)
+        : undefined
+      const tells = readAuthStatus !== undefined
+      if (readAuthStatus) {
+        await readAuthStatus().catch((error: unknown) => log((error as Error).message))
+        if (slot.signIn === 'signed-in') return true
+      }
+      // Google treats a client that drives agy on its own as a terms breach (see above).
+      if (slot.def.id === 'antigravity') return tells
+      const ownRead =
+        slot.def.reportsAccount === true || slot.def.id === 'opencode' || slot.def.id === 'deepseek'
+      if (ownRead) {
+        await this.refreshAccount(slot.id, { force: true })
+        return true
+      }
+      return (await this.checkSignIn(slot)) || tells
+    } catch (error) {
+      log(agentError(error).message)
+      return true
+    }
+  }
+
+  /**
+   * Checks a signed-out agent's sign-in again every `signInPollMs` for the next `signInWatchMs`;
+   * a signed-in one has none to wait for.
+   */
+  private watchSignIn(slot: Slot): void {
+    if (slot.signIn === 'signed-in') return
+    slot.signInWatchUntil = Date.now() + this.timings.signInWatchMs
+    if (!slot.signInWatchTimer && !this.stopped) this.nextSignInCheck(slot)
+  }
+
+  private nextSignInCheck(slot: Slot): void {
+    slot.signInWatchTimer = setTimeout(() => {
+      void this.signInCheck(slot)
+    }, this.timings.signInPollMs)
+    slot.signInWatchTimer.unref?.()
+  }
+
+  private stopSignInWatch(slot: Slot): void {
+    if (slot.signInWatchTimer) clearTimeout(slot.signInWatchTimer)
+    slot.signInWatchTimer = null
+    slot.signInWatchUntil = 0
+  }
+
+  /**
+   * One check of a waiting sign-in. Signed in, the watch ends, and so does an `authenticate` still
+   * waiting for the agent, as though it had answered: some agents finish in the browser and never
+   * answer it. The watch also ends when its time is up or the agent cannot run.
+   */
+  private async signInCheck(slot: Slot): Promise<void> {
+    let asked = true
+    if (this.watching(slot) && slot.signIn !== 'signed-in') {
+      asked = slot.signInRead ? await slot.signInRead.then(() => true) : await this.askSignIn(slot)
+    }
+    if (slot.signIn === 'signed-in') slot.signInAbort?.abort(SIGNED_IN_ELSEWHERE)
+    // An agent that tells its sign-in only by refusing a session has nothing to ask again.
+    if (!asked || !this.watching(slot) || slot.signIn === 'signed-in') {
+      this.stopSignInWatch(slot)
+      return
+    }
+    this.nextSignInCheck(slot)
+  }
+
+  /** Whether a watch of the agent's sign-in still runs: its time is not up, and it may run. */
+  private watching(slot: Slot): boolean {
+    return (
+      !this.stopped &&
+      this.slots.get(slot.id) === slot &&
+      this.has(slot.id) &&
+      !this.isDisabled(slot.id) &&
+      !slot.resetHold &&
+      Date.now() < slot.signInWatchUntil
+    )
+  }
+
+  /**
+   * The page a sign-in handed over is done with: the agent is asked at once rather than at the
+   * next check. One that has no way to be asked has its sessions that wait for the sign-in try
+   * again, as a sign-in would, since its own answer may never come.
+   */
+  private async signInPageDone(slot: Slot, abort: AbortController): Promise<void> {
+    if (abort.signal.aborted) return
+    const asked = slot.signIn === 'signed-in' || (await this.askSignIn(slot))
+    if (abort.signal.aborted) return
+    if (slot.signIn === 'signed-in') abort.abort(SIGNED_IN_ELSEWHERE)
+    else if (!asked) this.hooks.signedIn(slot.id)
   }
 
   /**
@@ -4593,23 +4805,29 @@ export class AgentManager {
     slot.signInAbort?.abort()
     const abort = new AbortController()
     slot.signInAbort = abort
+    // Huli: an agent that finishes in the browser, or keeps no answer for it, is found signed in.
+    this.watchSignIn(slot)
     try {
       await runtime.connection.authenticate(methodId, {
         openLink: client.openLink,
         ...(client.showImage ? { showImage: client.showImage } : {}),
+        pageDone: () => void this.signInPageDone(slot, abort),
         signal: abort.signal,
       })
     } catch (error) {
-      if (abort.signal.aborted) {
-        throw new HostError('agent_error', t('agent.signInCancelled', { agent: slot.name }))
+      if (abort.signal.reason !== SIGNED_IN_ELSEWHERE) {
+        if (abort.signal.aborted) {
+          throw new HostError('agent_error', t('agent.signInCancelled', { agent: slot.name }))
+        }
+        throw agentError(error)
       }
-      throw agentError(error)
     } finally {
       if (slot.signInAbort === abort) {
         slot.signInAbort = null
         this.sessionsChanged(agentId)
       }
     }
+    this.stopSignInWatch(slot)
     slot.signIn = 'signed-in'
     slot.accountRefused = false
     this.emit(slot)
@@ -4619,7 +4837,10 @@ export class AgentManager {
 
   /** Stops the agent's sign-in in progress, whose `authenticate` then rejects. */
   cancelSignIn(agentId: AgentId): void {
-    this.slots.get(agentId)?.signInAbort?.abort()
+    const slot = this.slots.get(agentId)
+    if (!slot) return
+    slot.signInAbort?.abort()
+    this.stopSignInWatch(slot)
   }
 
   async logout(agentId: AgentId): Promise<void> {
@@ -5299,6 +5520,7 @@ export class AgentManager {
         ? { version: installed.version, registry: this.release(h) !== null }
         : null,
       signIn: slot.signIn,
+      ...(slot.readingSignIn ? { readingSignIn: true as const } : {}),
       authMethods,
       canLogout: capabilities?.logout ?? false,
       account: slot.account,

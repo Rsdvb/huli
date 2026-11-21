@@ -125,6 +125,11 @@ export interface SignInClient {
    * one comes; null once the sign-in no longer waits for it.
    */
   showImage?(image: SignInImage | null): void
+  /**
+   * Huli: the agent says the page it handed over is done with, which tells, where its own answer
+   * to the sign-in may never come, that it may be signed in now.
+   */
+  pageDone?(): void
   signal: AbortSignal
 }
 

@@ -1458,6 +1458,11 @@ export function createValidators(platform: Platform): Validators {
       return { agentId: agentId(o), change: { site: change.site } }
     },
     'agents.refreshAccount': agentWithForce,
+    'agents.readSignIn': (params) => {
+      const o = fields(params)
+      const watch = optionalFlag(o, 'watch')
+      return { agentId: agentId(o), ...(watch !== undefined ? { watch } : {}) }
+    },
     'agents.options': none,
     'agents.lightAgents': none,
     'agents.draftReport': (params) => {

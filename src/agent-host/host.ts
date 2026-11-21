@@ -1755,6 +1755,7 @@ export class AgentHost {
       previous.agentNetwork ?? DEFAULT_AGENT_NETWORK,
       this.agents.ids(),
     )
+    this.agents.readJoinedSignIns(previous, next)
     const turnedOff = next.disabledAgents.filter((id) => !previous.disabledAgents.includes(id))
     const gone = [...removed, ...turnedOff]
     if (gone.length > 0) await this.sessions.agentsRemoved(gone)
@@ -3027,6 +3028,7 @@ export class AgentHost {
       'agents.codebuddySettings': ({ agentId }) => agents.codebuddySettings(agentId),
       'agents.setCodebuddySite': ({ agentId, change }) => agents.setCodebuddySite(agentId, change),
       'agents.refreshAccount': ({ agentId, force }) => agents.refreshAccount(agentId, { force }),
+      'agents.readSignIn': ({ agentId, watch }) => agents.readSignIn(agentId, { watch }),
       'agents.options': () => this.agentOptions.list().map((o) => this.withStartMode(o)),
       'agents.lightAgents': () => ({ agents: this.sessions.lightAgents() }),
       'agents.draftReport': (params) => this.draftReport(params),
