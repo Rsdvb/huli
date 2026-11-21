@@ -198,6 +198,11 @@ export function wakeFleet(): void {
   for (const entry of running.values()) entry.link?.reconnectNow()
 }
 
+/** A computer of the fleet takes the way the user picked for it now. */
+export function rerouteFleet(computerId: string): void {
+  running.get(computerId)?.link?.reroute()
+}
+
 /** A computer's light link while it is up, for an action on one of its sessions. */
 export function fleetLink(computerId: string): HostLink | null {
   const link = running.get(computerId)?.link ?? null

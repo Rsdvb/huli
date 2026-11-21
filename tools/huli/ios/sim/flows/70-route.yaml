@@ -1,0 +1,72 @@
+# The way the phone reaches the computer: Settings › 连接 › 线路 opens the computer's page, whose
+# 线路 group picks 自动, 只走直连 or 只走中转, the last off while the computer has no Kite Cloud
+# relay or the phone is not signed in to it, as here; in light, then in dark. Leaves 自动 and the
+# light theme picked.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '线路'
+    centerElement: true
+- tapOn: '线路'
+- waitForAnimationToEnd
+- takeScreenshot: r01-route
+# Picked direct: the link stays up on the computer's address, and the notes say so.
+- tapOn: '只走直连'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: r02-direct
+- scrollUntilVisible:
+    element: '解除配对'
+- takeScreenshot: r03-direct-addresses
+- scrollUntilVisible:
+    element: '自动'
+    direction: UP
+- tapOn: '自动'
+- waitForAnimationToEnd
+- tapOn: '返回'
+# The same in dark. The theme page goes back to home.
+- scrollUntilVisible:
+    element: '主题'
+    direction: UP
+- tapOn: '主题'
+- tapOn: '深色'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(返回|关闭)'
+    optional: true
+- waitForAnimationToEnd
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '线路'
+    centerElement: true
+- tapOn: '线路'
+- waitForAnimationToEnd
+- tapOn: '只走直连'
+- waitForAnimationToEnd
+- takeScreenshot: r04-direct-dark
+- tapOn: '自动'
+- waitForAnimationToEnd
+- takeScreenshot: r05-auto-dark
+- tapOn: '返回'
+# Back to the light theme, as the next flow expects.
+- scrollUntilVisible:
+    element: '主题'
+    direction: UP
+- tapOn: '主题'
+- tapOn: '浅色'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(返回|关闭)'
+    optional: true

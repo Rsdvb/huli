@@ -12,7 +12,7 @@ import { admin } from '../../admin'
 import { RenameDialog } from '../../components/RenameDialog'
 import { Sheet } from '../../components/Sheet'
 import { useUpdateRows } from '../../components/UpdateRows'
-import { APP_VERSION } from '../../connection'
+import { APP_VERSION, pickedRoute } from '../../connection'
 import { useCloudStatus } from '../../cloud'
 import { useHost } from '../../host'
 import { computerName } from '../../store'
@@ -390,7 +390,10 @@ export default function Settings() {
           />
         </ListGroup>
 
-        <ListGroup header="连接" footer={routesNote(!!host.host?.relay)}>
+        <ListGroup
+          header="连接"
+          footer={routesNote(!!host.host?.relay, host.host ? pickedRoute(host.host) : null)}
+        >
           <ListRow
             title="线路"
             icon="network"

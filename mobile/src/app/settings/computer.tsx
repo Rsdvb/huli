@@ -1,5 +1,6 @@
-// Settings › 已配对的电脑 › one computer: how the phone reaches it, the addresses it tries, and
-// switching to it, renaming, reconnecting or unpairing. Without an `id`, the active computer.
+// Settings › 已配对的电脑 › one computer: how the phone reaches it, the way the user picked and the
+// addresses it tries, and switching to it, renaming, reconnecting or unpairing. Without an `id`,
+// the active computer.
 
 import { Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -10,9 +11,11 @@ import {
   useComputerLine,
   useReach,
 } from '../../components/ComputerSheet'
-import { routeKind, usableAddresses } from '../../connection'
+import { useCloudStatus } from '../../cloud'
+import { pickedRoute, routeKind, usableAddresses } from '../../connection'
+import { rerouteFleet } from '../../fleet'
 import { useHost } from '../../host'
-import { hostPort, osName, platformOf, ROUTE_NAMES, routesNote } from '../../linkInfo'
+import { hostPort, osName, platformOf, ROUTE_NAMES, ROUTE_PICKS, routesNote } from '../../linkInfo'
 import { ago } from '../../sessions'
 import { computerName } from '../../store'
 import { THIS_DEVICE } from '../../system/device'
@@ -41,6 +44,8 @@ export default function Computer() {
   const route = useCurrentRoute(!!active, host.state)
   const welcome = active && host.state.kind === 'connected' ? host.state.welcome : null
   const connected = welcome !== null
+  // The relay takes the phone's own Kite Cloud sign-in too.
+  const signedIn = useCloudStatus().state === 'signed-in'
 
   if (!computer) {
     return (
@@ -62,6 +67,7 @@ export default function Computer() {
   const addresses = usableAddresses(computer.addresses)
   const current = connected && route?.kind === 'direct' ? hostPort(route.address) : null
   const busy = actions.busy.has(computer.id)
+  const picked = pickedRoute(computer)
 
   return (
     <Screen readable>
@@ -108,7 +114,45 @@ export default function Computer() {
           ) : null}
         </ListGroup>
 
-        <ListGroup header="地址" footer={routesNote(!!computer.relay)}>
+        <ListGroup header="线路">
+          {ROUTE_PICKS.map((option) => {
+            const offered =
+              option.pick === 'relay'
+                ? !!computer.relay && signedIn
+                : option.pick === 'direct'
+                  ? addresses.length > 0
+                  : true
+            return (
+              <ListRow
+                key={option.title}
+                title={option.title}
+                subtitle={
+                  offered
+                    ? option.subtitle
+                    : option.pick === 'direct'
+                      ? '电脑没有给出地址'
+                      : !computer.relay
+                        ? '这台电脑没有登录 Kite Cloud'
+                        : '手机还没登录 Kite Cloud'
+                }
+                disabled={!offered}
+                trailing={
+                  picked === option.pick ? (
+                    <Icon name="check" size={18} color={c.tint} weight="semibold" />
+                  ) : undefined
+                }
+                onPress={() => {
+                  if (picked === option.pick) return
+                  haptic.select()
+                  host.setRoute(computer.id, option.pick)
+                  rerouteFleet(computer.id)
+                }}
+              />
+            )
+          })}
+        </ListGroup>
+
+        <ListGroup header="地址" footer={routesNote(!!computer.relay, picked)}>
           {addresses.length === 0 ? (
             <ListRow title="电脑没有给出地址" />
           ) : (
