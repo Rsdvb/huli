@@ -1200,54 +1200,55 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
                     />
                   )),
                 )}
-              {((terminalSignIn && hostId === null) ||
-                pageSignIns.length > 0 ||
-                (status.canLogout && status.signIn === 'signed-in')) && (
-                <RowFrame
-                  text={
-                    <RowText
-                      name={t('agents.signInRow')}
-                      description={t(
-                        unsure
-                          ? 'agents.signInUnknownHint'
-                          : signsInItself
-                            ? 'agents.signInRowHintItself'
-                            : 'agents.signInRowHint',
-                        { name: status.name },
-                      )}
-                    />
-                  }
-                >
-                  {!waiting &&
-                    pageSignIns.map((method) => (
-                      <SetButton
-                        key={method.id}
-                        disabled={busy}
-                        title={method.description}
-                        onClick={() => act(() => signInAgent(hostId, status.id, method.id))}
-                      >
-                        {method.name}
+              {!off &&
+                ((terminalSignIn && hostId === null) ||
+                  pageSignIns.length > 0 ||
+                  (status.canLogout && status.signIn === 'signed-in')) && (
+                  <RowFrame
+                    text={
+                      <RowText
+                        name={t('agents.signInRow')}
+                        description={t(
+                          unsure
+                            ? 'agents.signInUnknownHint'
+                            : signsInItself
+                              ? 'agents.signInRowHintItself'
+                              : 'agents.signInRowHint',
+                          { name: status.name },
+                        )}
+                      />
+                    }
+                  >
+                    {!waiting &&
+                      pageSignIns.map((method) => (
+                        <SetButton
+                          key={method.id}
+                          disabled={busy}
+                          title={method.description}
+                          onClick={() => act(() => signInAgent(hostId, status.id, method.id))}
+                        >
+                          {method.name}
+                        </SetButton>
+                      ))}
+                    {status.canLogout && status.signIn === 'signed-in' && !off && (
+                      <SetButton variant="ghost" disabled={busy} onClick={askSignOut}>
+                        {t('agents.signOut')}
                       </SetButton>
-                    ))}
-                  {status.canLogout && status.signIn === 'signed-in' && !off && (
-                    <SetButton variant="ghost" disabled={busy} onClick={askSignOut}>
-                      {t('agents.signOut')}
-                    </SetButton>
-                  )}
-                  {terminalSignIn?.command && hostId === null && !off && (
-                    <SetButton
-                      icon={<Icon icon={ComputerTerminal01Icon} size={14} />}
-                      onClick={() => signInTerminal(status, terminalSignIn.command!)}
-                    >
-                      {t(
-                        status.signIn === 'signed-in'
-                          ? 'agents.signInAgain'
-                          : 'agents.signInInTerminal',
-                      )}
-                    </SetButton>
-                  )}
-                </RowFrame>
-              )}
+                    )}
+                    {terminalSignIn?.command && hostId === null && !off && (
+                      <SetButton
+                        icon={<Icon icon={ComputerTerminal01Icon} size={14} />}
+                        onClick={() => signInTerminal(status, terminalSignIn.command!)}
+                      >
+                        {t(
+                          status.signIn === 'signed-in'
+                            ? 'agents.signInAgain'
+                            : 'agents.signInInTerminal',
+                        )}
+                      </SetButton>
+                    )}
+                  </RowFrame>
+                )}
             </RowGroup>
           </section>
         )}

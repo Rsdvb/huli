@@ -369,11 +369,15 @@ function DraftComposer({
   // The first step goes to the tray's agent, which must be one that works on steps.
   const firstOff =
     !!workflow && workflow.workflow.steps[0]?.by === 'agent' && !!status && !runsSteps(status)
-  // Huli: a signed-out agent takes no message; its sign-in shows under the box instead.
+  // Huli: a signed-out agent takes no message; its sign-in shows under the box instead. One that
+  // tells its sign-in only by refusing a session cannot be asked, so after "I've signed in" the
+  // message may go and find out.
+  const [triedAnyway, setTriedAnyway] = useState<AgentId | null>(null)
   const signedOut = !!status && agentNeed(status) === 'sign-in'
+  const holdsForSignIn = signedOut && triedAnyway !== agentId
   useSignInRecheck(hostId, agentId)
   const canSend =
-    !signedOut &&
+    !holdsForSignIn &&
     (workflow
       ? !!agentId && !!taskProject && holdsMessage && !held && attachments.length === 0 && !firstOff
       : !!agentId && ready && holdsMessage && !held && !branchHeld)
@@ -517,7 +521,7 @@ function DraftComposer({
 
   const blocked = !agentId
     ? t('newSession.chooseAgentFirst')
-    : signedOut
+    : holdsForSignIn
       ? t('newSession.signInFirst', { agent: name })
       : !inScratch && !project
         ? t('newSession.chooseProjectFirst')
@@ -769,7 +773,13 @@ function DraftComposer({
           gitStatus && project && <WorktreeNote projectPath={project.path} status={gitStatus} />
         )}
         {agentId && signedOut && status && (
-          <StartSignIn status={status} hostId={hostId} name={name ?? status.name} />
+          <StartSignIn
+            status={status}
+            hostId={hostId}
+            name={name ?? status.name}
+            unsure={triedAnyway === agentId}
+            onSignedIn={() => setTriedAnyway(agentId)}
+          />
         )}
         {agentId && <StartNotices agentId={agentId} hostId={hostId} />}
         {waitingForNode && !(noAgent && guide) && (
@@ -793,10 +803,15 @@ function StartSignIn({
   status,
   hostId,
   name,
+  unsure,
+  onSignedIn,
 }: {
   status: AgentStatus
   hostId: string | null
   name: string
+  /** The user said it is signed in, which the host could not confirm: the message may go. */
+  unsure: boolean
+  onSignedIn: () => void
 }) {
   const { t } = useTranslation('session')
   const wait = useSignInWait(hostId, status.id, name)
@@ -806,7 +821,10 @@ function StartSignIn({
         <span className="text-ui font-medium text-primary">
           {t('newSession.signInNotice', { agent: name })}
         </span>
-        <span className="text-xs text-secondary">{wait ?? t('newSession.signInNoticeHint')}</span>
+        <span className="text-xs text-secondary">
+          {wait ??
+            t(unsure ? 'newSession.signInUnsure' : 'newSession.signInNoticeHint', { agent: name })}
+        </span>
       </span>
       <span className="flex flex-wrap items-center gap-1.5">
         <SignInActions
@@ -815,7 +833,7 @@ function StartSignIn({
           {...(hostId === null && {
             onTerminal: (command: string) => void signInTerminal(status, command),
           })}
-          onRetry={() => {}}
+          onRetry={onSignedIn}
         />
       </span>
     </div>

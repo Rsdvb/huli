@@ -802,7 +802,8 @@
     },
     "signInFirst": "Sign in to {{agent}} first",
     "signInNotice": "{{agent}} needs sign-in",
-    "signInNoticeHint": "Sign in, and your message can be sent."
+    "signInNoticeHint": "Sign in, and your message can be sent.",
+    "signInUnsure": "Kettu can’t tell yet whether {{agent}} is signed in; you can send to find out."
   },
   "signIn": {
     "title": "Sign in to {{agent}}",

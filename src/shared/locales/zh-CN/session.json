@@ -783,7 +783,8 @@
     },
     "signInFirst": "先登录 {{agent}}",
     "signInNotice": "{{agent}} 需要登录",
-    "signInNoticeHint": "登录后就能发送消息。"
+    "signInNoticeHint": "登录后就能发送消息。",
+    "signInUnsure": "Kettu 还确认不了 {{agent}} 是否已登录，可以直接发送试试。"
   },
   "signIn": {
     "title": "登录 {{agent}}",
