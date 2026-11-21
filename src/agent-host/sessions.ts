@@ -192,6 +192,7 @@ import {
   COLLABORATION_ID as CODEX_COLLABORATION_ID,
   MODE_ID as CODEX_MODE_ID,
 } from './codex/config'
+import { CONFIG as DOUBAO_CONFIG } from './doubao/options'
 import { CONFIG as DSH_CONFIG } from './dsh/options'
 import { carryMode, lostValues, lostValuesNotice, type LostValue } from './config-notice'
 import {
@@ -280,6 +281,7 @@ import {
   startableModes,
   startedCeiling,
   startedMode,
+  startedStartMode,
   starterRank,
   type ModeRank,
 } from './started-mode'
@@ -11013,7 +11015,7 @@ export class SessionManager {
     } else {
       Object.assign(options, this.deps.options?.rememberedOf(agentId) ?? {})
     }
-    Object.assign(options, this.startModeOf(agentId))
+    Object.assign(options, startedStartMode(harnessOf(agentId), this.startModeOf(agentId)))
     const summary = await this.create({
       agentId,
       projectPath: caller.projectPath,
@@ -12528,6 +12530,8 @@ function modeOptionId(agentId: AgentId): string | null {
       return CODEX_MODE_ID
     case 'deepseek':
       return DSH_CONFIG.mode
+    case 'doubao':
+      return DOUBAO_CONFIG.mode
     case 'antigravity':
       return AGY_MODE_OPTION
     default:

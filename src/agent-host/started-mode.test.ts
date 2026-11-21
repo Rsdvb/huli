@@ -6,6 +6,7 @@ import {
   startableModes,
   startedCeiling,
   startedMode,
+  startedStartMode,
   starterRank,
   type ModeRank,
   type RankedHarness,
@@ -111,5 +112,15 @@ describe('the mode of a started session', () => {
     expect(startableModes('claude-code', 3)).toEqual(['default', 'acceptEdits', 'auto'])
     expect(startableModes('codex', 2)).toEqual(['read-only', 'workspace-write'])
     expect(startableModes('deepseek', 3)).toEqual(['read-only', 'workspace-write'])
+  })
+
+  it('never takes full access from the start mode of a harness it cannot rank', () => {
+    // Huli: Doubao's modes are not ranked, so its start mode passes only when it asks something.
+    expect(startedStartMode('doubao', { mode: 'always_allow' })).toEqual({})
+    expect(startedStartMode('doubao', { mode: 'ask_risky' })).toEqual({ mode: 'ask_risky' })
+    // A ranked harness's start mode is held to the ceiling once the session opens.
+    expect(startedStartMode('codex', { mode: 'agent-full-access' })).toEqual({
+      mode: 'agent-full-access',
+    })
   })
 })
