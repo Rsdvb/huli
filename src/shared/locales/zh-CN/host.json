@@ -258,6 +258,7 @@
     "antigravitySignedOut": "{{agent}} 已登出。请在终端里重新登录，才能读取套餐限额。",
     "antigravityLimitsFailed": "{{agent}} 没能读出套餐限额：{{error}}",
     "antigravityNoPlan": "{{agent}} 没有报出 Google 套餐，所以没有可读的套餐限额。如果你用的是 Google 账号，请在终端里重新登录。",
+    "limitsReadFailed": "{{agent}} 这次没能读到套餐限额，请稍后再试。",
     "glmUsage": {
       "missingCredentials": "{{agent}} 还没有 Z.AI API key。设置 Z_AI_API_KEY，或运行一次 glm-acp-agent --setup，才能读取套餐用量。",
       "unsupportedEndpoint": "{{agent}} 用的是自定义接口地址，读不到 GLM Coding Plan 的用量。",

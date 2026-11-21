@@ -172,6 +172,7 @@ export class FakeQuery implements Query {
     skipBehaviors?: boolean
   }): Promise<UsageAnswer> {
     this.record('usage', options)
+    if (this.sdk.usageError) throw this.sdk.usageError
     return this.sdk.usage
   }
 
@@ -283,6 +284,8 @@ export class FakeClaudeSdk implements ClaudeSdk {
     agents: [],
     skills: { skillFrontmatter: [{ name: 'review', source: 'project', tokens: 45 }] },
   }
+  /** Thrown by a query's usage read until cleared, as a failed read of the plan limits. */
+  usageError: Error | null = null
   usage: UsageAnswer = {
     rate_limits_available: true,
     rate_limits: {

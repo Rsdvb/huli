@@ -177,6 +177,7 @@ import {
 import { OAUTH_ACCOUNT_LABEL } from './claude/reports'
 import {
   AgentRequestError,
+  LimitsReadFailed,
   type AgentConnection,
   type AgentInit,
   type AuthMethodInfo,
@@ -3830,6 +3831,9 @@ export class AgentManager {
     try {
       limits = await connection.readLimits()
     } catch (error) {
+      if (error instanceof LimitsReadFailed) {
+        throw new HostError('agent_error', t('agent.limitsReadFailed', { agent: slot.name }))
+      }
       throw this.limitsError(slot, error)
     }
     const now = Date.now()
