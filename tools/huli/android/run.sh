@@ -2,7 +2,8 @@
 # (huli-sim.yml with platform android), inside the emulator runner's script: installs the app
 # built from `ref`, starts this checkout's daemon with the fake agent in a data folder of its own,
 # pairs the app with it alone, then measures what the app costs at rest (../ios/sim/measure.sh,
-# with sample.mjs here). Everything lands in $OUT/results. Huli's own; see tools/huli/README.md.
+# with sample.mjs here), or runs the flows under flows/ that FLOWS names. Everything lands in
+# $OUT/results. Huli's own; see tools/huli/README.md.
 set -euo pipefail
 OUT="${OUT:?}"
 RESULTS="$OUT/results"
@@ -50,8 +51,40 @@ adb exec-out screencap -p > "$RESULTS/paired.png"
 
 adb logcat -d -s ReactNativeJS:W AndroidRuntime:E > "$RESULTS/logcat-paired.txt" || true
 
-DEVICE=$(adb get-serialno) SAMPLER=tools/huli/android/sample.mjs MAESTRO="$MAESTRO" \
-  RESULTS="$RESULTS" MEASURE_ALT=default bash tools/huli/ios/sim/measure.sh
+DEVICE=$(adb get-serialno)
+failed=0
+# The flows FLOWS names under flows/ (Huli's preview, say), each recorded; with none, the measure.
+for flow in ${FLOWS:-measure}; do
+  if [ "$flow" = measure ]; then
+    DEVICE="$DEVICE" SAMPLER=tools/huli/android/sample.mjs MAESTRO="$MAESTRO" \
+      RESULTS="$RESULTS" MEASURE_ALT=default bash tools/huli/ios/sim/measure.sh
+    continue
+  fi
+  [ -f "$flow" ] || flow="tools/huli/android/flows/$flow.yaml"
+  name=$(basename "$flow" .yaml)
+  echo "== $name"
+  adb shell screenrecord --time-limit 180 "/sdcard/$name.mp4" > /dev/null 2>&1 &
+  REC=$!
+  if ! "$MAESTRO" --device "$DEVICE" test --test-output-dir "$RESULTS/$name" "$flow" \
+    > "$RESULTS/$name.log" 2>&1; then
+    failed=1
+    tail -15 "$RESULTS/$name.log"
+  fi
+  # As run.sh on iOS: a flow that ends on a screen to see in both appearances says so.
+  if grep -q '^# Ends: both appearances' "$flow"; then
+    adb shell cmd uimode night yes > /dev/null
+    sleep 2
+    adb exec-out screencap -p > "$RESULTS/$name-dark.png"
+    adb shell cmd uimode night no > /dev/null
+    sleep 2
+    adb exec-out screencap -p > "$RESULTS/$name-light.png"
+  fi
+  kill -INT "$REC" 2> /dev/null || true
+  sleep 2
+  adb pull "/sdcard/$name.mp4" "$RESULTS/$name.mp4" > /dev/null 2>&1 || true
+  adb logcat -d -s ReactNativeJS:W AndroidRuntime:E > "$RESULTS/$name-logcat.txt" || true
+done
 
 cp -R "$KETTU_DAEMON_DATA/logs" "$RESULTS/daemon-logs" 2> /dev/null || true
 kill "$DAEMON" || true
+exit $failed

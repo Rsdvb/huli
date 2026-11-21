@@ -1,0 +1,85 @@
+# A document opened from the conversation: the reply's link to the Word document the fake agent
+# wrote (/documents) opens it in Quick Look; failing that, the tool call's file, and last the Files
+# browser. It ends on the Word document in Quick Look.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/documents'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2000
+    optional: true
+- tapOn:
+    text: 'kite-notes.docx'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: '(Done|完成|Close)'
+    timeout: 15000
+    optional: true
+- takeScreenshot: w01-from-link
+# The tool call's own files, opened from its card.
+- runFlow:
+    when:
+      notVisible:
+        text: '(Done|完成|Close)'
+    commands:
+      - tapOn:
+          text: '.*运行了.*'
+          optional: true
+      - tapOn:
+          text: '.*make_report.*'
+          optional: true
+      - takeScreenshot: w02-tool-card
+      - tapOn:
+          text: '打开 report/kite-notes.docx'
+          optional: true
+      - extendedWaitUntil:
+          visible:
+            text: '(Done|完成|Close)'
+          timeout: 15000
+          optional: true
+# Last, the Files browser.
+- runFlow:
+    when:
+      notVisible:
+        text: '(Done|完成|Close)'
+    commands:
+      - tapOn: '文件、改动、产物、终端和子会话'
+      - tapOn:
+          text: '文件(，\d+)?'
+      - tapOn: '文件夹 report'
+      - tapOn: '文件 kite-notes.docx'
+- extendedWaitUntil:
+    visible:
+      text: '(Done|完成|Close)'
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: w03-word

@@ -3,7 +3,8 @@
 # with the fake agent, pairs the app with it alone, runs the Maestro flows under
 # tools/huli/ios/sim/flows while recording the screen, and keeps the screenshots, recordings and
 # logs for a day. It uses no secrets. See tools/huli/ios/sim/run.sh. With platform android it
-# measures the app on an Android emulator instead (tools/huli/android/run.sh).
+# measures the app on an Android emulator instead, or runs the flows of tools/huli/android/flows
+# that `flows` names (tools/huli/android/run.sh).
 name: Huli simulator
 
 on:
@@ -22,7 +23,7 @@ on:
         required: false
         default: ''
       platform:
-        description: Where to run them; android only measures what the app costs at rest
+        description: Where to run them; android measures the app at rest, or runs its own flows
         type: choice
         options: [ios, android]
         default: ios
@@ -147,8 +148,10 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/maestro.zip"             https://github.com/mobile-dev-inc/maestro/releases/latest/download/maestro.zip
           unzip -q "$RUNNER_TEMP/maestro.zip" -d "$HOME/.huli-tools"
           "$HOME/.huli-tools/maestro/bin/maestro" --version
-      - name: Run the measure
+      - name: Run the measure or the flows
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          FLOWS: ${{ inputs.flows }}
         with:
           api-level: 35
           arch: x86_64
