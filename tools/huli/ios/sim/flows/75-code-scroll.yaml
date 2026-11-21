@@ -50,7 +50,7 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: k02b-table-swiped
 # A long press on the reply still opens its menu, as the sheet.
 - longPressOn:
-    point: 50%, 40%
+    text: '同一个请求里.*'
 - extendedWaitUntil:
     visible: '复制为 Markdown'
     timeout: 4000

@@ -378,9 +378,12 @@ function CodeBlock(props: { lang: string; meta: string; text: string; look: Look
           {Array.from({ length: shownCount }, (_, i) => firstLine + i).join('\n')}
         </Text>
       )}
+      {/* The rest of the row and no wider, so lines longer than it scroll rather than run past
+          the block's edge, where it clips them. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.codeScroll}
         contentContainerStyle={[styles.codeBody, firstLine !== null && { paddingLeft: 8 }]}
       >
         <Text style={[styles.codeText, { color: c.text }]}>
@@ -923,6 +926,7 @@ const styles = StyleSheet.create({
   codeCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 },
   codeBody: { paddingHorizontal: 12, paddingVertical: 10 },
   codeRow: { flexDirection: 'row' },
+  codeScroll: { flex: 1 },
   gutter: {
     paddingLeft: 10,
     paddingVertical: 10,
