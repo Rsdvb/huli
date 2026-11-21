@@ -686,7 +686,9 @@ export function waitingForNode(agents: Map<string, AgentStatus>): AgentStatus[] 
 
 /** Whether a session can start with the agent now. */
 export function canStart(agent: AgentStatus): boolean {
-  return agentNeed(agent) === null
+  const need = agentNeed(agent)
+  // Huli: one signed out whose new sessions run on an API profile starts them with its key.
+  return need === null || (need === 'sign-in' && !!agent.profiles?.defaultId)
 }
 
 /** The model an agent's next session starts with, from the options its last one reported. */

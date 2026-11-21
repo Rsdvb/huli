@@ -171,7 +171,9 @@ export default function NewSession() {
 
   // Why Send does nothing now, said over the box rather than left to guess; the note over it leads
   // to where the phone fixes it.
-  const need = agent ? agentNeed(agent) : null
+  // Huli: a session on an API profile signs in with its key, whatever the agent's own sign-in.
+  const agentNeeds = agent ? agentNeed(agent) : null
+  const need = agentNeeds === 'sign-in' && profileId ? null : agentNeeds
   const waiting = useMemo(() => waitingForNode(agentMap), [agentMap])
   const unsendable =
     agents.length === 0

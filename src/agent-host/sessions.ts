@@ -10728,21 +10728,25 @@ export class SessionManager {
     }
     const next = this.profileFor(record.agentId, profileId)
     if (next === record.profileId) return
-    let live = await this.revive(sessionId)
-    if (live.prepared) throw invalidParams(t('session.profile.prepared'))
-    const status = live.thread.session.status
-    const idle = !live.turn && (status === 'ready' || status === 'closed')
-    if (!idle || (live.connection && (!live.saved || this.holdReason(live) !== null))) {
-      throw new HostError('busy', t('session.profile.betweenTurns'))
+    const live = this.live.get(sessionId)
+    if (live?.prepared) throw invalidParams(t('session.profile.prepared'))
+    if (live) {
+      const status = live.thread.session.status
+      const idle = !live.turn && (status === 'ready' || status === 'closed')
+      if (!idle || (live.connection && (!live.saved || this.holdReason(live) !== null))) {
+        throw new HostError('busy', t('session.profile.betweenTurns'))
+      }
     }
-    if (next === undefined) delete live.record.profileId
-    else live.record.profileId = next
-    this.save(live)
-    this.touch(live.id)
-    this.deps.diagnostics.log('info', `Session ${live.id} changed its API provider profile`)
-    if (!live.connection) return
+    if (next === undefined) delete record.profileId
+    else record.profileId = next
+    if (live?.saved) this.save(live)
+    else if (!live) this.saveRecord(sessionId)
+    this.touch(sessionId)
+    this.deps.diagnostics.log('info', `Session ${sessionId} changed its API provider profile`)
+    // A session not attached takes the profile as it next attaches.
+    if (!live?.connection) return
     try {
-      live = await this.attachAgain(live)
+      await this.attachAgain(live)
     } catch (error) {
       throw agentError(error)
     }

@@ -385,7 +385,8 @@ function DraftComposer({
   // tells its sign-in only by refusing a session cannot be asked, so after "I've signed in" the
   // message may go and find out.
   const [triedAnyway, setTriedAnyway] = useState<AgentId | null>(null)
-  const signedOut = !!status && agentNeed(status) === 'sign-in'
+  // Huli: a session on an API profile signs in with its key, whatever the agent's own sign-in.
+  const signedOut = !!status && agentNeed(status) === 'sign-in' && !profileId
   const holdsForSignIn = signedOut && triedAnyway !== agentId
   useSignInRecheck(hostId, agentId)
   const canSend =
@@ -408,7 +409,7 @@ function DraftComposer({
   // An agent that must sign in first opens no session until it has, which is known once this
   // computer's agents are read after launch.
   const agentsRead = useAgentsStore((s) => hostId !== null || s.loaded)
-  const signIn = !!status && agentNeed(status) === 'sign-in'
+  const signIn = signedOut
   const parentId = parent?.id ?? null
   // The commands the session will list once it starts, as its agent reported them to the session
   // the first message will use.

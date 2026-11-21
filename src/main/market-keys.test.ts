@@ -147,8 +147,8 @@ describe('the Marketplace key store', () => {
     await keys.set({ serverId: github.id, values: { Authorization: TOKEN } })
     await keys.set({ serverId: github.id, values: { Authorization: null } })
     expect(pushed).toEqual([
-      { values: { [github.id]: { Authorization: TOKEN } }, oauth: {}, agentEnv: {} },
-      { values: {}, oauth: {}, agentEnv: {} },
+      { values: { [github.id]: { Authorization: TOKEN } }, oauth: {}, agentEnv: {}, profiles: {} },
+      { values: {}, oauth: {}, agentEnv: {}, profiles: {} },
     ])
     expect(keys.state()).toEqual({})
   })
@@ -199,6 +199,7 @@ describe('the Marketplace key store', () => {
       values: { [notes.id]: { NOTES_TOKEN: 'n0tes' } },
       oauth: {},
       agentEnv: {},
+      profiles: {},
     })
     expect((await load()).values()).toEqual({ [notes.id]: { NOTES_TOKEN: 'n0tes' } })
   })
@@ -369,7 +370,7 @@ describe('OAuth sign-ins in the key store', () => {
     )
     const keys = await load()
     await keys.flush()
-    expect(keys.contentsForHost()).toEqual({ values, oauth: {}, agentEnv: {} })
+    expect(keys.contentsForHost()).toEqual({ values, oauth: {}, agentEnv: {}, profiles: {} })
     const stored = JSON.parse(await fileText()) as Record<string, unknown>
     expect(stored.version).toBe(3)
     expect((await load()).values()).toEqual(values)
@@ -388,5 +389,107 @@ describe('agent environment keys in the key store', () => {
     })
     await keys.setAgentEnv('glm-agent', 'ZHIPU_API_KEY', null)
     expect(keys.agentEnvState()).toEqual({})
+  })
+})
+
+// Huli: an agent's API provider profiles, kept with their keys beside the Marketplace's.
+describe('API provider profiles in the key store', () => {
+  const KEY = 'sk-profile-SECRET-0123456789abcd'
+  const draft = {
+    agentId: 'claude-code',
+    name: 'DeepSeek',
+    preset: 'deepseek',
+    baseUrl: 'https://api.deepseek.com/anthropic',
+    model: 'deepseek-flash[1m]',
+    key: KEY,
+  }
+
+  it('keeps a profile encrypted with its key and pushes it to the agent host alone', async () => {
+    const keys = await load()
+    const id = await keys.saveProfile({ ...draft, makeDefault: true })
+    expect(await fileText()).not.toContain('SECRET')
+    expect(await fileText()).not.toContain('deepseek-flash')
+    expect(pushed.at(-1)?.profiles).toEqual({
+      'claude-code': {
+        defaultId: id,
+        items: [
+          {
+            id,
+            name: 'DeepSeek',
+            preset: 'deepseek',
+            baseUrl: 'https://api.deepseek.com/anthropic',
+            model: 'deepseek-flash[1m]',
+            key: KEY,
+          },
+        ],
+      },
+    })
+    expect((await load()).contentsForHost().profiles).toEqual(pushed.at(-1)?.profiles)
+    // Nothing a client is answered holds a profile.
+    expect(JSON.stringify(keys.state())).not.toContain('SECRET')
+    expect(JSON.stringify(keys.agentEnvState())).not.toContain('SECRET')
+  })
+
+  it('keeps the key of a profile changed without one, and takes a new one', async () => {
+    const keys = await load()
+    const id = await keys.saveProfile(draft)
+    await keys.saveProfile({ ...draft, id, name: 'Work', key: undefined })
+    let saved = keys.contentsForHost().profiles['claude-code']!.items[0]!
+    expect(saved).toMatchObject({ id, name: 'Work', key: KEY })
+    await keys.saveProfile({ ...draft, id, key: 'sk-another-SECRET' })
+    saved = keys.contentsForHost().profiles['claude-code']!.items[0]!
+    expect(saved.key).toBe('sk-another-SECRET')
+  })
+
+  it('refuses a draft that is not one, naming no key in its error', async () => {
+    const keys = await load()
+    const refused = async (raw: unknown): Promise<string> => {
+      const error = await keys.saveProfile(raw).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      expect(error).toBeInstanceOf(MarketKeysError)
+      expect((error as MarketKeysError).code).toBe('invalid_params')
+      return (error as Error).message
+    }
+    expect(await refused({ ...draft, key: undefined })).not.toContain('SECRET')
+    expect(await refused({ ...draft, key: 'sk with SECRET spaces' })).not.toContain('SECRET')
+    await refused({ ...draft, baseUrl: 'file:///etc/passwd' })
+    await refused({ ...draft, baseUrl: 'https://user:pass@example.com' })
+    await refused({ ...draft, model: 'two words' })
+    await refused({ ...draft, preset: 'nobody' })
+    await refused({ ...draft, name: '' })
+    await refused({ ...draft, agentId: 'codex' })
+    await refused({ ...draft, agentId: 'nobody~at-all' })
+    await refused({ ...draft, extra: true })
+    await refused({ ...draft, id: 'no-such-profile' })
+    expect(keys.contentsForHost().profiles).toEqual({})
+  })
+
+  it('removes a profile, and its agent then starts sessions on its own sign-in', async () => {
+    const keys = await load()
+    const id = await keys.saveProfile({ ...draft, makeDefault: true })
+    const other = await keys.saveProfile({ ...draft, name: 'Second' })
+    await keys.removeProfile('claude-code', id)
+    expect(keys.contentsForHost().profiles['claude-code']).toMatchObject({
+      defaultId: null,
+      items: [{ id: other }],
+    })
+    await keys.setDefaultProfile('claude-code', other)
+    expect(keys.contentsForHost().profiles['claude-code']!.defaultId).toBe(other)
+    await expect(keys.setDefaultProfile('claude-code', 'gone')).rejects.toThrow(MarketKeysError)
+    await keys.removeProfile('claude-code', other)
+    expect(keys.contentsForHost().profiles).toEqual({})
+  })
+
+  it('reads a file from before profiles with none', async () => {
+    const stored = { values: {}, oauth: {}, agentEnv: { a: { X: 'y' } } }
+    await writeFile(
+      marketKeysFile(dir),
+      JSON.stringify({ version: 3, encrypted: false, contents: stored }),
+    )
+    const keys = await load({ plainTextAllowed: true })
+    expect(keys.contentsForHost().profiles).toEqual({})
+    expect(keys.contentsForHost().agentEnv).toEqual({ a: { X: 'y' } })
   })
 })

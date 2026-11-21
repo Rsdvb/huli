@@ -33,6 +33,7 @@ function manager(
     outside?: OutsideReader
     threads?: Partial<ThreadStore>
     scratch?: ScratchFolders
+    profiles?: ConstructorParameters<typeof SessionManager>[0]['profiles']
   } = {},
 ) {
   const added: string[] = []
@@ -63,11 +64,12 @@ function manager(
     portOpen: () => false,
     threads: (extra.threads ?? null) as ThreadStore | null,
     reportsDir: path.join(dir, 'reports'),
-    diagnostics: { log: () => {} } as unknown as Diagnostics,
+    diagnostics: { log: () => {}, event: () => {} } as unknown as Diagnostics,
     git: () => null,
     events: new Proxy({}, { get: () => () => {} }) as SessionEvents,
     settings: () => ({}) as never,
     ...(extra.outside ? { outside: extra.outside } : {}),
+    ...(extra.profiles ? { profiles: extra.profiles } : {}),
   } satisfies ConstructorParameters<typeof SessionManager>[0]
   return { sessions: new SessionManager(deps), added }
 }
@@ -458,5 +460,52 @@ describe('answering a problem report', () => {
     expect(snapshot.entries.find((entry) => entry.id === 'e:1')).toMatchObject({
       outcome: { kind: 'skipped' },
     })
+  })
+})
+
+// Huli: the API provider profile a session runs with.
+describe('Huli: a session’s API profile', () => {
+  const held = new Set(['p1', 'p2'])
+  const profiles = {
+    get: (agentId: string, id: string) =>
+      agentId.startsWith('claude-code') && held.has(id) ? ({ id } as never) : null,
+    defaultOf: () => 'p1',
+  }
+
+  it('changes between turns to one its agent has, or back to its own sign-in', async () => {
+    const { sessions } = manager({}, { profiles })
+    await sessions.load()
+    const { id } = await sessions.importSession({
+      agentId: 'claude-code',
+      projectPath: '/repo',
+      acpSessionId: 'acp-1',
+    })
+    expect(sessions.summary(id).profileId).toBeNull()
+    await sessions.setProfile(id, 'p2')
+    expect(sessions.summary(id).profileId).toBe('p2')
+    await expect(sessions.setProfile(id, 'gone')).rejects.toMatchObject({
+      code: 'invalid_params',
+    })
+    expect(sessions.summary(id).profileId).toBe('p2')
+    await vi.waitFor(
+      async () =>
+        expect((await index())?.sessions.find((record) => record.id === id)?.profileId).toBe('p2'),
+      { timeout: 5_000 },
+    )
+    await sessions.setProfile(id, null)
+    expect(sessions.summary(id).profileId).toBeNull()
+  })
+
+  it('refuses a profile for an agent whose sessions take none', async () => {
+    const { sessions } = manager({}, { profiles })
+    await sessions.load()
+    const { id } = await sessions.importSession({
+      agentId: 'codex',
+      projectPath: '/repo',
+      acpSessionId: 'acp-2',
+    })
+    await expect(sessions.setProfile(id, 'p1')).rejects.toMatchObject({ code: 'invalid_params' })
+    // Null is its own sign-in already.
+    await sessions.setProfile(id, null)
   })
 })

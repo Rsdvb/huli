@@ -609,6 +609,32 @@ describe('createValidators', () => {
     ).toEqual({ agentId: 'codex', projectPath: '/p', cursor: '10' })
   })
 
+  // Huli: a session's API provider profile, by id, or null for its agent's own sign-in.
+  it('takes a profile id, null, or none for a session and its change', () => {
+    const create = posix['sessions.create']
+    expect(create({ agentId: 'claude-code', projectPath: '/p', profileId: 'a1-b2' })).toEqual({
+      agentId: 'claude-code',
+      projectPath: '/p',
+      profileId: 'a1-b2',
+    })
+    expect(create({ agentId: 'claude-code', projectPath: '/p', profileId: null })).toEqual({
+      agentId: 'claude-code',
+      projectPath: '/p',
+      profileId: null,
+    })
+    for (const profileId of ['', 'UPPER', 'a b', '../x', 7, {}, 'x'.repeat(41)]) {
+      rejects(() => create({ agentId: 'claude-code', projectPath: '/p', profileId }))
+      rejects(() =>
+        posix['sessions.prepare']({ agentId: 'claude-code', projectPath: '/p', profileId }),
+      )
+    }
+    const set = posix['sessions.setProfile']
+    expect(set({ sessionId: 's1', profileId: null })).toEqual({ sessionId: 's1', profileId: null })
+    expect(set({ sessionId: 's1', profileId: 'p1' })).toEqual({ sessionId: 's1', profileId: 'p1' })
+    rejects(() => set({ sessionId: 's1' }))
+    rejects(() => set({ sessionId: 's1', profileId: 'Bad Id' }))
+  })
+
   it('takes only positions and records that a page of requests gave', () => {
     const page = posix['sessions.modelRequests']
     expect(page({ sessionId: 's', before: '1048576' })).toEqual({
