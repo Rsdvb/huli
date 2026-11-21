@@ -861,8 +861,11 @@ export class AgentHistory {
         (other.unavailable === row.unavailable && (row.updatedAt ?? 0) > (other.updatedAt ?? 0))
       if (better) rows.set(acpSessionId, { row, session })
     }
+    // Sessions read in parallel arrive in any order, so a tie in time goes by id.
     const listed = [...rows.values()].sort(
-      (a, b) => (b.row.updatedAt ?? 0) - (a.row.updatedAt ?? 0),
+      (a, b) =>
+        (b.row.updatedAt ?? 0) - (a.row.updatedAt ?? 0) ||
+        (a.row.acpSessionId < b.row.acpSessionId ? -1 : 1),
     )
     const gone = await this.goneFolders(listed.map(({ row }) => row))
     for (const { row, session } of listed) {
