@@ -284,6 +284,31 @@ export function createMainWindow(start: StartMode = 'window'): BrowserWindow {
   return window
 }
 
+/**
+ * Huli: calls `changed` with whether any app window shows, neither hidden nor minimized, at once
+ * and whenever that changes.
+ */
+export function watchWindowsShown(changed: (shown: boolean) => void): void {
+  let last: boolean | null = null
+  const report = (): void => {
+    const shown = appWindows().some(
+      (window) => !isOverlay(window.webContents) && window.isVisible() && !window.isMinimized(),
+    )
+    if (shown === last) return
+    last = shown
+    changed(shown)
+  }
+  const later = (): void => void setImmediate(report)
+  app.on('browser-window-created', (_event, window) => {
+    window.on('show', later)
+    window.on('hide', later)
+    window.on('minimize', later)
+    window.on('restore', later)
+    window.on('closed', later)
+  })
+  report()
+}
+
 /** The window to talk to: the focused one, else the first open one. */
 export function currentWindow(): BrowserWindow | null {
   const focused = BrowserWindow.getFocusedWindow()

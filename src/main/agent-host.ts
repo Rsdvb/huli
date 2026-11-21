@@ -474,6 +474,11 @@ export class AgentHost {
     this.host.post({ type: 'host:power', state })
   }
 
+  /** Huli: whether any window of the app shows, for how often the GitHub flow reads. */
+  windowsVisible(visible: boolean): void {
+    this.host.post({ type: 'host:windows-visible', visible })
+  }
+
   /** The log level and detailed records; a host started later takes both from its environment. */
   setLogLevel(level: 'debug' | 'info', verbose: boolean): void {
     this.host.post({ type: 'host:log-level', level, verbose })

@@ -6,9 +6,11 @@ import path from 'node:path'
 import type { AgentStatus, PlanLimit, RoutineList, SessionSummary } from '@shared/agent-host'
 import { markdownFirstLine } from '@shared/markdown-line'
 import { nextRuns } from '@shared/schedule'
+import type { GithubEvent, RunCause } from '@shared/github-flow'
 import {
   RUN_OUTPUT_BYTES,
   RUNS_PAGE,
+  scheduleOf,
   ROUTINE_NAME_CHARS,
   ROUTINE_NAME_FROM_PROMPT,
   WORKING_RUNS,
@@ -28,6 +30,7 @@ import {
 import { limitsForModel } from '@shared/plan-limits'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { HostError } from '../errors'
+import { eventPrompt } from '../github-flow/decide'
 import { t } from '../i18n'
 import { resetTime, windowName } from '../limit-text'
 import type { JsonFile, LogFn, RoutinesFile } from '../storage'
@@ -105,6 +108,8 @@ interface LiveRun {
   workingSince: number | null
   timer: ReturnType<typeof setTimeout> | null
   intent: 'timed_out' | 'cancelled' | null
+  /** Huli: the prompt of a run on a GitHub event, the routine's own with what happened. */
+  prompt?: string
 }
 
 type RunEnd = {
@@ -188,8 +193,9 @@ export class RoutinesManager {
   private settleOnce(): void {
     let changed = false
     for (const [routineId, routine] of this.routines) {
-      if (!routine.enabled || routine.trigger.schedule.kind !== 'once') continue
-      if (nextRuns(routine.trigger.schedule, routine.checkedThrough, { count: 1 }).length > 0) {
+      const schedule = scheduleOf(routine.trigger)
+      if (!routine.enabled || schedule?.kind !== 'once') continue
+      if (nextRuns(schedule, routine.checkedThrough, { count: 1 }).length > 0) {
         continue
       }
       this.routines.set(routineId, { ...routine, enabled: false })
@@ -345,6 +351,52 @@ export class RoutinesManager {
     return { ...run }
   }
 
+  /** Huli: the enabled routines that run on a GitHub event, each in a project. */
+  eventTriggers(): { routineId: string; projectPath: string; event: GithubEvent }[] {
+    if (!this.loaded || this.stopped) return []
+    return [...this.routines.values()].flatMap((routine) =>
+      routine.enabled && routine.trigger.kind === 'github' && routine.projectPath !== null
+        ? [
+            {
+              routineId: routine.id,
+              projectPath: routine.projectPath,
+              event: routine.trigger.event,
+            },
+          ]
+        : [],
+    )
+  }
+
+  /** Huli: whether a run of the routine on an event may start now, none of it being active. */
+  idleForEvent(routineId: string): boolean {
+    const routine = this.routines.get(routineId)
+    return (
+      !!routine &&
+      routine.enabled &&
+      routine.trigger.kind === 'github' &&
+      !this.stopped &&
+      !this.deleting.has(routineId) &&
+      !this.activeOf(routineId)
+    )
+  }
+
+  /**
+   * Huli: a GitHub event the routine runs on happened: a run starts with the routine's prompt and
+   * what happened, as a scheduled one would, waiting for a plan limit the same way.
+   */
+  runOnEvent(routineId: string, cause: RunCause, context: string): void {
+    const routine = this.routines.get(routineId)
+    if (!routine || !this.idleForEvent(routineId)) return
+    if (this.held(routine) && !this.fallbackOf(routine)) {
+      this.announceWait(routine)
+      this.skip(routine, this.now(), 1, 'plan_limit')
+      return
+    }
+    const prompt = eventPrompt(routine.prompt, context)
+    const run = this.launch(routine, 'event', null, 1, { cause, prompt })
+    this.deps.log('info', `Run ${run.id} of ${routine.name}: ${run.status} (${cause.kind})`)
+  }
+
   async cancelRun(runId: string): Promise<void> {
     const live = this.runs.get(runId)
     if (!live) throw new HostError('not_found', t('routines.noRun'))
@@ -399,7 +451,7 @@ export class RoutinesManager {
     if (reason) {
       if (reason === 'plan_limit') this.announceWait(routine)
       this.skip(routine, at, count, reason)
-      if (routine.trigger.schedule.kind === 'once') this.finishOnce(routineId)
+      if (scheduleOf(routine.trigger)?.kind === 'once') this.finishOnce(routineId)
       return
     }
     const run = this.launch(routine, trigger, at, count)
@@ -645,6 +697,7 @@ export class RoutinesManager {
     trigger: RoutineRun['trigger'],
     scheduledFor: number | null,
     count: number,
+    event?: { cause: RunCause; prompt: string },
   ): RoutineRun {
     const working = this.workingCount()
     const run: RoutineRun = {
@@ -665,8 +718,15 @@ export class RoutinesManager {
       usage: null,
       changedFiles: [],
       seen: false,
+      ...(event ? { cause: event.cause } : {}),
     }
-    const live: LiveRun = { run, workingSince: null, timer: null, intent: null }
+    const live: LiveRun = {
+      run,
+      workingSince: null,
+      timer: null,
+      intent: null,
+      ...(event ? { prompt: event.prompt } : {}),
+    }
     this.runs.set(run.id, live)
     // A real run breaks the run of skipped times.
     this.lastSkips.delete(routine.id)
@@ -889,7 +949,7 @@ export class RoutinesManager {
         agentId,
         projectPath: folder,
         options,
-        prompt: routine.prompt,
+        prompt: live.prompt ?? routine.prompt,
         routine: {
           routineId: routine.id,
           runId: live.run.id,
@@ -983,7 +1043,7 @@ export class RoutinesManager {
     this.notify(run)
     if (run.trigger !== 'manual') {
       const routine = this.routines.get(run.routineId)
-      if (routine?.trigger.schedule.kind === 'once') this.finishOnce(run.routineId)
+      if (routine && scheduleOf(routine.trigger)?.kind === 'once') this.finishOnce(run.routineId)
     }
     this.startNext()
   }
@@ -1011,7 +1071,8 @@ export class RoutinesManager {
     void this.publish(run.routineId)
     this.setWorking()
     this.deps.log('info', `Run ${run.id} of ${this.nameOf(run.routineId)}: skipped (plan_limit)`)
-    if (this.routines.get(run.routineId)?.trigger.schedule.kind === 'once') {
+    const routine = this.routines.get(run.routineId)
+    if (routine && scheduleOf(routine.trigger)?.kind === 'once') {
       this.finishOnce(run.routineId)
     }
     this.startNext()
@@ -1223,7 +1284,8 @@ function schedulerRoutine(routine: Routine, model: string | null): SchedulerRout
     agentId: routine.agentId,
     model,
     schedule: routine.trigger.schedule,
-    enabled: routine.enabled,
+    // Huli: a routine that runs on a GitHub event keeps its schedule but does not run on it.
+    enabled: routine.enabled && routine.trigger.kind === 'schedule',
     checkedThrough: routine.checkedThrough,
   }
 }
@@ -1260,7 +1322,7 @@ function isWorking(run: RoutineRun): boolean {
 }
 
 function isDone(routine: Routine, last: RoutineRun | null): boolean {
-  return routine.trigger.schedule.kind === 'once' && last?.endedAt != null
+  return scheduleOf(routine.trigger)?.kind === 'once' && last?.endedAt != null
 }
 
 /** The user's name, or the prompt's first line cut to 60 characters. */

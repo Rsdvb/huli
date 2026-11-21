@@ -1369,5 +1369,56 @@
     "keptRun": "The run you kept is not set aside.",
     "discardFailed": "Some runs could not be set aside: {{error}}",
     "noWorktree": "This run's worktree is gone."
+  },
+  "githubFlow": {
+    "noMethod": "The repository allows no merge method Kite can use.",
+    "notOnGithub": "This project's remote is not on GitHub.",
+    "notThisSession": "That pull request is not one of this session's.",
+    "noRepoAccess": "gh could not read this repository: {{error}}",
+    "issuePrompt": "Please work on this GitHub issue, {{repo}}#{{number}}: {{title}}\n{{url}}",
+    "issueNoBody": "(The issue has no description.)",
+    "wake": {
+      "intro": "GitHub: pull request #{{number}} \"{{title}}\" needs your attention ({{url}}).",
+      "checks_one": "{{count}} check failed:",
+      "checks_other": "{{count}} checks failed:",
+      "conflict": "It now conflicts with {{base}}. Rebase or merge {{base}} into the branch and resolve:",
+      "more_one": "…and {{count}} more file",
+      "more_other": "…and {{count}} more files",
+      "changesRequested": "{{author}} requested changes:",
+      "reviewed": "{{author}} reviewed it:",
+      "commented": "{{author}} commented:",
+      "outro": "Please look into it and push the fix to this pull request's branch."
+    },
+    "event": {
+      "header": "This run was started by a GitHub event:",
+      "issue": "New issue {{title}}",
+      "pr": "New pull request {{title}}",
+      "checks": "Checks failed on pull request {{title}}",
+      "pushed": "New commits were pushed to {{branch}}; its tip is now {{oid}}.",
+      "behindTitle_one": "{{branch}} is {{count}} commit behind {{base}}",
+      "behindTitle_other": "{{branch}} is {{count}} commits behind {{base}}",
+      "behind_one": "The branch {{branch}} is {{count}} commit behind {{base}}.",
+      "behind_other": "The branch {{branch}} is {{count}} commits behind {{base}}."
+    },
+    "note": {
+      "merged": "Merged pull request #{{number}} ({{method}}) once its checks passed",
+      "archived": "The session was archived.",
+      "worktreeRemoved": "Its worktree was removed; the branch {{branch}} stays.",
+      "worktreeKept": "Its worktree was kept: {{reason}}",
+      "keptUncommitted_one": "it has {{count}} uncommitted change.",
+      "keptUncommitted_other": "it has {{count}} uncommitted changes.",
+      "keptAhead": "its branch has commits the pull request does not.",
+      "keptShared": "another session works in it.",
+      "keptFailed": "{{error}}",
+      "mergeFailed": "Could not merge pull request #{{number}}",
+      "closed": "Pull request #{{number}} was closed, so it will not be merged.",
+      "mergedElsewhere": "Pull request #{{number}} was merged outside Kite, so there is nothing left to merge.",
+      "told": "Told the agent about pull request #{{number}}: {{what}}",
+      "toldChecks": "checks failed",
+      "toldConflict": "a merge conflict",
+      "toldReview": "a review",
+      "toldComment": "a comment",
+      "separator": ", "
+    }
   }
 }

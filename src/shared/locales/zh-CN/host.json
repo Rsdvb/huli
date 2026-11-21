@@ -1349,5 +1349,56 @@
     "keptRun": "你保留的那个结果不会被归档。",
     "discardFailed": "有的运行没能归档：{{error}}",
     "noWorktree": "这个运行的工作树已经不在了。"
+  },
+  "githubFlow": {
+    "noMethod": "这个仓库没有开放纸鸢能用的合并方式。",
+    "notOnGithub": "这个项目的远程仓库不在 GitHub 上。",
+    "notThisSession": "这个拉取请求不属于这个会话。",
+    "noRepoAccess": "gh 读不了这个仓库：{{error}}",
+    "issuePrompt": "请处理这个 GitHub 议题，{{repo}}#{{number}}：{{title}}\n{{url}}",
+    "issueNoBody": "（这个议题没有写描述。）",
+    "wake": {
+      "intro": "GitHub：拉取请求 #{{number}}「{{title}}」需要你处理（{{url}}）。",
+      "checks_one": "有 {{count}} 项检查失败：",
+      "checks_other": "有 {{count}} 项检查失败：",
+      "conflict": "它现在和 {{base}} 有冲突。请把 {{base}} 变基或合并进这个分支，解决这些文件：",
+      "more_one": "……还有 {{count}} 个文件",
+      "more_other": "……还有 {{count}} 个文件",
+      "changesRequested": "{{author}} 要求修改：",
+      "reviewed": "{{author}} 审查了：",
+      "commented": "{{author}} 评论了：",
+      "outro": "请看一下，把修复推送到这个拉取请求的分支。"
+    },
+    "event": {
+      "header": "这次运行由一个 GitHub 事件触发：",
+      "issue": "新议题 {{title}}",
+      "pr": "新拉取请求 {{title}}",
+      "checks": "拉取请求 {{title}} 的检查失败了",
+      "pushed": "有新提交推送到了 {{branch}}，它现在指向 {{oid}}。",
+      "behindTitle_one": "{{branch}} 落后 {{base}} {{count}} 个提交",
+      "behindTitle_other": "{{branch}} 落后 {{base}} {{count}} 个提交",
+      "behind_one": "分支 {{branch}} 落后 {{base}} {{count}} 个提交。",
+      "behind_other": "分支 {{branch}} 落后 {{base}} {{count}} 个提交。"
+    },
+    "note": {
+      "merged": "检查通过后，已合并拉取请求 #{{number}}（{{method}}）",
+      "archived": "会话已归档。",
+      "worktreeRemoved": "工作树已移除，分支 {{branch}} 保留。",
+      "worktreeKept": "工作树保留了：{{reason}}",
+      "keptUncommitted_one": "里面还有 {{count}} 处没提交的改动。",
+      "keptUncommitted_other": "里面还有 {{count}} 处没提交的改动。",
+      "keptAhead": "分支上有拉取请求里没有的提交。",
+      "keptShared": "还有别的会话在用它。",
+      "keptFailed": "{{error}}",
+      "mergeFailed": "没能合并拉取请求 #{{number}}",
+      "closed": "拉取请求 #{{number}} 已关闭，不会再自动合并。",
+      "mergedElsewhere": "拉取请求 #{{number}} 已在纸鸢之外合并，不用再合并了。",
+      "told": "已把拉取请求 #{{number}} 的情况告诉代理：{{what}}",
+      "toldChecks": "检查失败",
+      "toldConflict": "合并冲突",
+      "toldReview": "新的审查",
+      "toldComment": "新的评论",
+      "separator": "、"
+    }
   }
 }

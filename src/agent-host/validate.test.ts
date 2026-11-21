@@ -951,6 +951,87 @@ describe('routine requests', () => {
     rejects(() => posix['routines.update']({ routineId, changes: { keptRunSessions: 1000 } }))
   })
 
+  it('runs on a GitHub event only as the event and its fields allow', () => {
+    const schedule = draft.trigger.schedule
+    const on = (event: unknown) =>
+      posix['routines.create']({ ...draft, trigger: { kind: 'github', event, schedule } })
+    expect(on({ kind: 'issue_opened', label: 'bug' }).trigger).toEqual({
+      kind: 'github',
+      event: { kind: 'issue_opened', label: 'bug' },
+      schedule,
+    })
+    expect(on({ kind: 'behind', branch: 'release/1.2' }).trigger).toMatchObject({
+      event: { kind: 'behind', branch: 'release/1.2' },
+    })
+    for (const event of [
+      { kind: 'pushed', branch: '--force' },
+      { kind: 'pushed', branch: 'a b' },
+      { kind: 'pushed' },
+      { kind: 'issue_opened', label: '' },
+      { kind: 'issue_opened', label: 'x'.repeat(51) },
+      { kind: 'cron' },
+      'pr_opened',
+    ]) {
+      rejects(() => on(event))
+    }
+    rejects(() =>
+      posix['routines.create']({
+        ...draft,
+        trigger: { kind: 'github', event: { kind: 'pr_opened' } },
+      }),
+    )
+    const routineId = 'r-0123456789ab'
+    const changes = { trigger: { kind: 'github', event: { kind: 'checks_failed' }, schedule } }
+    expect(posix['routines.update']({ routineId, changes })).toEqual({ routineId, changes })
+  })
+
+  it("sets a session's pull request automation only for a pull request URL and a switch", () => {
+    const url = 'https://github.com/octo-org/hello-world/pull/7'
+    expect(posix['sessions.setPrFlow']({ sessionId: 's', url, autoMerge: true })).toEqual({
+      sessionId: 's',
+      url,
+      autoMerge: true,
+    })
+    expect(posix['sessions.setPrFlow']({ sessionId: 's', url, watch: false })).toEqual({
+      sessionId: 's',
+      url,
+      watch: false,
+    })
+    rejects(() => posix['sessions.setPrFlow']({ sessionId: 's', url }))
+    rejects(() => posix['sessions.setPrFlow']({ sessionId: 's', url, autoMerge: 'yes' }))
+    for (const bad of [
+      'https://github.com/octo-org/hello-world/issues/7',
+      'https://example.com/octo-org/hello-world/pull/7',
+      'https://github.com/octo-org/hello-world/pull/7/files',
+    ]) {
+      rejects(() => posix['sessions.setPrFlow']({ sessionId: 's', url: bad, watch: true }))
+    }
+  })
+
+  it("reads a project's issues and starts a session only for an issue of a project", () => {
+    expect(posix['github.issues']({ projectPath: '/repo', filter: 'mine' })).toEqual({
+      projectPath: '/repo',
+      filter: 'mine',
+    })
+    rejects(() => posix['github.issues']({ projectPath: '/repo', filter: 'open' }))
+    rejects(() => posix['github.issues']({ projectPath: 'repo', filter: 'all' }))
+    const url = 'https://github.com/octo-org/hello-world/issues/12'
+    const start = (params: Record<string, unknown>) =>
+      posix['github.startIssue']({ projectPath: '/repo', url, agentId: 'codex', ...params })
+    expect(start({ worktree: { base: 'main' }, options: { model: 'gpt-5' } })).toEqual({
+      projectPath: '/repo',
+      url,
+      agentId: 'codex',
+      options: { model: 'gpt-5' },
+      worktree: { base: 'main' },
+    })
+    expect(start({})).toEqual({ projectPath: '/repo', url, agentId: 'codex' })
+    rejects(() => start({ url: 'https://github.com/octo-org/hello-world/pull/12' }))
+    rejects(() => start({ agentId: 'nope' }))
+    rejects(() => start({ worktree: { base: '--all' } }))
+    rejects(() => start({ worktree: 'main' }))
+  })
+
   it('waits at a used-up plan unless the draft or a change chooses to switch agents', () => {
     expect(posix['routines.create'](draft)).toMatchObject({ onLimit: 'wait' })
     expect(posix['routines.create']({ ...draft, onLimit: 'switch' })).toMatchObject({

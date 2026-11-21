@@ -228,11 +228,13 @@ import { questionsResult } from './question-answers'
 import { HostError, invalidParams, notFound } from './errors'
 import { t } from './i18n'
 import {
+  GITHUB_ISSUE_URL,
   GITHUB_PULL_REQUEST_URL,
   githubReferenceOf,
   type SessionWorktree,
   type WorktreeFailure,
 } from '@shared/git'
+import type { PrFlowState, SessionIssue, SessionPrFlow } from '@shared/github-flow'
 import type { GitEventDraft, GitServiceApi } from './git/api'
 import { canonicalizePath, isInside, pathKey, samePath } from './paths'
 import type { ProjectHooksAnswers } from './project-hooks'
@@ -314,6 +316,7 @@ import {
   type SessionRecord,
   type SessionsFile,
   type StoredGroup,
+  type StoredPrFlow,
   type WorktreeRecord,
 } from './storage'
 import { SUMMARY_RETRY_MS, writeTitles } from './outline-titles'
@@ -544,6 +547,8 @@ export interface SessionManagerDeps {
   reportsDir: string
   diagnostics: Diagnostics
   git(): GitServiceApi | null
+  /** Huli: a session's pull request automation was turned on or off, or its session went. */
+  prFlowChanged?(): void
   events: SessionEvents
   /** Each agent's options for New session, kept from its new sessions and the user's choices. */
   options?: AgentOptionsStore
@@ -1222,8 +1227,18 @@ function sessionPullRequests(
   })
 }
 
+/** Huli: a session's linked issue, from its canonical URL. */
+function sessionIssue(url: string): SessionIssue | null {
+  const ref = githubReferenceOf(url)
+  return ref?.kind === 'issue'
+    ? { url, owner: ref.owner, repo: ref.repo, number: ref.number }
+    : null
+}
+
 export class SessionManager {
   private readonly records = new Map<string, SessionRecord>()
+  /** Huli: what each session's pull request automation saw last; in memory, read again at start. */
+  private readonly prFlowStates = new Map<string, PrFlowState>()
   private readonly live = new Map<string, Live>()
   // Reports each session got since the user last wrote there; one past the limit once its notice
   // is shown. In memory: a restart lets a few more through, which the limit tolerates.
@@ -1717,6 +1732,8 @@ export class SessionManager {
             kept: record.group.kept ?? null,
           }
         : null,
+      issue: record.issue ? sessionIssue(record.issue) : null,
+      prFlow: record.prFlow ? this.prFlowSummary(record.id, record.prFlow) : null,
       ...(record.worktree ? { worktree: this.worktreeSummary(record.worktree) } : {}),
       ...(record.agentWorktree ? { agentWorktree: { ...record.agentWorktree } } : {}),
       ...(live?.prepared
@@ -4978,6 +4995,8 @@ export class SessionManager {
       worktree?: { base: string; branch?: string }
       /** Huli: the best-of-N group it is a run of. */
       group?: StoredGroup
+      /** Huli: the GitHub issue it is started for, by its canonical URL. */
+      issue?: string
     },
     portId?: string,
   ): Promise<SessionSummary> {
@@ -5051,6 +5070,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...(params.group ? { group: { ...params.group } } : {}),
+      ...(params.issue && GITHUB_ISSUE_URL.test(params.issue) ? { issue: params.issue } : {}),
     }
     if (params.startedBy !== undefined) record.startedBy = params.startedBy
     const options = params.options ?? {}
@@ -9591,6 +9611,223 @@ export class SessionManager {
     else this.saveRecord(sessionId)
   }
 
+  // Huli: the GitHub flow. A session's pull request merged once its checks pass, then the session
+  // archived, and its agent told of new failures, conflicts and reviews.
+
+  private prFlowSummary(sessionId: string, flow: StoredPrFlow): SessionPrFlow {
+    const ref = githubReferenceOf(flow.url)
+    return {
+      url: flow.url,
+      number: ref?.number ?? 0,
+      autoMerge: flow.autoMerge,
+      watch: flow.watch,
+      state: flow.ended?.state ?? this.prFlowStates.get(sessionId) ?? null,
+      ...(flow.ended?.message ? { message: flow.ended.message } : {}),
+    }
+  }
+
+  /** The pull requests a session may automate: those it opened, and its branch's or folder's. */
+  private async prUrlsOf(record: SessionRecord): Promise<string[]> {
+    const git = this.deps.git()
+    const branch =
+      record.branch && git
+        ? (git.branchPullRequests(workDir(record)).get(record.branch) ??
+          git.branchPullRequests(record.projectPath).get(record.branch) ??
+          null)
+        : null
+    const urls = sessionPullRequests(record, branch?.url ?? null, git).map((pr) => pr.url)
+    if (git) {
+      const current = await git.currentPullRequest(workDir(record)).catch(() => null)
+      if (current && !urls.includes(current.url)) urls.push(current.url)
+    }
+    return urls
+  }
+
+  /**
+   * Turns the session's pull request automation on or off, each switch only when named. Watching
+   * anew takes the reviews and comments already there as seen; both off forgets it.
+   */
+  async setPrFlow(
+    sessionId: string,
+    url: string,
+    change: { autoMerge?: boolean; watch?: boolean },
+  ): Promise<SessionSummary> {
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent') throw new HostError('restricted', t('supervisor.notHere'))
+    if (this.isArchived(record)) throw invalidParams('An archived session automates nothing')
+    if (!(await this.prUrlsOf(record)).includes(url)) {
+      throw invalidParams(t('githubFlow.notThisSession'))
+    }
+    const kept = record.prFlow
+    const current: StoredPrFlow =
+      kept && kept.url === url && !kept.ended
+        ? kept
+        : { url, autoMerge: false, watch: false, seen: kept?.url === url ? kept.seen : [] }
+    const next: StoredPrFlow = {
+      ...current,
+      ...(change.autoMerge === undefined ? {} : { autoMerge: change.autoMerge }),
+      ...(change.watch === undefined ? {} : { watch: change.watch }),
+    }
+    if (next.watch && !current.watch) delete next.baselined
+    this.prFlowStates.delete(sessionId)
+    if (next.autoMerge || next.watch) record.prFlow = next
+    else delete record.prFlow
+    this.saveRecord(sessionId)
+    this.deps.prFlowChanged?.()
+    return this.summary(sessionId)
+  }
+
+  /** The sessions whose pull request automation runs, for the GitHub flow. */
+  prFlows(): {
+    sessionId: string
+    flow: StoredPrFlow
+    folder: string
+    busy: boolean
+    worktree: boolean
+  }[] {
+    return this.allRecords().flatMap((record) => {
+      const flow = record.prFlow
+      if (!flow || flow.ended || (!flow.autoMerge && !flow.watch)) return []
+      if (record.origin === 'subagent' || this.isArchived(record)) return []
+      const view = this.live.get(record.id)?.thread.session
+      const busy =
+        !!view &&
+        (view.status === 'running' ||
+          view.status === 'awaiting_permission' ||
+          view.status === 'starting' ||
+          view.queue.length > 0)
+      return [
+        {
+          sessionId: record.id,
+          flow: { ...flow, seen: [...flow.seen] },
+          folder: workDir(record),
+          busy,
+          worktree: !!record.worktree && record.worktree.path !== '',
+        },
+      ]
+    })
+  }
+
+  /** Changes the stored automation of a session, while it is still that pull request's. */
+  updatePrFlow(sessionId: string, url: string, change: (flow: StoredPrFlow) => StoredPrFlow): void {
+    if (!this.has(sessionId)) return
+    const record = this.recordOf(sessionId)
+    if (!record.prFlow || record.prFlow.url !== url) return
+    const next = change(record.prFlow)
+    if (JSON.stringify(next) === JSON.stringify(record.prFlow)) return
+    record.prFlow = next
+    this.saveRecord(sessionId)
+  }
+
+  /** What the automation saw last, for the session's chip; in memory only. */
+  setPrFlowState(sessionId: string, state: PrFlowState | null): void {
+    if (state === null) {
+      if (!this.prFlowStates.delete(sessionId)) return
+    } else {
+      if (this.prFlowStates.get(sessionId) === state) return
+      this.prFlowStates.set(sessionId, state)
+    }
+    if (this.has(sessionId)) this.touch(sessionId)
+  }
+
+  /** An info, warning or error note in the session's thread from the GitHub flow. */
+  async flowNote(
+    sessionId: string,
+    severity: 'info' | 'warning' | 'error',
+    title: string,
+    description?: string,
+  ): Promise<void> {
+    if (!this.has(sessionId) || this.stopped) return
+    const live = await this.revive(sessionId)
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(live),
+          severity,
+          title,
+          ...(description ? { description } : {}),
+          after: agentEntryBefore(live.thread),
+        },
+      },
+    ])
+    this.persist(live)
+    this.touch(live.id)
+  }
+
+  /**
+   * Sends the agent a message from the GitHub flow: at once when the session is idle, else at the
+   * end of its queue. An archived session gets none, and false.
+   */
+  async tellFromHost(sessionId: string, text: string): Promise<boolean> {
+    if (!this.has(sessionId) || this.stopped) return false
+    if (this.isArchived(this.recordOf(sessionId))) return false
+    const live = await this.revive(sessionId)
+    const content: UserContent[] = [{ type: 'text', text }]
+    const { status, queue } = live.thread.session
+    if (canSend(status) && queue.length === 0 && !this.waitsForWorktree(live)) {
+      this.sendPrompt(live, content)
+      return true
+    }
+    this.update(live, { queue: [...queue, { id: randomUUID(), content, at: this.now() }] })
+    this.persist(live)
+    this.touch(live.id)
+    return true
+  }
+
+  /**
+   * After its pull request merged at `headOid`: whether the session's worktree goes, which it does
+   * only when nothing in it is left out of the merge, or why it stays; `finish` then removes it,
+   * keeping its branch, and archives the session.
+   */
+  async closeMerged(
+    sessionId: string,
+    headOid: string,
+  ): Promise<{
+    removing: { branch: string } | null
+    kept: string | null
+    finish: () => Promise<void>
+  }> {
+    const record = this.recordOf(sessionId)
+    const worktree = record.worktree
+    let removing: { branch: string } | null = null
+    let kept: string | null = null
+    let inspection: (WorktreeInspection & { others: string[] }) | null = null
+    if (worktree && worktree.path !== '' && worktree.removed === undefined) {
+      try {
+        const found = await this.inspectWorktree(sessionId)
+        if (!found.exists) {
+          // Gone already: nothing to remove.
+        } else if (found.others.length > 0) {
+          kept = t('githubFlow.note.keptShared')
+        } else if (found.uncommitted > 0) {
+          kept = t('githubFlow.note.keptUncommitted', { count: found.uncommitted })
+        } else if (found.head !== headOid && found.unpushed > 0 && !found.merged) {
+          kept = t('githubFlow.note.keptAhead')
+        } else {
+          inspection = found
+          removing = { branch: worktree.branch }
+        }
+      } catch (error) {
+        kept = t('githubFlow.note.keptFailed', { error: (error as Error).message })
+      }
+    }
+    const finish = async (): Promise<void> => {
+      if (inspection) {
+        await this.removeWorktree(sessionId, 'keep', inspection).catch((error: unknown) => {
+          this.deps.diagnostics.log(
+            'warn',
+            `Could not remove the worktree of a merged session: ${(error as Error).message}`,
+          )
+        })
+      }
+      await this.archive(sessionId)
+      this.deps.prFlowChanged?.()
+    }
+    return { removing, kept, finish }
+  }
+
   /**
    * The settings changed: pauses the settings no longer allow are dropped, and running turns are
    * timed by the new silence.
@@ -10718,6 +10955,7 @@ export class SessionManager {
     record.archivedAt = this.now()
     this.saveRecord(sessionId)
     this.deps.events.ended(all.map((item) => item.id))
+    if (record.prFlow) this.deps.prFlowChanged?.()
   }
 
   /**
@@ -10992,6 +11230,7 @@ export class SessionManager {
     record.archivedAt = this.now()
     this.saveRecord(sessionId)
     this.deps.events.ended(all.map((item) => item.id))
+    if (record.prFlow) this.deps.prFlowChanged?.()
   }
 
   /**
@@ -11789,6 +12028,7 @@ export class SessionManager {
     const all = [...this.descendants(sessionId), record]
     await this.closeAll(all, false)
     this.deps.events.ended(all.map((item) => item.id))
+    if (record.prFlow) queueMicrotask(() => this.deps.prFlowChanged?.())
     // Huli: `deleted`, the agent's own delete went through.
     const owners: { agentId: AgentId; acpSessionId: string; deleted: boolean }[] = []
     const deleting: {

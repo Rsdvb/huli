@@ -2,10 +2,11 @@
 
 import type { SessionSummary } from './agent-host'
 import { isAgentId } from './agents'
+import { isRunCause, type GithubEvent, type RunCause } from './github-flow'
 import type { AgentId, StopReason, TokenTotals } from './thread'
 
-/** A run's trigger. Chaining adds kinds of its own later. */
-export type RunTrigger = 'schedule' | 'catch-up' | 'manual'
+/** A run's trigger. Chaining adds kinds of its own later; Huli: `event`, a GitHub event. */
+export type RunTrigger = 'schedule' | 'catch-up' | 'manual' | 'event'
 
 /** When a routine runs. Only `schedule` exists until chaining's triggers do. */
 export type Schedule =
@@ -41,7 +42,7 @@ export interface Routine {
   agentId: AgentId
   projectPath: string | null // null: the routine's own scratch folder
   options: RoutineOption[] // model, model_config and thought_level values
-  trigger: { kind: 'schedule'; schedule: Schedule }
+  trigger: RoutineTrigger
   scope: PermissionScope
   timeLimitMinutes: TimeLimitMinutes
   keptRunSessions: KeptRunSessions // the latest runs whose sessions it keeps
@@ -50,6 +51,19 @@ export interface Routine {
   createdAt: number
   updatedAt: number
   checkedThrough: number // every scheduled time up to here has run, been skipped or caught up
+}
+
+/**
+ * When a routine runs: on its schedule, or Huli: on a GitHub event in its project's repository,
+ * which keeps the schedule it had for clients that know only schedules and for a switch back.
+ */
+export type RoutineTrigger =
+  | { kind: 'schedule'; schedule: Schedule }
+  | { kind: 'github'; event: GithubEvent; schedule: Schedule }
+
+/** The schedule a routine runs on; null for one that runs on an event. */
+export function scheduleOf(trigger: RoutineTrigger): Schedule | null {
+  return trigger.kind === 'schedule' ? trigger.schedule : null
 }
 
 export const TIME_LIMITS = [15, 30, 60, 120, 240] as const
@@ -150,6 +164,7 @@ export interface RoutineRun {
   changedFiles: string[] // paths its edits touched, relative to the project
   seen: boolean
   switched?: RunSwitch // set when another agent ran it in place of the routine's
+  cause?: RunCause // Huli: the GitHub event a run with trigger `event` ran for
 }
 
 /** How many runs of one routine the history reads at a time. */
@@ -273,7 +288,7 @@ export function isRunStatus(value: unknown): value is RunStatus {
 }
 
 export function isRunTrigger(value: unknown): value is RunTrigger {
-  return value === 'schedule' || value === 'catch-up' || value === 'manual'
+  return value === 'schedule' || value === 'catch-up' || value === 'manual' || value === 'event'
 }
 
 /** Whether a run record read from storage has every field, as its own type needs. */
@@ -305,7 +320,8 @@ export function isRoutineRun(value: unknown): value is RoutineRun {
     Array.isArray(run.changedFiles) &&
     run.changedFiles.every((path) => typeof path === 'string') &&
     typeof run.seen === 'boolean' &&
-    (run.switched === undefined || isRunSwitch(run.switched))
+    (run.switched === undefined || isRunSwitch(run.switched)) &&
+    (run.cause === undefined || isRunCause(run.cause))
   )
 }
 
