@@ -2110,6 +2110,8 @@
   --diffs-bg-selection-override: var(--selection);
   --diffs-bg-selection-number-override: var(--selection);
   --diffs-bg-separator-override: var(--bg-subtle);
+  /* The numbers of rows commented on for the agent. */
+  --diff-note: var(--pane-fox);
   --diffs-header-font-family: var(--font-mono);
   --diffs-line-height: 21px;
   /* A changed line's tint runs from the numbers into the code without a seam. */

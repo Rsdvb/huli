@@ -1,8 +1,12 @@
-import { useCallback, useRef, useState, type RefObject } from 'react'
+import { useCallback, useMemo, useRef, useState, type RefObject } from 'react'
 import type { SelectedLineRange } from '@pierre/diffs'
-import { ArrowDown01Icon, ArrowUp01Icon, AtIcon } from '@hugeicons/core-free-icons'
+import { ArrowDown01Icon, ArrowUp01Icon, AtIcon, BubbleChatIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { FileDiff } from '@shared/git'
+import { RenderCount } from '@renderer/features/diff-notes/notes'
+import { NotesLayer, type NoteEditing } from '@renderer/features/diff-notes/notes-layer'
+import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
+import { useDraftNotes } from '@renderer/features/session/composer/drafts'
 import { PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
 import { closeDiff, openFile, type DiffView } from '@renderer/stores/files'
 import { DiffFileToggle, PathCopy } from './file-header'
@@ -11,8 +15,19 @@ import { stepChange, useParsedDiff } from './diff-nav'
 import { FilesDiff } from './files-diff'
 import { mentionLines, selectedLines, type MentionMiss } from './mention-lines'
 
-/** A file's change: uncommitted against `HEAD` from the Changes list, or at a commit. */
-export function DiffPreview({ projectPath, diff }: { projectPath: string; diff: DiffView }) {
+/**
+ * A file's change: uncommitted against `HEAD` from the Changes list, or at a commit. Its lines take
+ * comments for `sessionId`'s agent, the session whose side panel shows it, when there is one.
+ */
+export function DiffPreview({
+  projectPath,
+  diff,
+  sessionId,
+}: {
+  projectPath: string
+  diff: DiffView
+  sessionId: string | null
+}) {
   const showFile = (): void => {
     if (diff.projectFile === null) return
     openFile(projectPath, diff.projectFile)
@@ -31,6 +46,7 @@ export function DiffPreview({ projectPath, diff }: { projectPath: string; diff: 
           projectPath={projectPath}
           diff={diff}
           result={drawn}
+          sessionId={sessionId}
           onShowFile={showFile}
         />
       ) : (
@@ -104,11 +120,13 @@ function Changes({
   projectPath,
   diff,
   result,
+  sessionId,
   onShowFile,
 }: {
   projectPath: string
   diff: DiffView
   result: FileDiff
+  sessionId: string | null
   onShowFile: () => void
 }) {
   const { t } = useTranslation(['files', 'composer'])
@@ -116,10 +134,23 @@ function Changes({
   const fileDiff = useParsedDiff(result.path, result.oldText, result.newText ?? '')
   const [selected, setSelected] = useState<SelectedLineRange | null>(null)
   const [miss, setMiss] = useState<MentionMiss | null>(null)
+  const [editing, setEditing] = useState<NoteEditing | null>(null)
+  const [renders] = useState(() => new RenderCount())
   const onSelect = useCallback((range: SelectedLineRange | null) => {
     setSelected(range)
     setMiss(null)
   }, [])
+  const onComment = useCallback((range: SelectedLineRange) => {
+    setSelected(range)
+    setEditing({ kind: 'new', range })
+  }, [])
+  const onEditing = useCallback((next: NoteEditing | null) => {
+    setEditing(next)
+    if (next === null) setSelected(null)
+  }, [])
+  // Comments name the file as the session's agent finds it, from the folder the pane shows.
+  const notePath = diff.projectFile ?? diff.path
+  const notePlace = useMemo(() => ({ path: notePath, ref: diff.ref }), [notePath, diff.ref])
   // Lines of a commit are not the file as it is now, so only the working tree's are mentioned.
   const mentionable = diff.ref === null && diff.projectFile !== null
   const lines = mentionable ? selectedLines(selected) : null
@@ -137,24 +168,66 @@ function Changes({
       <div
         className="kp-doc__body flex flex-col"
         onKeyDown={(event) => {
-          if (event.key !== 'Escape' || event.nativeEvent.isComposing || !selected) return
+          if (event.key !== 'Escape' || event.nativeEvent.isComposing || !selected || editing) {
+            return
+          }
           // Handled here, so the session does not also take Esc as a request to stop.
           event.preventDefault()
           setSelected(null)
         }}
       >
-        {/* Focusable, so a click on a line focuses it and Esc reaches the handler above. */}
+        {/* Focusable, so a click on a line focuses it and Esc reaches the handler above. Laid out
+            on its own: a change elsewhere in the window, such as the composer growing, would
+            otherwise lay out the diff's thousands of rows again. */}
         <div
           ref={scroller}
           tabIndex={-1}
           data-selectable=""
-          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-9 outline-none"
+          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-9 outline-none [contain:layout_size]"
         >
-          <FilesDiff fileDiff={fileDiff} selected={selected} onSelect={onSelect} />
+          <FilesDiff
+            fileDiff={fileDiff}
+            selected={selected}
+            onSelect={onSelect}
+            onRendered={renders.bump}
+          />
+          {sessionId && (
+            <NotesLayer
+              scroller={scroller}
+              fileDiff={fileDiff}
+              sessionId={sessionId}
+              place={notePlace}
+              selected={selected}
+              editing={editing}
+              onEditing={onEditing}
+              renders={renders}
+              onComment={onComment}
+            />
+          )}
         </div>
-        {miss ? (
+        {editing ? null : miss ? (
           <span className="kp-doc__hint" data-tone="error">
             {miss === 'full' ? t('composer:attachments.limit') : t('diff.noComposer')}
+          </span>
+        ) : selected && sessionId ? (
+          <span className="kp-lines-row">
+            {lines && (
+              <button type="button" className="kp-lines" onClick={mention}>
+                <PaneIcon icon={AtIcon} size={13} />
+                {lines[0] === lines[1]
+                  ? t('diff.mentionLine', { line: lines[0] })
+                  : t('diff.mentionLines', { start: lines[0], end: lines[1] })}
+              </button>
+            )}
+            <button
+              type="button"
+              className="kp-lines"
+              title={t('notes.commentTitle')}
+              onClick={() => setEditing({ kind: 'new', range: selected })}
+            >
+              <PaneIcon icon={BubbleChatIcon} size={13} />
+              {t('notes.comment')}
+            </button>
           </span>
         ) : lines ? (
           <button type="button" className="kp-lines" onClick={mention}>
@@ -163,6 +236,11 @@ function Changes({
               ? t('diff.mentionLine', { line: lines[0] })
               : t('diff.mentionLines', { start: lines[0], end: lines[1] })}
           </button>
+        ) : sessionId ? (
+          <NotesFoot
+            sessionId={sessionId}
+            hint={mentionable ? t('notes.hint') : t('diff.atCommit')}
+          />
         ) : (
           <span className="kp-doc__hint">
             {mentionable ? t('diff.selectHint') : t('diff.atCommit')}
@@ -170,5 +248,16 @@ function Changes({
         )}
       </div>
     </>
+  )
+}
+
+/** Under the diff: the session's comments waiting to go, or the hint while there are none. */
+function NotesFoot({ sessionId, hint }: { sessionId: string; hint: string }) {
+  const count = useDraftNotes(sessionId).length
+  if (count === 0) return <span className="kp-doc__hint">{hint}</span>
+  return (
+    <div className="kp-notes-foot">
+      <NotesTray sessionId={sessionId} place="pane" />
+    </div>
   )
 }
