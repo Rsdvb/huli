@@ -715,6 +715,8 @@ interface Live {
   /** Who sent the latest turn: a window's or a device's port, and the device it serves. */
   sender: TurnSender | null
   failure: Failure | null
+  /** Huli: the thread's notice that the agent asks to sign in, while the session waits for it. */
+  signInNotice: string | null
   unread: boolean
   /** The current error was in front of the user, so the row no longer marks it. */
   errorSeen: boolean
@@ -3141,6 +3143,10 @@ export class SessionManager {
   private update(live: Live, changes: Partial<SessionView>): void {
     if (changes.error) live.errorSeen = this.inFront(live.id)
     this.emit(live, [{ op: 'session.update', changes }])
+    // Huli: the session no longer waits for the sign-in, which its notice asked for.
+    if (changes.status !== undefined && changes.status !== 'auth_required') {
+      this.dropSignInNotice(live)
+    }
     if ('status' in changes) {
       this.refreshRelease(live)
       // A wait for the user's answer, the turn's own or a subagent's, holds the stuck-turn watch.
@@ -3869,6 +3875,7 @@ export class SessionManager {
       ask: null,
       sender: null,
       failure: null,
+      signInNotice: null,
       unread: this.persistedUnread(record),
       errorSeen: false,
       connection: null,
@@ -5546,7 +5553,7 @@ export class SessionManager {
       if (gone()) throw removedWhileStarting()
       const failed = this.failStart(live, error, { action: 'create' })
       // The first message waits for the sign-in, which retries the start and then sends it.
-      if (failed.code === 'auth_required' && live.first) this.signInNotice(live, failed)
+      if (failed.code === 'auth_required' && live.first) this.signInNotice(live)
       throw failed
     }
     if (live.startedMode) this.holdStartedMode(live, setup.config)
@@ -5697,21 +5704,37 @@ export class SessionManager {
     this.persist(live)
   }
 
-  /** The thread's notice that the agent asks to sign in, as a failed turn adds it. */
-  private signInNotice(live: Live, error: HostError): void {
+  /**
+   * The thread's notice that the agent asks to sign in, as a failed start or turn adds it. Huli:
+   * in the user's words rather than the agent's, one at a time, and only while the session waits
+   * for the sign-in, which the session's own sign-in card offers.
+   */
+  private signInNotice(live: Live): void {
+    this.dropSignInNotice(live)
+    const id = this.nextId(live)
+    live.signInNotice = id
     this.emit(live, [
       {
         op: 'entry.add',
         entry: {
           kind: 'notice',
-          id: this.nextId(live),
-          severity: 'error',
+          id,
+          severity: 'warning',
           title: t('notice.signInNeeded', { agent: this.deps.agents.name(live.record.agentId) }),
-          description: error.message,
+          description: t('notice.signInNeededBody'),
+          cause: 'sign_in',
           after: agentEntryBefore(live.thread),
         },
       },
     ])
+  }
+
+  /** Huli: takes the sign-in notice out of the thread once the session no longer waits. */
+  private dropSignInNotice(live: Live): void {
+    const id = live.signInNotice
+    if (id === null) return
+    live.signInNotice = null
+    if (id in live.thread.byId) this.emit(live, [{ op: 'entry.remove', ids: [id] }])
   }
 
   /** Removes an agent's session that no thread or index entry holds, leaving no trace. */
@@ -9088,21 +9111,17 @@ export class SessionManager {
     if (givenBack) turn.attachments = []
     this.finishTurn(live, turn, null)
     const now = this.now()
-    this.emit(live, [
-      {
-        op: 'entry.add',
-        entry: {
-          kind: 'notice',
-          id: this.nextId(live),
-          severity: 'error',
-          ...(authRequired
-            ? {
-                title: t('notice.signInNeeded', {
-                  agent: this.deps.agents.name(live.record.agentId),
-                }),
-                description: mapped.message,
-              }
-            : closed
+    if (authRequired) {
+      this.signInNotice(live)
+    } else {
+      this.emit(live, [
+        {
+          op: 'entry.add',
+          entry: {
+            kind: 'notice',
+            id: this.nextId(live),
+            severity: 'error',
+            ...(closed
               ? stoppedNotice(this.deps.agents.name(live.record.agentId))
               : isOutOfCredit(mapped)
                 ? outOfCreditNotice(
@@ -9118,10 +9137,11 @@ export class SessionManager {
                     // The thread offers to go on with an agent whose plan has room.
                     ...(!turn.byAgent && planLimit ? { planLimit: true as const } : {}),
                   }),
-          after: agentEntryBefore(live.thread),
+            after: agentEntryBefore(live.thread),
+          },
         },
-      },
-    ])
+      ])
+    }
     if (authRequired) {
       // A turn the agent started has no message to send again; Retry reopens the session.
       live.failure = turn.byAgent

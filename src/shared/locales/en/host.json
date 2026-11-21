@@ -133,7 +133,8 @@
     "fullAccessNotCarried": {
       "title": "Full access was not carried over",
       "description": "This session ran in full access outside Kettu. Kettu does not attach a session in it, so it is in {{mode}} here."
-    }
+    },
+    "signInNeededBody": "Sign in, and the message is sent again."
   },
   "attention": {
     "browserOrigin": "Wants to open {{site}}",
@@ -319,7 +320,23 @@
     "removing": "{{agent}} is being removed from this computer; try again once it is done",
     "removeBusy_one": "A session of this agent is working; stop it or let it finish, then remove it",
     "removeBusy_other": "{{count}} sessions of this agent are working; stop them or let them finish, then remove it",
-    "removeShared": "{{agents}} also run on {{harness}}, which uninstalling would break. Remove them first, or remove only this agent."
+    "removeShared": "{{agents}} also run on {{harness}}, which uninstalling would break. Remove them first, or remove only this agent.",
+    "unknownUsageReply": "The vendor sent a usage reply Kettu cannot read",
+    "unknownAccountReply": "{{agent}} sent an account reply Kettu cannot read",
+    "signInTimedOut": "The sign-in to {{agent}} took too long and was stopped. Try again.",
+    "method": {
+      "subscription": "Sign in with a subscription",
+      "deviceCode": "Sign in with a device code",
+      "terminal": "Sign in in a terminal",
+      "opencode": "Sign in to a provider"
+    },
+    "apiKey": {
+      "key": "The API key must be one word without spaces.",
+      "keyOnly": "This harness takes only an API key.",
+      "baseUrl": "The base URL must be an http or https address.",
+      "model": "The model must be one word without spaces.",
+      "none": "{{agent}} takes no API key from Kettu."
+    }
   },
   "detect": {
     "noVersion": "No version of {{agent}} fits this computer, so it cannot be installed.",
@@ -566,6 +583,35 @@
       "noResponse": "no response",
       "connection": "connection failed",
       "status": "HTTP {{status}}"
+    },
+    "auth": {
+      "subscription": {
+        "name": "Claude Subscription",
+        "description": "Use Claude subscription"
+      },
+      "console": {
+        "name": "Anthropic Console",
+        "description": "Use Anthropic Console (API usage billing)"
+      },
+      "login": {
+        "name": "Log in with Claude",
+        "description": "Run `claude` and then /login"
+      }
+    },
+    "account": {
+      "gateway": "Custom model gateway",
+      "apiKey": "Anthropic API key",
+      "none": "Not signed in"
+    },
+    "option": {
+      "mode": "Mode",
+      "modeDescription": "Session permission mode",
+      "model": "Model",
+      "modelDescription": "AI model to use",
+      "effort": "Effort",
+      "effortDescription": "Available effort levels for this model",
+      "fast": "Fast mode",
+      "fastDescription": "Faster responses on supported models"
     }
   },
   "codex": {
@@ -587,7 +633,8 @@
       "fastDescription": "1.5x speed, increased usage",
       "speed": "Speed",
       "speedDescription": "The speeds Codex offers for this model; faster ones use more",
-      "speedStandard": "Standard"
+      "speedStandard": "Standard",
+      "fastTier": "Fast"
     },
     "mode": {
       "read-only": {
@@ -1043,6 +1090,12 @@
     },
     "changelog": {
       "missing": "Changelog not found: pi's package could not be located."
+    },
+    "option": {
+      "model": "Model",
+      "modelDescription": "Select the model for this session",
+      "thinking": "Thinking",
+      "thinkingDescription": "Set the reasoning effort for this session"
     }
   },
   "cline": {
@@ -1275,5 +1328,15 @@
     "notStarted": "This session has no conversation in its agent yet, so there is nothing to resume.",
     "running": "This session is running here. Stop it first, then continue it in the terminal.",
     "subagent": "A sub-agent’s session goes on in its parent’s."
+  },
+  "effortLevel": {
+    "none": "Off",
+    "off": "Off",
+    "minimal": "Minimal",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Extra high",
+    "max": "Max"
   }
 }
