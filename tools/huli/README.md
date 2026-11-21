@@ -65,6 +65,7 @@ Code (kept small so upstream merges stay clean):
 | `src/agent-host/{agents,host,validate}.ts`, `acp/connection.ts`, `src/shared/agent-host.ts`, `agents-section.tsx`, `mobile/src/app/settings/agent.tsx` | an agent added, turned on or whose page opens is started (never installed) to learn its sign-in methods and state (`agents.readSignIn`, `readingSignIn` while it runs), asked once without a session that would stay in an unchecked agent's history; a sign-in waiting on a browser or terminal is checked every 4 s for 3 minutes, at once when its page is done and when the window comes back, and a check that finds it signed in ends a pending `authenticate` as signed in (`sign-in-watch.test.ts`) |
 | ----------------------------------------------------------------------------------------------------------------------------------------               | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------                                                                                                                                                                                         |
 | `src/agent-host/{agents,host,validate}.ts`, `src/shared/{agent-host,host-request-limits}.ts`, `agents-section.tsx`, `app/bootstrap.ts`                 | an agent's Remove… also offers to uninstall its program from the computer and to delete its own data there (see Removing an agent from the computer)                                                                                                                                                                                                                                                                                                                                                        |
+| `src/agent-host/{agents,sessions,started-mode}.ts`, `agents-section.tsx`, `agent-sign-in.ts`, `sign-in-actions.tsx`, `new-session.tsx`                 | a signed-out agent's status leaves out the account, plan and balances an earlier sign-in read, which go once it names another account; a changed key or a reset reads the sign-in again (`readingSignIn`); a sign-in stops after 5 minutes; a session's sign-in notice leaves once it no longer waits (`signed-out-readings.test.ts`); New session and a waiting session offer the sign-in in place                                                                                                         |
 
 ### Import from agents
 
@@ -574,7 +575,9 @@ and Kite runs that program itself, never cmd.exe or the PowerShell shim. The ins
   CLI's own modes and says so: 沙箱 (`ask_always`, the default: a sandbox that writes only in the
   folder), 拒绝风险操作 (`ask_risky`: no sandbox, risky actions refused) and 完全访问
   (`always_allow`). A refused call shows as denied, and the turn ends with a notice that lists
-  what was refused.
+  what was refused. The agent's page takes one as the mode new sessions start in; a session
+  another agent starts never takes full access from it (`startedStartMode`), since Kite does not
+  rank Doubao's modes.
 - Every `doubao` process uses one shared service per account, the child of whichever process
   started it; ending that process's tree (Stop, or the host reaping an exited process) ends every
   other run. So `doubao/gate.ts` runs one turn or sign-in at a time per account, and a read
