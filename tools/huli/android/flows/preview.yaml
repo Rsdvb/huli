@@ -26,7 +26,7 @@ appId: io.github.rsdvb.huli
     visible:
       text: '.*kite-report\.pdf.*'
     timeout: 120000
-- hideKeyboard
+# Maestro's hideKeyboard goes back from the session here, so the keyboard stays up.
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 3000

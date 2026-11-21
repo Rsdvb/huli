@@ -1,6 +1,6 @@
-# A document opened from the conversation: the reply's link to the Word document the fake agent
-# wrote (/documents) opens it in Quick Look; failing that, the tool call's file, and last the Files
-# browser. It ends on the Word document in Quick Look.
+# Documents opened from the conversation the fake agent's /documents left: the reply's inline code
+# naming the PDF and its link to the Word document, then the tool call's card, which opens the Word
+# document (the Files browser should that fail). It ends on the Word document in Quick Look.
 # Ends: both appearances
 appId: io.github.rsdvb.huli
 ---
@@ -36,36 +36,48 @@ appId: io.github.rsdvb.huli
     visible: 'PAUSE_NEVER'
     timeout: 2000
     optional: true
+# The reply's own links, by where they lie, as the reply is one text to Maestro: the inline code
+# naming the PDF, then the link to the Word document.
 - tapOn:
-    text: 'kite-notes.docx'
+    point: 48%,62.7%
     optional: true
 - extendedWaitUntil:
     visible:
       text: '(Done|完成|Close)'
     timeout: 15000
     optional: true
-- takeScreenshot: w01-from-link
+- takeScreenshot: w01-reply-code
+- tapOn:
+    text: '(Done|完成|Close)'
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    point: 13%,65.3%
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: '(Done|完成|Close)'
+    timeout: 15000
+    optional: true
+- takeScreenshot: w02-reply-link
+- tapOn:
+    text: '(Done|完成|Close)'
+    optional: true
+- waitForAnimationToEnd
 # The tool call's own files, opened from its card.
-- runFlow:
-    when:
-      notVisible:
-        text: '(Done|完成|Close)'
-    commands:
-      - tapOn:
-          text: '.*运行了.*'
-          optional: true
-      - tapOn:
-          text: '.*make_report.*'
-          optional: true
-      - takeScreenshot: w02-tool-card
-      - tapOn:
-          text: '打开 report/kite-notes.docx'
-          optional: true
-      - extendedWaitUntil:
-          visible:
-            text: '(Done|完成|Close)'
-          timeout: 15000
-          optional: true
+- tapOn:
+    text: '.*make_report.*'
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: w03-tool-card
+- tapOn:
+    text: '打开 report/kite-notes.docx'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: '(Done|完成|Close)'
+    timeout: 15000
+    optional: true
 # Last, the Files browser.
 - runFlow:
     when:
@@ -82,4 +94,4 @@ appId: io.github.rsdvb.huli
       text: '(Done|完成|Close)'
     timeout: 30000
 - waitForAnimationToEnd
-- takeScreenshot: w03-word
+- takeScreenshot: w04-word

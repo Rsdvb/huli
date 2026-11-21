@@ -100,7 +100,7 @@ function FileRow(props: {
   const { c } = useSessionTokens()
   const { change } = props
   const [open, setOpen] = useDisclosure(`change:${props.turn}:${change.path}`)
-  // The file as it is now, which a document is seen as better than through its diff.
+  // The file itself, which shows a document better than its diff does.
   const file = folderFile(change.path, props.root)
   const shown = useOpenFade(open)
   // The chevron and the rest of the line are buttons side by side: nested in the line, a tap on

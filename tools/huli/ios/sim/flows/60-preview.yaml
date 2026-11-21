@@ -1,7 +1,7 @@
 # A computer's documents on the phone. The fake agent writes a PDF, a Word document and a 24 MB PDF
 # into the session's folder (/documents). The Files browser opens the PDF in Quick Look, the large
-# one after its download shows its progress, the PDF again from the copy kept, and a long press
-# hands the Word document to the share sheet. It ends on the PDF in Quick Look.
+# one after its download shows its progress, a long press hands the Word document to the share
+# sheet, and the PDF opens again from the copy kept. It ends on the PDF in Quick Look.
 # Ends: both appearances
 appId: io.github.rsdvb.huli
 ---
@@ -72,23 +72,31 @@ appId: io.github.rsdvb.huli
 - tapOn:
     text: '(Done|完成|Close)'
 - waitForAnimationToEnd
-# A long press offers the Word document to other apps.
+# A long press offers the Word document to other apps; the share sheet fills in slowly here.
 - longPressOn: '文件 kite-notes.docx'
 - tapOn: '用其他 App 打开 / 分享'
 - extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 4000
+    visible:
+      text: '(Copy|Save to Files|拷贝|存储到“文件”)'
+    timeout: 45000
     optional: true
 - takeScreenshot: v06-share
+# The app started afresh, past the share sheet: the PDF again, unchanged on the computer, opens at
+# once from the copy kept.
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn: '会话'
 - tapOn:
-    text: '(Close|关闭)'
-    optional: true
-- swipe:
-    start: 50%, 45%
-    end: 50%, 98%
-    duration: 400
+    text: '.*Fake agent: documents.*'
+    index: 0
 - waitForAnimationToEnd
-# The PDF again, unchanged on the computer: from the copy kept, at once.
+- tapOn: '文件、改动、产物、终端和子会话'
+- tapOn:
+    text: '文件(，\d+)?'
+- tapOn: '文件夹 report'
+- waitForAnimationToEnd
 - tapOn: '文件 kite-report.pdf'
 - extendedWaitUntil:
     visible:
