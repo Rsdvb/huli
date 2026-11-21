@@ -203,6 +203,35 @@ describe('the page a PDF prints', () => {
     expect(html).toContain('<pre><code>indented\n  more</code></pre>')
   })
 
+  it('draws maths as KaTeX does, whose source reaches no tag and no link', () => {
+    const html = markdownHtml(
+      [
+        'Energy $$E = mc^2$$ costs $5 and $10.',
+        '',
+        '> $$',
+        '> \\frac{1}{2}',
+        '> $$',
+        '',
+        '$$\\text{<img src=x onerror=alert(1)>} \\href{https://example.com}{x}$$',
+        '',
+        '$$\\frac{1}{$$',
+      ].join('\n'),
+    )
+    expect(html).toContain('<span class="katex">')
+    expect(html).toContain('costs $5 and $10.')
+    expect(html).toContain('<blockquote><p><span class="katex-display">')
+    expect(html).not.toMatch(/<img|href=|<a /)
+    // KaTeX sets the spaces of `\text` as no-break spaces.
+    expect(html).toMatch(/&lt;img\ssrc=x\sonerror=alert\(1\)&gt;/)
+    expect(html).toContain('<code>\\frac{1}{</code>')
+  })
+
+  it('adds KaTeX’s styles only to a page that draws a formula', () => {
+    const style = () => '.katex{}'
+    expect(exportPage('Plain', '# Hi\n', style)).not.toContain('.katex{}')
+    expect(exportPage('Maths', '$$x$$\n', style)).toContain('<style>.katex{}</style>')
+  })
+
   it('makes a whole page that allows no script and no network', () => {
     const page = exportPage('A <b>title</b>', '# Hi\n')
     expect(page).toContain("default-src 'none'")

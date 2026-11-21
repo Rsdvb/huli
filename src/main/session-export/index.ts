@@ -1,19 +1,21 @@
 // Huli: Export… in a session's menu, as main does it: the save dialog, the secrets masked as the
 // logs mask them, and the files: Markdown with its pictures in a folder beside it, the same in a
-// zip, or a PDF printed from a page that runs no script, in a hidden window.
+// zip, or a PDF printed in a hidden window from a page that runs no script, which a worker writes.
 
 import { randomBytes } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { app, BrowserWindow, dialog, session } from 'electron'
 import JSZip from 'jszip'
 import { safeName } from '@shared/file-name'
 import type { ExportFormat, SessionExportRequest } from '@shared/session-export'
 import { t } from '../i18n'
 import { createLogger } from '../log'
-import { exportPage } from './html'
 import { maskSecrets } from './mask'
+import pageWorkerPath from './page-worker?modulePath'
+import type { PageReply, PageRequest } from './page-worker'
 import { parseExportRequest, pointAssets } from './request'
 
 const log = createLogger('session-export')
@@ -91,11 +93,27 @@ async function writePdf(file: string, request: SessionExportRequest): Promise<vo
     for (const image of request.images) await writeFile(path.join(dir, image.name), image.data)
     const names = request.images.map((image) => image.name)
     const page = path.join(dir, 'index.html')
-    await writeFile(page, exportPage(request.title, pointAssets(request.markdown, names, '')))
+    const markdown = pointAssets(request.markdown, names, '')
+    await writeFile(page, await renderPage({ title: request.title, markdown }))
     await writeFile(file, await printPage(page))
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+/** The page to print, written by a worker of its own, so main never parses nor draws maths. */
+function renderPage(request: PageRequest): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(pageWorkerPath, { workerData: request })
+    worker.once('message', (reply: PageReply) => {
+      if (reply.ok) resolve(reply.page)
+      else reject(new Error(reply.error))
+      void worker.terminate()
+    })
+    // Kept after the answer too: an error event nobody listens to would take main down.
+    worker.on('error', reject)
+    worker.once('exit', (code) => reject(new Error(`The page worker stopped with code ${code}`)))
+  })
 }
 
 async function printPage(page: string): Promise<Buffer> {
