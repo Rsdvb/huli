@@ -6,6 +6,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HOST_METHODS } from '@shared/agent-host'
 import {
+  agentRoute,
   DEFAULT_AGENT_NETWORK,
   NODE_NO_PROXY,
   type AgentNetworkSettings,
@@ -659,6 +660,32 @@ describe('the agent network settings', () => {
     })
     const settings = mergeSettings(structuredClone(DEFAULT_SETTINGS), patch)
     expect(hostSettings(settings, 'en').agentNetwork).toEqual(settings.agentNetwork)
+  })
+
+  it('take one network interface as the default, which agents without a choice follow', () => {
+    for (const bad of [{ interface: '' }, { interface: 'en0#proxy' }, { interface: 'a', x: 1 }]) {
+      expect(() => validateSettingsPatch({ agentNetwork: { defaultNode: bad } })).toThrow()
+      expect(() => withDefaultNode(structuredClone(DEFAULT_SETTINGS), bad)).toThrow()
+    }
+    const patch = validateSettingsPatch({ agentNetwork: { defaultNode: { interface: 'Mihomo' } } })
+    const merged = mergeSettings(structuredClone(DEFAULT_SETTINGS), patch)
+    expect(merged.agentNetwork.defaultNode).toEqual({ interface: 'Mihomo' })
+    const picked = withDefaultNode(structuredClone(DEFAULT_SETTINGS), { interface: 'Mihomo' })
+    expect(picked.agentNetwork.defaultNode).toEqual({ interface: 'Mihomo' })
+
+    const network: AgentNetworkSettings = {
+      ...DEFAULT_AGENT_NETWORK,
+      enabled: true,
+      defaultNode: { interface: 'Mihomo' },
+      agents: { codex: 'system', pi: { subscription: 'abcdef012345', node: 'JP' } },
+    }
+    expect(agentRoute(network, 'claude-code')).toEqual({ interface: 'Mihomo' })
+    expect(agentRoute(network, 'codex')).toBeNull()
+    expect(agentRoute(network, 'pi')).toEqual({ subscription: 'abcdef012345', node: 'JP' })
+    // A node as the default stays the default node's group.
+    const onNode = { ...network, defaultNode: { subscription: 'abcdef012345', node: 'JP' } }
+    expect(agentRoute(onNode, 'claude-code')).toBe('default')
+    expect(agentRoute({ ...network, enabled: false }, 'claude-code')).toBeNull()
   })
 })
 

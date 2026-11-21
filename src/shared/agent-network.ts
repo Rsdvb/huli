@@ -27,10 +27,16 @@ export interface InterfaceRef {
  */
 export type AgentNetworkChoice = 'system' | NodeRef | InterfaceRef
 
+/**
+ * The way agents without a choice of their own go: a node, or one network interface, as with no
+ * subscription. Kept under `defaultNode`, its name before it could be an interface.
+ */
+export type DefaultRoute = NodeRef | InterfaceRef
+
 /** The settings' part: no subscription address, only names and choices. */
 export interface AgentNetworkSettings {
   enabled: boolean
-  defaultNode: NodeRef | null
+  defaultNode: DefaultRoute | null
   /** Replaced whole by a change; an agent missing from it follows the default node. */
   agents: Partial<Record<AgentId, AgentNetworkChoice>>
   /** The network interface nodes dial out on, over the one found; null to use the one found. */
@@ -143,13 +149,27 @@ export type AgentRoute = 'default' | NodeRef | InterfaceRef
 
 /**
  * What the agent goes through: null for the system's network, else the node or interface it asked
- * for, or `default` while it follows the default node.
+ * for, the default interface, or `default` while it follows the default node.
  */
 export function agentRoute(settings: AgentNetworkSettings, agentId: AgentId): AgentRoute | null {
   if (!settings.enabled) return null
   const choice = settings.agents[agentId]
   if (choice === 'system') return null
-  return choice ?? 'default'
+  if (choice) return choice
+  const fallback = settings.defaultNode
+  return fallback && 'interface' in fallback ? { interface: fallback.interface } : 'default'
+}
+
+/** The default node, or null when there is none or the default is an interface. */
+export function defaultNodeRef(
+  settings: Pick<AgentNetworkSettings, 'defaultNode'>,
+): NodeRef | null {
+  const fallback = settings.defaultNode
+  return fallback && !('interface' in fallback) ? fallback : null
+}
+
+export function isDefaultRoute(value: unknown): value is DefaultRoute {
+  return isNodeRef(value) || isInterfaceRef(value)
 }
 
 /**
@@ -300,7 +320,7 @@ export interface AgentNetworkDeviceStatus {
   }[]
   /** Empty while the network is not running. */
   nodes: { subscription: string; node: string; delay: number | null }[]
-  defaultNode: NodeRef | null
+  defaultNode: DefaultRoute | null
   /** Every agent of the host, with `default` for one that follows the default node. */
   agents: { agentId: AgentId; choice: AgentNetworkChoice | 'default' }[]
   exits: ExitIp[]

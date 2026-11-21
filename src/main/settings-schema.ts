@@ -35,8 +35,8 @@ import { isComputerApp, isStopShortcut } from '@shared/computer-use'
 import {
   cleanChoice,
   isAgentNetworkChoice,
+  isDefaultRoute,
   isInterfaceName,
-  isNodeRef,
 } from '@shared/agent-network'
 import {
   IDLE_LIMITS,
@@ -186,7 +186,9 @@ const isComputerApps: Check = (value, path) => {
 }
 
 const isNodeChoice: Check = (value, path) =>
-  value === null || isNodeRef(value) ? null : `"${path}" must be null or a { subscription, node }`
+  value === null || isDefaultRoute(value)
+    ? null
+    : `"${path}" must be null, a { subscription, node } or an { interface }`
 
 const isNetworkInterface: Check = (value, path) =>
   value === null || isInterfaceName(value)
@@ -1326,14 +1328,21 @@ export function withAgentColor(
   return next
 }
 
-/** Huli: the agent network's default node as a paired device picked it; null for none. */
+/**
+ * Huli: the agent network's default as a paired device picked it: a node, one network interface,
+ * or null for none.
+ */
 export function withDefaultNode(current: SettingsFile, node: unknown): SettingsFile {
-  if (node !== null && !isNodeRef(node)) {
-    throw new SettingsError('"node" must be null or a { subscription, node }')
+  if (node !== null && !isDefaultRoute(node)) {
+    throw new SettingsError('"node" must be null, a { subscription, node } or an { interface }')
   }
   const next = structuredClone(current)
   next.agentNetwork.defaultNode =
-    node === null ? null : { subscription: node.subscription, node: node.node }
+    node === null
+      ? null
+      : 'interface' in node
+        ? { interface: node.interface }
+        : { subscription: node.subscription, node: node.node }
   return next
 }
 

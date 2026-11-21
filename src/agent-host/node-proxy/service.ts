@@ -20,6 +20,7 @@ import {
   isSubscriptionName,
   MAX_SUBSCRIPTIONS,
   routeInterface,
+  defaultNodeRef,
   type AgentNetworkAgent,
   type AgentNetworkDeviceStatus,
   type AgentNetworkProblem,
@@ -1228,7 +1229,8 @@ export class NodeProxy {
       await pickSide?.(agentGroup(side.agentId), wanted)
     }
     const pick = await picker(running)
-    const defaultName = settings.defaultNode ? this.fullName(settings.defaultNode) : null
+    const fallback = defaultNodeRef(settings)
+    const defaultName = fallback ? this.fullName(fallback) : null
     await pick(DEFAULT_GROUP, defaultName ?? 'REJECT')
     for (const agentId of this.listenerAgents()) {
       const route = agentRoute(settings, agentId)
@@ -1478,7 +1480,7 @@ function exitKey(settings: AgentNetworkSettings, agentId: AgentId): string {
   if (route === null) return 'system'
   const bound = routeInterface(route)
   if (bound !== null) return `interface:${bound}`
-  const node = route === 'default' ? settings.defaultNode : (route as NodeRef)
+  const node = route === 'default' ? defaultNodeRef(settings) : (route as NodeRef)
   return node ? `node:${node.subscription}:${node.node}` : 'node:none'
 }
 

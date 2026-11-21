@@ -5,7 +5,7 @@
 import type { ThumbnailPage } from '../artifacts'
 import type { HostToMain } from '../host-control'
 import type { AppInfo, RemotePairingEvent } from '../ipc'
-import type { AgentNetworkChoice, NodeRef } from '../agent-network'
+import type { AgentNetworkChoice, DefaultRoute } from '../agent-network'
 import type { MarketKeysPatch, MarketKeyState } from '../marketplace'
 import {
   DEFAULT_SETTINGS,
@@ -206,11 +206,12 @@ export interface HostAdminContract {
   /** A shell on the host; the host checks it is a file it may run. */
   'settings.setShellPath': { params: { path: string }; result: HostSettingsPart }
   /**
-   * Huli: the agent network's default node, and one agent's choice (null: follow the default).
+   * Huli: the agent network's default (a node or one interface), and one agent's choice (null:
+   * follow the default).
    * A device sees the network through `agentNetwork.deviceStatus` and changes only these two;
    * its subscriptions, switch and interface stay the computer's.
    */
-  'settings.setDefaultNode': { params: { node: NodeRef | null }; result: null }
+  'settings.setDefaultNode': { params: { node: DefaultRoute | null }; result: null }
   'settings.setAgentNetwork': {
     params: { agentId: AgentId; choice: AgentNetworkChoice | null }
     result: null
