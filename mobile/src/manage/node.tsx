@@ -11,7 +11,18 @@ import { showNotice } from '../ui/NoticeBar'
 import { ListRow } from '../ui/ListRow'
 import { haptic } from '../ui/haptics'
 import { hostErrorText } from '../hostErrors'
-import { Button, call, fail, Notice, SwitchRow, Tag, useConnected, useRead, type Read } from './kit'
+import {
+  Button,
+  call,
+  confirm,
+  fail,
+  Notice,
+  SwitchRow,
+  Tag,
+  useConnected,
+  useRead,
+  type Read,
+} from './kit'
 
 /** Where to install Node.js by hand, as the desktop links it. */
 export const NODE_MANUAL_URL = 'https://nodejs.org/zh-cn/download'
@@ -73,7 +84,7 @@ export interface NodeInstall {
   failure: string | null
   install(): void
   stop(): void
-  remove(): void
+  remove(): Promise<void>
 }
 
 /**
@@ -136,8 +147,14 @@ export function useNodeInstall(environment: Read<EnvironmentInfo>): NodeInstall 
     )
   }, [link])
 
-  const remove = useCallback(() => {
+  const remove = useCallback(async () => {
     if (!link) return
+    const go = await confirm({
+      title: '移除纸鸢的 Node.js？',
+      message: '用它的 Agent 会改用系统的 Node.js；系统里没有够新的，它们要等再装一份才能用。',
+      confirm: '移除',
+    })
+    if (!go) return
     setError(null)
     call(link, 'environment.removeNode', undefined).then(
       () => {
@@ -329,7 +346,7 @@ export function nodeRows(
         plainIcon
         destructive
         disabled={!props.connected}
-        onPress={state.remove}
+        onPress={() => void state.remove()}
       />,
     )
   }
