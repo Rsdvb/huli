@@ -4,7 +4,7 @@ import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { StarLine } from '@renderer/features/github-star/star-prompts'
-import type { Project, SessionSummary, StartNotice } from '@shared/agent-host'
+import type { AgentStatus, Project, SessionSummary, StartNotice } from '@shared/agent-host'
 import type { AgentId, SlashCommand, UserContent } from '@shared/thread'
 import { usableWorkflow, type Workflow, type WireWorkflowEntry } from '@shared/workflow'
 import { limitsForModel } from '@shared/plan-limits'
@@ -15,7 +15,14 @@ import { FolderMark } from '@renderer/components/affect/assistant-home'
 import { ChatComposer } from '@renderer/components/affect/chat-composer'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import {
+  signInTerminal,
+  useSignInRecheck,
+  useSignInWait,
+} from '@renderer/features/agents/agent-sign-in'
+import { SignInActions } from '@renderer/features/agents/sign-in-actions'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
+import { OptionMenu } from '@renderer/features/session/composer/control-row'
 import { HostChip } from '@renderer/features/session/composer/host-chip'
 import { useModeControl } from '@renderer/features/session/composer/mode-control'
 import { isSelect } from '@renderer/features/session/composer/options'
@@ -362,9 +369,14 @@ function DraftComposer({
   // The first step goes to the tray's agent, which must be one that works on steps.
   const firstOff =
     !!workflow && workflow.workflow.steps[0]?.by === 'agent' && !!status && !runsSteps(status)
-  const canSend = workflow
-    ? !!agentId && !!taskProject && holdsMessage && !held && attachments.length === 0 && !firstOff
-    : !!agentId && ready && holdsMessage && !held && !branchHeld
+  // Huli: a signed-out agent takes no message; its sign-in shows under the box instead.
+  const signedOut = !!status && agentNeed(status) === 'sign-in'
+  useSignInRecheck(hostId, agentId)
+  const canSend =
+    !signedOut &&
+    (workflow
+      ? !!agentId && !!taskProject && holdsMessage && !held && attachments.length === 0 && !firstOff
+      : !!agentId && ready && holdsMessage && !held && !branchHeld)
   const config = useStartConfig(agentId, undefined, hostId)
   const model = config?.find((o) => o.category === 'model' && isSelect(o))
   // A used-up window of another model does not hold the picked one back.
@@ -505,21 +517,23 @@ function DraftComposer({
 
   const blocked = !agentId
     ? t('newSession.chooseAgentFirst')
-    : !inScratch && !project
-      ? t('newSession.chooseProjectFirst')
-      : project?.missing && !inScratch
-        ? t('newSession.missingLine')
-        : firstOff
-          ? t('newSession.workflow.stepAgents')
-          : workflow && attachments.length > 0
-            ? t('newSession.workflow.textOnly')
-            : !workflow && branchHeld === 'invalid'
-              ? t('worktree.branchInvalid')
-              : !workflow && branchHeld === 'failed'
-                ? t('worktree.templateFailed', { message: templateError })
-                : !workflow && branchHeld === 'reading'
-                  ? t('worktree.templateReading')
-                  : (held?.message ?? null)
+    : signedOut
+      ? t('newSession.signInFirst', { agent: name })
+      : !inScratch && !project
+        ? t('newSession.chooseProjectFirst')
+        : project?.missing && !inScratch
+          ? t('newSession.missingLine')
+          : firstOff
+            ? t('newSession.workflow.stepAgents')
+            : workflow && attachments.length > 0
+              ? t('newSession.workflow.textOnly')
+              : !workflow && branchHeld === 'invalid'
+                ? t('worktree.branchInvalid')
+                : !workflow && branchHeld === 'failed'
+                  ? t('worktree.templateFailed', { message: templateError })
+                  : !workflow && branchHeld === 'reading'
+                    ? t('worktree.templateReading')
+                    : (held?.message ?? null)
   const blockedEnter = useBlockedEnter({
     // A missing folder is said under the box already.
     reason: project?.missing && !inScratch ? null : blocked,
@@ -560,6 +574,17 @@ function DraftComposer({
   }
   const mode = config?.find((o): o is SelectOption => o.category === 'mode' && isSelect(o))
   const modeControl = useModeControl(agentId ? mode : undefined, pick)
+  // Huli: the agent's other menus, such as Codex's collaboration and speed or Cline's provider, as
+  // the session's composer shows them, so the first message starts with them set.
+  const others = agentId
+    ? (config ?? []).filter(
+        (o): o is SelectOption =>
+          isSelect(o) &&
+          o.category !== 'mode' &&
+          o.category !== 'model' &&
+          o.category !== 'thought_level',
+      )
+    : []
   const hasModelMenu =
     !!agentId &&
     !!config?.some(
@@ -617,6 +642,16 @@ function DraftComposer({
           addDisabled={add.disabled}
           addRequest={box.addRequest}
           {...modeControl}
+          start={others
+            .filter((o) => o.category === 'other')
+            .map((o) => (
+              <OptionMenu key={o.id} option={o} onSelect={pick} />
+            ))}
+          extra={others
+            .filter((o) => o.category !== 'other')
+            .map((o) => (
+              <OptionMenu key={o.id} option={o} onSelect={pick} align="end" />
+            ))}
           models={[]}
           modelSlot={
             hasModelMenu &&
@@ -733,6 +768,9 @@ function DraftComposer({
         ) : (
           gitStatus && project && <WorktreeNote projectPath={project.path} status={gitStatus} />
         )}
+        {agentId && signedOut && status && (
+          <StartSignIn status={status} hostId={hostId} name={name ?? status.name} />
+        )}
         {agentId && <StartNotices agentId={agentId} hostId={hostId} />}
         {waitingForNode && !(noAgent && guide) && (
           <NoAgentLine
@@ -744,6 +782,43 @@ function DraftComposer({
       </div>
       {children}
     </>
+  )
+}
+
+/**
+ * Huli: New session's agent is signed out: it says so under the box, with the agent's own sign-in
+ * in place and "I've signed in", which asks the host again.
+ */
+function StartSignIn({
+  status,
+  hostId,
+  name,
+}: {
+  status: AgentStatus
+  hostId: string | null
+  name: string
+}) {
+  const { t } = useTranslation('session')
+  const wait = useSignInWait(hostId, status.id, name)
+  return (
+    <div className="kettu-start__signin" role="status">
+      <span className="flex min-w-0 flex-col">
+        <span className="text-ui font-medium text-primary">
+          {t('newSession.signInNotice', { agent: name })}
+        </span>
+        <span className="text-xs text-secondary">{wait ?? t('newSession.signInNoticeHint')}</span>
+      </span>
+      <span className="flex flex-wrap items-center gap-1.5">
+        <SignInActions
+          agentId={status.id}
+          hostId={hostId}
+          {...(hostId === null && {
+            onTerminal: (command: string) => void signInTerminal(status, command),
+          })}
+          onRetry={() => {}}
+        />
+      </span>
+    </div>
   )
 }
 
