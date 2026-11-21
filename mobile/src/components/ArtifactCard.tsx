@@ -6,7 +6,6 @@ import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import type { ArtifactSummary } from '@shared/artifacts'
 import {
-  age,
   artifactKind,
   KIND_TEXT,
   openArtifact,
@@ -14,6 +13,7 @@ import {
   type ArtifactKind,
 } from '../artifacts'
 import { useAgent, useMaybeLink, useSession } from '../host'
+import { listTime } from '../sessions'
 import { AgentGlyph } from '../ui/AgentAvatar'
 import { ContextMenu } from '../ui/ContextMenu'
 import type { MenuNode } from '../ui/menu'
@@ -182,7 +182,7 @@ export function ArtifactCard(props: {
             onPress={props.onPress}
             {...(longPress ? { onLongPress: longPress, delayLongPress: 350 } : {})}
             accessibilityRole="button"
-            accessibilityLabel={`${a.title}，${KIND_TEXT[kind]}，${age(a.updatedAt)}${editing ? '，正在编辑' : ''}`}
+            accessibilityLabel={`${a.title}，${KIND_TEXT[kind]}，${listTime(a.updatedAt)}${editing ? '，正在编辑' : ''}`}
             accessibilityHint="打开；长按显示更多操作"
             style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}
           >
@@ -200,7 +200,7 @@ export function ArtifactCard(props: {
                   style={[typeScale.footnote, styles.metaText, { color: c.textSecondary }]}
                   numberOfLines={1}
                 >
-                  {KIND_TEXT[kind]} · {age(a.updatedAt)}
+                  {KIND_TEXT[kind]} · {listTime(a.updatedAt)}
                 </Text>
                 {editing ? <View style={[styles.live, { backgroundColor: c.success }]} /> : null}
               </View>

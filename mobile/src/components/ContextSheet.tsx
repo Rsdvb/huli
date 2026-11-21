@@ -14,7 +14,7 @@ import { hostErrorText } from '../hostErrors'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
 import { haptic } from '../ui/session/feedback'
-import { clockTime } from '../ui/session/format'
+import { momentText } from '../ui/session/format'
 import { cacheLeftText, useCacheLeft } from '../ui/session/promptCache'
 import { AgentGlyph, G, Icon } from '../ui/session/icons'
 import {
@@ -567,7 +567,7 @@ function CacheBlock(props: { expiry: NonNullable<ReturnType<typeof knownExpiry>>
         />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[styles.cacheLine, { color: c.text }]}>
-            {state} · 上次请求 {clockTime(expiry.lastRequestAt)}
+            {state} · 上次请求 {momentText(expiry.lastRequestAt)}
           </Text>
           <Text style={[styles.note, { color: c.textSecondary }]}>
             {left > 0 ? '之后' : ''}下一条消息会按全价重新读取全部 {tokensText(props.used)} token。

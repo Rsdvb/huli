@@ -3,6 +3,9 @@ import { hostErrorText } from './hostErrors'
 import { durationText } from './ui/session/format'
 import type { Theme } from './theme'
 
+// The app's times, said one way (ui/session/format.ts).
+export { ago, clockOf, listTime, momentText } from './ui/session/format'
+
 export function needsYou(s: SessionSummary): boolean {
   // Huli: open requests only, as the desktop counts them. Claude Code's status can stay
   // `awaiting_permission` after a sub-agent's request is withdrawn, with nothing left to answer.
@@ -65,15 +68,6 @@ export function errorText(error: unknown): string {
   return hostErrorText(error)
 }
 
-export function ago(ms: number): string {
-  const s = Math.max(0, (Date.now() - ms) / 1000)
-  if (s < 60) return '刚刚'
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`
-  const d = new Date(ms)
-  return `${d.getMonth() + 1}月${d.getDate()}日`
-}
-
 export function folder(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean)
   return parts[parts.length - 1] ?? path
@@ -116,40 +110,6 @@ export function sessionState(s: SessionSummary): { kind: SessionState; text: str
   if (s.status === 'auth_required') return { kind: 'auth', text: '需要登录' }
   if (s.attention === 'unread') return { kind: 'unread', text: '有新回复' }
   return null
-}
-
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-
-function dayPart(hour: number): string {
-  if (hour < 6) return '凌晨'
-  if (hour < 12) return '上午'
-  if (hour < 13) return '中午'
-  if (hour < 18) return '下午'
-  return '晚上'
-}
-
-/** A time of day as the phone's clock app says it: 下午2:54. */
-export function clockOf(ms: number): string {
-  const d = new Date(ms)
-  const h = d.getHours()
-  const h12 = h % 12 === 0 ? 12 : h % 12
-  return `${dayPart(h)}${h12}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-/** When something happened, as a list's time column shows it: today's clock, 昨天, a weekday, a date. */
-export function listTime(ms: number, now = Date.now()): string {
-  const day = (t: number) => {
-    const d = new Date(t)
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  }
-  const days = Math.round((day(now) - day(ms)) / 86_400_000)
-  if (days <= 0) return clockOf(ms)
-  if (days === 1) return '昨天'
-  const d = new Date(ms)
-  if (days < 7) return WEEKDAYS[d.getDay()]!
-  if (d.getFullYear() === new Date(now).getFullYear())
-    return `${d.getMonth() + 1}月${d.getDate()}日`
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
 }
 
 /** The greeting for the hour. */

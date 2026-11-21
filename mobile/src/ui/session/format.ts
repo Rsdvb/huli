@@ -1,18 +1,74 @@
 // Small text helpers of the session screens: times as a Chinese phone shows them, and paths.
+//
+// Times read one way everywhere on the phone, as the desktop's Chinese says them
+// (src/renderer/src/lib/format.ts):
+// - The clock names the part of the day, by Chinese's own periods (CLDR's, which the desktop's
+//   Intl gives): 凌晨3:54, 早上7:54, 上午11:54, 中午12:54, 下午2:54, 晚上9:54.
+// - A day other than today is 昨天 or 明天, the weekday within six days, else the date: 11月3日,
+//   with its year when not this one.
+// - A moment (momentText) is its day and then its clock, the clock alone today: 下午2:54,
+//   昨天 下午2:54, 周三 下午2:54, 11月3日 下午2:54.
+// - A list's time column (listTime) is today's clock, else the day alone.
+// - How long since (ago), for a status line, is 刚刚 or minutes within the hour, else as a list.
 
-/** "晚上 9:52", with the date in front when it is not today. */
-export function clockTime(ms: number): string {
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+/** The part of the day an hour falls in, as Chinese names it. */
+export function dayPeriod(hour: number): string {
+  if (hour < 5) return '凌晨'
+  if (hour < 8) return '早上'
+  if (hour < 12) return '上午'
+  if (hour < 13) return '中午'
+  if (hour < 19) return '下午'
+  return '晚上'
+}
+
+/** The time of day: 下午2:54. */
+export function clockOf(ms: number): string {
   const d = new Date(ms)
   const h = d.getHours()
-  const part = h < 6 ? '凌晨' : h < 12 ? '上午' : h < 13 ? '中午' : h < 18 ? '下午' : '晚上'
-  const hour = h % 12 === 0 ? 12 : h % 12
-  const time = `${part} ${hour}:${String(d.getMinutes()).padStart(2, '0')}`
-  const now = new Date()
-  if (d.toDateString() === now.toDateString()) return time
-  const yesterday = new Date(now)
-  yesterday.setDate(now.getDate() - 1)
-  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${time}`
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${time}`
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${dayPeriod(h)}${h12}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** Calendar days from `now` to `ms`: 0 the same day, -1 the day before, 1 the day after. */
+function daysFrom(now: number, ms: number): number {
+  const day = (t: number) => new Date(t).setHours(0, 0, 0, 0)
+  // Rounded, since a day across a DST change is not 24 hours.
+  return Math.round((day(ms) - day(now)) / 86_400_000)
+}
+
+/** The day of `ms` other than today, in words; null for today. */
+function dayWords(ms: number, now: number): string | null {
+  const days = daysFrom(now, ms)
+  if (days === 0) return null
+  if (days === -1) return '昨天'
+  if (days === 1) return '明天'
+  const d = new Date(ms)
+  if (Math.abs(days) <= 6) return WEEKDAYS[d.getDay()]!
+  const date = `${d.getMonth() + 1}月${d.getDate()}日`
+  return d.getFullYear() === new Date(now).getFullYear() ? date : `${d.getFullYear()}年${date}`
+}
+
+/** A moment, past or to come: its day and its clock, today the clock alone. */
+export function momentText(ms: number, now = Date.now()): string {
+  const day = dayWords(ms, now)
+  return day ? `${day} ${clockOf(ms)}` : clockOf(ms)
+}
+
+/** When something happened, as a list's time column shows it: today's clock, else the day. */
+export function listTime(ms: number, now = Date.now()): string {
+  return dayWords(ms, now) ?? clockOf(ms)
+}
+
+/** How long since, for a status line: 刚刚, 5 分钟前, then as listTime. */
+export function ago(ms: number, now = Date.now()): string {
+  const since = Math.max(0, now - ms)
+  if (since < MINUTE) return '刚刚'
+  if (since < HOUR) return `${Math.floor(since / MINUTE)} 分钟前`
+  return listTime(ms, now)
 }
 
 /**

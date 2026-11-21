@@ -45,6 +45,7 @@ export const SCENARIOS = [
   'screenshots',
   'documents',
   'write',
+  'anchors',
 ] as const
 
 export type ScenarioName = (typeof SCENARIOS)[number]
@@ -179,6 +180,7 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
     description: "Writes the text and its model into a file of the session's folder, a real edit",
     hint: '[file] [text]',
   },
+  anchors: { description: 'A Chinese answer in sections whose #anchor links go to its headings' },
 }
 
 export interface ScenarioOptions {

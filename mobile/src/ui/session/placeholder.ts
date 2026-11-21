@@ -4,7 +4,8 @@
 
 import type { PlanLimit } from '@shared/agent-host'
 import type { ThreadState } from '@shared/thread'
-import { whenText, windowName } from './limits'
+import { momentText } from './format'
+import { windowName } from './limits'
 
 // How far back the thread is read for a denied tool call.
 const LOOKBACK = 40
@@ -46,7 +47,7 @@ export function sessionPlaceholder(state: {
   if (state.asking) return '回复，或在上方作答'
   if (state.awaiting) return '等待你的授权'
   if (!state.running && state.reached?.resetsAt) {
-    return `${windowName(state.reached)}限额已用完 · ${whenText(state.reached.resetsAt, Date.now())} 重置`
+    return `${windowName(state.reached)}限额已用完 · ${momentText(state.reached.resetsAt, Date.now())} 重置`
   }
   if (!state.running && state.rejected) return `告诉 ${state.agent} 改用什么做法`
   if (state.running)

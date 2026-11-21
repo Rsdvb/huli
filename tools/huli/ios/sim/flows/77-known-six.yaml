@@ -1,0 +1,92 @@
+# The 产物 tab shows an artifact an agent just made, without the app starting again, and a reply's
+# #anchor links scroll to their heading or say why they cannot. Run alone, on a computer with no
+# artifacts yet, so the tab first says it has none. The session list between shows its times.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+# The tab mounts while the computer has no artifacts.
+- tapOn: '产物'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: k01-artifacts-empty
+# An agent makes one while its session covers the tabs.
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/artifacts'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- takeScreenshot: k02-artifact-made
+- tapOn: '返回'
+- waitForAnimationToEnd
+- takeScreenshot: k03-session-list
+- tapOn: '产物'
+- extendedWaitUntil:
+    visible: '.*Fake canvas.*'
+    timeout: 8000
+    optional: true
+- takeScreenshot: k04-artifacts-after
+# A reply in sections, its links at its end.
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/anchors'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+# The links at the reply's end come up over the composer, which a tap through would hit instead.
+- swipe:
+    start: 50%, 65%
+    end: 50%, 20%
+    duration: 500
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: k05-anchors-end
+- tapOn: '回到第一节'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: k06-anchor-first
+- tapOn:
+    text: '.*回到最新'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- tapOn: '一个不存在的标题'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 600
+    optional: true
+- takeScreenshot: k07-anchor-missing

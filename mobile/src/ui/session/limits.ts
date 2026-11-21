@@ -13,6 +13,7 @@ import type {
 import type { Fallback, PlanQuota } from '@shared/plan-quota'
 import { modelTitle } from '../../usage/modelTitle'
 import type { Palette } from '../tokens'
+import { ago, listTime, momentText } from './format'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -209,27 +210,6 @@ export function balanceText(balance: ProviderBalance): { name: string; value: st
   return { name, value }
 }
 
-/** 「凌晨 2:40」. */
-function clock(at: number): string {
-  const d = new Date(at)
-  const h = d.getHours()
-  const part = h < 6 ? '凌晨' : h < 12 ? '上午' : h < 13 ? '中午' : h < 18 ? '下午' : '晚上'
-  const hour = h % 12 === 0 ? 12 : h % 12
-  return `${part} ${hour}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-
-/** When it comes: today's clock time, the weekday within six days, else the date. */
-export function whenText(at: number, now: number): string {
-  const days = daysBetween(now, at)
-  if (days === 0) return clock(at)
-  if (days === 1) return `明天 ${clock(at)}`
-  if (days > 1 && days <= 6) return `${WEEKDAYS[new Date(at).getDay()]} ${clock(at)}`
-  const d = new Date(at)
-  return `${d.getMonth() + 1}月${d.getDate()}日`
-}
-
 /** Time left in its two largest units: 「42 分」「2 小时 13 分」「3 天 5 小时」. */
 export function leftText(ms: number): string {
   if (ms < HOUR) return `${Math.max(1, Math.floor(ms / MINUTE))} 分钟`
@@ -243,11 +223,11 @@ export function leftText(ms: number): string {
   return h ? `${d} 天 ${h} 小时` : `${d} 天`
 }
 
-/** 「2 小时 13 分后重置」within a day, else 「周三 凌晨 2:40 重置」. */
+/** 「2 小时 13 分后重置」within a day, else 「周三 凌晨2:40 重置」. */
 export function resetText(at: number, now = Date.now()): string {
   const left = at - now
   if (left <= 0) return '已重置'
-  return left < DAY ? `${leftText(left)}后重置` : `${whenText(at, now)} 重置`
+  return left < DAY ? `${leftText(left)}后重置` : `${momentText(at, now)} 重置`
 }
 
 /** When a used-up window opens again, short: 「2 小时后恢复」「周三恢复」. */
@@ -257,10 +237,7 @@ export function backText(at: number | null, now = Date.now()): string {
   if (left <= 0) return '已恢复'
   if (left < HOUR) return `${Math.max(1, Math.floor(left / MINUTE))} 分钟后恢复`
   if (left < DAY) return `${Math.floor(left / HOUR)} 小时后恢复`
-  const d = new Date(at)
-  const days = daysBetween(now, at)
-  if (days === 1) return '明天恢复'
-  return days <= 6 ? `${WEEKDAYS[d.getDay()]}恢复` : `${d.getMonth() + 1}月${d.getDate()}日恢复`
+  return `${listTime(at, now)}恢复`
 }
 
 /** From this whole percentage used, a compact line says when the window resets, as the desktop's. */
@@ -268,13 +245,13 @@ export const RESET_SHOWN_AT = 80
 
 /**
  * When a window near its end resets, for a compact line right after its figure: 「2 小时后重置」,
- * or for one used up, when it comes back, 「凌晨 2:40 恢复」. Null under 80% used or with no reset
+ * or for one used up, when it comes back, 「凌晨2:40 恢复」. Null under 80% used or with no reset
  * ahead, when the reset stays in the details.
  */
 export function inlineReset(limit: PlanLimit, now = Date.now()): string | null {
   const at = limit.resetsAt
   if (at === null || at <= now) return null
-  if (isExhausted(limit, now)) return `${whenText(at, now)} 恢复`
+  if (isExhausted(limit, now)) return `${momentText(at, now)} 恢复`
   if (Math.round(limit.usedPercent ?? 0) < RESET_SHOWN_AT) return null
   const left = at - now
   if (left < HOUR) return `${Math.max(1, Math.floor(left / MINUTE))} 分钟后重置`
@@ -282,22 +259,9 @@ export function inlineReset(limit: PlanLimit, now = Date.now()): string | null {
   return `${Math.floor(left / DAY)} 天后重置`
 }
 
-/** Calendar days from `from` to `to`, rounded across a change of daylight saving time. */
-function daysBetween(from: number, to: number): number {
-  return Math.round((new Date(to).setHours(0, 0, 0, 0) - new Date(from).setHours(0, 0, 0, 0)) / DAY)
-}
-
-/** When the limits were read: 「刚刚读取」「12 分钟前读取」「昨天 晚上 9:57 读取」. */
+/** When the limits were read: 「刚刚读取」「12 分钟前读取」「晚上9:57读取」「昨天读取」. */
 export function readText(at: number, now = Date.now()): string {
-  const delta = Math.max(0, now - at)
-  if (delta < MINUTE) return '刚刚读取'
-  if (delta < HOUR) return `${Math.floor(delta / MINUTE)} 分钟前读取`
-  if (delta < 6 * HOUR) return `${Math.floor(delta / HOUR)} 小时前读取`
-  const days = daysBetween(at, now)
-  if (days === 0) return `${clock(at)} 读取`
-  if (days === 1) return `昨天 ${clock(at)} 读取`
-  const d = new Date(at)
-  return `${d.getMonth() + 1}月${d.getDate()}日读取`
+  return `${ago(at, now)}读取`
 }
 
 const REASONS: Record<LimitsReason, string> = {
@@ -343,7 +307,7 @@ export function quotaText(quota: PlanQuota, now = Date.now()): string | null {
   if (quota.kind !== 'out') return null
   const used = `${windowName(quota.limit)}限额已用完`
   return quota.resetsAt !== null && quota.resetsAt > now
-    ? `${used} · ${whenText(quota.resetsAt, now)} 恢复`
+    ? `${used} · ${momentText(quota.resetsAt, now)} 恢复`
     : used
 }
 

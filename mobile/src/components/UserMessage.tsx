@@ -15,7 +15,7 @@ import { ContextMenu } from '../ui/ContextMenu'
 import type { MenuNode } from '../ui/menu'
 import { copyText } from '../ui/session/feedback'
 import { foldersOf, openFile, parseFileRef, useFileRefs } from '../ui/session/fileRefs'
-import { clockTime } from '../ui/session/format'
+import { momentText } from '../ui/session/format'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { PressScale } from '../ui/session/Press'
@@ -231,7 +231,7 @@ export const UserMessage = memo(function UserMessage(props: {
           )}
           {/* A clock time, as the turn's footer says when it ended: the two read together. */}
           {props.at !== undefined && (
-            <Text style={[styles.meta, { color: c.textTertiary }]}>{clockTime(props.at)}</Text>
+            <Text style={[styles.meta, { color: c.textTertiary }]}>{momentText(props.at)}</Text>
           )}
         </View>
       )}

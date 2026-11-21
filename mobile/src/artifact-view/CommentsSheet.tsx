@@ -25,12 +25,11 @@ import {
 } from '@shared/artifact-comments'
 import { useHost } from '../host'
 import { LockLayer } from '../lock'
-import { errorText, sessionTitle } from '../sessions'
+import { errorText, momentText, sessionTitle } from '../sessions'
 import { haptic } from '../ui/haptics'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 import { PressScale, RoundButton } from '../ui/session/Press'
-import { whenText } from '../routines'
 import { anchorLabel } from './comments'
 
 export interface CommentTarget {
@@ -205,7 +204,7 @@ export function CommentsSheet(props: {
           {thread.comments.map((comment, i) => (
             <View key={i} style={styles.comment}>
               <Text style={[styles.meta, { color: c.textTertiary }]}>
-                {author(comment.author.session)} · {whenText(comment.createdAt)}
+                {author(comment.author.session)} · {momentText(comment.createdAt)}
               </Text>
               <Text style={[styles.body, { color: c.text }]} selectable>
                 {comment.body}

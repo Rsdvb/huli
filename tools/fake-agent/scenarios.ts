@@ -12,6 +12,7 @@ import type {
 } from '@agentclientprotocol/sdk/unstable'
 import {
   BASIC_DONE,
+  ANCHORS_REPLY,
   CHINESE_ANSWER,
   REASONING,
   REASONING_MESSAGES,
@@ -1381,6 +1382,11 @@ const chinese: Scenario = async (turn) => {
   return 'end_turn'
 }
 
+const anchors: Scenario = async (turn) => {
+  if (!(await stream(turn, ANCHORS_REPLY, { messageId: turn.messageId() }))) return 'cancelled'
+  return 'end_turn'
+}
+
 const tables: Scenario = async (turn) => {
   if (!(await stream(turn, TABLES_REPLY, { messageId: turn.messageId() }))) return 'cancelled'
   return 'end_turn'
@@ -1635,6 +1641,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   screenshots,
   documents,
   write,
+  anchors,
 }
 
 export const compact: Scenario = async (turn) => {

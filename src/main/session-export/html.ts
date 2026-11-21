@@ -2,13 +2,59 @@
 // with @lezer/markdown, as the document type's Word export does, and every piece of text is
 // escaped: raw HTML shows as text, but for the folds the export writes itself and a few plain
 // inline tags. Links go to http(s) only, and pictures only to the export's own files, so the
-// page, which runs no script, reaches nothing outside.
+// page, which runs no script, reaches nothing outside. Maths is drawn by KaTeX into HTML, as the
+// conversation draws it: `$$...$$` in a line, on lines of its own for a display, and ```math
+// fences; a single `$` stays text, as replies quote prices far more often than formulas.
 
-import { GFM, parser } from '@lezer/markdown'
+import { GFM, parser, type InlineContext, type MarkdownConfig } from '@lezer/markdown'
+import katex from 'katex'
 import { EXPORT_IMAGE_NAME } from '@shared/session-export'
 
-const markdown = parser.configure(GFM)
+const DOLLAR = 36
+
+/** `$$...$$`, the conversation's maths (remark-math without its single dollar). */
+const MathSyntax: MarkdownConfig = {
+  defineNodes: ['InlineMath', 'MathMark'],
+  parseInline: [
+    {
+      name: 'InlineMath',
+      before: 'InlineCode',
+      parse(cx: InlineContext, next: number, pos: number): number {
+        if (next !== DOLLAR || cx.char(pos + 1) !== DOLLAR || cx.char(pos + 2) === DOLLAR) {
+          return -1
+        }
+        const close = cx.slice(pos + 2, cx.end).indexOf('$$')
+        if (close <= 0) return -1
+        const end = pos + 2 + close
+        return cx.addElement(
+          cx.elt('InlineMath', pos, end + 2, [
+            cx.elt('MathMark', pos, pos + 2),
+            cx.elt('MathMark', end, end + 2),
+          ]),
+        )
+      },
+    },
+  ],
+}
+
+const markdown = parser.configure([GFM, MathSyntax])
 type SyntaxNode = ReturnType<typeof markdown.parse>['topNode']
+
+// As the conversation draws maths (the renderer's markdown/tex.ts): nothing that reaches outside
+// the formula, such as `\href`, and no size or expansion that grows without bound. HTML alone,
+// so the PDF's text carries no hidden MathML copy of each formula.
+const TEX_OPTIONS = {
+  throwOnError: true,
+  trust: false,
+  strict: 'ignore',
+  output: 'html',
+  maxSize: 20,
+  maxExpand: 1000,
+} as const
+
+// A formula's marks on lines of their own, which set it apart as a display.
+const OPENS_LINE = /^[ \t]*\n/
+const CLOSES_LINE = /\n[ \t]*$/
 
 // Inline tags kept as tags when they carry no attributes; others show as text.
 const INLINE_TAGS = new Set([
@@ -66,6 +112,8 @@ function safeImage(url: string): string | null {
 
 class Renderer {
   private openFolds = 0
+  /** Whether a formula was drawn, so the page needs KaTeX's styles. */
+  math = false
 
   constructor(private readonly text: string) {}
 
@@ -96,6 +144,7 @@ class Renderer {
       case 'HeaderMark':
       case 'ListMark':
       case 'TableDelimiter':
+      case 'MathMark':
       case 'Comment':
       case 'ProcessingInstruction':
         return ''
@@ -134,6 +183,18 @@ class Renderer {
         const target = url ? this.slice(url.from, url.to) : this.slice(node.from, node.to)
         const href = safeHref(target)
         return href ? `<a href="${escape(href)}">${escape(target)}</a>` : escape(target)
+      }
+      case 'InlineMath': {
+        // The source between the marks, a quote's marks on its lines left out.
+        let tex = ''
+        let at = node.from + 2
+        for (const child of children(node)) {
+          if (child.name === 'MathMark') continue
+          tex += this.slice(at, child.from)
+          at = child.to
+        }
+        tex += this.slice(at, node.to - 2)
+        return this.tex(tex, OPENS_LINE.test(tex) && CLOSES_LINE.test(tex))
       }
       case 'Escape':
         return escape(this.slice(node.from + 1, node.to))
@@ -215,6 +276,7 @@ class Renderer {
       .map((child) => this.slice(child.from, child.to))
       .join('')
       .replace(/\n$/, '')
+    if (language === 'math') return `<div class="math">${this.tex(text, true)}</div>\n`
     if (language === 'diff') {
       const lines = text.split('\n').map((line) => {
         const kind = line.startsWith('@@')
@@ -232,6 +294,18 @@ class Renderer {
       return `<pre class="diff"><code>${lines.join('')}</code></pre>\n`
     }
     return `<pre><code>${escape(text)}</code></pre>\n`
+  }
+
+  /** KaTeX's drawing of a formula, or its source as code where KaTeX cannot read it. */
+  private tex(source: string, display: boolean): string {
+    const tex = source.trim()
+    try {
+      const html = katex.renderToString(tex, { ...TEX_OPTIONS, displayMode: display })
+      this.math = true
+      return html
+    } catch {
+      return display ? `<pre><code>${escape(tex)}</code></pre>` : `<code>${escape(tex)}</code>`
+    }
   }
 
   private table(node: SyntaxNode): string {
@@ -282,9 +356,16 @@ class Renderer {
   }
 }
 
+/** The Markdown's body as HTML, and whether it draws a formula. */
+export function renderMarkdown(text: string): { html: string; math: boolean } {
+  const renderer = new Renderer(text)
+  const html = renderer.render()
+  return { html, math: renderer.math }
+}
+
 /** The Markdown's body as HTML. */
 export function markdownHtml(text: string): string {
-  return new Renderer(text).render()
+  return renderMarkdown(text).html
 }
 
 const STYLE = `
@@ -328,20 +409,31 @@ img { max-width: 100%; max-height: 220mm; border: 0.5pt solid #e1e4e8; border-ra
 .fold-title { font-weight: 600; font-size: 9.5pt; color: #57606a; margin-bottom: 5pt; }
 .task { font-family: "Segoe UI Symbol", sans-serif; }
 p.raw { font: 9pt/1.45 "Cascadia Code", Consolas, monospace; color: #57606a; }
+.katex-display, div.math { break-inside: avoid; }
+div.math > .katex-display { margin: 0 0 8pt; }
 `
 
-/** A whole page to print: the body, its title, and a stylesheet in light colors. */
-export function exportPage(title: string, markdownText: string): string {
+/**
+ * A whole page to print: the body, its title, and a stylesheet in light colors, with KaTeX's
+ * styles and fonts (`mathStyle`) when it draws a formula.
+ */
+export function exportPage(
+  title: string,
+  markdownText: string,
+  mathStyle: () => string = () => '',
+): string {
+  const body = renderMarkdown(markdownText)
+  const math = body.math ? `<style>${mathStyle()}</style>\n` : ''
   return `<!doctype html>
 <html lang="und">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'; font-src data:">
 <title>${escape(title)}</title>
 <style>${STYLE}</style>
-</head>
+${math}</head>
 <body>
-${markdownHtml(markdownText)}
+${body.html}
 </body>
 </html>
 `

@@ -28,8 +28,7 @@ import { confirmDelete } from '../components/ArtifactSheet'
 import { RenameDialog } from '../components/RenameDialog'
 import { Sheet, type SheetItem } from '../components/Sheet'
 import { useHost } from '../host'
-import { whenText } from '../routines'
-import { errorText, sessionTitle } from '../sessions'
+import { errorText, momentText, sessionTitle } from '../sessions'
 import { useWhenShown } from '../ui/focus'
 import { haptic } from '../ui/haptics'
 import { Skeleton } from '../ui/Skeleton'
@@ -471,7 +470,7 @@ export function ArtifactViewer(props: { id: string; version: number | null; page
   const versionItems: SheetItem[] = (versions ?? []).slice(0, 50).map((v) => ({
     key: String(v.version),
     label: `v${v.version}${v.version === latest ? ' · 最新' : ''}`,
-    detail: `${v.author === null ? '你' : sessionTitle(host.sessions.get(v.author))} · ${whenText(v.createdAt)}${v.note ? ` · ${v.note}` : ''}`,
+    detail: `${v.author === null ? '你' : sessionTitle(host.sessions.get(v.author))} · ${momentText(v.createdAt)}${v.note ? ` · ${v.note}` : ''}`,
     checked: v.version === shownNumber,
     onPress: () => {
       haptic.select()
