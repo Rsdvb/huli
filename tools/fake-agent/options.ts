@@ -44,6 +44,7 @@ export const SCENARIOS = [
   'media',
   'screenshots',
   'documents',
+  'anchors',
 ] as const
 
 export type ScenarioName = (typeof SCENARIOS)[number]
@@ -174,6 +175,7 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
     description:
       "Writes a PDF, a Word document and a 24 MB PDF into the session's folder and names them, for the phone's preview",
   },
+  anchors: { description: 'A Chinese answer in sections whose #anchor links go to its headings' },
 }
 
 export interface ScenarioOptions {
