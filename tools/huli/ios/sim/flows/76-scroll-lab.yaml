@@ -1,0 +1,164 @@
+# The developer's scroll lab (src/dev/ScrollLab.tsx): a sideways swipe on each scroller, in each of
+# the wrappers a reply's code block sits in, with a screenshot after each, to tell which wrapper
+# keeps the swipe from scrolling.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevScroll: 'plain'
+- extendedWaitUntil:
+    visible: 'scroll lab plain'
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-0
+- swipe:
+    from:
+      id: 'p1'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-p1
+- swipe:
+    from:
+      id: 'p2'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-p2
+- swipe:
+    from:
+      id: 'p3'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-p3
+- swipe:
+    from:
+      id: 'm4'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-m4
+- swipe:
+    from:
+      id: 'm5'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-m5
+- swipe:
+    from:
+      id: 'm6'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-m6
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevScroll: 'list'
+- extendedWaitUntil:
+    visible: 'scroll lab list'
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: l-list-0
+- swipe:
+    from:
+      id: 'p1'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-list-p1
+- swipe:
+    from:
+      id: 'p2'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-list-p2
+- swipe:
+    from:
+      id: 'p3'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-list-p3
+- swipe:
+    from:
+      id: 'm4'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-list-m4
+- swipe:
+    from:
+      id: 'm5'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-list-m5
+- swipe:
+    from:
+      id: 'm6'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-list-m6
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliDevScroll: 'plain-nogh'
+- extendedWaitUntil:
+    visible: 'scroll lab plain-nogh'
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-nogh-0
+- swipe:
+    from:
+      id: 'p1'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-nogh-p1
+- swipe:
+    from:
+      id: 'p2'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-nogh-p2
+- swipe:
+    from:
+      id: 'p3'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-nogh-p3
+- swipe:
+    from:
+      id: 'm4'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-nogh-m4
+- swipe:
+    from:
+      id: 'm5'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-nogh-m5
+- swipe:
+    from:
+      id: 'm6'
+    direction: LEFT
+    duration: 500
+- waitForAnimationToEnd
+- takeScreenshot: l-plain-nogh-m6

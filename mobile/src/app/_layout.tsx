@@ -8,6 +8,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { startCloud } from '../cloud'
 import { OutboxBridge } from '../components/OutboxBridge'
 import { launchedLongThread, LongThreadScreen } from '../dev/LongThreadScreen'
+import { launchedScrollLab, ScrollLab } from '../dev/ScrollLab'
 import { ShellProvider } from '../components/shell'
 import { HostProvider } from '../host'
 import { LinkBridge } from '../links'
@@ -50,12 +51,14 @@ const MANAGE_PAGES = [
 
 // Launched to measure the conversation list (dev/LongThreadScreen.tsx): that screen, and no other.
 const longThread = launchedLongThread()
+const scrollLab = launchedScrollLab()
 
 export default function Layout() {
   const { c, scheme } = useTokens()
   useEffect(() => watchUpdates(), [])
   useEffect(() => watchMemory(), [])
   useEffect(() => startCloud(), [])
+  if (scrollLab) return <ScrollLab mode={scrollLab} />
   if (longThread) {
     return (
       <KeyboardProvider>
