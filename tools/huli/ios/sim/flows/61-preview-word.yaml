@@ -46,6 +46,11 @@ appId: io.github.rsdvb.huli
       text: '(Done|完成|Close)'
     timeout: 15000
     optional: true
+# Quick Look draws a moment after it shows, and holds the screen till then.
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
 - takeScreenshot: w01-reply-code
 - tapOn:
     text: '(Done|完成|Close)'
@@ -58,6 +63,11 @@ appId: io.github.rsdvb.huli
     visible:
       text: '(Done|完成|Close)'
     timeout: 15000
+    optional: true
+# Quick Look draws a moment after it shows, and holds the screen till then.
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
     optional: true
 - takeScreenshot: w02-reply-link
 - tapOn:
