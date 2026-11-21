@@ -1404,7 +1404,51 @@
     },
     "signInDone": "{{name}} 已登录",
     "signInNotDone": "{{name}} 还没有登录",
-    "backToAgent": "回到它的设置"
+    "backToAgent": "回到它的设置",
+    "profiles": {
+      "group": "API 配置",
+      "hint": "用其他服务商的 API key 运行会话。新会话默认用标为「默认」的配置，会话里也可以在模型菜单中切换。纸鸢把 key 加密保存在这台电脑上，保存后不再显示。",
+      "ownHint": "用它自己的账号，或它配置里的 API key",
+      "makeDefault": "设为默认",
+      "add": "添加 API 配置",
+      "edit": "编辑 {{name}}",
+      "remove": "删除 {{name}}",
+      "keyEnd": "key 尾号 {{end}}",
+      "balance": "余额 {{amount}}",
+      "balanceFailed": "没能读取余额",
+      "balancesRefresh": "重新读取余额",
+      "dialog": {
+        "addTitle": "新的 API 配置",
+        "editTitle": "编辑 {{name}}",
+        "description": "选好服务商，粘贴它的 API key 即可：地址和模型按服务商自己的 Claude Code 接入文档填好。",
+        "provider": "服务商",
+        "name": "名称",
+        "key": "API key",
+        "keyKeep": "留空保留尾号 {{end}} 的 key",
+        "keyKeepNoEnd": "留空保留已保存的 key",
+        "getKey": "获取 key",
+        "baseUrl": "Base URL",
+        "model": "模型",
+        "modelHint": "留空用 Claude Code 自己的默认",
+        "fastModel": "快速模型",
+        "fastModelHint": "用于轻量任务；留空则同上面的模型",
+        "makeDefault": "新会话默认用这个配置",
+        "save": "保存"
+      },
+      "removeConfirm": {
+        "title": "删除「{{name}}」？",
+        "body": "它的 key 会从这台电脑上删除。用过它的会话换一个配置后可以继续。",
+        "action": "删除"
+      },
+      "problem": {
+        "name": "名称不能为空，最多 40 个字。",
+        "preset": "请选择服务商。",
+        "baseUrl": "Base URL 必须是 http 或 https 地址。",
+        "model": "模型名不能有空格。",
+        "key": "key 不能有空格。",
+        "keyMissing": "请粘贴服务商的 API key。"
+      }
+    }
   },
   "about": {
     "version": {

@@ -90,6 +90,7 @@ import { useFallback } from './plan-quota'
 import { useBlockedEnter } from './composer/use-blocked-enter'
 import { useBoxText, usePromptBox } from './composer/use-prompt-box'
 import { AgentPicker } from './new-session/agent-picker'
+import { ProfileChip } from './composer/profile-chip'
 import { HostMenu } from './new-session/host-menu'
 import { ProjectMenu } from './new-session/project-menu'
 import {
@@ -284,6 +285,17 @@ function DraftComposer({
   const [projectError, setProjectError] = useState<string | null>(null)
   const sendKey = useSettingsStore((s) => s.settings.general.sendKey)
   const status = useAgentsStore((s) => (agentId ? agentsOn(s, hostId).byId[agentId] : undefined))
+  // Huli: the API profile the session starts with: the agent's default until another is picked
+  // here; undefined for an agent whose sessions take none.
+  const [profilePick, setProfilePick] = useState<{ key: string; id: string | null } | null>(null)
+  const profiles = status?.profiles
+  const pickKey = `${hostId ?? ''}\n${agentId ?? ''}`
+  const picked =
+    profilePick?.key === pickKey &&
+    (profilePick.id === null || profiles?.items.some((p) => p.id === profilePick.id))
+      ? profilePick.id
+      : undefined
+  const profileId = profiles ? (picked !== undefined ? picked : profiles.defaultId) : undefined
   const readings = usePlanReadings()
   const limits = status ? newestLimits(readings, status) : undefined
   // A default agent that became usable after this page opened, such as the first start's, is what
@@ -426,9 +438,17 @@ function DraftComposer({
   // agent reports for it and the send only adopts it.
   useEffect(() => {
     prepareFor(
-      agentId && ready && agentsRead && !signIn ? { hostId, agentId, projectPath, parentId } : null,
+      agentId && ready && agentsRead && !signIn
+        ? {
+            hostId,
+            agentId,
+            projectPath,
+            parentId,
+            ...(profileId !== undefined ? { profileId } : {}),
+          }
+        : null,
     )
-  }, [hostId, agentId, ready, agentsRead, signIn, projectPath, parentId])
+  }, [hostId, agentId, ready, agentsRead, signIn, projectPath, parentId, profileId])
 
   // Without a folder nothing is prepared, so an agent with no options cached reads them once, and
   // the menu lists its models before a project is chosen.
@@ -513,7 +533,7 @@ function DraftComposer({
         project && !inScratch
           ? worktreeRequest(project.path, gitStatus ? currentBase(gitStatus) : null)
           : null
-      void startNewSession(agentId, projectPath, content, options, preparedId, worktree)
+      void startNewSession(agentId, projectPath, content, options, preparedId, worktree, profileId)
     } finally {
       sending.current = false
     }
@@ -731,6 +751,14 @@ function DraftComposer({
                   </>
                 )}
                 <AgentPicker agentId={agentId} onChoose={choose} hostId={hostId} />
+                {agentId && profileId !== undefined && !workflow && (
+                  <ProfileChip
+                    agentId={agentId}
+                    hostId={hostId}
+                    value={profileId}
+                    onChange={(id) => setProfilePick({ key: pickKey, id })}
+                  />
+                )}
                 {taskProject && (
                   <WorkflowMenu
                     hostId={hostId}

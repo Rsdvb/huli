@@ -75,6 +75,8 @@ export interface PendingSession {
   prompt: UserContent[] | null
   /** The config values New session chose, set once the session exists. */
   options: OptionValues | null
+  /** Huli: the API profile New session chose; null for the agent's own sign-in, absent for its default. */
+  profileId?: string | null
   error: { message: string; code: string | null } | null
 }
 
@@ -209,9 +211,11 @@ export async function createSession(
   preparedId: string | null = null,
   paneId: string = newSessionAt() ?? '',
   worktree: { base: string; branch?: string } | null = null,
+  profileId?: string | null,
 ): Promise<void> {
+  const profile = profileId === undefined ? {} : { profileId }
   usePendingSession.setState({
-    pending: { paneId, agentId, projectPath, parentId, prompt, options, error: null },
+    pending: { paneId, agentId, projectPath, parentId, prompt, options, ...profile, error: null },
   })
   useViewStore.setState((s) => ({
     projectPath: projectPath ?? s.projectPath,
@@ -236,6 +240,7 @@ export async function createSession(
       ...(prompt !== null ? { prompt } : {}),
       ...(preparedId ? { preparedId } : {}),
       ...(worktree ? { worktree } : {}),
+      ...profile,
     })
     // A session in a new worktree starts its own agent; the prepared one stays the window's.
     if (preparedId && !worktree) adoptedPrepared(summary.id)
@@ -283,6 +288,7 @@ export async function createSession(
         parentId,
         prompt,
         options,
+        ...profile,
         error: { message: errorMessage(error), code: errorCode(error) },
       },
     })
@@ -369,6 +375,7 @@ export function startNewSession(
   options: OptionValues | null,
   preparedId: string | null = null,
   worktree: { base: string; branch?: string } | null = null,
+  profileId?: string | null,
 ): Promise<void> {
   const { main } = useViewStore.getState()
   const parent =
@@ -376,8 +383,28 @@ export function startNewSession(
       ? useSessionsStore.getState().byId[main.parentId]
       : undefined
   return parent
-    ? createSession(agentId, parent.projectPath, parent.id, prompt, options, preparedId)
-    : createSession(agentId, projectPath, null, prompt, options, preparedId, undefined, worktree)
+    ? createSession(
+        agentId,
+        parent.projectPath,
+        parent.id,
+        prompt,
+        options,
+        preparedId,
+        undefined,
+        null,
+        profileId,
+      )
+    : createSession(
+        agentId,
+        projectPath,
+        null,
+        prompt,
+        options,
+        preparedId,
+        undefined,
+        worktree,
+        profileId,
+      )
 }
 
 /**
@@ -420,6 +447,8 @@ export function retryPendingSession(): void {
       pending.options,
       null,
       pending.paneId,
+      null,
+      pending.profileId,
     )
   }
 }

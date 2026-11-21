@@ -24,6 +24,8 @@ export interface PrepareTarget {
   agentId: AgentId
   projectPath: string | null // null: No project
   parentId: string | null
+  /** Huli: the API profile picked; null for the agent's own sign-in, absent where it takes none. */
+  profileId?: string | null
 }
 
 // It goes this long after New session leaves the front, and after this long untouched in front:
@@ -52,7 +54,7 @@ const setKey = (hostId: string | null, agentId: AgentId, optionId: string): stri
   `${agentKey(hostId, agentId)}\0${optionId}`
 
 const keyOf = (t: PrepareTarget): string =>
-  JSON.stringify([t.hostId, t.agentId, t.projectPath, t.parentId])
+  JSON.stringify([t.hostId, t.agentId, t.projectPath, t.parentId, t.profileId ?? null])
 
 const setPrepared = (next: PreparedState | null): void =>
   useAgentOptionsStore.setState({ prepared: next })
@@ -90,6 +92,7 @@ export async function prepare(t: PrepareTarget, replace = false): Promise<void> 
       ...(t.parentId ? { parentId: t.parentId } : {}),
       ...(picks && Object.keys(picks).length > 0 ? { options: picks } : {}),
       ...(replace ? { replace: true } : {}),
+      ...(t.profileId !== undefined ? { profileId: t.profileId } : {}),
     })
     if (useAgentOptionsStore.getState().prepared?.key !== key) {
       // Left for another agent or folder meanwhile.

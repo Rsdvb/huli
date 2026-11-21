@@ -38,5 +38,26 @@
     "done": "Node.js {{version}} is installed",
     "upToDate": "Node.js {{version}} is the latest",
     "hint": "It goes in Kite’s own folder: no administrator rights, nothing on your system changes."
+  },
+  "profiles": {
+    "own": "{{name}}'s own sign-in",
+    "ownShort": "Own sign-in",
+    "menu": "API profile",
+    "default": "Default",
+    "switching": "Switching the API profile…",
+    "switchHint": "Takes effect from the next turn",
+    "preset": {
+      "zhipu": "Zhipu GLM Coding Plan",
+      "zai": "Z.ai GLM Coding Plan",
+      "kimi": "Kimi (Moonshot)",
+      "kimi-intl": "Kimi (Moonshot, international)",
+      "deepseek": "DeepSeek",
+      "bailian": "Alibaba Bailian Coding Plan",
+      "ark": "Volcengine Ark Coding Plan",
+      "minimax": "MiniMax",
+      "minimax-intl": "MiniMax (international)",
+      "custom": "Custom"
+    },
+    "betweenTurns": "Changes between turns"
   }
 }

@@ -6,6 +6,7 @@ import { isFullAccessMode } from './agents'
 import { IDLE_RELEASE_MODES } from './idle-release'
 import { LOCALE_NAMES, LOCALES } from './locale'
 import type { Platform } from './platform'
+import { takesProfiles } from './provider-profiles'
 import {
   BACKUP_KEEP_MAX,
   BACKUP_KEEP_MIN,
@@ -924,6 +925,17 @@ const ENTRIES = {
     kind: 'secret',
     item: 'agent',
     on: isAgent,
+  },
+  // Huli: the agent's API provider profiles, for an agent whose sessions take them.
+  'agents.profiles': {
+    section: 'agents',
+    row: 'profiles',
+    name: 'agents.profiles.group',
+    description: 'agents.profiles.hint',
+    part: 'host',
+    kind: 'list',
+    item: 'agent',
+    on: (ctx, item) => isAgent(ctx, item) && takesProfiles(item as AgentId),
   },
   'agents.auto-compact': {
     section: 'agents',

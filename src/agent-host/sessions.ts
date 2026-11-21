@@ -9241,9 +9241,7 @@ export class SessionManager {
                 : {
                     title: t('notice.turnFailed'),
                     description: profileRefused
-                      ? `${t('session.profile.keyRefused')}
-
-${mapped.message}`
+                      ? `${t('session.profile.keyRefused')}\n\n${mapped.message}`
                       : mapped.message,
                     // A turn of a message has Retry, which sends it again; the agent's own has none.
                     ...(turn.byAgent ? {} : { cause: 'turn_failed' as const }),
