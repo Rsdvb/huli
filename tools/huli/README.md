@@ -383,8 +383,23 @@ an uninstall marks the harness `uninstalled`, as Settings › Harness's own unin
   Windows, its sandbox accounts' files; agy's `~/.gemini/antigravity-cli` (the Antigravity app's
   folder, sign-in and older token kept); dsh's folder (never `~/.agents`); Doubao's data folder but
   its program; Pi, Cline, DimCode, Codebuddy and OpenCode's XDG folders; an added agent's own
-  folder. Others have none Kite knows, so nothing is deleted. The dialog says where Claude's apps
-  and the Codex app share the folder. Kite's own sessions of the agent stay.
+  folder. The dialog says where Claude's apps and the Codex app share the folder. The other
+  agents' places come from their own docs and code, with sources and dates at the top of
+  `data.ts`. Where the vendor ships an uninstall that deletes the data, that command runs with the
+  agent's own CLI and environment, before any program step, and the dialog shows its line and,
+  once it ran, its last lines of output: `devin uninstall --clean --force`, `kilo uninstall
+--force`, `hermes uninstall --data --yes` (never over a folder the Hermes IBC relayer keeps keys
+  in), `nova uninstall --force` (only over `~/.nova`, never `~/.compass`), CodeWhale's `uninstall
+--yes --purge-data` for its receipted install, `cursor-agent logout` and `stakpak autopilot down
+--uninstall`; a note says what else it takes, such as the program or what Devin Desktop or
+  Kilo's extensions share. Otherwise Kite deletes what is provably the agent's own: Muse Code's
+  XDG `muse` folders, CodeWhale's, siGit's, the GLM agent's, fast-agent's, VT Code's but its
+  desktop app's, Stakpak's but `plugins`, OMP's but its worktrees, Poolside's and Minion Code's
+  own files, Harn's caches, amp-acp's, and the Cursor CLI's own files in the editor's `~/.cursor`.
+  A folder another program shares (Gemini CLI's, Qwen Code's, Grok's, Copilot's, goose's, Kimi
+  Code's, MiniMax Code's, Junie's and the others the header lists) is never planned: the dialog
+  names it and who shares it, and deletes nothing. An agent that keeps nothing, or whose folder is
+  not there yet, has no data on this computer. Kite's own sessions of the agent stay.
 - `agent-removal/guard.ts` checks every path as it is planned and again as it goes: inside the
   agent's folders, never a drive's root, the home folder or above Kite's data, the harnesses and
   the system's folders, and never at or above another agent's folder.
