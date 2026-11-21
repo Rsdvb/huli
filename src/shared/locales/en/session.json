@@ -1670,5 +1670,100 @@
     "undoLabel": "Undo the change to {{what}}",
     "showRows": "Show what changed",
     "row": "{{what}}: {{from}} → {{to}}"
+  },
+  "group": {
+    "someFailed_one": "{{agents, list}} could not start; the other runs did.",
+    "someFailed_other": "{{agents, list}} could not start; the other runs did.",
+    "mode_one": "{{count}} agent at once",
+    "mode_other": "{{count}} agents at once",
+    "choice": "Several agents at once",
+    "choiceHint": "Each does it in its own worktree; keep the best",
+    "worktreeHint": "Each agent works in a new worktree of its own, on its own branch.",
+    "worktreeNote": "Each agent works in its own worktree, on a branch cut from <base>{{base}}</base>.",
+    "kept": "Kept",
+    "runs": {
+      "label": "Give it to",
+      "add": "Add",
+      "edit": "Change run {{n}}",
+      "ownModel": "Default model",
+      "agent": "Agent",
+      "model": "Model",
+      "readingModels": "Reading the models…",
+      "remove": "Remove",
+      "notReady": "One of these agents can't start now. Pick another one, or set it up in Settings."
+    },
+    "row": {
+      "collapse": "Hide runs",
+      "expand": "Show runs",
+      "kept": "Kept",
+      "doneOf": "{{done}} of {{total}} done"
+    },
+    "phase": {
+      "working": "Working",
+      "waiting": "Needs you",
+      "done": "Done",
+      "failed": "Failed"
+    },
+    "card": {
+      "time": "Time",
+      "changes": "Changes",
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files",
+      "changesFailed": "Couldn't read them",
+      "branch": "Branch",
+      "setupFailed": "Its worktree setup failed. Open the session to see why.",
+      "showChanges": "Changes",
+      "open": "Open",
+      "keep": "Keep this",
+      "keepWhenDone": "You can keep a run once it is done."
+    },
+    "changes": {
+      "title": "Changes",
+      "of": "{{agent}}'s changes",
+      "none": "This run changed nothing yet.",
+      "truncated": "More files changed than are listed here.",
+      "binary": "A binary file, so no diff is shown.",
+      "tooLarge": "This file is too large to show its diff.",
+      "deleted": "This run deleted the file.",
+      "status": {
+        "added": "Added",
+        "modified": "Modified",
+        "deleted": "Deleted",
+        "renamed": "Renamed",
+        "copied": "Copied",
+        "typechange": "Type changed",
+        "untracked": "New file",
+        "conflicted": "Conflicted"
+      }
+    },
+    "page": {
+      "summary_one": "{{count}} agent · {{project}} · cut from {{base}}",
+      "summary_other": "{{count}} agents · {{project}} · cut from {{base}}",
+      "archived_one": "{{count}} run archived",
+      "archived_other": "{{count}} runs archived",
+      "keptNote": "You kept {{agent}}'s run. Its changes are merged into the project.",
+      "missing": "These runs are gone",
+      "missingBody": "They were deleted, or their computer is not connected.",
+      "newSession": "New session"
+    },
+    "keep": {
+      "title": "Keep {{agent}}'s run?",
+      "body": "Its branch {{runBranch}} is merged into {{branch}} in the project's own checkout, after what it has not committed is committed to it. Nothing changes if the merge would conflict.",
+      "currentBranch": "the current branch",
+      "cancel": "Cancel",
+      "confirm": "Keep this",
+      "done": "Kept {{agent}}'s run in {{branch}}."
+    },
+    "discard": {
+      "action_one": "Archive the other run",
+      "action_other": "Archive the other {{count}}",
+      "title_one": "Archive the other run?",
+      "title_other": "Archive the other {{count}} runs?",
+      "body": "{{runs}} will be archived and their worktrees removed. Anything they had not committed is committed to their branches first, and the branches stay, so none of their work is lost.",
+      "cancel": "Not now",
+      "confirm": "Archive and remove worktrees",
+      "done_one": "Archived the other run.",
+      "done_other": "Archived the other {{count}} runs."
+    }
   }
 }

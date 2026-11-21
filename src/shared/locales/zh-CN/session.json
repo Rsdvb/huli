@@ -1610,5 +1610,92 @@
     "undoLabel": "撤销对 {{what}} 的修改",
     "showRows": "查看修改了什么",
     "row": "{{what}}：{{from}} → {{to}}"
+  },
+  "group": {
+    "someFailed_other": "{{agents, list(style: narrow)}} 没能启动，其他的已经开始。",
+    "mode_other": "同时交给 {{count}} 个",
+    "choice": "同时交给几个 Agent",
+    "choiceHint": "各在自己的工作树里做同一件事，挑最好的保留",
+    "worktreeHint": "每个 Agent 在自己的新工作树和分支上做。",
+    "worktreeNote": "每个 Agent 在自己的工作树里做，都从 <base>{{base}}</base> 切出新分支。",
+    "kept": "已保留",
+    "runs": {
+      "label": "交给",
+      "add": "添加",
+      "edit": "修改第 {{n}} 个",
+      "ownModel": "默认模型",
+      "agent": "Agent",
+      "model": "模型",
+      "readingModels": "正在读取模型…",
+      "remove": "移除",
+      "notReady": "其中有 Agent 现在不能启动。换一个，或者先在设置里处理。"
+    },
+    "row": {
+      "collapse": "收起运行",
+      "expand": "展开运行",
+      "kept": "已保留",
+      "doneOf": "{{total}} 个里完成了 {{done}} 个"
+    },
+    "phase": {
+      "working": "进行中",
+      "waiting": "等你处理",
+      "done": "完成",
+      "failed": "失败"
+    },
+    "card": {
+      "time": "用时",
+      "changes": "改动",
+      "files_other": "{{count}} 个文件",
+      "changesFailed": "读不到改动",
+      "branch": "分支",
+      "setupFailed": "工作树没有准备好。打开会话看看原因。",
+      "showChanges": "看改动",
+      "open": "打开",
+      "keep": "保留这个",
+      "keepWhenDone": "运行完成后才能保留。"
+    },
+    "changes": {
+      "title": "改动",
+      "of": "{{agent}} 的改动",
+      "none": "这个运行还没有改动文件。",
+      "truncated": "改动的文件太多，这里没有全部列出。",
+      "binary": "二进制文件，不显示差异。",
+      "tooLarge": "文件太大，不显示差异。",
+      "deleted": "这个运行删除了这个文件。",
+      "status": {
+        "added": "新增",
+        "modified": "修改",
+        "deleted": "删除",
+        "renamed": "重命名",
+        "copied": "复制",
+        "typechange": "类型改变",
+        "untracked": "新文件",
+        "conflicted": "冲突"
+      }
+    },
+    "page": {
+      "summary_other": "{{count}} 个 Agent · {{project}} · 从 {{base}} 切出",
+      "archived_other": "已归档 {{count}} 个运行",
+      "keptNote": "已保留 {{agent}} 的结果，改动已合并到项目里。",
+      "missing": "这些运行已经不在了",
+      "missingBody": "它们已被删除，或者所在的电脑没有连接。",
+      "newSession": "新建会话"
+    },
+    "keep": {
+      "title": "保留 {{agent}} 的结果？",
+      "body": "先把它还没提交的改动提交到它的分支 {{runBranch}}，再把这个分支合并到项目本身工作区的 {{branch}}。如果合并会冲突，什么都不会改。",
+      "currentBranch": "当前分支",
+      "cancel": "取消",
+      "confirm": "保留这个",
+      "done": "已把 {{agent}} 的结果保留到 {{branch}}。"
+    },
+    "discard": {
+      "action_other": "归档其他 {{count}} 个",
+      "title_other": "归档其他 {{count}} 个运行？",
+      "body": "{{runs}} 会被归档，它们的工作树会删除。它们还没提交的改动会先提交到各自的分支，分支都保留，做过的工作不会丢。",
+      "cancel": "先不",
+      "confirm": "归档并删除工作树",
+      "done_other": "已归档其他 {{count}} 个运行。"
+    }
   }
 }

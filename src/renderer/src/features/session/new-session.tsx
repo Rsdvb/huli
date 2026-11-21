@@ -9,7 +9,7 @@ import type { AgentId, SlashCommand, UserContent } from '@shared/thread'
 import { usableWorkflow, type Workflow, type WireWorkflowEntry } from '@shared/workflow'
 import { limitsForModel } from '@shared/plan-limits'
 import { planQuota } from '@shared/plan-quota'
-import { startNewSession } from '@renderer/app/actions'
+import { startGroup, startNewSession } from '@renderer/app/actions'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { FolderMark } from '@renderer/components/affect/assistant-home'
 import { ChatComposer } from '@renderer/components/affect/chat-composer'
@@ -127,6 +127,9 @@ import { openTask } from './new-session/open-task'
 import { chooseWorkflow, taskStarted, useWorkflowChoice } from './new-session/workflow-choice'
 import { WorkflowMenu, TaskWorktreeNote, TaskWorktreeTag } from './new-session/workflow-menu'
 import { runsSteps } from './new-session/workflow-picks'
+import { RunsBar } from './new-session/runs-bar'
+import { runStarts, useRunsReady } from './new-session/run-starts'
+import { setBestOfN, useBestOfN } from '@renderer/stores/best-of-n'
 import { WorktreeTrayTag } from './worktree/worktree-tag'
 import { currentBase, useWorktreeStatus } from './new-session/worktree-base'
 import { WorktreeMenu, WorktreeNote } from './new-session/worktree-menu'
@@ -366,6 +369,10 @@ function DraftComposer({
           entry.id === chosenWorkflow && usableWorkflow(entry),
       )
     : undefined
+  // Huli: best of N, the message on several agents at once, each in a worktree of its own.
+  const several = useBestOfN((s) => !!taskProject && !!gitStatus && !!s.on[taskProject.path])
+  const runCount = useBestOfN((s) => s.runs.length)
+  const runsReady = useRunsReady(hostId)
   // The first step goes to the tray's agent, which must be one that works on steps.
   const firstOff =
     !!workflow && workflow.workflow.steps[0]?.by === 'agent' && !!status && !runsSteps(status)
@@ -376,11 +383,17 @@ function DraftComposer({
   const signedOut = !!status && agentNeed(status) === 'sign-in'
   const holdsForSignIn = signedOut && triedAnyway !== agentId
   useSignInRecheck(hostId, agentId)
-  const canSend =
-    !holdsForSignIn &&
-    (workflow
-      ? !!agentId && !!taskProject && holdsMessage && !held && attachments.length === 0 && !firstOff
-      : !!agentId && ready && holdsMessage && !held && !branchHeld)
+  const canSend = several
+    ? !!taskProject && !!gitStatus && holdsMessage && !held && runsReady
+    : !holdsForSignIn &&
+      (workflow
+        ? !!agentId &&
+          !!taskProject &&
+          holdsMessage &&
+          !held &&
+          attachments.length === 0 &&
+          !firstOff
+        : !!agentId && ready && holdsMessage && !held && !branchHeld)
   const config = useStartConfig(agentId, undefined, hostId)
   const model = config?.find((o) => o.category === 'model' && isSelect(o))
   // A used-up window of another model does not hold the picked one back.
@@ -472,8 +485,40 @@ function DraftComposer({
     }
   }
 
+  // Huli: the message goes to every run at once, each in a worktree cut from the branch here.
+  const sendToSeveral = async () => {
+    if (!taskProject || !gitStatus) return
+    const runs = runStarts(hostId, useBestOfN.getState().runs)
+    if (!runs) return
+    const text = editor.current?.text() ?? box.source.text
+    const surfaces = mentionSurfacesOf(newSessionPanel(taskProject.path))
+    const content: UserContent[] = [
+      ...(text.trim() ? [{ type: 'text' as const, text }] : []),
+      ...attachmentContent(attachments),
+      ...surfaceRefs(text, mentionResolver([], null, surfaces)).map((ref) => ({
+        type: 'ref' as const,
+        ref,
+      })),
+    ]
+    try {
+      await startGroup(taskProject.path, currentBase(gitStatus) ?? 'HEAD', content, runs)
+    } catch (error) {
+      box.setError(errorMessage(error))
+    }
+  }
+
   // The message leaves the draft with the request and comes back to it if the start fails.
   const send = async () => {
+    if (several) {
+      if (!canSend || sending.current) return
+      sending.current = true
+      try {
+        await sendToSeveral()
+      } finally {
+        sending.current = false
+      }
+      return
+    }
     if (!canSend || !agentId || sending.current) return
     sending.current = true
     try {
@@ -519,25 +564,29 @@ function DraftComposer({
     }
   }
 
-  const blocked = !agentId
-    ? t('newSession.chooseAgentFirst')
-    : holdsForSignIn
-      ? t('newSession.signInFirst', { agent: name })
-      : !inScratch && !project
-        ? t('newSession.chooseProjectFirst')
-        : project?.missing && !inScratch
-          ? t('newSession.missingLine')
-          : firstOff
-            ? t('newSession.workflow.stepAgents')
-            : workflow && attachments.length > 0
-              ? t('newSession.workflow.textOnly')
-              : !workflow && branchHeld === 'invalid'
-                ? t('worktree.branchInvalid')
-                : !workflow && branchHeld === 'failed'
-                  ? t('worktree.templateFailed', { message: templateError })
-                  : !workflow && branchHeld === 'reading'
-                    ? t('worktree.templateReading')
-                    : (held?.message ?? null)
+  const blocked = several
+    ? !runsReady
+      ? t('group.runs.notReady')
+      : (held?.message ?? null)
+    : !agentId
+      ? t('newSession.chooseAgentFirst')
+      : holdsForSignIn
+        ? t('newSession.signInFirst', { agent: name })
+        : !inScratch && !project
+          ? t('newSession.chooseProjectFirst')
+          : project?.missing && !inScratch
+            ? t('newSession.missingLine')
+            : firstOff
+              ? t('newSession.workflow.stepAgents')
+              : workflow && attachments.length > 0
+                ? t('newSession.workflow.textOnly')
+                : !workflow && branchHeld === 'invalid'
+                  ? t('worktree.branchInvalid')
+                  : !workflow && branchHeld === 'failed'
+                    ? t('worktree.templateFailed', { message: templateError })
+                    : !workflow && branchHeld === 'reading'
+                      ? t('worktree.templateReading')
+                      : (held?.message ?? null)
   const blockedEnter = useBlockedEnter({
     // A missing folder is said under the box already.
     reason: project?.missing && !inScratch ? null : blocked,
@@ -577,7 +626,7 @@ function DraftComposer({
     return Promise.resolve(true)
   }
   const mode = config?.find((o): o is SelectOption => o.category === 'mode' && isSelect(o))
-  const modeControl = useModeControl(agentId ? mode : undefined, pick)
+  const modeControl = useModeControl(agentId && !several ? mode : undefined, pick)
   // Huli: the agent's other menus, such as Codex's collaboration and speed or Cline's provider, as
   // the session's composer shows them, so the first message starts with them set.
   const others = agentId
@@ -590,6 +639,7 @@ function DraftComposer({
       )
     : []
   const hasModelMenu =
+    !several &&
     !!agentId &&
     !!config?.some(
       (o) => o.type === 'boolean' || o.category === 'model' || o.category === 'thought_level',
@@ -730,19 +780,35 @@ function DraftComposer({
                     />
                   </>
                 )}
-                <AgentPicker agentId={agentId} onChoose={choose} hostId={hostId} />
+                {!several && <AgentPicker agentId={agentId} onChoose={choose} hostId={hostId} />}
                 {taskProject && (
                   <WorkflowMenu
                     hostId={hostId}
                     workflowId={workflow?.id ?? null}
                     firstAgentId={agentId}
                     onChoose={(id) => {
+                      setBestOfN(taskProject.path, false, null)
                       chooseWorkflow(taskProject.path, id)
                       requestAnimationFrame(() => editor.current?.focus())
                     }}
+                    bestOfN={
+                      gitStatus
+                        ? {
+                            chosen: several,
+                            runs: runCount,
+                            onChoose: () => {
+                              chooseWorkflow(taskProject.path, null)
+                              setBestOfN(taskProject.path, true, agentId)
+                              requestAnimationFrame(() => editor.current?.focus())
+                            },
+                          }
+                        : null
+                    }
                   />
                 )}
-                {workflow && gitStatus ? (
+                {several && gitStatus ? (
+                  <TaskWorktreeTag base={currentBase(gitStatus)} several />
+                ) : workflow && gitStatus ? (
                   <TaskWorktreeTag base={currentBase(gitStatus)} />
                 ) : gitStatus && project ? (
                   <WorktreeMenu projectPath={project.path} status={gitStatus} />
@@ -767,12 +833,15 @@ function DraftComposer({
             {shownError}
           </p>
         )}
-        {workflow && gitStatus ? (
+        {several && <RunsBar hostId={hostId} />}
+        {several && gitStatus ? (
+          <TaskWorktreeNote base={currentBase(gitStatus)} several />
+        ) : workflow && gitStatus ? (
           <TaskWorktreeNote base={currentBase(gitStatus)} />
         ) : (
           gitStatus && project && <WorktreeNote projectPath={project.path} status={gitStatus} />
         )}
-        {agentId && signedOut && status && (
+        {!several && agentId && signedOut && status && (
           <StartSignIn
             status={status}
             hostId={hostId}

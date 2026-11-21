@@ -30,6 +30,9 @@ export function keepInSight(node: SessionNode, shownId: string | null): boolean 
 /** Whether a session's or a task's row stays in sight: it waits, runs or is in front. */
 export function rowInSight(row: SidebarRow, shownId: string | null): boolean {
   if (row.kind === 'session') return keepInSight(row.node, shownId)
+  if (row.kind === 'group') {
+    return row.id === shownId || row.runs.some((run) => keepInSight(run, shownId))
+  }
   const { task } = row
   return (
     task.id === shownId ||
