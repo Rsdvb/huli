@@ -124,9 +124,10 @@ const PLAN_PEEK = 150
 
 /**
  * The plan's text, cut short when long, with a quiet button that copies it. `peek` shows its start
- * only, with the whole of it in a sheet, for the card whose buttons must stay in view.
+ * only, with the whole of it in a sheet, for the card whose buttons must stay in view. `id` is the
+ * plan's entry, under which it stays opened when the list mounts the card again.
  */
-function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) {
+function PlanBody(props: { id: string; markdown: string; clamp?: boolean; peek?: boolean }) {
   const { c } = useSessionTokens()
   const [copied, setCopied] = useState(false)
   const [height, setHeight] = useState(0)
@@ -182,7 +183,7 @@ function PlanBody(props: { markdown: string; clamp?: boolean; peek?: boolean }) 
       ) : props.clamp === false ? (
         body
       ) : (
-        <Clamp maxHeight={320} more="显示完整计划">
+        <Clamp maxHeight={320} more="显示完整计划" id={`plan-body:${props.id}`}>
           {body}
         </Clamp>
       )}
@@ -319,7 +320,7 @@ export function PlanApprovalCard(props: {
           {view === 'changes' && plan.previous ? (
             <PlanChanges previous={plan.previous} markdown={plan.markdown} />
           ) : (
-            <PlanBody markdown={plan.markdown} peek />
+            <PlanBody id={entry.id} markdown={plan.markdown} peek />
           )}
           {(modes.length > 0 || choices.length > 1) && (
             <View style={{ gap: 6 }}>
@@ -491,7 +492,7 @@ export function PlanSettled(props: { entry: ToolEntry }) {
             {kept.note}
           </Text>
         ) : null}
-        {open && markdown ? <PlanBody markdown={markdown} clamp={false} /> : null}
+        {open && markdown ? <PlanBody id={entry.id} markdown={markdown} clamp={false} /> : null}
       </View>
       {mode ? (
         <View style={styles.moved}>

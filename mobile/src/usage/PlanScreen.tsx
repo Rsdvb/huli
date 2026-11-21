@@ -28,9 +28,9 @@ import {
   planName,
   readText,
   tokensText,
-  whenText,
   windowName,
 } from '../ui/session/limits'
+import { momentText } from '../ui/session/format'
 import { useTicking } from '../ui/session/ticking'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 import { modelRows, type BreakdownRow } from './model'
@@ -274,7 +274,7 @@ function Window(props: { limit: PlanLimit; now: number }) {
   const out = isExhausted(limit, now)
   const high = out || (limit.usedPercent ?? 0) >= 90
   const at = limit.resetsAt
-  const reset = at && at > now ? `${whenText(at, now)} 重置 · 还有 ${leftText(at - now)}` : null
+  const reset = at && at > now ? `${momentText(at, now)} 重置 · 还有 ${leftText(at - now)}` : null
   return (
     <View
       accessible

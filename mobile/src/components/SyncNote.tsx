@@ -8,17 +8,10 @@ import { useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { sameFields, useHostActions, useHostSelector, type HostData } from '../host'
 import { linkProblem } from '../linkInfo'
-import { clockOf, listTime } from '../sessions'
+import { momentText } from '../sessions'
 import { haptic } from '../ui/haptics'
 import { Press } from '../ui/Press'
 import { space, type as typeScale, useTokens } from '../ui/tokens'
-
-/** When, as the line says it: today's clock, else the day and the clock. */
-function when(ms: number): string {
-  const day = listTime(ms)
-  const clock = clockOf(ms)
-  return day === clock ? clock : `${day} ${clock}`
-}
 
 const pick = (d: HostData) => ({
   state: d.state,
@@ -46,7 +39,7 @@ export function SyncNote() {
     : away
       ? '未连接'
       : (linkProblem(host.state) ?? '')
-  const since = host.syncedAt ? `上次同步 ${when(host.syncedAt)}` : null
+  const since = host.syncedAt ? `上次同步 ${momentText(host.syncedAt)}` : null
   const canRetry = failed || (away && host.state.kind !== 'stopped')
   const queued = !connected && host.state.kind !== 'stopped' ? '发出的消息会在连上后送达' : null
   return (
@@ -109,7 +102,7 @@ export function ListSyncNote(props: {
   const [busy, setBusy] = useState(false)
   if (!props.error) return null
   const state = busy ? '正在同步…' : '没能同步'
-  const since = props.syncedAt ? `上次同步 ${when(props.syncedAt)}` : null
+  const since = props.syncedAt ? `上次同步 ${momentText(props.syncedAt)}` : null
   return (
     <NoteRow
       busy={busy}

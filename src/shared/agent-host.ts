@@ -48,6 +48,7 @@ import type {
   HistorySource,
 } from './agent-history'
 import type { SessionFolder } from './session-folders'
+import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './session-groups'
 import type {
   CatalogServer,
   ConnectStart,
@@ -858,6 +859,8 @@ export interface SessionSummary {
   autoResume?: boolean
   // Huli: its running turn has said nothing for a while and may be stuck
   stall?: Stall | null
+  // Huli: a run of a best-of-N group; null for a session on its own; absent from older hosts
+  group?: SessionGroupRef | null
 }
 
 /**
@@ -1513,6 +1516,26 @@ export interface HostContract {
     result: SessionSummary
   }
   'worktrees.retrySetup': { params: { sessionId: string }; result: void }
+  // Huli: best of N. One prompt on 2 to 4 agents at once, each run a session in a new worktree cut
+  // from `base`; the runs that started, in the order asked, and why the others could not.
+  'groups.start': {
+    params: { projectPath: string; base: string; prompt: UserContent[]; runs: GroupRunStart[] }
+    result: { sessions: SessionSummary[]; failed: { agentId: AgentId; message: string }[] }
+  }
+  // A run's changes against the commit its worktree was cut from, read when asked.
+  'groups.changes': { params: { sessionId: string }; result: RunChanges }
+  // One file of those changes: the base's side against the run's working tree.
+  'groups.fileDiff': {
+    params: { sessionId: string; path: string; oldPath: string | null }
+    result: FileDiff
+  }
+  // Merges the run's branch, its uncommitted changes committed to it first, into the project's
+  // own checkout. Refused while a run works, once one was kept, when that checkout has changes
+  // not committed or is amid a merge, and when the merge conflicts, which is then undone.
+  'groups.keep': { params: { sessionId: string }; result: KeptRun }
+  // Archives runs the user did not keep and removes their worktrees; what a run had not committed
+  // is committed to its branch first, and every branch stays.
+  'groups.discard': { params: { sessionIds: string[] }; result: void }
   // Goes on without the setup command; what waited for it is sent.
   'worktrees.skipSetup': { params: { sessionId: string }; result: void }
   // The output kept of the last setup run, or with `from` what it wrote after that offset:
@@ -2241,6 +2264,11 @@ export const HOST_METHODS = [
   'worktrees.retrySetup',
   'worktrees.skipSetup',
   'worktrees.setupLog',
+  'groups.start',
+  'groups.changes',
+  'groups.fileDiff',
+  'groups.keep',
+  'groups.discard',
   'sessions.switchAgent',
   'sessions.context',
   'sessions.contextEstimates',

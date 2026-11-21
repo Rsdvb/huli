@@ -12,6 +12,7 @@ import { useState, type ReactNode } from 'react'
 import { Alert } from 'react-native'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
+import { runPhase } from '@shared/session-groups'
 import type { HostLink } from '@shared/remote/link'
 import { call, sessionFolder } from '../git'
 import { useMaybeLink } from '../host'
@@ -196,6 +197,29 @@ export function useSessionActions(
       ),
   }
 
+  // A best-of-N run's changes go into the project on the computer, as the desktop's Keep this
+  // does; the computer checks it all again and says why when it refuses.
+  const keepRun = (s: SessionSummary) => {
+    haptic.warning()
+    Alert.alert(
+      '保留这个结果？',
+      '它的改动会合并到电脑上项目当前的分支。项目里有未提交的改动，或者合并会冲突时，什么都不会改。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '保留',
+          onPress: () =>
+            run(
+              s,
+              '没能保留',
+              (link) => link.request('groups.keep', { sessionId: s.id }),
+              () => showNotice({ text: '已保留，改动已合并到项目里' }),
+            ),
+        },
+      ],
+    )
+  }
+
   const menu = (s: SessionSummary, extras: MenuExtras = {}): MenuNode[] => {
     const running = isRunning(s)
     const topLevel = s.parentId === null
@@ -227,6 +251,15 @@ export function useSessionActions(
           : [],
       ])
     }
+    const keepable =
+      !!s.group &&
+      s.group.kept === null &&
+      s.archivedAt === null &&
+      runPhase(s) === 'done' &&
+      s.worktree?.state === 'ready'
+    const keep: MenuNode[] = keepable
+      ? [{ key: 'keep', label: '保留这个', icon: 'checkmark.circle', onPress: () => keepRun(s) }]
+      : []
     const state: MenuNode[] = running
       ? [
           {
@@ -353,7 +386,7 @@ export function useSessionActions(
             },
           ]
         : []
-    return joinGroups([state, own, organize, end, del])
+    return joinGroups([keep, state, own, organize, end, del])
   }
 
   const element = (

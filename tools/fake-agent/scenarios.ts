@@ -12,6 +12,7 @@ import type {
 } from '@agentclientprotocol/sdk/unstable'
 import {
   BASIC_DONE,
+  ANCHORS_REPLY,
   CHINESE_ANSWER,
   REASONING,
   REASONING_MESSAGES,
@@ -45,6 +46,7 @@ import { artifacts } from './artifacts.ts'
 import { browser, deviceTool, openSite } from './browser.ts'
 import { computer } from './computer.ts'
 import { documents } from './documents.ts'
+import { write } from './write.ts'
 import type { ScenarioName } from './options.ts'
 import type { Scenario, Turn } from './turn.ts'
 
@@ -1380,6 +1382,11 @@ const chinese: Scenario = async (turn) => {
   return 'end_turn'
 }
 
+const anchors: Scenario = async (turn) => {
+  if (!(await stream(turn, ANCHORS_REPLY, { messageId: turn.messageId() }))) return 'cancelled'
+  return 'end_turn'
+}
+
 const tables: Scenario = async (turn) => {
   if (!(await stream(turn, TABLES_REPLY, { messageId: turn.messageId() }))) return 'cancelled'
   return 'end_turn'
@@ -1633,6 +1640,8 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   media,
   screenshots,
   documents,
+  write,
+  anchors,
 }
 
 export const compact: Scenario = async (turn) => {

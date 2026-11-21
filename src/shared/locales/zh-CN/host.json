@@ -1339,5 +1339,23 @@
     "high": "高",
     "xhigh": "超高",
     "max": "最高"
+  },
+  "groups": {
+    "untitled": "同时交给几个 Agent",
+    "keeping": "正在保留这一组里的一个结果。",
+    "alreadyKept": "这一组已经保留过一个结果了。",
+    "stillWorking": "这个运行还在进行。等它完成，或者先停止它，再保留。",
+    "mainDetached": "项目本身的工作区不在任何分支上，所以没有合并。先切换到一个分支。",
+    "mainBusy": "项目本身的工作区正在合并、变基或进行其他操作。先完成或中止它。",
+    "mainChanged_one": "项目本身的工作区有 1 处未提交的改动（{{files}}）。先提交或暂存，再保留这个结果。",
+    "mainChanged_other": "项目本身的工作区有 {{count}} 处未提交的改动（{{files}}）。先提交或暂存，再保留这个结果。",
+    "branchMoved": "这个运行的工作树已经不在它的分支 {{branch}} 上，所以没有保留。",
+    "nothingToKeep": "这个运行没有改动任何文件，没有可保留的内容。",
+    "conflicts_one": "这个运行和项目本身的工作区在 {{files}} 上有冲突。没有合并任何内容；可以手动解决，或者保留另一个结果。",
+    "conflicts_other": "这个运行和项目本身的工作区在 {{count}} 个文件上有冲突（{{files}}）。没有合并任何内容；可以手动解决，或者保留另一个结果。",
+    "mergeFailed": "Git 没能合并这个运行：{{error}}",
+    "keptRun": "你保留的那个结果不会被归档。",
+    "discardFailed": "有的运行没能归档：{{error}}",
+    "noWorktree": "这个运行的工作树已经不在了。"
   }
 }

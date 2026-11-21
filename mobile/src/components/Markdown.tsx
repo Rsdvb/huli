@@ -1,23 +1,37 @@
 // Agents' replies as a phone reads them: comfortable type, headings, lists with hanging indents,
 // quotes, tables that scroll sideways with their numbers on the right, and code in cards with their
 // language or file, a copy button and a light tint, long ones folded past 20 lines. Links and
-// inline code that name a file of the session's folder open it. A reply still streaming ends in a
-// caret. A sent prompt's mentions and links read as chips.
+// inline code that name a file of the session's folder open it, and an `#anchor` link scrolls to
+// its heading. A reply still streaming ends in a caret. A sent prompt's mentions and links read as
+// chips.
 
 import {
   memo,
+  use,
   useDeferredValue,
   useEffect,
+  useId,
   useMemo,
   useReducer,
   useRef,
   useState,
   type ReactNode,
+  type ComponentRef,
+  type Ref,
 } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native'
 import { Image } from 'expo-image'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { cacheFor } from '../ui/memory'
+import {
+  anchorSlug,
+  findHeading,
+  headingSlug,
+  inlineText,
+  keepHeading,
+  RevealContext,
+  type AnchorTarget,
+} from '../ui/session/anchors'
 import { findChips, type Chip, type MentionTarget } from '../ui/session/chips'
 import { textKey, useDisclosure } from '../ui/session/disclosure'
 import { ContextMenu } from '../ui/ContextMenu'
@@ -67,6 +81,10 @@ interface Look {
   link?: (href: string) => void
   refs: FileRefsContext | null
   chips: MarkdownChips | null
+  /** The text whose headings a `#anchor` link goes to. */
+  scope: string
+  /** Brings a heading into view; null where the screen cannot. */
+  reveal: ((target: AnchorTarget) => void) | null
 }
 
 const SIZES: Record<MarkdownSize, { fontSize: number; lineHeight: number; gap: number }> = {
@@ -95,7 +113,7 @@ const SCHEME = /^[a-z][a-z\d+.-]*:/i
  * A link that looks tappable never does nothing: one that leads nowhere the phone can go says so.
  */
 function openLink(href: string, refs: FileRefsContext | null) {
-  if (href === '' || href.startsWith('#')) return
+  if (href === '') return
   const local = !SCHEME.test(href) || /^file:/i.test(href)
   if (local || /^[a-z]:[\\/]/i.test(href)) {
     // A file of the folder opens even before the folder's list came, which may never come.
@@ -105,6 +123,18 @@ function openLink(href: string, refs: FileRefsContext | null) {
     return
   }
   openUrl(href)
+}
+
+/** Follows a link: an `#anchor` to its heading in the same text, any other as openLink does. */
+function follow(href: string, look: Look) {
+  if (!href.startsWith('#')) {
+    if (look.link) look.link(href)
+    else openLink(href, look.refs)
+    return
+  }
+  const target = href.length > 1 ? findHeading(look.scope, anchorSlug(href)) : null
+  if (target && look.reveal) look.reveal(target)
+  else showNotice({ text: '没找到这一节，请滑动查找' })
 }
 
 /**
@@ -239,7 +269,7 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
           <Text
             key={i}
             style={{ color: c.tint }}
-            onPress={() => (look.link ? look.link(node.href) : openLink(node.href, look.refs))}
+            onPress={() => follow(node.href, look)}
             accessibilityRole="link"
           >
             <Runs nodes={node.c} look={{ ...look, chips: null }} />
@@ -247,11 +277,7 @@ function Runs(props: { nodes: Inline[]; look: Look }): ReactNode {
         )
       case 'image':
         return (
-          <Text
-            key={i}
-            style={{ color: c.tint }}
-            onPress={() => (look.link ? look.link(node.href) : openLink(node.href, look.refs))}
-          >
+          <Text key={i} style={{ color: c.tint }} onPress={() => follow(node.href, look)}>
             {`［图片${node.alt ? `：${node.alt}` : ''}］`}
           </Text>
         )
@@ -265,15 +291,29 @@ function Para(props: {
   style?: TextStyle
   tail?: ReactNode
   head?: ReactNode
+  textRef?: Ref<ComponentRef<typeof Text>>
 }) {
   const nodes = useMemo(() => inline(props.text), [props.text])
   return (
-    <Text style={[props.look.body, { color: props.look.color }, props.style]}>
+    <Text ref={props.textRef} style={[props.look.body, { color: props.look.color }, props.style]}>
       {props.head}
       <Runs nodes={nodes} look={props.look} />
       {props.tail}
     </Text>
   )
+}
+
+/** A heading, kept while mounted for the `#anchor` links of the same text to go to. */
+function Heading(props: { text: string; look: Look; style: TextStyle; tail?: ReactNode }) {
+  const ref = useRef<ComponentRef<typeof Text>>(null)
+  const slug = useMemo(() => headingSlug(inlineText(inline(props.text))), [props.text])
+  const { scope } = props.look
+  useEffect(() => {
+    const target = ref.current
+    if (!slug || !target) return
+    return keepHeading(scope, slug, target)
+  }, [scope, slug])
+  return <Para {...props} textRef={ref} />
 }
 
 const QUOTED = /\b(?:title|file|filename|name)=(?:"([^"]+)"|'([^']+)'|(\S+))/
@@ -675,7 +715,7 @@ const BlockItem = memo(function BlockItem(props: {
               : 16.5
             : look.body.fontSize!
       return (
-        <Para
+        <Heading
           text={block.text}
           look={look}
           tail={tail}
@@ -852,9 +892,14 @@ export const Markdown = memo(function Markdown(props: {
   head?: ReactNode
   /** The text goes on from a part above it, as a later part of a long reply does. */
   continues?: boolean
+  /** What the text is part of, such as a long reply drawn in parts, for its `#anchor` links. */
+  anchors?: string
 }) {
   const t = useSessionTokens()
   const refs = useFileRefs()
+  const reveal = use(RevealContext)
+  const own = useId()
+  const scope = props.anchors ?? own
   const size = props.size ?? 'body'
   const color = props.color ?? t.c.text
   const parsed = useBlocks(props.markdown, !!props.streaming)
@@ -868,9 +913,11 @@ export const Markdown = memo(function Markdown(props: {
       link: props.onLink,
       refs,
       chips: props.chips ?? null,
+      scope,
+      reveal,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t.c, t.s, color, size, props.image, props.onLink, refs, props.chips],
+    [t.c, t.s, color, size, props.image, props.onLink, refs, props.chips, scope, reveal],
   )
   const tail = useMemo(
     () => (props.streaming ? <Caret color={t.c.accent} /> : undefined),

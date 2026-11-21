@@ -41,6 +41,7 @@ import { GroupRenameHints } from '@renderer/features/sidebar/rename-hints'
 import { RenameScope } from '@renderer/features/sidebar/rename-scope'
 import { limitRows, rowInSight, ROWS_SHOWN } from '@renderer/features/sidebar/row-limit'
 import { INDENT_PAD, SessionRow } from '@renderer/features/sidebar/session-row'
+import { RunGroupRow } from '@renderer/features/sidebar/run-group-row'
 import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
 import { cn } from '@renderer/lib/utils'
 import {
@@ -312,11 +313,18 @@ function FolderGroup({
           )}
           <RenameScope value={key}>
             <AnimatePresence initial={false}>
-              {limited.rows.map(
-                (row) =>
-                  row.kind === 'session' && (
-                    <SessionRow key={row.id} node={row.node} tabStopId={tabStopId} indent />
-                  ),
+              {limited.rows.map((row) =>
+                row.kind === 'session' ? (
+                  <SessionRow key={row.id} node={row.node} tabStopId={tabStopId} indent />
+                ) : row.kind === 'group' ? (
+                  <RunGroupRow
+                    key={row.id}
+                    group={row.group}
+                    runs={row.runs}
+                    tabStopId={tabStopId}
+                    indent
+                  />
+                ) : null,
               )}
             </AnimatePresence>
           </RenameScope>

@@ -64,6 +64,8 @@ type PageView =
   | { kind: 'marketplace'; item?: string; tab?: MarketplaceTab }
   // A task's page, opened from its row in the sidebar: its timeline, or with `flow`, its flowchart.
   | { kind: 'task'; taskId: string; flow?: true }
+  // Huli: a best-of-N group's runs side by side, opened from its row or after it starts.
+  | { kind: 'group'; groupId: string }
 
 /** The Marketplace directory's tabs. */
 export type MarketplaceTab =
@@ -624,6 +626,14 @@ export function openTask(taskId: string, { flow = false }: { flow?: boolean } = 
   }))
 }
 
+/** Huli: a best-of-N group's page, where its runs are compared and one is kept. */
+export function openGroup(groupId: string): void {
+  useViewStore.setState((s) => ({
+    main: { kind: 'group', groupId },
+    settings: { ...s.settings, open: false },
+  }))
+}
+
 /** Switches the task's page between its timeline and its flowchart, as the same step. */
 export function setTaskFlow(taskId: string, flow: boolean): void {
   useViewStore.setState((s) =>
@@ -1009,6 +1019,8 @@ export function viewKey(view: HistoryView): string {
       return `artifact:${view.id}`
     case 'task':
       return `task:${view.taskId}`
+    case 'group':
+      return `group:${view.groupId}`
     default:
       return view.kind
   }

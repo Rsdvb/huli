@@ -7,8 +7,7 @@ import { router } from 'expo-router'
 import type { ArtifactSummary, VersionSummary } from '@shared/artifacts'
 import { artifactKind, KIND_TEXT, openArtifact } from '../artifacts'
 import { useConnected, useMaybeLink, useProjects, useSessions } from '../host'
-import { whenText } from '../routines'
-import { errorText, folder, sessionTitle } from '../sessions'
+import { errorText, folder, momentText, sessionTitle } from '../sessions'
 import { BottomSheet } from '../ui/BottomSheet'
 import { haptic } from '../ui/haptics'
 import { Icon } from '../ui/Icon'
@@ -164,7 +163,7 @@ export function ArtifactSheet(props: { artifact: ArtifactSummary | null; onClose
               <ListRow
                 key={v.version}
                 title={`v${v.version}${current ? ' · 最新' : ''}`}
-                subtitle={`${author(v)} · ${whenText(v.createdAt)}${v.note ? `\n${v.note}` : ''}`}
+                subtitle={`${author(v)} · ${momentText(v.createdAt)}${v.note ? `\n${v.note}` : ''}`}
                 trailing={
                   current ? undefined : <Icon name="restore" size={16} color={c.textSecondary} />
                 }

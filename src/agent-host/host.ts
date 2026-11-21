@@ -190,6 +190,8 @@ import { TaskEngine, type TaskSessionHooksRef, type WrittenDocument } from './wo
 import type { WorkflowSettings, TaskSummary } from '@shared/workflow'
 import { STEP_HARNESSES } from './workflow/picks'
 import { createTaskGit } from './workflow/git'
+import { createGroupGit } from './groups/git'
+import { SessionGroups } from './groups/groups'
 import { optionsOfPick, pickOfOptions, workflowAgents } from './workflow/host-agents'
 import { WorkflowLibrary, workflowsFile } from './workflow/library'
 import type { RoutineSessionHooksRef } from './routines/hooks'
@@ -475,6 +477,7 @@ export class AgentHost {
   readonly workflowLibrary: WorkflowLibrary
   /** The tasks that run through workflows. */
   readonly tasks: TaskEngine
+  private readonly groups: SessionGroups
   /** The attachments of drafts and queued prompts, until sent or removed. */
   readonly attachments: Attachments
   /** Every session's thread, read a page at a time, in a worker of its own. */
@@ -1449,6 +1452,19 @@ export class AgentHost {
       log,
     })
     taskHooks.current = this.tasks
+    const attachments = this.attachments
+    this.groups = new SessionGroups({
+      sessions: this.sessions,
+      git: createGroupGit(this.execRunner.exec),
+      exec: this.execRunner.exec,
+      copyAttachment: (id) => ({
+        type: 'ref',
+        ref: { kind: 'attachment', attachment: attachments.copy(id) },
+      }),
+      releaseAttachments: (ids) => void attachments.release(ids),
+      agentName: (agentId) => this.agents.name(agentId),
+      log,
+    })
     this.consents = new ArtifactConsents({
       store: this.artifacts,
       isDevice: (portId) => this.hub.deviceOf(portId) !== null,
@@ -3258,6 +3274,17 @@ export class AgentHost {
         this.gitCall(() => sessions.inspectWorktree(sessionId)),
       'worktrees.remove': ({ sessionId, branch, expected }) =>
         this.gitCall(() => sessions.removeWorktree(sessionId, branch, expected)),
+      'groups.start': async (params) => {
+        // Its worktrees are made with git, which is found as the agents find it.
+        await this.env.ready()
+        this.shareSurfaces(null, params.prompt)
+        return this.groups.start(params)
+      },
+      'groups.changes': ({ sessionId }) => this.gitCall(() => this.groups.changes(sessionId)),
+      'groups.fileDiff': ({ sessionId, path, oldPath }) =>
+        this.gitCall(() => this.groups.fileDiff(sessionId, path, oldPath)),
+      'groups.keep': ({ sessionId }) => this.gitCall(() => this.groups.keep(sessionId)),
+      'groups.discard': ({ sessionIds }) => this.gitCall(() => this.groups.discard(sessionIds)),
       'worktrees.retrySetup': ({ sessionId }) => sessions.retryWorktreeSetup(sessionId),
       'worktrees.skipSetup': ({ sessionId }) => sessions.skipWorktreeSetup(sessionId),
       'worktrees.setupLog': ({ sessionId, from }) => sessions.worktreeSetupLog(sessionId, from),

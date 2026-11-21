@@ -16,9 +16,8 @@ import {
   scopeText,
   STATE_TEXT,
   useRoutineList,
-  whenText,
 } from '../../routines'
-import { duration, errorText, folder, sessionTitle } from '../../sessions'
+import { duration, errorText, folder, momentText, sessionTitle } from '../../sessions'
 import { AgentGlyph } from '../../ui/AgentAvatar'
 import { EmptyState } from '../../ui/EmptyState'
 import { haptic } from '../../ui/haptics'
@@ -41,7 +40,7 @@ import { agentLabel } from '../../agentName'
 function stateLine(r: RoutineView): string {
   if (r.activeRun) return `${RUN_TEXT[r.activeRun.status]}`
   if (r.state === 'paused') return '已暂停：Agent 接近套餐限额'
-  if (r.state === 'on' && r.nextRunAt !== null) return `下次运行 ${whenText(r.nextRunAt)}`
+  if (r.state === 'on' && r.nextRunAt !== null) return `下次运行 ${momentText(r.nextRunAt)}`
   return STATE_TEXT[r.state]
 }
 
@@ -231,7 +230,7 @@ export default function RoutinePage() {
         </View>
         <View style={styles.runRight}>
           <Text style={[typeScale.footnote, styles.tabular, { color: c.textSecondary }]}>
-            {when ? whenText(when) : '—'}
+            {when ? momentText(when) : '—'}
           </Text>
           {run.workingMs > 0 && (
             <Text style={[typeScale.caption, styles.tabular, { color: c.textTertiary }]}>

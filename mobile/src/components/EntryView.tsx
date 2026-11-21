@@ -121,6 +121,7 @@ function Reply(props: { entry: Of<'agent'>; writing: boolean; part?: ReplyPart }
             <LongPressView onLongPress={longPress} delayLongPress={400}>
               <Markdown
                 markdown={text}
+                anchors={entryId}
                 streaming={writing && last}
                 {...(part && part.index > 0 ? { continues: true } : {})}
               />

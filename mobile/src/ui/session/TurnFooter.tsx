@@ -5,7 +5,7 @@ import { memo, useEffect, useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { useSessionRows } from './context'
 import { copyText } from './feedback'
-import { clockTime, spanText } from './format'
+import { momentText, spanText } from './format'
 import { G, Icon } from './icons'
 import { useSessionTokens } from './palette'
 import { PressScale } from './Press'
@@ -40,7 +40,7 @@ export const TurnFooter = memo(function TurnFooter(props: {
     .join('\n\n')
   const last = props.replies[props.replies.length - 1]
   const parts = [
-    props.endedAt !== null ? clockTime(props.endedAt) : null,
+    props.endedAt !== null ? momentText(props.endedAt) : null,
     spanText(props.end.durationMs),
     STOPS[props.end.stopReason] ?? null,
   ].filter(Boolean)

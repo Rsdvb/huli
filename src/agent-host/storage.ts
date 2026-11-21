@@ -370,6 +370,17 @@ export interface SessionRecord {
   limitPause?: LimitPause
   /** Huli: the user's own choice of going on after a plan limit; absent follows the settings. */
   autoResume?: boolean
+  /** Huli: a run of a best-of-N group, which every run of it names alike. */
+  group?: StoredGroup
+}
+
+/** A best-of-N run's group, as each of its runs' records keeps it. */
+export interface StoredGroup {
+  id: string
+  title: string
+  size: number
+  /** The run the user kept, by session id. */
+  kept?: string
 }
 
 /** The values of the last request a session made outside Kettu, as its agent recorded them. */
@@ -901,6 +912,34 @@ function agentWorktreeOf(value: unknown): { agentWorktree?: SessionRecord['agent
   }
 }
 
+const MAX_GROUP_TITLE = 500
+
+/** A run's group; one that does not read is dropped, and the run is then a session on its own. */
+function groupOf(value: unknown): { group?: StoredGroup } {
+  if (
+    !isRecord(value) ||
+    !isString(value.id) ||
+    value.id === '' ||
+    value.id.length > 100 ||
+    !isString(value.title) ||
+    value.title.length > MAX_GROUP_TITLE ||
+    typeof value.size !== 'number' ||
+    !Number.isInteger(value.size) ||
+    value.size < 1 ||
+    value.size > 16
+  ) {
+    return {}
+  }
+  return {
+    group: {
+      id: value.id,
+      title: value.title,
+      size: value.size,
+      ...(isString(value.kept) && value.kept !== '' ? { kept: value.kept } : {}),
+    },
+  }
+}
+
 /** A stored limit pause; one that does not read is dropped, so the session simply stays stopped. */
 function limitPauseField(value: unknown): { limitPause?: LimitPause } {
   const pause = limitPauseOf(value)
@@ -979,6 +1018,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...(item.instructionsAhead === true ? { instructionsAhead: true as const } : {}),
       ...limitPauseField(item.limitPause),
       ...(typeof item.autoResume === 'boolean' ? { autoResume: item.autoResume } : {}),
+      ...groupOf(item.group),
     })
   }
   return {

@@ -3,6 +3,7 @@ import {
   type ReturnedMessage,
   type SessionSummary,
 } from '@shared/agent-host'
+import type { GroupRunStart } from '@shared/session-groups'
 import type { AgentId, UserContent } from '@shared/thread'
 import {
   clearDraft,
@@ -30,6 +31,7 @@ import {
   setDraftAttachments,
   type DraftAttachment,
 } from '@renderer/stores/attachments'
+import { agentName } from '@renderer/stores/agents'
 import { useProjectsStore } from '@renderer/stores/projects'
 import {
   hostOfSession,
@@ -53,6 +55,7 @@ import {
   closeLayoutSession,
   closeSplitPane,
   newSessionAt,
+  openGroup,
   openNewSession,
   openSession,
   placeNewSession,
@@ -361,6 +364,41 @@ export async function takeReturnedMessages(
     restoreAttachments(draft, content)
     flushDraft(draft)
     emitAppEvent({ kind: 'draft-written', draft })
+  }
+}
+
+/**
+ * Huli: New session's send to several agents at once: one run per agent, each in a worktree cut
+ * from `base`, then the group's page. The message leaves the draft as it goes and comes back to it
+ * when no run could start.
+ */
+export async function startGroup(
+  projectPath: string,
+  base: string,
+  prompt: UserContent[],
+  runs: GroupRunStart[],
+): Promise<void> {
+  let held: DraftAttachment[] | null = null
+  if (draftIsPrompt(prompt)) {
+    held = draftAttachments(NEW_SESSION_DRAFT)
+    clearDraft(NEW_SESSION_DRAFT)
+    setDraftAttachments(NEW_SESSION_DRAFT, [])
+  }
+  preloadRenderers()
+  try {
+    const { sessions, failed } = await host('groups.start', { projectPath, base, prompt, runs })
+    for (const summary of sessions) useSessionsStore.getState().upsert(summary)
+    const groupId = sessions[0]?.group?.id
+    if (groupId) openGroup(groupId)
+    if (failed.length > 0) {
+      const agents = failed.map((run) => agentName(run.agentId, hostOfPath(projectPath)))
+      toast(i18n.t('session:group.someFailed', { agents, count: failed.length }), undefined, {
+        tone: 'warning',
+      })
+    }
+  } catch (error) {
+    if (held) putBackDraft(NEW_SESSION_DRAFT, promptText(prompt), held)
+    throw error
   }
 }
 

@@ -264,6 +264,34 @@ export function commandOutput(command: string, index: number): string {
   return [`$ ${command}`, 'checking 42 files', `done in ${(index % 7) + 1}.2s`, ''].join(eol)
 }
 
+/** An answer in sections whose `#anchor` links go to its headings, one to a heading it lacks. */
+export const ANCHORS_REPLY = `## 第一节：准备
+
+先在电脑上装好依赖，再打开项目文件夹。这一节说的是开始之前要做的事：确认 Node.js 的版本，确认包管理器可用，确认测试能在本机跑通。
+
+每一步都可以在终端里看到结果，出错时先看最后几行输出。
+
+## 第二节：修改
+
+改动集中在 \`src/clock.ts\`：签发令牌和校验令牌共用同一次读取的时钟，不再各读一次。这样即使 CI 机器负载很高，两次读取也不会跨过一秒的边界。
+
+改完之后，把相关的测试也一起更新，确保它们用的是假的时钟，而不是系统时间。
+
+## 第三节：验证
+
+在本机连续跑二十次登录测试，全部通过；再在 CI 上重跑三次，也都通过。最后把改动推到分支上，等待评审。
+
+如果之后还有偶发失败，记录失败时的时间和机器负载，再回来看这一节。
+
+## 目录
+
+[回到第一节](#第一节准备)
+
+[看第三节：验证](#第三节验证)
+
+[一个不存在的标题](#不存在的标题)
+`
+
 /** A long answer in Chinese that uses every Markdown block, for checking CJK prose. */
 export const CHINESE_ANSWER = `## 登录测试为什么会偶发失败
 

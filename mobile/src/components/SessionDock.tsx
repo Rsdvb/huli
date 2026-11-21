@@ -15,7 +15,7 @@ import type {
 } from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
 import type { LimitPause, LimitPauseAction, Stall, StallAction } from '@shared/supervisor'
-import { whenText } from '../ui/session/limits'
+import { momentText } from '../ui/session/format'
 import { useMinute } from '../ui/session/now'
 import { useAgent, useConnected, useMaybeLink } from '../host'
 import { setPrefs, usePrefs } from '../prefs'
@@ -219,8 +219,8 @@ export function LimitPauseStrip(props: { sessionId: string; pause: LimitPause })
       <View style={styles.stripBody}>
         <Text style={[styles.heldText, { color: c.text }]}>
           {pause.resetsAt === null
-            ? `额度恢复时间未知，${whenText(pause.resumeAt, now)} 再查一次`
-            : `额度 ${whenText(pause.resetsAt, now)} 恢复后自动继续`}
+            ? `额度恢复时间未知，${momentText(pause.resumeAt, now)} 再查一次`
+            : `额度 ${momentText(pause.resetsAt, now)} 恢复后自动继续`}
         </Text>
         <Text style={[styles.stripSmall, { color: c.textTertiary }]}>
           {pause.resetsAt === null ? `额度有空余后自动继续 · ${wait}再查` : `${wait}继续`}

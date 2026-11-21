@@ -44,19 +44,6 @@ export function artifactKind(a: Pick<ArtifactSummary, 'type' | 'pages' | 'canvas
   return a.canvas || a.pages >= 2 ? 'canvas' : 'web'
 }
 
-/** How long ago, as a card's byline says it: 刚刚, 5 分钟, 2 小时, 3 天, then the date. */
-export function age(ms: number, now = Date.now()): string {
-  const s = Math.max(0, (now - ms) / 1000)
-  if (s < 60) return '刚刚'
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟`
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时`
-  if (s < 86400 * 7) return `${Math.floor(s / 86400)} 天`
-  const d = new Date(ms)
-  return d.getFullYear() === new Date(now).getFullYear()
-    ? `${d.getMonth() + 1}月${d.getDate()}日`
-    : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
-}
-
 export const KEEP_DELETED_DAYS = 30
 
 /** Whole days before Recently deleted removes it for good. */
