@@ -60,6 +60,8 @@ export interface ScopeApi {
   restart(process: 'agent' | 'terminal'): Promise<void>
   /** Sets or clears a variable an agent of the host starts with; the value is never read back. */
   setAgentEnv: KettuApi['marketplace']['setAgentEnv']
+  /** Huli: the host's API provider profiles; their keys are never read back. */
+  profiles: KettuApi['profiles']
 }
 
 /** A store the host sections only read. */
@@ -105,6 +107,11 @@ export const LOCAL_SCOPE: HostScope = {
       process === 'agent' ? window.kettu.agents.restart() : window.kettu.terminals.restart(),
     setAgentEnv: (agentId, variable, value) =>
       window.kettu.marketplace.setAgentEnv(agentId, variable, value),
+    profiles: {
+      save: (draft) => window.kettu.profiles.save(draft),
+      remove: (agentId, profileId) => window.kettu.profiles.remove(agentId, profileId),
+      setDefault: (agentId, profileId) => window.kettu.profiles.setDefault(agentId, profileId),
+    },
   },
   useSettingsStore,
   useAgentsStore,
@@ -411,6 +418,11 @@ function createScope(hostId: string): OtherScope {
       restart: (process) => done(admin('host.restart', { process })),
       setAgentEnv: (agentId, variable, value) =>
         admin('marketplace.setAgentEnv', { agentId, variable, value }),
+      profiles: {
+        save: (draft) => admin('profiles.save', { draft }),
+        remove: (agentId, profileId) => admin('profiles.remove', { agentId, profileId }),
+        setDefault: (agentId, profileId) => admin('profiles.setDefault', { agentId, profileId }),
+      },
     },
     useSettingsStore: settings,
     useAgentsStore: createAgentsStore(request),

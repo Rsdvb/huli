@@ -227,6 +227,8 @@ import type { McpTransports } from './marketplace/servers'
 import { questionsResult } from './question-answers'
 import { HostError, invalidParams, notFound } from './errors'
 import { t } from './i18n'
+import type { ProviderProfiles } from './provider-profiles'
+import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
 import {
   GITHUB_PULL_REQUEST_URL,
   githubReferenceOf,
@@ -527,6 +529,8 @@ export interface SessionManagerDeps {
   portOpen(portId: string): boolean
   /** The paired device an open port serves, null for a window's; without it every port is one. */
   portDevice?(portId: string): PortDevice | null
+  /** Huli: the agents' API provider profiles; without them every session runs on its own sign-in. */
+  profiles?: Pick<ProviderProfiles, 'get' | 'defaultOf'>
   /** Where threads are stored; without it every session opens through its agent. */
   threads: ThreadStore | null
   /**
@@ -633,6 +637,8 @@ interface PrepareParams {
   agentId: AgentId
   projectPath: string | null
   parentId?: string
+  /** Huli: the profile it runs with, resolved; absent for the agent's own sign-in. */
+  profileId?: string
 }
 
 /** A session opened for a window's New session, outside the index until its first message. */
@@ -1699,6 +1705,7 @@ export class SessionManager {
       prs: sessionPullRequests(record, pr?.url ?? null, git),
       cache: record.cache ?? null,
       model: record.model ?? null,
+      profileId: record.profileId ?? null,
       pinnedAt: record.pinnedAt ?? null,
       archivedAt: record.archivedAt ?? null,
       acpSessionId: record.acpSessionId || null,
@@ -4029,8 +4036,10 @@ export class SessionManager {
           memory?.text ?? null,
         )
       : null
+    const provider = this.providerOf(record)
     return {
       mcpServers: [...own, ...this.libraryServers(sessionId, record, runtime, own)],
+      ...(provider ? { provider } : {}),
       ...skills,
       ...(projectMcp ? { projectMcp } : {}),
       ...(projectHooks ? { projectHooks } : {}),
@@ -4039,6 +4048,32 @@ export class SessionManager {
       ...(append ? { systemPromptAppend: append } : {}),
       ...(record.origin === 'routine' ? { routine: true } : {}),
     }
+  }
+
+  /**
+   * Huli: the profile a new session of the agent runs with: the one asked for, else the agent's
+   * default; undefined for its own sign-in. One the agent does not have is refused.
+   */
+  private profileFor(agentId: AgentId, asked: string | null | undefined): string | undefined {
+    if (!takesProfiles(agentId)) {
+      if (asked) throw invalidParams(t('session.profile.unsupported'))
+      return undefined
+    }
+    const id = asked === undefined ? (this.deps.profiles?.defaultOf(agentId) ?? null) : asked
+    if (id === null) return undefined
+    if (!this.deps.profiles?.get(agentId, id)) throw invalidParams(t('session.profile.unknown'))
+    return id
+  }
+
+  /**
+   * Huli: what the session's profile hands its agent; undefined on the agent's own sign-in. A
+   * profile removed since it was picked stops the session rather than send its work elsewhere.
+   */
+  private providerOf(record: SessionRecord): SessionOptions['provider'] {
+    if (record.profileId === undefined) return undefined
+    const profile = this.deps.profiles?.get(record.agentId, record.profileId)
+    if (!profile) throw new HostError('invalid_params', t('session.profile.gone'))
+    return { profileId: profile.id, model: profile.model ?? null, ...claudeProfileEnv(profile) }
   }
 
   /**
@@ -4967,12 +5002,15 @@ export class SessionManager {
       title?: string
       /** A new worktree to work in, cut from `base`; a sub-session takes its parent's instead. */
       worktree?: { base: string; branch?: string }
+      /** Huli: the profile it runs with; null for the agent's own sign-in, absent for its default. */
+      profileId?: string | null
     },
     portId?: string,
   ): Promise<SessionSummary> {
     const { agents, projects, scratch } = this.deps
     if (!agents.has(params.agentId)) throw invalidParams(`Unknown agent ${params.agentId}`)
     agents.assertEnabled(params.agentId)
+    const profileId = this.profileFor(params.agentId, params.profileId)
     // Before a prepared session is taken over, so a refused prompt leaves it prepared.
     const prompt = params.prompt && this.hydrate(params.prompt)
     // A prepared session's agent already works in the project's folder, so a worktree starts anew.
@@ -4982,6 +5020,7 @@ export class SessionManager {
         preparedId: params.preparedId,
         prompt,
         device: params.device,
+        profileId,
       })
       if (adopted) return adopted
     }
@@ -5036,6 +5075,7 @@ export class SessionManager {
       origin: 'user',
       description: null,
       branch: null,
+      ...(profileId !== undefined ? { profileId } : {}),
     }
     if (params.startedBy !== undefined) record.startedBy = params.startedBy
     const options = params.options ?? {}
@@ -5118,6 +5158,7 @@ export class SessionManager {
       task: { ...params.task },
       description: null,
       branch: null,
+      ...this.defaultProfile(params.agentId),
     }
     const live = this.makeLive(record, false, 'starting')
     live.unread = false
@@ -5184,6 +5225,7 @@ export class SessionManager {
       routine: params.routine,
       description: null,
       branch: null,
+      ...this.defaultProfile(params.agentId),
     }
     const live = this.makeLive(record, false, 'starting')
     live.unread = false
@@ -5278,13 +5320,20 @@ export class SessionManager {
    * answers. Resolves once `session/new` has answered and the start values are set.
    */
   async prepare(
-    params: PrepareParams & { options?: Record<string, string | boolean>; replace?: boolean },
+    asked: Omit<PrepareParams, 'profileId'> & {
+      options?: Record<string, string | boolean>
+      replace?: boolean
+      profileId?: string | null
+    },
     portId: string,
   ): Promise<SessionSummary> {
-    if (!this.deps.agents.has(params.agentId)) {
-      throw invalidParams(`Unknown agent ${params.agentId}`)
+    if (!this.deps.agents.has(asked.agentId)) {
+      throw invalidParams(`Unknown agent ${asked.agentId}`)
     }
-    this.deps.agents.assertEnabled(params.agentId)
+    this.deps.agents.assertEnabled(asked.agentId)
+    const { profileId: askedProfile, ...rest } = asked
+    const profileId = this.profileFor(asked.agentId, askedProfile)
+    const params = { ...rest, ...(profileId !== undefined ? { profileId } : {}) }
     const key = preparedKey(params)
     const slot = this.slotOf(portId)
     const held = slot.next ?? (slot.stale ? null : slot.current)
@@ -5367,6 +5416,7 @@ export class SessionManager {
       origin: 'user',
       description: null,
       branch: null,
+      ...(params.profileId !== undefined ? { profileId: params.profileId } : {}),
     }
     const options = params.options ?? {}
     const live = this.makeLive(record, false, 'starting')
@@ -5378,6 +5428,7 @@ export class SessionManager {
         agentId: params.agentId,
         projectPath: params.projectPath,
         ...(params.parentId !== undefined ? { parentId: params.parentId } : {}),
+        ...(params.profileId !== undefined ? { profileId: params.profileId } : {}),
       },
       openedAt: now,
       notices: [],
@@ -5533,9 +5584,12 @@ export class SessionManager {
     preparedId: string
     prompt: UserContent[] | undefined
     device?: FromDevice
+    profileId: string | undefined
   }): Promise<SessionSummary | null> {
     const asked = this.live.get(params.preparedId)
     if (!asked?.prepared || asked.record.agentId !== params.agentId) return null
+    // Huli: one prepared with another profile runs elsewhere than the message is meant for.
+    if (asked.record.profileId !== params.profileId) return null
     const { portId, key } = asked.prepared
     const slot = this.preparedSlots.get(portId)
     const live = slot?.stale && slot.next?.prepared?.key === key ? slot.next : asked
@@ -7610,6 +7664,9 @@ export class SessionManager {
       delete record.configDir
     }
     record.agentId = agentId
+    // Huli: a profile is its agent's; the new one starts on its own default.
+    delete record.profileId
+    Object.assign(record, this.defaultProfile(agentId))
     if (earlier.length > 0) record.earlier = earlier
     record.carry = {
       entryId,
@@ -8656,6 +8713,11 @@ export class SessionManager {
     ] as const) {
       delete record[key]
     }
+    // Huli: a profile is its agent's; another agent starts on its own default.
+    if (agentId !== source.record.agentId) {
+      delete record.profileId
+      Object.assign(record, this.defaultProfile(agentId))
+    }
     if (title === null) delete record.customTitle
     else record.customTitle = title
     // The takeovers it keeps, none of whose sessions it resumes: they belong to the source.
@@ -9139,7 +9201,9 @@ export class SessionManager {
       this.endTurn(live, turn, 'cancelled', null)
       return
     }
-    const authRequired = mapped.code === 'auth_required'
+    // Huli: a profile's key the provider refused is the profile's to fix, not the agent's sign-in.
+    const profileRefused = mapped.code === 'auth_required' && live.record.profileId !== undefined
+    const authRequired = mapped.code === 'auth_required' && !profileRefused
     const quota = this.recordQuota(live.record)
     const planLimit = isLimitStop(mapped, quota)
     // Huli: a turn the plan's limit stopped goes on by itself once the plan resets, which sends
@@ -9176,7 +9240,11 @@ export class SessionManager {
                   )
                 : {
                     title: t('notice.turnFailed'),
-                    description: mapped.message,
+                    description: profileRefused
+                      ? `${t('session.profile.keyRefused')}
+
+${mapped.message}`
+                      : mapped.message,
                     // A turn of a message has Retry, which sends it again; the agent's own has none.
                     ...(turn.byAgent ? {} : { cause: 'turn_failed' as const }),
                     // The thread offers to go on with an agent whose plan has room.
@@ -10647,6 +10715,46 @@ export class SessionManager {
     if (option.category !== 'model' || typeof value !== 'string') return false
     // Letting the agent go ends a session that was never saved, and a turn's work with it.
     return live.refreshedModels.has(value) && live.saved && this.holdReason(live) === null
+  }
+
+  /**
+   * Huli: the API provider profile the session runs with from its next turn; null for its agent's
+   * own sign-in. Between turns only: an attached agent starts again on the session's history,
+   * which a prepared session, never saved, would lose, so New session prepares another instead.
+   */
+  async setProfile(sessionId: string, profileId: string | null): Promise<void> {
+    this.assertRegistered(sessionId)
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent') {
+      throw new HostError('restricted', t('session.subagent.noConfig'))
+    }
+    const next = this.profileFor(record.agentId, profileId)
+    if (next === record.profileId) return
+    let live = await this.revive(sessionId)
+    if (live.prepared) throw invalidParams(t('session.profile.prepared'))
+    const status = live.thread.session.status
+    const idle = !live.turn && (status === 'ready' || status === 'closed')
+    if (!idle || (live.connection && (!live.saved || this.holdReason(live) !== null))) {
+      throw new HostError('busy', t('session.profile.betweenTurns'))
+    }
+    if (next === undefined) delete live.record.profileId
+    else live.record.profileId = next
+    this.save(live)
+    this.touch(live.id)
+    this.deps.diagnostics.log('info', `Session ${live.id} changed its API provider profile`)
+    if (!live.connection) return
+    try {
+      live = await this.attachAgain(live)
+    } catch (error) {
+      throw agentError(error)
+    }
+  }
+
+  /** Huli: the record field of the agent's default profile, for a session it starts itself. */
+  private defaultProfile(agentId: AgentId): { profileId?: string } {
+    if (!takesProfiles(agentId)) return {}
+    const id = this.deps.profiles?.defaultOf(agentId) ?? null
+    return id !== null && this.deps.profiles?.get(agentId, id) ? { profileId: id } : {}
   }
 
   /** Lets the session's agent go and attaches it again, which then lists what it offers now. */
@@ -12546,7 +12654,12 @@ function modelOf(config: readonly ConfigOption[]): string | null {
 
 /** Which prepared session a request asks for: the agent, the folder and the parent. */
 function preparedKey(params: PrepareParams): string {
-  return JSON.stringify([params.agentId, params.projectPath, params.parentId ?? null])
+  return JSON.stringify([
+    params.agentId,
+    params.projectPath,
+    params.parentId ?? null,
+    params.profileId ?? null,
+  ])
 }
 
 /** What a user reads for a value: its name in the session's list, else in the cached one. */

@@ -3,16 +3,28 @@
 // the settings, encrypted by the system in the desktop app, and in a file only the user can read
 // either way; the daemon, which has no such encryption, keeps them in that file alone. Both go to
 // the agent host only: a client learns which inputs are set, never what they hold, and nothing of
-// a sign-in.
+// a sign-in. Huli: the agents' API provider profiles live here too, each with its key, which only
+// the agent host is sent; a client sees them through the agents' statuses, without their keys.
 
+import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { isAgentId, type AgentId } from '@shared/agents'
 import {
   specInputs,
   type MarketKeyState,
   type MarketServer,
   type McpSpec,
 } from '@shared/marketplace'
+import {
+  isProfileId,
+  isProviderPresetId,
+  MAX_PROFILES,
+  profileProblem,
+  takesProfiles,
+  type ProfileDraft,
+  type StoredProfile,
+} from '@shared/provider-profiles'
 import { quarantineFile, readJsonFile, writeFileAtomic } from './json-file'
 import type { Logger } from './log'
 import type { IdentityCipher } from './remote-identity'
@@ -26,9 +38,17 @@ export interface MarketKeysPush {
   values: MarketKeyValues
   oauth: Record<string, string>
   agentEnv: Record<string, Record<string, string>>
+  profiles: Record<string, StoredProfiles>
 }
 
-// Version 1 held only the input values.
+/** Huli: an agent's profiles with their keys, and the one its new sessions start with. */
+export interface StoredProfiles {
+  items: StoredProfile[]
+  defaultId: string | null
+}
+
+// Version 1 held only the input values. Huli: the profiles came within version 3, so a Kite from
+// before them still reads the file, without them.
 const VERSION = 3
 const FILE_MODE = 0o600
 /** The most a value may hold, in UTF-8 bytes. */
@@ -64,6 +84,7 @@ interface Contents {
   keys: Keys
   oauth: Map<string, string>
   agentEnv: Map<string, Map<string, string>>
+  profiles: Map<string, StoredProfiles>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,20 +155,62 @@ function parseOAuth(raw: unknown): Map<string, string> | null {
 function parseContents(raw: unknown, version: 1 | 2 | 3): Contents | null {
   if (version === 1) {
     const keys = parseValues(raw)
-    return keys && { keys, oauth: new Map(), agentEnv: new Map() }
+    return keys && { keys, oauth: new Map(), agentEnv: new Map(), profiles: new Map() }
   }
   if (!isRecord(raw)) return null
   const keys = parseValues(raw.values)
   const oauth = parseOAuth(raw.oauth)
   const agentEnv = version === 3 ? parseValues(raw.agentEnv) : new Map()
-  return keys && oauth && agentEnv && { keys, oauth, agentEnv }
+  const profiles = raw.profiles === undefined ? new Map() : parseProfiles(raw.profiles)
+  return keys && oauth && agentEnv && profiles && { keys, oauth, agentEnv, profiles }
 }
 
-function contentsObject({ keys, oauth, agentEnv }: Contents): MarketKeysPush {
+/** Huli: a profile as the file keeps it, checked as a draft is; null for one that is not. */
+function parseProfile(raw: unknown): StoredProfile | null {
+  if (!isRecord(raw) || !isProfileId(raw.id) || !isProviderPresetId(raw.preset)) return null
+  const { name, baseUrl, model, fastModel, key } = raw
+  if (typeof name !== 'string' || typeof baseUrl !== 'string' || typeof key !== 'string') {
+    return null
+  }
+  if (model !== undefined && typeof model !== 'string') return null
+  if (fastModel !== undefined && typeof fastModel !== 'string') return null
+  const profile: StoredProfile = {
+    id: raw.id,
+    name,
+    preset: raw.preset,
+    baseUrl,
+    ...(model ? { model } : {}),
+    ...(fastModel ? { fastModel } : {}),
+    key,
+  }
+  return profileProblem(profile) === null ? profile : null
+}
+
+function parseProfiles(raw: unknown): Map<string, StoredProfiles> | null {
+  if (!isRecord(raw)) return null
+  const profiles = new Map<string, StoredProfiles>()
+  for (const [agentId, entry] of Object.entries(raw)) {
+    if (!isAgentId(agentId) || !isRecord(entry) || !Array.isArray(entry.items)) return null
+    if (entry.items.length > MAX_PROFILES) return null
+    const items: StoredProfile[] = []
+    for (const item of entry.items) {
+      const profile = parseProfile(item)
+      if (!profile || items.some((each) => each.id === profile.id)) return null
+      items.push(profile)
+    }
+    const { defaultId } = entry
+    if (defaultId !== null && !items.some((each) => each.id === defaultId)) return null
+    if (items.length > 0) profiles.set(agentId, { items, defaultId: defaultId as string | null })
+  }
+  return profiles
+}
+
+function contentsObject({ keys, oauth, agentEnv, profiles }: Contents): MarketKeysPush {
   return {
     values: toObject(keys),
     oauth: Object.fromEntries(oauth),
     agentEnv: toObject(agentEnv),
+    profiles: Object.fromEntries(profiles),
   }
 }
 
@@ -166,8 +229,11 @@ function toObject(keys: Keys): MarketKeyValues {
  * The contents without the keys of servers and inputs the settings no longer have, nor the sign-in
  * of a server that is gone or no longer signs in with OAuth.
  */
-function pruned({ keys, oauth, agentEnv }: Contents, servers: readonly MarketServer[]): Contents {
-  const next: Contents = { keys: new Map(), oauth: new Map(), agentEnv }
+function pruned(
+  { keys, oauth, agentEnv, profiles }: Contents,
+  servers: readonly MarketServer[],
+): Contents {
+  const next: Contents = { keys: new Map(), oauth: new Map(), agentEnv, profiles }
   for (const server of servers) {
     const inputs = keys.get(server.id)
     if (inputs) {
@@ -205,6 +271,67 @@ function parsePatch(raw: unknown): { serverId: string; values: [string, string |
   return { serverId, values: entries as [string, string | null][] }
 }
 
+/** Huli: an agent that takes profiles, named by an untrusted value. */
+function profileAgent(raw: unknown): AgentId {
+  if (!isAgentId(raw) || !takesProfiles(raw)) {
+    throw invalid('"agentId" must name an agent that takes profiles')
+  }
+  return raw
+}
+
+const DRAFT_FIELDS = new Set([
+  'agentId',
+  'id',
+  'name',
+  'preset',
+  'baseUrl',
+  'model',
+  'fastModel',
+  'key',
+  'makeDefault',
+])
+
+function optionalText(raw: Record<string, unknown>, field: string): string | undefined {
+  const value = raw[field]
+  if (value !== undefined && typeof value !== 'string') throw invalid(`"${field}" must be text`)
+  return value
+}
+
+/** Huli: a profile draft's shape and values, before it is checked against what the agent has. */
+function parseDraft(raw: unknown): ProfileDraft {
+  if (!isRecord(raw)) throw invalid('The profile must be an object')
+  const extra = Object.keys(raw).find((key) => !DRAFT_FIELDS.has(key))
+  if (extra) throw invalid(`Unknown field "${extra}"`)
+  const agentId = profileAgent(raw.agentId)
+  const { id, name, preset, baseUrl, makeDefault } = raw
+  if (id !== undefined && !isProfileId(id)) throw invalid('"id" must name a profile')
+  if (typeof name !== 'string' || typeof baseUrl !== 'string') {
+    throw invalid('"name" and "baseUrl" must be text')
+  }
+  if (!isProviderPresetId(preset)) throw invalid('"preset" must name a preset')
+  if (makeDefault !== undefined && typeof makeDefault !== 'boolean') {
+    throw invalid('"makeDefault" must be a boolean')
+  }
+  const model = optionalText(raw, 'model')
+  const fastModel = optionalText(raw, 'fastModel')
+  const key = optionalText(raw, 'key')
+  const draft: ProfileDraft = {
+    agentId,
+    ...(id !== undefined ? { id } : {}),
+    name,
+    preset,
+    baseUrl,
+    ...(model !== undefined ? { model } : {}),
+    ...(fastModel !== undefined ? { fastModel } : {}),
+    ...(key !== undefined ? { key } : {}),
+    ...(makeDefault === true ? { makeDefault: true } : {}),
+  }
+  const problem = profileProblem(draft)
+  // The message names the field, never the value, which may be a key.
+  if (problem) throw invalid(`The profile's ${problem} is not valid`)
+  return draft
+}
+
 interface KeysFile {
   version: typeof VERSION
   encrypted: boolean
@@ -238,7 +365,12 @@ export class MarketKeys {
   static async load(options: MarketKeysOptions): Promise<MarketKeys> {
     const { file, cipher, log } = options
     const read = await readJsonFile(file)
-    let contents: Contents = { keys: new Map(), oauth: new Map(), agentEnv: new Map() }
+    let contents: Contents = {
+      keys: new Map(),
+      oauth: new Map(),
+      agentEnv: new Map(),
+      profiles: new Map(),
+    }
     let readOnly: string | null = null
     let resave = false
     const quarantine = async (reason: string): Promise<void> => {
@@ -352,6 +484,82 @@ export class MarketKeys {
     })
   }
 
+  /**
+   * Huli: saves a profile of an agent from an untrusted draft: a new one, which needs a key, or
+   * one it has, whose key stays unless the draft gives another. Resolves with its id once written.
+   */
+  async saveProfile(raw: unknown): Promise<string> {
+    const draft = parseDraft(raw)
+    return this.run(async () => {
+      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      const current = this.contents.profiles.get(draft.agentId) ?? { items: [], defaultId: null }
+      const before = draft.id === undefined ? null : current.items.find((p) => p.id === draft.id)
+      if (draft.id !== undefined && !before) throw invalid('The agent has no such profile')
+      if (!before && current.items.length >= MAX_PROFILES) {
+        throw invalid(`An agent may keep at most ${MAX_PROFILES} profiles`)
+      }
+      const key = draft.key?.trim() || before?.key
+      if (!key) throw invalid('A new profile needs a key')
+      const id = before?.id ?? randomUUID()
+      const model = draft.model?.trim()
+      const fastModel = draft.fastModel?.trim()
+      const profile: StoredProfile = {
+        id,
+        name: draft.name.trim(),
+        preset: draft.preset,
+        baseUrl: draft.baseUrl.trim(),
+        ...(model ? { model } : {}),
+        ...(fastModel ? { fastModel } : {}),
+        key,
+      }
+      const items = before
+        ? current.items.map((each) => (each.id === id ? profile : each))
+        : [...current.items, profile]
+      const defaultId = draft.makeDefault ? id : current.defaultId
+      await this.commitProfiles(draft.agentId, { items, defaultId })
+      return id
+    })
+  }
+
+  /** Huli: removes a profile; new sessions then start as the agent's own if it was the default. */
+  async removeProfile(agentId: unknown, profileId: unknown): Promise<void> {
+    const agent = profileAgent(agentId)
+    if (!isProfileId(profileId)) throw invalid('"profileId" must name a profile')
+    await this.run(async () => {
+      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      const current = this.contents.profiles.get(agent)
+      if (!current?.items.some((each) => each.id === profileId)) return
+      await this.commitProfiles(agent, {
+        items: current.items.filter((each) => each.id !== profileId),
+        defaultId: current.defaultId === profileId ? null : current.defaultId,
+      })
+    })
+  }
+
+  /** Huli: the profile an agent's new sessions start with; null for the agent's own sign-in. */
+  async setDefaultProfile(agentId: unknown, profileId: unknown): Promise<void> {
+    const agent = profileAgent(agentId)
+    if (profileId !== null && !isProfileId(profileId)) {
+      throw invalid('"profileId" must name a profile, or be null')
+    }
+    await this.run(async () => {
+      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      const current = this.contents.profiles.get(agent)
+      if (profileId !== null && !current?.items.some((each) => each.id === profileId)) {
+        throw invalid('The agent has no such profile')
+      }
+      if (!current || current.defaultId === profileId) return
+      await this.commitProfiles(agent, { ...current, defaultId: profileId })
+    })
+  }
+
+  private async commitProfiles(agentId: AgentId, next: StoredProfiles): Promise<void> {
+    const profiles = new Map(this.contents.profiles)
+    if (next.items.length > 0) profiles.set(agentId, next)
+    else profiles.delete(agentId)
+    await this.commit({ ...this.contents, profiles }, true)
+  }
+
   /** Everything the agent host is sent: the values, and every OAuth sign-in. */
   contentsForHost(): MarketKeysPush {
     return contentsObject(this.contents)
@@ -383,7 +591,7 @@ export class MarketKeys {
       const keys: Keys = new Map(this.contents.keys)
       if (inputs.size > 0) keys.set(server.id, inputs)
       else keys.delete(server.id)
-      const next = { keys, oauth: this.contents.oauth, agentEnv: this.contents.agentEnv }
+      const next = { ...this.contents, keys }
       await this.commit(pruned(next, this.options.servers()), true)
       return this.state()
     })
@@ -414,7 +622,7 @@ export class MarketKeys {
       const oauth = new Map(this.contents.oauth)
       if (state === null) oauth.delete(serverId)
       else oauth.set(serverId, state)
-      const next = { keys: this.contents.keys, oauth, agentEnv: this.contents.agentEnv }
+      const next = { ...this.contents, oauth }
       if (sameContents(next, this.contents)) {
         this.options.changed(this.contentsForHost())
         return true
@@ -458,7 +666,12 @@ export class MarketKeys {
 
   private async save(contents: Contents): Promise<void> {
     const { file, cipher, plainTextAllowed } = this.options
-    if (contents.keys.size === 0 && contents.oauth.size === 0 && contents.agentEnv.size === 0) {
+    if (
+      contents.keys.size === 0 &&
+      contents.oauth.size === 0 &&
+      contents.agentEnv.size === 0 &&
+      contents.profiles.size === 0
+    ) {
       await rm(file, { force: true })
       return
     }

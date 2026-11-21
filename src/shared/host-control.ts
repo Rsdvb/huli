@@ -13,6 +13,7 @@ import type { MarketAccount, MarketCall, MarketCallAnswer } from './market-publi
 import type { MediaGrantRecord } from './media'
 import type { Platform } from './platform'
 import type { PortError } from './port-rpc'
+import type { StoredProfile } from './provider-profiles'
 import type { DeviceActivity } from './remote/activity'
 import type { NewDevice, PairedDevice, PortDevice } from './remote/device'
 import type { DiscoveredHosts, DiscoveryRequestEvent } from './remote/discovery'
@@ -128,6 +129,9 @@ export type MainToHost =
       values: Record<string, Record<string, string>>
       oauth?: Record<string, string>
       agentEnv?: Record<string, Record<string, string>>
+      // Huli: each agent's API provider profiles with their keys, and its default; see
+      // provider-profiles.
+      profiles?: Record<string, { items: StoredProfile[]; defaultId: string | null }>
     }
   | { type: 'host:busy-request'; requestId: number }
   // A problem report's bundle, answered by host:report. The parent adds its own part; the host

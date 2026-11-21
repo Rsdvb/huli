@@ -269,7 +269,7 @@ describe('the Marketplace key store', () => {
 })
 
 describe('OAuth sign-ins in the key store', () => {
-  const empty: MarketKeysPush = { values: {}, oauth: {}, agentEnv: {} }
+  const empty: MarketKeysPush = { values: {}, oauth: {}, agentEnv: {}, profiles: {} }
 
   it('keeps a sign-in encrypted beside the keys and reads it back', async () => {
     const keys = await load()
@@ -279,6 +279,7 @@ describe('OAuth sign-ins in the key store', () => {
       values: { [github.id]: { Authorization: TOKEN } },
       oauth: { [linear.id]: SIGN_IN },
       agentEnv: {},
+      profiles: {},
     }
     expect(pushed.at(-1)).toEqual(pushedLast)
     expect(await fileText()).not.toContain('SECRET')

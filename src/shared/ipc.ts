@@ -17,6 +17,7 @@ import type { Locale } from './locale'
 import type { MarketKeysPatch, MarketKeyState } from './marketplace'
 import type { CarriedMedia } from './media'
 import type { Platform } from './platform'
+import type { ProfileDraft } from './provider-profiles'
 import type { DeviceActivity } from './remote/activity'
 import type { HostAdminMethod } from './remote/host-admin'
 import type { DiscoveredHosts, DiscoveryRequestEvent } from './remote/discovery'
@@ -393,6 +394,10 @@ export interface IpcInvokeContract {
     args: [agentId: string, variable: string, value: string | null]
     result: void
   }
+  // Huli: an agent's API provider profiles, kept with their keys; answers a saved profile's id.
+  'profiles:save': { args: [draft: ProfileDraft]; result: string }
+  'profiles:remove': { args: [agentId: string, profileId: string]; result: void }
+  'profiles:set-default': { args: [agentId: string, profileId: string | null]; result: void }
   'remote:status': { args: []; result: RemoteStatus }
   // A pairing code for this page, voiding any other; null while remote access is not on. Its
   // progress comes as `remote:pairing` under the id.
@@ -763,6 +768,17 @@ export interface KettuApi {
      */
     setKeys(patch: MarketKeysPatch): Promise<MarketKeyState>
     setAgentEnv(agentId: string, variable: string, value: string | null): Promise<void>
+  }
+  /**
+   * Huli: the agents' API provider profiles, kept with their keys beside the Marketplace's; the
+   * agents' statuses show them, never their keys.
+   */
+  profiles: {
+    /** A new profile, which needs a key, or a change to one; resolves with its id. */
+    save(draft: ProfileDraft): Promise<string>
+    remove(agentId: string, profileId: string): Promise<void>
+    /** The profile the agent's new sessions start with; null for its own sign-in. */
+    setDefault(agentId: string, profileId: string | null): Promise<void>
   }
   /** Remote access: devices paired with this computer, and pairing more. */
   remote: {

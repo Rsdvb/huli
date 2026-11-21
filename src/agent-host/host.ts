@@ -247,6 +247,7 @@ import { AgentHistory } from './agent-history'
 import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
+import { ProviderProfiles } from './provider-profiles'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
@@ -537,6 +538,8 @@ export class AgentHost {
   /** The values of the Marketplace servers' inputs from main, held only in memory. */
   private marketKeys: MarketKeys = new Map()
   private agentEnvKeys: Record<string, Record<string, string>> = {}
+  /** Huli: the agents' API provider profiles from main, with their keys, held only in memory. */
+  private readonly profiles = new ProviderProfiles()
   /** The Marketplace's catalog of MCP servers, from the registry. */
   private readonly marketCatalog: MarketCatalogService
   /** The sign-ins of the Marketplace's OAuth servers. */
@@ -1040,6 +1043,15 @@ export class AgentHost {
       }),
       envKeyIsSet: (agentId, variable) =>
         typeof this.agentEnvKeys[agentId]?.[variable] === 'string',
+      profiles: (agentId) => ({
+        view: this.profiles.view(agentId),
+        balances: this.profiles.balancesOf(agentId),
+      }),
+      readProfileBalances: (agentId, force) => {
+        void this.profiles.readBalances(agentId, force).then((changed) => {
+          if (changed) this.agents.profilesChanged(agentId)
+        })
+      },
       ...(options.secretStore ? { secretStore: options.secretStore } : {}),
       copies: this.copies,
     })
@@ -1084,6 +1096,7 @@ export class AgentHost {
       projectHooks: new ProjectHooksAnswers(projectHooksFile(options.userDataPath, log)),
       portOpen: (portId) => this.hub.has(portId),
       portDevice: (portId) => this.hub.deviceOf(portId),
+      profiles: this.profiles,
       threads: this.threads,
       agentFile: (sessionId, file) =>
         this.agentFiles.read(sessionId, file).then(
@@ -2013,6 +2026,16 @@ export class AgentHost {
     this.marketChanged(this.settings.marketplace.mcp, previous)
     if (signIns) this.signInsPushed(signIns)
     this.hub.broadcast({ type: 'market.keysChanged' })
+  }
+
+  /**
+   * Huli: main's API provider profiles, with their keys, in place of those before. A running
+   * session keeps what it started with until its agent starts again.
+   */
+  setProfiles(raw: unknown): void {
+    for (const agentId of this.profiles.set(raw)) {
+      if (this.agents.has(agentId)) this.agents.profilesChanged(agentId)
+    }
   }
 
   /**
@@ -3174,6 +3197,8 @@ export class AgentHost {
       },
       'sessions.prepare': (params, { portId }) => sessions.prepare(params, portId),
       'sessions.discard': ({ sessionId }) => sessions.discard(sessionId),
+      'sessions.setProfile': ({ sessionId, profileId }) =>
+        sessions.setProfile(sessionId, profileId),
       // Huli: one listed by the import from the agents keeps its title and times.
       'sessions.import': ({ source, ...params }) =>
         sessions.importSession(

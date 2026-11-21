@@ -784,6 +784,14 @@ export function registerIpcHandlers({
     }
     return marketKeys.setAgentEnv(agentId, variable, value)
   })
+  // Huli: the store checks each untrusted value itself, and names no key in an error.
+  handle('profiles:save', 1, (_, draft) => marketKeys.saveProfile(draft))
+  handle('profiles:remove', 2, (_, agentId, profileId) =>
+    marketKeys.removeProfile(agentId, profileId),
+  )
+  handle('profiles:set-default', 2, (_, agentId, profileId) =>
+    marketKeys.setDefaultProfile(agentId, profileId),
+  )
 
   handle('remote:status', 0, () => remoteStatus())
   // Each code belongs to the page that opened it, which alone hears it and answers it.

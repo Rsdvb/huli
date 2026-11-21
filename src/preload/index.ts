@@ -228,6 +228,11 @@ const api: KettuApi = {
     setAgentEnv: (agentId, variable, value) =>
       invoke('marketplace:set-agent-env', agentId, variable, value),
   },
+  profiles: {
+    save: (draft) => invoke('profiles:save', draft),
+    remove: (agentId, profileId) => invoke('profiles:remove', agentId, profileId),
+    setDefault: (agentId, profileId) => invoke('profiles:set-default', agentId, profileId),
+  },
   settings: {
     get: () => invoke('settings:get'),
     update: (patch) => invoke('settings:update', patch),
