@@ -37,9 +37,9 @@ export interface DownloadDeps {
     signal: AbortSignal,
   ): Promise<FileBytes>
   /** The SHA-256 of the bytes, in lowercase hex. */
-  sha256(bytes: Uint8Array): Promise<string>
+  sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string>
   /** Appends the next bytes of the file to what is being written. */
-  write(bytes: Uint8Array): Promise<void>
+  write(bytes: Uint8Array<ArrayBuffer>): Promise<void>
   /** Empties what was written, as the file changed and starts over. */
   restart(): Promise<void>
   /** How many of the file's bytes are written, of its size. */
@@ -138,7 +138,7 @@ async function checkPart(
   offset: number,
   part: number,
   stamp: FileStamp,
-): Promise<Uint8Array | 'changed'> {
+): Promise<Uint8Array<ArrayBuffer> | 'changed'> {
   // A file grown past the limit since its first part changed as much as any other.
   if (answer.kind !== 'part') return 'changed'
   if (answer.size !== stamp.size || answer.mtimeMs !== stamp.mtimeMs) return 'changed'

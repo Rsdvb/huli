@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.github.rsdvb.huli'
+version = '1.0.0'
+
+android {
+  namespace "io.github.rsdvb.huli.system"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}

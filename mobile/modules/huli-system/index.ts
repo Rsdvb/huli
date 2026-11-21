@@ -1,7 +1,7 @@
 // The HuliSystem native module (ios/HuliSystemModule.swift): the links Siri, Shortcuts, the Control
 // Center controls, Spotlight and Handoff leave for the app, the sessions in Spotlight, the open
 // session's activity, and Low Power Mode. iOS only; elsewhere, and in a build without it,
-// `HuliSystem` is null.
+// `HuliSystem` is null. On Android the module is HuliShare (android/.../HuliShareModule.kt) alone.
 
 import { Platform } from 'react-native'
 import { requireOptionalNativeModule, type NativeModule } from 'expo'
@@ -44,3 +44,14 @@ declare class HuliSystemModule extends NativeModule<{
 
 export const HuliSystem: HuliSystemModule | null =
   Platform.OS === 'ios' ? requireOptionalNativeModule<HuliSystemModule>('HuliSystem') : null
+
+declare class HuliShareModule extends NativeModule {
+  /**
+   * Offers the file at `contentUri`, an expo-file-system File's `contentUri`, to the apps that
+   * take one of `mimeType`, through the system's share sheet.
+   */
+  share(contentUri: string, mimeType: string, title: string): Promise<void>
+}
+
+export const HuliShare: HuliShareModule | null =
+  Platform.OS === 'android' ? requireOptionalNativeModule<HuliShareModule>('HuliShare') : null
