@@ -86,7 +86,11 @@ export type LinkStop = 'removed' | 'update_client' | 'update_host'
 
 export type LinkState =
   | { kind: 'connecting' }
-  | { kind: 'connected'; welcome: Welcome }
+  /**
+   * `session` counts the sessions the host began for this link: it rises when the host could not
+   * resume the last one, which forgot what the device watched there, and stays when it did.
+   */
+  | { kind: 'connected'; welcome: Welcome; session: number }
   /**
    * Connected before; `reason` is what the host said as it ended, if it said anything. `kept`
    * while the host keeps the session for the link to resume, so nothing in flight is lost yet.
@@ -268,6 +272,8 @@ export class HostLink {
   /** A try under way when `reconnectNow` was asked: the next failure tries again at once. */
   private hurry = false
   private drops = 0
+  /** The sessions the host began for this link, which `connected` names. */
+  private sessions = 0
   private timer: ReturnType<typeof setTimeout> | null = null
   // Rising in the order the requests go, so the host's last one read says which went before it.
   private nextId = 1
@@ -581,8 +587,12 @@ export class HostLink {
       // The host has none of the last session, so what was in flight on it is lost.
       this.lose(linkError('host_restarted', 'The connection to the host ended'))
       this.nextId = 1
+      this.sessions++
       if (this.current.kind === 'reconnecting' && this.current.kept) {
         this.setState({ ...this.current, kept: false })
+      } else if (this.current.kind === 'connected') {
+        // A move to another route the host could not resume: a reconnect, though no drop showed.
+        this.setState({ kind: 'reconnecting', reason: null, kept: false })
       }
     }
     this.resumeToken = welcome.resume ?? null
@@ -599,7 +609,7 @@ export class HostLink {
     if (resumable(session) && this.paceMs !== 0) {
       this.send({ type: 'pace', ms: this.paceMs } satisfies Pace)
     }
-    this.setState({ kind: 'connected', welcome })
+    this.setState({ kind: 'connected', welcome, session: this.sessions })
     // The host read the requests up to the one it names; the rest go again, as new ones.
     const read = resumed ? welcome.resumed!.request : 0
     for (const outgoing of [...this.outgoing]) {
