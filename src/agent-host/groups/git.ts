@@ -19,8 +19,13 @@ export interface GroupGit {
   anyChanges(cwd: string): Promise<boolean>
   /** A merge, rebase, cherry-pick or revert waits to be finished, or files are in conflict. */
   busy(cwd: string): Promise<boolean>
-  /** Commits everything changed, staged or untracked, as one commit on the branch checked out. */
-  commitAll(cwd: string, message: string): Promise<void>
+  /**
+   * Commits everything changed, staged or untracked, as one commit on the branch checked out, and
+   * resolves to that commit.
+   */
+  commitAll(cwd: string, message: string): Promise<string>
+  /** Takes `commit` back off the branch into the working tree, while it is still the branch's tip. */
+  uncommit(cwd: string, commit: string): Promise<void>
   /** Commits on `branch` that `base` does not have. */
   commitsSince(cwd: string, base: string, branch: string): Promise<number>
   /** Merges `branch` into what `cwd` has checked out as a commit of its own; a conflict is undone. */
@@ -93,6 +98,15 @@ export function createGroupGit(exec: Exec): GroupGit {
       if (!ok(added)) throw fail('git add', added)
       const committed = await git(cwd, ['commit', '--quiet', '-m', message], MERGE_TIMEOUT_MS)
       if (!ok(committed)) throw fail('git commit', committed)
+      const head = await git(cwd, ['rev-parse', 'HEAD'])
+      if (!ok(head)) throw fail('git rev-parse', head)
+      return head.stdout.trim()
+    },
+    async uncommit(cwd, commit) {
+      const head = await git(cwd, ['rev-parse', 'HEAD'])
+      if (!ok(head) || head.stdout.trim() !== commit) return
+      const reset = await git(cwd, ['reset', '--quiet', '--mixed', `${commit}~1`])
+      if (!ok(reset)) throw fail('git reset', reset)
     },
     async commitsSince(cwd, base, branch) {
       const result = await git(cwd, ['rev-list', '--count', `${base}..${checkBranch(branch)}`])

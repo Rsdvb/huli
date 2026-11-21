@@ -61,8 +61,12 @@ describe('createGroupGit', { timeout: 30_000 }, () => {
     await expect(readFileDiffSince(exec, run, base, '../main/a.txt', null)).rejects.toThrow()
   })
 
-  it('commits everything a run left, untracked files too, to its branch', async () => {
+  it('commits everything a run left to its branch, and takes it back', async () => {
     expect(await groupGit.anyChanges(run)).toBe(true)
+    const undone = await groupGit.commitAll(run, 'Undone')
+    await groupGit.uncommit(run, undone)
+    expect(await groupGit.commitsSince(main, base, 'kettu/run')).toBe(1)
+    expect(git(run, 'status', '--porcelain')).toContain('?? new.txt')
     await groupGit.commitAll(run, 'Fix it\n\nBest of N: Fake')
     expect(await groupGit.anyChanges(run)).toBe(false)
     expect(await groupGit.commitsSince(main, base, 'kettu/run')).toBe(2)

@@ -13,7 +13,7 @@ import { HostError, invalidParams, notFound } from '../errors'
 import { t } from '../i18n'
 import { fallbackTitle, type SessionManager } from '../sessions'
 import type { LogFn, SessionRecord, StoredGroup, WorktreeRecord } from '../storage'
-import type { GroupGit } from './git'
+import type { GroupGit, GroupMerge } from './git'
 
 const MAX_TITLE = 200
 const LISTED_FILES = 5
@@ -140,32 +140,44 @@ export class SessionGroups {
         throw new HostError('conflict', t('groups.branchMoved', { branch: worktree.branch }))
       }
       const agent = this.deps.agentName(run.agentId)
-      if (await git.anyChanges(worktree.path)) {
-        await git.commitAll(worktree.path, `${run.group.title}\n\nBest of N: ${agent}`)
-      }
-      if ((await git.commitsSince(main, worktree.baseOid, worktree.branch)) === 0) {
-        throw new HostError('conflict', t('groups.nothingToKeep'))
-      }
-      const merge = await git.merge(
-        main,
-        worktree.branch,
-        `Keep ${agent}'s run: ${run.group.title}`,
-      )
-      if (!merge.merged) {
-        if (merge.conflicts.length > 0) {
-          throw new HostError(
-            'conflict',
-            t('groups.conflicts', {
-              count: merge.conflicts.length,
-              files: listed(merge.conflicts),
-            }),
-          )
+      // What the run left uncommitted goes on its branch, and back off it should the keep fail.
+      const snapshot = (await git.anyChanges(worktree.path))
+        ? await git.commitAll(worktree.path, `${run.group.title}\n\nBest of N: ${agent}`)
+        : null
+      let commit: string
+      try {
+        if ((await git.commitsSince(main, worktree.baseOid, worktree.branch)) === 0) {
+          throw new HostError('conflict', t('groups.nothingToKeep'))
         }
-        throw new HostError('git_error', t('groups.mergeFailed', { error: merge.error ?? '' }))
+        const merge: GroupMerge = await git.merge(
+          main,
+          worktree.branch,
+          `Keep ${agent}'s run: ${run.group.title}`,
+        )
+        if (!merge.merged) {
+          if (merge.conflicts.length > 0) {
+            throw new HostError(
+              'conflict',
+              t('groups.conflicts', {
+                count: merge.conflicts.length,
+                files: listed(merge.conflicts),
+              }),
+            )
+          }
+          throw new HostError('git_error', t('groups.mergeFailed', { error: merge.error ?? '' }))
+        }
+        commit = merge.commit
+      } catch (error) {
+        if (snapshot) {
+          await git.uncommit(worktree.path, snapshot).catch((undo: unknown) => {
+            this.deps.log('warn', `Could not take back the run's commit: ${messageOf(undo)}`)
+          })
+        }
+        throw error
       }
       this.deps.sessions.markGroupKept(groupId, sessionId)
       this.deps.log('info', `Kept the best-of-N run ${sessionId} into ${branch}`)
-      return { commit: merge.commit, branch }
+      return { commit, branch }
     } finally {
       this.keeping.delete(groupId)
     }
