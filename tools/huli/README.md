@@ -1667,9 +1667,9 @@ conflict, someone on a branch:
 
 - `src/main/update-keys.json` keeps Kite's `release` and `sources` keys and takes Kettu's
   `harnesses`.
-- `git grep kettu.sh` must not grow (185 after the 2026-11-23 merge; it counts
-  `window.kettu.shell` too). New code that calls Kettu's services points at Kite Cloud or stays
-  off.
+- `git grep` for Kettu's domain (`kettu` dot `sh`) must find no more lines than
+  before: 185 after the 2026-11-23 merge, its dot also matching the code's `window.kettu` shell
+  calls. New code that calls Kettu's services points at Kite Cloud or stays off.
 - `node tools/huli/rebrand.mjs --no-update-path`, then the tree put back: a `no longer holds …`
   warning means upstream changed a spelling `CODE` lists; add the new one there.
 - Kettu's scheduled workflows run only in `KettuAI/Kettu` (`if: github.repository == ...`).
@@ -1707,7 +1707,7 @@ Where both had built the same thing, as the 2026-11-23 merge settled it:
 - Edit from here is Kettu's; Kite's Undo (reverting the latest turn) stays beside it, and a refused
   turn's Edit message uses it.
 - The notch island (macOS) never runs in a test copy (`KITE_TEST_WINDOW`).
-- `.github/ISSUE_TEMPLATE` leaves out Kettu's lines on earning points at kettu.sh.
+- `.github/ISSUE_TEMPLATE` leaves out Kettu's lines on earning points with a Kettu account.
 
 ## Tests
 
