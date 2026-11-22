@@ -818,7 +818,7 @@ export function startRemoteHost(
         break
       }
       case 'remote-host:forward': {
-        const { requestId, hostId, sessionId, forward } = message
+        const { requestId, hostId, sessionId, forward, samePort } = message
         if (!Number.isSafeInteger(requestId)) break
         const answer = (port: number | null): void =>
           send({ type: 'remote-host:forwarding', requestId, port })
@@ -831,11 +831,22 @@ export function startRemoteHost(
           break
         }
         const started = withRunning(async () =>
-          answer(client ? await client.forward(hostId, sessionId, forward) : null),
+          answer(
+            client ? await client.forward(hostId, sessionId, forward, samePort === true) : null,
+          ),
         )
         if (!started) answer(null)
         break
       }
+      case 'remote-host:forward-stop':
+        if (
+          typeof message.hostId === 'string' &&
+          typeof message.sessionId === 'string' &&
+          isBrowserForward(message.forward)
+        ) {
+          client?.stopForward(message.hostId, message.sessionId, message.forward)
+        }
+        break
       case 'remote-host:forward-close':
         if (typeof message.hostId === 'string' && typeof message.sessionId === 'string') {
           client?.closeForwards(message.hostId, message.sessionId)

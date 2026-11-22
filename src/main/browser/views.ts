@@ -29,8 +29,10 @@ import { forwardedKey } from '../artifacts/guards'
 import { sendEvent } from '../events'
 import { createLogger } from '../log'
 import type { AllowedSites } from '@shared/ipc'
+import type { PickColor, PickEvent } from '@shared/page-notes'
 import { originOf, BrowserOrigins, type BrowserOriginStore } from './origins'
 import { PageOverlay, type OverlayParent } from './overlay'
+import { PagePicker } from './pick'
 import { BrowserPolicy, isAllowedNavigation, isHttp } from './policy'
 import { MAX_LIVE_TABS, TabStrip, tabsToRelease } from './tabs'
 
@@ -168,6 +170,8 @@ export interface BrowserViewsDeps {
   siteOpened?(pageUrl: string, favicons?: string[]): void
   /** An upload waits for the user's answer on the overlay: the pane should show the page. */
   uploadAsked?(sessionId: string): void
+  /** The pane's pick mode picked an element, or ended. */
+  picked?(event: PickEvent): void
   /** How long a new origin waits for the user; set only by tests, which cannot wait 2 minutes. */
   originWaitMs?: number
 }
@@ -198,8 +202,20 @@ export class BrowserViews {
     { consent: UploadConsent; settle: (answer: UploadAnswer) => void }
   >()
   private nextConsent = 1
+  private readonly picker: PagePicker
 
   constructor(private readonly deps: BrowserViewsDeps) {
+    this.picker = new PagePicker({
+      page: (sessionId) => {
+        const browser = this.browsers.get(sessionId)
+        const tab = browser?.shown ? this.selectedTab(browser) : null
+        const contents = this.contentsOf(tab)
+        if (!tab || !contents || this.holdsInput(tab)) return null
+        return { tabId: tab.id, contents, zoom: this.zoomOf(tab) }
+      },
+      event: (event) => deps.picked?.(event),
+      log: (message) => log.warn(message),
+    })
     this.policy = new BrowserPolicy(this.browserSession, {
       downloadDone: (contents, name, saved) => this.downloadDone(contents.id, name, saved),
     })
@@ -648,6 +664,18 @@ export class BrowserViews {
     this.syncOverlay()
   }
 
+  /**
+   * Turns the pane's pick mode on, or back on after a pick, on the selected tab; or off. True
+   * while it is on.
+   */
+  async pick(sessionId: string, on: boolean, color: PickColor): Promise<boolean> {
+    if (!on) {
+      this.picker.stop(sessionId, false)
+      return false
+    }
+    return this.picker.start(sessionId, color)
+  }
+
   async clearData(): Promise<void> {
     await this.browserSession.clearStorageData()
     await this.browserSession.clearCache()
@@ -767,6 +795,7 @@ export class BrowserViews {
       }
       this.setVisible(tab, on)
     }
+    this.picker.check(browser.sessionId)
   }
 
   /** Loads `url` in the tab, making its page when it has none, and waits for its end. */
@@ -1015,6 +1044,7 @@ export class BrowserViews {
   }
 
   private destroy(tab: Tab): void {
+    this.picker.tabGone(tab.id)
     if (this.overlayTab === tab.id) {
       this.overlay.hide()
       this.overlayTab = null
@@ -1122,6 +1152,7 @@ export class BrowserViews {
     })
     contents.on('did-navigate', (_event, url, code) => {
       if (isAllowedNavigation(url)) tab.lastUrl = url
+      this.picker.navigated(tab.id)
       // A page that failed to load commits too, with no response.
       if (code > 0 && isHttp(url)) this.deps.siteOpened?.(url)
       emit()
@@ -1187,6 +1218,10 @@ export class BrowserViews {
     contents.on('will-prevent-unload', (event) => event.preventDefault())
     contents.setWindowOpenHandler((details) => this.windowOpen(tab, details))
     contents.on('before-input-event', (event, input) => {
+      if (this.picker.key(tab.id, input)) {
+        event.preventDefault()
+        return
+      }
       // A new tab is the user's own, whoever has this one.
       if (pageKey(input, process.platform) === 'new-tab') {
         event.preventDefault()
@@ -1218,6 +1253,7 @@ export class BrowserViews {
     contents.once('destroyed', () => {
       // The view drops its contents once they are destroyed, so it is compared itself.
       if (tab.view !== view) return
+      this.picker.tabGone(tab.id)
       const window = this.deps.window()
       if (window && !window.isDestroyed()) window.contentView.removeChildView(view)
       if (this.overlayTab === tab.id) {
@@ -1524,6 +1560,7 @@ export class BrowserViews {
     }
     const browser = this.browsers.get(sessionId)
     if (browser) this.emit(browser)
+    this.picker.check(sessionId)
     this.syncOverlay()
   }
 }

@@ -540,6 +540,7 @@ export class RemoteHost {
     hostId: string,
     sessionId: string,
     forward: BrowserForward,
+    samePort = false,
   ): Promise<number | null> {
     if (!this.hostList?.some((entry) => entry.id === hostId)) return null
     const answer = await this.request((requestId) => ({
@@ -548,12 +549,18 @@ export class RemoteHost {
       hostId,
       sessionId,
       forward,
+      ...(samePort ? { samePort } : {}),
     }))
     if (answer?.type !== 'remote-host:forwarding') return null
     const { port } = answer
     return typeof port === 'number' && Number.isSafeInteger(port) && port > 0 && port < 65_536
       ? port
       : null
+  }
+
+  /** Huli: the user stopped one forward. */
+  stopForward(hostId: string, sessionId: string, forward: BrowserForward): void {
+    this.host?.post({ type: 'remote-host:forward-stop', hostId, sessionId, forward })
   }
 
   /** The session's page is gone: its forwards on that host close. */

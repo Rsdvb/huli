@@ -600,9 +600,14 @@ class HostLink {
   }
 
   /** A port on this computer that reaches `forward` on the host; null without its session. */
-  forward(sessionId: string, forward: BrowserForward): Promise<number | null> {
+  forward(sessionId: string, forward: BrowserForward, samePort = false): Promise<number | null> {
     if (!this.port) return Promise.resolve(null)
-    return this.forwards.listen(sessionId, forward)
+    return this.forwards.listen(sessionId, forward, samePort)
+  }
+
+  /** The user stopped one forward. */
+  stopForward(sessionId: string, forward: BrowserForward): void {
+    this.forwards.stopOne(sessionId, forward)
   }
 
   /** The session's page is gone, so its forwards go. */
@@ -2288,8 +2293,17 @@ export class HostClient {
   }
 
   /** A port on this computer that reaches a dev server on a host; null when none can. */
-  forward(id: string, sessionId: string, forward: BrowserForward): Promise<number | null> {
-    return this.links.get(id)?.forward(sessionId, forward) ?? Promise.resolve(null)
+  forward(
+    id: string,
+    sessionId: string,
+    forward: BrowserForward,
+    samePort = false,
+  ): Promise<number | null> {
+    return this.links.get(id)?.forward(sessionId, forward, samePort) ?? Promise.resolve(null)
+  }
+
+  stopForward(id: string, sessionId: string, forward: BrowserForward): void {
+    this.links.get(id)?.stopForward(sessionId, forward)
   }
 
   closeForwards(id: string, sessionId: string): void {

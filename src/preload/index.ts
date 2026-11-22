@@ -94,6 +94,8 @@ const onRemoteDiscovery = subscribe('remote:discovery')
 const onHostsChanged = subscribe('hosts:changed')
 const onHostPairing = subscribe('hosts:pairing')
 const onBrowserState = subscribe('browser:state')
+const onBrowserPick = subscribe('browser:pick')
+const onHostForwards = subscribe('hosts:forwards')
 const onBrowserOpened = subscribe('browser:opened')
 const onDeviceOpened = subscribe('devices:opened')
 const onSiteIcon = subscribe('browser:site-icon')
@@ -192,6 +194,12 @@ const api: KettuApi = {
     changeSsh: (id, address) => invoke('hosts:change-ssh', id, address),
     reconnect: (id) => invoke('hosts:reconnect', id),
     uninstall: (id, data) => invoke('hosts:uninstall', id, data),
+    ports: (id, folders) => invoke('hosts:ports', id, folders),
+    forwardPort: (id, port, sessionId, auto) =>
+      invoke('hosts:forward-port', id, port, sessionId, auto),
+    stopForward: (id, port, sessionId) => invoke('hosts:stop-forward', id, port, sessionId),
+    forwards: () => invoke('hosts:forwards'),
+    onForwards: onHostForwards,
     onChanged: onHostsChanged,
     onPairing: onHostPairing,
     request: (hostId, method, params) => otherHosts.request(hostId, method, params),
@@ -330,6 +338,8 @@ const api: KettuApi = {
     freeze: (id) => invoke('browser:freeze', id),
     thaw: (id) => invoke('browser:thaw', id),
     capture: (id) => invoke('browser:capture', id),
+    pick: (id, on, color) => invoke('browser:pick', id, on, color),
+    onPick: onBrowserPick,
     takeOver: (id) => invoke('browser:take-over', id),
     handBack: (id) => invoke('browser:hand-back', id),
     answerAsk: (id, outcome) => invoke('browser:answer-ask', id, outcome),

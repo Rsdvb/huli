@@ -660,9 +660,13 @@ export type MainToRemoteHost =
       hostId: string
       sessionId: string
       forward: BrowserForward
+      // Huli: listens at the host's own port number when it is free here, as the user's forwards do.
+      samePort?: boolean
     }
   // The session's page is gone: its forwards on that host close.
   | { type: 'remote-host:forward-close'; hostId: string; sessionId: string }
+  // Huli: the user stopped one forward.
+  | { type: 'remote-host:forward-stop'; hostId: string; sessionId: string; forward: BrowserForward }
   // The computer woke from sleep, maybe on another network: the direct addresses are read again
   // and the hosts not connected are tried at once.
   | { type: 'remote-host:resume' }

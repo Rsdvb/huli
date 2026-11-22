@@ -8,6 +8,8 @@ import type { GrantedAttachment } from './attachments'
 import type { BackupStatus, RestorePick } from './backup'
 import type { ChatBridgeView, ChatPlatform, ChatPlatformPatch } from './chat-bridge'
 import type { BrowserBounds, BrowserOriginDecision, BrowserState } from './browser'
+import type { PickColor, PickEvent } from './page-notes'
+import type { ForwardResult, PortForward, PortListResult } from './port-forwards'
 import type { ControlAgent, ControlOutcome } from './control'
 import type { DebugStatus } from './debug'
 import type { ComputerPermissionKind, ComputerUseStatus } from './computer-use'
@@ -456,6 +458,15 @@ export interface IpcInvokeContract {
   'hosts:change-ssh': { args: [id: string, address: SshAddress]; result: SshManageResult }
   'hosts:reconnect': { args: [id: string]; result: SshManageResult }
   'hosts:uninstall': { args: [id: string, data: boolean]; result: SshManageResult }
+  // Huli: the ports a host's programs listen on, its programs in `folders` first; read once a call.
+  'hosts:ports': { args: [id: string, folders: string[]]; result: PortListResult }
+  // Forwards a port of the host to this computer, for a session's browser or the host's page.
+  'hosts:forward-port': {
+    args: [id: string, port: number, sessionId: string | null, auto: boolean]
+    result: ForwardResult
+  }
+  'hosts:stop-forward': { args: [id: string, port: number, sessionId: string | null]; result: void }
+  'hosts:forwards': { args: []; result: PortForward[] }
   // The session's agent names the page's pill while a turn uses it.
   'browser:show': { args: [sessionId: string, agent: ControlAgent | null]; result: void }
   'browser:hide': { args: [sessionId: string]; result: void }
@@ -479,6 +490,11 @@ export interface IpcInvokeContract {
   // The page as it looks now, for the pane to show while an overlay would cover the view.
   'browser:freeze': { args: [sessionId: string]; result: string | null }
   'browser:capture': { args: [sessionId: string]; result: Uint8Array | null }
+  // Huli: pick mode on the selected tab, on (again after a pick) or off; whether it is on.
+  'browser:pick': {
+    args: [sessionId: string, on: boolean, color: PickColor | null]
+    result: boolean
+  }
   'browser:thaw': { args: [sessionId: string]; result: void }
   /** Take over: the page is the user's, and the agent's calls wait, until Hand back. */
   'browser:take-over': { args: [sessionId: string]; result: void }
@@ -572,6 +588,10 @@ export interface IpcEventContract {
   /** Sent only to the page that pasted the link. */
   'hosts:pairing': HostPairingEvent
   'browser:state': BrowserState
+  /** Huli: pick mode picked an element, or ended in the page. */
+  'browser:pick': PickEvent
+  /** Huli: the ports forwarded from other hosts changed. */
+  'hosts:forwards': PortForward[]
   /** An agent's first navigation opened a session's page, so the pane may show it. */
   'browser:opened': { sessionId: string }
   /** A session's agent opened a mobile device, which the pane shows if the panel is free. */
@@ -859,6 +879,17 @@ export interface KettuApi {
     reconnect(id: string): Promise<SshManageResult>
     /** Uninstalls Kettu from a host added over SSH, its data too with `data`, then forgets it. */
     uninstall(id: string, data: boolean): Promise<SshManageResult>
+    /** Huli: the ports a host's programs listen on, and forwarding one to this computer. */
+    ports(id: string, folders: string[]): Promise<PortListResult>
+    forwardPort(
+      id: string,
+      port: number,
+      sessionId: string | null,
+      auto: boolean,
+    ): Promise<ForwardResult>
+    stopForward(id: string, port: number, sessionId: string | null): Promise<void>
+    forwards(): Promise<PortForward[]>
+    onForwards(listener: (forwards: PortForward[]) => void): () => void
     onChanged(listener: (status: HostsStatus) => void): () => void
     onPairing(listener: (event: HostPairingEvent) => void): () => void
     /**
@@ -1028,6 +1059,9 @@ export interface KettuApi {
     thaw(sessionId: string): Promise<void>
     /** The page as PNG bytes, for attaching to a message; null when there is none to capture. */
     capture(sessionId: string): Promise<Uint8Array | null>
+    /** Huli: pick mode on the selected tab; whether it is on now. */
+    pick(sessionId: string, on: boolean, color: PickColor | null): Promise<boolean>
+    onPick(listener: (event: PickEvent) => void): () => void
     /** Take over: the page is the user's until Hand back; the agent's calls wait meanwhile. */
     takeOver(sessionId: string): Promise<void>
     /** Hand back: the agent goes on with the page. */

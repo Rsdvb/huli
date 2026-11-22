@@ -19,6 +19,7 @@ import type { PortChannel } from '@shared/port-channel'
 import { isPortError, type PortError } from '@shared/port-rpc'
 import type { ActivityActor, NewActivity } from '@shared/remote/activity'
 import { forbiddenToDevices, namesUploadFile } from '@shared/remote/allow-list'
+import { isPort, parsePortFolders, type ListeningPort } from '@shared/port-forwards'
 import { Channel, type ChannelMessage } from '@shared/remote/channel'
 import {
   normalizeDeviceName,
@@ -104,6 +105,7 @@ import { DeviceTerminal, isTerminalMethod, NOT_ALLOWED } from './device-terminal
 import type { DeviceStore, RemovedDevice } from './devices'
 import { bytesSource, Downloads, fileSource } from './downloads'
 import { HostForwards } from './forwards'
+import { listListeningPorts, type ListOptions } from './listening-ports'
 import { ArtifactFrames, FRAME_PATH } from './frames'
 import type { DeviceNotifications } from './notifications'
 import { IN_FLIGHT_BYTES, Outbox, type OutboxLimits } from './outbox'
@@ -141,6 +143,9 @@ const REMOTE_HOST_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'artifacts.content',
   'artifacts.runtime',
 ])
+
+/** The longest scope a device's port forward names: a session's id, or none. */
+const MAX_SCOPE_CHARS = 256
 
 /** The longest name a device may give a frame's stream. */
 const STREAM_CHARS = 128
@@ -187,6 +192,8 @@ export interface RemoteServerOptions {
   notifications?(): DeviceNotifications | null
   /** A port to the terminal host for a device's terminals, or null while it cannot have one. */
   openTerminalPort?(device: PortDevice): Promise<PortChannel | null>
+  /** Huli: the ports this host's user's programs listen on; tests give their own. */
+  listPorts?(options: ListOptions): Promise<ListeningPort[] | null>
   /** A port to the device host for a device's mobile devices, or null while it cannot have one. */
   openDevicePort?(device: PortDevice): Promise<PortChannel | null>
   /**
@@ -1521,6 +1528,10 @@ class DeviceSession {
       return void this.notificationsRequest(id, method, params)
     }
     if (method === 'media.read') return void this.readMedia(id, params)
+    if (method === 'ports.list') return void this.listPorts(id, params)
+    if (method === 'ports.forward' || method === 'ports.unforward') {
+      return this.forwardPort(id, method, params)
+    }
     if (method === 'artifacts.openFrame') return void this.openFrame(id, params)
     if (method === 'artifacts.closeFrame') return this.closeFrame(id, params)
     if (method === 'artifacts.frameRuntime') return this.frameRuntime(id, params)
@@ -1552,6 +1563,44 @@ class DeviceSession {
     const state = await notifications.update(this.device.id, update)
     if (!state) return fail('not_found', 'The device is no longer paired')
     reply({ type: 'response', id, result: state })
+  }
+
+  /**
+   * Huli: a device's `ports.list`: the ports this host's user's programs listen on, read now, its
+   * programs in the folders it names marked. The remote host answers, never the agent host.
+   */
+  private async listPorts(id: unknown, params: unknown): Promise<void> {
+    if (typeof id !== 'number') return
+    const folders = parsePortFolders((params as { folders?: unknown } | null)?.folders ?? [])
+    if (!folders) {
+      const message = 'The folders are a list of paths'
+      return this.send({ type: 'error', id, error: { code: 'invalid_params', message } })
+    }
+    const list = this.server.options.listPorts ?? listListeningPorts
+    const ports = await list({ folders, skipPids: new Set([process.pid, process.ppid]) }).catch(
+      () => null,
+    )
+    if (this.live) this.send({ type: 'response', id, result: { ports } })
+  }
+
+  /**
+   * Huli: a device's `ports.forward` grants it a port of this host's loopback, for a session's
+   * page or, its scope empty, for itself; `ports.unforward` takes the grant back. Every paired
+   * device is the host's owner, which reaches these ports through its terminal anyway.
+   */
+  private forwardPort(id: unknown, method: 'ports.forward' | 'ports.unforward', params: unknown) {
+    if (typeof id !== 'number') return
+    const { scope, port } = (params ?? {}) as Record<string, unknown>
+    if (typeof scope !== 'string' || scope.length > MAX_SCOPE_CHARS || !isPort(port)) {
+      const message = 'A forward names its scope and a port'
+      return this.send({ type: 'error', id, error: { code: 'invalid_params', message } })
+    }
+    if (method === 'ports.unforward') this.forwards.revoke(scope, port)
+    else if (!this.forwards.grant(scope, port)) {
+      const message = 'The device has as many forwards as it may'
+      return this.send({ type: 'error', id, error: { code: 'busy', message } })
+    }
+    this.send({ type: 'response', id, result: null })
   }
 
   /** An owner's call beyond its sessions, which the host's parent answers. */

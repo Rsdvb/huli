@@ -20,6 +20,10 @@ export interface PortList {
   ports: ListeningPort[] | null
 }
 
+/** The host's ports as a window asked for them, or why it could not list them. */
+export type PortListResult =
+  { ok: true; ports: ListeningPort[] } | { ok: false; reason: 'offline' | 'unsupported' | 'failed' }
+
 /** A port of the host forwarded to this computer. */
 export interface PortForward {
   hostId: string

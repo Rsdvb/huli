@@ -50,6 +50,7 @@ import { broadcast, sendCommand } from './events'
 import { HostAdmin } from './host-admin'
 import { HostMedia } from './host-media'
 import { HostSessions } from './host-sessions'
+import { PortForwards } from './port-forwards'
 import { locale as currentLocale, setLocale, t } from './i18n'
 import { mainDiagnostics } from './diagnostics'
 import {
@@ -371,6 +372,7 @@ async function start(): Promise<void> {
       if (favicons) void siteIcons.favicons(pageUrl, favicons)
       else siteIcons.visited(pageUrl)
     },
+    picked: (event) => broadcast('browser:pick', event),
   })
   browserViewsRef.current = browserViews
   browserTools = new BrowserTools({
@@ -390,7 +392,10 @@ async function start(): Promise<void> {
     run: (callId, sessionId, tool, args, projectPath, waiting, allowTab) =>
       browserTools!.call(callId, sessionId, tool, args, projectPath, waiting, allowTab),
     forward: (hostId, sessionId, forward) => remoteHost.forward(hostId, sessionId, forward),
-    closeForwards: (hostId, sessionId) => remoteHost.closeForwards(hostId, sessionId),
+    closeForwards: (hostId, sessionId) => {
+      remoteHost.closeForwards(hostId, sessionId)
+      portForwards.sessionClosed(hostId, sessionId)
+    },
     answerOrigin: (sessionId, requestId, decision) =>
       browserViews.answerOrigin(sessionId, requestId, decision),
     request: (hostId, method, params) => hostSessions.request(hostId, method, params),
@@ -706,6 +711,7 @@ async function start(): Promise<void> {
       browserTools?.endTurns(remoteBrowser.sessionsOf(hostId))
       remoteBrowser.hostClosed(hostId)
       remoteArtifacts.ended(hostId)
+      portForwards.hostEnded(hostId)
     },
     artifactEvent: (hostId, event) => {
       if (event.type === 'artifacts.runtime') remoteArtifacts.streamed(hostId, event)
@@ -714,6 +720,15 @@ async function start(): Promise<void> {
       }
     },
     media: hostMedia,
+  })
+  const portForwards = new PortForwards({
+    call: (hostId, method, params) => hostSessions.call(hostId, method, params),
+    request: (hostId, method, params) => hostSessions.request(hostId, method, params),
+    listen: (hostId, scope, port) =>
+      remoteHost.forward(hostId, scope, { host: 'localhost', port }, true),
+    stopListening: (hostId, scope, port) =>
+      remoteHost.stopForward(hostId, scope, { host: 'localhost', port }),
+    changed: (forwards) => broadcast('hosts:forwards', forwards),
   })
   const remoteArtifactsDir = join(userDataPath, 'artifacts', 'remote')
   const remoteArtifacts = new RemoteArtifacts({
@@ -1087,6 +1102,7 @@ async function start(): Promise<void> {
     remoteHost,
     hostSessions,
     hostMedia,
+    portForwards,
     remoteStatus,
     hostsStatus: () => {
       void readComputerModel()

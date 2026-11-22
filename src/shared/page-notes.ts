@@ -212,7 +212,7 @@ export function parseElementPath(value: unknown): ElementStep[] | null {
   for (const item of value.slice(0, MAX_STEPS)) {
     if (!isRecord(item)) return null
     const { tag, id, classes, attrs, nth, ofType } = item
-    if (typeof tag !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(tag)) return null
+    if (typeof tag !== 'string' || !/^[a-zA-Z][a-zA-Z0-9-]{0,63}$/.test(tag)) return null
     if (id !== null && typeof id !== 'string') return null
     if (!Array.isArray(classes) || !isRecord(attrs) || !isCount(nth) || !isCount(ofType)) {
       return null
@@ -259,6 +259,13 @@ export interface ElementPick {
   frame: PageBox
   /** The element as the page showed it, cropped to the viewport; null when none could be taken. */
   shot: Uint8Array | null
+}
+
+/** The pick mode's outline color, the theme's accent as the pane reads it. */
+export interface PickColor {
+  r: number
+  g: number
+  b: number
 }
 
 /** What main tells the pane of its pick mode: an element clicked, or the mode ended. */

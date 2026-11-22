@@ -93,6 +93,8 @@ import type { ThemeStore } from './themes'
 import type { HuliAccountDevices } from './huli-account'
 import type { Updater } from './updater'
 import { isComputerOverlay, isOverlay, isPanel } from './window'
+import { parsePickColor } from './browser/pick'
+import { folderArgs, forwardArgs, type PortForwards } from './port-forwards'
 
 const log = createLogger('ipc')
 const actionLog = createLogger('action')
@@ -117,6 +119,8 @@ export interface IpcDeps {
   remoteHost: RemoteHost
   hostSessions: HostSessions
   hostMedia: HostMedia
+  /** Huli: the ports of other hosts forwarded to this computer. */
+  portForwards: PortForwards
   remoteStatus(): RemoteStatus
   /** Settings › Hosts; it reads the computer's model the first time, then says it changed. */
   hostsStatus(): HostsStatus
@@ -480,6 +484,7 @@ export function registerIpcHandlers({
   remoteHost,
   hostSessions,
   hostMedia,
+  portForwards,
   remoteStatus,
   hostsStatus,
   computerModel,
@@ -936,6 +941,21 @@ export function registerIpcHandlers({
     return manageSsh(id, { kind: 'uninstall', data })
   })
 
+  handle('hosts:ports', 2, (_, id, folders) =>
+    portForwards.ports(hostIdArg(id), folderArgs(folders)),
+  )
+  handle('hosts:forward-port', 4, (_, id, port, session, auto) => {
+    if (typeof auto !== 'boolean')
+      throw new Error('"hosts:forward-port" takes whether it is automatic')
+    const args = forwardArgs(id, port, session)
+    return portForwards.forward(args.hostId, args.port, args.sessionId, auto)
+  })
+  handle('hosts:stop-forward', 3, (_, id, port, session) => {
+    const args = forwardArgs(id, port, session)
+    portForwards.stop(args.hostId, args.port, args.sessionId)
+  })
+  handle('hosts:forwards', 0, () => portForwards.list())
+
   handle('browser:show', 2, (_, id, agent) => browserViews.show(sessionId(id), controlAgent(agent)))
   handle('browser:hide', 1, (_, id) => browserViews.hide(sessionId(id)))
   handle('browser:close', 1, (_, id) => browserViews.close(sessionId(id)))
@@ -973,6 +993,13 @@ export function registerIpcHandlers({
   handle('browser:freeze', 1, (_, id) => browserViews.freeze(sessionId(id)))
   handle('browser:thaw', 1, (_, id) => browserViews.thaw(sessionId(id)))
   handle('browser:capture', 1, (_, id) => browserViews.capture(sessionId(id)))
+  // Huli: pick mode; the outline takes the theme's accent, which only the window knows.
+  handle('browser:pick', 3, (_, id, on, color) => {
+    if (typeof on !== 'boolean') throw new Error('"browser:pick" takes whether to pick')
+    const outline = parsePickColor(color)
+    if (on && !outline) throw new Error('"browser:pick" takes the outline color as r, g and b')
+    return browserViews.pick(sessionId(id), on, outline ?? { r: 0, g: 0, b: 0 })
+  })
   handle('browser:take-over', 1, (_, id) =>
     browserViews.controlRequest(sessionId(id), { type: 'take-over' }),
   )
@@ -1035,6 +1062,7 @@ export function registerIpcHandlers({
       return
     }
     browserViews.setSessions(ids as string[])
+    portForwards.keepSessions(ids as string[])
   })
 
   on('diagnostics:actions', (event, actions) => {

@@ -57,6 +57,7 @@ async function setup(
     /** Whether the host has its signing key, and so sends notifications. */
     push?: boolean
     uploadFreeSpace?: RemoteServerOptions['uploadFreeSpace']
+    listPorts?: RemoteServerOptions['listPorts']
   } = {},
 ) {
   // A test that sets up twice stops the first host too: one still running holds its folder's
@@ -137,6 +138,7 @@ async function setup(
     changed: () => changes++,
     log,
     ...(options.admin ? { admin: options.admin } : {}),
+    ...(options.listPorts ? { listPorts: options.listPorts } : {}),
     ...(options.helloTimeoutMs ? { helloTimeoutMs: options.helloTimeoutMs } : {}),
     ...(options.resumeMs ? { resumeMs: options.resumeMs } : {}),
     ...(options.backgroundResumeMs ? { backgroundResumeMs: options.backgroundResumeMs } : {}),
@@ -274,6 +276,37 @@ describe('a paired device', () => {
       `warn: Device ${t.phone.id} asked for media.open, which devices may not call`,
       `warn: Device ${t.phone.id} asked for attachments.add, which devices may not call`,
     ])
+  })
+
+  it('answers port listings and forwards itself, checking them, never the agent host', async () => {
+    const asked: unknown[] = []
+    const t = await setup({
+      listPorts: async (options) => {
+        asked.push(options.folders)
+        return [{ port: 5173, address: '127.0.0.1', pid: 9, process: 'node', folder: '/w' }]
+      },
+    })
+    const device = await t.connect()
+    await device.first
+    const request = (method: string, params: unknown) =>
+      device.port.request(method as never, params as never)
+    expect(await request('ports.list', { folders: ['/w'] })).toEqual({
+      ports: [{ port: 5173, address: '127.0.0.1', pid: 9, process: 'node', folder: '/w' }],
+    })
+    expect(asked).toEqual([['/w']])
+    await expect(request('ports.list', { folders: 'x' })).rejects.toMatchObject({
+      code: 'invalid_params',
+    })
+    expect(await request('ports.forward', { scope: 's1', port: 5173 })).toBeNull()
+    expect(await request('ports.unforward', { scope: 's1', port: 5173 })).toBeNull()
+    for (const params of [{ scope: 's1', port: 0 }, { scope: 7, port: 80 }, null]) {
+      await expect(request('ports.forward', params)).rejects.toMatchObject({
+        code: 'invalid_params',
+      })
+    }
+    expect(
+      t.forwarded.filter((m) => String((m as { method?: string }).method).startsWith('ports.')),
+    ).toEqual([])
   })
 
   it("hands an attachment's upload to the agent host as a file, which it moves in", async () => {
