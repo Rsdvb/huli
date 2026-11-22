@@ -1800,6 +1800,69 @@
   font-size: 12px;
   color: var(--danger);
 }
+/* Huli: an agent's theme card: a sheet for each mode in its own colors. */
+.ks-theme__swatches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ks-theme__swatch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+.ks-theme__sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 72px;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-app);
+}
+.ks-theme__ink,
+.ks-theme__quiet {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-primary);
+}
+.ks-theme__ink {
+  width: 70%;
+}
+.ks-theme__quiet {
+  width: 45%;
+  background: var(--text-tertiary);
+}
+.ks-theme__accent {
+  display: block;
+  width: 36px;
+  height: 14px;
+  margin-top: auto;
+  border-radius: 999px;
+  background: var(--send);
+}
+.ks-theme__caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  font-size: 12px;
+  color: var(--thread-muted);
+}
+.ks-theme__caption b {
+  font-weight: 500;
+  color: var(--thread-ink);
+}
+.ks-theme__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
 /* Huli: an agent's secret card on Approval Card: masked fields with an eye each. */
 .ks-secret__name {
   font-family: var(--font-mono);

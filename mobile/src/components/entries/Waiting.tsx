@@ -32,6 +32,7 @@ import {
 import { AskCard, CardButton, E, useSender } from './kit'
 import { MarketPublishEntry, publishWaits } from './MarketPublishEntry'
 import { SecretRequestEntry, secretWaits } from './SecretRequestEntry'
+import { ThemeChangeEntry, themeWaits } from './ThemeChangeEntry'
 
 /** Whether an entry waits for the user's answer, which its card above the composer asks. */
 export function waitsForUser(entry: ThreadEntry, now = Date.now()): boolean {
@@ -55,6 +56,8 @@ export function waitsForUser(entry: ThreadEntry, now = Date.now()): boolean {
       return publishWaits(entry, now)
     case 'secret_request':
       return secretWaits(entry, now)
+    case 'theme_change':
+      return themeWaits(entry, now)
     default:
       return false
   }
@@ -89,6 +92,8 @@ export function WaitingCard(props: { entry: ThreadEntry; sessionId: string; link
       return <MarketPublishEntry entry={entry} sessionId={sessionId} place={place} />
     case 'secret_request':
       return <SecretRequestEntry entry={entry} sessionId={sessionId} place={place} />
+    case 'theme_change':
+      return <ThemeChangeEntry entry={entry} sessionId={sessionId} place={place} />
     default:
       return null
   }

@@ -204,7 +204,9 @@
     "find_settings": "Find settings",
     "open_settings": "Open settings",
     "change_settings": "Change settings",
-    "request_secrets": "Ask for secrets"
+    "request_secrets": "Ask for secrets",
+    "read_theme": "Read theme colors",
+    "set_theme_colors": "Change theme colors"
   },
   "permission": {
     "outsideScope": "Outside this routine's permissions: {{level}}.",
@@ -1729,6 +1731,30 @@
     "declined": "Didn’t provide <b>{{title}}</b>",
     "noAnswer": "no answer in 10 minutes",
     "ended": "the turn ended first",
+    "answeredOn": "answered on {{device}}"
+  },
+  "themeChange": {
+    "title": "Change theme colors",
+    "who": "{{agent}} wants to change Kettu’s theme colors",
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "builtIn": "Built-in",
+    "canvas": "Canvas",
+    "accent": "Accent",
+    "reset": "Back to the built-in theme",
+    "preview": "Preview",
+    "previewing": "Previewing",
+    "apply": "Apply",
+    "applying": "Applying…",
+    "keep": "Don’t change",
+    "note": "Only colors change; the layout stays Kettu’s own. Every change can be undone.",
+    "changed": "Changed the theme colors to <b>{{name}}</b>",
+    "resetDone": "Went back to the built-in theme",
+    "notChanged": "Didn’t change the theme colors",
+    "undone": "Undid the theme change",
+    "undo": "Undo theme change",
+    "noAnswer": "no answer in 10 minutes",
     "answeredOn": "answered on {{device}}"
   },
   "group": {

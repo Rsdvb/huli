@@ -193,7 +193,9 @@
     "find_settings": "查找设置",
     "open_settings": "打开设置",
     "change_settings": "修改设置",
-    "request_secrets": "索要密钥"
+    "request_secrets": "索要密钥",
+    "read_theme": "读取主题颜色",
+    "set_theme_colors": "更换主题颜色"
   },
   "permission": {
     "outsideScope": "超出此定时任务的权限：{{level}}。",
@@ -1663,6 +1665,30 @@
     "declined": "没有提供 <b>{{title}}</b>",
     "noAnswer": "10 分钟没有回答",
     "ended": "回合先结束了",
+    "answeredOn": "在 {{device}} 上回答"
+  },
+  "themeChange": {
+    "title": "更换主题颜色",
+    "who": "{{agent}} 想更换 Kettu 的主题颜色",
+    "label": "主题",
+    "light": "浅色",
+    "dark": "深色",
+    "builtIn": "内置",
+    "canvas": "底色",
+    "accent": "强调色",
+    "reset": "换回内置主题",
+    "preview": "预览",
+    "previewing": "正在预览",
+    "apply": "应用",
+    "applying": "正在应用…",
+    "keep": "不改",
+    "note": "只改颜色，布局保持 Kettu 自己的。每次修改都能撤销。",
+    "changed": "已把主题颜色换成 <b>{{name}}</b>",
+    "resetDone": "已换回内置主题",
+    "notChanged": "没有更换主题颜色",
+    "undone": "已撤销主题修改",
+    "undo": "撤销主题修改",
+    "noAnswer": "10 分钟没有回答",
     "answeredOn": "在 {{device}} 上回答"
   },
   "group": {
