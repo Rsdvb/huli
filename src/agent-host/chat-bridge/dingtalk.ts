@@ -61,7 +61,11 @@ export function dingTalkMarkdown(markdown: string): string {
   const out: string[] = []
   let code = false
   for (const line of withoutEscapes(markdown, false).split('\n')) {
-    if (/^ {0,3}(`{3,}|~{3,})/.test(line)) code = !code
+    if (/^ {0,3}(`{3,}|~{3,})/.test(line)) {
+      code = !code
+      out.push(line)
+      continue
+    }
     out.push(code || line.trim() === '' ? line : `${line}  `)
   }
   return out.join('\n')

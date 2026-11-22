@@ -838,8 +838,9 @@ export class ChatController {
 
   private async tell(chat: ChatState, attention: Attention): Promise<void> {
     const following = this.follows(chat, attention.sessionId)
-    // Someone has it in front at the computer or on a phone, who sees it there.
-    if (!following && attention.front?.any) return
+    // A request waits until someone answers it, wherever they are; a turn that ended or failed
+    // in front of someone at the computer or on a phone was seen there.
+    if (attention.kind !== 'permission' && !following && attention.front?.any) return
     const title = attention.title
     switch (attention.kind) {
       case 'permission': {
@@ -855,7 +856,15 @@ export class ChatController {
           sessionId: attention.sessionId,
         })
         const tool = entries.find((entry) => isPermissionTool(entry, attention.request!.id))
-        if (!tool || !isPermissionTool(tool)) return
+        if (!tool || !isPermissionTool(tool)) {
+          // A site, a device or an app to allow: the session's card in Kite answers those.
+          return this.say(
+            chat,
+            `**${plain(title)}**\n${plain(attention.body)}\n\n${t('chatBridge.openKite')}`,
+            undefined,
+            attention.sessionId,
+          )
+        }
         return this.present(chat, attention.sessionId, title, attention.body, tool)
       }
       case 'turn-ended':
