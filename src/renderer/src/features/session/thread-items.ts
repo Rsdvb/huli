@@ -1,4 +1,4 @@
-import type { ThreadEntry, ThreadState } from '@shared/thread'
+import { answeredUnasked, type ThreadEntry, type ThreadState } from '@shared/thread'
 import { workflowCardOf } from './entries/workflow-tools'
 import { FOLDED_LINES, FOLD_OVER } from './markdown/code-meta'
 
@@ -50,10 +50,10 @@ function charOf(entry: ThreadEntry | undefined): string {
   if (entry.permission) return 'w'
   // A call of Kettu's workflow tools that ended is a card of its own, like a question.
   if (workflowCardOf(entry)) return 'o'
-  // An answered request keeps its folded card, so it stands on its own as the request did; a
-  // routine's own answer is the routine's, and folds as work.
+  // An answered request keeps its folded card, so it stands on its own as the request did; one
+  // nobody was asked, a routine's or Huli's host's own, folds as work.
   const result = entry.permissionResult
-  if (result && (typeof result !== 'object' || result.by !== 'routine')) return 'r'
+  if (result && !answeredUnasked(result)) return 'r'
   if (
     entry.status === 'completed' &&
     (entry.toolKind === 'read' || entry.toolKind === 'search' || entry.toolKind === 'fetch')

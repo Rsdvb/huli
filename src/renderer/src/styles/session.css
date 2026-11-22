@@ -1389,6 +1389,19 @@
   font-size: 12px;
   color: var(--thread-muted);
 }
+/* Huli: the level the host judged a request at, on the card's tag in its tone. */
+.ks-risk[data-level='low'] {
+  background: var(--ui-prc-ok-bg);
+  color: var(--ui-prc-ok-fg);
+}
+.ks-risk[data-level='medium'] {
+  background: var(--ui-prc-warn-bg);
+  color: var(--ui-prc-warn-fg);
+}
+.ks-risk[data-level='high'] {
+  background: var(--ui-prc-danger-bg);
+  color: var(--ui-prc-danger-fg);
+}
 .ks-card-error {
   margin-top: 6px;
   font-size: 12px;

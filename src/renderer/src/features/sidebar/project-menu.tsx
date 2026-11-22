@@ -34,6 +34,7 @@ import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/s
 import { useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
 import { openSettings } from '@renderer/stores/view'
+import { ProjectApprovalsMenu } from './project-approvals'
 import { openProjectTerminal } from './project-menu-model'
 
 /**
@@ -104,15 +105,16 @@ export function ProjectMenuItems({
           </DropdownMenuItem>
         )}
       </DropdownMenuGroup>
-      {git && (
-        <DropdownMenuGroup>
-          <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <ProjectApprovalsMenu project={project} disabled={!!gone} />
+        {git && (
           <DropdownMenuItem disabled={gone} onClick={() => openWorktreeSettings(project)}>
             <MenuGlyph icon={GitBranchIcon} />
             {t('project.menu.worktreeSettings')}
           </DropdownMenuItem>
-        </DropdownMenuGroup>
-      )}
+        )}
+      </DropdownMenuGroup>
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => openSettings('archived')}>

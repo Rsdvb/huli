@@ -53,6 +53,8 @@ export type PermissionRequestProps = {
   /** The tool's mark next to the target */
   toolIcon?: ReactNode;
   risk?: PermissionRisk;
+  /** Huli: a tag drawn in place of the risk's own, such as the level the host judged */
+  badge?: ReactNode;
   /** The agent's own words on why it needs this */
   reason?: ReactNode;
   /** What will happen if you allow it – files, recipients, amounts */
@@ -317,6 +319,7 @@ export function PermissionRequest({
   target,
   toolIcon,
   risk: riskProp = "risky",
+  badge,
   reason,
   preview = [],
   previewTitle = "What will happen",
@@ -587,12 +590,13 @@ export function PermissionRequest({
                     </span>
                   )}
                 </span>
-                {risk !== "safe" && (
+                {badge ??
+                  (risk !== "safe" && (
                   <span className="ui-prc__risk" data-risk={risk}>
                     {risk === "risky" ? <RiskyIcon /> : <DestructiveIcon />}
                     {labels?.risk?.(risk) ?? RISK[risk]}
                   </span>
-                )}
+                  ))}
               </header>
 
               {reason && (

@@ -322,6 +322,18 @@ export function isConfigValue(option: ConfigOption, value: string | boolean): bo
 }
 
 /**
+ * Whether nobody was asked: a routine's scope, or Huli's host for a request its setting allows,
+ * answered it, so the call folds as work with a quiet note rather than as an answered card.
+ */
+export function answeredUnasked(result: ToolEntry['permissionResult']): boolean {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    (result.by === 'routine' || result.by === 'risk')
+  )
+}
+
+/**
  * A command of more than one step, or too long for one line: a card shows it in full below its
  * header, and a notification, which shows one line, does not offer to allow it.
  */

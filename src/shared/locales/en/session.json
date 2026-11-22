@@ -210,9 +210,15 @@
       "rejectOnce": "Denied",
       "rejectAlways": "Always denied",
       "allowedByRoutine": "Allowed by the routine",
+      "autoApproved": "Approved automatically · {{level}}",
       "cancelled": "Cancelled",
       "withdrawn": "No longer needed",
       "onDevice": "{{answer}} · {{device}}"
+    },
+    "risk": {
+      "low": "Low risk",
+      "medium": "Medium risk",
+      "high": "High risk"
     },
     "answeredOn": "Already answered on {{device}}.",
     "answeredInWindow": "Already answered in another window.",

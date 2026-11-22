@@ -677,13 +677,15 @@ describe('the host files', () => {
     expect((await projectsFile(dir, log).load()).projects).toEqual([project])
 
     for (const autoApprove of ['all', 'high', true, 1, null]) {
-      expect(parseProjectsFile({ projects: [{ ...project, autoApprove }] }).projects).toEqual([
-        project,
-      ])
+      expect(parseProjectsFile({ projects: [{ ...project, autoApprove }] })).toEqual({
+        version: 1,
+        projects: [project],
+      })
     }
-    expect(parseProjectsFile({ projects: [{ ...project, autoApprove: 'low' }] }).projects).toEqual([
-      { ...project, autoApprove: 'low' },
-    ])
+    expect(parseProjectsFile({ projects: [{ ...project, autoApprove: 'low' }] })).toEqual({
+      version: 1,
+      projects: [{ ...project, autoApprove: 'low' }],
+    })
   })
 
   it('keeps what each agent reported and drops what does not parse, entry by entry', () => {

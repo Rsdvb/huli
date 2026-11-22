@@ -8,6 +8,7 @@ import { memo, useState, type ReactNode } from 'react'
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
+import type { PermissionRisk } from '@shared/risk'
 import type { ThreadEntry, ToolEntry } from '@shared/thread'
 import { ShellBlock, StepSection } from '../../components/entries/ShellBlock'
 import { Markdown } from '../../components/Markdown'
@@ -58,6 +59,13 @@ const ANSWERS = {
   reject_always: { headline: '已始终拒绝', note: '{agent} 不会再为此询问' },
 } as const
 
+const RISK_WORDS = { low: '低风险', medium: '中风险', high: '高风险' } as const
+
+/** Huli: the quiet note of a call the host allowed by itself, with the level it judged. */
+function autoApproved(risk: PermissionRisk | undefined): string {
+  return `已自动批准 · ${RISK_WORDS[risk?.level ?? 'low']}`
+}
+
 /** How an answered request reads, as the desktop's folded card words it: what, and what follows. */
 export function answerWords(
   entry: ToolEntry,
@@ -73,6 +81,7 @@ export function answerWords(
   }
   const allowed = result.kind === 'allow_once' || result.kind === 'allow_always'
   if (result.by === 'routine') return { headline: '由定时任务允许', note: '', allowed }
+  if (result.by === 'risk') return { headline: autoApproved(result.risk), note: '', allowed }
   if (result.questions?.length) {
     return {
       headline: '已回答',
@@ -359,7 +368,11 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
   const result = entry.permissionResult
   const note =
     props.note ??
-    (typeof result === 'object' && result?.by === 'routine' ? '由定时任务允许' : undefined)
+    (typeof result === 'object' && result?.by === 'routine'
+      ? '由定时任务允许'
+      : typeof result === 'object' && result?.by === 'risk'
+        ? autoApproved(result.risk)
+        : undefined)
   const body = hasBody(entry, label, root)
   const toggle = () => {
     setOpen((v) => !v)

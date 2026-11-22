@@ -57,6 +57,9 @@ const ACTION: Record<ToolEntry['toolKind'], string> = {
 
 type Scope = 'once' | 'timed' | 'always'
 
+/** Huli: the level the host judged a request at, as the card's tag says it. */
+const RISK_WORDS = { low: '低风险', medium: '中风险', high: '高风险' } as const
+
 /**
  * The agent's options on the card: its first denial as 拒绝, its allows as buttons after it, the
  * one-time allow first, and any other option as a button of its own before 拒绝.
@@ -111,6 +114,15 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
   const command = label.kind === 'command' ? label.target : null
   const target = command ? command.split('\n')[0]! : label.target
   const risky = entry.toolKind === 'execute' || entry.toolKind === 'delete'
+  // A host older than the risk levels sends none; the card then marks commands and deletions.
+  const risk = permission.risk ?? null
+  const tone = risk
+    ? {
+        low: { icon: G.shieldCheck, color: c.success, soft: s.successSoft },
+        medium: { icon: G.warning, color: c.warning, soft: s.warningSoft },
+        high: { icon: G.shieldAlert, color: c.danger, soft: s.dangerSoft },
+      }[risk.level]
+    : null
   const away = !connected
   const busy = sender.busy !== null || away
 
@@ -204,13 +216,21 @@ function ToolPermission(props: { entry: ToolEntry; sessionId: string; link: Host
             </View>
           ) : null}
         </View>
-        {risky && (
+        {risk && tone ? (
+          <View style={[styles.risk, { backgroundColor: tone.soft }]}>
+            <Icon icon={tone.icon} size={11} color={tone.color} />
+            <Text style={[styles.riskText, { color: tone.color }]}>{RISK_WORDS[risk.level]}</Text>
+          </View>
+        ) : risky ? (
           <View style={[styles.risk, { backgroundColor: s.warningSoft }]}>
             <Icon icon={G.warning} size={11} color={c.warning} />
             <Text style={[styles.riskText, { color: c.warning }]}>有风险</Text>
           </View>
-        )}
+        ) : null}
       </View>
+      {risk ? (
+        <Text style={[styles.riskReason, { color: c.textSecondary }]}>{risk.reason}</Text>
+      ) : null}
       {entry.description ? (
         <Text style={[styles.description, { color: c.textSecondary }]}>{entry.description}</Text>
       ) : null}
@@ -439,6 +459,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   riskText: { fontSize: 11, fontWeight: '600' },
+  riskReason: { fontSize: 13, lineHeight: 18, marginTop: 6 },
   preview: { borderRadius: 12, padding: 10, marginTop: 12, gap: 6 },
   previewTitle: { fontSize: 12, fontWeight: '600' },
   previewItem: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 26 },
