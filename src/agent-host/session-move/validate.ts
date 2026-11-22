@@ -132,6 +132,8 @@ function movedTo(value: unknown): MovedTo {
     hostId,
     name: text(o, 'name', NAME_CHARS),
     sessionId: matching(o, 'sessionId', SESSION_ID),
+    // The target's own path, which this computer only shows and links.
+    projectPath: text(o, 'projectPath', PATH_CHARS),
     at,
   }
 }

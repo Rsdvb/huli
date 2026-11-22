@@ -1437,12 +1437,20 @@ function movedToOf(value: unknown): { movedTo?: MovedTo } {
     !isString(value.sessionId) ||
     value.sessionId.length === 0 ||
     value.sessionId.length > 256 ||
+    !isString(value.projectPath) ||
+    value.projectPath.length > 4096 ||
     !isTime(value.at)
   ) {
     return {}
   }
   return {
-    movedTo: { hostId: value.hostId, name: value.name, sessionId: value.sessionId, at: value.at },
+    movedTo: {
+      hostId: value.hostId,
+      name: value.name,
+      sessionId: value.sessionId,
+      projectPath: value.projectPath,
+      at: value.at,
+    },
   }
 }
 

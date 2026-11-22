@@ -240,6 +240,8 @@ export interface MovedTo {
   hostId: string | null
   name: string
   sessionId: string
+  /** Its project there, as that host writes it. */
+  projectPath: string
   at: number
 }
 

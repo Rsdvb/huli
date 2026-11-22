@@ -1795,5 +1795,67 @@
       "done_one": "Archived the other run.",
       "done_other": "Archived the other {{count}} runs."
     }
+  },
+  "move": {
+    "title": "Move to another computer",
+    "to": "Computer to move it to",
+    "noComputers": "No other computer is connected yet. Add one in Settings › Computers first.",
+    "offline": "Not connected",
+    "start": "Move",
+    "starting": "Starting…",
+    "open": "Open",
+    "cleanUp": "Clean up local worktree…",
+    "stay": "Continue here",
+    "moved": "This session moved to {{name}} and goes on there. The files on this computer are as they were.",
+    "done": "Moved to {{name}}. The session and its worktree on this computer stay as they were, to clean up whenever you like.",
+    "failed": "The move failed: {{message}}",
+    "undone": "Everything was undone; the session on this computer works as before.",
+    "notUndone": "A step could not be undone, so part of the move may be left on {{name}}; the log says which. The session on this computer works as before.",
+    "plan": {
+      "title": "What will happen",
+      "project": "Project: the one {{name}} has at {{path}}",
+      "clone": "Project: {{name}} has none, so it clones {{url}} to {{path}} with its own Git sign-in",
+      "branch": "Code: the branch {{branch}}, sent over the existing encrypted connection and pushed nowhere",
+      "branchChanges": "Code: the branch {{branch}} with {{count}} uncommitted changes, sent over the existing encrypted connection and pushed nowhere",
+      "worktree": "A new worktree there, leaving its own project folder alone",
+      "inClone": "It goes on in the folder the clone makes",
+      "resume": "Conversation: {{agent}} there goes on from its own history",
+      "carry": "Conversation: {{agent}} there goes on from Kite’s copy of it",
+      "here": "The session and its worktree here stay as they are, marked with where they went."
+    },
+    "problems": {
+      "busy": "The session is working. Move it once the turn is over.",
+      "subagent": "A sub-session goes with its parent and cannot move alone.",
+      "prepared": "Nothing was sent in this session yet, so there is nothing to move.",
+      "noProject": "A session with No project cannot move.",
+      "noGit": "The session’s folder is not in a Git repository.",
+      "noCommits": "The repository has no commit yet.",
+      "operation": "A merge, rebase, cherry-pick or revert is under way in the repository. Finish or abort it first.",
+      "tooLarge": "What would be sent is over 512 MB, which is too large.",
+      "noRemote": "That computer has no such project, and the repository has no remote it could clone.",
+      "gitMissing": "That computer has no Git.",
+      "agentMissing": "That computer has no {{agent}}. Add it there first.",
+      "agentOff": "{{agent}} is turned off on that computer. Turn it on there first.",
+      "agentNotInstalled": "{{agent}} is not installed on that computer yet. Install it there first.",
+      "signedOut": "{{agent}} is signed out on that computer. Sign in there first.",
+      "sameHost": "The session is on that computer already.",
+      "offline": "That computer is not connected now.",
+      "olderHost": "Kite on that computer is too old to take sessions. Update it first."
+    },
+    "notes": {
+      "ignoredFiles": "Files .gitignore leaves out, such as .env and node_modules, stay behind.",
+      "submodules": "Submodules come as the commits they point at; update them there.",
+      "lfs": "Git LFS files come as pointers; that computer fetches them from the LFS server.",
+      "signInUnknown": "Whether {{agent}} is signed in there is not known yet; if not, the first message asks you to sign in.",
+      "carry": "This agent’s own history cannot move, so Kite hands it the conversation it kept."
+    },
+    "steps": {
+      "check": "Check both computers",
+      "project": "Prepare the project on {{name}}",
+      "pack": "Pack the branch, changes and conversation",
+      "transfer": "Send them over",
+      "apply": "Put them back together on {{name}}",
+      "finish": "Finish"
+    }
   }
 }

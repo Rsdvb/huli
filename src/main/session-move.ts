@@ -261,6 +261,7 @@ export class SessionMover {
           hostId: target,
           name: progress.targetName,
           sessionId: result.sessionId,
+          projectPath: result.projectPath,
           at: this.deps.now?.() ?? Date.now(),
         },
       })
