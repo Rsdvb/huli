@@ -3,8 +3,7 @@
 
 import { AlarmClockIcon, InboxDownloadIcon } from '@hugeicons/core-free-icons'
 import { create } from 'zustand'
-import type { AgentStatus, SessionSummary } from '@shared/agent-host'
-import { planQuota } from '@shared/plan-quota'
+import type { SessionSummary } from '@shared/agent-host'
 import type { SnoozeUntil } from '@shared/session-tidy'
 import { settleSession, snoozeSession } from '@renderer/app/actions'
 import { toast } from '@renderer/components/ui/toast'
@@ -119,22 +118,6 @@ export function unsettle(ids: readonly string[]): void {
   void settle(ids, (id) => settleSession(id, false)).then(({ errors }) => {
     if (errors.length > 0) toast(errorMessage(errors[0]))
   })
-}
-
-/**
- * When the session's agent's plan comes back, as 额度恢复后 would snooze it, a minute after the
- * reset as the host counts it; null when no reset is known, and the choice is not offered.
- */
-export function planReturns(
-  summary: Pick<SessionSummary, 'limitPause'>,
-  agent: Pick<AgentStatus, 'limits' | 'balances'> | undefined,
-  now: number,
-): number | null {
-  const quota = agent ? planQuota(agent, now) : null
-  const reset =
-    summary.limitPause?.resetsAt ??
-    (quota?.kind === 'out' || quota?.kind === 'extra' ? quota.resetsAt : null)
-  return reset !== null && reset > now ? reset + 60_000 : null
 }
 
 /** The sessions the custom snooze dialog is open for; empty while it is closed. */

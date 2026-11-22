@@ -16,7 +16,7 @@ import {
 import type { IconSvgElement } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import type { SessionSummary } from '@shared/agent-host'
-import { snoozePresets, type SnoozePreset } from '@shared/session-tidy'
+import { planReturns, snoozePresets, type SnoozePreset } from '@shared/session-tidy'
 import { setNeverSettle } from '@renderer/app/actions'
 import {
   DropdownMenuCheckboxItem,
@@ -35,14 +35,7 @@ import { useNow } from '@renderer/lib/use-now'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { hostOfSession } from '@renderer/stores/sessions'
-import {
-  askSnoozeTime,
-  planReturns,
-  settleWithUndo,
-  snoozeWithUndo,
-  unsettle,
-  wakeNow,
-} from './tidy'
+import { askSnoozeTime, settleWithUndo, snoozeWithUndo, unsettle, wakeNow } from './tidy'
 
 const PRESET_ICONS: Record<SnoozePreset, IconSvgElement> = {
   hour: Clock01Icon,

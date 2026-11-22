@@ -1,3 +1,6 @@
+import type { AgentStatus, SessionSummary } from './agent-host'
+import { planQuota } from './plan-quota'
+
 // Huli: tidying the session list (会话整理). A session snoozed until a time, or until its agent's
 // plan resets, leaves the active list and comes back then, or as soon as it needs the user. One
 // settled, by the user or by the rules in the settings (idle for some days, its pull request
@@ -85,4 +88,23 @@ export function snoozePresets(now: number): { preset: SnoozePreset; until: numbe
   const toMonday = (8 - new Date(now).getDay()) % 7 || 7
   if (toMonday > 1) out.push({ preset: 'monday', until: at(toMonday, MORNING_HOUR) })
   return out
+}
+
+/** How long after a plan's reset a session snoozed until it comes back, as limit pauses wait. */
+export const RESET_MARGIN_MS = 60_000
+
+/**
+ * When the session's agent's plan comes back, as 额度恢复后 snoozes it: a minute after the reset
+ * of its stopped turn or of its agent's used-up windows; null when no reset is known.
+ */
+export function planReturns(
+  summary: Pick<SessionSummary, 'limitPause'>,
+  agent: Pick<AgentStatus, 'limits' | 'balances'> | undefined,
+  now: number,
+): number | null {
+  const quota = agent ? planQuota(agent, now) : null
+  const reset =
+    summary.limitPause?.resetsAt ??
+    (quota?.kind === 'out' || quota?.kind === 'extra' ? quota.resetsAt : null)
+  return reset !== null && reset > now ? reset + RESET_MARGIN_MS : null
 }
