@@ -423,6 +423,52 @@ none.
   the probe), `sessions.test.ts` (sessions started together, the setup command's and the agent's
   variables, archive, restart and restore), `storage.test.ts` (the stored block and column).
 
+### Background processes on the session board (后台进程、转到后台)
+
+The session's board (the rail beside its thread, `features/board/`) lists what the agent left
+running with its process, CPU, memory and ports, moves what holds up a tool call to the
+background so the turn goes on (转到后台), and cleans the list.
+
+- Reading: `sessions.processes` (`processes` in `sessions.ts`, `src/agent-host/task-processes.ts`)
+  runs one process listing (`ps`, or CIM through PowerShell on Windows, with command lines,
+  working sets and CPU time) and one port listing (`listListeningPorts` of the remote host's port
+  forwarding) for every running task of the session. The board asks when it opens, when a task
+  starts or ends or something comes to hold up a call, when a turn ends, and on its refresh
+  button; never on a timer. A task's process is the one its agent names (Codex's `osPid`, the fake
+  agent's `pid`), else, for Claude Code, the process among the descendants of its Claude Code
+  process whose command line holds the task's command. CPU is the system's percentage where `ps`
+  gives one, else the CPU time used since the last reading (since the start on the first one).
+- Ports: each task's ports are those its process tree listens on; one outside the session's
+  block (KITE_PORT) is marked, and one inside another live session's block marked as colliding.
+  A port of the session's block that a program outside the session holds shows as a warning at
+  the board's top.
+- Claude Code: `task_started` with `is_backgrounded: false` lists the command or subagent in the
+  session's `foreground` until it moves (`task_updated` `is_backgrounded`), ends or the turn
+  ends; 转到后台 (on its board row, its Bash row in the thread and the subagent's card) is
+  `Query.backgroundTasks(toolUseId)` through `sessions.toBackground`. Clean (`sessions.cleanTasks`)
+  forgets the ended tasks in the mapper. `agentProgressSummaries` is on, and `task_progress`'s
+  `summary` becomes the subagent's `progress` on its summary (its card in the thread, its board
+  row, the phone's rows) or a background MCP task's line. `memory_recall` is a quiet `recall`
+  line (回忆了 N 条记忆) that opens on which, and the main thread's writes to a project's memory
+  folder of Claude Code's own (`<config>/projects/<project>/memory/*.md`, the index left out) one
+  `saved` line a turn (保存了 N 条记忆). `active_goal` is a notice like Codex's goal: 目标：…,
+  how many checks it took and why the last found it unmet, and 目标已结束 once it is null.
+- Codex: `thread/backgroundTerminals/list` gives the board its tasks with their process, CPU and
+  memory (read only with the processes, as no notification lists them), `/terminate` stops one
+  and `/clean`, Codex's own `/clean`, stops them all, so Clean reads 全部停止 there. A Codex
+  without them answers that it has no such method, and the board says the version cannot.
+  Output is what the command's row printed.
+- The fake agent's `/processes` scenario speaks Kite's own ACP extension (`acp/kite-tasks.ts`):
+  declared as `_meta: { 'kite/tasks': true }` in its capabilities, `_kite/tasks` carries the task
+  list, what holds up a call and subagents' summaries, and `_kite/tasks/stop`, `/output`,
+  `/background` and `/clean` are its requests. It starts real Node servers and a watcher.
+- Phone: 后台任务 in the session's ⋯ menu (`mobile/src/app/background/[id].tsx`), read on open,
+  on a pull and after an action: what holds up the turn with 转到后台, running tasks with their
+  stats, ports, output and 停止, ended ones, and Clean.
+- Tests: `claude/connection.test.ts` (foreground, moves, progress, Clean, recalls, saves, goals),
+  `codex/connection.test.ts` (terminals listed, ended, missing), `acp/kite-tasks.test.ts`,
+  `validate.test.ts`.
+
 ### Risk levels and auto-approve (风险等级、自动批准低风险操作)
 
 After Codex's risk before an action, Kiro's Approve for me and Claude Code's auto mode, without
