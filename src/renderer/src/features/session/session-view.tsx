@@ -41,6 +41,7 @@ import { readDraft } from './composer/drafts'
 import { preloadRenderers, useRenderersReady } from './markdown/preload'
 import { ComputerLabel } from './computer-bar'
 import { QueueStack } from './queue-stack'
+import { ManagerStrip } from '@renderer/features/manager/manager-strip'
 import { SessionHeader } from './session-header'
 import {
   ArchivedComposer,
@@ -307,6 +308,7 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                     session.queue.length > 0 && (
                       <QueueStack session={session} onError={setQueueError} />
                     )}
+                  {summary.manager && !archived && <ManagerStrip sessionId={sessionId} />}
                   <div className="ctl-labels" role="group" aria-label={t('control:label.group')}>
                     {session && (
                       <ComputerLabel

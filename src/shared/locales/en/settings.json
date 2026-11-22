@@ -21,7 +21,8 @@
     "computer-use": "Computer use",
     "agent-network": "Agent network",
     "backup": "Backup",
-    "chat-bridge": "Chat apps"
+    "chat-bridge": "Chat apps",
+    "manager": "Manager mode"
   },
   "page": {
     "title": "Settings",
@@ -1595,7 +1596,8 @@
     "computer-use": "Lets agents read and drive the desktop apps of this computer, one app and one session at a time.",
     "agent-network": "Each agent’s traffic through a node of your proxy subscriptions, and never around it.",
     "backup": "A copy of Kettu’s own data each day, kept on this computer, to restore after a loss.",
-    "chat-bridge": "See sessions, answer requests and write to the agents from Feishu, DingTalk, WeCom, QQ or Telegram."
+    "chat-bridge": "See sessions, answer requests and write to the agents from Feishu, DingTalk, WeCom, QQ or Telegram.",
+    "manager": "One agent splits your task and dispatches it to workers on other agents, which change the files, while you talk only to it."
   },
   "archived": {
     "description": "{{project}} · archived {{when}}",
@@ -2902,6 +2904,145 @@
       },
       "telegram": {
         "token": "Bot token"
+      }
+    }
+  },
+  "manager": {
+    "keywords": "manager orchestrator roster worker persona review dispatch",
+    "groups": {
+      "scope": "Scope",
+      "manager": "Manager",
+      "roster": "Roster",
+      "review": "Review and permissions",
+      "limits": "Limits"
+    },
+    "notes": {
+      "scope": "A project may have a roster of its own; the others use this one.",
+      "manager": "What new manager sessions start with. A manager only reads and dispatches, so a cheap model does.",
+      "roster": "The manager dispatches to workers by name. A persona goes only into that worker session's first message, never into the agent's own files. ★ marks the default reviewer.",
+      "limits": "A task starts when you write to the manager; past a limit Kite has the manager stop and ask you."
+    },
+    "scope": {
+      "name": "Settings for",
+      "description": "The roster for every project, or one project’s own.",
+      "global": "All projects",
+      "own": "{{name}} (its own)"
+    },
+    "project": {
+      "name": "Own settings for this project",
+      "description": "On, this project's manager sessions use the roster and choices below; off, they use the ones for all projects."
+    },
+    "suggestion": {
+      "name": "Suggested manager",
+      "description": "The agent, profile and model new manager sessions start with.",
+      "agent": "Agent",
+      "profile": "Profile",
+      "model": "Model",
+      "none": "No suggestion: keep the current choice",
+      "ownSignIn": "Its own sign-in",
+      "defaultModel": "Default model"
+    },
+    "empty": {
+      "title": "No workers yet",
+      "hint": "Start from a roster suggested by the agents on this computer, then change it as you like."
+    },
+    "actions": {
+      "add": "Add worker",
+      "suggest": "Use suggested roster",
+      "edit": "Edit",
+      "remove": "Remove",
+      "makeReviewer": "Make default reviewer"
+    },
+    "autoReview": {
+      "name": "Automatic review",
+      "description": "When code is finished, Kite hands it to the default reviewer and back until it is approved or the rounds run out. The default for new manager sessions.",
+      "noReviewer": "The roster has no default reviewer yet, so automatic review does nothing."
+    },
+    "rounds": {
+      "name": "Review rounds",
+      "description": "Not approved by then, the manager stops and asks you.",
+      "count_one": "{{count}} round",
+      "count_other": "{{count}} rounds"
+    },
+    "approvals": {
+      "name": "Workers' permission requests",
+      "description": "The default for new manager sessions, which each can change. The project's own auto-approve level always applies first.",
+      "user": "Only I answer",
+      "low": "The manager answers low risk"
+    },
+    "concurrent": {
+      "name": "Workers at once",
+      "description": "More dispatches wait for a worker to finish. Only one code-writing worker works in a folder at a time.",
+      "count_one": "{{count}} worker",
+      "count_other": "{{count}} workers"
+    },
+    "turns": {
+      "name": "Per task, at most",
+      "description": "Once the worker turns are spent, the manager dispatches no more and asks you.",
+      "count_one": "{{count}} worker turn",
+      "count_other": "{{count}} worker turns"
+    },
+    "budget": {
+      "name": "Token budget",
+      "description": "Tokens the manager and its workers may use per task; models Kite has prices for also show a cost.",
+      "none": "No limit",
+      "tokens": "{{short}} tokens"
+    },
+    "afterRestart": {
+      "name": "After Kite restarts",
+      "description": "What workers a restart cut do: go on one at a time, within the workers-at-once limit, or only tell the manager.",
+      "resume": "Workers go on",
+      "tell": "Only tell the manager"
+    },
+    "roles": {
+      "implement": "Code",
+      "review": "Review",
+      "plan": "Planning",
+      "other": "Odd jobs"
+    },
+    "worker": {
+      "addTitle": "Add worker",
+      "editTitle": "Edit worker",
+      "lead": "The manager dispatches by name; review and planning workers only read.",
+      "name": "Name",
+      "namePlaceholder": "Such as: Writer",
+      "role": "Role",
+      "agent": "Agent",
+      "model": "Model",
+      "effort": "Thinking",
+      "profile": "Profile",
+      "mode": "Permissions",
+      "agentDefault": "The agent's default",
+      "profileDefault": "The agent's default",
+      "modeDefault": "New sessions’ default",
+      "readOnly": "This role only reads: Kite keeps it from changing files; reading and read-only commands work.",
+      "worktree": "A new worktree for each dispatch",
+      "worktreeHint": "It can work beside other code-writing workers; its changes stay on a new branch, which Kite never merges itself.",
+      "worktreeShort": "own worktree",
+      "persona": "Persona",
+      "personaPlaceholder": "Such as: You write clean code with small changes, and read before you change.",
+      "personaNote": "Goes only into this worker session's first message, never into the agent's own settings.",
+      "repeated": "The roster already has this name.",
+      "agentGone": "agent gone",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "suggested": {
+      "writer": {
+        "name": "Writer",
+        "persona": "You write clean code with small changes, read before you change, and run the tests that matter."
+      },
+      "reviewer": {
+        "name": "Reviewer",
+        "persona": "You are a strict but practical reviewer: read git diff, check correctness, edge cases, tests and project conventions. Give changes only for what must change; note small things as nit and still approve."
+      },
+      "planner": {
+        "name": "Planner",
+        "persona": "You research and plan: read code and docs, give steps that can be acted on and the risks, and change no files."
+      },
+      "helper": {
+        "name": "Helper",
+        "persona": "You do small, clear jobs: tests, renames, docs, formatting, as the task says, without improvising."
       }
     }
   }

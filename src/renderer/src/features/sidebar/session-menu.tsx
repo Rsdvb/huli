@@ -127,6 +127,7 @@ import { prFlowActive, prFlowTarget, setPrFlow } from '@renderer/features/git/fl
 import { copyResumeCommand, resumeInTerminal } from '@renderer/features/agents/agent-terminal'
 import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
 import { BoardStatusMenu } from '@renderer/features/task-board/status'
+import { ManagerMenu } from '@renderer/features/manager/manager-menu'
 import { askExport, canExport } from '@renderer/features/session/export/export'
 import {
   askRemoveWorktree,
@@ -353,6 +354,8 @@ export function SessionMenuItems({
         )
       case 'board':
         return <BoardStatusMenu key={name} summary={summary} />
+      case 'manager':
+        return <ManagerMenu key={name} summary={summary} />
       case 'autoMerge':
       case 'watchPr': {
         if (!prTarget) return null

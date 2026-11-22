@@ -326,6 +326,7 @@ export class ManagerHub {
       unpriced: manager.task.unpriced,
       pending:
         manager.digest !== undefined && this.port.waitingDigest(record.id, manager.digest) !== null,
+      answers: manager.answers.slice(-5),
     }
   }
 
@@ -346,6 +347,7 @@ export class ManagerHub {
       detached: worker.detached !== undefined,
       tokens: worker.tokens,
       cost: worker.cost,
+      reviewOf: loop && loop.reviewerId === record.id ? loop.implementerId : null,
     }
   }
 
@@ -523,6 +525,19 @@ export class ManagerHub {
     const record = this.port.record(id)
     if (!record) return Promise.resolve()
     if (record.manager) {
+      const ended = this.ends.has(id)
+      this.ends.delete(id)
+      // The guard keeps a manager from writing; should a write still get through, the user hears
+      // of it and the manager pauses until they resume it.
+      const files = ended ? this.port.turnFiles(id) : []
+      if (files.length > 0 && !record.manager.paused) {
+        this.port.notice(
+          id,
+          'warning',
+          this.port.text('manager.editedFiles', { files: files.slice(0, 3).join(', ') }),
+        )
+        return this.setPaused(id, true)
+      }
       return this.locked(id, async () => this.pump(id))
     }
     const worker = record.worker

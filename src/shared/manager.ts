@@ -843,6 +843,8 @@ export interface ManagerSummary {
   unpriced: number
   /** A digest waits in its queue for its turn. */
   pending: boolean
+  /** The latest requests its agent answered for its workers, newest last. */
+  answers: ManagerAnswer[]
 }
 
 export interface WorkerSummary {
@@ -860,6 +862,8 @@ export interface WorkerSummary {
   detached: boolean
   tokens: number
   cost: number
+  /** For a reviewer the review loop started: the implementer it reviews. */
+  reviewOf: string | null
 }
 
 // The decisions.

@@ -26,6 +26,7 @@ import { errorCode, errorMessage, forgetSessionHost, host, hostAt } from '@rende
 import { i18n } from '@renderer/lib/i18n'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { adoptedPrepared } from '@renderer/features/session/new-session/prepared'
+import { clearManagerDraft, managerStart } from '@renderer/features/manager/draft'
 import { clearPicks, type OptionValues } from '@renderer/stores/agent-options'
 import {
   draftAttachments,
@@ -235,6 +236,8 @@ export async function createSession(
     clearDraft(NEW_SESSION_DRAFT)
     setDraftAttachments(NEW_SESSION_DRAFT, [])
   }
+  // Huli: a manager starts in a session of its own, held to reading, never in the prepared one.
+  const manager = managerStart(agentId, parentId)
   try {
     const summary = await host('sessions.create', {
       agentId,
@@ -242,12 +245,14 @@ export async function createSession(
       ...(parentId ? { parentId } : {}),
       ...(options && Object.keys(options).length > 0 ? { options } : {}),
       ...(prompt !== null ? { prompt } : {}),
-      ...(preparedId ? { preparedId } : {}),
+      ...(preparedId && !manager ? { preparedId } : {}),
       ...(worktree ? { worktree } : {}),
       ...profile,
+      ...(manager ? { manager } : {}),
     })
+    if (manager) clearManagerDraft()
     // A session in a new worktree starts its own agent; the prepared one stays the window's.
-    if (preparedId && !worktree) adoptedPrepared(summary.id)
+    if (preparedId && !worktree && !manager) adoptedPrepared(summary.id)
     if (worktree) writeSlug(null)
     // The host now remembers what carries over; the rest starts afresh next time.
     if (options) clearPicks(projectPath === null ? null : hostOfPath(projectPath), agentId)

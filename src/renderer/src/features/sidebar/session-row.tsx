@@ -276,8 +276,19 @@ export const SessionRow = memo(function SessionRow({
       {caret}
       {mark}
       <span className="ui-as-side__text" dir="auto">
+        {/* Huli: a manager's worker leads with its roster name; a manager says it is one. */}
+        {summary.worker && <span className="text-(--faint)">{summary.worker.name} · </span>}
         {title}
       </span>
+      {summary.manager && (
+        <span
+          aria-label={t('row.manager')}
+          title={t('row.manager')}
+          className="shrink-0 text-[11px] font-normal text-(--faint)"
+        >
+          {t('row.managerBadge')}
+        </span>
+      )}
       {node.subagents.length > 0 && !away && (
         <SubagentBadge
           parent={summary}

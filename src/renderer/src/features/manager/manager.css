@@ -1,0 +1,293 @@
+/* Huli: manager mode's pane, strip and report card. Colors come from the theme's tokens. */
+
+.km-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.km-head > span {
+  overflow: hidden;
+  color: var(--text-secondary, var(--shell-muted));
+  font-size: var(--text-xs, 12px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.km-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.km-faint {
+  color: var(--shell-muted);
+}
+
+.km-state {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.km-note {
+  border-radius: 8px;
+  background: var(--info-tint);
+  padding: 6px 10px;
+  color: var(--shell-text);
+  font-size: 12px;
+}
+.km-note--warn {
+  background: var(--danger-tint);
+}
+
+.km-list,
+.km-children {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.km-children {
+  margin-top: 6px;
+  margin-left: 18px;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 10px;
+}
+
+.km-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  padding: 10px 12px;
+}
+.km-row[data-state='waiting'] {
+  border-color: var(--attention);
+}
+.km-row--nested {
+  background: var(--bg-subtle);
+}
+.km-row__top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.km-row__name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.km-row__name:hover b,
+.km-row__name:focus-visible b {
+  text-decoration: underline;
+}
+.km-row__meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  font-size: 12px;
+}
+.km-row__meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.km-row__loop {
+  color: var(--info);
+  font-size: 12px;
+}
+.km-row__line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--shell-text);
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.km-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 2px -6px -4px;
+}
+
+.km-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  padding: 2px 8px;
+  color: var(--shell-muted);
+  font-size: 11px;
+}
+.km-pill[data-state='running'],
+.km-pill[data-state='starting'] {
+  background: var(--info-tint);
+  color: var(--info);
+}
+.km-pill[data-state='waiting'] {
+  background: var(--danger-tint);
+  color: var(--attention);
+}
+.km-pill[data-state='done'] {
+  background: var(--success-tint);
+  color: var(--success);
+}
+.km-pill[data-state='failed'] {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.km-spin {
+  animation: km-spin 1.2s linear infinite;
+}
+@keyframes km-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .km-spin {
+    animation: none;
+  }
+}
+:root[data-reduce-motion] .km-spin {
+  animation: none;
+}
+
+.km-requests {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.km-message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.km-message__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.km-answers h3 {
+  margin-bottom: 4px;
+  color: var(--shell-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.km-answers ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.km-foot {
+  position: sticky;
+  bottom: -12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: auto -12px -12px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+/* The strip above a manager's composer. */
+.km-strip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+}
+.km-strip__text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--shell-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.km-strip__asks {
+  color: var(--attention);
+  font-weight: 500;
+}
+
+/* The report card in a manager's thread. */
+.km-digest {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.km-digest__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--shell-muted);
+}
+.km-digest__item {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+.km-digest__item > button {
+  flex: none;
+  font-weight: 500;
+}
+.km-digest__item > button:hover,
+.km-digest__item > button:focus-visible {
+  text-decoration: underline;
+}
+.km-digest__line {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--shell-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.km-digest pre {
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  padding: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.kettu-manager-chip--on {
+  color: var(--shell-accent);
+}

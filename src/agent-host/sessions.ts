@@ -5117,7 +5117,7 @@ export class SessionManager {
     // Before a prepared session is taken over, so a refused prompt leaves it prepared.
     const prompt = params.prompt && this.hydrate(params.prompt)
     // A prepared session's agent already works in the project's folder, so a worktree starts anew.
-    if (params.preparedId !== undefined && params.worktree === undefined) {
+    if (params.preparedId !== undefined && params.worktree === undefined && !params.manager) {
       const adopted = await this.adopt({
         agentId: params.agentId,
         preparedId: params.preparedId,

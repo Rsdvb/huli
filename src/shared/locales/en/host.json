@@ -1573,6 +1573,7 @@
     "unsupported": "This agent cannot be held to reading, so it cannot be the manager.",
     "notTopLevel": "Only a session you started yourself can be a manager.",
     "workersWorking": "Stop the workers or wait for them to finish before switching manager mode off.",
-    "modeLocked": "A manager reads only: its mode stays one that asks before every change."
+    "modeLocked": "A manager reads only: its mode stays one that asks before every change.",
+    "editedFiles": "The manager changed files itself ({{files}}), so manager mode paused it. Check the change, then resume."
   }
 }

@@ -46,6 +46,7 @@ import { useAccountStore } from '@renderer/stores/account'
 import {
   optionsLoaded,
   optionsOn,
+  pickOption,
   picksOf,
   preparedFor,
   useAgentOptionsStore,
@@ -134,6 +135,7 @@ import { setBestOfN, useBestOfN } from '@renderer/stores/best-of-n'
 import { WorktreeTrayTag } from './worktree/worktree-tag'
 import { currentBase, useWorktreeStatus } from './new-session/worktree-base'
 import { WorktreeMenu, WorktreeNote } from './new-session/worktree-menu'
+import { ManagerChip } from '@renderer/features/manager/new-session-chip'
 import { ParentLink } from './session-header'
 import { ColumnScroller } from './session-states'
 import { TurnDots } from './turn-dots'
@@ -845,6 +847,20 @@ function DraftComposer({
                   <WorktreeTrayTag worktree={parent.worktree} />
                 ) : (
                   !inScratch && project && <BranchLabel projectPath={project.path} />
+                )}
+                {!parent && !workflow && !several && (
+                  <ManagerChip
+                    agentId={agentId}
+                    projectPath={project?.path ?? null}
+                    onSuggest={(suggested, profile, model) => {
+                      choose(suggested)
+                      setProfilePick({ key: `${hostId ?? ''}\n${suggested}`, id: profile })
+                      const option = optionsOn(useAgentOptionsStore.getState(), hostId)[
+                        suggested
+                      ]?.config.find((o) => o.category === 'model')
+                      if (option && model) pickOption(hostId, suggested, option.id, model)
+                    }}
+                  />
                 )}
               </span>
             </div>

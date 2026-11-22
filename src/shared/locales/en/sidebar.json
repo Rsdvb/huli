@@ -248,7 +248,9 @@
     "deleteRemovesAgentCopy_other": "They’re also deleted from {{agent}}’s own local history, so the official app and CLI won’t show them anymore.",
     "autoMerge": "Merge when checks pass",
     "watchPr": "Watch this pull request",
-    "issue": "Issue #{{number}}"
+    "issue": "Issue #{{number}}",
+    "manager": "Manager session",
+    "managerBadge": "Manager"
   },
   "work": {
     "turn": "Current turn",

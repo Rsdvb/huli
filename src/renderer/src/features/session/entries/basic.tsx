@@ -49,6 +49,7 @@ import { splitLinks } from './text-links'
 import { UserActions } from './message-actions'
 import { ReplyRunChip } from './reply-run-chip'
 import { FromSessionCard, ReportLine } from './session-origin'
+import { DigestCard } from '@renderer/features/manager/digest-card'
 import { TurnEndTag } from './turn-end-tag'
 import { RefChip, SentAttachments, UserContentView } from './user-content'
 
@@ -82,6 +83,10 @@ export const UserEntry = memo(function UserEntry({
   // Kettu's report of a turn another session ended is an event, not a message.
   if (entry.from?.ended) {
     return <ReportLine from={entry.from} ended={entry.from.ended} end={end} className={animation} />
+  }
+  // Huli: so is manager mode's report on its workers.
+  if (entry.from?.digest) {
+    return <DigestCard from={entry.from} content={entry.content} className={animation} />
   }
   return (
     <div className={cn('ks-user', entry.from && 'ks-user--agent', animation)}>
