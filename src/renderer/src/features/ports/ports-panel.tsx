@@ -12,7 +12,7 @@ import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Switch } from '@renderer/components/ui/switch'
 import { PaneIcon } from '@renderer/features/shell/panel-button'
 import { cn } from '@renderer/lib/utils'
-import { setAutoForward, useForwardsStore } from '@renderer/stores/forwards'
+import { loadForwards, setAutoForward, useForwardsStore } from '@renderer/stores/forwards'
 import { forwardFailure, forwardPort, forwardUrl, hostFolders, hostName } from './ports'
 
 type Listing =
@@ -62,6 +62,7 @@ export function PortsPanel({
   )
   // Read once as the list opens; Refresh reads again. Nothing reads it on a timer.
   useEffect(() => {
+    loadForwards()
     void read()
   }, [read])
   const refresh = () => {

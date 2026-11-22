@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowDataTransferHorizontalIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { PaneIcon } from '@renderer/features/shell/panel-button'
-import { useForwardsStore } from '@renderer/stores/forwards'
+import { loadForwards, useForwardsStore } from '@renderer/stores/forwards'
 import { PortsPanel } from './ports-panel'
 import { forwardUrl, hostName, openInSessionBrowser } from './ports'
 
@@ -14,6 +14,7 @@ import { forwardUrl, hostName, openInSessionBrowser } from './ports'
 export function PortsButton({ hostId, sessionId }: { hostId: string; sessionId: string }) {
   const { t } = useTranslation('browser')
   const [open, setOpen] = useState(false)
+  useEffect(loadForwards, [])
   const count = useForwardsStore((s) => s.forwards.filter((f) => f.hostId === hostId).length)
   const label = t('ports.button', { host: hostName(hostId) })
   return (

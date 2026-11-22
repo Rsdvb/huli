@@ -59,12 +59,25 @@ function watchTerminals(): void {
 /** Follows main's forwards, and the terminals of the hosts that forward on their own. */
 export function initForwards(forward: AutoForward): void {
   autoForward = forward
-  window.kettu.hosts.onForwards((forwards) => useForwardsStore.setState({ forwards }))
+  window.kettu.hosts.onForwards((forwards) => {
+    loaded = true
+    useForwardsStore.setState({ forwards })
+  })
+  watchTerminals()
+}
+
+let loaded = false
+
+/** Reads main's forwards once, when a view that shows them first opens; events keep them after. */
+export function loadForwards(): void {
+  if (loaded) return
+  loaded = true
   void window.kettu.hosts
     .forwards()
     .then((forwards) => useForwardsStore.setState({ forwards }))
-    .catch(() => {})
-  watchTerminals()
+    .catch(() => {
+      loaded = false
+    })
 }
 
 export function setAutoForward(hostId: string, on: boolean): void {

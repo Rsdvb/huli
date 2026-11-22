@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isOtherHostMethod } from './host-sessions'
 import {
   ForwardBook,
   MAX_HOST_FORWARDS,
@@ -132,5 +133,13 @@ describe('ForwardBook', () => {
     for (let i = 0; i < MAX_HOST_FORWARDS; i++) book.add(forward({ port: 2000 + i }))
     expect(book.hasRoom('a'.repeat(32))).toBe(false)
     expect(book.hasRoom('b'.repeat(32))).toBe(true)
+  })
+})
+
+describe('the host calls a window may not make', () => {
+  it('leaves listing and forwarding ports to main', () => {
+    for (const method of ['ports.list', 'ports.forward', 'ports.unforward']) {
+      expect(isOtherHostMethod(method), method).toBe(false)
+    }
   })
 })
