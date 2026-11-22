@@ -51,6 +51,7 @@ import { grantClipboardFiles, grantPaths } from './attachments'
 import type { Artifacts } from './artifacts'
 import type { Avatars } from './avatars'
 import type { BackupService } from './backup/service'
+import type { ChatBridgeStore } from './chat-bridge'
 import { ReportError, type Reports } from './report'
 import type { BrowserViews } from './browser/views'
 import type { SiteIcons } from './browser/site-icons'
@@ -1080,6 +1081,24 @@ export function registerBackupIpc(backup: BackupService): void {
   handle('backup:restore', 1, (_, token) => {
     actionLog.info('backup.restore')
     backup.restore(token)
+  })
+}
+
+/**
+ * Huli: the chat bridges. Every argument is checked by the store; the answers are the view, which
+ * holds no credential, and a refusal names no value.
+ */
+export function registerChatBridgeIpc(store: ChatBridgeStore): void {
+  handle('chat-bridge:state', 0, () => store.state())
+  handle('chat-bridge:save', 2, (_, platform, patch) => {
+    actionLog.info('chat-bridge.save')
+    return store.save(platform, patch)
+  })
+  handle('chat-bridge:start-binding', 1, (_, platform) => store.startBinding(platform))
+  handle('chat-bridge:cancel-binding', 0, () => store.cancelBinding())
+  handle('chat-bridge:unbind', 2, (_, platform, accountId) => {
+    actionLog.info('chat-bridge.unbind')
+    return store.unbind(platform, accountId)
   })
 }
 

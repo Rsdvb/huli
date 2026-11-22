@@ -396,6 +396,14 @@ const api: KettuApi = {
     onOpened: onDeviceOpened,
     saveCapture: (device, kind, data) => invoke('devices:save-capture', device, kind, data),
   } as KettuApi['devices'],
+  chatBridge: {
+    state: () => invoke('chat-bridge:state'),
+    save: (platform, patch) => invoke('chat-bridge:save', platform, patch),
+    startBinding: (platform) => invoke('chat-bridge:start-binding', platform),
+    cancelBinding: () => invoke('chat-bridge:cancel-binding'),
+    unbind: (platform, accountId) => invoke('chat-bridge:unbind', platform, accountId),
+    onChanged: subscribe('chat-bridge:changed'),
+  },
   backup: {
     status: () => invoke('backup:status'),
     run: () => invoke('backup:run'),

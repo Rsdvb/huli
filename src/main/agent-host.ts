@@ -66,6 +66,7 @@ import { ContentCache } from './artifacts/content-cache'
 import { computerHostOptions, mihomoPath } from './computer-use'
 import { GrantRequests } from './grant-requests'
 import type { MarketKeysPush } from './market-keys'
+import type { ChatBridgeConfig } from '@shared/chat-bridge'
 import { marketCallOf } from './market-api'
 import { t } from './i18n'
 import { createLogger } from './log'
@@ -97,6 +98,12 @@ export interface AgentHostDeps {
   onMarketOAuth?(serverId: unknown, state: unknown): void
   /** The Kettu account the Marketplace tools publish with, which follows init at each start. */
   marketAccount(): MarketAccount | null
+  /** Huli: the chat bridges' configuration, which follows init at each start. */
+  chatBridge?(): ChatBridgeConfig
+  /** Huli: the chat bridges' connections changed; checked by the store. */
+  onChatBridgeStatus?(statuses: unknown): void
+  /** Huli: an account sent a bridge the binding's code; the store checks it. */
+  onChatBridgeBind?(platform: unknown, code: unknown, account: unknown): void
   /** Makes a Marketplace API call of the host's with the account's access token. */
   market?: (call: MarketCall) => Promise<MarketCallAnswer>
   /** An agent's settings tool reads or changes the settings. */
@@ -397,6 +404,9 @@ export class AgentHost {
       startMessages: () => [
         { type: 'host:market-keys', ...deps.marketKeys() },
         { type: 'host:market-account', account: deps.marketAccount() },
+        ...(deps.chatBridge
+          ? [{ type: 'host:chat-bridge' as const, config: deps.chatBridge() }]
+          : []),
       ],
       connectMessage: (windowId) => ({ type: 'host:connect', windowId }),
       shutdownMessage: { type: 'host:shutdown' },
@@ -457,6 +467,11 @@ export class AgentHost {
   /** The Marketplace's key store, whole; a host started later gets it too. */
   pushMarketKeys(contents: MarketKeysPush): void {
     this.host.post({ type: 'host:market-keys', ...contents })
+  }
+
+  /** Huli: the chat bridges' configuration, whole; a host started later gets it too. */
+  pushChatBridge(config: ChatBridgeConfig): void {
+    this.host.post({ type: 'host:chat-bridge', config })
   }
 
   /** The Kettu account the Marketplace tools publish with, after a sign-in or a switch changed it. */
@@ -864,6 +879,12 @@ export class AgentHost {
       }
       case 'host:attention':
         this.deps.onAttention(message)
+        break
+      case 'host:chat-bridge-status':
+        this.deps.onChatBridgeStatus?.(message.statuses)
+        break
+      case 'host:chat-bridge-bind':
+        this.deps.onChatBridgeBind?.(message.platform, message.code, message.account)
         break
       case 'host:badge':
         if (typeof message.count === 'number') this.deps.onBadge(message.count)

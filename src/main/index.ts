@@ -56,6 +56,7 @@ import {
   appInfo,
   launchToInteractive,
   registerBackupIpc,
+  registerChatBridgeIpc,
   registerIpcHandlers,
   registerSessionExportIpc,
   registerSignInIpc,
@@ -87,6 +88,7 @@ import { watchPresence } from './presence'
 import { RelayFeatures, RelayToken, readRelayFeatures } from './relay-token'
 import { readJsonFile } from './json-file'
 import { MarketKeys, marketKeysFile } from './market-keys'
+import { ChatBridgeStore, chatBridgeFile } from './chat-bridge'
 import { MarketUnauthorized, runMarketCall } from './market-api'
 import { computerModelForRun } from './system-model'
 import { ComputerOverlay } from './computer-overlay'
@@ -437,9 +439,20 @@ async function start(): Promise<void> {
     () => computerHold,
     (url) => rendererPage(url) === 'index',
   )
+  // Huli: the chat bridges' credentials and accounts; the host loads the bridges once one is on.
+  const chatBridge = new ChatBridgeStore({
+    file: chatBridgeFile(userDataPath),
+    cipher: identityCipher,
+    pushed: (config) => agentHost.pushChatBridge(config),
+    changed: (view) => broadcast('chat-bridge:changed', view),
+    log: createLogger('chat-bridge'),
+  })
   const agentHost = new AgentHost({
     settings: () => hostSettings(settings.get(), systemLocale),
     marketKeys: () => marketKeys.contentsForHost(),
+    chatBridge: () => chatBridge.configForHost(),
+    onChatBridgeStatus: (statuses) => chatBridge.setStatuses(statuses),
+    onChatBridgeBind: (platform, code, account) => void chatBridge.bind(platform, code, account),
     onMarketOAuth: (serverId, state) => void marketKeys.setOAuth(serverId, state),
     onFirstStart: (harnesses) => settings.firstStart(harnesses),
     onAttention: (message) => {
@@ -470,6 +483,7 @@ async function start(): Promise<void> {
     },
     onDown: () => {
       tray.setConnected(false)
+      chatBridge.hostDown()
       // No turn of this computer's host runs now; another host's turns go on with their pages.
       browserTools?.endTurns(
         browserTools.controls.keys().filter((sessionId) => !remoteBrowser.isRemote(sessionId)),
@@ -886,6 +900,7 @@ async function start(): Promise<void> {
         appState.flush(),
         sharing.flush(),
         marketKeys.flush(),
+        chatBridge.flush(),
         browserOrigins.flush(),
         signIns.store.flush(),
         siteIcons.flush(),
@@ -1082,6 +1097,7 @@ async function start(): Promise<void> {
     reports,
   })
   registerBackupIpc(backup)
+  registerChatBridgeIpc(chatBridge)
   registerSessionExportIpc()
   ipcReady = true
   installMenu(menuDeps)

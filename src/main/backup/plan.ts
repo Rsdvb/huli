@@ -8,8 +8,9 @@
 //   encrypts them for this user on this computer, so a copy opens nowhere else, and on Linux
 //   without a keyring they are plain text; a restore keeps the ones in place, so pairings and the
 //   sign-in carry on.
-// - `market-keys.json` and `published-artifacts.json`: the Marketplace servers' keys and the
-//   sharing token, encrypted the same way; they are entered again after a loss.
+// - `market-keys.json`, `published-artifacts.json` and `chat-bridge.json`: the Marketplace
+//   servers' keys, the sharing token and the chat bots' credentials, encrypted the same way;
+//   they are entered again after a loss.
 // - `agent-network/`: the proxy subscriptions' addresses and nodes, which hold the provider's
 //   tokens and passwords in plain text; the subscriptions are added again after a loss.
 // - What is rebuilt or fetched again: the search index, thumbnails, the Marketplace's catalogs and
@@ -63,7 +64,7 @@ const SKIPPED_FOLDERS: readonly string[] = [
 /** What the manifest says was left out, for whoever reads it. */
 export const LEFT_OUT: readonly string[] = [
   'remote/: this computer’s keys, Kite Cloud sign-in and paired devices (kept in place on restore)',
-  'market-keys.json, published-artifacts.json: keys and tokens, encrypted for this computer',
+  'market-keys.json, published-artifacts.json, chat-bridge.json: keys and tokens, encrypted for this computer',
   'agent-network/: proxy subscriptions, which carry their tokens in plain text',
   'state/search-*.db, artifacts/thumbnails/: rebuilt from the threads and artifacts',
   'caches, logs, reports, scratch folders and Chromium’s folders',
