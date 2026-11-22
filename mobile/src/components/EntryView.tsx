@@ -39,6 +39,7 @@ import { ElicitationSettled } from './entries/ElicitationCard'
 import { QuietLine, WaitingLine } from './entries/kit'
 import { PlanSettled, PlanWaitingLine } from './entries/PlanCards'
 import { MarketPublishEntry } from './entries/MarketPublishEntry'
+import { SecretRequestEntry } from './entries/SecretRequestEntry'
 import {
   ChildEntry,
   ControlNoteEntry,
@@ -328,6 +329,8 @@ export const EntryView = memo(function EntryView(props: {
       return <MemoryEntry entry={entry} {...request} />
     case 'market_publish':
       return <MarketPublishEntry entry={entry} {...request} />
+    case 'secret_request':
+      return <SecretRequestEntry entry={entry} {...request} />
     case 'git':
       // In the desktop's words: 已提交, 已推送, 已切换到, 已创建 PR.
       if (entry.event === 'commit') {
