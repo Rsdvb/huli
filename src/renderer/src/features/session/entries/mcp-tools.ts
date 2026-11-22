@@ -61,7 +61,7 @@ const TARGETS = {
   browser_scroll: [],
   browser_select_option: ['element'],
   browser_take_screenshot: [],
-  browser_wait_for: ['text', 'text_gone'],
+  browser_wait_for: ['text', 'text_gone', 'selector'],
   browser_console_messages: [],
   browser_network_requests: ['url'],
   browser_network_request: [],

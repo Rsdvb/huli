@@ -12,6 +12,7 @@ import type {
 import {
   BROWSER_CONSOLE_LEVELS,
   BROWSER_TAB_ACTIONS,
+  BROWSER_WAIT_STATES,
   BROWSER_TOOL_NAMES,
   MAX_SESSION_TABS,
   MAX_SNAPSHOT_DEPTH,
@@ -29,8 +30,8 @@ import type { Caller } from './tools'
 
 /** A navigation and everything that waits on one. */
 export const NAVIGATION_TIMEOUT_MS = 30_000
-/** The other acting tools. */
-export const ACTION_TIMEOUT_MS = 10_000
+/** The other acting tools, which wait up to 5 s for their element and 5 s for the page. */
+export const ACTION_TIMEOUT_MS = 20_000
 /** Above `browser_wait_for`'s own time, so the page answers it before this does. */
 export const WAIT_EXTRA_MS = 5_000
 export const MAX_WAIT_SECONDS = 30
@@ -40,6 +41,7 @@ const MAX_VALUES = 50
 const MAX_REASON_CHARS = 500
 const MAX_PATH_CHARS = 4_096
 const MAX_URL_FILTER_CHARS = 2_000
+const MAX_SELECTOR_CHARS = 1_000
 const MAX_REQUEST_ID_CHARS = 200
 /** As main's MAX_BODY_CHARS, in round kilobytes for the description. */
 const MAX_BODY_KB = 32
@@ -220,8 +222,9 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_click',
     title: 'Click',
     description:
-      'Clicks an element from the snapshot, at its visible centre, after scrolling it into ' +
-      'view. A centre covered by another element fails and names it.',
+      'Clicks an element from the snapshot at its centre, once it is on the page, visible, ' +
+      'enabled, scrolled into view and not covered by another element, waiting up to 5 s for ' +
+      'that; one that stays covered fails and names what covers it.',
     inputSchema: object(
       {
         ref: REF,
@@ -239,7 +242,8 @@ export const BROWSER_TOOLS: Tool[] = [
     title: 'Type',
     description:
       'Focuses a field from the snapshot, replaces what it holds with text, and with submit ' +
-      'presses Enter. Slowly types one key at a time, for fields that react to keys.',
+      'presses Enter. Slowly types one key at a time, for fields that react to keys. Waits up ' +
+      'to 5 s for the field to be visible, enabled and not read-only.',
     inputSchema: object(
       {
         ref: REF,
@@ -344,11 +348,28 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_wait_for',
     title: 'Wait for',
     description:
-      'Waits for text to appear or to leave the page, or for a number of seconds, then returns ' +
-      'a snapshot.',
+      'Waits for text to appear or to leave the page, for an element (a CSS selector, or a ref ' +
+      'from the snapshot) to be visible, hidden, attached or detached, or for a number of ' +
+      'seconds, then returns the page. It looks in every frame of the page it can reach and in ' +
+      'open shadow roots. Give one of text, text_gone, selector and ref; time is then the ' +
+      'longest it waits.',
     inputSchema: object({
       text: { type: 'string', maxLength: MAX_TEXT_CHARS, description: 'Waits until it shows.' },
       text_gone: { type: 'string', maxLength: MAX_TEXT_CHARS, description: 'Waits until it goes.' },
+      selector: {
+        type: 'string',
+        maxLength: MAX_SELECTOR_CHARS,
+        description: 'A CSS selector, such as "#results li" or "[role=alert]".',
+      },
+      ref: { ...REF, description: 'An element from the snapshot.' },
+      state: {
+        type: 'string',
+        enum: [...BROWSER_WAIT_STATES],
+        default: 'visible',
+        description:
+          'For selector or ref: visible, hidden (not visible or gone), attached (on the page) ' +
+          'or detached (gone).',
+      },
       time: {
         type: 'number',
         minimum: 0,
@@ -649,7 +670,7 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_scroll: ['ref', 'direction', 'amount'],
     browser_select_option: ['ref', 'element', 'values'],
     browser_take_screenshot: ['ref', 'full_page'],
-    browser_wait_for: ['text', 'text_gone', 'time'],
+    browser_wait_for: ['text', 'text_gone', 'selector', 'ref', 'state', 'time'],
     browser_console_messages: ['since_navigation', 'level'],
     browser_network_requests: ['since_navigation', 'url', 'include_static'],
     browser_network_request: ['id'],
@@ -779,16 +800,34 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     case 'browser_wait_for': {
       const waiting = text('text', false)
       const gone = text('text_gone', false)
+      const selector = text('selector', false, MAX_SELECTOR_CHARS)
+      const element = ref(false)
       if (waiting !== undefined) args.text = waiting
       if (gone !== undefined) args.text_gone = gone
+      if (selector !== undefined) {
+        if (selector.trim() === '') throw invalid('selector must not be empty.')
+        args.selector = selector
+      }
+      if (element !== undefined) args.ref = element
+      if (o.state !== undefined) {
+        if (!(BROWSER_WAIT_STATES as readonly unknown[]).includes(o.state)) {
+          throw invalid('state must be visible, hidden, attached or detached.')
+        }
+        if (selector === undefined && element === undefined) {
+          throw invalid('state is for selector or ref.')
+        }
+        args.state = o.state
+      }
       if (o.time !== undefined) {
         if (typeof o.time !== 'number' || !Number.isFinite(o.time) || o.time < 0 || o.time > 30) {
           throw invalid('time must be 0 to 30 seconds.')
         }
         args.time = o.time
       }
-      if (waiting === undefined && gone === undefined && args.time === undefined) {
-        throw invalid('Give text, text_gone or time to wait for.')
+      const conditions = [waiting, gone, selector, element].filter((given) => given !== undefined)
+      if (conditions.length > 1) throw invalid('Give one of text, text_gone, selector and ref.')
+      if (conditions.length === 0 && args.time === undefined) {
+        throw invalid('Give text, text_gone, selector, ref or time to wait for.')
       }
       break
     }

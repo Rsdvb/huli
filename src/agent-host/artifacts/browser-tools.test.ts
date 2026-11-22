@@ -255,3 +255,35 @@ describe('the network tools arguments', () => {
     expect(call).not.toHaveBeenCalled()
   })
 })
+
+describe('browser_wait_for arguments', () => {
+  it.each([
+    [{ text: 'Saved' }],
+    [{ selector: '#results li', time: 10 }],
+    [{ selector: '.spinner', state: 'hidden' }],
+    [{ ref: 'e7', state: 'detached' }],
+    [{ time: 2 }],
+  ])('forwards %j to main as given', async (input) => {
+    const { service, call } = tools()
+    const result = await service.call(caller, 'browser_wait_for', input)
+    expect(result.isError).toBeUndefined()
+    expect(call.mock.calls[0][0]).toMatchObject({ args: input })
+  })
+
+  it.each([
+    [{}, /Give text, text_gone, selector, ref or time/],
+    [{ text: 'a', selector: 'b' }, /Give one of/],
+    [{ selector: '' }, /must not be empty/],
+    [{ selector: 'x'.repeat(1_001) }, /selector must be text/],
+    [{ ref: 'button' }, /ref must be/],
+    [{ selector: 'a', state: 'gone' }, /state must be/],
+    [{ text: 'a', state: 'hidden' }, /state is for selector or ref/],
+    [{ selector: 'a', time: 31 }, /time must be/],
+  ])('refuses %j before main sees it', async (input, message) => {
+    const { service, call } = tools()
+    const result = await service.call(caller, 'browser_wait_for', input)
+    expect(result.isError).toBe(true)
+    expect(String((result.content[0] as { text: string }).text)).toMatch(message)
+    expect(call).not.toHaveBeenCalled()
+  })
+})

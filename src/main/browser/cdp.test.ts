@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { WebContents } from 'electron'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { BrowserToolName } from '@shared/browser'
 import { SurfaceControls } from '@shared/control'
 import { BrowserCdp } from './cdp'
@@ -293,5 +293,139 @@ describe('snapshots', () => {
     await expect(call('browser_snapshot', { ref: 'e9' })).rejects.toMatchObject({
       code: 'stale_ref',
     })
+  })
+})
+
+describe('acting on an element', () => {
+  /** A page with the button "Pay" (e2), whose probe answers come from `probes` in turn. */
+  function buttonHarness(probes: Record<string, unknown>[]) {
+    let next = 0
+    const harnessed = harness({
+      'Accessibility.getFullAXTree': () => page(['Ready']),
+      'DOM.resolveNode': () => ({ object: { objectId: 'button' } }),
+      'Runtime.callFunctionOn': () => ({
+        result: { value: probes[Math.min(next++, probes.length - 1)] },
+      }),
+    })
+    return { ...harnessed, probed: () => next }
+  }
+
+  const ready = {
+    connected: true,
+    visible: true,
+    enabled: true,
+    editable: true,
+    inside: true,
+    covered: null,
+    x: 40,
+    y: 60,
+  }
+
+  it('waits until the element can be clicked, then clicks its centre', async () => {
+    const { call, debug, probed } = buttonHarness([
+      { ...ready, visible: false },
+      { ...ready, covered: 'div#spinner' },
+      ready,
+    ])
+    await call('browser_snapshot')
+    const clicked = await call('browser_click', { ref: 'e2', element: 'Pay' })
+    expect(clicked.text).toMatch(/^Clicked "Pay"\./)
+    expect(probed()).toBe(3)
+    const presses = debug.sent.filter(
+      (sent) => sent.method === 'Input.dispatchMouseEvent' && sent.params.type === 'mousePressed',
+    )
+    expect(presses).toEqual([
+      expect.objectContaining({ params: expect.objectContaining({ x: 40, y: 60 }) }),
+    ])
+  })
+
+  it('fails at once on an element the page removed', async () => {
+    const { call, debug } = buttonHarness([{ ...ready, connected: false }])
+    await call('browser_snapshot')
+    await expect(call('browser_click', { ref: 'e2' })).rejects.toMatchObject({
+      code: 'stale_ref',
+      message: expect.stringMatching(/no longer on the page/),
+    })
+    expect(debug.sent.some((sent) => sent.method.startsWith('Input.'))).toBe(false)
+  })
+
+  it('gives up on one that stays disabled, saying why', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] })
+    try {
+      const { call, debug } = buttonHarness([{ ...ready, enabled: false }])
+      await call('browser_snapshot')
+      const clicking = call('browser_click', { ref: 'e2' })
+      const failed = expect(clicking).rejects.toMatchObject({
+        code: 'invalid',
+        message: expect.stringMatching(/ref e2 is disabled\. It still was after 5 s\./),
+      })
+      await vi.advanceTimersByTimeAsync(6_000)
+      await failed
+      expect(debug.sent.some((sent) => sent.method.startsWith('Input.'))).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('waiting for the page', () => {
+  it('waits for a selector in every frame, each in an isolated world', async () => {
+    let polls = 0
+    const { call, debug } = harness({
+      'Page.getFrameTree': () => ({
+        frameTree: { frame: { id: 'main' }, childFrames: [{ frame: { id: 'child' } }] },
+      }),
+      'Page.createIsolatedWorld': (params) => ({
+        executionContextId: params.frameId === 'main' ? 1 : 2,
+      }),
+      'Runtime.evaluate': (params) => {
+        if (params.contextId === 1) return { result: { value: { matched: 0, visible: 0 } } }
+        polls += 1
+        return { result: { value: { matched: 1, visible: polls >= 3 ? 1 : 0 } } }
+      },
+    })
+    const waited = await call('browser_wait_for', { selector: '[role=alert]', time: 5 })
+    expect(waited.text).toMatch(/^An element matching "\[role=alert\]" is visible\./)
+    expect(polls).toBe(3)
+    const worlds = debug.sent.filter((sent) => sent.method === 'Page.createIsolatedWorld')
+    expect(worlds.map((sent) => sent.params.frameId)).toEqual(['main', 'child'])
+    const searched = debug.sent.find((sent) => sent.method === 'Runtime.evaluate')
+    expect(searched?.params.expression).toContain('"selector":"[role=alert]"')
+  })
+
+  it('finds text in a frame and fails on a selector the page cannot read', async () => {
+    const { call } = harness({
+      'Page.getFrameTree': () => ({
+        frameTree: { frame: { id: 'main' }, childFrames: [{ frame: { id: 'child' } }] },
+      }),
+      'Page.createIsolatedWorld': (params) => ({
+        executionContextId: params.frameId === 'main' ? 1 : 2,
+      }),
+      'Runtime.evaluate': (params) => {
+        const expression = String(params.expression)
+        if (expression.includes('"selector"'))
+          return { result: { value: { error: 'bad selector' } } }
+        return { result: { value: { found: params.contextId === 2 } } }
+      },
+    })
+    expect((await call('browser_wait_for', { text: 'Inside frame' })).text).toMatch(/appeared/)
+    await expect(call('browser_wait_for', { selector: 'a[' })).rejects.toMatchObject({
+      code: 'invalid',
+      message: expect.stringMatching(/could not use the selector: bad selector/),
+    })
+  })
+
+  it('waits for a ref’s element to go', async () => {
+    let shown = 2
+    const { call } = harness({
+      'Accessibility.getFullAXTree': () => page(['Loading']),
+      'DOM.resolveNode': () => ({ object: { objectId: 'spinner' } }),
+      'Runtime.callFunctionOn': () => ({
+        result: { value: { connected: shown-- > 0, visible: true } },
+      }),
+    })
+    await call('browser_snapshot')
+    const waited = await call('browser_wait_for', { ref: 'e2', state: 'detached' })
+    expect(waited.text).toMatch(/^ref e2 is detached\./)
   })
 })

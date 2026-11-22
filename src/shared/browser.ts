@@ -136,6 +136,10 @@ export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 export const BROWSER_CONSOLE_LEVELS = ['error', 'warn', 'info', 'all'] as const
 export type BrowserConsoleLevel = (typeof BROWSER_CONSOLE_LEVELS)[number]
 
+/** What `browser_wait_for` waits for a selector's or a ref's element to be. */
+export const BROWSER_WAIT_STATES = ['visible', 'hidden', 'attached', 'detached'] as const
+export type BrowserWaitState = (typeof BROWSER_WAIT_STATES)[number]
+
 /** The deepest a `browser_snapshot` with `depth` goes. */
 export const MAX_SNAPSHOT_DEPTH = 100
 

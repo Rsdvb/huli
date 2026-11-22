@@ -5,8 +5,10 @@
 import type { WebContents } from 'electron'
 import {
   BROWSER_CONSOLE_LEVELS,
+  BROWSER_WAIT_STATES,
   MAX_SNAPSHOT_DEPTH,
   siteOf,
+  type BrowserWaitState,
   type BrowserCallResult,
   type BrowserToolName,
   type UploadAnswer,
@@ -18,6 +20,15 @@ import {
   type SurfaceControls,
   type UploadConsent,
 } from '@shared/control'
+import {
+  actionProblem,
+  AUTO_WAIT_MS,
+  pauseBefore,
+  PROBE,
+  waitedFailure,
+  type ActionKind,
+  type Probe,
+} from './actionability'
 import {
   consoleCall,
   exceptionEntry,
@@ -38,6 +49,7 @@ import {
 } from './network'
 import { buildOutline, mergeFrames, outlineText, RefRegistry, type AXNode } from './outline'
 import { isNeverOpened } from './policy'
+import { elementMet, SEARCH, selectorMet, type FrameSearch } from './page-wait'
 import { diffOutline } from './snapshot-diff'
 import { UploadRefused, type UploadFile } from './upload'
 
@@ -1133,58 +1145,9 @@ export class BrowserCdp {
     const backend = this.resolveRef(page, String(args.ref ?? ''))
     const double = args.double === true
     const button = clickButton(args.button)
-    await this.send(sessionId, 'DOM.scrollIntoViewIfNeeded', { backendNodeId: backend }).catch(
-      () => {},
-    )
-    // The centre in the top frame's viewport, and what covers it there; a shadow root or a frame
-    // is the page's own answer, not a guess from the outline.
-    const spot = await this.onElement<{
-      x: number
-      y: number
-      covered: string | null
-      inside: boolean
-    }>(
-      sessionId,
-      backend,
-      `function () {
-        const rect = this.getBoundingClientRect()
-        if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0, covered: null, inside: false }
-        let x = rect.x + rect.width / 2
-        let y = rect.y + rect.height / 2
-        let view = window
-        for (let depth = 0; depth < 8 && view !== window.top; depth++) {
-          const frame = view.frameElement
-          if (!frame) break
-          const box = frame.getBoundingClientRect()
-          x += box.x
-          y += box.y
-          view = frame.ownerDocument.defaultView
-        }
-        const at = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
-        let covered = null
-        if (at && at !== this && !this.contains(at)) {
-          const name = at.tagName ? at.tagName.toLowerCase() : 'element'
-          const id = at.id ? '#' + at.id : ''
-          const text = (at.innerText || at.textContent || '').trim().slice(0, 60)
-          covered = text ? name + id + ' "' + text + '"' : name + id
-        }
-        const inside =
-          x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight
-        return { x, y, covered, inside }
-      }`,
-    )
-    if (!spot.inside) {
-      throw new ToolFailure(
-        'invalid',
-        `${describe(args, 'The element')} is not visible on the page. Scroll it into view, then click again.`,
-      )
-    }
-    if (spot.covered !== null) {
-      throw new ToolFailure(
-        'invalid',
-        `The centre of ${describe(args, 'the element')} is covered by ${spot.covered}. Scroll it or close what covers it, then click again.`,
-      )
-    }
+    // The centre in the top frame's viewport, once nothing covers it there; a shadow root or a
+    // frame is the page's own answer, not a guess from the outline.
+    const spot = await this.actionable(sessionId, backend, args, 'click')
     const { x, y } = spot
     this.deps.acted?.(sessionId, { x, y }, true)
     await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
@@ -1214,24 +1177,44 @@ export class BrowserCdp {
     )
   }
 
-  /** Where an element's centre is in the page's viewport, for the agent's pointer; null if unknown. */
-  private async centre(
+  /**
+   * Waits up to AUTO_WAIT_MS for the element to take the action: on the page, visible, enabled,
+   * editable to type, and to click inside the window with nothing over its centre, scrolling it
+   * into view on each try.
+   */
+  private async actionable(
     sessionId: string,
     backend: number,
-  ): Promise<{ x: number; y: number } | null> {
-    try {
-      const spot = await this.onElement<{ x: number; y: number } | null>(
-        sessionId,
-        backend,
-        `function () {
-          const rect = this.getBoundingClientRect()
-          if (rect.width <= 0 || rect.height <= 0) return null
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-        }`,
+    args: Record<string, unknown>,
+    action: ActionKind,
+  ): Promise<Probe> {
+    const started = Date.now()
+    for (let attempt = 0; ; attempt++) {
+      const pause = pauseBefore(attempt)
+      if (pause > 0) {
+        await this.gate(sessionId)
+        await sleep(pause)
+      }
+      await this.send(sessionId, 'DOM.scrollIntoViewIfNeeded', { backendNodeId: backend }).catch(
+        () => {},
       )
-      return spot && Number.isFinite(spot.x) && Number.isFinite(spot.y) ? spot : null
-    } catch {
-      return null
+      // An element the page dropped may be gone from the protocol too.
+      const probe = await this.onElement<Probe | null>(sessionId, backend, PROBE, [action]).catch(
+        (error: unknown) => {
+          if (error instanceof ToolFailure || error instanceof ControlWait) throw error
+          return null
+        },
+      )
+      const problem = probe
+        ? actionProblem(probe, action)
+        : actionProblem({ connected: false } as Probe, action)
+      if (!problem) return probe!
+      if (!problem.retry || Date.now() - started >= AUTO_WAIT_MS) {
+        throw new ToolFailure(
+          problem.code,
+          waitedFailure(describe(args, 'The element'), problem, attempt > 0),
+        )
+      }
     }
   }
 
@@ -1240,7 +1223,8 @@ export class BrowserCdp {
     const backend = this.resolveRef(page, String(args.ref ?? ''))
     const text = String(args.text ?? '')
     const slowly = args.slowly === true
-    this.deps.acted?.(sessionId, await this.centre(sessionId, backend), false)
+    const spot = await this.actionable(sessionId, backend, args, 'type')
+    this.deps.acted?.(sessionId, { x: spot.x, y: spot.y }, false)
     await this.send(sessionId, 'DOM.focus', { backendNodeId: backend })
     const { object } = await this.send<{ object: { objectId?: string } }>(
       sessionId,
@@ -1397,7 +1381,8 @@ export class BrowserCdp {
     const values = Array.isArray(args.values) ? args.values.map(String) : []
     if (values.length === 0)
       throw new ToolFailure('invalid', 'values must list at least one option.')
-    this.deps.acted?.(sessionId, await this.centre(sessionId, backend), true)
+    const spot = await this.actionable(sessionId, backend, args, 'select')
+    this.deps.acted?.(sessionId, { x: spot.x, y: spot.y }, true)
     const { object } = await this.send<{ object: { objectId?: string } }>(
       sessionId,
       'DOM.resolveNode',
@@ -1657,57 +1642,155 @@ export class BrowserCdp {
     const page = this.pageOf(sessionId)
     const text = args.text === undefined ? undefined : String(args.text)
     const gone = args.text_gone === undefined ? undefined : String(args.text_gone)
+    const selector = args.selector === undefined ? undefined : String(args.selector)
+    const ref = args.ref === undefined ? undefined : String(args.ref)
     const seconds = args.time === undefined ? undefined : Number(args.time)
-    if (text === undefined && gone === undefined && seconds === undefined) {
-      throw new ToolFailure('invalid', 'Give text, text_gone or time to wait for.')
+    const state = waitState(args.state)
+    const conditions = [text, gone, selector, ref].filter((given) => given !== undefined)
+    if (conditions.length === 0 && seconds === undefined) {
+      throw new ToolFailure('invalid', 'Give text, text_gone, selector, ref or time to wait for.')
+    }
+    if (conditions.length > 1) {
+      throw new ToolFailure('invalid', 'Give one of text, text_gone, selector and ref.')
     }
     if (seconds !== undefined && (!Number.isFinite(seconds) || seconds < 0 || seconds > 30)) {
       throw new ToolFailure('invalid', 'time must be 0 to 30 seconds.')
     }
-    const deadline = Date.now() + (seconds ?? 30) * 1000
-    if (text !== undefined || gone !== undefined) {
-      let seen: boolean
+    const backend = ref === undefined ? undefined : this.resolveRef(page, ref)
+    const limit = seconds ?? 30
+    const deadline = Date.now() + limit * 1000
+    let said: string
+    if (conditions.length > 0) {
+      // Each frame's own isolated world, which the page's scripts cannot change.
+      const worlds = new Map<string, number | null>()
+      let met: boolean
       for (;;) {
-        const body = await this.pageText(sessionId)
-        seen = text !== undefined ? body.includes(text) : !body.includes(gone!)
-        if (seen || Date.now() >= deadline) break
+        if (backend !== undefined) {
+          const shown = await this.onElement<{ connected: boolean; visible: boolean } | null>(
+            sessionId,
+            backend,
+            `function () {
+              if (!this.isConnected || this.nodeType !== 1) return { connected: false, visible: false }
+              const rect = this.getBoundingClientRect()
+              const visible = rect.width > 0 && rect.height > 0 &&
+                getComputedStyle(this).visibility !== 'hidden' &&
+                (typeof this.checkVisibility !== 'function' || this.checkVisibility({ visibilityProperty: true }))
+              return { connected: true, visible }
+            }`,
+          ).catch(() => null)
+          met = elementMet(state, shown?.connected ?? false, shown?.visible ?? false)
+        } else {
+          const query = selector !== undefined ? { selector } : { text: text ?? gone }
+          const frames = await this.searchFrames(sessionId, worlds, query)
+          const failed = frames.find((frame): frame is { error: string } => 'error' in frame)
+          if (failed) {
+            throw new ToolFailure('invalid', `The page could not use the selector: ${failed.error}`)
+          }
+          if (selector !== undefined) {
+            let matched = 0
+            let visible = 0
+            for (const frame of frames) {
+              if ('matched' in frame) {
+                matched += frame.matched
+                visible += frame.visible
+              }
+            }
+            met = selectorMet(state, matched, visible)
+          } else {
+            const found = frames.some((frame) => 'found' in frame && frame.found)
+            met = text !== undefined ? found : !found
+          }
+        }
+        if (met || Date.now() >= deadline) break
         await this.gate(sessionId)
         await sleep(100)
       }
-      if (!seen) {
+      const what =
+        text !== undefined
+          ? `"${text}"`
+          : gone !== undefined
+            ? `"${gone}"`
+            : selector !== undefined
+              ? `An element matching ${JSON.stringify(selector)}`
+              : describe(args, 'The element')
+      if (!met) {
         throw new ToolFailure(
           'timeout',
           text !== undefined
-            ? `"${text}" did not appear within ${seconds ?? 30} s.`
-            : `"${gone}" was still on the page after ${seconds ?? 30} s.`,
+            ? `${what} did not appear within ${limit} s.`
+            : gone !== undefined
+              ? `${what} was still on the page after ${limit} s.`
+              : `${what} was not ${state} within ${limit} s.`,
         )
       }
+      said =
+        text !== undefined
+          ? `${what} appeared.`
+          : gone !== undefined
+            ? `${what} left the page.`
+            : `${what} is ${state}.`
     } else {
       const until = Date.now() + (seconds ?? 0) * 1000
       while (Date.now() < until) {
         await this.gate(sessionId)
         await sleep(Math.min(100, Math.max(1, until - Date.now())))
       }
+      said = `Waited ${seconds ?? 0} s.`
     }
     const contents = this.contentsOf(sessionId)
-    const { outline } = await this.capture(sessionId, page)
+    const { outline, diff } = await this.changedOutline(sessionId, page)
     return {
-      text:
-        text !== undefined
-          ? `"${text}" appeared.`
-          : gone !== undefined
-            ? `"${gone}" left the page.`
-            : `Waited ${seconds ?? 0} s.`,
+      text: [
+        said,
+        ...newErrors(page),
+        ...(diff ? ['The snapshot shows what changed since your last one.'] : []),
+      ].join(' '),
       value: { url: contents.getURL(), title: contents.getTitle(), snapshot: outline },
     }
   }
 
-  private async pageText(sessionId: string): Promise<string> {
-    const result = await this.send<{ result?: { value?: string } }>(sessionId, 'Runtime.evaluate', {
-      expression: 'document.body ? document.body.innerText : ""',
-      returnByValue: true,
-    })
-    return result.result?.value ?? ''
+  /**
+   * SEARCH in every frame of the page that answers, each in an isolated world of its own, which
+   * `worlds` keeps for the wait; a frame without one is searched in its page's own world.
+   */
+  private async searchFrames(
+    sessionId: string,
+    worlds: Map<string, number | null>,
+    query: { text?: string; selector?: string },
+  ): Promise<FrameSearch[]> {
+    const expression = `(${SEARCH})(${JSON.stringify(query)})`
+    const results: FrameSearch[] = []
+    for (const frameId of await this.frameIds(sessionId)) {
+      let context = worlds.get(frameId)
+      if (context === undefined) {
+        const world =
+          frameId === ''
+            ? null
+            : await this.send<{ executionContextId?: number }>(
+                sessionId,
+                'Page.createIsolatedWorld',
+                { frameId, worldName: 'kite-wait' },
+              ).catch(() => null)
+        context = world?.executionContextId ?? null
+        worlds.set(frameId, context)
+      }
+      const answer = await this.send<{ result?: { value?: FrameSearch } }>(
+        sessionId,
+        'Runtime.evaluate',
+        {
+          expression,
+          returnByValue: true,
+          ...(context === null ? {} : { contextId: context }),
+        },
+      ).catch(() => {
+        // A world goes with its document; the next try makes the frame a new one.
+        worlds.delete(frameId)
+        return null
+      })
+      const value = answer?.result?.value
+      if (value && typeof value === 'object') results.push(value)
+    }
+    return results
   }
 
   private async consoleMessages(
@@ -1938,6 +2021,12 @@ function headerOf(headers: Record<string, unknown>, name: string): string {
 
 function numberOr(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function waitState(value: unknown): BrowserWaitState {
+  if (value === undefined) return 'visible'
+  if ((BROWSER_WAIT_STATES as readonly unknown[]).includes(value)) return value as BrowserWaitState
+  throw new ToolFailure('invalid', 'state must be visible, hidden, attached or detached.')
 }
 
 function consoleFilter(value: unknown): ConsoleLevel {
