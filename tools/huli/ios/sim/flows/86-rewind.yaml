@@ -1,6 +1,7 @@
-# Huli: going back to an earlier message from its menu. Two turns of the fake agent write into a
-# file of the session's folder; 回退到这里 on the first opens the dialog with what leaves the
-# conversation and, with 同时还原文件, the file that would be put back, then rewinds.
+# Huli: going back to an earlier message from its menu. Three turns of the fake agent write into a
+# file of the session's folder; 回退到这里 on the second opens the dialog with what leaves the
+# conversation and, with 同时还原文件, the file that would be put back, then rewinds. The first
+# message names the session, so the one held is the second, which the title does not repeat.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -15,7 +16,7 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - tapOn:
     text: '(想让|给) .*'
-- inputText: '/write notes.md first idea'
+- inputText: '/write notes.md alpha'
 - tapOn:
     text: '选一个项目，或者直接说你要什么。'
     optional: true
@@ -27,19 +28,36 @@ appId: io.github.rsdvb.huli
     timeout: 120000
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/write notes.md second idea'
+- inputText: '/write notes.md beta'
 - tapOn: '发送'
 - extendedWaitUntil:
     visible:
       text: '给 .* 发消息 回复.*'
     timeout: 60000
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/write notes.md gamma'
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 60000
+# The keyboard goes down as the list is dragged, and the second message comes into view.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 85%
+    duration: 700
+- scrollUntilVisible:
+    element: '.*notes.md beta.*'
+    direction: UP
+    timeout: 20000
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
-    timeout: 2000
+    timeout: 1500
     optional: true
-- takeScreenshot: r01-two-turns
+- takeScreenshot: r01-three-turns
 - longPressOn:
-    text: '.*first idea.*'
+    text: '.*notes.md beta.*'
 - waitForAnimationToEnd
 - takeScreenshot: r02-menu
 - tapOn: '回退到这里'
@@ -60,7 +78,7 @@ appId: io.github.rsdvb.huli
     optional: true
 - takeScreenshot: r05-done
 - longPressOn:
-    text: '.*first idea.*'
+    text: '.*notes.md beta.*'
 - waitForAnimationToEnd
 - tapOn: '从这里重来'
 - extendedWaitUntil:
