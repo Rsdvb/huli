@@ -608,7 +608,14 @@ describe('request risk', () => {
   })
 
   it('rates deletes, unknown tools and typing into a command high', () => {
-    expect(risk({ kind: 'delete', paths: ['/home/me/proj/a.ts'] }).level).toBe('high')
+    // A path inside the project is named as relative to it.
+    expect(risk({ kind: 'delete', paths: ['/home/me/proj/src/a.ts'] })).toMatchObject({
+      level: 'high',
+      detail: 'src/a.ts',
+    })
+    expect(risk({ kind: 'read', paths: ['/home/me/other/a.ts'] }).detail).toBe(
+      '/home/me/other/a.ts',
+    )
     expect(risk({ kind: 'other', name: 'Something' }).level).toBe('high')
     expect(risk({ kind: 'input' }).level).toBe('high')
   })

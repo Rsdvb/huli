@@ -38,7 +38,8 @@
     "move_other": "移动了 {{count}} 个文件",
     "moveNamed": "移动了 {{names}}",
     "moveMore": "移动了 {{names}} 及另外 {{more}} 个文件",
-    "failed": "{{failed}} 项失败"
+    "failed": "{{failed}} 项失败",
+    "autoApproved_other": "已自动批准 {{count}} 项"
   },
   "refusal": {
     "title": "模型拒绝继续",

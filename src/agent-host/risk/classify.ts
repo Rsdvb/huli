@@ -88,6 +88,8 @@ export function assessRisk(subject: RiskSubject, ctx: RiskContext): Assessment {
     shell: ctx.platform === 'win32' ? 'cmd' : 'posix',
   }
   const at = (file: string): Place => placeOf(file, places)
+  // A path inside the project as relative to it, as the card names it.
+  const shown = (file: string): string => relativeTo(ctx.roots, file, ctx.platform)
   const verdict = ((): Verdict => {
     switch (subject.kind) {
       case 'command':
@@ -99,7 +101,7 @@ export function assessRisk(subject: RiskSubject, ctx: RiskContext): Assessment {
       case 'read':
         if (subject.paths.length === 0) return medium('unclearScope')
         return subject.paths.reduce<Verdict>(
-          (out, file) => worst(out, readVerdict(at(file), file)),
+          (out, file) => worst(out, readVerdict(at(file), shown(file))),
           low('readProject'),
         )
       case 'edit':
@@ -108,16 +110,15 @@ export function assessRisk(subject: RiskSubject, ctx: RiskContext): Assessment {
         let out: Verdict = medium('editProject')
         for (const file of subject.paths) {
           const place = at(file)
-          const shown = relativeTo(ctx.roots, file, ctx.platform)
           // A setting of a tool or agent says so over a plain edit at the same level.
-          if (place === 'project' && CONFIG_PATH.test(shown)) {
-            if (out.reason === 'editProject') out = medium('editConfig', shown)
-          } else out = worst(out, writeVerdict(place, file))
+          if (place === 'project' && CONFIG_PATH.test(shown(file))) {
+            if (out.reason === 'editProject') out = medium('editConfig', shown(file))
+          } else out = worst(out, writeVerdict(place, shown(file)))
         }
         return out
       }
       case 'delete':
-        return high('delete', subject.paths[0])
+        return high('delete', subject.paths[0] === undefined ? undefined : shown(subject.paths[0]))
       case 'fetch':
         return medium('network', subject.url ? hostOf(subject.url) : undefined)
       case 'search':
@@ -128,8 +129,8 @@ export function assessRisk(subject: RiskSubject, ctx: RiskContext): Assessment {
       }
       case 'grant': {
         let out = subject.network ? medium('network') : medium('grant')
-        for (const file of subject.reads) out = worst(out, readVerdict(at(file), file))
-        for (const file of subject.writes) out = worst(out, writeVerdict(at(file), file))
+        for (const file of subject.reads) out = worst(out, readVerdict(at(file), shown(file)))
+        for (const file of subject.writes) out = worst(out, writeVerdict(at(file), shown(file)))
         return worst(out, medium('grant'))
       }
       case 'input':
@@ -142,10 +143,7 @@ export function assessRisk(subject: RiskSubject, ctx: RiskContext): Assessment {
     subject.kind === 'edit' &&
     verdict.level === 'medium' &&
     subject.paths.length > 0 &&
-    subject.paths.every(
-      (file) =>
-        at(file) === 'project' && !CONFIG_PATH.test(relativeTo(ctx.roots, file, ctx.platform)),
-    )
+    subject.paths.every((file) => at(file) === 'project' && !CONFIG_PATH.test(shown(file)))
   return { ...verdict, projectEdit }
 }
 

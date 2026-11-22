@@ -217,6 +217,14 @@ export const RunGroup = memo(function RunGroup({
       break
     }
   }
+  // Huli: calls the host allowed by itself say so on the folded line, so none goes unseen.
+  const auto = shown.filter(
+    (entry) =>
+      entry.kind === 'tool' &&
+      typeof entry.permissionResult === 'object' &&
+      entry.permissionResult?.by === 'risk',
+  ).length
+  if (auto > 0) texts.push(t('summary.autoApproved', { count: auto }))
   const label = texts.join(t('summary.separator'))
 
   // The time the run took, when this window saw each of its steps start and end.

@@ -1371,7 +1371,7 @@
       "readCommand": "只读命令",
       "projectCheck": "运行项目的测试、检查或构建",
       "editProject": "修改项目内的文件",
-      "editConfig": "修改工具或代理的配置",
+      "editConfig": "修改工具或 Agent 的配置",
       "readOutside": "读取项目外的内容",
       "install": "安装或移除依赖包",
       "download": "下载并运行软件包",

@@ -82,6 +82,14 @@ export const RunRow = memo(function RunRow(props: { entries: ThreadEntry[]; late
       break
     }
   }
+  // Huli: calls the host allowed by itself say so on the folded line, so none goes unseen.
+  const auto = entries.filter(
+    (entry) =>
+      entry.kind === 'tool' &&
+      typeof entry.permissionResult === 'object' &&
+      entry.permissionResult?.by === 'risk',
+  ).length
+  if (auto > 0) texts.push(`已自动批准 ${auto} 项`)
   const label = texts.join(' · ')
 
   // The time the run took, when this phone saw each of its steps start and end.

@@ -57,11 +57,11 @@ export function ProjectApprovalsMenu({
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-64">
         <DropdownMenuRadioGroup value={project.autoApprove ?? DEFAULT} onValueChange={choose}>
-          <DropdownMenuRadioItem value={DEFAULT}>
+          <DropdownMenuRadioItem value={DEFAULT} closeOnClick>
             {t('project.autoApprove.default', { level: levelName(fallback) })}
           </DropdownMenuRadioItem>
           {AUTO_APPROVE_LEVELS.map((level) => (
-            <DropdownMenuRadioItem key={level} value={level}>
+            <DropdownMenuRadioItem key={level} value={level} closeOnClick>
               {levelName(level)}
             </DropdownMenuRadioItem>
           ))}

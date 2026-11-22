@@ -48,7 +48,9 @@
     "move_other": "Moved {{count}} files",
     "moveNamed": "Moved {{names}}",
     "moveMore": "Moved {{names}} and {{more}} more",
-    "failed": "{{failed}} failed"
+    "failed": "{{failed}} failed",
+    "autoApproved_one": "{{count}} approved automatically",
+    "autoApproved_other": "{{count}} approved automatically"
   },
   "refusal": {
     "title": "The model declined to continue",
