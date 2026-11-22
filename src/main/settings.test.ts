@@ -727,3 +727,41 @@ describe('the backup', () => {
     expect(client).toEqual({ backup: { keep: 3 } })
   })
 })
+
+describe('manager mode settings', () => {
+  const writer = {
+    id: 'w-0a1b2c3d',
+    name: '写手',
+    role: 'implement',
+    agentId: 'codex',
+    model: null,
+    effort: null,
+    profileId: null,
+    mode: null,
+    worktree: false,
+    persona: '',
+  }
+  const manager = { ...DEFAULT_SETTINGS.manager, workers: [writer], approvals: 'low' }
+
+  it('takes a valid roster whole and sends it to the host', () => {
+    const patch = validateSettingsPatch({ manager })
+    const next = mergeSettings(DEFAULT_SETTINGS, patch)
+    expect(next.manager).toEqual(manager)
+    expect(hostSettings(next, 'en').manager).toEqual(manager)
+  })
+
+  it('refuses a roster with problems, changing nothing', () => {
+    expect(() =>
+      validateSettingsPatch({ manager: { ...manager, workers: [writer, writer] } }),
+    ).toThrow(/repeats/)
+    expect(() =>
+      validateSettingsPatch({ manager: { ...manager, limits: { concurrent: 3 } } }),
+    ).toThrow()
+    expect(() => validateSettingsPatch({ manager: { workers: [] } })).toThrow(/needs/)
+  })
+
+  it('reads a stored roster, dropping entries that do not validate', async () => {
+    await save({ version: 1, manager: { ...manager, workers: [writer, { name: 'x' }] } })
+    expect((await SettingsStore.load(dir)).get().manager.workers).toEqual([writer])
+  })
+})

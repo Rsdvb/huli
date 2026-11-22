@@ -131,6 +131,12 @@ import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
 import type {
+  ManagerChoices,
+  ManagerSummary,
+  ProjectManagerSettings,
+  WorkerSummary,
+} from './manager'
+import type {
   RoutineChanges,
   RoutineDraft,
   RoutineRef,
@@ -794,6 +800,8 @@ export interface Project {
   // Huli: which permission requests the host allows by itself in this project; null keeps the
   // settings' default, absent on hosts older than it.
   autoApprove?: AutoApprove | null
+  // Huli: the project's own manager-mode roster and choices; null keeps the settings'.
+  manager?: ProjectManagerSettings | null
 }
 
 export type SessionAttention = 'none' | 'permission' | 'unread' | 'error'
@@ -881,6 +889,10 @@ export interface SessionSummary {
   // Huli: its column on the user's task board, for the user's own top-level session; null for
   // the others; absent from older hosts
   board?: SessionBoard | null
+  // Huli: a manager session (总管模式): its choices, its workers' state and the task's counters
+  manager?: ManagerSummary | null
+  // Huli: a worker of a manager session, with its roster name, role and latest report
+  worker?: WorkerSummary | null
 }
 
 /**
@@ -1301,6 +1313,12 @@ export interface HostContract {
     params: { path: string; autoApprove: AutoApprove | null }
     result: void
   }
+  // Huli: the project's own manager-mode roster and choices; null keeps the settings'. The
+  // windows' alone, as the choice that lets the manager answer requests widens what runs.
+  'projects.setManager': {
+    params: { path: string; manager: ProjectManagerSettings | null }
+    result: void
+  }
   // How the project names and prepares its sessions' worktrees.
   'projects.worktreeSettings': { params: { path: string }; result: ProjectWorktreeSettings }
   // A device needs the owner's leave to use the terminal to change these, as they run a command.
@@ -1329,6 +1347,8 @@ export interface HostContract {
       // Huli: the agent's API provider profile it runs with; null for the agent's own sign-in,
       // absent for the agent's default.
       profileId?: string | null
+      // Huli: a manager session (总管模式) with these choices.
+      manager?: ManagerChoices
     }
     result: SessionSummary
   }
@@ -1628,6 +1648,18 @@ export interface HostContract {
   }
   /** Huli: moves the user's own top-level session to a column of the task board. */
   'sessions.setBoardStatus': { params: { sessionId: string; status: BoardStatus }; result: void }
+  // Huli: manager mode. `set` switches a session's mode between turns or changes its choices;
+  // `stopAll` stops the manager and every worker of it; `pause` holds new dispatches and
+  // reports; `detach` lets the user take a worker over or hand it back; `moreTurns` gives the
+  // task 10 more worker turns.
+  'manager.set': {
+    params: { sessionId: string; on: boolean; choices?: ManagerChoices }
+    result: void
+  }
+  'manager.stopAll': { params: { sessionId: string }; result: void }
+  'manager.pause': { params: { sessionId: string; paused: boolean }; result: void }
+  'manager.detach': { params: { sessionId: string; detached: boolean }; result: void }
+  'manager.moreTurns': { params: { sessionId: string }; result: void }
   /** Huli: stops a turn that looks stuck, stops it and goes on again, or keeps waiting. */
   'sessions.stall': { params: { sessionId: string; action: StallAction }; result: void }
   // An image or pasted text the thread store keeps for a sent attachment, by its hash.
@@ -2290,6 +2322,7 @@ export const HOST_METHODS = [
   'projects.touch',
   'projects.pin',
   'projects.setAutoApprove',
+  'projects.setManager',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
   'paths.complete',
@@ -2352,6 +2385,11 @@ export const HOST_METHODS = [
   'sessions.setAutoResume',
   'sessions.setPrFlow',
   'sessions.setBoardStatus',
+  'manager.set',
+  'manager.stopAll',
+  'manager.pause',
+  'manager.detach',
+  'manager.moreTurns',
   'sessions.stall',
   'sessions.blob',
   'sessions.setConfigOption',

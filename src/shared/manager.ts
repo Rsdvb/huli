@@ -7,6 +7,20 @@
 import { isAgentId, START_MODE_CHARS, type AgentId } from './agents'
 import type { RiskLevel } from './risk'
 
+/** The harnesses whose sessions manager mode can hold to reading, so can be managers. */
+export const MANAGER_HARNESSES = [
+  'claude-code',
+  'codex',
+  'deepseek',
+  'antigravity',
+  'fake-agent',
+] as const
+
+export function canManage(agentId: AgentId): boolean {
+  const harness = agentId.split('~')[0]!
+  return (MANAGER_HARNESSES as readonly string[]).includes(harness)
+}
+
 // The roster.
 
 /** 写代码 · 审阅 · 规划调研 · 杂活. */
@@ -566,6 +580,8 @@ export interface StoredWorker {
   role: WorkerRole
   kind: WorkerRole
   title: string
+  /** What done means, as the manager wrote it, for the review. */
+  acceptance?: string[]
   /** The commit an implementation started from, in a Git folder. */
   base?: string
   /** A turn started that the manager is owed a report for, and when. */
@@ -780,6 +796,11 @@ export function readStoredWorker(raw: unknown): StoredWorker | null {
         .filter((text): text is string => isText(text, INTERJECTION_CHARS))
         .slice(-INTERJECTIONS_MAX)
     : []
+  const acceptance = Array.isArray(raw.acceptance)
+    ? raw.acceptance
+        .filter((line): line is string => isText(line, ACCEPTANCE_CHARS) && line !== '')
+        .slice(0, ACCEPTANCE_MAX)
+    : []
   return {
     managerId: raw.managerId,
     workerId: raw.workerId,
@@ -789,6 +810,7 @@ export function readStoredWorker(raw: unknown): StoredWorker | null {
     title: raw.title,
     tokens: isWhole(raw.tokens) ? raw.tokens : 0,
     cost: isAmount(raw.cost) ? raw.cost : 0,
+    ...(acceptance.length > 0 ? { acceptance } : {}),
     ...(isText(raw.base, 64) && raw.base !== '' ? { base: raw.base } : {}),
     ...(isWhole(raw.owed) ? { owed: raw.owed } : {}),
     ...(isWhole(raw.resumedAt) ? { resumedAt: raw.resumedAt } : {}),
@@ -1111,6 +1133,7 @@ export type DigestStatus =
   | 'limit_paused'
   | 'taken_over'
   | 'handed_back'
+  | 'asks'
 
 export interface DigestItem {
   sessionId: string
@@ -1119,6 +1142,10 @@ export interface DigestItem {
   /** One line of what happened, at most 200 characters. */
   line: string
   round?: number
+  /** What the user said to the worker since its last report. */
+  said?: string[]
+  /** A low request the manager may answer. */
+  request?: { id: string; what: string }
 }
 
 export const DIGEST_LINE_CHARS = 200

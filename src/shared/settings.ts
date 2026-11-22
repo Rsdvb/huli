@@ -2,6 +2,7 @@ import { DEFAULT_AGENT_NETWORK, type AgentNetworkSettings } from './agent-networ
 import type { ComputerUseSettings } from './computer-use'
 import type { IdleSessionsSettings } from './idle-release'
 import type { LanguageSetting, Locale } from './locale'
+import { DEFAULT_MANAGER_SETTINGS, type ManagerSettings } from './manager'
 import type { MarketServer, MarketSkill } from './marketplace'
 import type { DirectAddress } from './remote/protocol'
 import type { AutoApprove } from './risk'
@@ -160,6 +161,8 @@ export interface SettingsFile {
   // Huli: which permission requests the host allows once by itself, for a project that keeps the
   // default; a project may choose its own. Agents never change it.
   permissions: { autoApprove: AutoApprove }
+  // Huli: manager mode's roster, review loop, approvals and limits; a project may have its own.
+  manager: ManagerSettings
 }
 
 /**
@@ -395,6 +398,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   onboarding: { done: false, step: 'welcome' },
   backup: { enabled: true, time: '03:00', keep: 7, folder: null },
   permissions: { autoApprove: 'off' },
+  manager: DEFAULT_MANAGER_SETTINGS,
 }
 
 /** The zoom one step in (1) or out (-1), held at the ends; 0 returns to the default. */
@@ -458,6 +462,7 @@ export interface SettingsPatch {
     discoverable?: boolean
   }
   permissions?: Partial<SettingsFile['permissions']>
+  manager?: ManagerSettings // replaced whole
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
     enabled?: boolean
@@ -499,6 +504,8 @@ export interface HostSettings {
   autoApprove?: AutoApprove
   // Huli: the host lowers its own priority; absent from a parent older than it, which leaves it.
   lowerAgentPriority?: boolean
+  // Huli: manager mode's settings; absent from a parent older than it, which has none.
+  manager?: ManagerSettings
 }
 
 /** The part of the settings the terminal host receives. */

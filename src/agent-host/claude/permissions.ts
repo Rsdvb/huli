@@ -279,6 +279,7 @@ export function permissionResult(
   optionId: string | null,
   input: Record<string, unknown>,
   context: Pick<ToolPermissionContext, 'suggestions' | 'toolUseID'>,
+  note?: string,
 ): PermissionResult {
   const { toolUseID } = context
   if (optionId === null) return { behavior: 'deny', message: CANCELLED, toolUseID }
@@ -300,7 +301,8 @@ export function permissionResult(
       toolUseID,
     }
   }
-  return { behavior: 'deny', message: REJECTED, toolUseID }
+  // Huli: a refusal with a note, such as manager mode's guard, tells the model why and goes on.
+  return { behavior: 'deny', message: note ?? REJECTED, toolUseID }
 }
 
 /** The option that lets the user answer a question in their own words, in their next message. */

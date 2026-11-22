@@ -1531,5 +1531,28 @@
       "mcpDanger": "可能删除、发送或执行操作的 MCP 工具",
       "input": "向正在运行的命令输入内容"
     }
+  },
+  "manager": {
+    "untitled": "总管",
+    "outOfRounds": {
+      "title": "有一项审阅需要你决定",
+      "body": "「{{name}}」的改动到轮数上限仍未通过审阅，总管会问你接下来怎么办。"
+    },
+    "wakesSpent": "本任务的回合用完了，Kite 不再叫醒总管。给总管发消息或再给一些回合就能接着做。",
+    "answered": {
+      "allowed": "总管批准了：{{name}} {{what}} · 低风险",
+      "denied": "总管拒绝了：{{name}} {{what}} · 低风险"
+    },
+    "stoppedAll": {
+      "title": "已全部停止：总管和 {{count}} 个工人",
+      "description": "给总管发消息即可接着做。"
+    },
+    "switchedOn": "已开启总管模式：这个会话只拆分、派活、验收，改文件交给工人。",
+    "switchedOff": "已关闭总管模式：这个会话又可以自己改文件了。",
+    "betweenTurns": "总管模式只能在两轮之间切换，且会话里没有在运行的东西。",
+    "unsupported": "这个智能体没法限制成只读，不能当总管。",
+    "notTopLevel": "只有你自己开的会话能当总管。",
+    "workersWorking": "先停止工人或等它们做完，再关闭总管模式。",
+    "modeLocked": "总管只读：它的模式只能是每次改动前都要询问的那种。"
   }
 }

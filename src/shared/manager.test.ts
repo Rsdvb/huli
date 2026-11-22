@@ -119,7 +119,8 @@ describe('settings checks', () => {
   })
 
   it('needs every field and refuses others', () => {
-    const { afterRestart: _, ...partial } = settings()
+    const partial: Partial<ManagerSettings> = settings()
+    delete partial.afterRestart
     expect(managerSettingsProblem(partial)).toMatch(/needs "afterRestart"/)
     expect(managerSettingsProblem({ ...settings(), more: true })).toMatch(/unknown field/)
   })

@@ -45,6 +45,7 @@ import {
   OUT_OF_VIEW_MINUTES,
 } from '@shared/idle-release'
 import { LANGUAGE_SETTINGS, resolveLocale, type Locale } from '@shared/locale'
+import { managerSettingsProblem, readManagerSettings, type ManagerSettings } from '@shared/manager'
 import {
   catalogSkillId,
   MARKET_NAME,
@@ -1122,6 +1123,10 @@ export function validateSettingsPatch(raw: unknown): SettingsPatch {
       checkRemote(value, problems)
     } else if (section === 'backup') {
       checkBackupPatch(value, problems)
+    } else if (section === 'manager') {
+      const problem = managerSettingsProblem(value)
+      if (problem) problems.push(`"manager" ${problem}`)
+      else checked.manager = structuredClone(value as ManagerSettings)
     } else if (section === 'terminal') {
       if (!isRecord(value)) {
         problems.push('"terminal" must be an object')
@@ -1239,6 +1244,7 @@ export function mergeSettings(current: SettingsFile, patch: SettingsPatch): Sett
     if (keep !== undefined) next.backup.keep = keep
     if (folder === null) next.backup.folder = null
   }
+  if (patch.manager) next.manager = structuredClone(patch.manager)
   holdForRemote(next)
   return next
 }
@@ -1540,6 +1546,7 @@ export function parseSettingsFile(raw: unknown): LoadedSettings {
   }
   if (raw.startModes !== undefined) settings.startModes = readStartModes(raw.startModes, problems)
   if (raw.backup !== undefined) settings.backup = readBackup(raw.backup, problems)
+  if (raw.manager !== undefined) settings.manager = readManagerSettings(raw.manager, problems)
   if (raw.remote !== undefined) {
     if (!isRecord(raw.remote)) problems.push('"remote" must be an object')
     else settings.remote = readRemote(raw.remote, problems)
@@ -1770,6 +1777,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     downloadService: settings.cloud.enabled && settings.updates.source === 'auto',
     autoApprove: settings.permissions.autoApprove,
     lowerAgentPriority: settings.general.lowerAgentPriority,
+    manager: structuredClone(settings.manager),
   }
 }
 
@@ -1804,6 +1812,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'cloud',
   'updates',
   'permissions',
+  'manager',
 ])
 
 /** Whether a change touches what the agent host is sent; a language change is checked apart. */

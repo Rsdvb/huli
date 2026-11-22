@@ -1551,5 +1551,28 @@
       "mcpDanger": "An MCP tool that may delete, send or run something",
       "input": "Types into a command that runs already"
     }
+  },
+  "manager": {
+    "untitled": "Manager",
+    "outOfRounds": {
+      "title": "A review needs your decision",
+      "body": "{{name}} was not approved within the round limit. The manager will ask you how to go on."
+    },
+    "wakesSpent": "Manager mode stopped waking the manager: this task's turns are spent. Send it a message or give more turns to go on.",
+    "answered": {
+      "allowed": "The manager allowed: {{name}} {{what}} · low risk",
+      "denied": "The manager denied: {{name}} {{what}} · low risk"
+    },
+    "stoppedAll": {
+      "title": "Stopped everything: the manager and {{count}} workers",
+      "description": "Send the manager a message to go on."
+    },
+    "switchedOn": "Manager mode is on: this session plans, dispatches and checks; workers change the files.",
+    "switchedOff": "Manager mode is off: this session changes files itself again.",
+    "betweenTurns": "Manager mode can be switched between turns, with nothing running in the session.",
+    "unsupported": "This agent cannot be held to reading, so it cannot be the manager.",
+    "notTopLevel": "Only a session you started yourself can be a manager.",
+    "workersWorking": "Stop the workers or wait for them to finish before switching manager mode off.",
+    "modeLocked": "A manager reads only: its mode stays one that asks before every change."
   }
 }

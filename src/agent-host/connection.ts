@@ -441,6 +441,11 @@ export interface SessionOptions {
    * sessions each run a process of their own; the others' processes serve several sessions.
    */
   env?: Record<string, string>
+  /**
+   * Huli: manager mode holds the session to reading: an agent that can take its file-writing
+   * tools away does, and Kite's guard answers the rest.
+   */
+  readOnly?: boolean
 }
 
 /** Kettu's memory as a session starts with it. */
