@@ -1459,7 +1459,8 @@ class DeviceSession {
       role: this.role,
       device: { id: this.device.id, name: this.device.name },
       terminal: this.server.terminal,
-      featuresOff: this.server.featuresOff,
+      // Absent while every feature is on, as from a host older than the switches.
+      ...(this.server.featuresOff.length > 0 ? { featuresOff: this.server.featuresOff } : {}),
       addresses: this.server.addresses,
       ...this.server.relay(),
       ...(this.token ? { resume: this.token } : {}),
