@@ -572,6 +572,11 @@ export type MainToRemoteHost =
       /** Whether devices may use the terminal; `remote-host:terminal` says when it changes. */
       terminal: boolean
       /**
+       * Huli: the features turned off in Settings > Features, which devices hide and the remote
+       * host refuses; `remote-host:features` says when they change. Absent: all are on.
+       */
+      featuresOff?: string[]
+      /**
        * The desktop app as a device of other hosts: the 32 bytes of its own X25519 private key, in
        * base64 and never logged, and its system as its hello names it. Absent under the daemon.
        */
@@ -611,6 +616,8 @@ export type MainToRemoteHost =
   | { type: 'remote-host:device-socket'; requestId: number; socketPath: string | null }
   // The owner allowed devices the terminal or stopped allowing it.
   | { type: 'remote-host:terminal'; allowed: boolean }
+  // Huli: the features turned off in Settings > Features changed.
+  | { type: 'remote-host:features'; off: string[] }
   | { type: 'remote-host:add-device'; device: NewDevice }
   // Forgets the device and closes its sessions at once.
   | { type: 'remote-host:remove-device'; id: string }

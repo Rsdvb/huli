@@ -127,6 +127,11 @@ export class PortForwards {
     this.deps.changed(this.book.list())
   }
 
+  /** Huli: port forwarding was turned off in Settings > Features: every forward stops. */
+  stopAll(): void {
+    for (const item of this.book.list()) this.stop(item.hostId, item.port, item.sessionId)
+  }
+
   /** The host's session ended, which closed its listeners and the host's grants. */
   hostEnded(hostId: string): void {
     if (this.book.removeHost(hostId).length > 0) this.deps.changed(this.book.list())

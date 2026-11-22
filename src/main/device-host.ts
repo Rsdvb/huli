@@ -27,6 +27,8 @@ export class DeviceHost {
   private readonly host: UtilityHost<MainToDeviceHost, DeviceHostToMain>
   private readonly calls = new Map<number, (answer: DeviceCallAnswer) => void>()
   private nextCall = 1
+  /** Huli: mobile devices are on in Settings > Features. */
+  private enabled = true
 
   constructor(deps: DeviceHostDeps) {
     this.host = new UtilityHost<MainToDeviceHost, DeviceHostToMain>({
@@ -101,8 +103,24 @@ export class DeviceHost {
     this.host.post({ type: 'device-host:turn-ended', sessionId })
   }
 
+  /**
+   * Huli: Settings > Features turned mobile devices off or on. Off, the host stops, with its
+   * device lists and their polling, and nothing starts it until they are on again.
+   */
+  setEnabled(enabled: boolean): void {
+    if (enabled === this.enabled) return
+    this.enabled = enabled
+    if (enabled) this.host.unpark()
+    else void this.host.park()
+  }
+
   /** Runs an agent's device call, starting the host when it is not running. */
   call(call: DeviceCall): Promise<DeviceCallAnswer> {
+    if (!this.enabled) {
+      return Promise.resolve({
+        error: { code: 'unavailable', message: 'Mobile devices are turned off in Settings' },
+      })
+    }
     this.host.start()
     const callId = this.nextCall++
     return new Promise((resolve) => {

@@ -120,6 +120,11 @@ interface ServeOptions {
 
 type Init = Extract<MainToRemoteHost, { type: 'remote-host:init' }>
 
+/** Huli: the ids of the features turned off, as main sent them; nothing else. */
+function offList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
+}
+
 export function startRemoteHost(
   control: ControlChannel<MainToRemoteHost, RemoteHostToMain>,
   deps: RemoteHostDeps,
@@ -134,6 +139,8 @@ export function startRemoteHost(
   let hostName = ''
   // Whether devices may use the terminal; each server starts with it and hears when it changes.
   let terminal = false
+  // Huli: the features turned off in Settings > Features, the same way.
+  let featuresOff: string[] = []
   // The relay: its main origin, Use the Kettu relay, and the account's access token now, which
   // the push gateway takes; with the relay token the relays get in its place once they take them.
   let relayUrl: string | null = null
@@ -232,6 +239,7 @@ export function startRemoteHost(
       uploads,
       openAgentPort: (device) => deps.openAgentPort(device),
       terminal,
+      featuresOff,
       openTerminalPort: (device) => deps.openTerminalPort(device),
       openDevicePort: (device) => deps.openDevicePort?.(device) ?? Promise.resolve(null),
       admin,
@@ -381,6 +389,7 @@ export function startRemoteHost(
     init = message
     hostName = message.hostName
     terminal = message.terminal === true
+    featuresOff = offList(message.featuresOff)
     if (typeof message.push === 'string') pushUrl = message.push
     waiting = parseWaiting(message.waiting) ?? {}
     progress = parseProgress(message.progress) ?? {}
@@ -584,6 +593,12 @@ export function startRemoteHost(
         const allowed = message.allowed === true
         terminal = allowed
         withServing(({ server: s }) => s.setTerminal(allowed))
+        break
+      }
+      case 'remote-host:features': {
+        const off = offList(message.off)
+        featuresOff = off
+        withServing(({ server: s }) => s.setFeaturesOff(off))
         break
       }
       case 'remote-host:resume':

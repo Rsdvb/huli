@@ -391,6 +391,11 @@ export class PagePicker {
   }
 
   /** Ends the session's pick mode; `notify` tells the pane, which did not end it itself. */
+  /** Huli: pick mode was turned off in Settings > Features; every page leaves it. */
+  stopAll(): void {
+    for (const sessionId of [...this.picking.keys()]) this.stop(sessionId, true)
+  }
+
   stop(sessionId: string, notify: boolean): void {
     const picking = this.picking.get(sessionId)
     if (!picking) return
