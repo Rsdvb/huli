@@ -89,6 +89,11 @@
       "titleNoModel": "{{agent}} 的模型服务商余额不足"
     },
     "turnFailed": "本轮对话失败",
+    "chatgptLimit": {
+      "title": "ChatGPT 套餐的额度用完了",
+      "app": "这个 Agent 本周用 ChatGPT 套餐的额度用完了，可在 ChatGPT 设置 › 用量 › App limits 调高，或改用 API key。",
+      "codex": "Codex 和 ChatGPT 共用套餐的额度，这份额度用完了。可在 ChatGPT 设置 › 用量 查看何时恢复或购买额度，或改用 API key。"
+    },
     "archivedByAgent": "{{agent}} 已归档此会话",
     "notArchivedByAgent": {
       "title": "{{agent}} 没有归档此会话",

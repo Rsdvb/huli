@@ -255,6 +255,7 @@ import type { ProjectHooksAnswers } from './project-hooks'
 import type { ProjectMcpAnswers } from './project-mcp'
 import { REPORTS_PER_DAY, type ReportDraft } from './report-tool'
 import { isOutOfCredit } from './out-of-credit'
+import { chatgptLimitOf } from './chatgpt-limit'
 import {
   isLimitStop,
   LIMIT_RESUME_TIMINGS,
@@ -9516,6 +9517,8 @@ export class SessionManager {
     const authRequired = mapped.code === 'auth_required' && !profileRefused
     const quota = this.recordQuota(live.record)
     const planLimit = isLimitStop(mapped, quota)
+    // Huli: a ChatGPT plan's allowance says where it can be raised, or what else to do.
+    const chatgpt = planLimit ? chatgptLimitOf(mapped) : null
     // Huli: a turn the plan's limit stopped goes on by itself once the plan resets, which sends
     // its message again when it did nothing, so the message stays in the thread for that.
     const pauses = planLimit && !turn.cancelRequested && this.autoResumes(live.record)
@@ -9549,10 +9552,12 @@ export class SessionManager {
                     mapped.message,
                   )
                 : {
-                    title: t('notice.turnFailed'),
-                    description: profileRefused
-                      ? `${t('session.profile.keyRefused')}\n\n${mapped.message}`
-                      : mapped.message,
+                    title: chatgpt ? t('notice.chatgptLimit.title') : t('notice.turnFailed'),
+                    description: chatgpt
+                      ? `${t(`notice.chatgptLimit.${chatgpt}`)}\n\n${mapped.message}`
+                      : profileRefused
+                        ? `${t('session.profile.keyRefused')}\n\n${mapped.message}`
+                        : mapped.message,
                     // A turn of a message has Retry, which sends it again; the agent's own has none.
                     ...(turn.byAgent ? {} : { cause: 'turn_failed' as const }),
                     // The thread offers to go on with an agent whose plan has room.
@@ -9594,7 +9599,7 @@ export class SessionManager {
       })
     }
     this.pauseQueue(live)
-    const pause = pauses ? this.pauseAtLimit(live, resetOf(mapped.message, quota, now)) : null
+    const pause = pauses ? this.pauseAtLimit(live, resetOf(mapped, quota, now)) : null
     this.persist(live)
     this.touch(live.id)
     if (givenBack) this.giveBack(live, turn)

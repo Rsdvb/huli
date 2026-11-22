@@ -161,7 +161,7 @@ describe('a turn stopped at the plan limit', () => {
     expect(limits).toMatchObject([{ window: 'five_hour', state: 'reached', resetsAt: RESET }])
     const quota = planQuota({ limits }, NOW)
     expect(isLimitStop(error!, quota)).toBe(true)
-    expect(resetOf(error!.message, quota, NOW)).toBe(RESET)
+    expect(resetOf(error!, quota, NOW)).toBe(RESET)
   })
 
   it("is Claude Code 1's, with the reset in its words", () => {
@@ -188,7 +188,7 @@ describe('a turn stopped at the plan limit', () => {
     )
     const quota = planQuota({ limits: windows }, NOW)
     expect(isLimitStop(error, quota)).toBe(true)
-    expect(resetOf(error.message, quota, NOW)).toBe(RESET)
+    expect(resetOf(error, quota, NOW)).toBe(RESET)
   })
 
   it("is an ACP agent's that names a used-up quota, with a reset when it gives one", () => {

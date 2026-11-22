@@ -1359,6 +1359,21 @@ organization linked to a Max, Ultra or Team plan spends the plan's monthly API c
 signed in with the plan instead, the SDK draws on the plan's own limits. The Claude Code page's
 API profiles group says so, side by side and neutrally (`agent-profiles.tsx`).
 
+### A ChatGPT plan's allowance used up (ChatGPT 套餐额度用完)
+
+An agent signed in with a ChatGPT plan stops when the plan has no allowance left for it, and each
+says so its own way: OpenCode's session error `provider.chatgpt-limit` (its name for OpenAI's 429
+`subscription_sharing_usage_limit_exceeded`, with `retryAfterMs` when the provider gave one), Pi's
+"You have hit your ChatGPT usage limit (... plan). Try again in ~N min." (pi-ai's `openai-codex`
+provider for any 429 of the ChatGPT backend), that error code anywhere in an agent's words or data,
+and Codex's `usageLimitExceeded` whose words name `chatgpt.com/` (since December's allowance that
+ChatGPT and Codex share), not a workspace's credits or spend cap. `src/agent-host/chatgpt-limit.ts`
+matches them (with its test); such a turn counts as a plan limit stop (`limit-resume.ts`), so it
+pauses and goes on by itself, at the wait given or else after the growing checks, and its notice
+says where the cap is raised (ChatGPT Settings › Usage › App limits, or the plan's usage page for
+Codex) or to use an API key. OpenCode's `retryAfterMs` now reaches the turn's error
+(`opencode/connection.ts`).
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and

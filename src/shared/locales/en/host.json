@@ -89,6 +89,11 @@
       "titleNoModel": "{{agent}}'s model provider is out of credit"
     },
     "turnFailed": "The turn failed",
+    "chatgptLimit": {
+      "title": "ChatGPT plan limit reached",
+      "app": "This agent has used up its share of your ChatGPT plan this week. You can raise it in ChatGPT Settings › Usage › App limits, or switch to an API key.",
+      "codex": "Codex shares your ChatGPT plan's allowance with ChatGPT, and it has run out. ChatGPT Settings › Usage says when it resets and sells more, or you can switch to an API key."
+    },
     "archivedByAgent": "{{agent}} archived this session",
     "notArchivedByAgent": {
       "title": "{{agent}} did not archive this session",
