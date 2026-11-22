@@ -491,7 +491,8 @@
     "unknownTool": "Unknown tool content",
     "toolCall": "Tool call",
     "toolReference": "Found tool: {{name}}",
-    "document": "Document: {{name}}"
+    "document": "Document: {{name}}",
+    "sessionRef": "[Session \"{{name}}\" for reference: id {{id}}, read it with read_session_history]"
   },
   "antigravity": {
     "plan": {

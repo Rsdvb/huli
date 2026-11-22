@@ -434,6 +434,23 @@ describe('the host files', () => {
     }
   })
 
+  // Huli: the sessions the user referenced in a session's messages, whose history its agent reads.
+  it("keeps a session's referenced sessions, each once, and drops what does not read", () => {
+    const kept: SessionRecord = { ...session, refs: ['a', 'b'] }
+    expect(parseSessionsFile({ sessions: [kept] })).toEqual({ version: 1, sessions: [kept] })
+    expect(
+      parseSessionsFile({
+        sessions: [{ ...session, refs: ['a', 7, '', 'a', 'x'.repeat(201), 'b'] }],
+      }),
+    ).toEqual({ version: 1, sessions: [{ ...session, refs: ['a', 'b'] }] })
+    for (const refs of ['a', [], [7], null]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, refs }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
   // Huli: the block of ports a worktree session holds.
   it("keeps a session's port block and drops one that does not read", () => {
     const held: SessionRecord = { ...session, ports: { first: 20_010, count: 10 } }

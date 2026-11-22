@@ -1049,6 +1049,7 @@ export class AgentHost {
         startMode: (agentId) => startModeIn(this.settings, agentId),
         sendRefusal: (callerId, sessionId) =>
           this.sessions.manager.sendRefusal(callerId, sessionId),
+        referenced: (callerId, sessionId) => this.sessions.referencedBy(callerId, sessionId),
       },
       manager: () => this.sessions.manager,
       log,

@@ -360,7 +360,8 @@ export function RefChip({
         ? contentRef.attachment.name
         : contentRef.kind === 'terminal' ||
             contentRef.kind === 'page' ||
-            contentRef.kind === 'device'
+            contentRef.kind === 'device' ||
+            contentRef.kind === 'session'
           ? contentRef.name
           : contentRef.label
   return (

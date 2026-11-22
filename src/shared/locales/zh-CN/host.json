@@ -483,7 +483,8 @@
     "unknownTool": "未知工具内容",
     "toolCall": "工具调用",
     "toolReference": "找到工具：{{name}}",
-    "document": "文档：{{name}}"
+    "document": "文档：{{name}}",
+    "sessionRef": "[参考会话「{{name}}」: id {{id}}，用 read_session_history 读取]"
   },
   "antigravity": {
     "plan": {

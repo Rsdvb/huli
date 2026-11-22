@@ -1197,6 +1197,11 @@ function contentRef(value: unknown, at: string): { ref: ContentRef; bytes: numbe
       const name = string(o, 'name', TERMINAL_NAME_CHARS)
       return { ref: { kind: 'device', deviceId, name }, bytes: deviceId.length + name.length }
     }
+    case 'session': {
+      const id = string(o, 'sessionId', ID_CHARS)
+      const name = string(o, 'name', TEXT_CHARS)
+      return { ref: { kind: 'session', sessionId: id, name }, bytes: id.length + name.length }
+    }
     case 'attachment': {
       // Only the id counts: the host takes everything else from its own record.
       const id = string(fields(o.attachment), 'id', ID_CHARS)
@@ -1204,7 +1209,7 @@ function contentRef(value: unknown, at: string): { ref: ContentRef; bytes: numbe
     }
     default:
       throw invalidParams(
-        `${at}: a prompt can carry images, links, terminals, tabs, devices and attachments only`,
+        `${at}: a prompt can carry images, links, terminals, tabs, devices, sessions and attachments only`,
       )
   }
 }

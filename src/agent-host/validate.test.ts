@@ -1263,6 +1263,25 @@ describe('promptContent', () => {
     )
   })
 
+  // Huli: another session the user referenced, which only the host's own record lets be read.
+  it('keeps a session the user referenced by its id and title alone', () => {
+    expect(
+      promptContent([
+        { type: 'text', text: 'Like @session:81038916' },
+        { type: 'ref', ref: { kind: 'session', sessionId: 's-1', name: 'Fix login', path: '/x' } },
+      ]),
+    ).toEqual([
+      { type: 'text', text: 'Like @session:81038916' },
+      { type: 'ref', ref: { kind: 'session', sessionId: 's-1', name: 'Fix login' } },
+    ])
+    rejects(() =>
+      promptContent([
+        { type: 'text', text: 'x' },
+        { type: 'ref', ref: { kind: 'session', name: 'Fix login' } },
+      ]),
+    )
+  })
+
   it('keeps a terminal the user referenced by its id and name alone', () => {
     expect(
       promptContent([

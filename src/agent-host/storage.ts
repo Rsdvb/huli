@@ -428,6 +428,11 @@ export interface SessionRecord {
   movedTo?: MovedTo
   /** Huli: snoozed or settled out of the active list, or kept from settling (会话整理). */
   tidy?: StoredTidy
+  /**
+   * Huli: the sessions the user referenced in its messages (@ in the composer), whose history its
+   * agent may read wherever they are; the latest last.
+   */
+  refs?: string[]
 }
 
 /** Huli: a session's pull request automation, as its record keeps it. */
@@ -1037,6 +1042,18 @@ function boardOf(value: unknown): { board?: SessionBoard } {
   return { board: { status: value.status, at: value.at } }
 }
 
+/** Huli: how many referenced sessions a session keeps; the oldest go first. */
+export const MAX_SESSION_REFS = 50
+
+/** Huli: a session's referenced sessions; ids that do not read are dropped. */
+function refsOf(value: unknown): { refs?: string[] } {
+  if (!Array.isArray(value)) return {}
+  const refs = [
+    ...new Set(value.filter((id): id is string => isString(id) && id !== '' && id.length <= 200)),
+  ].slice(-MAX_SESSION_REFS)
+  return refs.length > 0 ? { refs } : {}
+}
+
 const SETTLED_BY: readonly SettledBy[] = ['user', 'idle', 'merged']
 
 /** Huli: a session's tidy state; each part that does not read is dropped on its own. */
@@ -1045,7 +1062,8 @@ function tidyOf(value: unknown): { tidy?: StoredTidy } {
   const tidy: StoredTidy = {}
   const { snooze, settled, never, keptAt, merged } = value
   if (isRecord(snooze) && isTime(snooze.until)) {
-    tidy.snooze = snooze.reset === true ? { until: snooze.until, reset: true } : { until: snooze.until }
+    tidy.snooze =
+      snooze.reset === true ? { until: snooze.until, reset: true } : { until: snooze.until }
   }
   if (
     isRecord(settled) &&
@@ -1213,6 +1231,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...(item.managerOff === true ? { managerOff: true as const } : {}),
       ...movedToOf(item.movedTo),
       ...tidyOf(item.tidy),
+      ...refsOf(item.refs),
     })
   }
   return {

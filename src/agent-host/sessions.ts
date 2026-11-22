@@ -368,6 +368,7 @@ import {
   type StoredGroup,
   type StoredPrFlow,
   type WorktreeRecord,
+  MAX_SESSION_REFS,
 } from './storage'
 import { SUMMARY_RETRY_MS, writeTitles } from './outline-titles'
 import { lightTarget, type LightTarget } from './light-model'
@@ -3057,13 +3058,9 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.attention(
-      live.id,
-      'permission',
-      this.titleOf(live),
-      t('attention.themeChange'),
-      { id: entry.id },
-    )
+    this.attention(live.id, 'permission', this.titleOf(live), t('attention.themeChange'), {
+      id: entry.id,
+    })
     const answer = new Promise<ThemeAnswer>((resolve) => {
       const timer = setTimeout(
         () => this.settleTheme(sessionId, entry.id, { decision: 'expired' }),
@@ -3506,13 +3503,9 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.attention(
-      live.id,
-      'permission',
-      this.titleOf(live),
-      t('attention.computerSetup'),
-      { id: entry.id },
-    )
+    this.attention(live.id, 'permission', this.titleOf(live), t('attention.computerSetup'), {
+      id: entry.id,
+    })
   }
 
   /** Steps of a waiting setup were done: its card moves on to the next. */
@@ -6727,8 +6720,7 @@ export class SessionManager {
     } else {
       this.update(live, { status: 'failed', error: { message: mapped.message } })
       // A session still being created is in front of the user, and create rejects instead.
-      if (live.saved)
-        this.attention(live.id, 'error', this.titleOf(live), mapped.message)
+      if (live.saved) this.attention(live.id, 'error', this.titleOf(live), mapped.message)
     }
     this.touch(live.id)
     return mapped
@@ -8611,6 +8603,7 @@ export class SessionManager {
     device?: FromDevice,
     approval?: true,
   ): string {
+    if (!from) this.noteReferences(live.record, content)
     const entryId = this.nextId(live)
     this.emit(live, [
       {
@@ -13044,6 +13037,27 @@ export class SessionManager {
     this.persist(live)
     this.touch(live.id)
     return { itemId: id, merged: false }
+  }
+
+  // Huli: sessions the user referenced in a message (@ in the composer).
+
+  /** Keeps the sessions the user referenced in a message here, which its agent may then read. */
+  private noteReferences(record: SessionRecord, content: readonly UserContent[]): void {
+    const ids = content.flatMap((item) =>
+      item.type === 'ref' && item.ref.kind === 'session' && item.ref.sessionId !== record.id
+        ? [item.ref.sessionId]
+        : [],
+    )
+    if (ids.length === 0) return
+    const kept = (record.refs ?? []).filter((id) => !ids.includes(id))
+    record.refs = [...kept, ...new Set(ids)].slice(-MAX_SESSION_REFS)
+    if (this.records.has(record.id)) this.saveIndex()
+  }
+
+  /** Whether the user referenced `sessionId` in a message of `callerId`'s, which lets it read it. */
+  referencedBy(callerId: string, sessionId: string): boolean {
+    const record = this.live.get(callerId)?.record ?? this.records.get(callerId)
+    return record?.refs?.includes(sessionId) ?? false
   }
 
   // Huli: snoozing and settling sessions (会话整理); see session-tidy.ts.
