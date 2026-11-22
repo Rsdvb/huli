@@ -14,7 +14,7 @@ import { useHostsStore } from '@renderer/stores/hosts'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { toggleSidePane } from '@renderer/stores/view'
 
-/** The host's name, as Settings › Computers lists it. */
+/** The host's name, as Settings > Computers lists it. */
 export function hostName(hostId: string): string {
   return useHostsStore.getState().status?.hosts?.find((h) => h.id === hostId)?.name ?? hostId
 }

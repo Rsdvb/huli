@@ -174,7 +174,7 @@ function isBox(value: unknown): value is PageBox {
   return [x, y, width, height].every((n) => typeof n === 'number' && Number.isFinite(n))
 }
 
-/** The part of `box` inside a viewport of `width` × `height`; null when none of it is. */
+/** The part of `box` inside a viewport of `width` by `height`; null when none of it is. */
 export function visiblePart(box: PageBox, width: number, height: number): PageBox | null {
   const left = Math.max(0, box.x)
   const top = Math.max(0, box.y)

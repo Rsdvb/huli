@@ -72,7 +72,7 @@ export async function addPageNote(
   hostId: string | null,
 ): Promise<void> {
   const shot = await addShot(pick, hostId).catch((error: unknown) => {
-    console.warn('Could not add the element’s screenshot', error)
+    console.warn('Could not add the screenshot of the element', error)
     return null
   })
   const at = Date.now()

@@ -149,7 +149,11 @@ export function PortsPanel({
                 <span className="kp-ports__port kp-mono">{entry.port}</span>
                 <span className="kp-ports__what" title={entry.folder ?? entry.address}>
                   <span>{entry.process ?? t('ports.unknown')}</span>
-                  {entry.folder && <span className="kp-ports__folder kp-mono">{entry.folder}</span>}
+                  {entry.folder && (
+                    // A left-to-right mark keeps the path's leading slash at its start, which the
+                    // right-to-left direction that cuts it from the left would move to its end.
+                    <span className="kp-ports__folder kp-mono">{`\u200e${entry.folder}`}</span>
+                  )}
                 </span>
                 {known ? (
                   <OpenButton forward={known} onOpen={onOpen} />
