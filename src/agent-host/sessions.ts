@@ -10907,24 +10907,23 @@ export class SessionManager {
    */
   async processes(sessionId: string): Promise<SessionProcesses> {
     const live = this.live.get(sessionId)
-    if (!live?.connection) throw new HostError('busy', t('session.openFirst'))
-    const { connection } = live
-    const agent = this.deps.agents.name(live.record.agentId)
+    const recordNow = live?.record ?? this.recordOf(sessionId)
+    // A session whose agent was let go has no tasks running; its block's ports are still read.
+    const connection = live?.connection ?? null
+    const agent = this.deps.agents.name(recordNow.agentId)
     let own: AgentProcesses | null = null
     let error: string | undefined
-    if (connection.backgroundProcesses) {
+    if (live && connection?.backgroundProcesses) {
       try {
-        own = await connection.backgroundProcesses(live.record.acpSessionId)
+        own = await connection.backgroundProcesses(recordNow.acpSessionId)
         if (own === null) error = t('session.backgroundUnsupported', { agent })
       } catch (reason) {
         error = agentError(reason).message
       }
       live.listedTasks = own?.tasks ?? []
     }
-    const tasks = own?.tasks ?? live.thread.session.background ?? []
-    const record = live.record.parentId
-      ? (this.recordOf(live.record.parentId) ?? live.record)
-      : live.record
+    const tasks = own?.tasks ?? live?.thread.session.background ?? []
+    const record = recordNow.parentId ? (this.recordOf(recordNow.parentId) ?? recordNow) : recordNow
     const block = this.portsOf(record)
     const reading = await readTaskProcesses(
       {
@@ -10936,26 +10935,26 @@ export class SessionManager {
             ...(task.pid !== undefined ? { pid: task.pid } : {}),
           })),
         known: own?.processes ?? [],
-        root: connection.toolProcess?.(live.record.acpSessionId) ?? null,
+        root: connection?.toolProcess?.(recordNow.acpSessionId) ?? null,
         block,
         held: this.heldPorts(record.id).map((held) => held.block),
       },
       { platform: this.deps.platform },
     )
     return {
-      tasks: connection.backgroundProcesses ? (own?.tasks ?? []) : null,
+      tasks: connection?.backgroundProcesses ? (own?.tasks ?? []) : null,
       listed: tasks.map((task) => ({ ...task })),
-      held: (live.thread.session.foreground ?? []).map((task) => ({ ...task })),
+      held: (live?.thread.session.foreground ?? []).map((task) => ({ ...task })),
       processes: reading.processes,
       block: block ? { ...block } : null,
       taken: reading.taken,
-      clean: !connection.cleanTasks
+      clean: !connection?.cleanTasks
         ? null
         : connection.backgroundProcesses
           ? own
             ? 'all'
             : null
-          : live.thread.session.background !== undefined
+          : live?.thread.session.background !== undefined
             ? 'ended'
             : null,
       ...(error !== undefined ? { error } : {}),

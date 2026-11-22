@@ -30,7 +30,8 @@ describe('Huli: the _kite/tasks extension', () => {
       subagents: [{ sessionId: 'child', progress: 'Reading files' }, { sessionId: 'child' }],
     })
     expect(read?.sessionId).toBe('s1')
-    const [tasks, held, ...rest] = read!.effects
+    const [tasks, running, held, ...rest] = read!.effects
+    expect(running).toEqual({ kind: 'backgroundRunning', running: true, listed: true })
     expect(tasks).toMatchObject({
       kind: 'tasks',
       tasks: [

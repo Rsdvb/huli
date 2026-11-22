@@ -80,7 +80,18 @@ function list<T>(value: unknown, read: (item: unknown) => T | null): T[] {
 export function kiteTasks(params: unknown): { sessionId: string; effects: MapperEffect[] } | null {
   if (!isRecord(params) || typeof params.sessionId !== 'string') return null
   const effects: MapperEffect[] = []
-  if (Array.isArray(params.tasks)) effects.push({ kind: 'tasks', tasks: list(params.tasks, task) })
+  if (Array.isArray(params.tasks)) {
+    const tasks = list(params.tasks, task)
+    // The list is the whole of the background work, so the session keeps its agent while any runs.
+    effects.push(
+      { kind: 'tasks', tasks },
+      {
+        kind: 'backgroundRunning',
+        running: tasks.some((item) => item.status === 'running'),
+        listed: true,
+      },
+    )
+  }
   if (Array.isArray(params.foreground)) {
     effects.push({ kind: 'foreground', tasks: list(params.foreground, held) })
   }
