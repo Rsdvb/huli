@@ -26,6 +26,7 @@ export type SessionMenuItem =
   | 'copyResume'
   | 'copySessionId'
   | 'export'
+  | 'move'
   | 'showInParent'
   | 'removeWorktree'
   | 'archive'
@@ -89,6 +90,8 @@ export interface SessionMenuContext {
   removeWorktree?: boolean
   /** Huli: this window can export it, as the desktop app's can. */
   exportable?: boolean
+  /** Huli: this window can move it to another computer, as the desktop app's can. */
+  movable?: boolean
   /** Huli: it has an open pull request to merge once green or to watch. */
   prFlow?: boolean
 }
@@ -112,6 +115,7 @@ export function sessionMenuGroups(
     worktree = false,
     removeWorktree = false,
     exportable = false,
+    movable = false,
     prFlow = false,
   }: SessionMenuContext,
 ): SessionMenuItem[][] {
@@ -158,7 +162,7 @@ export function sessionMenuGroups(
           own,
           flow,
           ['openInEditor', 'showInFolder', 'openTerminal', 'resumeInTerminal'],
-          ['copyResume', 'copySessionId', 'export'],
+          ['copyResume', 'copySessionId', 'export', ...(topLevel ? (['move'] as const) : [])],
           ending,
         ]
       : [
@@ -176,6 +180,7 @@ export function sessionMenuGroups(
             'copyResume',
             'showInFolder',
             'export',
+            ...(topLevel ? (['move'] as const) : []),
           ],
           ending,
         ]
@@ -186,6 +191,7 @@ export function sessionMenuGroups(
     ...(resume && terminalResume ? [] : (['resumeInTerminal'] as const)),
     ...(rename ? [] : (['rename'] as const)),
     ...(exportable ? [] : (['export'] as const)),
+    ...(movable ? [] : (['move'] as const)),
   ])
   return groups
     .map((group) => group.filter((item) => !missing.has(item)))

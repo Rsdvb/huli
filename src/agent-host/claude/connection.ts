@@ -48,6 +48,7 @@ import type { HostedContext } from '../driver'
 import { formFields, isWebUrl } from '../elicitation'
 import type { Env } from '../find-command'
 import { t } from '../i18n'
+import { claudeSandbox } from '../sandbox/native'
 import {
   addTokenTotals,
   firstUserMessage,
@@ -340,6 +341,8 @@ interface Session {
   suggestable: boolean
   /** The predicted prompt the session offers, so it is cleared once and only when shown. */
   suggestion: PromptSuggestion | null
+  /** Huli: its process runs Kettu's file of exports before each command, as CLAUDE_ENV_FILE. */
+  envFile: boolean
 }
 
 interface Pending {
@@ -566,6 +569,10 @@ export class ClaudeConnection implements AgentConnection {
 
   get isClosed(): boolean {
     return this.done
+  }
+
+  loadsEnvFile(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.envFile === true
   }
 
   get ownInstructions(): boolean {
@@ -1035,6 +1042,8 @@ export class ClaudeConnection implements AgentConnection {
       version: undefined,
       suggestable: false,
       suggestion: null,
+      // The user's own CLAUDE_ENV_FILE stays theirs; the session's secrets then load by hand.
+      envFile: !!options.envFile && !hidden && !this.env.CLAUDE_ENV_FILE,
     }
     const flags: Record<string, unknown> = {}
     // Through the SDK, Claude Code runs the hooks of a folder's own settings without asking.
@@ -1081,6 +1090,7 @@ export class ClaudeConnection implements AgentConnection {
         CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: '1',
         // Kettu's memory stands in for Claude Code's own, which would load and write beside it.
         ...(options.memory ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}),
+        ...(session.envFile && options.envFile ? { CLAUDE_ENV_FILE: options.envFile } : {}),
       },
       pathToClaudeCodeExecutable: await this.runnableCli(),
       spawnClaudeCodeProcess: (spawn) => {
@@ -1150,6 +1160,11 @@ export class ClaudeConnection implements AgentConnection {
       ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(plugins.length > 0 ? { plugins } : {}),
       ...(Object.keys(flags).length > 0 ? { settings: flags } : {}),
+      // Huli: the session's shell commands in Claude Code's own sandbox, which fails the start
+      // where it cannot run rather than run them unheld.
+      ...(options.sandbox?.tier === 'native' && !bare
+        ? { sandbox: claudeSandbox(options.sandbox, os.homedir(), process.platform) }
+        : {}),
       ...runLimits(this.context.claudeRun?.() ?? null, options, mainModel),
       // Only for the user's own sessions: Kettu's own never offer a next prompt.
       ...(!hidden && !how.quiet && this.context.claudePromptSuggestions?.()

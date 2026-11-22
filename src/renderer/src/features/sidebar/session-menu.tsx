@@ -8,6 +8,7 @@ import {
   EyeIcon,
   ComputerIcon,
   FolderRemoveIcon,
+  ComputerArrowUpIcon,
   ComputerTerminal01Icon,
   Copy01Icon,
   Delete02Icon,
@@ -129,6 +130,7 @@ import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
 import { BoardStatusMenu } from '@renderer/features/task-board/status'
 import { ManagerMenu } from '@renderer/features/manager/manager-menu'
 import { askExport, canExport } from '@renderer/features/session/export/export'
+import { askMove, canMove } from '@renderer/features/session/move/move'
 import {
   askRemoveWorktree,
   canRemoveWorktree,
@@ -575,6 +577,13 @@ export function SessionMenuItems({
             {t('row.export')}
           </DropdownMenuItem>
         )
+      case 'move':
+        return (
+          <DropdownMenuItem key={name} {...props} onClick={() => askMove(summary)}>
+            <MenuGlyph icon={ComputerArrowUpIcon} />
+            {t('row.move')}
+          </DropdownMenuItem>
+        )
       case 'showInParent':
         return (
           <DropdownMenuItem
@@ -656,6 +665,7 @@ export function SessionMenuItems({
     worktree: hasLiveWorktree(summary),
     removeWorktree: canRemoveWorktree(summary),
     exportable: canExport(),
+    movable: canMove() && !summary.scratch && summary.origin !== 'subagent',
     prFlow: prTarget !== null,
   }
   return sessionMenuGroups(summary, context).map((group, index) => (

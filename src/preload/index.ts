@@ -429,6 +429,13 @@ const api: KettuApi = {
     onChanged: subscribe('backup:changed'),
   },
   exportSession: (request) => invoke('session:export', request),
+  moves: {
+    preview: (source, sessionId, target) =>
+      invoke('sessions:move-preview', source, sessionId, target),
+    start: (source, sessionId, target) => invoke('sessions:move-start', source, sessionId, target),
+    list: () => invoke('sessions:moves'),
+    onProgress: subscribe('sessions:move-progress'),
+  },
 }
 
 contextBridge.exposeInMainWorld('kettu', api)

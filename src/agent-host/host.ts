@@ -129,7 +129,8 @@ import { writeCommitMessage } from './commit-message'
 import { lightTarget } from './light-model'
 import { reportDraftPrompt, writeReportDraft } from './report-draft'
 import { Diagnostics } from './diagnostics'
-import { HostError, invalidParams } from './errors'
+import type { ContainerSandbox } from './sandbox/container'
+import { HostError, invalidParams, isHostError } from './errors'
 import { setLocale, t, tSettings, tSettingsEnglish } from './i18n'
 import { FilesService } from './files'
 import { MediaService } from './media'
@@ -183,7 +184,8 @@ import { opencodeModelRequests } from './model-requests/opencode'
 import { byHarness } from './model-requests/reader'
 import { AcpMessages, acpModelRequests } from './model-requests/acp-messages'
 import { IdleRelease } from './idle-release'
-import { PortHub, type Handlers, type RequestContext } from './rpc'
+import { MAIN_PORT, PortHub, type Handlers, type RequestContext } from './rpc'
+import type { SessionMoves } from './session-move/service'
 import { Attachments, toArrayBuffer } from './attachments'
 import { storageUsage } from './data-usage'
 import { RoutinesManager, type RoutineTimings } from './routines/manager'
@@ -254,6 +256,10 @@ import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
 import { ProviderProfiles } from './provider-profiles'
+import { removeSessionEnv, sessionEnvFiles } from './secrets/deliver'
+import { SECRET_WAIT_MS, SecretTools } from './secrets/tools'
+import { StaleThemeUndo, THEME_WAIT_MS, ThemeTools } from './theme/tools'
+import type { ThemeCall, ThemeCallAnswer, ThemeSnapshot } from '@shared/theme-palette'
 import { anyBridgeOn, parseChatBridgeConfig, type ChatBridgeConfig } from '@shared/chat-bridge'
 import type { ChatBridgeService } from './chat-bridge/service'
 
@@ -551,6 +557,8 @@ export class AgentHost {
   /** The values of the Marketplace servers' inputs from main, held only in memory. */
   private marketKeys: MarketKeys = new Map()
   private agentEnvKeys: Record<string, Record<string, string>> = {}
+  /** Huli: the container tier's engine and image, loaded on its first use. */
+  private containers: Promise<ContainerSandbox> | null = null
   /** Huli: the agents' API provider profiles from main, with their keys, held only in memory. */
   private readonly profiles = new ProviderProfiles()
   /** The Marketplace's catalog of MCP servers, from the registry. */
@@ -566,6 +574,8 @@ export class AgentHost {
   /** The skills catalog, the skills Kettu keeps, and what each agent gets of them. */
   private readonly marketSkills: MarketSkillsService
   private agentSyncService: Promise<AgentSync> | null = null
+  /** Huli: moving sessions to other computers, loaded at the first move. */
+  private movesService: Promise<SessionMoves> | null = null
   /** The Kettu Marketplace's listings, the downloads of their files and its plugins. */
   private readonly marketCommunity: MarketCommunityService
   private readonly marketBundles: MarketBundlesService
@@ -582,6 +592,14 @@ export class AgentHost {
   private nextSettingsCall = 1
   /** The settings tools of Kettu's MCP service. */
   private readonly settingsTools: SettingsTools
+  /** Huli: the secrets tool of Kettu's MCP service. */
+  private readonly secretTools: SecretTools
+  /** Huli: the theme tools of Kettu's MCP service, and their calls awaiting main's answer. */
+  private readonly themeTools: ThemeTools
+  private readonly themeCalls = new Map<number, (answer: ThemeCallAnswer) => void>()
+  private nextThemeCall = 1
+  /** Huli: the values the user saved for each project, by project path, then name; host only. */
+  private projectSecrets: Record<string, Record<string, string>> = {}
   /** What was put off or refused, to publish later. */
   private readonly publishDrafts: PublishDrafts
   /** The Marketplace tools of Kettu's MCP service. */
@@ -666,6 +684,35 @@ export class AgentHost {
       open: (sessionId, target) => this.openSettings(sessionId, target),
       words: tSettings,
       english: tSettingsEnglish,
+    })
+    const envDir = path.join(options.userDataPath, 'session-env')
+    this.secretTools = new SecretTools({
+      platform,
+      envDir,
+      saved: (project) => new Map(Object.entries(this.projectSecrets[project] ?? {})),
+      save: (project, values) => options.send({ type: 'host:project-secrets', project, values }),
+      loadsEnv: (sessionId) => this.sessions.loadsEnvFile(sessionId),
+      ask: (sessionId, ask) => this.sessions.secretAsked(sessionId, ask, SECRET_WAIT_MS),
+      answer: (sessionId, entryId, answer, device) =>
+        this.sessions.answerSecret(sessionId, entryId, answer, device),
+      check: (sessionId, entryId) => this.sessions.checkSecret(sessionId, entryId),
+      ignored: async (folder, relative) => {
+        const result = await this.execRunner.exec('git', ['check-ignore', '-q', '--', relative], {
+          cwd: folder,
+          timeoutMs: 10_000,
+        })
+        if (result.failure !== null) return null
+        return result.code === 0 ? true : result.code === 1 ? false : null
+      },
+    })
+    this.themeTools = new ThemeTools({
+      read: () => this.themeCall({ kind: 'read' }),
+      set: (agent, chosen) => this.themeCall({ kind: 'set', agent, chosen }),
+      fullAccess: (sessionId) => this.sessions.settingsFullAccess(sessionId),
+      ask: (sessionId, change) => this.sessions.themeAsked(sessionId, change, THEME_WAIT_MS),
+      recorded: (sessionId, change) => this.sessions.themeRecorded(sessionId, change),
+      settle: (sessionId, entryId, outcome) =>
+        this.sessions.themeSettled(sessionId, entryId, outcome),
     })
     this.projects = new Projects({ file: projectsFile(options.userDataPath, log), platform })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
@@ -960,6 +1007,8 @@ export class AgentHost {
       ...(this.computer ? { computer: this.computer } : {}),
       market: this.marketTools,
       settings: this.settingsTools,
+      secrets: this.secretTools,
+      theme: this.themeTools,
       proxy: this.mcpProxy,
       sessions: {
         info: (sessionId) => this.sessions.sessionInfo(sessionId),
@@ -1065,6 +1114,9 @@ export class AgentHost {
       }),
       envKeyIsSet: (agentId, variable) =>
         typeof this.agentEnvKeys[agentId]?.[variable] === 'string',
+      envKeyNames: (agentId) => Object.keys(this.agentEnvKeys[agentId] ?? {}),
+      containers: () => this.containerSandbox(),
+      dataDir: options.userDataPath,
       profiles: (agentId) => ({
         view: this.profiles.view(agentId),
         balances: this.profiles.balancesOf(agentId),
@@ -1115,6 +1167,8 @@ export class AgentHost {
       managerGit: managerGit(this.execRunner.exec),
       projects: this.projects,
       autoApprove: () => this.settings.autoApprove ?? 'off',
+      sandbox: () => this.settings.sandbox,
+      agentProxyPort: (agentId) => this.nodeProxy.portFor(agentId),
       scratch: this.scratch,
       worktrees: this.worktrees,
       file: sessionsFile(options.userDataPath, log),
@@ -1125,6 +1179,10 @@ export class AgentHost {
       portOpen: (portId) => this.hub.has(portId),
       portDevice: (portId) => this.hub.deviceOf(portId),
       profiles: this.profiles,
+      envFiles: {
+        of: (sessionId) => sessionEnvFiles(envDir, sessionId, platform).sh,
+        remove: (sessionId) => removeSessionEnv(envDir, sessionId, platform),
+      },
       threads: this.threads,
       agentFile: (sessionId, file) =>
         this.agentFiles.read(sessionId, file).then(
@@ -1181,6 +1239,8 @@ export class AgentHost {
           this.browserTurnEnded(sessionId)
           this.marketTools.turnEnded(sessionId)
           this.settingsTools.turnEnded(sessionId)
+          this.secretTools.turnEnded(sessionId)
+          this.themeTools.turnEnded(sessionId)
           if (this.deviceTurns.delete(sessionId)) {
             this.options.send({ type: 'host:device-turn-ended', sessionId })
           }
@@ -1664,6 +1724,21 @@ export class AgentHost {
    * their agents. A host whose login shell could not be read waits for the next start, since
    * the programs on its `PATH` may be missing.
    */
+  /** Huli: made on the first container session or status request, never at startup. */
+  private containerSandbox(): Promise<ContainerSandbox> {
+    this.containers ??= import('./sandbox/container').then(
+      ({ ContainerSandbox }) =>
+        new ContainerSandbox({
+          platform: this.options.platform,
+          // The engine's own program goes through the proxy Kite's settings name, as git does.
+          env: () => this.env.agentEnv(),
+          dataDir: this.options.userDataPath,
+          log: (level, message) => this.diagnostics.log(level, message),
+        }),
+    )
+    return this.containers
+  }
+
   private firstStart(): void {
     if (this.settings.initialSetupDone || this.env.info().source === 'fallback') return
     this.options.send({ type: 'host:first-start', harnesses: this.agents.userPrograms() })
@@ -1992,6 +2067,41 @@ export class AgentHost {
     })
   }
 
+  /** Huli: reads or sets the themes through main, which keeps them and the window. */
+  private themeCall(call: ThemeCall): Promise<ThemeSnapshot> {
+    const callId = this.nextThemeCall++
+    return new Promise<ThemeCallAnswer>((resolve) => {
+      this.themeCalls.set(callId, resolve)
+      this.options.send({ type: 'host:theme-call', callId, call })
+    }).then((answer) => {
+      if ('error' in answer) throw new Error(answer.error)
+      return answer.result
+    })
+  }
+
+  /** Huli: `theme-result`: main's or the daemon's answer to a theme call. */
+  themeResult(callId: number, answer: ThemeCallAnswer): void {
+    const resolve = this.themeCalls.get(callId)
+    if (!resolve) return
+    this.themeCalls.delete(callId)
+    resolve(answer)
+  }
+
+  /** Huli: Undo on a theme line: what the change replaced comes back, unless it changed since. */
+  private async undoTheme(sessionId: string, entryId: string): Promise<void> {
+    const change = this.sessions.themeChange(sessionId, entryId)
+    try {
+      await this.themeTools.undo(change)
+    } catch (error) {
+      if (error instanceof StaleThemeUndo) {
+        this.sessions.themeSettled(sessionId, entryId, { kind: 'changed', stale: true })
+        throw new HostError('conflict', error.message)
+      }
+      throw new HostError('unavailable', (error as Error).message)
+    }
+    this.sessions.themeSettled(sessionId, entryId, { kind: 'changed', undone: true })
+  }
+
   /** `settings-result`: main's or the daemon's answer to a settings call. */
   settingsResult(callId: number, answer: SettingsCallAnswer): void {
     const resolve = this.settingsCalls.get(callId)
@@ -2152,6 +2262,21 @@ export class AgentHost {
     this.marketChanged(this.settings.marketplace.mcp, previous)
     if (signIns) this.signInsPushed(signIns)
     this.hub.broadcast({ type: 'market.keysChanged' })
+  }
+
+  /** Huli: the values saved from secret cards, in place of those before; a bad message keeps none. */
+  setProjectSecrets(raw: unknown): void {
+    const kept: Record<string, Record<string, string>> = {}
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      for (const [project, values] of Object.entries(raw)) {
+        if (typeof values !== 'object' || values === null || Array.isArray(values)) continue
+        const own = Object.entries(values).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        )
+        if (own.length > 0) kept[project] = Object.fromEntries(own)
+      }
+    }
+    this.projectSecrets = kept
   }
 
   /**
@@ -2358,6 +2483,21 @@ export class AgentHost {
 
   busy(requestId: number): void {
     this.options.send({ type: 'host:busy', requestId, sessions: this.sessions.busy() })
+  }
+
+  /** Huli: main's own request of a host method, which only main may make of some. */
+  mainCall(callId: number, method: string, params: unknown): void {
+    this.hub.callFromMain(method, params).then(
+      (result) => this.options.send({ type: 'host:main-answer', callId, result }),
+      (error: unknown) =>
+        this.options.send({
+          type: 'host:main-answer',
+          callId,
+          error: isHostError(error)
+            ? error.toPortError()
+            : { code: 'internal', message: (error as Error)?.message ?? String(error) },
+        }),
+    )
   }
 
   /** The floating label's buttons and the stop shortcut, from main. */
@@ -3091,6 +3231,41 @@ export class AgentHost {
     return run(canonical)
   }
 
+  /**
+   * Huli: moving sessions to other computers. Main runs a move: of this computer's host through
+   * its own messages, of another as a device that is a desktop app; a window never.
+   */
+  private sessionMoves(ctx: RequestContext): Promise<SessionMoves> {
+    if (ctx.portId !== MAIN_PORT && ctx.device?.browser !== true) {
+      throw new HostError('forbidden', 'Only the app moves sessions')
+    }
+    this.movesService ??= import('./session-move/service').then(
+      ({ SessionMoves }) =>
+        new SessionMoves({
+          platform: this.options.platform,
+          homeDir: this.options.homeDir ?? os.homedir(),
+          folder: path.join(this.options.userDataPath, 'moves'),
+          exec: this.execRunner.exec,
+          ready: () => this.env.ready(),
+          sessions: this.sessions,
+          agents: this.agents,
+          projects: {
+            paths: () => this.projects.paths(),
+            add: (folder) => this.projects.add(folder),
+            remove: (folder) => {
+              const record = this.projects.find(folder)
+              if (record && this.sessions.list(record.path).length === 0) {
+                this.projects.remove(record)
+              }
+            },
+          },
+          worktreeRoot: (projectPath) => this.worktrees.rootFor(projectPath),
+          log: (level, message) => this.diagnostics.log(level, message),
+        }),
+    )
+    return this.movesService
+  }
+
   /** Huli: Agent sync, loaded the first time Marketplace › Sync asks for it. */
   private agentSync(): Promise<AgentSync> {
     this.agentSyncService ??= import('./agent-sync/service').then(
@@ -3268,6 +3443,11 @@ export class AgentHost {
       'settings.answerChange': ({ sessionId, entryId, decision }, { device }) =>
         this.sessions.answerSettings(sessionId, entryId, decision, fromDevice(device)),
       'settings.undoChange': ({ sessionId, entryId }) => this.undoSettings(sessionId, entryId),
+      'theme.answerChange': ({ sessionId, entryId, decision }, { device }) =>
+        this.sessions.answerTheme(sessionId, entryId, decision, fromDevice(device)),
+      'theme.undoChange': ({ sessionId, entryId }) => this.undoTheme(sessionId, entryId),
+      'secrets.answer': ({ sessionId, entryId, ...answer }, { device }) =>
+        this.secretTools.answer(sessionId, entryId, answer, fromDevice(device)),
       'market.answerPublish': ({ sessionId, entryId, ...answer }, { device }) =>
         this.sessions.answerMarket(
           sessionId,
@@ -3345,6 +3525,13 @@ export class AgentHost {
       },
       'projects.touch': ({ path }) => projects.touch(projects.match(path)),
       'projects.pin': ({ path, pinned }) => projects.pin(projects.match(path), pinned),
+      'projects.setSandbox': ({ path, sandbox }) =>
+        projects.setSandbox(projects.match(path), sandbox),
+      'sessions.setSandbox': ({ sessionId, sandbox }) =>
+        this.sessions.setSandbox(sessionId, sandbox),
+      'sandbox.containerStatus': async () => (await this.containerSandbox()).status(),
+      'sandbox.pullImage': async () => (await this.containerSandbox()).pull(),
+      'sandbox.removeImage': async () => (await this.containerSandbox()).remove(),
       'projects.setAutoApprove': ({ path, autoApprove }) =>
         projects.setAutoApprove(projects.match(path), autoApprove),
       'projects.setManager': ({ path, manager }) =>
@@ -3922,6 +4109,24 @@ export class AgentHost {
       'agentHistory.planCopy': ({ agentId, folder, sessionIds }) =>
         this.agentHistory.planCopy(agentId, folder, sessionIds),
       'agentHistory.copy': ({ token }) => this.agentHistory.copy(token),
+      'moves.inspect': async ({ sessionId }, ctx) =>
+        (await this.sessionMoves(ctx)).inspect(sessionId),
+      'moves.pack': async ({ sessionId, moveId, haves }, ctx) =>
+        (await this.sessionMoves(ctx)).pack(sessionId, moveId, haves),
+      'moves.part': async ({ moveId, name, offset }, ctx) =>
+        (await this.sessionMoves(ctx)).part(moveId, name, offset),
+      'moves.finish': async ({ moveId, sessionId, to }, ctx) =>
+        (await this.sessionMoves(ctx)).finish(moveId, sessionId, to),
+      'moves.abort': async ({ moveId }, ctx) => (await this.sessionMoves(ctx)).abort(moveId),
+      'moves.check': async (params, ctx) => (await this.sessionMoves(ctx)).check(params),
+      'moves.prepare': async ({ moveId, project, url }, ctx) =>
+        (await this.sessionMoves(ctx)).prepare(moveId, project, url),
+      'moves.receive': async ({ moveId, name, offset, size, bytes }, ctx) =>
+        (await this.sessionMoves(ctx)).receive(moveId, name, offset, size, bytes),
+      'moves.apply': async (params, ctx) => (await this.sessionMoves(ctx)).apply(params),
+      'moves.undo': async ({ moveId }, ctx) => (await this.sessionMoves(ctx)).undo(moveId),
+      'moves.commit': async ({ moveId }, ctx) => (await this.sessionMoves(ctx)).commit(moveId),
+      'sessions.clearMoved': ({ sessionId }) => sessions.setMovedTo(sessionId, null),
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),

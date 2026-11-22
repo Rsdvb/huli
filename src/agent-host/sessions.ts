@@ -72,6 +72,14 @@ import type {
 } from '@shared/host-control'
 import type { Platform } from '@shared/platform'
 import type { AutoApprove, PermissionRisk } from '@shared/risk'
+import {
+  resolveSandbox,
+  sameSandbox,
+  supportsChoice,
+  type SandboxChoice,
+  type SandboxSettings,
+} from '@shared/sandbox'
+import type { SessionSandbox } from './sandbox/native'
 import type { PortDevice } from '@shared/remote/device'
 import type { PermissionScope } from '@shared/routines'
 import type { HostSettings } from '@shared/settings'
@@ -135,6 +143,11 @@ import {
   type SettingChangeItem,
   type SettingsChangeEntry,
   type SettingsChangeOutcome,
+  type SecretRequestEntry,
+  type SecretRequestOutcome,
+  type ThemeChangeEntry,
+  type ThemeChangeOutcome,
+  type ThemeState,
   type ComputerAppEntry,
   type ComputerSetupEntry,
   type ComputerUseView,
@@ -172,6 +185,8 @@ import {
   requestText,
 } from './attention'
 import type { MarketAnswer, MarketAsk } from './marketplace/publish-tools'
+import type { SecretAnswer, SecretAsk } from './secrets/tools'
+import type { ThemeAnswer } from './theme/tools'
 import type { SettingsAnswer, SettingsAsk } from './settings/tools'
 import type { AgentCopies } from './agent-copies'
 import type { DeletedSessions } from './deleted-sessions'
@@ -241,6 +256,7 @@ import { currentLocale, t } from './i18n'
 import type { ProviderProfiles } from './provider-profiles'
 import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
 import { NEW_BOARD_STATUS, type BoardStatus, type SessionBoard } from '@shared/session-board'
+import type { MovedTo, MoveProblem } from '@shared/session-move'
 import { DEFAULT_PORT_BASE, isPortBase, portEnv, type PortBlock } from '@shared/worktree-ports'
 import {
   GITHUB_ISSUE_URL,
@@ -556,10 +572,22 @@ export interface SessionManagerDeps {
   /** Huli: the agents' API provider profiles; without them every session runs on its own sign-in. */
   profiles?: Pick<ProviderProfiles, 'get' | 'defaultOf'>
   /**
+   * Huli: the session's file of exports, which holds the secrets its user gave it, and its
+   * removal once the session is deleted; without it no agent is handed one.
+   */
+  envFiles?: { of(sessionId: string): string; remove(sessionId: string): Promise<void> }
+  /**
    * Huli: which requests the host allows by itself in a project that keeps the default; without
    * it, none.
    */
   autoApprove?(): AutoApprove
+  /**
+   * Huli: the sandbox default of a project that keeps none of its own, and its approvals rule;
+   * without it every session starts in none.
+   */
+  sandbox?(): SandboxSettings | undefined
+  /** Huli: the port of the listener the agent's network setting gives it; null for none. */
+  agentProxyPort?(agentId: AgentId): number | null
   /** Where threads are stored; without it every session opens through its agent. */
   threads: ThreadStore | null
   /**
@@ -683,6 +711,8 @@ interface PrepareParams {
   parentId?: string
   /** Huli: the profile it runs with, resolved; absent for the agent's own sign-in. */
   profileId?: string
+  /** Huli: the sandbox it runs in, resolved; absent for none. */
+  sandbox?: SandboxChoice
 }
 
 /** A session opened for a window's New session, outside the index until its first message. */
@@ -1285,6 +1315,8 @@ export class SessionManager {
   private readonly records = new Map<string, SessionRecord>()
   /** Huli: manager mode's coordinator. */
   readonly manager: ManagerHub
+  /** Huli: the sessions whose agent runs in a container of their own now. */
+  private readonly containerLives = new Set<string>()
   /** Huli: what each session's pull request automation saw last; in memory, read again at start. */
   private readonly prFlowStates = new Map<string, PrFlowState>()
   private readonly live = new Map<string, Live>()
@@ -1305,6 +1337,10 @@ export class SessionManager {
   private readonly marketAnswering = new Set<string>()
   /** Settings cards that wait for the user, by entry id. */
   private readonly settingsWaits = new Map<string, (answer: SettingsAnswer) => void>()
+  /** Huli: secret cards that wait for the user, by entry id. */
+  private readonly secretWaits = new Map<string, (answer: SecretAnswer) => void>()
+  /** Huli: theme cards that wait for the user, by entry id. */
+  private readonly themeWaits = new Map<string, (answer: ThemeAnswer) => void>()
   /** Each first use of an app that waits, by the computer use service's request id. */
   private readonly appRequests = new Map<number, AppRequest>()
   /** Each session's card holding its folder's own MCP servers while it waits, with the folder. */
@@ -1422,6 +1458,7 @@ export class SessionManager {
     deps.agents.hooks = {
       liveSessions: (agentId) => this.connectedCount(agentId),
       agentExited: (agentId) => this.agentExited(agentId),
+      containerExited: (sessionId) => this.containerExited(sessionId),
       signedIn: (agentId) => this.agentSignedIn(agentId),
       optionsKnown: (agentId) => !deps.options || deps.options.known(agentId),
       optionsSeen: (agentId, config, folder) => {
@@ -1688,7 +1725,9 @@ export class SessionManager {
   private connectedCount(agentId: AgentId): number {
     let count = 0
     for (const live of this.live.values()) {
-      if (live.record.agentId === agentId && CONNECTED.has(live.thread.session.status)) count++
+      // Huli: a session in its own container holds nothing of the agent's shared process.
+      if (live.record.agentId !== agentId || this.contained(live)) continue
+      if (CONNECTED.has(live.thread.session.status)) count++
     }
     return count
   }
@@ -1774,6 +1813,8 @@ export class SessionManager {
       cache: record.cache ?? null,
       model: record.model ?? null,
       profileId: record.profileId ?? null,
+      sandbox: record.sandbox ? { ...record.sandbox } : null,
+      ...(record.sandboxUnknown ? { sandboxUnknown: true } : {}),
       pinnedAt: record.pinnedAt ?? null,
       archivedAt: record.archivedAt ?? null,
       acpSessionId: record.acpSessionId || null,
@@ -1796,6 +1837,7 @@ export class SessionManager {
       board: this.boardOf(record),
       ...(record.manager ? { manager: this.manager.managerSummary(record) } : {}),
       ...(record.worker ? { worker: this.manager.workerSummary(record) } : {}),
+      ...(record.movedTo ? { movedTo: { ...record.movedTo } } : {}),
       ...(record.worktree
         ? { worktree: this.worktreeSummary(record.worktree, this.portsOf(record)) }
         : {}),
@@ -2881,6 +2923,261 @@ export class SessionManager {
         } else if (device) {
           this.emit(live, [{ op: 'entry.update', id: entryId, changes: { device } }])
         }
+      }
+      this.stopWaiting(live)
+      this.touch(live.id)
+      this.updateBadge()
+    }
+    resolve?.(answer)
+  }
+
+  /**
+   * Huli: an agent asks the user for secrets: a card in the thread that waits as a permission
+   * request does, and settles with their answer, `expired` after `waitMs`, or `ended` with the
+   * turn. The entry holds the fields and the target, never a value.
+   */
+  secretAsked(
+    sessionId: string,
+    ask: SecretAsk,
+    waitMs: number,
+  ): { entryId: string; answer: Promise<SecretAnswer> } | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: SecretRequestEntry = {
+      kind: 'secret_request',
+      id: this.nextId(live),
+      title: ask.title,
+      reason: ask.reason,
+      url: ask.url,
+      fields: ask.fields,
+      target: ask.target,
+      saved: ask.saved,
+      expiresAt: Date.now() + waitMs,
+      outcome: null,
+      after: agentEntryBefore(live.thread),
+    }
+    live.origins.set(`secret:${entry.id}`, entry.id)
+    this.emit(live, [{ op: 'entry.add', entry }])
+    const status = live.thread.session.status
+    if (status === 'running' || status === 'ready')
+      this.update(live, { status: 'awaiting_permission' })
+    this.touch(live.id)
+    this.updateBadge()
+    this.deps.events.attention(
+      live.id,
+      'permission',
+      this.titleOf(live),
+      t('attention.secretRequest', { title: ask.title }),
+      { id: entry.id },
+    )
+    const answer = new Promise<SecretAnswer>((resolve) => {
+      const timer = setTimeout(
+        () => this.settleSecret(sessionId, entry.id, { decision: 'expired' }),
+        waitMs,
+      )
+      this.secretWaits.set(entry.id, (given) => {
+        clearTimeout(timer)
+        resolve(given)
+      })
+    })
+    return { entryId: entry.id, answer }
+  }
+
+  /**
+   * Huli: an agent wants to change Kettu's theme colors: a card in the thread that waits as a
+   * permission request does, and settles with the user's answer, `expired` after `waitMs`, or
+   * `ended` with the turn.
+   */
+  themeAsked(
+    sessionId: string,
+    change: { from: ThemeState; to: ThemeState },
+    waitMs: number,
+  ): { entryId: string; answer: Promise<ThemeAnswer> } | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: ThemeChangeEntry = {
+      kind: 'theme_change',
+      id: this.nextId(live),
+      from: change.from,
+      to: change.to,
+      asked: true,
+      expiresAt: Date.now() + waitMs,
+      outcome: null,
+      after: agentEntryBefore(live.thread),
+    }
+    live.origins.set(`theme:${entry.id}`, entry.id)
+    this.emit(live, [{ op: 'entry.add', entry }])
+    const status = live.thread.session.status
+    if (status === 'running' || status === 'ready')
+      this.update(live, { status: 'awaiting_permission' })
+    this.touch(live.id)
+    this.updateBadge()
+    this.deps.events.attention(
+      live.id,
+      'permission',
+      this.titleOf(live),
+      t('attention.themeChange'),
+      { id: entry.id },
+    )
+    const answer = new Promise<ThemeAnswer>((resolve) => {
+      const timer = setTimeout(
+        () => this.settleTheme(sessionId, entry.id, { decision: 'expired' }),
+        waitMs,
+      )
+      this.themeWaits.set(entry.id, (given) => {
+        clearTimeout(timer)
+        resolve(given)
+      })
+    })
+    return { entryId: entry.id, answer }
+  }
+
+  /** A theme change Full access made without asking: only the line it leaves, with its undo. */
+  themeRecorded(sessionId: string, change: { from: ThemeState; to: ThemeState }): string | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: ThemeChangeEntry = {
+      kind: 'theme_change',
+      id: this.nextId(live),
+      from: change.from,
+      to: change.to,
+      asked: false,
+      expiresAt: null,
+      outcome: { kind: 'changed' },
+      after: agentEntryBefore(live.thread),
+    }
+    this.emit(live, [{ op: 'entry.add', entry }])
+    return entry.id
+  }
+
+  /** A window's or a device's answer to a theme card; the first one counts. */
+  answerTheme(
+    sessionId: string,
+    entryId: string,
+    decision: 'apply' | 'keep',
+    device?: FromDevice,
+  ): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const entry = live?.thread.byId[entryId]
+    if (!live || entry?.kind !== 'theme_change') throw notFound(`No theme card ${entryId}`)
+    if (entry.outcome !== null || !this.themeWaits.has(entryId)) {
+      throw new HostError('not_found', `The theme card ${entryId} was already answered`, {
+        reason: ALREADY_ANSWERED,
+        device: entry.device ?? null,
+      })
+    }
+    this.settleTheme(sessionId, entryId, { decision }, device)
+  }
+
+  /** What became of a theme change the user confirmed, or of one undone later. */
+  themeSettled(sessionId: string, entryId: string, outcome: ThemeChangeOutcome): void {
+    const live = this.live.get(sessionId)
+    if (live?.thread.byId[entryId]?.kind !== 'theme_change') return
+    this.emit(live, [{ op: 'entry.update', id: entryId, changes: { outcome } }])
+  }
+
+  /** A theme line's change, for its undo, once it was made and not undone. */
+  themeChange(sessionId: string, entryId: string): { from: ThemeState; to: ThemeState } {
+    this.recordOf(sessionId)
+    const entry = this.live.get(sessionId)?.thread.byId[entryId]
+    if (entry?.kind !== 'theme_change') throw notFound(`No theme change ${entryId}`)
+    if (entry.outcome?.kind !== 'changed' || entry.outcome.undone || entry.outcome.stale) {
+      throw new HostError('conflict', 'This change cannot be undone')
+    }
+    return { from: entry.from, to: entry.to }
+  }
+
+  private settleTheme(
+    sessionId: string,
+    entryId: string,
+    answer: ThemeAnswer,
+    device?: FromDevice,
+  ): void {
+    const resolve = this.themeWaits.get(entryId)
+    this.themeWaits.delete(entryId)
+    const live = this.live.get(sessionId)
+    if (live) {
+      live.origins.delete(`theme:${entryId}`)
+      const entry = live.thread.byId[entryId]
+      if (entry?.kind === 'theme_change' && entry.outcome === null) {
+        // Apply is settled by what applying it gives; the card holds until then.
+        if (answer.decision !== 'apply') {
+          const outcome: ThemeChangeOutcome = {
+            kind: answer.decision === 'keep' ? 'declined' : answer.decision,
+          }
+          this.emit(live, [
+            {
+              op: 'entry.update',
+              id: entryId,
+              changes: { outcome, ...(device ? { device } : {}) },
+            },
+          ])
+        } else if (device) {
+          this.emit(live, [{ op: 'entry.update', id: entryId, changes: { device } }])
+        }
+      }
+      this.stopWaiting(live)
+      this.touch(live.id)
+      this.updateBadge()
+    }
+    resolve?.(answer)
+  }
+
+  /** Huli: whether the session's agent runs its file of exports before each of its commands. */
+  loadsEnvFile(sessionId: string): boolean {
+    const live = this.live.get(sessionId)
+    const acpSessionId = live?.record.acpSessionId
+    if (!live || !acpSessionId) return false
+    const runtime = this.deps.agents.runtime(live.record.agentId)
+    return runtime?.connection.loadsEnvFile?.(acpSessionId) ?? false
+  }
+
+  /** Throws unless the secret card still waits: not found, or answered already and where. */
+  checkSecret(sessionId: string, entryId: string): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const entry = live?.thread.byId[entryId]
+    if (!live || entry?.kind !== 'secret_request') throw notFound(`No secret card ${entryId}`)
+    if (entry.outcome !== null || !this.secretWaits.has(entryId)) {
+      throw new HostError('not_found', `The secret card ${entryId} was already answered`, {
+        reason: ALREADY_ANSWERED,
+        device: entry.device ?? null,
+      })
+    }
+  }
+
+  /** The answer to a secret card, once its values went where they go or the user declined. */
+  answerSecret(
+    sessionId: string,
+    entryId: string,
+    answer: SecretAnswer,
+    device?: FromDevice,
+  ): void {
+    this.checkSecret(sessionId, entryId)
+    this.settleSecret(sessionId, entryId, answer, device)
+  }
+
+  private settleSecret(
+    sessionId: string,
+    entryId: string,
+    answer: SecretAnswer,
+    device?: FromDevice,
+  ): void {
+    const resolve = this.secretWaits.get(entryId)
+    this.secretWaits.delete(entryId)
+    const live = this.live.get(sessionId)
+    if (live) {
+      live.origins.delete(`secret:${entryId}`)
+      const entry = live.thread.byId[entryId]
+      if (entry?.kind === 'secret_request' && entry.outcome === null) {
+        const outcome: SecretRequestOutcome =
+          answer.decision === 'provided'
+            ? { kind: 'provided', names: answer.names, saved: answer.saved }
+            : { kind: answer.decision }
+        this.emit(live, [
+          { op: 'entry.update', id: entryId, changes: { outcome, ...(device ? { device } : {}) } },
+        ])
       }
       this.stopWaiting(live)
       this.touch(live.id)
@@ -4124,11 +4421,18 @@ export class SessionManager {
       : null
     const provider = this.providerOf(record)
     const readOnly = this.manager.readOnly(sessionId) !== null
+    const sandbox = this.sessionSandbox(record)
+    // Huli: a container reaches none of the computer's programs, so neither MCP servers, skills
+    // nor plugins from the computer go in.
+    const contained = sandbox?.tier === 'container'
     return {
-      mcpServers: [...own, ...this.libraryServers(sessionId, record, runtime, own)],
+      mcpServers: contained
+        ? []
+        : [...own, ...this.libraryServers(sessionId, record, runtime, own)],
       ...(provider ? { provider } : {}),
       ...(readOnly ? { readOnly: true } : {}),
-      ...skills,
+      ...(sandbox ? { sandbox } : {}),
+      ...(contained ? {} : skills),
       ...(projectMcp ? { projectMcp } : {}),
       ...(projectHooks ? { projectHooks } : {}),
       ...(memory ? { memory } : {}),
@@ -4136,6 +4440,142 @@ export class SessionManager {
       ...(append ? { systemPromptAppend: append } : {}),
       ...(record.origin === 'routine' ? { routine: true } : {}),
       ...(ports ? { env: portEnv(ports) } : {}),
+      // A container's agent reaches no file of the computer's, nor Kettu's MCP tools.
+      ...(this.deps.envFiles && !contained ? { envFile: this.deps.envFiles.of(sessionId) } : {}),
+    }
+  }
+
+  /**
+   * Huli: the sandbox a new session runs in: the one it inherits from the session that started it
+   * or its parent, else the one asked for, else its project's, else the default; undefined for
+   * none. One the agent cannot run in here is refused, never traded for another.
+   */
+  private sandboxFor(
+    agentId: AgentId,
+    projectPath: string | null,
+    asked: SandboxChoice | undefined,
+    from: string | undefined,
+  ): SandboxChoice | undefined {
+    const inherited = from === undefined ? undefined : this.records.get(from)?.sandbox
+    const project = projectPath === null ? null : this.deps.projects.sandbox(projectPath)
+    const choice = inherited ?? resolveSandbox(asked, project, this.deps.sandbox?.())
+    if (choice.tier === 'off') return undefined
+    this.assertSandbox(agentId, choice)
+    return choice
+  }
+
+  /** Huli: the record field of the sandbox a session Kite starts itself runs in. */
+  private defaultSandbox(agentId: AgentId, projectPath: string): { sandbox?: SandboxChoice } {
+    const sandbox = this.sandboxFor(agentId, projectPath, undefined, undefined)
+    return sandbox ? { sandbox } : {}
+  }
+
+  private assertSandbox(agentId: AgentId, choice: SandboxChoice): void {
+    if (choice.tier === 'off') return
+    if (supportsChoice(this.deps.agents.sandboxSupport(agentId), choice)) return
+    throw invalidParams(
+      t('sandbox.unsupported', {
+        agent: this.deps.agents.name(agentId),
+        tier: t(`sandbox.tier.${choice.tier}`),
+        network: t(`sandbox.network.${choice.network}`),
+      }),
+    )
+  }
+
+  /**
+   * Huli: the sandbox as the session's driver gets it; undefined for none. A choice stored by a
+   * newer version stops the start, as does one its agent cannot run in any longer.
+   */
+  private sessionSandbox(record: SessionRecord): SessionSandbox | undefined {
+    if (record.sandboxUnknown) throw new HostError('invalid_params', t('sandbox.unknown'))
+    const choice = record.sandbox
+    if (!choice || choice.tier === 'off') return undefined
+    this.assertSandbox(record.agentId, choice)
+    const roots = [...new Set([workDir(record), record.projectPath])]
+    const proxyPort =
+      choice.network === 'agent' ? (this.deps.agentProxyPort?.(record.agentId) ?? null) : null
+    if (choice.network === 'agent' && proxyPort === null) {
+      throw new HostError(
+        'invalid_params',
+        t('sandbox.noExit', { agent: this.deps.agents.name(record.agentId) }),
+      )
+    }
+    const gitWritable = this.deps.sandbox?.()?.gitWritable === true
+    return { tier: choice.tier, network: choice.network, roots, proxyPort, gitWritable }
+  }
+
+  /** Huli: whether the session's agent runs in a container of the session's own. */
+  private contained(live: Live): boolean {
+    return live.record.sandbox?.tier === 'container' || this.containerLives.has(live.id)
+  }
+
+  /**
+   * Huli: the agent the session attaches to: the agent's shared process, or for a container
+   * session a process of its own in its container, which starts with the session.
+   */
+  private async runtimeFor(live: Live): Promise<AgentRuntime> {
+    const { record } = live
+    if (record.sandbox?.tier !== 'container') {
+      if (record.sandboxUnknown) throw new HostError('invalid_params', t('sandbox.unknown'))
+      return this.deps.agents.ensureReady(record.agentId)
+    }
+    this.assertSandbox(record.agentId, record.sandbox)
+    const { network } = record.sandbox
+    if (network !== 'model' && network !== 'agent' && network !== 'open') {
+      throw new HostError('invalid_params', t('sandbox.unknown'))
+    }
+    const runtime = await this.deps.agents.containerRuntime(
+      live.id,
+      record.agentId,
+      await this.cwdOf(live),
+      network,
+      {
+        proxyPort:
+          network === 'agent' ? (this.deps.agentProxyPort?.(record.agentId) ?? null) : null,
+        gitWritable: this.deps.sandbox?.()?.gitWritable === true,
+      },
+    )
+    this.containerLives.add(live.id)
+    return runtime
+  }
+
+  /**
+   * Huli: the sandbox the session runs in from its next turn; its agent starts again in it on the
+   * session's history. Between turns only, as a profile changes.
+   */
+  async setSandbox(sessionId: string, choice: SandboxChoice): Promise<void> {
+    this.assertRegistered(sessionId)
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent') {
+      throw new HostError('restricted', t('session.subagent.noConfig'))
+    }
+    const next = choice.tier === 'off' ? undefined : choice
+    if (next) this.assertSandbox(record.agentId, next)
+    const before = record.sandbox
+    if (!record.sandboxUnknown && (before && next ? sameSandbox(before, next) : before === next)) {
+      return
+    }
+    const live = this.live.get(sessionId)
+    if (live?.prepared) throw invalidParams(t('sandbox.prepared'))
+    if (live) {
+      const status = live.thread.session.status
+      const idle = !live.turn && SWITCHABLE.has(status)
+      if (!idle || (live.connection && (!live.saved || this.holdReason(live) !== null))) {
+        throw new HostError('busy', t('sandbox.betweenTurns'))
+      }
+    }
+    delete record.sandboxUnknown
+    if (next) record.sandbox = { ...next }
+    else delete record.sandbox
+    if (live?.saved) this.save(live)
+    else if (!live) this.saveRecord(sessionId)
+    this.touch(sessionId)
+    this.deps.diagnostics.log('info', `Session ${sessionId} changed its sandbox`)
+    if (!live?.connection) return
+    try {
+      await this.attachAgain(live)
+    } catch (error) {
+      throw agentError(error)
     }
   }
 
@@ -5101,6 +5541,8 @@ export class SessionManager {
       worktree?: { base: string; branch?: string }
       /** Huli: the profile it runs with; null for the agent's own sign-in, absent for its default. */
       profileId?: string | null
+      /** Huli: the sandbox it runs in; absent for its project's or the default. */
+      sandbox?: SandboxChoice
       /** Huli: the best-of-N group it is a run of. */
       group?: StoredGroup
       /** Huli: the GitHub issue it is started for, by its canonical URL. */
@@ -5114,6 +5556,13 @@ export class SessionManager {
     if (!agents.has(params.agentId)) throw invalidParams(`Unknown agent ${params.agentId}`)
     agents.assertEnabled(params.agentId)
     const profileId = this.profileFor(params.agentId, params.profileId)
+    // Huli: a session another session's agent starts, or a sub-session, is held as that one is.
+    const sandbox = this.sandboxFor(
+      params.agentId,
+      params.projectPath,
+      params.sandbox,
+      params.startedBy ?? params.parentId,
+    )
     // Before a prepared session is taken over, so a refused prompt leaves it prepared.
     const prompt = params.prompt && this.hydrate(params.prompt)
     // A prepared session's agent already works in the project's folder, so a worktree starts anew.
@@ -5124,6 +5573,7 @@ export class SessionManager {
         prompt,
         device: params.device,
         profileId,
+        sandbox,
       })
       if (adopted) return adopted
     }
@@ -5188,6 +5638,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...(profileId !== undefined ? { profileId } : {}),
+      ...(sandbox ? { sandbox } : {}),
       ...(params.group ? { group: { ...params.group } } : {}),
       ...(params.issue && GITHUB_ISSUE_URL.test(params.issue) ? { issue: params.issue } : {}),
       ...(params.parentId === undefined ? { board: { status: NEW_BOARD_STATUS, at: now } } : {}),
@@ -5284,6 +5735,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...this.defaultProfile(params.agentId),
+      ...this.defaultSandbox(params.agentId, projectPath),
     }
     const live = this.makeLive(record, false, 'starting')
     live.unread = false
@@ -5351,6 +5803,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...this.defaultProfile(params.agentId),
+      ...this.defaultSandbox(params.agentId, projectPath),
     }
     const live = this.makeLive(record, false, 'starting')
     live.unread = false
@@ -5445,10 +5898,11 @@ export class SessionManager {
    * answers. Resolves once `session/new` has answered and the start values are set.
    */
   async prepare(
-    asked: Omit<PrepareParams, 'profileId'> & {
+    asked: Omit<PrepareParams, 'profileId' | 'sandbox'> & {
       options?: Record<string, string | boolean>
       replace?: boolean
       profileId?: string | null
+      sandbox?: SandboxChoice
     },
     portId: string,
   ): Promise<SessionSummary> {
@@ -5456,9 +5910,16 @@ export class SessionManager {
       throw invalidParams(`Unknown agent ${asked.agentId}`)
     }
     this.deps.agents.assertEnabled(asked.agentId)
-    const { profileId: askedProfile, ...rest } = asked
+    const { profileId: askedProfile, sandbox: askedSandbox, ...rest } = asked
     const profileId = this.profileFor(asked.agentId, askedProfile)
-    const params = { ...rest, ...(profileId !== undefined ? { profileId } : {}) }
+    const sandbox = this.sandboxFor(asked.agentId, asked.projectPath, askedSandbox, asked.parentId)
+    // Huli: a container starts with the session's first message, never for New session's screen.
+    if (sandbox?.tier === 'container') throw invalidParams(t('sandbox.container.noPrepare'))
+    const params = {
+      ...rest,
+      ...(profileId !== undefined ? { profileId } : {}),
+      ...(sandbox ? { sandbox } : {}),
+    }
     const key = preparedKey(params)
     const slot = this.slotOf(portId)
     const held = slot.next ?? (slot.stale ? null : slot.current)
@@ -5542,6 +6003,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...(params.profileId !== undefined ? { profileId: params.profileId } : {}),
+      ...(params.sandbox ? { sandbox: { ...params.sandbox } } : {}),
     }
     const options = params.options ?? {}
     const live = this.makeLive(record, false, 'starting')
@@ -5554,6 +6016,7 @@ export class SessionManager {
         projectPath: params.projectPath,
         ...(params.parentId !== undefined ? { parentId: params.parentId } : {}),
         ...(params.profileId !== undefined ? { profileId: params.profileId } : {}),
+        ...(params.sandbox ? { sandbox: params.sandbox } : {}),
       },
       openedAt: now,
       notices: [],
@@ -5710,11 +6173,17 @@ export class SessionManager {
     prompt: UserContent[] | undefined
     device?: FromDevice
     profileId: string | undefined
+    sandbox: SandboxChoice | undefined
   }): Promise<SessionSummary | null> {
     const asked = this.live.get(params.preparedId)
     if (!asked?.prepared || asked.record.agentId !== params.agentId) return null
     // Huli: one prepared with another profile runs elsewhere than the message is meant for.
     if (asked.record.profileId !== params.profileId) return null
+    // Huli: and one prepared in another sandbox is held otherwise than the message is meant to be.
+    const preparedIn = asked.record.sandbox
+    if (preparedIn ? !params.sandbox || !sameSandbox(preparedIn, params.sandbox) : params.sandbox) {
+      return null
+    }
     const { portId, key } = asked.prepared
     const slot = this.preparedSlots.get(portId)
     const live = slot?.stale && slot.next?.prepared?.key === key ? slot.next : asked
@@ -5760,7 +6229,7 @@ export class SessionManager {
     const gone = (): boolean => live.closing || this.live.get(live.id) !== live
     let runtime: AgentRuntime
     try {
-      runtime = await this.deps.agents.ensureReady(live.record.agentId)
+      runtime = await this.runtimeFor(live)
     } catch (error) {
       // Its failure, such as the agent's exit, no longer belongs to a session that went meanwhile.
       if (gone()) throw removedWhileStarting()
@@ -6274,7 +6743,7 @@ export class SessionManager {
     this.touch(live.id)
     let runtime: AgentRuntime
     try {
-      runtime = await this.deps.agents.ensureReady(live.record.agentId)
+      runtime = await this.runtimeFor(live)
     } catch (error) {
       throw this.failStart(live, error, { action: 'load' })
     }
@@ -6468,10 +6937,30 @@ export class SessionManager {
    * the agent, so a crash never brings back sessions no one is using.
    */
   private agentExited(agentId: AgentId): void {
+    // Huli: the sessions in containers of their own run on, on processes of their own.
+    this.connectionsGone(
+      agentId,
+      (live) => live.record.agentId === agentId && !this.contained(live),
+    )
+  }
+
+  /** Huli: a session's own agent in its container exited: that session, and its subagents, close. */
+  private containerExited(sessionId: string): void {
+    const root = this.live.get(sessionId)
+    if (!root) return
+    const connection = root.connection
+    this.containerLives.delete(sessionId)
+    this.connectionsGone(
+      root.record.agentId,
+      (live) => live.id === sessionId || (connection !== null && live.connection === connection),
+    )
+  }
+
+  private connectionsGone(agentId: AgentId, gone: (live: Live) => boolean): void {
     const name = this.deps.agents.name(agentId)
     const held: SessionRecord[] = []
     for (const live of [...this.live.values()]) {
-      if (live.record.agentId !== agentId) continue
+      if (!gone(live)) continue
       // New session prepares another once it needs one.
       if (live.prepared) {
         void this.dropPrepared(live, { agentGone: true })
@@ -7162,7 +7651,7 @@ export class SessionManager {
   private async attachStored(live: Live): Promise<AgentConnection> {
     const { record } = live
     const own = live.thread.session.config
-    const runtime = await this.deps.agents.ensureReady(record.agentId)
+    const runtime = await this.runtimeFor(live)
     const caps = runtime.init.capabilities
     const { connection } = runtime
     // A takeover's agent opens its own session at the values chosen for it, not the session's.
@@ -7761,6 +8250,9 @@ export class SessionManager {
     this.refuseIfCannotSend(sessionId)
     if (!this.deps.agents.has(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
     this.deps.agents.assertEnabled(agentId)
+    // Huli: the session keeps its sandbox with another agent, which must be able to hold it.
+    const held = this.recordOf(sessionId).sandbox
+    if (held) this.assertSandbox(agentId, held)
     this.reportsSent.delete(sessionId)
     const hydrated = this.hydrate(params.content)
     const live = await this.revive(sessionId)
@@ -8887,6 +9379,8 @@ export class SessionManager {
       delete record.profileId
       Object.assign(record, this.defaultProfile(agentId))
     }
+    // Huli: a fork keeps its source's sandbox, which its agent must be able to hold.
+    if (record.sandbox) this.assertSandbox(agentId, record.sandbox)
     if (title === null) delete record.customTitle
     else record.customTitle = title
     // The takeovers it keeps, none of whose sessions it resumes: they belong to the source.
@@ -10746,8 +11240,12 @@ export class SessionManager {
     risk: Assessment | null,
   ): string | null {
     if (!risk || live.record.origin === 'routine') return null
-    const setting =
+    const chosen =
       this.deps.projects.autoApprove(live.record.projectPath) ?? this.deps.autoApprove?.() ?? 'off'
+    // Huli: in a sandbox the user lets allow project edits, an edit inside the project goes too;
+    // a high request never does.
+    const sandboxed = live.record.sandbox !== undefined && live.record.sandbox.tier !== 'off'
+    const setting = sandboxed && this.deps.sandbox?.()?.autoApproveEdits === true ? 'edits' : chosen
     if (!autoApproves(setting, risk)) return null
     if (this.planning(live)) return null
     return request.options.find((option) => option.kind === 'allow_once')?.id ?? null
@@ -10998,6 +11496,16 @@ export class SessionManager {
       // A settings card ends with its turn, changing nothing.
       if (requestId.startsWith('settings:')) {
         this.settleSettings(live.id, entryId, { decision: 'ended' })
+        continue
+      }
+      // So does a secret card, and no value goes anywhere.
+      if (requestId.startsWith('secret:')) {
+        this.settleSecret(live.id, entryId, { decision: 'ended' })
+        continue
+      }
+      // And a theme card, changing nothing.
+      if (requestId.startsWith('theme:')) {
+        this.settleTheme(live.id, entryId, { decision: 'ended' })
         continue
       }
       live.origins.delete(requestId)
@@ -13017,6 +13525,8 @@ export class SessionManager {
       this.checkpoint(live, { final: true })
     }
     this.dropLive(live)
+    // Huli: a session's container goes with it; it starts again when the session is used.
+    if (this.containerLives.delete(sessionId)) void this.deps.agents.stopContainer(sessionId)
     this.updateBadge()
     // A session that never reached the index has nothing to come back to.
     if (live.saved) this.touch(sessionId)
@@ -13077,6 +13587,7 @@ export class SessionManager {
       if (removed === null ? !deleted : !removed) this.deps.deleted?.add(agentId, acpSessionId)
     }
     void this.deps.attachments?.release(queuedAttachments(all))
+    for (const item of all) void this.deps.envFiles?.remove(item.id).catch(() => {})
     for (const item of all) this.forget(item.id)
     this.saveIndex()
     this.removeThreads(all.map((item) => item.id))
@@ -13443,6 +13954,164 @@ export class SessionManager {
     return this.summary(record.id)
   }
 
+  // Huli: moving a session to another computer (session-move/service.ts).
+
+  /** What a move needs of a session here, and why it cannot move now. */
+  moveFacts(sessionId: string): MoveFacts {
+    const record = this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const problems: MoveProblem[] = []
+    if (record.origin === 'subagent' || record.parentId !== null) problems.push('subagent')
+    if (live?.prepared) problems.push('prepared')
+    if (this.deps.scratch.contains(record.projectPath)) problems.push('noProject')
+    if (live) {
+      const { status } = live.thread.session
+      const working =
+        status === 'running' || status === 'awaiting_permission' || status === 'starting'
+      if (
+        working ||
+        live.turn ||
+        waitingCount(live) > 0 ||
+        live.thread.session.queue.length > 0 ||
+        this.backgroundWork(live) !== null
+      ) {
+        problems.push('busy')
+      }
+    }
+    const worktree =
+      record.worktree && record.worktree.removed === undefined ? record.worktree : null
+    return {
+      agentId: record.agentId,
+      acpSessionId: record.acpSessionId,
+      projectPath: record.projectPath,
+      cwd: workDir(record),
+      worktree: worktree ? { base: worktree.base, baseOid: worktree.baseOid } : null,
+      title: record.customTitle ?? live?.thread.session.title ?? record.title,
+      createdAt: record.createdAt,
+      configDir: record.configDir ?? null,
+      // A takeover whose first turn never went has no session of the new agent's to move.
+      carry: record.carry !== undefined || record.acpSessionId === '',
+      problems,
+    }
+  }
+
+  /** Kite's copy of the thread with the pictures it holds, for an agent whose own cannot move. */
+  async moveThread(sessionId: string): Promise<{ entries: ThreadEntry[]; blobs: StoredBlob[] }> {
+    const live = await this.revive(sessionId)
+    const entries = threadEntries(live.thread).filter((entry) => entry.kind !== 'subagent')
+    const blobs = await Promise.all(
+      [...storedBlobs(entries)].map((hash) => this.storedBlob(live.id, hash).catch(() => null)),
+    )
+    return { entries, blobs: blobs.filter((blob) => blob !== null) }
+  }
+
+  /**
+   * A session moved here from another computer: its agent resumes its own copied session, or
+   * starts from Kite's copy of the thread, carried with its first turn as a takeover's is.
+   */
+  async adoptMoved(input: MoveAdoption): Promise<SessionSummary> {
+    if (!this.deps.agents.has(input.agentId)) throw invalidParams(`Unknown agent ${input.agentId}`)
+    this.deps.agents.assertEnabled(input.agentId)
+    const now = this.now()
+    const ports = input.worktree ? await this.takePorts() : null
+    const resumes = 'acpSessionId' in input.resume
+    const record: SessionRecord = {
+      id: randomUUID(),
+      agentId: input.agentId,
+      acpSessionId: 'acpSessionId' in input.resume ? input.resume.acpSessionId : '',
+      projectPath: input.projectPath,
+      title: input.title,
+      ...(input.title !== null ? { customTitle: input.title } : {}),
+      createdAt: input.createdAt,
+      updatedAt: now,
+      lastViewedAt: now,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: input.worktree?.branch ?? null,
+      ...(input.worktree ? { worktree: { ...input.worktree } } : {}),
+      ...(ports ? { ports: { ...ports } } : {}),
+      // As an import: Claude Code keeps the instructions its transcript recorded.
+      ...(resumes && harnessOf(input.agentId) === 'claude-code'
+        ? { instructionsAhead: true as const }
+        : {}),
+      board: { status: NEW_BOARD_STATUS, at: now },
+    }
+    Object.assign(record, this.defaultProfile(input.agentId))
+    this.stampConfig(record)
+    if ('acpSessionId' in input.resume) {
+      this.records.set(record.id, record)
+      this.saveIndex()
+      this.writeIndexNow()
+    } else {
+      const { entries, blobs } = input.resume
+      const live = this.makeLive(record, false, 'starting')
+      live.unread = false
+      live.used = true
+      live.blobs = new Map(blobs.map((blob) => [blob.hash, blob]))
+      for (const entry of entries) live.counter = Math.max(live.counter, idNumber(entry.id))
+      const entryId = this.nextId(live)
+      record.carry = { entryId, fromTurn: 1 }
+      this.emit(
+        live,
+        entries.map((entry): Patch => ({ op: 'entry.add', entry })),
+      )
+      this.emit(live, [
+        {
+          op: 'entry.add',
+          entry: {
+            kind: 'takeover',
+            id: entryId,
+            agentId: input.agentId,
+            turns: 0,
+            omitted: 0,
+            carried: '',
+            after: agentEntryBefore(live.thread),
+          },
+        },
+      ])
+      this.update(live, {
+        agentId: input.agentId,
+        acpSessionId: '',
+        config: this.deps.options?.get(input.agentId)?.config ?? [],
+        usage: null,
+        status: 'closed',
+      })
+      this.save(live)
+      this.persist(live)
+    }
+    if (ports) this.pendingPorts.delete(ports.first)
+    this.touch(record.id)
+    if (record.worktree) this.prepareWorktree(input.projectPath, record.worktree)
+    return this.summary(record.id)
+  }
+
+  /** Takes out a session `adoptMoved` added, for a move undone; its agent's files are the mover's. */
+  async removeAdopted(sessionId: string): Promise<void> {
+    const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+    if (!record) return
+    if (record.worktree) this.deps.worktrees?.stop(record.worktree.path)
+    await this.settled(sessionId)
+    await this.closeAll([record], false)
+    const live = this.live.get(sessionId)
+    if (live) this.dropLive(live)
+    this.deps.events.ended([sessionId])
+    this.forget(sessionId)
+    this.saveIndex()
+    this.removeThreads([sessionId])
+  }
+
+  /** The session went on on another computer, or (null) goes on here again. */
+  setMovedTo(sessionId: string, movedTo: MovedTo | null): void {
+    const record = this.recordOf(sessionId)
+    if (movedTo) record.movedTo = { ...movedTo }
+    else delete record.movedTo
+    const live = this.live.get(sessionId)
+    if (live) this.persist(live)
+    else this.saveIndex()
+    this.touch(sessionId)
+  }
+
   /**
    * Refuses a Claude Code session that a process outside Kettu, as in a terminal, is at work in:
    * two processes writing one transcript tangle it. Huli: an idle one lets it go on here, which
@@ -13562,6 +14231,30 @@ export class SessionManager {
     this.followTimer = null
     this.stopped = true
   }
+}
+
+/** Huli: what a move needs of a session on its source. */
+export interface MoveFacts {
+  agentId: AgentId
+  acpSessionId: string
+  projectPath: string
+  cwd: string
+  worktree: { base: string; baseOid: string } | null
+  title: string | null
+  createdAt: number
+  configDir: string | null
+  carry: boolean
+  problems: MoveProblem[]
+}
+
+/** Huli: a session moved here, as `adoptMoved` takes it. */
+export interface MoveAdoption {
+  agentId: AgentId
+  projectPath: string
+  worktree: WorktreeRecord | null
+  title: string | null
+  createdAt: number
+  resume: { acpSessionId: string } | { entries: ThreadEntry[]; blobs: StoredBlob[] }
 }
 
 /** Huli: the fields `importSession` takes over from another app's index. */
@@ -13865,6 +14558,7 @@ function preparedKey(params: PrepareParams): string {
     params.projectPath,
     params.parentId ?? null,
     params.profileId ?? null,
+    params.sandbox ?? null,
   ])
 }
 

@@ -5,6 +5,7 @@
 // the agent host only: a client learns which inputs are set, never what they hold, and nothing of
 // a sign-in. Huli: the agents' API provider profiles live here too, each with its key, which only
 // the agent host is sent; a client sees them through the agents' statuses, without their keys.
+// So do the values the user saved from an agent's secret card, by project path and name.
 
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
@@ -29,6 +30,7 @@ import { quarantineFile, readJsonFile, writeFileAtomic } from './json-file'
 import type { Logger } from './log'
 import type { IdentityCipher } from './remote-identity'
 import { MAX_MARKET_SERVERS } from './settings-schema'
+import { secretNameProblem, secretValueProblem } from '@shared/secret-request'
 
 /** The values of each server's inputs, by server id and input name, for the agent host alone. */
 export type MarketKeyValues = Record<string, Record<string, string>>
@@ -39,6 +41,8 @@ export interface MarketKeysPush {
   oauth: Record<string, string>
   agentEnv: Record<string, Record<string, string>>
   profiles: Record<string, StoredProfiles>
+  /** Huli: values saved from secret cards, by project path, then name; absent while none are. */
+  projectSecrets?: Record<string, Record<string, string>>
 }
 
 /** Huli: an agent's profiles with their keys, and the one its new sessions start with. */
@@ -59,6 +63,10 @@ const MAX_INPUTS = 64
 const MAX_SEALED_CHARS = 64 * 1024 * 1024
 /** The most a server's OAuth sign-in may hold, in UTF-8 bytes. */
 export const MAX_OAUTH_BYTES = 64 * 1024
+/** Huli: how many projects may keep values from secret cards, and how many each. */
+const MAX_SECRET_PROJECTS = 200
+const MAX_SECRETS_PER_PROJECT = 32
+const MAX_PROJECT_CHARS = 4096
 
 export function marketKeysFile(dataPath: string): string {
   return join(dataPath, 'market-keys.json')
@@ -85,6 +93,8 @@ interface Contents {
   oauth: Map<string, string>
   agentEnv: Map<string, Map<string, string>>
   profiles: Map<string, StoredProfiles>
+  /** Huli: values saved from secret cards, by project path, then name. */
+  projects: Keys
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -155,14 +165,29 @@ function parseOAuth(raw: unknown): Map<string, string> | null {
 function parseContents(raw: unknown, version: 1 | 2 | 3): Contents | null {
   if (version === 1) {
     const keys = parseValues(raw)
-    return keys && { keys, oauth: new Map(), agentEnv: new Map(), profiles: new Map() }
+    return (
+      keys && {
+        keys,
+        oauth: new Map(),
+        agentEnv: new Map(),
+        profiles: new Map(),
+        projects: new Map(),
+      }
+    )
   }
   if (!isRecord(raw)) return null
   const keys = parseValues(raw.values)
   const oauth = parseOAuth(raw.oauth)
   const agentEnv = version === 3 ? parseValues(raw.agentEnv) : new Map()
   const profiles = raw.profiles === undefined ? new Map() : parseProfiles(raw.profiles)
-  return keys && oauth && agentEnv && profiles && { keys, oauth, agentEnv, profiles }
+  const projects = raw.projectSecrets === undefined ? new Map() : parseProjects(raw.projectSecrets)
+  return (
+    keys &&
+    oauth &&
+    agentEnv &&
+    profiles &&
+    projects && { keys, oauth, agentEnv, profiles, projects }
+  )
 }
 
 /** Huli: a profile as the file keeps it, checked as a draft is; null for one that is not. */
@@ -205,13 +230,34 @@ function parseProfiles(raw: unknown): Map<string, StoredProfiles> | null {
   return profiles
 }
 
-function contentsObject({ keys, oauth, agentEnv, profiles }: Contents): MarketKeysPush {
+function contentsObject({ keys, oauth, agentEnv, profiles, projects }: Contents): MarketKeysPush {
   return {
     values: toObject(keys),
     oauth: Object.fromEntries(oauth),
     agentEnv: toObject(agentEnv),
     profiles: Object.fromEntries(profiles),
+    ...(projects.size > 0 ? { projectSecrets: toObject(projects) } : {}),
   }
+}
+
+/** Huli: values saved from secret cards as the file keeps them; null when one is not valid. */
+function parseProjects(raw: unknown): Keys | null {
+  if (!isRecord(raw)) return null
+  const entries = Object.entries(raw)
+  if (entries.length > MAX_SECRET_PROJECTS) return null
+  const projects: Keys = new Map()
+  for (const [project, values] of entries) {
+    if (project.length === 0 || project.length > MAX_PROJECT_CHARS || !isRecord(values)) return null
+    const kept = new Map<string, string>()
+    for (const [name, value] of Object.entries(values)) {
+      if (secretNameProblem(name) !== null || typeof value !== 'string') return null
+      if (secretValueProblem(value) !== null) return null
+      kept.set(name, value)
+    }
+    if (kept.size > MAX_SECRETS_PER_PROJECT) return null
+    if (kept.size > 0) projects.set(project, kept)
+  }
+  return projects
 }
 
 /** Whether a server signs in with OAuth, so the store may keep a sign-in for it. */
@@ -230,10 +276,10 @@ function toObject(keys: Keys): MarketKeyValues {
  * of a server that is gone or no longer signs in with OAuth.
  */
 function pruned(
-  { keys, oauth, agentEnv, profiles }: Contents,
+  { keys, oauth, agentEnv, profiles, projects }: Contents,
   servers: readonly MarketServer[],
 ): Contents {
-  const next: Contents = { keys: new Map(), oauth: new Map(), agentEnv, profiles }
+  const next: Contents = { keys: new Map(), oauth: new Map(), agentEnv, profiles, projects }
   for (const server of servers) {
     const inputs = keys.get(server.id)
     if (inputs) {
@@ -370,6 +416,7 @@ export class MarketKeys {
       oauth: new Map(),
       agentEnv: new Map(),
       profiles: new Map(),
+      projects: new Map(),
     }
     let readOnly: string | null = null
     let resave = false
@@ -560,6 +607,45 @@ export class MarketKeys {
     await this.commit({ ...this.contents, profiles }, true)
   }
 
+  /**
+   * Huli: saves or, with null, forgets values from an agent's secret card for a project, from an
+   * untrusted message of the agent host. Settles once the file holds the change.
+   */
+  async setProjectSecrets(project: unknown, raw: unknown): Promise<void> {
+    if (typeof project !== 'string' || project.length === 0 || project.length > MAX_PROJECT_CHARS) {
+      throw invalid('"project" must name a project')
+    }
+    if (!isRecord(raw)) throw invalid('"values" must be an object')
+    const entries = Object.entries(raw)
+    for (const [name, value] of entries) {
+      if (secretNameProblem(name) !== null)
+        throw invalid(`"${name.slice(0, 64)}" is no variable name`)
+      // The message names the variable, never the value.
+      if (value !== null && (typeof value !== 'string' || secretValueProblem(value) !== null)) {
+        throw invalid(`The value of "${name}" is not valid`)
+      }
+    }
+    await this.run(async () => {
+      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      const values = new Map(this.contents.projects.get(project))
+      for (const [name, value] of entries) {
+        if (value === null) values.delete(name)
+        else values.set(name, (value as string).trim())
+      }
+      if (values.size > MAX_SECRETS_PER_PROJECT) {
+        throw invalid(`A project may keep at most ${MAX_SECRETS_PER_PROJECT} saved values`)
+      }
+      const projects = new Map(this.contents.projects)
+      if (values.size > 0) projects.set(project, values)
+      else projects.delete(project)
+      if (!projects.has(project) && !this.contents.projects.has(project)) return
+      if (projects.size > MAX_SECRET_PROJECTS) {
+        throw invalid(`At most ${MAX_SECRET_PROJECTS} projects may keep saved values`)
+      }
+      await this.commit({ ...this.contents, projects }, true)
+    })
+  }
+
   /** Everything the agent host is sent: the values, and every OAuth sign-in. */
   contentsForHost(): MarketKeysPush {
     return contentsObject(this.contents)
@@ -670,7 +756,8 @@ export class MarketKeys {
       contents.keys.size === 0 &&
       contents.oauth.size === 0 &&
       contents.agentEnv.size === 0 &&
-      contents.profiles.size === 0
+      contents.profiles.size === 0 &&
+      contents.projects.size === 0
     ) {
       await rm(file, { force: true })
       return

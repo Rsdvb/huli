@@ -180,7 +180,9 @@
     "marketPublish": "Wants to publish {{name}} to the Kettu Marketplace",
     "marketUnlist": "Wants to unlist {{name}} from the Kettu Marketplace",
     "settingsChange_one": "Wants to change {{count}} setting",
-    "settingsChange_other": "Wants to change {{count}} settings"
+    "settingsChange_other": "Wants to change {{count}} settings",
+    "secretRequest": "Needs {{title}} from you",
+    "themeChange": "Wants to change Kettu’s theme colors"
   },
   "supervisor": {
     "continueText": "Continue",
@@ -387,6 +389,8 @@
       "omp": "Install OMP with `bun install -g @oh-my-pi/pi-coding-agent` or its installer at omp.sh.",
       "antigravity": "Install the Antigravity CLI in Settings › Harnesses on macOS or Linux. On Windows, run irm https://antigravity.google/cli/install.ps1 | iex in PowerShell.",
       "hermes": "Install Hermes Agent in Settings › Harnesses on macOS or Linux. On Windows, follow the official guide for WSL2.",
+      "kiro": "Install Kiro CLI in Settings › Harnesses on macOS or Linux, then run kiro-cli login. On Windows 11, run irm 'https://cli.kiro.dev/install.ps1' | iex in PowerShell.",
+      "fx": "Install fx in Settings › Harnesses on macOS or Linux, then run fx login. fx doesn’t run on Windows, and the JSON viewer also named fx is a different program.",
       "muse": "Install Muse Code from dev.meta.ai, or choose its binary in Settings › Harnesses.",
       "codewhale": "Install CodeWhale with the installer at codewhale.net, or choose its binary in Settings › Harnesses.",
       "deepseek": "Kettu installs DeepSeek Harness from npm on its first use, on Node.js 24.9 or later.",
@@ -1575,5 +1579,50 @@
     "workersWorking": "Stop the workers or wait for them to finish before switching manager mode off.",
     "modeLocked": "A manager reads only: its mode stays one that asks before every change.",
     "editedFiles": "The manager changed files itself ({{files}}), so manager mode paused it. Check the change, then resume."
+  },
+  "sandbox": {
+    "tier": {
+      "native": "the agent's own sandbox",
+      "container": "a container"
+    },
+    "network": {
+      "none": "its commands offline",
+      "model": "only its model's addresses",
+      "agent": "only its Agent network exit",
+      "open": "the network open"
+    },
+    "unsupported": "{{agent}} cannot run in {{tier}} with {{network}} here, so the session did not start. Pick another sandbox for it, or change the project's.",
+    "unknown": "A newer version of Kite set this session's sandbox, which this one cannot read. Pick its sandbox again to start it.",
+    "noExit": "Agent network gives {{agent}} no exit of its own, so “only its Agent network exit” would leave it none. Pick a node or an interface for it in Agent network, or another network choice for the sandbox.",
+    "prepared": "Pick the sandbox before the first message.",
+    "betweenTurns": "The sandbox changes between turns only.",
+    "codexFullAccess": "Full access runs outside the sandbox, so a sandboxed session cannot take it. Turn the session's sandbox off first.",
+    "codexNetwork": "Codex's sandbox turns the network on or off as a whole and cannot hold it to one exit. Pick “no network” or “network open”.",
+    "codexWindowsSetup": "Codex's Windows sandbox is not set up on this computer, so the session did not start. Set it up in Codex (`windows.sandbox` in its config.toml, or its own setup), or pick another sandbox.",
+    "codexWindowsUpdate": "Codex's Windows sandbox needs its setup run again after an update, so the session did not start. Run Codex's sandbox setup, or pick another sandbox.",
+    "container": {
+      "unsupported": "{{agent}} cannot run in a container yet.",
+      "noPrepare": "A session in a container starts with its first message.",
+      "engineNotFound": "No container engine was found, so the session did not start. Install Docker (on Windows, Docker Desktop or Docker inside WSL) or Podman, or pick another sandbox.",
+      "engineNotRunning": "The container engine does not answer, so the session did not start. Start Docker or Podman, or pick another sandbox.",
+      "imageMissing": "Kite's container image is not downloaded yet ({{mb}} MB), so the session did not start. Download it in Settings › Agents › Sandbox, or pick another sandbox.",
+      "install": "{{agent}} could not be installed into the container's volume: {{detail}}",
+      "failed": "{{agent}} did not start in its container: {{detail}}",
+      "mount": "This folder cannot be mounted into a container ({{reason}}), so the session did not start.",
+      "mountReason": {
+        "notAbsolute": "it is not a full path",
+        "dotSegments": "its path has . or .. parts",
+        "badCharacters": "its path has characters a mount cannot carry",
+        "devicePath": "it is a device path",
+        "root": "it is a drive or the file system's root",
+        "home": "it is your home folder",
+        "aboveHome": "it holds your home folder or other users'",
+        "system": "it is a system folder",
+        "credentials": "it holds sign-ins, keys or settings",
+        "kiteData": "it is Kite's own data folder",
+        "missing": "it does not exist"
+      },
+      "noModelHosts": "Kite does not know the addresses of {{agent}}'s model service, so “only its model's addresses” would leave it none. Pick “only its Agent network exit” or “the network open”."
+    }
   }
 }

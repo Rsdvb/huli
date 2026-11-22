@@ -17,7 +17,7 @@
     "cached": "缓存命中",
     "output": "输出",
     "cost": "费用",
-    "api": "API",
+    "api": "按 API 价",
     "costHint": "智能体自己按 API 价算的，订阅账号不按这个收费。",
     "reasoning": "推理"
   },

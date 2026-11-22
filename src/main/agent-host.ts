@@ -41,6 +41,7 @@ import type {
   SessionProgress,
   SettingsCallAnswer,
 } from '@shared/host-control'
+import type { ThemeCallAnswer } from '@shared/theme-palette'
 import {
   isComputerApp,
   isComputerFrame,
@@ -52,6 +53,7 @@ import {
 import { isControlOutcome, type ControlOutcome } from '@shared/control'
 import type { MarketAccount, MarketCall, MarketCallAnswer } from '@shared/market-publish'
 import { isMediaType, MEDIA_TOKEN, type MediaGrantRecord } from '@shared/media'
+import { isPortError, PortRequestError } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
 import { reportBuildResult, type ReportBuildResult } from '@shared/report'
 import type { HostSettings } from '@shared/settings'
@@ -96,6 +98,8 @@ export interface AgentHostDeps {
   marketKeys(): MarketKeysPush
   /** The host asks to keep or clear a server's OAuth sign-in; main checks it against the settings. */
   onMarketOAuth?(serverId: unknown, state: unknown): void
+  /** Huli: values a secret card saved or forgot for a project, unchecked. */
+  onProjectSecrets?(project: unknown, values: unknown): void
   /** The Kettu account the Marketplace tools publish with, which follows init at each start. */
   marketAccount(): MarketAccount | null
   /** Huli: the chat bridges' configuration, which follows init at each start. */
@@ -108,6 +112,8 @@ export interface AgentHostDeps {
   market?: (call: MarketCall) => Promise<MarketCallAnswer>
   /** An agent's settings tool reads or changes the settings. */
   settingsCall?: (call: unknown) => SettingsCallAnswer
+  /** Huli: an agent's theme tool reads or sets the agent theme, unchecked. */
+  themeCall?: (call: unknown) => Promise<ThemeCallAnswer>
   /** The host's first start found the programs of these harnesses; main adds their agents. */
   onFirstStart?(harnesses: unknown): void
   onAttention(message: Extract<HostToMain, { type: 'host:attention' }>): void
@@ -368,6 +374,12 @@ export class AgentHost {
   private readonly importRequests = new Map<number, (result: ImportAnswer) => void>()
   private nextImportId = 1
   private readonly exportRequests = new Map<number, (result: ArtifactExportResult) => void>()
+  /** Huli: main's own requests of host methods, by call id. */
+  private readonly mainCalls = new Map<
+    number,
+    { resolve: (result: unknown) => void; reject: (error: Error) => void }
+  >()
+  private nextMainCall = 1
   private nextExportId = 1
   private readonly listRequests = new Map<number, (list: ArtifactBrief[] | null) => void>()
   private nextListId = 1
@@ -388,9 +400,10 @@ export class AgentHost {
         platform: process.platform,
         isPackaged: app.isPackaged,
         nodeRuntime: { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
-        fakeAgentPath: app.isPackaged
-          ? (process.env.KETTU_FAKE_AGENT ?? null)
-          : join(app.getAppPath(), 'tools/fake-agent/main.ts'),
+        // Huli: a development copy may run a bundled fake agent too, as a container needs one.
+        fakeAgentPath:
+          process.env.KETTU_FAKE_AGENT ??
+          (app.isPackaged ? null : join(app.getAppPath(), 'tools/fake-agent/main.ts')),
         threadWorkerPath,
         usageWorkerPath,
         // The router runs on the user's Node.js, which cannot read inside app.asar.
@@ -458,6 +471,21 @@ export class AgentHost {
 
   restart(): void {
     this.host.restart()
+  }
+
+  /**
+   * Huli: main's own request of a host method, which the host runs as a window's and, for the
+   * methods only main may call, as main's; rejects with the host's error.
+   */
+  call(method: string, params: unknown): Promise<unknown> {
+    const callId = this.nextMainCall++
+    return new Promise((resolve, reject) => {
+      this.mainCalls.set(callId, { resolve, reject })
+      if (!this.host.post({ type: 'host:main-call', callId, method, params })) {
+        this.mainCalls.delete(callId)
+        reject(new PortRequestError({ code: 'unavailable', message: 'The host is not running' }))
+      }
+    })
   }
 
   pushSettings(settings: HostSettings): void {
@@ -796,6 +824,15 @@ export class AgentHost {
         )
         break
       }
+      case 'host:theme-call': {
+        const { callId } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.deps.themeCall
+        void (run ? run(message.call) : Promise.resolve({ error: 'This build shows no themes.' }))
+          .catch((error: unknown) => ({ error: (error as Error).message }))
+          .then((answer) => this.host.post({ type: 'theme-result', callId, answer }))
+        break
+      }
       case 'host:settings-call': {
         const { callId } = message
         if (!Number.isSafeInteger(callId)) break
@@ -855,6 +892,9 @@ export class AgentHost {
         break
       case 'host:market-oauth':
         this.deps.onMarketOAuth?.(message.serverId, message.state)
+        break
+      case 'host:project-secrets':
+        this.deps.onProjectSecrets?.(message.project, message.values)
         break
       case 'host:first-start':
         this.deps.onFirstStart?.(message.harnesses)
@@ -948,6 +988,21 @@ export class AgentHost {
         if (!resolve) break
         this.listRequests.delete(message.requestId)
         resolve(listedArtifacts(message.result))
+        break
+      }
+      case 'host:main-answer': {
+        const call = this.mainCalls.get(message.callId)
+        if (!call) break
+        this.mainCalls.delete(message.callId)
+        if ('error' in message) {
+          call.reject(
+            new PortRequestError(
+              isPortError(message.error)
+                ? message.error
+                : { code: 'internal', message: 'The host failed' },
+            ),
+          )
+        } else call.resolve(message.result)
         break
       }
       case 'host:artifact-export': {
@@ -1070,6 +1125,10 @@ export class AgentHost {
 
   private exited(clean: boolean): void {
     this.migratingNow = false
+    for (const call of this.mainCalls.values()) {
+      call.reject(new PortRequestError({ code: 'host_restarted', message: 'The host stopped' }))
+    }
+    this.mainCalls.clear()
     for (const resolve of this.busyRequests.values()) resolve([])
     this.busyRequests.clear()
     this.grants.failAll()

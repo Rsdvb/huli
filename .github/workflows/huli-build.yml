@@ -131,6 +131,9 @@ jobs:
       - name: Fetch mihomo
         run: node tools/install/mihomo.mjs
       - run: pnpm build
+        env:
+          # The renderer's type check outgrew Node's default heap on the smaller runners.
+          NODE_OPTIONS: --max-old-space-size=6144
       - name: Fetch the device helpers
         run: node tools/install/device-helpers.mjs
       - name: Package
@@ -211,6 +214,9 @@ jobs:
             echo 'No Developer ID here: an unsigned build'
           fi
       - run: pnpm build
+        env:
+          # The Mac runner has 7 GB; the renderer's type check outgrew Node's default 2 GB heap.
+          NODE_OPTIONS: --max-old-space-size=5120
       - run: node tools/install/device-helpers.mjs
       # The Mac's network drops connections now and then; a failed package is tried twice more.
       - name: Package

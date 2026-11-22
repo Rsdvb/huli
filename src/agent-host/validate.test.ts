@@ -2092,3 +2092,45 @@ describe('worktree requests', () => {
     rejects(() => posix['sessions.runCommand']({ sessionId: 's', command: 'ls' }))
   })
 })
+
+describe('secrets.answer', () => {
+  const base = { sessionId: 's1', entryId: 'e1' }
+
+  it('takes values by variable, saved names and save, only with provide', () => {
+    expect(
+      posix['secrets.answer']({
+        ...base,
+        decision: 'provide',
+        values: { OPENAI_API_KEY: 'sk-1' },
+        useSaved: ['OPENAI_ORG'],
+        save: true,
+      }),
+    ).toEqual({
+      ...base,
+      decision: 'provide',
+      values: { OPENAI_API_KEY: 'sk-1' },
+      useSaved: ['OPENAI_ORG'],
+      save: true,
+    })
+    expect(
+      posix['secrets.answer']({ ...base, decision: 'decline', values: { A: 'x' }, save: true }),
+    ).toEqual({ ...base, decision: 'decline' })
+  })
+
+  it.each([
+    ['another decision', { decision: 'allow' }],
+    ['values that are no object', { decision: 'provide', values: ['x'] }],
+    ['a value that is no text', { decision: 'provide', values: { A: 1 } }],
+    ['a name that is no variable', { decision: 'provide', values: { 'a b': 'x' } }],
+    ['a saved name that is no variable', { decision: 'provide', useSaved: ['../x'] }],
+    ['save that is no switch', { decision: 'provide', save: 'yes' }],
+  ])('refuses %s', (_, params) => {
+    rejects(() => posix['secrets.answer']({ ...base, ...params }))
+  })
+
+  it('names the field and never the value it refuses', () => {
+    const run = () =>
+      posix['secrets.answer']({ ...base, decision: 'provide', values: { A: 'x'.repeat(9000) } })
+    expect(run).toThrow(expect.not.objectContaining({ message: expect.stringContaining('xxxx') }))
+  })
+})

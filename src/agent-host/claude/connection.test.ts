@@ -4248,3 +4248,42 @@ describe('API provider profiles', () => {
     expect(s.sdk.last.closed).toBe(true)
   })
 })
+
+// Huli: a session in Claude Code's own sandbox.
+describe('the native sandbox', () => {
+  const sandbox = {
+    tier: 'native' as const,
+    network: 'none' as const,
+    roots: ['/repo-wt', '/repo'],
+    proxyPort: null,
+    gitWritable: false,
+  }
+
+  it("starts the query in Claude Code's sandbox, failing closed with no way around it", async () => {
+    const s = await setup()
+    await s.connection.newSession('/repo', { sandbox })
+    expect(s.sdk.last.options.sandbox).toMatchObject({
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      autoAllowBashIfSandboxed: false,
+      filesystem: { allowWrite: ['/repo-wt', '/repo'] },
+      network: { allowedDomains: [], strictAllowlist: true },
+    })
+  })
+
+  it('starts one without a sandbox, or in a container, as before', async () => {
+    const s = await setup()
+    await s.connection.newSession('/repo')
+    expect(s.sdk.last.options.sandbox).toBeUndefined()
+    await s.connection.newSession('/repo', { sandbox: { ...sandbox, tier: 'container' } })
+    expect(s.sdk.last.options.sandbox).toBeUndefined()
+  })
+
+  it('refuses a network held to one exit that the agent does not have', async () => {
+    const s = await setup()
+    await expect(
+      s.connection.newSession('/repo', { sandbox: { ...sandbox, network: 'agent' } }),
+    ).rejects.toThrow()
+  })
+})

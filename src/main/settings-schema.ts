@@ -59,6 +59,7 @@ import type { DirectAddress } from '@shared/remote/protocol'
 import { DEVICE_NAME_CHARS, isDeviceName } from '@shared/remote/device'
 import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports'
 import { AUTO_APPROVE_LEVELS } from '@shared/risk'
+import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { THEME_ID } from '@shared/themes'
 import { isAbsolutePath } from '../agent-host/paths'
@@ -331,6 +332,12 @@ const SECTION_FIELDS = {
   cloud: { enabled: isBoolean },
   onboarding: { done: isBoolean, step: oneOf(...ONBOARDING_STEPS) },
   permissions: { autoApprove: oneOf(...AUTO_APPROVE_LEVELS) },
+  sandbox: {
+    tier: oneOf(...SANDBOX_TIERS),
+    network: oneOf(...SANDBOX_NETWORKS),
+    autoApproveEdits: isBoolean,
+    gitWritable: isBoolean,
+  },
 } as const satisfies Record<string, Record<string, Check>>
 
 type FieldSection = keyof typeof SECTION_FIELDS
@@ -1778,6 +1785,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     autoApprove: settings.permissions.autoApprove,
     lowerAgentPriority: settings.general.lowerAgentPriority,
     manager: structuredClone(settings.manager),
+    sandbox: { ...settings.sandbox },
   }
 }
 
@@ -1813,6 +1821,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'updates',
   'permissions',
   'manager',
+  'sandbox',
 ])
 
 /** Whether a change touches what the agent host is sent; a language change is checked apart. */

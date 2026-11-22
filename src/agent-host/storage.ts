@@ -29,6 +29,8 @@ import {
 import { isProfileId } from '@shared/provider-profiles'
 import { isBoardStatus, type SessionBoard } from '@shared/session-board'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
+import type { MovedTo } from '@shared/session-move'
+import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
 import type { PortBlock } from '@shared/worktree-ports'
@@ -301,6 +303,7 @@ export interface ProjectRecord {
   worktree?: Partial<ProjectWorktreeSettings> // only what differs from the defaults
   autoApprove?: AutoApprove // Huli: absent keeps the settings' default
   manager?: ProjectManagerSettings // Huli: its own manager-mode roster and choices
+  sandbox?: SandboxChoice // Huli: the sandbox its sessions start in; absent keeps the default
 }
 
 /**
@@ -352,6 +355,10 @@ export interface SessionRecord {
   startedBy?: string // the session whose agent started it through start_session
   configDir?: string // the configuration folder picked for its agent when it was created
   profileId?: string // Huli: the agent's API provider profile it runs with; absent for its own sign-in
+  sandbox?: SandboxChoice // Huli: the sandbox it runs in; absent for none, as before sandboxes
+  // Huli: it names a sandbox this version cannot read, as a newer Kite's: it starts in none of it
+  // and no other, until the user picks one again.
+  sandboxUnknown?: true
   pullRequests?: string[] // the pull requests it opened, oldest first, by their github.com URL
   /** The agents that had the session before its current one took over, oldest first. */
   earlier?: EarlierAgent[]
@@ -410,6 +417,8 @@ export interface SessionRecord {
   worker?: StoredWorker
   /** Huli: manager mode was switched off; the next prompt tells its agent so. */
   managerOff?: true
+  /** Huli: moved to another computer, where it goes on; this one stays as it was left. */
+  movedTo?: MovedTo
 }
 
 /** Huli: a session's pull request automation, as its record keeps it. */
@@ -758,6 +767,7 @@ export function parseProjectsFile(data: Record<string, unknown>): ProjectsFile |
       ...projectWorktreeOf(item.worktree),
       ...(isAutoApprove(item.autoApprove) ? { autoApprove: item.autoApprove } : {}),
       ...projectManagerOf(item.manager),
+      ...sandboxField(item.sandbox),
     })
   }
   return { version: 1, projects }
@@ -1109,6 +1119,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...(isString(item.startedBy) ? { startedBy: item.startedBy } : {}),
       ...(isString(item.configDir) && item.configDir !== '' ? { configDir: item.configDir } : {}),
       ...(isProfileId(item.profileId) ? { profileId: item.profileId } : {}),
+      ...sessionSandbox(item.sandbox, item.sandboxUnknown),
       ...pullRequestsOf(item.pullRequests),
       ...earlierOf(item.earlier),
       ...carryOf(item.carry),
@@ -1135,6 +1146,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...managerOf(item.manager, item.updatedAt),
       ...workerOf(item.worker),
       ...(item.managerOff === true ? { managerOff: true as const } : {}),
+      ...movedToOf(item.movedTo),
     })
   }
   return {
@@ -1469,6 +1481,33 @@ export function projectsFile(userDataPath: string, log: LogFn): JsonFile<Project
   })
 }
 
+/** Huli: where a session was moved to; one that does not read is dropped, and the session stays. */
+function movedToOf(value: unknown): { movedTo?: MovedTo } {
+  if (
+    !isRecord(value) ||
+    !(value.hostId === null || (isString(value.hostId) && /^[0-9a-f]{32}$/.test(value.hostId))) ||
+    !isString(value.name) ||
+    value.name.length > 200 ||
+    !isString(value.sessionId) ||
+    value.sessionId.length === 0 ||
+    value.sessionId.length > 256 ||
+    !isString(value.projectPath) ||
+    value.projectPath.length > 4096 ||
+    !isTime(value.at)
+  ) {
+    return {}
+  }
+  return {
+    movedTo: {
+      hostId: value.hostId,
+      name: value.name,
+      sessionId: value.sessionId,
+      projectPath: value.projectPath,
+      at: value.at,
+    },
+  }
+}
+
 const MAX_PR_FLOW_SEEN = 200
 
 /** Huli: a session's pull request automation; one that does not read is dropped, and so ends. */
@@ -1701,4 +1740,23 @@ export function agentUpdatesFile(userDataPath: string, log: LogFn): JsonFile<Age
     empty: () => ({ version: 1, agents: {} }),
     log,
   })
+}
+
+/** Huli: a project's stored sandbox choice; one that cannot be read gives way to the default. */
+function sandboxField(value: unknown): { sandbox?: SandboxChoice } {
+  const choice = sandboxChoiceOf(value)
+  return choice ? { sandbox: choice } : {}
+}
+
+/**
+ * Huli: a session's stored sandbox choice. One there that cannot be read never becomes no sandbox:
+ * the session keeps the mark, and its start stops until the user picks one again.
+ */
+function sessionSandbox(
+  value: unknown,
+  unknown: unknown,
+): Pick<SessionRecord, 'sandbox' | 'sandboxUnknown'> {
+  if (value === undefined) return unknown === true ? { sandboxUnknown: true } : {}
+  const choice = sandboxChoiceOf(value)
+  return choice ? { sandbox: choice } : { sandboxUnknown: true }
 }

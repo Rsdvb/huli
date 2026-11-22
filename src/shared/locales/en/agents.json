@@ -60,5 +60,80 @@
     },
     "betweenTurns": "Changes between turns",
     "gone": "Profile removed"
+  },
+  "sandbox": {
+    "menu": "Sandbox",
+    "chip": "Sandbox: {{choice}}",
+    "tier": {
+      "off": "Off",
+      "native": "Agent's own sandbox",
+      "container": "Container"
+    },
+    "short": {
+      "off": "No sandbox",
+      "native": "Own sandbox",
+      "container": "Container"
+    },
+    "network": {
+      "none": "Commands offline",
+      "model": "Model's addresses only",
+      "agent": "Only its Agent network exit",
+      "open": "Network open"
+    },
+    "choice": "{{tier}} · {{network}}",
+    "offNote": "As today: the agent works with your rights",
+    "block": {
+      "noSandbox": "it has no sandbox of its own",
+      "notWired": "it has one, which Kite does not drive yet",
+      "platform": "not on this computer",
+      "protocol": "the way Kite runs it cannot go in a container yet"
+    },
+    "networkUnsupported": "This tier cannot hold it to that",
+    "cost": {
+      "native": "Almost free: each command starts a little slower",
+      "container": "Starts in about {{start}} s; Docker holds about {{memory}} MB",
+      "drive": "this project on a Windows drive builds {{build}}× and searches {{search}}× slower",
+      "wsl": "in WSL's own disk a project runs at full speed"
+    },
+    "setup": {
+      "claudeWindows": "Needs `claude sandbox install` once (one administrator prompt)",
+      "claudeLinux": "Needs bubblewrap and socat",
+      "codexWindows": "Needs Codex's Windows sandbox set up once",
+      "container": "Needs Docker or Podman and an {{mb}} MB image once"
+    },
+    "recommended": "Suggested",
+    "betweenTurns": "Changes between turns",
+    "allowed": {
+      "title": "Sandbox: {{choice}}",
+      "nativeWrites": "Commands write only in the project",
+      "nativeReads": "They read your files, except keys and sign-ins",
+      "nativeTools": "File edits and web tools still ask as before",
+      "containerSees": "Sees only the project",
+      "containerSignIn": "None of your sign-ins: an API key Kite holds, or one made inside",
+      "containerTools": "No Kite tools inside (artifacts, memory)",
+      "networkCommands": "Its commands: {{network}}",
+      "networkAgent": "Network: {{network}}",
+      "gitReadOnly": "Its .git is read-only: no commits inside",
+      "gitWritable": "Its .git is writable: it may commit"
+    },
+    "switching": "Switching the sandbox…",
+    "joinCost": "{{first}}; {{next}}",
+    "joinSetup": "{{first}}. {{next}}",
+    "unsupportedBecause": "This agent does not support it: {{reason}}",
+    "withHint": "{{tier}} · {{hint}}",
+    "networkNote": {
+      "native": {
+        "none": "Commands offline; the agent still calls its model",
+        "agent": "Commands go out only through its Agent network exit",
+        "open": "Commands reach any address"
+      },
+      "container": {
+        "model": "Only {{hosts}}",
+        "agent": "Everything through Kite to its Agent network exit",
+        "open": "Any address"
+      }
+    },
+    "moreHosts": "{{first}} and {{count}} more",
+    "noModelHosts": "Kite does not know this agent's model addresses"
   }
 }

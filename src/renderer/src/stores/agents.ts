@@ -487,6 +487,8 @@ export const AGENT_NAMES: Record<HarnessId, string> = {
   droid: 'Factory Droid',
   omp: 'OMP',
   hermes: 'Hermes Agent',
+  kiro: 'Kiro CLI',
+  fx: 'fx',
   muse: 'Muse Code',
   codewhale: 'CodeWhale',
   deepseek: 'DeepSeek Harness',

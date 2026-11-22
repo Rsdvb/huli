@@ -130,6 +130,7 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
         withHost((h) => {
           h.setMarketKeys(message.values, message.oauth, message.agentEnv)
           h.setProfiles(message.profiles)
+          h.setProjectSecrets(message.projectSecrets)
         })
         break
       case 'host:chat-bridge':
@@ -145,6 +146,15 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
           message.answer !== null
         ) {
           withHost((h) => h.marketResult(message.callId, message.answer))
+        }
+        break
+      case 'theme-result':
+        if (
+          Number.isSafeInteger(message.callId) &&
+          typeof message.answer === 'object' &&
+          message.answer !== null
+        ) {
+          withHost((h) => h.themeResult(message.callId, message.answer))
         }
         break
       case 'settings-result':
@@ -166,6 +176,11 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
         break
       case 'host:busy-request':
         withHost((h) => h.busy(message.requestId))
+        break
+      case 'host:main-call':
+        if (Number.isSafeInteger(message.callId) && typeof message.method === 'string') {
+          withHost((h) => h.mainCall(message.callId, message.method, message.params))
+        }
         break
       case 'host:report-request':
         if (Number.isSafeInteger(message.requestId)) withHost((h) => void h.report(message))

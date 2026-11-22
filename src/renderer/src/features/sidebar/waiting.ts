@@ -104,6 +104,8 @@ export function waitingKind(entry: ThreadEntry): WaitingKind | null {
       return entry.outcome === null ? 'step' : null
     case 'market_publish':
       return entry.outcome === null ? 'publish' : null
+    case 'secret_request':
+      return entry.outcome === null ? 'form' : null
     default:
       return null
   }

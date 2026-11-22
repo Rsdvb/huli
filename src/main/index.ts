@@ -60,12 +60,14 @@ import {
   registerChatBridgeIpc,
   registerIpcHandlers,
   registerSessionExportIpc,
+  registerSessionMoveIpc,
   registerSignInIpc,
   registerTrayIpc,
 } from './ipc'
 import { Reports } from './report'
 import { MediaGrants, mediaScheme, serveMedia } from './media'
 import { createLogger } from './log'
+import { SessionMover } from './session-move'
 import { installMenu } from './menu'
 import { isOpenedAtLogin, startMode, syncLoginItem } from './login-item'
 import { notifyAttention, notifyDiscovery } from './notifications'
@@ -98,6 +100,7 @@ import { systemReleaseForRun } from './system-name'
 import { rendererPage } from './renderer'
 import { SettingsStore } from './settings'
 import { answerSettingsCall } from './settings-call'
+import { answerThemeCall } from './theme-call'
 import { effectiveDirect, hostSettings, reachesHost, terminalSettings } from './settings-schema'
 import { hasPendingFrame, isRevoked, watchSubframes } from './subframes'
 import { DeviceHost } from './device-host'
@@ -460,6 +463,10 @@ async function start(): Promise<void> {
     onChatBridgeStatus: (statuses) => chatBridge.setStatuses(statuses),
     onChatBridgeBind: (platform, code, account) => void chatBridge.bind(platform, code, account),
     onMarketOAuth: (serverId, state) => void marketKeys.setOAuth(serverId, state),
+    onProjectSecrets: (project, values) =>
+      void marketKeys.setProjectSecrets(project, values).catch((error: unknown) => {
+        log.warn(`Could not save a project's secrets: ${(error as Error).message}`)
+      }),
     onFirstStart: (harnesses) => settings.firstStart(harnesses),
     onAttention: (message) => {
       notifyAttention(message, settings.get(), (sessionId, requestId, optionId) =>
@@ -528,6 +535,7 @@ async function start(): Promise<void> {
         : Promise.resolve({
             error: { code: 'no_page', message: 'Another host’s session has this page.' },
           }),
+    themeCall: (call) => answerThemeCall(call, { themes, settings }),
     settingsCall: (call) =>
       answerSettingsCall(call, {
         settings,
@@ -1116,6 +1124,22 @@ async function start(): Promise<void> {
   registerBackupIpc(backup)
   registerChatBridgeIpc(chatBridge)
   registerSessionExportIpc()
+  registerSessionMoveIpc(
+    new SessionMover({
+      call: (host, method, params) =>
+        host === null ? agentHost.call(method, params) : hostSessions.call(host, method, params),
+      hostName: (host) =>
+        host === null
+          ? hostName()
+          : (remoteHost.hosts?.find((known) => known.id === host)?.name ?? host),
+      online: (host) =>
+        host === null
+          ? agentHost.state === 'ready'
+          : remoteHost.hosts?.find((known) => known.id === host)?.connection.state === 'online',
+      changed: (progress) => broadcast('sessions:move-progress', progress),
+      log: (level, message) => log[level](message),
+    }),
+  )
   ipcReady = true
   installMenu(menuDeps)
 

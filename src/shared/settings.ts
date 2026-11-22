@@ -6,6 +6,7 @@ import { DEFAULT_MANAGER_SETTINGS, type ManagerSettings } from './manager'
 import type { MarketServer, MarketSkill } from './marketplace'
 import type { DirectAddress } from './remote/protocol'
 import type { AutoApprove } from './risk'
+import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from './sandbox'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
@@ -163,6 +164,9 @@ export interface SettingsFile {
   permissions: { autoApprove: AutoApprove }
   // Huli: manager mode's roster, review loop, approvals and limits; a project may have its own.
   manager: ManagerSettings
+  // Huli: the sandbox a session of a project that keeps the default starts in, and whether a
+  // sandboxed session's edits inside its project need no asking. Agents never change it.
+  sandbox: SandboxSettings
 }
 
 /**
@@ -399,6 +403,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   backup: { enabled: true, time: '03:00', keep: 7, folder: null },
   permissions: { autoApprove: 'off' },
   manager: DEFAULT_MANAGER_SETTINGS,
+  sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
 }
 
 /** The zoom one step in (1) or out (-1), held at the ends; 0 returns to the default. */
@@ -463,6 +468,7 @@ export interface SettingsPatch {
   }
   permissions?: Partial<SettingsFile['permissions']>
   manager?: ManagerSettings // replaced whole
+  sandbox?: Partial<SandboxSettings>
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
     enabled?: boolean
@@ -506,6 +512,9 @@ export interface HostSettings {
   lowerAgentPriority?: boolean
   // Huli: manager mode's settings; absent from a parent older than it, which has none.
   manager?: ManagerSettings
+  // Huli: the sandbox default and its approvals rule; absent from a parent older than it, which
+  // starts every session unsandboxed.
+  sandbox?: SandboxSettings
 }
 
 /** The part of the settings the terminal host receives. */

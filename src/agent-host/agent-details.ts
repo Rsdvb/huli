@@ -450,6 +450,26 @@ export function configLocations(
         { id: 'instructions', candidates: [p.join(folder, 'AGENTS.md')], env: null },
       ]
     }
+    case 'kiro': {
+      // Kiro CLI's settings reference: KIRO_HOME, an absolute path other than the home folder or
+      // above it, else `~/.kiro`, whose `settings/cli.json` holds its settings.
+      const value = getEnv('KIRO_HOME')
+      const rel = value && p.isAbsolute(value) ? p.relative(value, home) : null
+      const moved = rel !== null && (rel.startsWith('..') || p.isAbsolute(rel)) ? value! : null
+      const folder = moved ?? p.join(home, '.kiro')
+      return [
+        { id: 'folder', candidates: [folder], env: moved ? 'KIRO_HOME' : null },
+        { id: 'settings', candidates: [p.join(folder, 'settings', 'cli.json')], env: null },
+      ]
+    }
+    case 'fx': {
+      // fx's docs: its profile, settings and MCP servers in `~/.fx`.
+      const folder = p.join(home, '.fx')
+      return [
+        { id: 'folder', candidates: [folder], env: null },
+        { id: 'settings', candidates: [p.join(folder, 'settings.json')], env: null },
+      ]
+    }
     case 'hermes': {
       // hermes_constants.py: HERMES_HOME, else `%LOCALAPPDATA%\hermes` on Windows, `~/.hermes`.
       const moved = variable('HERMES_HOME')

@@ -177,7 +177,9 @@
     "withChanges_other": "{{text}}改动了 {{count}} 个文件。",
     "marketPublish": "想把 {{name}} 发布到 Kettu 市场",
     "marketUnlist": "想把 {{name}} 从 Kettu 市场下架",
-    "settingsChange_other": "想修改 {{count}} 项设置"
+    "settingsChange_other": "想修改 {{count}} 项设置",
+    "secretRequest": "需要你提供 {{title}}",
+    "themeChange": "想更换纸鸢的主题颜色"
   },
   "supervisor": {
     "continueText": "继续",
@@ -379,6 +381,8 @@
       "omp": "请用 `bun install -g @oh-my-pi/pi-coding-agent` 或 omp.sh 上的安装程序安装 OMP。",
       "antigravity": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 Antigravity CLI；在 Windows 上，请在 PowerShell 中运行 irm https://antigravity.google/cli/install.ps1 | iex。",
       "hermes": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 Hermes Agent；在 Windows 上，请按官方指南通过 WSL2 安装。",
+      "kiro": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 Kiro CLI，然后运行 kiro-cli login；在 Windows 11 上，请在 PowerShell 中运行 irm 'https://cli.kiro.dev/install.ps1' | iex。",
+      "fx": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 fx，然后运行 fx login。fx 不支持 Windows；同名的 JSON 查看器 fx 是另一个程序。",
       "muse": "请从 dev.meta.ai 安装 Muse Code，或在「设置 › Harness」中选择它的程序。",
       "codewhale": "请用 codewhale.net 上的安装程序安装 CodeWhale，或在「设置 › Harness」中选择它的程序。",
       "deepseek": "Kettu 第一次使用 DeepSeek Harness 时从 npm 安装它，需要 Node.js 24.9 或更高版本。",
@@ -1555,5 +1559,50 @@
     "workersWorking": "先停止工人或等它们做完，再关闭总管模式。",
     "modeLocked": "总管只读：它的模式只能是每次改动前都要询问的那种。",
     "editedFiles": "总管自己改了文件（{{files}}），总管模式已暂停它。请检查改动后再继续。"
+  },
+  "sandbox": {
+    "tier": {
+      "native": "Agent 自带沙箱",
+      "container": "容器"
+    },
+    "network": {
+      "none": "命令不联网",
+      "model": "只允许模型接口",
+      "agent": "只走 Agent 网络的出口",
+      "open": "不限制网络"
+    },
+    "unsupported": "{{agent}} 在这台电脑上不能用「{{tier}}」加「{{network}}」，会话没有启动。请给它换个沙箱，或改项目的沙箱设置。",
+    "unknown": "这个会话的沙箱是更新版本的纸鸢设的，当前版本读不懂。重新选一次沙箱就能启动。",
+    "noExit": "Agent 网络没有给 {{agent}} 单独的出口，选「只走 Agent 网络的出口」就等于没有网。请在 Agent 网络里给它选节点或网卡，或者换一个网络选项。",
+    "prepared": "沙箱要在发第一条消息前选好。",
+    "betweenTurns": "沙箱只能在两轮之间换。",
+    "codexFullAccess": "「完全访问」不在沙箱里运行，开着沙箱的会话不能用它。要用的话先关掉这个会话的沙箱。",
+    "codexNetwork": "Codex 的沙箱只能整体开关网络，不能只走某个出口。请选「不联网」或「不限制网络」。",
+    "codexWindowsSetup": "这台电脑还没设置 Codex 的 Windows 沙箱，会话没有启动。请先在 Codex 里设置（config.toml 里的 `windows.sandbox`，或 Codex 自己的设置流程），或者换个沙箱。",
+    "codexWindowsUpdate": "Codex 更新后需要重新设置它的 Windows 沙箱，会话没有启动。请重新运行 Codex 的沙箱设置，或者换个沙箱。",
+    "container": {
+      "unsupported": "{{agent}} 暂时还不能在容器里运行。",
+      "noPrepare": "容器里的会话从第一条消息开始启动。",
+      "engineNotFound": "没找到容器引擎，会话没有启动。请装 Docker（Windows 上用 Docker Desktop 或 WSL 里的 Docker）或 Podman，或者换个沙箱。",
+      "engineNotRunning": "容器引擎没有响应，会话没有启动。请先启动 Docker 或 Podman，或者换个沙箱。",
+      "imageMissing": "纸鸢的容器镜像还没下载（{{mb}} MB），会话没有启动。可以在 设置 › Agent › 沙箱 里下载，或者换个沙箱。",
+      "install": "没能把 {{agent}} 装进容器的数据卷：{{detail}}",
+      "failed": "{{agent}} 没能在容器里启动：{{detail}}",
+      "mount": "这个文件夹不能挂进容器（{{reason}}），会话没有启动。",
+      "mountReason": {
+        "notAbsolute": "不是完整路径",
+        "dotSegments": "路径里有 . 或 ..",
+        "badCharacters": "路径里有挂载带不了的字符",
+        "devicePath": "是设备路径",
+        "root": "是整个磁盘或文件系统的根目录",
+        "home": "是你的用户主文件夹",
+        "aboveHome": "里面有你的主文件夹或别的用户的文件夹",
+        "system": "是系统文件夹",
+        "credentials": "里面放着登录信息、密钥或设置",
+        "kiteData": "是纸鸢自己的数据文件夹",
+        "missing": "不存在"
+      },
+      "noModelHosts": "纸鸢不知道 {{agent}} 的模型接口地址，选「只允许模型接口」它就连不上任何地方。请改选「只走 Agent 网络的出口」或「不限制网络」。"
+    }
   }
 }

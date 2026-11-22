@@ -60,5 +60,80 @@
     },
     "betweenTurns": "在两轮之间切换",
     "gone": "配置已删除"
+  },
+  "sandbox": {
+    "menu": "沙箱",
+    "chip": "沙箱：{{choice}}",
+    "tier": {
+      "off": "关闭",
+      "native": "Agent 自带沙箱",
+      "container": "容器"
+    },
+    "short": {
+      "off": "无沙箱",
+      "native": "自带沙箱",
+      "container": "容器"
+    },
+    "network": {
+      "none": "命令不联网",
+      "model": "只允许模型接口",
+      "agent": "只走 Agent 网络的出口",
+      "open": "不限制网络"
+    },
+    "choice": "{{tier}} · {{network}}",
+    "offNote": "和现在一样：Agent 用你的权限做事",
+    "block": {
+      "noSandbox": "它没有自带沙箱",
+      "notWired": "它有自带沙箱，纸鸢还没接上",
+      "platform": "这台电脑上用不了",
+      "protocol": "纸鸢跑它的方式暂时放不进容器"
+    },
+    "networkUnsupported": "这一档管不住这种网络",
+    "cost": {
+      "native": "几乎没有开销：每条命令启动稍慢一点",
+      "container": "启动约 {{start}} 秒，Docker 占约 {{memory}} MB",
+      "drive": "这个项目在 Windows 盘上，构建慢 {{build}} 倍、搜索慢 {{search}} 倍",
+      "wsl": "放在 WSL 自己的磁盘里的项目不会变慢"
+    },
+    "setup": {
+      "claudeWindows": "要先运行一次 `claude sandbox install`（会弹一次管理员确认）",
+      "claudeLinux": "需要装好 bubblewrap 和 socat",
+      "codexWindows": "要先设置一次 Codex 的 Windows 沙箱",
+      "container": "需要 Docker 或 Podman，第一次下载 {{mb}} MB 镜像"
+    },
+    "recommended": "建议",
+    "betweenTurns": "两轮之间才能换",
+    "allowed": {
+      "title": "沙箱：{{choice}}",
+      "nativeWrites": "命令只能写项目文件夹",
+      "nativeReads": "能读你的文件，但读不到密钥和登录信息",
+      "nativeTools": "改文件、上网的工具照旧会问你",
+      "containerSees": "只看得到这个项目",
+      "containerSignIn": "拿不到你的任何登录：用纸鸢保存的 API Key，或在容器里另行登录",
+      "containerTools": "容器里没有纸鸢的工具（制品、记忆等）",
+      "networkCommands": "它跑的命令：{{network}}",
+      "networkAgent": "网络：{{network}}",
+      "gitReadOnly": ".git 只读：不能在里面提交",
+      "gitWritable": ".git 可写：可以提交"
+    },
+    "switching": "正在切换沙箱…",
+    "joinCost": "{{first}}；{{next}}",
+    "joinSetup": "{{first}}。{{next}}",
+    "unsupportedBecause": "这个 Agent 不支持：{{reason}}",
+    "withHint": "{{tier}} · {{hint}}",
+    "networkNote": {
+      "native": {
+        "none": "命令连不了网，Agent 调用模型不受影响",
+        "agent": "命令只经 Agent 网络的出口上网",
+        "open": "命令能连任何地址"
+      },
+      "container": {
+        "model": "只放行 {{hosts}}",
+        "agent": "全部经纸鸢走 Agent 网络的出口",
+        "open": "能连任何地址"
+      }
+    },
+    "moreHosts": "{{first}} 等 {{count}} 个",
+    "noModelHosts": "纸鸢不知道这个 Agent 的模型接口地址"
   }
 }

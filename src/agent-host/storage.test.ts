@@ -851,6 +851,7 @@ describe('the host files', () => {
         lastOpenedAt: 2,
         pinnedAt: null,
         autoApprove: null,
+        sandbox: null,
       },
     ])
     first.pin(first.match('/repo'), true)

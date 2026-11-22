@@ -1500,6 +1500,63 @@
         "key": "The key cannot hold spaces.",
         "keyMissing": "Paste the provider's API key."
       }
+    },
+    "sandbox": {
+      "group": "Sandbox",
+      "name": "Default sandbox",
+      "description": "Where new sessions run, unless their project or the session picks otherwise. Off is as today.",
+      "keywords": "sandbox isolation isolate container docker podman wsl network",
+      "tier": {
+        "off": {
+          "name": "Off"
+        },
+        "native": {
+          "name": "Agent's own sandbox"
+        },
+        "container": {
+          "name": "Container"
+        }
+      },
+      "network": {
+        "name": "Network in the sandbox",
+        "description": "In the agent's own sandbox, what its commands may reach (the agent still calls its model); in a container, what the whole agent may reach.",
+        "none": "Commands offline",
+        "model": "Model's addresses only",
+        "agent": "Only its Agent network exit",
+        "open": "Network open"
+      },
+      "autoApprove": {
+        "name": "Allow project edits without asking in a sandbox",
+        "description": "While a session's sandbox runs, an edit of a file inside the project is allowed once without asking. High-risk requests are always asked."
+      },
+      "details": "What each tier protects and costs",
+      "hide": "Hide",
+      "measured": "Measured on this computer on 2026-11-22 with npm ci, a TypeScript build and a test run of a small project.",
+      "off": "Off — the agent works with your rights, as today. No cost.",
+      "native": "Agent's own sandbox — Claude Code and Codex hold their commands to the project folder with the system's own isolation; their commands' network is off, through the agent's exit, or open, while the agent itself still calls its model. Almost no cost. Claude Code on Windows needs `claude sandbox install` once; Codex on Windows needs its Windows sandbox set up.",
+      "container": "Container — the agent itself runs in a Docker or Podman container that sees only the project, with none of your sign-ins; its only way out is a small proxy beside it, which lets through its model's addresses only, everything through the agent's exit, or anything. Starts in about {{start}} s and Docker holds about {{memory}} MB. A project on a Windows drive builds {{build}}× slower ({{native}} s → {{container}} s) and searches {{search}}× slower; one inside WSL's own disk runs at full speed ({{wsl}} s).",
+      "notProtected": "What a sandbox does not protect: the project itself can still be changed or deleted; Claude Code's and Codex's own file and web tools are held by the permission requests rather than by the sandbox, and their model calls go out as before; MCP servers and hooks run outside it; an API key the agent gets is visible to it, and its model service sees what it sends.",
+      "image": {
+        "name": "Container image",
+        "check": "Check",
+        "checking": "Checking the container engine…",
+        "missing": "Not downloaded: node:22-bookworm-slim, {{mb}} MB to download.",
+        "present": "Downloaded ({{engine}}); about {{mb}} MB on disk.",
+        "noEngine": "No container engine found. Install Docker (Docker Desktop, or Docker inside WSL) or Podman.",
+        "notRunning": "The container engine does not answer. Start Docker or Podman.",
+        "download": "Download…",
+        "downloading": "Downloading…",
+        "remove": "Remove, freeing about {{mb}} MB",
+        "confirm": {
+          "title": "Download the container image?",
+          "body": "Kite downloads node:22-bookworm-slim from Docker Hub once: {{mb}} MB, about {{disk}} MB on disk. Each agent is installed into a volume beside it the first time it runs in a container. Nothing else is downloaded without asking.",
+          "action": "Download {{mb}} MB"
+        }
+      },
+      "git": {
+        "name": "Allow commits in a sandbox (.git writable)",
+        "description": "Off, a container mounts the project's .git read-only and Claude Code's sandbox may not write it, so the agent cannot commit or rewrite history. Codex always keeps .git read-only itself."
+      }
     }
   },
   "about": {

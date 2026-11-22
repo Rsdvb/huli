@@ -109,7 +109,8 @@
       "worktreeSettings": "工作树设置…",
       "remove": "移除项目…",
       "issues": "议题",
-      "autoApprove": "自动批准"
+      "autoApprove": "自动批准",
+      "sandbox": "沙箱"
     },
     "remove": {
       "title": "移除 {{name}}？",
@@ -127,6 +128,9 @@
         "low": "低风险操作",
         "edits": "低风险操作和项目内的修改"
       }
+    },
+    "sandbox": {
+      "default": "默认（{{choice}}）"
     }
   },
   "prs": {
@@ -214,6 +218,7 @@
     "copySessionId": "复制会话 ID",
     "copiedSessionId": "已复制会话 ID",
     "export": "导出…",
+    "move": "搬到另一台电脑…",
     "showInParent": "在父会话中显示",
     "agentOf": "{{harness}} · {{agent}}",
     "tokensUsed": "{{tokens}} tokens",

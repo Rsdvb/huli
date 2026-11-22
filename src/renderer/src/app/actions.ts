@@ -5,6 +5,7 @@ import {
 } from '@shared/agent-host'
 import type { GroupRunStart } from '@shared/session-groups'
 import type { AgentId, UserContent } from '@shared/thread'
+import type { SandboxChoice } from '@shared/sandbox'
 import {
   clearDraft,
   draftedSessions,
@@ -82,6 +83,8 @@ export interface PendingSession {
   options: OptionValues | null
   /** Huli: the API profile New session chose; null for the agent's own sign-in, absent for its default. */
   profileId?: string | null
+  /** Huli: the sandbox New session chose; absent for the host's own default. */
+  sandbox?: SandboxChoice
   error: { message: string; code: string | null } | null
 }
 
@@ -217,8 +220,12 @@ export async function createSession(
   paneId: string = newSessionAt() ?? '',
   worktree: { base: string; branch?: string } | null = null,
   profileId?: string | null,
+  sandbox?: SandboxChoice,
 ): Promise<void> {
-  const profile = profileId === undefined ? {} : { profileId }
+  const profile = {
+    ...(profileId === undefined ? {} : { profileId }),
+    ...(sandbox ? { sandbox } : {}),
+  }
   usePendingSession.setState({
     pending: { paneId, agentId, projectPath, parentId, prompt, options, ...profile, error: null },
   })
@@ -420,6 +427,7 @@ export function startNewSession(
   preparedId: string | null = null,
   worktree: { base: string; branch?: string } | null = null,
   profileId?: string | null,
+  sandbox?: SandboxChoice,
 ): Promise<void> {
   const { main } = useViewStore.getState()
   const parent =
@@ -437,6 +445,7 @@ export function startNewSession(
         undefined,
         null,
         profileId,
+        sandbox,
       )
     : createSession(
         agentId,
@@ -448,6 +457,7 @@ export function startNewSession(
         undefined,
         worktree,
         profileId,
+        sandbox,
       )
 }
 
@@ -493,6 +503,7 @@ export function retryPendingSession(): void {
       pending.paneId,
       null,
       pending.profileId,
+      pending.sandbox,
     )
   }
 }

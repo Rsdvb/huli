@@ -88,6 +88,11 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'settings.answerChange': HOST_MS,
   // Undo writes the settings through main or the daemon.
   'settings.undoChange': AGENT_MS,
+  // Provide writes the values to a file before it answers.
+  'secrets.answer': AGENT_MS,
+  'theme.answerChange': HOST_MS,
+  // Undo writes the agent theme through main.
+  'theme.undoChange': AGENT_MS,
   'market.publishDrafts': HOST_MS,
   'market.discardPublishDraft': HOST_MS,
   'market.community': AGENT_MS,
@@ -115,6 +120,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'projects.touch': HOST_MS,
   'projects.pin': HOST_MS,
   'projects.setAutoApprove': HOST_MS,
+  'projects.setSandbox': HOST_MS,
   'projects.setManager': HOST_MS,
   'projects.worktreeSettings': HOST_MS,
   'projects.setWorktreeSettings': HOST_MS,
@@ -124,6 +130,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.prepare': AGENT_MS,
   'sessions.discard': HOST_MS,
   'sessions.setProfile': AGENT_MS,
+  'sessions.setSandbox': AGENT_MS,
   'sessions.import': AGENT_MS,
   'sessions.open': AGENT_MS,
   'sessions.snapshot': HOST_MS,
@@ -345,6 +352,10 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'agentHistory.planCopy': NONE,
   'agentHistory.copy': NONE,
   'agentNetwork.status': HOST_MS,
+  'sandbox.containerStatus': AGENT_MS,
+  // A pull downloads some 80 MB, whose time is the network's; the window shows it waits.
+  'sandbox.pullImage': NONE,
+  'sandbox.removeImage': AGENT_MS,
   'agentNetwork.addSubscription': AGENT_MS,
   'agentNetwork.importSubscription': AGENT_MS,
   'agentNetwork.reimportSubscription': AGENT_MS,
@@ -364,6 +375,18 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'folders.delete': HOST_MS,
   'folders.reorder': HOST_MS,
   'folders.move': HOST_MS,
+  'moves.inspect': AGENT_MS,
+  'moves.pack': NONE,
+  'moves.part': AGENT_MS,
+  'moves.finish': HOST_MS,
+  'moves.abort': HOST_MS,
+  'moves.check': AGENT_MS,
+  'moves.prepare': NONE,
+  'moves.receive': AGENT_MS,
+  'moves.apply': NONE,
+  'moves.undo': NONE,
+  'moves.commit': HOST_MS,
+  'sessions.clearMoved': HOST_MS,
 }
 
 /** How long to wait for `method`'s answer; null to wait as long as it takes. */

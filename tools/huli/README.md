@@ -450,6 +450,90 @@ deterministic classifier, and the user may have the host answer low ones by itse
   project's tests runs its code, which edits allowed by the agent's own mode (or the edits level)
   may have changed.
 
+### Sandbox (沙箱)
+
+Agents run commands with the user's rights. A session may instead run in a sandbox the user picks,
+at three levels: Settings › Agents › 沙箱 (`sandbox` in the settings: `tier`, `network`,
+`autoApproveEdits`, `gitWritable`), a project's menu (`sandbox` in `projects.json`, absent for the default) and New
+session's chip, which is also the session's badge on the composer's tray (`sandbox` in
+`sessions.json`, changed between turns with `sessions.setSandbox`, which starts its agent again).
+Off is the default. Kite never picks or changes a tier by itself, and a tier that cannot run stops
+the session's start with what to do; it never falls back to another or to none. `src/shared/sandbox.ts`
+holds the choices, what each harness offers on each system and the measured costs the copy shows.
+
+- 关闭 (`off`): as before.
+- The network choice means what the tier holds. The harness's own sandbox holds only the agent's
+  commands, while the agent still calls its model itself: `none` (命令不联网), `agent` (its commands
+  only through its Agent network exit) or `open`. A container holds the whole agent, its model
+  calls included, so it has no `none`: `model` (只允许模型接口, the default), `agent` or `open`. A
+  stored `none` on a container reads as `model` and a `model` on the harness's own sandbox as
+  `none`, each tier's strictest (`networkFor`).
+- 允许在沙箱里提交 (`gitWritable`, off by default): off, a container mounts the project's `.git`
+  read-only and Claude Code's sandbox denies writes to it, so the agent cannot commit or rewrite
+  history; Codex always keeps `.git` read-only itself.
+- Agent 自带沙箱 (`native`), `src/agent-host/sandbox/native.ts`: Claude Code gets the SDK's
+  `sandbox` option (`failIfUnavailable`, `allowUnsandboxedCommands: false`, writes only in the
+  session's folders, no reads of the key folders; network `none` is an empty strict allowlist,
+  `agent` hands its proxy ports to the agent's mihomo listener, `open` lets Claude Code ask per new
+  domain). It runs on macOS (Seatbelt), Linux and WSL 2 (bubblewrap and socat) and Windows, where
+  `claude sandbox install` must have run once (one administrator prompt). Codex gets its turns'
+  `sandboxPolicy` held to `workspaceWrite` (read-only stays read-only, full access is refused, the
+  network on or off); on Windows the session starts only once `windowsSandbox/readiness` says
+  `ready`. Only Claude Code's commands are held: its Read, Edit and web tools, hooks and MCP servers
+  still go through the permission requests. Gemini CLI, Qwen Code, Copilot, Cursor, Droid, Qoder and
+  Goose have sandboxes Kite does not drive yet (each turns its own on for a whole process, which Kite
+  shares between sessions); the others have none.
+- 容器 (`container`), `src/agent-host/sandbox/container.ts` and `runtimes.ts`: for an ACP agent Kite
+  installs from npm (and the fake agent), the session gets an agent process of its own in a
+  container: `--rm -i --init`, no capabilities, `no-new-privileges`, a read-only root with a private
+  `/tmp`, half the cores and memory (at most 8 GB), the project at `/workspace` (its `.git`
+  read-only unless commits are allowed), the agent's packages from the `kite-sandbox-tools` volume
+  (installed once by a container that mounts no project) and a home volume of the agent's own, never
+  the user's sign-ins: only the API key variables Kite holds for the agent go in, by name. The
+  project's path is renamed in every message both ways, so the thread shows real paths; no MCP
+  server, skill or plugin of the computer goes in. `mounts.ts` refuses a root, the home folder and
+  what holds it, system folders, the key and settings folders in home, Kite's data folder, `.` and
+  `..`, device paths and characters a mount option could be bent with, as written and again once
+  links are followed. Network (`egress.ts`, `tunnel.ts`): with `open` the container is on the
+  engine's bridge. Otherwise it is on a network of the session's own with no way out
+  (`--internal`; a direct connection fails with `ENETUNREACH`), and its proxy variables (and
+  `NODE_USE_ENV_PROXY=1`) name an egress proxy beside it, `kite-egress:3128`: a container of Kite's
+  image on that network and the bridge, running `EGRESS_SOURCE` as `node -e`, with nothing mounted,
+  no capabilities and 128 MB. For `model` it lets CONNECT and plain HTTP through to the model's
+  addresses alone (`model-hosts.ts`: the hosts each harness's docs name, plus the hosts of the
+  base-address variables Kite hands the agent; an agent with none cannot take `model`) and refuses
+  everything else with 403. For `agent` it lets everything through, but only over a tunnel: its
+  port is published on the engine's loopback, the agent host dials into it with a token of the
+  session's, and each request goes on through the agent's own mihomo listener, which holds it to
+  the exit Agent network picks (REJECT while it has none); with no dial-in to take, 503. Engines:
+  Docker or Podman; on Windows Docker Desktop, else Docker inside WSL
+  through `wsl.exe -e docker`, with paths from `wslpath` and keys passed in `WSLENV`. The image is
+  `node:22-bookworm-slim` by digest (80 MB download, about 330 MB on disk), pulled only from
+  Settings after a dialog that names its size, and removable there. Nothing of this loads until a
+  container session starts or Settings asks (`sandbox.containerStatus`); the container and its
+  proxy start with the session's agent, stop when the session lets it go (the idle-session rules),
+  and the containers and networks a crashed Kite left are removed by their owner label before the
+  next one starts. A container's
+  sessions are never prepared on New session's screen, and a paired device can neither pass a
+  sandbox nor set one.
+- Measured on the owner's computer (2026-11-22; `npm ci`, `tsc` and `vitest run` of a 46-package
+  project): 19.2 s on Windows on E:, 40.6 s in a container mounted from E: through WSL's file share
+  (41.5 s in WSL itself, so the share and not Docker costs it), 7.4 s in a container on WSL's own
+  disk (7.2 s in WSL itself). A search over 2,499 files took 0.71 s on Windows and 5.2 s through the
+  share. `docker run` of an idle container through `wsl.exe` took 0.76 s, Docker's own socket start
+  0.79 s; the session's network and egress proxy add 1.3 to 1.7 s. Docker's services hold about
+  105 MB and each container about 11 MB beside its agent. Checked end to end against Docker in WSL:
+  with `model` a container reached a stand-in model's address and got 403 for another port and for
+  example.com, Node's own `fetch` went through the proxy, and direct connections failed; with
+  `agent` a request reached a stand-in model on Windows through the tunnel and a stand-in listener,
+  and one the listener refused got 503.
+- With 沙箱里自动批准项目内修改 on, a sandboxed session's edits inside the project are allowed once
+  as the edits level allows them; a high request is always asked.
+- Not built: a VM tier (the measured cost and the no-bloat rule leave it for later, downloaded on
+  demand), extra model addresses the user names, Antigravity's `--sandbox`, Codex's Windows
+  sandbox setup from Kite (`windowsSandbox/setupStart`), and signing an agent in inside its
+  container.
+
 ### Backup
 
 A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,
@@ -922,6 +1006,50 @@ host is forwarded to this computer and opens in the session's browser.
   link open the host's `localhost` through a forward; Settings › Computers › the host has Ports.
   Its switch forwards on their own the dev servers a session's terminals print on that host,
   watching the terminals only while some host has it on (`stores/forwards.ts`).
+
+### Moving a session to another computer (搬到另一台电脑)
+
+As Codex moves a chat with its Git state to a remote host, a session's menu offers 搬到另一台电脑…:
+an idle session in a Git project moves to any other computer this one connects to (a paired Kite
+or a machine added over SSH), or from one back to this computer, and goes on there with the same
+kind of agent.
+
+- Main runs it (`src/main/session-move.ts`, `SessionMover`), never a window: this computer's agent
+  host through main's own messages (`host:main-call`, `PortHub.callFromMain` with `MAIN_PORT`),
+  another host as this computer's desktop device of it over its existing encrypted channel. The
+  hosts refuse `moves.*` to window ports and to devices that are no desktop app (a phone), and
+  `isOtherHostMethod` keeps them off the windows' relay. IPC: `sessions:move-preview`,
+  `sessions:move-start`, `sessions:moves`, event `sessions:move-progress`.
+- Steps: check both sides (`moves.inspect`, `moves.check`: the target's agent of the session's
+  harness installed, on and signed in; its project whose remote is the same repository, matched by
+  `remoteKey`, else a clone into `~/.huli/projects/<repo>` with its own Git sign-in), prepare the
+  project (`moves.prepare`, which sends back the target's branch tips), pack on the source
+  (`moves.pack`), carry the pack in 8 MiB parts (`moves.part` → `moves.receive`, SHA-256 checked),
+  apply on the target (`moves.apply`), then mark the source (`moves.finish`) and commit
+  (`moves.commit`). A failure at any step has the target undo all it did (`moves.undo`) and the
+  source drop its pack (`moves.abort`); the session stays where it was, working.
+- Git (`src/agent-host/session-move/git.ts`): the uncommitted changes become two commits made aside
+  through copies of the index (staged, then the whole working tree with `git add -A`, so ignored
+  files stay behind), bundled with the branch's commits the target lacks under temporary
+  `refs/kite-move/<id>/*` refs removed right after; nothing is pushed and the source's index, files
+  and branches are untouched. The target unbundles (no refs), makes the branch (`-2`... when taken)
+  in a new worktree under the project's worktree root, or checks it out in a clone made for a
+  session that had none, restores the working tree and index with `read-tree`, and sets the
+  upstream when its remote has the branch. Remote URLs lose any user name and password first.
+- Conversation (`service.ts`, `transcript.ts`): Claude Code's transcript and its `<id>/` files go to
+  `projects/<the target folder as Claude Code names it>/`, Codex's rollout to its day folder, every
+  `cwd` and path inside the source's folder rewritten to the target's across Windows and POSIX
+  (`mapPath`); an id the target already has gets a new one. Other agents, or a session whose
+  transcript is missing, get Kite's copy of the thread carried as a takeover's (`adoptMoved`).
+- Undo: the target journals each step in `<data>/moves/<id>/journal.json` and takes them back in
+  reverse (session, files, folders it made only while empty, worktree, branch only at the oid it
+  set, project, clone only inside the clone folder); a journal a crash left is undone at the next
+  move. Afterwards the local session shows 已搬到 <computer> in place of its composer
+  (`movedTo` in its record), with Open, Clean up local worktree… and 在这台继续
+  (`sessions.clearMoved`). The phone does not offer moves.
+- Tests: `src/agent-host/session-move/*.test.ts` (Git transfer with temp repositories, transcript
+  rewriting, validation, Claude Code and Codex placement, crash undo) and
+  `src/main/session-move.test.ts` (two whole agent hosts on temp folders, with rollbacks).
 
 ### Recap, one-tap compact and image markup (离开期间摘要、一键压缩、图片标注)
 

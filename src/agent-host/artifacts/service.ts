@@ -37,7 +37,21 @@ import {
   MARKET_UNLIST,
   type MarketTools,
 } from '../marketplace/publish-tools'
+import {
+  isSecretToolName,
+  REQUEST_SECRETS,
+  SECRET_TOOL_NAMES,
+  SECRET_TOOLS,
+  type SecretTools,
+} from '../secrets/tools'
 import { SERVICE_NAME } from '../service-name'
+import {
+  isThemeToolName,
+  SET_THEME_COLORS,
+  THEME_TOOL_NAMES,
+  THEME_TOOLS,
+  type ThemeTools,
+} from '../theme/tools'
 import {
   CHANGE_SETTINGS,
   isSettingsToolName,
@@ -143,13 +157,21 @@ const TOOL_GROUPS: ReadonlyMap<string, McpToolGroup> = new Map(
       [MANAGER_TOOLS, 'sessions'],
       [WORKER_TOOLS, 'sessions'],
       [SETTINGS_TOOLS, 'settings'],
+      [SECRET_TOOLS, 'secrets'],
+      [THEME_TOOLS, 'theme'],
     ] as const
   )
     .flatMap(([tools, group]) => tools.map((tool) => [tool.name, group] as const))
     .concat([[GUIDE_TOOL, 'sessions']]),
 )
 /** The tools that wait for the user's answer in the session before they act. */
-const ASKING_TOOLS: ReadonlySet<string> = new Set([MARKET_PUBLISH, MARKET_UNLIST, CHANGE_SETTINGS])
+const ASKING_TOOLS: ReadonlySet<string> = new Set([
+  MARKET_PUBLISH,
+  MARKET_UNLIST,
+  CHANGE_SETTINGS,
+  REQUEST_SECRETS,
+  SET_THEME_COLORS,
+])
 
 /** Serves the computer use tools, on a host that carries the driver. */
 export interface ComputerCalls {
@@ -222,6 +244,10 @@ export interface ArtifactServiceDeps extends ArtifactToolsDeps {
   market?: MarketTools
   /** Kettu's settings tools; without them the service lists none. */
   settings?: SettingsTools
+  /** Huli: the secrets tool, which asks the user in Kettu's own card; without it none. */
+  secrets?: SecretTools
+  /** Huli: the theme tools, which ask in Kettu's own card unless in Full access; without them none. */
+  theme?: ThemeTools
   /** The proxy to the Marketplace's OAuth servers, under its own paths; without it none. */
   proxy?: {
     handle(req: http.IncomingMessage, res: http.ServerResponse, path: string): Promise<void>
@@ -281,6 +307,8 @@ function entry(url: string, token: string, prompt: string): McpServer[] {
         ...WORKFLOW_TOOL_NAMES,
         ...MARKET_AUTO_ALLOW,
         ...SETTINGS_TOOL_NAMES,
+        ...SECRET_TOOL_NAMES,
+        ...THEME_TOOL_NAMES,
       ],
       prompt,
       secret: true,
@@ -504,6 +532,8 @@ export class ArtifactService {
       ...(this.marketOn ? MARKET_TOOLS : []),
       ...(this.workflowTools?.listed(sessionId) ?? []),
       ...(this.deps.settings ? SETTINGS_TOOLS : []),
+      ...(this.deps.secrets ? SECRET_TOOLS : []),
+      ...(this.deps.theme ? THEME_TOOLS : []),
     ]
   }
 
@@ -831,6 +861,24 @@ export class ArtifactService {
       if (settings && isSettingsToolName(name)) {
         try {
           return await settings.call(caller, name, input)
+        } catch (error) {
+          this.deps.log('error', `${name} failed: ${(error as Error).message}`)
+          throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)
+        }
+      }
+      const theme = this.deps.theme
+      if (theme && isThemeToolName(name)) {
+        try {
+          return await theme.call(caller, name, input)
+        } catch (error) {
+          this.deps.log('error', `${name} failed: ${(error as Error).message}`)
+          throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)
+        }
+      }
+      const secrets = this.deps.secrets
+      if (secrets && isSecretToolName(name)) {
+        try {
+          return await secrets.call(caller, name, input)
         } catch (error) {
           this.deps.log('error', `${name} failed: ${(error as Error).message}`)
           throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)

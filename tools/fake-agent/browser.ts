@@ -121,7 +121,13 @@ export const deviceTool: Scenario = async (turn) => {
     locations: [],
     content: [],
   })
-  const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 600_000 })
+  let result = await client.callTool({ name, arguments: args }, undefined, { timeout: 600_000 })
+  // A tool whose card still waits asks to be called again with the same arguments, as agents do.
+  for (let again = 0; again < 20; again++) {
+    const value = (result.structuredContent ?? {}) as { waiting?: unknown; status?: unknown }
+    if (value.waiting !== true && value.status !== 'waiting') break
+    result = await client.callTool({ name, arguments: args }, undefined, { timeout: 600_000 })
+  }
   const content = result.content as {
     type: string
     text?: string

@@ -83,6 +83,7 @@ import {
 } from '@shared/manager'
 import { isProfileId } from '@shared/provider-profiles'
 import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
+import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
 import { BOARD_STATUSES, isBoardStatus } from '@shared/session-board'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
@@ -141,7 +142,9 @@ import { isCompletablePath } from './path-completion'
 import { isAbsolutePath } from './paths'
 import { networkValidators } from './node-proxy/validate'
 import { nodeRuntimeValidators } from './node-runtime/validate'
+import { MAX_SECRET_FIELDS, MAX_SECRET_VALUE, SECRET_NAME } from '@shared/secret-request'
 import { folderValidators } from './session-folders'
+import { moveValidators } from './session-move/validate'
 import { MAX_WORKTREE_COPY_PATHS } from './storage'
 import { checkIncludeEntry } from './worktrees/copy'
 import { branchFromTemplate, checkWorktreeBranch } from './worktrees/names'
@@ -214,6 +217,19 @@ function string(o: Fields, key: string, max: number): string {
 
 function optionalString(o: Fields, key: string, max: number): string | undefined {
   return o[key] === undefined ? undefined : string(o, key, max)
+}
+
+/** Huli: a sandbox choice, its tier and its network preset; nothing else is taken. */
+function sandboxChoice(value: unknown): SandboxChoice {
+  const choice = sandboxChoiceOf(value)
+  if (!choice) throw invalidParams('sandbox must be { tier, network } with known values')
+  const extra = Object.keys(value as object).find((key) => key !== 'tier' && key !== 'network')
+  if (extra !== undefined) throw invalidParams(`Unknown sandbox field "${extra}"`)
+  return choice
+}
+
+function optionalSandbox(o: Fields): { sandbox?: SandboxChoice } {
+  return o.sandbox === undefined ? {} : { sandbox: sandboxChoice(o.sandbox) }
 }
 
 /** Huli: an API provider profile's id, or null for the agent's own sign-in; undefined when absent. */
@@ -1799,6 +1815,64 @@ export function createValidators(platform: Platform): Validators {
         decision: o.decision,
       }
     },
+    'theme.answerChange': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'apply' && o.decision !== 'keep') {
+        throw invalidParams('decision must be apply or keep')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+      }
+    },
+    'theme.undoChange': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
+    },
+    'secrets.answer': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'provide' && o.decision !== 'decline') {
+        throw invalidParams('decision must be provide or decline')
+      }
+      const values: Record<string, string> = {}
+      if (o.values !== undefined) {
+        if (!isRecord(o.values)) throw invalidParams('values must be an object')
+        const entries = Object.entries(o.values)
+        if (entries.length > MAX_SECRET_FIELDS) throw invalidParams('values lists too many fields')
+        for (const [name, value] of entries) {
+          // The message names the field, never the value.
+          if (!SECRET_NAME.test(name))
+            throw invalidParams('values names a field that is no variable')
+          if (typeof value !== 'string' || value.length > MAX_SECRET_VALUE * 2) {
+            throw invalidParams(`values.${name} must be a text`)
+          }
+          values[name] = value
+        }
+      }
+      let useSaved: string[] | undefined
+      if (o.useSaved !== undefined) {
+        if (
+          !Array.isArray(o.useSaved) ||
+          o.useSaved.length > MAX_SECRET_FIELDS ||
+          !o.useSaved.every((name) => typeof name === 'string' && SECRET_NAME.test(name))
+        ) {
+          throw invalidParams('useSaved must list field names')
+        }
+        useSaved = o.useSaved as string[]
+      }
+      if (o.save !== undefined && typeof o.save !== 'boolean') {
+        throw invalidParams('save must be true or false')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+        ...(o.decision === 'provide' ? { values } : {}),
+        ...(useSaved && o.decision === 'provide' ? { useSaved } : {}),
+        ...(o.save === true && o.decision === 'provide' ? { save: true } : {}),
+      }
+    },
     'settings.undoChange': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
@@ -1984,6 +2058,13 @@ export function createValidators(platform: Platform): Validators {
         manager: o.manager === null ? null : structuredClone(o.manager as ProjectManagerSettings),
       }
     },
+    'projects.setSandbox': (params) => {
+      const o = fields(params)
+      return {
+        path: absolutePath(o, 'path', platform),
+        sandbox: o.sandbox === null ? null : sandboxChoice(o.sandbox),
+      }
+    },
     'projects.setAutoApprove': (params) => {
       const o = fields(params)
       const level = o.autoApprove
@@ -2022,6 +2103,7 @@ export function createValidators(platform: Platform): Validators {
       const profileId = optionalProfile(o)
       return {
         ...(profileId !== undefined ? { profileId } : {}),
+        ...optionalSandbox(o),
         agentId: agentId(o),
         // null: no project, so the host makes a scratch folder.
         projectPath: o.projectPath === null ? null : absolutePath(o, 'projectPath', platform),
@@ -2043,6 +2125,7 @@ export function createValidators(platform: Platform): Validators {
       const profileId = optionalProfile(o)
       return {
         ...(profileId !== undefined ? { profileId } : {}),
+        ...optionalSandbox(o),
         agentId: agentId(o),
         projectPath: o.projectPath === null ? null : absolutePath(o, 'projectPath', platform),
         ...(parentId !== undefined ? { parentId } : {}),
@@ -2051,6 +2134,13 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'sessions.discard': (params) => ({ sessionId: sessionId(fields(params)) }),
+    'sessions.setSandbox': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), sandbox: sandboxChoice(o.sandbox) }
+    },
+    'sandbox.containerStatus': none,
+    'sandbox.pullImage': none,
+    'sandbox.removeImage': none,
     'sessions.setProfile': (params) => {
       const o = fields(params)
       const profileId = optionalProfile(o)
@@ -3237,5 +3327,6 @@ export function createValidators(platform: Platform): Validators {
     ...folderValidators,
     ...networkValidators,
     ...nodeRuntimeValidators,
+    ...moveValidators(platform),
   }
 }

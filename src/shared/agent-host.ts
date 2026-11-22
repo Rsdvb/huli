@@ -130,6 +130,7 @@ import type { AgentProfiles, ProfileBalance } from './provider-profiles'
 import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
+import type { AgentSandboxSupport, ContainerStatus, SandboxChoice } from './sandbox'
 import type {
   ManagerChoices,
   ManagerSummary,
@@ -161,6 +162,15 @@ import type {
 import type { ClockRequest, UsageScope, UsageStatus, UsageSummary, UsageTotal } from './usage'
 import type { ImageClear, ImageClearScope, StorageUsage } from './data-usage'
 import type { TurnWork } from './turn-phase'
+import type {
+  MoveApply,
+  MovedTo,
+  MovePack,
+  MovePrepared,
+  MoveRemote,
+  MoveSource,
+  MoveTarget,
+} from './session-move'
 import type { LimitPause, LimitPauseAction, Stall, StallAction } from './supervisor'
 import type {
   AgentId,
@@ -452,6 +462,8 @@ export interface AgentStatus {
   profiles?: AgentProfiles
   // Huli: the balances the vendors of its profiles report, by profile, where a vendor has an API.
   profileBalances?: ProfileBalance[]
+  // Huli: the sandbox tiers it can run in on this host; absent from older hosts, which have none.
+  sandbox?: AgentSandboxSupport
   state: AgentState
   // From `initialize`, a binary agent's `--version`, or the `requires` program's (Pi's `pi`); for
   // Kettu's own install of a program that reports none, the release it installed.
@@ -689,6 +701,8 @@ export type McpToolGroup =
   | 'reports'
   | 'workflows'
   | 'settings'
+  | 'secrets'
+  | 'theme'
 
 export interface McpToolSummary {
   name: string
@@ -802,6 +816,9 @@ export interface Project {
   autoApprove?: AutoApprove | null
   // Huli: the project's own manager-mode roster and choices; null keeps the settings'.
   manager?: ProjectManagerSettings | null
+  // Huli: the sandbox its sessions start in; null keeps the settings' default, absent on hosts
+  // older than sandboxes.
+  sandbox?: SandboxChoice | null
 }
 
 export type SessionAttention = 'none' | 'permission' | 'unread' | 'error'
@@ -861,6 +878,11 @@ export interface SessionSummary {
   // Huli: the API provider profile it runs with, by id among its agent's; null or absent for the
   // agent's own sign-in.
   profileId?: string | null
+  // Huli: the sandbox it runs in; null for none, absent from hosts older than sandboxes.
+  // `sandboxUnknown` marks one stored by a newer version, which does not start until another is
+  // picked.
+  sandbox?: SandboxChoice | null
+  sandboxUnknown?: boolean
   pinnedAt: number | null // when the user pinned it; a top-level session only
   archivedAt: number | null // when the user archived it; off the sidebar while set
   acpSessionId: string | null // the harness's own id for it, which its CLI resumes; null until known
@@ -893,6 +915,8 @@ export interface SessionSummary {
   manager?: ManagerSummary | null
   // Huli: a worker of a manager session, with its roster name, role and latest report
   worker?: WorkerSummary | null
+  // Huli: moved to another computer, where it goes on; absent while it was not
+  movedTo?: MovedTo
 }
 
 /**
@@ -1246,6 +1270,29 @@ export interface HostContract {
   // Undo on a settings line: the rows go back to what they were, refused with `conflict` once one
   // of them changed again since, which takes the undo away.
   'settings.undoChange': { params: { sessionId: string; entryId: string }; result: void }
+  // Huli: any window's or device's answer to a card an agent's set_theme_colors shows: Apply or
+  // Don't change; the first counts.
+  'theme.answerChange': {
+    params: { sessionId: string; entryId: string; decision: 'apply' | 'keep' }
+    result: void
+  }
+  // Huli: Undo on a theme line: what the change replaced comes back, refused with `conflict` once
+  // the theme changed again since, which takes the undo away.
+  'theme.undoChange': { params: { sessionId: string; entryId: string }; result: void }
+  // Huli: any window's or device's answer to an agent's secret card. Provide delivers the values
+  // where the card says, refused with the reason while the card keeps waiting; they reach nothing
+  // else, and `save` keeps the typed ones encrypted for the project. The first answer counts.
+  'secrets.answer': {
+    params: {
+      sessionId: string
+      entryId: string
+      decision: 'provide' | 'decline'
+      values?: Record<string, string>
+      useSaved?: string[]
+      save?: boolean
+    }
+    result: void
+  }
   // What was put off or refused, newest first, kept on the host to publish later.
   'market.publishDrafts': { params: void; result: { drafts: PublishDraft[] } }
   'market.discardPublishDraft': { params: { id: string }; result: void }
@@ -1319,6 +1366,9 @@ export interface HostContract {
     params: { path: string; manager: ProjectManagerSettings | null }
     result: void
   }
+  // Huli: the sandbox the project's new sessions start in; null keeps the default. The windows'
+  // alone, like what is allowed without asking.
+  'projects.setSandbox': { params: { path: string; sandbox: SandboxChoice | null }; result: void }
   // How the project names and prepares its sessions' worktrees.
   'projects.worktreeSettings': { params: { path: string }; result: ProjectWorktreeSettings }
   // A device needs the owner's leave to use the terminal to change these, as they run a command.
@@ -1349,6 +1399,9 @@ export interface HostContract {
       profileId?: string | null
       // Huli: a manager session (总管模式) with these choices.
       manager?: ManagerChoices
+      // Huli: the sandbox it runs in; absent for the project's or the default. A device's choice
+      // is ignored: it starts in the computer's.
+      sandbox?: SandboxChoice
     }
     result: SessionSummary
   }
@@ -1438,6 +1491,7 @@ export interface HostContract {
       replace?: boolean
       // Huli: as for sessions.create.
       profileId?: string | null
+      sandbox?: SandboxChoice
     }
     result: SessionSummary
   }
@@ -1445,6 +1499,9 @@ export interface HostContract {
   // Huli: the API provider profile the session runs with from its next turn, between turns; null
   // for its agent's own sign-in. Its agent starts again on the session's history.
   'sessions.setProfile': { params: { sessionId: string; profileId: string | null }; result: void }
+  // Huli: the sandbox the session runs in from its next turn, between turns; its agent starts again
+  // on the session's history in it. The windows' alone.
+  'sessions.setSandbox': { params: { sessionId: string; sandbox: SandboxChoice }; result: void }
   // `fork`: a copy of the session is imported instead, for one another program still has open.
   'sessions.import': {
     // Huli: `source`, chosen among the Claude desktop app's sessions, so it takes the app's title,
@@ -2162,6 +2219,12 @@ export interface HostContract {
   // A subscription's address goes in with `addSubscription` and never comes out; the host
   // downloads it before it adds it.
   'agentNetwork.status': { params: void; result: AgentNetworkStatus }
+  // Huli: the container engine and Kite's container image, looked for only when asked. Pulling the
+  // image downloads it, which the window asks the user about first with its size; removing it
+  // frees its space. The windows' alone.
+  'sandbox.containerStatus': { params: void; result: ContainerStatus }
+  'sandbox.pullImage': { params: void; result: ContainerStatus }
+  'sandbox.removeImage': { params: void; result: ContainerStatus }
   'agentNetwork.addSubscription': { params: { name: string; url: string }; result: { id: string } }
   // A subscription from a file's text, Clash YAML or a list of node links, at most 10 MiB; it is
   // never refreshed, only imported again.
@@ -2212,6 +2275,39 @@ export interface HostContract {
   'folders.reorder': { params: { folderIds: string[] }; result: void }
   // Into a folder, or out of every folder with null; ids of sessions not on the host are skipped.
   'folders.move': { params: { sessionIds: string[]; folderId: string | null }; result: void }
+  // Huli: moving a session to another computer (shared/session-move.ts). Main alone asks these:
+  // of this computer's host through its own messages, of the others as a desktop device.
+  // The source's: what the session holds, its pack in parts, and the mark once it went.
+  'moves.inspect': { params: { sessionId: string }; result: MoveSource }
+  'moves.pack': {
+    params: { sessionId: string; moveId: string; haves: string[] }
+    result: MovePack
+  }
+  'moves.part': {
+    params: { moveId: string; name: string; offset: number }
+    result: { bytes: Uint8Array }
+  }
+  'moves.finish': { params: { moveId: string; sessionId: string; to: MovedTo }; result: void }
+  'moves.abort': { params: { moveId: string }; result: void }
+  // The target's: what it would do, its project (a clone made when it has none), the pack's parts,
+  // the session, and the undo of all of it until main commits the move.
+  'moves.check': {
+    params: { agentId: AgentId; remotes: MoveRemote[]; remote: string | null }
+    result: MoveTarget
+  }
+  'moves.prepare': {
+    params: { moveId: string; project: { path: string } | { clone: true }; url: string }
+    result: MovePrepared
+  }
+  'moves.receive': {
+    params: { moveId: string; name: string; offset: number; size: number; bytes: Uint8Array }
+    result: void
+  }
+  'moves.apply': { params: MoveApply; result: { sessionId: string; projectPath: string } }
+  'moves.undo': { params: { moveId: string }; result: { undone: boolean } }
+  'moves.commit': { params: { moveId: string }; result: void }
+  // Huli: a moved session goes on here again.
+  'sessions.clearMoved': { params: { sessionId: string }; result: void }
 }
 
 export type HostMethod = keyof HostContract
@@ -2295,6 +2391,9 @@ export const HOST_METHODS = [
   'market.answerPublish',
   'settings.answerChange',
   'settings.undoChange',
+  'secrets.answer',
+  'theme.answerChange',
+  'theme.undoChange',
   'market.publishDrafts',
   'market.discardPublishDraft',
   'market.community',
@@ -2323,6 +2422,7 @@ export const HOST_METHODS = [
   'projects.pin',
   'projects.setAutoApprove',
   'projects.setManager',
+  'projects.setSandbox',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
   'paths.complete',
@@ -2331,6 +2431,7 @@ export const HOST_METHODS = [
   'sessions.prepare',
   'sessions.discard',
   'sessions.setProfile',
+  'sessions.setSandbox',
   'sessions.import',
   'sessions.open',
   'sessions.snapshot',
@@ -2552,6 +2653,9 @@ export const HOST_METHODS = [
   'agentHistory.planCopy',
   'agentHistory.copy',
   'agentNetwork.status',
+  'sandbox.containerStatus',
+  'sandbox.pullImage',
+  'sandbox.removeImage',
   'agentNetwork.addSubscription',
   'agentNetwork.importSubscription',
   'agentNetwork.reimportSubscription',
@@ -2571,6 +2675,18 @@ export const HOST_METHODS = [
   'folders.delete',
   'folders.reorder',
   'folders.move',
+  'moves.inspect',
+  'moves.pack',
+  'moves.part',
+  'moves.finish',
+  'moves.abort',
+  'moves.check',
+  'moves.prepare',
+  'moves.receive',
+  'moves.apply',
+  'moves.undo',
+  'moves.commit',
+  'sessions.clearMoved',
 ] as const satisfies readonly HostMethod[]
 
 /** One that has a session in front: the host's own windows as one, or a paired device. */

@@ -17,7 +17,7 @@
     "cached": "Cached",
     "output": "Output",
     "cost": "Cost",
-    "api": "API",
+    "api": "at API rates",
     "costHint": "The agent's own reckoning at API prices. A subscription is not charged this.",
     "reasoning": "Reasoning"
   },

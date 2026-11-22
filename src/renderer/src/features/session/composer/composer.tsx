@@ -41,6 +41,7 @@ import { Glyph } from '@renderer/features/shell/glyph'
 import { runningWorkOf, workItems, type WorkItem } from '@renderer/features/sidebar/running-work'
 import { setPaneSelection, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { SANDBOX_OFF, type SandboxChoice } from '@shared/sandbox'
 import { showSending, useThreadsStore } from '@renderer/stores/threads'
 import { refreshLimits } from '@renderer/stores/usage'
 import { useViewStore } from '@renderer/stores/view'
@@ -68,6 +69,7 @@ import { CACHE_NOTICE_MIN_TOKENS, CacheNotice } from './cache-notice'
 import { QueueButton, SendButton, StopButton } from './send-button'
 import { SessionPlace } from './session-place'
 import { ProfileChip } from './profile-chip'
+import { SandboxChip } from './sandbox-chip'
 import { SwitchConfirm } from './switch-confirm'
 import { SwitchStrip } from './switch-strip'
 import { QuotaStrip } from './quota-strip'
@@ -361,6 +363,25 @@ export function Composer({
     : profileIdle
       ? null
       : ta('profiles.betweenTurns')
+  // Huli: the sandbox the session runs in, its badge; a change between turns starts its agent again
+  // in the new one. Shown while it runs in one, or while sandboxes are in use at all.
+  const sandboxChoice = useSessionsStore((s) => s.byId[sessionId]?.sandbox)
+  const sandboxInUse = useSettingsStore((s) => (s.settings.sandbox?.tier ?? 'off') !== 'off')
+  const [switchingSandbox, setSwitchingSandbox] = useState(false)
+  const chooseSandbox = (next: SandboxChoice): void => {
+    setConfigError(null)
+    setSwitchingSandbox(true)
+    host('sessions.setSandbox', { sessionId, sandbox: next })
+      .catch((e: unknown) => setConfigError(errorMessage(e)))
+      .finally(() => setSwitchingSandbox(false))
+  }
+  const sandboxShown =
+    hostId === null && sandboxChoice !== undefined && (sandboxChoice !== null || sandboxInUse)
+  const sandboxHint = switchingSandbox
+    ? ta('sandbox.switching')
+    : profileIdle
+      ? null
+      : ta('sandbox.betweenTurns')
   const profileAction =
     profiles && profiles.items.length > 0 && !pending && !mustSwitch
       ? [
@@ -876,6 +897,16 @@ export function Composer({
                   onChange={chooseProfile}
                   disabledHint={profileHint}
                   triggerRef={profileTrigger}
+                />
+              )}
+              {!pending && !mustSwitch && sandboxShown && (
+                <SandboxChip
+                  agentId={session.agentId}
+                  hostId={hostId}
+                  value={sandboxChoice ?? SANDBOX_OFF}
+                  folder={folder}
+                  onChange={chooseSandbox}
+                  disabledHint={sandboxHint}
                 />
               )}
             </span>

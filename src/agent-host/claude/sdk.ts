@@ -2,6 +2,7 @@
 // dependency: its license grants no right to ship it, so Kettu installs it on first use into its
 // data folder and loads it from there. Only the fields Kettu reads are named; the SDK sends more.
 
+import type { ClaudeSandboxOption } from '../sandbox/native'
 import { pathToFileURL } from 'node:url'
 import type { ChildProcess } from 'node:child_process'
 
@@ -206,6 +207,8 @@ export interface QueryOptions {
   /** Plugin folders loaded for the session beside the user's own plugins. */
   plugins?: { type: 'local'; path: string }[]
   settings?: FlagSettings
+  /** Huli: the part of the SDK's `SandboxSettings` Kite sets for a sandboxed session. */
+  sandbox?: ClaudeSandboxOption
   extraArgs?: Record<string, string | null>
   persistSession?: boolean
   /** Taken while the main model is overloaded or unavailable; the SDK throws when it is `model`. */

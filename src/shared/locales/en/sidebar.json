@@ -114,7 +114,8 @@
       "worktreeSettings": "Worktree settings…",
       "remove": "Remove project…",
       "issues": "Issues",
-      "autoApprove": "Auto-approve"
+      "autoApprove": "Auto-approve",
+      "sandbox": "Sandbox"
     },
     "remove": {
       "title": "Remove {{name}}?",
@@ -134,6 +135,9 @@
         "low": "Low-risk actions",
         "edits": "Low-risk actions and edits"
       }
+    },
+    "sandbox": {
+      "default": "Default ({{choice}})"
     }
   },
   "prs": {
@@ -231,6 +235,7 @@
     "copySessionId": "Copy session ID",
     "copiedSessionId": "Copied the session ID",
     "export": "Export…",
+    "move": "Move to another computer…",
     "showInParent": "Show in parent session",
     "agentOf": "{{harness}} · {{agent}}",
     "tokensUsed": "{{tokens}} tokens",
