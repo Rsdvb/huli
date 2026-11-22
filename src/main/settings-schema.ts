@@ -32,6 +32,7 @@ import {
   ZOOM_LEVELS,
 } from '@shared/settings'
 import { isComputerApp, isStopShortcut } from '@shared/computer-use'
+import { FEATURE_IDS } from '@shared/features'
 import {
   cleanChoice,
   isAgentNetworkChoice,
@@ -339,6 +340,11 @@ const SECTION_FIELDS = {
     autoApproveEdits: isBoolean,
     gitWritable: isBoolean,
   },
+  // Huli: one switch per feature of the registry; a key it no longer has is dropped on load.
+  features: Object.fromEntries(FEATURE_IDS.map((id) => [id, isBoolean])) as Record<
+    (typeof FEATURE_IDS)[number],
+    Check
+  >,
 } as const satisfies Record<string, Record<string, Check>>
 
 type FieldSection = keyof typeof SECTION_FIELDS
@@ -1253,6 +1259,17 @@ export function mergeSettings(current: SettingsFile, patch: SettingsPatch): Sett
     if (folder === null) next.backup.folder = null
   }
   if (patch.manager) next.manager = structuredClone(patch.manager)
+  // Huli: the sandbox's switch hides where a sandbox is chosen, so it may not hide a default one
+  // that new sessions still start in.
+  if (
+    (patch.features?.sandbox === false || patch.sandbox?.tier !== undefined) &&
+    !next.features.sandbox &&
+    next.sandbox.tier !== 'off'
+  ) {
+    throw new SettingsError(
+      '"features.sandbox" can be turned off only while "sandbox.tier" is "off"',
+    )
+  }
   holdForRemote(next)
   return next
 }
@@ -1787,6 +1804,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     lowerAgentPriority: settings.general.lowerAgentPriority,
     manager: structuredClone(settings.manager),
     sandbox: { ...settings.sandbox },
+    features: { ...settings.features },
   }
 }
 
@@ -1823,6 +1841,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'permissions',
   'manager',
   'sandbox',
+  'features',
 ])
 
 /** Whether a change touches what the agent host is sent; a language change is checked apart. */

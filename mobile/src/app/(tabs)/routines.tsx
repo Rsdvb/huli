@@ -15,6 +15,7 @@ import { inFilter, TopBar, useScrollTopOnTabPress, useShell } from '../../compon
 import { TasksView } from '../../components/tasks/TasksView'
 import {
   useAgents,
+  useEntryOn,
   useComputerId,
   useHostActions,
   useHostState,
@@ -53,7 +54,9 @@ export default function TasksTab() {
   const view = useTasksTabView()
   // Each computer's lists mount afresh, so none shows another's while its own load.
   const hostId = useComputerId() ?? ''
-  const switcher = (
+  // Huli: with routines turned off on the computer the tab holds requirements alone.
+  const routinesOn = useEntryOn('phone.routines')
+  const switcher = routinesOn ? (
     <SegmentedControl
       segments={[
         { key: 'tasks', label: '需求' },
@@ -62,8 +65,8 @@ export default function TasksTab() {
       value={view}
       onChange={setTasksTabView}
     />
-  )
-  return view === 'tasks' ? (
+  ) : null
+  return view === 'tasks' || !routinesOn ? (
     <TasksView key={hostId} switcher={switcher} />
   ) : (
     <Routines key={hostId} switcher={switcher} />

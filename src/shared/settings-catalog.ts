@@ -3,6 +3,7 @@
 // Kettu's settings tools read the same entries, so a row added to the page is one agents see.
 
 import { isFullAccessMode } from './agents'
+import { FEATURE_IDS, featureOn, type FeatureId } from './features'
 import { IDLE_RELEASE_MODES } from './idle-release'
 import { LOCALE_NAMES, LOCALES } from './locale'
 import type { Platform } from './platform'
@@ -49,6 +50,8 @@ export const SETTINGS_SECTIONS = [
   'agent-network',
   'backup',
   'chat-bridge',
+  // Huli: the switches of Kite's optional features.
+  'features',
   'advanced',
   'about',
 ] as const
@@ -102,6 +105,8 @@ export interface CatalogContext {
   harnesses: readonly { id: HarnessId; name: string }[]
   /** The modes each agent's new sessions may start in, by agent; absent before it was used. */
   modes: Readonly<Partial<Record<AgentId, readonly { value: string; name: string }[]>>>
+  /** Huli: which optional features are on (Settings > Features); all when absent. */
+  features?: Partial<Record<string, boolean>>
 }
 
 export interface CatalogEntry {
@@ -124,6 +129,8 @@ export interface CatalogEntry {
   item?: 'agent' | 'harness'
   /** Whether the host has the row; always when absent. */
   on?(ctx: CatalogContext, item: string | null): boolean
+  /** Huli: the optional feature the row belongs to, which hides it while turned off. */
+  feature?: FeatureId
   options?:
     readonly SettingOption[] | ((ctx: CatalogContext, item: string | null) => SettingOption[])
   /** A number's bounds and the unit it reads in. */
@@ -182,6 +189,53 @@ function pick<S extends keyof SettingsPatch>(
     patch: (value) => ({ [section]: { [key]: value } }) as SettingsPatch,
   }
 }
+
+/** Huli: the groups of Settings > Features, in the page's order. */
+export const FEATURE_GROUPS = ['work', 'agents', 'connections'] as const
+export type FeatureGroup = (typeof FEATURE_GROUPS)[number]
+
+/** Huli: where each feature's switch shows on Settings > Features. */
+export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
+  board: 'work',
+  manager: 'work',
+  bestOfN: 'work',
+  routines: 'work',
+  github: 'work',
+  sandbox: 'agents',
+  devices: 'agents',
+  secrets: 'agents',
+  agentTheme: 'agents',
+  chatBridge: 'connections',
+  portForwarding: 'connections',
+  devPreview: 'connections',
+  pickElement: 'connections',
+  agentSync: 'connections',
+}
+
+/** Huli: the sections a feature switch hides whole. */
+const SECTION_FEATURES: Partial<Record<SettingsSection, FeatureId>> = {
+  manager: 'manager',
+  'chat-bridge': 'chatBridge',
+  devices: 'devices',
+}
+
+/** Huli: one switch a feature, which always asks: it reshapes the app the user sees. */
+const FEATURE_ENTRIES = Object.fromEntries(
+  FEATURE_IDS.map((id) => [
+    `features.${id}`,
+    {
+      section: 'features',
+      row: id,
+      group: `features.groups.${FEATURE_GROUP[id]}`,
+      name: `features.items.${id}.name`,
+      description: `features.items.${id}.description`,
+      keywords: 'features.keywords',
+      part: 'desktop',
+      access: 'ask',
+      ...flag('features', id, (file) => featureOn(file.features, id)),
+    } satisfies CatalogEntry,
+  ]),
+) as Record<`features.${FeatureId}`, CatalogEntry>
 
 const ENTRIES = {
   // ---- General
@@ -488,6 +542,7 @@ const ENTRIES = {
   },
   'notifications.routines': {
     section: 'notifications',
+    feature: 'routines',
     row: 'routines',
     group: 'notifications.groups.when',
     name: 'notifications.routines.name',
@@ -1057,6 +1112,7 @@ const ENTRIES = {
   // loosen what holds them back, and only the user picks a tier.
   'agents.sandbox': {
     section: 'agents',
+    feature: 'sandbox',
     row: 'sandbox',
     group: 'agents.sandbox.group',
     name: 'agents.sandbox.name',
@@ -1070,6 +1126,7 @@ const ENTRIES = {
   },
   'agents.sandbox-network': {
     section: 'agents',
+    feature: 'sandbox',
     row: 'sandbox-network',
     group: 'agents.sandbox.group',
     name: 'agents.sandbox.network.name',
@@ -1083,6 +1140,7 @@ const ENTRIES = {
   },
   'agents.sandbox-git': {
     section: 'agents',
+    feature: 'sandbox',
     row: 'sandbox-git',
     group: 'agents.sandbox.group',
     name: 'agents.sandbox.git.name',
@@ -1096,6 +1154,7 @@ const ENTRIES = {
   },
   'agents.sandbox-auto-approve': {
     section: 'agents',
+    feature: 'sandbox',
     row: 'sandbox-auto-approve',
     group: 'agents.sandbox.group',
     name: 'agents.sandbox.autoApprove.name',
@@ -2211,6 +2270,17 @@ const ENTRIES = {
     part: 'desktop',
     kind: 'list',
   },
+  ...FEATURE_ENTRIES,
+  'features.computer-use': {
+    section: 'features',
+    row: 'computer-use',
+    group: 'features.groups.agents',
+    name: 'features.computerUse.name',
+    description: 'features.computerUse.description',
+    keywords: 'features.keywords',
+    part: 'desktop',
+    kind: 'action',
+  },
 } as const satisfies Record<string, CatalogEntry>
 
 export type SettingId = keyof typeof ENTRIES
@@ -2290,6 +2360,8 @@ export function parseToolId(value: string): { id: SettingId; item: string | null
 /** Whether the host has the row: its part applies there, and it is on for its system and item. */
 export function present(entry: CatalogEntry, ctx: CatalogContext, item: string | null): boolean {
   if (entry.part === 'desktop' && !ctx.desktop) return false
+  const feature = entry.feature ?? SECTION_FEATURES[entry.section]
+  if (feature && !featureOn(ctx.features, feature)) return false
   return entry.on?.(ctx, item) ?? true
 }
 

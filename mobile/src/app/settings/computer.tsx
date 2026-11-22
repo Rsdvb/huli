@@ -14,7 +14,7 @@ import {
 import { useCloudStatus } from '../../cloud'
 import { pickedRoute, routeKind, usableAddresses } from '../../connection'
 import { rerouteFleet } from '../../fleet'
-import { useHost } from '../../host'
+import { useEntryOn, useHost } from '../../host'
 import { hostPort, osName, platformOf, ROUTE_NAMES, ROUTE_PICKS, routesNote } from '../../linkInfo'
 import { ago } from '../../sessions'
 import { computerName } from '../../store'
@@ -44,6 +44,7 @@ export default function Computer() {
   const route = useCurrentRoute(!!active, host.state)
   const welcome = active && host.state.kind === 'connected' ? host.state.welcome : null
   const connected = welcome !== null
+  const devServers = useEntryOn('phone.devServers')
   // The relay takes the phone's own Kite Cloud sign-in too.
   const signedIn = useCloudStatus().state === 'signed-in'
 
@@ -114,7 +115,7 @@ export default function Computer() {
           ) : null}
         </ListGroup>
 
-        {connected ? (
+        {connected && devServers ? (
           <ListGroup footer="电脑上正在运行的开发服务器，点一下就能在手机上预览。">
             <ListRow
               title="开发服务器"

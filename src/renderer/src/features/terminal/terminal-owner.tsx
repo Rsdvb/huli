@@ -3,6 +3,7 @@ import { Globe02Icon, LockPasswordIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AnimatePresence } from 'motion/react'
 import { Trans, useTranslation } from 'react-i18next'
+import { useEntry } from '@renderer/lib/features'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { HeldBubble } from '@renderer/components/control/held-bubble'
 import { SurfaceLight } from '@renderer/components/control/surface-light'
@@ -37,7 +38,9 @@ export function OwnerBar({ terminal, owner }: { terminal: TerminalState; owner: 
   const sessionId = terminal.sessionId ?? owner.sessionId
   const running = terminal.busy && terminal.exitCode === null && !terminal.stale
   // Huli: another host's localhost opens through a forward of its port to this computer.
-  const url = terminal.localUrl
+  const forwardsOn = useEntry('terminal.openOnHost')
+  // Off, another host's address has no way here, so it offers none.
+  const url = hostId !== null && !forwardsOn ? null : terminal.localUrl
 
   const openInBrowser = () => {
     if (!sessionId || !url) return

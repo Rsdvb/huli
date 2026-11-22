@@ -62,6 +62,7 @@ import type { FromPort, PortErrorCode } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
 import type { MemorySource } from '@shared/memory'
 import { DEFAULT_AGENT_NETWORK } from '@shared/agent-network'
+import { featureOfMethod, featureOn, type FeatureId } from '@shared/features'
 import type { HostSettings } from '@shared/settings'
 import { serverFor, type MarketConnection, type MarketServer } from '@shared/marketplace'
 import { listingIdOf } from '@shared/market-community'
@@ -267,6 +268,14 @@ import type { ChatBridgeService } from './chat-bridge/service'
 const OPTIONS_FRESH_MS = 5 * 60_000
 /** The harnesses whose connection answers a page's question in a session with no tools at all. */
 const QUESTION_HARNESSES: ReadonlySet<HarnessId> = new Set(['claude-code'])
+
+/** Huli: a request of a feature that Settings > Features turned off. */
+function featureOff(id: FeatureId): HostError {
+  return new HostError(
+    'unavailable',
+    t('featureOff', { name: tSettings(`features.items.${id}.name`) }),
+  )
+}
 
 /** Refuses a port that is not a desktop app's: only one runs browser calls for the host. */
 function browserApp(ctx: RequestContext): void {
@@ -1014,6 +1023,7 @@ export class AgentHost {
       settings: this.settingsTools,
       secrets: this.secretTools,
       theme: this.themeTools,
+      features: () => this.settings.features,
       proxy: this.mcpProxy,
       sessions: {
         info: (sessionId) => this.sessions.sessionInfo(sessionId),
@@ -1568,8 +1578,9 @@ export class AgentHost {
         const status = await this.gitCall((git) => git.status(folder))
         return status.remote?.github ?? null
       },
+      // Huli: with GitHub automation off it reads nothing, so it keeps no timer.
       sessions: {
-        flows: () => sessions.prFlows(),
+        flows: () => (this.featureOn('github') ? sessions.prFlows() : []),
         update: (sessionId, url, change) => sessions.updatePrFlow(sessionId, url, change),
         setState: (sessionId, state) => sessions.setPrFlowState(sessionId, state),
         note: (sessionId, severity, title, description) =>
@@ -1578,7 +1589,7 @@ export class AgentHost {
         closeMerged: (sessionId, headOid) => sessions.closeMerged(sessionId, headOid),
       },
       routines: {
-        triggers: () => this.routines.eventTriggers(),
+        triggers: () => (this.featureOn('github') ? this.routines.eventTriggers() : []),
         idle: (routineId) => this.routines.idleForEvent(routineId),
         fire: (routineId, cause, context) => this.routines.runOnEvent(routineId, cause, context),
       },
@@ -1615,7 +1626,7 @@ export class AgentHost {
       servicePort: () => this.artifactService.listeningPort,
     })
     this.hub = new PortHub({
-      handlers: this.handlers(),
+      handlers: this.gatedHandlers(this.handlers()),
       validators: createValidators(platform),
       closed: (portId) => this.portClosed(portId),
       log,
@@ -1701,7 +1712,7 @@ export class AgentHost {
     host.agents.restoreManifest(manifest)
     host.agents.restoreUpdates(updates)
     void host.moveLocalMarketplaces()
-    host.routines.start()
+    host.routines.setOn(host.featureOn('routines'))
     // Huli: reads GitHub only for what a session or a routine turned on.
     host.routineTriggersChanged()
     void host.githubFlow.refresh()
@@ -1944,6 +1955,45 @@ export class AgentHost {
     const turnedOff = next.disabledAgents.filter((id) => !previous.disabledAgents.includes(id))
     const gone = [...removed, ...turnedOff]
     if (gone.length > 0) await this.sessions.agentsRemoved(gone)
+    this.featuresChanged(previous)
+  }
+
+  /** Huli: whether an optional feature is on, as Settings > Features has it. */
+  featureOn(id: FeatureId): boolean {
+    return featureOn(this.settings.features, id)
+  }
+
+  /**
+   * Huli: Settings > Features turned features on or off. Each takes effect at once: routines'
+   * schedule and the GitHub reads stop or start, the chat bridges disconnect or connect, and
+   * Kite's skills, guide and tools follow for the sessions started from now on.
+   */
+  private featuresChanged(previous: HostSettings): void {
+    const changed = (id: FeatureId) => featureOn(previous.features, id) !== this.featureOn(id)
+    if (changed('routines')) {
+      this.routines.setOn(this.featureOn('routines'))
+      this.routineTriggersChanged()
+    }
+    if (changed('github') || changed('routines')) void this.githubFlow.refresh()
+    if (changed('chatBridge')) this.applyChatBridge()
+    if (changed('board') || changed('devices')) void this.ownSkillsChanged()
+    else if (['manager', 'secrets', 'agentTheme'].some((id) => changed(id as FeatureId))) {
+      this.sessions.libraryChanged(() => true)
+    }
+  }
+
+  /** Huli: the handlers with the methods of a feature that is off refused. */
+  private gatedHandlers(handlers: Handlers): Handlers {
+    const gated = { ...handlers } as Record<string, (...args: never[]) => unknown>
+    for (const [method, handler] of Object.entries(handlers)) {
+      const feature = featureOfMethod(method)
+      if (!feature) continue
+      gated[method] = (...args: never[]) => {
+        if (!this.featureOn(feature)) throw featureOff(feature)
+        return (handler as (...args: never[]) => unknown)(...args)
+      }
+    }
+    return gated as unknown as Handlers
   }
 
   /**
@@ -1957,6 +2007,14 @@ export class AgentHost {
       return
     }
     this.chatBridgeConfig = config
+    this.applyChatBridge()
+  }
+
+  /** Huli: the bridges as main last configured them, none while their feature is off. */
+  private applyChatBridge(): void {
+    const stored = this.chatBridgeConfig
+    if (!stored) return
+    const config = this.featureOn('chatBridge') ? stored : { platforms: {}, binding: null }
     if (this.chatBridge) {
       this.chatBridge.setConfig(config)
       return
@@ -1974,8 +2032,8 @@ export class AgentHost {
       return service
     })
     void this.chatBridgeLoad.then(
-      (service) => {
-        if (this.chatBridgeConfig && !this.stopping) service.setConfig(this.chatBridgeConfig)
+      () => {
+        if (!this.stopping) this.applyChatBridge()
       },
       (error: unknown) => {
         this.chatBridgeLoad = null
@@ -3561,6 +3619,7 @@ export class AgentHost {
         completePath(path, this.options.platform, this.options.homeDir ?? os.homedir()),
       'sessions.list': ({ projectPath }) => sessions.list(projectPath),
       'sessions.create': async (params, { portId, device }) => {
+        if (params.manager && !this.featureOn('manager')) throw featureOff('manager')
         // A worktree is made with git, which is found as the agents find it.
         if (params.worktree) await this.env.ready()
         if (params.prompt) this.shareSurfaces(null, params.prompt)

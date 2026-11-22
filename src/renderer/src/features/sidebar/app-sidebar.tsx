@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '@shared/agent-host'
 import type { AgentId } from '@shared/thread'
+import { useEntry } from '@renderer/lib/features'
 import { newSession } from '@renderer/app/actions'
 import { retryHostState } from '@renderer/app/bootstrap'
 import { FolderClosedMark } from '@renderer/components/affect/app-shell'
@@ -339,7 +340,8 @@ function ProjectGroup({
   const tasks = useTasksStore(
     useShallow((s) => (project ? listedTasks(s.summaries, project.path) : [])),
   )
-  const rows = useMemo(() => sidebarRows(tree, tasks, byActivity), [tree, tasks])
+  const fold = useEntry('sidebar.runGroup')
+  const rows = useMemo(() => sidebarRows(tree, tasks, byActivity, fold), [tree, tasks, fold])
   if (!project && tree.length === 0) return null
   const limited = limitRows(rows, allShown, (row) => rowInSight(row, shownId))
   // Importing reads the agents' own lists, which only this computer's do.
@@ -599,7 +601,8 @@ function PinnedGroup({
       ),
     ),
   )
-  const rows = useMemo(() => sidebarRows(tree, tasks, byPin), [tree, tasks])
+  const fold = useEntry('sidebar.runGroup')
+  const rows = useMemo(() => sidebarRows(tree, tasks, byPin, fold), [tree, tasks, fold])
   const folders = useMemo(() => pinnedProjects(projects, hosts), [projects, hosts])
   if (rows.length === 0 && folders.length === 0) return null
   const toggle = () => toggleGroup(PINNED_GROUP)

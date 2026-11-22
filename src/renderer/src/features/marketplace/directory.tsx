@@ -43,6 +43,7 @@ import {
   SearchField,
   Tabs,
 } from '@renderer/components/affect/app-shell'
+import { useEntry } from '@renderer/lib/features'
 import { Button } from '@renderer/components/affect/button'
 import { mediumAgo } from '@renderer/lib/format'
 import { currentLocale } from '@renderer/lib/i18n'
@@ -682,8 +683,11 @@ function foundSections(
   return sections
 }
 
-export function Directory({ tab }: { tab: MarketplaceTab }) {
+export function Directory({ tab: asked }: { tab: MarketplaceTab }) {
   const { t } = useTranslation('marketplace')
+  // Huli: Agent sync's tab, while Settings > Features has it on.
+  const syncOn = useEntry('marketplace.sync')
+  const tab = asked === 'sync' && !syncOn ? 'all' : asked
   const scope = useHostScope()
   const { useMarketplaceStore } = scope
   const query = useMarketplaceStore((s) => s.query)
@@ -692,7 +696,9 @@ export function Directory({ tab }: { tab: MarketplaceTab }) {
   const windowHost = useWindowHost()
   const hostName = useHostName()
   const showsPublished = useShowsPublished()
-  const tabs = showsPublished && COMMUNITY_MARKETPLACE ? SIGNED_IN_TABS : TABS
+  const tabs = (showsPublished && COMMUNITY_MARKETPLACE ? SIGNED_IN_TABS : TABS).filter(
+    (id) => syncOn || id !== 'sync',
+  )
   const published = tab === 'published'
   const labels: Record<MarketplaceTab, string> = {
     all: t('page.tabs.all'),

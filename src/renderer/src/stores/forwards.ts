@@ -4,6 +4,8 @@
 
 import { create } from 'zustand'
 import { loopbackPort, type PortForward } from '@shared/port-forwards'
+import { entryShown } from '@renderer/lib/features'
+import { useSettingsStore } from '@renderer/stores/settings'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { useTerminalsStore } from '@renderer/stores/terminals'
@@ -33,7 +35,8 @@ let unwatch: (() => void) | null = null
 const forwarded = new Map<string, string>()
 
 function watchTerminals(): void {
-  const on = Object.keys(useForwardsStore.getState().auto).length > 0
+  const on =
+    Object.keys(useForwardsStore.getState().auto).length > 0 && entryShown('terminal.openOnHost')
   if (!on) {
     unwatch?.()
     unwatch = null
@@ -64,6 +67,10 @@ export function initForwards(forward: AutoForward): void {
     useForwardsStore.setState({ forwards })
   })
   watchTerminals()
+  // Huli: port forwarding turned off or on in Settings > Features stops or starts the watch.
+  useSettingsStore.subscribe((state, previous) => {
+    if (state.settings.features !== previous.settings.features) watchTerminals()
+  })
 }
 
 let loaded = false

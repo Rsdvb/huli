@@ -17,6 +17,8 @@ const LEFT_OUT: Partial<Record<SectionDef['id'], readonly string[] | 'all'>> = {
   // Huli: so is the backup of its data folder, and so are the chat apps' bots it runs.
   backup: 'all',
   'chat-bridge': 'all',
+  // Huli: and so are the feature switches, which the desktop app's window and computer follow.
+  features: 'all',
   ...(isHosted ? {} : { account: 'all' as const }),
   // Kettu's cloud is switched on the computer itself.
   general: ['confirm-quit', 'background', 'open-at-login', 'cloud', 'other-connections'],

@@ -73,6 +73,8 @@ export class UtilityHost<ToChild, FromChild extends { type: string }> {
   private exited: Promise<void> | null = null
   private cleanStop = false
   private shutDown = false
+  /** Huli: stopped until `unpark`, as while the feature it serves is turned off. */
+  private parked = false
 
   constructor(private readonly config: UtilityHostConfig<ToChild, FromChild>) {
     this.log = createLogger(config.label)
@@ -92,7 +94,8 @@ export class UtilityHost<ToChild, FromChild extends { type: string }> {
 
   /** Starts the process if it is not running; a no-op once shut down or while it has failed. */
   start(): void {
-    if (this.shutDown || this.child || this.status === 'waiting' || this.status === 'failed') return
+    if (this.shutDown || this.parked || this.child) return
+    if (this.status === 'waiting' || this.status === 'failed') return
     this.spawn()
   }
 
@@ -117,7 +120,7 @@ export class UtilityHost<ToChild, FromChild extends { type: string }> {
       })
     }
     if (this.shutDown) return
-    if (this.status === 'failed') {
+    if (this.status === 'failed' || this.parked) {
       this.sendReset(webContents, true)
       return
     }
@@ -154,6 +157,28 @@ export class UtilityHost<ToChild, FromChild extends { type: string }> {
     shutdownMessage: ToChild = this.config.shutdownMessage,
   ): Promise<void> {
     this.shutDown = true
+    await this.halt(timeoutMs, shutdownMessage)
+  }
+
+  /**
+   * Huli: stops the process until `unpark`, as while the feature it serves is turned off: pages
+   * lose their port, and neither they nor a call start it meanwhile.
+   */
+  async park(): Promise<void> {
+    if (this.shutDown || this.parked) return
+    this.parked = true
+    this.resetClients(true)
+    await this.halt(STOP_TIMEOUT_MS, this.config.shutdownMessage)
+  }
+
+  /** Huli: lets a parked process run again; the pages that had a port ask for a new one. */
+  unpark(): void {
+    if (!this.parked) return
+    this.parked = false
+    this.resetClients(false)
+  }
+
+  private async halt(timeoutMs: number, shutdownMessage: ToChild): Promise<void> {
     if (this.restartTimer) clearTimeout(this.restartTimer)
     this.restartTimer = null
     this.pendingConnects.clear()
@@ -277,6 +302,8 @@ export class UtilityHost<ToChild, FromChild extends { type: string }> {
       this.status = 'stopped'
       this.record('exit', `code ${code}`)
       this.log.info(`Stopped with code ${code}${clean ? '' : ' without reporting a clean stop'}`)
+      // Huli: unparked while it was stopping, with pages waiting for a port.
+      if (!this.shutDown && !this.parked && this.pendingConnects.size > 0) this.spawn()
       return
     }
     this.record('crash', `code ${code}`)

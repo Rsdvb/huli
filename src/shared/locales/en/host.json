@@ -1654,5 +1654,6 @@
     "worktree": "Worktrees are off in a project with several folders: a worktree would set apart only the project’s own folder, while the agent would still change the other folders in place. Start the session in the project’s folder, or take the extra folders out of the project first.",
     "note": "This project also has these folders beside the one you work in. You may read and change files in them as part of the task, by their full paths:",
     "mount": "The sandbox cannot mount the project folder {{folder}}: {{reason}}"
-  }
+  },
+  "featureOff": "{{name}} is turned off in Settings › Features."
 }

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { splitSettingsPatch } from '@shared/remote/host-admin'
+import { FEATURE_IDS } from '@shared/features'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import { DEFAULT_PORT_BASE } from '@shared/worktree-ports'
 import { SettingsStore } from './settings'
@@ -813,5 +814,57 @@ describe('manager mode settings', () => {
   it('reads a stored roster, dropping entries that do not validate', async () => {
     await save({ version: 1, manager: { ...manager, workers: [writer, { name: 'x' }] } })
     expect((await SettingsStore.load(dir)).get().manager.workers).toEqual([writer])
+  })
+})
+
+describe('the feature switches', () => {
+  const allOn = Object.fromEntries(FEATURE_IDS.map((id) => [id, true]))
+
+  it('are all on for a file from before them, and reach the host', async () => {
+    await save({ version: 1, general: { language: 'en' } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.features).toEqual(allOn)
+    expect(hostSettings(settings, 'en').features).toEqual(allOn)
+  })
+
+  it('keep a stored off and drop unknown features and values that are no boolean', async () => {
+    await save({ version: 1, features: { board: false, routines: 'off', gone: false } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.features).toEqual({ ...allOn, board: false })
+    expect('gone' in settings.features).toBe(false)
+  })
+
+  it('take only known features and booleans in a change, merged key by key', () => {
+    const off = mergeSettings(
+      DEFAULT_SETTINGS,
+      validateSettingsPatch({ features: { manager: false, devices: false } }),
+    )
+    const back = mergeSettings(off, validateSettingsPatch({ features: { devices: true } }))
+    expect(back.features).toEqual({ ...allOn, manager: false })
+    expect(hostSettings(back, 'en').features).toEqual({ ...allOn, manager: false })
+    for (const features of [{ nope: false }, { board: 'false' }, { board: null }, []]) {
+      expect(() => validateSettingsPatch({ features })).toThrow()
+    }
+  })
+
+  it('stay with this computer, never changed by a paired device', () => {
+    const { host, client } = splitSettingsPatch({ features: { board: false } })
+    expect(host).toBeNull()
+    expect(client).toEqual({ features: { board: false } })
+  })
+
+  it('refuse to hide the sandbox while new sessions start in one', () => {
+    const contained = mergeSettings(DEFAULT_SETTINGS, { sandbox: { tier: 'container' } })
+    expect(() => mergeSettings(contained, { features: { sandbox: false } })).toThrow(
+      'features.sandbox',
+    )
+    const hidden = mergeSettings(DEFAULT_SETTINGS, { features: { sandbox: false } })
+    expect(hidden.features.sandbox).toBe(false)
+    expect(() => mergeSettings(hidden, { sandbox: { tier: 'native' } })).toThrow('features.sandbox')
+    expect(mergeSettings(hidden, { sandbox: { network: 'open' } }).sandbox.network).toBe('open')
+    expect(
+      mergeSettings(contained, { features: { sandbox: false }, sandbox: { tier: 'off' } }).features
+        .sandbox,
+    ).toBe(false)
   })
 })

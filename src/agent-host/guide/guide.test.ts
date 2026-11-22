@@ -13,8 +13,23 @@ import {
 } from './guide'
 import { WORKFLOW_EXAMPLE } from './topics'
 
-const ALL: GuideFlags = { computer: true, market: true, suggest: true, memory: true }
-const NONE: GuideFlags = { computer: false, market: false, suggest: false, memory: false }
+// Huli: the features Settings > Features may turn off, on unless a test says otherwise.
+const SWITCHED = { board: true, devices: true, secrets: true, theme: true }
+const ALL: GuideFlags = { computer: true, market: true, suggest: true, memory: true, ...SWITCHED }
+const NONE: GuideFlags = {
+  computer: false,
+  market: false,
+  suggest: false,
+  memory: false,
+  ...SWITCHED,
+}
+const SWITCHED_OFF: GuideFlags = {
+  ...ALL,
+  board: false,
+  devices: false,
+  secrets: false,
+  theme: false,
+}
 
 const names = (flags: GuideFlags) => kettuSkills(flags).map((skill) => skill.name)
 
@@ -40,6 +55,23 @@ describe("Kettu's own skills", () => {
       'kettu-terminals',
       'kettu-settings',
     ])
+  })
+
+  it('leave out what the feature switches turned off', () => {
+    expect(names(SWITCHED_OFF)).not.toContain('kettu-devices')
+    expect(guideTopics(SWITCHED_OFF)).not.toContain('devices')
+    const sessions = kettuSkills(SWITCHED_OFF).find((skill) => skill.name === 'kettu-sessions')!
+    expect(sessions.text).not.toContain('set_board_status')
+    expect(kettuSkills(ALL).find((skill) => skill.name === 'kettu-sessions')!.text).toContain(
+      'set_board_status',
+    )
+    const instructions = serviceInstructions(SWITCHED_OFF)
+    for (const word of ['set_board_status', 'device_', 'request_secrets', 'set_theme_colors']) {
+      expect(instructions).not.toContain(word)
+      expect(serviceInstructions(ALL)).toContain(word)
+    }
+    expect(guidePrompt(SWITCHED_OFF, true)).not.toContain('kettu-devices')
+    expect(guidePrompt(SWITCHED_OFF, false)).toContain("use Kettu's browser, a terminal or")
   })
 
   // Every harness reads a skill's name and description from its YAML frontmatter.

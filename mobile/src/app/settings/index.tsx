@@ -14,7 +14,7 @@ import { Sheet } from '../../components/Sheet'
 import { useUpdateRows } from '../../components/UpdateRows'
 import { APP_VERSION, pickedRoute } from '../../connection'
 import { useCloudStatus } from '../../cloud'
-import { useHost } from '../../host'
+import { useEntryOn, useHost } from '../../host'
 import { computerName } from '../../store'
 import { ON_DEVICE, THIS_DEVICE } from '../../system/device'
 import { useCurrentRoute } from '../../system/route'
@@ -86,6 +86,7 @@ export default function Settings() {
   const liveAllowed = useLiveAllowed()
   const updateRows = useUpdateRows()
   const routines = useRoutineList()
+  const routinesOn = useEntryOn('phone.routines')
   // The route can change under a kept link, as when the phone leaves the Wi-Fi.
   const current = useCurrentRoute(true, host.state)
   const [sheet, setSheet] = useState<'theme' | 'language' | null>(null)
@@ -299,14 +300,16 @@ export default function Settings() {
             chevron
             onPress={() => router.push('/settings/computers')}
           />
-          <ListRow
-            title="定时任务"
-            icon="history"
-            plainIcon
-            value={enabledRoutines === undefined ? '—' : `${enabledRoutines} 个开着`}
-            chevron
-            onPress={() => router.navigate('/routines')}
-          />
+          {routinesOn ? (
+            <ListRow
+              title="定时任务"
+              icon="history"
+              plainIcon
+              value={enabledRoutines === undefined ? '—' : `${enabledRoutines} 个开着`}
+              chevron
+              onPress={() => router.navigate('/routines')}
+            />
+          ) : null}
           <ListRow
             title="已归档的会话"
             icon="archive"

@@ -1586,6 +1586,77 @@ remote host already bundles.
   `settings-catalog.ts`, `settings-page.tsx`, `web-sections.ts`, `use-search-entries.ts`. The daemon
   has no chat bridges.
 
+### Feature switches (功能管理)
+
+Settings › 功能管理 lists Kite's big optional features, each with a switch and one line. A feature
+turned off has its entry points hidden, in the window and on paired phones, and its code neither
+loaded nor run; agents are not offered its MCP tools and the agent host refuses its methods. Every
+feature is on by default, and each takes effect at once, both ways, without a restart (code a
+feature already loaded leaves memory at the next launch).
+
+| Feature (id)                      | Off, it stops                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 看板 (`board`)                    | the Overview's board view (now lazily loaded), the rows' column mark, the session menus' 看板 ›, `set_board_status`      |
+| 总管模式 (`manager`)              | Settings › 总管模式, New session's chip, the 工人 pane, the strip, the menu switch, the manager tools, restart recovery  |
+| 同时交给几个 Agent (`bestOfN`)    | the way-of-working item, the group page and row (runs list one by one), `groups.*`                                       |
+| 定时任务 (`routines`)             | the sidebar row, its pages and palette entries, the schedule's timer and event runs; windows and phones do not read them |
+| GitHub 自动化 (`github`)          | the issue inbox, auto-merge and PR watch, the GitHub chips, routine triggers; the flow reads nothing, so no timer        |
+| 沙箱 (`sandbox`)                  | where a sandbox is chosen (Settings, project menu, New session); see below                                               |
+| 聊天软件遥控 (`chatBridge`)       | Settings › 聊天软件; the agent host gets no bridge, so its code never loads and a running one disconnects                |
+| Agent 同步 (`agentSync`)          | the Marketplace's Sync tab and `sync.*`                                                                                  |
+| 端口转发 (`portForwarding`)       | the browser's and the host page's Ports, a remote localhost through a forward, the terminal watch; forwards stop         |
+| 手机预览开发服务器 (`devPreview`) | the phone's 开发服务器 entries; the remote host refuses `preview.open` and closes open previews                          |
+| 移动设备 (`devices`)              | Settings › 移动设备, the devices pane and tabs, the `device_*` tools; main parks the device host and its polling         |
+| 浏览器点选元素 (`pickElement`)    | the pick toggle, hint, layer and tray (now lazily loaded); main refuses `browser:pick` and ends pick mode                |
+| 密钥卡片 (`secrets`)              | `request_secrets` and its line in Kite's MCP instructions                                                                |
+| Agent 改主题 (`agentTheme`)       | `read_theme`, `set_theme_colors` and their line                                                                          |
+
+Computer use (电脑操控) already has its own switch (`computerUse.enabled`), so the page links to it
+rather than repeating it. These stay on for good, as Kite's core: sessions, the terminal, the
+browser, Git, the Marketplace (it holds the workflow library, the only page for installed MCP
+servers and skills and the Kettu MCP switch, and the code that hands agents Kite's own skills) and
+artifacts (Kite's MCP server is the artifacts service itself, and workflow steps hand in their
+documents, the chat bridge's `/get` and sharing are artifacts). A project's further folders stay
+too: they are the project's own data, which a session works in, with nothing running at rest.
+
+- One source of truth: `src/shared/features.ts` lists each feature with its id, its entry points
+  (`<where>.<what>`, `phone.` for the phone's), the MCP tools by name or group, and the agent host
+  methods it gates. Its name and line are `features.items.<id>.name` / `.description` in
+  `locales/*/settings.json`; `FEATURE_GROUP` in `settings-catalog.ts` places its row on the page.
+- The switches are `features` in the settings (`FeatureSettings`, one boolean an id), validated in
+  main like every section (an unknown id or a value that is no boolean is refused; on load, an id
+  the registry no longer has is dropped and a file from before has all on), sent to the agent host
+  in `HostSettings.features` (absent from an older parent: all on). They are this computer's: a
+  device's `settings.update` is refused as a client key. Paired phones read them, never change
+  them: the remote host gets `remote-host:features`, puts `featuresOff` in each welcome (left out
+  while all are on) and sends `{ type: 'features', off }` when they change.
+- The sandbox's switch may turn off only while the default sandbox is 关闭 (main refuses it, the page
+  holds the switch with why): hidden, new sessions would still start in it. A project or session
+  that keeps a sandbox of its own keeps its menu and badge, so a sandbox is never invisible.
+- Agents: `ArtifactService` takes `features`; `listedTools` leaves out a feature's tools and a call
+  of one is refused with why; the guide's flags (`board`, `devices`, `secrets`, `theme`) drop their
+  lines, the board's part of the sessions skill and the devices skill. A change replaces the
+  prepared sessions, whose agents started with the old list. The catalog's rows of a feature that is
+  off (`feature` on an entry, or its whole section) leave what the settings tools list, and each
+  switch is a row agents may change, always through the user's card.
+
+Adding a feature: add its entry to `FEATURES` (id, entries, tools or tool groups, methods) and its
+two lines to both locales, place it in `FEATURE_GROUP`, then gate each place it shows with
+`useEntry('<entry>')` (`entryShown` outside React; `useEntryOn` / `entryShownOnPhone` on the
+phone), read heavy code with `import()` behind it, and stop what runs for it in the host's
+`featuresChanged` (or main's `features` branch of `settings.onChange`). The type of `useEntry`
+takes only entries the registry lists; the tools and methods follow from the registry alone, and
+`service.test.ts` checks every tool it names is a real one.
+
+Measured on the built app (2026-11-23, a test copy with 3 sessions and a routine, 3 launches each,
+after 30 s idle and a GC): the shell came up in 1.3–2.1 s with all optional features off and
+1.5–2.2 s with all on (median 1.30 s against 2.00 s, within the noise of the first launch);
+renderer heap 20.3 MB off against 20.6–20.7 MB on, renderer private 113 MB against 117 MB, agent
+host private 154 MB against 153 MB (no difference). At rest the features already cost little,
+since most loaded lazily; what the switches save shows once one is used: the device host, which
+starts once Settings › 移动设备 or the devices pane opens and polls for simulators every 5 s, holds
+about 60 MB and never starts with 移动设备 off.
+
 ## Tests
 
 `pnpm test` passes on Linux, as CI runs it, and on Windows. Tests of what Huli changes read the

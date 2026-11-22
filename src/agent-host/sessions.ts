@@ -82,6 +82,7 @@ import {
 import type { SessionSandbox } from './sandbox/native'
 import type { PortDevice } from '@shared/remote/device'
 import type { PermissionScope } from '@shared/routines'
+import { featureOn } from '@shared/features'
 import type { HostSettings } from '@shared/settings'
 import type { PlanQuota } from '@shared/plan-quota'
 import {
@@ -1497,7 +1498,10 @@ export class SessionManager {
       file.sessions.some((record) => record.worker?.owed !== undefined || record.manager?.digest)
     ) {
       setTimeout(() => {
-        if (!this.stopped) this.manager.recover()
+        // Huli: with manager mode off in Settings > Features, the owed stay owed until it is on.
+        if (!this.stopped && featureOn(this.deps.settings().features, 'manager')) {
+          this.manager.recover()
+        }
       }, this.timings.limitResume.startupMs)
     }
     await this.deps.projectMcp?.load()

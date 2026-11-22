@@ -7,6 +7,7 @@ import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionSummary } from '@shared/agent-host'
+import { useEntry } from '@renderer/lib/features'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { HostIcon, OnlineDot } from '@renderer/features/settings/remote-parts'
 import { deviceShape } from '@renderer/features/settings/remote-text'
@@ -64,6 +65,7 @@ export function NeedsYouGroup({
       return [...found]
     }),
   )
+  const fold = useEntry('sidebar.runGroup')
   const shown = (host: string | null) =>
     hosts.includes(host) && !(host !== null && away.includes(host))
   const tasks = useTasksStore(
@@ -80,8 +82,9 @@ export function NeedsYouGroup({
         }),
         tasks,
         byActivity,
+        fold,
       ),
-    [summaries, hosts, away, tasks],
+    [summaries, hosts, away, tasks, fold],
   )
   if (rows.length === 0) return null
   return (
