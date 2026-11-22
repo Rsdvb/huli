@@ -60,6 +60,7 @@ function manager(
     projects: {
       list: () => [],
       sandbox: () => null,
+      presentFolders: () => [],
       resolveDirectory: async (folder: string) => folder,
       add: async (folder: string) => {
         added.push(folder)

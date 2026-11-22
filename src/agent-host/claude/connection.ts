@@ -575,6 +575,11 @@ export class ClaudeConnection implements AgentConnection {
     return this.sessions.get(sessionId)?.envFile === true
   }
 
+  /** Huli: a session's query opened with further folders names them as directories of its own. */
+  takesFolders(sessionId: string): boolean {
+    return (this.sessions.get(sessionId)?.options.folders?.length ?? 0) > 0
+  }
+
   get ownInstructions(): boolean {
     return true
   }
@@ -1165,6 +1170,8 @@ export class ClaudeConnection implements AgentConnection {
       ...(options.sandbox?.tier === 'native' && !bare
         ? { sandbox: claudeSandbox(options.sandbox, os.homedir(), process.platform) }
         : {}),
+      // Huli: the project's further folders, which its tools may read and edit as the project's.
+      ...(options.folders?.length && !bare ? { additionalDirectories: [...options.folders] } : {}),
       ...runLimits(this.context.claudeRun?.() ?? null, options, mainModel),
       // Only for the user's own sessions: Kettu's own never offer a next prompt.
       ...(!hidden && !how.quiet && this.context.claudePromptSuggestions?.()

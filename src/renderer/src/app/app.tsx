@@ -33,6 +33,7 @@ import { ArchiveConfirmDialog } from '@renderer/features/sidebar/archive-confirm
 import { ProjectApprovalsConfirm } from '@renderer/features/sidebar/project-approvals'
 import { RemoveWorktreeDialog } from '@renderer/features/worktrees/remove-worktree-dialog'
 import { WorktreeSettingsDialog } from '@renderer/features/worktrees/worktree-settings-dialog'
+import { ProjectFoldersDialog } from '@renderer/features/sidebar/project-folders'
 import { SearchDialog } from '@renderer/features/search/search-dialog'
 import { ReportDialog } from '@renderer/features/report/report-dialog'
 import { SignInsDialog } from '@renderer/features/browser/sign-ins-dialog'
@@ -140,6 +141,7 @@ export function App() {
         <ProjectApprovalsConfirm />
         <RemoveWorktreeDialog />
         <WorktreeSettingsDialog />
+        <ProjectFoldersDialog />
         <ReportDialog />
         {/* Kettu's browser, which sign-ins are brought into, runs in the desktop app alone. */}
         {!isWeb && <SignInsDialog />}

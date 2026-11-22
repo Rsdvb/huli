@@ -5887,6 +5887,16 @@ li[data-row-exit='dust'] > * {
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
+/* Huli: a further folder's name ahead of its repository's branch, which truncates first. */
+.ui-as-tray-link > .kettu-branch__repo {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 7.5em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
 /* Four levels by how much is used, for the context ring, the tray's limit and the plan bars. */
 :is(.kettu-meter-ring, .kettu-tray-limit, .kettu-limit) {

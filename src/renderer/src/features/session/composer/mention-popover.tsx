@@ -35,6 +35,8 @@ export function MentionItem({
 }) {
   const { t } = useTranslation('composer')
   const nameStart = row.path.lastIndexOf('/') + 1
+  // Huli: a further folder's name leads its rows' paths; the row says it in a tag instead.
+  const skip = row.root ? row.root.name.length + 1 : 0
   const icon = row.folder ? Folder01Icon : File01Icon
   return (
     <div
@@ -52,11 +54,20 @@ export function MentionItem({
       <Glyph icon={icon} className="size-3.75 shrink-0 text-icon" />
       <span className="min-w-0 flex-1 truncate font-mono text-hint">
         <span className="text-tertiary">
-          <Runs text={row.path.slice(0, nameStart)} offset={0} positions={row.positions} />
+          <Runs
+            text={row.path.slice(skip, Math.max(skip, nameStart))}
+            offset={skip}
+            positions={row.positions}
+          />
         </span>
         <Runs text={row.path.slice(nameStart)} offset={nameStart} positions={row.positions} />
         {row.folder && '/'}
       </span>
+      {row.root && (
+        <span className="max-w-28 shrink-0 truncate rounded-sm bg-subtle px-1.5 text-hint text-secondary">
+          {row.root.name}
+        </span>
+      )}
       {row.folder && (
         <span className="shrink-0 pl-4 text-hint text-tertiary">{t('mentions.folder')}</span>
       )}

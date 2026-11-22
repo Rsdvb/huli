@@ -11,6 +11,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useDefaultLayout, usePanelRef } from 'react-resizable-panels'
+import type { ProjectFolder } from '@shared/agent-host'
 import type { FileSearch } from '@shared/files'
 import type { ChangeStatus } from '@shared/git'
 import { SegmentedControl } from '@renderer/components/affect/segmented-control'
@@ -19,6 +20,14 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@renderer/components/ui/resizable'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@renderer/components/ui/select'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { toast } from '@renderer/components/ui/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -46,8 +55,9 @@ import {
   watchFiles,
 } from '@renderer/stores/files'
 import { openGitDialog, useGitStore } from '@renderer/stores/git'
+import { useFurtherFolders } from '@renderer/stores/projects'
 import { useSessionsStore } from '@renderer/stores/sessions'
-import { panelSession } from '@renderer/stores/view'
+import { chooseFilesRoot, panelSession, useViewStore } from '@renderer/stores/view'
 import { ChangeBadge } from './change-badge'
 import { useFileChanges, type FileChanges, type ProjectChange } from './changes'
 import { columnOf, saveColumn } from './column'
@@ -61,6 +71,7 @@ import { FileTabs } from './file-tabs'
 import { FileTypeIcon } from './file-type-icon'
 import { UnsavedPrompt } from './unsaved-prompt'
 import { folderOf, nameOf, rankPaths, type PathMatch } from './paths'
+import { basename } from '@renderer/lib/format'
 import { usePhoneWindow } from '@renderer/features/shell/narrow'
 import { VirtualRows } from './virtual-rows'
 
@@ -82,11 +93,34 @@ interface FilesPanelProps {
  * switches between Changes and All files, or holds the filter while one is typed.
  */
 export default function FilesPanel(props: FilesPanelProps) {
+  // Huli: a project with further folders shows one of its folders at a time, its own first.
+  const owner = useSessionsStore((s) => {
+    const id = panelSession(props.panel)
+    return id === null ? null : (s.byId[id]?.projectPath ?? null)
+  })
+  const folders = useFurtherFolders(owner ?? props.projectPath)
+  const chosen = useViewStore((s) => s.filesRoot[props.panel] ?? null)
+  const root =
+    chosen !== null && folders.some((f) => f.path === chosen && !f.missing)
+      ? chosen
+      : props.projectPath
+  const roots = folders.length > 0 ? { home: props.projectPath, folders } : null
   // Each side panel has its own column, so another session's pane starts from its own.
-  return <FilesPane key={`${props.panel}\0${props.projectPath}`} {...props} />
+  return <FilesPane key={`${props.panel}\0${root}`} {...props} projectPath={root} roots={roots} />
 }
 
-function FilesPane({ projectPath, panel, maximized }: FilesPanelProps) {
+interface FilesRoots {
+  /** The panel's own folder. */
+  home: string
+  folders: ProjectFolder[]
+}
+
+function FilesPane({
+  projectPath,
+  panel,
+  maximized,
+  roots,
+}: FilesPanelProps & { roots: FilesRoots | null }) {
   const { t } = useTranslation(['files', 'common'])
   const columnKey = `${panel}\0${projectPath}`
   const tabs = useFilesStore((s) => s.open[projectPath] ?? null)
@@ -169,7 +203,7 @@ function FilesPane({ projectPath, panel, maximized }: FilesPanelProps) {
     setPhoneList(opened === null)
   }
 
-  const treeList =
+  const folderList =
     mode === 'changes' ? (
       <ChangesList projectPath={projectPath} changes={changes} openPath={open?.path} />
     ) : (
@@ -186,6 +220,14 @@ function FilesPane({ projectPath, panel, maximized }: FilesPanelProps) {
         collapsed={collapsed}
       />
     )
+  const treeList = roots ? (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <RootPicker panel={panel} root={projectPath} roots={roots} />
+      {folderList}
+    </div>
+  ) : (
+    folderList
+  )
   const preview = (
     <section className="kp-doc" aria-label={t('tabs.label')}>
       {!!tabs?.files.length && (
@@ -854,6 +896,50 @@ function LoadingRows() {
       {[60, 45, 70, 50, 35].map((w) => (
         <Skeleton key={w} className="h-3" style={{ width: `${w}%` }} />
       ))}
+    </div>
+  )
+}
+
+/**
+ * Huli: which of the project's folders the pane shows, its own and each further one by name; the
+ * changes, the files and the commit are that folder's.
+ */
+function RootPicker({ panel, root, roots }: { panel: string; root: string; roots: FilesRoots }) {
+  const { t } = useTranslation('files')
+  const items = [
+    { value: roots.home, label: basename(roots.home) },
+    ...roots.folders
+      .filter((folder) => !folder.missing)
+      .map((folder) => ({ value: folder.path, label: folder.name })),
+  ]
+  return (
+    <div className="flex h-9 shrink-0 items-center border-b border-subtle px-1.5">
+      <Select
+        value={root}
+        items={items}
+        onValueChange={(next) =>
+          next && chooseFilesRoot(panel, next === roots.home ? null : (next as string))
+        }
+      >
+        <SelectTrigger
+          aria-label={t('panel.folder')}
+          variant="quiet"
+          size="sm"
+          className="max-w-full min-w-0 gap-1.5 rounded-lg px-2 text-control font-medium text-primary [&>svg:last-child]:size-3.25 [&>svg:last-child]:text-tertiary"
+        >
+          <PaneIcon icon={Folder01Icon} size={14} />
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value} title={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import {
   Download04Icon,
   FolderMinusIcon,
   FolderOpenIcon,
+  FoldersIcon,
   GitBranchIcon,
   PencilEdit02Icon,
   PinIcon,
@@ -36,6 +37,7 @@ import { useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
 import { openIssues, openSettings } from '@renderer/stores/view'
 import { ProjectApprovalsMenu } from './project-approvals'
+import { openProjectFolders } from './project-folders-model'
 import { ProjectSandboxMenu } from './project-sandbox'
 import { openProjectTerminal } from './project-menu-model'
 
@@ -114,6 +116,12 @@ export function ProjectMenuItems({
       </DropdownMenuGroup>
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
+        {project.folders !== undefined && (
+          <DropdownMenuItem disabled={gone} onClick={() => openProjectFolders(project.path)}>
+            <MenuGlyph icon={FoldersIcon} />
+            {t('project.menu.folders')}
+          </DropdownMenuItem>
+        )}
         <ProjectApprovalsMenu project={project} disabled={!!gone} />
         {local && <ProjectSandboxMenu project={project} disabled={!!gone} />}
         {git && github && (

@@ -12,6 +12,7 @@ import { MentionFooter, MentionItem } from './mention-popover'
 import {
   mentionAt,
   mentionName,
+  rowPath,
   mentionShown,
   moveHighlight,
   popoverKey,
@@ -166,7 +167,7 @@ export function PromptBox({
     if (!mention || !projectPath) return
     const next = replaceMention(source.text, mention, mentionName(row))
     update(next.text, next.caret)
-    box.limitError(attachMention(draft, projectPath, row.path, row.folder))
+    box.limitError(attachMention(draft, row.root?.path ?? projectPath, rowPath(row), row.folder))
   }
   const chooseItem = (item: PopoverItem | undefined) => {
     if (!item) return

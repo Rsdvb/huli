@@ -170,17 +170,22 @@ export function repeatsFirstMessage(title: string, message: string | null): bool
 
 /**
  * What Kettu sends ahead of a session's first prompt, its guide, its memory index or both, and
- * the blank lines the host adds.
+ * the blank lines the host adds; Huli: and before them the note naming the project's further
+ * folders.
  */
-const AHEAD =
-  /^\s*(?:<kettu-guide>[\s\S]*?<\/kettu-guide>(?:\r?\n){0,2}(?:<kettu-memory>[\s\S]*?<\/kettu-memory>(?:\r?\n){0,2})?|<kettu-memory>[\s\S]*?<\/kettu-memory>(?:\r?\n){0,2})/
+const KETTU_AHEAD =
+  /(?:<kettu-guide>[\s\S]*?<\/kettu-guide>(?:\r?\n){0,2}(?:<kettu-memory>[\s\S]*?<\/kettu-memory>(?:\r?\n){0,2})?|<kettu-memory>[\s\S]*?<\/kettu-memory>(?:\r?\n){0,2})/
+const FOLDERS_AHEAD = /<kite-project-folders>[\s\S]*?<\/kite-project-folders>(?:\r?\n){0,2}/
+const AHEAD = new RegExp(
+  `^\\s*(?:${FOLDERS_AHEAD.source}(?:${KETTU_AHEAD.source})?|${KETTU_AHEAD.source})`,
+)
 
 /** A replayed user message's text without what Kettu sent ahead of it. */
 export function withoutAhead(text: string): string {
   return text.replace(AHEAD, '')
 }
 
-const AHEAD_TAG = /^\s*<kettu-(?:guide|memory)>/
+const AHEAD_TAG = /^\s*<(?:kettu-(?:guide|memory)|kite-project-folders)>/
 
 /**
  * A title an agent made from the first prompt, without what Kettu sent ahead of it. Empty when

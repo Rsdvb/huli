@@ -1,11 +1,13 @@
-// A project's page: where it is, how its sessions' worktrees are named and prepared, and removing
-// it from Huli, which leaves its folder where it is.
+// A project's page: where it is, the further folders its sessions also work in, how its sessions'
+// worktrees are named and prepared, and removing it from Huli, which leaves its folder where it is.
 
 import { useEffect, useState } from 'react'
 import { Alert, StyleSheet, Switch, Text, View } from 'react-native'
 import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
+import type { FolderSuggestion, Project } from '@shared/agent-host'
 import { DEFAULT_BRANCH_TEMPLATE, type ProjectWorktreeSettings } from '@shared/git'
 import { useHost } from '../../host'
+import { FolderPathSheet } from '../../manage/FolderPathSheet'
 import {
   Button,
   call,
@@ -14,9 +16,11 @@ import {
   Field,
   FieldLabel,
   FieldNote,
+  homeShort,
   ManagePage,
   Notice,
   ReadState,
+  Tag,
   useActions,
   useConnected,
   useRead,
@@ -54,6 +58,7 @@ export default function ProjectPage() {
   const [wait, setWait] = useState(true)
   const [error, setError] = useState<{ field: FieldName | null; message: string } | null>(null)
   const [saved, setSaved] = useState(false)
+  const [addingFolder, setAddingFolder] = useState(false)
   const loaded = read.value
 
   useEffect(() => {
@@ -186,7 +191,24 @@ export default function ProjectPage() {
   }
 
   return (
-    <ManagePage title={project.name} onRefresh={() => Promise.all([read.reload(), host.refresh()])}>
+    <ManagePage
+      title={project.name}
+      onRefresh={() => Promise.all([read.reload(), host.refresh()])}
+      overlay={
+        <FolderPathSheet
+          visible={addingFolder}
+          onClose={() => setAddingFolder(false)}
+          title="添加文件夹"
+          message="输入电脑上一个文件夹的路径。这个项目里的会话也会在其中读取和修改文件。"
+          submitLabel="添加"
+          onChosen={async (chosen) => {
+            if (!host.link) throw new Error('电脑没有连上。')
+            await call(host.link, 'projects.addFolder', { path: project.path, folder: chosen })
+            void host.refresh().catch(() => {})
+          }}
+        />
+      }
+    >
       <ListGroup>
         <ListRow title="路径" icon="folder" plainIcon subtitle={project.path} />
         <ListRow
@@ -200,6 +222,10 @@ export default function ProjectPage() {
         <Notice tone="warning" title="未找到">
           电脑上已经没有这个文件夹了。
         </Notice>
+      ) : null}
+
+      {project.folders !== undefined && !project.missing ? (
+        <ProjectFolders project={project} onAdd={() => setAddingFolder(true)} />
       ) : null}
 
       <View style={styles.section}>
@@ -301,6 +327,106 @@ export default function ProjectPage() {
         />
       </ListGroup>
     </ManagePage>
+  )
+}
+
+/**
+ * Huli: the further folders the project's sessions also work in, such as a backend beside a
+ * frontend: each taken out on its own, one added by its path, and the repositories and workspace
+ * folders the computer found in the project to add.
+ */
+function ProjectFolders({ project, onAdd }: { project: Project; onAdd(): void }) {
+  const { c } = useTokens()
+  const host = useHost()
+  const connected = useConnected()
+  const actions = useActions()
+  const folders = project.folders ?? []
+  const listed = folders.map((folder) => folder.path).join('\n')
+  const found = useRead<FolderSuggestion[]>(`folders\n${project.path}\n${listed}`, (link) =>
+    call(link, 'projects.suggestFolders', { path: project.path }),
+  )
+
+  const add = (folder: string) =>
+    actions.run(
+      `add\n${folder}`,
+      async () => {
+        if (!host.link) throw new Error('电脑没有连上。')
+        await call(host.link, 'projects.addFolder', { path: project.path, folder })
+        await host.refresh().catch(() => {})
+      },
+      '没能添加文件夹',
+    )
+  const remove = async (folder: { path: string; name: string }) => {
+    const ok = await confirm({
+      title: `把 ${folder.name} 移出项目？`,
+      message: '文件夹和里面的文件会留在电脑上。已打开的会话在 Agent 下次启动时不再用它。',
+      confirm: '移出',
+    })
+    if (!ok) return
+    await actions.run(
+      `remove\n${folder.path}`,
+      async () => {
+        if (!host.link) throw new Error('电脑没有连上。')
+        await call(host.link, 'projects.removeFolder', { path: project.path, folder: folder.path })
+        await host.refresh().catch(() => {})
+      },
+      '没能移出文件夹',
+    )
+  }
+  const offered = found.value ?? []
+
+  return (
+    <>
+      <ListGroup
+        header="文件夹"
+        footer={
+          folders.length > 0
+            ? '这个项目里的会话也能读取和修改这些文件夹。已打开的会话在 Agent 下次启动时生效。项目有多个文件夹时不能用工作树。'
+            : '添加这个项目的会话也要用到的文件夹，比如前端旁边的后端仓库。'
+        }
+      >
+        {folders.map((folder) => (
+          <ListRow
+            key={folder.path}
+            title={folder.name}
+            subtitle={homeShort(folder.path)}
+            icon="folder"
+            plainIcon
+            trailing={folder.missing ? <Tag label="未找到" tone="warning" /> : undefined}
+            disabled={!connected || actions.busy(`remove\n${folder.path}`)}
+            onPress={() => void remove(folder)}
+          />
+        ))}
+        <ListRow
+          title="添加文件夹"
+          icon="folderPlus"
+          plainIcon
+          action
+          disabled={!connected}
+          onPress={onAdd}
+        />
+      </ListGroup>
+      {offered.length > 0 ? (
+        <ListGroup
+          header="在项目里找到"
+          footer="项目文件夹里的 Git 仓库，以及 .code-workspace 文件列出的文件夹。轻点添加。"
+        >
+          {offered.map((item) => (
+            <ListRow
+              key={item.path}
+              title={item.name}
+              subtitle={homeShort(item.path)}
+              icon="folderPlus"
+              plainIcon
+              iconTint={c.textSecondary}
+              trailing={<Tag label={item.source === 'workspace' ? '工作区' : 'Git'} />}
+              disabled={!connected || actions.busy(`add\n${item.path}`)}
+              onPress={() => void add(item.path)}
+            />
+          ))}
+        </ListGroup>
+      ) : null}
+    </>
   )
 }
 

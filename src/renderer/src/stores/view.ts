@@ -33,6 +33,7 @@ import { NARROW_WINDOW, PHONE_WINDOW } from '@renderer/features/shell/narrow'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
+import { useProjectsStore } from '@renderer/stores/projects'
 import type { SettingsSection } from '@shared/settings-catalog'
 
 type PageView =
@@ -198,6 +199,11 @@ interface ViewStore {
   sidePane: Record<string, SidePane>
   /** The artifact each panel's artifact pane shows. */
   sideArtifact: Record<string, string>
+  /**
+   * Huli: the folder each panel's Files pane shows, for a project with further folders; absent
+   * for the panel's own folder.
+   */
+  filesRoot: Record<string, string>
   sidePaneMaximized: boolean
   /** The sessions whose board is open at the right of their thread. */
   boardOpen: Record<string, true>
@@ -254,6 +260,7 @@ export const useViewStore = create<ViewStore>()(() => ({
   renamingIn: null,
   sidePane: saved.sidePanes ?? {},
   sideArtifact: {},
+  filesRoot: {},
   sidePaneMaximized: false,
   boardOpen: saved.boardOpen ?? {},
   sideChatOpen: saved.sideChatOpen ?? {},
@@ -955,11 +962,40 @@ function toggleRail(
   })
 }
 
-/** Shows the pane in the side panel in view, when the pane in focus works in `projectPath`. */
+/**
+ * Shows the pane in the side panel in view, when the pane in focus works in `projectPath`; Huli:
+ * or the Files pane on a further folder of the project it works in, which it then shows.
+ */
 export function showSidePane(projectPath: string, pane: SidePane): void {
   const view = focusedPane(useViewStore.getState().layout).view
   const panel = panelOf(view)
-  if (panel && view.projectPath === projectPath) toggleSidePane(panel, pane, true)
+  if (!panel) return
+  if (view.projectPath === projectPath) {
+    if (pane === 'files') chooseFilesRoot(panel, null)
+    toggleSidePane(panel, pane, true)
+    return
+  }
+  const further =
+    pane === 'files' &&
+    useProjectsStore
+      .getState()
+      .projects.some(
+        (p) => p.path === view.projectPath && !!p.folders?.some((f) => f.path === projectPath),
+      )
+  if (!further) return
+  chooseFilesRoot(panel, projectPath)
+  toggleSidePane(panel, 'files', true)
+}
+
+/** Huli: the folder the panel's Files pane shows; null for the panel's own. */
+export function chooseFilesRoot(panel: string, root: string | null): void {
+  useViewStore.setState((s) => {
+    if ((s.filesRoot[panel] ?? null) === root) return s
+    const filesRoot = { ...s.filesRoot }
+    if (root === null) delete filesRoot[panel]
+    else filesRoot[panel] = root
+    return { filesRoot }
+  })
 }
 
 /** Shows the artifact beside a session's thread, or closes the pane when it already shows it. */

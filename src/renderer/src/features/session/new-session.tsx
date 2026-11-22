@@ -136,7 +136,7 @@ import { runStarts, useRunsReady } from './new-session/run-starts'
 import { setBestOfN, useBestOfN } from '@renderer/stores/best-of-n'
 import { WorktreeTrayTag } from './worktree/worktree-tag'
 import { currentBase, useWorktreeStatus } from './new-session/worktree-base'
-import { WorktreeMenu, WorktreeNote } from './new-session/worktree-menu'
+import { FoldersWorktreeNote, WorktreeMenu, WorktreeNote } from './new-session/worktree-menu'
 import { ManagerChip } from '@renderer/features/manager/new-session-chip'
 import { ParentLink } from './session-header'
 import { ColumnScroller } from './session-states'
@@ -379,7 +379,11 @@ ${parent?.projectPath ?? project?.path ?? ''}`
   const holdsMessage = useBoxText(box, (text) => hasMessage(text, attachments))
   // A sub-session works in its parent's worktree, so only a top-level session in a repository
   // with a commit chooses one.
-  const gitStatus = useWorktreeStatus(!parent && !inScratch && project ? project.path : '')
+  // Huli: a project with further folders makes no worktree, which would set apart one of them.
+  const severalFolders = !!project?.folders?.length
+  const gitStatus = useWorktreeStatus(
+    !parent && !inScratch && project && !severalFolders ? project.path : '',
+  )
   const branchHeld = useWorktreeChoice((s) =>
     gitStatus && project && s.where[project.path] === 'worktree'
       ? branchHold(s, project.path)
@@ -936,8 +940,13 @@ ${parent?.projectPath ?? project?.path ?? ''}`
           <TaskWorktreeNote base={currentBase(gitStatus)} several />
         ) : workflow && gitStatus ? (
           <TaskWorktreeNote base={currentBase(gitStatus)} />
+        ) : gitStatus && project ? (
+          <WorktreeNote projectPath={project.path} status={gitStatus} />
         ) : (
-          gitStatus && project && <WorktreeNote projectPath={project.path} status={gitStatus} />
+          severalFolders &&
+          !parent &&
+          !inScratch &&
+          project && <FoldersWorktreeNote projectPath={project.path} />
         )}
         {!several && agentId && signedOut && status && (
           <StartSignIn
