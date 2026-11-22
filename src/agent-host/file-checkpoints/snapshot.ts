@@ -258,11 +258,15 @@ function sorted(files: Record<string, FileState>): Record<string, FileState> {
 }
 
 /**
- * Whether a file changed after `at`, a time in whole milliseconds; a file system's times carry a
- * fraction, and a change within the millisecond the listing ended in came before it.
+ * A file system's clock may run ahead of `Date.now()` by up to a tick of the system's timer (15.6
+ * ms on Windows), and its times carry a fraction of a millisecond; a change this close to the
+ * listing came before it. No agent acts within it, as its turn starts only after the listing.
  */
+const CLOCK_SLACK_MS = 20
+
+/** Whether a file changed after `at`, the time the listing ended. */
 function changedAfter(info: { ctimeMs: number }, at: number): boolean {
-  return Math.floor(info.ctimeMs) > at
+  return info.ctimeMs > at + CLOCK_SLACK_MS
 }
 
 function identity(info: {

@@ -165,7 +165,13 @@ export function RewindDialog(props: {
               {how ? (
                 <Text style={[typeScale.footnote, { color: c.textSecondary }]}>{how}</Text>
               ) : null}
-              <View style={styles.toggle}>
+              <Press
+                onPress={() => setRestore((on) => !on)}
+                disabled={!ready || busy}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: restore && !!ready, disabled: !ready || busy }}
+                style={styles.toggle}
+              >
                 <Text
                   style={[typeScale.body, styles.flex, { color: ready ? c.text : c.textTertiary }]}
                 >
@@ -175,9 +181,10 @@ export function RewindDialog(props: {
                   value={restore && !!ready}
                   disabled={!ready || busy}
                   onValueChange={setRestore}
-                  accessibilityLabel="同时还原文件"
+                  accessibilityElementsHidden
+                  importantForAccessibility="no"
                 />
-              </View>
+              </Press>
               {files && filesLine(files) ? (
                 <Text
                   style={[

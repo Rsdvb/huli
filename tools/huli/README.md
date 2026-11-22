@@ -1586,6 +1586,58 @@ remote host already bundles.
   `settings-catalog.ts`, `settings-page.tsx`, `web-sections.ts`, `use-search-entries.ts`. The daemon
   has no chat bridges.
 
+### Rewinding to a message (从这里重来、回退到这里)
+
+As Claude Code's `/rewind` and T3 Code's Edit from here, each of the user's messages that started a
+turn offers 从这里重来 (the message and all after it leave the conversation, and the message goes
+back to the composer) and 回退到这里 (it stays with its reply; the turns after leave), on the
+desktop under the message and on the phone in its menu. Both open a dialog that asks
+`sessions.rewindPreview` first: how many messages leave, how the agent takes it, and, with 同时还原
+文件, every file a restore would change (还原, 删除 or 恢复, with its lines), which
+`sessions.rewind` then does with the preview's token. Files go back to the checkpoint of the first
+message taken out: for 回退到这里, the next message's.
+
+- Conversation (`sessions.ts`: `rewindCut`, `rewindConversation`): Codex cuts its own history with
+  `thread/revert` before the first turn taken out; Claude Code keeps its transcript whole, so the
+  session resumes at the last message kept (`resumeSessionAt`, `historyCut` in
+  `claude/connection.ts`) until the next turn has gone, the cut kept in the record (`resumeAt`)
+  across restarts. Other agents, or a cut before the last takeover, leave their own session behind:
+  the entries go and a new session of the same agent is given the conversation kept with its first
+  turn, as a takeover's is (`record.carry.rewound`, a `takeover` entry with `rewound`, shown as
+  在新的 X 会话里继续). A cut that keeps nothing starts the next message in a new session.
+- Files: Claude Code's own checkpoints (`enableFileCheckpointing`, `Query.rewindFiles`), which know
+  only what its edit tools changed; for every other agent, Kite's (`src/agent-host/file-checkpoints/`).
+  As a turn starts and before its prompt goes, the host lists each of the session's folders (its
+  own and its project's further ones): in a repository one `git status` (the paths that differ from
+  HEAD, every other one being HEAD's blob), elsewhere a walk that leaves out `node_modules` and the
+  like. The changed and untracked files are then copied by SHA-256 into
+  `<data>/checkpoints/<folder key>/objects`, beside the turn if need be: a file whose change time is
+  past the listing is not copied but named as skipped. A snapshot per message (`snapshots/<session>/
+e-<entry>.json.gz`) names them. Nothing is written into the user's repository or index.
+  Limits: 16 MiB a file, 5000 files and 128 MiB of new copies a checkpoint, 8 s for the listing
+  (a turn waits no longer and goes without one); 100 checkpoints and 5 backups per session and
+  folder, 30 days, 2 GiB per folder. Trimming and sweeping follow a checkpoint, a restore and a
+  session's delete, never a timer.
+- Safety: a restore touches only paths both snapshots know; one either did not keep (ignored, too
+  large, changing while copied) stays as it is, and so does anything in the way (a folder, a link).
+  It refuses while another session's turn runs in an overlapping folder, and when the files changed
+  since the preview (`ChangedSincePreview`, by the token). Before writing it keeps the files as they
+  were as a backup snapshot, which 撤销还原 restores (`sessions.undoRewindFiles`). Files are written
+  beside themselves and renamed into place; a clean file of HEAD comes back from the stored blob
+  with the line endings the file has now, or through `cat-file --filters` when it is gone or Git
+  LFS keeps it.
+- Cost, measured on this repository (3366 files, Windows, Defender on): a checkpoint in a
+  repository lists in 80 to 140 ms and keeps under 1 KiB when little changed; outside a repository
+  the first copies everything (5.8 s for 35 MB, beside the turn), the next ones about 250 ms.
+- Files: `src/agent-host/file-checkpoints/{git,snapshot,plan,store}.ts` (+ `store.test.ts`), the
+  `sessions.rewindPreview`, `sessions.rewind` and `sessions.undoRewindFiles` requests
+  (`shared/agent-host.ts`, `validate.ts`, `host.ts`), `claude/connection.ts` (`revertTurns`,
+  `rewindFiles`), `features/session/entries/rewind-dialog.tsx`, `message-actions.tsx`,
+  `takeover-entry.tsx`, `rewind` in `locales/*/session.json`, and on the phone
+  `components/RewindDialog.tsx`, `UserMessage.tsx` and `app/session/[id].tsx`. Tests: `store.test.ts`
+  (round trips on temp folders, refusals, sweeping), `session-revert.test.ts` (Codex),
+  `claude/connection.test.ts` (Huli: rewinds) and `validate.test.ts`.
+
 ## Tests
 
 `pnpm test` passes on Linux, as CI runs it, and on Windows. Tests of what Huli changes read the
