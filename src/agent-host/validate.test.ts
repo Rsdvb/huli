@@ -240,6 +240,53 @@ describe('createValidators', () => {
     })
   })
 
+  it('Huli: takes Agent sync changes by absolute places, one folder name for a skill', () => {
+    const place = '/Users/me/.claude.json'
+    expect(
+      posix['sync.preview']({
+        changes: [
+          { kind: 'mcp-add', server: 'ctx', from: place, to: '/Users/me/.codex/x', more: 1 },
+        ],
+      }),
+    ).toEqual({
+      changes: [{ kind: 'mcp-add', server: 'ctx', from: place, to: '/Users/me/.codex/x' }],
+    })
+    expect(
+      windows['sync.preview']({
+        changes: [
+          { kind: 'instructions', place: 'C:\\Users\\me\\CLAUDE.md', snippetIds: ['a', 'a'] },
+        ],
+      }),
+    ).toEqual({
+      changes: [{ kind: 'instructions', place: 'C:\\Users\\me\\CLAUDE.md', snippetIds: ['a'] }],
+    })
+    rejects(() => posix['sync.preview']({ changes: [] }))
+    rejects(() =>
+      posix['sync.preview']({ changes: [{ kind: 'mcp-remove', server: 'x', place: 'rel' }] }),
+    )
+    rejects(() => posix['sync.preview']({ changes: [{ kind: 'run', command: 'rm' }] }))
+    for (const skill of ['..', '../x', 'a/b', '.hidden', 'a\\b']) {
+      rejects(() =>
+        posix['sync.preview']({
+          changes: [{ kind: 'skill-copy', skill, from: '/a', to: '/b' }],
+        }),
+      )
+    }
+    rejects(() => posix['sync.apply']({ previewId: '../../etc' }))
+    rejects(() => posix['sync.saveSnippets']({ snippets: [{ id: 'a', title: 't', body: 1 }] }))
+    rejects(() =>
+      posix['sync.saveSnippets']({
+        snippets: [
+          { id: 'a', title: '', body: '' },
+          { id: 'a', title: '', body: '' },
+        ],
+      }),
+    )
+    for (const method of ['sync.read', 'sync.preview', 'sync.apply', 'sync.saveSnippets']) {
+      expect(forbiddenToDevices(method, {})).toBe(true)
+    }
+  })
+
   it('checks the connection methods: servers Kettu keeps and logins of Connect', () => {
     expect(posix['market.connect']({ serverId: 'app.linear/linear' })).toEqual({
       serverId: 'app.linear/linear',

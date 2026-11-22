@@ -3,6 +3,7 @@
 // are shared by its agents: its default agent and those added with folders of their own.
 
 import { mkdir, readFile, realpath, rm } from 'node:fs/promises'
+import type { SyncAgentContext } from './agent-sync/service'
 import os from 'node:os'
 import path from 'node:path'
 import type { AgentRemovalPreview, AgentRemovalResult, RemovalStep } from '@shared/agent-removal'
@@ -6260,6 +6261,27 @@ export class AgentManager {
     await this.detectAll()
     const program = this.userProgram(slot.h)
     return program ? { program: program.path, env: this.deps.env.agentEnv(agentId) } : null
+  }
+
+  /**
+   * Huli: what Agent sync needs to find each agent's files: its harness, its variables and the
+   * folder picked in Settings, for every agent but those in `skip`.
+   */
+  syncContexts(skip: readonly AgentId[]): SyncAgentContext[] {
+    const { platform } = this.deps
+    return this.ids()
+      .filter((id) => !skip.includes(id))
+      .map((agentId) => {
+        const slot = this.slots.get(agentId)!
+        const env = this.deps.env.agentEnv(agentId)
+        return {
+          agentId,
+          harness: slot.def.id,
+          getEnv: (name: string) => getEnv(env, name, platform),
+          chosen: this.chosenFolder(slot),
+          installed: async () => (await this.harnessProgram(agentId)) !== null,
+        }
+      })
   }
 
   /** The agent's own configuration folder, as the agent resolves it; null when it has none. */

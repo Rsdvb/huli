@@ -3,6 +3,17 @@
 
 import type { AgentInstallMethod, HostMethod, HostParams } from '@shared/agent-host'
 import { MAX_REMOVAL_STEPS } from '@shared/agent-removal'
+import {
+  SYNC_ID,
+  SYNC_MAX_CHANGES,
+  SYNC_MAX_SNIPPETS,
+  SYNC_NAME_CHARS,
+  SYNC_PATH_CHARS,
+  SYNC_SNIPPET_BODY_CHARS,
+  SYNC_SNIPPET_TITLE_CHARS,
+  type SyncChange,
+  type SyncSnippet,
+} from '@shared/agent-sync'
 import { AGENT_RESET_CATEGORIES, type AgentResetCategory } from '@shared/agent-reset'
 import { MAX_TERMINAL_COMMAND, replyCommandProblem } from '@shared/terminal-agent'
 import { COMMENT_CHARS, THREAD_ID, type CommentAnchor } from '@shared/artifact-comments'
@@ -339,6 +350,104 @@ function absolutePath(o: Fields, key: string, platform: Platform): string {
   if (!isAbsolutePath(value, platform)) throw invalidParams(`${key} must be an absolute path`)
   return value
 }
+
+// Huli: Agent sync's places are the paths `sync.read` gave, which the host looks up again among
+// its own; a server is named as in its file, a skill by its folder's name, one step deep.
+function syncPlace(o: Fields, key: string, platform: Platform): string {
+  const value = string(o, key, SYNC_PATH_CHARS)
+  if (value.includes('\0') || !isAbsolutePath(value, platform)) {
+    throw invalidParams(`${key} must be an absolute path`)
+  }
+  return value
+}
+
+function syncName(o: Fields, key: string): string {
+  const value = string(o, key, SYNC_NAME_CHARS)
+  if (/\p{Cc}/u.test(value)) throw invalidParams(`${key} must be on one line`)
+  return value
+}
+
+function syncSkill(o: Fields): string {
+  const value = syncName(o, 'skill')
+  if (value === '.' || value === '..' || /[\\/:*?"<>|]/.test(value) || value.startsWith('.')) {
+    throw invalidParams('skill must be the name of one folder')
+  }
+  return value
+}
+
+function syncSnippetIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > SYNC_MAX_SNIPPETS) {
+    throw invalidParams(`snippetIds must be a list of at most ${SYNC_MAX_SNIPPETS}`)
+  }
+  const ids = value.map((id) => {
+    if (typeof id !== 'string' || !SYNC_ID.test(id)) throw invalidParams('a snippet id is not one')
+    return id
+  })
+  return [...new Set(ids)]
+}
+
+function syncChanges(value: unknown, platform: Platform): SyncChange[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > SYNC_MAX_CHANGES) {
+    throw invalidParams(`changes must be a list of 1 to ${SYNC_MAX_CHANGES}`)
+  }
+  return value.map((item): SyncChange => {
+    const o = fields(item)
+    switch (o.kind) {
+      case 'mcp-add':
+        return {
+          kind: 'mcp-add',
+          server: syncName(o, 'server'),
+          from: syncPlace(o, 'from', platform),
+          to: syncPlace(o, 'to', platform),
+        }
+      case 'mcp-remove':
+        return {
+          kind: 'mcp-remove',
+          server: syncName(o, 'server'),
+          place: syncPlace(o, 'place', platform),
+        }
+      case 'skill-copy':
+        return {
+          kind: 'skill-copy',
+          skill: syncSkill(o),
+          from: syncPlace(o, 'from', platform),
+          to: syncPlace(o, 'to', platform),
+        }
+      case 'instructions':
+        return {
+          kind: 'instructions',
+          place: syncPlace(o, 'place', platform),
+          snippetIds: syncSnippetIds(o.snippetIds),
+        }
+      default:
+        throw invalidParams('kind must be mcp-add, mcp-remove, skill-copy or instructions')
+    }
+  })
+}
+
+function syncSnippets(value: unknown): SyncSnippet[] {
+  if (!Array.isArray(value) || value.length > SYNC_MAX_SNIPPETS) {
+    throw invalidParams(`snippets must be a list of at most ${SYNC_MAX_SNIPPETS}`)
+  }
+  const seen = new Set<string>()
+  return value.map((item) => {
+    const o = fields(item)
+    const id = string(o, 'id', 64)
+    if (!SYNC_ID.test(id) || seen.has(id)) throw invalidParams('a snippet id is not one, or twice')
+    seen.add(id)
+    const title = o.title
+    const body = o.body
+    if (typeof title !== 'string' || title.length > SYNC_SNIPPET_TITLE_CHARS) {
+      throw invalidParams(`title must be at most ${SYNC_SNIPPET_TITLE_CHARS} characters`)
+    }
+    if (typeof body !== 'string' || body.length > SYNC_SNIPPET_BODY_CHARS) {
+      throw invalidParams(`body must be at most ${SYNC_SNIPPET_BODY_CHARS} characters`)
+    }
+    return { id, title, body }
+  })
+}
+
+const SYNC_PREVIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // Huli: what an import from another folder of an agent's takes: as many sessions as a listing of
 // it holds, each by the agent's own id, and the plan the host made of them.
@@ -1609,6 +1718,14 @@ export function createValidators(platform: Platform): Validators {
       }
       return { query: trimmed }
     },
+    'sync.read': none,
+    'sync.preview': (params) => ({ changes: syncChanges(fields(params).changes, platform) }),
+    'sync.apply': (params) => {
+      const previewId = string(fields(params), 'previewId', 64)
+      if (!SYNC_PREVIEW_ID.test(previewId)) throw invalidParams('previewId is not a preview')
+      return { previewId }
+    },
+    'sync.saveSnippets': (params) => ({ snippets: syncSnippets(fields(params).snippets) }),
     'market.keys': none,
     'market.connect': (params) => ({ serverId: marketServerId(fields(params)) }),
     'market.detectSignIn': (params) => {
