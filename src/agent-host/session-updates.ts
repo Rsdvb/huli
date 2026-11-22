@@ -5,6 +5,7 @@ import type { PlanLimit } from '@shared/agent-host'
 import type {
   BackgroundTaskView,
   ConfigOption,
+  ForegroundTaskView,
   Patch,
   StopReason,
   ThreadEntry,
@@ -77,6 +78,8 @@ export type MapperEffect =
       state?: SubagentState
       /** A worktree the agent made for the subagent itself, which Kettu only shows. */
       worktree?: AgentWorktree
+      /** Huli: its latest one-line summary of what it does; it goes once the subagent stops. */
+      progress?: string
     }
   | { kind: 'limit'; limit: PlanLimit }
   // Huli: a call the agent's review denied may still be allowed; the host judges its risk.
@@ -102,6 +105,8 @@ export type MapperEffect =
   | { kind: 'scheduled'; jobs: number }
   // The commands and monitors the agent has running or has ended since, replacing the last list.
   | { kind: 'tasks'; tasks: BackgroundTaskView[] }
+  // Huli: the commands and subagents that hold up their tool call, replacing the last list.
+  | { kind: 'foreground'; tasks: ForegroundTaskView[] }
   // A turn the agent started between the host's own, as when such a command ended. A prompt that
   // crossed it joins it, and the prompt's answer ends both.
   | { kind: 'agentTurn'; phase: 'started' }
