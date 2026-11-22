@@ -362,7 +362,9 @@ export class GithubFlow {
     }
     for (const session of this.deps.sessions.flows()) {
       const ref = githubReferenceOf(session.flow.url)
-      if (ref?.kind === 'pull') need(ref, `s:${session.sessionId}`)
+      // A switch turned on reads soon, as a new session would.
+      const { autoMerge, watch } = session.flow
+      if (ref?.kind === 'pull') need(ref, `s:${session.sessionId}:${autoMerge}:${watch}`)
     }
     for (const trigger of this.deps.routines.triggers()) {
       const repo = await this.cachedRepoOf(trigger.projectPath)
@@ -434,19 +436,23 @@ export class GithubFlow {
       if (tools.gh.state !== 'ready') {
         failed = true
       } else {
+        const read = new Set<string>()
         for (const session of this.deps.sessions.flows()) {
           const ref = githubReferenceOf(session.flow.url)
           if (ref?.kind !== 'pull' || repoKey(ref) !== state.key || this.stopped) continue
-          const read = await this.pollSession(state, session)
-          failed ||= read.failed
-          wanted = Math.min(wanted, read.wanted)
+          // Each session once a read, so nothing is merged or told twice.
+          if (read.has(session.sessionId)) continue
+          read.add(session.sessionId)
+          const result = await this.pollSession(state, session)
+          failed ||= result.failed
+          wanted = Math.min(wanted, result.wanted)
         }
         for (const trigger of this.deps.routines.triggers()) {
           const repo = await this.cachedRepoOf(trigger.projectPath)
           if (!repo || repoKey(repo) !== state.key || this.stopped) continue
-          const read = await this.pollTrigger(state, trigger)
-          failed ||= read.failed
-          wanted = Math.min(wanted, read.wanted)
+          const result = await this.pollTrigger(state, trigger)
+          failed ||= result.failed
+          wanted = Math.min(wanted, result.wanted)
         }
       }
     } catch (error) {
@@ -557,16 +563,17 @@ export class GithubFlow {
           ? await this.lineComments(state, pr, Math.min(...reviewed.map((e) => e.at)) - 60_000)
           : []
       const message = wakeMessage(pr, events, { conflicts, lineComments })
+      const what = [...new Set(events.map((event) => toldWord(event.kind)))].join(
+        t('githubFlow.note.separator'),
+      )
+      // The note goes above the message it explains; an archived session gets neither.
+      await this.deps.sessions.note(
+        session.sessionId,
+        'info',
+        t('githubFlow.note.told', { number: pr.number, what }),
+      )
       if (await this.deps.sessions.tell(session.sessionId, message)) {
         told = events.map((event) => event.key)
-        const what = [...new Set(events.map((event) => toldWord(event.kind)))].join(
-          t('githubFlow.note.separator'),
-        )
-        await this.deps.sessions.note(
-          session.sessionId,
-          'info',
-          t('githubFlow.note.told', { number: pr.number, what }),
-        )
       }
     }
     this.deps.sessions.update(session.sessionId, flow.url, (current) => ({

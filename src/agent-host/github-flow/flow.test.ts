@@ -218,6 +218,35 @@ describe('the GitHub flow’s reads', () => {
     expect(h.timers).toEqual([])
   })
 
+  it('merges once even when a session is listed twice', async () => {
+    const entry = { sessionId: 's1', flow: autoMerge(GREEN_URL) }
+    const h = harness({
+      flows: [entry, entry],
+      answer: (args) =>
+        args[0] === 'pr' && args[1] === 'view' ? ok(JSON.stringify(greenJson)) : undefined,
+    })
+    await h.flow.refresh()
+    await h.next()
+    expect(h.calls.filter((call) => call[1] === 'pr' && call[2] === 'merge')).toHaveLength(1)
+    expect(h.closed).toEqual(['s1'])
+  })
+
+  it('reads soon after a switch is turned on, within the least interval', async () => {
+    const watched: StoredPrFlow = { url: FAILING_URL, autoMerge: false, watch: true, seen: [] }
+    const h = harness({
+      flows: [{ sessionId: 's1', flow: watched }],
+      answer: (args) =>
+        args[0] === 'pr' && args[1] === 'view' ? ok(JSON.stringify(failingJson)) : undefined,
+    })
+    await h.flow.refresh()
+    await h.next()
+    expect(h.timers[0]!.at - START).toBe(SLOW_MS)
+    h.advance(10_000)
+    h.flows[0]!.flow = { ...h.flows[0]!.flow, autoMerge: true }
+    await h.flow.refresh()
+    expect(h.timers.map((timer) => timer.at - START)).toEqual([MIN_INTERVAL_MS])
+  })
+
   it('does not merge failing checks or while the agent works, and reads again in a minute', async () => {
     const h = harness({
       flows: [
@@ -307,6 +336,9 @@ describe('the GitHub flow’s reads', () => {
     expect(h.told[0]!.text).not.toContain('bump the timeout')
     expect(h.notes[0]?.title).toBe('Told the agent about pull request #43: checks failed')
     expect(h.flows[0]!.flow.baselined).toBe(true)
+    // One read of the pull request, and the next one at the slow cadence.
+    expect(h.calls.filter((call) => call[1] === 'pr' && call[2] === 'view')).toHaveLength(1)
+    expect(h.timers.map((timer) => timer.at - START)).toEqual([SLOW_MS])
     await h.next()
     expect(h.told).toHaveLength(1)
   })

@@ -354,6 +354,7 @@
       "checks_failed": "When checks fail",
       "pushed": "On pushes to {{branch}}",
       "behind": "When {{branch}} falls behind"
-    }
+    },
+    "kind": "Trigger"
   }
 }

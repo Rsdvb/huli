@@ -56,9 +56,9 @@ export function TriggerField({
 
   return (
     <div className="ui-sg-card">
-      <Row title={t('on.title')} note={event ? t('on.hint') : undefined}>
+      <Row title={t('on.kind')} note={event ? t('on.hint') : undefined}>
         <Select
-          label={t('on.title')}
+          label={t('on.kind')}
           value={trigger.kind}
           options={kindOptions}
           onChange={(kind) =>
@@ -77,6 +77,7 @@ export function TriggerField({
               label={t('on.event')}
               value={event.kind}
               options={eventOptions}
+              width={280}
               onChange={(kind) =>
                 onTrigger({ kind: 'github', event: eventOf(kind, event), schedule })
               }

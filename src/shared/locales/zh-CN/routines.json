@@ -353,6 +353,7 @@
       "checks_failed": "检查失败时",
       "pushed": "推送到 {{branch}} 时",
       "behind": "{{branch}} 落后时"
-    }
+    },
+    "kind": "触发方式"
   }
 }

@@ -9685,8 +9685,12 @@ export class SessionManager {
     busy: boolean
     worktree: boolean
   }[] {
-    return this.allRecords().flatMap((record) => {
-      const flow = record.prFlow
+    // Each session once: a live one's record is also in the index.
+    const ids = new Set([...this.records.keys(), ...this.live.keys()])
+    return [...ids].flatMap((id) => {
+      const record = this.live.get(id)?.record ?? this.records.get(id)
+      const flow = record?.prFlow
+      if (!record) return []
       if (!flow || flow.ended || (!flow.autoMerge && !flow.watch)) return []
       if (record.origin === 'subagent' || this.isArchived(record)) return []
       const view = this.live.get(record.id)?.thread.session
