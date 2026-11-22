@@ -46,11 +46,26 @@ export const SCENARIOS = [
   'documents',
   'write',
   'anchors',
+  // Huli: manager mode's manager, worker and reviewer.
+  'manager-demo',
+  'work',
+  'review',
 ] as const
 
 export type ScenarioName = (typeof SCENARIOS)[number]
 
 export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; hint?: string }> = {
+  'manager-demo': {
+    description: 'A manager: dispatches three workers through Kite and answers its reports',
+    hint: 'start it as fake:/manager-demo so the manager block goes ahead',
+  },
+  work: {
+    description: 'A worker: may ask first, may fail once, edits a file and calls report_work',
+    hint: '--ask --fail-once --file <path> --read',
+  },
+  review: {
+    description: 'A reviewer: asks for changes in round 1, approves from FAKE_AGENT_APPROVE_ON',
+  },
   'basic-turn': {
     description: 'A short answer with markdown, then reads, an edit, a new file and a test run',
   },

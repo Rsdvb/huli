@@ -272,6 +272,21 @@ describe('dispatch', () => {
     expect(canDispatch(state({ working: reader }), request)).toEqual({ kind: 'start' })
   })
 
+  it('holds a writer for a folder another writer keeps between review rounds', () => {
+    const reserved = [{ id: 's1', folder: '/p' }]
+    expect(canDispatch(state({ reserved }), request)).toEqual({ kind: 'hold', reason: 'folder' })
+    expect(canDispatch(state({ reserved }), { ...request, writes: false })).toEqual({
+      kind: 'start',
+    })
+    expect(canDispatch(state({ reserved }), { ...request, folder: '/q' })).toEqual({
+      kind: 'start',
+    })
+    // Its own next round is no other writer.
+    expect(canSend(state({ reserved }), { ...request, workerId: 's1', working: false })).toEqual({
+      kind: 'send',
+    })
+  })
+
   it('refuses rather than holds past the held limit', () => {
     const working = [1, 2, 3].map((n) => ({ id: `s${n}`, folder: '/x', writes: false }))
     expect(canDispatch(state({ working, held: HELD_MAX }), request)).toEqual({

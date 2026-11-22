@@ -236,7 +236,7 @@ const WorkerRow = memo(function WorkerRow({ id, nested }: { id: string; nested?:
         </span>
       </div>
       <div className="km-row__meta">
-        <span className="truncate">{sessionTitle(summary)}</span>
+        <span className="truncate">{worker.title || sessionTitle(summary)}</span>
         <span className="km-faint">
           {runs}
           {summary.turnStartedAt

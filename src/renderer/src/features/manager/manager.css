@@ -208,7 +208,7 @@
   gap: 6px;
   margin: auto -12px -12px;
   border-top: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  background: inherit;
   padding: 8px 12px;
   font-size: 12px;
 }

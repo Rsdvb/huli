@@ -413,14 +413,16 @@ export function digestText(
     const summary = cut(entry.summary.trim(), DIGEST_SUMMARY_CHARS)
     if (summary) lines.push(`   ${zh ? '摘要' : 'Summary'}: ${summary.replace(/\n+/g, ' ')}`)
     if (entry.changed.length > 0) {
+      const counted = entry.changed.some((file) => file.added !== null)
       const added = entry.changed.reduce((sum, file) => sum + (file.added ?? 0), 0)
       const removed = entry.changed.reduce((sum, file) => sum + (file.removed ?? 0), 0)
+      const counts = counted ? ` +${added} −${removed}` : ''
       const names = entry.changed.slice(0, 4).map((file) => file.path)
       const more = entry.changed.length > 4 ? ', …' : ''
       lines.push(
         zh
-          ? `   改动：${entry.changed.length} 个文件 +${added} −${removed}（${names.join(', ')}${more}）`
-          : `   Changed: ${entry.changed.length} files +${added} −${removed} (${names.join(', ')}${more})`,
+          ? `   改动：${entry.changed.length} 个文件${counts}（${names.join(', ')}${more}）`
+          : `   Changed: ${entry.changed.length} files${counts} (${names.join(', ')}${more})`,
       )
     }
     if (entry.findings.length > 0) {

@@ -1822,7 +1822,8 @@
     },
     "digest": {
       "title": "Kite 汇报",
-      "raw": "总管看到的原文"
+      "raw": "总管看到的原文",
+      "said_other": "你插话了 {{count}} 次"
     },
     "status": {
       "done": "完成",

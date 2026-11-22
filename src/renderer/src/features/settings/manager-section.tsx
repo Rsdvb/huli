@@ -135,7 +135,7 @@ export function useManagerSection(): SectionDef {
       id: 'auto-review',
       setting: 'manager.auto-review',
       group: reviewGroup,
-      description: value.reviewerId ? null : t('manager.autoReview.noReviewer'),
+      ...(value.reviewerId ? {} : { description: t('manager.autoReview.noReviewer') }),
       render: () => (
         <SettingSwitch
           label={t('manager.autoReview.name')}

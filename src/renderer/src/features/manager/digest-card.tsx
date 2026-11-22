@@ -78,12 +78,14 @@ function DigestRow({
   status,
   line,
   round,
+  said,
 }: {
   sessionId: string
   name: string
   status: DigestStatus
   line: string
   round?: number
+  said?: string[]
 }) {
   const { t } = useTranslation('session')
   const target = useSessionsStore((s) => s.byId[sessionId])
@@ -109,6 +111,11 @@ function DigestRow({
         {t(`manager.status.${status}`, { round: round ?? 1 })}
       </span>
       {line && <span className="km-digest__line">{line}</span>}
+      {said && said.length > 0 && (
+        <span className="flex-none text-muted-foreground">
+          {t('manager.digest.said', { count: said.length })}
+        </span>
+      )}
     </div>
   )
 }

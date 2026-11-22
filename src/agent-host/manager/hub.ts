@@ -348,6 +348,7 @@ export class ManagerHub {
       tokens: worker.tokens,
       cost: worker.cost,
       reviewOf: loop && loop.reviewerId === record.id ? loop.implementerId : null,
+      title: worker.title,
     }
   }
 
@@ -966,6 +967,14 @@ export class ManagerHub {
     const record = this.port.record(managerId)!
     const manager = record.manager!
     const working: DispatchState['working'][number][] = []
+    // A writer between review rounds keeps its folder, so no other writer mixes into its change.
+    const reserved = manager.loops
+      .filter((loop) => loop.state === 'reviewing' || loop.state === 'fixing')
+      .filter((loop) => this.attached(loop.implementerId) !== null)
+      .map((loop) => ({
+        id: loop.implementerId,
+        folder: this.port.folderKey(this.port.folder(loop.implementerId)),
+      }))
     for (const id of this.workerIds(managerId)) {
       const link = this.attached(id)
       const state = this.port.state(id)
@@ -982,6 +991,7 @@ export class ManagerHub {
       task: manager.task,
       limits: this.port.settings(record.projectPath).limits,
       working,
+      reserved,
       held: manager.held.length,
     }
   }

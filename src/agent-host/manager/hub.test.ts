@@ -472,6 +472,37 @@ describe('the review loop', () => {
     ])
   })
 
+  it('keeps the folder for the implementer until its loop ends', async () => {
+    manager()
+    await hub.startWorker('m', { worker: '写手', task: 'fix', acceptance: [], files: [] })
+    await finish('s1')
+    // s2 reviews; another writer for the same folder waits for the loop.
+    const held = await hub.startWorker('m', {
+      worker: '杂活',
+      task: 'docs',
+      acceptance: [],
+      files: [],
+    })
+    expect(held).toEqual({ kind: 'held', position: 1, reason: 'folder' })
+    await finish('s2', {
+      status: 'done',
+      summary: 'fix it',
+      changed: [],
+      verdict: 'changes',
+      findings: [{ level: 'must', text: 'x' }],
+    })
+    expect(port.created).toHaveLength(2)
+    await finish('s1', { status: 'done', summary: 'fixed', changed: [], findings: [] })
+    await finish('s2', {
+      status: 'done',
+      summary: 'ok',
+      changed: [],
+      verdict: 'approve',
+      findings: [],
+    })
+    expect(port.created.map((item) => item.spec.worker.name)).toEqual(['写手', '审阅', '杂活'])
+  })
+
   it('asks the user after the last round', async () => {
     port.settingsValue.limits = { ...port.settingsValue.limits, reviewRounds: 1 }
     manager()

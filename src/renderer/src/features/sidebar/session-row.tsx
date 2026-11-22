@@ -169,7 +169,8 @@ export const SessionRow = memo(function SessionRow({
   const status = rowStatus(node, hasChildren && !expanded)
   // What waits gets a button of its own in the row's tools, over the status slot.
   const waiting = !away && status.waiting > 0
-  const title = sessionTitle(summary)
+  // Huli: a manager's worker shows the task its manager gave it.
+  const title = summary.worker?.title || sessionTitle(summary)
 
   // Mod-click and Shift-click pick rows for a menu that acts on all of them; a plain click opens
   // the session and lets go of the picked ones.

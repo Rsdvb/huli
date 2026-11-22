@@ -864,6 +864,8 @@ export interface WorkerSummary {
   cost: number
   /** For a reviewer the review loop started: the implementer it reviews. */
   reviewOf: string | null
+  /** The task's title as the manager gave it. */
+  title: string
 }
 
 // The decisions.
@@ -876,6 +878,8 @@ export interface DispatchState {
   limits: ManagerLimits
   /** Attached workers working now: their folder (compared as given) and whether they write. */
   working: readonly { id: string; folder: string; writes: boolean }[]
+  /** Folders a writer holds while its review loop goes on, though it waits between rounds. */
+  reserved?: readonly { id: string; folder: string }[]
   held: number
 }
 
@@ -925,10 +929,12 @@ export function canDispatch(state: DispatchState, request: DispatchRequest): Dis
 export function holdReason(state: DispatchState, request: DispatchRequest): HoldReason | null {
   const others = state.working.filter((item) => item.id !== request.workerId)
   if (others.length >= state.limits.concurrent) return 'slots'
+  const reserved = (state.reserved ?? []).filter((item) => item.id !== request.workerId)
   if (
     request.writes &&
     !request.ownWorktree &&
-    others.some((item) => item.writes && item.folder === request.folder)
+    (others.some((item) => item.writes && item.folder === request.folder) ||
+      reserved.some((item) => item.folder === request.folder))
   ) {
     return 'folder'
   }

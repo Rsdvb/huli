@@ -1902,7 +1902,9 @@
     },
     "digest": {
       "title": "Kite report",
-      "raw": "What the manager read"
+      "raw": "What the manager read",
+      "said_one": "you spoke to it once",
+      "said_other": "you spoke to it {{count}} times"
     },
     "status": {
       "done": "done",
