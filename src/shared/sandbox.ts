@@ -269,6 +269,8 @@ export const SANDBOX_MEASURED = {
   searchShare: 5.2,
   /** `docker run` of an idle container through wsl.exe, and Docker's own start once a day. */
   containerStart: 0.76,
+  /** The session's network and its egress proxy, before the agent's container: 1.29 to 1.66 s. */
+  egressStart: 1.5,
   engineStart: 0.79,
   /** The memory Docker's services hold while one runs, and each container's own overhead, in MB. */
   engineMemoryMb: 105,

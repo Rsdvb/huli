@@ -115,7 +115,7 @@ export function SandboxDefault({ text }: { text: ReactNode }) {
           <p>{t('agents.sandbox.native')}</p>
           <p>
             {t('agents.sandbox.container', {
-              start: m.containerStart.toFixed(1),
+              start: (m.containerStart + m.egressStart).toFixed(1),
               memory: m.engineMemoryMb,
               build: ratio(m.containerWindowsDrive, m.windowsNative),
               native: m.windowsNative,

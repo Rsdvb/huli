@@ -29,7 +29,7 @@ export function sandboxCost(t: T, tier: SandboxTier, folder: string | null): str
   if (tier === 'off') return t('sandbox.offNote')
   if (tier === 'native') return t('sandbox.cost.native')
   const start = t('sandbox.cost.container', {
-    start: m.containerStart.toFixed(1),
+    start: (m.containerStart + m.egressStart).toFixed(1),
     memory: m.engineMemoryMb,
   })
   if (platform !== 'win32') return start
