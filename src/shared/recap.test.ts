@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { DigestedThreadEntry, ThreadEntry, ToolEntry } from './thread'
 import {
+  NOT_VISITED,
   RECAP_AWAY_MS,
   SEEN_MARKS_KEPT,
   changedLines,
   parseSeenMarks,
   recapSince,
+  recapStep,
   replyLine,
+  seenBook,
   withSeen,
+  type RecapEvent,
   type RecapThread,
+  type RecapVisit,
+  type SeenMark,
 } from './recap'
 
 function thread(entries: (ThreadEntry | DigestedThreadEntry)[]): RecapThread {
@@ -220,5 +226,187 @@ describe('seen marks', () => {
       }),
     ).toEqual({ a: { at: 1, entry: 'e' }, e: { at: 3, entry: null } })
     expect(parseSeenMarks([1])).toEqual({})
+  })
+})
+
+describe('recapStep', () => {
+  const MIN = 60_000
+  const run = (id: string) => tool(id, { toolKind: 'execute' })
+  // The thread as it stands at each moment of the visit.
+  const t0 = [user('u1'), agent('a1', 'Started')]
+  const t1 = [...t0, run('x1'), run('x2'), agent('a2', 'Watched this one')]
+  const t2 = [...t1, run('x3'), agent('a3', 'Done while away')]
+  const t3 = [...t2, run('x4'), run('x5'), agent('a4', 'Second absence')]
+
+  function walk(steps: [RecapEvent, ThreadEntry[], number][]): RecapVisit[] {
+    let visit: RecapVisit = NOT_VISITED
+    const seen: RecapVisit[] = []
+    for (const [event, entries, minutes] of steps) {
+      visit = recapStep(visit, event, thread(entries), { now: minutes * MIN, older: false })
+      seen.push(visit)
+    }
+    return seen
+  }
+
+  it('counts the time in view as seen and recaps only what came while away', () => {
+    const [, , , back] = walk([
+      ['view', t0, 0],
+      // Watched for an hour as the agent worked, then the app went to the back.
+      ['leave', t1, 60],
+      ['leave', t1, 61],
+      ['view', t2, 100],
+    ])
+    expect(back!.shown).toMatchObject({ from: 'x3', commands: 1, reply: 'Done while away' })
+    expect(back!.mark).toEqual({ at: 100 * MIN, entry: 'a3' })
+  })
+
+  it('shows nothing after a short absence, though work went on', () => {
+    const [, , back] = walk([
+      ['view', t0, 0],
+      ['leave', t1, 60],
+      ['view', t2, 60 + 29],
+    ])
+    expect(back!.shown).toBeNull()
+    expect(back!.mark).toEqual({ at: 89 * MIN, entry: 'a3' })
+  })
+
+  it('never measures an absence from before the user last looked', () => {
+    // A view while in view, as the app back from an overlay it never left the session for.
+    const [, again] = walk([
+      ['view', t0, 0],
+      ['view', t2, 120],
+    ])
+    expect(again!.shown).toBeNull()
+    expect(again!.mark).toEqual({ at: 0, entry: 'a1' })
+  })
+
+  it('keeps a recap put away once done with, until the next absence brings new work', () => {
+    const steps = walk([
+      ['view', t0, 0],
+      ['leave', t1, 10],
+      ['view', t2, 50],
+      ['done', t2, 51],
+      ['leave', t2, 52],
+      ['view', t2, 52 + 5],
+      ['leave', t2, 60],
+      // Away long enough, but nothing new.
+      ['view', t2, 120],
+      ['leave', t2, 121],
+      ['view', t3, 200],
+    ])
+    expect(steps[2]!.shown).toMatchObject({ commands: 1 })
+    expect(steps[3]).toEqual({ mark: { at: 51 * MIN, entry: 'a3' }, inView: true, shown: null })
+    expect(steps[5]!.shown).toBeNull()
+    expect(steps[7]!.shown).toBeNull()
+    expect(steps[9]!.shown).toMatchObject({ from: 'x4', commands: 2, reply: 'Second absence' })
+  })
+
+  it('puts the recap away on leaving, the user having had it in view', () => {
+    const [, , back, left] = walk([
+      ['view', t0, 0],
+      ['leave', t1, 10],
+      ['view', t2, 50],
+      ['leave', t2, 51],
+    ])
+    expect(back!.shown).not.toBeNull()
+    expect(left).toEqual({ mark: { at: 51 * MIN, entry: 'a3' }, inView: false, shown: null })
+  })
+
+  it('takes a stored mark from an earlier run as where the user left', () => {
+    const stored: RecapVisit = { ...NOT_VISITED, mark: { at: 0, entry: 'a2' } }
+    const back = recapStep(stored, 'view', thread(t2), { now: 40 * MIN, older: false })
+    expect(back.shown).toMatchObject({ from: 'x3', commands: 1 })
+  })
+
+  it('changes nothing when done with no recap on show', () => {
+    const [viewed, done] = walk([
+      ['view', t0, 0],
+      ['done', t1, 5],
+    ])
+    expect(done).toBe(viewed)
+  })
+})
+
+describe('seenBook', () => {
+  function storage(stored: unknown, { failRead = false } = {}) {
+    const written: Record<string, SeenMark>[] = []
+    let release = (): void => {}
+    const reading = new Promise<void>((resolve) => (release = resolve))
+    let writing = 0
+    let mostAtOnce = 0
+    return {
+      written,
+      release: () => release(),
+      mostAtOnce: () => mostAtOnce,
+      read: async () => {
+        await reading
+        if (failRead) throw new Error('unreadable')
+        return stored
+      },
+      write: async (marks: Record<string, SeenMark>) => {
+        writing++
+        mostAtOnce = Math.max(mostAtOnce, writing)
+        await Promise.resolve()
+        written.push({ ...marks })
+        writing--
+      },
+    }
+  }
+
+  it('gives back a mark set after the stored ones were read', async () => {
+    const store = storage({ s1: { at: 1, entry: 'e1' } })
+    store.release()
+    const book = seenBook(store)
+    expect(await book.get('s1')).toEqual({ at: 1, entry: 'e1' })
+    await book.set('s1', { at: 2, entry: 'e2' })
+    expect(await book.get('s1')).toEqual({ at: 2, entry: 'e2' })
+    await book.set('s1', { at: 3, entry: 'e3' })
+    expect(await book.get('s1')).toEqual({ at: 3, entry: 'e3' })
+  })
+
+  it('keeps a mark set while the stored ones are read over its stored one, and the rest', async () => {
+    const store = storage({ s1: { at: 1, entry: 'old' }, s2: { at: 1, entry: 'other' } })
+    const book = seenBook(store)
+    const written = book.set('s1', { at: 5, entry: 'new' })
+    await Promise.resolve()
+    expect(store.written).toHaveLength(0)
+    store.release()
+    await written
+    expect(await book.get('s1')).toEqual({ at: 5, entry: 'new' })
+    expect(store.written.at(-1)).toEqual({
+      s1: { at: 5, entry: 'new' },
+      s2: { at: 1, entry: 'other' },
+    })
+  })
+
+  it('writes one at a time, the last write holding the latest marks', async () => {
+    const store = storage({})
+    store.release()
+    const book = seenBook(store)
+    await book.get('s1')
+    const writes = [1, 2, 3, 4].map((at) => book.set('s1', { at, entry: `e${at}` }))
+    await Promise.all(writes)
+    expect(store.mostAtOnce()).toBe(1)
+    expect(store.written.at(-1)).toEqual({ s1: { at: 4, entry: 'e4' } })
+    expect(store.written.length).toBeLessThan(4)
+  })
+
+  it('starts empty from storage it cannot read', async () => {
+    const store = storage(null, { failRead: true })
+    store.release()
+    const book = seenBook(store)
+    expect(await book.get('s1')).toBeNull()
+    await book.set('s1', { at: 1, entry: null })
+    expect(store.written.at(-1)).toEqual({ s1: { at: 1, entry: null } })
+  })
+
+  it('writes nothing once closed', async () => {
+    const store = storage({})
+    store.release()
+    const book = seenBook(store)
+    await book.get('s1')
+    book.close()
+    await book.set('s1', { at: 1, entry: null })
+    expect(store.written).toHaveLength(0)
   })
 })
