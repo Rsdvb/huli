@@ -51,7 +51,6 @@ export function ProjectSandboxMenu({ project, disabled }: { project: Project; di
   const shown = useEntry('projectMenu.sandbox') || (project.sandbox ?? null) !== null
   // A host older than sandboxes lists none.
   if (project.sandbox === undefined || !shown) return null
-
   const label = (choice: SandboxChoice): string =>
     choice.tier === 'off' ? ta('sandbox.tier.off') : sandboxLabel(ta, choice)
   const choose = (value: string): void => {

@@ -76,7 +76,6 @@ export function SessionView({ sessionId }: { sessionId: string }) {
 
 function SessionBody({ summary }: { summary: SessionSummary }) {
   const managerStrip = useEntry('composer.managerStrip')
-
   const { t } = useTranslation(['session', 'common', 'control'])
   const sessionId = summary.id
   const replicaStatus = useThreadsStore((s) => s.replicas[sessionId]?.status ?? 'loading')
@@ -315,7 +314,6 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                   {summary.manager && !archived && managerStrip && (
                     <ManagerStrip sessionId={sessionId} />
                   )}
-
                   <div className="ctl-labels" role="group" aria-label={t('control:label.group')}>
                     {session && (
                       <ComputerLabel

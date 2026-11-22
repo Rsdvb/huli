@@ -603,7 +603,6 @@ function PinnedGroup({
   )
   const fold = useEntry('sidebar.runGroup')
   const rows = useMemo(() => sidebarRows(tree, tasks, byPin, fold), [tree, tasks, fold])
-
   const folders = useMemo(() => pinnedProjects(projects, hosts), [projects, hosts])
   if (rows.length === 0 && folders.length === 0) return null
   const toggle = () => toggleGroup(PINNED_GROUP)

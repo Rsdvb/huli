@@ -854,7 +854,6 @@ function RoutineFields({
           <TriggerField trigger={trigger} onTrigger={onTrigger} noProject={noProject} />
         </>
       )}
-
       {trigger.kind === 'schedule' && (
         <>
           <Head title={t('routine.schedule')} note={t('routine.scheduleHint')} />

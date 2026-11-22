@@ -122,6 +122,7 @@ import { call, sessionFolder } from '../../git'
 import {
   sameFields,
   sameItems,
+  useEntryOn,
   useAgents,
   useComputerId,
   useHostSelector,
@@ -368,6 +369,8 @@ function Session() {
   })
   const muted = useMuted(id)
   const terminalAllowed = useTerminalAllowed(link, hostState)
+  const managerBanner = useEntryOn('phone.managerBanner')
+  const devServers = useEntryOn('phone.devServers')
   // A system menu says nothing as it opens, so what it shows is read beforehand there.
   const agentOptions = useAgentOptions(
     link,
@@ -1029,12 +1032,16 @@ function Session() {
             : { detail: '未开放', disabled: true }),
           onPress: () => router.push({ pathname: '/terminals/[id]', params: { id } }),
         },
-        {
-          key: 'dev-servers',
-          label: '开发服务器',
-          icon: G.devServer,
-          onPress: () => router.push({ pathname: '/dev-servers', params: { session: id } }),
-        },
+        ...(devServers
+          ? [
+              {
+                key: 'dev-servers',
+                label: '开发服务器',
+                icon: G.devServer,
+                onPress: () => router.push({ pathname: '/dev-servers', params: { session: id } }),
+              },
+            ]
+          : []),
         { kind: 'divider', key: 'rule' },
         {
           key: 'children',
@@ -1290,7 +1297,7 @@ function Session() {
               onOpenParent={openSession}
             />
           )}
-          {summary?.manager && <ManagerBanner summary={summary} />}
+          {summary?.manager && managerBanner && <ManagerBanner summary={summary} />}
           <Composer
             key={id}
             hidden={summary?.origin === 'subagent'}

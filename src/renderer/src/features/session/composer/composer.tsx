@@ -382,7 +382,6 @@ export function Composer({
     hostId === null &&
     sandboxChoice !== undefined &&
     ((sandboxChoice !== null && (sandboxOn || sandboxChoice.tier !== 'off')) || sandboxInUse)
-
   const sandboxHint = switchingSandbox
     ? ta('sandbox.switching')
     : profileIdle

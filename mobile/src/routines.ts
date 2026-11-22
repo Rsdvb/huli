@@ -13,7 +13,7 @@ import type {
   RunStatus,
   Schedule,
 } from '@shared/routines'
-import { useHostState, useMaybeLink, withinRefreshLimit } from './host'
+import { useEntryOn, useHostState, useMaybeLink, withinRefreshLimit } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
 import type { IconName } from './ui/Icon'
@@ -236,10 +236,12 @@ export function useRoutineList(): RoutinesData {
   const [data, setData] = useState<RoutineList | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [syncedAt, setSyncedAt] = useState<number | null>(null)
-  const connected = state.kind === 'connected'
+  // Huli: nothing is read while routines are turned off on the computer.
+  const routinesOn = useEntryOn('phone.routines')
+  const connected = state.kind === 'connected' && routinesOn
 
   const load = useCallback(async () => {
-    if (!link) return
+    if (!link || !routinesOn) return
     try {
       const list = await withinRefreshLimit(
         (signal) => link.request('routines.list', undefined, signal) as Promise<RoutineList>,
@@ -250,7 +252,7 @@ export function useRoutineList(): RoutinesData {
     } catch (failure) {
       setError(errorText(failure))
     }
-  }, [link])
+  }, [link, routinesOn])
 
   useEffect(() => {
     if (connected) void load()

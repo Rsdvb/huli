@@ -700,7 +700,6 @@ export function Directory({ tab: asked }: { tab: MarketplaceTab }) {
     (id) => syncOn || id !== 'sync',
   )
   const published = tab === 'published'
-
   const labels: Record<MarketplaceTab, string> = {
     all: t('page.tabs.all'),
     plugins: t('page.tabs.plugins'),

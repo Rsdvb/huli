@@ -258,14 +258,12 @@ function loadRoutines(): Promise<void> | undefined {
 }
 
 /** What the shell needs before it can show a session. */
-
 function loadSessionState(): Promise<unknown> {
   return Promise.allSettled([
     useProjectsStore.getState().refresh(),
     useSessionsStore.getState().refresh(),
     loadRoutines(),
     useTasksStore.getState().load(),
-
     loadAgentOptions(),
     loadFolders(),
   ])

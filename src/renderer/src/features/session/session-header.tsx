@@ -176,7 +176,6 @@ export function SessionHeader({
           (prFlowActive(summary.prFlow) || summary.prFlow.state === 'failed') && (
             <PrFlowChip flow={summary.prFlow} />
           )}
-
         {session && !archived && summary.origin !== 'subagent' && (
           <PlanChip sessionId={summary.id} status={session.status} />
         )}

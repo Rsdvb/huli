@@ -53,6 +53,7 @@ import {
   useActiveHost,
   useAgents,
   useComputerId,
+  useEntryOn,
   useFolders,
   useHost,
   useHostActions,
@@ -562,6 +563,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     [byComputer],
   )
 
+  const foldBestOf = useEntryOn('phone.bestOfRow')
   const items = useMemo<HomeItem[]>(
     () =>
       homeItems({
@@ -577,8 +579,10 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         expanded,
         showEmptyFolders: shell.filter.kind === 'all',
         openBestOf,
+        foldBestOf,
       }),
     [
+      foldBestOf,
       listed,
       foldersOf,
       projectNames,

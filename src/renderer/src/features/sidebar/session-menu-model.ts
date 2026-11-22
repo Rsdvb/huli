@@ -155,7 +155,6 @@ export function sessionMenuGroups(
   // Huli: its pull request merged once its checks pass, or watched for its agent.
   const flow: SessionMenuItem[] =
     prFlow && topLevel && entryShown('sessionMenu.prFlow') ? ['autoMerge', 'watchPr'] : []
-
   const state: SessionMenuItem[] = running
     ? ['stop']
     : status === 'failed' || status === 'auth_required'

@@ -147,7 +147,6 @@ export function HeaderTools({
   // Huli: a manager session's workers.
   const workersOn = useEntry('pane.workers')
   const workers = !!sessionId && !!summary?.manager && workersOn
-
   const available: Pane[] = [
     ...(workers ? (['workers'] as const) : []),
     ...(computer ? (['computer'] as const) : []),

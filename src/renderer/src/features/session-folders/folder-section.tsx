@@ -239,7 +239,6 @@ function FolderGroup({
   )
   const fold = useEntry('sidebar.runGroup')
   const rows = useMemo(() => sidebarRows(nodes, [], byActivity, fold), [nodes, fold])
-
   const limited = limitRows(rows, allShown, (row) => rowInSight(row, shownId))
   const tabStopId = stop?.kind === 'session' ? stop.id : null
   const toggle = () => void updateFolder(hostId, folder.id, { collapsed: open })

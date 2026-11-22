@@ -4,7 +4,6 @@ import type { TaskSummary } from '@shared/workflow'
 import type { SessionGroupRef } from '@shared/session-groups'
 import { entryShown } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
-
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
 import { pinnedProjects } from './projects'

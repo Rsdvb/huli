@@ -6,7 +6,6 @@ import { SplitView } from '@renderer/features/split/split-view'
 import { focusedPane } from '@renderer/features/split/layout'
 import { useEntry } from '@renderer/lib/features'
 import { cn } from '@renderer/lib/utils'
-
 import { showProjects } from '@renderer/stores/git'
 import { useProjectsStore } from '@renderer/stores/projects'
 import {

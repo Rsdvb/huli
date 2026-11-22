@@ -7,7 +7,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-na
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
 import { call } from '../git'
-import { useConnected, useLink, useSession } from '../host'
+import { entryShownOnPhone, useConnected, useEntryOn, useLink, useSession } from '../host'
 import { sessionTitle } from '../sessions'
 import { sessionPullRequests, topPrState } from '../sessionMenu'
 import { TapMenu } from '../ui/ContextMenu'
@@ -25,10 +25,10 @@ export function hasChips(summary: SessionSummary | undefined, parentKnown: boole
   if (!summary) return false
   return (
     (summary.parentId !== null && parentKnown) ||
-    !!summary.routine ||
+    (!!summary.routine && entryShownOnPhone('phone.routines')) ||
     !!summary.task ||
     !!summary.worktree ||
-    !!summary.issue ||
+    (!!summary.issue && entryShownOnPhone('phone.flowChips')) ||
     sessionPullRequests(summary).length > 0
   )
 }
@@ -100,7 +100,10 @@ export function SessionChips(props: {
   const { summary } = props
   const parent = useSession(summary.parentId)
   const prs = sessionPullRequests(summary)
-  const routineId = summary.routine?.routineId ?? null
+  // Huli: what Settings > Features turned off on the computer leaves the chips.
+  const routinesOn = useEntryOn('phone.routines')
+  const flowOn = useEntryOn('phone.flowChips')
+  const routineId = (routinesOn && summary.routine?.routineId) || null
   const taskId = summary.task?.taskId ?? null
   const routine = useName(
     routineId
@@ -128,7 +131,7 @@ export function SessionChips(props: {
         }))
       : []
   const failing = prs.some((pr) => pr.failing)
-  const flowText = prFlowText(summary)
+  const flowText = flowOn ? prFlowText(summary) : null
 
   return (
     <View pointerEvents="box-none" style={[styles.dock, { top: props.top }]}>
@@ -154,7 +157,7 @@ export function SessionChips(props: {
             </Text>
           </Chip>
         ) : null}
-        {summary.routine ? (
+        {summary.routine && routinesOn ? (
           <Chip
             label={`定时任务 ${routine ?? ''}`}
             onPress={() => router.push(`/routine/${summary.routine!.routineId}`)}
@@ -187,7 +190,7 @@ export function SessionChips(props: {
             </Text>
           </Chip>
         ) : null}
-        {summary.issue ? (
+        {summary.issue && flowOn ? (
           <Chip
             label={`议题 #${summary.issue.number}`}
             onPress={() => openPage(summary.issue!.url)}

@@ -68,7 +68,6 @@ export function NeedsYouGroup({
   const fold = useEntry('sidebar.runGroup')
   const shown = (host: string | null) =>
     hosts.includes(host) && !(host !== null && away.includes(host))
-
   const tasks = useTasksStore(
     useShallow((s) =>
       needingTasks(s.summaries).filter((task) => shown(hostOfPath(task.projectPath))),
@@ -87,7 +86,6 @@ export function NeedsYouGroup({
       ),
     [summaries, hosts, away, tasks, fold],
   )
-
   if (rows.length === 0) return null
   return (
     <section aria-label={t('needsYou.label')} className="ui-as-side__group">

@@ -190,7 +190,6 @@ function SearchPalette() {
     artifactListShown(true)
     const routines = useRoutinesStore.getState()
     if (!routines.loaded && entryShown('search.routines')) void routines.load()
-
     return () => artifactListShown(false)
   }, [])
   const artifactsLoaded = useArtifactsStore((s) => s.list !== null)

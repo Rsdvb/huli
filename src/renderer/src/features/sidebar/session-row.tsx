@@ -64,7 +64,6 @@ import { IssueBadge } from '@renderer/features/git/flow-chips'
 import { BoardRowMark } from '@renderer/features/task-board/status'
 import { onBoard } from '@shared/session-board'
 import { useEntry } from '@renderer/lib/features'
-
 import { SubagentBadge } from './subagent-badge'
 import { useRenaming } from './use-renaming'
 import { WaitingMark } from './waiting-mark'
