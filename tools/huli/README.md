@@ -1141,6 +1141,24 @@ shows it in `mobile/src/app/settings/network.tsx` (设置 › Agent 网络), `ne
 node picker with latencies), the 网络出口 group of `settings/agent.tsx`, and
 `mobile/src/manage/network.ts`.
 
+### Agents yield to you (让 Agent 让着你)
+
+Builds and tests start bursts of short processes, and on Windows the antivirus scans each, so the
+whole computer stuttered while agents ran them. With `general.lowerAgentPriority` on (the default,
+Settings › Agents › Performance), the agent host lowers its own priority to below normal
+(`os.setPriority`, a niceness of 10 on macOS and Linux) when `host:init` arrives, before it starts
+anything, and every agent, MCP server, mihomo and command it starts inherits it: Windows'
+`CreateProcess` passes the below normal and idle classes on, and a forked process keeps its
+niceness. Given the processor alone they run as fast as before. Main, the window and the terminal
+host keep their priority, so the user's own shells, Kettu's `terminal_run` tool, an agent's CLI
+opened in a terminal and sign-ins in a terminal run at normal priority. A change applies at once to
+the host and to what it starts afterwards; programs already running keep theirs. Turning it off
+raises the host back on Windows; macOS and Linux refuse an unprivileged raise, so there it stays
+low until Kite (or the daemon) restarts. A host that started that low or lower, as under `nice`, is
+left alone. The daemon's agent host does the same from the same setting.
+`src/agent-host/priority.ts` (with its test) and `start.ts` hold it; the row is in
+`section-defs.tsx` and `settings-catalog.ts`.
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and
