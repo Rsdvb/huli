@@ -3304,6 +3304,7 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'computer.stop': (params) => ({ sessionId: sessionId(fields(params)) }),
+    'computer.stopElevated': (params) => ({ sessionId: sessionId(fields(params)) }),
     'computer.takeOver': (params) => ({ sessionId: sessionId(fields(params)) }),
     'computer.handBack': (params) => ({ sessionId: sessionId(fields(params)) }),
     'computer.show': (params) => ({ sessionId: sessionId(fields(params)) }),

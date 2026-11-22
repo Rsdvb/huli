@@ -2214,6 +2214,11 @@ export interface HostContract {
     params: { sessionId: string }
     result: void
   }
+  // Huli: the badge's Stop: the elevated helper ends and the turn may not start it again.
+  'computer.stopElevated': {
+    params: { sessionId: string }
+    result: void
+  }
   // Take over: the user holds the app the session uses, and its calls wait until Hand back.
   'computer.takeOver': {
     params: { sessionId: string }
@@ -2689,6 +2694,7 @@ export const HOST_METHODS = [
   'memory.importScan',
   'memory.import',
   'computer.stop',
+  'computer.stopElevated',
   'computer.takeOver',
   'computer.handBack',
   'computer.show',

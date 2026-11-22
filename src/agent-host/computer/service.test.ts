@@ -7,8 +7,10 @@ import {
   ComputerUse,
   PAUSE_POLL_MS,
   PAUSE_SETTLE_MS,
+  type ComputerAsk,
   type ComputerUseDeps,
   type DriverLike,
+  type ElevatedDriverLike,
 } from './service'
 
 const APPS = [
@@ -28,6 +30,8 @@ const APPS = [
 
 class FakeDriver implements DriverLike {
   calls: { tool: string; args: Record<string, unknown> }[] = []
+  /** Huli: what an action answers, when not plain success. */
+  act: ((args: Record<string, unknown>) => CallToolResult) | null = null
   /** What `bring_to_front` answers, when not plain success. */
   front: CallToolResult | null = null
   /** The process of the app in front, as `list_apps` reports it. */
@@ -57,6 +61,7 @@ class FakeDriver implements DriverLike {
         },
       }
     }
+    if (this.act && tool !== 'bring_to_front' && tool !== 'list_windows') return this.act(args)
     return { content: [{ type: 'text', text: `${tool} done` }] }
   }
 
@@ -71,18 +76,25 @@ interface Harness {
   service: ComputerUse
   driver: FakeDriver
   settings: ComputerUseSettings
-  asked: { sessionId: string; requestId: number; app: ComputerApp }[]
+  asked: { sessionId: string; requestId: number; app: ComputerApp; ask?: ComputerAsk }[]
   settled: [number, string][]
   always: ComputerApp[]
   holds: (ComputerHold | null)[]
   notes: string[]
 }
 
-function harness(): Harness {
+function harness(extra: Partial<ComputerUseDeps> = {}): Harness {
   const driver = new FakeDriver()
   const h: Omit<Harness, 'service'> = {
     driver,
-    settings: { enabled: true, allowedApps: [], pauseOnUse: true, stopShortcut: '' },
+    settings: {
+      enabled: true,
+      allowedApps: [],
+      pauseOnUse: true,
+      stopShortcut: '',
+      allowForeground: true,
+      allowElevated: false,
+    },
     asked: [],
     settled: [],
     always: [],
@@ -96,7 +108,8 @@ function harness(): Harness {
     settings: () => h.settings,
     turnRefusal: () => null,
     sessionTitle: (sessionId) => `Title of ${sessionId}`,
-    asked: (sessionId, requestId, app) => h.asked.push({ sessionId, requestId, app }),
+    asked: (sessionId, requestId, app, ask) =>
+      h.asked.push({ sessionId, requestId, app, ...(ask ? { ask } : {}) }),
     settled: (requestId, answer) => h.settled.push([requestId, answer]),
     allowAlways: (app) => h.always.push(app),
     using: () => {},
@@ -110,6 +123,7 @@ function harness(): Harness {
     agent: () => ({ id: 'claude-code', name: 'Claude Code' }),
     held: (hold) => h.holds.push(hold),
     log: () => {},
+    ...extra,
   }
   return Object.assign(h, { service: new ComputerUse(deps) })
 }
@@ -447,5 +461,169 @@ describe('who has the app', () => {
     h.service.takeOver('a')
     h.service.handBack('b')
     expect(last(h)?.control).toBe('you')
+  })
+})
+
+describe('Huli: the foreground', () => {
+  const dropped: CallToolResult = {
+    isError: true,
+    content: [{ type: 'text', text: 'Background delivery is not available' }],
+    structuredContent: {
+      code: 'background_unavailable',
+      effect: 'refused',
+      escalation: { recommended: 'foreground' },
+    },
+  }
+
+  it('tries an action the app dropped once in the foreground, noting it once a turn', async () => {
+    const noted: string[] = []
+    const h = harness({ foreground: (sessionId, app) => noted.push(`${sessionId} ${app}`) })
+    h.settings.allowedApps = [{ id: 'com.apple.textedit', name: 'TextEdit' }]
+    h.driver.act = (args) =>
+      args.delivery_mode === 'foreground' ? { content: [{ type: 'text', text: 'done' }] } : dropped
+    const result = await h.service.call('a', 'computer_scroll', {
+      ...READ,
+      x: 1,
+      y: 1,
+      direction: 'down',
+    })
+    expect(result.isError).toBeUndefined()
+    const modes = h.driver.calls.filter((c) => c.tool === 'scroll').map((c) => c.args.delivery_mode)
+    expect(modes).toEqual(['background', 'foreground'])
+    await h.service.call('a', 'computer_scroll', { ...READ, x: 1, y: 1, direction: 'down' })
+    expect(noted).toEqual(['a TextEdit'])
+    expect(h.holds.at(-1)?.foreground).toBe(2)
+  })
+
+  it('keeps to the background when the setting is off', async () => {
+    const h = harness()
+    h.settings.allowedApps = [{ id: 'com.apple.textedit', name: 'TextEdit' }]
+    h.settings.allowForeground = false
+    h.driver.act = () => dropped
+    const result = await h.service.call('a', 'computer_click', { ...READ, x: 1, y: 1 })
+    expect(result.isError).toBe(true)
+    expect(h.driver.calls.filter((c) => c.tool === 'click')).toHaveLength(1)
+    const asked = await h.service.call('a', 'computer_click', {
+      ...READ,
+      x: 1,
+      y: 1,
+      delivery_mode: 'foreground',
+    })
+    expect(code(asked)).toBe('not_allowed')
+    expect(h.driver.calls.filter((c) => c.tool === 'click')).toHaveLength(1)
+  })
+})
+
+describe('Huli: apps run as administrator', () => {
+  class FakeElevated implements ElevatedDriverLike {
+    calls: { tool: string; args: Record<string, unknown> }[] = []
+    running = true
+    onClosed: (() => void) | null = null
+    async call(tool: string, args: Record<string, unknown>): Promise<CallToolResult> {
+      this.calls.push({ tool, args })
+      return { content: [{ type: 'text', text: `${tool} as administrator` }] }
+    }
+    async stop(): Promise<void> {
+      this.running = false
+      this.onClosed?.()
+    }
+  }
+
+  function elevatedHarness(declined = false) {
+    const elevated = new FakeElevated()
+    const started: number[] = []
+    const stops: string[] = []
+    const h = harness({
+      platform: 'win32',
+      helper: {
+        whoami: async () => ({ sid: 'S-1-5-21-1-2-3-1001', pid: 1, integrity: 0x2000 }),
+        elevation: async (pids) => ({
+          self: 0x2000,
+          pids: Object.fromEntries(
+            pids.map((pid) => [
+              pid,
+              { integrity: pid === 12 ? 0x3000 : 0x2000, elevated: pid === 12 },
+            ]),
+          ),
+        }),
+        ocr: async () => ({ languages: [], width: 1, height: 1, lines: [] }),
+        elevate: async () => 1,
+        stop: () => {},
+      },
+      elevate: async (pid) => {
+        started.push(pid)
+        return declined ? null : elevated
+      },
+      elevatedStopped: (sessionId, app) => stops.push(`${sessionId} ${app}`),
+    })
+    return { h, elevated, started, stops }
+  }
+
+  const NOTES = { pid: 12, window_id: 5 }
+
+  it('marks them in the list of apps', async () => {
+    const { h } = elevatedHarness()
+    const result = await h.service.call('a', 'computer_list_apps', {})
+    const apps = (result.structuredContent as { apps: { pid: number; elevated?: boolean }[] }).apps
+    expect(apps.find((app) => app.pid === 12)?.elevated).toBe(true)
+    expect(apps.find((app) => app.pid === 10)?.elevated).toBeUndefined()
+    expect((result.content[0] as { text: string }).text).toContain('管理员权限运行')
+  })
+
+  it('refuses to act in one up front while the setting is off', async () => {
+    const { h, started } = elevatedHarness()
+    expect(code(await h.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 }))).toBe(
+      'elevated',
+    )
+    expect(h.asked).toEqual([])
+    expect(h.driver.acted()).toEqual([])
+    expect(started).toEqual([])
+  })
+
+  it('asks, starts the helper and acts only through it, confirming risky steps', async () => {
+    const { h, elevated, started } = elevatedHarness()
+    h.settings.allowElevated = true
+    await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
+    expect(h.asked[0]?.ask).toEqual({ kind: 'elevated', step: null })
+    expect(started).toEqual([12])
+    expect(h.holds.at(-1)?.elevated).toBe('Notes')
+    // Scrolling needs no confirmation; a key that commits does.
+    await h.service.call('a', 'computer_scroll', { ...NOTES, x: 1, y: 1, direction: 'down' })
+    expect(h.asked).toHaveLength(1)
+    const key = { ...NOTES, key: 'return' }
+    expect(code(await answered(h, 'a', 'computer_press_key', key, 'deny'))).toBe('not_allowed')
+    expect(h.asked.at(-1)?.ask).toEqual({ kind: 'risky', step: { kind: 'key', text: 'return' } })
+    await answered(h, 'a', 'computer_press_key', key, 'session')
+    expect(elevated.calls.map((c) => c.tool)).toEqual(['get_window_state', 'scroll', 'press_key'])
+    expect(h.driver.acted()).toEqual([])
+    // The helper acts in the background only.
+    const front = { ...NOTES, x: 1, y: 1, delivery_mode: 'foreground' }
+    expect(code(await h.service.call('a', 'computer_click', front))).toBe('elevated')
+    expect(started).toEqual([12])
+  })
+
+  it('ends the helper on its Stop for the rest of the turn, and when the turn ends', async () => {
+    const { h, elevated, started, stops } = elevatedHarness()
+    h.settings.allowElevated = true
+    await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
+    h.service.stopElevated('a')
+    expect(elevated.running).toBe(false)
+    expect(stops).toEqual(['a Notes'])
+    expect(h.holds.at(-1)?.elevated).toBeNull()
+    expect(code(await h.service.call('a', 'computer_get_window_state', NOTES))).toBe('not_allowed')
+    h.service.turnEnded('a')
+    elevated.running = true
+    await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
+    expect(started).toEqual([12, 12])
+    h.service.turnEnded('a')
+    expect(elevated.running).toBe(false)
+  })
+
+  it('fails when the user says no at the administrator prompt', async () => {
+    const { h } = elevatedHarness(true)
+    h.settings.allowElevated = true
+    const result = await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
+    expect(code(result)).toBe('not_allowed')
+    expect(h.holds.at(-1)?.elevated ?? null).toBeNull()
   })
 })

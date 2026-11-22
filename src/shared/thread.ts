@@ -19,11 +19,12 @@ import type { DeviceAccessAnswer } from './device-agent'
 import type {
   ComputerAct,
   ComputerAppAnswer,
+  ComputerAppAsk,
   ComputerControl,
   ComputerSetupOutcome,
   ComputerSetupStep,
 } from './computer-use'
-import { isComputerSetupStep } from './computer-use'
+import { isComputerAppAsk, isComputerSetupStep } from './computer-use'
 import type { ContextReport } from './context'
 import type { OutputSpeed } from './output-speed'
 import type {
@@ -219,6 +220,8 @@ export interface ComputerUseView {
   window?: { id: number; title: string | null } | null
   /** Its latest action in that window, where the pane draws its pointer. */
   act?: ComputerAct | null
+  /** Huli: the app an elevated helper drives for it as administrator, which a badge shows. */
+  elevated?: string | null
 }
 
 export interface QueuedPrompt {
@@ -636,10 +639,30 @@ export interface ComputerAppEntry {
   appId: string
   appName: string
   decision: ComputerAppAnswer | null
+  /**
+   * Huli: what the card asks beside a first use: leave to drive the app as administrator, or to
+   * take the risky `step` there. Absent for a first use.
+   */
+  ask?: ComputerAppAsk
+  step?: ComputerRiskyStep | null
   /** Set when a paired device gave the answer; the host's own windows give none. */
   device?: FromDevice
   /** The agent's entry before it, to put it back after a replay. */
   after: string | null
+}
+
+/** Huli: a step in an app run as administrator, as its card names it. */
+export interface ComputerRiskyStep {
+  kind: 'click' | 'type' | 'key' | 'drag' | 'menu'
+  text: string | null
+}
+
+const RISKY_KINDS = new Set(['click', 'type', 'key', 'drag', 'menu'])
+
+function isRiskyStep(value: unknown): value is ComputerRiskyStep {
+  if (typeof value !== 'object' || value === null) return false
+  const { kind, text } = value as Record<string, unknown>
+  return RISKY_KINDS.has(kind as string) && (text === null || typeof text === 'string')
 }
 
 /**
@@ -1839,6 +1862,8 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         Number.isSafeInteger(value.requestId) &&
         typeof value.appId === 'string' &&
         typeof value.appName === 'string' &&
+        (value.ask === undefined || isComputerAppAsk(value.ask)) &&
+        (value.step === undefined || value.step === null || isRiskyStep(value.step)) &&
         (value.decision === null ||
           value.decision === 'session' ||
           value.decision === 'always' ||

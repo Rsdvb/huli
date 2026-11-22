@@ -47,6 +47,16 @@ const MODIFIERS: Schema = {
   description: 'Modifier keys: cmd (Windows or Super key elsewhere), ctrl, alt (option), shift.',
 }
 
+const DELIVERY: Schema = {
+  type: 'string',
+  enum: ['background', 'foreground'],
+  default: 'background',
+  description:
+    'background by default. An action the app drops in the background is tried once in the ' +
+    'foreground by itself, as the user’s settings allow; ask for foreground only when a read ' +
+    'shows a background action did not land.',
+}
+
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const
 const ACTS = { readOnlyHint: false, destructiveHint: true, openWorldHint: false } as const
 
@@ -85,7 +95,9 @@ export const COMPUTER_TOOLS: Tool[] = [
     description:
       'Reads a window: its accessibility tree as Markdown rows [N], addressed by the element ' +
       'token <snapshot_id>:N, and a screenshot. Read narrow first with query; after acting, read ' +
-      'again with since to get only what changed. The first use of an app asks the user.',
+      'again with since to get only what changed. For a window whose tree is nearly empty, the ' +
+      'text in the screenshot comes too, found by the system’s text recognition, with boxes in ' +
+      'screenshot pixels to click by x and y. The first use of an app asks the user.',
     inputSchema: object(
       {
         pid: PID,
@@ -109,6 +121,13 @@ export const COMPUTER_TOOLS: Tool[] = [
         max_depth: { type: 'integer', minimum: 1, maximum: 100 },
         include_screenshot: { type: 'boolean', default: true },
         include_accessibility_tree: { type: 'boolean', default: true },
+        ocr: {
+          type: 'boolean',
+          description:
+            'Also read the text in the screenshot with the system’s text recognition, for what ' +
+            'the tree misses, such as custom-drawn controls. On by itself when the tree is nearly ' +
+            'empty.',
+        },
       },
       ['pid', 'window_id'],
     ),
@@ -130,11 +149,7 @@ export const COMPUTER_TOOLS: Tool[] = [
         y: COORD,
         button: { type: 'string', enum: ['left', 'right', 'middle'], default: 'left' },
         count: { type: 'integer', minimum: 1, maximum: 3, default: 1 },
-        delivery_mode: {
-          type: 'string',
-          enum: ['background', 'foreground'],
-          default: 'background',
-        },
+        delivery_mode: DELIVERY,
       },
       ['pid', 'window_id'],
     ),
@@ -151,6 +166,7 @@ export const COMPUTER_TOOLS: Tool[] = [
         window_id: WINDOW,
         text: { type: 'string', maxLength: MAX_TEXT_CHARS },
         element_token: { ...TOKEN, description: `${TOKEN.description as string} macOS only.` },
+        delivery_mode: DELIVERY,
       },
       ['pid', 'window_id', 'text'],
     ),
@@ -168,6 +184,7 @@ export const COMPUTER_TOOLS: Tool[] = [
         window_id: WINDOW,
         key: { type: 'string', minLength: 1, maxLength: 30 },
         modifiers: MODIFIERS,
+        delivery_mode: DELIVERY,
       },
       ['pid', 'window_id', 'key'],
     ),
@@ -189,6 +206,7 @@ export const COMPUTER_TOOLS: Tool[] = [
           maxItems: MAX_KEYS,
           items: { type: 'string', minLength: 1, maxLength: 30 },
         },
+        delivery_mode: DELIVERY,
       },
       ['pid', 'window_id', 'keys'],
     ),
@@ -207,6 +225,7 @@ export const COMPUTER_TOOLS: Tool[] = [
         direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
         amount: { type: 'integer', minimum: 1, maximum: 50, default: 3 },
         by: { type: 'string', enum: ['line', 'page'], default: 'line' },
+        delivery_mode: DELIVERY,
       },
       ['pid', 'window_id', 'x', 'y', 'direction'],
     ),
@@ -229,6 +248,7 @@ export const COMPUTER_TOOLS: Tool[] = [
         modifier: MODIFIERS,
         duration_ms: { type: 'integer', minimum: 0, maximum: 10_000 },
         steps: { type: 'integer', minimum: 1, maximum: 200 },
+        delivery_mode: DELIVERY,
       },
       ['pid', 'window_id', 'from_x', 'from_y', 'to_x', 'to_y'],
     ),
@@ -250,6 +270,7 @@ export const COMPUTER_TOOLS: Tool[] = [
           maxItems: MAX_MENU_DEPTH,
           items: { type: 'string', minLength: 1, maxLength: 200 },
         },
+        delivery_mode: DELIVERY,
       },
       ['pid', 'window_id', 'path'],
     ),
@@ -276,6 +297,8 @@ export interface ComputerCall {
   keys?: string[]
   /** The menu item it chooses, for the refused items. */
   menuPath?: string[]
+  /** Huli: the agent asked for the screenshot's text, which Kettu reads, not the driver. */
+  ocr?: boolean
 }
 
 /** An argument that does not fit its schema; its message goes back as the tool error. */
@@ -306,6 +329,7 @@ const ALLOWED: Record<ComputerToolName, readonly string[]> = {
     'max_depth',
     'include_screenshot',
     'include_accessibility_tree',
+    'ocr',
   ],
   computer_click: [
     'pid',
@@ -317,10 +341,10 @@ const ALLOWED: Record<ComputerToolName, readonly string[]> = {
     'count',
     'delivery_mode',
   ],
-  computer_type_text: ['pid', 'window_id', 'text', 'element_token'],
-  computer_press_key: ['pid', 'window_id', 'key', 'modifiers'],
-  computer_hotkey: ['pid', 'window_id', 'keys'],
-  computer_scroll: ['pid', 'window_id', 'x', 'y', 'direction', 'amount', 'by'],
+  computer_type_text: ['pid', 'window_id', 'text', 'element_token', 'delivery_mode'],
+  computer_press_key: ['pid', 'window_id', 'key', 'modifiers', 'delivery_mode'],
+  computer_hotkey: ['pid', 'window_id', 'keys', 'delivery_mode'],
+  computer_scroll: ['pid', 'window_id', 'x', 'y', 'direction', 'amount', 'by', 'delivery_mode'],
   computer_drag: [
     'pid',
     'window_id',
@@ -332,8 +356,9 @@ const ALLOWED: Record<ComputerToolName, readonly string[]> = {
     'modifier',
     'duration_ms',
     'steps',
+    'delivery_mode',
   ],
-  computer_invoke_menu: ['pid', 'window_id', 'path'],
+  computer_invoke_menu: ['pid', 'window_id', 'path', 'delivery_mode'],
 }
 
 const DRIVER_TOOL: Record<ComputerToolName, string> = {
@@ -448,6 +473,11 @@ class Reader {
   }
 }
 
+/** The delivery an action asks for: the background unless it names the foreground. */
+function delivery(read: Reader): 'background' | 'foreground' {
+  return read.choice('delivery_mode', ['background', 'foreground']) ?? 'background'
+}
+
 /** Sets `key` on `args` when the value is there. */
 function put(args: Args, key: string, value: unknown): void {
   if (value !== undefined) args[key] = value
@@ -497,7 +527,16 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
       }
       put(args, 'include_screenshot', screenshot)
       put(args, 'include_accessibility_tree', tree)
-      return { tool: name, driverTool, args, pid, windowId, acts: false }
+      const ocr = read.flag('ocr')
+      return {
+        tool: name,
+        driverTool,
+        args,
+        pid,
+        windowId,
+        acts: false,
+        ...(ocr !== undefined ? { ocr } : {}),
+      }
     }
     case 'computer_click': {
       const elementToken = read.token('element_token')
@@ -509,10 +548,7 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
       if (elementToken !== undefined && (x !== undefined || y !== undefined)) {
         throw invalid('Give an element_token or x and y, not both.')
       }
-      const args: Args = {
-        target,
-        delivery_mode: read.choice('delivery_mode', ['background', 'foreground']) ?? 'background',
-      }
+      const args: Args = { target, delivery_mode: delivery(read) }
       put(args, 'element_token', elementToken)
       put(args, 'x', x)
       put(args, 'y', y)
@@ -533,7 +569,11 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
       if (elementToken !== undefined && platform !== 'darwin') {
         throw invalid('element_token works only on macOS; click the field first, then type.')
       }
-      const args: Args = { target, text: read.text('text', MAX_TEXT_CHARS, true)! }
+      const args: Args = {
+        target,
+        text: read.text('text', MAX_TEXT_CHARS, true)!,
+        delivery_mode: delivery(read),
+      }
       put(args, 'element_token', elementToken)
       return {
         tool: name,
@@ -549,7 +589,7 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
       const key = read.text('key', 30, true)!
       if (key.trim() === '') throw invalid('key must not be empty.')
       const modifiers = read.modifiers('modifiers')
-      const args: Args = { target, key }
+      const args: Args = { target, key, delivery_mode: delivery(read) }
       put(args, 'modifiers', modifiers)
       return {
         tool: name,
@@ -563,7 +603,15 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
     }
     case 'computer_hotkey': {
       const keys = read.strings('keys', 2, MAX_KEYS, 30, true)
-      return { tool: name, driverTool, args: { target, keys }, pid, windowId, acts: true, keys }
+      return {
+        tool: name,
+        driverTool,
+        args: { target, keys, delivery_mode: delivery(read) },
+        pid,
+        windowId,
+        acts: true,
+        keys,
+      }
     }
     case 'computer_scroll': {
       const args: Args = {
@@ -571,6 +619,7 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
         x: read.number('x', true),
         y: read.number('y', true),
         direction: read.choice('direction', ['up', 'down', 'left', 'right']),
+        delivery_mode: delivery(read),
       }
       if (args.direction === undefined) throw invalid('direction is needed.')
       put(args, 'amount', read.integer('amount', 1, 50))
@@ -584,6 +633,7 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
         from_y: read.number('from_y', true),
         to_x: read.number('to_x', true),
         to_y: read.number('to_y', true),
+        delivery_mode: delivery(read),
       }
       put(args, 'button', read.choice('button', ['left', 'right', 'middle']))
       put(args, 'modifier', read.modifiers('modifier'))
@@ -597,7 +647,7 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
         tool: name,
         driverTool,
         // Named, since the driver's menus take a delivery mode of their own since 0.47.17.
-        args: { pid, window_id: windowId, path, delivery_mode: 'background' },
+        args: { pid, window_id: windowId, path, delivery_mode: delivery(read) },
         pid,
         windowId,
         acts: true,
