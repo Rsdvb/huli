@@ -1,7 +1,7 @@
 import { parseMarkdownIntoBlocks } from 'streamdown'
 
 /** A chunk is cut once the text after the previous one grows past this many characters. */
-export const CHUNK_SIZE = 8_000
+export const CHUNK_SIZE = 3_000
 
 // The last blocks can still change as text arrives: a paragraph becomes a setext heading, a list
 // takes another item, and a cut at the window's edge leaves the last block incomplete.
