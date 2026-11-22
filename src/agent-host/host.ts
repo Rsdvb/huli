@@ -3538,6 +3538,8 @@ export class AgentHost {
           }),
         ),
       'sessions.stall': ({ sessionId, action }) => sessions.stallAction(sessionId, action),
+      'sessions.allowDenied': ({ sessionId, entryId, confirmed }) =>
+        sessions.allowDenied(sessionId, entryId, confirmed === true),
       'sessions.blob': ({ sessionId, hash }) => sessions.blob(sessionId, hash),
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
         sessions.setConfigOption(sessionId, optionId, value),

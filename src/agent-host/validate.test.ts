@@ -1411,6 +1411,21 @@ describe('attachments', () => {
     })
     rejects(() => posix['sessions.entry']({ sessionId: 's' }))
     rejects(() => posix['sessions.entry']({ sessionId: 's', entryId: 'x'.repeat(1025) }))
+    // Huli: allowing a call the review denied names its entry, and a confirmation only as a flag.
+    const allow = posix['sessions.allowDenied']
+    expect(allow({ sessionId: 's', entryId: 't:cmd-1', more: 1 })).toEqual({
+      sessionId: 's',
+      entryId: 't:cmd-1',
+    })
+    expect(allow({ sessionId: 's', entryId: 't:cmd-1', confirmed: true })).toEqual({
+      sessionId: 's',
+      entryId: 't:cmd-1',
+      confirmed: true,
+    })
+    rejects(() => allow({ sessionId: 's', entryId: 't:cmd-1', confirmed: 'yes' }))
+    rejects(() => allow({ sessionId: 's' }))
+    rejects(() => allow({ entryId: 't:cmd-1' }))
+    rejects(() => allow({ sessionId: 's', entryId: 'x'.repeat(1025) }))
     expect(posix['sessions.requests']({ sessionId: 's', more: 1 })).toEqual({ sessionId: 's' })
     rejects(() => posix['sessions.requests']({}))
     expect(posix['attachments.read']({ id: 'a1', more: 1 })).toEqual({ id: 'a1' })

@@ -153,6 +153,7 @@ import {
   type TurnRefusal,
   type UserContent,
   type OutsideKind,
+  appealConfirms,
 } from '@shared/thread'
 import {
   agentEntryBefore,
@@ -4639,6 +4640,18 @@ export class SessionManager {
       case 'limits-allowed':
         this.deps.agents.allowLimits(agentId)
         break
+      case 'appeal': {
+        // Huli: the denied call's risk, judged as a permission request's, shows by its appeal.
+        const entry = live.thread.byId[effect.entryId]
+        const appeal = entry?.kind === 'tool' ? entry.review?.appeal : undefined
+        if (entry?.kind !== 'tool' || !entry.review || !appeal || appeal.risk) break
+        const review = {
+          ...entry.review,
+          appeal: { ...appeal, risk: this.appealRisk(live, entry) },
+        }
+        this.emit(live, [{ op: 'entry.update', id: entry.id, changes: { review } }])
+        break
+      }
       case 'title': {
         if (effect.title === null) {
           delete live.record.titleSource
@@ -9933,6 +9946,62 @@ export class SessionManager {
       return
     }
     this.sendPrompt(live, [{ type: 'text', text: this.resumeText() }])
+  }
+
+  /** Huli: the host's risk of a call the review denied, as a permission request's card shows. */
+  private appealRisk(live: Live, entry: ToolEntry): PermissionRisk {
+    const cwd = workDir(live.record)
+    const assessed = assessRisk(entrySubject(entry), {
+      platform: this.deps.platform,
+      cwd,
+      roots: [...new Set([cwd, live.record.projectPath])],
+    })
+    return { level: assessed.level, reason: riskReason(assessed) }
+  }
+
+  /**
+   * Huli: the user allows a call the agent's review denied, once: the agent is told with its own
+   * record of the denial, and with no turn running a message asks it to try again, which its review
+   * sees too. A call `appealConfirms` needs `confirmed`, as the clients ask for it.
+   */
+  async allowDenied(sessionId: string, entryId: string, confirmed: boolean): Promise<void> {
+    this.assertRegistered(sessionId)
+    this.refuseIfCannotSend(sessionId)
+    const live = await this.revive(sessionId)
+    const entry = live.thread.byId[entryId]
+    const review = entry?.kind === 'tool' ? entry.review : undefined
+    const appeal = review?.status === 'denied' ? review.appeal : undefined
+    if (entry?.kind !== 'tool' || !review || !appeal) {
+      throw new HostError('not_found', t('session.appeal.none'))
+    }
+    if (appeal.allowed) throw new HostError('conflict', t('session.appeal.done'))
+    const risk = appeal.risk ?? this.appealRisk(live, entry)
+    if (appealConfirms({ ...review, appeal: { ...appeal, risk } }) && !confirmed) {
+      throw invalidParams(t('session.appeal.confirm'))
+    }
+    let connection: AgentConnection
+    try {
+      connection = await this.attachClosed(live)
+    } catch (error) {
+      throw agentError(error)
+    }
+    if (!connection.allowDenied) {
+      const agent = this.deps.agents.name(live.record.agentId)
+      throw new HostError('restricted', t('session.appeal.unsupported', { agent }))
+    }
+    try {
+      await connection.allowDenied(live.record.acpSessionId, appeal.event)
+    } catch (error) {
+      throw agentError(error)
+    }
+    const allowed = { ...review, appeal: { ...appeal, risk, allowed: true as const } }
+    this.emit(live, [{ op: 'entry.update', id: entryId, changes: { review: allowed } }])
+    this.touch(live.id)
+    // A running turn reads the approval at its next request; a stopped one is asked to go on.
+    const running = live.turn !== null && !live.turn.ended
+    if (running || live.record.origin === 'subagent') return
+    if (!canSend(live.thread.session.status) || this.waitsForWorktree(live)) return
+    this.sendPrompt(live, [{ type: 'text', text: t('session.appeal.retry') }])
   }
 
   /** The strip's Cancel, which keeps the session stopped, and Retry now, which goes on at once. */
