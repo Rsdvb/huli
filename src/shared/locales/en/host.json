@@ -82,7 +82,8 @@
     },
     "tidy": {
       "noReset": "Kite doesn't know when this agent's plan resets, so pick a time instead.",
-      "snoozeRange": "Pick a time after now and within a year."
+      "snoozeRange": "Pick a time after now and within a year.",
+      "ownOnly": "Only a session you started yourself can be snoozed or settled."
     }
   },
   "notice": {

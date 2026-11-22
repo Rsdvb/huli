@@ -13138,8 +13138,15 @@ export class SessionManager {
    * Takes a top-level session out of the active list until `until`, or until its agent's plan
    * comes back; null brings it back now.
    */
-  snooze(sessionId: string, until: SnoozeUntil): void {
+  /** The user's own top-level session, the only kind snoozed or settled. */
+  private tidyTarget(sessionId: string): SessionRecord {
     const record = this.topLevel(sessionId)
+    if (record.origin !== 'user') throw new HostError('restricted', t('session.tidy.ownOnly'))
+    return record
+  }
+
+  snooze(sessionId: string, until: SnoozeUntil): void {
+    const record = this.tidyTarget(sessionId)
     if (until === null) {
       this.tidy.apply(record, (tidy) => withSnooze(tidy, null, false))
       return
@@ -13154,13 +13161,13 @@ export class SessionManager {
 
   /** Settles a top-level session out of the active list, or brings it back. */
   settle(sessionId: string, settled: boolean): void {
-    const record = this.topLevel(sessionId)
+    const record = this.tidyTarget(sessionId)
     this.tidy.apply(record, (tidy) => withSettled(tidy, settled, this.now()))
   }
 
   /** 永不收起: no rule settles the session; turning it on brings back one a rule settled. */
   setNeverSettle(sessionId: string, never: boolean): void {
-    const record = this.topLevel(sessionId)
+    const record = this.tidyTarget(sessionId)
     this.tidy.apply(record, (tidy) => withNever(tidy, never))
   }
 
