@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { AiChat02Icon, Alert02Icon, ComputerTerminal01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { TakenPort, TaskProcess } from '@shared/task-processes'
@@ -7,8 +6,8 @@ import { lastPort, type PortBlock } from '@shared/worktree-ports'
 import { Button } from '@renderer/components/ui/button'
 import { PaneIcon } from '@renderer/features/shell/panel-button'
 import { storageBytes } from '@renderer/lib/format'
-import { errorMessage, host } from '@renderer/lib/host'
 import { Clock } from './row-parts'
+import { useToBackground } from './use-to-background'
 
 const percent = (cpu: number): string =>
   `${new Intl.NumberFormat(undefined, { maximumFractionDigits: cpu < 10 ? 1 : 0 }).format(cpu)}%`
@@ -67,24 +66,6 @@ export function TakenPorts({ taken, block }: { taken: TakenPort[]; block: PortBl
       <span>{t('process.taken', { count: taken.length, range, ports })}</span>
     </p>
   )
-}
-
-/** Huli: moves what holds up a tool call to the background; `error` says why the last try failed. */
-export function useToBackground(sessionId: string, toolCallId: string) {
-  const { t } = useTranslation('board')
-  const [moving, setMoving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const move = () => {
-    setMoving(true)
-    setError(null)
-    host('sessions.toBackground', { sessionId, toolCallId })
-      .then(({ moved }) => {
-        if (!moved) setError(t('held.notMoved'))
-      })
-      .catch((reason: unknown) => setError(errorMessage(reason)))
-      .finally(() => setMoving(false))
-  }
-  return { move, moving, error }
 }
 
 /** Huli: To background on a command's row in the thread, while the turn waits for it. */

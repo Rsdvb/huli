@@ -73,7 +73,13 @@ class Board {
         summary: task.summary,
         ...(task.child?.pid && task.status === 'running' ? { pid: task.child.pid } : {}),
       })),
-      foreground: [...this.held.values()].map(({ release: _release, ...view }) => view),
+      foreground: [...this.held.values()].map((held) => ({
+        toolCallId: held.toolCallId,
+        taskId: held.taskId,
+        kind: held.kind,
+        title: held.title,
+        startedAt: held.startedAt,
+      })),
       subagents: [...this.progress].map(([sessionId, progress]) => ({ sessionId, progress })),
     }).catch(() => {})
   }

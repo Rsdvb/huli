@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { SessionProcesses } from '@shared/task-processes'
 import { errorMessage, host } from '@renderer/lib/host'
 
@@ -11,39 +11,49 @@ export interface ProcessesState {
   refresh(): void
 }
 
+interface Answer {
+  /** The reading it answers, as `ask` names one. */
+  ask: string
+  sessionId: string
+  data: SessionProcesses | null
+  error: string | null
+}
+
 /**
  * Huli: the session's background processes while the board shows them: read when it opens, when
  * `key` changes (a task starts or ends, a turn ends) and on `refresh`, never on a timer.
  */
 export function useSessionProcesses(sessionId: string, key: string): ProcessesState {
-  const [data, setData] = useState<SessionProcesses | null>(null)
-  const [reading, setReading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [asked, setAsked] = useState(0)
-  const latest = useRef(0)
+  const [answer, setAnswer] = useState<Answer | null>(null)
+  const ask = `${sessionId}\n${key}\n${asked}`
 
   useEffect(() => {
-    const run = ++latest.current
-    setReading(true)
+    let current = true
     host('sessions.processes', { sessionId })
-      .then((answer) => {
-        if (run !== latest.current) return
-        setData(answer)
-        setError(null)
+      .then((data) => {
+        if (current) setAnswer({ ask, sessionId, data, error: null })
       })
       .catch((reason: unknown) => {
-        if (run === latest.current) setError(errorMessage(reason))
+        if (!current) return
+        setAnswer((prev) => ({
+          ask,
+          sessionId,
+          data: prev?.sessionId === sessionId ? prev.data : null,
+          error: errorMessage(reason),
+        }))
       })
-      .finally(() => {
-        if (run === latest.current) setReading(false)
-      })
-  }, [sessionId, key, asked])
-
-  useEffect(() => {
-    setData(null)
-    setError(null)
-  }, [sessionId])
+    return () => {
+      current = false
+    }
+  }, [ask, sessionId])
 
   const refresh = useCallback(() => setAsked((n) => n + 1), [])
-  return { data, reading, error, refresh }
+  const own = answer?.sessionId === sessionId ? answer : null
+  return {
+    data: own?.data ?? null,
+    reading: answer?.ask !== ask,
+    error: own?.error ?? null,
+    refresh,
+  }
 }

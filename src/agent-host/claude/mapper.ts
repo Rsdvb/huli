@@ -1932,9 +1932,10 @@ export class ClaudeMapper {
       return this.backgroundDelivery()
     }
     const endedAt = endTime ?? Date.now()
-    const { progress: _progress, ...rest } = task
+    const ended: BackgroundTaskView = { ...task }
+    delete ended.progress
     this.background.set(taskId, {
-      ...rest,
+      ...ended,
       status,
       endedAt,
       startedAt: duration === null ? task.startedAt : Math.min(task.startedAt, endedAt - duration),
