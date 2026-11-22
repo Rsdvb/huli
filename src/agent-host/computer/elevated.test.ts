@@ -1,0 +1,581 @@
+// Huli: the elevated helper of Kite's computer use, as a test build of it runs without elevation:
+// its install, the checks before its broker starts, who may connect, what passes, the owner's
+// confirmations, the program's containment and when it ends. Windows only; it builds the helper and
+// small stand-in programs with the .NET Framework compiler Windows ships. A test build installs into
+// a folder of the test's, starts with no administrator prompt and answers its own windows from
+// KITE_BROKER_TEST_ANSWER, logging each question to KITE_BROKER_TEST_LOG.
+
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import net from 'node:net'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { connect, ElevatedDriver, newSecrets } from './elevated'
+import { ComputerHelper } from './helper'
+
+const root = process.env.SystemRoot ?? 'C:\\Windows'
+const csc = path.join(root, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
+const runs = process.platform === 'win32' && existsSync(csc)
+
+// Answers every request as Cua Driver would: a read gives a snapshot with a button and a field;
+// every other call says what it was called with. It writes its process id where its TEMP is.
+const FAKE_DRIVER = `
+using System; using System.Collections.Generic; using System.IO; using System.Text;
+using System.Web.Script.Serialization;
+static class FakeDriver {
+  static void Main() {
+    File.WriteAllText(Path.Combine(Environment.GetEnvironmentVariable("TEMP"), "fake-driver.pid"),
+      System.Diagnostics.Process.GetCurrentProcess().Id.ToString());
+    var json = new JavaScriptSerializer();
+    var input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
+    var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
+    output.AutoFlush = true;
+    string line;
+    while ((line = input.ReadLine()) != null) {
+      var message = json.DeserializeObject(line) as Dictionary<string, object>;
+      if (message == null || !message.ContainsKey("id")) continue;
+      object result;
+      var p = message.ContainsKey("params") ? message["params"] as Dictionary<string, object> : null;
+      if ((string)message["method"] == "initialize") {
+        result = new Dictionary<string, object> {
+          { "protocolVersion", p["protocolVersion"] },
+          { "capabilities", new Dictionary<string, object> { { "tools", new Dictionary<string, object>() } } },
+          { "serverInfo", new Dictionary<string, object> { { "name", "fake" }, { "version", "1" } } } };
+      } else if (p != null && (string)p["name"] == "get_window_state") {
+        var args = p["arguments"] as Dictionary<string, object>;
+        var elements = new object[] {
+          new Dictionary<string, object> { { "element_index", 0 }, { "role", "Button" }, { "label", "Delete" },
+            { "frame", new Dictionary<string, object> { { "x", 10 }, { "y", 10 }, { "w", 40 }, { "h", 20 } } } },
+          new Dictionary<string, object> { { "element_index", 1 }, { "role", "Edit" }, { "label", "Name" },
+            { "frame", new Dictionary<string, object> { { "x", 10 }, { "y", 40 }, { "w", 80 }, { "h", 20 } } } },
+        };
+        result = new Dictionary<string, object> {
+          { "content", new object[] { new Dictionary<string, object> { { "type", "text" }, { "text", "read" } } } },
+          { "structuredContent", new Dictionary<string, object> {
+            { "snapshot_id", "s00000001" }, { "window_id", args["window_id"] },
+            { "window_bounds", new Dictionary<string, object> { { "x", 0 }, { "y", 0 }, { "width", 200 }, { "height", 100 } } },
+            { "screenshot_width", 200 }, { "screenshot_height", 100 }, { "elements", elements } } } };
+      } else {
+        result = new Dictionary<string, object> { { "content", new object[] { new Dictionary<string, object> {
+          { "type", "text" }, { "text", "called " + (p == null ? "" : json.Serialize(p)) } } } } };
+      }
+      output.WriteLine(json.Serialize(new Dictionary<string, object> { { "jsonrpc", "2.0" }, { "id", message["id"] }, { "result", result } }));
+    }
+  }
+}`
+
+// A program with a window that never shows: it prints the window's handle, then on each "spawn"
+// line tries to start a program and says whether it could.
+const TARGET = `
+using System; using System.Diagnostics; using System.Windows.Forms;
+static class Target {
+  [STAThread] static void Main() {
+    var form = new Form();
+    Console.WriteLine(form.Handle.ToInt64());
+    string line;
+    while ((line = Console.ReadLine()) != null) {
+      if (line != "spawn") continue;
+      try {
+        var p = Process.Start(new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec"), "/c exit") { UseShellExecute = false, CreateNoWindow = true });
+        p.WaitForExit();
+        Console.WriteLine("spawned");
+      } catch (Exception) { Console.WriteLine("refused"); }
+    }
+  }
+}`
+
+function compile(dir: string, name: string, source: string, references: string[]): string {
+  const file = path.join(dir, `${name}.cs`)
+  const out = path.join(dir, `${name}.exe`)
+  writeFileSync(file, source)
+  const result = spawnSync(
+    csc,
+    ['-nologo', `-out:${out}`, ...references.map((r) => `-r:${r}`), file],
+    { encoding: 'utf8' },
+  )
+  if (result.status !== 0) throw new Error(`${name}: ${result.stdout}${result.stderr}`)
+  return out
+}
+
+interface Target {
+  process: ChildProcess
+  pid: number
+  window: number
+  lines: string[]
+}
+
+function startTarget(exe: string): Promise<Target> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, [], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true })
+    const lines: string[] = []
+    let first = true
+    child.stdout!.setEncoding('utf8')
+    child.stdout!.on('data', (text: string) => {
+      for (const line of text.split(/\r?\n/).filter(Boolean)) {
+        if (first) {
+          first = false
+          resolve({ process: child, pid: child.pid!, window: Number(line), lines })
+        } else {
+          lines.push(line)
+        }
+      }
+    })
+    child.once('error', reject)
+  })
+}
+
+async function spawnFrom(target: Target): Promise<string> {
+  const before = target.lines.length
+  target.process.stdin!.write('spawn\n')
+  for (let i = 0; i < 100 && target.lines.length === before; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return target.lines[before] ?? 'no answer'
+}
+
+function exited(pid: number, withinMs: number): Promise<boolean> {
+  const alive = () => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  return new Promise((resolve) => {
+    const end = Date.now() + withinMs
+    const check = () => {
+      if (!alive()) resolve(true)
+      else if (Date.now() > end) resolve(false)
+      else setTimeout(check, 100)
+    }
+    check()
+  })
+}
+
+const text = (result: { content: unknown[] }) => (result.content[0] as { text: string }).text
+
+describe.skipIf(!runs)('the elevated helper', () => {
+  let work = ''
+  let app = ''
+  let installDir = ''
+  let targetExe = ''
+  let launcherExe = ''
+  let sid = ''
+  let log = ''
+  const children: ChildProcess[] = []
+  const helpers: ComputerHelper[] = []
+
+  beforeAll(async () => {
+    work = mkdtempSync(path.join(tmpdir(), 'kite-elevated-test-'))
+    app = path.join(work, 'app')
+    installDir = path.join(work, 'Kite Computer Helper')
+    mkdirSync(app)
+    compile(app, 'cua-driver', FAKE_DRIVER, ['System.Web.Extensions.dll'])
+    const build = path.resolve(__dirname, '../../../native/computer-helper/build.mjs')
+    const built = spawnSync(process.execPath, [build, app, '--test'], { encoding: 'utf8' })
+    if (built.status !== 0) throw new Error(built.stdout + built.stderr)
+    targetExe = compile(work, 'target', TARGET, ['System.Windows.Forms.dll'])
+    launcherExe = path.join(work, 'taskmgr.exe')
+    copyFileSync(targetExe, launcherExe)
+    log = path.join(work, 'questions.log')
+    const helper = helperFor('allow')
+    sid = (await helper.whoami()).sid!
+    const state = await helper.install(process.execPath)
+    expect(state).toMatchObject({ state: 'current', exitCode: 0 })
+  }, 90_000)
+
+  afterEach(() => {
+    for (const helper of helpers.splice(0)) helper.stop()
+  })
+
+  afterAll(() => {
+    for (const child of children) child.kill()
+    // The programs take a moment to exit and let go of their files.
+    if (work) rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
+  })
+
+  /** A helper whose broker answers its windows with `answers`, in turn. */
+  function helperFor(answers: string, dir = installDir): ComputerHelper {
+    process.env.KITE_BROKER_TEST_ANSWER = answers
+    process.env.KITE_BROKER_TEST_LOG = log
+    const helper = new ComputerHelper({
+      path: path.join(app, 'kite-computer-helper.exe'),
+      log: () => {},
+      installDir: dir,
+    })
+    helpers.push(helper)
+    return helper
+  }
+
+  async function target(exe = targetExe): Promise<Target> {
+    const started = await startTarget(exe)
+    children.push(started.process)
+    return started
+  }
+
+  function questions(): Record<string, unknown>[] {
+    if (!existsSync(log)) return []
+    return readFileSync(log, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+  }
+
+  async function start(answers: string, program: Target) {
+    const helper = helperFor(answers)
+    return ElevatedDriver.start({
+      target: program.pid,
+      user: sid,
+      helper,
+      installDir,
+      lang: 'en',
+      log: () => {},
+      testBuild: true,
+      idleMs: 20_000,
+    })
+  }
+
+  it('installs only a driver that matches the build, and knows a stale install', async () => {
+    const helper = helperFor('allow')
+    expect(await helper.layout(process.execPath)).toMatchObject({ state: 'current' })
+    expect(await helper.layout(targetExe)).toMatchObject({ state: 'outdated' })
+    const swapped = path.join(work, 'swapped')
+    mkdirSync(swapped)
+    copyFileSync(
+      path.join(app, 'kite-computer-helper.exe'),
+      path.join(swapped, 'kite-computer-helper.exe'),
+    )
+    copyFileSync(targetExe, path.join(swapped, 'cua-driver.exe'))
+    const other = new ComputerHelper({
+      path: path.join(swapped, 'kite-computer-helper.exe'),
+      log: () => {},
+      installDir: path.join(work, 'other'),
+    })
+    helpers.push(other)
+    expect(await other.install(process.execPath)).toMatchObject({ state: 'missing', exitCode: 10 })
+  }, 30_000)
+
+  it('starts no broker without a current install, or for a program that starts programs', async () => {
+    const program = await target()
+    const empty = helperFor('allow', path.join(work, 'empty'))
+    const info = await empty.process(program.pid)
+    const request = {
+      ...newSecrets(),
+      user: sid,
+      host: process.pid,
+      target: program.pid,
+      targetImage: info.image!,
+      targetStarted: info.started!,
+      idleMs: 20_000,
+      lang: 'en' as const,
+    }
+    await expect(empty.elevate(request)).rejects.toThrow('not installed')
+    const launcher = await target(launcherExe)
+    const helper = helperFor('allow')
+    const launcherInfo = await helper.process(launcher.pid)
+    await expect(
+      helper.elevate({
+        ...request,
+        target: launcher.pid,
+        targetImage: launcherInfo.image!,
+        targetStarted: launcherInfo.started!,
+      }),
+    ).rejects.toThrow('starts other programs')
+  }, 30_000)
+
+  it('starts no broker while a .NET profiler would load into it', async () => {
+    const program = await target()
+    process.env.COR_ENABLE_PROFILING = '1'
+    let helper: ComputerHelper
+    try {
+      helper = helperFor('allow')
+      await helper.whoami()
+    } finally {
+      delete process.env.COR_ENABLE_PROFILING
+    }
+    const info = await helper.process(program.pid)
+    await expect(
+      helper.elevate({
+        ...newSecrets(),
+        user: sid,
+        host: process.pid,
+        target: program.pid,
+        targetImage: info.image!,
+        targetStarted: info.started!,
+        idleMs: 20_000,
+        lang: 'en',
+      }),
+    ).rejects.toThrow('COR_ENABLE_PROFILING')
+  }, 30_000)
+
+  it('serves only the program that was approved, by its start time and image', async () => {
+    const program = await target()
+    const helper = helperFor('allow')
+    const info = await helper.process(program.pid)
+    const secrets = newSecrets()
+    const broker = await helper.elevate({
+      ...secrets,
+      user: sid,
+      host: process.pid,
+      target: program.pid,
+      targetImage: info.image!,
+      targetStarted: String(BigInt(info.started!) - 10_000_000n),
+      idleMs: 20_000,
+      lang: 'en',
+    })
+    expect(await exited(broker!, 5_000)).toBe(true)
+    const exe = path.join(installDir, 'kite-computer-helper.exe')
+    await expect(
+      connect(
+        exe,
+        ['--pipe', secrets.pipe, '--server', String(broker), '--install-dir', installDir],
+        secrets.token,
+        30_000,
+      ),
+    ).rejects.toThrow('could not be reached')
+  }, 40_000)
+
+  it('refuses a missing or wrong token and a client of its own, ending after three', async () => {
+    const program = await target()
+    const helper = helperFor('allow')
+    const info = await helper.process(program.pid)
+    const secrets = newSecrets()
+    const broker = await helper.elevate({
+      ...secrets,
+      user: sid,
+      host: process.pid,
+      target: program.pid,
+      targetImage: info.image!,
+      targetStarted: info.started!,
+      idleMs: 20_000,
+      lang: 'en',
+    })
+    const exe = path.join(installDir, 'kite-computer-helper.exe')
+    const args = ['--pipe', secrets.pipe, '--server', String(broker), '--install-dir', installDir]
+    await expect(connect(exe, args, 'not the token', 20_000)).rejects.toThrow('wrong token')
+    // A client that is not the installed helper started by the host is refused before its token.
+    const direct = net.connect(`\\\\.\\pipe\\${secrets.pipe}`)
+    const answer = await new Promise<string>((resolve) => {
+      direct.once('data', (chunk: Buffer) => resolve(chunk.toString('utf8')))
+      direct.once('error', () => resolve('error'))
+    })
+    expect(answer).toContain('not the expected program')
+    direct.destroy()
+    await expect(connect(exe, args, secrets.tokenSha256, 20_000)).rejects.toThrow('wrong token')
+    expect(await exited(broker!, 5_000)).toBe(true)
+  }, 40_000)
+
+  it('connects only to the broker its prompt started', async () => {
+    const pipe = newSecrets().pipe
+    const squatter = net.createServer((socket) => socket.end()).listen(`\\\\.\\pipe\\${pipe}`)
+    await new Promise((resolve) => squatter.once('listening', resolve))
+    const exe = path.join(installDir, 'kite-computer-helper.exe')
+    await expect(
+      connect(
+        exe,
+        ['--pipe', pipe, '--server', String(process.pid + 1), '--install-dir', installDir],
+        'x',
+        20_000,
+      ),
+    ).rejects.toThrow('not served by the helper Kite started')
+    await expect(
+      connect(
+        exe,
+        ['--pipe', pipe, '--server', String(process.pid), '--install-dir', installDir],
+        'x',
+        20_000,
+      ),
+    ).rejects.toThrow('not served by the installed helper')
+    squatter.close()
+  }, 30_000)
+
+  it('starts only when the owner allows it in its window, naming the program', async () => {
+    const program = await target()
+    await expect(start('deny', program)).rejects.toThrow('the user did not allow it')
+    const asked = questions().filter((q) => q.kind === 'start')
+    expect(asked.at(-1)).toMatchObject({ kind: 'start', pid: program.pid })
+    expect(String(asked.at(-1)?.target).toLowerCase()).toBe(targetExe.toLowerCase())
+  }, 30_000)
+
+  it('relays only the approved program’s windows, in the background, as it checked them', async () => {
+    const approved = await target()
+    const other = await target()
+    const driver = await start('allow', approved)
+    expect(driver).not.toBeNull()
+    const own = await driver!.call('get_window_state', {
+      pid: approved.pid,
+      window_id: approved.window,
+    })
+    expect(own.isError).toBeFalsy()
+    const window = { kind: 'window', pid: approved.pid, window_id: approved.window }
+    const refusals: [string, Record<string, unknown>][] = [
+      ['list_windows', { pid: other.pid }],
+      ['get_window_state', { pid: approved.pid, window_id: other.window }],
+      [
+        'click',
+        { target: { ...window, window_id: other.window }, x: 1, y: 1, delivery_mode: 'background' },
+      ],
+      ['launch_app', { path: 'notepad.exe' }],
+      ['run_script', { script: 'x' }],
+      [
+        'get_window_state',
+        { pid: approved.pid, window_id: approved.window, screenshot_out_file: 'C:\\x.png' },
+      ],
+      ['click', { target: window, x: 1, y: 1, delivery_mode: 'foreground' }],
+      ['scroll', { target: window, x: 1, y: 1, direction: 'down' }],
+    ]
+    for (const [tool, args] of refusals) {
+      const result = await driver!.call(tool, args)
+      expect(result.isError, `${tool} ${JSON.stringify(args)}`).toBe(true)
+      expect(text(result)).toContain('Refused by Kite')
+    }
+    const scrolled = await driver!.call('scroll', {
+      target: window,
+      x: 1,
+      y: 1,
+      direction: 'down',
+      delivery_mode: 'background',
+    })
+    expect(text(scrolled)).toContain('"name":"scroll"')
+    await driver!.stop()
+  }, 40_000)
+
+  it('passes on what it checked, not the line it was sent', async () => {
+    const program = await target()
+    const helper = helperFor('allow')
+    const info = await helper.process(program.pid)
+    const secrets = newSecrets()
+    const broker = await helper.elevate({
+      ...secrets,
+      user: sid,
+      host: process.pid,
+      target: program.pid,
+      targetImage: info.image!,
+      targetStarted: info.started!,
+      idleMs: 20_000,
+      lang: 'en',
+    })
+    const exe = path.join(installDir, 'kite-computer-helper.exe')
+    const { child } = await connect(
+      exe,
+      ['--pipe', secrets.pipe, '--server', String(broker), '--install-dir', installDir],
+      secrets.token,
+    )
+    children.push(child)
+    const lines: string[] = []
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => lines.push(...chunk.split('\n').filter(Boolean)))
+    // The same key twice: whatever the broker reads is what the driver gets, never the other.
+    child.stdin.write(
+      `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"launch_app","name":"list_windows","arguments":{"pid":${program.pid}}}}\n`,
+    )
+    child.stdin.write(
+      `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_windows","arguments":{"pid":${program.pid}},"task":{"x":1}}}\n`,
+    )
+    for (let i = 0; i < 100 && lines.length < 2; i++)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(lines.join('\n')).not.toContain('launch_app')
+    expect(lines.find((line) => line.includes('"id":8'))).toContain('Refused by Kite')
+    child.kill()
+  }, 30_000)
+
+  it('asks the owner in its own window before every step but harmless ones', async () => {
+    const program = await target()
+    const driver = await start('allow,deny', program)
+    const window = { kind: 'window', pid: program.pid, window_id: program.window }
+    const background = { target: window, delivery_mode: 'background' }
+    await driver!.call('get_window_state', { pid: program.pid, window_id: program.window })
+    const before = questions().length
+    const harmless: [string, Record<string, unknown>][] = [
+      ['scroll', { ...background, x: 5, y: 5, direction: 'down' }],
+      ['click', { ...background, element_token: 's00000001:1' }],
+      ['press_key', { ...background, key: 'tab' }],
+      ['type_text', { ...background, text: 'name' }],
+    ]
+    for (const [tool, args] of harmless) {
+      expect((await driver!.call(tool, args)).isError, tool).toBeFalsy()
+    }
+    expect(questions()).toHaveLength(before)
+    const risky: [string, Record<string, unknown>, string][] = [
+      ['click', { ...background, element_token: 's00000001:0' }, 'click'],
+      ['click', { ...background, element_token: 's00000001:9' }, 'click'],
+      ['click', { ...background, element_token: 's00000001:1', button: 'right' }, 'right-click'],
+      ['click', { ...background, element_token: 's00000001:1', count: 2 }, 'double-click'],
+      ['click', { ...background, x: 20, y: 20 }, 'click'],
+      ['press_key', { ...background, key: 'return' }, 'key'],
+      ['hotkey', { ...background, keys: ['ctrl', 'v'] }, 'key'],
+      ['type_text', { ...background, text: 'del *\n' }, 'type'],
+      ['drag', { ...background, from_x: 1, from_y: 1, to_x: 9, to_y: 9 }, 'drag'],
+      [
+        'invoke_menu',
+        {
+          pid: program.pid,
+          window_id: program.window,
+          path: ['File', 'Open'],
+          delivery_mode: 'background',
+        },
+        'menu',
+      ],
+    ]
+    for (const [tool, args] of risky) {
+      const result = await driver!.call(tool, args)
+      expect(text(result), tool).toContain('the user did not allow this step')
+    }
+    const asked = questions().slice(before)
+    expect(asked.map((q) => q.step)).toEqual(risky.map(([, , kind]) => kind))
+    expect(asked[0]).toMatchObject({ text: 'Delete', role: 'Button' })
+    expect(asked[7]).toMatchObject({ text: 'del *\n' })
+    await driver!.stop()
+  }, 60_000)
+
+  it('keeps the program from starting programs while it runs, and lets it after', async () => {
+    const program = await target()
+    expect(await spawnFrom(program)).toBe('spawned')
+    const driver = await start('allow', program)
+    expect(await spawnFrom(program)).toBe('refused')
+    await driver!.stop()
+    for (let i = 0; i < 40 && (await spawnFrom(program)) !== 'spawned'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    expect(await spawnFrom(program)).toBe('spawned')
+  }, 40_000)
+
+  it('ends with the program, when idle, and takes the driver with it', async () => {
+    const program = await target()
+    const driver = await start('allow', program)
+    const pid = Number(
+      readFileSync(path.join(installDir, 'home', 'Temp', 'fake-driver.pid'), 'utf8'),
+    )
+    let closed = false
+    driver!.onClosed = () => (closed = true)
+    program.process.kill()
+    expect(await exited(driver!.brokerPid, 5_000)).toBe(true)
+    expect(await exited(pid, 5_000)).toBe(true)
+    for (let i = 0; i < 50 && !closed; i++) await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(closed).toBe(true)
+
+    const idle = await target()
+    const helper = helperFor('allow')
+    const quiet = await ElevatedDriver.start({
+      target: idle.pid,
+      user: sid,
+      helper,
+      installDir,
+      lang: 'en',
+      log: () => {},
+      testBuild: true,
+      idleMs: 5_000,
+    })
+    expect(await exited(quiet!.brokerPid, 9_000)).toBe(true)
+  }, 40_000)
+})

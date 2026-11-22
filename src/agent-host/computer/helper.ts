@@ -1,14 +1,16 @@
 // Huli: Kite's own computer use helper (native/computer-helper), started when a computer use
 // session first needs it and ended with the session: which processes run elevated (Windows), the
-// system's text recognition (Windows and macOS). One JSON object per line each way, each answer
+// system's text recognition (Windows and macOS), and the administrator prompts that install the
+// elevated helper and start its broker (Windows). One JSON object per line each way, each answer
 // naming its request.
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 import type { LogFn } from '../storage'
 
-/** A request the helper does not answer in this time fails. */
+/** A request the helper does not answer in this time fails; the administrator prompt waits longer. */
 const CALL_MS = 30_000
+const PROMPT_MS = 11 * 60_000
 /** An idle helper ends after this, though the service ends it with the session first. */
 export const HELPER_IDLE_MS = 3 * 60_000
 const MAX_ANSWER_BYTES = 8 * 1024 * 1024
@@ -41,11 +43,47 @@ export interface OcrReport {
   lines: OcrLine[]
 }
 
+/** A process's image path and start time (a FILETIME, as text), which the broker checks. */
+export interface ProcessInfo {
+  image: string | null
+  started: string | null
+}
+
+/**
+ * The elevated helper's install folder and how it stands: missing, current (the same helper as
+ * this one, the driver it was built with, for this Kite program) or outdated.
+ */
+export interface InstallState {
+  installDir: string
+  state: 'missing' | 'current' | 'outdated'
+  exitCode?: number
+}
+
+export interface ElevateRequest {
+  pipe: string
+  user: string
+  /** The agent host's process, whose child the broker's client must be. */
+  host: number
+  target: number
+  targetImage: string
+  targetStarted: string
+  tokenSha256: string
+  idleMs: number
+  lang: 'zh-CN' | 'en'
+}
+
 /** What the service needs of the helper; a stand-in in tests. */
 export interface ComputerHelperLike {
   whoami(): Promise<{ sid: string | null; pid: number; integrity: number | null }>
   elevation(pids: number[]): Promise<ElevationReport>
   ocr(image: string): Promise<OcrReport>
+  process(pid: number): Promise<ProcessInfo>
+  layout(client: string): Promise<InstallState>
+  /** Null when the user said no at the administrator prompt. */
+  install(client: string): Promise<InstallState | null>
+  uninstall(): Promise<InstallState | null>
+  /** The broker's process id, or null when the user said no at the administrator prompt. */
+  elevate(request: ElevateRequest): Promise<number | null>
   stop(): void
 }
 
@@ -59,6 +97,8 @@ export interface ComputerHelperDeps {
   path: string
   log: LogFn
   idleMs?: number
+  /** A test build's install folder in place of Program Files. */
+  installDir?: string
 }
 
 export class ComputerHelper implements ComputerHelperLike {
@@ -82,6 +122,48 @@ export class ComputerHelper implements ComputerHelperLike {
 
   ocr(image: string): Promise<OcrReport> {
     return this.request('ocr', { image }, CALL_MS)
+  }
+
+  process(pid: number): Promise<ProcessInfo> {
+    return this.request('process', { pid }, CALL_MS)
+  }
+
+  layout(client: string): Promise<InstallState> {
+    return this.request('layout', { client, ...this.installDir() }, CALL_MS)
+  }
+
+  async install(client: string): Promise<InstallState | null> {
+    const answer = await this.request<InstallState & { cancelled?: boolean }>(
+      'install',
+      { client, ...this.installDir() },
+      PROMPT_MS,
+    )
+    return answer.cancelled ? null : answer
+  }
+
+  async uninstall(): Promise<InstallState | null> {
+    const answer = await this.request<InstallState & { cancelled?: boolean }>(
+      'uninstall',
+      { ...this.installDir() },
+      PROMPT_MS,
+    )
+    return answer.cancelled ? null : answer
+  }
+
+  /** The install folder a test build was given; Program Files otherwise. */
+  private installDir(): { installDir?: string } {
+    return this.deps.installDir ? { installDir: this.deps.installDir } : {}
+  }
+
+  async elevate(request: ElevateRequest): Promise<number | null> {
+    const answer = await this.request<{ pid?: number | null; cancelled?: boolean }>(
+      'elevate',
+      { ...request, ...this.installDir() },
+      PROMPT_MS,
+    )
+    if (answer.cancelled) return null
+    if (typeof answer.pid !== 'number') throw new Error('The elevated helper did not start.')
+    return answer.pid
   }
 
   /** Ends the helper, and with it any request in flight. */

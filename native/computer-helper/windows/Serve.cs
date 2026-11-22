@@ -5,11 +5,13 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
+using Microsoft.Win32;
 
 namespace Kite.ComputerHelper
 {
@@ -17,6 +19,7 @@ namespace Kite.ComputerHelper
     {
         const int MaxLine = 64 * 1024 * 1024;
         const int MaxPids = 1024;
+        const int ErrorCancelled = 1223;
 
         static readonly object WriteLock = new object();
         static StreamWriter output;
@@ -58,6 +61,11 @@ namespace Kite.ComputerHelper
                 if (op == "whoami") result = WhoAmI();
                 else if (op == "elevation") result = Elevation(request);
                 else if (op == "ocr") result = Ocr.Recognize(request);
+                else if (op == "process") result = ProcessInfo(request);
+                else if (op == "layout") result = LayoutState(request);
+                else if (op == "install") result = Prompted(request, "install");
+                else if (op == "uninstall") result = Prompted(request, "uninstall");
+                else if (op == "elevate") result = Elevate(request);
                 else throw new ArgumentException("Unknown op " + op + ".");
                 Write(json, new Dictionary<string, object> { { "id", id }, { "ok", true }, { "result", result } });
             }
@@ -111,6 +119,140 @@ namespace Kite.ComputerHelper
                 pids[pid.ToString()] = new Dictionary<string, object> { { "integrity", integrity }, { "elevated", elevated } };
             }
             return new Dictionary<string, object> { { "self", self }, { "selfElevated", selfElevated }, { "pids", pids } };
+        }
+
+        static object ProcessInfo(Dictionary<string, object> request)
+        {
+            long pid = Json.Integer(request, "pid");
+            if (pid <= 0 || pid > int.MaxValue) throw new ArgumentException("pid must be a process id.");
+            long started = Native.StartedAt((int)pid);
+            return new Dictionary<string, object>
+            {
+                { "image", Native.ImageOf((int)pid) },
+                { "started", started == 0 ? null : started.ToString() },
+            };
+        }
+
+        static object LayoutState(Dictionary<string, object> request)
+        {
+            return Layout.State(Layout.InstallDir(Json.OptionalText(request, "installDir")), Json.OptionalText(request, "client"));
+        }
+
+        /// <summary>
+        /// Installs or removes the elevated helper through the administrator prompt, which the owner
+        /// answers on the secure desktop, and waits for it: its exit code and the folder's state
+        /// after, or cancelled when the owner said no.
+        /// </summary>
+        static object Prompted(Dictionary<string, object> request, string mode)
+        {
+            string other = Json.OptionalText(request, "installDir");
+            string dir = Layout.InstallDir(other);
+            string client = Json.OptionalText(request, "client");
+            var args = new StringBuilder(mode);
+            if (mode == "install")
+            {
+                if (client == null || client.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0) throw new ArgumentException("client must name Kite's program.");
+                args.Append(" --client-image \"").Append(client).Append('"');
+            }
+            if (other != null) args.Append(" --install-dir \"").Append(dir).Append('"');
+            // Removal runs the installed copy when there is one, which only administrators can change.
+            string installed = Path.Combine(dir, Layout.HelperFile);
+            string program = mode == "uninstall" && File.Exists(installed) ? installed : Layout.OwnPath();
+            Process process;
+            try
+            {
+                process = Start(program, args.ToString());
+            }
+            catch (Win32Exception error)
+            {
+                if (error.NativeErrorCode == ErrorCancelled) return new Dictionary<string, object> { { "cancelled", true } };
+                throw;
+            }
+            using (process)
+            {
+                if (!process.WaitForExit(10 * 60 * 1000)) throw new TimeoutException("The administrator helper's " + mode + " took too long.");
+                var state = Layout.State(dir, client);
+                state["exitCode"] = process.ExitCode;
+                return state;
+            }
+        }
+
+        /// <summary>
+        /// Starts the installed broker through the administrator prompt, for one approved program:
+        /// only the installed copy, only when it is this very helper and the driver it was built with,
+        /// held open while it starts, and only when no .NET profiler would load into it.
+        /// </summary>
+        static object Elevate(Dictionary<string, object> request)
+        {
+            var options = BrokerOptions.FromRequest(request);
+            string dir = Layout.InstallDir(options.InstallDir);
+            string hostImage = Native.ImageOf(options.Host);
+            var state = Layout.State(dir, hostImage);
+            if ((string)state["state"] != "current") throw new InvalidOperationException("The administrator helper is not installed for this Kite, or is out of date.");
+            if (Broker.Launchers.Contains(Path.GetFileName(options.TargetImage))) throw new InvalidOperationException("That program starts other programs, which the administrator helper never drives.");
+            string profiling = Profiling();
+            if (profiling != null) throw new InvalidOperationException("The .NET profiling variable " + profiling + " is set, which would load code into the administrator helper.");
+            string installed = Path.Combine(dir, Layout.HelperFile);
+            using (FileStream held = Layout.Hold(installed))
+            using (FileStream driver = Layout.Hold(Path.Combine(dir, Layout.DriverFile)))
+            {
+                if (Layout.Sha256(held) != Layout.Sha256(Layout.OwnPath()) || Layout.Sha256(driver) != Build.DriverSha256)
+                    throw new InvalidOperationException("The installed administrator helper changed.");
+                try
+                {
+                    using (var process = Start(installed, options.ToArguments()))
+                    {
+                        return new Dictionary<string, object> { { "pid", process == null ? (int?)null : process.Id } };
+                    }
+                }
+                catch (Win32Exception error)
+                {
+                    if (error.NativeErrorCode == ErrorCancelled) return new Dictionary<string, object> { { "cancelled", true } };
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>Through the administrator prompt; a test build starts it as it is, with no prompt.</summary>
+        static Process Start(string program, string arguments)
+        {
+            var start = new ProcessStartInfo { FileName = program, Arguments = arguments };
+            if (Build.Test)
+            {
+                start.UseShellExecute = false;
+                start.CreateNoWindow = true;
+            }
+            else
+            {
+                start.UseShellExecute = true;
+                start.Verb = "runas";
+                start.WindowStyle = ProcessWindowStyle.Hidden;
+            }
+            return Process.Start(start);
+        }
+
+        static readonly string[] ProfilingNames = { "COR_ENABLE_PROFILING", "COR_PROFILER", "COR_PROFILER_PATH", "COR_PROFILER_PATH_32", "COR_PROFILER_PATH_64" };
+
+        /// <summary>
+        /// A variable that makes the .NET runtime load a profiler or change itself, as this process,
+        /// the user's or the machine's environment sets it; the elevated helper would inherit it.
+        /// </summary>
+        static string Profiling()
+        {
+            var names = new List<string>();
+            foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables()) names.Add((string)entry.Key);
+            foreach (var key in new[] { Registry.CurrentUser.OpenSubKey("Environment"), Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") })
+            {
+                if (key == null) continue;
+                using (key) names.AddRange(key.GetValueNames());
+            }
+            foreach (string name in names)
+            {
+                if (Array.Exists(ProfilingNames, p => string.Equals(p, name, StringComparison.OrdinalIgnoreCase))) return name;
+                // COMPlus_ settings reach the .NET Framework runtime, some of them loading code (AltJit).
+                if (name.StartsWith("COMPLUS_", StringComparison.OrdinalIgnoreCase)) return name;
+            }
+            return null;
         }
     }
 
