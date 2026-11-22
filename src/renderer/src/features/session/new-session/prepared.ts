@@ -3,6 +3,7 @@
 // the session model.
 
 import type { SessionSummary } from '@shared/agent-host'
+import type { SandboxChoice } from '@shared/sandbox'
 import type { AgentId } from '@shared/thread'
 import { errorMessage, host, hostAt } from '@renderer/lib/host'
 import {
@@ -26,6 +27,8 @@ export interface PrepareTarget {
   parentId: string | null
   /** Huli: the API profile picked; null for the agent's own sign-in, absent where it takes none. */
   profileId?: string | null
+  /** Huli: the sandbox picked; absent on a host that goes by its own settings. */
+  sandbox?: SandboxChoice
 }
 
 // It goes this long after New session leaves the front, and after this long untouched in front:
@@ -54,7 +57,14 @@ const setKey = (hostId: string | null, agentId: AgentId, optionId: string): stri
   `${agentKey(hostId, agentId)}\0${optionId}`
 
 const keyOf = (t: PrepareTarget): string =>
-  JSON.stringify([t.hostId, t.agentId, t.projectPath, t.parentId, t.profileId ?? null])
+  JSON.stringify([
+    t.hostId,
+    t.agentId,
+    t.projectPath,
+    t.parentId,
+    t.profileId ?? null,
+    t.sandbox ? [t.sandbox.tier, t.sandbox.network] : null,
+  ])
 
 const setPrepared = (next: PreparedState | null): void =>
   useAgentOptionsStore.setState({ prepared: next })
@@ -93,6 +103,7 @@ export async function prepare(t: PrepareTarget, replace = false): Promise<void> 
       ...(picks && Object.keys(picks).length > 0 ? { options: picks } : {}),
       ...(replace ? { replace: true } : {}),
       ...(t.profileId !== undefined ? { profileId: t.profileId } : {}),
+      ...(t.sandbox ? { sandbox: t.sandbox } : {}),
     })
     if (useAgentOptionsStore.getState().prepared?.key !== key) {
       // Left for another agent or folder meanwhile.

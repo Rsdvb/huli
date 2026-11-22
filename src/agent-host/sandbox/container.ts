@@ -15,7 +15,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { Transform } from 'node:stream'
 import type { Platform } from '@shared/platform'
-import type { ContainerEngineKind, ContainerStatus, SandboxNetwork } from '@shared/sandbox'
+import {
+  SANDBOX_IMAGE_MB,
+  type ContainerEngineKind,
+  type ContainerStatus,
+  type SandboxNetwork,
+} from '@shared/sandbox'
 import type { StdioTransport } from '../driver'
 import { findCommand, isExecutableFile, type Env } from '../find-command'
 import { isEngineName } from './mounts'
@@ -26,8 +31,8 @@ import { isEngineName } from './mounts'
  */
 export const SANDBOX_IMAGE = {
   ref: 'docker.io/library/node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee',
-  downloadMb: 80,
-  diskMb: 230,
+  downloadMb: SANDBOX_IMAGE_MB.download,
+  diskMb: SANDBOX_IMAGE_MB.disk,
 } as const
 
 /** Where every container finds the project, the agents' installs and the agent's home. */

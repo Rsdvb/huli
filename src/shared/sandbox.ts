@@ -203,6 +203,9 @@ export function onWindowsDrive(folder: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(folder)
 }
 
+/** Kite's container image: what a pull downloads and what it then takes on disk, in MB. */
+export const SANDBOX_IMAGE_MB = { download: 80, disk: 230 } as const
+
 /**
  * What was measured on the owner's computer on 2026-11-22 (Windows 11, Ryzen 9 9950X3D, NVMe, WSL 2
  * Ubuntu 24.04 with Docker 29.9): `npm ci` with a warm cache, `tsc` and `vitest run` of a small

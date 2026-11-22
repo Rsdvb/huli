@@ -5267,6 +5267,28 @@ li[data-row-exit='dust'] > * {
   line-height: 16px;
   color: var(--muted);
 }
+/* Huli: the sandbox row's folded details: what each tier protects and costs, and the image. */
+:is(.kettu-settings, .kettu-sd) .k-sandbox-more {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--link);
+  cursor: pointer;
+}
+:is(.kettu-settings, .kettu-sd) .k-sandbox-more:hover {
+  text-decoration: underline;
+}
+:is(.kettu-settings, .kettu-sd) .k-sandbox-more:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+:is(.kettu-settings, .kettu-sd) .k-sandbox-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 :is(.kettu-settings, .kettu-sd) .k-input.k-mono {
   font-family: var(--code-face);
   font-size: 12.5px;
@@ -5808,6 +5830,23 @@ li[data-row-exit='dust'] > * {
 }
 .ui-as-tray-link[data-tone='warn'] {
   color: var(--warning);
+}
+/* Huli: a session's sandbox, green while one holds its agent back; its tooltip lists what it allows. */
+.ui-as-tray-link.kettu-tray-link--sandbox {
+  flex-shrink: 0;
+  max-width: 14em;
+}
+.ui-as-tray-link.kettu-tray-link--sandbox[data-on] {
+  color: var(--success);
+}
+.kettu-sandbox-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 300px;
+}
+.kettu-sandbox-tip > b {
+  font-weight: 600;
 }
 .ui-as-tray-link > :is(.kettu-tray-link__text, .kettu-branch__name) {
   min-width: 0;

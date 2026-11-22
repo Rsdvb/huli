@@ -60,5 +60,59 @@
     },
     "betweenTurns": "在两轮之间切换",
     "gone": "配置已删除"
+  },
+  "sandbox": {
+    "menu": "沙箱",
+    "chip": "沙箱：{{choice}}",
+    "tier": {
+      "off": "关闭",
+      "native": "Agent 自带沙箱",
+      "container": "容器"
+    },
+    "short": {
+      "off": "无沙箱",
+      "native": "自带沙箱",
+      "container": "容器"
+    },
+    "network": {
+      "none": "不联网",
+      "agent": "只走 Agent 网络的出口",
+      "open": "不限制网络"
+    },
+    "choice": "{{tier}} · {{network}}",
+    "offNote": "和现在一样：Agent 用你的权限做事",
+    "unsupported": "这个 Agent 不支持",
+    "block": {
+      "noSandbox": "这个 Agent 没有自带沙箱",
+      "notWired": "它有自带沙箱，纸鸢还没接上",
+      "platform": "这台电脑上用不了",
+      "protocol": "纸鸢跑它的方式暂时放不进容器"
+    },
+    "networkUnsupported": "这一档管不住这种网络",
+    "cost": {
+      "native": "几乎没有开销：每条命令启动稍慢一点",
+      "container": "启动约 {{start}} 秒；运行时 Docker 占约 {{memory}} MB 内存",
+      "drive": "这个项目在 Windows 盘上：实测构建和测试慢 {{build}} 倍（{{native}} 秒 → {{container}} 秒），搜索文件慢 {{search}} 倍",
+      "wsl": "放在 WSL 自己的磁盘里的项目不会变慢"
+    },
+    "setup": {
+      "claudeWindows": "要先运行一次 `claude sandbox install`（会弹一次管理员确认）",
+      "claudeLinux": "需要装好 bubblewrap 和 socat",
+      "codexWindows": "要先设置一次 Codex 的 Windows 沙箱",
+      "container": "需要 Docker 或 Podman，第一次要下载镜像（{{mb}} MB）"
+    },
+    "recommended": "建议",
+    "betweenTurns": "两轮之间才能换",
+    "allowed": {
+      "title": "沙箱：{{choice}}",
+      "nativeWrites": "命令只能写项目文件夹",
+      "nativeReads": "能读你的文件，但读不到密钥和登录信息",
+      "nativeTools": "改文件、上网的工具照旧会问你",
+      "containerSees": "只看得到这个项目，.git 只读",
+      "containerSignIn": "拿不到你的任何登录：用纸鸢保存的 API Key，或在容器里另行登录",
+      "containerTools": "容器里没有纸鸢的工具（制品、记忆等）",
+      "network": "网络：{{network}}"
+    },
+    "switching": "正在切换沙箱…"
   }
 }

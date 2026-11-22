@@ -1479,6 +1479,58 @@
         "key": "key 不能有空格。",
         "keyMissing": "请粘贴服务商的 API key。"
       }
+    },
+    "sandbox": {
+      "group": "沙箱",
+      "name": "默认沙箱",
+      "description": "新会话默认在哪种隔离里运行；项目或会话可以另选。关闭就是现在的样子。",
+      "keywords": "沙箱 隔离 容器 docker podman wsl 网络 sandbox container",
+      "tier": {
+        "off": {
+          "name": "关闭"
+        },
+        "native": {
+          "name": "Agent 自带沙箱"
+        },
+        "container": {
+          "name": "容器"
+        }
+      },
+      "network": {
+        "name": "沙箱里的网络",
+        "description": "沙箱里 Agent 跑的命令能连到哪儿。",
+        "none": "不联网",
+        "agent": "只走 Agent 网络的出口",
+        "open": "不限制网络"
+      },
+      "autoApprove": {
+        "name": "沙箱里自动批准项目内修改",
+        "description": "会话的沙箱在运行时，项目里的文件修改直接放行一次；高风险请求一律还会问你。"
+      },
+      "details": "各档的保护和代价",
+      "hide": "收起",
+      "measured": "2026-11-22 在这台电脑上实测：小项目的 npm ci、TypeScript 构建和一轮测试。",
+      "off": "关闭——Agent 用你的权限做事，和现在一样。没有开销。",
+      "native": "Agent 自带沙箱——Claude Code 和 Codex 用系统自带的隔离，把命令限制在项目文件夹里；网络可以关、只走 Agent 的出口，或不限制。几乎没有开销。Windows 上 Claude Code 要先运行一次 `claude sandbox install`，Codex 要先设置它的 Windows 沙箱。",
+      "container": "容器——Agent 本身在 Docker 或 Podman 容器里运行，只看得到这个项目，拿不到你的任何登录。启动约 {{start}} 秒，Docker 占约 {{memory}} MB 内存。项目在 Windows 盘上时构建和测试慢 {{build}} 倍（{{native}} 秒 → {{container}} 秒），搜索文件慢 {{search}} 倍；放在 WSL 自己的磁盘里则不会变慢（{{wsl}} 秒）。",
+      "notProtected": "沙箱管不到的：项目本身照样可以被改、被删（容器里 .git 除外）；Claude Code 和 Codex 自己的改文件、上网工具靠权限确认把关，不靠沙箱；MCP 服务器和钩子在沙箱外运行；交给 Agent 的 API Key 它自己看得到。",
+      "image": {
+        "name": "容器镜像",
+        "check": "检查",
+        "checking": "正在检查容器引擎…",
+        "missing": "未下载：node:22-bookworm-slim，下载 {{mb}} MB。",
+        "present": "已下载（{{engine}}），占用约 {{mb}} MB 磁盘。",
+        "noEngine": "没找到容器引擎。请装 Docker（Docker Desktop 或 WSL 里的 Docker）或 Podman。",
+        "notRunning": "容器引擎没有响应。请先启动 Docker 或 Podman。",
+        "download": "下载…",
+        "downloading": "正在下载…",
+        "remove": "删除容器镜像，释放约 {{mb}} MB",
+        "confirm": {
+          "title": "下载容器镜像？",
+          "body": "纸鸢会从 Docker Hub 下载一次 node:22-bookworm-slim：{{mb}} MB，解压后约占 {{disk}} MB。每个 Agent 第一次在容器里运行时，会装进旁边的数据卷。不经你同意不会再下载别的。",
+          "action": "下载 {{mb}} MB"
+        }
+      }
     }
   },
   "about": {
