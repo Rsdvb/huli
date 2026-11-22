@@ -883,6 +883,50 @@ host is forwarded to this computer and opens in the session's browser.
   Its switch forwards on their own the dev servers a session's terminals print on that host,
   watching the terminals only while some host has it on (`stores/forwards.ts`).
 
+### Moving a session to another computer (搬到另一台电脑)
+
+As Codex moves a chat with its Git state to a remote host, a session's menu offers 搬到另一台电脑…:
+an idle session in a Git project moves to any other computer this one connects to (a paired Kite
+or a machine added over SSH), or from one back to this computer, and goes on there with the same
+kind of agent.
+
+- Main runs it (`src/main/session-move.ts`, `SessionMover`), never a window: this computer's agent
+  host through main's own messages (`host:main-call`, `PortHub.callFromMain` with `MAIN_PORT`),
+  another host as this computer's desktop device of it over its existing encrypted channel. The
+  hosts refuse `moves.*` to window ports and to devices that are no desktop app (a phone), and
+  `isOtherHostMethod` keeps them off the windows' relay. IPC: `sessions:move-preview`,
+  `sessions:move-start`, `sessions:moves`, event `sessions:move-progress`.
+- Steps: check both sides (`moves.inspect`, `moves.check`: the target's agent of the session's
+  harness installed, on and signed in; its project whose remote is the same repository, matched by
+  `remoteKey`, else a clone into `~/.huli/projects/<repo>` with its own Git sign-in), prepare the
+  project (`moves.prepare`, which sends back the target's branch tips), pack on the source
+  (`moves.pack`), carry the pack in 8 MiB parts (`moves.part` → `moves.receive`, SHA-256 checked),
+  apply on the target (`moves.apply`), then mark the source (`moves.finish`) and commit
+  (`moves.commit`). A failure at any step has the target undo all it did (`moves.undo`) and the
+  source drop its pack (`moves.abort`); the session stays where it was, working.
+- Git (`src/agent-host/session-move/git.ts`): the uncommitted changes become two commits made aside
+  through copies of the index (staged, then the whole working tree with `git add -A`, so ignored
+  files stay behind), bundled with the branch's commits the target lacks under temporary
+  `refs/kite-move/<id>/*` refs removed right after; nothing is pushed and the source's index, files
+  and branches are untouched. The target unbundles (no refs), makes the branch (`-2`... when taken)
+  in a new worktree under the project's worktree root, or checks it out in a clone made for a
+  session that had none, restores the working tree and index with `read-tree`, and sets the
+  upstream when its remote has the branch. Remote URLs lose any user name and password first.
+- Conversation (`service.ts`, `transcript.ts`): Claude Code's transcript and its `<id>/` files go to
+  `projects/<the target folder as Claude Code names it>/`, Codex's rollout to its day folder, every
+  `cwd` and path inside the source's folder rewritten to the target's across Windows and POSIX
+  (`mapPath`); an id the target already has gets a new one. Other agents, or a session whose
+  transcript is missing, get Kite's copy of the thread carried as a takeover's (`adoptMoved`).
+- Undo: the target journals each step in `<data>/moves/<id>/journal.json` and takes them back in
+  reverse (session, files, folders it made only while empty, worktree, branch only at the oid it
+  set, project, clone only inside the clone folder); a journal a crash left is undone at the next
+  move. Afterwards the local session shows 已搬到 <computer> in place of its composer
+  (`movedTo` in its record), with Open, Clean up local worktree… and 在这台继续
+  (`sessions.clearMoved`). The phone does not offer moves.
+- Tests: `src/agent-host/session-move/*.test.ts` (Git transfer with temp repositories, transcript
+  rewriting, validation, Claude Code and Codex placement, crash undo) and
+  `src/main/session-move.test.ts` (two whole agent hosts on temp folders, with rollbacks).
+
 ### Recap, one-tap compact and image markup (离开期间摘要、一键压缩、图片标注)
 
 Three small things Claude Code, Cursor and Moshi have, on the desktop and the phone alike.
