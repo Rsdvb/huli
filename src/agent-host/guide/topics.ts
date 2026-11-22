@@ -195,7 +195,15 @@ After you took a session over from another agent, \`read_session_history\` also 
 
 ## Tidying up
 
-\`list_sessions\` lists the project's sessions and \`rename_session\` titles yours or one you started. Archive your own session with \`archive_session\` only when the user asked you to or your work is clearly done. Archive a session you started once you have its result and it has nothing left to do.`
+\`list_sessions\` lists the project's sessions and \`rename_session\` titles yours or one you started. Archive your own session with \`archive_session\` only when the user asked you to or your work is clearly done. Archive a session you started once you have its result and it has nothing left to do.
+
+## The task board
+
+The user keeps their own top-level sessions on a task board, in the columns todo, in_progress, review and done; a new session starts in in_progress. When you finish work the user should check, \`set_board_status\` with \`review\` moves your session there. Leave done to the user unless they ask.
+
+## Ports of a worktree
+
+A session Kettu made a worktree for holds a block of ports no other live session holds: \`get_session\` gives it as \`ports\`, and the worktree's setup command sees it as \`KITE_PORT\` (the first) and \`KITE_PORT_COUNT\`, as Claude Code's commands do. Run the worktree's dev servers on those ports so parallel worktrees never clash.`
 
 /** A workflow an agent can copy, which the tests check the format accepts. */
 export const WORKFLOW_EXAMPLE = `format: 1

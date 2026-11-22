@@ -54,6 +54,7 @@
     "worktreeGone": "This session's worktree and its branch were removed, so it can't continue.",
     "worktreeInterrupted": "The worktree's preparation was interrupted. Run it again or go on without it.",
     "untitled": "Untitled session",
+    "notOnBoard": "Only your own top-level session is on the task board.",
     "profile": {
       "unsupported": "This agent's sessions take no API profile.",
       "unknown": "This agent has no such API profile. It may have been removed.",

@@ -22,6 +22,8 @@ function session(id: string, startedBy: string | null): ToolSession {
     startedBy,
     archived: false,
     projectPath: '/repo',
+    board: startedBy === null ? 'in_progress' : null,
+    ports: null,
   }
 }
 
@@ -179,5 +181,41 @@ describe('archive_session', () => {
     const out = await t.call(caller, 'archive_session', { id: 'started' })
     expect(out.isError).toBeUndefined()
     expect(archiveNow).toHaveBeenCalledWith('started', 'Claude Code')
+  })
+})
+
+// Huli: an agent moves its own session on the user's task board.
+describe('set_board_status', () => {
+  function board(callerBoard: ToolSession['board']) {
+    const sessions = [{ ...session('starter', null), board: callerBoard }]
+    const setBoard = vi.fn<SessionToolsDeps['setBoard']>((_id, status) => {
+      sessions[0]!.board = status
+    })
+    const deps = {
+      info: (id: string) => sessions.find((item) => item.id === id) ?? null,
+      setBoard,
+    } as unknown as SessionToolsDeps
+    return { tools: new SessionTools(deps), setBoard }
+  }
+
+  it("moves the caller's own session and says where it is now", async () => {
+    const { tools: t, setBoard } = board('in_progress')
+    const out = await t.call(caller, 'set_board_status', { status: 'review' })
+    expect(out.isError).toBeUndefined()
+    expect(setBoard).toHaveBeenCalledWith('starter', 'review')
+    expect(out.structuredContent).toMatchObject({ id: 'starter', board_status: 'review' })
+  })
+
+  it('refuses a column the board does not have, another session, or one off the board', async () => {
+    const { tools: t, setBoard } = board('in_progress')
+    for (const input of [{ status: 'blocked' }, {}, { status: 'done', id: 'other' }]) {
+      expect((await t.call(caller, 'set_board_status', input)).isError).toBe(true)
+    }
+    const off = board(null)
+    const out = await off.tools.call(caller, 'set_board_status', { status: 'review' })
+    expect(out.isError).toBe(true)
+    expect(out.structuredContent).toMatchObject({ code: 'not_allowed' })
+    expect(setBoard).not.toHaveBeenCalled()
+    expect(off.setBoard).not.toHaveBeenCalled()
   })
 })

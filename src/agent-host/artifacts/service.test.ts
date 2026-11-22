@@ -57,6 +57,7 @@ describe('the servers a session attaches with', () => {
       'list_sessions',
       'get_session',
       'rename_session',
+      'set_board_status',
       'archive_session',
       'start_session',
       'read_session_history',

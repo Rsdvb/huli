@@ -19,6 +19,7 @@ import { Trans, useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { originLabel } from '@shared/browser'
 import { LOCALES, LOCALE_NAMES, type LanguageSetting } from '@shared/locale'
+import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports'
 import {
   DEFAULT_SETTINGS,
   NEW_SESSION_LISTS,
@@ -841,6 +842,53 @@ export function WorktreeLocation() {
           {t('git.worktreeRoot.reset')}
         </SetButton>
       )}
+    </>
+  )
+}
+
+/** Huli: the first port of the blocks worktree sessions hold, applied when the field is left. */
+export function WorktreePorts() {
+  const { t } = useTranslation('settings')
+  const base = useSettings().git.portBase
+  const [apply, error] = useApply()
+  const [draft, setDraft] = useState<string | null>(null)
+  const next = draft === null ? base : Number(draft.trim())
+  const invalid = draft !== null && !isPortBase(next)
+  const commit = () => {
+    if (draft !== null && isPortBase(next) && next !== base) apply({ git: { portBase: next } })
+    if (!invalid) setDraft(null)
+  }
+  return (
+    <>
+      <ControlError
+        error={
+          invalid
+            ? t('git.worktreePorts.invalid', { min: PORT_BASE_MIN, max: PORT_BASE_MAX })
+            : error
+        }
+      />
+      <span className="k-value">{t('git.worktreePorts.from')}</span>
+      <SetInput
+        aria-label={t('git.worktreePorts.name')}
+        aria-invalid={invalid || undefined}
+        value={draft ?? String(base)}
+        inputMode="numeric"
+        maxLength={5}
+        spellCheck={false}
+        autoComplete="off"
+        className="k-input--short"
+        onFocus={() => setDraft((current) => current ?? String(base))}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return
+          if (event.key === 'Enter') event.currentTarget.blur()
+          else if (event.key === 'Escape') {
+            event.stopPropagation()
+            setDraft(null)
+          }
+        }}
+      />
     </>
   )
 }

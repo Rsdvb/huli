@@ -11,6 +11,10 @@ import { SessionManager, type SessionEvents } from './sessions'
 import { returnedFile, sessionsFile, type SessionRecord, type SessionsFile } from './storage'
 import type { StoredThread } from './threads/model'
 import type { ThreadStore } from './threads/store'
+import { DEFAULT_WORKTREE_SETTINGS } from '@shared/git'
+import type { SessionOptions } from './connection'
+import { HostError } from './errors'
+import type { WorktreeManager } from './worktrees/manager'
 
 let dir: string
 
@@ -34,6 +38,8 @@ function manager(
     threads?: Partial<ThreadStore>
     scratch?: ScratchFolders
     profiles?: ConstructorParameters<typeof SessionManager>[0]['profiles']
+    worktrees?: WorktreeManager
+    portFree?: (port: number) => Promise<boolean>
   } = {},
 ) {
   const added: string[] = []
@@ -70,6 +76,8 @@ function manager(
     settings: () => ({}) as never,
     ...(extra.outside ? { outside: extra.outside } : {}),
     ...(extra.profiles ? { profiles: extra.profiles } : {}),
+    ...(extra.worktrees ? { worktrees: extra.worktrees } : {}),
+    ...(extra.portFree ? { portFree: extra.portFree } : {}),
   } satisfies ConstructorParameters<typeof SessionManager>[0]
   return { sessions: new SessionManager(deps), added }
 }
@@ -507,5 +515,240 @@ describe('Huli: a session’s API profile', () => {
     await expect(sessions.setProfile(id, 'p1')).rejects.toMatchObject({ code: 'invalid_params' })
     // Null is its own sign-in already.
     await sessions.setProfile(id, null)
+  })
+})
+
+describe('Huli: the task board', () => {
+  const record = (id: string, extra: Partial<SessionRecord> = {}) =>
+    ({
+      id,
+      agentId: 'claude-code',
+      acpSessionId: `acp-${id}`,
+      projectPath: '/repo',
+      title: id,
+      createdAt: 7,
+      updatedAt: 8,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+      ...extra,
+    }) satisfies SessionRecord
+
+  async function loaded(records: SessionRecord[]) {
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: records })
+    await store.flush()
+    const { sessions } = manager()
+    await sessions.load()
+    return sessions
+  }
+
+  it("puts the user's own sessions from before the board in progress, and no other", async () => {
+    const sessions = await loaded([
+      record('own'),
+      record('child', { parentId: 'own' }),
+      record('run', { origin: 'routine' }),
+    ])
+    expect(sessions.summary('own').board).toEqual({ status: 'in_progress', at: 7 })
+    expect(sessions.summary('child').board).toBeNull()
+    expect(sessions.summary('run').board).toBeNull()
+  })
+
+  it('keeps the column a session was moved to across a restart and an archive', async () => {
+    const before = await loaded([record('s1')])
+    before.setBoardStatus('s1', 'review')
+    const moved = before.summary('s1').board
+    expect(moved?.status).toBe('review')
+    await before.archive('s1')
+    await before.flush()
+    const { sessions } = manager()
+    await sessions.load()
+    expect(sessions.summary('s1').board).toEqual(moved)
+    await sessions.unarchive('s1')
+    expect(sessions.summary('s1').board).toEqual(moved)
+  })
+
+  it("refuses a session that is not on the board, and leaves a column's time alone", async () => {
+    const sessions = await loaded([record('own', { board: { status: 'todo', at: 9 } })])
+    sessions.setBoardStatus('own', 'todo')
+    expect(sessions.summary('own').board).toEqual({ status: 'todo', at: 9 })
+    const child = await loaded([record('p'), record('c', { parentId: 'p' })])
+    expect(() => child.setBoardStatus('c', 'done')).toThrow(HostError)
+    expect(child.summary('c').board).toBeNull()
+  })
+})
+
+describe('Huli: the ports of worktree sessions', () => {
+  const OID = 'a'.repeat(40)
+
+  /** Worktrees in real folders of `dir`, each prepared at once, with the variables it got. */
+  function worktrees() {
+    const setupEnv: Record<string, string>[] = []
+    let made = 0
+    const manager = {
+      settings: () => DEFAULT_WORKTREE_SETTINGS,
+      create: async () => {
+        made++
+        const folder = path.join(dir, `wt-${made}`)
+        await mkdir(folder, { recursive: true })
+        return { path: folder, branch: `b${made}`, base: 'main', baseOid: OID }
+      },
+      prepare: async (
+        _project: string,
+        _record: unknown,
+        onState: (state: { state: 'ready' }) => void,
+        env: Record<string, string>,
+      ) => {
+        setupEnv.push(env)
+        onState({ state: 'ready' })
+        return { state: 'ready' }
+      },
+      stop: () => {},
+      isPreparing: () => false,
+    } as unknown as WorktreeManager
+    return { manager, setupEnv }
+  }
+
+  /** An agent that is signed out, so a new session stays as it is, with what it was given. */
+  function signedOut() {
+    const given: SessionOptions[] = []
+    return {
+      given,
+      agents: {
+        ensureReady: async () => ({
+          init: { capabilities: {} },
+          connection: {
+            newSession: async (_cwd: string, attach: SessionOptions) => {
+              given.push(attach)
+              throw new HostError('auth_required', 'Sign in first')
+            },
+          },
+        }),
+        authRequired: () => {},
+        isDisabled: () => false,
+        runtime: () => null,
+      },
+    }
+  }
+
+  async function started(busy: ReadonlySet<number> = new Set()) {
+    const agent = signedOut()
+    const trees = worktrees()
+    const made = manager(
+      {},
+      {
+        agents: agent.agents,
+        worktrees: trees.manager,
+        portFree: async (port) => !busy.has(port),
+      },
+    )
+    await made.sessions.load()
+    const create = (branch: string) =>
+      made.sessions.create({
+        agentId: 'claude-code',
+        projectPath: dir,
+        worktree: { base: 'main', branch },
+      })
+    return { ...made, ...agent, ...trees, create }
+  }
+
+  it('gives sessions started together blocks that never overlap', async () => {
+    const { create } = await started()
+    const made = await Promise.all([create('a'), create('b'), create('c')])
+    expect(made.map((summary) => summary.worktree?.ports?.first).toSorted()).toEqual([
+      20_000, 20_010, 20_020,
+    ])
+  })
+
+  it('hands the block to the setup command and the agent, past ports in use', async () => {
+    const { create, given, setupEnv } = await started(new Set([20_004]))
+    const summary = await create('a')
+    expect(summary.worktree?.ports).toEqual({ first: 20_010, count: 10 })
+    expect(given[0]?.env).toEqual({ KITE_PORT: '20010', KITE_PORT_COUNT: '10' })
+    expect(setupEnv[0]).toEqual({ KITE_PORT: '20010', KITE_PORT_COUNT: '10' })
+  })
+
+  /** A stored worktree session that holds `first` and the nine ports after it. */
+  const holding = (id: string, first: number, extra: Partial<SessionRecord> = {}) =>
+    ({
+      id,
+      agentId: 'claude-code',
+      acpSessionId: `acp-${id}`,
+      projectPath: dir,
+      title: id,
+      createdAt: 1,
+      updatedAt: 2,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+      worktree: { path: path.join(dir, `stored-${id}`), branch: id, base: 'main', baseOid: OID },
+      ports: { first, count: 10 },
+      ...extra,
+    }) satisfies SessionRecord
+
+  it('keeps the blocks stored sessions hold across a restart, and lets one go with its archive', async () => {
+    const store = sessionsFile(dir, log)
+    store.save({
+      version: 1,
+      sessions: [
+        holding('a', 20_000),
+        holding('b', 20_010),
+        // Archived: its block is free, kept only for a restore.
+        holding('old', 20_020, { archivedAt: 3 }),
+        // Its worktree was removed, so it holds nothing.
+        holding('gone', 20_030, {
+          worktree: { path: '/x', branch: 'g', base: 'main', baseOid: OID, removed: 'worktree' },
+        }),
+      ],
+    })
+    await store.flush()
+    const { sessions, create } = await started()
+    expect(sessions.summary('a').worktree?.ports).toEqual({ first: 20_000, count: 10 })
+    expect(sessions.summary('old').worktree?.ports).toBeUndefined()
+    expect(sessions.summary('gone').worktree?.ports).toBeUndefined()
+    expect((await create('c')).worktree?.ports).toEqual({ first: 20_020, count: 10 })
+    expect((await create('d')).worktree?.ports).toEqual({ first: 20_030, count: 10 })
+    await sessions.archive('a')
+    expect(sessions.summary('a').worktree?.ports).toBeUndefined()
+    // The archived session's block goes to the next one.
+    expect((await create('e')).worktree?.ports).toEqual({ first: 20_000, count: 10 })
+  })
+
+  it('gives a restored session its block back, or a new one when another took it', async () => {
+    const store = sessionsFile(dir, log)
+    store.save({
+      version: 1,
+      sessions: [
+        holding('kept', 20_000, { archivedAt: 3 }),
+        holding('taken', 20_010, { archivedAt: 3 }),
+        holding('child', 20_010, {
+          parentId: 'taken',
+          worktree: {
+            path: path.join(dir, 'stored-taken'),
+            branch: 'taken',
+            base: 'main',
+            baseOid: OID,
+          },
+        }),
+        holding('other', 20_010),
+      ],
+    })
+    await store.flush()
+    const { sessions } = await started()
+    await sessions.unarchive('kept')
+    expect(sessions.summary('kept').worktree?.ports).toEqual({ first: 20_000, count: 10 })
+    await sessions.unarchive('taken')
+    expect(sessions.summary('taken').worktree?.ports).toEqual({ first: 20_020, count: 10 })
+    // Its sub-session, in the same worktree, shares the new block.
+    expect(sessions.summary('child').worktree?.ports).toEqual({ first: 20_020, count: 10 })
+    await sessions.flush()
+    expect((await index())?.sessions.find((item) => item.id === 'taken')?.ports).toEqual({
+      first: 20_020,
+      count: 10,
+    })
   })
 })

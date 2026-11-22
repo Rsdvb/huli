@@ -162,6 +162,7 @@ import {
   WebNotificationsNote,
   TextSize,
   WorktreeLocation,
+  WorktreePorts,
   Zoom,
 } from './sections'
 import { useAllowedSites } from './allowed-sites'
@@ -829,6 +830,12 @@ export function useGitSection(): SectionDef {
         setting: 'git.worktree-root',
         group: group('worktrees', t('git.groups.worktrees')),
         render: () => <WorktreeLocation />,
+      },
+      {
+        id: 'worktree-ports',
+        setting: 'git.worktree-ports',
+        group: group('worktrees', t('git.groups.worktrees')),
+        render: () => <WorktreePorts />,
       },
     ],
   }

@@ -230,6 +230,8 @@ import { HostError, invalidParams, notFound } from './errors'
 import { t } from './i18n'
 import type { ProviderProfiles } from './provider-profiles'
 import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
+import { NEW_BOARD_STATUS, type BoardStatus, type SessionBoard } from '@shared/session-board'
+import { DEFAULT_PORT_BASE, isPortBase, portEnv, type PortBlock } from '@shared/worktree-ports'
 import {
   GITHUB_ISSUE_URL,
   GITHUB_PULL_REQUEST_URL,
@@ -303,6 +305,7 @@ import { isDesktopScratch } from './claude-desktop'
 import type { WorktreeInspection } from './worktrees/api'
 import type { PrepareState, SetupLog, WorktreeManager } from './worktrees/manager'
 import { BranchNaming } from './worktrees/naming'
+import { overlaps, pickPortBlock, portFree } from './worktrees/ports'
 import {
   carriedContext,
   compactedTurns,
@@ -610,8 +613,13 @@ export interface SessionManagerDeps {
   /** What a workflow step hears of its session; set once the task engine exists. */
   task?: TaskSessionHooksRef
   timings?: Partial<SessionTimings>
+  /** Huli: whether nothing listens on a port, for a worktree's block; the system's by default. */
+  portFree?: (port: number) => Promise<boolean>
   now?: () => number
 }
+
+/** Huli: how long a block picked for a worktree is kept from others before its session holds it. */
+const PENDING_PORTS_MS = 10 * 60_000
 
 type Failure =
   | { action: 'create' }
@@ -1749,7 +1757,10 @@ export class SessionManager {
         : null,
       issue: record.issue ? sessionIssue(record.issue) : null,
       prFlow: record.prFlow ? this.prFlowSummary(record.id, record.prFlow) : null,
-      ...(record.worktree ? { worktree: this.worktreeSummary(record.worktree) } : {}),
+      board: this.boardOf(record),
+      ...(record.worktree
+        ? { worktree: this.worktreeSummary(record.worktree, this.portsOf(record)) }
+        : {}),
       ...(record.agentWorktree ? { agentWorktree: { ...record.agentWorktree } } : {}),
       ...(live?.prepared
         ? {
@@ -4057,6 +4068,7 @@ export class SessionManager {
     sessionId: string,
     record: SessionRecord,
     runtime: AgentRuntime | null | undefined,
+    ports: PortBlock | null = this.portsOf(record),
   ): Promise<SessionOptions> {
     const projectMcp = this.projectMcpGate(sessionId)
     const projectHooks = this.projectHooksGate(sessionId)
@@ -4081,6 +4093,7 @@ export class SessionManager {
       ...(record.instructionsAhead ? { promptAhead: true } : {}),
       ...(append ? { systemPromptAppend: append } : {}),
       ...(record.origin === 'routine' ? { routine: true } : {}),
+      ...(ports ? { env: portEnv(ports) } : {}),
     }
   }
 
@@ -5100,6 +5113,12 @@ export class SessionManager {
         this.nameBranch(params.agentId, projectPath, worktree, prompt, request, params.options)
       }
     }
+    // Huli: a new worktree gets a block of ports of its own; a sub-session shares its parent's.
+    const ports = newWorktree
+      ? await this.takePorts()
+      : params.parentId !== undefined && worktree
+        ? this.portsOf(this.recordOf(params.parentId))
+        : null
     const now = this.now()
     const record: SessionRecord = {
       id: randomUUID(),
@@ -5119,6 +5138,8 @@ export class SessionManager {
       ...(profileId !== undefined ? { profileId } : {}),
       ...(params.group ? { group: { ...params.group } } : {}),
       ...(params.issue && GITHUB_ISSUE_URL.test(params.issue) ? { issue: params.issue } : {}),
+      ...(params.parentId === undefined ? { board: { status: NEW_BOARD_STATUS, at: now } } : {}),
+      ...(ports ? { ports: { ...ports } } : {}),
     }
     if (params.startedBy !== undefined) record.startedBy = params.startedBy
     const options = params.options ?? {}
@@ -5164,6 +5185,7 @@ export class SessionManager {
           this.deps.worktrees?.stop(worktree.path)
           this.dropBranchName(worktree.path)
           void this.discardWorktree(projectPath, worktree)
+          if (ports) this.pendingPorts.delete(ports.first)
         }
         throw error
       }
@@ -8570,17 +8592,20 @@ export class SessionManager {
     )
     const forkId = randomUUID()
     const own = await this.forkWorktree(source.record, worktree)
+    // Huli: a fork in a worktree of its own gets ports of its own; one that shares, the source's.
+    const ports = own ? await this.takePorts() : this.portsOf(source.record)
     let setup
     try {
       setup = await runtime.connection.forkSession(
         source.record.acpSessionId,
         own?.path ?? workDir(source.record),
-        await this.attachOptions(forkId, source.record, runtime),
+        await this.attachOptions(forkId, source.record, runtime, ports),
         cut?.point,
       )
     } catch (error) {
       this.deps.mcp?.detached(forkId)
       if (own) void this.discardWorktree(source.record.projectPath, own)
+      if (own && ports) this.pendingPorts.delete(ports.first)
       throw agentError(error)
     }
     const blobs = (await reading).filter((blob) => blob !== null)
@@ -8601,7 +8626,10 @@ export class SessionManager {
       lastViewedAt: now,
       branch: null,
       ...(own ? { worktree: own } : {}),
+      board: { status: NEW_BOARD_STATUS, at: now },
     }
+    if (ports) record.ports = { ...ports }
+    else delete record.ports
     // A queued prompt, the attachments it holds, and the source's pin or archive stay with it.
     delete record.queue
     delete record.pinnedAt
@@ -8740,6 +8768,7 @@ export class SessionManager {
     this.deps.agents.assertEnabled(agentId)
     // A fork in a worktree that asked for one of its own gets it; otherwise it shares the source's.
     const own = worktree ? await this.forkWorktree(source.record, worktree) : null
+    const ports = own ? await this.takePorts() : this.portsOf(source.record)
     const kept = entries.filter((entry) => entry.kind !== 'subagent')
     const blobs = (
       await Promise.all(
@@ -8765,7 +8794,10 @@ export class SessionManager {
       lastViewedAt: now,
       branch: null,
       ...(own ? { worktree: own } : {}),
+      board: { status: NEW_BOARD_STATUS, at: now },
     }
+    if (ports) record.ports = { ...ports }
+    else delete record.ports
     for (const key of [
       'queue',
       'pinnedAt',
@@ -11224,6 +11256,8 @@ export class SessionManager {
       startedBy: record.startedBy ?? null,
       archived: this.isArchived(record),
       projectPath: record.projectPath,
+      board: this.boardOf(record)?.status ?? null,
+      ports: this.portsOf(record),
     }
   }
 
@@ -11668,7 +11702,104 @@ export class SessionManager {
 
   // Worktrees.
 
-  private worktreeSummary(worktree: NonNullable<SessionRecord['worktree']>): SessionWorktree {
+  // Huli: the task board.
+
+  /** Its board column, for the user's own top-level session; null for the others. */
+  private boardOf(record: SessionRecord): SessionBoard | null {
+    if (record.parentId !== null || record.origin !== 'user') return null
+    return record.board ? { ...record.board } : { status: NEW_BOARD_STATUS, at: record.createdAt }
+  }
+
+  /** Moves the user's own top-level session to a column of the task board. */
+  setBoardStatus(sessionId: string, status: BoardStatus): void {
+    const record = this.recordOf(sessionId)
+    const board = this.boardOf(record)
+    if (!board) throw new HostError('restricted', t('session.notOnBoard'))
+    if (board.status === status) return
+    record.board = { status, at: this.now() }
+    this.saveRecord(sessionId)
+  }
+
+  // Huli: the ports of worktree sessions.
+
+  /** Blocks picked for worktrees whose session holds none yet, by their first port, with when. */
+  private readonly pendingPorts = new Map<number, { block: PortBlock; at: number }>()
+  private portsQueue: Promise<unknown> = Promise.resolve()
+
+  /** The block a session holds while it is live: not archived, its worktree there. */
+  private portsOf(record: SessionRecord): PortBlock | null {
+    if (!record.ports || !record.worktree || record.worktree.removed !== undefined) return null
+    return this.isArchived(record) ? null : record.ports
+  }
+
+  /** The blocks live sessions hold, each with its worktree's folder; `except`'s left out. */
+  private heldPorts(except?: string): { block: PortBlock; folder: string }[] {
+    const records = new Map<string, SessionRecord>()
+    for (const record of this.records.values()) records.set(record.id, record)
+    for (const live of this.live.values()) records.set(live.id, live.record)
+    const held: { block: PortBlock; folder: string }[] = []
+    for (const record of records.values()) {
+      const block = record.id === except ? null : this.portsOf(record)
+      if (block && record.worktree) held.push({ block, folder: record.worktree.path })
+    }
+    return held
+  }
+
+  private portBase(): number {
+    const base = this.deps.settings().git?.portBase
+    return isPortBase(base) ? base : DEFAULT_PORT_BASE
+  }
+
+  /**
+   * A free block for a new worktree, kept from other picks until its session holds it; null when
+   * none is free. Picks run one at a time, so sessions started together never share one.
+   */
+  private takePorts(): Promise<PortBlock | null> {
+    const run = this.portsQueue.then(async () => {
+      const held = this.heldPorts().map((item) => item.block)
+      const now = this.now()
+      for (const [first, pending] of this.pendingPorts) {
+        if (now - pending.at > PENDING_PORTS_MS || held.some((block) => block.first === first)) {
+          this.pendingPorts.delete(first)
+        }
+      }
+      const taken = [...held, ...[...this.pendingPorts.values()].map((item) => item.block)]
+      const block = await pickPortBlock(this.portBase(), taken, this.deps.portFree ?? portFree)
+      if (block) this.pendingPorts.set(block.first, { block, at: this.now() })
+      else this.deps.diagnostics.log('warn', 'No free block of ports for a new worktree')
+      return block
+    })
+    this.portsQueue = run.catch(() => undefined)
+    return run.catch(() => null)
+  }
+
+  /**
+   * Sessions live again, restored or back in their worktree, keep their block unless a live
+   * session of another worktree took part of it meanwhile; then they share the block another
+   * session of their worktree holds, or get a new one.
+   */
+  private async reclaimPorts(records: readonly SessionRecord[]): Promise<void> {
+    for (const record of records) {
+      const own = this.portsOf(record)
+      if (!own || !record.worktree) continue
+      const folder = record.worktree.path
+      const held = this.heldPorts(record.id)
+      const here = (item: { folder: string }) => samePath(item.folder, folder, this.deps.platform)
+      const clashes = (block: PortBlock) =>
+        held.some((item) => !here(item) && overlaps(item.block, block))
+      if (!clashes(own)) continue
+      const shared = held.find((item) => here(item) && !clashes(item.block))?.block
+      const block = shared ?? (await this.takePorts())
+      if (block) record.ports = { ...block }
+      else delete record.ports
+      this.saveRecord(record.id)
+    }
+  }
+
+  private worktreeSummary(
+    worktree: NonNullable<SessionRecord['worktree']>,
+    ports: PortBlock | null = null,
+  ): SessionWorktree {
     const { path, branch, base, baseOid } = worktree
     const key = pathKey(path, this.deps.platform)
     const preparing = this.preparing.get(key)
@@ -11684,7 +11815,15 @@ export class SessionManager {
         : state === 'setup-failed'
           ? { stage: 'setup', exitCode: null, message: t('session.worktreeInterrupted') }
           : undefined
-    return { path, branch, base, baseOid, state, ...(failure ? { failure } : {}) }
+    return {
+      path,
+      branch,
+      base,
+      baseOid,
+      state,
+      ...(failure ? { failure } : {}),
+      ...(ports ? { ports: { ...ports } } : {}),
+    }
   }
 
   /** Whether the session's first message, and what follows it, waits for its worktree. */
@@ -11729,6 +11868,7 @@ export class SessionManager {
     this.markWorktree(worktree.path, (record) => {
       delete record.removed
     })
+    await this.reclaimPorts(this.worktreeUsers(worktree.path))
     return worktree.path
   }
 
@@ -11856,20 +11996,29 @@ export class SessionManager {
     this.markWorktree(worktree.path, (record) => {
       record.pending = true
     })
-    void manager.prepare(projectPath, worktree, (next) => {
-      if (next.state === 'ready') {
-        this.afterBranchName(projectPath, worktree.path, () => {
-          this.preparing.delete(key)
-          this.markWorktree(worktree.path, (record) => {
-            delete record.pending
+    const ports = this.worktreeUsers(worktree.path)
+      .map((record) => this.portsOf(record))
+      .find((block) => block !== null)
+    const env = ports ? portEnv(ports) : {}
+    void manager.prepare(
+      projectPath,
+      worktree,
+      (next) => {
+        if (next.state === 'ready') {
+          this.afterBranchName(projectPath, worktree.path, () => {
+            this.preparing.delete(key)
+            this.markWorktree(worktree.path, (record) => {
+              delete record.pending
+            })
+            this.releaseWorktreeWaiters(worktree.path)
           })
-          this.releaseWorktreeWaiters(worktree.path)
-        })
-        return
-      }
-      this.preparing.set(key, next)
-      for (const record of this.worktreeUsers(worktree.path)) this.touch(record.id)
-    })
+          return
+        }
+        this.preparing.set(key, next)
+        for (const record of this.worktreeUsers(worktree.path)) this.touch(record.id)
+      },
+      env,
+    )
   }
 
   /**
@@ -12132,6 +12281,7 @@ export class SessionManager {
     }
     delete record.archivedAt
     this.takeBackSubSessions(record)
+    await this.reclaimPorts([record, ...this.descendants(record.id)])
     this.saveRecord(record.id)
   }
 

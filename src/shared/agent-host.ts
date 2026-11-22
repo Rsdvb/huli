@@ -48,6 +48,7 @@ import type {
   HistorySource,
 } from './agent-history'
 import type { SessionFolder } from './session-folders'
+import type { BoardStatus, SessionBoard } from './session-board'
 import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './session-groups'
 import type { IssueInbox, SessionIssue, SessionPrFlow } from './github-flow'
 import type {
@@ -870,6 +871,9 @@ export interface SessionSummary {
   issue?: SessionIssue | null
   // Huli: its pull request merged once green or watched for its agent; null while neither is on
   prFlow?: SessionPrFlow | null
+  // Huli: its column on the user's task board, for the user's own top-level session; null for
+  // the others; absent from older hosts
+  board?: SessionBoard | null
 }
 
 /**
@@ -1605,6 +1609,8 @@ export interface HostContract {
     params: { sessionId: string; url: string; autoMerge?: boolean; watch?: boolean }
     result: SessionSummary
   }
+  /** Huli: moves the user's own top-level session to a column of the task board. */
+  'sessions.setBoardStatus': { params: { sessionId: string; status: BoardStatus }; result: void }
   /** Huli: stops a turn that looks stuck, stops it and goes on again, or keeps waiting. */
   'sessions.stall': { params: { sessionId: string; action: StallAction }; result: void }
   // An image or pasted text the thread store keeps for a sent attachment, by its hash.
@@ -2324,6 +2330,7 @@ export const HOST_METHODS = [
   'sessions.limitPause',
   'sessions.setAutoResume',
   'sessions.setPrFlow',
+  'sessions.setBoardStatus',
   'sessions.stall',
   'sessions.blob',
   'sessions.setConfigOption',

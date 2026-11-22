@@ -56,6 +56,7 @@ import {
 import { addressKey, isPort, MAX_OWN_ADDRESSES, parseDirectAddress } from '@shared/remote/address'
 import type { DirectAddress } from '@shared/remote/protocol'
 import { DEVICE_NAME_CHARS, isDeviceName } from '@shared/remote/device'
+import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports'
 import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { THEME_ID } from '@shared/themes'
@@ -230,6 +231,12 @@ const isLinkSites: Check = (value, path) => {
   return null
 }
 
+/** Huli: where worktree sessions' port blocks start, with room for a whole block below 65536. */
+const isPortBaseValue: Check = (value, path) =>
+  isPortBase(value)
+    ? null
+    : `"${path}" must be a whole number from ${PORT_BASE_MIN} to ${PORT_BASE_MAX}`
+
 /** Null, or an absolute path on this computer that has no NUL. */
 function isWorktreeRoot(value: unknown, path: string): string | null {
   if (value === null) return null
@@ -284,7 +291,7 @@ const SECTION_FIELDS = {
     sound: isBoolean,
     badge: isBoolean,
   },
-  git: { backgroundFetch: isBoolean, worktreeRoot: isWorktreeRoot },
+  git: { backgroundFetch: isBoolean, worktreeRoot: isWorktreeRoot, portBase: isPortBaseValue },
   updates: {
     automatic: oneOf('download', 'restart', 'notify', 'off'),
     source: oneOf('auto', 'github'),

@@ -301,6 +301,16 @@
       "publish": "确认发布"
     }
   },
+  "board": {
+    "menu": "看板",
+    "mark": "看板：{{status}}",
+    "status": {
+      "todo": "待办",
+      "in_progress": "进行中",
+      "review": "待审",
+      "done": "完成"
+    }
+  },
   "indicator": {
     "waiting_other": "等待你处理，{{count}} 个请求",
     "error": "错误",

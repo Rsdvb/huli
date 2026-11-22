@@ -67,6 +67,7 @@ import type { Platform } from '@shared/platform'
 import { isProfileId } from '@shared/provider-profiles'
 import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
+import { BOARD_STATUSES, isBoardStatus } from '@shared/session-board'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
 import {
   MAX_WORKFLOW_STEPS,
@@ -2133,6 +2134,13 @@ export function createValidators(platform: Platform): Validators {
     'sessions.setAutoResume': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), on: flag(o, 'on') }
+    },
+    'sessions.setBoardStatus': (params) => {
+      const o = fields(params)
+      if (!isBoardStatus(o.status)) {
+        throw invalidParams(`status must be one of ${BOARD_STATUSES.join(', ')}`)
+      }
+      return { sessionId: sessionId(o), status: o.status }
     },
     'sessions.setPrFlow': (params) => {
       const o = fields(params)

@@ -331,6 +331,16 @@
       "publish": "A publish to confirm"
     }
   },
+  "board": {
+    "menu": "Board",
+    "mark": "Board: {{status}}",
+    "status": {
+      "todo": "To do",
+      "in_progress": "In progress",
+      "review": "In review",
+      "done": "Done"
+    }
+  },
   "indicator": {
     "waiting_one": "Waiting for you, {{count}} request",
     "waiting_other": "Waiting for you, {{count}} requests",

@@ -963,6 +963,7 @@ export class AgentHost {
         list: (projectPath) => this.sessions.toolSessions(projectPath),
         lastReply: (sessionId) => this.sessions.lastReply(sessionId),
         rename: (sessionId, title) => this.sessions.renameByAgent(sessionId, title),
+        setBoard: (sessionId, status) => this.sessions.setBoardStatus(sessionId, status),
         work: (sessionId) => this.sessions.runningWork([sessionId]),
         archiveAfterTurn: (sessionId, agentName) =>
           this.sessions.archiveWhenIdle(sessionId, agentName),
@@ -3423,6 +3424,8 @@ export class AgentHost {
       'sessions.limitPause': ({ sessionId, action }) =>
         sessions.limitPauseAction(sessionId, action),
       'sessions.setAutoResume': ({ sessionId, on }) => sessions.setAutoResume(sessionId, on),
+      'sessions.setBoardStatus': ({ sessionId, status }) =>
+        sessions.setBoardStatus(sessionId, status),
       'sessions.setPrFlow': ({ sessionId, url, autoMerge, watch }) =>
         this.gitCall(() =>
           sessions.setPrFlow(sessionId, url, {

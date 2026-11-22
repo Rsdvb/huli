@@ -1,0 +1,218 @@
+/* Huli: the task board, the Overview page's Board view, on App Shell's variables. Its four
+   columns stand side by side, and two by two or one under another as the page narrows. */
+
+.kb-frame {
+  container-type: inline-size;
+  margin-top: 20px;
+}
+.kb-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
+}
+@container (max-width: 700px) {
+  .kb-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 360px) {
+  .kb-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.kb-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 120px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--line-soft);
+  box-shadow: inset 0 0 0 0.5px var(--line);
+  transition:
+    background-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+.kb-col[data-over] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+
+.kb-col__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.kb-col__head b {
+  font-weight: 600;
+  color: var(--ink);
+}
+.kb-col__head span {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-col__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kb-col__empty {
+  margin: 4px 0 0;
+  padding: 18px 10px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--faint);
+}
+
+/* A card off screen skips its layout and paint, so a column of hundreds stays cheap. */
+.kb-card-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 62px;
+}
+.kb-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 9px 10px 8px;
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  text-align: left;
+  color: var(--text);
+  cursor: grab;
+  transition:
+    box-shadow var(--duration-fast) ease,
+    opacity var(--duration-fast) ease;
+}
+.kb-card:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+.kb-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.kb-card[data-dragging] {
+  opacity: 0.4;
+}
+.kb-card__title {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--ink);
+}
+.kb-card__title > :first-child {
+  flex: none;
+  margin-top: 2px;
+}
+.kb-card__title > span {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.kb-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 16px;
+  padding-left: 21px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.kb-card__place,
+.kb-card__branch span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-card__place {
+  max-width: 100%;
+}
+.kb-card__branch {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.kb-card__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.kb-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  height: 34px;
+  padding: 0 12px 0 10px;
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: grabbing;
+}
+.kb-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The project filter in the page's head. */
+.kb-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 240px;
+  padding: 0 10px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: 12.5px;
+  color: var(--text);
+  transition: background-color var(--duration-fast) ease;
+}
+.kb-filter:hover,
+.kb-filter[data-popup-open] {
+  background: var(--chip);
+}
+.kb-filter span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-col,
+  .kb-card,
+  .kb-filter {
+    transition: none;
+  }
+}

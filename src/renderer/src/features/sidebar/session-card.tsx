@@ -11,6 +11,7 @@ import { useNow } from '@renderer/lib/use-now'
 import { agentName } from '@renderer/stores/agents'
 import { optionsOn, useAgentOptionsStore } from '@renderer/stores/agent-options'
 import { hostOfSession, sessionTitle } from '@renderer/stores/sessions'
+import { WorktreePorts } from '@renderer/features/session/worktree/worktree-tag'
 import { CardOutputs } from './card-outputs'
 import type { RowStatus } from './row-status'
 import type { SessionCache } from './session-cache'
@@ -54,6 +55,9 @@ export function SessionCard({
             </span>
           )}
         </div>
+        {summary.worktree?.ports && (
+          <WorktreePorts ports={summary.worktree.ports} className="text-tertiary" />
+        )}
       </div>
       <CardOutputs summary={summary} outputs={outputs} />
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-subtle px-3.5 py-2 text-hint text-tertiary">

@@ -14,6 +14,8 @@ import { SubagentMenu } from './SubagentMenu'
 import { PR_STATE_TEXT, PrMark } from '../ui/session/gitIcons'
 import { AgentAvatar, type AvatarBadge } from '../ui/AgentAvatar'
 import { Icon } from '../ui/Icon'
+import { Icon as SpecIcon } from '../ui/session/Icon'
+import { BOARD_ICON, BOARD_LABEL, boardStatusOf } from '../board'
 import { OsIcon } from '../ui/OsIcon'
 import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
@@ -242,6 +244,7 @@ export const SessionRow = memo(function SessionRow(props: {
   const subagents =
     props.stale && props.subagents ? { ...props.subagents, running: false } : props.subagents
   const since = running ? (s.turnStartedAt ?? null) : null
+  const board = boardStatusOf(s)
   // The avatar's badge already says it runs; the meta line keeps only what asks for the user, and
   // that a run is only as last heard of.
   const stateText = state && (state.kind !== 'live' || props.stale) ? state : null
@@ -329,6 +332,18 @@ export const SessionRow = memo(function SessionRow(props: {
                 numberOfLines={1}
               >
                 {s.worktree.branch}
+              </Text>
+            </View>
+          ) : null}
+          {/* Huli: its column on the user's task board, quiet beside what Kite marks itself. */}
+          {board ? (
+            <View style={styles.mark} accessibilityLabel={`看板：${BOARD_LABEL[board]}`}>
+              <SpecIcon icon={BOARD_ICON[board]} size={12} color={c.textTertiary} />
+              <Text
+                style={[typeScale.footnote, styles.markName, { color: c.textTertiary }]}
+                numberOfLines={1}
+              >
+                {BOARD_LABEL[board]}
               </Text>
             </View>
           ) : null}

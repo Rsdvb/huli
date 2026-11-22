@@ -12,6 +12,7 @@ import { useState, type ReactNode } from 'react'
 import { Alert } from 'react-native'
 import { router } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
+import { BOARD_STATUSES, type BoardStatus } from '@shared/session-board'
 import { runPhase } from '@shared/session-groups'
 import type { HostLink } from '@shared/remote/link'
 import { call, sessionFolder } from '../git'
@@ -34,6 +35,7 @@ import { copyText } from '../ui/session/feedback'
 import { DeleteSessionDialog } from './DeleteSessionDialog'
 import { RenameDialog } from './RenameDialog'
 import { openUrl } from '../system/openUrl'
+import { BOARD_ICON, BOARD_LABEL, boardStatusOf } from '../board'
 
 export type ActionsPlace = 'list' | 'archive' | 'session'
 
@@ -61,6 +63,8 @@ export interface SessionActions {
   toggleUnread(summary: SessionSummary): void
   retry(summary: SessionSummary): void
   stop(summary: SessionSummary): void
+  /** Huli: moves it to a column of the user's task board. */
+  setBoard(summary: SessionSummary, status: BoardStatus): void
   copyResume(summary: SessionSummary): void
   copySessionId(summary: SessionSummary): void
   /** Its resume command, or null for an agent without one. */
@@ -186,6 +190,10 @@ export function useSessionActions(
       run(s, '没能重试', (link) => link.request('sessions.retry', { sessionId: s.id })),
     stop: (s: SessionSummary) =>
       run(s, '没能停止', (link) => link.request('sessions.cancel', { sessionId: s.id })),
+    setBoard: (s: SessionSummary, status: BoardStatus) =>
+      run(s, '没能移动', (link) =>
+        link.request('sessions.setBoardStatus', { sessionId: s.id, status }),
+      ),
     copyResume: (s: SessionSummary) => {
       const command = resumeOf(s)
       if (!command) return
@@ -305,7 +313,25 @@ export function useSessionActions(
         onPress: () => toggleMuted(s.id, !muted),
       },
     ]
+    const board = boardStatusOf(s)
     const organize: MenuNode[] = [
+      ...(board
+        ? [
+            {
+              key: 'board',
+              label: '看板',
+              subtitle: BOARD_LABEL[board],
+              icon: BOARD_ICON[board].sf,
+              items: BOARD_STATUSES.map((status) => ({
+                key: `board:${status}`,
+                label: BOARD_LABEL[status],
+                icon: BOARD_ICON[status].sf,
+                checked: status === board,
+                onPress: () => actions.setBoard(s, status),
+              })),
+            },
+          ]
+        : []),
       ...(topLevel && extras.folders
         ? [{ key: 'move', label: '移到文件夹', icon: 'folder' as const, items: extras.folders }]
         : []),

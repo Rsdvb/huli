@@ -349,6 +349,13 @@
       "choose": "选择…",
       "reset": "重置"
     },
+    "worktreePorts": {
+      "name": "工作树端口",
+      "description": "纸鸢为会话建的每个工作树，都会从这个端口起分到 10 个别的打开会话不用的端口，给它的开发服务器用。工作树的准备命令里可以用 KITE_PORT 和 KITE_PORT_COUNT 读到。",
+      "keywords": "端口 port KITE_PORT 开发服务器 工作树 worktree",
+      "invalid": "请输入 {{min}} 到 {{max}} 之间的端口。",
+      "from": "起始"
+    },
     "groups": {
       "tools": "工具",
       "sync": "同步",

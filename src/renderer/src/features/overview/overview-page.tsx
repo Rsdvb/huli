@@ -3,11 +3,18 @@
 
 import type { ReactNode } from 'react'
 import { useState } from 'react'
-import { Calendar03Icon, InboxIcon, WorkflowSquare03Icon } from '@hugeicons/core-free-icons'
+import {
+  Calendar03Icon,
+  InboxIcon,
+  KanbanIcon,
+  WorkflowSquare03Icon,
+} from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { EmptyState, Icon } from '@renderer/components/affect/app-shell'
 import { SegmentedControl } from '@renderer/components/segmented-control'
 import { SettingsStyles } from '@renderer/features/routines/kit'
+import { BoardProjectFilter, BoardView } from '@renderer/features/task-board/board-view'
+import { useBoardHasCards } from '@renderer/features/task-board/use-board'
 import { basename } from '@renderer/lib/format'
 import { hostPath } from '@renderer/lib/host-paths'
 import { useSessionsStore } from '@renderer/stores/sessions'
@@ -25,8 +32,13 @@ import {
 } from './use-overview'
 import './overview.css'
 
-const VIEW_ICON = { inbox: InboxIcon, flow: WorkflowSquare03Icon, timeline: Calendar03Icon }
-const VIEWS: readonly OverviewView[] = ['inbox', 'flow', 'timeline']
+const VIEW_ICON = {
+  inbox: InboxIcon,
+  flow: WorkflowSquare03Icon,
+  timeline: Calendar03Icon,
+  board: KanbanIcon,
+}
+const VIEWS: readonly OverviewView[] = ['inbox', 'flow', 'timeline', 'board']
 
 export default function OverviewPage() {
   const { t } = useTranslation('overview')
@@ -37,7 +49,9 @@ export default function OverviewPage() {
   useTaskViews(rows)
   const counts = countByState(rows)
   const shown = filter === 'all' ? rows : rows.filter((row) => row.state === filter)
-  const table = prefs.view !== 'inbox'
+  const board = prefs.view === 'board'
+  const table = prefs.view !== 'inbox' && !board
+  const boardCards = useBoardHasCards()
 
   return (
     <div className="k-scroll">
@@ -49,10 +63,18 @@ export default function OverviewPage() {
             <h1 className="ui-as-page-title">{t('title')}</h1>
             {/* Huli: what is for you, as the sidebar counts it; running rows are not. */}
             <p className="ui-as-page-sub">
-              {t('description', { count: counts.ready + counts.you })}
+              {board
+                ? t('board.description')
+                : t('description', { count: counts.ready + counts.you })}
             </p>
           </span>
           <span className="k-ov__tools app-region-no-drag">
+            {board && (
+              <BoardProjectFilter
+                project={prefs.boardProject}
+                onChange={(boardProject) => setPrefs({ boardProject })}
+              />
+            )}
             {prefs.view === 'flow' && (
               <SegmentedControl<GroupBy>
                 aria-label={t('groupBy.label')}
@@ -81,7 +103,15 @@ export default function OverviewPage() {
           </span>
         </header>
 
-        {!loaded ? null : rows.length === 0 ? (
+        {!loaded ? null : board ? (
+          boardCards ? (
+            <BoardView project={prefs.boardProject} />
+          ) : (
+            <div className="k-ov-empty">
+              <EmptyState bare tall title={t('board.none.title')} text={t('board.none.text')} />
+            </div>
+          )
+        ) : rows.length === 0 ? (
           <div className="k-ov-empty">
             <EmptyState bare tall title={t('empty.title')} text={t('empty.text')} />
           </div>

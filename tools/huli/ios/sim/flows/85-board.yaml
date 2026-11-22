@@ -1,0 +1,42 @@
+# The task board on the phone: a new session's row says 进行中, its long-press menu's 看板 moves
+# it to 待审, which the row then says, and the session's title menu shows the column too.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- tapOn: '返回'
+- waitForAnimationToEnd
+- takeScreenshot: b01-list
+- longPressOn:
+    text: '.*Fix the flaky login test.*'
+- waitForAnimationToEnd
+- takeScreenshot: b02-menu
+- tapOn: '看板'
+- waitForAnimationToEnd
+- takeScreenshot: b03-board-menu
+- tapOn: '待审'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- takeScreenshot: b04-review
