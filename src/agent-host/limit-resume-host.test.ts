@@ -220,3 +220,27 @@ it('goes on now when asked, and with the settings off drops the pause', async ()
     () => window.summary(id)?.limitPause === null && window.summary(id)?.autoResume === false,
   )
 })
+
+it('says where a ChatGPT plan’s shared allowance is raised, and pauses until its reset', async () => {
+  let resetS = 0
+  const fake = codex(() => usedUp(resetS))
+  const { window, id, started } = await running(fake)
+  resetS = soon()
+  // Codex 0.171's words once ChatGPT and Codex share the plan's allowance.
+  const shared = {
+    ...USAGE_LIMIT,
+    message:
+      'You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:00 PM.',
+  }
+  fake.server.notify('account/rateLimits/updated', { rateLimits: usedUp(resetS) })
+  fake.server.notify('error', { ...started, willRetry: false, error: shared })
+  fake.server.notify('turn/completed', {
+    threadId: started.threadId,
+    turn: turn(started.turnId, 'failed', shared),
+  })
+  await paused(window, id)
+  expect(window.summary(id)?.limitPause).toMatchObject({ resetsAt: resetS * 1000 })
+  const notice = window.entries(id).find((entry) => entry.kind === 'notice')
+  expect(notice).toMatchObject({ title: 'ChatGPT plan limit reached', planLimit: true })
+  expect(notice?.kind === 'notice' && notice.description).toContain('ChatGPT Settings › Usage')
+})

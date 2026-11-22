@@ -1719,6 +1719,15 @@ export interface HostContract {
   'manager.moreTurns': { params: { sessionId: string }; result: void }
   /** Huli: stops a turn that looks stuck, stops it and goes on again, or keeps waiting. */
   'sessions.stall': { params: { sessionId: string; action: StallAction }; result: void }
+  /**
+   * Huli: allows a call the agent's automatic review denied, once, where its entry's review offers
+   * an appeal: the agent is told, and with no turn running asked to try again. A call whose risk
+   * `appealConfirms` needs `confirmed`.
+   */
+  'sessions.allowDenied': {
+    params: { sessionId: string; entryId: string; confirmed?: boolean }
+    result: void
+  }
   // An image or pasted text the thread store keeps for a sent attachment, by its hash.
   'sessions.blob': { params: { sessionId: string; hash: string }; result: AttachmentBytes }
   'sessions.setConfigOption': {
@@ -2492,6 +2501,7 @@ export const HOST_METHODS = [
   'manager.detach',
   'manager.moreTurns',
   'sessions.stall',
+  'sessions.allowDenied',
   'sessions.blob',
   'sessions.setConfigOption',
   'sessions.refreshModels',

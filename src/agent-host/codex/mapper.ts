@@ -2,15 +2,17 @@
 // produces for the same work, so a Codex thread reads as it did through codex-acp.
 
 import path from 'node:path'
-import type {
-  ContentRef,
-  EntryChanges,
-  PlanItem,
-  TokenTotals,
-  ToolContent,
-  ToolEntry,
-  ToolReview,
-  UserContent,
+import {
+  MAX_APPEAL_CHARS,
+  type ContentRef,
+  type EntryChanges,
+  type PlanItem,
+  type TokenTotals,
+  type ToolAppeal,
+  type ToolContent,
+  type ToolEntry,
+  type ToolReview,
+  type UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { replayedBlock } from '../acp/mapper'
@@ -382,6 +384,90 @@ const REVIEW_STATUS: Record<string, ToolReview['status']> = {
 }
 
 const REVIEW_RISKS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'critical'])
+const REVIEW_AUTHORIZATIONS: ReadonlySet<string> = new Set(['unknown', 'low', 'medium', 'high'])
+
+/** Huli: the app-server's names for a command's source and a network protocol, in Codex's core. */
+const CORE_SOURCES: Record<string, string> = { shell: 'shell', unifiedExec: 'unified_exec' }
+const CORE_PROTOCOLS: Record<string, string> = {
+  http: 'http',
+  https: 'https',
+  socks5Tcp: 'socks5_tcp',
+  socks5Udp: 'socks5_udp',
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string'
+const isTexts = (value: unknown): value is string[] => Array.isArray(value) && value.every(isText)
+const isWhole = (value: unknown): value is number => Number.isSafeInteger(value)
+const textOrNull = (value: unknown): string | null => (isText(value) ? value : null)
+
+/**
+ * Huli: a reviewed action as Codex's core protocol names it, which `GuardianAssessmentEvent`
+ * carries; null for one not carried over whole: input to a running command, whose folder the core
+ * takes as a URI, and a permissions request, whose profile it converts.
+ */
+function coreAction(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const a = raw as Record<string, unknown>
+  switch (a.type) {
+    case 'command': {
+      const source = CORE_SOURCES[String(a.source)]
+      if (!source || !isText(a.command) || !isText(a.cwd)) return null
+      return { type: 'command', source, command: a.command, cwd: a.cwd }
+    }
+    case 'execve': {
+      const source = CORE_SOURCES[String(a.source)]
+      if (!source || !isText(a.program) || !isTexts(a.argv) || !isText(a.cwd)) return null
+      return { type: 'execve', source, program: a.program, argv: a.argv, cwd: a.cwd }
+    }
+    case 'applyPatch':
+      if (!isText(a.cwd) || !isTexts(a.files)) return null
+      return { type: 'apply_patch', cwd: a.cwd, files: a.files }
+    case 'networkAccess': {
+      const protocol = CORE_PROTOCOLS[String(a.protocol)]
+      if (!protocol || !isText(a.target) || !isText(a.host) || !isWhole(a.port)) return null
+      return { type: 'network_access', target: a.target, host: a.host, protocol, port: a.port }
+    }
+    case 'mcpToolCall':
+      if (!isText(a.server) || !isText(a.toolName)) return null
+      return {
+        type: 'mcp_tool_call',
+        server: a.server,
+        tool_name: a.toolName,
+        connector_id: textOrNull(a.connectorId),
+        connector_name: textOrNull(a.connectorName),
+        tool_title: textOrNull(a.toolTitle),
+      }
+    default:
+      return null
+  }
+}
+
+/**
+ * Huli: a denial of Codex's auto-review as `thread/approveGuardianDeniedAction` takes it back: the
+ * core's `GuardianAssessmentEvent`, in its snake_case, from the app-server's camelCase review
+ * notification. Null for any other review, or one whose action is not carried over.
+ */
+export function deniedEvent(p: Record<string, unknown>): Record<string, unknown> | null {
+  const review = (p.review ?? {}) as Record<string, unknown>
+  if (review.status !== 'denied' || !isText(p.reviewId) || p.reviewId === '') return null
+  const action = coreAction(p.action)
+  if (!action) return null
+  return {
+    id: p.reviewId,
+    ...(isText(p.targetItemId) ? { target_item_id: p.targetItemId } : {}),
+    turn_id: isText(p.turnId) ? p.turnId : '',
+    started_at_ms: isWhole(p.startedAtMs) ? p.startedAtMs : 0,
+    ...(isWhole(p.completedAtMs) ? { completed_at_ms: p.completedAtMs } : {}),
+    status: 'denied',
+    ...(REVIEW_RISKS.has(String(review.riskLevel)) ? { risk_level: review.riskLevel } : {}),
+    ...(REVIEW_AUTHORIZATIONS.has(String(review.userAuthorization))
+      ? { user_authorization: review.userAuthorization }
+      : {}),
+    ...(isText(review.rationale) ? { rationale: review.rationale } : {}),
+    ...(p.decisionSource === 'agent' ? { decision_source: 'agent' } : {}),
+    action,
+  }
+}
 
 /** Huli: the row of an action an auto-review looks at before Codex has an item for it. */
 function reviewFacts(action: ReviewAction): ToolChanges {
@@ -466,6 +552,12 @@ interface ReasoningParts {
 
 /** One Codex thread's mapper: what Kettu shows of its items, live and replayed. */
 export class ThreadMapper {
+  /**
+   * Huli: `appeals`: this Codex takes back a denial its auto-review made, so a denied call offers
+   * the user to allow it still.
+   */
+  constructor(private readonly options: { appeals?: boolean } = {}) {}
+
   /** What each running command printed so far. */
   private readonly outputs = new Map<string, string>()
   /** The thoughts each reasoning item made so far, one per part, by the item's id. */
@@ -656,7 +748,13 @@ export class ThreadMapper {
     const risk = REVIEW_RISKS.has(review.riskLevel ?? '')
       ? (review.riskLevel as ToolReview['risk'])
       : null
-    const verdict: ToolReview = { status, risk, rationale: review.rationale?.trim() || null }
+    const appeal = done && status === 'denied' ? this.appealOf(p) : null
+    const verdict: ToolReview = {
+      status,
+      risk,
+      rationale: review.rationale?.trim() || null,
+      ...(appeal ? { appeal } : {}),
+    }
     const existing = ctx.thread.byId[`t:${itemId}`]
     const ownItem =
       target !== null && action.type !== 'networkAccess' && action.type !== 'requestPermissions'
@@ -677,6 +775,15 @@ export class ThreadMapper {
             ? { status: 'completed' as const }
             : {}),
     })
+    if (appeal) out.effects.push({ kind: 'appeal', entryId: `t:${itemId}` })
+  }
+
+  /** Huli: the user's way past a denial, where this Codex takes one back; null where not. */
+  private appealOf(p: Record<string, unknown>): ToolAppeal | null {
+    if (!this.options.appeals) return null
+    const event = deniedEvent(p)
+    const json = event && JSON.stringify(event)
+    return json && json.length <= MAX_APPEAL_CHARS ? { event: json, risk: null } : null
   }
 
   /**

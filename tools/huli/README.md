@@ -1403,6 +1403,63 @@ left alone. The daemon's agent host does the same from the same setting.
 `src/agent-host/priority.ts` (with its test) and `start.ts` hold it; the row is in
 `section-defs.tsx` and `settings-catalog.ts`.
 
+### Keeping the computer awake (Agent 干活时不让电脑睡眠)
+
+With `general.keepAwake` on (the default, Settings › General › Sessions), main holds one
+`powerSaveBlocker` of the `prevent-app-suspension` kind, which stops idle system sleep but not the
+display's, while any session's turn runs or waits on a permission (the tray's `running` count from
+`host:busy-changed`) or a routine run works (`host:routines-working`), and lets it go once all are
+idle. A session paused at a plan limit holds none. The system's lid and battery rules still apply.
+It is all events, nothing polls. `src/main/power-save.ts` (with its test) holds it, wired in
+`src/main/index.ts`. The `kettu` daemon holds nothing: Node.js has no portable way to, and it
+mostly runs on machines that do not sleep.
+
+### Anthropic's own API as a profile (Anthropic 官方（Console API 额度）)
+
+Claude Code's API profiles (`src/shared/provider-profiles.ts`) have an `anthropic` preset:
+`https://api.anthropic.com`, no model (Claude Code's own defaults and model menu), and a key from
+the Claude Console. Its key goes in `ANTHROPIC_API_KEY`, which Claude Code sends as `x-api-key`,
+while the other presets' go in `ANTHROPIC_AUTH_TOKEN` as a bearer token; both are set empty on the
+command line and the key follows over the control channel, as before. A key of the Console
+organization linked to a Max, Ultra or Team plan spends the plan's monthly API credits
+([Anthropic's article](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan));
+signed in with the plan instead, the SDK draws on the plan's own limits. The Claude Code page's
+API profiles group says so, side by side and neutrally (`agent-profiles.tsx`).
+
+### A ChatGPT plan's allowance used up (ChatGPT 套餐额度用完)
+
+An agent signed in with a ChatGPT plan stops when the plan has no allowance left for it, and each
+says so its own way: OpenCode's session error `provider.chatgpt-limit` (its name for OpenAI's 429
+`subscription_sharing_usage_limit_exceeded`, with `retryAfterMs` when the provider gave one), Pi's
+"You have hit your ChatGPT usage limit (... plan). Try again in ~N min." (pi-ai's `openai-codex`
+provider for any 429 of the ChatGPT backend), that error code anywhere in an agent's words or data,
+and Codex's `usageLimitExceeded` whose words name `chatgpt.com/` (since December's allowance that
+ChatGPT and Codex share), not a workspace's credits or spend cap. `src/agent-host/chatgpt-limit.ts`
+matches them (with its test); such a turn counts as a plan limit stop (`limit-resume.ts`), so it
+pauses and goes on by itself, at the wait given or else after the growing checks, and its notice
+says where the cap is raised (ChatGPT Settings › Usage › App limits, or the plan's usage page for
+Codex) or to use an API key. OpenCode's `retryAfterMs` now reaches the turn's error
+(`opencode/connection.ts`).
+
+### Allowing what Codex's auto-review denied (仍然允许)
+
+Codex 0.171's app-server takes back a denial of its auto-review (`thread/approveGuardianDeniedAction`
+with the core's `GuardianAssessmentEvent`), adding the user's approval of that exact action to the
+thread; the model's retry still goes through the review. The Codex mapper (`codex/mapper.ts`,
+`deniedEvent`) turns a denied `item/autoApprovalReview/completed` into that event, in the core's
+snake_case, and keeps it as JSON on the call's `review.appeal` (`ToolAppeal` in
+`src/shared/thread.ts`, so it survives a restart or an idle release), for commands, execve,
+patches, network access and MCP calls; input to a running command and a permissions request are
+not carried over. The connection offers appeals only from Codex 0.171.0 on, read from
+`initialize`'s user agent; an older Codex shows the denial and its reason only. An `appeal`
+effect has the host judge the call's risk as a permission request's (`assessRisk` of the tool
+entry). `sessions.allowDenied` checks the appeal, needs `confirmed` when `appealConfirms` (the
+host's level high, or the review's high or critical), hands Codex the event, marks it allowed,
+and with no turn running sends a short message asking the model to retry. The desktop shows it in
+the denied call's card (`denial-appeal.tsx`), the phone in the call's screen (`mobile/src/app/tool.tsx`),
+both with the risk and a confirmation for a high one. Tests: `codex/mapper.test.ts`,
+`codex-appeal-host.test.ts`, `validate.test.ts`.
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and

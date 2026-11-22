@@ -307,6 +307,18 @@ const ENTRIES = {
     access: 'change',
     ...flag('general', 'background', (file) => file.general.background),
   },
+  // Huli: no idle sleep while agents work.
+  'general.keep-awake': {
+    section: 'general',
+    row: 'keep-awake',
+    group: 'general.groups.sessions',
+    name: 'general.keepAwake.name',
+    description: 'general.keepAwake.description',
+    keywords: 'general.keepAwake.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...flag('general', 'keepAwake', (file) => file.general.keepAwake),
+  },
   'general.outline-summaries': {
     section: 'general',
     row: 'outline-summaries',

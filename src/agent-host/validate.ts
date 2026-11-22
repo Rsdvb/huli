@@ -2417,6 +2417,15 @@ export function createValidators(platform: Platform): Validators {
       }
       return { sessionId: sessionId(o), action: o.action as StallAction }
     },
+    'sessions.allowDenied': (params) => {
+      const o = fields(params)
+      const confirmed = optionalFlag(o, 'confirmed')
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ACP_ID_CHARS),
+        ...(confirmed === undefined ? {} : { confirmed }),
+      }
+    },
     'sessions.blob': (params) => {
       const o = fields(params)
       const hash = string(o, 'hash', 64)

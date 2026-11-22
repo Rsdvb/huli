@@ -79,6 +79,8 @@ export type MapperEffect =
       worktree?: AgentWorktree
     }
   | { kind: 'limit'; limit: PlanLimit }
+  // Huli: a call the agent's review denied may still be allowed; the host judges its risk.
+  | { kind: 'appeal'; entryId: string }
   // The plan accepts requests again, which ends a block a window showed.
   | { kind: 'limits-allowed' }
   | { kind: 'title'; title: string | null }

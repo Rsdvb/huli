@@ -6,11 +6,11 @@ import { describe, expect, it } from 'vitest'
 import { applyPatches, threadEntries, threadFromSnapshot, type ThreadState } from '@shared/thread'
 import { newTurnScope, type MapperContext, type MapperEffect } from '../session-updates'
 import { fenced } from '../session-updates'
-import { commandFacts, diffHunks, stripShellPrefix, ThreadMapper } from './mapper'
+import { commandFacts, deniedEvent, diffHunks, stripShellPrefix, ThreadMapper } from './mapper'
 
 function run(
   notifications: [string, unknown, number?][],
-  options: { replaying?: boolean; title?: string } = {},
+  options: { replaying?: boolean; title?: string; appeals?: boolean } = {},
 ) {
   let thread: ThreadState = threadFromSnapshot({
     session: {
@@ -38,7 +38,7 @@ function run(
     entries: [],
     seq: 0,
   })
-  const mapper = new ThreadMapper()
+  const mapper = new ThreadMapper({ appeals: options.appeals ?? false })
   const scope = newTurnScope()
   const effects: MapperEffect[] = []
   let n = 0
@@ -655,6 +655,101 @@ describe('auto-review', () => {
       { kind: 'notice', severity: 'warning', description: 'Too many denied actions' },
     ])
     expect(entries[0]).not.toHaveProperty('denied')
+  })
+
+  it('offers to allow a denied call, with the denial as Codex’s core takes it back', () => {
+    const denied = review('denied', {
+      rationale: 'Deletes the build outside the task',
+      userAuthorization: 'low',
+    })
+    Object.assign(denied[1] as Record<string, unknown>, {
+      completedAtMs: 5,
+      decisionSource: 'agent',
+    })
+    const { entries, effects } = run([review('inProgress'), denied], { appeals: true })
+    const appeal = entries[0]?.kind === 'tool' ? entries[0].review?.appeal : undefined
+    expect(appeal).toMatchObject({ risk: null })
+    expect(JSON.parse(appeal!.event)).toEqual({
+      id: 'r1',
+      target_item_id: 'cmd-1',
+      turn_id: 'turn-1',
+      started_at_ms: 1,
+      completed_at_ms: 5,
+      status: 'denied',
+      risk_level: 'high',
+      user_authorization: 'low',
+      rationale: 'Deletes the build outside the task',
+      decision_source: 'agent',
+      action: { type: 'command', source: 'shell', command: 'rm -rf build', cwd: '/p' },
+    })
+    expect(effects).toContainEqual({ kind: 'appeal', entryId: 't:cmd-1' })
+  })
+
+  it('offers none on a Codex that takes no denial back, or for a review that denied nothing', () => {
+    const reviewOf = (result: ReturnType<typeof run>) =>
+      result.entries[0]?.kind === 'tool' ? result.entries[0].review : undefined
+    const plain = run([review('denied')])
+    expect(reviewOf(plain)).toMatchObject({ status: 'denied' })
+    expect(reviewOf(plain)).not.toHaveProperty('appeal')
+    expect(plain.effects.some((effect) => effect.kind === 'appeal')).toBe(false)
+    expect(reviewOf(run([review('approved')], { appeals: true }))).not.toHaveProperty('appeal')
+  })
+
+  it('carries each action over in the core’s names, and none it cannot carry whole', () => {
+    const event = (action: unknown, status = 'denied') =>
+      deniedEvent({ ...at, reviewId: 'r9', action, review: { status } })?.action ?? null
+    expect(
+      event({
+        type: 'execve',
+        source: 'unifiedExec',
+        program: 'git',
+        argv: ['git', 'push'],
+        cwd: '/p',
+      }),
+    ).toEqual({
+      type: 'execve',
+      source: 'unified_exec',
+      program: 'git',
+      argv: ['git', 'push'],
+      cwd: '/p',
+    })
+    expect(event({ type: 'applyPatch', cwd: '/p', files: ['a.ts'] })).toEqual({
+      type: 'apply_patch',
+      cwd: '/p',
+      files: ['a.ts'],
+    })
+    expect(
+      event({
+        type: 'networkAccess',
+        target: 't',
+        host: 'pypi.org',
+        protocol: 'socks5Tcp',
+        port: 443,
+      }),
+    ).toEqual({
+      type: 'network_access',
+      target: 't',
+      host: 'pypi.org',
+      protocol: 'socks5_tcp',
+      port: 443,
+    })
+    expect(
+      event({ type: 'mcpToolCall', server: 'gh', toolName: 'merge', toolTitle: 'Merge' }),
+    ).toEqual({
+      type: 'mcp_tool_call',
+      server: 'gh',
+      tool_name: 'merge',
+      connector_id: null,
+      connector_name: null,
+      tool_title: 'Merge',
+    })
+    expect(
+      event({ type: 'writeStdin', approvalId: 'a', processId: '1', stdin: 'y', cwd: '/p' }),
+    ).toBeNull()
+    expect(event({ type: 'requestPermissions', reason: null, permissions: {} })).toBeNull()
+    expect(event({ type: 'command', source: 'zsh', command: 'ls', cwd: '/p' })).toBeNull()
+    expect(event({ type: 'command', source: 'shell', command: 'ls' })).toBeNull()
+    expect(event({ type: 'applyPatch', cwd: '/p', files: [] }, 'approved')).toBeNull()
   })
 })
 

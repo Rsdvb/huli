@@ -4,7 +4,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { Add01Icon, Delete02Icon, Edit02Icon, RefreshIcon } from '@hugeicons/core-free-icons'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import type { AgentStatus } from '@shared/agent-host'
 import {
   PROVIDER_PRESET_IDS,
@@ -50,6 +50,10 @@ import {
   SettingsField,
 } from './settings-dialog'
 import { GroupLabel, RowFrame, RowGroup, RowText } from './rows'
+
+/** Anthropic's article on the plans whose monthly API credits apply to a Console key's use. */
+const PLAN_CREDITS_URL =
+  'https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan'
 
 /** What a profile row says under its name: the provider, its model, the key's end and balance. */
 function profileLine(profile: ProviderProfileView, balance: ProfileBalance | undefined): string {
@@ -109,7 +113,18 @@ export function ProfilesGroup({ status }: { status: AgentStatus }) {
     <section className="k-group" aria-label={t('agents.profiles.group')}>
       <GroupLabel group={{ id: 'profiles', label: t('agents.profiles.group'), actions }} />
       <p className="ui-sg-hint" data-wrap="">
-        {t('agents.profiles.hint')}
+        {t('agents.profiles.ways.intro')}
+      </p>
+      {(['own', 'api'] as const).map((way) => (
+        <p key={way} className="ui-sg-hint" data-wrap="">
+          <Trans t={t} i18nKey={`agents.profiles.ways.${way}`} components={{ b: <b /> }} />
+        </p>
+      ))}
+      <p className="ui-sg-hint" data-wrap="">
+        {t('agents.profiles.hint')}{' '}
+        <a href={PLAN_CREDITS_URL} target="_blank" rel="noreferrer" className="k-link">
+          {t('agents.profiles.ways.link')}
+        </a>
       </p>
       <ControlError error={error} />
       <RowGroup>
@@ -323,7 +338,12 @@ function ProfileDialog({
             {t('agents.profiles.dialog.description')}
           </SettingsDialogHeader>
           <SettingsDialogBody>
-            <SettingsField label={t('agents.profiles.dialog.provider')}>
+            <SettingsField
+              label={t('agents.profiles.dialog.provider')}
+              hint={
+                value.preset === 'anthropic' ? t('agents.profiles.dialog.anthropicHint') : undefined
+              }
+            >
               <SettingSelect
                 label={t('agents.profiles.dialog.provider')}
                 className="k-select--full"

@@ -203,6 +203,7 @@ export function GeneralSwitch({
     | 'sessionTitles'
     | 'background'
     | 'lowerAgentPriority'
+    | 'keepAwake'
   label: string
   disabled?: boolean
 }) {

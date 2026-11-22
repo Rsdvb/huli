@@ -580,6 +580,11 @@ export interface AgentConnection {
   /** The end of a background task's output, at most 8 KiB. */
   taskOutput?(sessionId: string, taskId: string): Promise<{ output: string; truncated: boolean }>
   /**
+   * Huli: tells the agent the user allowed a call its automatic review denied, with `event`, the
+   * agent's own record of the denial a tool entry's appeal keeps. Absent where it takes none.
+   */
+  allowDenied?(sessionId: string, event: string): Promise<void>
+  /**
    * Answers a side question from the session's own conversation, beside its turn and without
    * adding to it. Absent where the agent has no side question of its own; rejects with
    * `SideQuestionUnsupported` where this version lacks it.

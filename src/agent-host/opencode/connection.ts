@@ -176,14 +176,21 @@ interface PromptFile {
   source?: { type: 'inline' }
 }
 
-/** A failed turn as Kettu's error, with OpenCode's own words. */
+/** A failed turn as Kettu's error, with OpenCode's own words and the wait its provider asked. */
 export function turnError(error: StructuredError | undefined): Error {
+  const wait = error?.retryAfterMs
   return new AgentRequestError(
     'agent_error',
     error?.message || 'OpenCode could not finish the turn',
     null,
     error
-      ? { type: error.type, ...(error.status !== undefined ? { status: error.status } : {}) }
+      ? {
+          type: error.type,
+          ...(error.status !== undefined ? { status: error.status } : {}),
+          ...(typeof wait === 'number' && Number.isFinite(wait) && wait > 0
+            ? { retryAfterMs: wait }
+            : {}),
+        }
       : {},
   )
 }

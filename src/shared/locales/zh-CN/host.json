@@ -63,6 +63,13 @@
       "betweenTurns": "API 配置只能在两轮对话之间切换。",
       "keyRefused": "服务商拒绝了这个 API 配置的密钥。请到「设置 › 智能体」检查密钥。"
     },
+    "appeal": {
+      "none": "这一步没有可以放行的拒绝。",
+      "done": "这一步已经放行过了。",
+      "confirm": "这一步风险高，请先确认再放行。",
+      "unsupported": "{{agent}} 不支持放行被自动审查拒绝的操作。",
+      "retry": "我已允许刚才被自动审查拒绝的那一步，请照原样重试。"
+    },
     "subagent": {
       "noPrompt": "子智能体会话从父会话接收指令",
       "noFork": "子智能体会话不能复制",
@@ -89,6 +96,11 @@
       "titleNoModel": "{{agent}} 的模型服务商余额不足"
     },
     "turnFailed": "本轮对话失败",
+    "chatgptLimit": {
+      "title": "ChatGPT 套餐的额度用完了",
+      "app": "这个 Agent 本周用 ChatGPT 套餐的额度用完了，可在 ChatGPT 设置 › 用量 › App limits 调高，或改用 API key。",
+      "codex": "Codex 和 ChatGPT 共用套餐的额度，这份额度用完了。可在 ChatGPT 设置 › 用量 查看何时恢复或购买额度，或改用 API key。"
+    },
     "archivedByAgent": "{{agent}} 已归档此会话",
     "notArchivedByAgent": {
       "title": "{{agent}} 没有归档此会话",
@@ -873,7 +885,9 @@
       "warning": "自动审查提醒",
       "action": "待审查的操作",
       "entered": "开始审查",
-      "exited": "审查结束"
+      "exited": "审查结束",
+      "appealUnsupported": "这个版本的 Codex 还不能放行被自动审查拒绝的操作，请升级 Codex。",
+      "appealGone": "Codex 对这次拒绝的记录读不出来了，请让它重新尝试。"
     },
     "agent": {
       "model": "使用 {{model}}",

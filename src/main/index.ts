@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import {
   app,
   powerMonitor,
+  powerSaveBlocker,
   protocol,
   safeStorage,
   session,
@@ -71,7 +72,7 @@ import { SessionMover } from './session-move'
 import { installMenu } from './menu'
 import { isOpenedAtLogin, startMode, syncLoginItem } from './login-item'
 import { notifyAttention, notifyDiscovery } from './notifications'
-import { RoutinesAwake } from './power-save'
+import { KeepAwake } from './power-save'
 import { sessionProxy } from './proxy'
 import { Sharing } from './sharing'
 import { KettuUnauthorized } from './sharing/kettu'
@@ -406,7 +407,7 @@ async function start(): Promise<void> {
     askAnswered: (sessionId, outcome) => browserTools!.answerAsk(sessionId, outcome),
     log: (level, message) => log[level](`browser: ${message}`),
   })
-  const routinesAwake = new RoutinesAwake()
+  const keepAwake = new KeepAwake(settings.get().general.keepAwake, powerSaveBlocker)
   const terminalHost = new TerminalHost({
     settings: () => terminalSettings(settings.get()),
     onReady: () => broadcast('terminals:ready', null),
@@ -479,7 +480,10 @@ async function start(): Promise<void> {
     onProgress: (sessions) => remoteHost.setProgress(sessions),
     onSeen: (sessionId) => remoteHost.seen(sessionId),
     onBadge: (count) => setBadgeCount(count),
-    onBusy: (counts) => tray.setBusy(counts),
+    onBusy: (counts) => {
+      tray.setBusy(counts)
+      keepAwake.setRunning(counts.running)
+    },
     onProjects: (paths) => terminalHost.setProjects(paths),
     onArtifactsChanged: () => sharingArtifactsChanged?.(),
     onSessionsEnded: (sessionIds) => {
@@ -489,7 +493,7 @@ async function start(): Promise<void> {
     onAuthCommands: (commands) => terminalHost.setAuthCommands(commands),
     onMediaGrant: (grant) => mediaGrants.add(grant),
     onMediaRevoke: (sessionId) => mediaGrants.revoke(sessionId),
-    onRoutinesWorking: (working) => routinesAwake.set(working),
+    onRoutinesWorking: (working) => keepAwake.setRoutines(working),
     onReady: () => {
       tray.setConnected(true)
       reconcileSharing?.()
@@ -1080,7 +1084,10 @@ async function start(): Promise<void> {
       themes.choose(next.appearance.colorTheme)
     }
     if (changed.has('notifications')) setBadgeEnabled(next.notifications.badge)
-    if (changed.has('general')) syncLoginItem(next.general.openAtLogin)
+    if (changed.has('general')) {
+      syncLoginItem(next.general.openAtLogin)
+      keepAwake.setEnabled(next.general.keepAwake)
+    }
     if (changed.has('proxy')) {
       void sharingSession.setProxy(sessionProxy(next.proxy))
       themesProxy = themesSession.setProxy(sessionProxy(next.proxy))

@@ -191,6 +191,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'manager.detach': HOST_MS,
   'manager.moreTurns': HOST_MS,
   'sessions.stall': AGENT_MS,
+  'sessions.allowDenied': AGENT_MS,
   'sessions.blob': HOST_MS,
   'sessions.setConfigOption': AGENT_MS,
   'sessions.refreshModels': AGENT_MS,

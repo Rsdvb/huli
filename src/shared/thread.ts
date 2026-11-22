@@ -1039,6 +1039,36 @@ export interface ToolReview {
   status: 'reviewing' | 'approved' | 'denied' | 'timed_out' | 'aborted'
   risk: 'low' | 'medium' | 'high' | 'critical' | null
   rationale: string | null
+  /** Huli: a denied call the user may still allow, where the agent takes that. */
+  appeal?: ToolAppeal
+}
+
+/**
+ * Huli: the user's way past the review's denial, as Codex's "approve a denied action" takes it:
+ * the agent's own record of the denial, which goes back to it as it came, and the host's risk of
+ * the call. The agent then knows the user allowed that exact action once, and its retry goes
+ * through the review again.
+ */
+export interface ToolAppeal {
+  /** The agent's record of the denial, as JSON. */
+  event: string
+  /** The host's risk of the call, as a permission request's card shows it; null until judged. */
+  risk: PermissionRisk | null
+  /** The user allowed it, and the agent was told. */
+  allowed?: true
+}
+
+/** The longest record of a denial an appeal keeps. */
+export const MAX_APPEAL_CHARS = 32_000
+
+/**
+ * Whether allowing a denied call needs the user to confirm first: the host judged it high, or the
+ * agent's review did.
+ */
+export function appealConfirms(review: ToolReview): boolean {
+  return (
+    review.appeal?.risk?.level === 'high' || review.risk === 'high' || review.risk === 'critical'
+  )
 }
 
 /**

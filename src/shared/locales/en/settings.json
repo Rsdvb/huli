@@ -121,6 +121,11 @@
       "keywords": "background tray menu bar notification area close window keep running",
       "lockedByRemote": "On while remote access is on."
     },
+    "keepAwake": {
+      "name": "Keep the computer awake while agents work",
+      "description": "While a session works or waits for your answer, or a routine runs, the computer doesn't go to sleep on its own; the display still turns off. Closing a laptop's lid or a low battery still puts it to sleep as the system's settings say.",
+      "keywords": "sleep awake keep awake prevent sleep power lid battery caffeinate"
+    },
     "openAtLogin": {
       "name": "Open at login",
       "description": "Routines run only while Kettu is open.",
@@ -1459,7 +1464,13 @@
     "backToAgent": "Back to its settings",
     "profiles": {
       "group": "API profiles",
-      "hint": "Run sessions on another provider's API key. New sessions start with the default, and a session can switch in its model menu. Kite keeps the keys encrypted on this computer and never shows them again.",
+      "hint": "New sessions start with the default, and a session can switch in its model menu. Kite keeps the keys encrypted on this computer and never shows them again.",
+      "ways": {
+        "intro": "Kite runs Claude Code in one of two ways:",
+        "own": "<b>Your own Claude sign-in (plan usage)</b>: the account Claude Code is signed in to; use counts toward your plan's limits.",
+        "api": "<b>API profiles (billed per key; Max, Ultra and Team monthly API credits apply)</b>: an API key, billed by use. With a key from the Claude Console organization linked to a Max, Ultra or Team plan, the plan's monthly API credits apply.",
+        "link": "How plan credits apply to the Agent SDK"
+      },
       "ownHint": "Its account, or the API key in its own settings",
       "makeDefault": "Make default",
       "add": "Add API profile",
@@ -1474,6 +1485,7 @@
         "editTitle": "Edit {{name}}",
         "description": "Pick a provider and paste its API key: the address and models come from the provider's own Claude Code guide.",
         "provider": "Provider",
+        "anthropicHint": "Use an API key from the Claude Console. A key of the organization linked to your Max, Ultra or Team plan can use the plan's monthly API credits. Leave the model empty for Claude Code's own default.",
         "name": "Name",
         "key": "API key",
         "keyKeep": "Empty keeps the key ending in {{end}}",
