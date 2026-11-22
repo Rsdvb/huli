@@ -66,19 +66,25 @@ function noteRows(
 
 let made = 0
 
-/** The rows the notes on this file cover, by index into the diff's rows. */
+/**
+ * The rows the notes on this file cover, by index into the diff's rows: by their numbers, or for
+ * an edit's comments, which have none, by the lines they quote.
+ */
 export function notedRows(diff: Diff, notes: readonly DiffNote[], place: NotePlace): Set<number> {
-  const mine = notes.filter(
-    (note) => note.range && note.path === place.path && note.ref === place.ref,
-  )
+  const mine = notes.filter((note) => note.path === place.path && note.ref === place.ref)
   const rows = new Set<number>()
-  if (mine.length === 0 || !place.numbered) return rows
+  if (mine.length === 0) return rows
+  const ranges = place.numbered ? mine.flatMap((note) => (note.range ? [note.range] : [])) : []
+  const quoted = new Set(mine.flatMap((note) => (note.range ? [] : note.quote)))
   diff.rows.forEach((row, index) => {
     if (row.kind === 'hunk') return
-    const covered = mine.some(({ range }) => {
-      const line = range!.side === 'deletions' ? row.old : row.new
-      return line !== null && line >= range!.start && line <= range!.end
-    })
+    const mark = row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '
+    const covered =
+      quoted.has(mark + row.text) ||
+      ranges.some((range) => {
+        const line = range.side === 'deletions' ? row.old : row.new
+        return line !== null && line >= range.start && line <= range.end
+      })
     if (covered) rows.add(index)
   })
   return rows

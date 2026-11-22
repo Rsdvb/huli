@@ -83,7 +83,9 @@ const Row = memo(function Row(props: {
   const numberColor = props.noted ? colors.note : colors.muted
   const cells = (
     <>
-      {props.noted ? <View style={[styles.noteBar, { backgroundColor: colors.note }]} /> : null}
+      {props.noted || props.picked ? (
+        <View style={[styles.noteBar, { backgroundColor: colors.note }]} />
+      ) : null}
       <Text
         style={[styles.text, styles.number, { width: gutter, color: numberColor }]}
         maxFontSizeMultiplier={SCALE}

@@ -106,7 +106,8 @@ export default function DiffScreen() {
   // so its rows' numbers are not the file's and its comments name the file alone.
   const computer = useComputerId()
   const commentable = !!params.id && !!computer && !!summary && !missing
-  const root = summary && !summary.scratch ? sessionFolder(summary) : null
+  // A session without a project works in a folder of its own, which its paths are under too.
+  const root = summary ? sessionFolder(summary) : null
   const place = useMemo<NotePlace>(
     () => ({ path: relativePath(path, root), ref, numbered: !handed }),
     [path, root, ref, handed],
