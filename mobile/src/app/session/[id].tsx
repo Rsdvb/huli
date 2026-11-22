@@ -100,6 +100,7 @@ import {
 } from '../../components/entries/Waiting'
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { RewindDialog, type RewindDone } from '../../components/RewindDialog'
+import { rewindTarget } from '@shared/rewind-target'
 import { WorktreeLine } from '../../components/git/WorktreeCard'
 import { toggleMuted, useSessionActions } from '../../components/SessionActions'
 import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionChips'
@@ -648,7 +649,8 @@ function Session() {
         return
       }
       const thread = view.store.get()
-      if (mode === 'rewind' && thread && latestTurn(thread).start === entryId) {
+      const target = thread ? rewindTarget(thread, entryId, mode) : null
+      if (target === null) {
         Alert.alert('不能回退到这里', '这条消息之后没有别的内容。')
         return
       }
@@ -657,7 +659,7 @@ function Session() {
         entry?.kind === 'user'
           ? entry.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n\n')
           : ''
-      setRewinding({ entryId, mode, text })
+      setRewinding({ entryId: target, mode, text })
     },
     [view.store],
   )

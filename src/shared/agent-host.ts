@@ -879,13 +879,6 @@ export interface SessionPullRequest {
   failing: boolean // an open one has a failing check
 }
 
-/**
- * Huli: the two ways back to one of the user's messages. `edit` takes the message out too and
- * gives it back to the composer, to send again as it is or changed; `rewind` keeps it and its
- * reply, and takes out what came after.
- */
-export type RewindMode = 'edit' | 'rewind'
-
 /** Huli: one file a rewind would put back, by what it does to the file as it is now. */
 export interface RewindChange {
   /** Relative to its folder and `/`-separated, or absolute for an agent's own checkpoint. */
@@ -938,14 +931,12 @@ export interface RewindPreview {
   files: RewindFiles
 }
 
-export interface RewindResult {
-  /** Null when the files were left as they are. */
-  files: {
-    restored: number
-    failed: number
-    /** The copy of the files as they were before, which `sessions.undoRewindFiles` restores. */
-    backup: string | null
-  } | null
+/** Huli: what restoring the files to a message's checkpoint did. */
+export interface FilesRestored {
+  restored: number
+  failed: number
+  /** The copy of the files as they were before, which `sessions.undoRewindFiles` restores. */
+  backup: string | null
 }
 
 export interface SessionSummary {
@@ -1718,24 +1709,25 @@ export interface HostContract {
   // Undoes the latest turn, which `entryId`, the user's message, starts: the agent's history loses
   // it and the thread its entries. What it changed on disk stays.
   'sessions.revert': { params: { sessionId: string; entryId: string }; result: void }
-  // Huli: what going back to the user's message `entryId` would do, changing nothing.
+  // Huli: what taking the session back to before `entryId`, one of the user's messages, would do
+  // to its conversation and files, changing nothing.
   'sessions.rewindPreview': {
-    params: { sessionId: string; entryId: string; mode: RewindMode }
+    params: { sessionId: string; entryId: string }
     result: RewindPreview
   }
-  // Huli: goes back to the user's message `entryId`; `restoreFiles` with the preview's `token`
-  // also puts the files back, only while they are as the preview found them.
+  // Takes the session back to before `entryId`, one of the user's messages: the turns from it on
+  // leave, and its content comes back for the composer. `draft` is what the composer held.
   'sessions.rewind': {
-    params: {
-      sessionId: string
-      entryId: string
-      mode: RewindMode
-      restoreFiles?: boolean
-      token?: string
-    }
-    result: RewindResult
+    params: { sessionId: string; entryId: string; draft: UserContent[] }
+    result: { content: UserContent[] }
   }
-  // Huli: puts the files back as a rewind found them, from its backup.
+  // Huli: puts the files of the session's folders back as they were when `entryId` was sent, while
+  // they are as the preview's `token` found them, keeping a backup of them as they are.
+  'sessions.restoreFiles': {
+    params: { sessionId: string; entryId: string; token: string }
+    result: FilesRestored
+  }
+  // Huli: puts the files back as a restore found them, from its backup.
   'sessions.undoRewindFiles': {
     params: { sessionId: string; backup: string }
     result: { restored: number; failed: number }
@@ -2600,6 +2592,7 @@ export const HOST_METHODS = [
   'sessions.revert',
   'sessions.rewindPreview',
   'sessions.rewind',
+  'sessions.restoreFiles',
   'sessions.undoRewindFiles',
   'worktrees.inspect',
   'worktrees.remove',

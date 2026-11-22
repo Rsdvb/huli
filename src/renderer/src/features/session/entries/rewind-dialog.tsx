@@ -4,7 +4,8 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { RewindChange, RewindFiles, RewindMode, RewindPreview } from '@shared/agent-host'
+import type { FilesRestored, RewindChange, RewindFiles, RewindPreview } from '@shared/agent-host'
+import { rewindTarget, type RewindMode } from '@shared/rewind-target'
 import { putBackUndone } from '@renderer/app/actions'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
@@ -19,6 +20,7 @@ import {
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { toast } from '@renderer/components/ui/toast'
+import { useEntry } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
 import { cn } from '@renderer/lib/utils'
 import { useThreadsStore } from '@renderer/stores/threads'
@@ -155,15 +157,24 @@ export function RewindDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation(['session', 'common'])
+  const filesOn = useEntry('rewind.files')
+  // The first message the rewind takes out, read once: the thread changes as it goes.
+  const [target] = useState(() => {
+    const state = useThreadsStore.getState().replicas[sessionId]?.state
+    return state ? rewindTarget(state, entryId, mode) : null
+  })
   const [preview, setPreview] = useState<RewindPreview | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(
+    target === null ? t('rewind.nothingAfter') : null,
+  )
   const [restore, setRestore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (target === null) return
     let live = true
-    host('sessions.rewindPreview', { sessionId, entryId, mode }).then(
+    host('sessions.rewindPreview', { sessionId, entryId: target }).then(
       (answer) => {
         if (live) setPreview(answer)
       },
@@ -174,54 +185,60 @@ export function RewindDialog({
     return () => {
       live = false
     }
-  }, [sessionId, entryId, mode])
+  }, [sessionId, target])
 
-  const files = preview?.files ?? null
+  const files = filesOn ? (preview?.files ?? null) : null
   const canRestore = files?.state === 'ready'
   const later = Math.max(0, (preview?.messages ?? 1) - (mode === 'edit' ? 1 : 0))
 
+  const restoredToast = (restored: FilesRestored) => {
+    const backup = restored.backup
+    toast(
+      restored.failed > 0
+        ? t('rewind.doneSomeFailed', { count: restored.restored, failed: restored.failed })
+        : t('rewind.doneFiles', { count: restored.restored }),
+      backup
+        ? {
+            label: t('rewind.undoFiles'),
+            onClick: () => {
+              host('sessions.undoRewindFiles', { sessionId, backup }).then(
+                () => toast(t('rewind.undoneFiles'), undefined, { tone: 'success' }),
+                (e: unknown) => toast(errorMessage(e), undefined, { tone: 'warning' }),
+              )
+            },
+          }
+        : undefined,
+      { tone: restored.failed > 0 ? 'warning' : 'success', duration: 10_000 },
+    )
+  }
+
+  // The files first, so a refusal leaves the conversation as it is too.
   const go = async () => {
+    if (target === null) return
     setBusy(true)
     setError(null)
-    // Read before the message leaves the thread.
-    const entry = useThreadsStore.getState().replicas[sessionId]?.state?.byId[entryId]
-    const text =
-      mode === 'edit' && entry?.kind === 'user'
-        ? entry.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join(PARAGRAPH)
-        : ''
+    let restored: FilesRestored | null = null
     try {
-      const done = await host('sessions.rewind', {
-        sessionId,
-        entryId,
-        mode,
-        ...(restore && files?.state === 'ready' ? { restoreFiles: true, token: files.token } : {}),
-      })
+      if (restore && files?.state === 'ready') {
+        restored = await host('sessions.restoreFiles', {
+          sessionId,
+          entryId: target,
+          token: files.token,
+        })
+      }
+      const { content } = await host('sessions.rewind', { sessionId, entryId: target, draft: [] })
       onClose()
-      if (mode === 'edit') putBackUndone(sessionId, text)
-      const restored = done.files
-      if (restored) {
-        const backup = restored.backup
-        toast(
-          restored.failed > 0
-            ? t('rewind.doneSomeFailed', { count: restored.restored, failed: restored.failed })
-            : t('rewind.doneFiles', { count: restored.restored }),
-          backup
-            ? {
-                label: t('rewind.undoFiles'),
-                onClick: () => {
-                  host('sessions.undoRewindFiles', { sessionId, backup }).then(
-                    () => toast(t('rewind.undoneFiles'), undefined, { tone: 'success' }),
-                    (e: unknown) => toast(errorMessage(e), undefined, { tone: 'warning' }),
-                  )
-                },
-              }
-            : undefined,
-          { tone: restored.failed > 0 ? 'warning' : 'success', duration: 10_000 },
+      if (mode === 'edit') {
+        putBackUndone(
+          sessionId,
+          content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join(PARAGRAPH),
         )
       }
+      if (restored) restoredToast(restored)
     } catch (e) {
       setError(errorMessage(e))
       setBusy(false)
+      if (restored) restoredToast(restored)
     }
   }
 
@@ -262,22 +279,26 @@ export function RewindDialog({
               ) : (
                 <p className="text-hint text-secondary">{conversation}</p>
               )}
-              <label
-                className={cn(
-                  'flex items-center gap-2.25 text-control',
-                  canRestore ? 'text-primary' : 'text-tertiary',
-                )}
-              >
-                <Checkbox
-                  checked={restore && canRestore}
-                  disabled={!canRestore || busy}
-                  onCheckedChange={(on) => setRestore(on === true)}
-                />
-                {t('rewind.files')}
-              </label>
-              <FilesState files={files} />
-              {restore && canRestore && (
-                <p className="text-hint text-warning">{t('rewind.overwrite')}</p>
+              {filesOn && (
+                <>
+                  <label
+                    className={cn(
+                      'flex items-center gap-2.25 text-control',
+                      canRestore ? 'text-primary' : 'text-tertiary',
+                    )}
+                  >
+                    <Checkbox
+                      checked={restore && canRestore}
+                      disabled={!canRestore || busy}
+                      onCheckedChange={(on) => setRestore(on === true)}
+                    />
+                    {t('rewind.files')}
+                  </label>
+                  <FilesState files={preview === null ? null : files} />
+                  {restore && canRestore && (
+                    <p className="text-hint text-warning">{t('rewind.overwrite')}</p>
+                  )}
+                </>
               )}
             </>
           )}
@@ -290,7 +311,7 @@ export function RewindDialog({
           <Button
             variant="destructive"
             size="compact"
-            disabled={busy || preview === null}
+            disabled={busy || preview === null || target === null}
             onClick={() => void go()}
           >
             {busy && <Spinner data-icon="inline-start" />}

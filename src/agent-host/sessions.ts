@@ -30,10 +30,9 @@ import {
   type OutlineTitle,
   type PlanProgress,
   type ReturnedMessage,
+  type FilesRestored,
   type RewindFiles,
-  type RewindMode,
   type RewindPreview,
-  type RewindResult,
   type RunningWork,
   type SessionAttention,
   type SessionOutputs,
@@ -451,6 +450,8 @@ export interface SessionTimings {
   limitResume: LimitResumeTimings
   /** Huli: how long a turn waits for its file checkpoint's listing before it goes without one. */
   checkpointListMs: number
+  /** Huli: and for its copies, which then go on beside the turn. */
+  checkpointCopyMs: number
 }
 
 /** The longest a thread's write waits after writes that failed. */
@@ -470,6 +471,7 @@ export const SESSION_TIMINGS: SessionTimings = {
   contextDebounceMs: 500,
   limitResume: LIMIT_RESUME_TIMINGS,
   checkpointListMs: 8_000,
+  checkpointCopyMs: 1_500,
 }
 
 export interface SessionEvents {
@@ -9480,14 +9482,10 @@ export class SessionManager {
     }
   }
 
-  /** What going back to the user's message `entryId` would do; changes nothing. */
-  async rewindPreview(
-    sessionId: string,
-    entryId: string,
-    mode: RewindMode,
-  ): Promise<RewindPreview> {
+  /** What taking the session back to before the user's message `entryId` would do; changes nothing. */
+  async rewindPreview(sessionId: string, entryId: string): Promise<RewindPreview> {
     const live = await this.rewindable(sessionId)
-    const cut = rewindCut(live.thread, entryId, mode)
+    const cut = rewindCut(live.thread, entryId)
     const own = this.ownHistory(live, cut)
     const runtime = own ? await this.rewindRuntime(live) : null
     const caps = runtime?.init.capabilities
@@ -9589,30 +9587,37 @@ export class SessionManager {
   }
 
   /**
-   * Goes back to the user's message `entryId`: the files first, where asked and while they are as
-   * the preview found them, then the conversation, which the agent cuts in its own history where
-   * it can, else a new session of it carries on, given the conversation kept.
+   * Takes the session back to before the user's message `entryId`: the agent cuts the turns from
+   * it out of its own history where it can, else a new session of it carries on, given the
+   * conversation kept. The message's text comes back for the composer.
    */
-  async rewind(params: {
-    sessionId: string
-    entryId: string
-    mode: RewindMode
-    restoreFiles?: boolean
-    token?: string
-  }): Promise<RewindResult> {
-    const live = await this.rewindable(params.sessionId)
-    const cut = rewindCut(live.thread, params.entryId, params.mode)
+  async rewind(sessionId: string, entryId: string): Promise<{ content: UserContent[] }> {
+    const live = await this.rewindable(sessionId)
+    const cut = rewindCut(live.thread, entryId)
+    const entry = live.thread.byId[entryId] as Extract<ThreadEntry, { kind: 'user' }>
+    const content = entry.content.filter((item) => item.type === 'text')
     const own = this.ownHistory(live, cut)
     const folders = this.checkpointFolders(live.record)
-    let files: RewindResult['files'] = null
-    if (params.restoreFiles) {
-      files = await this.restoreRewindFiles(live, cut, own, folders, params.token ?? '')
-    }
-    this.assertBetweenTurns(live)
     const removed = cut.ids.filter((id) => live.thread.byId[id]?.kind === 'user')
     await this.rewindConversation(live, cut, own)
     void this.deps.fileCheckpoints?.drop(live.id, removed, folders).catch(() => {})
-    return { files }
+    return { content }
+  }
+
+  /**
+   * Puts the files of the session's folders back as they were when the user's message `entryId`
+   * was sent, while they are as the preview's `token` found them.
+   */
+  async restoreFiles(sessionId: string, entryId: string, token: string): Promise<FilesRestored> {
+    const live = await this.rewindable(sessionId)
+    const cut = rewindCut(live.thread, entryId)
+    return this.restoreRewindFiles(
+      live,
+      cut,
+      this.ownHistory(live, cut),
+      this.checkpointFolders(live.record),
+      token,
+    )
   }
 
   private async restoreRewindFiles(
@@ -9621,7 +9626,7 @@ export class SessionManager {
     own: boolean,
     folders: string[],
     token: string,
-  ): Promise<NonNullable<RewindResult['files']>> {
+  ): Promise<FilesRestored> {
     const busy = this.busyIn(live, folders)
     if (busy) throw new HostError('conflict', t('session.rewindFolderBusy', { session: busy }))
     if (token !== 'agent') {
@@ -9780,10 +9785,11 @@ export class SessionManager {
   private beginCheckpoint(
     live: Live,
     turn: Turn,
-  ): { listed: Promise<void>; cancel: () => void } | null {
+  ): { listed: Promise<void>; saved: Promise<void>; cancel: () => void } | null {
     const kite = this.deps.fileCheckpoints
     const { record } = live
     if (!kite || !turn.entryId || record.origin === 'subagent') return null
+    if (!featureOn(this.deps.settings().features, 'fileCheckpoints')) return null
     const entry = live.thread.byId[turn.entryId]
     if (entry?.kind !== 'user' || entry.steered) return null
     const own =
@@ -9793,20 +9799,30 @@ export class SessionManager {
     return kite.begin(live.id, turn.entryId, this.checkpointFolders(record))
   }
 
-  /** Waits for the checkpoint's listing, up to a budget; one that takes longer is dropped. */
+  /**
+   * Waits for the checkpoint's listing, up to a budget, and a moment for its copies, which go on
+   * beside the turn after it; a listing that takes longer is dropped.
+   */
   private async checkpointListed(
-    checkpoint: { listed: Promise<void>; cancel: () => void } | null,
+    checkpoint: { listed: Promise<void>; saved: Promise<void>; cancel: () => void } | null,
   ): Promise<void> {
     if (!checkpoint) return
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const listed = await Promise.race([
-      checkpoint.listed.then(() => true),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), this.timings.checkpointListMs)
-      }),
-    ])
-    clearTimeout(timer)
-    if (!listed) checkpoint.cancel()
+    const within = async (promise: Promise<void>, ms: number): Promise<boolean> => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const done = await Promise.race([
+        promise.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), ms)
+        }),
+      ])
+      clearTimeout(timer)
+      return done
+    }
+    if (!(await within(checkpoint.listed, this.timings.checkpointListMs))) {
+      checkpoint.cancel()
+      return
+    }
+    await within(checkpoint.saved, this.timings.checkpointCopyMs)
   }
 
   /**
@@ -15095,26 +15111,17 @@ export interface RewindCut {
 }
 
 /**
- * Huli: a rewind to the user's message `entryId`: `edit` takes it out with all after it, so it can
- * be sent again; `rewind` keeps it and its turn, and takes out the turns after.
+ * Huli: a rewind to before the user's message `entryId`, which started a turn: it and every entry
+ * after it leave.
  */
-export function rewindCut(
-  thread: Pick<ThreadState, 'order' | 'byId'>,
-  entryId: string,
-  mode: 'edit' | 'rewind',
-): RewindCut {
+export function rewindCut(thread: Pick<ThreadState, 'order' | 'byId'>, entryId: string): RewindCut {
   const startsTurn = (id: string): boolean => {
     const entry = thread.byId[id]
     return entry?.kind === 'user' && !entry.steered
   }
-  const at = thread.order.indexOf(entryId)
-  if (at < 0 || !startsTurn(entryId)) {
+  const start = thread.order.indexOf(entryId)
+  if (start < 0 || !startsTurn(entryId)) {
     throw new HostError('invalid_params', t('session.rewindNoPoint'))
-  }
-  let start = at
-  if (mode === 'rewind') {
-    start = thread.order.findIndex((id, index) => index > at && startsTurn(id))
-    if (start < 0) throw new HostError('invalid_params', t('session.rewindNothingAfter'))
   }
   const ids = thread.order.slice(start)
   const before = thread.order.slice(0, start)

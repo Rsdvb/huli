@@ -4,7 +4,6 @@
     "rewindNoCheckpoint": "Kite kept no copy of the files at this message",
     "rewindFolderBusy": "{{session}} is working in these files, so they can't be restored now",
     "rewindFilesChanged": "The files changed since the preview. Look at it again before restoring them.",
-    "rewindNothingAfter": "Nothing came after this message",
     "rewindNoPoint": "This message can't be rewound to",
     "status": {
       "starting": "starting",

@@ -1593,9 +1593,17 @@ turn offers 从这里重来 (the message and all after it leave the conversation
 back to the composer) and 回退到这里 (it stays with its reply; the turns after leave), on the
 desktop under the message and on the phone in its menu. Both open a dialog that asks
 `sessions.rewindPreview` first: how many messages leave, how the agent takes it, and, with 同时还原
-文件, every file a restore would change (还原, 删除 or 恢复, with its lines), which
-`sessions.rewind` then does with the preview's token. Files go back to the checkpoint of the first
-message taken out: for 回退到这里, the next message's.
+文件, every file a restore would change (还原, 删除 or 恢复, with its lines). Going on, the window
+calls `sessions.restoreFiles` with the preview's token when the box is ticked, then
+`sessions.rewind` (`{ sessionId, entryId, draft }` → `{ content }`), both at the first message the
+rewind takes out (`rewindTarget` in `shared/rewind-target.ts`): the message itself, or for 回退到这里
+the next one that started a turn.
+
+`sessions.rewind` has upstream Kettu's signature (KettuAI/Kettu #2271, Edit from here), which sets
+the turns aside until the next send and has Put back. Until that merge lands here, the host cuts at
+once as below; when it does, upstream's model takes over the conversation and Huli keeps what it
+lacks: 回退到这里, the files with their preview and checkpoints, the fresh session for an agent that
+cannot cut its history, the busy-folder refusal and the phone.
 
 - Conversation (`sessions.ts`: `rewindCut`, `rewindConversation`): Codex cuts its own history with
   `thread/revert` before the first turn taken out; Claude Code keeps its transcript whole, so the
@@ -1615,8 +1623,10 @@ message taken out: for 回退到这里, the next message's.
   past the listing is not copied but named as skipped. A snapshot per message (`snapshots/<session>/
 e-<entry>.json.gz`) names them. Nothing is written into the user's repository or index.
   Limits: 16 MiB a file, 5000 files and 128 MiB of new copies a checkpoint, 8 s for the listing
-  (a turn waits no longer and goes without one); 100 checkpoints and 5 backups per session and
-  folder, 30 days, 2 GiB per folder. Trimming and sweeping follow a checkpoint, a restore and a
+  (a turn waits no longer and goes without one) and 1.5 s more for the copies, which then go on
+  beside it; 100 checkpoints and 5 backups per session and folder, 30 days, 2 GiB per folder.
+  Settings › 功能管理 › 回退时还原文件 (`fileCheckpoints`) turns Kite's checkpoints off with the
+  dialog's files part and `sessions.restoreFiles` / `sessions.undoRewindFiles`. Trimming and sweeping follow a checkpoint, a restore and a
   session's delete, never a timer.
 - Safety: a restore touches only paths both snapshots know; one either did not keep (ignored, too
   large, changing while copied) stays as it is, and so does anything in the way (a folder, a link).
@@ -1630,7 +1640,8 @@ e-<entry>.json.gz`) names them. Nothing is written into the user's repository or
   repository lists in 80 to 140 ms and keeps under 1 KiB when little changed; outside a repository
   the first copies everything (5.8 s for 35 MB, beside the turn), the next ones about 250 ms.
 - Files: `src/agent-host/file-checkpoints/{git,snapshot,plan,store}.ts` (+ `store.test.ts`), the
-  `sessions.rewindPreview`, `sessions.rewind` and `sessions.undoRewindFiles` requests
+  `sessions.rewindPreview`, `sessions.rewind`, `sessions.restoreFiles` and
+  `sessions.undoRewindFiles` requests
   (`shared/agent-host.ts`, `validate.ts`, `host.ts`), `claude/connection.ts` (`revertTurns`,
   `rewindFiles`), `features/session/entries/rewind-dialog.tsx`, `message-actions.tsx`,
   `takeover-entry.tsx`, `rewind` in `locales/*/session.json`, and on the phone
@@ -1646,22 +1657,23 @@ loaded nor run; agents are not offered its MCP tools and the agent host refuses 
 feature is on by default, and each takes effect at once, both ways, without a restart (code a
 feature already loaded leaves memory at the next launch).
 
-| Feature (id)                      | Off, it stops                                                                                                            |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 看板 (`board`)                    | the Overview's board view (now lazily loaded), the rows' column mark, the session menus' 看板 ›, `set_board_status`      |
-| 总管模式 (`manager`)              | Settings › 总管模式, New session's chip, the 工人 pane, the strip, the menu switch, the manager tools, restart recovery  |
-| 同时交给几个 Agent (`bestOfN`)    | the way-of-working item, the group page and row (runs list one by one), `groups.*`                                       |
-| 定时任务 (`routines`)             | the sidebar row, its pages and palette entries, the schedule's timer and event runs; windows and phones do not read them |
-| GitHub 自动化 (`github`)          | the issue inbox, auto-merge and PR watch, the GitHub chips, routine triggers; the flow reads nothing, so no timer        |
-| 沙箱 (`sandbox`)                  | where a sandbox is chosen (Settings, project menu, New session); see below                                               |
-| 聊天软件遥控 (`chatBridge`)       | Settings › 聊天软件; the agent host gets no bridge, so its code never loads and a running one disconnects                |
-| Agent 同步 (`agentSync`)          | the Marketplace's Sync tab and `sync.*`                                                                                  |
-| 端口转发 (`portForwarding`)       | the browser's and the host page's Ports, a remote localhost through a forward, the terminal watch; forwards stop         |
-| 手机预览开发服务器 (`devPreview`) | the phone's 开发服务器 entries; the remote host refuses `preview.open` and closes open previews                          |
-| 移动设备 (`devices`)              | Settings › 移动设备, the devices pane and tabs, the `device_*` tools; main parks the device host and its polling         |
-| 浏览器点选元素 (`pickElement`)    | the pick toggle, hint, layer and tray (now lazily loaded); main refuses `browser:pick` and ends pick mode                |
-| 密钥卡片 (`secrets`)              | `request_secrets` and its line in Kite's MCP instructions                                                                |
-| Agent 改主题 (`agentTheme`)       | `read_theme`, `set_theme_colors` and their line                                                                          |
+| Feature (id)                       | Off, it stops                                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 看板 (`board`)                     | the Overview's board view (now lazily loaded), the rows' column mark, the session menus' 看板 ›, `set_board_status`      |
+| 总管模式 (`manager`)               | Settings › 总管模式, New session's chip, the 工人 pane, the strip, the menu switch, the manager tools, restart recovery  |
+| 同时交给几个 Agent (`bestOfN`)     | the way-of-working item, the group page and row (runs list one by one), `groups.*`                                       |
+| 定时任务 (`routines`)              | the sidebar row, its pages and palette entries, the schedule's timer and event runs; windows and phones do not read them |
+| GitHub 自动化 (`github`)           | the issue inbox, auto-merge and PR watch, the GitHub chips, routine triggers; the flow reads nothing, so no timer        |
+| 沙箱 (`sandbox`)                   | where a sandbox is chosen (Settings, project menu, New session); see below                                               |
+| 聊天软件遥控 (`chatBridge`)        | Settings › 聊天软件; the agent host gets no bridge, so its code never loads and a running one disconnects                |
+| Agent 同步 (`agentSync`)           | the Marketplace's Sync tab and `sync.*`                                                                                  |
+| 端口转发 (`portForwarding`)        | the browser's and the host page's Ports, a remote localhost through a forward, the terminal watch; forwards stop         |
+| 手机预览开发服务器 (`devPreview`)  | the phone's 开发服务器 entries; the remote host refuses `preview.open` and closes open previews                          |
+| 移动设备 (`devices`)               | Settings › 移动设备, the devices pane and tabs, the `device_*` tools; main parks the device host and its polling         |
+| 浏览器点选元素 (`pickElement`)     | the pick toggle, hint, layer and tray (now lazily loaded); main refuses `browser:pick` and ends pick mode                |
+| 密钥卡片 (`secrets`)               | `request_secrets` and its line in Kite's MCP instructions                                                                |
+| Agent 改主题 (`agentTheme`)        | `read_theme`, `set_theme_colors` and their line                                                                          |
+| 回退时还原文件 (`fileCheckpoints`) | Kite's file checkpoints as each turn starts, the rewind dialog's files part, `sessions.restoreFiles`                     |
 
 Computer use (电脑操控) already has its own switch (`computerUse.enabled`), so the page links to it
 rather than repeating it. These stay on for good, as Kite's core: sessions, the terminal, the

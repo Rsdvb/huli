@@ -1991,66 +1991,37 @@ describe('worktree requests', () => {
     rejects(() => posix['sessions.revert']({ sessionId: 's', entryId: 'x'.repeat(1_025) }))
   })
 
-  it('rewinds with a mode, and restores files only with a preview token', () => {
+  it('rewinds to a message, and restores files only with a preview token', () => {
     const token = 'a'.repeat(64)
-    expect(
-      posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4', mode: 'edit', x: 1 }),
-    ).toEqual({ sessionId: 's', entryId: 'e:4', mode: 'edit' })
-    rejects(() => posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4' }))
-    rejects(() => posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4', mode: 'all' }))
-    expect(posix['sessions.rewind']({ sessionId: 's', entryId: 'e:4', mode: 'rewind' })).toEqual({
+    expect(posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4', x: 1 })).toEqual({
       sessionId: 's',
       entryId: 'e:4',
-      mode: 'rewind',
+    })
+    rejects(() => posix['sessions.rewindPreview']({ sessionId: 's' }))
+    expect(posix['sessions.rewind']({ sessionId: 's', entryId: 'e:4' })).toEqual({
+      sessionId: 's',
+      entryId: 'e:4',
+      draft: [],
     })
     expect(
       posix['sessions.rewind']({
         sessionId: 's',
         entryId: 'e:4',
-        mode: 'edit',
-        restoreFiles: true,
-        token,
+        draft: [{ type: 'text', text: 'held' }],
       }),
-    ).toEqual({ sessionId: 's', entryId: 'e:4', mode: 'edit', restoreFiles: true, token })
+    ).toMatchObject({ draft: [{ type: 'text', text: 'held' }] })
+    rejects(() => posix['sessions.rewind']({ sessionId: 's', entryId: 4 }))
+    expect(posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token })).toEqual({
+      sessionId: 's',
+      entryId: 'e:4',
+      token,
+    })
     expect(
-      posix['sessions.rewind']({
-        sessionId: 's',
-        entryId: 'e:4',
-        mode: 'edit',
-        restoreFiles: true,
-        token: 'agent',
-      }),
-    ).toMatchObject({ restoreFiles: true, token: 'agent' })
-    // A token alone restores nothing.
-    expect(
-      posix['sessions.rewind']({ sessionId: 's', entryId: 'e:4', mode: 'edit', token }),
-    ).toEqual({ sessionId: 's', entryId: 'e:4', mode: 'edit' })
-    rejects(() =>
-      posix['sessions.rewind']({
-        sessionId: 's',
-        entryId: 'e:4',
-        mode: 'edit',
-        restoreFiles: true,
-      }),
-    )
-    rejects(() =>
-      posix['sessions.rewind']({
-        sessionId: 's',
-        entryId: 'e:4',
-        mode: 'edit',
-        restoreFiles: 'yes',
-        token,
-      }),
-    )
-    rejects(() =>
-      posix['sessions.rewind']({
-        sessionId: 's',
-        entryId: 'e:4',
-        mode: 'edit',
-        restoreFiles: true,
-        token: '../x',
-      }),
-    )
+      posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token: 'agent' }),
+    ).toMatchObject({ token: 'agent' })
+    for (const bad of [undefined, '', '../x', 'A'.repeat(64), 7]) {
+      rejects(() => posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token: bad }))
+    }
     expect(
       posix['sessions.undoRewindFiles']({ sessionId: 's', backup: 'b-1700000000000' }),
     ).toEqual({

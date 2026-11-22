@@ -4,10 +4,11 @@
 
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
-import type { RewindChange, RewindFiles, RewindMode, RewindPreview } from '@shared/agent-host'
+import type { FilesRestored, RewindChange, RewindFiles, RewindPreview } from '@shared/agent-host'
+import type { RewindMode } from '@shared/rewind-target'
 import { call } from '../git'
 import { hostErrorText } from '../hostErrors'
-import { useConnected, useMaybeLink } from '../host'
+import { useConnected, useEntryOn, useMaybeLink } from '../host'
 import { LockLayer } from '../lock'
 import { Press } from '../ui/Press'
 import { MONO } from '../ui/session/palette'
@@ -15,6 +16,8 @@ import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
 export interface RewindDone {
   mode: RewindMode
+  /** The message's text, for the composer after 从这里重来. */
+  text: string
   restored: number | null
   failed: number
   backup: string | null
@@ -67,7 +70,7 @@ function filesLine(files: RewindFiles): string | null {
 
 export function RewindDialog(props: {
   sessionId: string
-  /** The message, and how to go back to it; null while closed. */
+  /** The first message the rewind takes out, and how it goes back; null while closed. */
   target: { entryId: string; mode: RewindMode } | null
   /** The session's agent, by name. */
   agent: string
@@ -82,6 +85,7 @@ export function RewindDialog(props: {
   const [error, setError] = useState<string | null>(null)
   const [restore, setRestore] = useState(false)
   const [busy, setBusy] = useState(false)
+  const filesOn = useEntryOn('phone.rewindFiles')
   const entryId = target?.entryId ?? null
   const mode = target?.mode ?? 'edit'
 
@@ -92,17 +96,17 @@ export function RewindDialog(props: {
     setBusy(false)
     if (!entryId || !link || !connected) return
     let live = true
-    call(link, 'sessions.rewindPreview', { sessionId, entryId, mode }).then(
+    call(link, 'sessions.rewindPreview', { sessionId, entryId }).then(
       (answer) => live && setPreview(answer),
       (e: unknown) => live && setError(hostErrorText(e)),
     )
     return () => {
       live = false
     }
-  }, [entryId, mode, sessionId, link, connected])
+  }, [entryId, sessionId, link, connected])
 
   if (!target) return null
-  const files = preview?.files ?? null
+  const files = filesOn ? (preview?.files ?? null) : null
   const ready = files?.state === 'ready' ? files : null
   const later = Math.max(0, (preview?.messages ?? 1) - (mode === 'edit' ? 1 : 0))
   const body =
@@ -125,21 +129,32 @@ export function RewindDialog(props: {
     if (!link || busy) return
     setBusy(true)
     setError(null)
+    // The files first, so a refusal leaves the conversation as it is too.
+    let restored: FilesRestored | null = null
     try {
-      const done = await call(link, 'sessions.rewind', {
+      if (restore && ready) {
+        restored = await call(link, 'sessions.restoreFiles', {
+          sessionId,
+          entryId: target.entryId,
+          token: ready.token,
+        })
+      }
+      const { content } = await call(link, 'sessions.rewind', {
         sessionId,
         entryId: target.entryId,
-        mode,
-        ...(restore && ready ? { restoreFiles: true, token: ready.token } : {}),
+        draft: [],
       })
       props.onDone({
         mode,
-        restored: done.files ? done.files.restored : null,
-        failed: done.files?.failed ?? 0,
-        backup: done.files?.backup ?? null,
+        text: content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n\n'),
+        restored: restored ? restored.restored : null,
+        failed: restored?.failed ?? 0,
+        backup: restored?.backup ?? null,
       })
     } catch (e) {
-      setError(hostErrorText(e))
+      setError(
+        restored ? `${hostErrorText(e)}（文件已还原 ${restored.restored} 个）` : hostErrorText(e),
+      )
       setBusy(false)
     }
   }
@@ -165,26 +180,32 @@ export function RewindDialog(props: {
               {how ? (
                 <Text style={[typeScale.footnote, { color: c.textSecondary }]}>{how}</Text>
               ) : null}
-              <Press
-                onPress={() => setRestore((on) => !on)}
-                disabled={!ready || busy}
-                accessibilityRole="switch"
-                accessibilityState={{ checked: restore && !!ready, disabled: !ready || busy }}
-                style={styles.toggle}
-              >
-                <Text
-                  style={[typeScale.body, styles.flex, { color: ready ? c.text : c.textTertiary }]}
-                >
-                  同时还原文件
-                </Text>
-                <Switch
-                  value={restore && !!ready}
+              {filesOn ? (
+                <Press
+                  onPress={() => setRestore((on) => !on)}
                   disabled={!ready || busy}
-                  onValueChange={setRestore}
-                  accessibilityElementsHidden
-                  importantForAccessibility="no"
-                />
-              </Press>
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: restore && !!ready, disabled: !ready || busy }}
+                  style={styles.toggle}
+                >
+                  <Text
+                    style={[
+                      typeScale.body,
+                      styles.flex,
+                      { color: ready ? c.text : c.textTertiary },
+                    ]}
+                  >
+                    同时还原文件
+                  </Text>
+                  <Switch
+                    value={restore && !!ready}
+                    disabled={!ready || busy}
+                    onValueChange={setRestore}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no"
+                  />
+                </Press>
+              ) : null}
               {files && filesLine(files) ? (
                 <Text
                   style={[

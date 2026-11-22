@@ -8,7 +8,7 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { RewindMode } from '@shared/agent-host'
+import type { RewindMode } from '@shared/rewind-target'
 import { harnessOf, turnText, type StopReason, type UserContent } from '@shared/thread'
 import { forkSession, putBackUndone } from '@renderer/app/actions'
 import { MessageActions } from '@renderer/components/affect/message-actions'
@@ -101,7 +101,7 @@ function latestTurnStartOf(state: TurnState): string | null {
  * Huli: Edit from here and Rewind to here, on a message of the user's that started a turn, in a
  * session of the user's own.
  */
-function useRewindActions(sessionId: string, entryId: string, steered: boolean) {
+function useRewindActions(sessionId: string, entryId: string, rewindable: boolean) {
   const { t } = useTranslation('session')
   const view = useThreadsStore(
     useShallow((s) => {
@@ -127,7 +127,7 @@ function useRewindActions(sessionId: string, entryId: string, steered: boolean) 
       : '',
   )
   const [open, setOpen] = useState<RewindMode | null>(null)
-  if (!view || view.origin !== 'user' || steered || !entryId) {
+  if (!view || view.origin !== 'user' || !rewindable || !entryId) {
     return { actions: [], dialog: null }
   }
   const notReady = t('rewind.notReady')
@@ -172,6 +172,7 @@ function useRewindActions(sessionId: string, entryId: string, steered: boolean) 
 export function UserActions({
   sessionId = '',
   entryId = '',
+  rewindable = false,
   content,
   at,
   steered,
@@ -179,6 +180,8 @@ export function UserActions({
 }: {
   sessionId?: string
   entryId?: string
+  /** Huli: a message of the user's own that started a turn, which a rewind can go back to. */
+  rewindable?: boolean
   content: UserContent[]
   at?: number
   steered?: boolean
@@ -187,7 +190,7 @@ export function UserActions({
 }) {
   const { t } = useTranslation('session')
   const labels = useCopyLabels(t('userActions.copyMessage'))
-  const rewind = useRewindActions(sessionId, entryId, steered === true)
+  const rewind = useRewindActions(sessionId, entryId, rewindable)
   const meta = (
     <span className="ks-user__meta">
       {steered && (

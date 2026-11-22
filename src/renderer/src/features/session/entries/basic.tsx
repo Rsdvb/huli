@@ -46,6 +46,7 @@ import { CutTurnEnd } from './cut-turn'
 import { FailedTurnActions } from './failed-turn'
 import { OutOfCreditEnd } from './out-of-credit'
 import { splitLinks } from './text-links'
+import { canRewindFrom } from '@shared/rewind-target'
 import { UserActions } from './message-actions'
 import { ReplyRunChip } from './reply-run-chip'
 import { FromSessionCard, ReportLine } from './session-origin'
@@ -121,6 +122,7 @@ export const UserEntry = memo(function UserEntry({
       <UserActions
         sessionId={sessionId}
         entryId={entryId}
+        rewindable={canRewindFrom(entry)}
         content={entry.content}
         at={entry.at}
         steered={entry.steered}

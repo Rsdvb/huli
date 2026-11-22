@@ -167,6 +167,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.revert': AGENT_MS,
   'sessions.rewindPreview': AGENT_MS,
   'sessions.rewind': AGENT_MS,
+  'sessions.restoreFiles': AGENT_MS,
   'sessions.undoRewindFiles': AGENT_MS,
   'worktrees.inspect': AGENT_MS,
   'worktrees.remove': NONE,

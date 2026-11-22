@@ -2030,6 +2030,7 @@
     "doneSomeFailed_one": "已回退，还原了 {{count}} 个文件，{{failed}} 个没能还原",
     "doneSomeFailed_other": "已回退，还原了 {{count}} 个文件，{{failed}} 个没能还原",
     "undoFiles": "撤销还原",
-    "undoneFiles": "文件已改回还原之前的样子"
+    "undoneFiles": "文件已改回还原之前的样子",
+    "nothingAfter": "这条消息之后没有别的内容。"
   }
 }

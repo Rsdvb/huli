@@ -2111,6 +2111,7 @@
     "doneSomeFailed_one": "Rewound; {{count}} file restored, {{failed}} couldn't be",
     "doneSomeFailed_other": "Rewound; {{count}} files restored, {{failed}} couldn't be",
     "undoFiles": "Undo restore",
-    "undoneFiles": "The files are back as they were before the restore"
+    "undoneFiles": "The files are back as they were before the restore",
+    "nothingAfter": "Nothing came after this message."
   }
 }

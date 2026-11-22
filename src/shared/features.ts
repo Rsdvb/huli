@@ -108,6 +108,12 @@ export const FEATURES = [
     toolGroups: ['devices'],
   },
   { id: 'pickElement', entries: ['browser.pick'] },
+  // A checkpoint of the session's files as each message goes, which a rewind can restore them to.
+  {
+    id: 'fileCheckpoints',
+    entries: ['rewind.files', 'phone.rewindFiles'],
+    methods: ['sessions.restoreFiles', 'sessions.undoRewindFiles'],
+  },
   { id: 'secrets', entries: [], toolGroups: ['secrets'] },
   { id: 'agentTheme', entries: [], toolGroups: ['theme'] },
 ] as const satisfies readonly FeatureDef[]

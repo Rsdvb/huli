@@ -3690,9 +3690,11 @@ export class AgentHost {
       'sessions.fork': ({ sessionId, entryId, worktree }) =>
         sessions.fork(sessionId, entryId, worktree),
       'sessions.revert': ({ sessionId, entryId }) => sessions.revert(sessionId, entryId),
-      'sessions.rewindPreview': ({ sessionId, entryId, mode }) =>
-        sessions.rewindPreview(sessionId, entryId, mode),
-      'sessions.rewind': (params) => sessions.rewind(params),
+      'sessions.rewindPreview': ({ sessionId, entryId }) =>
+        sessions.rewindPreview(sessionId, entryId),
+      'sessions.rewind': ({ sessionId, entryId }) => sessions.rewind(sessionId, entryId),
+      'sessions.restoreFiles': ({ sessionId, entryId, token }) =>
+        sessions.restoreFiles(sessionId, entryId, token),
       'sessions.undoRewindFiles': ({ sessionId, backup }) =>
         sessions.undoRewindFiles(sessionId, backup),
       'worktrees.inspect': ({ sessionId }) =>

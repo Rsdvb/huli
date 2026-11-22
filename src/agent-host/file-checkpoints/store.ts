@@ -152,16 +152,18 @@ export class FileCheckpoints {
 
   /**
    * Takes the checkpoint of the session's folders for the message `entryId`, unless one is kept
-   * already. Settles once the folders are listed, which the turn waits for; `cancel` drops a
-   * checkpoint whose turn did not wait.
+   * already. `listed` settles once the folders are listed, which the turn waits for, and `saved`
+   * once the copies are made, which it waits for a moment; `cancel` drops a checkpoint whose turn
+   * did not wait.
    */
   begin(
     sessionId: string,
     entryId: string,
     folders: readonly string[],
-  ): { listed: Promise<void>; cancel: () => void } {
+  ): { listed: Promise<void>; saved: Promise<void>; cancel: () => void } {
     let cancelled = false
     const listings: Promise<unknown>[] = []
+    const savings: Promise<unknown>[] = []
     for (const folder of folders) {
       const job = (async () => {
         const store = await this.store(folder)
@@ -202,12 +204,15 @@ export class FileCheckpoints {
             void this.afterCheckpoint(store, sessionId)
           })
         this.pending.set(pendingKey, saved)
+        savings.push(saved)
         await taking.listed
       })()
       listings.push(job.catch(() => {}))
     }
+    const listed = Promise.all(listings).then(() => {})
     return {
-      listed: Promise.all(listings).then(() => {}),
+      listed,
+      saved: listed.then(() => Promise.all(savings)).then(() => {}),
       cancel: () => {
         cancelled = true
       },
