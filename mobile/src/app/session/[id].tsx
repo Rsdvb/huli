@@ -1028,6 +1028,12 @@ function Session() {
             : { detail: '未开放', disabled: true }),
           onPress: () => router.push({ pathname: '/terminals/[id]', params: { id } }),
         },
+        {
+          key: 'dev-servers',
+          label: '开发服务器',
+          icon: G.devServer,
+          onPress: () => router.push({ pathname: '/dev-servers', params: { session: id } }),
+        },
         { kind: 'divider', key: 'rule' },
         {
           key: 'children',

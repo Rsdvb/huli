@@ -117,6 +117,8 @@ const secret = (): string => {
 /** Every device's previews. */
 export class DevPreviews {
   private readonly previews = new Map<string, Preview>()
+  /** The port each device's preview of a port last listened on, the latest last. */
+  private readonly ports = new Map<string, number>()
   private readonly now: () => number
   private readonly idleMs: number
   private readonly maxMs: number
@@ -221,19 +223,27 @@ export class DevPreviews {
       if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
       else socket.destroy()
     })
-    preview.ready = new Promise<void>((resolve) => {
-      server.on('error', (error: NodeJS.ErrnoException) => {
-        this.options.log('warn', `A preview on ${bind} failed: ${error.code ?? error.name}`)
-        this.shut(preview)
-        resolve()
-      })
-      server.listen({ host: bind, port: 0, exclusive: true }, () => {
-        const address = server.address()
-        preview.port = typeof address === 'object' && address ? address.port : 0
-        this.schedule(preview)
-        resolve()
-      })
-    })
+    const failed = (error: NodeJS.ErrnoException): void => {
+      this.options.log('warn', `A preview on ${bind} failed: ${error.code ?? error.name}`)
+      this.shut(preview)
+    }
+    // The port it had before, while that is free, keeps the dev server's origin and with it what
+    // its pages stored in the web view.
+    const before = this.ports.get(key) ?? 0
+    preview.ready = listenOn(server, bind, before)
+      .catch((error: unknown) => (before === 0 ? Promise.reject(error) : listenOn(server, bind, 0)))
+      .then(
+        (port) => {
+          preview.port = port
+          server.on('error', failed)
+          this.ports.delete(key)
+          this.ports.set(key, port)
+          if (this.ports.size > MAX_PREVIEWS * 4) this.ports.delete(this.ports.keys().next().value!)
+          if (preview.closed) server.close()
+          else this.schedule(preview)
+        },
+        (error: NodeJS.ErrnoException) => failed(error),
+      )
     this.previews.set(key, preview)
     return preview
   }
@@ -429,6 +439,18 @@ export class DevPreviews {
     socket.once('close', () => upstream.destroy())
     upstream.once('close', () => socket.destroy())
   }
+}
+
+/** Listens on `host` at `port`, 0 for any; the port it took. */
+function listenOn(server: Server, host: string, port: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen({ host, port, exclusive: true }, () => {
+      server.off('error', reject)
+      const address = server.address()
+      resolve(typeof address === 'object' && address ? address.port : port)
+    })
+  })
 }
 
 /**

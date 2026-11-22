@@ -390,6 +390,10 @@ describe('a preview', () => {
     const second = await previews.open('phone', { host: '127.0.0.1', port: devPort }, '127.0.0.1')
     expect(second.port).toBe(first.port)
     expect(second.path).not.toBe(first.path)
+    // Closed and opened again, it takes its port again, so the dev server keeps its origin.
+    previews.close('phone', devPort)
+    const third = await previews.open('phone', { host: '127.0.0.1', port: devPort }, '127.0.0.1')
+    expect(third.port).toBe(first.port)
     for (let port = 30_001; previews.size < MAX_DEVICE_PREVIEWS; port++) {
       await previews.open('phone', { host: '127.0.0.1', port }, '127.0.0.1')
     }

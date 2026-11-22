@@ -44,6 +44,7 @@ import {
   Plus,
   Repeat,
   Search,
+  Server,
   Shield,
   ShieldAlert,
   ShieldCheck,
@@ -167,6 +168,8 @@ export const G = {
   sendNow: { sf: 'arrow.turn.down.left', lucide: CornerDownLeft },
   select: { sf: 'character.cursor.ibeam', lucide: TextSelect },
   comment: { sf: 'bubble.left', lucide: MessageSquare },
+  devServer: { sf: 'server.rack', lucide: Server },
+  globe: { sf: 'globe', lucide: Globe },
 } satisfies Record<string, IconSpec>
 
 export const TOOL_ICONS: Record<ToolKind, IconSpec> = {

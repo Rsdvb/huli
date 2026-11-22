@@ -71,6 +71,13 @@ done
 sleep 5
 xcrun simctl io "$UDID" screenshot "$RESULTS/paired.png"
 
+# A dev server on the loopback for the preview flow, only when it runs.
+DEV_SERVER=
+if [ -z "${FLOWS:-}" ] || [[ "$FLOWS" == *dev-preview* ]]; then
+  node tools/huli/ios/sim/dev-server.mjs > "$RESULTS/dev-server.log" 2>&1 &
+  DEV_SERVER=$!
+fi
+
 failed=0
 for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
   # What the app costs at rest, sampled without a recording, which would load the runner.
@@ -124,6 +131,7 @@ sleep 2
 xcrun simctl io "$UDID" screenshot "$RESULTS/last-light.png"
 
 cp -R "$KETTU_DAEMON_DATA/logs" "$RESULTS/daemon-logs" 2>/dev/null || true
+[ -n "$DEV_SERVER" ] && kill "$DEV_SERVER" 2>/dev/null || true
 kill "$DAEMON" || true
 xcrun simctl shutdown "$UDID" || true
 xcrun simctl delete "$UDID" || true
