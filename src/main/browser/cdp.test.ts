@@ -199,3 +199,99 @@ describe('the network tools', () => {
     await expect(call('browser_network_request', { id: '404' })).rejects.toThrow(/No request/)
   })
 })
+
+/** A page of a main region holding a button and the given lines of text, as the tree reports it. */
+function page(texts: string[], buttons = ['Pay']) {
+  const nodes: Record<string, unknown>[] = [
+    { nodeId: 'root', role: { value: 'RootWebArea' }, name: { value: 'App' }, childIds: ['main'] },
+  ]
+  const kids: string[] = []
+  buttons.forEach((name, i) => {
+    kids.push(`b${i}`)
+    nodes.push({
+      nodeId: `b${i}`,
+      parentId: 'main',
+      role: { value: 'button' },
+      name: { value: name },
+      backendDOMNodeId: 100 + i,
+    })
+  })
+  texts.forEach((text, i) => {
+    kids.push(`p${i}`, `t${i}`)
+    nodes.push(
+      { nodeId: `p${i}`, parentId: 'main', role: { value: 'paragraph' }, childIds: [`s${i}`] },
+      { nodeId: `s${i}`, parentId: `p${i}`, role: { value: 'StaticText' }, name: { value: text } },
+    )
+  })
+  nodes.push({
+    nodeId: 'main',
+    parentId: 'root',
+    role: { value: 'main' },
+    backendDOMNodeId: 10,
+    childIds: kids,
+  })
+  return { nodes }
+}
+
+describe('snapshots', () => {
+  function pageHarness() {
+    let tree = page(['Ready'])
+    const harnessed = harness({ 'Accessibility.getFullAXTree': () => tree })
+    return { ...harnessed, show: (next: ReturnType<typeof page>) => (tree = next) }
+  }
+
+  it('answer an action with what changed since the last one', async () => {
+    const { call, show } = pageHarness()
+    const items = Array.from({ length: 30 }, (_, i) => `Order ${i} shipped`)
+    show(page(items))
+    const first = await call('browser_snapshot')
+    expect((first.value.snapshot as string).split('\n').slice(0, 4)).toEqual([
+      '- Page: App (http://localhost:5173/)',
+      '- main [ref=e1]:',
+      '  - button "Pay" [ref=e2]',
+      '  - paragraph: Order 0 shipped',
+    ])
+    show(page([...items, 'Card declined']))
+    const pressed = await call('browser_press_key', { key: 'Enter' })
+    expect(pressed.text).toMatch(/shows what changed/)
+    const lines = (pressed.value.snapshot as string).split('\n')
+    expect(lines[0]).toBe('- Page: App (http://localhost:5173/)')
+    expect(lines[1]).toMatch(/^Changes since your last snapshot/)
+    expect(lines.slice(2)).toEqual(['  - main [ref=e1]:', '+   - paragraph: Card declined'])
+    const again = await call('browser_press_key', { key: 'Enter' })
+    expect(again.value.snapshot).toMatch(/Nothing changed since your last snapshot/)
+    // The whole page again, with the refs it had.
+    const whole = await call('browser_snapshot')
+    expect(whole.value.snapshot).toMatch(/\[ref=e2\]/)
+    expect(whole.value.snapshot).toMatch(/- paragraph: Card declined$/)
+  })
+
+  it('answer with the whole page when it is as short as the changes', async () => {
+    const { call, show } = pageHarness()
+    await call('browser_snapshot')
+    show(page(['Paid']))
+    const pressed = await call('browser_press_key', { key: 'Enter' })
+    expect(pressed.value.snapshot).toMatch(/^- Page: .*\n- main \[ref=e1\]:/)
+  })
+
+  it('give a new document whole, and its refs anew', async () => {
+    const { call, emit, show } = pageHarness()
+    await call('browser_snapshot')
+    emit('Page.frameNavigated', { frame: { id: 'main' } })
+    await expect(call('browser_click', { ref: 'e2' })).rejects.toMatchObject({ code: 'stale_ref' })
+    show(page(['Welcome'], ['Start']))
+    const pressed = await call('browser_press_key', { key: 'Tab' })
+    expect(pressed.value.snapshot).not.toMatch(/Changes since/)
+    expect(pressed.value.snapshot).toMatch(/- button "Start" \[ref=e2\]/)
+  })
+
+  it('show one element alone, to a depth', async () => {
+    const { call } = pageHarness()
+    await call('browser_snapshot')
+    const scoped = await call('browser_snapshot', { ref: 'e1', depth: 0 })
+    expect(scoped.value.snapshot).toBe('- Page: App (http://localhost:5173/)\n- main [ref=e1]: …')
+    await expect(call('browser_snapshot', { ref: 'e9' })).rejects.toMatchObject({
+      code: 'stale_ref',
+    })
+  })
+})

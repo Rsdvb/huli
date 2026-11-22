@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import cases from './fixtures/ax-cases.json'
 import checkout from './fixtures/ax-checkout.json'
-import { buildOutline, MAX_TEXT_CHARS, mergeFrames, outlineText, type AXNode } from './outline'
+import {
+  buildOutline,
+  MAX_TEXT_CHARS,
+  mergeFrames,
+  outlineText,
+  RefRegistry,
+  type AXNode,
+} from './outline'
 
 // The fixtures are Accessibility.getFullAXTree of the pages beside them, one tree per frame, as
 // Electron 44's Chromium reports them, trimmed to the fields the outline reads.
@@ -36,49 +43,49 @@ const text = (value: string, extra: Partial<AXNode> = {}) =>
 describe('the snapshot outline', () => {
   it('keeps the text of paragraphs, wrappers, list items and alerts', () => {
     expect(buildOutline(checkoutTree()).lines).toEqual([
-      '- banner:',
-      '  - navigation:',
-      '    - link "Home" [ref=e1]',
-      '    - link "Cart" [ref=e2]',
-      '- main:',
+      '- banner [ref=e1]:',
+      '  - navigation [ref=e2]:',
+      '    - link "Home" [ref=e3]',
+      '    - link "Cart" [ref=e4]',
+      '- main [ref=e5]:',
       '  - heading "Checkout" [level=1]',
       '  - paragraph: Review your order before paying.',
       '  - text: Subtotal',
       '  - text: $40.00',
       '  - text: Total due $42.00',
       '  - paragraph: Hello world and more text.',
-      '  - list:',
+      '  - list [ref=e6]:',
       '    - listitem: Apples',
       '    - listitem:',
       '      - text: Bananas',
-      '      - link "remove" [ref=e3]',
+      '      - link "remove" [ref=e7]',
       '    - listitem: Cherries',
-      '  - list:',
+      '  - list [ref=e8]:',
       '    - listitem: First step',
       '    - listitem: Second step',
       '  - alert: Network error',
       '  - status: Saving…',
       '  - text: Card declined',
-      '  - button "Pay now" [ref=e4]',
-      '  - button "Close" [ref=e5]: ×',
-      '  - textbox "Email" [value="a@b.c"] [ref=e6]',
-      '  - table:',
+      '  - button "Pay now" [ref=e9]',
+      '  - button "Close" [ref=e10]: ×',
+      '  - textbox "Email" [value="a@b.c"] [ref=e11]',
+      '  - table [ref=e12]:',
       '    - row:',
       '      - columnheader "Item"',
       '      - columnheader "Qty"',
       '    - row:',
       '      - cell "Widget"',
       '      - cell "2"',
-      '  - list:',
+      '  - list [ref=e13]:',
       '    - term "Shipping"',
       '    - definition: Free',
       '  - text: Line one',
       '  - text: Line two',
-      '  - region "Promo":',
+      '  - region "Promo" [ref=e14]:',
       '    - paragraph: Use code SAVE10',
-      '  - iframe:',
+      '  - iframe [ref=e15]:',
       '    - paragraph: Inside frame',
-      '    - button "Frame button" [ref=e7]',
+      '    - button "Frame button" [ref=e16]',
     ])
   })
 
@@ -97,7 +104,7 @@ describe('the snapshot outline', () => {
     const lines = buildOutline((cases as AXNode[][])[0]!).lines
     expect(lines).toContain('- text: Inline lonely span')
     expect(lines).toEqual(expect.arrayContaining(['  - text: Price: $9', '  - text: Tax: $1']))
-    expect(lines).toContain('- link "Read more" [ref=e11]')
+    expect(lines).toContain('- link "Read more" [ref=e13]')
     expect(lines).toContain('- generic "Labelled box": Inner text')
   })
 
@@ -106,7 +113,7 @@ describe('the snapshot outline', () => {
     expect(lines[0]).toBe('- textbox [value="Editable rich text"] [ref=e1]')
     expect(lines[1]).toBe('- textbox [value="Area value"] [ref=e2]')
     expect(lines).toContain('- searchbox "Search docs" [ref=e3]')
-    expect(lines).toContain('  - button "No" [disabled] [ref=e10]')
+    expect(lines).toContain('  - button "No" [disabled] [ref=e12]')
     expect(lines.join('\n')).not.toMatch(/listitem \[level/)
   })
 
@@ -115,7 +122,7 @@ describe('the snapshot outline', () => {
     expect(lines).toEqual(
       expect.arrayContaining([
         '  - paragraph: Shadow text',
-        '- dialog "Confirm":',
+        '- dialog "Confirm" [ref=e10]:',
         '  - paragraph: Are you sure?',
       ]),
     )
@@ -152,9 +159,62 @@ describe('the snapshot outline', () => {
     const [page, frame] = checkout as AXNode[][]
     const lines = buildOutline(mergeFrames(page!, [{ owner: null, nodes: frame! }])).lines
     expect(lines.slice(-3)).toEqual([
-      '  - iframe',
+      '  - iframe [ref=e15]',
       '- paragraph: Inside frame',
-      '- button "Frame button" [ref=e7]',
+      '- button "Frame button" [ref=e16]',
     ])
+  })
+})
+
+describe('a scoped outline', () => {
+  it('shows one element and what it holds', () => {
+    const lines = buildOutline(checkoutTree(), { root: 24 }).lines
+    expect(lines).toEqual([
+      '- list [ref=e1]:',
+      '  - listitem: Apples',
+      '  - listitem:',
+      '    - text: Bananas',
+      '    - link "remove" [ref=e2]',
+      '  - listitem: Cherries',
+    ])
+    expect(buildOutline(checkoutTree(), { root: 99_999 }).found).toBe(false)
+  })
+
+  it('stops at a depth, marking what it left out', () => {
+    const lines = buildOutline(checkoutTree(), { depth: 1 }).lines
+    expect(lines).toContain('  - list [ref=e6]: …')
+    expect(lines).toContain('  - paragraph: Review your order before paying.')
+    expect(lines).not.toContain('    - listitem: Apples')
+    expect(buildOutline(checkoutTree(), { depth: 0 }).lines).toEqual([
+      '- banner [ref=e1]: …',
+      '- main [ref=e5]: …',
+    ])
+  })
+})
+
+describe('refs', () => {
+  it('stay the same element’s from one outline to the next', () => {
+    const registry = new RefRegistry()
+    const refFor = (backend: number) => registry.refFor(backend)
+    const whole = buildOutline(checkoutTree(), { refFor }).lines
+    expect(whole).toContain('      - link "remove" [ref=e7]')
+    // The list alone, and the page again, give its link the ref it had.
+    expect(buildOutline(checkoutTree(), { refFor, root: 24 }).lines).toContain(
+      '    - link "remove" [ref=e7]',
+    )
+    expect(buildOutline(checkoutTree(), { refFor }).lines).toEqual(whole)
+    expect(registry.backendOf('e7')).toBe(27)
+  })
+
+  it('number a new element on and let the oldest go past the cap', () => {
+    const registry = new RefRegistry(2)
+    expect([1, 2, 1, 3].map((backend) => registry.refFor(backend))).toEqual([
+      'e1',
+      'e2',
+      'e1',
+      'e3',
+    ])
+    expect(registry.backendOf('e1')).toBeUndefined()
+    expect(registry.backendOf('e3')).toBe(3)
   })
 })

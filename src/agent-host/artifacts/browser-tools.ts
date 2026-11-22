@@ -14,6 +14,7 @@ import {
   BROWSER_TAB_ACTIONS,
   BROWSER_TOOL_NAMES,
   MAX_SESSION_TABS,
+  MAX_SNAPSHOT_DEPTH,
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_FILES,
   ORIGIN_WAIT_MS,
@@ -120,7 +121,12 @@ const ERROR = object({ code: { type: 'string', enum: ERROR_CODES }, message: { t
 const PAGE = {
   url: { type: 'string', description: 'The address the page shows.' },
   title: { type: ['string', 'null'], description: "The page's title." },
-  snapshot: { type: 'string', description: 'The page outline after the action settled.' },
+  snapshot: {
+    type: 'string',
+    description:
+      'The page outline after the action settled; after an action on the same page, only what ' +
+      'changed since your last snapshot when that is shorter, as it says.',
+  },
 }
 
 function output(properties: Record<string, Schema>): Tool['outputSchema'] {
@@ -192,9 +198,21 @@ export const BROWSER_TOOLS: Tool[] = [
     title: 'Snapshot',
     description:
       'Returns the page as an outline of its accessibility tree, with a ref on each element ' +
-      'you can act on (buttons, links, fields, options and the like) and the page’s text ' +
-      'under the element that holds it.',
-    inputSchema: object({}),
+      'you can act on (buttons, links, fields, options and the like) and on the lists, forms, ' +
+      'dialogs and regions that hold them, and the page’s text under the element that holds ' +
+      'it. A ref stays the same element’s while the page shows it. Give a ref to read only that ' +
+      'element, and depth to read fewer levels; acting tools answer with only what changed, and ' +
+      'this gives the whole page again.',
+    inputSchema: object({
+      ref: { ...REF, description: 'Only this element and what it holds.' },
+      depth: {
+        type: 'integer',
+        minimum: 0,
+        maximum: MAX_SNAPSHOT_DEPTH,
+        description:
+          'How many levels under the top elements to show; an element cut off ends in "…".',
+      },
+    }),
     outputSchema: output(PAGE),
     annotations: { ...READ_ONLY },
   },
@@ -624,7 +642,7 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_navigate: ['url'],
     browser_navigate_back: [],
     browser_reload: [],
-    browser_snapshot: [],
+    browser_snapshot: ['ref', 'depth'],
     browser_click: ['ref', 'element', 'double', 'button'],
     browser_type: ['ref', 'element', 'text', 'submit', 'slowly'],
     browser_press_key: ['key'],
@@ -677,6 +695,22 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
       const url = text('url', true, 8_192)!
       if (url.trim() === '') throw invalid('url must not be empty.')
       args.url = url
+      break
+    }
+    case 'browser_snapshot': {
+      const element = ref(false)
+      if (element !== undefined) args.ref = element
+      if (o.depth !== undefined) {
+        if (
+          typeof o.depth !== 'number' ||
+          !Number.isInteger(o.depth) ||
+          o.depth < 0 ||
+          o.depth > MAX_SNAPSHOT_DEPTH
+        ) {
+          throw invalid(`depth must be a whole number from 0 to ${MAX_SNAPSHOT_DEPTH}.`)
+        }
+        args.depth = o.depth
+      }
       break
     }
     case 'browser_click': {

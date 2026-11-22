@@ -136,6 +136,9 @@ export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 export const BROWSER_CONSOLE_LEVELS = ['error', 'warn', 'info', 'all'] as const
 export type BrowserConsoleLevel = (typeof BROWSER_CONSOLE_LEVELS)[number]
 
+/** The deepest a `browser_snapshot` with `depth` goes. */
+export const MAX_SNAPSHOT_DEPTH = 100
+
 /** What `browser_tabs` does. */
 export const BROWSER_TAB_ACTIONS = ['list', 'new', 'select', 'close'] as const
 export type BrowserTabAction = (typeof BROWSER_TAB_ACTIONS)[number]

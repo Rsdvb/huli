@@ -9,6 +9,8 @@ export const MAX_SNAPSHOT_LINES = 2_000
 export const MAX_SNAPSHOT_CHARS = 80_000
 /** The longest text or name one line shows. */
 export const MAX_TEXT_CHARS = 300
+/** The refs a document keeps; the oldest go stale beyond this. */
+export const MAX_REFS = 20_000
 
 /** Accessibility node, as Accessibility.getFullAXTree reports it. */
 export interface AXNode {
@@ -30,13 +32,54 @@ export interface Outline {
   refs: Map<string, number>
   /** Lines left out beyond the cap. */
   more: number
+  /** False when the element `root` names is not in the tree. */
+  found: boolean
 }
 
 export interface OutlineOptions {
   /** The ref an element gets; by default they are numbered in the order the page holds them. */
   refFor?: (backend: number) => string
+  /** Only the element with this backend id and what it holds. */
+  root?: number
+  /** How many levels of elements under the top ones to show; all by default. */
+  depth?: number
   maxLines?: number
   maxChars?: number
+}
+
+/**
+ * The refs of one document's elements: an element keeps its ref from one snapshot to the next, so
+ * an agent that read an earlier one acts on the same element, and a changed outline is a short
+ * diff. Refs are numbered in the order the page first showed the elements.
+ */
+export class RefRegistry {
+  private readonly refs = new Map<number, string>()
+  private readonly backends = new Map<string, number>()
+  private count = 0
+  private readonly max: number
+
+  constructor(max = MAX_REFS) {
+    this.max = max
+  }
+
+  refFor(backend: number): string {
+    const known = this.refs.get(backend)
+    if (known !== undefined) return known
+    const ref = `e${++this.count}`
+    this.refs.set(backend, ref)
+    this.backends.set(ref, backend)
+    if (this.refs.size > this.max) {
+      const [oldest, gone] = this.refs.entries().next().value!
+      this.refs.delete(oldest)
+      this.backends.delete(gone)
+    }
+    return ref
+  }
+
+  /** The backend id of an element a snapshot named, or undefined for a ref it never gave. */
+  backendOf(ref: string): number | undefined {
+    return this.backends.get(ref)
+  }
 }
 
 const ROLE_NAMES: Record<string, string> = {
@@ -92,6 +135,34 @@ const ACTIONABLE = new Set([
   'option',
   'treeitem',
   'textfield',
+])
+
+// Elements that hold others, with a ref so that a snapshot can show one of them alone.
+const SCOPABLE = new Set([
+  'banner',
+  'main',
+  'navigation',
+  'region',
+  'form',
+  'search',
+  'complementary',
+  'contentinfo',
+  'article',
+  'dialog',
+  'alertdialog',
+  'list',
+  'table',
+  'grid',
+  'treegrid',
+  'tree',
+  'menu',
+  'menubar',
+  'tablist',
+  'tabpanel',
+  'toolbar',
+  'group',
+  'radiogroup',
+  'iframe',
 ])
 
 // Wrappers that add nothing an agent needs; what they hold takes their place.
@@ -307,7 +378,9 @@ export function buildOutline(nodes: readonly AXNode[], options: OutlineOptions =
     if (typeof value === 'string' && value !== '' && FIELDS.has(role))
       head += ` [value=${quoted(value.slice(0, 80))}]`
     const backend = node.backendDOMNodeId
-    if (ACTIONABLE.has(role) && backend !== undefined) {
+    // A select's own list of options is the select's to act on.
+    const scopable = SCOPABLE.has(role) && raw !== 'MenuListPopup'
+    if ((ACTIONABLE.has(role) || scopable) && backend !== undefined) {
       const ref = refFor(backend)
       refs.set(ref, backend)
       head += ` [ref=${ref}]`
@@ -320,16 +393,25 @@ export function buildOutline(nodes: readonly AXNode[], options: OutlineOptions =
   }
 
   const top: Item[] = []
-  for (const node of nodes) {
-    if (node.parentId === undefined || !byId.has(node.parentId)) collect(node, top)
+  if (options.root !== undefined) {
+    const scope = nodes.find((node) => node.backendDOMNodeId === options.root)
+    if (!scope) return { lines: [], refs, more: 0, found: false }
+    collect(scope, top)
+  } else {
+    for (const node of nodes) {
+      if (node.parentId === undefined || !byId.has(node.parentId)) collect(node, top)
+    }
   }
-  return cap(render(finish(top, '')), refs, options)
+  return { ...cap(render(finish(top, ''), options.depth), refs, options), found: true }
 }
 
-/** The lines of the items, children indented under their element. */
-function render(items: readonly Item[]): string[] {
+/**
+ * The lines of the items, children indented under their element; below `depth` levels an element
+ * that holds more ends in `: …`.
+ */
+function render(items: readonly Item[], depth?: number): string[] {
   const lines: string[] = []
-  const walk = (list: readonly Item[], indent: string): void => {
+  const walk = (list: readonly Item[], indent: string, level: number): void => {
     for (const item of list) {
       if (item.kind === TEXT) {
         lines.push(`${indent}- text: ${cut(item.text)}`)
@@ -339,17 +421,22 @@ function render(items: readonly Item[]): string[] {
       const only = item.children.length === 1 ? item.children[0]! : null
       if (item.children.length === 0) lines.push(line)
       else if (only?.kind === TEXT) lines.push(`${line}: ${cut(only.text)}`)
+      else if (depth !== undefined && level >= depth) lines.push(`${line}: …`)
       else {
         lines.push(`${line}:`)
-        walk(item.children, `${indent}  `)
+        walk(item.children, `${indent}  `, level + 1)
       }
     }
   }
-  walk(items, '')
+  walk(items, '', 0)
   return lines
 }
 
-function cap(lines: string[], refs: Map<string, number>, options: OutlineOptions): Outline {
+function cap(
+  lines: string[],
+  refs: Map<string, number>,
+  options: OutlineOptions,
+): Omit<Outline, 'found'> {
   const maxLines = options.maxLines ?? MAX_SNAPSHOT_LINES
   const maxChars = options.maxChars ?? MAX_SNAPSHOT_CHARS
   let kept = 0

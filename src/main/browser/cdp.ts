@@ -5,6 +5,7 @@
 import type { WebContents } from 'electron'
 import {
   BROWSER_CONSOLE_LEVELS,
+  MAX_SNAPSHOT_DEPTH,
   siteOf,
   type BrowserCallResult,
   type BrowserToolName,
@@ -35,8 +36,9 @@ import {
   type BodyText,
   type ResourceTiming,
 } from './network'
-import { buildOutline, mergeFrames, outlineText, type AXNode } from './outline'
+import { buildOutline, mergeFrames, outlineText, RefRegistry, type AXNode } from './outline'
 import { isNeverOpened } from './policy'
+import { diffOutline } from './snapshot-diff'
 import { UploadRefused, type UploadFile } from './upload'
 
 /** How long the network stays quiet before a page counts as settled. */
@@ -147,15 +149,14 @@ interface NetworkRequest {
   fromCache: boolean
 }
 
+/** The last whole outline the agent read of a document, which the next one's changes are from. */
 interface Snapshot {
-  /** The document it was taken from; a ref from another one is stale. */
   nav: number
-  refs: Map<string, number>
-  /** The accessibility node behind each backend id, for the covered-centre message. */
-  outline: string
-  url: string
-  title: string
+  lines: string[]
 }
+
+/** A diff is worth reading over the whole outline only when it is this much shorter. */
+const DIFF_SHARE = 0.7
 
 interface PageState {
   nav: number
@@ -173,6 +174,8 @@ interface PageState {
     { request?: Record<string, unknown>; response?: Record<string, unknown> }
   >
   snapshot: Snapshot | null
+  /** The refs of the document's elements, which keep from one snapshot to the next. */
+  refs: RefRegistry
   dialogs: string[]
   /** Input events injected right now; the page reports them as it reports the user's. */
   injecting: number
@@ -397,6 +400,7 @@ export class BrowserCdp {
       requestsById: new Map(),
       extraHeaders: new Map(),
       snapshot: null,
+      refs: new RefRegistry(),
       dialogs: [],
       injecting: 0,
       status: null,
@@ -553,7 +557,7 @@ export class BrowserCdp {
       case 'browser_reload':
         return this.reload(sessionId)
       case 'browser_snapshot':
-        return this.snapshotResult(sessionId)
+        return this.snapshotResult(sessionId, args)
       case 'browser_click':
         return this.click(sessionId, args)
       case 'browser_type':
@@ -807,6 +811,7 @@ export class BrowserCdp {
         if (typeof frame.id === 'string') page.frameId = frame.id
         page.nav += 1
         page.snapshot = null
+        page.refs = new RefRegistry()
         page.status = null
         page.chooser = null
         break
@@ -864,10 +869,15 @@ export class BrowserCdp {
     }
   }
 
+  /**
+   * The page's outline: the whole of it, which the agent's next snapshot of the document is told
+   * apart from, or one element's (`root`) to `depth` levels.
+   */
   private async capture(
     sessionId: string,
     page: PageState,
-  ): Promise<{ outline: string; refs: Map<string, number>; nav: number }> {
+    scope: { root?: number; depth?: number } = {},
+  ): Promise<{ outline: string; lines: string[]; found: boolean }> {
     // Each frame has a tree of its own, which goes under the element of the frame that holds it.
     let main: AXNode[] | null = null
     const frames: { owner: number | null; nodes: AXNode[] }[] = []
@@ -889,28 +899,78 @@ export class BrowserCdp {
     }
     const nodes = mergeFrames(main ?? [], frames)
     const contents = this.contentsOf(sessionId)
-    const built = buildOutline(nodes)
+    const refs = page.refs
+    const built = buildOutline(nodes, { refFor: (backend) => refs.refFor(backend), ...scope })
     const url = contents.getURL()
     const title = contents.getTitle() || null
     const text = outlineText({ title, url }, built)
-    page.snapshot = {
-      nav: page.nav,
-      refs: built.refs,
-      outline: text,
-      url,
-      title: title ?? '',
+    // The page's line first, then the outline and its "more" line, as the agent read them.
+    const lines = text.split('\n')
+    if (scope.root === undefined && scope.depth === undefined) {
+      page.snapshot = { nav: page.nav, lines }
     }
-    return { outline: text, refs: built.refs, nav: page.nav }
+    return { outline: text, lines, found: built.found }
   }
 
-  private async snapshotResult(sessionId: string): Promise<BrowserCallResult> {
+  /**
+   * The outline an action answers with: what changed since the agent's last snapshot of this
+   * document when that is much shorter, else the whole of it.
+   */
+  private async changedOutline(
+    sessionId: string,
+    page: PageState,
+  ): Promise<{ outline: string; diff: boolean }> {
+    const before = page.snapshot?.nav === page.nav ? page.snapshot : null
+    const { outline, lines } = await this.capture(sessionId, page)
+    if (!before) return { outline, diff: false }
+    const changes = diffOutline(before.lines.slice(1), lines.slice(1))
+    if (changes === null) return { outline, diff: false }
+    if (changes.length === 0) {
+      return {
+        outline: `${lines[0]}\nNothing changed since your last snapshot (browser_snapshot gives the whole page).`,
+        diff: true,
+      }
+    }
+    const diff = [
+      lines[0]!,
+      'Changes since your last snapshot: + added, - removed, under the unchanged elements that ' +
+        'hold them; the rest is as it was (browser_snapshot gives the whole page).',
+      ...changes,
+    ].join('\n')
+    if (diff.length > outline.length * DIFF_SHARE) return { outline, diff: false }
+    return { outline: diff, diff: true }
+  }
+
+  private async snapshotResult(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
     const page = this.pageOf(sessionId)
     const contents = this.contentsOf(sessionId)
-    const { outline } = await this.capture(sessionId, page)
+    const scope: { root?: number; depth?: number } = {}
+    if (args.ref !== undefined) scope.root = this.resolveRef(page, String(args.ref))
+    if (args.depth !== undefined) {
+      const depth = Number(args.depth)
+      if (!Number.isInteger(depth) || depth < 0 || depth > MAX_SNAPSHOT_DEPTH) {
+        throw new ToolFailure(
+          'invalid',
+          `depth must be a whole number from 0 to ${MAX_SNAPSHOT_DEPTH}.`,
+        )
+      }
+      scope.depth = depth
+    }
+    const { outline, found } = await this.capture(sessionId, page, scope)
+    if (!found) {
+      throw new ToolFailure(
+        'stale_ref',
+        `${describe(args, 'That element')} is no longer on the page. Take a new snapshot.`,
+      )
+    }
     const url = contents.getURL()
     const title = contents.getTitle()
+    const part = scope.root !== undefined ? ` ${describe(args, 'the element')} of` : ''
     return {
-      text: `Snapshotted the page at ${url || 'about:blank'}${title ? `, "${title}"` : ''}.`,
+      text: `Snapshotted${part} the page at ${url || 'about:blank'}${title ? `, "${title}"` : ''}${scope.depth === undefined ? '' : `, ${scope.depth} level${scope.depth === 1 ? '' : 's'} deep`}.`,
       value: { url, title, snapshot: outline },
     }
   }
@@ -935,7 +995,10 @@ export class BrowserCdp {
     const current = this.pageOf(sessionId)
     if (switched) await this.settle(sessionId, current)
     const contents = this.contentsOf(sessionId)
-    const { outline } = await this.capture(sessionId, current)
+    // Another tab's outline is new to the agent, so it reads the whole of it.
+    const { outline, diff } = switched
+      ? { ...(await this.capture(sessionId, current)), diff: false }
+      : await this.changedOutline(sessionId, current)
     const url = contents.getURL()
     const title = contents.getTitle()
     const dialogs = page.dialogs.splice(0)
@@ -948,7 +1011,14 @@ export class BrowserCdp {
         ? ['It opened a new tab, which is now your current tab.']
         : ['The page closed itself, and the tab that opened it is your current tab again.']
     return {
-      text: [text, ...dialogs, ...chooser, ...opened, ...newErrors(current)].join(' '),
+      text: [
+        text,
+        ...dialogs,
+        ...chooser,
+        ...opened,
+        ...newErrors(current),
+        ...(diff ? ['The snapshot shows what changed since your last one.'] : []),
+      ].join(' '),
       value: { url, title, snapshot: outline },
     }
   }
@@ -1009,9 +1079,8 @@ export class BrowserCdp {
   private resolveRef(page: PageState, ref: string): number {
     const match = /^e(\d+)$/.exec(ref)
     if (!match) throw new ToolFailure('invalid', `"${ref}" is not a ref such as e12.`)
-    const snapshot = page.snapshot
-    const backend = snapshot?.refs.get(ref)
-    if (!snapshot || snapshot.nav !== page.nav || backend === undefined) {
+    const backend = page.refs.backendOf(ref)
+    if (backend === undefined) {
       throw new ToolFailure(
         'stale_ref',
         `Ref ${ref} is no longer on the page. Take a new snapshot.`,

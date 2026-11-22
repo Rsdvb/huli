@@ -176,6 +176,33 @@ describe('an agent using a tab the user opened', () => {
   })
 })
 
+describe('browser_snapshot arguments', () => {
+  it.each([[{}], [{ ref: 'e4' }], [{ depth: 0 }], [{ ref: 'e4', depth: 3 }]])(
+    'forwards %j to main as given',
+    async (input) => {
+      const { service, call } = tools()
+      const result = await service.call(caller, 'browser_snapshot', input)
+      expect(result.isError).toBeUndefined()
+      expect(call.mock.calls[0][0]).toMatchObject({ args: input })
+    },
+  )
+
+  it.each([
+    [{ ref: 'main' }, /ref must be/],
+    [{ depth: -1 }, /depth must be/],
+    [{ depth: 1.5 }, /depth must be/],
+    [{ depth: 101 }, /depth must be/],
+    [{ depth: '2' }, /depth must be/],
+    [{ full: true }, /Unknown argument full/],
+  ])('refuses %j before main sees it', async (input, message) => {
+    const { service, call } = tools()
+    const result = await service.call(caller, 'browser_snapshot', input)
+    expect(result.isError).toBe(true)
+    expect(String((result.content[0] as { text: string }).text)).toMatch(message)
+    expect(call).not.toHaveBeenCalled()
+  })
+})
+
 describe('browser_console_messages arguments', () => {
   it.each([[{}], [{ level: 'error' }], [{ level: 'all', since_navigation: true }]])(
     'forwards %j to main as given',
