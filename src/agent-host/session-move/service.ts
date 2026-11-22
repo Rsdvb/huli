@@ -7,7 +7,7 @@
 // it makes itself.
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { constants, createReadStream, createWriteStream } from 'node:fs'
 import {
   copyFile,
   mkdir,
@@ -16,6 +16,7 @@ import {
   readFile,
   realpath,
   rm,
+  rmdir,
   stat,
   writeFile,
 } from 'node:fs/promises'
@@ -122,7 +123,7 @@ type Step =
   | { kind: 'project'; path: string }
   | GitStep
   | { kind: 'file'; path: string }
-  /** A folder the move made, taken back whole. */
+  /** A folder the move made, taken back once nothing else is in it. */
   | { kind: 'folder'; path: string }
   | { kind: 'session'; id: string }
 
@@ -251,7 +252,8 @@ export class SessionMoves {
       cwd: facts.cwd,
       projectPath: facts.projectPath,
       projectName: folderName(facts.projectPath, this.deps.platform),
-      worktree: facts.worktree !== null,
+      createdAt: facts.createdAt,
+      worktree: facts.worktree,
       conversation: conversation.kind,
       git,
       problems,
@@ -264,7 +266,8 @@ export class SessionMoves {
     facts: MoveFacts,
   ): Promise<{ kind: MoveConversation['kind']; file: string | null }> {
     const harness = harnessOf(facts.agentId)
-    if (facts.carry || facts.acpSessionId === '') return { kind: 'carry', file: null }
+    // Only a UUID names a transcript or rollout another computer's agent resumes.
+    if (facts.carry || !UUID.test(facts.acpSessionId)) return { kind: 'carry', file: null }
     const folder = facts.configDir ?? this.deps.agents.configFolder(facts.agentId)
     if (harness === 'claude-code' && folder) {
       const file = await findClaudeTranscript(
@@ -357,6 +360,8 @@ export class SessionMoves {
       for (const name of names) {
         const file = path.join(move.dir, ...name.split('/'))
         const size = (await stat(file)).size
+        // An empty file of a session's folder carries nothing; a part is never empty.
+        if (size === 0 && name.startsWith('extra/')) continue
         total += size
         if (total > MOVE_MAX_BYTES) throw moveError('tooLarge', 'The session is too large to move')
         files.push({ name, size, sha256: await sha256Of(file) })
@@ -645,6 +650,13 @@ export class SessionMoves {
   ): Promise<{ sessionId: string; projectPath: string }> {
     const { platform } = this.deps
     for (const file of params.files) {
+      if (file.size === 0 && !move.files.has(file.name)) {
+        // No part carries an empty file.
+        const empty = this.stagedFile(move, file.name)
+        await mkdir(path.dirname(empty), { recursive: true })
+        await writeFile(empty, '', { flag: 'wx' })
+        move.files.set(file.name, { size: 0, written: 0 })
+      }
       const staged = move.files.get(file.name)
       if (!staged || staged.written !== file.size || staged.size !== file.size) {
         throw new HostError('invalid_params', `The pack's ${file.name} did not arrive whole`)
@@ -765,10 +777,11 @@ export class SessionMoves {
         for (const extra of extras) {
           const to = path.join(own, ...extra.name.slice('extra/'.length).split('/'))
           if (!isInside(to, own, this.deps.platform)) continue
-          await mkdir(path.dirname(to), { recursive: true })
+          await this.makeFolder(move, path.dirname(to))
+          await this.took(move, { kind: 'file', path: to })
           const from = this.stagedFile(move, extra.name)
           if (to.endsWith('.jsonl')) await rewriteTranscriptFile(from, to, full)
-          else await copyFile(from, to)
+          else await copyFile(from, to, constants.COPYFILE_EXCL)
         }
       }
       return { acpSessionId: newId }
@@ -834,8 +847,17 @@ export class SessionMoves {
 
   /** Makes a folder, writing down the first one it had to make. */
   private async makeFolder(move: Move, folder: string): Promise<void> {
-    const made = await mkdir(folder, { recursive: true })
-    if (made) await this.took(move, { kind: 'folder', path: made })
+    const missing: string[] = []
+    for (let at = folder; !(await exists(at)); at = path.dirname(at)) {
+      missing.unshift(at)
+      if (path.dirname(at) === at) break
+    }
+    for (const made of missing) {
+      await this.took(move, { kind: 'folder', path: made })
+      await mkdir(made).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EEXIST') throw error
+      })
+    }
   }
 
   /** Takes back every step the target took for the move, the clone too, and drops its staging. */
@@ -874,7 +896,12 @@ export class SessionMoves {
         await rm(step.path, { force: true })
         return true
       case 'folder':
-        await rm(step.path, { recursive: true, force: true, maxRetries: 3 })
+        // Anything another program wrote in it meanwhile stays, and so does the folder.
+        await rmdir(step.path).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT' && error.code !== 'ENOTEMPTY' && error.code !== 'EEXIST') {
+            throw error
+          }
+        })
         return true
       case 'project':
         this.deps.projects.remove(step.path)

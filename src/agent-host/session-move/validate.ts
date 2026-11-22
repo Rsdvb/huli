@@ -248,7 +248,8 @@ export function moveValidators(platform: Platform): Pick<Validators, MoveMethod>
       const o = fields(params)
       const project = fields(o.project, 'project')
       let chosen: HostParams<'moves.prepare'>['project']
-      if (project.clone === true && Object.keys(project).length === 1) chosen = { clone: true }
+      if (Object.keys(project).length !== 1) throw invalidParams('project names one project')
+      if (project.clone === true) chosen = { clone: true }
       else {
         const folder = text(project, 'path', PATH_CHARS)
         if (!isAbsolutePath(folder, platform)) throw invalidParams('project.path must be absolute')

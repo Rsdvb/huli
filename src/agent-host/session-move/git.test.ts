@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Platform } from '@shared/platform'
-import { remoteKey, withoutCredentials } from '@shared/session-move'
+import { isClonable, remoteKey, withoutCredentials } from '@shared/session-move'
 import { createExec } from '../git/exec'
 import {
   applyRepo,
@@ -277,8 +277,14 @@ describe('remote URLs', () => {
     expect(remoteKey('git@github.com:owner/repo.git')).toBe(key)
     expect(remoteKey('ssh://git@github.com:22/owner/repo')).toBe(key)
     expect(remoteKey('https://token@github.com/owner/repo/')).toBe(key)
-    expect(remoteKey('C:\\repos\\x')).toBeNull()
+    // A folder is one only on its own computer, and never cloned from another.
+    expect(remoteKey('C:\\Repos\\x')).toBe('file:c:/repos/x')
     expect(remoteKey('/srv/git/x.git')).toBe('file:/srv/git/x.git')
+    expect(isClonable('/srv/git/x.git')).toBe(false)
+    expect(isClonable('C:\\repos\\x')).toBe(false)
+    expect(isClonable('git@github.com:owner/repo.git')).toBe(true)
+    expect(isClonable('https://github.com/owner/repo')).toBe(true)
+    expect(isClonable('ext::sh -c touch% /tmp/pwned')).toBe(false)
   })
 
   it('drops passwords and tokens but keeps an SSH user', () => {

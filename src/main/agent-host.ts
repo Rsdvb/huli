@@ -52,6 +52,7 @@ import {
 import { isControlOutcome, type ControlOutcome } from '@shared/control'
 import type { MarketAccount, MarketCall, MarketCallAnswer } from '@shared/market-publish'
 import { isMediaType, MEDIA_TOKEN, type MediaGrantRecord } from '@shared/media'
+import { isPortError, PortRequestError } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
 import { reportBuildResult, type ReportBuildResult } from '@shared/report'
 import type { HostSettings } from '@shared/settings'
@@ -368,6 +369,12 @@ export class AgentHost {
   private readonly importRequests = new Map<number, (result: ImportAnswer) => void>()
   private nextImportId = 1
   private readonly exportRequests = new Map<number, (result: ArtifactExportResult) => void>()
+  /** Huli: main's own requests of host methods, by call id. */
+  private readonly mainCalls = new Map<
+    number,
+    { resolve: (result: unknown) => void; reject: (error: Error) => void }
+  >()
+  private nextMainCall = 1
   private nextExportId = 1
   private readonly listRequests = new Map<number, (list: ArtifactBrief[] | null) => void>()
   private nextListId = 1
@@ -458,6 +465,21 @@ export class AgentHost {
 
   restart(): void {
     this.host.restart()
+  }
+
+  /**
+   * Huli: main's own request of a host method, which the host runs as a window's and, for the
+   * methods only main may call, as main's; rejects with the host's error.
+   */
+  call(method: string, params: unknown): Promise<unknown> {
+    const callId = this.nextMainCall++
+    return new Promise((resolve, reject) => {
+      this.mainCalls.set(callId, { resolve, reject })
+      if (!this.host.post({ type: 'host:main-call', callId, method, params })) {
+        this.mainCalls.delete(callId)
+        reject(new PortRequestError({ code: 'unavailable', message: 'The host is not running' }))
+      }
+    })
   }
 
   pushSettings(settings: HostSettings): void {
@@ -950,6 +972,21 @@ export class AgentHost {
         resolve(listedArtifacts(message.result))
         break
       }
+      case 'host:main-answer': {
+        const call = this.mainCalls.get(message.callId)
+        if (!call) break
+        this.mainCalls.delete(message.callId)
+        if ('error' in message) {
+          call.reject(
+            new PortRequestError(
+              isPortError(message.error)
+                ? message.error
+                : { code: 'internal', message: 'The host failed' },
+            ),
+          )
+        } else call.resolve(message.result)
+        break
+      }
       case 'host:artifact-export': {
         const resolve = this.exportRequests.get(message.requestId)
         if (!resolve) break
@@ -1070,6 +1107,10 @@ export class AgentHost {
 
   private exited(clean: boolean): void {
     this.migratingNow = false
+    for (const call of this.mainCalls.values()) {
+      call.reject(new PortRequestError({ code: 'host_restarted', message: 'The host stopped' }))
+    }
+    this.mainCalls.clear()
     for (const resolve of this.busyRequests.values()) resolve([])
     this.busyRequests.clear()
     this.grants.failAll()

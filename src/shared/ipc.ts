@@ -36,6 +36,7 @@ import type { PairingState } from './remote/pairing'
 import type { DirectAddress } from './remote/protocol'
 import type { RemoteStatus } from './remote/status'
 import type { SessionExportRequest } from './session-export'
+import type { MovePreviewResult, MoveProgress } from './session-move'
 import type { AgentColor, SettingsFile, SettingsPatch } from './settings'
 import type {
   BroughtSite,
@@ -545,6 +546,16 @@ export interface IpcInvokeContract {
   'backup:restore': { args: [token: string]; result: void }
   // Huli: a session as the page built it, saved where main's dialog says; false when cancelled.
   'session:export': { args: [request: SessionExportRequest]; result: boolean }
+  // Huli: moving a session to another computer (session-move.ts); a host is null for this one.
+  'sessions:move-preview': {
+    args: [source: string | null, sessionId: string, target: string | null]
+    result: MovePreviewResult
+  }
+  'sessions:move-start': {
+    args: [source: string | null, sessionId: string, target: string | null]
+    result: string
+  }
+  'sessions:moves': { args: []; result: MoveProgress[] }
   // Huli: the chat bridges (Settings › 聊天软件). The page sends credentials and never reads them
   // back: each answer is the view, with a secret's last characters at most.
   'chat-bridge:state': { args: []; result: ChatBridgeView }
@@ -592,6 +603,8 @@ export interface IpcEventContract {
   'browser:pick': PickEvent
   /** Huli: the ports forwarded from other hosts changed. */
   'hosts:forwards': PortForward[]
+  /** Huli: a move of a session to another computer went on, or ended. */
+  'sessions:move-progress': MoveProgress
   /** An agent's first navigation opened a session's page, so the pane may show it. */
   'browser:opened': { sessionId: string }
   /** A session's agent opened a mobile device, which the pane shows if the panel is free. */
@@ -1157,4 +1170,15 @@ export interface KettuApi {
    * cancelled. Absent in the web client.
    */
   exportSession?(request: SessionExportRequest): Promise<boolean>
+  /** Huli: moving a session to another computer, which main runs; absent in the web client. */
+  moves?: {
+    preview(
+      source: string | null,
+      sessionId: string,
+      target: string | null,
+    ): Promise<MovePreviewResult>
+    start(source: string | null, sessionId: string, target: string | null): Promise<string>
+    list(): Promise<MoveProgress[]>
+    onProgress(listener: (progress: MoveProgress) => void): () => void
+  }
 }

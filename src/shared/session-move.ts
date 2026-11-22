@@ -89,8 +89,9 @@ export interface MoveSource {
   cwd: string
   projectPath: string
   projectName: string
-  /** It works in a worktree of its own. */
-  worktree: boolean
+  createdAt: number
+  /** The worktree of its own it works in, by what it was cut from; null in the project's folder. */
+  worktree: { base: string; baseOid: string } | null
   conversation: MoveConversationKind
   git: MoveSourceGit | null
   problems: MoveProblem[]
@@ -211,6 +212,8 @@ export interface MoveProgress {
   result: { sessionId: string; projectPath: string } | null
   /** Why it failed, in the host's or main's words. */
   error: string | null
+  /** Why it failed, when a host named one of the known reasons. */
+  reason: MoveProblem | null
   /** What the failure left: false when the undo itself failed somewhere, which `error` names. */
   undone: boolean
   /** Problems found when it rechecked before starting. */
@@ -226,6 +229,10 @@ export interface MovePreview {
   /** The target's name, as main knows it. */
   targetName: string
 }
+
+/** What the window gets for a preview: the facts, or why none could be read. */
+export type MovePreviewResult =
+  { ok: true; preview: MovePreview } | { ok: false; reason: MoveProblem | null; message: string }
 
 /** Where the session went, as its summary carries it; absent while it was not moved. */
 export interface MovedTo {
@@ -264,6 +271,9 @@ export function remoteKey(url: string): string | null {
     if (protocol!.toLowerCase() === 'file') return `file:${pathPart!.replace(/\/+$/, '')}`
     host = authority!.slice(authority!.lastIndexOf('@') + 1).replace(/:\d+$/, '')
     repo = pathPart!
+  } else if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')) {
+    // A folder of a Windows computer: the same repository only on that computer.
+    return `file:${value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()}`
   } else {
     const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/\/)(.+)$/.exec(value)
     if (!scp || /^[A-Za-z]$/.test(scp[1]!)) return value.startsWith('/') ? `file:${value}` : null
@@ -280,9 +290,14 @@ export function remoteKey(url: string): string | null {
 
 /** Whether a remote can be cloned on another computer: not a folder of the source's own. */
 export function isClonable(url: string): boolean {
+  // Nothing git could read as an option or a transport helper such as `ext::`.
+  if (/\s/.test(url) || url.startsWith('-') || url.includes('::')) return false
   const key = remoteKey(url)
   if (key === null || key.startsWith('file:')) return false
-  return /^(?:https?|ssh|git):\/\//i.test(url) || /^(?:[^@/\s]+@)?[^:/\s]{2,}:(?!\/\/)/.test(url)
+  return (
+    /^(?:https?|ssh|git):\/\/[^/]/i.test(url) ||
+    /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]{2,}:(?!\/)[^:]/.test(url)
+  )
 }
 
 /** The repository's name as a remote URL ends, for the folder a clone goes in. */
