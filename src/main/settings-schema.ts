@@ -56,6 +56,7 @@ import {
 import { addressKey, isPort, MAX_OWN_ADDRESSES, parseDirectAddress } from '@shared/remote/address'
 import type { DirectAddress } from '@shared/remote/protocol'
 import { DEVICE_NAME_CHARS, isDeviceName } from '@shared/remote/device'
+import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { THEME_ID } from '@shared/themes'
 import { isAbsolutePath } from '../agent-host/paths'
@@ -320,6 +321,7 @@ const SECTION_FIELDS = {
   },
   cloud: { enabled: isBoolean },
   onboarding: { done: isBoolean, step: oneOf(...ONBOARDING_STEPS) },
+  permissions: { autoApprove: oneOf(...AUTO_APPROVE_LEVELS) },
 } as const satisfies Record<string, Record<string, Check>>
 
 type FieldSection = keyof typeof SECTION_FIELDS
@@ -1758,6 +1760,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     computerUse: structuredClone(settings.computerUse),
     agentNetwork: structuredClone(settings.agentNetwork),
     downloadService: settings.cloud.enabled && settings.updates.source === 'auto',
+    autoApprove: settings.permissions.autoApprove,
   }
 }
 
@@ -1791,6 +1794,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'agentNetwork',
   'cloud',
   'updates',
+  'permissions',
 ])
 
 /** Whether a change touches what the agent host is sent; a language change is checked apart. */

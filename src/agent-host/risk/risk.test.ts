@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { RiskLevel } from '@shared/risk'
 import type { ToolEntry } from '@shared/thread'
+import { riskSubject } from '../claude/permissions'
+import { commandSubject, grantSubject } from '../codex/approvals'
 import { commandSteps, unsafeCommand } from '../command-safety'
 import {
   assessRisk,
@@ -708,5 +710,87 @@ describe('autoApproves', () => {
       expect(autoApproves('low', risk), command).toBe(false)
       expect(autoApproves('edits', risk), command).toBe(false)
     }
+  })
+})
+
+describe("the drivers' subjects", () => {
+  it("reads Claude Code's tools by name", () => {
+    expect(riskSubject('Bash', { command: 'ls' })).toEqual({
+      kind: 'command',
+      command: 'ls',
+      shell: 'posix',
+    })
+    expect(riskSubject('PowerShell', { command: 'gci' })).toMatchObject({ shell: 'powershell' })
+    expect(riskSubject('Read', { file_path: '/a' })).toEqual({ kind: 'read', paths: ['/a'] })
+    expect(riskSubject('Grep', { pattern: 'x' })).toEqual({ kind: 'read', paths: ['.'] })
+    expect(riskSubject('Edit', { file_path: '/a' })).toEqual({ kind: 'edit', paths: ['/a'] })
+    expect(riskSubject('NotebookEdit', { notebook_path: '/n' })).toEqual({
+      kind: 'edit',
+      paths: ['/n'],
+    })
+    expect(riskSubject('WebFetch', { url: 'https://x' })).toEqual({
+      kind: 'fetch',
+      url: 'https://x',
+    })
+    expect(riskSubject('mcp__git_hub__delete_repo', {})).toEqual({
+      kind: 'mcp',
+      server: 'git_hub',
+      tool: 'delete_repo',
+    })
+    expect(riskSubject('Task', {})).toBeUndefined()
+    // A Bash call without its command is high, never low.
+    expect(assessRisk(riskSubject('Bash', {})!, POSIX).level).toBe('high')
+  })
+
+  it("reads Codex's requests: the network, wider rights, typing and the command", () => {
+    const base = { threadId: 't', turnId: 'u', itemId: 'i' }
+    expect(
+      commandSubject({
+        ...base,
+        command: "/bin/zsh -lc 'pnpm test'",
+        cwd: '/home/me/proj',
+      }),
+    ).toEqual({
+      kind: 'command',
+      command: "/bin/zsh -lc 'pnpm test'",
+      shell: 'posix',
+      cwd: '/home/me/proj',
+    })
+    expect(
+      assessRisk(commandSubject({ ...base, command: "/bin/zsh -lc 'pnpm test'" }), POSIX),
+    ).toMatchObject({ level: 'low' })
+    expect(
+      assessRisk(
+        commandSubject({
+          ...base,
+          command: "'C:\\Program Files\\PowerShell\\7\\pwsh.exe' -Command 'Get-ChildItem'",
+        }),
+        WIN,
+      ).level,
+    ).toBe('low')
+    // A command that asks for the network, or for wider rights, is never low.
+    const network = commandSubject({
+      ...base,
+      command: 'pnpm test',
+      networkApprovalContext: { host: 'registry.npmjs.org', protocol: 'https' },
+    })
+    expect(assessRisk(network, POSIX).level).toBe('medium')
+    const wider = commandSubject({
+      ...base,
+      command: 'pnpm test',
+      additionalPermissions: { fileSystem: { write: ['/usr/local'] } },
+    })
+    expect(assessRisk(wider, POSIX).level).toBe('high')
+    expect(assessRisk(commandSubject(base), POSIX).level).toBe('high')
+    expect(
+      assessRisk(
+        grantSubject({
+          fileSystem: {
+            entries: [{ access: 'write', path: { type: 'special', value: { kind: 'root' } } }],
+          },
+        }),
+        POSIX,
+      ).level,
+    ).toBe('high')
   })
 })

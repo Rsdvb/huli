@@ -1094,6 +1094,7 @@ export class AgentHost {
       platform,
       agents: this.agents,
       projects: this.projects,
+      autoApprove: () => this.settings.autoApprove ?? 'off',
       scratch: this.scratch,
       worktrees: this.worktrees,
       file: sessionsFile(options.userDataPath, log),
@@ -3204,6 +3205,8 @@ export class AgentHost {
       },
       'projects.touch': ({ path }) => projects.touch(projects.match(path)),
       'projects.pin': ({ path, pinned }) => projects.pin(projects.match(path), pinned),
+      'projects.setAutoApprove': ({ path, autoApprove }) =>
+        projects.setAutoApprove(projects.match(path), autoApprove),
       'projects.worktreeSettings': ({ path }) =>
         projects.worktreeSettings(projects.match(path).path),
       'projects.setWorktreeSettings': ({ path, settings }) =>

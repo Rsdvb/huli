@@ -1377,5 +1377,47 @@
     "keptRun": "The run you kept is not set aside.",
     "discardFailed": "Some runs could not be set aside: {{error}}",
     "noWorktree": "This run's worktree is gone."
+  },
+  "risk": {
+    "level": {
+      "low": "Low risk",
+      "medium": "Medium risk",
+      "high": "High risk"
+    },
+    "withLevel": "{{text}} · {{level}}",
+    "detail": "{{reason}}: {{detail}}",
+    "reason": {
+      "readProject": "Only reads inside the project",
+      "readCommand": "A read-only command",
+      "projectCheck": "Runs the project's tests, checks or build",
+      "editProject": "Changes files inside the project",
+      "editConfig": "Changes the settings of a tool or agent",
+      "readOutside": "Reads outside the project",
+      "install": "Installs or removes packages",
+      "download": "Downloads and runs a package",
+      "network": "Uses the network",
+      "projectScript": "Runs a script or program of the project",
+      "outsideProject": "Runs outside the project folder",
+      "gitWrite": "Changes the Git repository",
+      "mcp": "Calls an MCP tool, whose effect its server decides",
+      "globRead": "A wildcard may read hidden files",
+      "unclearScope": "What it reaches is not clear",
+      "grant": "Widens the sandbox's access",
+      "unsafe": "Could delete, change rights, stop processes or run a command it does not show",
+      "delete": "Deletes files",
+      "gitDanger": "Rewrites, discards or pushes Git history",
+      "writeOutside": "Writes outside the project",
+      "gitDir": "Changes the .git folder",
+      "sensitive": "Touches credentials or keys",
+      "system": "Touches the system's files",
+      "unparsed": "What this command does cannot be read for certain",
+      "unknownCommand": "A program not known",
+      "unknown": "An action whose effect is not known",
+      "globalInstall": "Installs outside the project, for the whole computer",
+      "publish": "Publishes, deploys or changes something on a service",
+      "upload": "Sends data or files over the network",
+      "mcpDanger": "An MCP tool that may delete, send or run something",
+      "input": "Types into a command that runs already"
+    }
   }
 }

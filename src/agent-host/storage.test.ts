@@ -628,6 +628,7 @@ describe('the host files', () => {
         missing: true,
         lastOpenedAt: 2,
         pinnedAt: null,
+        autoApprove: null,
       },
     ])
     first.pin(first.match('/repo'), true)
@@ -647,6 +648,42 @@ describe('the host files', () => {
       version: 1,
       projects: [project],
     })
+  })
+
+  it("keeps a project's own auto-approve level and drops one that does not parse", async () => {
+    const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
+    const file = projectsFile(dir, log)
+    file.save({ version: 1, projects: [project] })
+    await file.flush()
+    const registry = () =>
+      new Projects({
+        file: projectsFile(dir, log),
+        platform: 'linux',
+        isDirectory: async () => true,
+      })
+
+    const first = registry()
+    await first.load()
+    expect(first.autoApprove('/repo')).toBeNull()
+    first.setAutoApprove(first.match('/repo'), 'edits')
+    await first.flush()
+
+    const next = registry()
+    await next.load()
+    expect(next.autoApprove('/repo')).toBe('edits')
+    expect(next.list()[0]).toMatchObject({ autoApprove: 'edits' })
+    next.setAutoApprove(next.match('/repo'), null)
+    await next.flush()
+    expect((await projectsFile(dir, log).load()).projects).toEqual([project])
+
+    for (const autoApprove of ['all', 'high', true, 1, null]) {
+      expect(parseProjectsFile({ projects: [{ ...project, autoApprove }] }).projects).toEqual([
+        project,
+      ])
+    }
+    expect(parseProjectsFile({ projects: [{ ...project, autoApprove: 'low' }] }).projects).toEqual([
+      { ...project, autoApprove: 'low' },
+    ])
   })
 
   it('keeps what each agent reported and drops what does not parse, entry by entry', () => {

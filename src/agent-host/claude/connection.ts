@@ -97,11 +97,13 @@ import {
   questionAnswers,
   questionOptions,
   QUESTIONS_SKIPPED,
+  riskSubject,
 } from './permissions'
 import { folderHooks } from './project-hooks'
 import { declaredServers } from './project-mcp'
 import { mapAccount, mapAuthStatus, mapContextUsage, mapUsageLimits } from './reports'
 import { TerminalCommands } from './terminal-commands'
+import type { RiskSubject } from '../risk/classify'
 import { askedQuestions } from './tools'
 import type {
   AccountInfo,
@@ -452,6 +454,12 @@ function askReason(permission: ToolPermissionContext): { reason?: string } {
     .map((part) => (typeof part === 'string' ? part.trim() : ''))
     .filter((part, i, all) => part !== '' && all.indexOf(part) === i)
   return parts.length > 0 ? { reason: parts.join('\n') } : {}
+}
+
+/** Huli: what the request does, for its risk, where its tool says more than its entry shows. */
+function subjectOf(toolName: string, input: Record<string, unknown>): { subject?: RiskSubject } {
+  const subject = riskSubject(toolName, input)
+  return subject ? { subject } : {}
 }
 
 function errorText(error: unknown): string {
@@ -2195,6 +2203,7 @@ export class ClaudeConnection implements AgentConnection {
             options,
             ...(plan ? { plan: typeof input.plan === 'string' ? input.plan : '' } : {}),
             ...askReason(permission),
+            ...subjectOf(toolName, input),
           },
           permission.signal,
         ),
