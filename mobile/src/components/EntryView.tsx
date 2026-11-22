@@ -44,6 +44,7 @@ import { ThemeChangeEntry } from './entries/ThemeChangeEntry'
 import {
   ChildEntry,
   ControlNoteEntry,
+  RecallEntry,
   SessionMessageEntry,
   TakeoverEntry,
   TurnEndEntry,
@@ -295,6 +296,8 @@ export const EntryView = memo(function EntryView(props: {
     }
     case 'plan':
       return null
+    case 'recall':
+      return <RecallEntry entry={entry} />
     case 'notice':
       return <NoticeEntry entry={entry} />
     case 'compaction':

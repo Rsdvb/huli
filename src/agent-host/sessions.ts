@@ -10944,6 +10944,8 @@ export class SessionManager {
     )
     return {
       tasks: connection.backgroundProcesses ? (own?.tasks ?? []) : null,
+      listed: tasks.map((task) => ({ ...task })),
+      held: (live.thread.session.foreground ?? []).map((task) => ({ ...task })),
       processes: reading.processes,
       block: block ? { ...block } : null,
       taken: reading.taken,

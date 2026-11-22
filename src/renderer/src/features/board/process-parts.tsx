@@ -42,8 +42,7 @@ export function TaskStats({ stats, block }: { stats: TaskProcess; block: PortBlo
                 : t('process.listens', { port: item.port })
           }
         >
-          {(item.outside || item.collides) && <PaneIcon icon={Alert02Icon} size={11} />}:
-          {item.port}
+          {(item.outside || item.collides) && <PaneIcon icon={Alert02Icon} size={11} />}:{item.port}
         </span>
       ))}
     </span>

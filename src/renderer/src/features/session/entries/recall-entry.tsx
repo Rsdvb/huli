@@ -38,7 +38,12 @@ export const RecallEntry = memo(function RecallEntry({ sessionId, entryId }: Ent
       <Marker variant="separator" className="text-xs">
         <CollapsibleTrigger className="group/recall inline-flex h-7 flex-none items-center gap-1.5 rounded-full px-2.5 pr-2 outline-none transition-colors duration-(--duration-fast) hover:bg-hover hover:text-foreground focus-visible:bg-hover focus-visible:text-foreground">
           <MarkerIcon className="grid size-3.5 place-items-center">
-            <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={1.9} aria-hidden className="size-3.5" />
+            <HugeiconsIcon
+              icon={AiBrain01Icon}
+              strokeWidth={1.9}
+              aria-hidden
+              className="size-3.5"
+            />
           </MarkerIcon>
           <MarkerContent>{t(`recall.${entry.action}`, { count })}</MarkerContent>
           <HugeiconsIcon

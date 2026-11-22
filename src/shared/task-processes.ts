@@ -3,7 +3,7 @@
 // and when it asks again, never on a timer. A port outside the session's block (KITE_PORT) is
 // marked, and so is a port of the block that something outside the session holds.
 
-import type { BackgroundTaskView } from './thread'
+import type { BackgroundTaskView, ForegroundTaskView } from './thread'
 import type { PortBlock } from './worktree-ports'
 
 /** A port a task's processes listen on. */
@@ -40,6 +40,12 @@ export interface SessionProcesses {
    * read with the rest; null where the session's own `background` lists them.
    */
   tasks: BackgroundTaskView[] | null
+  /**
+   * Every task the board lists now, whichever list holds it, and what holds up a tool call: for
+   * a client that reads them only with the processes, as the phone does.
+   */
+  listed: BackgroundTaskView[]
+  held: ForegroundTaskView[]
   processes: TaskProcess[]
   /** The block of ports the session holds; null without one. */
   block: PortBlock | null
