@@ -6,8 +6,10 @@ import {
   agentsFile,
   agentUpdatesFile,
   corruptName,
+  githubFlowFile,
   JsonFile,
   migrate,
+  parseGithubFlowFile,
   parseAgentsFile,
   parseAgentUpdatesFile,
   parseProjectsFile,
@@ -334,6 +336,44 @@ describe('the host files', () => {
     }
   })
 
+  it("keeps a session's linked issue and pull request automation, and drops what does not read", () => {
+    const url = 'https://github.com/octo-org/hello-world/pull/7'
+    const linked: SessionRecord = {
+      ...session,
+      issue: 'https://github.com/octo-org/hello-world/issues/3',
+      prFlow: {
+        url,
+        autoMerge: true,
+        watch: true,
+        seen: ['checks:abc', 'review:R1'],
+        baselined: true,
+        ended: { state: 'failed', message: 'Base branch was modified' },
+      },
+    }
+    expect(parseSessionsFile({ sessions: [linked] })).toEqual({ version: 1, sessions: [linked] })
+    for (const issue of ['https://github.com/octo-org/hello-world/pull/3', 3, '']) {
+      expect(parseSessionsFile({ sessions: [{ ...session, issue }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+    for (const prFlow of [
+      { url: 'https://example.com/a/b/pull/1', autoMerge: true, watch: false, seen: [] },
+      { url, autoMerge: 'yes', watch: false, seen: [] },
+      { url, autoMerge: true, watch: false },
+    ]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, prFlow }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+    const odd = { url, autoMerge: false, watch: true, seen: ['a', 7, ''], ended: { state: 'gone' } }
+    expect(parseSessionsFile({ sessions: [{ ...session, prFlow: odd }] })).toEqual({
+      version: 1,
+      sessions: [{ ...session, prFlow: { url, autoMerge: false, watch: true, seen: ['a'] } }],
+    })
+  })
+
   it('keeps the sub-sessions a session archived alone left in the list', () => {
     const archived: SessionRecord = { ...session, archivedAt: 3, leftSubSessions: ['c1', 'c2'] }
     expect(parseSessionsFile({ sessions: [archived] })).toEqual({
@@ -594,6 +634,68 @@ describe('the host files', () => {
     expect(parseRoutinesFile({ routines: [{ ...routine, onLimit: 'skip' }] })).toBe(
       'routine 0 is malformed',
     )
+  })
+
+  it("keeps a routine's GitHub trigger with its schedule, and each trigger's cursor", async () => {
+    const schedule = { kind: 'weekly' as const, days: [1], time: '09:00' }
+    const routine = {
+      id: 'r-0123456789ab',
+      name: 'Triage',
+      prompt: 'Label the new issue',
+      agentId: 'codex' as const,
+      projectPath: '/repo',
+      options: [],
+      trigger: {
+        kind: 'github' as const,
+        event: { kind: 'issue_opened' as const, label: null },
+        schedule,
+      },
+      scope: { level: 'read' as const, web: false },
+      timeLimitMinutes: 60 as const,
+      keptRunSessions: 50 as const,
+      onLimit: 'wait' as const,
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 2,
+      checkedThrough: 3,
+    }
+    expect(parseRoutinesFile({ routines: [routine] })).toEqual({ version: 1, routines: [routine] })
+    expect(
+      parseRoutinesFile({
+        routines: [
+          { ...routine, trigger: { kind: 'github', event: { kind: 'deploy' }, schedule } },
+        ],
+      }),
+    ).toBe('routine 0 is malformed')
+    expect(
+      parseRoutinesFile({
+        routines: [{ ...routine, trigger: { kind: 'github', event: { kind: 'pr_opened' } } }],
+      }),
+    ).toBe('routine 0 is malformed')
+
+    const cursor = { signature: '["/repo"]', armedAt: 5, baselined: true, seen: ['issue:3'] }
+    expect(
+      parseGithubFlowFile({
+        triggers: {
+          'r-0123456789ab': cursor,
+          'not-a-routine': cursor,
+          'r-0123456789ac': { ...cursor, armedAt: -1 },
+          'r-0123456789ad': { ...cursor, seen: ['ok', 3, ''] },
+        },
+      }),
+    ).toEqual({
+      version: 1,
+      triggers: { 'r-0123456789ab': cursor, 'r-0123456789ad': { ...cursor, seen: ['ok'] } },
+    })
+    expect(parseGithubFlowFile({ triggers: [] })).toBe('triggers is not an object')
+    const store = githubFlowFile(dir, log)
+    expect(store.file).toBe(path.join(dir, 'state', 'github-flow.json'))
+    store.save({ version: 1, triggers: { 'r-0123456789ab': cursor } })
+    await store.flush()
+    expect(await githubFlowFile(dir, log).load()).toEqual({
+      version: 1,
+      triggers: { 'r-0123456789ab': cursor },
+    })
   })
 
   it('validates projects', async () => {

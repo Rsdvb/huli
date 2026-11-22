@@ -107,8 +107,9 @@
       "showIn": "在{{name}}中显示",
       "showArchived": "显示已归档的会话",
       "worktreeSettings": "工作树设置…",
-      "autoApprove": "自动批准",
-      "remove": "移除项目…"
+      "remove": "移除项目…",
+      "issues": "议题",
+      "autoApprove": "自动批准"
     },
     "remove": {
       "title": "移除 {{name}}？",
@@ -224,7 +225,10 @@
     "deleteCount": "删除 {{count}} 个…",
     "moreFor": "{{title}} 的更多操作",
     "deleteKeepsAppCopy": "{{agent}} 自己保留的那份，Kettu 删不掉。",
-    "deleteRemovesAgentCopy_other": "也会从 {{agent}} 自己的本地历史里删除，官方客户端和应用里不会再显示。"
+    "deleteRemovesAgentCopy_other": "也会从 {{agent}} 自己的本地历史里删除，官方客户端和应用里不会再显示。",
+    "autoMerge": "检查通过后自动合并",
+    "watchPr": "盯着这个 PR",
+    "issue": "议题 #{{number}}"
   },
   "work": {
     "turn": "当前这一轮",

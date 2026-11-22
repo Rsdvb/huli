@@ -11,6 +11,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { usePane } from '@renderer/features/split/pane-context'
 import { usePaneDragSource } from '@renderer/features/split/session-drag-model'
 import { PrBarChip } from '@renderer/features/git/pr-bar-chip'
+import { IssueBarChip, PrFlowChip } from '@renderer/features/git/flow-chips'
+import { prFlowActive } from '@renderer/features/git/flow-model'
 import { HeaderTools, SessionMoreMenu } from '@renderer/features/shell/header-tools'
 import { StepRoundBadge, TaskCrumb } from '@renderer/features/tasks/step-crumb'
 import { useStepSessionTitle } from '@renderer/features/tasks/use-task'
@@ -164,7 +166,11 @@ export function SessionHeader({
           menu={rename.menu}
         />
         {summary.worktree && <WorktreeBarChip worktree={summary.worktree} />}
+        {summary.issue && <IssueBarChip issue={summary.issue} />}
         <PrBarChip projectPath={sessionFolder(summary)} />
+        {summary.prFlow && (prFlowActive(summary.prFlow) || summary.prFlow.state === 'failed') && (
+          <PrFlowChip flow={summary.prFlow} />
+        )}
         {session && !archived && summary.origin !== 'subagent' && (
           <PlanChip sessionId={summary.id} status={session.status} />
         )}

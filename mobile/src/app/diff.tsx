@@ -1,10 +1,11 @@
 // One file's change: a file of a session's working tree (or as one of the branch's commits changed
 // it), read from the computer and read again when the folder changes, or a tool's edit handed over
-// from the conversation.
+// from the conversation. With the session known, its lines take comments for the agent.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
+import { DiffNotesBar, notedRows, useLinePick, type NotePlace } from '../components/DiffNotes'
 import { DiffView } from '../components/DiffView'
 import { diffTexts, handedDiff, type Diff } from '../diff'
 import { call, sessionFolder, useChanges } from '../git'
@@ -12,7 +13,8 @@ import { hostErrorText } from '../hostErrors'
 import { Button } from '../manage/kit'
 import { previewFile } from '../preview/preview'
 import { SHARE_LABEL } from '../preview/PreviewSheet'
-import { useConnected, useHasSessions, useLink, useSession } from '../host'
+import { useComputerId, useConnected, useHasSessions, useLink, useSession } from '../host'
+import { useDraftNotes } from '../drafts'
 import { baseName, dirName, relativePath } from '../ui/session/format'
 import { GlassHeader } from '../ui/session/GlassHeader'
 import { G, Icon } from '../ui/session/icons'
@@ -100,6 +102,24 @@ export default function DiffScreen() {
           : null
   const diff = shown?.kind === 'diff' ? shown.diff : null
 
+  // Comments go to the session the diff came from. A tool's edit may show only part of the file,
+  // so its rows' numbers are not the file's and its comments name the file alone.
+  const computer = useComputerId()
+  const commentable = !!params.id && !!computer && !!summary && !missing
+  // A session without a project works in a folder of its own, which its paths are under too.
+  const root = summary ? sessionFolder(summary) : null
+  const place = useMemo<NotePlace>(
+    () => ({ path: relativePath(path, root), ref, numbered: !handed }),
+    [path, root, ref, handed],
+  )
+  const pick = useLinePick(diff)
+  const notes = useDraftNotes(commentable ? computer : null, params.id ?? null)
+  const noted = useMemo(
+    () => (diff && commentable ? notedRows(diff, notes, place) : undefined),
+    [diff, commentable, notes, place],
+  )
+  const [barHeight, setBarHeight] = useState(0)
+
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -163,7 +183,28 @@ export default function DiffScreen() {
             </View>
           )}
           <View style={[styles.sheet, { borderTopColor: c.border }]}>
-            <DiffView diff={shown.diff} />
+            <DiffView
+              diff={shown.diff}
+              {...(commentable
+                ? {
+                    picked: pick.picked,
+                    ...(noted ? { noted } : {}),
+                    onPressRow: pick.press,
+                    onLongPressRow: pick.longPress,
+                    bottomInset: barHeight,
+                  }
+                : {})}
+            />
+            {commentable && computer && params.id ? (
+              <DiffNotesBar
+                computer={computer}
+                sessionId={params.id}
+                place={place}
+                diff={shown.diff}
+                pick={pick}
+                onHeight={setBarHeight}
+              />
+            ) : null}
           </View>
         </>
       )}

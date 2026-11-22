@@ -28,6 +28,7 @@ export function hasChips(summary: SessionSummary | undefined, parentKnown: boole
     !!summary.routine ||
     !!summary.task ||
     !!summary.worktree ||
+    !!summary.issue ||
     sessionPullRequests(summary).length > 0
   )
 }
@@ -127,6 +128,7 @@ export function SessionChips(props: {
         }))
       : []
   const failing = prs.some((pr) => pr.failing)
+  const flowText = prFlowText(summary)
 
   return (
     <View pointerEvents="box-none" style={[styles.dock, { top: props.top }]}>
@@ -185,6 +187,15 @@ export function SessionChips(props: {
             </Text>
           </Chip>
         ) : null}
+        {summary.issue ? (
+          <Chip
+            label={`议题 #${summary.issue.number}`}
+            onPress={() => openPage(summary.issue!.url)}
+          >
+            <Icon icon={GI.issue} size={13} color={c.success} />
+            <Text style={[styles.text, { color: c.text }]}>#{summary.issue.number}</Text>
+          </Chip>
+        ) : null}
         {prs.length > 0 ? (
           <TapMenu items={prMenu} title="Pull Request">
             {(open) => (
@@ -196,6 +207,11 @@ export function SessionChips(props: {
                 <Text style={[styles.text, { color: c.text }]}>
                   {prs.length === 1 ? `#${prs[0]!.number}` : prs.length}
                 </Text>
+                {flowText ? (
+                  <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={1}>
+                    {flowText}
+                  </Text>
+                ) : null}
               </Chip>
             )}
           </TapMenu>
@@ -203,6 +219,27 @@ export function SessionChips(props: {
       </ScrollView>
     </View>
   )
+}
+
+const FLOW_STATE: Record<string, string> = {
+  waiting: '等待检查',
+  checks_failed: '检查失败',
+  conflict: '有冲突',
+  changes_requested: '要求修改',
+  blocked: '被阻止',
+  merging: '正在合并',
+  merged: '已合并',
+  closed: '已关闭',
+  failed: '合并失败',
+}
+
+/** Huli: what the computer does with the session's pull request by itself, in a few words. */
+function prFlowText(summary: SessionSummary): string | null {
+  const flow = summary.prFlow
+  if (!flow) return null
+  const state = flow.state ? FLOW_STATE[flow.state] : null
+  const mode = flow.autoMerge ? '自动合并' : '盯着'
+  return state ? `${mode} · ${state}` : mode
 }
 
 const styles = StyleSheet.create({

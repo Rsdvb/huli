@@ -9,6 +9,7 @@ import {
   PencilEdit02Icon,
   PinIcon,
   PinOffIcon,
+  RadioButtonIcon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
@@ -33,7 +34,7 @@ import { fileManagerName, formatShortcut, isWeb } from '@renderer/lib/platform'
 import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
-import { openSettings } from '@renderer/stores/view'
+import { openIssues, openSettings } from '@renderer/stores/view'
 import { ProjectApprovalsMenu } from './project-approvals'
 import { openProjectTerminal } from './project-menu-model'
 
@@ -63,6 +64,11 @@ export function ProjectMenuItems({
   const revealable = !isWeb && local
   // Left out once the project is known not to be a Git repository.
   const git = useGitStore((s) => s.status[project.path]?.repo !== null)
+  // Huli: left out once its remote is known not to be on GitHub.
+  const github = useGitStore((s) => {
+    const status = s.status[project.path]
+    return status === undefined || !!status.remote?.github
+  })
   const pinned = project.pinnedAt != null
   const pinItem = project.pinnedAt !== undefined && (
     <DropdownMenuItem disabled={pinDisabled} onClick={() => void onPin(!pinned)}>
@@ -108,6 +114,12 @@ export function ProjectMenuItems({
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
         <ProjectApprovalsMenu project={project} disabled={!!gone} />
+        {git && github && (
+          <DropdownMenuItem disabled={gone} onClick={() => openIssues(project.path)}>
+            <MenuGlyph icon={RadioButtonIcon} />
+            {t('project.menu.issues')}
+          </DropdownMenuItem>
+        )}
         {git && (
           <DropdownMenuItem disabled={gone} onClick={() => openWorktreeSettings(project)}>
             <MenuGlyph icon={GitBranchIcon} />

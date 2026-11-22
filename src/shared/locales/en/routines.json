@@ -305,7 +305,8 @@
   "trigger": {
     "manual": "Run now",
     "catchUp": "Catch-up",
-    "schedule": "Scheduled"
+    "schedule": "Scheduled",
+    "event": "GitHub event"
   },
   "run": {
     "starting": "Starting",
@@ -327,5 +328,33 @@
     "announce": "{{name}}: {{status}}",
     "switchedAtStart": "{{from}}'s plan was used up, so {{to}} ran it",
     "switchedAtStop": "{{from}}'s plan ran out mid-run, so {{to}} went on"
+  },
+  "on": {
+    "title": "Runs",
+    "schedule": "On a schedule",
+    "github": "On a GitHub event",
+    "event": "Event",
+    "events": {
+      "issue_opened": "A new issue",
+      "pr_opened": "A new pull request",
+      "checks_failed": "A pull request's checks fail",
+      "pushed": "Commits pushed to a branch",
+      "behind": "A branch falls behind the default branch"
+    },
+    "label": "With label",
+    "labelHint": "Optional: only issues with this label.",
+    "branch": "Branch",
+    "branchHint": "The branch on GitHub, such as main.",
+    "needsProject": "A GitHub event needs a project whose remote is on GitHub.",
+    "hint": "While the routine is on, Kite checks GitHub at most once a minute. Each event starts one run, with what happened added to the prompt.",
+    "summary": {
+      "issue_opened": "On new issues",
+      "issue_label": "On new issues labeled {{label}}",
+      "pr_opened": "On new pull requests",
+      "checks_failed": "When checks fail",
+      "pushed": "On pushes to {{branch}}",
+      "behind": "When {{branch}} falls behind"
+    },
+    "kind": "Trigger"
   }
 }

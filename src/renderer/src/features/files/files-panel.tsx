@@ -46,6 +46,8 @@ import {
   watchFiles,
 } from '@renderer/stores/files'
 import { openGitDialog, useGitStore } from '@renderer/stores/git'
+import { useSessionsStore } from '@renderer/stores/sessions'
+import { panelSession } from '@renderer/stores/view'
 import { ChangeBadge } from './change-badge'
 import { useFileChanges, type FileChanges, type ProjectChange } from './changes'
 import { columnOf, saveColumn } from './column'
@@ -90,6 +92,11 @@ function FilesPane({ projectPath, panel, maximized }: FilesPanelProps) {
   const tabs = useFilesStore((s) => s.open[projectPath] ?? null)
   const open = activeFile(tabs)
   const diff = useFilesStore((s) => s.diffs[projectPath] ?? null)
+  // The session whose side panel this is takes comments on the diff's lines.
+  const sessionId = useSessionsStore((s) => {
+    const id = panelSession(panel)
+    return id !== null && s.byId[id] ? id : null
+  })
   const isRepo = useGitStore((s) => !!s.status[projectPath]?.repo)
   // Editors open folders on this computer only.
   const local = !isWeb && hostOfPath(projectPath) === null
@@ -195,7 +202,7 @@ function FilesPane({ projectPath, panel, maximized }: FilesPanelProps) {
         </div>
       )}
       {diff ? (
-        <DiffPreview projectPath={projectPath} diff={diff} />
+        <DiffPreview projectPath={projectPath} diff={diff} sessionId={sessionId} />
       ) : (
         <FilePreview
           projectPath={projectPath}

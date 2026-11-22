@@ -265,6 +265,49 @@ exists: the session list, its events and the phone get the groups for free.
   be (`components/BestOfRow.tsx`), opening to the runs' rows; a finished run's menu offers 保留这个.
 - The fake agent's `/write [file] [text]` makes a real edit, to compare runs with.
 
+### GitHub flow (议题、自动合并、盯 PR、GitHub 触发)
+
+After T3 Code's Issues page, Conductor, Claude desktop's merge when ready and JetBrains Air's
+triggers. Everything goes through the user's own `gh` (no auth of Kite's own) and only reads,
+except the merge.
+
+- `src/shared/github-flow.ts`: the inbox's issues, a session's linked issue and pull request
+  automation (`SessionPrFlow`), the routine events (`GithubEvent`) and a run's cause.
+- `src/agent-host/github-flow/gh-api.ts`: the `gh` calls and their mapping. REST reads go through
+  `gh api --include` with the last ETag in `If-None-Match`; gh exits 1 on a 304, which is read
+  from the status line. The merge is `gh pr merge <url> --squash|--merge|--rebase
+--match-head-commit <oid>` (squash, else a merge commit, else rebase, as the repository
+  allows), run outside any checkout so gh touches no local branch.
+- `decide.ts` (pure, tested with recorded responses in `fixtures/`): merge only an open, not
+  draft pull request whose checks all passed, which GitHub calls mergeable and CLEAN (or
+  HAS_HOOKS), with no change requested and the session's agent idle; with no checks at all, two
+  reads must find the same head ready. The watch tells the agent once per head of failing checks
+  (names, links, `gh run view <run> --job <job> --log-failed`) and of a conflict (files from
+  `git merge-tree` in the session's folder), and once per review or comment by someone other
+  than the author; reviews and comments from before the watch began count as seen. Triggers:
+  issues and pull requests opened after the trigger was armed; checks, pushes and a branch
+  behind the default branch count from the first read on, each event once.
+- `flow.ts`: the reads. Only repositories that a session's automation or an enabled routine
+  trigger needs are read, one timer each, at most once a minute, at the git service's cadence
+  (60 s while checks run, else 5 min), three times slower while no window shows
+  (`host:windows-visible` from `watchWindowsShown` in `src/main/window.ts`), backing off after
+  failures up to 30 min, and not at all while the computer sleeps. With nothing turned on there
+  is no timer. The issue inbox is read when its page opens or on Refresh, never polled.
+- Sessions: `issue` and `prFlow` in the session record (`seen` keys, `ended`); `setPrFlow`
+  accepts only one of the session's pull requests. After a merge the session is archived, and its
+  worktree removed (its branch kept) unless it has uncommitted changes, commits the merge lacks,
+  or another session works in it; a note in the thread says what happened. Routine triggers'
+  cursors live in `state/github-flow.json`; a routine on an event keeps its schedule for older
+  clients, and a run on an event gets the event appended to its prompt.
+- Desktop: the project menu's 议题 opens `features/issues/issues-page.tsx`; the session menus'
+  检查通过后自动合并 and 盯着这个 PR, the top bar's issue and automation chips and the row's
+  issue badge (`features/git/flow-chips.tsx`, `flow-model.ts`); the routine page's trigger
+  (`features/routines/trigger-field.tsx`). Phone: the session's chips show the linked issue and
+  the automation's state; routines show their event.
+- Checking it without GitHub: a fake `gh.exe` (a C# launcher compiled with the .NET Framework's
+  `csc.exe` that runs a Node script of recorded answers) first on the test copy's `PATH`, and a
+  repository whose `origin` names a github.com repository nothing is pushed to.
+
 ### Backup
 
 A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,
@@ -653,6 +696,39 @@ app's own viewer.
   The fake agent's `/documents` writes a PDF, a Word document and a 24 MB PDF for the simulator's
   `60-preview` and `61-preview-word` flows and the emulator's `preview` (see Workflows).
 
+### Comments on a diff's lines
+
+The lines of an agent's diff take comments that go back to the agent together, as Claude
+desktop, Warp, Conductor and Vibe Kanban have them. On the desktop it is the Files pane's diff,
+whichever way it opened (the Changes list, a turn's changes card, the branch popover); on the phone
+the diff screen, for a working-tree or commit diff and for a turn's or a tool's edit.
+
+- `src/shared/diff-notes.ts`: a note (file, commit, the lines' numbers on one side or none for an
+  edit's partial diff, up to 40 quoted lines with their `+`/`-`/space mark, the comment), its
+  check for stored drafts, and the message they go as: for each, `path:start-end`, the quoted
+  lines in a `diff` fence, the comment. The desktop words it in the interface's language
+  (`files:notes.message.*`), the phone in Chinese.
+- Kept in the session's draft beside its text and attachments (`notes`): the desktop's
+  `composer/drafts.ts` (`draft:<session id>` in localStorage), whose `clearDraft` on a send now
+  leaves them and `forgetDraft` drops them with a deleted session, and the phone's `drafts.ts`,
+  whose composer writes leave them. At most 50 a session.
+- Desktop (`features/diff-notes/`): a + by the line number the pointer rests on (120 ms), or
+  Comment for lines picked by their numbers, opens a box under the lines; comments mark their rows'
+  numbers, show a pin to edit them and gather in a tray under the diff and over the composer
+  (`NotesTray`), whose Send to agent puts them in one message through `sessions.queue`, which sends
+  at once when the session is free and queues it during a turn. Nothing in the diff renders for a
+  comment: the marks are a `data-note` attribute on a few number cells, styled by paint alone, and
+  the pins, the box and the + sit on a layout-contained layer over the scrolled diff. The library's
+  own gutter + is not used: it moves into the hovered row's cell, and every row lays the whole
+  grid out again (over 100 ms a row on 7,000 rows). The diff's scroller is layout-contained, so a
+  change elsewhere in the window (the composer growing) no longer lays out its rows.
+- Phone (`components/DiffNotes.tsx`, `DiffView.tsx`): a tap picks a line and a second stretches
+  the pick, a long press comments, a bar under the diff has 写意见 or the comments' count, 发送给
+  Agent and 清空, and a strip over the session's composer does the same. Rows stay memoized and
+  take only booleans for their state, so a pick redraws the rows it changed. A turn's or a tool's
+  edit opens with the session's id; its comments name the file alone.
+- The simulator's `80-diff-notes` flow walks the phone's part.
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,
@@ -969,6 +1045,64 @@ before the first detection, `nodeSetupChanged`, the handlers, `ownProxy`),
 `src/shared/host-request-limits.ts`, `features/agents/readiness.ts`, `agents-section.tsx`,
 `harness-section.tsx`, `new-session.tsx`, `mobile/src/app/settings/agents.tsx` and the
 `node`/`nodeRuntime` keys of `locales/*/{agents,settings,host}.json`.
+
+### Chat apps (聊天软件)
+
+Settings › 聊天软件 lets the user drive the agents from a bot of their own in Feishu, DingTalk,
+WeCom, QQ or Telegram. Every bot connects out from this computer, so no public address is needed:
+
+| Platform | Mode                                                           | Buttons               | Files in / out |
+| -------- | -------------------------------------------------------------- | --------------------- | -------------- |
+| Feishu   | custom app, events and card callbacks over the long connection | card JSON 2.0 buttons | yes / yes      |
+| DingTalk | internal app's bot in Stream mode (bot message callback only)  | text commands         | yes / yes      |
+| WeCom    | AI bot (智能机器人) in API mode over the long connection       | button cards (≤ 6)    | yes / yes      |
+| QQ       | QQ open platform bot over the WebSocket gateway, C2C only      | text commands         | yes / no       |
+| Telegram | Bot API long polling (getUpdates), through Kite's own proxy    | inline keyboards      | yes / yes      |
+
+All of them speak the platforms' raw protocols; no SDK is added. Feishu's frames are the
+`pbbp2.Frame` protobuf of its official SDKs, coded by hand in `feishu-frame.ts`. Every request and
+connection goes the way Kite's own requests go (Advanced › Proxy, else the environment's proxy
+variables, else directly), through `node-proxy/download.ts`'s tunnel and the `ws` package the
+remote host already bundles.
+
+- Where: the agent host loads `src/agent-host/chat-bridge/` with `import()` only once a bridge is
+  on with its credentials; with none on, nothing of it runs or loads. Each bridge has its own port
+  into the host's `PortHub`, served as a paired device's (`chat-<platform>`), so every request it
+  makes takes the phone's validation and refusals, and what it sends or answers is marked as from
+  that app. It hears what needs the user from the same `host:attention` main's notifications get.
+- Credentials: main keeps them with the bound accounts in `chat-bridge.json`, encrypted by the
+  system like the Marketplace's keys (nothing is kept where the system cannot encrypt), read off
+  the start's path, and sends them whole to the agent host (`host:chat-bridge`). A window gets
+  `ChatBridgeView` alone: which credentials are set, a secret's last 4 characters, the accounts,
+  each connection's state and last error (`host:chat-bridge-status`). The values are log secrets in
+  the agent host. The backup leaves the file out.
+- Who: only bound accounts, and only in a one-to-one chat with the bot, get any answer; everyone
+  else, and every group, gets none. Binding: 绑定 makes a 6-digit code in main, good for 10 minutes
+  and for one account; the agent host reports it when an unbound account sends it
+  (`host:chat-bridge-bind`), main checks it is the code under way and keeps the account. Five wrong
+  codes use a binding up. Button presses are checked against the bound accounts too, and carry
+  only a random key the bridge maps to the request. New credentials of another bot drop the
+  accounts of the one before.
+- In the chat: `/list` (sessions that need you first), `/s 3`, plain text to the chosen session
+  (`sessions.queue`, `/now` steers with `sessions.sendNow`), `/new 2 1` then the first message
+  (`sessions.create`), `/stop`, `/y` `/n` `/2 note` for the request in front, answers to questions
+  (one at a time for an ask of several; secret ones are refused), plans with their options,
+  `/get 1` for the last turn's artifact as a file, `//` to send a slash command to the agent.
+  Pictures and files become attachments as the phone's do (`attachments.add`, 20 MB). A finished
+  turn's reply comes whole for a session the chat chose or wrote to in the last day, else as a
+  line; replies are cut to each platform's size, code blocks closed and reopened (`split.ts`).
+- Pace: each platform's published limits (`pacing.ts`), a 429 or its code waits as told,
+  reconnects back off from 1 s to 5 minutes; a timer runs only while a message waits or a
+  reconnect is due. Free Feishu and DingTalk organizations have a monthly API quota.
+- Files: `src/shared/chat-bridge.ts`, `src/main/chat-bridge.ts` (+ test), `src/agent-host/chat-bridge/`
+  (`service.ts`, `controller.ts`, `commands.ts`, `access.ts`, `split.ts`, `pacing.ts`, `net.ts`,
+  `lifeline.ts`, `markdown.ts`, `host-client.ts`, one file per platform, tests for the commands,
+  the allowlist and binding, splitting, Feishu's frames and WeCom's file decryption), and
+  `features/settings/chat-bridge-*.tsx`, `stores/chat-bridge.ts`, `chatBridge` in
+  `locales/*/{settings,host}.json`. Hooks: `host-control.ts`, `ipc.ts`, `preload/index.ts`,
+  `main/index.ts`, `main/agent-host.ts`, `main/ipc.ts`, `agent-host/host.ts`, `start.ts`,
+  `settings-catalog.ts`, `settings-page.tsx`, `web-sections.ts`, `use-search-entries.ts`. The daemon
+  has no chat bridges.
 
 ## Tests
 

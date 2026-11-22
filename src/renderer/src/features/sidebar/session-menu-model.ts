@@ -10,6 +10,8 @@ export type SessionMenuItem =
   | 'unread'
   | 'rename'
   | 'autoResume'
+  | 'autoMerge'
+  | 'watchPr'
   | 'fork'
   | 'forkSame'
   | 'newSubSession'
@@ -85,6 +87,8 @@ export interface SessionMenuContext {
   removeWorktree?: boolean
   /** Huli: this window can export it, as the desktop app's can. */
   exportable?: boolean
+  /** Huli: it has an open pull request to merge once green or to watch. */
+  prFlow?: boolean
 }
 
 /**
@@ -106,6 +110,7 @@ export function sessionMenuGroups(
     worktree = false,
     removeWorktree = false,
     exportable = false,
+    prFlow = false,
   }: SessionMenuContext,
 ): SessionMenuItem[][] {
   const running = isRunning(summary)
@@ -126,6 +131,8 @@ export function sessionMenuGroups(
   ]
   // Huli: a session of the user's own goes on by itself after a plan limit, or not.
   const own: SessionMenuItem[] = summary.origin === 'user' ? ['autoResume'] : []
+  // Huli: its pull request merged once its checks pass, or watched for its agent.
+  const flow: SessionMenuItem[] = prFlow && topLevel ? ['autoMerge', 'watchPr'] : []
   const state: SessionMenuItem[] = running
     ? ['stop']
     : status === 'failed' || status === 'auth_required'
@@ -137,6 +144,7 @@ export function sessionMenuGroups(
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
           own,
+          flow,
           ['openInEditor', 'showInFolder', 'openTerminal', 'resumeInTerminal'],
           ['copyResume', 'copySessionId', 'export'],
           ending,
@@ -145,6 +153,7 @@ export function sessionMenuGroups(
           state,
           topLevel ? ['pin', 'unread', 'rename'] : ['unread', 'rename'],
           own,
+          flow,
           [...forks, 'newSubSession'],
           [
             ...(shown ? [] : (['openInSplit'] as const)),

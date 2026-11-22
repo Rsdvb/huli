@@ -9,6 +9,7 @@ import {
   clearDraft,
   draftedSessions,
   flushDraft,
+  forgetDraft,
   NEW_SESSION_DRAFT,
   readDraft,
   writeDraft,
@@ -540,7 +541,7 @@ export async function renameSession(sessionId: string, title: string | null): Pr
 export async function deleteSession(sessionId: string): Promise<void> {
   await host('sessions.delete', { sessionId })
   forgetSession(sessionId)
-  clearDraft(sessionId)
+  forgetDraft(sessionId)
   dropAttachments(sessionId)
   useSessionsStore.getState().remove(sessionId)
   closeSessionInSplit(sessionId)
@@ -550,7 +551,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
 export function sessionRemoved(sessionId: string): void {
   useSessionsStore.getState().remove(sessionId)
   forgetSession(sessionId)
-  clearDraft(sessionId)
+  forgetDraft(sessionId)
   dropAttachments(sessionId)
   closeSessionInSplit(sessionId)
 }

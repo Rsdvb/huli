@@ -3,13 +3,16 @@
 // and written a moment after the last change, and at once when the app leaves the front, to one
 // JSON file per computer in the app's documents folder, so a draft outlives leaving the screen and
 // a restart of the app; a file that would read the same is not written again. New session's draft is
-// kept under NEW_SESSION_DRAFT until the session it starts exists.
+// kept under NEW_SESSION_DRAFT until the session it starts exists. A draft's `notes` are comments on
+// diff lines waiting to go to the agent together (@shared/diff-notes); the composer's writes leave
+// them as they are.
 //
 //   <documents>/huli/drafts/<computer id>.json   { v: 1, drafts: { <session id>: Draft } }
 
 import { useSyncExternalStore } from 'react'
 import { AppState } from 'react-native'
 import { Directory, File, Paths } from 'expo-file-system'
+import { parseDiffNotes, type DiffNote } from '@shared/diff-notes'
 import { isAttachment, type Attachment } from '@shared/thread'
 
 export const NEW_SESSION_DRAFT = 'new'
@@ -34,6 +37,7 @@ export interface Draft {
   text: string
   attachments: SavedAttachment[]
   mentions: SavedMention[]
+  notes?: DiffNote[]
 }
 
 const VERSION = 1
@@ -85,7 +89,8 @@ function parseDraft(value: unknown): Draft | null {
       m.to > m.from &&
       m.to <= (value.text as string).length,
   )
-  return { text: value.text, attachments, mentions }
+  const notes = parseDiffNotes(value.notes)
+  return { text: value.text, attachments, mentions, ...(notes.length > 0 ? { notes } : {}) }
 }
 
 function fileOf(computer: string): File {
@@ -139,6 +144,9 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
+/** Hears of every change to the drafts that the views show, such as notes added or sent. */
+export const subscribeDrafts = subscribe
+
 /** Whether the computer's drafts have been read; starts the read. */
 export function useDraftsReady(computer: string | null): boolean {
   if (computer && !loading.has(computer)) void loadDrafts(computer)
@@ -151,12 +159,17 @@ export function readDraft(computer: string, key: string): Draft | null {
 }
 
 function empty(draft: Draft): boolean {
-  return draft.text === '' && draft.attachments.length === 0
+  return draft.text === '' && draft.attachments.length === 0 && !draft.notes?.length
 }
 
+/** Writes the draft's message; a draft without `notes` keeps the notes the stored one has. */
 export function writeDraft(computer: string, key: string, draft: Draft): void {
   let drafts = memory.get(computer)
   if (!drafts) memory.set(computer, (drafts = new Map()))
+  if (draft.notes === undefined) {
+    const notes = drafts.get(key)?.notes
+    if (notes?.length) draft = { ...draft, notes }
+  }
   if (empty(draft)) {
     if (!drafts.has(key)) return
     drafts.delete(key)
@@ -168,6 +181,28 @@ export function writeDraft(computer: string, key: string, draft: Draft): void {
 
 export function clearDraft(computer: string, key: string): void {
   writeDraft(computer, key, { text: '', attachments: [], mentions: [] })
+}
+
+const NO_NOTES: readonly DiffNote[] = []
+
+/** The session's comments on diff lines, in the order they were written. */
+export function readDraftNotes(computer: string, key: string): readonly DiffNote[] {
+  return memory.get(computer)?.get(key)?.notes ?? NO_NOTES
+}
+
+/** Replaces the session's notes, leaving its message as it is. */
+export function writeDraftNotes(computer: string, key: string, notes: DiffNote[]): void {
+  const draft = readDraft(computer, key) ?? { text: '', attachments: [], mentions: [] }
+  writeDraft(computer, key, { ...draft, notes })
+  publish()
+}
+
+/** The session's notes, rendering again only when the drafts change; none until they are read. */
+export function useDraftNotes(computer: string | null, key: string | null): readonly DiffNote[] {
+  if (computer && !loading.has(computer)) void loadDrafts(computer)
+  return useSyncExternalStore(subscribe, () =>
+    computer && key ? readDraftNotes(computer, key) : NO_NOTES,
+  )
 }
 
 function schedule(computer: string): void {

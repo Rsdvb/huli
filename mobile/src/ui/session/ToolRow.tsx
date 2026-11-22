@@ -112,6 +112,8 @@ export function target(entry: ToolEntry, root: string | null): string {
 export function EditLine(props: { edit: FileEdit; root: string | null }) {
   const { c } = useSessionTokens()
   const { edit } = props
+  // The diff screen takes comments on the edit's lines for this session.
+  const { sessionId } = useSessionRows((rows) => ({ sessionId: rows.sessionId }))
   return (
     <Pressable
       onPress={() =>
@@ -124,6 +126,7 @@ export function EditLine(props: { edit: FileEdit; root: string | null }) {
               newText: edit.newText,
               diff: edit.diff,
             }),
+            ...(sessionId ? { id: sessionId } : {}),
           },
         })
       }

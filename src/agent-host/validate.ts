@@ -53,7 +53,9 @@ import {
   type ListingChange,
   type ListingVisibility,
 } from '@shared/market-publish'
+import { isGithubEvent } from '@shared/github-flow'
 import {
+  GITHUB_ISSUE_URL,
   GITHUB_LOGIN,
   GITHUB_PULL_REQUEST_URL,
   githubReferenceOf,
@@ -741,13 +743,16 @@ function routineOptions(value: unknown): RoutineOption[] {
   })
 }
 
-function routineTrigger(value: unknown): {
-  kind: 'schedule'
-  schedule: import('@shared/routines').Schedule
-} {
-  if (!isRecord(value) || value.kind !== 'schedule' || !isSchedule(value.schedule)) {
+/** A schedule, or Huli: a GitHub event with the schedule it keeps. */
+function routineTrigger(value: unknown): import('@shared/routines').RoutineTrigger {
+  if (!isRecord(value) || !isSchedule(value.schedule)) {
     throw invalidParams('trigger must be a schedule')
   }
+  if (value.kind === 'github') {
+    if (!isGithubEvent(value.event)) throw invalidParams('trigger.event is not a GitHub event')
+    return { kind: 'github', event: value.event, schedule: value.schedule }
+  }
+  if (value.kind !== 'schedule') throw invalidParams('trigger must be a schedule')
   return { kind: 'schedule', schedule: value.schedule }
 }
 
@@ -2129,6 +2134,23 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), on: flag(o, 'on') }
     },
+    'sessions.setPrFlow': (params) => {
+      const o = fields(params)
+      const url = string(o, 'url', URL_CHARS)
+      if (!GITHUB_PULL_REQUEST_URL.test(url))
+        throw invalidParams('url is not a GitHub pull request')
+      const autoMerge = optionalFlag(o, 'autoMerge')
+      const watch = optionalFlag(o, 'watch')
+      if (autoMerge === undefined && watch === undefined) {
+        throw invalidParams('autoMerge or watch must be given')
+      }
+      return {
+        sessionId: sessionId(o),
+        url,
+        ...(autoMerge === undefined ? {} : { autoMerge }),
+        ...(watch === undefined ? {} : { watch }),
+      }
+    },
     'sessions.stall': (params) => {
       const o = fields(params)
       if (!(STALL_ACTIONS as readonly unknown[]).includes(o.action)) {
@@ -2409,6 +2431,29 @@ export function createValidators(platform: Platform): Validators {
       const url = string(fields(params), 'url', URL_CHARS)
       if (githubReferenceOf(url)?.kind !== 'issue') throw invalidParams('url is not a GitHub issue')
       return { url }
+    },
+    'github.issues': (params) => {
+      const o = fields(params)
+      if (o.filter !== 'mine' && o.filter !== 'all')
+        throw invalidParams('filter must be mine or all')
+      return { projectPath: absolutePath(o, 'projectPath', platform), filter: o.filter }
+    },
+    'github.startIssue': (params) => {
+      const o = fields(params)
+      const url = string(o, 'url', URL_CHARS)
+      if (!GITHUB_ISSUE_URL.test(url) || githubReferenceOf(url)?.kind !== 'issue') {
+        throw invalidParams('url is not a GitHub issue')
+      }
+      const options = o.options === undefined ? undefined : configValues(o.options)
+      let worktree: { base: string } | undefined
+      if (o.worktree !== undefined) worktree = { base: baseRef(fields(o.worktree), 'base') }
+      return {
+        projectPath: absolutePath(o, 'projectPath', platform),
+        url,
+        agentId: agentId(o),
+        ...(options === undefined ? {} : { options }),
+        ...(worktree === undefined ? {} : { worktree }),
+      }
     },
     'git.watchReferences': (params) => {
       const value = fields(params).urls

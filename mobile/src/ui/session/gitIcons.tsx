@@ -4,6 +4,7 @@
 import { View } from 'react-native'
 import {
   CircleDashed,
+  CircleDot,
   Clock,
   Download,
   GitMerge,
@@ -33,6 +34,7 @@ export const GI = {
   task: { sf: 'point.3.connected.trianglepath.dotted', lucide: Workflow },
   resume: { sf: 'terminal', lucide: Terminal },
   queued: { sf: 'circle.dashed', lucide: CircleDashed },
+  issue: { sf: 'smallcircle.filled.circle', lucide: CircleDot },
 } satisfies Record<string, IconSpec>
 
 export const PR_STATE_TEXT: Record<PullRequestState, string> = {

@@ -99,7 +99,8 @@
       "marketplaceItem": "Marketplace › {{item}}",
       "settings": "Settings › {{section}}",
       "settingsItem": "Settings › {{section}} › {{item}}",
-      "group": "Several agents"
+      "group": "Several agents",
+      "issues": "Issues"
     }
   },
   "debugMode": {

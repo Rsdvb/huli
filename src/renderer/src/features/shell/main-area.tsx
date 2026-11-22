@@ -27,6 +27,7 @@ const ArtifactViewer = lazy(() => import('@renderer/features/artifacts/artifact-
 const MarketplacePage = lazy(() => import('@renderer/features/marketplace/marketplace-page'))
 const TaskPage = lazy(() => import('@renderer/features/tasks/task-page'))
 const GroupPage = lazy(() => import('@renderer/features/groups/group-page'))
+const IssuesPage = lazy(() => import('@renderer/features/issues/issues-page'))
 
 /**
  * What the main area shows: the split of sessions and New session, the Overview, the usage page, the routines
@@ -153,6 +154,15 @@ export function MainArea() {
       <PageSheet>
         <Suspense fallback={null}>
           <GroupPage key={main.groupId} groupId={main.groupId} />
+        </Suspense>
+      </PageSheet>
+    )
+  }
+  if (main.kind === 'issues') {
+    return (
+      <PageSheet>
+        <Suspense fallback={null}>
+          <IssuesPage key={main.projectPath} projectPath={main.projectPath} />
         </Suspense>
       </PageSheet>
     )

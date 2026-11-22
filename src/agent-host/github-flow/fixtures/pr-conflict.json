@@ -1,0 +1,54 @@
+{
+  "author": {
+    "id": "U_1",
+    "is_bot": false,
+    "login": "octocat",
+    "name": "Mona Octocat"
+  },
+  "baseRefName": "main",
+  "comments": [],
+  "headRefName": "kite/fix-login",
+  "headRefOid": "31514b61d0d70cd4150b473d0f61488a72b0116d",
+  "isDraft": false,
+  "mergeStateStatus": "DIRTY",
+  "mergeable": "CONFLICTING",
+  "number": 42,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "reviews": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-19T17:50:13Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/octo-org/hello-world/actions/runs/44580805822/job/135760595507",
+      "name": "CodeQL-Build (go, manual, ./.github/codeql/codeql-config.yml)",
+      "startedAt": "2026-11-19T17:46:46Z",
+      "status": "COMPLETED",
+      "workflowName": "Code Scanning"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-19T17:49:39Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/octo-org/hello-world/actions/runs/44580805818/job/135760597412",
+      "name": "lint",
+      "startedAt": "2026-11-19T17:46:46Z",
+      "status": "COMPLETED",
+      "workflowName": "Lint"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-19T17:46:51Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/octo-org/hello-world/actions/runs/44580806364/job/135760604381",
+      "name": "label-external / label_issues",
+      "startedAt": "2026-11-19T17:46:47Z",
+      "status": "COMPLETED",
+      "workflowName": "PR Triaging"
+    }
+  ],
+  "title": "Fix the login timeout",
+  "updatedAt": "2026-11-19T17:49:58Z",
+  "url": "https://github.com/octo-org/hello-world/pull/42"
+}

@@ -1,0 +1,119 @@
+# Comments on a diff's lines for the agent: a turn of the fake agent edits src/clock.ts, and its
+# change opens on the diff screen. A tap picks a line, a second stretches the pick, Comment writes
+# a comment, a long press writes another, the tray lists them, and the diff still scrolls sideways.
+# Back in the session the strip over the composer sends them as one message; one more comment
+# leaves the diff screen with its tray for both appearances.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- scrollUntilVisible:
+    element:
+      text: '.*src/clock\.ts，增加.*'
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    text: '.*src/clock\.ts，增加.*'
+- extendedWaitUntil:
+    visible: '轻点一行选中，再点一行选一段，长按写意见'
+    timeout: 10000
+- takeScreenshot: n01-diff
+# A tap picks a line; a second tap on another stretches the pick to it.
+- tapOn:
+    text: '(?s).*issueToken\(user: User, now.*'
+- tapOn:
+    text: '(?s).*expiresAt: now \+ TOKEN_TTL_MS.*'
+- extendedWaitUntil:
+    visible: '第 .*行'
+    timeout: 4000
+- takeScreenshot: n02-picked
+- tapOn: '写意见'
+- extendedWaitUntil:
+    visible: '添加意见'
+    timeout: 6000
+- inputText: 'document the now default'
+- takeScreenshot: n03-sheet
+- tapOn: '添加意见'
+- extendedWaitUntil:
+    visible: '1 条意见.*'
+    timeout: 6000
+# A long press writes a comment on its own line.
+- longPressOn:
+    text: '(?s).*return token\.expiresAt > now.*'
+- extendedWaitUntil:
+    visible: '添加意见'
+    timeout: 6000
+- inputText: 'validate also needs a test'
+- tapOn: '添加意见'
+- extendedWaitUntil:
+    visible: '2 条意见.*'
+    timeout: 6000
+- takeScreenshot: n04-tray
+- tapOn:
+    text: '2 条意见.*'
+- extendedWaitUntil:
+    visible: '发送前可以修改或删除'
+    timeout: 6000
+- takeScreenshot: n05-list
+- swipe:
+    start: 50%, 40%
+    end: 50%, 95%
+    duration: 400
+- waitForAnimationToEnd
+# The rows take taps, yet the diff still scrolls sideways.
+- swipe:
+    start: 85%, 30%
+    end: 10%, 30%
+    duration: 600
+- waitForAnimationToEnd
+- takeScreenshot: n06-swiped
+- tapOn: '返回'
+- extendedWaitUntil:
+    visible: '2 条意见.*'
+    timeout: 6000
+- takeScreenshot: n07-strip
+- tapOn: '发送给 Agent'
+- extendedWaitUntil:
+    visible:
+      text: '(?s).*请处理我对改动的 2 条意见.*'
+    timeout: 20000
+- takeScreenshot: n08-sent
+# One more comment, to see the diff screen with its tray in both appearances.
+- scrollUntilVisible:
+    element:
+      text: '.*src/clock\.ts，增加.*'
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    text: '.*src/clock\.ts，增加.*'
+- longPressOn:
+    text: '(?s).*issueToken\(user: User, now.*'
+- extendedWaitUntil:
+    visible: '添加意见'
+    timeout: 6000
+- inputText: 'keep the old signature too'
+- tapOn: '添加意见'
+- extendedWaitUntil:
+    visible: '1 条意见.*'
+    timeout: 6000
+- takeScreenshot: n09-again

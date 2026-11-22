@@ -9,7 +9,12 @@ import type {
   ProviderBalance,
   VersionMoveReason,
 } from '@shared/agent-host'
-import { GITHUB_PULL_REQUEST_URL, type ProjectWorktreeSettings } from '@shared/git'
+import {
+  GITHUB_ISSUE_URL,
+  GITHUB_PULL_REQUEST_URL,
+  type ProjectWorktreeSettings,
+} from '@shared/git'
+import { isGithubEvent } from '@shared/github-flow'
 import { isProfileId } from '@shared/provider-profiles'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
@@ -374,6 +379,23 @@ export interface SessionRecord {
   autoResume?: boolean
   /** Huli: a run of a best-of-N group, which every run of it names alike. */
   group?: StoredGroup
+  /** Huli: the GitHub issue it was started for, by its canonical URL. */
+  issue?: string
+  /** Huli: its pull request merged once its checks pass, watched for its agent, or both. */
+  prFlow?: StoredPrFlow
+}
+
+/** Huli: a session's pull request automation, as its record keeps it. */
+export interface StoredPrFlow {
+  url: string
+  autoMerge: boolean
+  watch: boolean
+  /** The events its agent was told of, or took as seen when the watch began; the newest last. */
+  seen: string[]
+  /** The first read since the watch began is done. */
+  baselined?: true
+  /** It ended: merged, closed, or a merge that failed, with why. */
+  ended?: { state: 'merged' | 'closed' | 'failed'; message?: string }
 }
 
 /** A best-of-N run's group, as each of its runs' records keeps it. */
@@ -555,7 +577,8 @@ function routineOf(value: unknown): Routine | null {
     !Array.isArray(value.options) ||
     value.options.length > ROUTINE_OPTION_LIMIT ||
     !isRecord(value.trigger) ||
-    value.trigger.kind !== 'schedule' ||
+    (value.trigger.kind !== 'schedule' &&
+      !(value.trigger.kind === 'github' && isGithubEvent(value.trigger.event))) ||
     !isSchedule(value.trigger.schedule) ||
     !isPermissionScope(value.scope) ||
     !isTimeLimit(value.timeLimitMinutes) ||
@@ -591,7 +614,10 @@ function routineOf(value: unknown): Routine | null {
     agentId: agentId as Routine['agentId'],
     projectPath: value.projectPath as string | null,
     options,
-    trigger: { kind: 'schedule', schedule: value.trigger.schedule },
+    trigger:
+      value.trigger.kind === 'github' && isGithubEvent(value.trigger.event)
+        ? { kind: 'github', event: value.trigger.event, schedule: value.trigger.schedule }
+        : { kind: 'schedule', schedule: value.trigger.schedule },
     scope: value.scope,
     timeLimitMinutes: value.timeLimitMinutes,
     keptRunSessions,
@@ -1022,6 +1048,8 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...limitPauseField(item.limitPause),
       ...(typeof item.autoResume === 'boolean' ? { autoResume: item.autoResume } : {}),
       ...groupOf(item.group),
+      ...(isString(item.issue) && GITHUB_ISSUE_URL.test(item.issue) ? { issue: item.issue } : {}),
+      ...prFlowOf(item.prFlow),
     })
   }
   return {
@@ -1356,6 +1384,44 @@ export function projectsFile(userDataPath: string, log: LogFn): JsonFile<Project
   })
 }
 
+const MAX_PR_FLOW_SEEN = 200
+
+/** Huli: a session's pull request automation; one that does not read is dropped, and so ends. */
+function prFlowOf(value: unknown): { prFlow?: StoredPrFlow } {
+  if (
+    !isRecord(value) ||
+    !isString(value.url) ||
+    !GITHUB_PULL_REQUEST_URL.test(value.url) ||
+    typeof value.autoMerge !== 'boolean' ||
+    typeof value.watch !== 'boolean' ||
+    !Array.isArray(value.seen)
+  ) {
+    return {}
+  }
+  const seen = value.seen
+    .filter((key): key is string => isString(key) && key.length > 0 && key.length <= 200)
+    .slice(-MAX_PR_FLOW_SEEN)
+  const ended = isRecord(value.ended) ? value.ended : null
+  const state = ended?.state
+  return {
+    prFlow: {
+      url: value.url,
+      autoMerge: value.autoMerge,
+      watch: value.watch,
+      seen,
+      ...(value.baselined === true ? { baselined: true as const } : {}),
+      ...(state === 'merged' || state === 'closed' || state === 'failed'
+        ? {
+            ended: {
+              state,
+              ...(isString(ended?.message) ? { message: ended.message.slice(0, 1000) } : {}),
+            },
+          }
+        : {}),
+    },
+  }
+}
+
 /** A session's opened pull requests; an address that is not one is dropped, as are repeats. */
 function pullRequestsOf(value: unknown): { pullRequests?: string[] } {
   if (!Array.isArray(value)) return {}
@@ -1457,6 +1523,58 @@ export function routinesFile(userDataPath: string, log: LogFn): JsonFile<Routine
     migrations: ROUTINES_MIGRATIONS,
     parse: parseRoutinesFile,
     empty: () => ({ version: 1, routines: [] }),
+    log,
+  })
+}
+
+/** Huli: what each routine's GitHub trigger remembers between reads. */
+export interface StoredTriggerCursor {
+  /** What the trigger was when armed: a change of event or project arms it anew. */
+  signature: string
+  armedAt: number
+  /** The first read was taken as the state things are in, not as events. */
+  baselined: boolean
+  seen: string[]
+}
+
+export interface GithubFlowFile {
+  version: 1
+  /** By routine id. */
+  triggers: Record<string, StoredTriggerCursor>
+}
+
+export const GITHUB_FLOW_VERSION = 1
+
+const MAX_TRIGGER_SEEN = 200
+
+/** A cursor that does not read is dropped, and its trigger is armed anew at the next read. */
+export function parseGithubFlowFile(data: Record<string, unknown>): GithubFlowFile | string {
+  if (!isRecord(data.triggers)) return 'triggers is not an object'
+  const triggers: Record<string, StoredTriggerCursor> = {}
+  for (const [routineId, value] of Object.entries(data.triggers)) {
+    if (!ROUTINE_ID.test(routineId) || !isRecord(value)) continue
+    if (!isString(value.signature) || value.signature.length > 2000) continue
+    if (!isTime(value.armedAt) || typeof value.baselined !== 'boolean') continue
+    if (!Array.isArray(value.seen)) continue
+    triggers[routineId] = {
+      signature: value.signature,
+      armedAt: value.armedAt,
+      baselined: value.baselined,
+      seen: value.seen
+        .filter((key): key is string => isString(key) && key.length > 0 && key.length <= 300)
+        .slice(-MAX_TRIGGER_SEEN),
+    }
+  }
+  return { version: 1, triggers }
+}
+
+export function githubFlowFile(userDataPath: string, log: LogFn): JsonFile<GithubFlowFile> {
+  return new JsonFile<GithubFlowFile>({
+    file: path.join(userDataPath, 'state', 'github-flow.json'),
+    version: GITHUB_FLOW_VERSION,
+    migrations: {},
+    parse: parseGithubFlowFile,
+    empty: () => ({ version: 1, triggers: {} }),
     log,
   })
 }

@@ -189,7 +189,11 @@ export function RoutineEditor(props: {
           name: name.trim(),
           prompt: prompt.trim(),
           projectPath,
-          trigger: { kind: 'schedule', schedule },
+          // Huli: one that runs on a GitHub event keeps it; the phone edits only its schedule.
+          trigger:
+            props.routine.trigger.kind === 'github'
+              ? { ...props.routine.trigger, schedule }
+              : { kind: 'schedule', schedule },
           scope,
           onLimit,
           ...(agentId !== props.routine.agentId ? { agentId, options: [] } : {}),

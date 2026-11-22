@@ -11,6 +11,7 @@ import {
   type UserContent,
 } from '@shared/thread'
 import { ChatComposer } from '@renderer/components/affect/chat-composer'
+import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useCachePhase } from '@renderer/features/prompt-cache/cache-phase'
 import { BranchTrayLink } from '@renderer/features/git/git-status'
@@ -788,6 +789,7 @@ export function Composer({
                 {selection && (
                   <SelectionChip selection={selection} onRemove={() => setPaneSelection(null)} />
                 )}
+                <NotesTray sessionId={sessionId} place="composer" />
               </>
             }
           />
