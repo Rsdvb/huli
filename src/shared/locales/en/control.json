@@ -19,7 +19,9 @@
     "computer": {
       "agent": "{{agent}} is using <b>{{target}}</b>",
       "looking": "{{agent}} is looking at <b>{{target}}</b>",
-      "you": "<b>You took over {{held}}</b><i>·</i>{{agent}} is waiting"
+      "you": "<b>You took over {{held}}</b><i>·</i>{{agent}} is waiting",
+      "elevated": "{{agent}} is operating <b>{{target}}</b> as administrator",
+      "foreground": "Brought to the front"
     }
   },
   "target": {

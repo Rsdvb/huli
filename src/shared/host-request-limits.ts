@@ -348,6 +348,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'memory.importScan': HOST_MS,
   'memory.import': HOST_MS,
   'computer.stop': AGENT_MS,
+  'computer.stopElevated': AGENT_MS,
   'computer.takeOver': HOST_MS,
   'computer.handBack': HOST_MS,
   'computer.show': AGENT_MS,

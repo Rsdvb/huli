@@ -38,6 +38,8 @@ export type ComputerToolErrorCode =
   // The driver refused the call or failed; its message says why.
   | 'failed'
   | 'timeout'
+  // Huli: the app runs as administrator, which computer use cannot drive without the user's leave.
+  | 'elevated'
 
 /** An app as approvals know it: an identity that outlives its process, and the name shown. */
 export interface ComputerApp {
@@ -67,6 +69,17 @@ export function isComputerAppDecision(value: unknown): value is ComputerAppDecis
 
 /** The answer to a first use of an app; `timeout` when the user did not answer. */
 export type ComputerAppAnswer = ComputerAppDecision | 'timeout'
+
+/**
+ * Huli: what else an app card asks besides a first use: to drive an app that runs as administrator
+ * through an elevated helper, which starts with the system's administrator prompt, or to take one
+ * risky step in such an app. Neither has an Always allow.
+ */
+export type ComputerAppAsk = 'elevated' | 'risky'
+
+export function isComputerAppAsk(value: unknown): value is ComputerAppAsk {
+  return value === 'elevated' || value === 'risky'
+}
 
 /** How long a call waits for the user to answer a first use of an app. */
 export const COMPUTER_APP_WAIT_MS = 120_000
@@ -101,6 +114,16 @@ export interface ComputerUseSettings {
   pauseOnUse: boolean
   /** The global shortcut that stops using the computer from anywhere, as an Electron accelerator. */
   stopShortcut: string
+  /**
+   * Huli: an action the app drops in the background is tried once in the foreground, which brings
+   * its window forward for the moment it takes; off, the agent hears that it was not delivered.
+   */
+  allowForeground: boolean
+  /**
+   * Huli: Windows only. An agent may ask to drive an app that runs as administrator, which the
+   * user approves app by app and confirms with the system's administrator prompt.
+   */
+  allowElevated: boolean
 }
 
 /** Stop from anywhere: Control, Option, Command and period on macOS; with Shift elsewhere. */
@@ -113,6 +136,8 @@ export const DEFAULT_COMPUTER_USE: ComputerUseSettings = {
   allowedApps: [],
   pauseOnUse: true,
   stopShortcut: '',
+  allowForeground: true,
+  allowElevated: false,
 }
 
 const SHORTCUT_MODIFIERS = new Set(['Control', 'Alt', 'Shift', 'Command', 'Super'])
@@ -195,6 +220,10 @@ export interface ComputerHold {
   window: ComputerWindowRef | null
   control: ComputerControl
   act: ComputerAct | null
+  /** Huli: the app an elevated helper drives for the session as administrator; null for none. */
+  elevated?: string | null
+  /** Huli: counts the actions that went to the foreground, so the label notes each; null for none. */
+  foreground?: number | null
 }
 
 /** Where the window a session uses is now, in screen points, as main asks for it. */
@@ -264,7 +293,9 @@ export function isComputerHold(value: unknown): value is ComputerHold {
         Number.isSafeInteger(window.id) &&
         (window.title === null || isText(window.title)))) &&
     (o.control === 'agent' || o.control === 'you') &&
-    (o.act === null || isAct(o.act))
+    (o.act === null || isAct(o.act)) &&
+    (o.elevated === undefined || o.elevated === null || isText(o.elevated)) &&
+    (o.foreground === undefined || o.foreground === null || Number.isSafeInteger(o.foreground))
   )
 }
 

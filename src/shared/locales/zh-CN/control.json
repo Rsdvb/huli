@@ -19,7 +19,9 @@
     "computer": {
       "agent": "{{agent}} 正在使用 <b>{{target}}</b>",
       "looking": "{{agent}} 正在查看 <b>{{target}}</b>",
-      "you": "<b>你接管了 {{held}}</b><i>·</i>{{agent}} 在等"
+      "you": "<b>你接管了 {{held}}</b><i>·</i>{{agent}} 在等",
+      "elevated": "{{agent}} 正在以管理员权限操作 <b>{{target}}</b>",
+      "foreground": "已切到前台"
     }
   },
   "target": {

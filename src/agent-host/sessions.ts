@@ -58,6 +58,7 @@ import type {
 import type {
   ComputerApp,
   ComputerAppAnswer,
+  ComputerAppAsk,
   ComputerAppDecision,
   ComputerSetupOutcome,
   ComputerSetupStep,
@@ -150,6 +151,7 @@ import {
   type ThemeChangeOutcome,
   type ThemeState,
   type ComputerAppEntry,
+  type ComputerRiskyStep,
   type ComputerSetupEntry,
   type ComputerUseView,
   type DeclaredMcpServer,
@@ -3364,7 +3366,12 @@ export class SessionManager {
    * An agent wants to use an app for the first time in the session, which waits for the user in
    * its thread and marks the session as waiting, as a permission request does.
    */
-  computerAppAsked(sessionId: string, requestId: number, app: ComputerApp): void {
+  computerAppAsked(
+    sessionId: string,
+    requestId: number,
+    app: ComputerApp,
+    ask?: { kind: ComputerAppAsk; step: ComputerRiskyStep | null },
+  ): void {
     const live = this.live.get(sessionId)
     if (!live || this.appRequests.has(requestId)) return
     const entry: ComputerAppEntry = {
@@ -3374,6 +3381,7 @@ export class SessionManager {
       appId: app.id,
       appName: app.name,
       decision: null,
+      ...(ask ? { ask: ask.kind, step: ask.step } : {}),
       after: agentEntryBefore(live.thread),
     }
     live.apps.set(requestId, entry.id)
@@ -3388,9 +3396,60 @@ export class SessionManager {
       live.id,
       'permission',
       this.titleOf(live),
-      t('attention.computerApp', { app: app.name }),
+      t(
+        ask?.kind === 'elevated'
+          ? 'attention.computerElevated'
+          : ask?.kind === 'risky'
+            ? 'attention.computerRisky'
+            : 'attention.computerApp',
+        { app: app.name },
+      ),
       { id: entry.id },
     )
+  }
+
+  /** Huli: whether a waiting app card asks more than a first use, which only this computer answers. */
+  computerAppAsks(sessionId: string, entryId: string): boolean {
+    const entry = this.live.get(sessionId)?.thread.byId[entryId]
+    return entry?.kind === 'computer_app' && entry.ask !== undefined
+  }
+
+  /** Huli: an action went to the foreground in `app`: the thread says so, once a turn. */
+  computerForeground(sessionId: string, app: string): void {
+    const live = this.live.get(sessionId)
+    if (!live) return
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(live),
+          severity: 'info',
+          title: t('notice.computerForeground.title', { app }),
+          description: t('notice.computerForeground.description'),
+          after: agentEntryBefore(live.thread),
+        },
+      },
+    ])
+  }
+
+  /** Huli: the user ended the elevated helper: the thread says the turn no longer uses it. */
+  computerElevatedStopped(sessionId: string, app: string): void {
+    const live = this.live.get(sessionId)
+    if (!live) return
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(live),
+          severity: 'info',
+          title: t('notice.computerElevatedStopped.title', { app }),
+          description: t('notice.computerElevatedStopped.description'),
+          after: agentEntryBefore(live.thread),
+        },
+      },
+    ])
   }
 
   /** The wait ended, so the card takes the answer, labelled with the device that gave it. */

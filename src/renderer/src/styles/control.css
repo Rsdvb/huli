@@ -98,6 +98,15 @@
 .ctl-label[data-surface='computer'][data-control='waiting'] .ctl-label__text b {
   color: var(--attention);
 }
+/* Huli: an app driven as administrator: a badge that stands out from the label below it. */
+.ctl-label[data-surface='computer'][data-control='elevated'] {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+.ctl-label[data-surface='computer'][data-control='elevated'] .ctl-label__text b {
+  font-weight: var(--weight-semibold);
+  color: var(--danger);
+}
 /* The app's own icon, as the system draws it. */
 .ctl-app-icon {
   display: grid;

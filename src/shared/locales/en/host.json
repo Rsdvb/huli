@@ -151,6 +151,14 @@
       "title": "Stopped using the computer",
       "description": "Agents can use it again after your next message."
     },
+    "computerForeground": {
+      "title": "Switched {{app}} to the foreground",
+      "description": "It ignored an action in the background, so its window came to the front for the action and the front went back. Turn this off in Settings › Computer use."
+    },
+    "computerElevatedStopped": {
+      "title": "Stopped operating {{app}} as administrator",
+      "description": "The administrator helper ended. Agents can ask again after your next message."
+    },
     "fullAccessNotCarried": {
       "title": "Full access was not carried over",
       "description": "This session ran in full access outside Kettu. Kettu does not attach a session in it, so it is in {{mode}} here."
@@ -164,6 +172,8 @@
     "tabAccess": "Wants to use your tab {{tab}}",
     "terminalRename": "Wants to rename your terminal {{terminal}} to {{name}}",
     "computerApp": "Wants to use {{app}}",
+    "computerElevated": "Wants to use {{app}} as administrator",
+    "computerRisky": "Asks to confirm a step in {{app}}",
     "computerSetup": "Wants to use your computer",
     "controlAsk": {
       "sign_in": "Needs you to sign in to {{target}}",
