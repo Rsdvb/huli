@@ -540,10 +540,10 @@ function Totals({
           <TooltipTrigger
             render={
               <div>
-                <small>{t('totals.cost')}</small>
-                <b className="tabular">
-                  ≈ {usd(costUsd)} <em>{t('totals.api')}</em>
-                </b>
+                <small>
+                  {t('totals.cost')} <em>{t('totals.api')}</em>
+                </small>
+                <b className="tabular">≈ {usd(costUsd)}</b>
               </div>
             }
           />

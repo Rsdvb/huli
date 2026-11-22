@@ -68,18 +68,23 @@
 }
 .kr-totals small {
   display: block;
+  overflow: hidden;
   font-size: 11.5px;
   line-height: 16px;
   color: var(--text-tertiary);
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
+/* Huli: a cell's value is cut with an ellipsis in a narrow pane rather than running past the card. */
 .kr-totals b {
   display: block;
+  overflow: hidden;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
   color: var(--text-primary);
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .kr-totals em {
   font-size: 11px;
