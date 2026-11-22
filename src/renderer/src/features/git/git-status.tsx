@@ -17,6 +17,7 @@ import { formatShortcut } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { loadGitTools, receiveCurrentPr, receiveGitStatus, useGitStore } from '@renderer/stores/git'
+import { useFurtherFolders } from '@renderer/stores/projects'
 import { BranchPopover } from './branch-popover'
 import { BranchSwitcher } from './branch-switcher'
 import { useDialogReturn } from './dialog-focus'
@@ -31,10 +32,24 @@ function middleTruncate(text: string, max: number): string {
 }
 
 /**
- * The project's branch and its state on the composer's tray; it opens the branch's popover (sync,
- * changes, commits and the pull request), and Option-click opens the branch switcher.
+ * Huli: a branch link for each further folder of the project that is a repository of its own,
+ * each named by its folder: its sync, changes, commit and pull request are that repository's.
  */
-export function BranchTrayLink({ projectPath }: { projectPath: string }) {
+export function FolderBranchLinks({ projectPath }: { projectPath: string }) {
+  const folders = useFurtherFolders(projectPath)
+  return folders
+    .filter((folder) => !folder.missing)
+    .map((folder) => (
+      <BranchTrayLink key={folder.path} projectPath={folder.path} repo={folder.name} />
+    ))
+}
+
+/**
+ * The project's branch and its state on the composer's tray; it opens the branch's popover (sync,
+ * changes, commits and the pull request), and Option-click opens the branch switcher. Huli: `repo`
+ * names a further folder's repository on its link.
+ */
+export function BranchTrayLink({ projectPath, repo }: { projectPath: string; repo?: string }) {
   const { t } = useTranslation('git')
   const status = useGitStore((s) => s.status[projectPath])
   const pr = useGitStore((s) => s.currentPr[projectPath] ?? null)
@@ -87,13 +102,18 @@ export function BranchTrayLink({ projectPath }: { projectPath: string }) {
               <PopoverTrigger
                 ref={trigger}
                 className="ui-as-tray-link kettu-branch"
-                aria-label={branchLabel(status, t)}
+                aria-label={
+                  repo
+                    ? t('status.repoBranch', { repo, branch: branchLabel(status, t) })
+                    : branchLabel(status, t)
+                }
                 aria-keyshortcuts="Alt+Enter"
                 data-switching={open === 'switch' || undefined}
                 onKeyDown={onChipKeys}
               />
             }
           >
+            {repo && <span className="kettu-branch__dim kettu-branch__repo">{repo}</span>}
             <BranchSummary status={status} />
           </TooltipTrigger>
           <TooltipContent>{t('status.chipHint', { alt: formatShortcut('Alt') })}</TooltipContent>

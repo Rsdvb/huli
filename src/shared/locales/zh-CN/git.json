@@ -25,7 +25,8 @@
     "ahead_one": "{{count}} 个提交待推送",
     "ahead_other": "{{count}} 个提交待推送",
     "behind_one": "{{count}} 个提交待拉取",
-    "behind_other": "{{count}} 个提交待拉取"
+    "behind_other": "{{count}} 个提交待拉取",
+    "repoBranch": "{{repo}}：{{branch}}"
   },
   "pr": {
     "state": {

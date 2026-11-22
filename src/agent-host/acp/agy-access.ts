@@ -20,6 +20,12 @@ export const HELD_MODE = 'default'
  * where a request asks it to start the session's process with it (`SESSION_FLAG_META` there).
  */
 export const SESSION_FLAG_META = 'sh.kettu/session-flag'
+/**
+ * Huli: where the session router's `initialize` answer names the flag that adds a folder to a
+ * session's process, and where a session's request names its further folders for it.
+ */
+export const DIR_FLAG_META = 'sh.kettu/dir-flag'
+export const DIRS_META = 'sh.kettu/dirs'
 
 /** Whether agy offers full access: a version it was checked on, behind a router that found the flag. */
 export function offersFullAccess(version: string | null, meta: unknown): boolean {

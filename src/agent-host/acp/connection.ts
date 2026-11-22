@@ -94,6 +94,8 @@ import {
 import {
   FULL_ACCESS,
   HELD_MODE,
+  DIR_FLAG_META,
+  DIRS_META,
   SESSION_FLAG_META,
   lacks,
   offersFullAccess,
@@ -416,6 +418,12 @@ export class AcpConnection implements AgentConnection {
   private fullAccess = false
   /** agy takes a system prompt addition for a new session, once `initialize` has answered. */
   private appendsSystemPrompt = false
+  /** Huli: the agent takes ACP's `additionalDirectories`, once `initialize` has answered. */
+  private takesDirectories = false
+  /** Huli: the session router starts a session's process with each further folder's flag. */
+  private routesDirectories = false
+  /** Huli: the sessions opened with the project's further folders as workspace roots. */
+  private readonly foldered = new Set<string>()
   /** agy's sessions while it offers full access. */
   private readonly agyAccess = new Map<string, AgyAccess>()
   /** Pages a session's elicitation opened, by its id, until the agent says they are done. */
@@ -981,13 +989,43 @@ export class AcpConnection implements AgentConnection {
     this.version = result.version
     this.fullAccess = this.agy && offersFullAccess(result.version, init._meta)
     this.appendsSystemPrompt = this.agy && takesSystemPromptAppend(result.version, caps)
+    this.takesDirectories = session.additionalDirectories != null
+    this.routesDirectories =
+      typeof (init._meta as Record<string, unknown> | null | undefined)?.[DIR_FLAG_META] ===
+      'string'
     this.naming = mcpNaming(init.agentInfo)
     this.removal = hiddenRemoval(this.hooks.agentId, result.capabilities, result.version)
     return result
   }
 
   private meta(options: SessionOptions): Record<string, unknown> | undefined {
-    return sessionMeta(this.hooks.agentId, options)
+    const meta = sessionMeta(this.hooks.agentId, options)
+    if (this.takesDirectories || !this.routesDirectories || !options.folders?.length) return meta
+    return { ...meta, [DIRS_META]: [...options.folders] }
+  }
+
+  /**
+   * Huli: the project's further folders as ACP's own field, for an agent that takes it; the
+   * session counts as handed them when it takes them either way.
+   */
+  private directories(
+    sessionId: string,
+    options: SessionOptions,
+  ): { additionalDirectories?: string[] } {
+    const folders = options.folders ?? []
+    if (folders.length > 0 && (this.takesDirectories || this.routesDirectories)) {
+      this.foldered.add(sessionId)
+    } else {
+      this.foldered.delete(sessionId)
+    }
+    return this.takesDirectories && folders.length > 0
+      ? { additionalDirectories: [...folders] }
+      : {}
+  }
+
+  /** Huli: whether the session was opened with the project's further folders as its roots. */
+  takesFolders(sessionId: string): boolean {
+    return this.foldered.has(sessionId)
   }
 
   async newSession(cwd: string, options: SessionOptions = {}): Promise<OpenedSession> {
@@ -996,13 +1034,16 @@ export class AcpConnection implements AgentConnection {
       this.appendsSystemPrompt && options.systemPromptAppend
         ? { ...started, ...systemPromptMeta(options.systemPromptAppend) }
         : started
+    const dirs = this.takesDirectories && options.folders?.length ? [...options.folders] : null
     const response = await this.call(() =>
       this.connection.agent.request(methods.agent.session.new, {
         cwd,
         mcpServers: mcpServers(options.mcpServers),
+        ...(dirs ? { additionalDirectories: dirs } : {}),
         ...(meta ? { _meta: meta } : {}),
       }),
     )
+    this.directories(response.sessionId, options)
     this.readPlan(response._meta)
     this.allowWithoutAsking(response.sessionId, options)
     if (options.hidden && !promptsHidden(this.removal)) this.unprompted.add(response.sessionId)
@@ -1028,6 +1069,7 @@ export class AcpConnection implements AgentConnection {
         sessionId,
         cwd,
         mcpServers: mcpServers(options.mcpServers),
+        ...this.directories(sessionId, options),
         ...(meta ? { _meta: meta } : {}),
       }),
     )
@@ -1054,6 +1096,7 @@ export class AcpConnection implements AgentConnection {
         sessionId,
         cwd,
         mcpServers: mcpServers(options.mcpServers),
+        ...this.directories(sessionId, options),
         ...(meta ? { _meta: meta } : {}),
       }),
     )
@@ -1081,14 +1124,17 @@ export class AcpConnection implements AgentConnection {
   ): Promise<OpenedSession> {
     const meta = this.meta(options)
     const forkMeta = point ? { ...meta, ...forkPointMeta(point) } : meta
+    const dirs = this.takesDirectories && options.folders?.length ? [...options.folders] : null
     const response = await this.call(() =>
       this.connection.agent.request(methods.agent.session.fork, {
         sessionId,
         cwd,
         mcpServers: mcpServers(options.mcpServers),
+        ...(dirs ? { additionalDirectories: dirs } : {}),
         ...(forkMeta ? { _meta: forkMeta } : {}),
       }),
     )
+    this.directories(response.sessionId, options)
     this.allowWithoutAsking(response.sessionId, options)
     return {
       sessionId: response.sessionId,
@@ -1100,6 +1146,7 @@ export class AcpConnection implements AgentConnection {
     await this.call(() => this.connection.agent.request(methods.agent.session.close, { sessionId }))
     this.autoAllowed.delete(sessionId)
     this.agyAccess.delete(sessionId)
+    this.foldered.delete(sessionId)
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -1108,6 +1155,7 @@ export class AcpConnection implements AgentConnection {
     )
     this.autoAllowed.delete(sessionId)
     this.agyAccess.delete(sessionId)
+    this.foldered.delete(sessionId)
   }
 
   async listSessions(
@@ -1547,6 +1595,7 @@ export class AcpConnection implements AgentConnection {
       sessionId,
       cwd: access.cwd,
       mcpServers: mcpServers(access.options.mcpServers),
+      ...this.directories(sessionId, access.options),
       ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
     })
     access.full = full

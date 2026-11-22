@@ -15,7 +15,7 @@ import { ChatComposer } from '@renderer/components/affect/chat-composer'
 import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useCachePhase } from '@renderer/features/prompt-cache/cache-phase'
-import { BranchTrayLink } from '@renderer/features/git/git-status'
+import { BranchTrayLink, FolderBranchLinks } from '@renderer/features/git/git-status'
 import { limitPhrase, resetTime, tokens } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
@@ -889,6 +889,7 @@ export function Composer({
             <span className="kettu-tray__group">
               <SessionPlace sessionId={sessionId} projectPath={session.projectPath} />
               <BranchTrayLink projectPath={folder} />
+              <FolderBranchLinks projectPath={session.projectPath} />
               {!pending && !mustSwitch && (
                 <ProfileChip
                   agentId={session.agentId}

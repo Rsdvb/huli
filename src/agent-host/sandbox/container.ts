@@ -33,6 +33,8 @@ export const SANDBOX_IMAGE = {
 
 /** Where every container finds the project, the agents' installs and the agent's home. */
 export const WORKSPACE = '/workspace'
+/** Huli: where a container finds the project's further folders, each in a folder of its own. */
+export const FOLDERS = '/folders'
 const TOOLS = '/tools'
 const HOME = '/home/node'
 const TOOLS_VOLUME = 'kite-sandbox-tools'
@@ -222,7 +224,42 @@ export interface ContainerRun {
   command: string[]
   /** A folder of Kite's own the agent runs from, as a script's, mounted read-only. */
   agentFolder?: string
+  /** Huli: the project's further folders, each mounted writable at its place under FOLDERS. */
+  folders?: ContainerFolder[]
   podman?: boolean
+}
+
+/** Huli: a further folder of the project as a container mounts it. */
+export interface ContainerFolder {
+  /** The folder as the engine names it. */
+  source: string
+  /** Its place in the container, a folder of its own under FOLDERS. */
+  target: string
+  /** Whether its `.git` folder is mounted read-only over it, as the project's is. */
+  gitDir: boolean
+}
+
+const FOLDER_TARGET = /^\/folders\/[a-z0-9][a-z0-9._-]{0,63}$/
+
+/**
+ * Huli: the places under FOLDERS of folders with these names: each name in lowercase letters,
+ * digits, `.`, `_` and `-`, a number after one that is taken.
+ */
+export function folderTargets(names: readonly string[]): string[] {
+  const taken = new Set<string>()
+  return names.map((name) => {
+    const slug =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, '-')
+        .replace(/^[^a-z0-9]+/, '')
+        .slice(0, 56)
+        .replace(/[-.]+$/, '') || 'folder'
+    let target = `${FOLDERS}/${slug}`
+    for (let n = 2; taken.has(target); n++) target = `${FOLDERS}/${slug}-${n}`
+    taken.add(target)
+    return target
+  })
 }
 
 /**
@@ -236,9 +273,19 @@ export function runArgs(run: ContainerRun): string[] {
   for (const name of names) {
     if (!isEngineName(name)) throw new ContainerError(`Not a container name: ${name}`, 'mount')
   }
-  for (const folder of [run.project, ...(run.agentFolder === undefined ? [] : [run.agentFolder])]) {
+  const folders = run.folders ?? []
+  for (const folder of [
+    run.project,
+    ...(run.agentFolder === undefined ? [] : [run.agentFolder]),
+    ...folders.map((item) => item.source),
+  ]) {
     if (/[,\0\r\n]/.test(folder)) {
       throw new ContainerError(`The folder cannot be mounted: ${folder}`, 'mount')
+    }
+  }
+  for (const folder of folders) {
+    if (!FOLDER_TARGET.test(folder.target)) {
+      throw new ContainerError(`Not a place for a folder: ${folder.target}`, 'mount')
     }
   }
   const args = [
@@ -280,6 +327,16 @@ export function runArgs(run: ContainerRun): string[] {
     ...(run.agentFolder
       ? ['--mount', `type=bind,source=${run.agentFolder},target=${AGENT_FOLDER},readonly`]
       : []),
+    ...folders.flatMap((folder) => [
+      '--mount',
+      `type=bind,source=${folder.source},target=${folder.target}`,
+      ...(folder.gitDir
+        ? [
+            '--mount',
+            `type=bind,source=${folder.source}/.git,target=${folder.target}/.git,readonly`,
+          ]
+        : []),
+    ]),
     '-e',
     `HOME=${HOME}`,
     ...(run.network.kind === 'egress' ? proxyVariables() : []),
@@ -469,21 +526,44 @@ export function containerLimits(
  * string of a message: paths, and `file://` addresses. Everything else is left as it is.
  */
 export function mapPaths(value: unknown, from: string, to: string, platform: Platform): unknown {
-  const fromKey = platform === 'win32' && /^[a-zA-Z]:/.test(from) ? from.toLowerCase() : from
-  const toHost = to !== WORKSPACE
+  return mapFolders(value, [[from, to]], to !== WORKSPACE, platform)
+}
+
+/**
+ * Huli: `mapPaths` for several folders at once, such as the project's and its further folders':
+ * each string by the first pair, longest folder first, that it lies in. `toHost` says which way.
+ */
+export function mapFolders(
+  value: unknown,
+  pairs: readonly (readonly [from: string, to: string])[],
+  toHost: boolean,
+  platform: Platform,
+): unknown {
   const sep = toHost && platform === 'win32' ? '\\' : '/'
-  const fromUri = fileUri(from)
-  const toUri = fileUri(to)
+  const mappers = [...pairs]
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([from, to]) => {
+      const fromKey = platform === 'win32' && /^[a-zA-Z]:/.test(from) ? from.toLowerCase() : from
+      const fromUri = fileUri(from)
+      const toUri = fileUri(to)
+      return (text: string): string | null => {
+        const head = fromKey === from ? text : text.toLowerCase()
+        if (head === fromKey || head.startsWith(fromKey + '/') || head.startsWith(fromKey + '\\')) {
+          const rest = text.slice(from.length).replace(/[\\/]/g, sep)
+          return to + rest
+        }
+        const uriKey = fromKey === from ? fromUri : fromUri.toLowerCase()
+        if (head === uriKey || head.startsWith(uriKey + '/')) {
+          return toUri + text.slice(fromUri.length)
+        }
+        return null
+      }
+    })
   const one = (text: string): string => {
-    const head = fromKey === from ? text : text.toLowerCase()
-    if (head === fromKey || head.startsWith(fromKey + '/') || head.startsWith(fromKey + '\\')) {
-      const rest = text.slice(from.length).replace(/[\\/]/g, sep)
-      return to + rest
+    for (const map of mappers) {
+      const mapped = map(text)
+      if (mapped !== null) return mapped
     }
-    const uriHead = fromKey === from ? text : text.toLowerCase()
-    const uriKey = fromKey === from ? fromUri : fromUri.toLowerCase()
-    if (uriHead === uriKey || uriHead.startsWith(uriKey + '/'))
-      return toUri + text.slice(fromUri.length)
     return text
   }
   const walk = (item: unknown): unknown => {
@@ -535,10 +615,16 @@ export function mappedTransport(
   transport: StdioTransport,
   hostFolder: string,
   platform: Platform,
+  folders: readonly { host: string; target: string }[] = [],
 ): StdioTransport {
+  const inward: [string, string][] = [
+    [hostFolder, WORKSPACE],
+    ...folders.map((folder): [string, string] => [folder.host, folder.target]),
+  ]
+  const outward = inward.map(([host, inside]): [string, string] => [inside, host])
   // The computer's folder is matched as the computer compares names: without case on Windows.
-  const toAgent = lineMapper((message) => mapPaths(message, hostFolder, WORKSPACE, platform))
-  const fromAgent = lineMapper((message) => mapPaths(message, WORKSPACE, hostFolder, platform))
+  const toAgent = lineMapper((message) => mapFolders(message, inward, false, platform))
+  const fromAgent = lineMapper((message) => mapFolders(message, outward, true, platform))
   toAgent.pipe(transport.stdin as NodeJS.WritableStream)
   ;(transport.stdout as NodeJS.ReadableStream).pipe(fromAgent)
   return { kind: 'stdio', stdin: toAgent, stdout: fromAgent }

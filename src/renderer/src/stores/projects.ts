@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Project } from '@shared/agent-host'
+import type { Project, ProjectFolder } from '@shared/agent-host'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 
@@ -34,6 +34,16 @@ export function pinnedProjects(
   return projects
     .filter((project) => project.pinnedAt != null && hosts.includes(hostOfPath(project.path)))
     .sort((a, b) => (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0) || a.path.localeCompare(b.path))
+}
+
+const NO_FOLDERS: ProjectFolder[] = []
+
+/** Huli: the further folders of the project at `path`, the same list while they stay as they are. */
+export function useFurtherFolders(path: string | null): ProjectFolder[] {
+  return useProjectsStore(
+    (s) =>
+      (path === null ? undefined : s.projects.find((p) => p.path === path)?.folders) ?? NO_FOLDERS,
+  )
 }
 
 export const useProjectsStore = create<ProjectsStore>()((set) => ({

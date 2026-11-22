@@ -927,6 +927,11 @@ interface Live {
   archiveAfterTurn: string | null
   /** Send now stopped the running turn, so the queue's first prompt goes when the turn ends. */
   sendNext: boolean
+  /**
+   * Huli: the agent's session and the further folders the host last named ahead of a prompt, for
+   * an agent not handed them as workspace roots; null until named, and again after a compaction.
+   */
+  foldersNamed: string | null
 }
 
 const TITLE_LENGTH = 60
@@ -4377,6 +4382,7 @@ export class SessionManager {
       contextReadAt: 0,
       archiveAfterTurn: null,
       sendNext: false,
+      foldersNamed: null,
     }
     this.live.set(record.id, live)
     this.deps.agents.sessionsChanged(record.agentId)
@@ -4430,6 +4436,7 @@ export class SessionManager {
     // Huli: a container reaches none of the computer's programs, so neither MCP servers, skills
     // nor plugins from the computer go in.
     const contained = sandbox?.tier === 'container'
+    const folders = this.agentFolders(record)
     return {
       mcpServers: contained
         ? []
@@ -4447,7 +4454,28 @@ export class SessionManager {
       ...(ports ? { env: portEnv(ports) } : {}),
       // A container's agent reaches no file of the computer's, nor Kettu's MCP tools.
       ...(this.deps.envFiles && !contained ? { envFile: this.deps.envFiles.of(sessionId) } : {}),
+      ...(folders.length > 0 ? { folders } : {}),
     }
+  }
+
+  /**
+   * Huli: the further folders of the session's project its agent gets beside its own folder: those
+   * that were there when last looked at, less any inside the folder it works in already.
+   */
+  private agentFolders(record: SessionRecord): string[] {
+    const cwd = workDir(record)
+    const { platform } = this.deps
+    return this.deps.projects
+      .presentFolders(record.projectPath)
+      .filter((folder) => !samePath(folder, cwd, platform) && !isInside(folder, cwd, platform))
+  }
+
+  /**
+   * Huli: the folders that count as the session's project for its risk and its sandbox: the folder
+   * it works in, its project's, and the project's further folders.
+   */
+  private projectRoots(record: SessionRecord): string[] {
+    return [...new Set([workDir(record), record.projectPath, ...this.agentFolders(record)])]
   }
 
   /**
@@ -4496,7 +4524,7 @@ export class SessionManager {
     const choice = record.sandbox
     if (!choice || choice.tier === 'off') return undefined
     this.assertSandbox(record.agentId, choice)
-    const roots = [...new Set([workDir(record), record.projectPath])]
+    const roots = this.projectRoots(record)
     const proxyPort =
       choice.network === 'agent' ? (this.deps.agentProxyPort?.(record.agentId) ?? null) : null
     if (choice.network === 'agent' && proxyPort === null) {
@@ -4538,6 +4566,7 @@ export class SessionManager {
         proxyPort:
           network === 'agent' ? (this.deps.agentProxyPort?.(record.agentId) ?? null) : null,
         gitWritable: this.deps.sandbox?.()?.gitWritable === true,
+        folders: this.agentFolders(record),
       },
     )
     this.containerLives.add(live.id)
@@ -4941,6 +4970,9 @@ export class SessionManager {
     ) {
       delete live.record.memorySentTo
       this.persist(live)
+    }
+    if (!live.replaying && live.foldersNamed !== null) {
+      if (output.patches.some((patch) => compacted(live.thread, patch))) live.foldersNamed = null
     }
     if (
       !live.replaying &&
@@ -8503,6 +8535,22 @@ export class SessionManager {
     return kettuAhead(tools && this.deps.mcp && text ? text : null, memory)
   }
 
+  /**
+   * Huli: the note that names the project's further folders ahead of a prompt, for an agent that
+   * was not handed them as workspace roots: once for each of its sessions and each change of the
+   * folders, and again after a compaction lost it; null when nothing is to be said.
+   */
+  private foldersNote(live: Live, connection: AgentConnection): string | null {
+    const { record } = live
+    const folders = this.agentFolders(record)
+    if (folders.length === 0 || connection.takesFolders?.(record.acpSessionId)) return null
+    const named = [record.acpSessionId, ...folders].join('\n')
+    if (live.foldersNamed === named) return null
+    live.foldersNamed = named
+    const list = folders.map((folder) => `- ${folder}`).join('\n')
+    return `<kite-project-folders>\n${t('projectFolders.note')}\n${list}\n</kite-project-folders>`
+  }
+
   /** The agent that had the session before any takeover. */
   private firstAgentOf(record: SessionRecord): AgentId {
     return record.earlier?.[0]?.agentId ?? record.agentId
@@ -9492,6 +9540,8 @@ export class SessionManager {
         this.persist(live)
         wire = [{ type: 'text', text: `${parts.join('\n\n')}\n\n` }, ...carried]
       }
+      const named = opensWithCommand(resolved.wire) ? null : this.foldersNote(live, connection)
+      if (named) wire = [{ type: 'text', text: `${named}\n\n` }, ...wire]
       const sending = connection.prompt(live.record.acpSessionId, wire).finally(() => {
         if (live.unansweredCancel === turn) live.unansweredCancel = null
       })
@@ -11267,11 +11317,10 @@ export class SessionManager {
     if (entry?.kind === 'tool' && entry.question !== undefined) return null
     const subject = request.subject ?? (entry?.kind === 'tool' ? entrySubject(entry) : null)
     if (!subject) return null
-    const cwd = workDir(live.record)
     return assessRisk(subject, {
       platform: this.deps.platform,
-      cwd,
-      roots: [...new Set([cwd, live.record.projectPath])],
+      cwd: workDir(live.record),
+      roots: this.projectRoots(live.record),
     })
   }
 

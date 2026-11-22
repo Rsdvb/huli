@@ -1,3 +1,5 @@
+// Huli: first, so a test copy's start-up crash never opens a dialog on the owner's screen.
+import './test-crash'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import {

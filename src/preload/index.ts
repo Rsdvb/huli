@@ -273,6 +273,7 @@ const api: KettuApi = {
     chooseAgentFolder: () => invoke('dialog:choose-agent-folder'),
     chooseShell: () => invoke('dialog:choose-shell'),
     chooseHistoryFolder: () => invoke('dialog:choose-history-folder'),
+    chooseProjectFolder: () => invoke('dialog:choose-project-folder'),
   },
   debug: {
     get: () => invoke('debug:get'),

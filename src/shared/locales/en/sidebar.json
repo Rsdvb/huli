@@ -115,7 +115,8 @@
       "remove": "Remove project…",
       "issues": "Issues",
       "autoApprove": "Auto-approve",
-      "sandbox": "Sandbox"
+      "sandbox": "Sandbox",
+      "folders": "Project folders…"
     },
     "remove": {
       "title": "Remove {{name}}?",
@@ -546,5 +547,25 @@
     "waitHint": "The agent starts once the files are copied and the command has finished.",
     "save": "Save",
     "forbidden": "Only the owner of this host can change these from here, unless they let paired devices use its terminal."
+  },
+  "projectFolders": {
+    "title": "Folders of {{project}}",
+    "description": "Sessions in this project read and change every folder listed here, such as a frontend and a backend repository. New sessions get them at once; open ones when their agent next starts.",
+    "own": "Project folder",
+    "missing": "Not found",
+    "none": "No other folders yet. Add one that sessions here should work in too.",
+    "add": "Add folder…",
+    "remove": "Take {{name}} out of the project",
+    "removed": "{{name}} is out of the project. Its files stay where they are.",
+    "found": "Found in this project",
+    "foundHint": "Git repositories inside the folder, and folders a .code-workspace file lists.",
+    "addFound": "Add",
+    "addAll": "Add all",
+    "searching": "Looking for repositories…",
+    "noneFound": "No other repositories or workspace folders found.",
+    "repo": "Git",
+    "workspace": "Workspace",
+    "worktrees": "Worktrees are off while the project has several folders: one would set apart only the project folder.",
+    "done": "Done"
   }
 }

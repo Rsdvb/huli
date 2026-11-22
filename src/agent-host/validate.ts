@@ -2073,6 +2073,21 @@ export function createValidators(platform: Platform): Validators {
       }
       return { path: absolutePath(o, 'path', platform), autoApprove: level }
     },
+    'projects.addFolder': (params) => {
+      const o = fields(params)
+      return {
+        path: absolutePath(o, 'path', platform),
+        folder: absolutePath(o, 'folder', platform),
+      }
+    },
+    'projects.removeFolder': (params) => {
+      const o = fields(params)
+      return {
+        path: absolutePath(o, 'path', platform),
+        folder: absolutePath(o, 'folder', platform),
+      }
+    },
+    'projects.suggestFolders': folder,
     'projects.worktreeSettings': folder,
     'projects.setWorktreeSettings': (params) => {
       const o = fields(params)

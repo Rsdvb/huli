@@ -595,6 +595,16 @@ describe('the Claude Agent SDK driver', () => {
     expect(sdk.last.options.plugins).toBeUndefined()
   })
 
+  it("hands the project's further folders over as Claude Code's additional directories", async () => {
+    const { sdk, connection } = await setup()
+    const opened = await connection.newSession('/repo', { folders: ['/api', '/web'] })
+    expect(sdk.last.options.additionalDirectories).toEqual(['/api', '/web'])
+    expect(connection.takesFolders?.(opened.sessionId)).toBe(true)
+    const plain = await connection.newSession('/repo', {})
+    expect(sdk.last.options).not.toHaveProperty('additionalDirectories')
+    expect(connection.takesFolders?.(plain.sessionId)).toBe(false)
+  })
+
   it('sets no servers over the control channel when none holds a key', async () => {
     const { sdk, connection } = await setup()
     await connection.newSession('/repo', {

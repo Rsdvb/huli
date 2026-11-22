@@ -443,6 +443,51 @@ describe("Kettu's memory in a replay", () => {
   })
 })
 
+describe("Huli: the note naming a project's further folders", () => {
+  const folders =
+    '<kite-project-folders>\nThis project also has:\n- /work/api\n</kite-project-folders>'
+  const guide = '<kettu-guide>\nYou are working in Kettu.\n</kettu-guide>'
+
+  it('is left out of the replayed user message, alone or before the guide', () => {
+    const { entries } = run(
+      [
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: `${folders}\n\n${guide}\n\nFix the build` },
+        },
+        text('Done'),
+        {
+          sessionUpdate: 'user_message_chunk',
+          messageId: 'u2',
+          content: { type: 'text', text: `${folders}\n\nAnd the tests` },
+        },
+        text('Done too'),
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '  Indented' } },
+      ],
+      { replaying: true },
+    )
+    expect(entries.filter((e) => e.kind === 'user').map((e) => e.content)).toEqual([
+      [{ type: 'text', text: 'Fix the build' }],
+      [{ type: 'text', text: 'And the tests' }],
+      [{ type: 'text', text: '  Indented' }],
+    ])
+  })
+
+  it('is no title of the session, and the words after it are', () => {
+    const titled = (title: string) =>
+      run(
+        [
+          { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Fix the build' } },
+          { sessionUpdate: 'session_info_update', title },
+        ],
+        { replaying: true },
+      ).thread.session.title
+    expect(titled('<kite-project-folders>')).toBeNull()
+    expect(titled(`${folders}\n\nFix the build`)).toBeNull()
+    expect(titled(`${folders}\n\n${guide}\n\nFix login`)).toBe('Fix login')
+  })
+})
+
 describe('replayed attachments', () => {
   const fixture = (updates: unknown): SessionUpdate[] => updates as SessionUpdate[]
   const userOf = (entries: ThreadEntry[]) => {
