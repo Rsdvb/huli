@@ -308,6 +308,72 @@ except the merge.
   `csc.exe` that runs a Node script of recorded answers) first on the test copy's `PATH`, and a
   repository whose `origin` names a github.com repository nothing is pushed to.
 
+### Task board (看板)
+
+After Conductor 0.95's workspace board, Paradev and Nimbalyst: the user's own top-level sessions
+sit in four columns of their own workflow, 待办 / 进行中 / 待审 / 完成 (`todo`, `in_progress`,
+`review`, `done`), apart from what Kite marks by itself (working, waiting, done), which each card
+still shows. A new session (forks included) starts in 进行中, and so does one from before the
+board; an archived one leaves the board and keeps its column for a restore. A routine's runs, a
+task's steps and sub-sessions are not on it.
+
+- `src/shared/session-board.ts`: the columns, `SessionBoard` (`status`, and `at`, when it moved
+  there, which orders a column the latest first) and `onBoard`.
+- Host: `board` in the session record (`state/sessions.json`, parsed by `boardOf` in `storage.ts`)
+  and in the summary (`boardOf` in `sessions.ts`, null for a session not on the board);
+  `sessions.setBoardStatus` (validated in `validate.ts`; windows and paired phones alike) and the
+  agents' `set_board_status` tool (`session-tools.ts`), which moves only the caller's own session.
+  Kite's MCP instructions and the sessions guide topic tell agents to move theirs to review when
+  their work is ready to check; `list_sessions` and `get_session` give `board_status`.
+- Desktop: the Overview page's fourth view, 看板 (`features/task-board/`, chosen there rather than a
+  sidebar entry so the nav keeps its rows and the page holds every view of the sessions), with a
+  project filter (kept with the page's other choices in `kettu:overview`). Cards drag between the
+  columns with `@dnd-kit/react` (`board-view.tsx`; a mouse press that moves, or Space), and their
+  context menu sets the column too; `move.ts` moves a card at once and puts it back if the host
+  refuses. Every read is a selector over the session list that returns a string (the columns'
+  ids, the projects), so a card renders again only when its own session changes and a column only
+  when its cards change; cards off screen skip layout (`content-visibility`). Sidebar rows carry
+  the column's faint mark (`BoardRowMark`) and the session menus a 看板 › submenu
+  (`BoardStatusMenu`, item `board` in `session-menu-model.ts`).
+- Phone: a row's meta line says its column (`mobile/src/board.ts`, `SessionRow.tsx`), and the
+  list's long-press menu and the session's title menu move it (`SessionActions.tsx`,
+  `SessionMenu.ts`); flow `tools/huli/ios/sim/flows/85-board.yaml`.
+- Measured in a test copy with 207 sessions on the board (development build): nothing runs at
+  rest (0 ms of script in 10 s); while a card is dragged, frames stay under 7 ms; the drop itself
+  takes one frame of about 34 ms.
+
+### Worktree ports (KITE_PORT)
+
+After Conductor's `$CONDUCTOR_PORT`: each session Kite makes a worktree for (New session's
+worktree, a best-of-N run, a fork into a worktree of its own) holds a block of 10 ports that no
+other live session holds, so the dev servers of parallel worktrees never collide. A sub-session
+and a fork into the same worktree share their parent's block; a workflow task's worktree gets
+none.
+
+- The block is the first one from Settings › Git › 工作树端口 (`git.portBase`, 20000 by default,
+  below every system's ephemeral range), on a step of 10, that overlaps no block a live session
+  holds and none of whose ports can't be bound on 127.0.0.1 and on every address
+  (`src/agent-host/worktrees/ports.ts`); Windows' excluded port ranges (Hyper-V, WSL) count as
+  taken. Picks run one at a time, so runs started together never share a block. With no free
+  block within 64 tries the session gets none and the log says so.
+- It is kept in the session record as `ports` (`{ first, count }`) and held while the session is
+  live: archiving it, removing its worktree or deleting it lets the block go. A restored session
+  takes its block back unless a session of another worktree holds part of it meanwhile; then it
+  shares its worktree's other block or gets a new one. Blocks survive a restart with the index.
+- The worktree's setup command sees `KITE_PORT` (the first port) and `KITE_PORT_COUNT` (10),
+  beside upstream's `KETTU_PROJECT_PATH` and `KETTU_WORKTREE_PATH`; the names follow Huli's own
+  `KITE_*` variables. Claude Code sessions, each a process of its own, get both in their
+  environment (`SessionOptions.env`), so their shell commands see them; agents whose process
+  serves several sessions (Codex, ACP agents) cannot, and read the block from `get_session`'s
+  `ports` (the sessions guide topic says so). A setup command that writes `.env` from them is the
+  sure way for every agent: `echo PORT=%KITE_PORT% > .env` on Windows, `echo "PORT=$KITE_PORT" >
+.env` elsewhere.
+- Shown in the tooltip of the session's worktree chip and row mark (`WorktreeHint`) and on the
+  row's card: 端口 20000–20009（KITE_PORT）.
+- Tests: `worktrees/ports.test.ts` (no overlap, steps past ports in use, a block back once let go,
+  the probe), `sessions.test.ts` (sessions started together, the setup command's and the agent's
+  variables, archive, restart and restore), `storage.test.ts` (the stored block and column).
+
 ### Backup
 
 A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,
