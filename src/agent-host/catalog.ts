@@ -40,7 +40,9 @@ import { GOOSE } from './agents/goose'
 import { GROK } from './agents/grok'
 import { HARN } from './agents/harn'
 import { HERMES } from './agents/hermes'
+import { FX } from './agents/fx'
 import { KILO } from './agents/kilo'
+import { KIRO } from './agents/kiro'
 import { KIMCHI } from './agents/kimchi'
 import { KIMI } from './agents/kimi'
 import { MINIMAX } from './agents/minimax'
@@ -289,9 +291,11 @@ export {
   GROK,
   HARN,
   HERMES,
+  FX,
   KILO,
   KIMCHI,
   KIMI,
+  KIRO,
   MINIMAX,
   MINION,
   MUSE,
@@ -362,6 +366,8 @@ export function buildCatalog(fakeAgentPath: string | null): AgentDefinition[] {
     FAST_AGENT,
     MINION,
     DOUBAO,
+    KIRO,
+    FX,
   ]
   if (fakeAgentPath) catalog.push(fakeAgent(fakeAgentPath))
   return catalog
@@ -960,6 +966,10 @@ export async function detectAgent(def: AgentDefinition, ctx: DetectContext): Pro
         return binaryDetection(ctx.binaryOverride, launch.args, ctx.platform, display, env)
       }
       const program = await findCommand(launch.command, ctx)
+      // Huli: a program that serves one session a connection runs a process for each.
+      if (program && launch.perSession && ctx.sessionRouterPath) {
+        return routedDetection(program, launch, ctx, display, env)
+      }
       if (program) return binaryDetection(program, launch.args, ctx.platform, display, env)
       // The user's own copy wins, so their sign-in and configuration stay; without one,
       // Kettu's archive install runs: the version wanted, else the one that ran before.

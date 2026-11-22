@@ -25,6 +25,7 @@ import * as doubao from './doubao'
 import * as droid from './droid'
 import * as fakeAgent from './fake-agent'
 import * as fastAgent from './fast-agent'
+import * as fx from './fx'
 import * as gemini from './gemini'
 import * as glm from './glm'
 import * as goose from './goose'
@@ -34,6 +35,7 @@ import * as hermes from './hermes'
 import * as kilo from './kilo'
 import * as kimchi from './kimchi'
 import * as kimi from './kimi'
+import * as kiro from './kiro'
 import * as minimax from './minimax'
 import * as minion from './minion'
 import * as muse from './muse'
@@ -95,6 +97,8 @@ export const AGENT_MARKS: Record<HarnessId, AgentMarkModule> = {
   gemini,
   omp,
   hermes,
+  kiro,
+  fx,
   muse,
   codewhale,
   deepseek,

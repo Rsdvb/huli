@@ -149,7 +149,7 @@ The container only knows its own address, so `direct add` gives devices your ser
 ## Agents
 
 <details>
-<summary><b>All 48 agents</b></summary>
+<summary><b>All 50 agents</b></summary>
 
 |                                                                     |                                                                             |                                                       |                                                                                     |
 | ------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -165,6 +165,7 @@ The container only knows its own address, so `direct add` gives devices your ser
 | [Kimchi](https://kimchi.dev)                                        | [Google Antigravity](https://antigravity.google)                            | [Devin](https://docs.devin.ai/cli)                    | [Cortex Code](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) |
 | [Corust Agent](https://corust.ai)                                   | [crow-cli](https://github.com/crow-cli/crow-cli)                            | [Junie](https://junie.jetbrains.com)                  | [Mistral Vibe](https://github.com/mistralai/mistral-vibe)                           |
 | [Poolside](https://poolside.ai)                                     | [Stakpak](https://stakpak.dev)                                              | [VT Code](https://github.com/vinhnx/VTCode)           | [Qoder CN](https://qoder.cn)                                                        |
+| [Kiro CLI](https://kiro.dev/cli/)                                   | [fx](https://fx.sh)                                                         |                                                       |                                                                                     |
 
 </details>
 

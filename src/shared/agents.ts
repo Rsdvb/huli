@@ -51,6 +51,8 @@ export type HarnessId =
   | 'fast-agent'
   | 'minion'
   | 'doubao'
+  | 'kiro'
+  | 'fx'
   | 'fake-agent'
 
 export const HARNESS_IDS: readonly HarnessId[] = [
@@ -103,6 +105,8 @@ export const HARNESS_IDS: readonly HarnessId[] = [
   'fast-agent',
   'minion',
   'doubao',
+  'kiro',
+  'fx',
   'fake-agent',
 ]
 
@@ -161,6 +165,8 @@ export const USER_PROGRAM_HARNESSES: readonly HarnessId[] = [
   'codewhale',
   'antigravity',
   'doubao',
+  'kiro',
+  'fx',
 ]
 
 /**
