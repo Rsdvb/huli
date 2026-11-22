@@ -1804,7 +1804,13 @@ disables every other workflow after each merge, new ones included.
   newer push to the same branch cancels the run before it. It stands in for Kettu's `ci.yml`,
   which only runs on pull requests.
 - `huli-sync.yml`, every night at 03:23 Beijing time: merges Kettu's main, checks it, pushes and
-  starts `huli-build.yml`; a conflict or failed check opens an issue instead.
+  starts `huli-build.yml`. A conflict or failed check pushes nothing and opens one issue,
+  `上游同步失败`, with the conflicting files (or what failed), upstream's commit, how far main is
+  behind and the run's log; while it is open each failed night replaces its body and comments only
+  when what failed changed. The first sync that merges, or finds main already holding Kettu's (a
+  merge made by hand), closes it, and the one-a-night issues older syncs opened
+  (`合并官方 Kettu 更新…`). `tools/huli/sync-issue.sh` does the issue side with the workflow's own
+  token (`issues: write`).
 - `huli-build.yml`, by hand, from a sync that merged, and every night at 03:41 Beijing time. The
   night's run first compares main with the commit of the latest release and builds only when they
   differ, and not while a sync is running (the sync starts its own build) nor for a commit whose
