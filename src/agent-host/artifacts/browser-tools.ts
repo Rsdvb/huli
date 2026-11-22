@@ -10,6 +10,7 @@ import type {
   BrowserToolName,
 } from '@shared/browser'
 import {
+  BROWSER_CONSOLE_LEVELS,
   BROWSER_TAB_ACTIONS,
   BROWSER_TOOL_NAMES,
   MAX_SESSION_TABS,
@@ -339,9 +340,17 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_console_messages',
     title: 'Console messages',
     description:
-      'Returns the page’s console messages, the last 200, without the values they were given ' +
-      'beyond their text.',
-    inputSchema: object({ since_navigation: SINCE }),
+      'Returns the page’s console messages and the errors it did not catch, thrown or an ' +
+      'unhandled rejection, the last 200, as text. Errors and warnings come with their stack.',
+    inputSchema: object({
+      since_navigation: SINCE,
+      level: {
+        type: 'string',
+        enum: [...BROWSER_CONSOLE_LEVELS],
+        default: 'all',
+        description: 'Only messages at this level or more severe: error, warn, info, or all.',
+      },
+    }),
     outputSchema: output({
       messages: {
         type: 'array',
@@ -351,6 +360,10 @@ export const BROWSER_TOOLS: Tool[] = [
             text: { type: 'string' },
             url: { type: 'string' },
             line: { type: 'integer' },
+            stack: {
+              type: 'string',
+              description: 'Where it was thrown or logged, one call a line, the innermost first.',
+            },
           },
           ['level', 'text', 'url', 'line'],
         ),
@@ -536,7 +549,7 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_select_option: ['ref', 'element', 'values'],
     browser_take_screenshot: ['ref', 'full_page'],
     browser_wait_for: ['text', 'text_gone', 'time'],
-    browser_console_messages: ['since_navigation'],
+    browser_console_messages: ['since_navigation', 'level'],
     browser_network_requests: ['since_navigation'],
     browser_evaluate: ['function', 'ref'],
     browser_ask_user: ['step', 'reason'],
@@ -661,7 +674,17 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
       }
       break
     }
-    case 'browser_console_messages':
+    case 'browser_console_messages': {
+      const since = flag('since_navigation')
+      if (since !== undefined) args.since_navigation = since
+      if (o.level !== undefined) {
+        if (!(BROWSER_CONSOLE_LEVELS as readonly unknown[]).includes(o.level)) {
+          throw invalid('level must be error, warn, info or all.')
+        }
+        args.level = o.level
+      }
+      break
+    }
     case 'browser_network_requests': {
       const since = flag('since_navigation')
       if (since !== undefined) args.since_navigation = since

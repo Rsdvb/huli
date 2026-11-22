@@ -306,7 +306,8 @@ Use it without being asked when it fits: after you change a page or a component,
 - \`browser_snapshot\` gives the page as an outline with a ref on each element you can act on. Act by ref with \`browser_click\`, \`browser_type\`, \`browser_select_option\`, \`browser_press_key\` and \`browser_scroll\`; they return the page with a fresh snapshot.
 - \`browser_take_screenshot\` shows how the page looks: use it to check layout, colors and images, not to find elements.
 - \`browser_wait_for\` waits for text to show or to go.
-- \`browser_console_messages\` and \`browser_network_requests\` show errors and failed requests; \`since_navigation\` keeps those of the current page.
+- \`browser_console_messages\` shows the console and the errors the page did not catch, with their stack; \`level: "error"\` keeps only errors. An action's result says when the page logged a new error.
+- \`browser_network_requests\` shows failed and other requests; \`since_navigation\` keeps those of the current page in both.
 - \`browser_evaluate\` runs a function on the page to inspect it; act with the other tools.
 - \`browser_upload_file\` puts files from this computer into a file input: click the page's upload button first, then call it with absolute paths. The user is asked each time whether those files may go to that site, and nothing is uploaded without their Allow.
 

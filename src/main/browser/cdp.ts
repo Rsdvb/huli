@@ -4,6 +4,7 @@
 
 import type { WebContents } from 'electron'
 import {
+  BROWSER_CONSOLE_LEVELS,
   siteOf,
   type BrowserCallResult,
   type BrowserToolName,
@@ -16,6 +17,14 @@ import {
   type SurfaceControls,
   type UploadConsent,
 } from '@shared/control'
+import {
+  consoleCall,
+  exceptionEntry,
+  logEntry,
+  shownAt,
+  type ConsoleEntry,
+  type ConsoleLevel,
+} from './console'
 import { buildOutline, mergeFrames, outlineText, type AXNode } from './outline'
 import { isNeverOpened } from './policy'
 import { UploadRefused, type UploadFile } from './upload'
@@ -94,13 +103,11 @@ export interface BrowserCdpDeps {
   ): Promise<UploadAnswer>
 }
 
-interface ConsoleMessage {
-  level: string
-  text: string
-  url: string
-  line: number
+interface ConsoleMessage extends ConsoleEntry {
   /** The page's document it was logged under, so `since_navigation` can leave earlier ones out. */
   nav: number
+  /** Its place among everything the page logged, for the errors an action reports. */
+  seq: number
 }
 
 interface NetworkRequest {
@@ -128,6 +135,9 @@ interface PageState {
   loading: boolean
   inFlight: Set<string>
   console: ConsoleMessage[]
+  /** How many messages the page logged, and of them the last the agent was told about. */
+  logged: number
+  reported: number
   requests: NetworkRequest[]
   snapshot: Snapshot | null
   dialogs: string[]
@@ -348,6 +358,8 @@ export class BrowserCdp {
       loading: false,
       inFlight: new Set(),
       console: [],
+      logged: 0,
+      reported: 0,
       requests: [],
       snapshot: null,
       dialogs: [],
@@ -608,31 +620,15 @@ export class BrowserCdp {
 
   private event(page: PageState, method: string, params: Record<string, unknown>): void {
     switch (method) {
-      case 'Runtime.consoleAPICalled': {
-        const args = Array.isArray(params.args) ? (params.args as Record<string, unknown>[]) : []
-        const stack = params.stackTrace as
-          { callFrames?: { url?: string; lineNumber?: number }[] } | undefined
-        const frame = stack?.callFrames?.[0]
-        this.pushConsole(page, {
-          level: consoleLevel(params.type),
-          text: args.map(argumentText).join(' '),
-          url: String(frame?.url ?? ''),
-          line: (frame?.lineNumber ?? 0) + 1,
-          nav: page.nav,
-        })
+      case 'Runtime.consoleAPICalled':
+        this.pushConsole(page, consoleCall(params))
         break
-      }
-      case 'Log.entryAdded': {
-        const entry = (params.entry ?? {}) as Record<string, unknown>
-        this.pushConsole(page, {
-          level: entry.level === 'warning' ? 'warn' : String(entry.level ?? 'info'),
-          text: String(entry.text ?? ''),
-          url: String(entry.url ?? ''),
-          line: Number(entry.lineNumber ?? 0) + 1,
-          nav: page.nav,
-        })
+      case 'Log.entryAdded':
+        this.pushConsole(page, logEntry(params))
         break
-      }
+      case 'Runtime.exceptionThrown':
+        this.pushConsole(page, exceptionEntry(params))
+        break
       case 'Network.requestWillBeSent': {
         const request = (params.request ?? {}) as Record<string, unknown>
         const id = String(params.requestId ?? '')
@@ -725,8 +721,9 @@ export class BrowserCdp {
     return frameId === undefined || frameId === page.frameId
   }
 
-  private pushConsole(page: PageState, message: ConsoleMessage): void {
-    page.console.push(message)
+  private pushConsole(page: PageState, entry: ConsoleEntry): void {
+    page.logged += 1
+    page.console.push({ ...entry, nav: page.nav, seq: page.logged })
     if (page.console.length > MAX_CONSOLE) page.console.splice(0, page.console.length - MAX_CONSOLE)
   }
 
@@ -837,7 +834,7 @@ export class BrowserCdp {
         ? ['It opened a new tab, which is now your current tab.']
         : ['The page closed itself, and the tab that opened it is your current tab again.']
     return {
-      text: [text, ...dialogs, ...chooser, ...opened].join(' '),
+      text: [text, ...dialogs, ...chooser, ...opened, ...newErrors(current)].join(' '),
       value: { url, title, snapshot: outline },
     }
   }
@@ -868,6 +865,7 @@ export class BrowserCdp {
       text: [
         `Opened ${shown}${title ? `, "${title}"` : ''}${status === null ? '' : ` (HTTP ${status})`}.`,
         ...dialogs,
+        ...newErrors(page),
       ].join(' '),
       value: { url: shown, title, status, snapshot: outline },
     }
@@ -1535,14 +1533,23 @@ export class BrowserCdp {
   ): Promise<BrowserCallResult> {
     const page = this.pageOf(sessionId)
     const since = args.since_navigation === true
+    const level = consoleFilter(args.level)
     const messages = page.console
-      .filter((message) => !since || message.nav === page.nav)
-      .map(({ level, text, url, line }) => ({ level, text, url, line }))
+      .filter((message) => (!since || message.nav === page.nav) && shownAt(message.level, level))
+      .map(({ level, text, url, line, stack }) => ({
+        level,
+        text,
+        url,
+        line,
+        ...(stack.length > 0 ? { stack: stack.join('\n') } : {}),
+      }))
+    page.reported = page.logged
+    const which = level === 'all' ? 'console message' : `${level} message`
     return {
       text:
         messages.length === 0
-          ? 'No console messages.'
-          : `${messages.length} console message${messages.length === 1 ? '' : 's'}, oldest first.`,
+          ? `No ${which}s.`
+          : `${messages.length} ${which}${messages.length === 1 ? '' : 's'}, oldest first.`,
       value: { messages },
     }
   }
@@ -1629,33 +1636,27 @@ export class BrowserCdp {
   }
 }
 
-function argumentText(argument: Record<string, unknown>): string {
-  const value = argument.value
-  if (value !== undefined) return typeof value === 'string' ? value : JSON.stringify(value)
-  if (argument.unserializableValue !== undefined) return String(argument.unserializableValue)
-  if (argument.description !== undefined) return String(argument.description)
-  return String(argument.type ?? '')
+function consoleFilter(value: unknown): ConsoleLevel {
+  if (value === undefined) return 'all'
+  if ((BROWSER_CONSOLE_LEVELS as readonly unknown[]).includes(value)) return value as ConsoleLevel
+  throw new ToolFailure('invalid', 'level must be error, warn, info or all.')
 }
 
-/** A console message's level, in Chrome's words. */
-function consoleLevel(type: unknown): string {
-  switch (type) {
-    case 'warning':
-      return 'warn'
-    case 'startGroup':
-    case 'startGroupCollapsed':
-    case 'endGroup':
-    case 'debug':
-    case 'verbose':
-      return 'debug'
-    case 'error':
-    case 'assert':
-      return 'error'
-    case 'info':
-      return 'info'
-    default:
-      return 'log'
-  }
+/** The errors the page logged since the agent was last told, for an action's result. */
+function newErrors(page: PageState): string[] {
+  const errors = page.console.filter(
+    (message) =>
+      message.seq > page.reported && message.nav === page.nav && message.level === 'error',
+  )
+  page.reported = page.logged
+  if (errors.length === 0) return []
+  const first = errors[0]!.text.split('\n')[0]!.slice(0, 200)
+  return [
+    errors.length === 1
+      ? `The page logged an error: ${first}.`
+      : `The page logged ${errors.length} errors, the first: ${first}.`,
+    'browser_console_messages shows them.',
+  ]
 }
 
 function describe(args: Record<string, unknown>, fallback: string): string {

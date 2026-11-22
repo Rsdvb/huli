@@ -175,3 +175,27 @@ describe('an agent using a tab the user opened', () => {
     }
   })
 })
+
+describe('browser_console_messages arguments', () => {
+  it.each([[{}], [{ level: 'error' }], [{ level: 'all', since_navigation: true }]])(
+    'forwards %j to main as given',
+    async (input) => {
+      const { service, call } = tools()
+      const result = await service.call(caller, 'browser_console_messages', input)
+      expect(result.isError).toBeUndefined()
+      expect(call.mock.calls[0][0]).toMatchObject({ args: input })
+    },
+  )
+
+  it.each([
+    [{ level: 'warning' }, /level must be/],
+    [{ level: 2 }, /level must be/],
+    [{ since_navigation: 'yes' }, /true or false/],
+  ])('refuses %j before main sees it', async (input, message) => {
+    const { service, call } = tools()
+    const result = await service.call(caller, 'browser_console_messages', input)
+    expect(result.isError).toBe(true)
+    expect(String((result.content[0] as { text: string }).text)).toMatch(message)
+    expect(call).not.toHaveBeenCalled()
+  })
+})
