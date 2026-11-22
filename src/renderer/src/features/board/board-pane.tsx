@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Cancel01Icon,
   ComputerTerminal01Icon,
@@ -7,7 +7,10 @@ import {
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { BackgroundTaskView } from '@shared/thread'
+import type { BackgroundTaskView, ForegroundTaskView } from '@shared/thread'
+import { RefreshIcon } from '@renderer/components/refresh-icon'
+import { Button } from '@renderer/components/ui/button'
+import { errorMessage, host } from '@renderer/lib/host'
 import { subagentRunning, useSubagentDigests } from '@renderer/features/session/subagent/progress'
 import { PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
 import { artifactListShown, artifactStanding, useArtifactsStore } from '@renderer/stores/artifacts'
@@ -26,11 +29,14 @@ import {
 } from './board-model'
 import { EndedAgent, EndedGroup, EndedTask } from './earlier'
 import { AgentLive, TaskLive } from './live-rows'
+import { HeldLive, TakenPorts } from './process-parts'
 import { useBoardActivity } from './use-board-activity'
+import { useSessionProcesses } from './use-session-processes'
 import './board.css'
 
 const NO_ARTIFACTS: BoardArtifact[] = []
 const NO_TASKS: BackgroundTaskView[] = []
+const NO_HELD: ForegroundTaskView[] = []
 // Past this many live rows, those that do not wait for the user keep one line.
 const ROOMY = 6
 
@@ -49,7 +55,38 @@ export default function BoardRail({
   overlay?: boolean
 }) {
   const { t } = useTranslation('board')
-  const tasks = useThreadsStore((s) => s.replicas[sessionId]?.state?.session.background ?? NO_TASKS)
+  const background = useThreadsStore(
+    (s) => s.replicas[sessionId]?.state?.session.background ?? NO_TASKS,
+  )
+  const held = useThreadsStore((s) => s.replicas[sessionId]?.state?.session.foreground ?? NO_HELD)
+  const turning = useThreadsStore((s) => s.replicas[sessionId]?.state?.session.status === 'running')
+  // Read again when a task starts or ends, something comes to hold up a call, or a turn ends.
+  const key = [
+    ...background.filter((task) => task.status === 'running').map((task) => task.id),
+    '|',
+    ...held.map((task) => task.toolCallId),
+    turning ? 'turn' : 'idle',
+  ].join(' ')
+  const processes = useSessionProcesses(sessionId, key)
+  const tasks = processes.data?.tasks ?? background
+  const stats = useMemo(
+    () => new Map((processes.data?.processes ?? []).map((item) => [item.taskId, item])),
+    [processes.data],
+  )
+  const block = processes.data?.block ?? null
+  const clean = processes.data?.clean ?? null
+  const [cleaning, setCleaning] = useState(false)
+  const [cleanError, setCleanError] = useState<string | null>(null)
+  const runClean = () => {
+    setCleaning(true)
+    setCleanError(null)
+    host('sessions.cleanTasks', { sessionId })
+      .catch((reason: unknown) => setCleanError(errorMessage(reason)))
+      .finally(() => {
+        setCleaning(false)
+        processes.refresh()
+      })
+  }
   const children = useSessionsStore(
     useShallow((s) =>
       Object.values(s.byId).filter(
@@ -82,9 +119,17 @@ export default function BoardRail({
   const ordered = backgroundOrder(tasks)
   const liveTasks = ordered.filter((task) => task.status === 'running')
   const endedTasks = ordered.filter((task) => task.status !== 'running')
-  const live = liveAgents.length + liveTasks.length
+  const heldCommands = held.filter((task) => task.kind === 'shell')
+  const heldAgents = new Map(
+    held.filter((task) => task.kind === 'subagent').map((task) => [task.taskId, task]),
+  )
+  const live = heldCommands.length + liveAgents.length + liveTasks.length
   const compact = live > ROOMY
-  const empty = subagents.length === 0 && tasks.length === 0 && artifacts.length === 0
+  const empty =
+    subagents.length === 0 && tasks.length === 0 && held.length === 0 && artifacts.length === 0
+  const notes = [processes.error, processes.data?.error ?? null, cleanError].filter(
+    (note): note is string => !!note,
+  )
   const parts = summaryParts(t, activity)
   const failedFirst = <T,>(items: T[], failed: (item: T) => boolean) => [
     ...items.filter(failed),
@@ -103,27 +148,71 @@ export default function BoardRail({
   } else {
     body = (
       <div className="kb-scroll">
+        {block && processes.data && <TakenPorts taken={processes.data.taken} block={block} />}
+        {notes.map((note) => (
+          <p key={note} role="alert" className="kb-note">
+            {note}
+          </p>
+        ))}
         {live > 0 && (
           <section aria-label={t('sections.now')}>
-            <h3 className="kb-label">{t('sections.now')}</h3>
+            <div className="kb-label kb-label--acts">
+              <h3>{t('sections.now')}</h3>
+              {clean === 'all' && liveTasks.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="kb-label__act"
+                  disabled={cleaning}
+                  onClick={runClean}
+                >
+                  {t('actions.stopAll')}
+                </Button>
+              )}
+            </div>
             <div className="kb-now">
+              {heldCommands.map((task) => (
+                <HeldLive key={task.toolCallId} sessionId={sessionId} task={task} />
+              ))}
               {liveAgents.map((child) => (
                 <AgentLive
                   key={child.id}
                   child={child}
                   digest={digests[child.id]?.digest ?? null}
                   compact={compact}
+                  sessionId={sessionId}
+                  held={child.acpSessionId ? (heldAgents.get(child.acpSessionId) ?? null) : null}
                 />
               ))}
               {liveTasks.map((task) => (
-                <TaskLive key={task.id} sessionId={sessionId} task={task} compact={compact} />
+                <TaskLive
+                  key={task.id}
+                  sessionId={sessionId}
+                  task={task}
+                  compact={compact}
+                  stats={stats.get(task.id) ?? null}
+                  block={block}
+                />
               ))}
             </div>
           </section>
         )}
         {(endedAgents.length > 0 || endedTasks.length > 0) && (
           <section aria-label={t('sections.earlier')}>
-            <h3 className="kb-label">{t('sections.earlier')}</h3>
+            <div className="kb-label kb-label--acts">
+              <h3>{t('sections.earlier')}</h3>
+              {clean === 'ended' && endedTasks.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="kb-label__act"
+                  disabled={cleaning}
+                  onClick={runClean}
+                >
+                  {t('actions.clean')}
+                </Button>
+              )}
+            </div>
             {endedAgents.length > 0 && (
               <EndedGroup
                 // Opened by itself once nothing is live, when it is all there is to read.
@@ -193,6 +282,18 @@ export default function BoardRail({
             </>
           )}
         </span>
+        {(tasks.length > 0 || held.length > 0) && (
+          <button
+            type="button"
+            className="kp-tool kb-head__refresh"
+            aria-label={t('actions.refresh')}
+            title={t('actions.refresh')}
+            disabled={processes.reading}
+            onClick={processes.refresh}
+          >
+            <RefreshIcon phase={processes.reading ? 'turning' : 'idle'} className="size-[15px]" />
+          </button>
+        )}
         <button
           type="button"
           className="kp-tool kb-head__close"
