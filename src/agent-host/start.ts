@@ -12,9 +12,11 @@ import type { HostToMain, MainToHost } from '@shared/host-control'
 import type { ControlChannel, PortChannel } from '@shared/port-channel'
 import type { FromPort } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
+import type { HostSettings } from '@shared/settings'
 import { recordedSecretStore } from './agent-reset/secrets'
 import { createGitService } from './git'
 import { AgentHost } from './host'
+import { processPriority } from './priority'
 import { nodeThreadWorker } from './threads/store'
 import { nodeUsageWorker } from './usage/store'
 
@@ -43,12 +45,29 @@ function isHostDecision(value: unknown): value is 'session' | 'project' | 'deny'
 export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>): StartedAgentHost {
   const send = (message: HostToMain): void => control.send(message)
   let host: Promise<AgentHost> | null = null
+  const priority = processPriority()
+
+  function applyPriority(settings: HostSettings): void {
+    const outcome = priority(settings.lowerAgentPriority)
+    if (!outcome) return
+    if (outcome.kind === 'lowered') {
+      writeLog('info', 'host', `Priority lowered from ${outcome.from}`)
+    } else if (outcome.kind === 'restored') {
+      writeLog('info', 'host', `Priority restored to ${outcome.to}`)
+    } else if (outcome.kind === 'kept-low') {
+      writeLog('info', 'host', `Priority stays low until Kite restarts: ${String(outcome.error)}`)
+    } else {
+      writeLog('warn', 'host', `Priority not lowered: ${String(outcome.error)}`)
+    }
+  }
 
   function init(message: Extract<MainToHost, { type: 'host:init' }>): void {
     if (host) {
       writeLog('warn', 'host', 'host:init arrived twice; ignored')
       return
     }
+    // Before the host starts anything, so every program it starts inherits it.
+    applyPriority(message.settings)
     host = AgentHost.start({
       userDataPath: message.userDataPath,
       appVersion: message.appVersion,
@@ -104,6 +123,7 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
         init(message)
         break
       case 'host:settings':
+        if (host) applyPriority(message.settings)
         withHost((h) => h.updateSettings(message.settings))
         break
       case 'host:market-keys':

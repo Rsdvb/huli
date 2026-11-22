@@ -1009,6 +1009,20 @@ const ENTRIES = {
     kind: 'info',
     on: () => false,
   },
+  'agents.lower-priority': {
+    section: 'agents',
+    row: 'lower-priority',
+    group: 'agents.priority.group',
+    name: 'agents.priority.name',
+    description: {
+      windows: 'agents.priority.descriptionWindows',
+      other: 'agents.priority.description',
+    },
+    keywords: 'agents.priority.keywords',
+    part: 'host',
+    access: 'change',
+    ...flag('general', 'lowerAgentPriority', (file) => file.general.lowerAgentPriority),
+  },
   // Huli: which requests the host allows by itself. Agents read it and never change it, since a
   // change would widen what they may do without asking.
   'agents.auto-approve': {

@@ -133,6 +133,35 @@ describe('prompt suggestions', () => {
   })
 })
 
+describe("the agents' lower priority", () => {
+  it('is on for a file from before it and reaches the host', async () => {
+    await save({ version: 1, general: { language: 'en' } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.general.lowerAgentPriority).toBe(true)
+    expect(hostSettings(settings, 'en').lowerAgentPriority).toBe(true)
+    const off = mergeSettings(settings, { general: { lowerAgentPriority: false } })
+    expect(off.general.lowerAgentPriority).toBe(false)
+    expect(hostSettings(off, 'en').lowerAgentPriority).toBe(false)
+  })
+
+  it('keeps a stored off and drops a value that is no boolean', async () => {
+    await save({ version: 1, general: { lowerAgentPriority: false } })
+    expect((await SettingsStore.load(dir)).get().general.lowerAgentPriority).toBe(false)
+    await save({ version: 1, general: { lowerAgentPriority: 'no' } })
+    expect((await SettingsStore.load(dir)).get().general.lowerAgentPriority).toBe(true)
+  })
+
+  it('takes only a boolean, kept by the host for a paired device', () => {
+    expect(() => validateSettingsPatch({ general: { lowerAgentPriority: false } })).not.toThrow()
+    for (const value of ['false', 0, null, {}]) {
+      expect(() => validateSettingsPatch({ general: { lowerAgentPriority: value } })).toThrow()
+    }
+    const split = splitSettingsPatch({ general: { lowerAgentPriority: false, sendKey: 'enter' } })
+    expect(split.host).toEqual({ general: { lowerAgentPriority: false } })
+    expect(split.client).toEqual({ general: { sendKey: 'enter' } })
+  })
+})
+
 describe('the first start record on load', () => {
   it('leaves a host without a settings file to run its first start', async () => {
     const store = await SettingsStore.load(dir)

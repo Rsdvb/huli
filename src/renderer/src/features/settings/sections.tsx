@@ -197,11 +197,17 @@ export function GeneralSwitch({
   label,
   disabled,
 }: {
-  field: 'restoreLastSession' | 'confirmQuitWhileRunning' | 'sessionTitles' | 'background'
+  field:
+    | 'restoreLastSession'
+    | 'confirmQuitWhileRunning'
+    | 'sessionTitles'
+    | 'background'
+    | 'lowerAgentPriority'
   label: string
   disabled?: boolean
 }) {
-  const checked = useSettings().general[field]
+  // A host older than a field sends none, and works as its default.
+  const checked = useSettings().general[field] ?? DEFAULT_SETTINGS.general[field]
   const [apply, error] = useApply()
   return (
     <>
