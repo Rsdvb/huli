@@ -218,9 +218,10 @@ namespace Kite.ComputerHelper
                     idle = new Timer(delegate { End("idle"); }, null, options.IdleMs, Timeout.Infinite);
                     Task requests = Requests();
                     Task replies = Replies();
-                    requests.ContinueWith(delegate { End("Kite disconnected"); });
-                    replies.ContinueWith(delegate { End("Cua Driver exited"); });
+                    requests.ContinueWith(done => End(Reason("Kite disconnected", done)));
+                    replies.ContinueWith(done => End(Reason("Cua Driver exited", done)));
                     ended.Task.Wait();
+                    Console.Error.WriteLine("Broker ended: " + ended.Task.Result);
                     return 0;
                 }
                 finally
@@ -358,10 +359,12 @@ namespace Kite.ComputerHelper
                 };
                 var mine = Environment.GetEnvironmentVariables();
                 start.EnvironmentVariables.Clear();
-                foreach (string name in Passed)
+                // Names compare without case, as Windows compares them.
+                foreach (System.Collections.DictionaryEntry entry in mine)
                 {
-                    object value = mine[name];
-                    if (value != null) start.EnvironmentVariables[name] = (string)value;
+                    string name = (string)entry.Key;
+                    if (Array.Exists(Passed, passed => string.Equals(passed, name, StringComparison.OrdinalIgnoreCase)))
+                        start.EnvironmentVariables[name] = (string)entry.Value;
                 }
                 string root = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
                 // System folders only: the elevated driver resolves nothing from the user's own PATH.
@@ -420,10 +423,18 @@ namespace Kite.ComputerHelper
             {
                 Stream output = driver.StandardOutput.BaseStream;
                 var buffer = new byte[1 << 16];
+                int empty = 0;
                 while (true)
                 {
                     int read = await output.ReadAsync(buffer, 0, buffer.Length);
-                    if (read <= 0) return;
+                    if (read <= 0)
+                    {
+                        // A zero-length write by the child reads as no bytes too; only its exit ends it.
+                        if (driver.WaitForExit(50) || ++empty > 100) return;
+                        continue;
+                    }
+                    empty = 0;
+                    idle.Change(options.IdleMs, Timeout.Infinite);
                     await writeLock.WaitAsync();
                     try
                     {
@@ -589,6 +600,11 @@ namespace Kite.ComputerHelper
                 {
                     writeLock.Release();
                 }
+            }
+
+            static string Reason(string what, Task done)
+            {
+                return done.Exception == null ? what : what + ": " + done.Exception.GetBaseException().Message;
             }
 
             void End(string reason)

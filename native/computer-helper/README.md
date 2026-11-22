@@ -23,12 +23,12 @@ Requests on stdin, answers on stdout, one JSON object per line. Each request has
 `op`; its answer is `{ "id", "ok": true, "result" }` or `{ "id", "ok": false, "error" }`.
 Requests run concurrently and answers may come in any order.
 
-| op          | Request                                             | Result                                                        |
-| ----------- | --------------------------------------------------- | ------------------------------------------------------------- |
-| `whoami`    | -                                                   | `{ sid, pid, integrity, elevated }` of the helper's own token |
-| `elevation` | `pids`: up to 1024 process ids                      | `{ self, selfElevated, pids: { "<pid>": { integrity, elevated } } }` |
-| `ocr`       | `image`: base64 PNG or JPEG; `language`: optional   | `{ languages, width, height, lines: [{ text, x, y, width, height }] }` |
-| `elevate`   | `pipe`, `user`, `client`, `target`, `tokenSha256`, `idleMs` | `{ pid }`, or `{ cancelled: true }` when the user says no |
+| op          | Request                                                     | Result                                                                 |
+| ----------- | ----------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `whoami`    | -                                                           | `{ sid, pid, integrity, elevated }` of the helper's own token          |
+| `elevation` | `pids`: up to 1024 process ids                              | `{ self, selfElevated, pids: { "<pid>": { integrity, elevated } } }`   |
+| `ocr`       | `image`: base64 PNG or JPEG; `language`: optional           | `{ languages, width, height, lines: [{ text, x, y, width, height }] }` |
+| `elevate`   | `pipe`, `user`, `client`, `target`, `tokenSha256`, `idleMs` | `{ pid }`, or `{ cancelled: true }` when the user says no              |
 
 `elevation` opens each process with `PROCESS_QUERY_LIMITED_INFORMATION` and reads its token's
 mandatory integrity level (`0x2000` medium, `0x3000` high) and `TokenElevation`; null where the
