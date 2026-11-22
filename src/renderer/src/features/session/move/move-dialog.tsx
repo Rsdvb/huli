@@ -2,7 +2,7 @@
 // found on both sides and would do, then the move's steps as main runs them, and the session
 // there once it is. Mounted once for the window.
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import {
   Alert02Icon,
   Cancel01Icon,
@@ -16,7 +16,6 @@ import type {
   MoveHost,
   MoveNote,
   MovePreview,
-  MovePreviewResult,
   MoveProblem,
   MoveProgress,
 } from '@shared/session-move'
@@ -39,7 +38,7 @@ import { bytes } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { useHostsStore, useOtherHosts } from '@renderer/stores/hosts'
 import { hostOfSession, sessionTitle } from '@renderer/stores/sessions'
-import { closeMove, openMoved, previewMove, startMove, useMoveStore } from './move'
+import { closeMove, openMoved, previewMove, runningMove, startMove, useMoveStore } from './move'
 
 export function SessionMoveDialog() {
   const summary = useMoveStore((s) => s.summary)
@@ -84,23 +83,16 @@ function MoveForm({ summary }: { summary: SessionSummary }) {
   const from = hostOfSession(summary)
   const computers = useComputers(from)
   const [target, setTarget] = useState<MoveHost | undefined>(undefined)
-  const [preview, setPreview] = useState<MovePreviewResult | 'loading' | null>(null)
-  const [moveId, setMoveId] = useState<string | null>(null)
+  const preview = useMoveStore((s) => s.preview)
+  // A move of this session main runs already shows its steps, as when the dialog opens again.
+  const [moveId, setMoveId] = useState<string | null>(() => runningMove(summary.id))
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const progress = useMoveStore((s) => (moveId ? (s.moves[moveId] ?? null) : null))
-  // The latest pick, so an earlier pick's late answer is dropped.
-  const asked = useRef(0)
 
   const choose = (host: MoveHost) => {
-    const ask = ++asked.current
     setTarget(host)
-    setPreview('loading')
-    previewMove(summary, host).then(
-      (result) => ask === asked.current && setPreview(result),
-      (e: unknown) =>
-        ask === asked.current && setPreview({ ok: false, reason: null, message: errorMessage(e) }),
-    )
+    previewMove(summary, host)
   }
 
   const start = async () => {

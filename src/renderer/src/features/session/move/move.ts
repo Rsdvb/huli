@@ -6,6 +6,7 @@ import { create } from 'zustand'
 import type { SessionSummary } from '@shared/agent-host'
 import type { MoveHost, MovePreviewResult, MoveProgress } from '@shared/session-move'
 import { hostOfSession } from '@renderer/stores/sessions'
+import { errorMessage } from '@renderer/lib/host'
 import { onHost } from '@renderer/lib/host-paths'
 import { switchHost } from '@renderer/stores/host-switch'
 import { openSession, THIS_COMPUTER, useViewStore } from '@renderer/stores/view'
@@ -15,9 +16,14 @@ interface MoveStore {
   summary: SessionSummary | null
   /** The latest of each move main runs or ran this run, by move id. */
   moves: Record<string, MoveProgress>
+  /** What main found for the computer picked in the open dialog, or that it is looking. */
+  preview: MovePreviewResult | 'loading' | null
 }
 
-export const useMoveStore = create<MoveStore>()(() => ({ summary: null, moves: {} }))
+export const useMoveStore = create<MoveStore>()(() => ({ summary: null, moves: {}, preview: null }))
+
+/** The latest pick, so an earlier pick's late answer is dropped. */
+let asked = 0
 
 let listening = false
 
@@ -44,15 +50,33 @@ export function canMove(): boolean {
 /** Opens the dialog for the session, as its menu's 搬到另一台电脑… does. */
 export function askMove(summary: SessionSummary): void {
   listen()
-  useMoveStore.setState({ summary })
+  asked++
+  useMoveStore.setState({ summary, preview: null })
+}
+
+/** The move of the session main runs now, if any. */
+export function runningMove(sessionId: string): string | null {
+  const moves = Object.values(useMoveStore.getState().moves)
+  return (
+    moves.find((move) => move.sessionId === sessionId && move.state === 'running')?.moveId ?? null
+  )
 }
 
 export function closeMove(): void {
-  useMoveStore.setState({ summary: null })
+  asked++
+  useMoveStore.setState({ summary: null, preview: null })
 }
 
-export function previewMove(summary: SessionSummary, target: MoveHost): Promise<MovePreviewResult> {
-  return window.kettu.moves!.preview(hostOfSession(summary), summary.id, target)
+/** Asks main what moving the session to `target` would do; the dialog shows the answer. */
+export function previewMove(summary: SessionSummary, target: MoveHost): void {
+  const ask = ++asked
+  const answered = (preview: MovePreviewResult): void => {
+    if (ask === asked) useMoveStore.setState({ preview })
+  }
+  useMoveStore.setState({ preview: 'loading' })
+  window.kettu
+    .moves!.preview(hostOfSession(summary), summary.id, target)
+    .then(answered, (e) => answered({ ok: false, reason: null, message: errorMessage(e) }))
 }
 
 export function startMove(summary: SessionSummary, target: MoveHost): Promise<string> {

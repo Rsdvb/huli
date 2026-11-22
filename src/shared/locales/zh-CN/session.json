@@ -1760,10 +1760,10 @@
       "tooLarge": "要传的内容超过 512 MB，太大了。",
       "noRemote": "那台电脑上没有这个项目，这个仓库也没有能克隆的远端。",
       "gitMissing": "那台电脑上没有 Git。",
-      "agentMissing": "那台电脑上没有{{agent}}。先在那边添加它。",
-      "agentOff": "{{agent}}在那台电脑上被关掉了。先在那边打开它。",
-      "agentNotInstalled": "{{agent}}在那台电脑上还没装好。先在那边安装它。",
-      "signedOut": "{{agent}}在那台电脑上还没登录。先在那边登录。",
+      "agentMissing": "那台电脑上没有 {{agent}}。先在那边添加它。",
+      "agentOff": "{{agent}} 在那台电脑上被关掉了。先在那边打开它。",
+      "agentNotInstalled": "{{agent}} 在那台电脑上还没装好。先在那边安装它。",
+      "signedOut": "{{agent}} 在那台电脑上还没登录。先在那边登录。",
       "sameHost": "会话已经在这台电脑上了。",
       "offline": "那台电脑现在没连上。",
       "olderHost": "那台电脑上的纸鸢太旧，还不能接收会话。先更新它。"
@@ -1772,7 +1772,7 @@
       "ignoredFiles": "被 .gitignore 忽略的文件（比如 .env、node_modules）不会带过去。",
       "submodules": "子模块只带上它们指向的提交，那边需要自己更新子模块。",
       "lfs": "Git LFS 的文件只带上指针，那边会从 LFS 服务器自己拉取。",
-      "signInUnknown": "还不确定{{agent}}在那边有没有登录；没登录的话，第一次发消息时会提示登录。",
+      "signInUnknown": "还不确定 {{agent}} 在那边有没有登录；没登录的话，第一次发消息时会提示登录。",
       "carry": "这个智能体的记录没法直接搬，那边会把纸鸢保存的对话交给它接着聊。"
     },
     "steps": {
