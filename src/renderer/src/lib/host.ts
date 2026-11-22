@@ -257,7 +257,7 @@ export function toHost(method: string, params: unknown, depth: number): unknown 
   for (const [key, value] of Object.entries(params)) {
     copy[key] =
       typeof value === 'string' &&
-      (key === 'projectPath' || (key === 'path' && isProjectCall(method)))
+      (key === 'projectPath' || ((key === 'path' || key === 'folder') && isProjectCall(method)))
         ? hostPath(value)
         : toHost(method, value, depth + 1)
   }
@@ -270,7 +270,11 @@ function isProjectCall(method: string): boolean {
 
 /** A host's result as the window names folders, with the sessions it lists learned. */
 export function fromHost(hostId: string, method: string, result: unknown): unknown {
-  if (method === 'projects.list' || method === 'projects.add') qualifyProjects(hostId, result)
+  if (method === 'projects.list' || method === 'projects.add' || method === 'projects.addFolder') {
+    qualifyProjects(hostId, result)
+  }
+  // Huli: a suggested folder is that host's folder, which adding names again.
+  if (method === 'projects.suggestFolders') qualifyProjects(hostId, result)
   if (method === 'artifacts.list') qualifyArtifacts(hostId, result)
   const added = (result as { id?: unknown } | null)?.id
   if (method === 'attachments.add' && typeof added === 'string') attachmentHosts.set(added, hostId)
@@ -306,8 +310,13 @@ function qualifyArtifacts(hostId: string, value: unknown): void {
 function qualifyProjects(hostId: string, value: unknown): void {
   const list = Array.isArray(value) ? value : [value]
   for (const project of list) {
-    const record = project as { path?: unknown } | null
+    const record = project as { path?: unknown; folders?: unknown } | null
     if (typeof record?.path === 'string') record.path = onHost(hostId, record.path)
+    // Huli: its further folders are that host's folders too, which its panes open.
+    for (const folder of Array.isArray(record?.folders) ? record.folders : []) {
+      const item = folder as { path?: unknown } | null
+      if (typeof item?.path === 'string') item.path = onHost(hostId, item.path)
+    }
   }
 }
 

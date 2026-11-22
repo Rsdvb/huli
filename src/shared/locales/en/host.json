@@ -1640,5 +1640,20 @@
       "noModelHosts": "Kite does not know the addresses of {{agent}}'s model service, so “only its model's addresses” would leave it none. Pick “only its Agent network exit” or “the network open”."
     }
   },
+  "projectFolders": {
+    "refused": {
+      "notAbsolute": "{{folder}} is not a full path",
+      "devicePath": "{{folder}} is a device path, which cannot be a project folder",
+      "root": "A drive or the root of the file system cannot be a project folder",
+      "home": "Your home folder cannot be a project folder; add a folder inside it instead",
+      "aboveHome": "{{folder}} holds your home folder, so it cannot be a project folder",
+      "kiteData": "{{folder}} holds Kite’s own data, so it cannot be a project folder"
+    },
+    "own": "This is the project’s own folder",
+    "tooMany": "A project holds at most {{count}} folders",
+    "worktree": "Worktrees are off in a project with several folders: a worktree would set apart only the project’s own folder, while the agent would still change the other folders in place. Start the session in the project’s folder, or take the extra folders out of the project first.",
+    "note": "This project also has these folders beside the one you work in. You may read and change files in them as part of the task, by their full paths:",
+    "mount": "The sandbox cannot mount the project folder {{folder}}: {{reason}}"
+  },
   "featureOff": "{{name}} is turned off in Settings › Features."
 }

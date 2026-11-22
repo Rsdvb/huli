@@ -2,6 +2,8 @@
 
 import { withLongPaths, type ProjectWorktreeSettings, type WorktreeFailure } from '@shared/git'
 import type { Platform } from '@shared/platform'
+import { HostError } from '../errors'
+import { t } from '../i18n'
 import { pathKey } from '../paths'
 import type { WorktreeRecord } from '../storage'
 import type { WorktreeGit, WorktreeInspection } from './api'
@@ -23,6 +25,11 @@ export interface WorktreeManagerDeps {
   /** The environment agents run with, resolved. */
   env(): Promise<NodeJS.ProcessEnv>
   takenByPullRequest?(projectPath: string, branch: string): boolean
+  /**
+   * Huli: whether the project has further folders. A worktree would set apart its own folder
+   * alone while its agents changed the others in place, so none is made for it.
+   */
+  severalFolders?(projectPath: string): boolean
   log(level: 'info' | 'warn' | 'error', message: string): void
   timeoutMs?: number
 }
@@ -67,6 +74,9 @@ export class WorktreeManager {
     request: { base: string; branch?: string; text: string; type?: string; issue?: string },
   ): Promise<WorktreeRecord> {
     const { takenByPullRequest } = this.deps
+    if (this.deps.severalFolders?.(projectPath)) {
+      return Promise.reject(new HostError('restricted', t('projectFolders.worktree')))
+    }
     return this.deps.git.create({
       projectPath,
       root: this.deps.root(),

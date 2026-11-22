@@ -6,8 +6,9 @@
 // of every child. With `--folder-per-session` first, each session's child starts in the folder the
 // session names, for a program that works in the folder it started in whatever the session says.
 // With `--session-flag=<flag>`, a session the host asks for starts with `<flag>` added, once the
-// program's `--help` lists it, as agy's own full access does. It imports Node's built-ins only, so
-// its bundle is one file.
+// program's `--help` lists it, as agy's own full access does. With `--dir-flag=<flag>`, a session
+// the host names further folders for starts with `<flag> <folder>` for each, once the help lists
+// it, as agy's `--add-dir` takes them. It imports Node's built-ins only, so its bundle is one file.
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -77,19 +78,39 @@ const SESSION_FLAG = '--session-flag='
 // Where `initialize`'s answer names the session flag the program lists, and where `session/new`,
 // `session/load` and `session/resume` ask for it, as `SESSION_FLAG_META` in the host's connection.
 const SESSION_FLAG_META = 'sh.kettu/session-flag'
+/** The router's flag naming the program's flag that adds a folder to a session's workspace. */
+const DIR_FLAG = '--dir-flag='
+// Huli: where `initialize`'s answer names the folder flag the program lists, and where a session's
+// request names its further folders, as `DIR_FLAG_META` and `DIRS_META` in the host's connection.
+const DIR_FLAG_META = 'sh.kettu/dir-flag'
+const DIRS_META = 'sh.kettu/dirs'
 
-/** Takes the ask for the session flag out of a request: the request to pass on, and the ask. */
-function takeFlag(params: unknown): { params: unknown; flagged: boolean } {
-  if (typeof params !== 'object' || params === null) return { params, flagged: false }
+/**
+ * Takes the router's asks out of a request: the request to pass on, whether it asked for the
+ * session flag, and the further folders it named.
+ */
+function takeFlag(params: unknown): { params: unknown; flagged: boolean; dirs: string[] } {
+  if (typeof params !== 'object' || params === null) return { params, flagged: false, dirs: [] }
   const meta = (params as { _meta?: unknown })._meta
-  if (typeof meta !== 'object' || meta === null || !(SESSION_FLAG_META in meta)) {
-    return { params, flagged: false }
+  if (
+    typeof meta !== 'object' ||
+    meta === null ||
+    (!(SESSION_FLAG_META in meta) && !(DIRS_META in meta))
+  ) {
+    return { params, flagged: false, dirs: [] }
   }
-  const { [SESSION_FLAG_META]: asked, ...rest } = meta as Record<string, unknown>
+  const {
+    [SESSION_FLAG_META]: asked,
+    [DIRS_META]: named,
+    ...rest
+  } = meta as Record<string, unknown>
   const forward: Record<string, unknown> = { ...(params as Record<string, unknown>) }
   if (Object.keys(rest).length > 0) forward._meta = rest
   else delete forward._meta
-  return { params: forward, flagged: asked === true }
+  const dirs = Array.isArray(named)
+    ? named.filter((dir): dir is string => typeof dir === 'string' && path.isAbsolute(dir))
+    : []
+  return { params: forward, flagged: asked === true, dirs }
 }
 
 /** Whether a program's help lists `flag` as a word of its own. */
@@ -138,14 +159,14 @@ function withClose(result: unknown): unknown {
 }
 
 /** Names the session flag in `initialize`'s answer, for a host that may ask for it. */
-function withFlag(result: unknown, flag: string | null): unknown {
+function withFlag(result: unknown, flag: string | null, key = SESSION_FLAG_META): unknown {
   if (flag === null || typeof result !== 'object' || result === null) return result
   const response = result as Record<string, unknown>
   const meta =
     typeof response._meta === 'object' && response._meta !== null
       ? (response._meta as Record<string, unknown>)
       : {}
-  response._meta = { ...meta, [SESSION_FLAG_META]: flag }
+  response._meta = { ...meta, [key]: flag }
   return response
 }
 
@@ -175,7 +196,9 @@ export class SessionRouter {
   private readonly folderPerSession: boolean
   /** The flag a session's child may start with, once the program's help lists it. */
   private readonly sessionFlag: string | null
-  private listed: Promise<boolean> | null = null
+  /** Huli: the flag that adds a folder to a session's child, once the program's help lists it. */
+  private readonly dirFlag: string | null
+  private help: Promise<string | null> | null = null
   private readonly children = new Set<Child>()
   /** Each live session's child, by the session id it opened. */
   private readonly sessions = new Map<string, Child>()
@@ -190,12 +213,17 @@ export class SessionRouter {
   constructor(
     command: string,
     args: string[],
-    options: { folderPerSession?: boolean; sessionFlag?: string | null } = {},
+    options: {
+      folderPerSession?: boolean
+      sessionFlag?: string | null
+      dirFlag?: string | null
+    } = {},
   ) {
     this.childCommand = command
     this.childArgs = args
     this.folderPerSession = options.folderPerSession ?? false
     this.sessionFlag = options.sessionFlag ?? null
+    this.dirFlag = options.dirFlag ?? null
   }
 
   start(): void {
@@ -224,14 +252,19 @@ export class SessionRouter {
       if (method === 'initialize') {
         this.initializeParams = params
         this.control ??= this.spawnChild()
-        const [answer, listed] = await Promise.all([
+        const [answer, listed, dirsListed] = await Promise.all([
           this.request(this.control, method, params),
           this.flagListed(),
+          this.listsOwn(this.dirFlag),
         ])
         if (answer.error) return this.sendError(id, answer.error)
         return this.sendResult(
           id,
-          withFlag(withClose(answer.result), listed ? this.sessionFlag : null),
+          withFlag(
+            withFlag(withClose(answer.result), listed ? this.sessionFlag : null),
+            dirsListed ? this.dirFlag : null,
+            DIR_FLAG_META,
+          ),
         )
       }
       if (method === 'session/new') return await this.newSession(id, params)
@@ -286,7 +319,10 @@ export class SessionRouter {
     let child: Child | null = null
     try {
       const flag = takeFlag(params)
-      child = await this.startSessionChild(params, await this.flagFor(flag.flagged))
+      child = await this.startSessionChild(params, [
+        ...(await this.flagFor(flag.flagged)),
+        ...(await this.dirsFor(flag.dirs)),
+      ])
       const answer = await this.request(child, 'session/new', flag.params)
       if (answer.error) {
         this.endChild(child)
@@ -324,7 +360,7 @@ export class SessionRouter {
     try {
       const flag = takeFlag(params)
       // Refused before the session's process ends, so a refusal leaves the session as it was.
-      const extra = await this.flagFor(flag.flagged)
+      const extra = [...(await this.flagFor(flag.flagged)), ...(await this.dirsFor(flag.dirs))]
       const existing = this.sessions.get(sessionId)
       if (existing) {
         this.sessions.delete(sessionId)
@@ -383,11 +419,33 @@ export class SessionRouter {
     return [this.sessionFlag]
   }
 
+  /**
+   * Huli: the folder flag and each further folder a session named, as the words its child adds;
+   * none without a listed flag, and none for a folder a `.cmd` child's line could not carry.
+   */
+  private async dirsFor(dirs: readonly string[]): Promise<string[]> {
+    const flag = this.dirFlag
+    if (dirs.length === 0 || flag === null || !(await this.listsOwn(flag))) return []
+    return dirs
+      .filter((dir) => !(this.childShell && /["%!\r\n\0]/.test(dir)))
+      .flatMap((dir) => [flag, dir])
+  }
+
   /** Whether the program's `--help` lists the session flag, read once. */
   private flagListed(): Promise<boolean> {
-    const flag = this.sessionFlag
-    if (flag === null) return Promise.resolve(false)
-    this.listed ??= new Promise((resolve) => {
+    return this.listsOwn(this.sessionFlag)
+  }
+
+  /** Whether the program's `--help` lists `flag`; false for none. */
+  private async listsOwn(flag: string | null): Promise<boolean> {
+    if (flag === null) return false
+    const help = await this.readHelp()
+    return help !== null && listsFlag(help, flag)
+  }
+
+  /** The program's `--help`, read once; null when it could not run. */
+  private readHelp(): Promise<string | null> {
+    this.help ??= new Promise((resolve) => {
       const { command, args } = this.spawnWords(this.childCommand, [...this.childArgs, '--help'])
       let help = ''
       let proc: ChildProcess
@@ -399,7 +457,7 @@ export class SessionRouter {
           windowsHide: true,
         })
       } catch {
-        resolve(false)
+        resolve(null)
         return
       }
       const read = (data: Buffer) => {
@@ -410,14 +468,14 @@ export class SessionRouter {
       const timer = setTimeout(() => proc.kill(), HELP_MS)
       proc.on('error', () => {
         clearTimeout(timer)
-        resolve(false)
+        resolve(null)
       })
       proc.on('close', () => {
         clearTimeout(timer)
-        resolve(listsFlag(help, flag))
+        resolve(help)
       })
     })
-    return this.listed
+    return this.help
   }
 
   /**
@@ -651,22 +709,22 @@ function parse(line: string): RpcMessage | null {
 }
 
 // The host starts this file as
-// `<node> <router> [--folder-per-session] [--session-flag=<flag>] <command> <args>`; it is never
-// imported.
+// `<node> <router> [--folder-per-session] [--session-flag=<flag>] [--dir-flag=<flag>] <command>
+// <args>`; it is never imported.
 const words = process.argv.slice(2)
 let folderPerSession = false
 let sessionFlag: string | null = null
+let dirFlag: string | null = null
 for (;;) {
   if (words[0] === FOLDER_PER_SESSION) folderPerSession = true
   else if (words[0]?.startsWith(SESSION_FLAG)) sessionFlag = words[0].slice(SESSION_FLAG.length)
+  else if (words[0]?.startsWith(DIR_FLAG)) dirFlag = words[0].slice(DIR_FLAG.length)
   else break
   words.shift()
 }
 const command = words[0]
-if (!command || sessionFlag === '') {
-  process.stderr.write(
-    `session-router: ${command ? 'an empty session flag' : 'no agent command line'}\n`,
-  )
+if (!command || sessionFlag === '' || dirFlag === '') {
+  process.stderr.write(`session-router: ${command ? 'an empty flag' : 'no agent command line'}\n`)
   process.exit(1)
 }
-new SessionRouter(command, words.slice(1), { folderPerSession, sessionFlag }).start()
+new SessionRouter(command, words.slice(1), { folderPerSession, sessionFlag, dirFlag }).start()

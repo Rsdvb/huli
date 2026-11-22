@@ -3750,7 +3750,7 @@ export class AgentManager {
     agentId: AgentId,
     folder: string,
     network: 'model' | 'agent' | 'open',
-    options: { proxyPort: number | null; gitWritable: boolean },
+    options: { proxyPort: number | null; gitWritable: boolean; folders?: readonly string[] },
   ): Promise<AgentRuntime> {
     const running = this.containerRuns.get(sessionId)
     if (running && !running.launched.hasExited) return running.runtime
@@ -3782,6 +3782,7 @@ export class AgentManager {
       def: slot.def,
       agent: this.containerAgent(slot),
       folder,
+      ...(options.folders?.length ? { folders: options.folders } : {}),
       network,
       modelHosts: modelHosts(slot.def.id, env),
       proxyPort: options.proxyPort,

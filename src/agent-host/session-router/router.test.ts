@@ -52,7 +52,12 @@ afterEach(async () => {
 })
 
 async function startRouter(
-  options: { folderPerSession?: boolean; sessionFlag?: string; help?: string } = {},
+  options: {
+    folderPerSession?: boolean
+    sessionFlag?: string
+    dirFlag?: string
+    help?: string
+  } = {},
 ) {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'kettu-router-')))
   dirs.push(dir)
@@ -65,6 +70,7 @@ async function startRouter(
     ? ['--folder-per-session', program, child]
     : [process.execPath, child]
   if (options.sessionFlag) words.unshift(`--session-flag=${options.sessionFlag}`)
+  if (options.dirFlag) words.unshift(`--dir-flag=${options.dirFlag}`)
   const router = spawn(process.execPath, [ROUTER, ...words], {
     cwd: dir,
     env: {
@@ -195,6 +201,37 @@ describe('the session router', () => {
     })
     expect((alsoRefused._meta as unknown as { error?: unknown }).error).toBeDefined()
     expect(alsoRefused.sessionId).toBeUndefined()
+  })
+
+  it("starts a session's process with each further folder's flag, once its help lists it", async () => {
+    const help = 'Usage: agent acp [flags]\n  --add-dir   Add a directory to the workspace\n'
+    const { request } = await startRouter({ dirFlag: '--add-dir', help })
+    const control = await request('initialize', { protocolVersion: 1 })
+    expect(
+      (control as unknown as { _meta: Record<string, unknown> })._meta['sh.kettu/dir-flag'],
+    ).toBe('--add-dir')
+    const dirs = [path.resolve('/work/api'), path.resolve('/work/web')]
+    const opened = await request('session/new', {
+      cwd: '/repo',
+      mcpServers: [],
+      _meta: { 'sh.kettu/dirs': [...dirs, 'relative', 3] },
+    })
+    expect(opened._meta.args.slice(-4)).toEqual(['--add-dir', dirs[0], '--add-dir', dirs[1]])
+    expect(opened._meta.params).toEqual({ cwd: '/repo', mcpServers: [] })
+    const plain = await request('session/new', { cwd: '/repo', mcpServers: [] })
+    expect(plain._meta.args).not.toContain('--add-dir')
+
+    const unlisted = await startRouter({ dirFlag: '--add-dir', help: 'Usage: agent acp\n' })
+    const none = await unlisted.request('initialize', { protocolVersion: 1 })
+    expect((none as unknown as { _meta: Record<string, unknown> })._meta['sh.kettu/dir-flag']).toBe(
+      undefined,
+    )
+    const ignored = await unlisted.request('session/new', {
+      cwd: '/repo',
+      mcpServers: [],
+      _meta: { 'sh.kettu/dirs': dirs },
+    })
+    expect(ignored._meta.args).not.toContain('--add-dir')
   })
 
   it('keeps the runtime switch for a child that is the runtime itself', async () => {

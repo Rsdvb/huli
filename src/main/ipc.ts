@@ -593,6 +593,18 @@ export function registerIpcHandlers({
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
 
+  // Huli: the folder goes to the agent host, which checks it before the project takes it.
+  handle('dialog:choose-project-folder', 0, async ({ window }) => {
+    const options: Electron.OpenDialogOptions = {
+      title: t('dialogs.chooseProjectFolder'),
+      properties: ['openDirectory', 'dontAddToRecent'],
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
   handle('dialog:choose-shell', 0, async ({ window }) => {
     const path = await chooseProgram(window, t('dialogs.chooseShell'))
     if (path) settings.setShellPath(path)

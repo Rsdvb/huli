@@ -261,6 +261,8 @@ export interface IpcInvokeContract {
   'dialog:choose-shell': { args: []; result: string | null }
   // Huli: a folder of an agent's sessions kept elsewhere, for the import from the agents to read.
   'dialog:choose-history-folder': { args: []; result: string | null }
+  // Huli: a further folder for a project; null when cancelled. The host checks it once added.
+  'dialog:choose-project-folder': { args: []; result: string | null }
   // `defaultPath`: the folder the dialog opens in, the session's; an empty list when cancelled.
   'dialog:add-attachments': {
     args: [kind: 'files' | 'folder', defaultPath: string | null]
@@ -964,6 +966,8 @@ export interface KettuApi {
     chooseShell(): Promise<string | null>
     /** Huli: a folder with another copy of an agent's sessions; null when cancelled. */
     chooseHistoryFolder(): Promise<string | null>
+    /** Huli: a further folder for a project; null when cancelled. */
+    chooseProjectFolder(): Promise<string | null>
   }
   /** Debug mode: this run's ports, and restarting into it or out of it. */
   debug: {
