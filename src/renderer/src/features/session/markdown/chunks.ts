@@ -1,7 +1,10 @@
 import { parseMarkdownIntoBlocks } from 'streamdown'
 
-/** A chunk is cut once the text after the previous one grows past this many characters. */
-export const CHUNK_SIZE = 8_000
+/**
+ * A chunk is cut once the text after the previous one grows past this many characters: a screen
+ * or two of prose, which is how much more than it shows a long text renders (in-parts.ts).
+ */
+export const CHUNK_SIZE = 3_000
 
 // The last blocks can still change as text arrives: a paragraph becomes a setext heading, a list
 // takes another item, and a cut at the window's edge leaves the last block incomplete.
@@ -44,7 +47,7 @@ export function splitIntoChunks(text: string, previous?: Chunks): Chunks {
   for (;;) {
     const length = settledLength(text, offset)
     if (length === 0) break
-    chunks.push(text.slice(offset, offset + length))
+    chunks.push(own(text.slice(offset, offset + length)))
     offset += length
   }
   const tail = text.length - offset
@@ -54,6 +57,15 @@ export function splitIntoChunks(text: string, previous?: Chunks): Chunks {
     // half a chunk more.
     retryAt: tail > CHUNK_SIZE ? text.length + CHUNK_SIZE / 2 : offset + CHUNK_SIZE + 1,
   }
+}
+
+/**
+ * The text as a string of its own. A slice refers to the whole string it was cut from, so each
+ * settled chunk of a reply being written held on to the reply as it was then: one of 300 KB
+ * streamed in a hundred chunks kept 15 MB of its earlier versions.
+ */
+function own(text: string): string {
+  return JSON.parse(JSON.stringify(text)) as string
 }
 
 /** The length of the next chunk from `offset`, or 0 when what follows is still live. */
