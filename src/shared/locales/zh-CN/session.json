@@ -1784,7 +1784,8 @@
       "reviewing": "审阅中 · 第 {{round}} 轮",
       "fixing": "按审阅意见修改中 · 第 {{round}} 轮",
       "approved": "审阅通过（第 {{round}} 轮）",
-      "outOfRounds": "审阅到轮数上限仍未通过"
+      "outOfRounds": "审阅到轮数上限仍未通过",
+      "waitingFix": "等对方修改 · 第 {{round}} 轮"
     },
     "role": {
       "implement": "写代码",

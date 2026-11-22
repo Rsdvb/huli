@@ -149,15 +149,17 @@ const WorkerRow = memo(function WorkerRow({ worker }: { worker: SessionSummary }
             ? c.success
             : c.textSecondary
   const loop =
-    info.loop === 'reviewing'
-      ? `审阅中 · 第 ${info.round} 轮`
-      : info.loop === 'fixing'
-        ? `按审阅意见修改 · 第 ${info.round} 轮`
-        : info.loop === 'approved'
-          ? `审阅通过（第 ${info.round} 轮）`
-          : info.loop === 'out_of_rounds'
-            ? '审阅到轮数上限仍未通过'
-            : null
+    info.reviewOf && info.loop === 'fixing'
+      ? `等对方修改 · 第 ${info.round} 轮`
+      : info.loop === 'reviewing'
+        ? `审阅中 · 第 ${info.round} 轮`
+        : info.loop === 'fixing'
+          ? `按审阅意见修改 · 第 ${info.round} 轮`
+          : info.loop === 'approved'
+            ? `审阅通过（第 ${info.round} 轮）`
+            : info.loop === 'out_of_rounds'
+              ? '审阅到轮数上限仍未通过'
+              : null
   return (
     <PressScale
       scale={0.98}

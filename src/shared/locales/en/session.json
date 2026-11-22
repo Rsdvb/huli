@@ -1860,7 +1860,8 @@
       "reviewing": "In review · round {{round}}",
       "fixing": "Fixing review findings · round {{round}}",
       "approved": "Review approved (round {{round}})",
-      "outOfRounds": "Not approved within the round limit"
+      "outOfRounds": "Not approved within the round limit",
+      "waitingFix": "Waiting for the fix · round {{round}}"
     },
     "role": {
       "implement": "code",

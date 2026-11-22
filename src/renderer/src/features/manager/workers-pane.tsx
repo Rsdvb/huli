@@ -207,13 +207,15 @@ const WorkerRow = memo(function WorkerRow({ id, nested }: { id: string; nested?:
   const hostId = hostOfPath(summary.projectPath)
   const runs = [agentName(summary.agentId, hostId), summary.model].filter(Boolean).join(' · ')
   const loop =
-    worker.loop === 'reviewing' || worker.loop === 'fixing'
-      ? t(`manager.loop.${worker.loop}`, { round: worker.round ?? 1 })
-      : worker.loop === 'approved'
-        ? t('manager.loop.approved', { round: worker.round ?? 1 })
-        : worker.loop === 'out_of_rounds'
-          ? t('manager.loop.outOfRounds')
-          : null
+    worker.reviewOf && worker.loop === 'fixing'
+      ? t('manager.loop.waitingFix', { round: worker.round ?? 1 })
+      : worker.loop === 'reviewing' || worker.loop === 'fixing'
+        ? t(`manager.loop.${worker.loop}`, { round: worker.round ?? 1 })
+        : worker.loop === 'approved'
+          ? t('manager.loop.approved', { round: worker.round ?? 1 })
+          : worker.loop === 'out_of_rounds'
+            ? t('manager.loop.outOfRounds')
+            : null
   return (
     <div className={cn('km-row', nested && 'km-row--nested')} data-state={state}>
       <div className="km-row__top">
