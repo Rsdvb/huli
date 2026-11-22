@@ -981,26 +981,25 @@
     animation: none;
   }
 }
-/* Huli: what happened while the user was away, one quiet line over the thread's top. */
+/* Huli: what happened while the user was away, a quiet bar over the thread's top. The thread
+   gives it its room rather than scrolling under it. */
 .ks-recap {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  z-index: 15;
   display: flex;
+  flex: none;
+  align-self: center;
   width: max-content;
   max-width: min(calc(var(--thread-column) + 16px), calc(100% - 32px));
   align-items: center;
   gap: 4px;
   min-height: 30px;
+  margin-top: 10px;
   padding: 0 4px 0 12px;
   border-radius: var(--radius-xl);
   background: var(--thread-card);
-  box-shadow: var(--thread-float-shadow);
+  box-shadow: var(--thread-card-shadow);
   color: var(--muted-foreground);
   font-size: var(--text-small);
   line-height: var(--text-small--line-height);
-  transform: translateX(-50%);
   animation: ks-recap-in var(--duration-base) var(--ease-standard) both;
 }
 .ks-recap__text {
@@ -1047,7 +1046,6 @@
 @keyframes ks-recap-in {
   from {
     opacity: 0;
-    transform: translate(-50%, -4px);
   }
 }
 @media (prefers-reduced-motion: reduce) {
