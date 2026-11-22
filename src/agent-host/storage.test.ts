@@ -598,6 +598,87 @@ describe('the host files', () => {
     }
   })
 
+  it("keeps a manager session's field and a worker's, and drops what does not read", () => {
+    const manager = {
+      autoReview: true,
+      approvals: 'low',
+      task: { since: 1, turns: 4, extraTurns: 0, tokens: 900, cost: 0.1, unpriced: 0, wakes: 1 },
+      held: [],
+      loops: [
+        {
+          id: 'l1',
+          implementerId: 's2',
+          reviewerId: 's3',
+          round: 2,
+          state: 'fixing',
+          startedAt: 1,
+        },
+      ],
+      answers: [],
+    }
+    const worker = {
+      managerId: 's1',
+      workerId: 'w-0a1b2c3d',
+      name: '写手',
+      role: 'implement',
+      kind: 'implement',
+      title: '修复时钟',
+      owed: 3,
+      tokens: 100,
+      cost: 0,
+    }
+    const both = [
+      { ...session, id: 's1', manager },
+      { ...session, id: 's2', parentId: 's1', startedBy: 's1', worker },
+    ]
+    expect(parseSessionsFile({ sessions: both })).toEqual({ version: 1, sessions: both })
+    const off = { ...session, managerOff: true }
+    expect(parseSessionsFile({ sessions: [off] })).toEqual({ version: 1, sessions: [off] })
+    for (const bad of [
+      { manager: 'x' },
+      { manager: {} },
+      { worker: { ...worker, role: 'boss' } },
+    ]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, ...bad }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
+  it("keeps a project's own manager roster, dropping entries that do not read", () => {
+    const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
+    const writer = {
+      id: 'w-0a1b2c3d',
+      name: '写手',
+      role: 'implement',
+      agentId: 'codex',
+      model: null,
+      effort: null,
+      profileId: null,
+      mode: null,
+      worktree: true,
+      persona: '',
+    }
+    const manager = { workers: [writer], reviewerId: null, approvals: 'low' }
+    expect(parseProjectsFile({ projects: [{ ...project, manager }] })).toEqual({
+      version: 1,
+      projects: [{ ...project, manager }],
+    })
+    expect(
+      parseProjectsFile({
+        projects: [{ ...project, manager: { workers: [writer, { id: 1 }], reviewerId: 'gone' } }],
+      }),
+    ).toEqual({
+      version: 1,
+      projects: [{ ...project, manager: { workers: [writer], reviewerId: null } }],
+    })
+    expect(parseProjectsFile({ projects: [{ ...project, manager: 3 }] })).toEqual({
+      version: 1,
+      projects: [project],
+    })
+  })
+
   it("keeps a project's worktree settings key by key", () => {
     const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
     const worktree = {

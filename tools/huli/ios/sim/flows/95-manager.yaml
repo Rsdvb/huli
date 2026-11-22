@@ -1,0 +1,46 @@
+# Manager mode on the phone: a new session started as a manager (总管模式) dispatches the fake
+# workers; its banner opens the 工人 screen, whose card allows the writer's command, after which
+# Kite's review loop runs, and 全部停止 stops what is left.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn: '总管模式'
+- takeScreenshot: m00-new
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: 'fake:/manager-demo 手机上的总管'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '.*个等你批准.*'
+    timeout: 120000
+- takeScreenshot: m01-manager
+- tapOn:
+    text: '.*个工人在干活.*'
+- waitForAnimationToEnd
+- takeScreenshot: m02-workers
+- tapOn: '允许一次'
+- extendedWaitUntil:
+    visible:
+      text: '审阅通过.*'
+    timeout: 90000
+    optional: true
+- takeScreenshot: m03-reviewed
+- tapOn:
+    text: '全部停止'
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: m04-stopped

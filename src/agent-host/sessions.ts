@@ -2,6 +2,15 @@
 // session lifecycle, sub-sessions, and the session index.
 
 import { CANNOT_LIST } from '@shared/agent-history'
+import {
+  canManage,
+  DEFAULT_MANAGER_SETTINGS,
+  effectiveManager,
+  newManager,
+  readOnlyDecision,
+  type ManagerChoices,
+  type ManagerSettings,
+} from '@shared/manager'
 import type { AgentResetBusy } from '@shared/agent-reset'
 import type { DeviceAccessAnswer, DeviceAccessDecision } from '@shared/device-agent'
 import type { PublishVisibility } from '@shared/market-publish'
@@ -171,6 +180,7 @@ import {
 import {
   allowOnceOption,
   changedFiles,
+  changedPaths,
   notificationQuestion,
   replySummary,
   requestText,
@@ -243,7 +253,7 @@ import { holdsNothing, mayBeEmpty } from './empty-sessions'
 import type { McpTransports } from './marketplace/servers'
 import { questionsResult } from './question-answers'
 import { HostError, invalidParams, notFound } from './errors'
-import { t } from './i18n'
+import { currentLocale, t } from './i18n'
 import type { ProviderProfiles } from './provider-profiles'
 import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
 import { NEW_BOARD_STATUS, type BoardStatus, type SessionBoard } from '@shared/session-board'
@@ -297,6 +307,7 @@ import { missedCache, type IdleRelease } from './idle-release'
 import {
   REPORT_LIMIT,
   reportText,
+  toolAgentStatus,
   type ToolDelivery,
   type ToolMode,
   type ToolSession,
@@ -310,6 +321,7 @@ import {
   startedMode,
   startedStartMode,
   starterRank,
+  STARTED_MAX,
   type ModeRank,
 } from './started-mode'
 import type { RoutineSessionHooksRef, RoutineSessionStart } from './routines/hooks'
@@ -399,7 +411,9 @@ import {
   type ThreadWrite,
 } from './threads/model'
 import { ThreadStoreError, type ThreadStore } from './threads/store'
-import type { UsageRow } from './usage/model'
+import { normalizeModel, priceFor, type UsageRow } from './usage/model'
+import { ManagerError, ManagerHub, type ManagerPort, type WorkerSpec } from './manager/hub'
+import { managerOffBlock, readOnlyRefusal } from './manager/texts'
 import { recordRows } from './usage/record'
 
 /** What a step may do without asking until it reports: edit and run commands in its folder. */
@@ -645,6 +659,14 @@ export interface SessionManagerDeps {
   timings?: Partial<SessionTimings>
   /** Huli: whether nothing listens on a port, for a worktree's block; the system's by default. */
   portFree?: (port: number) => Promise<boolean>
+  /** Huli: what manager mode reads of a folder's Git: its HEAD and its changes since a commit. */
+  managerGit?: {
+    head(folder: string): Promise<string | null>
+    changesSince(
+      folder: string,
+      base: string,
+    ): Promise<{ path: string; added: number | null; removed: number | null }[] | null>
+  }
   now?: () => number
 }
 
@@ -741,6 +763,8 @@ interface StartedModeHold {
   starter: ModeRank | null
   wanted: string | null
   ceiling: ModeRank | null
+  /** Huli: a manager's worker, whose mode the user chose in its roster entry. */
+  roster?: true
 }
 
 interface Live {
@@ -867,6 +891,8 @@ interface Live {
   routineScope: PermissionScope | null
   routineTurnStarted: boolean
   routineTurnEnded: boolean
+  /** Huli: its next turn is Kite's own going on after a plan limit, which nobody typed. */
+  goesOn: boolean
   /** A session another session's agent or a workflow started: what its mode is held to. */
   startedMode: StartedModeHold | null
   /** Since when nothing has needed its agent, and since when no port has shown it in front. */
@@ -1291,6 +1317,8 @@ function sessionIssue(url: string): SessionIssue | null {
 
 export class SessionManager {
   private readonly records = new Map<string, SessionRecord>()
+  /** Huli: manager mode's coordinator. */
+  readonly manager: ManagerHub
   /** Huli: the sessions whose agent runs in a container of their own now. */
   private readonly containerLives = new Set<string>()
   /** Huli: what each session's pull request automation saw last; in memory, read again at start. */
@@ -1424,6 +1452,7 @@ export class SessionManager {
   constructor(private readonly deps: SessionManagerDeps) {
     this.timings = { ...SESSION_TIMINGS, ...deps.timings }
     this.now = deps.now ?? Date.now
+    this.manager = new ManagerHub(this.managerPort())
     this.stalls = new StallWatch({
       now: () => this.now(),
       thresholdMs: () => this.supervisor().stallMinutes * 60_000,
@@ -1457,6 +1486,15 @@ export class SessionManager {
         this.armLimit(record.id, Math.max(record.limitPause.resumeAt, settledAt))
     }
     this.returned = (await this.deps.returned.load()).messages
+    this.manager.load()
+    // Huli: workers a quit cut go on once the host has settled, which is no startup work.
+    if (
+      file.sessions.some((record) => record.worker?.owed !== undefined || record.manager?.digest)
+    ) {
+      setTimeout(() => {
+        if (!this.stopped) this.manager.recover()
+      }, this.timings.limitResume.startupMs)
+    }
     await this.deps.projectMcp?.load()
     await this.deps.projectHooks?.load()
     await this.deps.deleted?.load()
@@ -1801,6 +1839,8 @@ export class SessionManager {
       issue: record.issue ? sessionIssue(record.issue) : null,
       prFlow: record.prFlow ? this.prFlowSummary(record.id, record.prFlow) : null,
       board: this.boardOf(record),
+      ...(record.manager ? { manager: this.manager.managerSummary(record) } : {}),
+      ...(record.worker ? { worker: this.manager.workerSummary(record) } : {}),
       ...(record.movedTo ? { movedTo: { ...record.movedTo } } : {}),
       ...(record.worktree
         ? { worktree: this.worktreeSummary(record.worktree, this.portsOf(record)) }
@@ -1906,6 +1946,8 @@ export class SessionManager {
     this.progressChanged()
     if (live?.prepared) this.deps.events.summary(summary, [live.prepared.portId])
     else this.deps.events.summary(summary)
+    const managerId = (live?.record ?? this.records.get(sessionId))?.worker?.managerId
+    if (managerId && managerId !== sessionId) this.touch(managerId)
   }
 
   private updateBadge(): void {
@@ -4314,6 +4356,7 @@ export class SessionManager {
       routineScope: null,
       routineTurnStarted: false,
       routineTurnEnded: false,
+      goesOn: false,
       startedMode: null,
       idleSince: null,
       hiddenSince: this.inFront(record.id) ? null : this.now(),
@@ -4382,6 +4425,7 @@ export class SessionManager {
         )
       : null
     const provider = this.providerOf(record)
+    const readOnly = this.manager.readOnly(sessionId) !== null
     const sandbox = this.sessionSandbox(record)
     // Huli: a container reaches none of the computer's programs, so neither MCP servers, skills
     // nor plugins from the computer go in.
@@ -4391,6 +4435,7 @@ export class SessionManager {
         ? []
         : [...own, ...this.libraryServers(sessionId, record, runtime, own)],
       ...(provider ? { provider } : {}),
+      ...(readOnly ? { readOnly: true } : {}),
       ...(sandbox ? { sandbox } : {}),
       ...(contained ? {} : skills),
       ...(projectMcp ? { projectMcp } : {}),
@@ -4511,6 +4556,10 @@ export class SessionManager {
     }
     const next = choice.tier === 'off' ? undefined : choice
     if (next) this.assertSandbox(record.agentId, next)
+    // Huli: a manager's agent dispatches through Kite's tools, which a container's never gets.
+    if (record.manager && next?.tier === 'container') {
+      throw new HostError('restricted', t('manager.contained'))
+    }
     const before = record.sandbox
     if (!record.sandboxUnknown && (before && next ? sameSandbox(before, next) : before === next)) {
       return
@@ -4891,6 +4940,14 @@ export class SessionManager {
       output.patches.some((patch) => compacted(live.thread, patch))
     ) {
       delete live.record.memorySentTo
+      this.persist(live)
+    }
+    if (
+      !live.replaying &&
+      (live.record.manager?.sentTo !== undefined || live.record.worker?.sentTo !== undefined) &&
+      output.patches.some((patch) => compacted(live.thread, patch))
+    ) {
+      this.manager.forget(live.id)
       this.persist(live)
     }
     for (const effect of output.effects) this.applyEffect(live, effect)
@@ -5511,6 +5568,8 @@ export class SessionManager {
       group?: StoredGroup
       /** Huli: the GitHub issue it is started for, by its canonical URL. */
       issue?: string
+      /** Huli: a manager session (总管模式) with these choices. */
+      manager?: ManagerChoices
     },
     portId?: string,
   ): Promise<SessionSummary> {
@@ -5528,7 +5587,7 @@ export class SessionManager {
     // Before a prepared session is taken over, so a refused prompt leaves it prepared.
     const prompt = params.prompt && this.hydrate(params.prompt)
     // A prepared session's agent already works in the project's folder, so a worktree starts anew.
-    if (params.preparedId !== undefined && params.worktree === undefined) {
+    if (params.preparedId !== undefined && params.worktree === undefined && !params.manager) {
       const adopted = await this.adopt({
         agentId: params.agentId,
         preparedId: params.preparedId,
@@ -5607,7 +5666,17 @@ export class SessionManager {
       ...(ports ? { ports: { ...ports } } : {}),
     }
     if (params.startedBy !== undefined) record.startedBy = params.startedBy
-    const options = params.options ?? {}
+    const options = { ...params.options }
+    if (params.manager) {
+      const readOnly = readOnlyModeOf(params.agentId)
+      if (params.parentId !== undefined || !readOnly) {
+        throw invalidParams(t('manager.unsupported'))
+      }
+      // Huli: a container's agent gets none of Kite's tools, so it could dispatch nothing.
+      if (sandbox?.tier === 'container') throw invalidParams(t('manager.contained'))
+      record.manager = newManager(params.manager, now)
+      options[readOnly.option] = readOnly.mode
+    }
     const live = this.makeLive(record, false, 'starting')
     live.unread = false
     live.used = true
@@ -6540,7 +6609,10 @@ export class SessionManager {
     const own = config.find((option) => option.id === optionId)?.value
     const agentMode =
       startModeIn(this.deps.settings(), agentId) ?? (typeof own === 'string' ? own : '')
-    hold.ceiling = startedCeiling(hold.starter, harness, agentMode)
+    hold.ceiling =
+      hold.roster && hold.wanted !== null
+        ? (Math.min(modeRank(harness, hold.wanted) ?? 1, STARTED_MAX) as ModeRank)
+        : startedCeiling(hold.starter, harness, agentMode)
     live.startValues[optionId] = startedMode(harness, hold.wanted ?? agentMode, hold.ceiling)
   }
 
@@ -8914,6 +8986,16 @@ export class SessionManager {
     // Whatever started this turn, a message of the user's or the plan's reset, takes over.
     if (live.record.limitPause) this.setLimitPause(live.record, null)
     this.stalls.turnStarted(live.id)
+    const goesOn = live.goesOn
+    live.goesOn = false
+    if (live.record.manager || live.record.worker) {
+      const entry = entryId === null ? undefined : live.thread.byId[entryId]
+      const typed =
+        entry?.kind === 'user' && !entry.from && !goesOn
+          ? entry.content.flatMap((item) => (item.type === 'text' ? [item.text] : [])).join(' ')
+          : null
+      this.manager.turnStarted(live.id, typed)
+    }
     this.update(live, {
       status: 'running',
       turnStartedAt: now,
@@ -9397,13 +9479,18 @@ export class SessionManager {
         ? await this.withCarried(live, connection, carry, resolved.wire)
         : resolved.wire
       // A slash command must open the prompt to be one, so what goes ahead waits for the next.
-      const ahead = opensWithCommand(resolved.wire) ? null : await this.aheadText(live, connection)
+      const command = opensWithCommand(resolved.wire)
+      const ahead = command ? null : await this.aheadText(live, connection)
       if (turn.ended) return
+      // Huli: manager mode's block, the manager's or a worker's persona, after Kettu's own.
+      const role = command ? null : this.roleAhead(live)
       let wire = carried
-      if (ahead) {
-        live.record.memorySentTo = live.record.acpSessionId
+      if (ahead) live.record.memorySentTo = live.record.acpSessionId
+      const parts = [ahead, role?.text ?? null].filter((part): part is string => part !== null)
+      if (role) role.sent()
+      if (parts.length > 0) {
         this.persist(live)
-        wire = [{ type: 'text', text: `${ahead}\n\n` }, ...carried]
+        wire = [{ type: 'text', text: `${parts.join('\n\n')}\n\n` }, ...carried]
       }
       const sending = connection.prompt(live.record.acpSessionId, wire).finally(() => {
         if (live.unansweredCancel === turn) live.unansweredCancel = null
@@ -9468,6 +9555,7 @@ export class SessionManager {
     this.deps.mcp?.turnEnded(live.id)
     this.deps.diagnostics.turnEnded(live.record.agentId, [live.id, live.record.acpSessionId])
     this.reportTurn(live, turn, stopReason)
+    this.manager.turnEnded(live.id, stopReason)
     this.closeOpenEntries(live)
     this.clearPermissions(live, 'cancelled', true)
     this.stalls.turnEnded(live.id)
@@ -9547,6 +9635,13 @@ export class SessionManager {
         tokens: addTokenTotals(usage?.tokens ?? null, turnTokens),
         ...(cache ? { cache } : {}),
       }
+    }
+    if (turnTokens && (live.record.manager || live.record.worker)) {
+      this.manager.used(
+        live.id,
+        turnTokens.total,
+        turnCost(modelOf(live.thread.session.config), turnTokens),
+      )
     }
     if (turnEntryId && this.deps.usage) {
       this.deps.usage.record(
@@ -9826,6 +9921,8 @@ export class SessionManager {
       !turn.cancelRequested &&
       agentAddedNothing(live.thread, turn.entryId)
     if (givenBack) turn.attachments = []
+    // Huli: a worker stopped at its limit for good is no failure to its manager.
+    if (planLimit && !pauses && !turn.cancelRequested) this.manager.limitStopped(live.id)
     this.finishTurn(live, turn, null)
     const now = this.now()
     if (authRequired) {
@@ -10223,6 +10320,8 @@ export class SessionManager {
       this.touch(live.id)
       return
     }
+    // Huli: a manager or worker hears of this turn as Kite's, never as one the user typed.
+    live.goesOn = true
     if (kind === 'resend' && message) {
       this.startTurn(live, message.content, this.now(), message.entryId)
       return
@@ -11177,6 +11276,48 @@ export class SessionManager {
   }
 
   /**
+   * Huli: manager mode's guard, before anything else answers: a manager, a reviewer or planner
+   * worker, and their subagents run what only reads without asking and are refused what changes
+   * things, with the reason their agent reads; the rest asks the user as before.
+   */
+  private readOnlyAnswer(
+    live: Live,
+    request: PermissionRequest,
+    risk: PermissionRisk | null,
+  ): PermissionAnswer | null {
+    const root = live.record.origin === 'subagent' ? (this.rootOf(live) ?? live) : live
+    const role = this.manager.readOnly(root.id)
+    if (!role) return null
+    if (request.plan !== undefined || request.elicitation || request.questions) return null
+    if (request.nonBlocking) return null
+    const entry = live.thread.byId[request.toolEntryId]
+    if (entry?.kind === 'tool' && entry.question !== undefined) return null
+    const decision = readOnlyDecision(risk, entry?.kind === 'tool' ? entry.toolKind : null)
+    if (decision === 'ask') return null
+    const kind = decision === 'allow' ? 'allow_once' : 'reject_once'
+    const option = request.options.find((candidate) => candidate.kind === kind)
+    if (!option) return null
+    this.emit(live, [
+      {
+        op: 'entry.update',
+        id: request.toolEntryId,
+        changes: {
+          permission: null,
+          permissionResult: {
+            optionId: option.id,
+            kind: option.kind,
+            by: 'readonly',
+            ...(risk ? { risk } : {}),
+          },
+        },
+      },
+    ])
+    this.touch(live.id)
+    if (decision === 'allow') return { optionId: option.id }
+    return { optionId: option.id, note: readOnlyRefusal(this.managerLang(), role === 'manager') }
+  }
+
+  /**
    * Huli: the `allow_once` option the user's setting has the host answer with, or null to ask: a
    * low request, or with the edits level an edit inside the project, never in plan mode and never
    * for a routine's run, whose own scope says what it may do. An `allow_always` option is never
@@ -11264,6 +11405,8 @@ export class SessionManager {
         return Promise.resolve({ optionId })
       }
     }
+    const guarded = this.readOnlyAnswer(live, request, risk)
+    if (guarded) return Promise.resolve(guarded)
     const auto = this.autoAnswer(live, request, assessed)
     if (auto !== null && risk) {
       this.emit(live, [
@@ -11353,6 +11496,14 @@ export class SessionManager {
         // A step's request needs the user as its task does, which says so once.
         this.deps.task.current.waiting(live.id, true)
       } else {
+        if (live.record.worker && !request.questions && request.plan === undefined) {
+          this.manager.requested(
+            live.id,
+            requestId,
+            risk?.level ?? null,
+            requestText(tool, workDir(live.record)),
+          )
+        }
         const optionId = allowOnceOption(tool, request.options)
         const allow = request.options.find((option) => option.id === optionId)
         const deny = request.options.find((option) => option.kind === 'reject_once')
@@ -11616,6 +11767,9 @@ export class SessionManager {
     if (!live.connection && status !== 'closed') throw busyError(status)
     const option = live.thread.session.config.find((o) => o.id === optionId)
     if (!option) throw invalidParams(`No config option ${optionId}`)
+    if (this.manager.readOnly(sessionId) && !readOnlyMode(live.record.agentId, option, value)) {
+      throw new HostError('restricted', t('manager.modeLocked'))
+    }
     if (!isValueOf(option, value)) {
       throw invalidParams(`${String(value)} is not a choice of ${option.name}`)
     }
@@ -11840,6 +11994,7 @@ export class SessionManager {
       projectPath: record.projectPath,
       board: this.boardOf(record)?.status ?? null,
       ports: this.portsOf(record),
+      ...(record.manager ? { manager: true } : {}),
     }
   }
 
@@ -12212,6 +12367,7 @@ export class SessionManager {
    * or the host chose.
    */
   private reportTurn(live: Live, turn: Turn, stopReason: StopReason | null): void {
+    if (live.record.worker) return
     const starterId = live.record.startedBy
     if (!starterId || turn.entryId === null || this.stopped || live.closing) return
     const entry = live.thread.byId[turn.entryId]
@@ -12283,6 +12439,524 @@ export class SessionManager {
   }
 
   // Worktrees.
+
+  // Huli: manager mode (总管模式).
+
+  /** The language manager mode writes to agents in, the user's. */
+  private managerLang(): 'zh' | 'en' {
+    return currentLocale().startsWith('zh') ? 'zh' : 'en'
+  }
+
+  /** A project's manager settings: its own over the settings'. */
+  managerSettings(projectPath: string): ManagerSettings {
+    return effectiveManager(
+      this.deps.settings().manager ?? DEFAULT_MANAGER_SETTINGS,
+      this.deps.projects.manager(projectPath),
+    )
+  }
+
+  /** The block the next prompt carries ahead of it: the manager's, a worker's, or the switch off. */
+  private roleAhead(live: Live): { text: string; sent(): void } | null {
+    const { record } = live
+    if (record.managerOff) {
+      return {
+        text: managerOffBlock(this.managerLang()),
+        sent: () => {
+          delete record.managerOff
+        },
+      }
+    }
+    const block = this.manager.aheadFor(live.id, record.acpSessionId)
+    return block
+      ? { text: block.text, sent: () => this.manager.markSent(live.id, block.mark) }
+      : null
+  }
+
+  /**
+   * A worker of a manager: a sub-session started from a roster entry with its agent, model,
+   * level, profile and mode, in the manager's folder, a new worktree or the folder of the session
+   * it reviews. Its first message is the task; its persona goes ahead of it on the wire.
+   */
+  async createWorker(managerId: string, spec: WorkerSpec): Promise<string> {
+    const manager = this.recordOf(managerId)
+    const { entry } = spec
+    const { agents } = this.deps
+    if (!agents.has(entry.agentId)) throw invalidParams(`Unknown agent ${entry.agentId}`)
+    agents.assertEnabled(entry.agentId)
+    const harness = harnessOf(entry.agentId)
+    const profileId = this.profileFor(
+      entry.agentId,
+      takesProfiles(entry.agentId) ? (entry.profileId ?? undefined) : undefined,
+    )
+    // Held as any session another one starts: in the manager's sandbox, else its entry's, else the
+    // project's or the default; one its agent cannot run in fails the start, before any worktree.
+    const sandbox = this.sandboxFor(entry.agentId, manager.projectPath, entry.sandbox, managerId)
+    const known = this.deps.options?.get(entry.agentId) ?? null
+    const options: Record<string, string | boolean> = {
+      ...(this.deps.options?.rememberedOf(entry.agentId) ?? {}),
+    }
+    const modelOption = known?.config.find((option) => option.category === 'model')
+    if (entry.model && modelOption) options[modelOption.id] = entry.model
+    if (entry.effort) {
+      const level =
+        (entry.model ? known?.levels[entry.model] : undefined) ??
+        known?.config.find((option) => option.category === 'thought_level')
+      if (level) options[level.id] = entry.effort
+    }
+    Object.assign(options, startedStartMode(harness, this.startModeOf(entry.agentId)))
+    const modeId =
+      modeOptionId(entry.agentId) ??
+      known?.config.find((option) => option.category === 'mode' && option.type === 'select')?.id ??
+      null
+    const wanted = spec.readOnlyMode ?? entry.mode
+    if (modeId && wanted) options[modeId] = wanted
+    let worktree: WorktreeRecord | undefined
+    let ports: PortBlock | null = null
+    let newWorktree = false
+    if (spec.shareWith) {
+      const shared = this.recordOf(spec.shareWith).worktree
+      if (shared) worktree = { ...shared }
+    } else if (
+      spec.ownWorktree &&
+      this.deps.worktrees &&
+      !this.deps.scratch.contains(manager.projectPath)
+    ) {
+      const base = this.deps.git()?.currentBranch(workDir(manager)) ?? 'HEAD'
+      const worktrees = this.deps.worktrees
+      worktree = await this.oneWorktreeAtATime(manager.projectPath, () =>
+        worktrees.create(manager.projectPath, { base, text: spec.title }),
+      )
+      newWorktree = true
+      ports = await this.takePorts()
+    } else if (manager.worktree) {
+      worktree = { ...manager.worktree }
+    }
+    const now = this.now()
+    const record: SessionRecord = {
+      id: randomUUID(),
+      agentId: entry.agentId,
+      acpSessionId: '',
+      projectPath: manager.projectPath,
+      ...(worktree ? { worktree } : {}),
+      title: spec.title,
+      titleSource: 'agent',
+      createdAt: now,
+      updatedAt: now,
+      lastViewedAt: now,
+      parentId: managerId,
+      origin: 'user',
+      description: null,
+      branch: null,
+      startedBy: managerId,
+      ...(profileId !== undefined ? { profileId } : {}),
+      ...(sandbox ? { sandbox } : {}),
+      ...(ports ? { ports: { ...ports } } : {}),
+      worker: {
+        ...spec.worker,
+        ...(newWorktree && worktree && spec.kind === 'implement' ? { base: worktree.baseOid } : {}),
+      },
+    }
+    const live = this.makeLive(record, false, 'starting')
+    live.unread = false
+    live.used = true
+    live.startedMode = { starter: null, wanted: wanted ?? null, ceiling: null, roster: true }
+    this.manager.added(record)
+    const content: UserContent[] = [{ type: 'text', text: spec.prompt }]
+    const from: FromSession = { sessionId: managerId, title: this.toolName(managerId) }
+    live.first = { content, entryId: this.addPrompt(live, content, now, from), from }
+    this.touch(live.id)
+    if (newWorktree && worktree) this.prepareWorktree(manager.projectPath, worktree)
+    const parent = this.live.get(managerId)
+    if (parent) {
+      this.emit(parent, [startedPatch(parent.thread, live.id, () => this.nextId(parent))])
+      parent.used = true
+    }
+    try {
+      live.startValues = options
+      await this.startNew(live)
+    } catch (error) {
+      if (this.live.get(live.id) === live) {
+        this.dropLive(live)
+        this.forget(live.id)
+      }
+      if (newWorktree && worktree) {
+        this.deps.worktrees?.stop(worktree.path)
+        void this.discardWorktree(manager.projectPath, worktree)
+        if (ports) this.pendingPorts.delete(ports.first)
+      }
+      throw error
+    }
+    return live.id
+  }
+
+  /**
+   * Switches manager mode on or off between turns, or changes its choices at any time. On, the
+   * agent goes to its read-only mode and attaches again, so it lists the manager's tools and
+   * loses its edit tools; off is refused while a worker works.
+   */
+  async setManager(sessionId: string, on: boolean, choices?: ManagerChoices): Promise<void> {
+    this.assertRegistered(sessionId)
+    const record = this.recordOf(sessionId)
+    if (record.origin !== 'user' || record.parentId !== null || record.worker) {
+      throw new HostError('restricted', t('manager.notTopLevel'))
+    }
+    if (on && record.manager && choices) {
+      record.manager.autoReview = choices.autoReview
+      record.manager.approvals = choices.approvals
+      delete record.manager.sentTo
+      const live = this.live.get(sessionId)
+      if (live) this.persist(live)
+      else this.saveIndex()
+      this.touch(sessionId)
+      return
+    }
+    if (on === (record.manager !== undefined)) return
+    const readOnly = readOnlyModeOf(record.agentId)
+    if (on && !readOnly) throw new HostError('restricted', t('manager.unsupported'))
+    if (on && record.sandbox?.tier === 'container') {
+      throw new HostError('restricted', t('manager.contained'))
+    }
+    const live = this.live.get(sessionId)
+    if (live) {
+      const status = live.thread.session.status
+      if (live.turn || !SWITCHABLE.has(status) || (live.connection && this.holdReason(live))) {
+        throw new HostError('busy', t('manager.betweenTurns'))
+      }
+    }
+    if (!on) {
+      const working = this.manager.workerIds(sessionId).some((id) => {
+        const worker = this.live.get(id)
+        return worker !== undefined && (worker.turn !== null || waitingCount(worker) > 0)
+      })
+      if (working) throw new HostError('busy', t('manager.workersWorking'))
+    }
+    const settings = this.managerSettings(record.projectPath)
+    if (on) {
+      record.manager = newManager(
+        choices ?? { autoReview: settings.autoReview, approvals: settings.approvals },
+        this.now(),
+      )
+      delete record.managerOff
+    } else {
+      delete record.manager
+      record.managerOff = true
+    }
+    if (live) this.persist(live)
+    else this.saveIndex()
+    const shown = live ?? (await this.revive(sessionId))
+    this.emit(shown, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(shown),
+          severity: 'info',
+          title: t(on ? 'manager.switchedOn' : 'manager.switchedOff'),
+          after: agentEntryBefore(shown.thread),
+        },
+      },
+    ])
+    this.touch(sessionId)
+    const connected = this.live.get(sessionId)?.connection != null
+    try {
+      if (on && readOnly) await this.setConfigOption(sessionId, readOnly.option, readOnly.mode)
+      const again = this.live.get(sessionId)
+      if (connected && again?.connection) await this.attachAgain(again)
+    } catch (error) {
+      throw agentError(error)
+    }
+  }
+
+  /** Runs a manager-mode action of the user's, its refusal as the host's. */
+  private async managerAction<T>(sessionId: string, run: () => Promise<T> | T): Promise<T> {
+    this.assertRegistered(sessionId)
+    try {
+      return await run()
+    } catch (error) {
+      if (error instanceof ManagerError) {
+        throw new HostError(error.code === 'busy' ? 'busy' : 'restricted', error.message)
+      }
+      throw error
+    }
+  }
+
+  stopAllWorkers(sessionId: string): Promise<void> {
+    return this.managerAction(sessionId, () => this.manager.stopAll(sessionId))
+  }
+
+  pauseManager(sessionId: string, paused: boolean): Promise<void> {
+    return this.managerAction(sessionId, () => this.manager.setPaused(sessionId, paused))
+  }
+
+  detachWorker(sessionId: string, detached: boolean): Promise<void> {
+    return this.managerAction(sessionId, () => this.manager.setDetached(sessionId, detached))
+  }
+
+  moreManagerTurns(sessionId: string): Promise<void> {
+    return this.managerAction(sessionId, () => this.manager.moreTurns(sessionId))
+  }
+
+  /** What manager mode reaches of the sessions, for its coordinator. */
+  private managerPort(): ManagerPort {
+    const recordOf = (id: string): SessionRecord | null =>
+      this.live.get(id)?.record ?? this.records.get(id) ?? null
+    const notice = (
+      live: Live,
+      severity: 'info' | 'warning',
+      title: string,
+      description?: string,
+    ) =>
+      this.emit(live, [
+        {
+          op: 'entry.add',
+          entry: {
+            kind: 'notice',
+            id: this.nextId(live),
+            severity,
+            title,
+            ...(description ? { description } : {}),
+            after: agentEntryBefore(live.thread),
+          },
+        },
+      ])
+    return {
+      now: () => this.now(),
+      lang: () => this.managerLang(),
+      log: (level, message) => this.deps.diagnostics.log(level, message),
+      settings: (projectPath) => this.managerSettings(projectPath),
+      record: recordOf,
+      records: () => {
+        const all = new Map<string, SessionRecord>(this.records)
+        for (const live of this.live.values()) if (!live.prepared) all.set(live.id, live.record)
+        return all.values()
+      },
+      save: (id) => {
+        const live = this.live.get(id)
+        if (live) this.persist(live)
+        else if (this.records.has(id)) this.saveIndex()
+      },
+      touch: (id) => this.touch(id),
+      state: (id) => {
+        const live = this.live.get(id)
+        if (!live) return null
+        const { status, queue, queuePaused, turnStartedAt } = live.thread.session
+        return {
+          status,
+          turn: (live.turn !== null && !live.turn.ended) || status === 'starting',
+          waiting: waitingCount(live),
+          queued: queue.length,
+          queuePaused,
+          limitPaused: live.record.limitPause !== undefined,
+          turnStartedAt,
+        }
+      },
+      folder: (id) => {
+        const record = recordOf(id)
+        return record ? workDir(record) : ''
+      },
+      folderKey: (folder) => pathKey(folder, this.deps.platform),
+      branch: (id) => {
+        const record = recordOf(id)
+        if (!record) return null
+        return record.worktree?.branch ?? this.deps.git()?.currentBranch(workDir(record)) ?? null
+      },
+      lastReply: (id) => this.lastReply(id),
+      lastError: (id) => this.live.get(id)?.thread.session.error?.message ?? null,
+      turnFiles: (id) => {
+        const live = this.live.get(id)
+        if (!live) return []
+        const root = workDir(live.record)
+        return changedPaths(live.thread).map((file) => {
+          const relative = path.relative(root, file)
+          return relative.startsWith('..') || path.isAbsolute(relative) ? file : relative
+        })
+      },
+      head: async (folder) => (await this.deps.managerGit?.head(folder)) ?? null,
+      numstat: async (folder, base) =>
+        (await this.deps.managerGit?.changesSince(folder, base)) ?? null,
+      agent: (agentId) => {
+        if (!this.deps.agents.has(agentId) || this.deps.agents.isDisabled(agentId)) {
+          return { name: agentId, ready: false, reason: 'its agent is not on this computer' }
+        }
+        const status = toolAgentStatus(this.deps.agents.status(agentId))
+        const name = this.deps.agents.name(agentId)
+        return {
+          name,
+          ready: status === 'ready',
+          reason:
+            status === 'needs_sign_in'
+              ? `${name} needs the user to sign in`
+              : status === 'ready'
+                ? null
+                : `${name} is ${status ?? 'turned off'}`,
+        }
+      },
+      runs: (entry) => {
+        const name = this.deps.agents.has(entry.agentId)
+          ? this.deps.agents.name(entry.agentId)
+          : entry.agentId
+        if (!entry.model) return name
+        const model = this.deps.options
+          ?.get(entry.agentId)
+          ?.config.find((option) => option.category === 'model')
+          ?.choices?.find((choice) => choice.value === entry.model)?.name
+        return `${name} · ${model ?? entry.model}`
+      },
+      readOnlyMode: (agentId) => readOnlyModeOf(agentId)?.mode ?? null,
+      tools: (id) => {
+        const live = this.live.get(id)
+        return live ? !this.contained(live) : recordOf(id)?.sandbox?.tier !== 'container'
+      },
+      toolsFor: (managerId, entry) => {
+        const manager = recordOf(managerId)
+        if (!manager) return true
+        try {
+          const sandbox = this.sandboxFor(
+            entry.agentId,
+            manager.projectPath,
+            entry.sandbox,
+            managerId,
+          )
+          return sandbox?.tier !== 'container'
+        } catch {
+          // Its start fails and says why, so no prompt reaches it.
+          return true
+        }
+      },
+      createWorker: (managerId, spec) => this.createWorker(managerId, spec),
+      send: async (id, text, from) => {
+        await this.sendFromTool(id, text, from, false)
+      },
+      deliver: (managerId, itemId, text, from) => this.deliverDigest(managerId, itemId, text, from),
+      waitingDigest: (managerId, itemId) => {
+        const queue = this.live.get(managerId)?.thread.session.queue ?? recordOf(managerId)?.queue
+        return queue?.find((item) => item.id === itemId)?.from?.digest ?? null
+      },
+      cancel: (id) => this.cancel(id),
+      pauseQueue: (id) => {
+        const live = this.live.get(id)
+        if (live) this.pauseQueue(live)
+      },
+      resumeQueue: async (id) => {
+        if (!this.has(id) || this.isArchived(this.recordOf(id))) return
+        await this.resumeQueue(id)
+      },
+      notice: (id, severity, title, description) => {
+        const live = this.live.get(id)
+        if (live) {
+          notice(live, severity, title, description)
+          return
+        }
+        if (!this.has(id)) return
+        void this.revive(id)
+          .then((revived) => notice(revived, severity, title, description))
+          .catch(() => {})
+      },
+      attention: (id, title, body) => this.deps.events.attention(id, 'turn-ended', title, body),
+      pending: (id) => {
+        const live = this.live.get(id)
+        if (!live) return []
+        return [...live.permissions.values()].flatMap((pending) => {
+          if (pending.questions || pending.plan || pending.elicitation) return []
+          const entry = live.thread.byId[pending.toolEntryId]
+          const tool = entry?.kind === 'tool' ? entry : undefined
+          return [
+            {
+              requestId: pending.requestId,
+              what: requestText(tool, workDir(live.record)),
+              level: tool?.permission?.risk?.level ?? null,
+            },
+          ]
+        })
+      },
+      assess: (id, requestId) => {
+        const live = this.live.get(id)
+        const pending = live?.permissions.get(requestId)
+        const entry = pending ? live?.thread.byId[pending.toolEntryId] : undefined
+        if (!live || entry?.kind !== 'tool') return null
+        const cwd = workDir(live.record)
+        const now = assessRisk(entrySubject(entry), {
+          platform: this.deps.platform,
+          cwd,
+          roots: [...new Set([cwd, live.record.projectPath])],
+        }).level
+        const then = entry.permission?.risk?.level ?? null
+        // The stricter of what Kite judged when it asked and what it judges now.
+        if (then === 'high' || now === 'high') return 'high'
+        if (then === 'medium' || now === 'medium') return 'medium'
+        return now
+      },
+      respond: (id, requestId, allow) => {
+        const live = this.live.get(id)
+        const pending = live?.permissions.get(requestId)
+        if (!live || !pending) return false
+        const option = pending.options.find(
+          (candidate) => candidate.kind === (allow ? 'allow_once' : 'reject_once'),
+        )
+        if (!option) return false
+        this.respond(id, requestId, { optionId: option.id })
+        const entry = live.thread.byId[pending.toolEntryId]
+        if (
+          entry?.kind === 'tool' &&
+          typeof entry.permissionResult === 'object' &&
+          entry.permissionResult
+        ) {
+          this.emit(live, [
+            {
+              op: 'entry.update',
+              id: entry.id,
+              changes: { permissionResult: { ...entry.permissionResult, by: 'manager' } },
+            },
+          ])
+        }
+        return true
+      },
+      text: (key, params) =>
+        (t as (key: string, params?: Record<string, string | number>) => string)(key, params),
+    }
+  }
+
+  /**
+   * A manager's digest, in place of the one still waiting in its queue, else sent at once while it
+   * is free and not paused, else queued, paused with its queue while the manager is.
+   */
+  private async deliverDigest(
+    managerId: string,
+    itemId: string | null,
+    text: string,
+    from: FromSession,
+  ): Promise<{ itemId: string | null; merged: boolean }> {
+    if (!this.has(managerId) || this.isArchived(this.recordOf(managerId))) {
+      return { itemId: null, merged: false }
+    }
+    const live = await this.revive(managerId)
+    const content: UserContent[] = [{ type: 'text', text }]
+    const { status, queue } = live.thread.session
+    if (itemId !== null) {
+      const index = queue.findIndex((item) => item.id === itemId)
+      if (index >= 0) {
+        const next = [...queue]
+        next[index] = { ...queue[index]!, content, from }
+        this.update(live, { queue: next })
+        this.persist(live)
+        this.touch(live.id)
+        return { itemId, merged: true }
+      }
+    }
+    const paused = live.record.manager?.paused === true
+    if (!paused && canSend(status) && queue.length === 0 && !this.waitsForWorktree(live)) {
+      this.sendPrompt(live, content, from)
+      return { itemId: null, merged: false }
+    }
+    const id = randomUUID()
+    this.update(live, {
+      queue: [...queue, { id, content, at: this.now(), from }],
+      ...(paused ? { queuePaused: true } : {}),
+    })
+    this.persist(live)
+    this.touch(live.id)
+    return { itemId: id, merged: false }
+  }
 
   // Huli: the task board.
 
@@ -13069,6 +13743,7 @@ export class SessionManager {
     this.stalls.turnEnded(sessionId)
     if (record?.origin === 'routine') this.deps.routine?.current?.sessionGone(sessionId)
     if (record?.origin === 'task') this.deps.task?.current?.sessionGone(sessionId)
+    this.manager.removed(sessionId)
     if (known) this.deps.events.removed(sessionId, portIds)
   }
 
@@ -13402,7 +14077,12 @@ export class SessionManager {
     const record = this.recordOf(sessionId)
     const live = this.live.get(sessionId)
     const problems: MoveProblem[] = []
-    if (record.origin === 'subagent' || record.parentId !== null) problems.push('subagent')
+    // Huli: a manager's workers run here, and an attached worker reports to its manager here.
+    if (record.manager) problems.push('manager')
+    else if (record.worker && !record.worker.detached) problems.push('worker')
+    else if (record.origin === 'subagent' || (record.parentId !== null && !record.worker)) {
+      problems.push('subagent')
+    }
     if (live?.prepared) problems.push('prepared')
     if (this.deps.scratch.contains(record.projectPath)) problems.push('noProject')
     if (live) {
@@ -14032,6 +14712,56 @@ function replacedNotice(
     wanted: nameOf(option, wanted, cached),
     actual: nameOf(now, now.value, cached),
   }
+}
+
+/**
+ * Huli: the mode a session that only reads runs in, by harness: one that asks before any change,
+ * which manager mode's guard answers. Null for an agent manager mode cannot hold to reading.
+ */
+function readOnlyModeOf(agentId: AgentId): { option: string; mode: string } | null {
+  if (!canManage(agentId)) return null
+  switch (harnessOf(agentId)) {
+    case 'claude-code':
+      return { option: CLAUDE_OPTION_IDS.mode, mode: 'default' }
+    case 'codex':
+      return { option: CODEX_MODE_ID, mode: 'read-only' }
+    case 'deepseek':
+      return { option: DSH_CONFIG.mode, mode: 'read-only' }
+    case 'antigravity':
+      return { option: AGY_MODE_OPTION, mode: 'default' }
+    case 'fake-agent':
+      return { option: 'mode', mode: 'ask' }
+    default:
+      return null
+  }
+}
+
+/**
+ * Huli: whether a value of an option leaves a read-only session reading: anything but its mode,
+ * and of its mode the read-only one or another that asks before every change.
+ */
+function readOnlyMode(agentId: AgentId, option: ConfigOption, value: string | boolean): boolean {
+  const readOnly = readOnlyModeOf(agentId)
+  const isMode =
+    option.id === (modeOptionId(agentId) ?? readOnly?.option) || option.category === 'mode'
+  if (!isMode) return true
+  if (typeof value !== 'string') return false
+  if (value === readOnly?.mode) return true
+  const harness = harnessOf(agentId)
+  return isRanked(harness) && modeRank(harness, value) === 1
+}
+
+/** Huli: what a turn's tokens cost in USD at its model's price; null for a model without one. */
+function turnCost(model: string | null, tokens: TokenTotals): number | null {
+  if (!model) return null
+  const price = priceFor(normalizeModel(model))
+  if (!price) return null
+  return (
+    tokens.input * price.input +
+    tokens.output * price.output +
+    (tokens.cacheRead ?? 0) * price.cacheRead +
+    (tokens.cacheWrite ?? 0) * price.cacheWrite
+  )
 }
 
 /** The id of the permission mode option of a Claude Code or Codex agent; null for any other. */

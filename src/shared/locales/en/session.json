@@ -230,7 +230,11 @@
       "autoApproved": "Approved automatically · {{level}}",
       "cancelled": "Cancelled",
       "withdrawn": "No longer needed",
-      "onDevice": "{{answer}} · {{device}}"
+      "onDevice": "{{answer}} · {{device}}",
+      "readOnlyAllowed": "Manager mode · read-only, allowed by itself",
+      "readOnlyDenied": "Manager mode · changes nothing, denied",
+      "managerAllowed": "Allowed by the manager · low risk",
+      "managerDenied": "Denied by the manager · low risk"
     },
     "risk": {
       "low": "Low risk",
@@ -1864,6 +1868,140 @@
       "done_other": "Archived the other {{count}} runs."
     }
   },
+  "manager": {
+    "stopAll": "Stop all",
+    "chip": {
+      "label": "Manager mode",
+      "on": "Manager mode",
+      "off": "Manager",
+      "title": "Manager mode",
+      "lead": "The manager splits the work, dispatches it and checks it, never changing files itself; you talk only to it.",
+      "cannot": "This agent cannot be held to reading, so it cannot be the manager. Pick another agent.",
+      "workers": "Workers",
+      "editRoster": "Edit roster",
+      "noWorkers": "The roster is empty. Add workers in Settings › Manager mode first.",
+      "autoReview": "Automatic review",
+      "autoReviewHint": "Finished code goes to {{name}}, at most {{count}} rounds",
+      "noReviewer": "The roster has no default reviewer",
+      "approvals": "The manager may allow low-risk requests",
+      "limits": "At most {{concurrent}} workers at once · {{turns}} worker turns per task"
+    },
+    "approvals": {
+      "user": "Only I answer",
+      "low": "The manager answers low risk",
+      "userHint": "Every worker's request waits for you",
+      "lowHint": "The manager answers what Kite rates low; medium and high still wait for you"
+    },
+    "pane": {
+      "title": "Workers",
+      "turns": "Turns {{turns}}/{{max}}",
+      "notManager": "This is not a manager session",
+      "notManagerText": "Switch manager mode on in the session menu, and its workers show here.",
+      "empty": "No workers yet",
+      "emptyText": "Tell the manager what to do and it hands the work to the roster.",
+      "answers": "Requests the manager answered",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "held_one": "{{count}} dispatch waits for a slot",
+      "held_other": "{{count}} dispatches wait for a slot",
+      "moreTurns": "Give 10 more turns",
+      "pause": "Pause",
+      "resume": "Resume"
+    },
+    "usage": {
+      "tokens_one": "{{tokens}} token",
+      "tokens_other": "{{tokens}} tokens",
+      "cost": "about {{cost}}",
+      "costSome": "about {{cost}} (some models unpriced)"
+    },
+    "state": {
+      "stopped": "Everything stopped. Send the manager a message to go on.",
+      "paused": "Paused: workers stop after their current turn, and reports wait until you resume.",
+      "spent": "This task's worker turns are spent; the manager will ask you whether to go on.",
+      "tokens": "This task's token budget is spent; the manager will ask you whether to go on.",
+      "pending": "The manager failed; a report waits in its queue. Retry the manager to send it.",
+      "autoReviewOn": "Automatic review on",
+      "autoReviewOff": "Automatic review off",
+      "takenOver": "Taken over"
+    },
+    "loop": {
+      "reviewing": "In review · round {{round}}",
+      "fixing": "Fixing review findings · round {{round}}",
+      "approved": "Review approved (round {{round}})",
+      "outOfRounds": "Not approved within the round limit",
+      "waitingFix": "Waiting for the fix · round {{round}}"
+    },
+    "role": {
+      "implement": "code",
+      "review": "review",
+      "plan": "planning",
+      "other": "odd jobs"
+    },
+    "worker": {
+      "starting": "Starting",
+      "running": "Running",
+      "waiting": "Waiting for you",
+      "limit": "At its plan limit",
+      "limitResumes": "Paused at its plan limit; goes on by itself around {{time}}.",
+      "limitStopped": "Stopped at its plan limit and does not go on by itself. Send it a message once the plan resets.",
+      "done": "Done",
+      "failed": "Failed",
+      "stopped": "Stopped",
+      "idle": "Idle",
+      "since": "since {{time}}",
+      "open": "Open",
+      "message": "Message",
+      "stop": "Stop",
+      "takeOver": "Take over",
+      "handBack": "Hand back",
+      "messagePlaceholder": "To {{name}}…",
+      "messageNote": "Waits behind its current turn; the manager hears what you said.",
+      "send": "Send"
+    },
+    "strip": {
+      "stopped": "Everything stopped",
+      "paused_one": "Paused · {{count}} worker working",
+      "paused_other": "Paused · {{count}} workers working",
+      "working_one": "{{count}} worker working",
+      "working_other": "{{count}} workers working",
+      "idle": "No worker is working",
+      "waiting_one": "{{count}} waits for you",
+      "waiting_other": "{{count}} wait for you",
+      "held_one": "{{count}} queued",
+      "held_other": "{{count}} queued",
+      "show": "Show workers",
+      "hide": "Hide workers"
+    },
+    "digest": {
+      "title": "Kite report",
+      "raw": "What the manager read",
+      "said_one": "you spoke to it once",
+      "said_other": "you spoke to it {{count}} times"
+    },
+    "status": {
+      "done": "done",
+      "blocked": "blocked",
+      "failed": "failed",
+      "needs_user": "needs your decision",
+      "stopped": "stopped",
+      "interrupted": "cut by a restart",
+      "limit": "stopped at its plan limit",
+      "approved": "review approved (round {{round}})",
+      "out_of_rounds": "not approved within the round limit",
+      "review_failed": "review gave no verdict",
+      "limit_paused": "paused at its plan limit",
+      "taken_over": "taken over by you",
+      "handed_back": "handed back to the manager",
+      "asks": "waiting for approval"
+    },
+    "menu": {
+      "title": "Manager mode",
+      "on": "On",
+      "off": "Off",
+      "switch": "This session is the manager",
+      "betweenTurns": "Switches only between turns"
+    }
+  },
   "move": {
     "title": "Move to another computer",
     "to": "Computer to move it to",
@@ -1894,6 +2032,8 @@
     "problems": {
       "busy": "The session is working. Move it once the turn is over.",
       "subagent": "A sub-session goes with its parent and cannot move alone.",
+      "manager": "A manager stays on this computer with its workers. Turn manager mode off first.",
+      "worker": "A worker reports to its manager on this computer. Take it over from the manager first.",
       "prepared": "Nothing was sent in this session yet, so there is nothing to move.",
       "noProject": "A session with No project cannot move.",
       "noGit": "The session’s folder is not in a Git repository.",

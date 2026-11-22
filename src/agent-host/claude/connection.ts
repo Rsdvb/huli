@@ -138,6 +138,9 @@ import type {
 /** Claude Code's tools that move a session into another worktree mid-session. */
 export const WORKTREE_TOOLS = ['EnterWorktree', 'ExitWorktree'] as const
 
+/** Huli: the tools a manager or a read-only worker never gets: Claude Code's file writers. */
+export const READ_ONLY_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
+
 export type LoadSdk = (entry: string) => Promise<ClaudeSdk>
 
 const CONFIG_DIR = 'CLAUDE_CONFIG_DIR'
@@ -1118,7 +1121,12 @@ export class ClaudeConnection implements AgentConnection {
       ...(allowedTools.length > 0 && !bare ? { allowedTools } : {}),
       // Kettu keeps a session in its folder: the panels, the diffs and the permission scope follow
       // that folder, and a worktree is Kettu's to make.
-      ...(bare ? {} : { disallowedTools: [...WORKTREE_TOOLS] }),
+      // Huli: a session manager mode holds to reading never sees the tools that write files.
+      ...(bare
+        ? {}
+        : {
+            disallowedTools: [...WORKTREE_TOOLS, ...(options.readOnly ? READ_ONLY_TOOLS : [])],
+          }),
       permissionMode: mode,
       allowDangerouslySkipPermissions: allowBypass,
       canUseTool: (name, toolInput, permission) =>
@@ -2232,7 +2240,7 @@ export class ClaudeConnection implements AgentConnection {
     const optionId = picked?.optionId ?? null
     const result = plan
       ? planResult(picked, input, permission)
-      : permissionResult(optionId, input, permission)
+      : permissionResult(optionId, input, permission, picked?.note)
     if (result.behavior === 'allow') {
       target.apply(session.mapper.toolStatus(target.context(), permission.toolUseID, 'in_progress'))
       const mode = optionId ? answeredMode(optionId) : null

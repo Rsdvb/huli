@@ -195,6 +195,7 @@ import { STEP_HARNESSES } from './workflow/picks'
 import { createTaskGit } from './workflow/git'
 import { createGroupGit } from './groups/git'
 import { SessionGroups } from './groups/groups'
+import { managerGit } from './manager/git'
 import { GithubFlow } from './github-flow/flow'
 import { optionsOfPick, pickOfOptions, workflowAgents } from './workflow/host-agents'
 import { WorkflowLibrary, workflowsFile } from './workflow/library'
@@ -1031,7 +1032,10 @@ export class AgentHost {
         mode: (sessionId) => this.sessions.toolMode(sessionId),
         starterRank: (sessionId) => this.sessions.starterRank(sessionId),
         startMode: (agentId) => startModeIn(this.settings, agentId),
+        sendRefusal: (callerId, sessionId) =>
+          this.sessions.manager.sendRefusal(callerId, sessionId),
       },
+      manager: () => this.sessions.manager,
       log,
       appVersion: options.appVersion,
     })
@@ -1160,6 +1164,7 @@ export class AgentHost {
     this.sessions = new SessionManager({
       platform,
       agents: this.agents,
+      managerGit: managerGit(this.execRunner.exec),
       projects: this.projects,
       autoApprove: () => this.settings.autoApprove ?? 'off',
       sandbox: () => this.settings.sandbox,
@@ -3529,6 +3534,8 @@ export class AgentHost {
       'sandbox.removeImage': async () => (await this.containerSandbox()).remove(),
       'projects.setAutoApprove': ({ path, autoApprove }) =>
         projects.setAutoApprove(projects.match(path), autoApprove),
+      'projects.setManager': ({ path, manager }) =>
+        projects.setManager(projects.match(path), manager),
       'projects.worktreeSettings': ({ path }) =>
         projects.worktreeSettings(projects.match(path).path),
       'projects.setWorktreeSettings': ({ path, settings }) =>
@@ -3634,6 +3641,11 @@ export class AgentHost {
       'sessions.setAutoResume': ({ sessionId, on }) => sessions.setAutoResume(sessionId, on),
       'sessions.setBoardStatus': ({ sessionId, status }) =>
         sessions.setBoardStatus(sessionId, status),
+      'manager.set': ({ sessionId, on, choices }) => sessions.setManager(sessionId, on, choices),
+      'manager.stopAll': ({ sessionId }) => sessions.stopAllWorkers(sessionId),
+      'manager.pause': ({ sessionId, paused }) => sessions.pauseManager(sessionId, paused),
+      'manager.detach': ({ sessionId, detached }) => sessions.detachWorker(sessionId, detached),
+      'manager.moreTurns': ({ sessionId }) => sessions.moreManagerTurns(sessionId),
       'sessions.setPrFlow': ({ sessionId, url, autoMerge, watch }) =>
         this.gitCall(() =>
           sessions.setPrFlow(sessionId, url, {

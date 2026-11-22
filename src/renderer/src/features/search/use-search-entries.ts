@@ -37,6 +37,7 @@ const SECTIONS: readonly SettingsSection[] = [
   'chat-bridge',
   'backup',
   'agents',
+  'manager',
   'harnesses',
   'memory',
   'usage',

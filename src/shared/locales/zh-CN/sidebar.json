@@ -233,7 +233,9 @@
     "deleteRemovesAgentCopy_other": "也会从 {{agent}} 自己的本地历史里删除，官方客户端和应用里不会再显示。",
     "autoMerge": "检查通过后自动合并",
     "watchPr": "盯着这个 PR",
-    "issue": "议题 #{{number}}"
+    "issue": "议题 #{{number}}",
+    "manager": "总管会话",
+    "managerBadge": "总管"
   },
   "work": {
     "turn": "当前这一轮",

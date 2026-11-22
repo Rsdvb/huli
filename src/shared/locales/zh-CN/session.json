@@ -219,7 +219,11 @@
       "autoApproved": "已自动批准 · {{level}}",
       "cancelled": "已取消",
       "withdrawn": "已不再需要",
-      "onDevice": "{{answer}} · {{device}}"
+      "onDevice": "{{answer}} · {{device}}",
+      "readOnlyAllowed": "总管模式 · 只读，已自动允许",
+      "readOnlyDenied": "总管模式 · 不改文件，已拒绝",
+      "managerAllowed": "总管批准了 · 低风险",
+      "managerDenied": "总管拒绝了 · 低风险"
     },
     "risk": {
       "low": "低风险",
@@ -1790,6 +1794,133 @@
       "done_other": "已归档其他 {{count}} 个运行。"
     }
   },
+  "manager": {
+    "stopAll": "全部停止",
+    "chip": {
+      "label": "总管模式",
+      "on": "总管模式",
+      "off": "总管",
+      "title": "总管模式",
+      "lead": "总管只拆分、派活、验收，自己不改文件；你只和它说话。",
+      "cannot": "这个智能体没法限制成只读，不能当总管。换一个智能体。",
+      "workers": "工人",
+      "editRoster": "编辑名单",
+      "noWorkers": "名单是空的，先在设置 › 总管模式里添加工人。",
+      "autoReview": "自动审阅",
+      "autoReviewHint": "写代码的活做完后交给「{{name}}」，最多 {{count}} 轮",
+      "noReviewer": "名单里没有默认审阅者",
+      "approvals": "总管可以批低风险的",
+      "limits": "同时最多 {{concurrent}} 个工人 · 每个任务最多 {{turns}} 个工人回合"
+    },
+    "approvals": {
+      "user": "只能我批",
+      "low": "总管可以批低风险的",
+      "userHint": "工人要的权限都等你批",
+      "lowHint": "Kite 评为低风险的由总管批，中、高风险仍等你批"
+    },
+    "pane": {
+      "title": "工人",
+      "turns": "回合 {{turns}}/{{max}}",
+      "notManager": "这不是总管会话",
+      "notManagerText": "在会话菜单里开启总管模式后，这里会列出它派出的工人。",
+      "empty": "还没有派出工人",
+      "emptyText": "告诉总管要做什么，它会把活派给名单里的工人。",
+      "answers": "总管批过的请求",
+      "allowed": "批准",
+      "denied": "拒绝",
+      "held_other": "{{count}} 个派活在排队等空位",
+      "moreTurns": "再给 10 回合",
+      "pause": "暂停",
+      "resume": "继续"
+    },
+    "usage": {
+      "tokens_other": "{{tokens}} 令牌",
+      "cost": "约 {{cost}}",
+      "costSome": "约 {{cost}}（部分模型无价格）"
+    },
+    "state": {
+      "stopped": "已全部停止。给总管发消息即可接着做。",
+      "paused": "已暂停：工人做完当前回合就停，汇报先攒着，按「继续」再发给总管。",
+      "spent": "本任务的工人回合用完了，总管会问你是否继续。",
+      "tokens": "本任务的令牌预算用完了，总管会问你是否继续。",
+      "pending": "总管出错了，汇报在它的队列里等着。重试总管即可发出。",
+      "autoReviewOn": "自动审阅开",
+      "autoReviewOff": "自动审阅关",
+      "takenOver": "你接管了"
+    },
+    "loop": {
+      "reviewing": "审阅中 · 第 {{round}} 轮",
+      "fixing": "按审阅意见修改中 · 第 {{round}} 轮",
+      "approved": "审阅通过（第 {{round}} 轮）",
+      "outOfRounds": "审阅到轮数上限仍未通过",
+      "waitingFix": "等对方修改 · 第 {{round}} 轮"
+    },
+    "role": {
+      "implement": "写代码",
+      "review": "审阅",
+      "plan": "规划调研",
+      "other": "杂活"
+    },
+    "worker": {
+      "starting": "启动中",
+      "running": "运行中",
+      "waiting": "等你批准",
+      "limit": "到套餐上限",
+      "limitResumes": "到了套餐上限，暂停中；约 {{time}} 自己继续。",
+      "limitStopped": "到了套餐上限停下了，不会自己继续。额度恢复后给它发条消息就能接着做。",
+      "done": "完成",
+      "failed": "失败",
+      "stopped": "停止了",
+      "idle": "空闲",
+      "since": "{{time}} 开始",
+      "open": "打开",
+      "message": "发消息",
+      "stop": "停止",
+      "takeOver": "接管",
+      "handBack": "交还总管",
+      "messagePlaceholder": "发给「{{name}}」……",
+      "messageNote": "排在它当前的回合后面，总管会知道你说了什么。",
+      "send": "发送"
+    },
+    "strip": {
+      "stopped": "已全部停止",
+      "paused_other": "已暂停 · {{count}} 个工人在干活",
+      "working_other": "{{count}} 个工人在干活",
+      "idle": "没有工人在干活",
+      "waiting_other": "{{count}} 个等你批准",
+      "held_other": "{{count}} 个排队",
+      "show": "查看工人",
+      "hide": "收起工人"
+    },
+    "digest": {
+      "title": "Kite 汇报",
+      "raw": "总管看到的原文",
+      "said_other": "你插话了 {{count}} 次"
+    },
+    "status": {
+      "done": "完成",
+      "blocked": "卡住了",
+      "failed": "失败",
+      "needs_user": "需要你决定",
+      "stopped": "停止了",
+      "interrupted": "被重启打断",
+      "limit": "到套餐上限停下了",
+      "approved": "审阅通过（第 {{round}} 轮）",
+      "out_of_rounds": "审阅到轮数上限仍未通过",
+      "review_failed": "审阅没有结论",
+      "limit_paused": "达到套餐上限，暂停中",
+      "taken_over": "你接管了它",
+      "handed_back": "你把它交还给总管",
+      "asks": "在等批准"
+    },
+    "menu": {
+      "title": "总管模式",
+      "on": "开",
+      "off": "关",
+      "switch": "这个会话当总管",
+      "betweenTurns": "只能在两轮之间切换开关"
+    }
+  },
   "move": {
     "title": "搬到另一台电脑",
     "to": "搬到哪台电脑",
@@ -1820,6 +1951,8 @@
     "problems": {
       "busy": "会话正在工作。等这一轮结束再搬。",
       "subagent": "子会话跟着它的上级会话，不能单独搬。",
+      "manager": "总管和它的工人都在这台电脑上，不能单独移走。先关掉总管模式。",
+      "worker": "工人要向这台电脑上的总管汇报。先从总管那里接管它。",
       "prepared": "这个会话还没发过消息，没有可搬的内容。",
       "noProject": "没有项目的会话不能搬。",
       "noGit": "会话的文件夹不在 Git 仓库里。",

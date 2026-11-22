@@ -104,6 +104,14 @@ import {
   type MemoryToolsDeps,
 } from '../memory/tools'
 import { artifactWrite, type ArtifactWrite } from './entries'
+import type { ManagerHub } from '../manager/hub'
+import {
+  isManagerToolName,
+  MANAGER_TOOL_NAMES,
+  MANAGER_TOOLS,
+  ManagerTools,
+  WORKER_TOOLS,
+} from '../manager/tools'
 import type { ArtifactData } from './runtime/data'
 import { DATA_TOOLS, DataTools, isDataToolName } from './runtime/data-tools'
 import { ArtifactTools, isToolName, TOOLS, type ArtifactToolsDeps, type Caller } from './tools'
@@ -146,6 +154,8 @@ const TOOL_GROUPS: ReadonlyMap<string, McpToolGroup> = new Map(
       [MEMORY_TOOLS, 'memory'],
       [REPORT_TOOLS, 'reports'],
       [WORKFLOW_TOOLS, 'workflows'],
+      [MANAGER_TOOLS, 'sessions'],
+      [WORKER_TOOLS, 'sessions'],
       [SETTINGS_TOOLS, 'settings'],
       [SECRET_TOOLS, 'secrets'],
       [THEME_TOOLS, 'theme'],
@@ -225,6 +235,8 @@ export interface ArtifactServiceDeps extends ArtifactToolsDeps {
   computer?: ComputerCalls
   /** The workflow tools; without them the service lists none. */
   workflow?: WorkflowToolsDeps
+  /** Huli: manager mode's coordinator, behind the manager's and workers' tools. */
+  manager?: () => ManagerHub
   /**
    * The Marketplace tools, listed only while the host is signed in to a Kettu account with Kettu's
    * services on; without them none.
@@ -291,6 +303,7 @@ function entry(url: string, token: string, prompt: string): McpServer[] {
         GUIDE_TOOL,
         ...MEMORY_TOOL_NAMES,
         ...SESSION_TOOLS.map((tool) => tool.name),
+        ...MANAGER_TOOL_NAMES,
         ...WORKFLOW_TOOL_NAMES,
         ...MARKET_AUTO_ALLOW,
         ...SETTINGS_TOOL_NAMES,
@@ -346,6 +359,7 @@ export class ArtifactService {
   private readonly terminalTools: TerminalTools | null
   private readonly dataTools: DataTools | null
   private readonly workflowTools: WorkflowTools | null
+  private readonly managerTools: ManagerTools | null
   private sdk: Promise<Sdk> | null = null
   /** Why the last `start()` could not listen; cleared once it does. */
   private startError: string | null = null
@@ -359,6 +373,7 @@ export class ArtifactService {
     this.reportTools = new ReportTools(deps.report)
     this.memoryTools = deps.memory ? new MemoryTools(deps.memory) : null
     this.workflowTools = deps.workflow ? new WorkflowTools(deps.workflow) : null
+    this.managerTools = deps.manager ? new ManagerTools(deps.manager) : null
     this.serviceTools = deps.computer ? [...SERVICE_TOOLS, ...COMPUTER_TOOLS] : SERVICE_TOOLS
     const browserCall = deps.browserCall
     this.browserTools = new BrowserTools({
@@ -498,12 +513,21 @@ export class ArtifactService {
     return `${guidePrompt(this.guideFlags, true)}\n\n${PLAN_PROMPT}`
   }
 
-  /** What `tools/list` answers now; a step's session alone gets the step's tools. */
+  /**
+   * What `tools/list` answers now; a step's session alone gets the step's tools, a manager its
+   * own in place of start_session, a worker report_work.
+   */
   private listedTools(grant?: Grant): Tool[] {
     const sessionId = grant && 'sessionId' in grant ? grant.sessionId : null
+    const managing = this.managerTools?.listed(sessionId) ?? []
+    const service =
+      managing === MANAGER_TOOLS
+        ? this.serviceTools.filter((tool) => tool.name !== 'start_session')
+        : this.serviceTools
     return [
       guideTool(this.guideFlags),
-      ...this.serviceTools,
+      ...service,
+      ...managing,
       ...(this.memoryOn ? MEMORY_TOOLS : []),
       ...(this.marketOn ? MARKET_TOOLS : []),
       ...(this.workflowTools?.listed(sessionId) ?? []),
@@ -768,6 +792,14 @@ export class ArtifactService {
         )
       }
       if (name === GUIDE_TOOL) return callGuide(input, flags)
+      if (this.managerTools && isManagerToolName(name)) {
+        try {
+          return await this.managerTools.call(caller, name, input)
+        } catch (error) {
+          this.deps.log('error', `${name} failed: ${(error as Error).message}`)
+          throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)
+        }
+      }
       if (isSessionToolName(name)) {
         try {
           return await this.sessionTools.call(caller, name, input)

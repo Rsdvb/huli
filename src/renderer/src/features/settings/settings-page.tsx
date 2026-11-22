@@ -80,6 +80,7 @@ import { useComputerUseSection } from './computer-section'
 import { useAgentNetworkSection } from './agent-network-section'
 import { useBackupSection } from './backup-section'
 import { useChatBridgeSection } from './chat-bridge-section'
+import { useManagerSection } from './manager-section'
 import { useMemorySection } from './memory-section'
 
 const FLASH_MS = 1200
@@ -230,6 +231,7 @@ function SettingsLayout({
     client,
     [
       useAgentsSection(),
+      useManagerSection(),
       useHarnessesSection(),
       useMemorySection(),
       useUsageSection(),

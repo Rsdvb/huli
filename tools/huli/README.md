@@ -265,6 +265,55 @@ exists: the session list, its events and the phone get the groups for free.
   be (`components/BestOfRow.tsx`), opening to the runs' rows; a finished run's menu offers 保留这个.
 - The fake agent's `/write [file] [text]` makes a real edit, to compare runs with.
 
+### Manager mode (总管模式)
+
+One session is the manager: it never changes files, splits the user's task, dispatches each step
+to a worker from a roster (an agent, model, level, profile and persona), checks the reports and
+goes on, while the user talks only to it. T3 Code (MIT) was read for the idea, not copied: its
+issues with parents left unwoken and interjections that interrupted children shaped the wake.
+
+- `src/shared/manager.ts`: the roster and its checks (`managerSettingsProblem`,
+  `readManagerSettings`, a project's own `ProjectManagerSettings` over the settings'), what records
+  and summaries carry, and the pure decisions: `canDispatch` (stopped, paused, turns or tokens
+  spent, slots, one writer per folder, a writer's folder kept through its review loop),
+  `reviewNext` (the loop's next step), `readOnlyDecision` (what a reading session runs, is
+  refused or asks), `managerMayAnswer`, `restartPlan`, digest merging. Settings key `manager`;
+  a project's choice in its record (`projects.setManager`, the windows' alone).
+- `src/agent-host/manager/hub.ts` holds the rest behind a port to the session manager: a worker
+  reports once it **settles** (no turn, nothing waiting, its queue empty or paused, no plan-limit
+  pause), not at each turn's end, so an interjection, a queued follow-up or a turn the agent
+  starts itself wakes the manager once, with what the user said quoted. `worker.owed` is saved
+  when a turn starts and cleared only after the digest is in the manager's saved queue; a digest
+  still waiting there takes newer reports (one wake for several workers), and the manager is
+  never steered or interrupted by one. After a restart, owed workers go on by themselves (or the
+  manager is told, by the setting), at most a manager's slots at once and once per 10 minutes.
+  The review loop is Kite's: a finished implementation goes to the default reviewer (in the
+  implementer's folder), changes go back, and the manager hears only of the end.
+- `report_work` is checked against its schema and refused with what to fix; a turn that ends
+  without it is reminded once, then read from its reply. `start_worker`, `list_workers`,
+  `get_worker`, `stop_worker` and `answer_worker_request` are listed for a manager alone (and
+  `start_session` is not); `answer_worker_request` answers only what Kite rates low now, when the
+  user chose 总管可以批低风险的.
+- Read-only: Claude Code loses `Edit`, `Write`, `MultiEdit` and `NotebookEdit`; every harness runs
+  in its asking mode (`readOnlyModeOf`), and the guard in `requestPermission` allows reads and
+  project checks and refuses changes with a reason the agent reads. A manager's own edit that
+  still gets through pauses it.
+- Desktop: Settings › 总管模式 (`features/settings/manager-*.ts*`), New session's chip
+  (`features/manager/new-session-chip.tsx`), the 工人 pane (`workers-pane.tsx`, lazily loaded),
+  the strip above the composer, the 汇报 card and the session menu's switch. Phone: the banner,
+  the 工人 screen with approvals (`mobile/src/app/workers/[id].tsx`) and New session's switch.
+- Sandboxes: a worker starts in its manager's sandbox, else its roster entry's, else the
+  project's or the default (`createWorker`). A container gets no Kite tools, so a contained
+  worker's last reply is its report (a reviewer's verdict from a `VERDICT:` line) and it is never
+  reminded of `report_work`; a manager cannot run in a container.
+- A manager, and a worker its manager still runs, refuse to move to another computer
+  (`moveFacts`). A worker paused at its plan limit keeps its slot and folder; a limit stop that
+  does not resume reports `limit`, not a failure. A worker's secret cards are answered in the 工人
+  pane and on the phone, never by the manager.
+- The fake agent's `fake:/manager-demo`, `/work` (`--ask`, `--secret`, `--fail-once`, `--read`)
+  and `/review` drive it end to end; simulator flow `95-manager` with a roster `seed-manager.mjs`
+  writes.
+
 ### GitHub flow (议题、自动合并、盯 PR、GitHub 触发)
 
 After T3 Code's Issues page, Conductor, Claude desktop's merge when ready and JetBrains Air's

@@ -47,6 +47,8 @@ export type MoveConversationKind =
 export type MoveProblem =
   | 'busy' // a turn runs, waits for an answer, or work runs beside it
   | 'subagent' // a sub-session moves with its parent, never alone
+  | 'manager' // Huli: a manager stays with the workers it runs here
+  | 'worker' // Huli: a worker its manager here still runs
   | 'prepared' // nothing was sent yet
   | 'noProject' // a session with No project
   | 'noGit' // its folder is not in a Git repository

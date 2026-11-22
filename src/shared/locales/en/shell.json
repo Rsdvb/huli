@@ -12,7 +12,8 @@
     "sideChatNews": "New answer",
     "more": "More tools",
     "requests": "Requests",
-    "surfaces": "Terminal, browser and devices"
+    "surfaces": "Terminal, browser and devices",
+    "workers": "Workers"
   },
   "hostBanner": {
     "restarting": "Restarting the agent host. Your sessions come back by themselves.",

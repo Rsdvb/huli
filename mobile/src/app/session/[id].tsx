@@ -161,6 +161,7 @@ import { Icon } from '../../ui/session/Icon'
 import { StateView } from '../../ui/session/StateView'
 import { StatusLine } from '../../ui/session/StatusLine'
 import { SubagentBar } from '../../components/SubagentBar'
+import { ManagerBanner } from '../../components/ManagerBanner'
 import { foldsIntoRun, latestPlan, latestTurn } from '../../ui/session/turns'
 import {
   askedText,
@@ -1289,6 +1290,7 @@ function Session() {
               onOpenParent={openSession}
             />
           )}
+          {summary?.manager && <ManagerBanner summary={summary} />}
           <Composer
             key={id}
             hidden={summary?.origin === 'subagent'}

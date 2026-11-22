@@ -62,6 +62,13 @@ describe('the servers a session attaches with', () => {
       'start_session',
       'read_session_history',
       'send_message',
+      // Huli: manager mode's own tools, which check what each may do themselves.
+      'list_workers',
+      'start_worker',
+      'get_worker',
+      'stop_worker',
+      'answer_worker_request',
+      'report_work',
       'list_workflows',
       'suggest_workflow',
       'create_workflow',

@@ -35,6 +35,7 @@ const ArtifactPane = lazy(() => import('@renderer/features/artifacts/artifact-pa
 const DevicesPane = lazy(() => import('@renderer/features/devices/devices-pane'))
 const ComputerPane = lazy(() => import('@renderer/features/computer/computer-pane'))
 const RequestsPane = lazy(() => import('@renderer/features/requests/requests-pane'))
+const WorkersPane = lazy(() => import('@renderer/features/manager/workers-pane'))
 const BrowserPane = lazy(() =>
   import('@renderer/features/browser/browser-pane').then((module) => ({
     default: module.BrowserPane,
@@ -57,6 +58,7 @@ const PANES = {
   artifact: { id: 'side-panel-artifact', defaultSize: '560px', minSize: MIN_WIDTH },
   computer: { id: 'side-panel-computer', defaultSize: '540px', minSize: MIN_WIDTH },
   requests: { id: 'side-panel-requests', defaultSize: '560px', minSize: MIN_WIDTH },
+  workers: { id: 'side-panel-workers', defaultSize: '420px', minSize: MIN_WIDTH },
 } as const
 
 // As long as App Shell's columns take to glide.
@@ -283,6 +285,8 @@ export function SidePanelArea({
                     <ComputerPane panel={panel} maximized={maximized} />
                   ) : held === 'requests' ? (
                     <RequestsPane key={panel} panel={panel} maximized={maximized} />
+                  ) : held === 'workers' ? (
+                    <WorkersPane key={panel} panel={panel} maximized={maximized} />
                   ) : (
                     artifactId && (
                       <ArtifactPane

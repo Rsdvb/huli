@@ -11,6 +11,7 @@ export type SessionMenuItem =
   | 'rename'
   | 'autoResume'
   | 'board'
+  | 'manager'
   | 'autoMerge'
   | 'watchPr'
   | 'fork'
@@ -138,7 +139,14 @@ export function sessionMenuGroups(
   // top-level one sits in a column of the task board.
   const onBoard = topLevel && summary.origin === 'user' && summary.archivedAt === null
   const own: SessionMenuItem[] =
-    summary.origin === 'user' ? [...(onBoard ? (['board'] as const) : []), 'autoResume'] : []
+    summary.origin === 'user'
+      ? [
+          ...(onBoard ? (['board'] as const) : []),
+          // Huli: manager mode, for a session the user started.
+          ...(topLevel ? (['manager'] as const) : []),
+          'autoResume',
+        ]
+      : []
   // Huli: its pull request merged once its checks pass, or watched for its agent.
   const flow: SessionMenuItem[] = prFlow && topLevel ? ['autoMerge', 'watchPr'] : []
   const state: SessionMenuItem[] = running

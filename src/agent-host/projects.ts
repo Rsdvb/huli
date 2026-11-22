@@ -4,6 +4,7 @@ import { realpath as fsRealpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { Project } from '@shared/agent-host'
 import { DEFAULT_WORKTREE_SETTINGS, type ProjectWorktreeSettings } from '@shared/git'
+import type { ProjectManagerSettings } from '@shared/manager'
 import type { Platform } from '@shared/platform'
 import type { AutoApprove } from '@shared/risk'
 import { sameSandbox, type SandboxChoice } from '@shared/sandbox'
@@ -61,6 +62,7 @@ export class Projects {
         pinnedAt: record.pinnedAt ?? null,
         autoApprove: record.autoApprove ?? null,
         sandbox: record.sandbox ? { ...record.sandbox } : null,
+        ...(record.manager ? { manager: record.manager } : {}),
       }))
   }
 
@@ -147,6 +149,17 @@ export class Projects {
   /** Huli: the project's own choice of what the host allows by itself; null keeps the default. */
   autoApprove(value: string): AutoApprove | null {
     return this.find(value)?.autoApprove ?? null
+  }
+
+  /** Huli: the project's own manager-mode roster and choices; null keeps the settings'. */
+  manager(value: string): ProjectManagerSettings | null {
+    return this.find(value)?.manager ?? null
+  }
+
+  setManager(record: ProjectRecord, manager: ProjectManagerSettings | null): void {
+    if (manager === null) delete record.manager
+    else record.manager = structuredClone(manager)
+    this.changed()
   }
 
   setAutoApprove(record: ProjectRecord, level: AutoApprove | null): void {
