@@ -35,6 +35,7 @@ import { tightestLimit } from '@renderer/features/sidebar/plan-usage'
 import { useHostLabel } from '@renderer/features/sidebar/host-label'
 import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { usePane } from '@renderer/features/split/pane-context'
+import { useEntry } from '@renderer/lib/features'
 import { useCloudOff } from '@renderer/lib/cloud'
 import { backTime, basename, limitPhrase, longAgo, resetTime } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
@@ -406,7 +407,13 @@ ${parent?.projectPath ?? project?.path ?? ''}`
       )
     : undefined
   // Huli: best of N, the message on several agents at once, each in a worktree of its own.
-  const several = useBestOfN((s) => !!taskProject && !!gitStatus && !!s.on[taskProject.path])
+  const bestOfNOn = useEntry('newSession.bestOfN')
+  const managerOn = useEntry('newSession.manager')
+  // Huli: a sandbox the session would start in shows even with the feature off, never hidden.
+  const sandboxOn = useEntry('newSession.sandbox')
+  const several = useBestOfN(
+    (s) => bestOfNOn && !!taskProject && !!gitStatus && !!s.on[taskProject.path],
+  )
   const runCount = useBestOfN((s) => s.runs.length)
   const runsReady = useRunsReady(hostId)
   // The first step goes to the tray's agent, which must be one that works on steps.
@@ -860,15 +867,19 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                     onChange={(id) => setProfilePick({ key: pickKey, id })}
                   />
                 )}
-                {agentId && sandbox && !workflow && !several && (
-                  <SandboxChip
-                    agentId={agentId}
-                    hostId={hostId}
-                    value={sandbox}
-                    folder={projectPath}
-                    onChange={(choice) => setSandboxPick({ key: sandboxKey, choice })}
-                  />
-                )}
+                {agentId &&
+                  sandbox &&
+                  (sandboxOn || sandbox.tier !== 'off') &&
+                  !workflow &&
+                  !several && (
+                    <SandboxChip
+                      agentId={agentId}
+                      hostId={hostId}
+                      value={sandbox}
+                      folder={projectPath}
+                      onChange={(choice) => setSandboxPick({ key: sandboxKey, choice })}
+                    />
+                  )}
                 {taskProject && (
                   <WorkflowMenu
                     hostId={hostId}
@@ -880,7 +891,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                       requestAnimationFrame(() => editor.current?.focus())
                     }}
                     bestOfN={
-                      gitStatus
+                      gitStatus && bestOfNOn
                         ? {
                             chosen: several,
                             runs: runCount,
@@ -905,7 +916,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                 ) : (
                   !inScratch && project && <BranchLabel projectPath={project.path} />
                 )}
-                {!parent && !workflow && !several && (
+                {!parent && !workflow && !several && managerOn && (
                   <ManagerChip
                     agentId={agentId}
                     projectPath={project?.path ?? null}

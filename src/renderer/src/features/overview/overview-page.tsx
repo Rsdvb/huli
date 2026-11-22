@@ -2,7 +2,7 @@
 // stopped, over one set of rows in three views to switch between.
 
 import type { ReactNode } from 'react'
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import {
   Calendar03Icon,
   InboxIcon,
@@ -13,8 +13,8 @@ import { useTranslation } from 'react-i18next'
 import { EmptyState, Icon } from '@renderer/components/affect/app-shell'
 import { SegmentedControl } from '@renderer/components/segmented-control'
 import { SettingsStyles } from '@renderer/features/routines/kit'
-import { BoardProjectFilter, BoardView } from '@renderer/features/task-board/board-view'
-import { useBoardHasCards } from '@renderer/features/task-board/use-board'
+import { anyOnBoard } from '@renderer/features/task-board/model'
+import { useEntry } from '@renderer/lib/features'
 import { basename } from '@renderer/lib/format'
 import { hostPath } from '@renderer/lib/host-paths'
 import { useSessionsStore } from '@renderer/stores/sessions'
@@ -40,6 +40,16 @@ const VIEW_ICON = {
 }
 const VIEWS: readonly OverviewView[] = ['inbox', 'flow', 'timeline', 'board']
 
+// Huli: the task board's code, drag and drop with it, loads only when its view shows.
+const BoardView = lazy(() =>
+  import('@renderer/features/task-board/board-view').then((m) => ({ default: m.BoardView })),
+)
+const BoardProjectFilter = lazy(() =>
+  import('@renderer/features/task-board/board-view').then((m) => ({
+    default: m.BoardProjectFilter,
+  })),
+)
+
 export default function OverviewPage() {
   const { t } = useTranslation('overview')
   const loaded = useSessionsStore((s) => s.loaded)
@@ -49,15 +59,19 @@ export default function OverviewPage() {
   useTaskViews(rows)
   const counts = countByState(rows)
   const shown = filter === 'all' ? rows : rows.filter((row) => row.state === filter)
-  const board = prefs.view === 'board'
-  const table = prefs.view !== 'inbox' && !board
-  const boardCards = useBoardHasCards()
+  // Huli: with the board turned off in Settings > Features, its view is not offered.
+  const boardOn = useEntry('overview.board')
+  const view: OverviewView = prefs.view === 'board' && !boardOn ? 'flow' : prefs.view
+  const views = boardOn ? VIEWS : VIEWS.filter((each) => each !== 'board')
+  const board = view === 'board'
+  const table = view !== 'inbox' && !board
+  const boardCards = useSessionsStore((s) => board && anyOnBoard(s.byId))
 
   return (
     <div className="k-scroll">
       <SettingsStyles />
       <div aria-hidden className="k-drag app-region-drag" />
-      <div className="ui-as-page k-ov" data-view={prefs.view}>
+      <div className="ui-as-page k-ov" data-view={view}>
         <header className="k-ov__head">
           <span>
             <h1 className="ui-as-page-title">{t('title')}</h1>
@@ -70,12 +84,14 @@ export default function OverviewPage() {
           </span>
           <span className="k-ov__tools app-region-no-drag">
             {board && (
-              <BoardProjectFilter
-                project={prefs.boardProject}
-                onChange={(boardProject) => setPrefs({ boardProject })}
-              />
+              <Suspense fallback={null}>
+                <BoardProjectFilter
+                  project={prefs.boardProject}
+                  onChange={(boardProject) => setPrefs({ boardProject })}
+                />
+              </Suspense>
             )}
-            {prefs.view === 'flow' && (
+            {view === 'flow' && (
               <SegmentedControl<GroupBy>
                 aria-label={t('groupBy.label')}
                 value={prefs.groupBy}
@@ -88,9 +104,9 @@ export default function OverviewPage() {
             )}
             <SegmentedControl<OverviewView>
               aria-label={t('views.label')}
-              value={prefs.view}
-              onChange={(view) => setPrefs({ view })}
-              segments={VIEWS.map((view) => ({
+              value={view}
+              onChange={(next) => setPrefs({ view: next })}
+              segments={views.map((view) => ({
                 value: view,
                 label: (
                   <span className="k-ov-view">
@@ -105,7 +121,9 @@ export default function OverviewPage() {
 
         {!loaded ? null : board ? (
           boardCards ? (
-            <BoardView project={prefs.boardProject} />
+            <Suspense fallback={null}>
+              <BoardView project={prefs.boardProject} />
+            </Suspense>
           ) : (
             <div className="k-ov-empty">
               <EmptyState bare tall title={t('board.none.title')} text={t('board.none.text')} />
@@ -144,9 +162,9 @@ export default function OverviewPage() {
                 </button>
               </div>
             )}
-            {prefs.view === 'inbox' ? (
+            {view === 'inbox' ? (
               <InboxView rows={rows} />
-            ) : prefs.view === 'flow' ? (
+            ) : view === 'flow' ? (
               <FlowTable>
                 <Groups rows={shown} by={prefs.groupBy}>
                   {(row, project) => <FlowRow key={row.key} row={row} project={project} />}

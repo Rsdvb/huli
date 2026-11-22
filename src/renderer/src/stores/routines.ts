@@ -13,6 +13,7 @@ import {
   type RunView,
   type RoutinesProblem,
 } from '@shared/routines'
+import { entryShown } from '@renderer/lib/features'
 import { errorMessage, host, hostAt, learnRoutineHost, routineHost } from '@renderer/lib/host'
 import { otherHosts, useHostsStore } from './hosts'
 
@@ -351,6 +352,8 @@ export function routinesRead(
 
 /** A connection to another host opened: its routines are read again. */
 export function routinesHostOpened(hostId: string): void {
+  // Huli: not while routines are turned off in Settings > Features.
+  if (!entryShown('page.routines')) return
   void useRoutinesStore.getState().load(hostId)
 }
 

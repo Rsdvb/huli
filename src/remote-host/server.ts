@@ -81,6 +81,7 @@ import {
   type HostRenamed,
   type Renamed,
   type Standby,
+  type FeaturesOff,
   type TerminalAccess,
   type Welcome,
 } from '@shared/remote/protocol'
@@ -193,6 +194,8 @@ export interface RemoteServerOptions {
   openAgentPort(device: PortDevice): Promise<PortChannel | null>
   /** Whether devices may use the terminal from the start; they may not when absent. */
   terminal?: boolean
+  /** Huli: the features turned off in Settings > Features from the start; none when absent. */
+  featuresOff?: readonly string[]
   /** The host's id on the Kettu relay and its relays while it uses the relay, for welcomes. */
   relay?(): HostRelay | null
   /** The relay regions, which devices that read them hear of; none without the relay. */
@@ -237,6 +240,7 @@ export class RemoteServer {
   private refusedUnreported = false
   private directAddresses: DirectAddress[] = []
   private terminalAllowed: boolean
+  private offFeatures: string[]
   private stopped = false
   private sweeper: ReturnType<typeof setInterval> | null = null
   private readonly now: () => number
@@ -252,6 +256,7 @@ export class RemoteServer {
     this.previews = new DevPreviews({ log: options.log, now: this.now })
     this.uploads = new UploadCounts(MAX_UPLOADS, options.maxUnwritten)
     this.terminalAllowed = options.terminal ?? false
+    this.offFeatures = [...(options.featuresOff ?? [])]
   }
 
   /**
@@ -300,6 +305,19 @@ export class RemoteServer {
   /** Whether devices may use the terminal: in each welcome, and sent again when it changes. */
   get terminal(): boolean {
     return this.terminalAllowed
+  }
+
+  /** Huli: the features turned off: in each welcome, and sent again when they change. */
+  get featuresOff(): string[] {
+    return [...this.offFeatures]
+  }
+
+  /** Huli: Settings > Features changed; a preview of a feature turned off closes. */
+  setFeaturesOff(off: readonly string[]): void {
+    if (JSON.stringify(off) === JSON.stringify(this.offFeatures)) return
+    this.offFeatures = [...off]
+    if (this.offFeatures.includes('devPreview')) this.previews.closeAll()
+    for (const session of this.sessions) session.featuresChanged(this.featuresOff)
   }
 
   /** The owner allowed devices the terminal or no longer does, which closes their terminals. */
@@ -1375,6 +1393,11 @@ class DeviceSession {
     if (this.live) this.send({ type: 'addresses', addresses } satisfies Addresses)
   }
 
+  /** Huli: tells the device which features are turned off now. */
+  featuresChanged(off: string[]): void {
+    if (this.live) this.send({ type: 'features', off } satisfies FeaturesOff)
+  }
+
   /** Tells the device whether it may use the terminal; once it may not, its terminals close. */
   terminalChanged(allowed: boolean): void {
     if (!this.live) return
@@ -1436,6 +1459,8 @@ class DeviceSession {
       role: this.role,
       device: { id: this.device.id, name: this.device.name },
       terminal: this.server.terminal,
+      // Absent while every feature is on, as from a host older than the switches.
+      ...(this.server.featuresOff.length > 0 ? { featuresOff: this.server.featuresOff } : {}),
       addresses: this.server.addresses,
       ...this.server.relay(),
       ...(this.token ? { resume: this.token } : {}),
@@ -1646,6 +1671,9 @@ class DeviceSession {
     }
     const fail = (code: string, message: string): void =>
       reply({ type: 'error', id, error: { code, message } })
+    if (this.server.featuresOff.includes('devPreview')) {
+      return fail('unavailable', 'Dev server previews are turned off in Settings on the computer')
+    }
     const port = (params as { port?: unknown } | null)?.port
     if (!isPreviewPort(port)) return fail('invalid_params', 'A preview names a port above 1024')
     const bind = this.connection?.local ?? null

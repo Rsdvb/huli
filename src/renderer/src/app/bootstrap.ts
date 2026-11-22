@@ -26,6 +26,7 @@ import {
   learnSessionHosts,
   sessionHost,
 } from '@renderer/lib/host'
+import { entryShown, whenEntryOn } from '@renderer/lib/features'
 import { whenHostHas } from '@renderer/lib/host-features'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { isHosted, isWeb, platform } from '@renderer/lib/platform'
@@ -243,12 +244,25 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
   }
 }
 
+let routinesWaiting = false
+
+/** Huli: routines are read only while their feature is on, or once it is (Settings > Features). */
+function loadRoutines(): Promise<void> | undefined {
+  if (entryShown('page.routines')) return useRoutinesStore.getState().load()
+  if (routinesWaiting) return
+  routinesWaiting = true
+  whenEntryOn('page.routines', () => {
+    routinesWaiting = false
+    void useRoutinesStore.getState().load()
+  })
+}
+
 /** What the shell needs before it can show a session. */
 function loadSessionState(): Promise<unknown> {
   return Promise.allSettled([
     useProjectsStore.getState().refresh(),
     useSessionsStore.getState().refresh(),
-    useRoutinesStore.getState().load(),
+    loadRoutines(),
     useTasksStore.getState().load(),
     loadAgentOptions(),
     loadFolders(),

@@ -683,6 +683,11 @@ export class BrowserViews {
     return this.picker.start(sessionId, color)
   }
 
+  /** Huli: pick mode was turned off in Settings > Features. */
+  stopPicking(): void {
+    this.picker.stopAll()
+  }
+
   async clearData(): Promise<void> {
     await this.browserSession.clearStorageData()
     await this.browserSession.clearCache()

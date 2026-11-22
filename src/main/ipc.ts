@@ -30,6 +30,7 @@ import type { RemoteStatus } from '@shared/remote/status'
 import type { BrowserBounds, BrowserOriginDecision } from '@shared/browser'
 import { isAgentId } from '@shared/agents'
 import { isControlOutcome, type ControlAgent } from '@shared/control'
+import { featureOn, type FeatureId } from '@shared/features'
 import { isAgentColor } from '@shared/settings'
 import { isComputerPermissionKind } from '@shared/computer-use'
 import type {
@@ -954,10 +955,16 @@ export function registerIpcHandlers({
     return manageSsh(id, { kind: 'uninstall', data })
   })
 
-  handle('hosts:ports', 2, (_, id, folders) =>
-    portForwards.ports(hostIdArg(id), folderArgs(folders)),
-  )
+  // Huli: a feature Settings > Features turned off is refused, whatever the window still shows.
+  const featureNeeded = (id: FeatureId): void => {
+    if (!featureOn(settings.get().features, id)) throw new Error(`"${id}" is turned off`)
+  }
+  handle('hosts:ports', 2, (_, id, folders) => {
+    featureNeeded('portForwarding')
+    return portForwards.ports(hostIdArg(id), folderArgs(folders))
+  })
   handle('hosts:forward-port', 4, (_, id, port, session, auto) => {
+    featureNeeded('portForwarding')
     if (typeof auto !== 'boolean')
       throw new Error('"hosts:forward-port" takes whether it is automatic')
     const args = forwardArgs(id, port, session)
@@ -1009,6 +1016,7 @@ export function registerIpcHandlers({
   // Huli: pick mode; the outline takes the theme's accent, which only the window knows.
   handle('browser:pick', 3, (_, id, on, color) => {
     if (typeof on !== 'boolean') throw new Error('"browser:pick" takes whether to pick')
+    if (on) featureNeeded('pickElement')
     const outline = parsePickColor(color)
     if (on && !outline) throw new Error('"browser:pick" takes the outline color as r, g and b')
     return browserViews.pick(sessionId(id), on, outline ?? { r: 0, g: 0, b: 0 })

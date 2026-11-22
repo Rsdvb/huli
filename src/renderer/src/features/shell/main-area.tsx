@@ -4,6 +4,7 @@ import { SHEET } from '@renderer/features/shell/sheet'
 import { SidePanelArea } from '@renderer/features/shell/side-panel-area'
 import { SplitView } from '@renderer/features/split/split-view'
 import { focusedPane } from '@renderer/features/split/layout'
+import { useEntry } from '@renderer/lib/features'
 import { cn } from '@renderer/lib/utils'
 import { showProjects } from '@renderer/stores/git'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -78,6 +79,19 @@ export function MainArea() {
     const folders = [paths, worktrees, further].filter(Boolean).join('\n')
     showProjects(folders ? [...new Set(folders.split('\n'))] : [])
   }, [paths, worktrees, further])
+
+  // Huli: a page whose feature Settings > Features turned off gives way to the Overview.
+  const routinesOn = useEntry('page.routines')
+  const groupOn = useEntry('page.group')
+  const issuesOn = useEntry('page.issues')
+  const pageOff =
+    ((main.kind === 'routines' || main.kind === 'routine') && !routinesOn) ||
+    (main.kind === 'group' && !groupOn) ||
+    (main.kind === 'issues' && !issuesOn)
+  useEffect(() => {
+    if (pageOff) useViewStore.setState({ main: { kind: 'overview' } })
+  }, [pageOff])
+  if (pageOff) return null
 
   if (main.kind === 'overview') {
     return (

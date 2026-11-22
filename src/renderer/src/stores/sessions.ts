@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Project, SessionSummary } from '@shared/agent-host'
 import type { TaskSummary } from '@shared/workflow'
 import type { SessionGroupRef } from '@shared/session-groups'
+import { entryShown } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
@@ -408,21 +409,23 @@ export type SidebarRow =
 
 /**
  * A group's sessions and tasks in one list, by `order` of each. Runs of one best-of-N group make
- * one row while two or more of them are listed; a run left alone is a session's row again.
+ * one row while two or more of them are listed; a run left alone is a session's row again. With
+ * `fold` off (Huli: best-of-N turned off in Settings > Features), each run is a row of its own.
  */
 export function sidebarRows(
   nodes: readonly SessionNode[],
   tasks: readonly TaskSummary[],
   order: (row: SidebarRow) => number,
+  fold = entryShown('sidebar.runGroup'),
 ): SidebarRow[] {
   const runs = new Map<string, SessionNode[]>()
   for (const node of nodes) {
-    const group = node.summary.group
+    const group = fold ? node.summary.group : undefined
     if (group) runs.set(group.id, [...(runs.get(group.id) ?? []), node])
   }
   const rows: SidebarRow[] = []
   for (const node of nodes) {
-    const group = node.summary.group
+    const group = fold ? node.summary.group : undefined
     const together = group ? runs.get(group.id) : undefined
     if (!group || !together || together.length < 2) {
       rows.push({ kind: 'session', id: node.summary.id, node })

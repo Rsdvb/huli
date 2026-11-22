@@ -20,6 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
+import { useEntry } from '@renderer/lib/features'
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { monthDay } from '@renderer/lib/format'
 import { isAway, useHostsStore } from '@renderer/stores/hosts'
@@ -92,6 +93,7 @@ export function HostPage({ id }: { id: string }) {
 
 function HostPageBody({ host, onAddAgain }: { host: HostStatus; onAddAgain: () => void }) {
   const { t } = useTranslation('settings')
+  const portsOn = useEntry('settings.hostPorts')
   const { name } = host
   const version = useHostsStore((s) => s.status?.self.version ?? null)
   const sshHost = host.ssh ? (host as HostStatus & { ssh: SshRoute }) : null
@@ -173,7 +175,7 @@ function HostPageBody({ host, onAddAgain }: { host: HostStatus; onAddAgain: () =
               : t('hosts.page.addressesNote', { name })}
           </GroupNote>
         </section>
-        {host.connection.state === 'online' && (
+        {host.connection.state === 'online' && portsOn && (
           <section aria-label={t('hosts.page.ports.label')} className="k-group">
             <GroupLabel group={{ id: 'ports', label: t('hosts.page.ports.label') }} />
             <RowGroup>

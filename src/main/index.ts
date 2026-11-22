@@ -26,6 +26,7 @@ import { RELAY_TOKENS_FEATURE, RELAY_URL, RELAY_URL_ENV, relayUrlFrom } from '@s
 import type { RemoteStatus } from '@shared/remote/status'
 import type { ComputerHold } from '@shared/computer-use'
 import type { SettingFacts } from '@shared/host-control'
+import { featureOn, featuresOff } from '@shared/features'
 import { stepZoom, type SettingsFile, type ZoomStep } from '@shared/settings'
 import { AGENTS_FOLDER, KETTU_HOME_FOLDER } from '@shared/storage'
 import { Account, NotSignedIn } from './account'
@@ -419,6 +420,7 @@ async function start(): Promise<void> {
     allowDevices: () => true,
     onHandedBack: (sessionId, ms) => hostRef.current?.deviceHandedBack(sessionId, ms),
   })
+  deviceHost.setEnabled(featureOn(settings.get().features, 'devices'))
   // Set once the sharing service exists; the host reports ready only after that, at each start.
   let reconcileSharing: (() => void) | null = null
   let sharingArtifactsChanged: (() => void) | null = null
@@ -804,6 +806,7 @@ async function start(): Promise<void> {
     devices: () => loadStoredDevices(userDataPath, (level, message) => remoteLog[level](message)),
     direct: () => effectiveDirect(settings.get(), accountInUse()),
     terminal: () => settings.get().remote.terminal,
+    featuresOff: () => featuresOff(settings.get().features),
     openPort: (device) => agentHost.connectDevice(device),
     openTerminalPort: (device) => terminalHost.connectDevice(device),
     openDevicePort: (device) => deviceHost.connectDevice(device),
@@ -1051,6 +1054,14 @@ async function start(): Promise<void> {
       agentHost.pushSettings(hostSettings(next, systemLocale))
     }
     if (changed.has('marketplace')) marketKeys.prune()
+    // Huli: what main runs for a feature Settings > Features turned off stops at once.
+    if (changed.has('features')) {
+      const { features } = next
+      if (!featureOn(features, 'portForwarding')) portForwards.stopAll()
+      if (!featureOn(features, 'pickElement')) browserViews.stopPicking()
+      deviceHost.setEnabled(featureOn(features, 'devices'))
+      remoteHost.featuresChanged()
+    }
     if (changed.has('remote')) {
       remoteHost.directChanged()
       remoteHost.terminalChanged()

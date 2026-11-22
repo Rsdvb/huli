@@ -16,6 +16,7 @@ import { shortModelName } from '../ui/session/optionText'
 import { agentLabel } from '../agentName'
 import { BOARD_STATUSES } from '@shared/session-board'
 import { BOARD_ICON, BOARD_LABEL, boardStatusOf } from '../board'
+import { entryShownOnPhone } from '../host'
 
 export interface SessionMenuContext {
   summary: SessionSummary
@@ -146,7 +147,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
       },
     ]
     // Huli: its column on the user's task board.
-    const board = boardStatusOf(summary)
+    const board = entryShownOnPhone('phone.boardMenu') ? boardStatusOf(summary) : null
     if (board) {
       own.push({
         key: 'board',

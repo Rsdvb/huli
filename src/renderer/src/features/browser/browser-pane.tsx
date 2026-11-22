@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
@@ -29,11 +29,18 @@ import { panelSession } from '@renderer/stores/view'
 import { AddressField } from './address-field'
 import { SurfaceTabs } from '@renderer/features/shell/surface-tabs'
 import { OriginBar } from './origin-bar'
-import { PickHint, PickLayer, PickToggle, PickTray } from './pick-mode'
 import { startPicking, stopPicking } from './pick'
 import { PortsButton } from '@renderer/features/ports/ports-button'
 import { openOnHost } from '@renderer/features/ports/ports'
+import { useEntry } from '@renderer/lib/features'
 import { BringSignInsOffer, SignInChip } from './sign-in-offer'
+
+// Huli: pick mode's code loads only while the feature is on (Settings > Features).
+const pickMode = () => import('./pick-mode')
+const PickHint = lazy(() => pickMode().then((m) => ({ default: m.PickHint })))
+const PickLayer = lazy(() => pickMode().then((m) => ({ default: m.PickLayer })))
+const PickToggle = lazy(() => pickMode().then((m) => ({ default: m.PickToggle })))
+const PickTray = lazy(() => pickMode().then((m) => ({ default: m.PickTray })))
 
 /**
  * The side panel's Browser pane: a session's tabs, the selected one's page drawn by main over the
@@ -50,6 +57,10 @@ export function BrowserPane({
 }) {
   const { t } = useTranslation(['browser', 'common'])
   const sessionId = panelSession(panel)
+  const pickOn = useEntry('browser.pick')
+  const portsOn = useEntry('browser.ports')
+  // The session pick mode serves, none while it is off.
+  const pickId = pickOn ? sessionId : null
   const state = useBrowserStore((s) => (sessionId ? s.bySession[sessionId] : undefined))
   const still = useBrowserStore((s) => (sessionId ? s.stills[sessionId] : undefined))
   const hidden = useBrowserStore((s) => (sessionId ? !!s.unseen[sessionId] : false))
@@ -92,7 +103,7 @@ export function BrowserPane({
   const navigate = (url: string) => {
     if (!sessionId) return
     // Huli: another host's localhost opens through a forward to it, as its agent's pages do.
-    if (hostId !== null && openOnHost(hostId, sessionId, url)) return
+    if (hostId !== null && portsOn && openOnHost(hostId, sessionId, url)) return
     void window.kettu.browser.navigate(sessionId, url)
   }
 
@@ -275,8 +286,12 @@ export function BrowserPane({
                   />
                 }
               />
-              {sessionId && <PickToggle sessionId={sessionId} disabled={agentHasPage} />}
-              {sessionId && hostId !== null && (
+              {pickId && (
+                <Suspense fallback={null}>
+                  <PickToggle sessionId={pickId} disabled={agentHasPage} />
+                </Suspense>
+              )}
+              {sessionId && hostId !== null && portsOn && (
                 <PortsButton hostId={hostId} sessionId={sessionId} />
               )}
               {state.loading && (
@@ -299,14 +314,24 @@ export function BrowserPane({
               />
             )}
             {state.notice && <Notice notice={state.notice} sessionId={sessionId} />}
-            {sessionId && <PickHint sessionId={sessionId} />}
+            {pickId && (
+              <Suspense fallback={null}>
+                <PickHint sessionId={pickId} />
+              </Suspense>
+            )}
             <div ref={page} className="kp-view">
               {still && <img src={still} alt="" aria-hidden className="kp-view__still" />}
-              {sessionId && picked && still && (
-                <PickLayer sessionId={sessionId} pick={picked} hostId={hostId} zoom={zoom} />
+              {pickId && picked && still && (
+                <Suspense fallback={null}>
+                  <PickLayer sessionId={pickId} pick={picked} hostId={hostId} zoom={zoom} />
+                </Suspense>
               )}
             </div>
-            {sessionId && <PickTray sessionId={sessionId} />}
+            {pickId && (
+              <Suspense fallback={null}>
+                <PickTray sessionId={pickId} />
+              </Suspense>
+            )}
           </>
         ) : (
           <>

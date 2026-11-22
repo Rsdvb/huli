@@ -22,6 +22,13 @@ import {
 import { Alert } from 'react-native'
 import { router } from 'expo-router'
 import type { AgentStatus, HostEvent, Project, SessionSummary } from '@shared/agent-host'
+import {
+  DEFAULT_FEATURES,
+  entryOn,
+  featuresFromOff,
+  type FeatureEntry,
+  type FeatureSettings,
+} from '@shared/features'
 import type { HostLink, LinkState } from '@shared/remote/link'
 import type { SessionFolder } from '@shared/session-folders'
 import type { KeyPair } from '@shared/remote/noise'
@@ -71,6 +78,11 @@ export interface HostData {
   down: boolean
   /** The last refresh of the lists failed or timed out; while `fromCache`, they are still old. */
   syncFailed: boolean
+  /**
+   * Huli: which optional features the computer's owner has on in Settings > Features, from the
+   * welcome and each `features` message; all on until a computer says otherwise.
+   */
+  features: FeatureSettings
 }
 
 export interface HostActions {
@@ -139,8 +151,15 @@ const store = createStore<HostData>({
   unreachable: false,
   down: false,
   syncFailed: false,
+  features: DEFAULT_FEATURES,
 })
 const subscribe = store.subscribe
+
+/** Huli: the features the computer says are off; the store changes only when they do. */
+function takeFeatures(off: readonly unknown[]): void {
+  const next = featuresFromOff(off)
+  setHost((d) => (JSON.stringify(d.features) === JSON.stringify(next) ? {} : { features: next }))
+}
 
 /** The store as it is now, for code outside React or inside callbacks. */
 export function getHost(): HostData {
@@ -244,6 +263,19 @@ export function useLinkDown(): boolean {
  */
 export function useListsStale(): boolean {
   return useHostSelector(selectStale)
+}
+
+/**
+ * Huli: whether an entry point of an optional feature shows, as the computer's Settings > Features
+ * has it; it changes only when that feature is switched.
+ */
+export function useEntryOn(entry: FeatureEntry): boolean {
+  return useHostSelector(useCallback((d: HostData) => entryOn(d.features, entry), [entry]))
+}
+
+/** The same outside React. */
+export function entryShownOnPhone(entry: FeatureEntry): boolean {
+  return entryOn(store.get().features, entry)
 }
 
 /** The active computer's id, which the caches are kept under. */
@@ -744,6 +776,7 @@ export function HostProvider(props: { children: ReactNode }) {
       if (next.kind === 'connected') {
         wasConnected = true
         const { welcome } = next
+        takeFeatures(welcome.featuresOff ?? [])
         const saved = getHost().computers.hosts.find((h) => h.id === id)
         if (saved) {
           const addresses = welcome.addresses.length > 0 ? welcome.addresses : saved.addresses
@@ -816,6 +849,9 @@ export function HostProvider(props: { children: ReactNode }) {
           break
       }
     })
+    const offFeatures = link.onMessage((message) => {
+      if (message.type === 'features' && Array.isArray(message.off)) takeFeatures(message.off)
+    })
     // Back in front, on a new network or with a notification, the computer is tried at once
     // rather than when the backoff says.
     const offWakeups = watchWakeups(wake)
@@ -823,6 +859,7 @@ export function HostProvider(props: { children: ReactNode }) {
     return () => {
       offState()
       offEvents()
+      offFeatures()
       offWakeups()
       link.stop()
     }

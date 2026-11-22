@@ -4,6 +4,7 @@
 import { create } from 'zustand'
 import { canManage, type ManagerApprovals, type ManagerChoices } from '@shared/manager'
 import type { AgentId } from '@shared/thread'
+import { entryShown } from '@renderer/lib/features'
 import { useSettingsStore } from '@renderer/stores/settings'
 
 interface ManagerDraft {
@@ -23,6 +24,7 @@ export const useManagerDraft = create<ManagerDraft>()(() => ({
 export function managerStart(agentId: AgentId, parentId: string | null): ManagerChoices | null {
   const draft = useManagerDraft.getState()
   if (!draft.on || parentId !== null || !canManage(agentId)) return null
+  if (!entryShown('newSession.manager')) return null
   const settings = useSettingsStore.getState().settings.manager
   return {
     autoReview: draft.autoReview ?? settings?.autoReview ?? true,

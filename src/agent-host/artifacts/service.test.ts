@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { MarketTools } from '../marketplace/publish-tools'
+import { FEATURES, type FeatureDef } from '@shared/features'
 import { PLAN_PROMPT } from '../plan-tool'
 import { ArtifactService, type AgentProcess, type ArtifactServiceDeps } from './service'
 
@@ -196,3 +197,120 @@ describe('the Marketplace tools', () => {
     ])
   })
 })
+
+describe('the feature switches of Settings > Features', () => {
+  /** A service whose session is a manager or a worker, with the secrets and theme tools. */
+  async function switched(features: { current: Record<string, boolean> }, role: string) {
+    const deps = {
+      log: () => {},
+      plan: {},
+      sessions: {},
+      manager: () => ({ roleOf: () => role }),
+      secrets: { call: () => Promise.reject(new Error('not in this test')) },
+      theme: { call: () => Promise.reject(new Error('not in this test')) },
+      features: () => features.current,
+    } as unknown as ArtifactServiceDeps
+    const service = new ArtifactService(deps)
+    services.push(service)
+    await service.start()
+    return service
+  }
+
+  const listed = async (service: ArtifactService) =>
+    (await rpc<{ tools: Tool[] }>(service, 'tools/list', {})).tools.map((tool) => tool.name)
+
+  /** Each feature's tools, as a session of its role lists them with everything on. */
+  async function toolsOf(feature: FeatureDef, role: string): Promise<string[]> {
+    const on = { current: {} }
+    const all = await listed(await switched(on, role))
+    const off = { current: { [feature.id]: false } }
+    const without = new Set(await listed(await switched(off, role)))
+    return all.filter((name) => !without.has(name))
+  }
+
+  it('offer every tool the registry names while its feature is on', async () => {
+    const all = new Set([
+      ...(await listed(await switched({ current: {} }, 'manager'))),
+      ...(await listed(await switched({ current: {} }, 'worker'))),
+    ])
+    for (const feature of FEATURES as readonly FeatureDef[]) {
+      for (const name of feature.tools ?? []) expect(all, `${feature.id}: ${name}`).toContain(name)
+    }
+  })
+
+  it("neither list nor answer a feature's tools while it is off, and offer them again once on", async () => {
+    const expected: Record<string, string[]> = {
+      board: ['set_board_status'],
+      manager: [
+        'list_workers',
+        'start_worker',
+        'get_worker',
+        'stop_worker',
+        'answer_worker_request',
+      ],
+      secrets: ['request_secrets'],
+      agentTheme: ['read_theme', 'set_theme_colors'],
+    }
+    for (const [id, names] of Object.entries(expected)) {
+      const feature = (FEATURES as readonly FeatureDef[]).find((each) => each.id === id)!
+      expect((await toolsOf(feature, 'manager')).sort(), id).toEqual([...names].sort())
+    }
+    const devices = (FEATURES as readonly FeatureDef[]).find((each) => each.id === 'devices')!
+    const deviceTools = await toolsOf(devices, 'manager')
+    expect(deviceTools.length).toBeGreaterThan(10)
+    expect(deviceTools.every((name) => name.startsWith('device_'))).toBe(true)
+
+    const features = { current: { manager: false, board: false } as Record<string, boolean> }
+    const service = await switched(features, 'worker')
+    const off = await listed(service)
+    expect(off).not.toContain('report_work')
+    expect(off).not.toContain('set_board_status')
+    for (const name of ['report_work', 'set_board_status']) {
+      const answer = await call(service, name, {})
+      expect(answer.error?.message).toContain('turned its feature off')
+    }
+    features.current = {}
+    const on = await listed(service)
+    expect(on).toContain('report_work')
+    expect(on).toContain('set_board_status')
+  })
+
+  it('keep start_session for a manager while manager mode is off', async () => {
+    const service = await switched({ current: { manager: false } }, 'manager')
+    expect(await listed(service)).toContain('start_session')
+    expect(await listed(await switched({ current: {} }, 'manager'))).not.toContain('start_session')
+  })
+
+  it("tell agents nothing of a feature that is off in the service's instructions", async () => {
+    const service = await switched({ current: { board: false, devices: false } }, 'manager')
+    const { instructions } = await rpc<{ instructions?: string }>(service, 'initialize', INITIALIZE)
+    expect(instructions).not.toContain('set_board_status')
+    expect(instructions).not.toContain('device_')
+    expect(service.guidePrompt(true)).not.toContain('kettu-devices')
+  })
+})
+
+/** A tool call's whole answer, its error included. */
+async function call(
+  service: ArtifactService,
+  name: string,
+  args: unknown,
+): Promise<{ result?: unknown; error?: { message: string } }> {
+  const [server] = service.servers('s1', '/repo')
+  if (!server || server.type !== 'http') throw new Error('No server')
+  const response = await fetch(server.url, {
+    method: 'POST',
+    headers: {
+      ...Object.fromEntries(server.headers.map((header) => [header.name, header.value])),
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args },
+    }),
+  })
+  return (await response.json()) as { result?: unknown; error?: { message: string } }
+}

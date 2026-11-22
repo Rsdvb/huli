@@ -25,7 +25,7 @@ import { usePaneFocused } from '@renderer/features/split/pane-context'
 import { errorCode, errorMessage, host } from '@renderer/lib/host'
 import { showFind, useFindStore } from '@renderer/stores/find'
 import { useThreadsStore } from '@renderer/stores/threads'
-import { partsRendered } from '../markdown/in-parts'
+import { revealPart } from '../markdown/in-parts'
 import { useJumpToMessage } from '../outline/use-jump'
 import type { ThreadJumps } from '../thread'
 import { clearMarks, MESSAGE_BODY, rangesOf, setMarks } from './find-marks'
@@ -237,8 +237,11 @@ export function FindInSession({
     setMarks(owner.current, others, now)
   }
 
-  /** Scrolls the first word of the message into the view, if it is not in it already. */
-  const reveal = (entryId: string): void => {
+  /**
+   * Scrolls the first word of the message into the view, if it is not in it already; in a long
+   * reply, the first in `part`, the part of it a find rendered.
+   */
+  const reveal = (entryId: string, part: Element | null): void => {
     const view = viewport.current
     const column = content.current
     if (!view || !column) return
@@ -247,7 +250,7 @@ export function FindInSession({
         child instanceof HTMLElement && child.dataset.messageId === entryId,
     )
     const range = item
-      ? [...item.querySelectorAll(MESSAGE_BODY)]
+      ? (part ? [part] : [...item.querySelectorAll(MESSAGE_BODY)])
           .flatMap((body) => rangesOf(body, words))
           .reduce<Range | undefined>(
             (first, next) =>
@@ -263,7 +266,7 @@ export function FindInSession({
       // A thread following its end would take it back there at its next change of size.
       if (pass === 0) takeOver(view)
       if (rect.height === 0) {
-        item.scrollIntoView({ block: 'start', behavior: 'instant' })
+        ;(part ?? item).scrollIntoView({ block: 'start', behavior: 'instant' })
         continue
       }
       view.scrollTo({
@@ -273,9 +276,9 @@ export function FindInSession({
     }
   }
 
-  const latest = useRef({ jumpTo, mark, reveal, matches })
+  const latest = useRef({ jumpTo, mark, reveal, matches, words })
   useEffect(() => {
-    latest.current = { jumpTo, mark, reveal, matches }
+    latest.current = { jumpTo, mark, reveal, matches, words }
   })
 
   // The outline marks the matches while the bar is open, and may ask for one of them.
@@ -311,13 +314,16 @@ export function FindInSession({
         )
         if (!live || !arrived) return
       }
-      // A long reply opened a moment ago may still be rendering its parts.
+      // A long reply renders only its parts near the view: the part with the words renders first.
       const item = [...(content.current?.children ?? [])].find(
         (child) => child instanceof HTMLElement && child.dataset.messageId === target.entryId,
       )
-      if (item) await partsRendered(item)
+      const words = latest.current.words
+      const part = item
+        ? await revealPart(item, words, (el) => rangesOf(el, words).length > 0)
+        : null
       if (!live) return
-      latest.current.reveal(target.entryId)
+      latest.current.reveal(target.entryId, part)
       latest.current.mark()
     })()
     return () => {

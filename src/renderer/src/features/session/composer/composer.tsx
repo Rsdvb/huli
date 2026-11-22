@@ -11,6 +11,7 @@ import {
   type SessionView,
   type UserContent,
 } from '@shared/thread'
+import { useEntry } from '@renderer/lib/features'
 import { ChatComposer } from '@renderer/components/affect/chat-composer'
 import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -375,8 +376,12 @@ export function Composer({
       .catch((e: unknown) => setConfigError(errorMessage(e)))
       .finally(() => setSwitchingSandbox(false))
   }
+  // Huli: with sandboxes turned off in Settings > Features, only a session that runs in one.
+  const sandboxOn = useEntry('composer.sandbox')
   const sandboxShown =
-    hostId === null && sandboxChoice !== undefined && (sandboxChoice !== null || sandboxInUse)
+    hostId === null &&
+    sandboxChoice !== undefined &&
+    ((sandboxChoice !== null && (sandboxOn || sandboxChoice.tier !== 'off')) || sandboxInUse)
   const sandboxHint = switchingSandbox
     ? ta('sandbox.switching')
     : profileIdle

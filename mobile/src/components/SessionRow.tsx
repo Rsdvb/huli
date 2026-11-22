@@ -20,6 +20,7 @@ import { OsIcon } from '../ui/OsIcon'
 import { Press } from '../ui/Press'
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow'
 import { Skeleton } from '../ui/Skeleton'
+import { useEntryOn } from '../host'
 import { Spinner } from '../ui/StepMarks'
 import { elapsedText } from '../ui/session/format'
 import { useQuarterMinute, useSecond } from '../ui/session/now'
@@ -244,7 +245,8 @@ export const SessionRow = memo(function SessionRow(props: {
   const subagents =
     props.stale && props.subagents ? { ...props.subagents, running: false } : props.subagents
   const since = running ? (s.turnStartedAt ?? null) : null
-  const board = boardStatusOf(s)
+  const boardShown = useEntryOn('phone.boardRow')
+  const board = boardShown ? boardStatusOf(s) : null
   // The avatar's badge already says it runs; the meta line keeps only what asks for the user, and
   // that a run is only as last heard of.
   const stateText = state && (state.kind !== 'live' || props.stale) ? state : null

@@ -16,7 +16,7 @@ import { BOARD_STATUSES, type BoardStatus } from '@shared/session-board'
 import { runPhase } from '@shared/session-groups'
 import type { HostLink } from '@shared/remote/link'
 import { call, sessionFolder } from '../git'
-import { useMaybeLink } from '../host'
+import { entryShownOnPhone, useMaybeLink } from '../host'
 import { isMuted, setMuted } from '../push/muted'
 import { errorText, sessionTitle } from '../sessions'
 import {
@@ -260,6 +260,7 @@ export function useSessionActions(
       ])
     }
     const keepable =
+      entryShownOnPhone('phone.bestOfRow') &&
       !!s.group &&
       s.group.kept === null &&
       s.archivedAt === null &&
@@ -313,7 +314,7 @@ export function useSessionActions(
         onPress: () => toggleMuted(s.id, !muted),
       },
     ]
-    const board = boardStatusOf(s)
+    const board = entryShownOnPhone('phone.boardMenu') ? boardStatusOf(s) : null
     const organize: MenuNode[] = [
       ...(board
         ? [

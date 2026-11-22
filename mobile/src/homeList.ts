@@ -70,6 +70,8 @@ export interface HomeInput {
   showEmptyFolders: boolean
   /** Best-of-N groups opened to their runs, by `bestOfKey`. */
   openBestOf?: ReadonlySet<string>
+  /** Huli: false while best-of-N is turned off on the computer: each run is a row of its own. */
+  foldBestOf?: boolean
 }
 
 export const placedKey = (p: Placed) => `${p.computer}\0${p.session.id}`
@@ -118,7 +120,8 @@ export function homeItems(input: HomeInput): HomeItem[] {
   const taken = new Set<string>()
   const ownWait = (p: Placed) =>
     needsYou(p.session) && !(p.session.task && input.taskIds.has(p.session.task.taskId))
-  const groups = bestOfGroups(input.sessions)
+  const groups: ReturnType<typeof bestOfGroups> =
+    input.foldBestOf === false ? new Map() : bestOfGroups(input.sessions)
   const leads = new Map<string, string>()
   const inGroup = new Set<string>()
   for (const [key, { runs, lead }] of groups) {

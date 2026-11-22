@@ -4,6 +4,7 @@ import type { IdleSessionsSettings } from './idle-release'
 import type { LanguageSetting, Locale } from './locale'
 import { DEFAULT_MANAGER_SETTINGS, type ManagerSettings } from './manager'
 import type { MarketServer, MarketSkill } from './marketplace'
+import { DEFAULT_FEATURES, type FeatureSettings } from './features'
 import type { DirectAddress } from './remote/protocol'
 import type { AutoApprove } from './risk'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from './sandbox'
@@ -169,6 +170,8 @@ export interface SettingsFile {
   // Huli: the sandbox a session of a project that keeps the default starts in, and whether a
   // sandboxed session's edits inside its project need no asking. Agents never change it.
   sandbox: SandboxSettings
+  // Huli: Settings > Features, which optional features are on; see src/shared/features.ts.
+  features: FeatureSettings
 }
 
 /**
@@ -407,6 +410,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   permissions: { autoApprove: 'off' },
   manager: DEFAULT_MANAGER_SETTINGS,
   sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
+  features: { ...DEFAULT_FEATURES },
 }
 
 /** The zoom one step in (1) or out (-1), held at the ends; 0 returns to the default. */
@@ -472,6 +476,7 @@ export interface SettingsPatch {
   permissions?: Partial<SettingsFile['permissions']>
   manager?: ManagerSettings // replaced whole
   sandbox?: Partial<SandboxSettings>
+  features?: Partial<FeatureSettings>
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
     enabled?: boolean
@@ -518,6 +523,8 @@ export interface HostSettings {
   // Huli: the sandbox default and its approvals rule; absent from a parent older than it, which
   // starts every session unsandboxed.
   sandbox?: SandboxSettings
+  // Huli: which optional features are on; absent from a parent older than it, which has all on.
+  features?: FeatureSettings
 }
 
 /** The part of the settings the terminal host receives. */

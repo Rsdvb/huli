@@ -96,8 +96,12 @@ export function allSkillFolders(): Map<string, KettuSkill> {
   for (const computer of [false, true]) {
     for (const market of [false, true]) {
       for (const suggest of [false, true]) {
-        const flags = { computer, market, suggest, memory: false }
-        for (const skill of kettuSkills(flags)) folders.set(skillFolderName(skill), skill)
+        for (const board of [false, true]) {
+          // Memory, secrets and the theme change no skill, and devices only whether it is handed.
+          const flags = { computer, market, suggest, board, memory: false, devices: true }
+          const all = { ...flags, secrets: true, theme: true }
+          for (const skill of kettuSkills(all)) folders.set(skillFolderName(skill), skill)
+        }
       }
     }
   }
@@ -119,6 +123,20 @@ export function guideText(topic: GuideTopic, flags: GuideFlags): string | null {
   return specOf(topic)?.body(flags, toolRef) ?? null
 }
 
+/** What the browser, devices, terminals and computer topics are for, as far as they are on. */
+function surfaces(flags: GuideFlags): [string, GuideTopic[]] {
+  const parts: [string, GuideTopic][] = [
+    ["Kettu's browser", 'browser'],
+    ...(flags.devices ? [['a phone device', 'devices'] as [string, GuideTopic]] : []),
+    ['a terminal', 'terminals'],
+    ...(flags.computer ? [["the user's desktop apps", 'computer'] as [string, GuideTopic]] : []),
+  ]
+  const words = parts.map(([what]) => what)
+  const what =
+    words.length > 2 ? `${words.slice(0, -1).join(', ')} or ${words.at(-1)}` : words.join(' or ')
+  return [`use ${what}`, parts.map(([, topic]) => topic)]
+}
+
 /**
  * The paragraph that tells an agent where Kettu's tools are and when to load which part, the same
  * for every session: for an agent that takes skills, by their names; else by the guide's topics.
@@ -131,12 +149,7 @@ export function guidePrompt(flags: GuideFlags, skills: boolean): string {
     ...(flags.suggest
       ? [['take on a requirement large enough for stages', ['workflows']] as [string, GuideTopic[]]]
       : []),
-    flags.computer
-      ? [
-          "use Kettu's browser, a phone device, a terminal or the user's desktop apps",
-          ['browser', 'devices', 'terminals', 'computer'],
-        ]
-      : ["use Kettu's browser, a phone device or a terminal", ['browser', 'devices', 'terminals']],
+    surfaces(flags),
     ['find or change a Kettu setting', ['settings']],
   ]
   const clauses = uses.map(([what, topics]) => `${what} (${topics.map(name).join(', ')})`)
@@ -171,8 +184,10 @@ export function serviceInstructions(flags: GuideFlags): string {
     "Sessions: start_session hands work to another Kettu session, on another of the user's agents " +
       'from list_agents when it fits, such as a review in a read-only mode. Start one when the ' +
       'user asks for a review or parallel work; after a substantial change, offer one in your ' +
-      'reply. Kettu tells you when its turn ends, so never wait for it in a loop. Topic sessions. ' +
-      "When you finish work for the user to check, set_board_status moves your session to review on the user's task board.",
+      'reply. Kettu tells you when its turn ends, so never wait for it in a loop. Topic sessions.' +
+      (flags.board
+        ? " When you finish work for the user to check, set_board_status moves your session to review on the user's task board."
+        : ''),
     'Workflows: ' +
       (flags.suggest
         ? "for a requirement large enough for stages, suggest one of the user's workflows from " +
@@ -185,8 +200,12 @@ export function serviceInstructions(flags: GuideFlags): string {
     "Browser: the browser_* tools open and check, in Kettu's browser the user watches, the web " +
       'app you work on, a local dev server or a page the user asked for; after you change a page, ' +
       'check it without being asked. Topic browser.',
-    'Devices: the device_* tools run and check a phone app on iOS simulators, Android emulators ' +
-      'and connected phones. Topic devices.',
+    ...(flags.devices
+      ? [
+          'Devices: the device_* tools run and check a phone app on iOS simulators, Android ' +
+            'emulators and connected phones. Topic devices.',
+        ]
+      : []),
     'Terminals: terminal_run runs a dev server, a long command or one that asks for a password ' +
       'in a terminal the user sees. Topic terminals.',
     ...(flags.computer
@@ -211,12 +230,20 @@ export function serviceInstructions(flags: GuideFlags): string {
     'Settings: find_settings, open_settings and change_settings find, show and change ' +
       "Kettu's own settings, only when the user asks; a change waits for the user's card unless " +
       'this session is in Full access. Topic settings.',
-    'Secrets: request_secrets asks the user for an API key, token or password in a private card; ' +
-      'never ask for one in the chat. You get only the variable names, and the result says how ' +
-      'your commands get the values; never print them.',
-    "Theme: read_theme and set_theme_colors read and change Kettu's colors, only when the user " +
-      "asks: a canvas and an accent per mode, never CSS or layout; a change waits for the user's " +
-      'card unless this session is in Full access, and every change can be undone.',
+    ...(flags.secrets
+      ? [
+          'Secrets: request_secrets asks the user for an API key, token or password in a private ' +
+            'card; never ask for one in the chat. You get only the variable names, and the ' +
+            'result says how your commands get the values; never print them.',
+        ]
+      : []),
+    ...(flags.theme
+      ? [
+          "Theme: read_theme and set_theme_colors read and change Kettu's colors, only when the " +
+            'user asks: a canvas and an accent per mode, never CSS or layout; a change waits for ' +
+            "the user's card unless this session is in Full access, and every change can be undone.",
+        ]
+      : []),
     `Problems: ${REPORT_TOOL} drafts a report for the Kettu team, only for problems with Kettu ` +
       "itself, never for bugs in the user's project, your model provider's limits or your own " +
       'mistakes; the user sends it.',
@@ -232,7 +259,9 @@ export function guideTool(flags: GuideFlags): Tool {
     description:
       "Explains when and how to use Kettu's tools, by topic: artifacts (pages, documents and " +
       'slide decks for the user), with files, canvas and runtime for their details; sessions ' +
-      '(handing work to another session or agent); workflows; browser; devices; terminals' +
+      '(handing work to another session or agent); workflows; browser' +
+      (flags.devices ? '; devices' : '') +
+      '; terminals' +
       (flags.computer ? '; computer (the user’s desktop apps)' : '') +
       (flags.market ? '; marketplace (publishing)' : '') +
       "; settings (Kettu's own settings).",

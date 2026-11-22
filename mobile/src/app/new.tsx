@@ -47,6 +47,7 @@ import { useChanges } from '../git'
 import {
   sameFields,
   useAgents,
+  useEntryOn,
   useComputerId,
   useHostSelector,
   useHostState,
@@ -131,6 +132,7 @@ export default function NewSession() {
   const [usageOpen, setUsageOpen] = useState(false)
   // Huli: the session starts as a manager (总管模式); a phone leaves workers' requests to the user.
   const [managing, setManaging] = useState(false)
+  const managerShown = useEntryOn('phone.newSessionManager')
   const [attachCount, setAttachCount] = useState(0)
   const connected = state.kind === 'connected'
 
@@ -224,7 +226,7 @@ export default function NewSession() {
   const notices = entry && agent ? startNotices(entry, picks, agent.name) : []
 
   const manager =
-    managing && !parent && agentId && canManage(agentId as AgentId)
+    managing && managerShown && !parent && agentId && canManage(agentId as AgentId)
       ? { manager: { autoReview: true, approvals: 'user' as const } }
       : {}
   const create = async (prompt: UserContent[]) => {
@@ -498,7 +500,7 @@ export default function NewSession() {
             onCountChange={setAttachCount}
             top={
               <>
-                {!parent && agentId && canManage(agentId as AgentId) ? (
+                {managerShown && !parent && agentId && canManage(agentId as AgentId) ? (
                   <Pressable
                     onPress={() => setManaging((on) => !on)}
                     accessibilityRole="switch"

@@ -103,6 +103,8 @@ export interface RemoteHostDeps {
   direct(): DirectSettings
   /** Whether devices may use the terminal now. */
   terminal(): boolean
+  /** Huli: the features turned off in Settings > Features now; none when absent. */
+  featuresOff?(): string[]
   /** A port to the agent host for a device's session, or null while it is not running. */
   openPort(device: PortDevice): MessagePortMain | null
   /**
@@ -169,6 +171,8 @@ export class RemoteHost {
   private direct: string | null = null
   /** Whether devices may use the terminal, as the running process was last told. */
   private terminal: boolean | null = null
+  /** Huli: the features turned off, as the running process was last told. */
+  private featuresOff: string | null = null
   /** Use the Kettu relay, as the running process was last told. */
   private relayOn: boolean | null = null
   /** Whether devices of the account find this computer, as the running process was last told. */
@@ -302,6 +306,14 @@ export class RemoteHost {
     const allowed = this.deps.terminal()
     if (allowed === this.terminal) return
     if (this.host?.post({ type: 'remote-host:terminal', allowed })) this.terminal = allowed
+  }
+
+  /** Huli: tells the process when Settings > Features changed; each start reads it. */
+  featuresChanged(): void {
+    const off = this.deps.featuresOff?.() ?? []
+    const sent = JSON.stringify(off)
+    if (sent === this.featuresOff) return
+    if (this.host?.post({ type: 'remote-host:features', off })) this.featuresOff = sent
   }
 
   /** Tells the process when Use the Kettu relay changed; each start reads it. */
@@ -798,6 +810,7 @@ export class RemoteHost {
       direct: this.initDirect(),
       webRoot: WEB_ROOT,
       terminal: this.initTerminal(),
+      featuresOff: this.initFeatures(),
       relay: this.initRelay(identity !== null),
       push: this.deps.pushUrl,
       waiting: this.waiting,
@@ -819,6 +832,12 @@ export class RemoteHost {
   private initTerminal(): boolean {
     this.terminal = this.deps.terminal()
     return this.terminal
+  }
+
+  private initFeatures(): string[] {
+    const off = this.deps.featuresOff?.() ?? []
+    this.featuresOff = JSON.stringify(off)
+    return off
   }
 
   private initDiscoverable(): boolean {

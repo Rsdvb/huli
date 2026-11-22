@@ -146,6 +146,11 @@ export interface Welcome {
   /** Where the device may also connect directly, the owner's own first; none while it is off. */
   addresses: DirectAddress[]
   /**
+   * Huli: the features the owner turned off in Settings > Features, by id, which the device hides
+   * too; a `features` message says when they change. Absent from an older host: all are on.
+   */
+  featuresOff?: string[]
+  /**
    * The host's id on the Kettu relay and the relays it signs in to, while it uses the relay;
    * devices paired before the relay learn it here. Older hosts send none.
    */
@@ -210,6 +215,12 @@ export interface TerminalAccess {
 export interface TerminalsRestarted {
   type: 'terminals.restarted'
   ids: string[]
+}
+
+/** Huli: the owner turned features on or off in Settings > Features; the ids of those off. */
+export interface FeaturesOff {
+  type: 'features'
+  off: string[]
 }
 
 /** The device renames itself, once welcomed. */
@@ -377,8 +388,19 @@ export function parseAddresses(value: unknown): DirectAddress[] {
  */
 export function parseWelcome(value: unknown): Welcome | null {
   if (typeof value !== 'object' || value === null) return null
-  const { type, protocol, host, features, device, terminal, addresses, relay, resume, resumed } =
-    value as Record<string, unknown>
+  const {
+    type,
+    protocol,
+    host,
+    features,
+    device,
+    terminal,
+    addresses,
+    relay,
+    resume,
+    resumed,
+    featuresOff,
+  } = value as Record<string, unknown>
   if (type !== 'welcome' || !isVersion(protocol)) return null
   if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return null
   if (typeof host !== 'object' || host === null) return null
@@ -402,6 +424,9 @@ export function parseWelcome(value: unknown): Welcome | null {
   }
   const onRelay = parseHostRelay(relay)
   if (onRelay) welcome.relay = onRelay
+  if (Array.isArray(featuresOff)) {
+    welcome.featuresOff = featuresOff.filter((id): id is string => typeof id === 'string')
+  }
   if (protocol < RESUME_VERSION) return welcome
   if (typeof resume === 'string' && TOKEN.test(resume)) welcome.resume = resume
   const request = (resumed as { request?: unknown } | null | undefined)?.request

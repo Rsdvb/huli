@@ -13,6 +13,7 @@ import type { AppShellProps, ShellNavItem } from '@renderer/components/affect/ap
 import { useOverviewCount } from '@renderer/features/overview/use-overview'
 import { strongestSignal, signalText } from '@renderer/features/routines/model'
 import { useShownRoutines } from '@renderer/features/routines/window-routines'
+import { useEntry } from '@renderer/lib/features'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { useSettingsStore } from '@renderer/stores/settings'
 import {
@@ -57,12 +58,22 @@ export function useSidebarNav(): Pick<AppShellProps, 'nav' | 'active' | 'onNavig
     return null
   })
   const routineRun = useRoutineRunShown()
-  const active = current ?? (routineRun ? 'routines' : null)
+  const routinesOn = useEntry('sidebar.routines')
+  const active = current ?? (routineRun && routinesOn ? 'routines' : null)
   const nav: ShellNavItem[] = [
     { label: labels.newSession, icon: PencilEdit02Icon, end: <NavShortcut keys="Mod+N" /> },
     { label: labels.overview, icon: KanbanIcon, count: forYou || undefined },
     { label: labels.artifacts, icon: DashboardSquare02Icon },
-    { label: labels.routines, icon: TimeScheduleIcon, end: routines.end, ariaLabel: routines.name },
+    ...(routinesOn
+      ? [
+          {
+            label: labels.routines,
+            icon: TimeScheduleIcon,
+            end: routines.end,
+            ariaLabel: routines.name,
+          },
+        ]
+      : []),
     { label: labels.marketplace, icon: Store01Icon },
     { label: labels.usage, icon: PieChartIcon, end: usageEnd },
   ]

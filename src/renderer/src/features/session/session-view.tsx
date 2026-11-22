@@ -5,6 +5,7 @@ import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { SessionSummary } from '@shared/agent-host'
 import type { AgentId } from '@shared/thread'
+import { useEntry } from '@renderer/lib/features'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
 import { SurfaceLight } from '@renderer/components/control/surface-light'
 import { Button } from '@renderer/components/ui/button'
@@ -74,6 +75,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
 }
 
 function SessionBody({ summary }: { summary: SessionSummary }) {
+  const managerStrip = useEntry('composer.managerStrip')
   const { t } = useTranslation(['session', 'common', 'control'])
   const sessionId = summary.id
   const replicaStatus = useThreadsStore((s) => s.replicas[sessionId]?.status ?? 'loading')
@@ -309,7 +311,9 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                     session.queue.length > 0 && (
                       <QueueStack session={session} onError={setQueueError} />
                     )}
-                  {summary.manager && !archived && <ManagerStrip sessionId={sessionId} />}
+                  {summary.manager && !archived && managerStrip && (
+                    <ManagerStrip sessionId={sessionId} />
+                  )}
                   <div className="ctl-labels" role="group" aria-label={t('control:label.group')}>
                     {session && (
                       <ComputerLabel
