@@ -113,6 +113,7 @@ export const FEATURES = [
     entries: ['sidebar.parked', 'sessionMenu.snooze', 'settings.autoSettle', 'phone.snooze'],
     methods: ['sessions.snooze', 'sessions.settle', 'sessions.setNeverSettle'],
   },
+  { id: 'sessionMentions', entries: ['composer.sessionMention', 'phone.sessionMention'] },
   { id: 'secrets', entries: [], toolGroups: ['secrets'] },
   { id: 'agentTheme', entries: [], toolGroups: ['theme'] },
 ] as const satisfies readonly FeatureDef[]

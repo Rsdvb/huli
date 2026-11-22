@@ -203,6 +203,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   routines: 'work',
   github: 'work',
   sessionTidy: 'work',
+  sessionMentions: 'work',
   sandbox: 'agents',
   devices: 'agents',
   secrets: 'agents',

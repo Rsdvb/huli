@@ -13,6 +13,7 @@ import { ensureFiles, openFile, useFilesStore } from '@renderer/stores/files'
 import { useBrowserStore } from '@renderer/stores/browser'
 import { useDevicesStore } from '@renderer/stores/devices'
 import { useTerminalsStore } from '@renderer/stores/terminals'
+import { useSessionsStore } from '@renderer/stores/sessions'
 import { revealSurface } from '@renderer/features/shell/open-surfaces'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { openViewer } from '@renderer/stores/viewer'
@@ -136,6 +137,7 @@ const MENTIONED: Partial<Record<ContentRef['kind'], string>> = {
   terminal: 'terminal',
   page: 'page',
   device: 'device',
+  session: 'session',
 }
 
 /** The terminals, browser tabs and devices a sent prompt referenced, as mentions name them. */
@@ -144,14 +146,16 @@ function surfacesOf(entry: ThreadEntry | undefined): MentionSurfaces {
   const terminal: MentionItem[] = []
   const page: MentionItem[] = []
   const device: MentionItem[] = []
+  const session: MentionItem[] = []
   for (const c of entry.content) {
     if (c.type !== 'ref') continue
     const { ref } = c
     if (ref.kind === 'terminal') terminal.push({ id: ref.terminalId, name: ref.name })
     if (ref.kind === 'page') page.push({ id: ref.tabId, name: ref.name })
     if (ref.kind === 'device') device.push({ id: ref.deviceId, name: ref.name })
+    if (ref.kind === 'session') session.push({ id: ref.sessionId, name: ref.name })
   }
-  return { terminal, page, device }
+  return { terminal, page, device, session }
 }
 
 /**
@@ -183,6 +187,13 @@ function useSentResolver(
       .map((d) => d.id)
       .join('\n'),
   )
+  // Huli: a referenced session reads as missing once it is deleted.
+  const sessions = useSessionsStore((s) =>
+    surfaces.session
+      .filter((x) => s.byId[x.id])
+      .map((x) => x.id)
+      .join('\n'),
+  )
   const mentions = /[@＠]/.test(text)
   useEffect(() => {
     if (projectPath && mentions) ensureFiles(projectPath)
@@ -193,14 +204,14 @@ function useSentResolver(
       files ? projectOf(files.paths, files.known) : null,
       surfaces,
     )
-    const live = new Set([terminals, pages, devices].flatMap((ids) => ids.split('\n')))
+    const live = new Set([terminals, pages, devices, sessions].flatMap((ids) => ids.split('\n')))
     return (token: string) => {
       const target = resolve(token)
       return target && isSurfaceMention(target.kind) && !live.has(target.surfaceId ?? '')
         ? { ...target, missing: true }
         : target
     }
-  }, [attachments, surfaces, files, terminals, pages, devices])
+  }, [attachments, surfaces, files, terminals, pages, devices, sessions])
 }
 
 /** Opens a sent attachment as its tile does: an image in the viewer, a file or folder itself. */

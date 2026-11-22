@@ -7,6 +7,7 @@ import {
   File01Icon,
   Folder01Icon,
   GlobalIcon,
+  BubbleChatIcon,
 } from '@hugeicons/core-free-icons'
 import { githubReferenceFromLink, type GitHubReference } from '@shared/git'
 import { SiteIconImage } from '@renderer/components/site-icon-image'
@@ -138,6 +139,8 @@ function ChipBody({ chip, missing }: { chip: Chip; missing: boolean }) {
         <Glyph icon={GlobalIcon} className="size-3.25 shrink-0 text-tertiary" />
       ) : chip.kind === 'device' ? (
         <Glyph icon={SmartPhone01Icon} className="size-3.25 shrink-0 text-tertiary" />
+      ) : chip.kind === 'session' ? (
+        <Glyph icon={BubbleChatIcon} className="size-3.25 shrink-0 text-tertiary" />
       ) : (
         <Glyph icon={File01Icon} className="size-3.25 shrink-0 text-tertiary" />
       )}

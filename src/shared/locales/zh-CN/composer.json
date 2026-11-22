@@ -328,7 +328,9 @@
     "folder": "文件夹",
     "keysMove": "↑↓ 移动",
     "keysInsert": "↵ 插入",
-    "keysFolder": "Tab 打开文件夹"
+    "keysFolder": "Tab 打开文件夹",
+    "sessions": "会话",
+    "noProject": "无项目"
   },
   "chips": {
     "pastedLink": "已粘贴为链接",

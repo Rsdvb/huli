@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Popover } from '@base-ui/react/popover'
 import { useTranslation } from 'react-i18next'
 import type { AgentId, SlashCommand } from '@shared/thread'
@@ -24,17 +24,27 @@ import { ResizeGrip } from './resize-grip'
 import { orderSlashMatches, placeCommand, slashAt } from './slash'
 import { useMentionList, type MentionList } from './use-mention-list'
 import { useBoxText, type PromptBoxState } from './use-prompt-box'
+import {
+  isSessionMention,
+  sessionMentionName,
+  useComposerDrop,
+  useSessionMentions,
+  type SessionMention,
+} from './session-mentions'
+import { SessionMentionItem } from './session-mention-item'
+import { newSessionPanel } from '@renderer/stores/view'
 
 // The box both composers share, the session's and New session's: the text with its slash and `@`
 // popovers and the attachments, kept in a draft, inside the Chat Composer's writing area. What
 // sends, and how, is each one's own.
 
-type PopoverItem = SlashCommand | MentionRow
+type PopoverItem = SlashCommand | MentionRow | SessionMention
 
 /** Why there are no commands to list yet: none reported so far, or no project chosen. */
 export type SlashNote = 'loading' | 'chooseProject'
 
-const isMentionRow = (item: PopoverItem): item is MentionRow => 'positions' in item
+const isMentionRow = (item: PopoverItem): item is MentionRow =>
+  'positions' in item && !isSessionMention(item)
 
 /** The prompt box: what shows on its top edge, the attachments, then the text and its popovers. */
 export function PromptBox({
@@ -119,6 +129,10 @@ export function PromptBox({
   if (mentionDismissed !== null && mention?.start !== mentionDismissed) setMentionDismissed(null)
   const shown = mentionShown(mention, mentionDismissed, composition)
   const mentions = useMentionList(draft, projectPath, shown ? mention!.query : null)
+  // Huli: the box's other sessions whose title has what is typed (@ a session).
+  const panel = box.sessionId ?? (projectPath ? newSessionPanel(projectPath) : null)
+  const sessionRows = useSessionMentions(shown ? mention!.query : null, panel)
+  const drop = useComposerDrop(draft, hostId, box.sessionId)
   const filesReady = !!mentions.files && !(mentions.files.error && !mentions.files.paths.length)
   // With nothing typed it shows the files the session used and how many there are to search;
   // typed, only while something matches. With no project it says to choose one.
@@ -127,6 +141,7 @@ export function PromptBox({
     (mentions.noProject ||
       mentions.used ||
       mentions.rows.length > 0 ||
+      sessionRows.length > 0 ||
       (mention!.query !== '' && !filesReady))
   // What the popup shows, kept after it closes so it fades out as it was.
   const showing = slashOpen || slashNote ? 'slash' : mentionOpen ? mentions : popover
@@ -149,7 +164,15 @@ export function PromptBox({
   )
   const listing = typeof showing === 'object' ? showing : null
   const open = slashOpen || slashNote !== null || mentionOpen
-  const rows: PopoverItem[] = showing === 'slash' ? slashMatches : listing ? listing.rows : []
+  const sessionCount = listing && mentionOpen ? sessionRows.length : 0
+  const rows: PopoverItem[] =
+    showing === 'slash'
+      ? slashMatches
+      : listing
+        ? sessionCount > 0
+          ? [...sessionRows, ...listing.rows]
+          : listing.rows
+        : []
   // A list opens, and a new query starts, on its first row.
   const listKey = slashOpen
     ? `/${slash.start}:${slash.query}`
@@ -169,9 +192,15 @@ export function PromptBox({
     update(next.text, next.caret)
     box.limitError(attachMention(draft, row.root?.path ?? projectPath, rowPath(row), row.folder))
   }
+  const chooseSession = (row: SessionMention) => {
+    if (!mention) return
+    const next = replaceMention(source.text, mention, sessionMentionName(row.sessionId))
+    update(next.text, next.caret)
+  }
   const chooseItem = (item: PopoverItem | undefined) => {
     if (!item) return
-    if (isMentionRow(item)) choose(item)
+    if (isSessionMention(item)) chooseSession(item)
+    else if (isMentionRow(item)) choose(item)
     else if (slash) {
       const next = placeCommand(
         source.text,
@@ -219,7 +248,7 @@ export function PromptBox({
       modified,
       slashOpen,
       mentionOpen,
-      mentionRows: mentions.rows.length > 0,
+      mentionRows: mentions.rows.length > 0 || sessionRows.length > 0,
     })
     // IME composition: no key reaches a popover, and Enter confirms the candidate, never sends.
     if (handling === 'block') return false
@@ -281,7 +310,15 @@ export function PromptBox({
 
   return (
     <>
-      <div ref={group} className="kettu-prompt" data-disabled={disabled || undefined}>
+      <div
+        ref={(element) => {
+          group.current = element
+          drop.attach(element)
+        }}
+        className="kettu-prompt"
+        data-disabled={disabled || undefined}
+        data-drop={drop.over || undefined}
+      >
         <ResizeGrip editor={editor} />
         {top}
         <AttachmentTray
@@ -353,9 +390,11 @@ export function PromptBox({
                 >
                   {showing === 'slash'
                     ? agentName
-                    : listing?.used
-                      ? t('mentions.used')
-                      : t('mentions.files')}
+                    : sessionCount > 0
+                      ? t('mentions.sessions')
+                      : listing?.used
+                        ? t('mentions.used')
+                        : t('mentions.files')}
                 </div>
               )}
               <div
@@ -371,15 +410,34 @@ export function PromptBox({
                 )}
               >
                 {rows.map((item, index) =>
-                  isMentionRow(item) ? (
-                    <MentionItem
-                      key={`${item.folder ? 'd' : 'f'}:${item.path}`}
+                  isSessionMention(item) ? (
+                    <SessionMentionItem
+                      key={`s:${item.sessionId}`}
                       id={optionId(index)}
                       row={item}
                       highlighted={index === active}
                       onHighlight={() => highlightRow(index)}
-                      onChoose={choose}
+                      onChoose={chooseSession}
                     />
+                  ) : isMentionRow(item) ? (
+                    <Fragment key={`${item.folder ? 'd' : 'f'}:${item.path}`}>
+                      {/* Huli: the files under the sessions keep a label of their own. */}
+                      {index === sessionCount && sessionCount > 0 && (
+                        <div
+                          role="presentation"
+                          className="flex h-6.5 items-center px-2 text-small font-medium text-tertiary"
+                        >
+                          {listing?.used ? t('mentions.used') : t('mentions.files')}
+                        </div>
+                      )}
+                      <MentionItem
+                        id={optionId(index)}
+                        row={item}
+                        highlighted={index === active}
+                        onHighlight={() => highlightRow(index)}
+                        onChoose={choose}
+                      />
+                    </Fragment>
                   ) : (
                     <SlashItem
                       key={item.name}

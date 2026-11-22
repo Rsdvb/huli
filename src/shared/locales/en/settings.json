@@ -3214,6 +3214,10 @@
       "sessionTidy": {
         "name": "Snooze and settle",
         "description": "Snooze a session until later; it comes back then, or sooner if it needs you. Idle sessions and ones whose pull request merged settle out of the list by themselves."
+      },
+      "sessionMentions": {
+        "name": "Mention a session",
+        "description": "Type @ in the composer, or drag a session's row onto it, to point the agent at another session; it reads that session's history only when it needs to."
       }
     }
   }
