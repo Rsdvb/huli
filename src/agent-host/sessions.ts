@@ -4398,7 +4398,8 @@ export class SessionManager {
       ...(append ? { systemPromptAppend: append } : {}),
       ...(record.origin === 'routine' ? { routine: true } : {}),
       ...(ports ? { env: portEnv(ports) } : {}),
-      ...(this.deps.envFiles ? { envFile: this.deps.envFiles.of(sessionId) } : {}),
+      // A container's agent reaches no file of the computer's, nor Kettu's MCP tools.
+      ...(this.deps.envFiles && !contained ? { envFile: this.deps.envFiles.of(sessionId) } : {}),
     }
   }
 
