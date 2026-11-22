@@ -765,6 +765,40 @@ the diff screen, for a working-tree or commit diff and for a turn's or a tool's 
   edit opens with the session's id; its comments name the file alone.
 - The simulator's `80-diff-notes` flow walks the phone's part.
 
+### Recap, one-tap compact and image markup (离开期间摘要、一键压缩、图片标注)
+
+Three small things Claude Code, Cursor and Moshi have, on the desktop and the phone alike.
+
+- Recap: a session opened again after half an hour away, with something new in it, greets the
+  user with one quiet line over the thread's top ("你离开期间：改了 4 个文件（+120 −30），跑了 12
+  条命令，2 次需要你批准，最后回复：……") and 跳到离开处, which brings the first new item to the
+  top. `src/shared/recap.ts` works it out from the entries after the one the device last saw, with
+  no model: distinct files of completed edits and their lines (a Myers count, bounded, or a
+  digest's own counts on the phone), commands that ran, requests that asked the user, errors and
+  the latest reply's first line. Each device keeps where it last saw each session (300 at most):
+  the desktop in localStorage (`session-seen`, `features/session/recap/`), written when a pane
+  shows another session or the window goes to the back, and checked again when it comes to the
+  front; the phone in `<documents>/huli/seen/<computer>.json` (`mobile/src/seen.ts`), written when
+  the screen is left or covered or the app leaves the front. A line goes when it is closed, its
+  jump arrives, or a message is sent. Nothing runs between: the desktop's line takes the thread's
+  items only when its jump is pressed.
+- Compact: the context card on the desktop (`composer/usage.tsx`) and the context sheet on the
+  phone offer 压缩上下文 for an agent that lists `/compact` (Claude Code, Codex, OpenCode, Pi, agy)
+  or `/compress` (Gemini CLI, Qwen Code), only while the session is free (`ready`, nothing
+  queued). It goes as an ordinary message through `sessions.queue`, so no host call is new and the
+  thread's compaction divider shows it running.
+- Markup: an image tile in the desktop's composer has a pen button (or E on a focused tile) that
+  opens `features/session/markup/`, a lazy chunk: pen (perfect-freehand), arrow, box, label, crop,
+  four colors (`--markup-*`, alike in every theme), undo (Ctrl/Cmd+Z, tool keys P A R T C). Done
+  draws the picture and its marks on an OffscreenCanvas cut to the crop and replaces the tile's
+  record with the PNG under the same name. On the phone a photo tile's sheet has 标注
+  (`components/MarkupEditor.tsx`, lazy): the same tools in SVG over a copy no larger than
+  `IMAGE_SIDE`; Done takes react-native-svg's own `toDataURL` snapshot (the view's size at the
+  screen's scale) and crops it with expo-image-manipulator, and a crop alone cuts the photo
+  itself. `src/shared/markup.ts` holds the marks both draw.
+- The simulator's `85-recap-compact-markup` flow walks the phone's part; a developer build's
+  `-huliRecapAwayMs` launch argument shortens the half hour for it.
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,
