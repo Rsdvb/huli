@@ -25,6 +25,8 @@ export const VENDORS: Partial<Record<HarnessId, string>> = {
   pi: 'Earendil',
   omp: 'Oh My Pi',
   hermes: 'Nous Research',
+  kiro: 'Amazon',
+  fx: 'Vercel Labs',
   muse: 'Meta',
   codewhale: 'Codewhale',
   deepseek: 'DeepSeek',

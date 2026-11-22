@@ -15,6 +15,7 @@ import type { MediaGrantRecord } from './media'
 import type { Platform } from './platform'
 import type { PortError } from './port-rpc'
 import type { StoredProfile } from './provider-profiles'
+import type { ThemeCall, ThemeCallAnswer } from './theme-palette'
 import type { DeviceActivity } from './remote/activity'
 import type { NewDevice, PairedDevice, PortDevice } from './remote/device'
 import type { DiscoveredHosts, DiscoveryRequestEvent } from './remote/discovery'
@@ -133,6 +134,8 @@ export type MainToHost =
       // Huli: each agent's API provider profiles with their keys, and its default; see
       // provider-profiles.
       profiles?: Record<string, { items: StoredProfile[]; defaultId: string | null }>
+      // Huli: the values saved from secret cards, by project path, then name.
+      projectSecrets?: Record<string, Record<string, string>>
     }
   // Huli: the chat bridges' credentials, bound accounts and the binding under way, whole, after
   // host:init at every start and whenever they change; only the agent host reads them.
@@ -197,6 +200,8 @@ export type MainToHost =
   | { type: 'trash-result'; callId: number; error: string | null }
   // The answer to a host:settings-call.
   | { type: 'settings-result'; callId: number; answer: SettingsCallAnswer }
+  // Huli: the answer to a host:theme-call.
+  | { type: 'theme-result'; callId: number; answer: ThemeCallAnswer }
   // A browser call now waits for the user to answer a new origin, so its limit grows to that wait.
   | { type: 'host:browser-waiting'; callId: number; waiting: boolean }
   // A page waits for a new origin: the session's thread shows it, waiting for the user.
@@ -344,6 +349,9 @@ export type HostToMain =
   // Keep (or, with null, clear) a server's OAuth sign-in after the host connected, renewed or
   // disconnected it; main stores the text as it stores keys and pushes host:market-keys again.
   | { type: 'host:market-oauth'; serverId: string; state: string | null }
+  // Huli: save (or, with null, forget) values the user gave an agent's secret card for the
+  // project, in the key store; main pushes host:market-keys again.
+  | { type: 'host:project-secrets'; project: string; values: Record<string, string | null> }
   | { type: 'host:ready' }
   // The harnesses whose user program the host's first start found, in the order to add them: the
   // settings' owner adds their default agents and records the first start as done.
@@ -457,6 +465,9 @@ export type HostToMain =
   // An agent's settings tool reads the settings, or changes them through the same checks as the
   // Settings page, from whoever keeps the file: main or the daemon. Answered by settings-result.
   | { type: 'host:settings-call'; callId: number; call: SettingsCall }
+  // Huli: an agent's theme tools read or set the agent theme and the chosen theme; main answers
+  // with theme-result, the daemon with an error, as it shows no window.
+  | { type: 'host:theme-call'; callId: number; call: ThemeCall }
   // The artifacts service's port, which the browser's pages must never reach; null when it is down.
   | { type: 'host:service-port'; port: number | null }
   // A session's card allowed an app always: main keeps it in the settings, which come back.

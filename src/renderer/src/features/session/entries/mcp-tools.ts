@@ -121,6 +121,9 @@ const TARGETS = {
   find_settings: ['query'],
   open_settings: ['id'],
   change_settings: [],
+  request_secrets: ['title'],
+  read_theme: [],
+  set_theme_colors: ['name'],
 } satisfies Record<KettuTool, readonly Target[]>
 
 const known = (tool: string): tool is KettuTool => Object.hasOwn(TARGETS, tool)

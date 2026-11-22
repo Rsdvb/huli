@@ -136,6 +136,7 @@ import { isCompletablePath } from './path-completion'
 import { isAbsolutePath } from './paths'
 import { networkValidators } from './node-proxy/validate'
 import { nodeRuntimeValidators } from './node-runtime/validate'
+import { MAX_SECRET_FIELDS, MAX_SECRET_VALUE, SECRET_NAME } from '@shared/secret-request'
 import { folderValidators } from './session-folders'
 import { moveValidators } from './session-move/validate'
 import { MAX_WORKTREE_COPY_PATHS } from './storage'
@@ -1798,6 +1799,64 @@ export function createValidators(platform: Platform): Validators {
         sessionId: sessionId(o),
         entryId: string(o, 'entryId', ID_CHARS),
         decision: o.decision,
+      }
+    },
+    'theme.answerChange': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'apply' && o.decision !== 'keep') {
+        throw invalidParams('decision must be apply or keep')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+      }
+    },
+    'theme.undoChange': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
+    },
+    'secrets.answer': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'provide' && o.decision !== 'decline') {
+        throw invalidParams('decision must be provide or decline')
+      }
+      const values: Record<string, string> = {}
+      if (o.values !== undefined) {
+        if (!isRecord(o.values)) throw invalidParams('values must be an object')
+        const entries = Object.entries(o.values)
+        if (entries.length > MAX_SECRET_FIELDS) throw invalidParams('values lists too many fields')
+        for (const [name, value] of entries) {
+          // The message names the field, never the value.
+          if (!SECRET_NAME.test(name))
+            throw invalidParams('values names a field that is no variable')
+          if (typeof value !== 'string' || value.length > MAX_SECRET_VALUE * 2) {
+            throw invalidParams(`values.${name} must be a text`)
+          }
+          values[name] = value
+        }
+      }
+      let useSaved: string[] | undefined
+      if (o.useSaved !== undefined) {
+        if (
+          !Array.isArray(o.useSaved) ||
+          o.useSaved.length > MAX_SECRET_FIELDS ||
+          !o.useSaved.every((name) => typeof name === 'string' && SECRET_NAME.test(name))
+        ) {
+          throw invalidParams('useSaved must list field names')
+        }
+        useSaved = o.useSaved as string[]
+      }
+      if (o.save !== undefined && typeof o.save !== 'boolean') {
+        throw invalidParams('save must be true or false')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+        ...(o.decision === 'provide' ? { values } : {}),
+        ...(useSaved && o.decision === 'provide' ? { useSaved } : {}),
+        ...(o.save === true && o.decision === 'provide' ? { save: true } : {}),
       }
     },
     'settings.undoChange': (params) => {

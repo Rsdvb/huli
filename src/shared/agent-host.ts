@@ -695,6 +695,8 @@ export type McpToolGroup =
   | 'reports'
   | 'workflows'
   | 'settings'
+  | 'secrets'
+  | 'theme'
 
 export interface McpToolSummary {
   name: string
@@ -1256,6 +1258,29 @@ export interface HostContract {
   // Undo on a settings line: the rows go back to what they were, refused with `conflict` once one
   // of them changed again since, which takes the undo away.
   'settings.undoChange': { params: { sessionId: string; entryId: string }; result: void }
+  // Huli: any window's or device's answer to a card an agent's set_theme_colors shows: Apply or
+  // Don't change; the first counts.
+  'theme.answerChange': {
+    params: { sessionId: string; entryId: string; decision: 'apply' | 'keep' }
+    result: void
+  }
+  // Huli: Undo on a theme line: what the change replaced comes back, refused with `conflict` once
+  // the theme changed again since, which takes the undo away.
+  'theme.undoChange': { params: { sessionId: string; entryId: string }; result: void }
+  // Huli: any window's or device's answer to an agent's secret card. Provide delivers the values
+  // where the card says, refused with the reason while the card keeps waiting; they reach nothing
+  // else, and `save` keeps the typed ones encrypted for the project. The first answer counts.
+  'secrets.answer': {
+    params: {
+      sessionId: string
+      entryId: string
+      decision: 'provide' | 'decline'
+      values?: Record<string, string>
+      useSaved?: string[]
+      save?: boolean
+    }
+    result: void
+  }
   // What was put off or refused, newest first, kept on the host to publish later.
   'market.publishDrafts': { params: void; result: { drafts: PublishDraft[] } }
   'market.discardPublishDraft': { params: { id: string }; result: void }
@@ -2334,6 +2359,9 @@ export const HOST_METHODS = [
   'market.answerPublish',
   'settings.answerChange',
   'settings.undoChange',
+  'secrets.answer',
+  'theme.answerChange',
+  'theme.undoChange',
   'market.publishDrafts',
   'market.discardPublishDraft',
   'market.community',

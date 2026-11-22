@@ -10,7 +10,7 @@ import {
   removeStaleArchives,
   type InstalledArchive,
 } from './archive-install'
-import { detectAgent, type AgentDefinition, type DetectContext } from './catalog'
+import { detectAgent, FX, type AgentDefinition, type DetectContext } from './catalog'
 import { orderInstalls, type VersionChoice } from './harness-versions'
 import { httpTransport } from './node-runtime/transport'
 import { tempFolder } from './testing/temp'
@@ -200,6 +200,20 @@ describe('the archive install a start runs', () => {
     )
     expect(found).toMatchObject({ state: 'available', spec: { command: '/usr/bin/harn' } })
     expect(found).not.toHaveProperty('release')
+  })
+
+  it('runs a program of one session a connection through the router, a process each', async () => {
+    const found = await detectAgent(FX, {
+      ...context([], (file) => file === '/usr/bin/fx'),
+      sessionRouterPath: '/app/router.js',
+    })
+    expect(found).toMatchObject({
+      state: 'available',
+      spec: {
+        command: '/usr/bin/node',
+        args: ['/app/router.js', '--folder-per-session', '/usr/bin/fx', 'acp'],
+      },
+    })
   })
 })
 

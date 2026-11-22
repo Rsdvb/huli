@@ -33,6 +33,8 @@ const HARNESS_NAMES: Record<string, string> = {
   droid: 'Factory Droid',
   omp: 'OMP',
   hermes: 'Hermes Agent',
+  kiro: 'Kiro CLI',
+  fx: 'fx',
   muse: 'Muse Code',
   codewhale: 'CodeWhale',
   deepseek: 'DeepSeek Harness',

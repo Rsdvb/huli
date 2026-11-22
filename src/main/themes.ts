@@ -371,6 +371,38 @@ export class ThemeStore {
     else this.publish()
   }
 
+  /**
+   * Huli: writes a theme Kettu makes itself, such as an agent's colors, checked in full like any
+   * install, or removes it for null; nothing is chosen.
+   */
+  async putOwn(id: string, text: string | null): Promise<void> {
+    if (!THEME_ID.test(id) || id === BUILTIN_THEME_ID) throw new Error('Not a theme id')
+    if (text !== null) {
+      const read = checkThemeText(text)
+      if (!read.ok) throw new Error(`Not a theme file: ${read.error.code}`)
+    }
+    const file = join(this.deps.dir, `${id}.json`)
+    await this.serial(async () => {
+      if (text === null) await rm(file, { force: true })
+      else await writeFileAtomic(file, text)
+      this.folder = await readThemeFolder(this.deps.dir)
+      await this.record(id, undefined)
+    })
+    this.publish()
+  }
+
+  /** Huli: an installed theme's file text, or null when there is none to read. */
+  async ownText(id: string): Promise<string | null> {
+    if (!this.find(id)) return null
+    const read = await readThemeFile(join(this.deps.dir, `${id}.json`))
+    return read.ok ? read.text : null
+  }
+
+  /** Huli: an installed theme's name, or null for none. */
+  nameOf(id: string): string | null {
+    return this.find(id)?.theme.name ?? null
+  }
+
   /** The name of the theme in a file the renderer built to export, checked in full. */
   exportName(text: unknown): string {
     if (typeof text !== 'string') throw new Error('A theme file must be text')

@@ -177,7 +177,9 @@
     "withChanges_other": "{{text}}改动了 {{count}} 个文件。",
     "marketPublish": "想把 {{name}} 发布到 Kettu 市场",
     "marketUnlist": "想把 {{name}} 从 Kettu 市场下架",
-    "settingsChange_other": "想修改 {{count}} 项设置"
+    "settingsChange_other": "想修改 {{count}} 项设置",
+    "secretRequest": "需要你提供 {{title}}",
+    "themeChange": "想更换纸鸢的主题颜色"
   },
   "supervisor": {
     "continueText": "继续",
@@ -379,6 +381,8 @@
       "omp": "请用 `bun install -g @oh-my-pi/pi-coding-agent` 或 omp.sh 上的安装程序安装 OMP。",
       "antigravity": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 Antigravity CLI；在 Windows 上，请在 PowerShell 中运行 irm https://antigravity.google/cli/install.ps1 | iex。",
       "hermes": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 Hermes Agent；在 Windows 上，请按官方指南通过 WSL2 安装。",
+      "kiro": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 Kiro CLI，然后运行 kiro-cli login；在 Windows 11 上，请在 PowerShell 中运行 irm 'https://cli.kiro.dev/install.ps1' | iex。",
+      "fx": "在 macOS 或 Linux 上，请在「设置 › Harness」中安装 fx，然后运行 fx login。fx 不支持 Windows；同名的 JSON 查看器 fx 是另一个程序。",
       "muse": "请从 dev.meta.ai 安装 Muse Code，或在「设置 › Harness」中选择它的程序。",
       "codewhale": "请用 codewhale.net 上的安装程序安装 CodeWhale，或在「设置 › Harness」中选择它的程序。",
       "deepseek": "Kettu 第一次使用 DeepSeek Harness 时从 npm 安装它，需要 Node.js 24.9 或更高版本。",

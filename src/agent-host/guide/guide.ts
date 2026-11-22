@@ -211,6 +211,12 @@ export function serviceInstructions(flags: GuideFlags): string {
     'Settings: find_settings, open_settings and change_settings find, show and change ' +
       "Kettu's own settings, only when the user asks; a change waits for the user's card unless " +
       'this session is in Full access. Topic settings.',
+    'Secrets: request_secrets asks the user for an API key, token or password in a private card; ' +
+      'never ask for one in the chat. You get only the variable names, and the result says how ' +
+      'your commands get the values; never print them.',
+    "Theme: read_theme and set_theme_colors read and change Kettu's colors, only when the user " +
+      "asks: a canvas and an accent per mode, never CSS or layout; a change waits for the user's " +
+      'card unless this session is in Full access, and every change can be undone.',
     `Problems: ${REPORT_TOOL} drafts a report for the Kettu team, only for problems with Kettu ` +
       "itself, never for bugs in the user's project, your model provider's limits or your own " +
       'mistakes; the user sends it.',

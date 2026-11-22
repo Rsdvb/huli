@@ -41,6 +41,7 @@ import type {
   SessionProgress,
   SettingsCallAnswer,
 } from '@shared/host-control'
+import type { ThemeCallAnswer } from '@shared/theme-palette'
 import {
   isComputerApp,
   isComputerFrame,
@@ -97,6 +98,8 @@ export interface AgentHostDeps {
   marketKeys(): MarketKeysPush
   /** The host asks to keep or clear a server's OAuth sign-in; main checks it against the settings. */
   onMarketOAuth?(serverId: unknown, state: unknown): void
+  /** Huli: values a secret card saved or forgot for a project, unchecked. */
+  onProjectSecrets?(project: unknown, values: unknown): void
   /** The Kettu account the Marketplace tools publish with, which follows init at each start. */
   marketAccount(): MarketAccount | null
   /** Huli: the chat bridges' configuration, which follows init at each start. */
@@ -109,6 +112,8 @@ export interface AgentHostDeps {
   market?: (call: MarketCall) => Promise<MarketCallAnswer>
   /** An agent's settings tool reads or changes the settings. */
   settingsCall?: (call: unknown) => SettingsCallAnswer
+  /** Huli: an agent's theme tool reads or sets the agent theme, unchecked. */
+  themeCall?: (call: unknown) => Promise<ThemeCallAnswer>
   /** The host's first start found the programs of these harnesses; main adds their agents. */
   onFirstStart?(harnesses: unknown): void
   onAttention(message: Extract<HostToMain, { type: 'host:attention' }>): void
@@ -819,6 +824,15 @@ export class AgentHost {
         )
         break
       }
+      case 'host:theme-call': {
+        const { callId } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.deps.themeCall
+        void (run ? run(message.call) : Promise.resolve({ error: 'This build shows no themes.' }))
+          .catch((error: unknown) => ({ error: (error as Error).message }))
+          .then((answer) => this.host.post({ type: 'theme-result', callId, answer }))
+        break
+      }
       case 'host:settings-call': {
         const { callId } = message
         if (!Number.isSafeInteger(callId)) break
@@ -878,6 +892,9 @@ export class AgentHost {
         break
       case 'host:market-oauth':
         this.deps.onMarketOAuth?.(message.serverId, message.state)
+        break
+      case 'host:project-secrets':
+        this.deps.onProjectSecrets?.(message.project, message.values)
         break
       case 'host:first-start':
         this.deps.onFirstStart?.(message.harnesses)

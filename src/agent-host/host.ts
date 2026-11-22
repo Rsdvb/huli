@@ -255,6 +255,10 @@ import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
 import { ProviderProfiles } from './provider-profiles'
+import { removeSessionEnv, sessionEnvFiles } from './secrets/deliver'
+import { SECRET_WAIT_MS, SecretTools } from './secrets/tools'
+import { StaleThemeUndo, THEME_WAIT_MS, ThemeTools } from './theme/tools'
+import type { ThemeCall, ThemeCallAnswer, ThemeSnapshot } from '@shared/theme-palette'
 import { anyBridgeOn, parseChatBridgeConfig, type ChatBridgeConfig } from '@shared/chat-bridge'
 import type { ChatBridgeService } from './chat-bridge/service'
 
@@ -587,6 +591,14 @@ export class AgentHost {
   private nextSettingsCall = 1
   /** The settings tools of Kettu's MCP service. */
   private readonly settingsTools: SettingsTools
+  /** Huli: the secrets tool of Kettu's MCP service. */
+  private readonly secretTools: SecretTools
+  /** Huli: the theme tools of Kettu's MCP service, and their calls awaiting main's answer. */
+  private readonly themeTools: ThemeTools
+  private readonly themeCalls = new Map<number, (answer: ThemeCallAnswer) => void>()
+  private nextThemeCall = 1
+  /** Huli: the values the user saved for each project, by project path, then name; host only. */
+  private projectSecrets: Record<string, Record<string, string>> = {}
   /** What was put off or refused, to publish later. */
   private readonly publishDrafts: PublishDrafts
   /** The Marketplace tools of Kettu's MCP service. */
@@ -671,6 +683,35 @@ export class AgentHost {
       open: (sessionId, target) => this.openSettings(sessionId, target),
       words: tSettings,
       english: tSettingsEnglish,
+    })
+    const envDir = path.join(options.userDataPath, 'session-env')
+    this.secretTools = new SecretTools({
+      platform,
+      envDir,
+      saved: (project) => new Map(Object.entries(this.projectSecrets[project] ?? {})),
+      save: (project, values) => options.send({ type: 'host:project-secrets', project, values }),
+      loadsEnv: (sessionId) => this.sessions.loadsEnvFile(sessionId),
+      ask: (sessionId, ask) => this.sessions.secretAsked(sessionId, ask, SECRET_WAIT_MS),
+      answer: (sessionId, entryId, answer, device) =>
+        this.sessions.answerSecret(sessionId, entryId, answer, device),
+      check: (sessionId, entryId) => this.sessions.checkSecret(sessionId, entryId),
+      ignored: async (folder, relative) => {
+        const result = await this.execRunner.exec('git', ['check-ignore', '-q', '--', relative], {
+          cwd: folder,
+          timeoutMs: 10_000,
+        })
+        if (result.failure !== null) return null
+        return result.code === 0 ? true : result.code === 1 ? false : null
+      },
+    })
+    this.themeTools = new ThemeTools({
+      read: () => this.themeCall({ kind: 'read' }),
+      set: (agent, chosen) => this.themeCall({ kind: 'set', agent, chosen }),
+      fullAccess: (sessionId) => this.sessions.settingsFullAccess(sessionId),
+      ask: (sessionId, change) => this.sessions.themeAsked(sessionId, change, THEME_WAIT_MS),
+      recorded: (sessionId, change) => this.sessions.themeRecorded(sessionId, change),
+      settle: (sessionId, entryId, outcome) =>
+        this.sessions.themeSettled(sessionId, entryId, outcome),
     })
     this.projects = new Projects({ file: projectsFile(options.userDataPath, log), platform })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
@@ -965,6 +1006,8 @@ export class AgentHost {
       ...(this.computer ? { computer: this.computer } : {}),
       market: this.marketTools,
       settings: this.settingsTools,
+      secrets: this.secretTools,
+      theme: this.themeTools,
       proxy: this.mcpProxy,
       sessions: {
         info: (sessionId) => this.sessions.sessionInfo(sessionId),
@@ -1131,6 +1174,10 @@ export class AgentHost {
       portOpen: (portId) => this.hub.has(portId),
       portDevice: (portId) => this.hub.deviceOf(portId),
       profiles: this.profiles,
+      envFiles: {
+        of: (sessionId) => sessionEnvFiles(envDir, sessionId, platform).sh,
+        remove: (sessionId) => removeSessionEnv(envDir, sessionId, platform),
+      },
       threads: this.threads,
       agentFile: (sessionId, file) =>
         this.agentFiles.read(sessionId, file).then(
@@ -1187,6 +1234,8 @@ export class AgentHost {
           this.browserTurnEnded(sessionId)
           this.marketTools.turnEnded(sessionId)
           this.settingsTools.turnEnded(sessionId)
+          this.secretTools.turnEnded(sessionId)
+          this.themeTools.turnEnded(sessionId)
           if (this.deviceTurns.delete(sessionId)) {
             this.options.send({ type: 'host:device-turn-ended', sessionId })
           }
@@ -2013,6 +2062,41 @@ export class AgentHost {
     })
   }
 
+  /** Huli: reads or sets the themes through main, which keeps them and the window. */
+  private themeCall(call: ThemeCall): Promise<ThemeSnapshot> {
+    const callId = this.nextThemeCall++
+    return new Promise<ThemeCallAnswer>((resolve) => {
+      this.themeCalls.set(callId, resolve)
+      this.options.send({ type: 'host:theme-call', callId, call })
+    }).then((answer) => {
+      if ('error' in answer) throw new Error(answer.error)
+      return answer.result
+    })
+  }
+
+  /** Huli: `theme-result`: main's or the daemon's answer to a theme call. */
+  themeResult(callId: number, answer: ThemeCallAnswer): void {
+    const resolve = this.themeCalls.get(callId)
+    if (!resolve) return
+    this.themeCalls.delete(callId)
+    resolve(answer)
+  }
+
+  /** Huli: Undo on a theme line: what the change replaced comes back, unless it changed since. */
+  private async undoTheme(sessionId: string, entryId: string): Promise<void> {
+    const change = this.sessions.themeChange(sessionId, entryId)
+    try {
+      await this.themeTools.undo(change)
+    } catch (error) {
+      if (error instanceof StaleThemeUndo) {
+        this.sessions.themeSettled(sessionId, entryId, { kind: 'changed', stale: true })
+        throw new HostError('conflict', error.message)
+      }
+      throw new HostError('unavailable', (error as Error).message)
+    }
+    this.sessions.themeSettled(sessionId, entryId, { kind: 'changed', undone: true })
+  }
+
   /** `settings-result`: main's or the daemon's answer to a settings call. */
   settingsResult(callId: number, answer: SettingsCallAnswer): void {
     const resolve = this.settingsCalls.get(callId)
@@ -2173,6 +2257,21 @@ export class AgentHost {
     this.marketChanged(this.settings.marketplace.mcp, previous)
     if (signIns) this.signInsPushed(signIns)
     this.hub.broadcast({ type: 'market.keysChanged' })
+  }
+
+  /** Huli: the values saved from secret cards, in place of those before; a bad message keeps none. */
+  setProjectSecrets(raw: unknown): void {
+    const kept: Record<string, Record<string, string>> = {}
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      for (const [project, values] of Object.entries(raw)) {
+        if (typeof values !== 'object' || values === null || Array.isArray(values)) continue
+        const own = Object.entries(values).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        )
+        if (own.length > 0) kept[project] = Object.fromEntries(own)
+      }
+    }
+    this.projectSecrets = kept
   }
 
   /**
@@ -3339,6 +3438,11 @@ export class AgentHost {
       'settings.answerChange': ({ sessionId, entryId, decision }, { device }) =>
         this.sessions.answerSettings(sessionId, entryId, decision, fromDevice(device)),
       'settings.undoChange': ({ sessionId, entryId }) => this.undoSettings(sessionId, entryId),
+      'theme.answerChange': ({ sessionId, entryId, decision }, { device }) =>
+        this.sessions.answerTheme(sessionId, entryId, decision, fromDevice(device)),
+      'theme.undoChange': ({ sessionId, entryId }) => this.undoTheme(sessionId, entryId),
+      'secrets.answer': ({ sessionId, entryId, ...answer }, { device }) =>
+        this.secretTools.answer(sessionId, entryId, answer, fromDevice(device)),
       'market.answerPublish': ({ sessionId, entryId, ...answer }, { device }) =>
         this.sessions.answerMarket(
           sessionId,

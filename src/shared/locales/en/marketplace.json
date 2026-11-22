@@ -945,7 +945,9 @@
       "memory": "Memory",
       "reports": "Problem reports",
       "workflows": "Workflows",
-      "settings": "Settings"
+      "settings": "Settings",
+      "secrets": "Secrets",
+      "theme": "Theme colors"
     },
     "new": "New",
     "whileSignedIn": "While you’re signed in to Kettu",
