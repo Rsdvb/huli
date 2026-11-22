@@ -317,6 +317,7 @@ export class SettingsTools {
       agents: local.agents,
       harnesses: local.harnesses,
       modes: local.modes,
+      features: snapshot.file.features,
     }
   }
 

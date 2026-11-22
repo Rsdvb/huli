@@ -22,7 +22,8 @@
     "agent-network": "Agent 网络",
     "backup": "备份",
     "chat-bridge": "聊天软件",
-    "manager": "总管模式"
+    "manager": "总管模式",
+    "features": "功能管理"
   },
   "page": {
     "title": "设置",
@@ -1646,7 +1647,8 @@
     "agent-network": "让每个 Agent 的流量经由你的机场订阅里的节点出去，绝不绕开它。",
     "backup": "每天把 Kettu 自己的数据备份一份，存在这台电脑上，丢失后可以恢复。",
     "chat-bridge": "在飞书、钉钉、企业微信、QQ 或 Telegram 里看会话、回答请求、给 Agent 发消息。",
-    "manager": "一个总管拆分任务、派给别的智能体当工人去改代码，你只和总管说话。"
+    "manager": "一个总管拆分任务、派给别的智能体当工人去改代码，你只和总管说话。",
+    "features": "关掉不用的功能：它的入口会藏起来，代码也不再加载和运行。"
   },
   "archived": {
     "description": "{{project}} · {{when}}归档",
@@ -3071,6 +3073,81 @@
       "helper": {
         "name": "杂活",
         "persona": "你做简单明确的活：补测试、改名、整理文档、跑格式化，照任务说的做，不自作主张。"
+      }
+    }
+  },
+  "features": {
+    "keywords": "功能 开关 精简 关闭 隐藏 臃肿 加载",
+    "groups": {
+      "work": "工作方式",
+      "agents": "Agent 能用的",
+      "connections": "连接和预览"
+    },
+    "note": "会话、终端、浏览器、Git、产物和插件市场是纸鸢的核心，一直开着。关掉的功能不再加载和运行，随时可以再打开，不用重启；已经加载过的代码要到下次启动才从内存里释放。",
+    "sandboxHeld": "默认沙箱不是「关闭」时不能关掉。先到 Agent › 沙箱 里把默认改成关闭。",
+    "computerUse": {
+      "name": "电脑操控",
+      "description": "让 Agent 操作这台电脑上的应用，在「电脑操控」里单独开关。",
+      "on": "已打开",
+      "off": "已关闭",
+      "open": "打开设置"
+    },
+    "items": {
+      "board": {
+        "name": "看板",
+        "description": "在概览里把会话排进 待办 / 进行中 / 待审 / 完成，Agent 做完会把自己的移到待审。"
+      },
+      "manager": {
+        "name": "总管模式",
+        "description": "一个会话当总管，把任务拆给工人 Agent 去做，再检查他们的汇报。"
+      },
+      "bestOfN": {
+        "name": "同时交给几个 Agent",
+        "description": "一条消息同时交给 2 到 4 个 Agent 或模型，各在自己的工作树里做，留下最好的那个。"
+      },
+      "routines": {
+        "name": "定时任务",
+        "description": "按时间表或 GitHub 事件自动开会话。关掉后什么都不会按时运行。"
+      },
+      "github": {
+        "name": "GitHub 自动化",
+        "description": "议题收件箱、检查通过后自动合并、盯 PR 和定时任务的 GitHub 触发。关掉后纸鸢不再读 GitHub。"
+      },
+      "sandbox": {
+        "name": "沙箱",
+        "description": "让会话在 Agent 自带的沙箱或容器里运行。"
+      },
+      "devices": {
+        "name": "移动设备",
+        "description": "Agent 在 iOS 模拟器、Android 模拟器和连着的手机上运行和检查 App。关掉后纸鸢不再查找设备。"
+      },
+      "secrets": {
+        "name": "密钥卡片",
+        "description": "Agent 要 API 密钥、令牌或密码时，用私密卡片向你要，不经过聊天。"
+      },
+      "agentTheme": {
+        "name": "Agent 改主题",
+        "description": "你让 Agent 改配色时，它能读取和修改纸鸢的主题颜色。"
+      },
+      "chatBridge": {
+        "name": "聊天软件遥控",
+        "description": "用飞书、钉钉、企业微信、QQ 或 Telegram 的机器人遥控 Agent。关掉后机器人全部断开。"
+      },
+      "portForwarding": {
+        "name": "端口转发",
+        "description": "把其他电脑上的开发服务器端口转发到这台电脑，在会话的浏览器里打开。"
+      },
+      "devPreview": {
+        "name": "手机预览开发服务器",
+        "description": "在配对的手机上预览这台电脑的开发服务器。"
+      },
+      "pickElement": {
+        "name": "浏览器点选元素",
+        "description": "在侧栏浏览器里点选页面元素，写下意见交给 Agent。"
+      },
+      "agentSync": {
+        "name": "Agent 同步",
+        "description": "插件市场的「同步」页：在几个 Agent 之间同步 MCP 服务器、技能和指令。"
       }
     }
   }
