@@ -18,6 +18,8 @@ export interface StructuredError {
   type: string
   message: string
   status?: number
+  /** How long the provider asked to wait before trying again, from when the failure was recorded. */
+  retryAfterMs?: number
 }
 
 export interface SessionInfo {

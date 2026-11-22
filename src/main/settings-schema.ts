@@ -269,6 +269,7 @@ const SECTION_FIELDS = {
     promptSuggestions: isBoolean,
     lightModel: isLightModel,
     lowerAgentPriority: isBoolean,
+    keepAwake: isBoolean,
   },
   thread: {
     outlineSummaries: isBoolean,

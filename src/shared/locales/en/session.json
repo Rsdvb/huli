@@ -92,6 +92,17 @@
       "rule": "Denied by a permission rule",
       "hook": "Denied by a hook"
     },
+    "appeal": {
+      "allow": "Allow anyway",
+      "hint": "Allows this exact action once; the agent's retry still goes through its review.",
+      "allowed": "Allowed. The agent will try this step again.",
+      "note": "Denied by automatic review · can be allowed",
+      "noteAllowed": "Denied by automatic review · allowed anyway",
+      "confirmTitle": "Allow this step anyway?",
+      "confirmRisk": "Kite's judgment: {{reason}}",
+      "confirmReview": "The review's reason: {{reason}}",
+      "confirmBody": "This step is high risk. Only this exact action is allowed, once."
+    },
     "review": {
       "approved": "Approved by automatic review",
       "approvedRisk": "Approved by automatic review · {{risk}}",

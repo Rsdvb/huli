@@ -81,6 +81,17 @@
       "rule": "被权限规则拒绝",
       "hook": "被 Hook 拒绝"
     },
+    "appeal": {
+      "allow": "仍然允许",
+      "hint": "只放行这一次完全相同的操作，Agent 重试时仍会经过自动审查。",
+      "allowed": "已允许，Agent 会重试这一步。",
+      "note": "被自动审查拒绝 · 可仍然允许",
+      "noteAllowed": "被自动审查拒绝 · 已仍然允许",
+      "confirmTitle": "仍然允许这一步？",
+      "confirmRisk": "纸鸢的判断：{{reason}}",
+      "confirmReview": "自动审查的理由：{{reason}}",
+      "confirmBody": "这一步风险高。只放行这一次完全相同的操作。"
+    },
     "review": {
       "approved": "自动审查已批准",
       "approvedRisk": "自动审查已批准 · {{risk}}",

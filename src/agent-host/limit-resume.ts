@@ -7,6 +7,7 @@ import { limitsForModel } from '@shared/plan-limits'
 import { planQuota, type PlanQuota } from '@shared/plan-quota'
 import type { LimitPause } from '@shared/supervisor'
 import { retryableTurn, type ConfigOption, type ThreadState } from '@shared/thread'
+import { chatgptLimitOf, chatgptResetOf } from './chatgpt-limit'
 import type { HostError } from './errors'
 import { isOutOfCredit } from './out-of-credit'
 import { isPlanLimitStop } from './plan-limit-stop'
@@ -55,15 +56,15 @@ export function sessionQuota(
 
 /**
  * Whether a failed turn stopped at the plan's limit: Claude Code and Codex say so themselves, an
- * ACP agent's words name a used-up quota, or the agent's own limits show the model's window used
- * up. Credit that ran out is no limit that resets.
+ * ACP agent's words name a used-up quota, an agent on a ChatGPT plan hit its allowance, or the
+ * agent's own limits show the model's window used up. Credit that ran out is no limit that resets.
  */
 export function isLimitStop(
   error: Pick<HostError, 'code' | 'message' | 'data'>,
   quota: PlanQuota,
 ): boolean {
   if (error.code !== 'agent_error' || isOutOfCredit(error)) return false
-  if (isPlanLimitStop(error) || quota.kind === 'out') return true
+  if (isPlanLimitStop(error) || chatgptLimitOf(error) || quota.kind === 'out') return true
   const text = error.message.toLowerCase()
   return QUOTA_PHRASES.some((phrase) => phrase.test(text))
 }
@@ -83,9 +84,20 @@ export function resetInMessage(message: string, now: number): number | null {
   return ms > 0 ? now + Math.ceil(ms) : null
 }
 
-/** When the plan comes back: the failure's own words first, else the agent's used-up window. */
-export function resetOf(message: string, quota: PlanQuota, now: number): number | null {
-  return resetInMessage(message, now) ?? (quota.kind === 'out' ? quota.resetsAt : null)
+/**
+ * When the plan comes back: the failure's own account first, a ChatGPT plan's wait or the reset in
+ * its words, else the agent's used-up window.
+ */
+export function resetOf(
+  error: Pick<HostError, 'code' | 'message' | 'data'>,
+  quota: PlanQuota,
+  now: number,
+): number | null {
+  return (
+    (chatgptLimitOf(error) ? chatgptResetOf(error, now) : null) ??
+    resetInMessage(error.message, now) ??
+    (quota.kind === 'out' ? quota.resetsAt : null)
+  )
 }
 
 /**

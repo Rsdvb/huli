@@ -66,6 +66,8 @@ export interface SettingsFile {
     lightModel: LightModel // replaced whole
     // Huli: the agent host runs below normal priority, and so does every program it starts.
     lowerAgentPriority: boolean
+    // Huli: no idle sleep while a session's turn runs or waits on the user, or a routine runs.
+    keepAwake: boolean
   }
   thread: {
     outlineSummaries: boolean // a small model titles the outline's messages
@@ -347,6 +349,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     promptSuggestions: true,
     lightModel: { mode: 'small' },
     lowerAgentPriority: true,
+    keepAwake: true,
   },
   thread: { outlineSummaries: true, confirmLinks: true, openLinksIn: 'browser', alwaysOpenIn: {} },
   appearance: {

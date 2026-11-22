@@ -63,6 +63,13 @@
       "betweenTurns": "The API profile changes between turns.",
       "keyRefused": "The provider refused the API profile's key. Check the key in Settings › Agents."
     },
+    "appeal": {
+      "none": "There's no denial to override on this step.",
+      "done": "This step was already allowed.",
+      "confirm": "This step is high risk. Confirm before you allow it.",
+      "unsupported": "{{agent}} can't take back an action its automatic review denied.",
+      "retry": "I've allowed the step the automatic review just denied. Please try it again exactly as before."
+    },
     "subagent": {
       "noPrompt": "A subagent session takes its instructions from its parent",
       "noFork": "A subagent session cannot be forked",
@@ -89,6 +96,11 @@
       "titleNoModel": "{{agent}}'s model provider is out of credit"
     },
     "turnFailed": "The turn failed",
+    "chatgptLimit": {
+      "title": "ChatGPT plan limit reached",
+      "app": "This agent has used up its share of your ChatGPT plan this week. You can raise it in ChatGPT Settings › Usage › App limits, or switch to an API key.",
+      "codex": "Codex shares your ChatGPT plan's allowance with ChatGPT, and it has run out. ChatGPT Settings › Usage says when it resets and sells more, or you can switch to an API key."
+    },
     "archivedByAgent": "{{agent}} archived this session",
     "notArchivedByAgent": {
       "title": "{{agent}} did not archive this session",
@@ -889,7 +901,9 @@
       "warning": "Automatic review warning",
       "action": "Action under review",
       "entered": "Review started",
-      "exited": "Review finished"
+      "exited": "Review finished",
+      "appealUnsupported": "This version of Codex can't allow an action its automatic review denied. Update Codex.",
+      "appealGone": "Codex's record of this denial can't be read anymore. Ask it to try again."
     },
     "agent": {
       "model": "Runs on {{model}}",

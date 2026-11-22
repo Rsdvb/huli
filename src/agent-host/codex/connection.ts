@@ -41,6 +41,7 @@ import {
 import type { AgentTransport } from '../driver'
 import type { Env } from '../find-command'
 import { t } from '../i18n'
+import { versionAtLeast } from '../versions'
 import { planMarkdown } from '../plan-revision'
 import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
@@ -135,6 +136,8 @@ export interface CodexLaunch {
 const RESOURCE_NOT_FOUND = -32002
 const INVALID_REQUEST = -32600
 const METHOD_NOT_FOUND = -32601
+/** Huli: the first Codex whose app-server was checked to take a denied action back. */
+const APPEALS_VERSION = '0.171.0'
 
 // Updates for a thread nobody registered yet wait here, as ACP's do.
 const PENDING_THREADS = 32
@@ -537,6 +540,8 @@ export class CodexConnection implements AgentConnection {
   private modelsReadAt: number | null = null
   private modelsRead: Promise<Model[]> | null = null
   private initialized = false
+  /** Huli: this Codex takes back a denial of its auto-review, which a denied call offers. */
+  private appeals = false
   /** The skill folders last set on app-server, as JSON. */
   private skillRoots: string | null = null
   private account: AgentAccount | null = null
@@ -646,6 +651,7 @@ export class CodexConnection implements AgentConnection {
     this.initialized = true
     // `<client>/<Codex version> (...)`, the only place app-server says its version.
     const version = /^[^/\s]+\/(\S+)/.exec(response.userAgent ?? '')?.[1] ?? null
+    this.appeals = versionAtLeast(version, APPEALS_VERSION)
     void this.refreshAccount()
     return {
       name: 'Codex',
@@ -821,7 +827,7 @@ export class CodexConnection implements AgentConnection {
       hidden,
       known: true,
       prompted: false,
-      mapper: seen?.mapper ?? new ThreadMapper(),
+      mapper: seen?.mapper ?? this.newMapper(),
     })
     record.usage = seen?.usage ?? null
     this.threads.set(id, record)
@@ -1266,7 +1272,7 @@ export class CodexConnection implements AgentConnection {
       hidden: false,
       known: false,
       prompted: true,
-      mapper: new ThreadMapper(),
+      mapper: this.newMapper(),
     })
     this.threads.set(id, record)
     return record
@@ -1282,7 +1288,7 @@ export class CodexConnection implements AgentConnection {
       hidden: false,
       known: false,
       prompted: true,
-      mapper: new ThreadMapper(),
+      mapper: this.newMapper(),
     })
     this.threads.set(id, created)
     return created
@@ -1759,6 +1765,41 @@ export class CodexConnection implements AgentConnection {
       this.unregister(sessionId)
     }
     return messages
+  }
+
+  private newMapper(): ThreadMapper {
+    return new ThreadMapper({ appeals: this.appeals })
+  }
+
+  /**
+   * Huli: `thread/approveGuardianDeniedAction` with the denial as Codex recorded it. Codex adds the
+   * user's approval of that exact action to the thread, into the running turn or ahead of the next,
+   * and the model's retry goes through the auto-review again.
+   */
+  async allowDenied(sessionId: string, event: string): Promise<void> {
+    const unsupported = () =>
+      new AgentRequestError('agent_error', t('codex.review.appealUnsupported'))
+    if (!this.appeals) throw unsupported()
+    let denial: unknown
+    try {
+      denial = JSON.parse(event)
+    } catch {
+      throw new AgentRequestError('agent_error', t('codex.review.appealGone'))
+    }
+    const record = this.thread(sessionId)
+    try {
+      await this.rpc.request('thread/approveGuardianDeniedAction', {
+        threadId: record.id,
+        event: denial,
+      })
+    } catch (error) {
+      // An app-server that lacks the method cannot read the request it names.
+      const lacks =
+        error instanceof RpcError &&
+        (error.code === METHOD_NOT_FOUND || /unknown variant/i.test(error.message))
+      if (lacks) throw unsupported()
+      throw this.toError(error)
+    }
   }
 
   /** `thread/inject_items`, as Responses API messages; false on a Codex that lacks it. */

@@ -118,6 +118,11 @@
       "keywords": "后台 托盘 菜单栏 通知区域 关闭 窗口 继续运行 background tray menu bar close window",
       "lockedByRemote": "远程访问开启时保持开启。"
     },
+    "keepAwake": {
+      "name": "Agent 干活时不让电脑睡眠",
+      "description": "有会话在运行或在等你批准、或有定时任务在跑时，电脑不会自动睡眠，屏幕照常熄灭。合上笔记本盖子、电量不足等情况仍按系统的规则睡眠。",
+      "keywords": "睡眠 休眠 唤醒 保持唤醒 防止睡眠 电源 合盖 电池 sleep awake keep awake power lid battery"
+    },
     "openAtLogin": {
       "name": "登录时打开",
       "description": "定时任务只在 Kettu 打开时运行。",
@@ -1438,7 +1443,13 @@
     "backToAgent": "回到它的设置",
     "profiles": {
       "group": "API 配置",
-      "hint": "用其他服务商的 API key 运行会话。新会话默认用标为「默认」的配置，会话里也可以在模型菜单中切换。纸鸢把 key 加密保存在这台电脑上，保存后不再显示。",
+      "hint": "新会话默认用标为「默认」的那一项，会话里也可以在模型菜单中切换。纸鸢把 key 加密保存在这台电脑上，保存后不再显示。",
+      "ways": {
+        "intro": "纸鸢运行 Claude Code 有两种方式：",
+        "own": "<b>你自己的 Claude 登录（订阅额度）</b>：用 Claude Code 登录的账号，用量算在你的套餐额度里。",
+        "api": "<b>API 配置（按 key 计费；Max/Ultra/Team 每月附带的 API 额度可用）</b>：用 API key，按用量计费。key 来自与 Max、Ultra 或 Team 套餐关联的 Claude Console 组织时，可以用套餐每月附带的 API 额度。",
+        "link": "Anthropic 对套餐额度用于 Agent SDK 的说明"
+      },
       "ownHint": "用它自己的账号，或它配置里的 API key",
       "makeDefault": "设为默认",
       "add": "添加 API 配置",
@@ -1453,6 +1464,7 @@
         "editTitle": "编辑 {{name}}",
         "description": "选好服务商，粘贴它的 API key 即可：地址和模型按服务商自己的 Claude Code 接入文档填好。",
         "provider": "服务商",
+        "anthropicHint": "用 Claude Console 里的 API key。key 来自与你的 Max、Ultra 或 Team 套餐关联的组织时，可以用套餐每月附带的 API 额度。模型留空即用 Claude Code 自己的默认。",
         "name": "名称",
         "key": "API key",
         "keyKeep": "留空保留尾号 {{end}} 的 key",

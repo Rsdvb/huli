@@ -14,6 +14,7 @@ import { Markdown } from '../markdown'
 import { EntryIdContext, SessionIdContext } from '../media/grants'
 import { toolMedia } from '../media/named'
 import { useEntry } from '../use-thread'
+import { DenialAppeal } from './denial-appeal'
 import { commandOutput, toolInputFields, toolLabel, type InputField } from './helpers'
 import { fenceBody, numberedRead } from './read-code'
 import { ShellBlock } from './shell-block'
@@ -59,11 +60,14 @@ export const ToolBody = memo(function ToolBody({
           </p>
         </ToolCallSection>
       )}
-      {entry.denied?.reason && (
+      {(entry.denied?.reason || entry.review?.appeal) && (
         <ToolCallSection label={t('toolCall.section.denied')} labels={labels}>
-          <p data-selectable="" className="ks-tool-prompt">
-            {entry.denied.reason}
-          </p>
+          {entry.denied?.reason && (
+            <p data-selectable="" className="ks-tool-prompt">
+              {entry.denied.reason}
+            </p>
+          )}
+          <DenialAppeal sessionId={sessionId} entry={entry} />
         </ToolCallSection>
       )}
       {entry.review?.rationale && !entry.denied?.reason && (

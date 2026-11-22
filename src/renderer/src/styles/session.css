@@ -2767,3 +2767,57 @@
 .ks-pub-handle .ks-pub-hint {
   flex-basis: 100%;
 }
+
+/* Huli: a call the review denied that the user may still allow, under the reason it gave. */
+.ks-appeal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ks-appeal__risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ui-tcc-text);
+}
+.ks-appeal__risk .ks-risk {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 6px 0 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ks-appeal__risk .ks-risk[data-level='low'] {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+.ks-appeal__risk .ks-risk[data-level='medium'] {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+.ks-appeal__risk .ks-risk[data-level='high'] {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+.ks-appeal__risk > span:last-child {
+  padding-top: 1px;
+}
+.ks-appeal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.ks-appeal__hint,
+.ks-appeal__done {
+  margin: 0;
+  font-size: 12px;
+  color: var(--thread-muted);
+}
