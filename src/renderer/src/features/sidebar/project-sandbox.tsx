@@ -17,6 +17,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '@renderer/components/ui/dropdown-menu'
+import { useEntry } from '@renderer/lib/features'
 import { toast } from '@renderer/components/ui/toast'
 import { sandboxLabel } from '@renderer/features/session/composer/sandbox-text'
 import { MenuGlyph } from '@renderer/features/shell/glyph'
@@ -46,8 +47,11 @@ export function ProjectSandboxMenu({ project, disabled }: { project: Project; di
   const { t } = useTranslation('sidebar')
   const { t: ta } = useTranslation('agents')
   const fallback = useSettingsStore((s) => s.settings.sandbox)
+  // Huli: with sandboxes turned off it shows only for a project that still has one of its own.
+  const shown = useEntry('projectMenu.sandbox') || (project.sandbox ?? null) !== null
   // A host older than sandboxes lists none.
-  if (project.sandbox === undefined) return null
+  if (project.sandbox === undefined || !shown) return null
+
   const label = (choice: SandboxChoice): string =>
     choice.tier === 'off' ? ta('sandbox.tier.off') : sandboxLabel(ta, choice)
   const choose = (value: string): void => {

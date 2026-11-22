@@ -3,6 +3,7 @@ import { AiChat02Icon, ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core
 import { useTranslation } from 'react-i18next'
 import type { SessionSummary } from '@shared/agent-host'
 import type { SessionView } from '@shared/thread'
+import { useEntry } from '@renderer/lib/features'
 import { backTo } from '@renderer/app/history'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
@@ -99,6 +100,8 @@ export function SessionHeader({
   const title = stepTitle ?? sessionTitle(summary)
   const pane = usePane()
   const archived = useSessionsStore((s) => sessionArchived(s.byId, summary.id))
+  const routineLink = useEntry('session.routineLink')
+  const flowChips = useEntry('header.flowChips')
 
   return (
     <TopBar cornered={pane?.cornered}>
@@ -106,7 +109,7 @@ export function SessionHeader({
           its least width is cut at the group's edge, not under the tools. Only the sides are cut,
           so the rename field's ring is not clipped above and below. */}
       <NoDrag className="min-w-0 gap-2 overflow-x-clip">
-        {routine && summary.routine && (
+        {routine && summary.routine && routineLink && (
           <>
             <Button
               variant="quiet"
@@ -166,11 +169,14 @@ export function SessionHeader({
           menu={rename.menu}
         />
         {summary.worktree && <WorktreeBarChip worktree={summary.worktree} />}
-        {summary.issue && <IssueBarChip issue={summary.issue} />}
+        {summary.issue && flowChips && <IssueBarChip issue={summary.issue} />}
         <PrBarChip projectPath={sessionFolder(summary)} />
-        {summary.prFlow && (prFlowActive(summary.prFlow) || summary.prFlow.state === 'failed') && (
-          <PrFlowChip flow={summary.prFlow} />
-        )}
+        {flowChips &&
+          summary.prFlow &&
+          (prFlowActive(summary.prFlow) || summary.prFlow.state === 'failed') && (
+            <PrFlowChip flow={summary.prFlow} />
+          )}
+
         {session && !archived && summary.origin !== 'subagent' && (
           <PlanChip sessionId={summary.id} status={session.status} />
         )}

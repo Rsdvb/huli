@@ -15,6 +15,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '@shared/agent-host'
+import { useEntry } from '@renderer/lib/features'
 import { newSession } from '@renderer/app/actions'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import {
@@ -72,6 +73,7 @@ export function ProjectMenuItems({
     const status = s.status[project.path]
     return status === undefined || !!status.remote?.github
   })
+  const issues = useEntry('projectMenu.issues')
   const pinned = project.pinnedAt != null
   const pinItem = project.pinnedAt !== undefined && (
     <DropdownMenuItem disabled={pinDisabled} onClick={() => void onPin(!pinned)}>
@@ -124,7 +126,7 @@ export function ProjectMenuItems({
         )}
         <ProjectApprovalsMenu project={project} disabled={!!gone} />
         {local && <ProjectSandboxMenu project={project} disabled={!!gone} />}
-        {git && github && (
+        {git && github && issues && (
           <DropdownMenuItem disabled={gone} onClick={() => openIssues(project.path)}>
             <MenuGlyph icon={RadioButtonIcon} />
             {t('project.menu.issues')}

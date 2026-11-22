@@ -29,6 +29,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { SurfaceControl } from '@shared/control'
 import type { AgentId } from '@shared/thread'
 import { SESSION_DEVICE_LIMIT, type DeviceInfo } from '@shared/device-host'
+import { useEntry } from '@renderer/lib/features'
 import { emitAppEvent, onAppEvent } from '@renderer/app/events'
 import { NEW_SESSION_DRAFT } from '@renderer/features/session/composer/drafts'
 import { surfaceMention } from '@renderer/features/session/composer/chips'
@@ -162,8 +163,10 @@ function useSurfaceKinds(panel: string, projectPath: string): SurfaceKinds {
   const sessionId = panelSession(panel)
   const terminal = useTerminalAllowed(projectPath)
   const remote = hostOfPath(projectPath) !== null
+  const devicesOn = useEntry('pane.devices')
   const devices = useDevicesStore(
     (s) =>
+      devicesOn &&
       !!sessionId &&
       (!s.environment ||
         s.environment.ios ||

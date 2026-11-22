@@ -18,3 +18,19 @@ export function useFeature(id: FeatureId): boolean {
 export function entryShown(entry: FeatureEntry): boolean {
   return entryOn(useSettingsStore.getState().settings.features, entry)
 }
+
+/**
+ * Runs `start` now while the entry point shows, else once it first does, as when its feature is
+ * turned on, so a feature that is off reads nothing at launch.
+ */
+export function whenEntryOn(entry: FeatureEntry, start: () => unknown): void {
+  if (entryShown(entry)) {
+    start()
+    return
+  }
+  const stop = useSettingsStore.subscribe((state) => {
+    if (!entryOn(state.settings.features, entry)) return
+    stop()
+    start()
+  })
+}

@@ -20,6 +20,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import type { IconSvgElement } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
+import { entryShown } from '@renderer/lib/features'
 import { newSession, openProjectDialog } from '@renderer/app/actions'
 import { starFromPalette } from '@renderer/features/github-star/palette'
 import { FolderClosedMark, Icon } from '@renderer/components/affect/app-shell'
@@ -188,7 +189,8 @@ function SearchPalette() {
   useEffect(() => {
     artifactListShown(true)
     const routines = useRoutinesStore.getState()
-    if (!routines.loaded) void routines.load()
+    if (!routines.loaded && entryShown('search.routines')) void routines.load()
+
     return () => artifactListShown(false)
   }, [])
   const artifactsLoaded = useArtifactsStore((s) => s.list !== null)

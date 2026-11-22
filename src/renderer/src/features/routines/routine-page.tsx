@@ -35,6 +35,7 @@ import {
 import type { GithubEvent } from '@shared/github-flow'
 import type { ScheduleProblem } from '@shared/schedule'
 import type { AgentId } from '@shared/thread'
+import { useEntry } from '@renderer/lib/features'
 import { backTo } from '@renderer/app/history'
 import { Dropdown, Icon } from '@renderer/components/affect/app-shell'
 import { Button } from '@renderer/components/affect/button'
@@ -781,6 +782,7 @@ function RoutineFields({
   onScheduleProblem?: (problem: ScheduleProblem | null) => void
 }) {
   const { t } = useTranslation('routines')
+  const triggerOn = useEntry('routine.trigger')
   const projects = useProjectsStore((s) => s.projects)
   const project: Project | null =
     projectPath === null
@@ -845,8 +847,14 @@ function RoutineFields({
           </span>
         </Row>
       </div>
-      <Head title={t('on.title')} />
-      <TriggerField trigger={trigger} onTrigger={onTrigger} noProject={noProject} />
+      {/* Huli: GitHub events, while GitHub automation is on or the routine still runs on one. */}
+      {(triggerOn || trigger.kind === 'github') && (
+        <>
+          <Head title={t('on.title')} />
+          <TriggerField trigger={trigger} onTrigger={onTrigger} noProject={noProject} />
+        </>
+      )}
+
       {trigger.kind === 'schedule' && (
         <>
           <Head title={t('routine.schedule')} note={t('routine.scheduleHint')} />
