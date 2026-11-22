@@ -55,6 +55,8 @@ export function placeTitle(place: HistoryPlace): string {
       return (
         groupTitle(useSessionsStore.getState().byId, place.groupId) ?? t('history.places.group')
       )
+    case 'issues':
+      return t('history.places.issues')
     case 'artifact': {
       const { list, deleted } = useArtifactsStore.getState()
       const found = [...(list ?? []), ...(deleted ?? [])].find((a) => a.id === place.id)

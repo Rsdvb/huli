@@ -457,8 +457,15 @@ export class GithubFlow {
     }
     state.failures = failed ? state.failures + 1 : 0
     state.wanted = wanted
-    if (this.repos.get(state.key) === state) {
-      this.schedule(state, nextDelay(wanted, state.failures, this.visible))
+    if (this.repos.get(state.key) !== state) return
+    // An automation that ended here leaves nothing to read for it: plan again rather than wait.
+    const left = this.deps.sessions.flows().some((session) => {
+      const ref = githubReferenceOf(session.flow.url)
+      return ref?.kind === 'pull' && repoKey(ref) === state.key
+    })
+    this.schedule(state, nextDelay(wanted, state.failures, this.visible))
+    if (!left && state.signature.split('\n').some((part) => part.startsWith('s:'))) {
+      void this.refresh()
     }
   }
 
@@ -516,8 +523,16 @@ export class GithubFlow {
     const wanted = pr.checks.state === 'pending' || pr.mergeable === 'unknown' ? FAST_MS : SLOW_MS
     let told = false
     if (flow.watch) told = await this.watch(state, session, pr)
-    if (flow.autoMerge) await this.merge(state, session, pr, told)
-    else this.deps.sessions.setState(session.sessionId, watchState(pr))
+    if (flow.autoMerge) {
+      await this.merge(state, session, pr, told)
+    } else if (pr.state === 'merged' || pr.state === 'closed') {
+      // Nothing more can happen to watch, so the reads stop.
+      const ended = { state: pr.state }
+      this.deps.sessions.update(session.sessionId, flow.url, (current) => ({ ...current, ended }))
+      this.deps.sessions.setState(session.sessionId, null)
+    } else {
+      this.deps.sessions.setState(session.sessionId, watchState(pr))
+    }
     return { failed: false, wanted }
   }
 

@@ -81,6 +81,13 @@ describe('reading what gh records', () => {
       author: 'hubot',
     })
     expect(issues[1]?.body).toBe('')
+    // gh ends the status line with LF and each header with CRLF, as recorded.
+    const recorded = fixture('issues.http').replace(/\r?\n/g, (_, at: number) =>
+      at === fixture('issues.http').indexOf('\n') ? '\n' : '\r\n',
+    )
+    const crlf = parseIncluded(recorded)
+    expect(crlf?.headers.get('etag')).toBe('W/"6c1f2a0b7d9e"')
+    expect(mapRestIssues(JSON.parse(crlf!.body), repo)).toHaveLength(2)
     expect(parseIncluded(fixture('not-modified.http'))?.status).toBe(304)
     expect(parseIncluded('gh: not json')).toBeNull()
   })

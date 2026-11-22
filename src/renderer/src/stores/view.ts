@@ -66,6 +66,8 @@ type PageView =
   | { kind: 'task'; taskId: string; flow?: true }
   // Huli: a best-of-N group's runs side by side, opened from its row or after it starts.
   | { kind: 'group'; groupId: string }
+  // Huli: a project's open GitHub issues, opened from its menu.
+  | { kind: 'issues'; projectPath: string }
 
 /** The Marketplace directory's tabs. */
 export type MarketplaceTab =
@@ -634,6 +636,15 @@ export function openGroup(groupId: string): void {
   }))
 }
 
+/** Huli: a project's issue inbox, its open GitHub issues each a session away. */
+export function openIssues(projectPath: string): void {
+  useViewStore.setState((s) => ({
+    main: { kind: 'issues', projectPath },
+    projectPath,
+    settings: { ...s.settings, open: false },
+  }))
+}
+
 /** Switches the task's page between its timeline and its flowchart, as the same step. */
 export function setTaskFlow(taskId: string, flow: boolean): void {
   useViewStore.setState((s) =>
@@ -1021,6 +1032,8 @@ export function viewKey(view: HistoryView): string {
       return `task:${view.taskId}`
     case 'group':
       return `group:${view.groupId}`
+    case 'issues':
+      return `issues:${view.projectPath}`
     default:
       return view.kind
   }

@@ -27,6 +27,7 @@ import {
   RUN_TEXT,
   runLook,
   scheduleText,
+  triggerText,
   scopeText,
   STATE_TEXT,
   useRoutineList,
@@ -188,7 +189,7 @@ function Routines(props: { switcher: ReactNode }) {
             onPress={() => router.push(`/routine/${r.id}`)}
             scale={false}
             accessibilityRole="button"
-            accessibilityLabel={`${r.name}，${scheduleText(r.trigger.schedule)}，${STATE_TEXT[r.state]}`}
+            accessibilityLabel={`${r.name}，${triggerText(r.trigger)}，${STATE_TEXT[r.state]}`}
             accessibilityHint="查看运行记录和设置"
             style={[styles.routine, { backgroundColor: c.surface }]}
           >
@@ -212,7 +213,7 @@ function Routines(props: { switcher: ReactNode }) {
                 style={[typeScale.footnote, styles.tabular, { color: c.textSecondary }]}
                 numberOfLines={1}
               >
-                {scheduleText(r.trigger.schedule)} · {place(r)}
+                {triggerText(r.trigger)} · {place(r)}
               </Text>
               <View style={styles.meta}>
                 {run && look ? (

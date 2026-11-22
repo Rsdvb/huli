@@ -304,7 +304,8 @@
   "trigger": {
     "manual": "立即运行",
     "catchUp": "补运行",
-    "schedule": "按计划"
+    "schedule": "按计划",
+    "event": "GitHub 事件"
   },
   "run": {
     "starting": "启动中",
@@ -326,5 +327,32 @@
     "announce": "{{name}}：{{status}}",
     "switchedAtStart": "{{from}} 额度已用完，换成 {{to}} 运行",
     "switchedAtStop": "{{from}} 运行中额度用完，换成 {{to}} 继续"
+  },
+  "on": {
+    "title": "运行时机",
+    "schedule": "按计划",
+    "github": "GitHub 事件发生时",
+    "event": "事件",
+    "events": {
+      "issue_opened": "有新议题",
+      "pr_opened": "有新拉取请求",
+      "checks_failed": "拉取请求的检查失败",
+      "pushed": "有提交推送到分支",
+      "behind": "分支落后于默认分支"
+    },
+    "label": "带标签",
+    "labelHint": "可不填：只看带这个标签的议题。",
+    "branch": "分支",
+    "branchHint": "GitHub 上的分支名，比如 main。",
+    "needsProject": "GitHub 事件需要一个远程仓库在 GitHub 上的项目。",
+    "hint": "例行任务开着时，纸鸢最多每分钟查一次 GitHub。每个事件启动一次运行，并把发生了什么附在提示后面。",
+    "summary": {
+      "issue_opened": "有新议题时",
+      "issue_label": "有带 {{label}} 标签的新议题时",
+      "pr_opened": "有新拉取请求时",
+      "checks_failed": "检查失败时",
+      "pushed": "推送到 {{branch}} 时",
+      "behind": "{{branch}} 落后时"
+    }
   }
 }

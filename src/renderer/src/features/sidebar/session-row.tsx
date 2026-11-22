@@ -60,6 +60,7 @@ import {
 import { runSessionMenuAccelerator } from './session-menu-model'
 import { WorktreeRowMark } from '@renderer/features/session/worktree/worktree-tag'
 import { PrBadge } from './pr-badge'
+import { IssueBadge } from '@renderer/features/git/flow-chips'
 import { SubagentBadge } from './subagent-badge'
 import { useRenaming } from './use-renaming'
 import { WaitingMark } from './waiting-mark'
@@ -285,6 +286,7 @@ export const SessionRow = memo(function SessionRow({
       {summary.worktree && (
         <WorktreeRowMark worktree={summary.worktree} onEnter={() => setCardOpen(false)} />
       )}
+      {summary.issue && <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />}
       <PrBadge summary={summary} onEnter={() => setCardOpen(false)} />
       {hasChildren && !expanded && (
         <span

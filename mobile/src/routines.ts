@@ -5,7 +5,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert } from 'react-native'
 import type { HostEvent, RoutineList } from '@shared/agent-host'
-import type { PermissionScope, RoutineView, RunStatus, Schedule } from '@shared/routines'
+import type { GithubEvent } from '@shared/github-flow'
+import type {
+  PermissionScope,
+  RoutineTrigger,
+  RoutineView,
+  RunStatus,
+  Schedule,
+} from '@shared/routines'
 import { useHostState, useMaybeLink, withinRefreshLimit } from './host'
 import { clockOf, errorText } from './sessions'
 import { haptic } from './ui/haptics'
@@ -19,6 +26,26 @@ export function clockText(time: string): string {
   const [h, m] = time.split(':').map(Number)
   const date = new Date(2000, 0, 1, h ?? 0, m ?? 0)
   return clockOf(date.getTime())
+}
+
+/** Huli: when a routine runs: its schedule, or the GitHub event it runs on. */
+export function triggerText(trigger: RoutineTrigger): string {
+  return trigger.kind === 'github' ? eventText(trigger.event) : scheduleText(trigger.schedule)
+}
+
+function eventText(event: GithubEvent): string {
+  switch (event.kind) {
+    case 'issue_opened':
+      return event.label ? `有带 ${event.label} 标签的新议题时` : '有新议题时'
+    case 'pr_opened':
+      return '有新拉取请求时'
+    case 'checks_failed':
+      return '检查失败时'
+    case 'pushed':
+      return `推送到 ${event.branch} 时`
+    case 'behind':
+      return `${event.branch} 落后时`
+  }
 }
 
 export function scheduleText(schedule: Schedule): string {

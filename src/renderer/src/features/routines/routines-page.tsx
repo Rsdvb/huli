@@ -59,6 +59,7 @@ import {
   runStatus,
   scheduleWords,
   sinceTime,
+  triggerWords,
   untilTime,
 } from './model'
 import { routineMenu } from './menu-items'
@@ -290,7 +291,7 @@ function RoutineRow({
   const [contextOpen, setContextOpen] = useState(false)
   const project = routineProject(routine, projects)
   const name = routine.name
-  const schedule = scheduleWords(routine.trigger.schedule)
+  const schedule = triggerWords(routine.trigger)
   const agent = agentName(routine.agentId, routineOn)
   const projectName =
     project?.name ??

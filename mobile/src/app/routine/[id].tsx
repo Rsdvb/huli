@@ -12,7 +12,7 @@ import {
   confirmDeleteRoutine,
   RUN_TEXT,
   runLook,
-  scheduleText,
+  triggerText,
   scopeText,
   STATE_TEXT,
   useRoutineList,
@@ -207,7 +207,13 @@ export default function RoutinePage() {
         <View style={styles.flex}>
           <Text style={[typeScale.callout, { color: c.text }]}>
             {RUN_TEXT[run.status]}
-            {run.trigger === 'manual' ? ' · 手动' : run.trigger === 'catch-up' ? ' · 补跑' : ''}
+            {run.trigger === 'manual'
+              ? ' · 手动'
+              : run.trigger === 'catch-up'
+                ? ' · 补跑'
+                : run.trigger === 'event'
+                  ? ` · ${run.cause?.title ?? 'GitHub 事件'}`
+                  : ''}
             {run.count > 1 ? ` · ${run.count} 次合并` : ''}
           </Text>
           {run.error ? (
@@ -314,7 +320,10 @@ export default function RoutinePage() {
               />
             }
           />
-          <ListRow title="计划" value={scheduleText(routine.trigger.schedule)} />
+          <ListRow
+            title={routine.trigger.kind === 'github' ? '运行时机' : '计划'}
+            value={triggerText(routine.trigger)}
+          />
           <ListRow
             title="Agent"
             value={agentLabel(routine.agentId, agent?.name)}

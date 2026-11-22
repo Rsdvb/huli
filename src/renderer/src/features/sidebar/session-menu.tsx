@@ -5,6 +5,7 @@ import {
   Clock01Icon,
   CodeIcon,
   CommandLineIcon,
+  EyeIcon,
   ComputerIcon,
   FolderRemoveIcon,
   ComputerTerminal01Icon,
@@ -13,6 +14,7 @@ import {
   FileExportIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  GitMergeIcon,
   Layout2ColumnIcon,
   LinkSquare02Icon,
   PencilEdit02Icon,
@@ -121,6 +123,7 @@ import { dissolveRows } from './row-dust'
 import { markReturning } from './row-exit'
 import { sessionPullRequests } from './session-prs'
 import { sessionFolder } from '@renderer/lib/session-folder'
+import { prFlowActive, prFlowTarget, setPrFlow } from '@renderer/features/git/flow-model'
 import { copyResumeCommand, resumeInTerminal } from '@renderer/features/agents/agent-terminal'
 import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
 import { askExport, canExport } from '@renderer/features/session/export/export'
@@ -256,6 +259,8 @@ export function SessionMenuItems({
   })
   const { id } = summary
   const subSessions = useListedSubSessions([id])
+  const currentPr = useGitStore((s) => s.currentPr[sessionFolder(summary)] ?? null)
+  const prTarget = prFlowTarget(summary, currentPr)
 
   const item = (name: SessionMenuItem) => {
     const accelerator = ACCELERATORS[name]
@@ -345,6 +350,33 @@ export function SessionMenuItems({
             {t('row.autoResume')}
           </DropdownMenuCheckboxItem>
         )
+      case 'autoMerge':
+      case 'watchPr': {
+        if (!prTarget) return null
+        const flow =
+          summary.prFlow && prFlowActive(summary.prFlow) && summary.prFlow.url === prTarget.url
+            ? summary.prFlow
+            : null
+        const on = !!flow && (name === 'autoMerge' ? flow.autoMerge : flow.watch)
+        return (
+          <DropdownMenuCheckboxItem
+            key={name}
+            {...props}
+            checked={on}
+            onCheckedChange={(checked) =>
+              setPrFlow(
+                id,
+                prTarget.url,
+                name === 'autoMerge' ? { autoMerge: checked } : { watch: checked },
+              )
+            }
+            closeOnClick
+          >
+            <MenuGlyph icon={name === 'autoMerge' ? GitMergeIcon : EyeIcon} />
+            {t(name === 'autoMerge' ? 'row.autoMerge' : 'row.watchPr')}
+          </DropdownMenuCheckboxItem>
+        )
+      }
       case 'rename':
         return (
           <DropdownMenuItem key={name} {...props} onClick={onRename}>
@@ -618,6 +650,7 @@ export function SessionMenuItems({
     worktree: hasLiveWorktree(summary),
     removeWorktree: canRemoveWorktree(summary),
     exportable: canExport(),
+    prFlow: prTarget !== null,
   }
   return sessionMenuGroups(summary, context).map((group, index) => (
     <DropdownMenuGroup key={group[0]}>
