@@ -47,6 +47,7 @@
     "switching": "Switching the API profile…",
     "switchHint": "Takes effect from the next turn",
     "preset": {
+      "anthropic": "Anthropic (Console API credits)",
       "zhipu": "Zhipu GLM Coding Plan",
       "zai": "Z.ai GLM Coding Plan",
       "kimi": "Kimi (Moonshot)",

@@ -47,6 +47,7 @@
     "switching": "正在切换 API 配置…",
     "switchHint": "从下一轮起生效",
     "preset": {
+      "anthropic": "Anthropic 官方（Console API 额度）",
       "zhipu": "智谱 GLM 编程套餐",
       "zai": "Z.ai GLM 编程套餐（国际）",
       "kimi": "Kimi（月之暗面）",

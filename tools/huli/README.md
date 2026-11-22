@@ -1347,6 +1347,18 @@ It is all events, nothing polls. `src/main/power-save.ts` (with its test) holds 
 `src/main/index.ts`. The `kettu` daemon holds nothing: Node.js has no portable way to, and it
 mostly runs on machines that do not sleep.
 
+### Anthropic's own API as a profile (Anthropic 官方（Console API 额度）)
+
+Claude Code's API profiles (`src/shared/provider-profiles.ts`) have an `anthropic` preset:
+`https://api.anthropic.com`, no model (Claude Code's own defaults and model menu), and a key from
+the Claude Console. Its key goes in `ANTHROPIC_API_KEY`, which Claude Code sends as `x-api-key`,
+while the other presets' go in `ANTHROPIC_AUTH_TOKEN` as a bearer token; both are set empty on the
+command line and the key follows over the control channel, as before. A key of the Console
+organization linked to a Max, Ultra or Team plan spends the plan's monthly API credits
+([Anthropic's article](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan));
+signed in with the plan instead, the SDK draws on the plan's own limits. The Claude Code page's
+API profiles group says so, side by side and neutrally (`agent-profiles.tsx`).
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and

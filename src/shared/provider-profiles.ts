@@ -15,6 +15,7 @@ export function takesProfiles(agentId: AgentId): boolean {
 }
 
 export const PROVIDER_PRESET_IDS = [
+  'anthropic',
   'zhipu',
   'zai',
   'kimi',
@@ -42,6 +43,7 @@ export type ProfileBalanceVendor = 'deepseek' | 'moonshot-cn' | 'moonshot-intl'
 export interface ProviderPreset {
   id: ProviderPresetId
   baseUrl: string
+  /** Empty where Claude Code's own default models are right. */
   model: string
   /** The model for Claude Code's quick work (its Haiku slot), where the guide names another. */
   fastModel?: string
@@ -49,6 +51,11 @@ export interface ProviderPreset {
   /** The vendor's page where a key is made. */
   keyUrl: string
   balance?: ProfileBalanceVendor
+  /**
+   * The variable the key goes in: Anthropic's own API takes a Console key as `x-api-key`, which
+   * Claude Code sends for `ANTHROPIC_API_KEY`; the others take it as a bearer token.
+   */
+  keyVar?: 'ANTHROPIC_API_KEY'
 }
 
 // Each as its vendor's Claude Code guide gives it, read on 2026-11-22:
@@ -74,6 +81,16 @@ const KIMI_ENV = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000' }
 const MINIMAX_ENV = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '524288' }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
+  // A key of the Claude Console. One of the organization linked to a Max, Ultra or Team plan
+  // spends the plan's monthly API credits first:
+  // https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan
+  {
+    id: 'anthropic',
+    baseUrl: 'https://api.anthropic.com',
+    model: '',
+    keyUrl: 'https://platform.claude.com/settings/keys',
+    keyVar: 'ANTHROPIC_API_KEY',
+  },
   {
     id: 'zhipu',
     baseUrl: 'https://open.bigmodel.cn/api/anthropic',
@@ -282,7 +299,7 @@ export interface StoredProfile {
 
 /**
  * Claude Code's variables for a session with the profile: `plain` holds no secret and may go on a
- * command line, with the key's variable set empty; `secret` holds the key.
+ * command line, with both key variables set empty; `secret` holds the key in its preset's one.
  */
 export function claudeProfileEnv(profile: StoredProfile): {
   plain: Record<string, string>
@@ -309,5 +326,6 @@ export function claudeProfileEnv(profile: StoredProfile): {
     plain.ANTHROPIC_DEFAULT_HAIKU_MODEL = fast
     plain.ANTHROPIC_SMALL_FAST_MODEL = fast
   }
-  return { plain, secret: { [CLAUDE_SECRET_VAR]: profile.key } }
+  const keyVar = preset?.keyVar ?? CLAUDE_SECRET_VAR
+  return { plain, secret: { [keyVar]: profile.key } }
 }
