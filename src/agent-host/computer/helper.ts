@@ -1,15 +1,14 @@
 // Huli: Kite's own computer use helper (native/computer-helper), started when a computer use
 // session first needs it and ended with the session: which processes run elevated (Windows), the
-// system's text recognition (Windows and macOS), and the administrator prompt that starts the
-// elevated broker (Windows). One JSON object per line each way, each answer naming its request.
+// system's text recognition (Windows and macOS). One JSON object per line each way, each answer
+// naming its request.
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 import type { LogFn } from '../storage'
 
-/** A request the helper does not answer in this time fails; the administrator prompt waits longer. */
+/** A request the helper does not answer in this time fails. */
 const CALL_MS = 30_000
-const ELEVATE_MS = 10 * 60_000
 /** An idle helper ends after this, though the service ends it with the session first. */
 export const HELPER_IDLE_MS = 3 * 60_000
 const MAX_ANSWER_BYTES = 8 * 1024 * 1024
@@ -42,22 +41,11 @@ export interface OcrReport {
   lines: OcrLine[]
 }
 
-export interface ElevateRequest {
-  pipe: string
-  user: string
-  client: number
-  target: number
-  tokenSha256: string
-  idleMs: number
-}
-
 /** What the service needs of the helper; a stand-in in tests. */
 export interface ComputerHelperLike {
   whoami(): Promise<{ sid: string | null; pid: number; integrity: number | null }>
   elevation(pids: number[]): Promise<ElevationReport>
   ocr(image: string): Promise<OcrReport>
-  /** The broker's process id, or null when the user said no at the administrator prompt. */
-  elevate(request: ElevateRequest): Promise<number | null>
   stop(): void
 }
 
@@ -94,17 +82,6 @@ export class ComputerHelper implements ComputerHelperLike {
 
   ocr(image: string): Promise<OcrReport> {
     return this.request('ocr', { image }, CALL_MS)
-  }
-
-  async elevate(request: ElevateRequest): Promise<number | null> {
-    const answer = await this.request<{ pid?: number | null; cancelled?: boolean }>(
-      'elevate',
-      { ...request },
-      ELEVATE_MS,
-    )
-    if (answer.cancelled) return null
-    if (typeof answer.pid !== 'number') throw new Error('The elevated helper did not start.')
-    return answer.pid
   }
 
   /** Ends the helper, and with it any request in flight. */

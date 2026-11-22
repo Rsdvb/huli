@@ -406,7 +406,7 @@ Shortcuts and menu items that quit, log out, lock or shut down are refused.
 
 ## Apps run as administrator
 
-\`computer_list_apps\` marks apps that run as administrator. Computer use cannot click or type in them, and says so before you try. Only when the user turned on administrator use in Settings can you use one: your first call asks the user, who then confirms Windows' administrator prompt. It then acts in the background only, asks the user before risky steps (keys, shortcuts, menu items, committing buttons, clicks at bare points), and ends with the turn. Do not ask for it unless the task needs that app.
+\`computer_list_apps\` marks apps that run as administrator. Computer use cannot click or type in them, and says so before you try; reading them may give a blank screenshot. When the task needs one, ask the user to run it normally, or to do that step themselves.
 
 ## Who is operating
 

@@ -74,7 +74,7 @@
 - **内置浏览器**：Agent 能打开页面、点击、输入和截图，你随时可以接手。
 - **Artifacts**：Agent 做的网页、文档、幻灯片和画布。画布上的画框可以排版、标注后交给 Agent，也可以留言、自己编辑，或导出成 Word 和 PowerPoint。
 - **发布到 Kettu**：给 Artifact 一个 kettu.page 上的页面，可以只有自己能看、凭访问码看或公开。
-- **Computer use**：打开之后，Agent 能操作你电脑上的应用，用系统自带的文字识别读懂自绘界面里的文字；你允许的话，还能操作以管理员身份运行的程序。
+- **Computer use**：打开之后，Agent 能操作你电脑上的应用，还能用系统自带的文字识别读懂自绘界面里的文字。
 - **Routines**：按时让 Agent 干活，每次运行都留成会话。
 - **Marketplace**：在一个地方发现、安装和管理给 Agent 用的插件、Skills、MCP 服务器和工作流。
 - **搜索**：在一个命令面板里搜会话、Artifacts、Routines、项目、设置和操作。

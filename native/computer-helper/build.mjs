@@ -61,7 +61,7 @@ function buildWindows(destination) {
         '-nologo',
         '-optimize+',
         '-codepage:65001',
-        // A windowed program: the broker starts through the administrator prompt with no console.
+        // A windowed program, so no console window opens for it.
         '-target:winexe',
         '-platform:anycpu',
         `-out:${output}`,

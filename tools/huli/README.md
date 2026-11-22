@@ -1254,26 +1254,15 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
   notes it once a turn per app, and the floating label notes each time. Off, the agent hears it was
   not tried. An agent may ask for the foreground on any action, which the same switch allows. An
   action the driver delivered in the foreground by itself (Windows menus) is noted the same way.
-- **Administrator use, opt in** (允许以管理员权限操作指定程序, Windows, off by default, `access: 'read'`
-  so agents can never turn it on). An action or read of an elevated app then shows a card naming
-  it (only this computer's window can answer it). On approve, the helper starts its `broker` mode
-  through `ShellExecute` `runas`: Windows' administrator prompt, which the owner answers. The
-  broker creates `\\.\pipe\kite-computer-<random>` with a DACL for Kite's user's SID alone (passed
-  in, as under Administrator protection the broker runs as the shadow admin) and a medium label,
-  checks that the client is the agent host's process and account, and takes the per-session token
-  as the first line (only its SHA-256 is on the command line). It runs `cua-driver mcp --direct`
-  as its child and relays only the read and input tools, scoped to the approved process's windows,
-  background only, with Kite's arguments only. The host asks again before risky steps (`riskyStep`
-  in `policy.ts`: keys, shortcuts, line breaks, drags, menus, committing buttons, bare points). A red
-  badge on the composer says 正在以管理员权限操作 <程序> with a Stop that ends only the helper, and
-  the floating label turns red. The broker ends with the hold (turn end, idle, Stop), when its idle
-  time passes, or when the program or the agent host exits. No UIAccess.
+- **Administrator use** is held back: driving a program run as administrator through an elevated
+  helper the owner approves at Windows' prompt is not in the app yet, pending a security rework of
+  where the elevated programs run from and who may start them. The service keeps the hook
+  (`elevate` in `ComputerUseDeps`, null in the host), the cards and the badge for it.
 
 A test copy (`KITE_TEST_WINDOW=background`) keeps computer use's floating label and light off every
 display and registers no stop shortcut. To try computer use there, start a window of your own and
 drive it through the fake agent's `fake:/computer <tool> <json> ; ...` turns (see
-`tools/fake-agent/computer.ts`); the administrator broker is tested without elevation by
-`src/agent-host/computer/elevated.test.ts` on Windows.
+`tools/fake-agent/computer.ts`).
 
 ### Kite in development
 

@@ -24,7 +24,7 @@ export function ComputerSwitch({
   setting = 'enabled',
 }: {
   label: string
-  setting?: 'enabled' | 'pauseOnUse' | 'allowForeground' | 'allowElevated'
+  setting?: 'enabled' | 'pauseOnUse' | 'allowForeground'
 }) {
   const checked = useSettingsStore((s) => s.settings.computerUse[setting])
   const [error, setError] = useState<string | null>(null)

@@ -577,11 +577,6 @@
       "description": "An action an app ignores in the background, as many Electron apps and games do, is tried once with its window brought to the front, which then goes back. The thread and a label on screen say so.",
       "keywords": "foreground front focus electron background delivery computer use"
     },
-    "allowElevated": {
-      "name": "Allow operating chosen programs as administrator",
-      "description": "An agent may ask to use a program that runs as administrator. You allow each program in its session, then confirm Windows’ administrator prompt yourself. Kite then drives only that program’s windows, asks before risky steps, shows a badge with Stop the whole time, and ends the helper when the turn ends or it sits idle.",
-      "keywords": "administrator admin elevated uac run as administrator computer use"
-    },
     "stopShortcut": {
       "name": "Stop from anywhere",
       "description": "Stops using the computer from any app, also while Kettu is in the background, where a label shows at the top of the screen.",
@@ -611,7 +606,7 @@
     },
     "windows": {
       "name": "Windows",
-      "description": "Needs no permission. Programs run as administrator cannot be used unless you allow it below, and some actions in Electron apps need the window in front."
+      "description": "Needs no permission. Programs run as administrator cannot be used, and some actions in Electron apps need the window in front."
     },
     "desktop": {
       "name": "Desktop",

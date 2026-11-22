@@ -5,7 +5,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -18,7 +17,6 @@ namespace Kite.ComputerHelper
     {
         const int MaxLine = 64 * 1024 * 1024;
         const int MaxPids = 1024;
-        const int ErrorCancelled = 1223;
 
         static readonly object WriteLock = new object();
         static StreamWriter output;
@@ -60,7 +58,6 @@ namespace Kite.ComputerHelper
                 if (op == "whoami") result = WhoAmI();
                 else if (op == "elevation") result = Elevation(request);
                 else if (op == "ocr") result = Ocr.Recognize(request);
-                else if (op == "elevate") result = Elevate(request);
                 else throw new ArgumentException("Unknown op " + op + ".");
                 Write(json, new Dictionary<string, object> { { "id", id }, { "ok", true }, { "result", result } });
             }
@@ -114,36 +111,6 @@ namespace Kite.ComputerHelper
                 pids[pid.ToString()] = new Dictionary<string, object> { { "integrity", integrity }, { "elevated", elevated } };
             }
             return new Dictionary<string, object> { { "self", self }, { "selfElevated", selfElevated }, { "pids", pids } };
-        }
-
-        /// <summary>
-        /// Starts this program as the broker through the administrator prompt, which the owner
-        /// answers on the secure desktop. Cancelled when they say no.
-        /// </summary>
-        static object Elevate(Dictionary<string, object> request)
-        {
-            var options = BrokerOptions.FromRequest(request);
-            var start = new ProcessStartInfo
-            {
-                FileName = Process.GetCurrentProcess().MainModule.FileName,
-                Arguments = options.ToArguments(),
-                UseShellExecute = true,
-                Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Hidden,
-            };
-            try
-            {
-                using (var process = Process.Start(start))
-                {
-                    return new Dictionary<string, object> { { "pid", process == null ? (int?)null : process.Id } };
-                }
-            }
-            catch (Win32Exception error)
-            {
-                if (error.NativeErrorCode == ErrorCancelled)
-                    return new Dictionary<string, object> { { "cancelled", true } };
-                throw;
-            }
         }
     }
 

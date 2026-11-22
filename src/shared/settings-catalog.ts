@@ -784,8 +784,7 @@ const ENTRIES = {
     access: 'change',
     ...flag('computerUse', 'pauseOnUse', (file) => file.computerUse.pauseOnUse),
   },
-  // Huli: the foreground once an action is not delivered in the background, and apps run as
-  // administrator, which agents never turn on themselves.
+  // Huli: the foreground once an action is not delivered in the background.
   'computer-use.allow-foreground': {
     section: 'computer-use',
     row: 'allow-foreground',
@@ -797,18 +796,6 @@ const ENTRIES = {
     access: 'ask',
     warning: 'agentSettings.warning.computerForeground',
     ...flag('computerUse', 'allowForeground', (file) => file.computerUse.allowForeground),
-  },
-  'computer-use.allow-elevated': {
-    section: 'computer-use',
-    row: 'allow-elevated',
-    group: 'computer.groups.use',
-    name: 'computer.allowElevated.name',
-    description: 'computer.allowElevated.description',
-    keywords: 'computer.allowElevated.keywords',
-    part: 'desktop',
-    access: 'read',
-    on: (ctx) => ctx.desktop && ctx.platform === 'win32',
-    ...flag('computerUse', 'allowElevated', (file) => file.computerUse.allowElevated),
   },
   'computer-use.stop-shortcut': {
     section: 'computer-use',

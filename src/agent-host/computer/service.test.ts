@@ -547,7 +547,6 @@ describe('Huli: apps run as administrator', () => {
           ),
         }),
         ocr: async () => ({ languages: [], width: 1, height: 1, lines: [] }),
-        elevate: async () => 1,
         stop: () => {},
       },
       elevate: async (pid) => {

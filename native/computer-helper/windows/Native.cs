@@ -1,37 +1,17 @@
-// The Win32 calls the helper makes: process tokens, named pipes and window owners.
+// The Win32 calls the helper makes: process tokens.
 
 using System;
-using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
-using Microsoft.Win32.SafeHandles;
 
 namespace Kite.ComputerHelper
 {
     static class Native
     {
         public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-        public const uint SYNCHRONIZE = 0x00100000;
         const uint TOKEN_QUERY = 0x0008;
         const int TokenElevation = 20;
         const int TokenIntegrityLevel = 25;
-
-        public const uint PIPE_ACCESS_DUPLEX = 0x00000003;
-        public const uint FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000;
-        public const uint PIPE_TYPE_BYTE = 0x00000000;
-        public const uint PIPE_READMODE_BYTE = 0x00000000;
-        public const uint PIPE_WAIT = 0x00000000;
-        public const uint PIPE_REJECT_REMOTE_CLIENTS = 0x00000008;
-        public const int ERROR_PIPE_CONNECTED = 535;
-        public const uint WAIT_OBJECT_0 = 0;
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct SECURITY_ATTRIBUTES
-        {
-            public int nLength;
-            public IntPtr lpSecurityDescriptor;
-            public int bInheritHandle;
-        }
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
@@ -41,9 +21,6 @@ namespace Kite.ComputerHelper
 
         [DllImport("kernel32.dll")]
         public static extern IntPtr GetCurrentProcess();
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
 
         [DllImport("advapi32.dll", SetLastError = true)]
         static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
@@ -56,44 +33,6 @@ namespace Kite.ComputerHelper
 
         [DllImport("advapi32.dll")]
         static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
-
-        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        public static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            string sddl, uint revision, out IntPtr descriptor, IntPtr size);
-
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr LocalFree(IntPtr memory);
-
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        public static extern SafePipeHandle CreateNamedPipeW(
-            string name, uint openMode, uint pipeMode, uint maxInstances, uint outBuffer,
-            uint inBuffer, uint timeout, ref SECURITY_ATTRIBUTES attributes);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool ConnectNamedPipe(SafePipeHandle pipe, IntPtr overlapped);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool DisconnectNamedPipe(SafePipeHandle pipe);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out int pid);
-
-        [DllImport("user32.dll")]
-        static extern int GetWindowThreadProcessId(IntPtr window, out int pid);
-
-        [DllImport("user32.dll")]
-        static extern bool IsWindow(IntPtr window);
-
-        /// <summary>The process that owns a top-level window, or 0 when it is no window.</summary>
-        public static int WindowOwner(long windowId)
-        {
-            if (windowId <= 0) return 0;
-            var handle = new IntPtr(windowId);
-            if (!IsWindow(handle)) return 0;
-            int pid;
-            GetWindowThreadProcessId(handle, out pid);
-            return pid;
-        }
 
         /// <summary>
         /// A process's mandatory integrity level (the integrity SID's last sub-authority, such as
@@ -199,12 +138,6 @@ namespace Kite.ComputerHelper
             {
                 CloseHandle(process);
             }
-        }
-
-        public static Win32Exception LastError(string what)
-        {
-            int code = Marshal.GetLastWin32Error();
-            return new Win32Exception(code, what + " failed (" + code + ")");
         }
     }
 }

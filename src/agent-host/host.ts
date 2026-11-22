@@ -205,7 +205,6 @@ import { ScratchFolders } from './scratch'
 import { createWorktreeGit } from './worktrees/git'
 import { WorktreeManager } from './worktrees/manager'
 import { ComputerDriver, probePermissions } from './computer/driver'
-import { ElevatedDriver } from './computer/elevated'
 import { ComputerHelper } from './computer/helper'
 import { networkStateFile, subscriptionsFile } from './node-proxy/files'
 import { NodeProxy, type NodeProxyDeps } from './node-proxy/service'
@@ -906,19 +905,8 @@ export class AgentHost {
           platform,
           driver: new ComputerDriver({ path: computer.driverPath, log }),
           helper,
-          elevate:
-            platform === 'win32' && helper
-              ? async (pid) => {
-                  const { sid } = await helper.whoami()
-                  if (!sid) throw new Error('Windows did not name this account.')
-                  return ElevatedDriver.start({
-                    target: pid,
-                    user: sid,
-                    launch: (request) => helper.elevate(request),
-                    log,
-                  })
-                }
-              : null,
+          // Huli: no elevated helper yet; apps run as administrator stay refused.
+          elevate: null,
           foreground: (sessionId, app) => this.sessions.computerForeground(sessionId, app),
           elevatedStopped: (sessionId, app) =>
             this.sessions.computerElevatedStopped(sessionId, app),

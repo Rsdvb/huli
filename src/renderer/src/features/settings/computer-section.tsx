@@ -98,18 +98,6 @@ export function useComputerUseSection(): SectionDef {
         <ComputerSwitch label={t('computer.allowForeground.name')} setting="allowForeground" />
       ),
     },
-    ...(isWindows
-      ? [
-          {
-            id: 'allow-elevated',
-            setting: 'computer-use.allow-elevated',
-            group: main,
-            render: () => (
-              <ComputerSwitch label={t('computer.allowElevated.name')} setting="allowElevated" />
-            ),
-          } satisfies RowDef,
-        ]
-      : []),
     {
       id: 'stop-shortcut',
       setting: 'computer-use.stop-shortcut',
