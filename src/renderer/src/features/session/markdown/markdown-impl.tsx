@@ -336,10 +336,10 @@ const ChunkPlaceholder = memo(function ChunkPlaceholder({
 /**
  * Agent prose. Raw HTML goes through the sanitizer, and an inline `<svg>` is first written as an
  * `svg` code block (`inline-svg.ts`). A long text renders in chunks (`chunks.ts`), so a streamed
- * update re-renders, lays out and paints the live tail instead of the whole message. Streaming
- * mode splits each chunk into memoized blocks, and the mode never changes: static mode renders
- * one tree, so switching when a message finishes would rebuild all of it. Finishing only turns
- * off incomplete-markdown repair.
+ * update re-renders, lays out and paints the live tail instead of the whole message, and only its
+ * chunks near the view render (`in-parts.ts`). Streaming mode splits each chunk into memoized
+ * blocks, and the mode never changes: static mode renders one tree, so switching when a message
+ * finishes would rebuild all of it. Finishing only turns off incomplete-markdown repair.
  */
 function MarkdownImpl({
   markdown,
