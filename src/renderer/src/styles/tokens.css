@@ -1602,6 +1602,15 @@
    its own, such as the theme previews in Settings, resolves them against its own values. */
 :root,
 [data-theme] {
+  /* Huli: the marks drawn on a picture before it is sent, alike in every theme since they go with
+     the picture; the halo keeps a label legible on any picture, and the veil covers what a crop
+     leaves out. */
+  --markup-red: #e5484d;
+  --markup-yellow: #f5b800;
+  --markup-green: #30a46c;
+  --markup-blue: #0090ff;
+  --markup-halo: #ffffff;
+  --markup-veil: rgb(0 0 0 / 55%);
   /* shadcn/ui's names, so its components pick the palette up unchanged. */
   --background: var(--bg-app);
   --foreground: var(--text-primary);

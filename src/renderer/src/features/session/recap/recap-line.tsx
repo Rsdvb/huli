@@ -24,7 +24,7 @@ function recapNow(sessionId: string): Recap | null {
 }
 
 /** The recap as one line: what changed, ran and asked, then the latest reply. */
-export function recapText(t: TFunction<'session'>, recap: Recap): string {
+function recapText(t: TFunction<'session'>, recap: Recap): string {
   const parts: string[] = []
   if (recap.files > 0) {
     parts.push(

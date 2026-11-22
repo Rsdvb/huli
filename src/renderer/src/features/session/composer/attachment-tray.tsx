@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { embedsText, readTextThumb } from '@shared/attachments'
@@ -17,7 +17,10 @@ import { AttachmentTile, type TileView } from '../attachments/attachment-tile'
 import { openAttachmentPath } from '../attachments/open-attachment'
 import type { TextDialogTarget } from '../attachments/text-dialog'
 import { draftKey } from '../media/viewer-items'
-import { removeAttachment } from './attachments'
+import { readImage, removeAttachment, replaceImage } from './attachments'
+
+// The editor and its drawing load only once a picture is marked up.
+const MarkupDialog = lazy(() => import('../markup/markup-dialog'))
 
 const EASE_OUT_QUART = [0.165, 0.84, 0.44, 1] as const
 
@@ -98,6 +101,16 @@ export function AttachmentTray({
   }
   const focusAt = (i: number) => focusTile(items[i]!.key, i)
 
+  // Huli: the image tile being marked up.
+  const [marking, setMarking] = useState<DraftAttachment | null>(null)
+  const markable = (item: DraftAttachment | undefined): item is DraftAttachment =>
+    item?.kind === 'image' && item.status === 'ready' && item.attachment?.type === 'image'
+  const markingAttachment = marking?.attachment ?? null
+  const loadMarked = useCallback(
+    () => (markingAttachment ? readImage(markingAttachment) : Promise.reject(new Error('gone'))),
+    [markingAttachment],
+  )
+
   const open = (item: DraftAttachment, from: HTMLElement) => {
     const attachment = item.attachment
     if (!attachment || item.status !== 'ready') return
@@ -161,6 +174,11 @@ export function AttachmentTray({
       case ' ':
         open(items[index]!, event.target as HTMLElement)
         break
+      case 'e':
+      case 'E':
+        if (!markable(items[index])) return
+        setMarking(items[index])
+        break
       default:
         return
     }
@@ -209,6 +227,8 @@ export function AttachmentTray({
                   onClick={(event) => open(item, event.currentTarget)}
                   onRemove={() => remove(i)}
                   removeLabel={t('attachments.remove', { name: item.name })}
+                  onMarkup={markable(item) ? () => setMarking(item) : undefined}
+                  markupLabel={t('markup.open', { name: item.name })}
                 />
               </motion.div>
             ))}
@@ -218,6 +238,21 @@ export function AttachmentTray({
       <span className="sr-only" aria-live="polite">
         {announcement}
       </span>
+      {marking && (
+        <Suspense fallback={null}>
+          <MarkupDialog
+            name={marking.name}
+            load={loadMarked}
+            onClose={() => setMarking(null)}
+            onDone={async (image) => {
+              const key = marking.key
+              setMarking(null)
+              await replaceImage(draft, key, image, hostId)
+              setAnnouncement(t('markup.announceDone', { name: marking.name }))
+            }}
+          />
+        </Suspense>
+      )}
     </>
   )
 }
