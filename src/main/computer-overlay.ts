@@ -291,6 +291,8 @@ export class ComputerOverlay {
       control: hold.control,
       act: hold.act,
       frame,
+      elevated: hold.elevated ?? null,
+      foreground: hold.foreground ?? null,
     }
   }
 

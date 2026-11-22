@@ -38,6 +38,33 @@ html[data-overlay] body {
   box-shadow: var(--computer-float-you-shadow);
   color: var(--text-secondary);
 }
+/* Huli: an app driven as administrator. */
+.kco-float[data-elevated] {
+  background: var(--shell-danger);
+}
+/* Huli: an action that went to the foreground, noted for a moment. */
+.kco-float__note {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--on-fill) 22%, transparent);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--on-fill);
+  animation: kco-note 2.6s ease both;
+}
+@keyframes kco-note {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
 .kco-float__in {
   display: flex;
   align-items: center;

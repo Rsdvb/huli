@@ -7,6 +7,7 @@ import { Icon } from '@renderer/components/affect/app-shell'
 import {
   PermissionRequest,
   type PermissionDecision,
+  type PermissionRisk,
   type PermissionPreviewItem,
 } from '@renderer/components/affect/permission-request'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
@@ -44,6 +45,7 @@ export function AccessCard({
   request,
   trailing,
   title,
+  risk = 'safe',
 }: {
   sessionId: string
   entryId: string
@@ -77,6 +79,8 @@ export function AccessCard({
     | null
   /** The card's title in place of "wants to", from the agent's name and the action. */
   title?: (agent: string, action: string) => ReactNode
+  /** Huli: how much is at stake, which tints the card; safe by default. */
+  risk?: PermissionRisk
 }) {
   const { t } = useTranslation('session')
   const agentId = useSessionsStore((s) => s.byId[sessionId]?.agentId ?? null)
@@ -131,7 +135,7 @@ export function AccessCard({
         action={action}
         target={target}
         toolIcon={<Icon icon={glyph} size={12} />}
-        risk="safe"
+        risk={risk}
         reason={reason}
         {...(preview ? { preview, previewTitle, previewLimit: preview.length } : {})}
         scopes={['once']}

@@ -23,7 +23,7 @@ export function ControlLabelRow({
   children,
 }: {
   surface: ControlSurface
-  kind: ActiveControl['kind'] | 'waiting'
+  kind: ActiveControl['kind'] | 'waiting' | 'elevated'
   mark: ReactNode
   text: ReactNode
   textId?: string

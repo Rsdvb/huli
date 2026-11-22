@@ -1,11 +1,17 @@
 import { useState } from 'react'
-import { ComputerIcon, DashboardSquare01Icon } from '@hugeicons/core-free-icons'
+import {
+  ComputerIcon,
+  DashboardSquare01Icon,
+  Shield01Icon,
+  StopCircleIcon,
+} from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AnimatePresence } from 'motion/react'
 import { Trans, useTranslation } from 'react-i18next'
 import { computerControl, stopShortcutText } from '@shared/computer-use'
 import type { AgentId, ComputerUseView } from '@shared/thread'
 import { ControlLabel, ControlLabelRow } from '@renderer/components/control/control-label'
+import { Button } from '@renderer/components/ui/button'
 import { useControlAgent } from '@renderer/components/control/use-control-agent'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { errorMessage, host } from '@renderer/lib/host'
@@ -150,5 +156,46 @@ export function ComputerLabel({
       />
     )
   }
-  return <AnimatePresence>{label}</AnimatePresence>
+  // Huli: while an elevated helper drives an app for the session, a badge says so above the label,
+  // with a Stop of its own that ends the helper and not the turn.
+  const elevated = view?.elevated ?? null
+  const badge = elevated ? (
+    <ControlLabelRow
+      key="elevated"
+      surface="computer"
+      kind="elevated"
+      title={elevated}
+      mark={<HugeiconsIcon icon={Shield01Icon} strokeWidth={1.9} className="size-3.75" />}
+      text={
+        <Trans
+          t={t}
+          i18nKey="session:computerBar.elevated"
+          values={{ app: elevated }}
+          components={{ app: <b dir="auto" /> }}
+        />
+      }
+    >
+      <Button
+        variant="destructive"
+        size="dialog"
+        className="h-6"
+        title={t('session:computerBar.elevatedStopLabel')}
+        onClick={() => {
+          onError(null)
+          host('computer.stopElevated', { sessionId }).catch((caught: unknown) =>
+            onError(errorMessage(caught)),
+          )
+        }}
+      >
+        <HugeiconsIcon icon={StopCircleIcon} strokeWidth={1.9} aria-hidden />
+        {t('session:computerBar.elevatedStop')}
+      </Button>
+    </ControlLabelRow>
+  ) : null
+  return (
+    <AnimatePresence>
+      {badge}
+      {label}
+    </AnimatePresence>
+  )
 }
