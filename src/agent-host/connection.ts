@@ -165,6 +165,8 @@ export interface AgentInit {
     forkAtMessage: boolean
     /** It has `revertTurns`, which takes the latest turns out of a session's history. */
     revertTurns?: boolean
+    /** Huli: it has `rewindFiles`, its own file checkpoints, so Kite takes none of its own. */
+    rewindFiles?: boolean
     /** How its own session titles arrive, or null when Kettu writes one. */
     ownTitles: OwnTitles | null
     logout: boolean
@@ -292,6 +294,21 @@ export interface RevertPoint {
   removed: string[]
   /** The items before them, latest first; empty when the cut takes the whole history. */
   kept: string[]
+}
+
+/** Huli: a revert that holds only once the session opens at `resumeAt`, which Kite then keeps. */
+export interface RevertDone {
+  resumeAt: string
+}
+
+/** Huli: what an agent's own file rewind did, or with a dry run would do. */
+export interface FileRewind {
+  canRewind: boolean
+  error?: string
+  /** Absolute, or relative to the session's folder. */
+  files: string[]
+  insertions: number | null
+  deletions: number | null
 }
 
 /**
@@ -464,6 +481,11 @@ export interface SessionOptions {
    * them; absent for none.
    */
   folders?: readonly string[]
+  /**
+   * Huli: where a rewind cut the session's history, for an agent whose revert leaves the history
+   * whole until the next prompt: a resume takes the history up to it.
+   */
+  resumeAt?: string
 }
 
 /** Kettu's memory as a session starts with it. */
@@ -551,7 +573,13 @@ export interface AgentConnection {
    * Takes the latest turns out of the session's history, where `point` cuts it, so the model no
    * longer sees them; what they changed on disk stays. Absent where the agent cannot.
    */
-  revertTurns?(sessionId: string, point: RevertPoint): Promise<void>
+  revertTurns?(sessionId: string, point: RevertPoint): Promise<void | RevertDone>
+  /**
+   * Huli: puts the files the agent changed since the first user message `point` takes out back as
+   * they were before it, from the agent's own checkpoints; with `dryRun` only says what would
+   * change. Absent where the agent keeps none.
+   */
+  rewindFiles?(sessionId: string, point: RevertPoint, dryRun: boolean): Promise<FileRewind>
   closeSession(sessionId: string): Promise<void>
   deleteSession(sessionId: string): Promise<void>
   listSessions(

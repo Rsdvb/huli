@@ -1,5 +1,11 @@
 {
   "session": {
+    "rewindFilesFailed": "没能还原文件：{{reason}}",
+    "rewindNoCheckpoint": "纸鸢没有保存这条消息时的文件",
+    "rewindFolderBusy": "「{{session}}」正在改这些文件，现在不能还原",
+    "rewindFilesChanged": "预览之后文件又变了，请重新看一下预览再还原",
+    "rewindNothingAfter": "这条消息之后没有别的内容",
+    "rewindNoPoint": "不能回退到这条消息",
     "status": {
       "starting": "正在启动",
       "ready": "就绪",
@@ -525,6 +531,8 @@
     }
   },
   "claude": {
+    "noFileCheckpoint": "Claude Code 没有保存这条消息时的文件",
+    "noRevertPoint": "Claude Code 在它的历史里找不到这一轮",
     "mode": {
       "default": {
         "name": "编辑前询问",

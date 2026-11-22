@@ -34,7 +34,7 @@ import {
   type MapperOutput,
 } from '../session-updates'
 import { FakeChild, FakeClaudeSdk, type FakeQuery } from '../testing/fake-claude-sdk'
-import { ClaudeConnection, promptContent } from './connection'
+import { ClaudeConnection, historyCut, promptContent } from './connection'
 import { claudeSdkDriver } from './driver'
 import { ANSWER_IN_REPLY, QUESTION_UNREADABLE, QUESTIONS_SKIPPED } from './permissions'
 import type { PostModelSwitchHookInput, SdkMessage, StoredMessage } from './sdk'
@@ -4295,5 +4295,127 @@ describe('the native sandbox', () => {
     await expect(
       s.connection.newSession('/repo', { sandbox: { ...sandbox, network: 'agent' } }),
     ).rejects.toThrow()
+  })
+})
+
+describe('Huli: rewinds', () => {
+  const user = (uuid: string, text: string): StoredMessage => ({
+    type: 'user',
+    uuid,
+    session_id: 's',
+    parent_tool_use_id: null,
+    message: { role: 'user', content: text },
+  })
+  const reply = (uuid: string, id: string, content: unknown[] = []): StoredMessage => ({
+    type: 'assistant',
+    uuid,
+    session_id: 's',
+    parent_tool_use_id: null,
+    message: { id, content },
+  })
+  const toolResult = (uuid: string, toolId: string): StoredMessage => ({
+    type: 'user',
+    uuid,
+    session_id: 's',
+    parent_tool_use_id: null,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId }] },
+  })
+  const history = [
+    user('u1', 'one'),
+    reply('a1', 'msg_1', [{ type: 'tool_use', id: 'toolu_1', name: 'Edit', input: {} }]),
+    toolResult('r1', 'toolu_1'),
+    reply('a2', 'msg_2', [{ type: 'text', text: 'Done.' }]),
+    user('u2', 'two'),
+    reply('a3', 'msg_3'),
+    user('u3', 'three'),
+    reply('a4', 'msg_4'),
+  ]
+
+  it('cuts after the latest kept item, else before the first removed one', () => {
+    expect(
+      historyCut(history, { removed: ['msg_3', 'msg_4'], kept: ['msg_2', 'toolu_1'] }),
+    ).toEqual({ prompt: 'u2', keep: 'a2' })
+    // A tool's result is no message of the user's.
+    expect(historyCut(history, { removed: ['msg_3'], kept: ['toolu_1'] })).toEqual({
+      prompt: 'u2',
+      keep: 'a2',
+    })
+    expect(historyCut(history, { removed: ['msg_4'], kept: ['msg_gone'] })).toEqual({
+      prompt: 'u3',
+      keep: 'a3',
+    })
+    expect(historyCut(history, { removed: ['msg_1'], kept: [] })).toEqual({
+      prompt: 'u1',
+      keep: null,
+    })
+    // Nothing of the cut turns reached the history.
+    expect(historyCut(history, { removed: ['msg_9'], kept: ['msg_4'] })).toEqual({
+      prompt: null,
+      keep: 'a4',
+    })
+    expect(historyCut(history, { removed: ['msg_9'], kept: ['msg_8'] })).toBeNull()
+  })
+
+  it('keeps file checkpoints for the user’s sessions, not for its own', async () => {
+    const s = await setup()
+    await s.connection.newSession('/repo')
+    expect(s.sdk.last.options.enableFileCheckpointing).toBe(true)
+    await s.connection.newSession('/repo', { hidden: 'titles' })
+    expect(s.sdk.last.options).not.toHaveProperty('enableFileCheckpointing')
+  })
+
+  it('reopens at the cut, and the next prompt is chained there', async () => {
+    const s = await setup()
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    s.sdk.history.set(sessionId, history)
+    const done = await s.connection.revertTurns!(sessionId, {
+      removed: ['msg_3', 'msg_4'],
+      kept: ['msg_2', 'toolu_1', 'msg_1'],
+    })
+    expect(done).toEqual({ resumeAt: 'a2' })
+    const queries = s.sdk.queries.length
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'two, again' }])
+    expect(s.sdk.queries.length).toBe(queries + 1)
+    expect(s.sdk.last.options).toMatchObject({ resume: sessionId, resumeSessionAt: 'a2' })
+  })
+
+  it('resumes at the cut Kite kept for a session opened again', async () => {
+    const s = await setup()
+    await s.connection.resumeSession('old', '/repo', { resumeAt: 'a2' })
+    expect(s.sdk.last.options).toMatchObject({ resume: 'old', resumeSessionAt: 'a2' })
+    await s.connection.resumeSession('other', '/repo')
+    expect(s.sdk.last.options).not.toHaveProperty('resumeSessionAt')
+  })
+
+  it('rewinds the files from the first message the cut takes out', async () => {
+    const s = await setup()
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    s.sdk.history.set(sessionId, history)
+    s.sdk.rewind = { canRewind: true, filesChanged: ['/repo/a.ts'], insertions: 3, deletions: 1 }
+    const preview = await s.connection.rewindFiles!(
+      sessionId,
+      { removed: ['msg_3', 'msg_4'], kept: ['msg_2'] },
+      true,
+    )
+    expect(preview).toEqual({ canRewind: true, files: ['/repo/a.ts'], insertions: 3, deletions: 1 })
+    expect(s.sdk.last.calls.find((call) => call.method === 'rewindFiles')?.args).toEqual([
+      'u2',
+      { dryRun: true },
+    ])
+    s.sdk.rewind = { canRewind: false, error: 'No file checkpoint found for this message' }
+    const refused = await s.connection.rewindFiles!(
+      sessionId,
+      { removed: ['msg_4'], kept: ['msg_3'] },
+      false,
+    )
+    expect(refused).toMatchObject({ canRewind: false, files: [] })
+    expect(s.sdk.last.calls.filter((call) => call.method === 'rewindFiles').at(-1)?.args).toEqual([
+      'u3',
+      { dryRun: false },
+    ])
   })
 })

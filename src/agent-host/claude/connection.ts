@@ -28,6 +28,7 @@ import {
   SideQuestionUnsupported,
   type AgentConnection,
   type AgentInit,
+  type FileRewind,
   type FolderHooks,
   type ForkPoint,
   type ListedSession,
@@ -37,6 +38,8 @@ import {
   type PermissionAnswer,
   type PromptBlock,
   type PromptResult,
+  type RevertDone,
+  type RevertPoint,
   type SessionOptions,
   type SessionSetup,
   type SessionTarget,
@@ -313,6 +316,11 @@ interface Session {
   terminal: Set<string>
   /** Reopen before the next prompt: the last one failed to sign in, or the query ended. */
   stale: boolean
+  /**
+   * Huli: where a rewind cut the history, which the query resumes at until the next prompt goes;
+   * Claude Code then chains it there, and the turns cut off stay out of the history.
+   */
+  resumeAt: string | null
   /** The servers the folder declares itself that the query was started without. */
   held: string[]
   /** The hooks the folder declares itself, which the query runs only when `hooksHeld` is false. */
@@ -348,6 +356,61 @@ interface Session {
 interface Pending {
   at: number
   items: Delivery[]
+}
+
+function noRewind(error: string): FileRewind {
+  return { canRewind: false, error, files: [], insertions: null, deletions: null }
+}
+
+/** Huli: the ids Kettu names a stored message's items by: its API message id and its tool calls. */
+function itemIdsOf(message: StoredMessage): string[] {
+  if (message.type !== 'assistant') return []
+  const inner = message.message as AssistantMessage['message'] | undefined
+  const ids: string[] = inner?.id ? [inner.id] : []
+  for (const block of inner?.content ?? []) {
+    if (block.type === 'tool_use') ids.push((block as { id: string }).id)
+  }
+  return ids
+}
+
+/** Huli: a message the user sent, as against a tool's result, which Claude Code also stores as one. */
+function isPrompt(message: StoredMessage): boolean {
+  if (message.type !== 'user' || message.parent_tool_use_id) return false
+  const content = (message.message as { content?: unknown } | undefined)?.content
+  if (!Array.isArray(content)) return true
+  return !content.some((block) => (block as { type?: unknown }).type === 'tool_result')
+}
+
+/**
+ * Huli: where a revert at `point` cuts Claude Code's history: `prompt`, the first user message it
+ * takes out, whose uuid is also its file checkpoint, and `keep`, the last message it keeps. The cut
+ * is found after the latest kept item Claude Code has, else before the first removed one. Null
+ * when neither is in the history; `prompt` null when nothing of the cut turns is.
+ */
+export function historyCut(
+  history: readonly StoredMessage[],
+  point: RevertPoint,
+): { prompt: string | null; keep: string | null } | null {
+  const main = history.filter((message) => !message.parent_tool_use_id)
+  const at = (index: number) => ({
+    prompt: main[index]?.uuid ?? null,
+    keep: index > 0 ? main[index - 1]!.uuid : null,
+  })
+  if (point.kept.length === 0) {
+    const first = main.findIndex(isPrompt)
+    return first < 0 ? { prompt: null, keep: null } : at(first)
+  }
+  for (const id of point.kept) {
+    const last = main.findLastIndex((message) => itemIdsOf(message).includes(id))
+    if (last < 0) continue
+    const next = main.findIndex((message, index) => index > last && isPrompt(message))
+    return next < 0 ? { prompt: null, keep: main.at(-1)?.uuid ?? null } : at(next)
+  }
+  const removed = new Set(point.removed)
+  const first = main.findIndex((message) => itemIdsOf(message).some((id) => removed.has(id)))
+  if (first < 0) return null
+  const prompt = main.findLastIndex((message, index) => index <= first && isPrompt(message))
+  return prompt < 0 ? null : at(prompt)
 }
 
 function setupOf(session: Session): SessionSetup {
@@ -669,6 +732,8 @@ export class ClaudeConnection implements AgentConnection {
         deleteSession: true,
         forkSession: true,
         forkAtMessage: true,
+        revertTurns: true,
+        rewindFiles: true,
         ownTitles: 'sent',
         logout: true,
         steering: true,
@@ -825,7 +890,11 @@ export class ClaudeConnection implements AgentConnection {
   ): Promise<SessionSetup> {
     const open = this.sessions.get(sessionId)
     if (open?.query && !open.stale) return setupOf(open)
-    const session = await this.open(sessionId, cwd, options, { resume: true })
+    const at = open?.resumeAt ?? options.resumeAt
+    const session = await this.open(sessionId, cwd, options, {
+      resume: true,
+      ...(at ? { at } : {}),
+    })
     return setupOf(session)
   }
 
@@ -836,7 +905,10 @@ export class ClaudeConnection implements AgentConnection {
     point?: ForkPoint,
   ): Promise<OpenedSession> {
     const sdk = this.requireSdk()
-    const upTo = point ? await this.forkUuid(sessionId, cwd, point) : undefined
+    // Huli: a session a rewind cut forks as its history now stands.
+    const upTo = point
+      ? await this.forkUuid(sessionId, cwd, point)
+      : (this.sessions.get(sessionId)?.resumeAt ?? options.resumeAt)
     if (point && !upTo) {
       throw new AgentRequestError(
         'agent_error',
@@ -887,6 +959,59 @@ export class ClaudeConnection implements AgentConnection {
     if (exact) return exact.uuid
     const same = [...groups.values()].filter((group) => group.text === point.text)
     return same[point.occurrence - 1]?.uuid ?? null
+  }
+
+  /**
+   * Huli: takes the turns `point` cuts out of the history. Claude Code keeps its transcript whole,
+   * so the query opens again at the last message kept, and the next prompt is chained there.
+   */
+  async revertTurns(sessionId: string, point: RevertPoint): Promise<void | RevertDone> {
+    const session = this.sessions.get(sessionId)
+    if (session?.turn) {
+      throw new AgentRequestError('agent_error', 'A turn is running in this session')
+    }
+    const cwd = session?.cwd
+    if (!cwd) throw new AgentRequestError('agent_error', `Session ${sessionId} is not open`)
+    const cut = historyCut(await this.history(sessionId, cwd), point)
+    if (cut === null) throw new AgentRequestError('agent_error', t('claude.noRevertPoint'))
+    // Nothing of the turns reached Claude Code's history, such as a turn that failed to start.
+    if (cut.prompt === null) return
+    if (cut.keep === null) {
+      throw new AgentRequestError('agent_error', 'The whole history would go')
+    }
+    session.resumeAt = cut.keep
+    // The query reopens at the cut before its next prompt.
+    session.stale = true
+    if (session.query) await this.stop(session)
+    return { resumeAt: cut.keep }
+  }
+
+  /** Huli: Claude Code's own file rewind to the first user message `point` takes out. */
+  async rewindFiles(sessionId: string, point: RevertPoint, dryRun: boolean): Promise<FileRewind> {
+    const known = this.sessions.get(sessionId)
+    if (!known) throw new AgentRequestError('agent_error', `Session ${sessionId} is not open`)
+    const cut = historyCut(await this.history(sessionId, known.cwd), point)
+    if (!cut?.prompt) return noRewind(t('claude.noFileCheckpoint'))
+    const session = await this.ready(sessionId)
+    const query = session.query
+    if (!query?.rewindFiles) return noRewind(t('claude.noFileCheckpoint'))
+    try {
+      const result = await query.rewindFiles(cut.prompt, { dryRun })
+      return {
+        canRewind: result.canRewind,
+        ...(result.error ? { error: result.error } : {}),
+        files: result.filesChanged ?? [],
+        insertions: result.insertions ?? null,
+        deletions: result.deletions ?? null,
+      }
+    } catch (error) {
+      return noRewind(errorText(error))
+    }
+  }
+
+  private async history(sessionId: string, cwd: string): Promise<StoredMessage[]> {
+    const sdk = this.requireSdk()
+    return this.withConfigDir(() => sdk.getSessionMessages(sessionId, { dir: cwd }))
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -1030,6 +1155,7 @@ export class ClaudeConnection implements AgentConnection {
       commands: [],
       terminal: new Set(),
       stale: false,
+      resumeAt: how.resume && !how.from ? (how.at ?? null) : null,
       held: [],
       hooks: settings.hooks,
       hooksHeld: false,
@@ -1179,6 +1305,8 @@ export class ClaudeConnection implements AgentConnection {
         : {}),
       extraArgs: { 'replay-user-messages': null },
       ...(hidden ? { persistSession: false } : {}),
+      // Huli: a copy of each file its edit tools change, so a rewind can put the files back.
+      ...(!hidden && !how.quiet ? { enableFileCheckpointing: true } : {}),
       ...(how.from
         ? {
             resume: how.from,
@@ -1187,7 +1315,7 @@ export class ClaudeConnection implements AgentConnection {
             ...(how.at ? { resumeSessionAt: how.at } : {}),
           }
         : how.resume
-          ? { resume: sessionId }
+          ? { resume: sessionId, ...(how.at ? { resumeSessionAt: how.at } : {}) }
           : { sessionId }),
     }
     const query = sdk.query({ prompt: input, options: queryOptions })
@@ -1734,7 +1862,10 @@ export class ClaudeConnection implements AgentConnection {
     }
     let reopened: Session
     try {
-      reopened = await this.open(sessionId, session.cwd, session.options, { resume: true })
+      reopened = await this.open(sessionId, session.cwd, session.options, {
+        resume: true,
+        ...(session.resumeAt ? { at: session.resumeAt } : {}),
+      })
     } catch (error) {
       // Claude Code keeps no history for a session never prompted, so it starts again as new.
       if (!(error instanceof AgentRequestError) || error.code !== RESOURCE_NOT_FOUND) throw error
@@ -1834,6 +1965,8 @@ export class ClaudeConnection implements AgentConnection {
     this.noteTitle(session, `\n${text}\n`)
     session.suggestable = false
     this.offerSuggestion(session, null)
+    // Huli: Claude Code chains this prompt where a rewind cut the history, which then holds.
+    if (!priority) session.resumeAt = null
     session.input!.push({
       type: 'user',
       message: { role: 'user', content },

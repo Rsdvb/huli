@@ -165,6 +165,8 @@ import {
 import { findCommand, isExecutableFile, type Env } from './find-command'
 import type { GitServiceApi, GitServiceDeps } from './git/api'
 import { createExec, type ExecRunner } from './git/exec'
+import { createGitRunner, type GitRunner } from './file-checkpoints/git'
+import { FileCheckpoints } from './file-checkpoints/store'
 import { GitRetains } from './git/retains'
 import type { SkillsListResponse } from './codex/protocol'
 import { completePath } from './path-completion'
@@ -521,6 +523,8 @@ export class AgentHost {
   private readonly git: GitServiceApi | null
   /** Runs git for the project's files, with the agent environment. */
   private readonly execRunner: ExecRunner
+  /** Huli: git for the file checkpoints, which reads the user's repositories and writes none. */
+  private readonly checkpointGit: GitRunner
   private readonly files: FilesService
   private readonly agentFiles: AgentFiles
   /** Huli: what agents keep of the sessions deleted here. */
@@ -631,6 +635,7 @@ export class AgentHost {
     this.env.setProxy(options.settings.proxy)
     this.env.setConfigFolders(configFolders(catalog, options.settings))
     this.execRunner = createExec(() => this.env.agentEnv() as NodeJS.ProcessEnv)
+    this.checkpointGit = createGitRunner(() => this.env.agentEnv() as NodeJS.ProcessEnv, platform)
     this.media = new MediaService({
       platform,
       homeDir: options.homeDir ?? os.homedir(),
@@ -1179,6 +1184,12 @@ export class AgentHost {
       worktrees: this.worktrees,
       file: sessionsFile(options.userDataPath, log),
       returned: returnedFile(options.userDataPath, log),
+      fileCheckpoints: new FileCheckpoints({
+        root: path.join(options.userDataPath, 'checkpoints'),
+        run: this.checkpointGit.run,
+        platform,
+        log,
+      }),
       deleted: new DeletedSessions(deletedSessionsFile(options.userDataPath, log)),
       projectMcp: new ProjectMcpAnswers(projectMcpFile(options.userDataPath, log)),
       projectHooks: new ProjectHooksAnswers(projectHooksFile(options.userDataPath, log)),
@@ -3084,6 +3095,7 @@ export class AgentHost {
       this.usage.stop()
       this.artifacts.stop()
       this.execRunner.killAll()
+      this.checkpointGit.stop()
       for (const unsubscribe of this.gitUnsubscribe) unsubscribe()
       await Promise.all([
         this.agents.stopAll(),
@@ -3619,6 +3631,11 @@ export class AgentHost {
       'sessions.fork': ({ sessionId, entryId, worktree }) =>
         sessions.fork(sessionId, entryId, worktree),
       'sessions.revert': ({ sessionId, entryId }) => sessions.revert(sessionId, entryId),
+      'sessions.rewindPreview': ({ sessionId, entryId, mode }) =>
+        sessions.rewindPreview(sessionId, entryId, mode),
+      'sessions.rewind': (params) => sessions.rewind(params),
+      'sessions.undoRewindFiles': ({ sessionId, backup }) =>
+        sessions.undoRewindFiles(sessionId, backup),
       'worktrees.inspect': ({ sessionId }) =>
         this.gitCall(() => sessions.inspectWorktree(sessionId)),
       'worktrees.remove': ({ sessionId, branch, expected }) =>

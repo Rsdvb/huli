@@ -596,6 +596,7 @@ export interface AgentStatus {
     forkSession: boolean
     forkAtMessage: boolean // `session/fork` up to a message, through the adapters' fork point
     revertTurns: boolean // takes the latest turn out of a session's history, as Codex's `thread/revert`
+    rewindFiles?: boolean // Huli: puts the files back from checkpoints of its own, as Claude Code does
     steering: boolean // `_session/steering` into a running turn
     reports: boolean // plan limits from its own report (`/usage`, `/status`)
     context: boolean // what fills the context from its own report (`/context`)
@@ -876,6 +877,75 @@ export interface SessionPullRequest {
   number: number
   state: PullRequestState | null
   failing: boolean // an open one has a failing check
+}
+
+/**
+ * Huli: the two ways back to one of the user's messages. `edit` takes the message out too and
+ * gives it back to the composer, to send again as it is or changed; `rewind` keeps it and its
+ * reply, and takes out what came after.
+ */
+export type RewindMode = 'edit' | 'rewind'
+
+/** Huli: one file a rewind would put back, by what it does to the file as it is now. */
+export interface RewindChange {
+  /** Relative to its folder and `/`-separated, or absolute for an agent's own checkpoint. */
+  path: string
+  action: 'restore' | 'delete' | 'recreate'
+  /** Lines the restore adds and removes; null where they were not counted. */
+  insertions: number | null
+  deletions: number | null
+  binary?: boolean
+}
+
+/** Huli: what a rewind would do to the files of the session's folders. */
+export type RewindFiles =
+  | {
+      state: 'ready'
+      /** Kite's own checkpoints, or the agent's, which know only the files its edit tools changed. */
+      source: 'kite' | 'agent'
+      folders: {
+        folder: string
+        changes: RewindChange[]
+        /** Files that may differ but stay as they are, as no copy of them was kept. */
+        kept: number
+        /** No checkpoint of this folder for the message. */
+        missing?: boolean
+      }[]
+      /** Totals where only they are known, as for the agent's checkpoints. */
+      insertions: number | null
+      deletions: number | null
+      /** Passed back to the rewind, which restores only while the files are as previewed. */
+      token: string
+    }
+  | { state: 'unchanged'; source: 'kite' | 'agent' }
+  | {
+      state: 'unavailable'
+      /** `none`: no checkpoint for the message; `busy`: another session is at work in the files. */
+      reason: 'none' | 'busy' | 'failed'
+      detail?: string
+    }
+
+/** Huli: a rewind's preview, which changes nothing. */
+export interface RewindPreview {
+  /** The user's messages that leave the conversation. */
+  messages: number
+  /**
+   * How the conversation goes back: `agent`, the agent takes the turns out of its own history;
+   * `fresh`, the agent cannot, so a new session of it carries on, given the conversation kept;
+   * `empty`, nothing is kept and the next message starts a new session.
+   */
+  conversation: 'agent' | 'fresh' | 'empty'
+  files: RewindFiles
+}
+
+export interface RewindResult {
+  /** Null when the files were left as they are. */
+  files: {
+    restored: number
+    failed: number
+    /** The copy of the files as they were before, which `sessions.undoRewindFiles` restores. */
+    backup: string | null
+  } | null
 }
 
 export interface SessionSummary {
@@ -1648,6 +1718,28 @@ export interface HostContract {
   // Undoes the latest turn, which `entryId`, the user's message, starts: the agent's history loses
   // it and the thread its entries. What it changed on disk stays.
   'sessions.revert': { params: { sessionId: string; entryId: string }; result: void }
+  // Huli: what going back to the user's message `entryId` would do, changing nothing.
+  'sessions.rewindPreview': {
+    params: { sessionId: string; entryId: string; mode: RewindMode }
+    result: RewindPreview
+  }
+  // Huli: goes back to the user's message `entryId`; `restoreFiles` with the preview's `token`
+  // also puts the files back, only while they are as the preview found them.
+  'sessions.rewind': {
+    params: {
+      sessionId: string
+      entryId: string
+      mode: RewindMode
+      restoreFiles?: boolean
+      token?: string
+    }
+    result: RewindResult
+  }
+  // Huli: puts the files back as a rewind found them, from its backup.
+  'sessions.undoRewindFiles': {
+    params: { sessionId: string; backup: string }
+    result: { restored: number; failed: number }
+  }
   // What removing the session's worktree would lose, and the other sessions still in it.
   'worktrees.inspect': {
     params: { sessionId: string }
@@ -2506,6 +2598,9 @@ export const HOST_METHODS = [
   'sessions.retry',
   'sessions.fork',
   'sessions.revert',
+  'sessions.rewindPreview',
+  'sessions.rewind',
+  'sessions.undoRewindFiles',
   'worktrees.inspect',
   'worktrees.remove',
   'worktrees.retrySetup',

@@ -222,6 +222,8 @@ export interface QueryOptions {
   resume?: string
   resumeSessionAt?: string
   forkSession?: boolean
+  /** Huli: Claude Code keeps a copy of each file its edit tools change, for `rewindFiles`. */
+  enableFileCheckpointing?: boolean
   stderr?: (text: string) => void
 }
 
@@ -465,6 +467,11 @@ export interface Query extends AsyncIterable<SdkMessage> {
    */
   setMcpServers(servers: Record<string, McpServerConfig>): Promise<McpSetServersResult>
   close(): void
+  /**
+   * Huli: puts the files Claude Code's edit tools changed back as they were at the user message
+   * `userMessageId`; with `dryRun` only says what would change. Needs `enableFileCheckpointing`.
+   */
+  rewindFiles?(userMessageId: string, options?: { dryRun?: boolean }): Promise<RewindFilesResult>
   /** Present in the SDK Kettu pins, though not in its published types. */
   generateSessionTitle?(description: string, options: { persist: boolean }): Promise<string | null>
   /** Stores a title this query generated. Present beside `generateSessionTitle` in the pinned SDK. */
@@ -490,6 +497,15 @@ export interface SessionInfo {
   customTitle?: string
   firstPrompt?: string
   cwd?: string
+}
+
+/** Huli: the SDK's `RewindFilesResult`. */
+export interface RewindFilesResult {
+  canRewind: boolean
+  error?: string
+  filesChanged?: string[]
+  insertions?: number
+  deletions?: number
 }
 
 export interface StoredMessage {

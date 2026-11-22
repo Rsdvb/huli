@@ -369,6 +369,11 @@ export interface SessionRecord {
   earlier?: EarlierAgent[]
   /** A takeover whose first turn has not gone to its agent yet. */
   carry?: PendingCarry
+  /**
+   * Huli: where a rewind cut the agent's history, for an agent that keeps it whole until the next
+   * turn: its session resumes there until a turn of the session ends.
+   */
+  resumeAt?: string
   /** The worktree it works in; absent when it works in its project's folder. */
   worktree?: WorktreeRecord
   /** A worktree its agent made for a subagent, which Kettu shows and never removes. */
@@ -466,6 +471,8 @@ export interface PendingCarry {
   summarize?: boolean
   /** The values chosen for it, set once its session opens. */
   values?: Record<string, string | boolean>
+  /** Huli: a rewind's new session of the same agent, which keeps the session's own values. */
+  rewound?: true
 }
 
 /** An agent that had a session before another took it over, and its own session for it. */
@@ -950,6 +957,7 @@ function carryOf(value: unknown): { carry?: PendingCarry } {
       fromTurn: value.fromTurn,
       ...(value.summarize === true ? { summarize: true } : {}),
       ...(values && Object.keys(values).length > 0 ? { values } : {}),
+      ...(value.rewound === true ? { rewound: true as const } : {}),
     },
   }
 }
@@ -1165,6 +1173,9 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...agentWorktreeOf(item.agentWorktree),
       ...(isString(item.memorySentTo) && item.memorySentTo !== ''
         ? { memorySentTo: item.memorySentTo }
+        : {}),
+      ...(isString(item.resumeAt) && /^[0-9a-f-]{36}$/i.test(item.resumeAt)
+        ? { resumeAt: item.resumeAt }
         : {}),
       ...(isString(item.systemPromptSentTo) && item.systemPromptSentTo !== ''
         ? { systemPromptSentTo: item.systemPromptSentTo }

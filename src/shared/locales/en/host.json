@@ -1,5 +1,11 @@
 {
   "session": {
+    "rewindFilesFailed": "The files could not be restored: {{reason}}",
+    "rewindNoCheckpoint": "Kite kept no copy of the files at this message",
+    "rewindFolderBusy": "{{session}} is working in these files, so they can't be restored now",
+    "rewindFilesChanged": "The files changed since the preview. Look at it again before restoring them.",
+    "rewindNothingAfter": "Nothing came after this message",
+    "rewindNoPoint": "This message can't be rewound to",
     "status": {
       "starting": "starting",
       "ready": "ready",
@@ -533,6 +539,8 @@
     }
   },
   "claude": {
+    "noFileCheckpoint": "Claude Code kept no copy of the files at this message",
+    "noRevertPoint": "Claude Code can't find this turn in its history",
     "mode": {
       "default": {
         "name": "Ask before edits",

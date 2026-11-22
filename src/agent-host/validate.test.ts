@@ -1991,6 +1991,77 @@ describe('worktree requests', () => {
     rejects(() => posix['sessions.revert']({ sessionId: 's', entryId: 'x'.repeat(1_025) }))
   })
 
+  it('rewinds with a mode, and restores files only with a preview token', () => {
+    const token = 'a'.repeat(64)
+    expect(
+      posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4', mode: 'edit', x: 1 }),
+    ).toEqual({ sessionId: 's', entryId: 'e:4', mode: 'edit' })
+    rejects(() => posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4' }))
+    rejects(() => posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4', mode: 'all' }))
+    expect(posix['sessions.rewind']({ sessionId: 's', entryId: 'e:4', mode: 'rewind' })).toEqual({
+      sessionId: 's',
+      entryId: 'e:4',
+      mode: 'rewind',
+    })
+    expect(
+      posix['sessions.rewind']({
+        sessionId: 's',
+        entryId: 'e:4',
+        mode: 'edit',
+        restoreFiles: true,
+        token,
+      }),
+    ).toEqual({ sessionId: 's', entryId: 'e:4', mode: 'edit', restoreFiles: true, token })
+    expect(
+      posix['sessions.rewind']({
+        sessionId: 's',
+        entryId: 'e:4',
+        mode: 'edit',
+        restoreFiles: true,
+        token: 'agent',
+      }),
+    ).toMatchObject({ restoreFiles: true, token: 'agent' })
+    // A token alone restores nothing.
+    expect(
+      posix['sessions.rewind']({ sessionId: 's', entryId: 'e:4', mode: 'edit', token }),
+    ).toEqual({ sessionId: 's', entryId: 'e:4', mode: 'edit' })
+    rejects(() =>
+      posix['sessions.rewind']({
+        sessionId: 's',
+        entryId: 'e:4',
+        mode: 'edit',
+        restoreFiles: true,
+      }),
+    )
+    rejects(() =>
+      posix['sessions.rewind']({
+        sessionId: 's',
+        entryId: 'e:4',
+        mode: 'edit',
+        restoreFiles: 'yes',
+        token,
+      }),
+    )
+    rejects(() =>
+      posix['sessions.rewind']({
+        sessionId: 's',
+        entryId: 'e:4',
+        mode: 'edit',
+        restoreFiles: true,
+        token: '../x',
+      }),
+    )
+    expect(
+      posix['sessions.undoRewindFiles']({ sessionId: 's', backup: 'b-1700000000000' }),
+    ).toEqual({
+      sessionId: 's',
+      backup: 'b-1700000000000',
+    })
+    for (const backup of ['e-00', '../b-1', 'b-', 'b-1/2', 3]) {
+      rejects(() => posix['sessions.undoRewindFiles']({ sessionId: 's', backup }))
+    }
+  })
+
   it('removes a worktree only against the state the user was shown', () => {
     const expected = {
       exists: true,

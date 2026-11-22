@@ -989,6 +989,12 @@ function sessionId(o: Fields): string {
   return string(o, 'sessionId', ID_CHARS)
 }
 
+/** Huli: how a rewind goes back to a message. */
+function rewindMode(value: unknown): 'edit' | 'rewind' {
+  if (value !== 'edit' && value !== 'rewind') throw invalidParams('mode must be "edit" or "rewind"')
+  return value
+}
+
 /** Huli: a file's size and time, as a `files.readBytes` expects to find it. */
 function fileStamp(value: unknown): FileStamp {
   if (!isRecord(value)) throw invalidParams('expect must be an object')
@@ -2301,6 +2307,42 @@ export function createValidators(platform: Platform): Validators {
     'sessions.revert': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ACP_ID_CHARS) }
+    },
+    'sessions.rewindPreview': (params) => {
+      const o = fields(params)
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ACP_ID_CHARS),
+        mode: rewindMode(o.mode),
+      }
+    },
+    'sessions.rewind': (params) => {
+      const o = fields(params)
+      if (o.restoreFiles !== undefined && typeof o.restoreFiles !== 'boolean') {
+        throw invalidParams('restoreFiles must be a boolean')
+      }
+      if (
+        o.token !== undefined &&
+        (typeof o.token !== 'string' || !/^(?:agent|[0-9a-f]{64})$/.test(o.token))
+      ) {
+        throw invalidParams('token must be a preview token')
+      }
+      if (o.restoreFiles === true && o.token === undefined) {
+        throw invalidParams('restoreFiles needs the preview token')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ACP_ID_CHARS),
+        mode: rewindMode(o.mode),
+        ...(o.restoreFiles === true ? { restoreFiles: true, token: o.token as string } : {}),
+      }
+    },
+    'sessions.undoRewindFiles': (params) => {
+      const o = fields(params)
+      if (typeof o.backup !== 'string' || !/^b-\d{1,16}$/.test(o.backup)) {
+        throw invalidParams('backup must be a rewind backup')
+      }
+      return { sessionId: sessionId(o), backup: o.backup }
     },
     'worktrees.inspect': session,
     'worktrees.remove': (params) => {

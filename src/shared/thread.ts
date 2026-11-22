@@ -476,6 +476,8 @@ export interface TakeoverEntry {
   carried: string
   /** The agent was asked to summarize the earlier conversation before carrying on. */
   summarize?: boolean
+  /** Huli: a rewind left its agent's own session behind; a new one carries on from here. */
+  rewound?: true
   after: string | null
 }
 
