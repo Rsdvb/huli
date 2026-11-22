@@ -16,12 +16,32 @@ export type SandboxTier = 'off' | 'native' | 'container'
 export const SANDBOX_TIERS: readonly SandboxTier[] = ['off', 'native', 'container']
 
 /**
- * What the agent's commands may reach: nothing, only the exit the agent's network setting (Agent
- * 网络) picks for it, or anything.
+ * What the sandbox lets reach the network, which differs by tier. The harness's own sandbox holds
+ * only the agent's commands, while the agent itself still calls its model: `none` cuts the
+ * commands off. A container holds the whole agent, its model calls included: `model` lets through
+ * only its model service's addresses. In both, `agent` sends everything through the exit the
+ * agent's network setting (Agent 网络) picks, and `open` holds nothing back.
  */
-export type SandboxNetwork = 'none' | 'agent' | 'open'
+export type SandboxNetwork = 'none' | 'model' | 'agent' | 'open'
 
-export const SANDBOX_NETWORKS: readonly SandboxNetwork[] = ['none', 'agent', 'open']
+export const SANDBOX_NETWORKS: readonly SandboxNetwork[] = ['none', 'model', 'agent', 'open']
+
+/** The network choices each tier has, the strictest first. */
+export const TIER_NETWORKS: Readonly<Record<Exclude<SandboxTier, 'off'>, SandboxNetwork[]>> = {
+  native: ['none', 'agent', 'open'],
+  container: ['model', 'agent', 'open'],
+}
+
+/**
+ * A network choice as the tier has it: each tier's strictest stands for the other's, since a
+ * container without its model would not work at all and the harness's own sandbox never holds the
+ * model's calls.
+ */
+export function networkFor(tier: SandboxTier, network: SandboxNetwork): SandboxNetwork {
+  if (tier === 'container' && network === 'none') return 'model'
+  if (tier === 'native' && network === 'model') return 'none'
+  return network
+}
 
 export interface SandboxChoice {
   tier: SandboxTier
@@ -39,12 +59,19 @@ export interface SandboxSettings {
    * asking, as the auto-approve setting's edits level does. A high request never is.
    */
   autoApproveEdits: boolean
+  /**
+   * The project's `.git` may be written in a sandbox, so the agent can commit there. Off, a
+   * container mounts it read-only and Claude Code's sandbox denies writes to it; Codex always
+   * keeps it read-only itself.
+   */
+  gitWritable: boolean
 }
 
 export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
   tier: 'off',
   network: 'none',
   autoApproveEdits: false,
+  gitWritable: false,
 }
 
 export function isSandboxTier(value: unknown): value is SandboxTier {
@@ -61,7 +88,7 @@ export function sandboxChoiceOf(value: unknown): SandboxChoice | null {
   const { tier, network } = value as Record<string, unknown>
   if (!isSandboxTier(tier) || !isSandboxNetwork(network)) return null
   // Off holds nothing back, so its network is never anything else.
-  return tier === 'off' ? { ...SANDBOX_OFF } : { tier, network }
+  return tier === 'off' ? { ...SANDBOX_OFF } : { tier, network: networkFor(tier, network) }
 }
 
 export function sameSandbox(a: SandboxChoice, b: SandboxChoice): boolean {
@@ -101,6 +128,8 @@ export interface TierSupport {
   /** The network presets the tier holds the agent to; empty when it is not available. */
   networks: SandboxNetwork[]
   setup?: SandboxSetup
+  /** A container's: the model's addresses `model` lets through, as Kite knows them. */
+  modelHosts?: string[]
 }
 
 export interface AgentSandboxSupport {
@@ -168,23 +197,37 @@ export type ContainerLaunch = 'acp-package' | 'node-script' | 'other'
  * engine of the system: Docker or Podman, and on Windows Docker Desktop or Docker inside WSL. The
  * engine is looked for only when such a session starts.
  */
-export function containerSupport(launch: ContainerLaunch, platform: Platform): TierSupport {
+export function containerSupport(
+  launch: ContainerLaunch,
+  platform: Platform,
+  modelHosts: readonly string[] = [],
+): TierSupport {
   if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
     return BLOCKED('platform')
   }
   if (launch === 'other') return BLOCKED('protocol')
-  // Holding a container to one exit needs a proxy of its own beside it, which is not built yet.
-  return { available: true, networks: ['none', 'open'], setup: 'container' }
+  // The container's own network has no way out but a small proxy beside it, which lets through
+  // the model's addresses, or everything to the agent's exit, and nothing else. An agent whose
+  // model's addresses Kite does not know has no `model`.
+  return {
+    available: true,
+    networks: TIER_NETWORKS.container.filter(
+      (network) => network !== 'model' || modelHosts.length > 0,
+    ),
+    setup: 'container',
+    modelHosts: [...modelHosts],
+  }
 }
 
 export function agentSandboxSupport(
   agentId: AgentId,
   launch: ContainerLaunch,
   platform: Platform,
+  modelHosts: readonly string[] = [],
 ): AgentSandboxSupport {
   return {
     native: nativeSupport(harnessOf(agentId), platform),
-    container: containerSupport(launch, platform),
+    container: containerSupport(launch, platform, modelHosts),
   }
 }
 
@@ -226,6 +269,8 @@ export const SANDBOX_MEASURED = {
   searchShare: 5.2,
   /** `docker run` of an idle container through wsl.exe, and Docker's own start once a day. */
   containerStart: 0.76,
+  /** The session's network and its egress proxy, before the agent's container: 1.29 to 1.66 s. */
+  egressStart: 1.5,
   engineStart: 0.79,
   /** The memory Docker's services hold while one runs, and each container's own overhead, in MB. */
   engineMemoryMb: 105,

@@ -15,14 +15,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { Transform } from 'node:stream'
 import type { Platform } from '@shared/platform'
-import {
-  SANDBOX_IMAGE_MB,
-  type ContainerEngineKind,
-  type ContainerStatus,
-  type SandboxNetwork,
-} from '@shared/sandbox'
+import { SANDBOX_IMAGE_MB, type ContainerEngineKind, type ContainerStatus } from '@shared/sandbox'
 import type { StdioTransport } from '../driver'
 import { findCommand, isExecutableFile, type Env } from '../find-command'
+import { EGRESS_HOST, EGRESS_PORT, EGRESS_SOURCE, TUNNEL_PORT } from './egress'
 import { isEngineName } from './mounts'
 
 /**
@@ -51,7 +47,7 @@ const INSTALL_MS = 10 * 60_000
 export class ContainerError extends Error {
   constructor(
     message: string,
-    readonly reason: 'engine' | 'image' | 'install' | 'mount',
+    readonly reason: 'engine' | 'image' | 'install' | 'mount' | 'network',
   ) {
     super(message)
     this.name = 'ContainerError'
@@ -205,9 +201,16 @@ export interface ContainerRun {
   owner: string
   /** The project folder as the engine names it. */
   project: string
-  /** Whether the project has a `.git` folder, which is mounted read-only over the writable one. */
+  /**
+   * Whether the project has a `.git` folder that is mounted read-only over the writable project:
+   * false where there is none, or where the user lets the sandbox commit.
+   */
   gitDir: boolean
-  network: Exclude<SandboxNetwork, 'agent'>
+  /**
+   * The engine's bridge, for a network held back in nothing; else the session's own network with
+   * no way out, where the egress proxy beside it, at EGRESS_HOST, is the only way out.
+   */
+  network: { kind: 'open' } | { kind: 'egress'; name: string }
   user: string
   /** The agent's own home volume. */
   home: string
@@ -229,7 +232,8 @@ export interface ContainerRun {
  * no engine socket is mounted.
  */
 export function runArgs(run: ContainerRun): string[] {
-  for (const name of [run.name, run.home]) {
+  const names = [run.name, run.home, ...(run.network.kind === 'egress' ? [run.network.name] : [])]
+  for (const name of names) {
     if (!isEngineName(name)) throw new ContainerError(`Not a container name: ${name}`, 'mount')
   }
   for (const folder of [run.project, ...(run.agentFolder === undefined ? [] : [run.agentFolder])]) {
@@ -249,7 +253,7 @@ export function runArgs(run: ContainerRun): string[] {
     '--label',
     `app.kite.owner=${run.owner}`,
     '--network',
-    run.network === 'none' ? 'none' : 'bridge',
+    run.network.kind === 'open' ? 'bridge' : run.network.name,
     '--cap-drop',
     'ALL',
     '--security-opt',
@@ -278,6 +282,7 @@ export function runArgs(run: ContainerRun): string[] {
       : []),
     '-e',
     `HOME=${HOME}`,
+    ...(run.network.kind === 'egress' ? proxyVariables() : []),
     ...run.env.flatMap((name) => ['-e', name]),
     '-w',
     WORKSPACE,
@@ -285,6 +290,90 @@ export function runArgs(run: ContainerRun): string[] {
     ...run.command,
   ]
   return args
+}
+
+/**
+ * The proxy variables of an agent behind the egress proxy, in both cases as programs read them,
+ * and Node.js's switch that has its own requests follow them.
+ */
+function proxyVariables(): string[] {
+  const url = `http://${EGRESS_HOST}:${EGRESS_PORT}`
+  const values: [string, string][] = [
+    ['HTTP_PROXY', url],
+    ['HTTPS_PROXY', url],
+    ['ALL_PROXY', url],
+    ['NO_PROXY', 'localhost,127.0.0.1'],
+  ]
+  return [
+    ...values.flatMap(([name, value]) => [
+      '-e',
+      `${name}=${value}`,
+      '-e',
+      `${name.toLowerCase()}=${value}`,
+    ]),
+    '-e',
+    'NODE_USE_ENV_PROXY=1',
+  ]
+}
+
+/** What a session's egress proxy lets through, and the session's names for it. */
+export interface EgressRun {
+  /** The proxy's container. */
+  name: string
+  /** The session's network with no way out. */
+  network: string
+  owner: string
+  user: string
+  mode: 'allow' | 'tunnel'
+  /** For `allow`: the model's addresses. */
+  allow: string[]
+}
+
+/**
+ * The engine's `run` words for a session's egress proxy: on the engine's bridge, with nothing of
+ * the computer mounted, no capability, a read-only root and a small cap. In `tunnel` mode its
+ * tunnel port is published on the engine's loopback alone, and the token comes by name.
+ */
+export function egressArgs(run: EgressRun): string[] {
+  for (const name of [run.name, run.network]) {
+    if (!isEngineName(name)) throw new ContainerError(`Not a container name: ${name}`, 'mount')
+  }
+  const rules = run.allow.filter((rule) => /^(?:\*\.)?[a-z0-9.-]+(?::\d{1,5})?$/.test(rule))
+  return [
+    'run',
+    '-d',
+    '--rm',
+    '--init',
+    '--name',
+    run.name,
+    '--label',
+    'app.kite.sandbox=1',
+    '--label',
+    `app.kite.owner=${run.owner}`,
+    '--network',
+    'bridge',
+    ...(run.mode === 'tunnel' ? ['-p', `127.0.0.1::${TUNNEL_PORT}`] : []),
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges',
+    '--pids-limit',
+    '64',
+    '--memory',
+    '128m',
+    '--read-only',
+    '--user',
+    run.user,
+    '-e',
+    `KITE_EGRESS_MODE=${run.mode}`,
+    '-e',
+    `KITE_EGRESS_ALLOW=${run.mode === 'allow' ? rules.join(',') : ''}`,
+    ...(run.mode === 'tunnel' ? ['-e', 'KITE_EGRESS_TOKEN'] : []),
+    SANDBOX_IMAGE.ref,
+    'node',
+    '-e',
+    EGRESS_SOURCE,
+  ]
 }
 
 /** A name of Kite's for an engine object, from ids that may hold other characters. */
@@ -679,16 +768,67 @@ export class ContainerSandbox {
   }
 
   private async sweep(engine: Engine): Promise<void> {
+    const filter = ['--filter', `label=app.kite.owner=${this.owner}`]
+    const ids = (out: string): string[] =>
+      out.split(/\s+/).filter((id) => /^[0-9a-f]{6,64}$/.test(id))
     try {
-      const ids = (
-        await this.run(engine, ['ps', '-aq', '--filter', `label=app.kite.owner=${this.owner}`])
-      )
-        .split(/\s+/)
-        .filter((id) => /^[0-9a-f]{6,64}$/.test(id))
-      if (ids.length > 0) await this.run(engine, ['rm', '-f', ...ids])
+      const containers = ids(await this.run(engine, ['ps', '-aq', ...filter]))
+      if (containers.length > 0) await this.run(engine, ['rm', '-f', ...containers])
+      const networks = ids(await this.run(engine, ['network', 'ls', '-q', ...filter]))
+      if (networks.length > 0) await this.run(engine, ['network', 'rm', ...networks])
     } catch (error) {
       this.deps.log('warn', `Could not remove old sandbox containers: ${String(error)}`)
     }
+  }
+
+  /**
+   * The session's network with no way out and its egress proxy on it, under the alias the agent's
+   * proxy variables name. In `tunnel` mode, also the port on 127.0.0.1 the agent host dials into.
+   * Whatever of it started is removed again when a step fails.
+   */
+  async startEgress(
+    engine: Engine,
+    run: Omit<EgressRun, 'owner' | 'user'>,
+    env: Env,
+  ): Promise<{ tunnelPort: number | null }> {
+    try {
+      await this.run(engine, [
+        'network',
+        'create',
+        '--internal',
+        '--label',
+        'app.kite.sandbox=1',
+        '--label',
+        `app.kite.owner=${this.owner}`,
+        run.network,
+      ])
+      const args = egressArgs({ ...run, owner: this.owner, user: engine.user })
+      const { file, args: words } = engineCommand(engine, args)
+      const names = run.mode === 'tunnel' ? ['KITE_EGRESS_TOKEN'] : []
+      await this.exec(file, words, {
+        env: this.engineEnv(engine, env, names),
+        timeoutMs: ENGINE_MS,
+      })
+      await this.run(engine, ['network', 'connect', '--alias', EGRESS_HOST, run.network, run.name])
+      if (run.mode !== 'tunnel') return { tunnelPort: null }
+      const published = await this.run(engine, ['port', run.name, `${TUNNEL_PORT}/tcp`])
+      const port = Number(/127\.0\.0\.1:(\d+)/.exec(published)?.[1])
+      if (!Number.isInteger(port) || port <= 0) throw new Error(`No tunnel port: ${published}`)
+      return { tunnelPort: port }
+    } catch (error) {
+      await this.stopEgress(run.name, run.network)
+      throw new ContainerError(
+        `The sandbox network did not start: ${String((error as { stderr?: string }).stderr ?? error).slice(-300)}`,
+        'network',
+      )
+    }
+  }
+
+  async stopEgress(name: string, network: string): Promise<void> {
+    const engine = this.engine
+    if (!engine || !isEngineName(name) || !isEngineName(network)) return
+    await this.run(engine, ['rm', '-f', name]).catch(() => '')
+    await this.run(engine, ['network', 'rm', network]).catch(() => '')
   }
 
   /** The environment of the engine's program, with the named variables passed on into WSL. */

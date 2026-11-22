@@ -5,6 +5,7 @@ import {
   onWindowsDrive,
   SANDBOX_MEASURED,
   type SandboxChoice,
+  type SandboxNetwork,
   type SandboxTier,
 } from '@shared/sandbox'
 import { platform } from '@renderer/lib/platform'
@@ -28,15 +29,13 @@ export function sandboxCost(t: T, tier: SandboxTier, folder: string | null): str
   if (tier === 'off') return t('sandbox.offNote')
   if (tier === 'native') return t('sandbox.cost.native')
   const start = t('sandbox.cost.container', {
-    start: m.containerStart.toFixed(1),
+    start: (m.containerStart + m.egressStart).toFixed(1),
     memory: m.engineMemoryMb,
   })
   if (platform !== 'win32') return start
   if (folder && onWindowsDrive(folder)) {
     const drive = t('sandbox.cost.drive', {
       build: ratio(m.containerWindowsDrive, m.windowsNative),
-      native: m.windowsNative,
-      container: m.containerWindowsDrive,
       search: Math.round(m.searchShare / m.searchWindows),
     })
     return t('sandbox.joinCost', { first: start, next: drive })
@@ -44,20 +43,42 @@ export function sandboxCost(t: T, tier: SandboxTier, folder: string | null): str
   return t('sandbox.joinCost', { first: start, next: t('sandbox.cost.wsl') })
 }
 
-/** What the sandbox allows, line by line, for the badge's tooltip. */
-export function sandboxAllowed(t: T, choice: SandboxChoice): string[] {
+/** What a network choice lets through on a tier, with the model's addresses a container has. */
+export function networkNote(
+  t: T,
+  tier: Exclude<SandboxTier, 'off'>,
+  network: SandboxNetwork,
+  hosts: readonly string[] = [],
+): string {
+  const shown =
+    hosts.length > 2
+      ? t('sandbox.moreHosts', { first: hosts.slice(0, 2).join(', '), count: hosts.length })
+      : hosts.join(', ')
+  return t(`sandbox.networkNote.${tier}.${network}` as 'sandbox.networkNote.native.none', {
+    hosts: shown,
+  })
+}
+
+/**
+ * What the sandbox allows, line by line, for the badge's tooltip: the harness's own sandbox holds
+ * the agent's commands, a container the whole agent.
+ */
+export function sandboxAllowed(t: T, choice: SandboxChoice, gitWritable: boolean): string[] {
   if (choice.tier === 'off') return [t('sandbox.offNote')]
-  const network = t('sandbox.allowed.network', { network: t(`sandbox.network.${choice.network}`) })
+  const label = t(`sandbox.network.${choice.network}`)
+  const git = t(gitWritable ? 'sandbox.allowed.gitWritable' : 'sandbox.allowed.gitReadOnly')
   return choice.tier === 'native'
     ? [
         t('sandbox.allowed.nativeWrites'),
         t('sandbox.allowed.nativeReads'),
-        network,
+        t('sandbox.allowed.networkCommands', { network: label }),
+        git,
         t('sandbox.allowed.nativeTools'),
       ]
     : [
         t('sandbox.allowed.containerSees'),
-        network,
+        git,
+        t('sandbox.allowed.networkAgent', { network: label }),
         t('sandbox.allowed.containerSignIn'),
         t('sandbox.allowed.containerTools'),
       ]

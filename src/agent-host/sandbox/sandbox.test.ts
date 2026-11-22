@@ -13,6 +13,7 @@ import { createValidators } from '../validate'
 import {
   agentCommand,
   containerLimits,
+  egressArgs,
   engineName,
   findEngine,
   installArgs,
@@ -21,6 +22,7 @@ import {
   type ContainerRun,
   type Exec,
 } from './container'
+import { modelHosts } from './model-hosts'
 import { folderProblem, MountError, projectMount, type MountContext } from './mounts'
 import { claudeSandbox, codexPolicy, codexWindowsReady, type SessionSandbox } from './native'
 
@@ -161,7 +163,7 @@ const RUN: ContainerRun = {
   owner: 'abcdef0123456789',
   project: '/mnt/e/proj',
   gitDir: true,
-  network: 'none',
+  network: { kind: 'egress', name: 'kite-sbx-net-s1-12345678' },
   user: '1000:1000',
   home: 'kite-sandbox-home-gemini-12345678',
   env: ['GEMINI_API_KEY'],
@@ -171,12 +173,12 @@ const RUN: ContainerRun = {
 }
 
 describe("a session's container", () => {
-  it('runs with no capability, no network and only the project mounted writable', () => {
+  it('runs with no capability, on a network with no way out, and only the project writable', () => {
     const args = runArgs(RUN)
     const pairs = (flag: string): string[] =>
       args.flatMap((word, i) => (word === flag ? [args[i + 1]!] : []))
     expect(args.slice(0, 4)).toEqual(['run', '--rm', '-i', '--init'])
-    expect(pairs('--network')).toEqual(['none'])
+    expect(pairs('--network')).toEqual(['kite-sbx-net-s1-12345678'])
     expect(pairs('--cap-drop')).toEqual(['ALL'])
     expect(pairs('--security-opt')).toEqual(['no-new-privileges'])
     expect(args).toContain('--read-only')
@@ -187,8 +189,22 @@ describe("a session's container", () => {
       'type=volume,source=kite-sandbox-tools,target=/tools,readonly',
       'type=volume,source=kite-sandbox-home-gemini-12345678,target=/home/node',
     ])
-    // A key goes in by name: its value never reaches the command line.
-    expect(pairs('-e')).toEqual(['HOME=/home/node', 'GEMINI_API_KEY'])
+    // A key goes in by name: its value never reaches the command line. The proxy variables name
+    // the egress proxy, the only way out.
+    const proxy = 'http://kite-egress:3128'
+    expect(pairs('-e')).toEqual([
+      'HOME=/home/node',
+      `HTTP_PROXY=${proxy}`,
+      `http_proxy=${proxy}`,
+      `HTTPS_PROXY=${proxy}`,
+      `https_proxy=${proxy}`,
+      `ALL_PROXY=${proxy}`,
+      `all_proxy=${proxy}`,
+      'NO_PROXY=localhost,127.0.0.1',
+      'no_proxy=localhost,127.0.0.1',
+      'NODE_USE_ENV_PROXY=1',
+      'GEMINI_API_KEY',
+    ])
     for (const word of args) {
       expect(word).not.toMatch(
         /docker\.sock|--privileged|^-v$|^--volume$|--pid=host|--network=host/,
@@ -198,7 +214,7 @@ describe("a session's container", () => {
   })
 
   it('opens the network only when asked, and mounts no .git that is not there', () => {
-    const args = runArgs({ ...RUN, network: 'open', gitDir: false, env: [] })
+    const args = runArgs({ ...RUN, network: { kind: 'open' }, gitDir: false, env: [] })
     expect(args[args.indexOf('--network') + 1]).toBe('bridge')
     expect(args.filter((word) => word.includes('.git'))).toEqual([])
     expect(args.filter((word) => word === '-e')).toHaveLength(1)
@@ -209,6 +225,9 @@ describe("a session's container", () => {
     expect(() => runArgs({ ...RUN, home: '../home' })).toThrow()
     expect(() => runArgs({ ...RUN, project: '/mnt/e/a,readonly=false,target=/etc' })).toThrow()
     expect(() => runArgs({ ...RUN, agentFolder: '/x\n--privileged' })).toThrow()
+    expect(() =>
+      runArgs({ ...RUN, network: { kind: 'egress', name: 'host --privileged' } }),
+    ).toThrow()
     expect(engineName('kite-sbx', 'Session/../ID 1')).toMatch(
       /^kite-sbx-session-[a-z0-9_.-]+-id-1-[0-9a-f]{8}$/,
     )
@@ -236,6 +255,67 @@ describe("a session's container", () => {
       /^\/tools\/agent-gemini-[0-9a-f]{8}\/0\.70\.0\/node_modules\/@google\/gemini-cli$/,
     )
     expect(command.slice(5)).toEqual(['--acp'])
+  })
+
+  it("runs the egress proxy with nothing mounted, its tunnel on the engine's loopback alone", () => {
+    const allow = egressArgs({
+      name: 'kite-sbx-egress-s1-1',
+      network: 'kite-sbx-net-s1-1',
+      owner: 'o',
+      user: '1000:1000',
+      mode: 'allow',
+      allow: ['api.example.com', '*.example.org:8443', 'bad rule', 'x,y'],
+    })
+    // The words after a flag, up to the image: `node -e` runs the proxy's source after it.
+    const pairs = (args: string[], flag: string): string[] => {
+      const image = args.findIndex((word) => word.startsWith('docker.io/'))
+      return args.slice(0, image).flatMap((word, i) => (word === flag ? [args[i + 1]!] : []))
+    }
+    expect(pairs(allow, '--network')).toEqual(['bridge'])
+    expect(pairs(allow, '--cap-drop')).toEqual(['ALL'])
+    expect(allow).toContain('--read-only')
+    expect(allow.filter((word) => word === '--mount' || word === '-p')).toEqual([])
+    expect(pairs(allow, '-e')).toEqual([
+      'KITE_EGRESS_MODE=allow',
+      'KITE_EGRESS_ALLOW=api.example.com,*.example.org:8443',
+    ])
+    const tunnel = egressArgs({
+      name: 'kite-sbx-egress-s1-1',
+      network: 'kite-sbx-net-s1-1',
+      owner: 'o',
+      user: '1000:1000',
+      mode: 'tunnel',
+      allow: ['api.example.com'],
+    })
+    expect(pairs(tunnel, '-p')).toEqual(['127.0.0.1::7000'])
+    // The token comes by name, never on the command line.
+    expect(pairs(tunnel, '-e')).toEqual([
+      'KITE_EGRESS_MODE=tunnel',
+      'KITE_EGRESS_ALLOW=',
+      'KITE_EGRESS_TOKEN',
+    ])
+    expect(() =>
+      egressArgs({ name: 'a b', network: 'n', owner: 'o', user: 'u', mode: 'allow', allow: [] }),
+    ).toThrow()
+  })
+
+  it("names the model's addresses from the harness and the base addresses Kite hands it", () => {
+    expect(modelHosts('gemini', {})).toContain('generativelanguage.googleapis.com')
+    expect(modelHosts('opencode', {})).toEqual([])
+    expect(
+      modelHosts('qwen', {
+        OPENAI_BASE_URL: 'https://gateway.example.com:8443/v1',
+        OTHER_URL: 'https://not-a-base.example.com',
+        ANTHROPIC_BASE_URL: 'not a url',
+        DEEPSEEK_API_BASE: 'ftp://files.example.com',
+      }),
+    ).toEqual([
+      'dashscope.aliyuncs.com',
+      'dashscope-intl.aliyuncs.com',
+      'chat.qwen.ai',
+      'portal.qwen.ai',
+      'gateway.example.com:8443',
+    ])
   })
 
   it('takes half the cores and memory, at most 8 GB', () => {
@@ -346,6 +426,7 @@ const SANDBOX: SessionSandbox = {
   network: 'none',
   roots: ['/home/dvb/proj-wt', '/home/dvb/proj'],
   proxyPort: null,
+  gitWritable: false,
 }
 
 describe("the harnesses' own sandboxes", () => {
@@ -373,6 +454,10 @@ describe("the harnesses' own sandboxes", () => {
     })
     expect(() => claudeSandbox({ ...SANDBOX, network: 'agent' }, '/h', 'linux')).toThrow()
     expect(claudeSandbox({ ...SANDBOX, network: 'open' }, '/h', 'linux').network).toEqual({})
+    // Its commands may not write the project's .git unless the user lets the sandbox commit.
+    expect(option.filesystem.denyWrite).toEqual(['/home/dvb/proj-wt/.git', '/home/dvb/proj/.git'])
+    const committing = claudeSandbox({ ...SANDBOX, gitWritable: true }, '/h', 'linux')
+    expect(committing.filesystem.denyWrite).toBeUndefined()
   })
 
   it("holds Codex's turns to the project, and never to full access", () => {
@@ -416,6 +501,16 @@ describe('sandbox choices', () => {
       tier: 'off',
       network: 'open',
     })
+    // Each tier's strictest stands for the other's: a container keeps its model, and the harness's
+    // own sandbox never held the model's calls.
+    expect(sandboxChoiceOf({ tier: 'container', network: 'none' })).toEqual({
+      tier: 'container',
+      network: 'model',
+    })
+    expect(sandboxChoiceOf({ tier: 'native', network: 'model' })).toEqual({
+      tier: 'native',
+      network: 'none',
+    })
     for (const bad of [
       null,
       'native',
@@ -429,7 +524,7 @@ describe('sandbox choices', () => {
   })
 
   it('takes the asked choice, else the project, else the default, which is off', () => {
-    const project = { tier: 'container' as const, network: 'none' as const }
+    const project = { tier: 'container' as const, network: 'model' as const }
     const settings = { tier: 'native' as const, network: 'open' as const }
     expect(resolveSandbox(undefined, undefined, undefined)).toEqual({
       tier: 'off',
@@ -466,13 +561,17 @@ describe('sandbox choices', () => {
       available: false,
       block: 'protocol',
     })
-    expect(containerSupport('acp-package', 'win32')).toMatchObject({
+    expect(containerSupport('acp-package', 'win32', ['api.example.com'])).toMatchObject({
       available: true,
-      networks: ['none', 'open'],
+      networks: ['model', 'agent', 'open'],
+      modelHosts: ['api.example.com'],
     })
-    const gemini = agentSandboxSupport('gemini', 'acp-package', 'win32')
-    expect(supportsChoice(gemini, { tier: 'container', network: 'none' })).toBe(true)
-    expect(supportsChoice(gemini, { tier: 'container', network: 'agent' })).toBe(false)
+    // Without the model's addresses, "only the model" would leave the agent nothing.
+    expect(containerSupport('acp-package', 'win32')).toMatchObject({ networks: ['agent', 'open'] })
+    const gemini = agentSandboxSupport('gemini', 'acp-package', 'win32', modelHosts('gemini', {}))
+    expect(supportsChoice(gemini, { tier: 'container', network: 'model' })).toBe(true)
+    expect(supportsChoice(gemini, { tier: 'container', network: 'agent' })).toBe(true)
+    expect(supportsChoice(gemini, { tier: 'container', network: 'none' })).toBe(false)
     expect(supportsChoice(gemini, { tier: 'native', network: 'none' })).toBe(false)
     expect(supportsChoice(gemini, { tier: 'off', network: 'open' })).toBe(true)
   })
@@ -486,7 +585,7 @@ describe('sandbox requests and what is stored', () => {
 
   it('takes a sandbox of known values only, at the start, for a project and between turns', () => {
     const create = posix['sessions.create']
-    const choice = { tier: 'container', network: 'none' }
+    const choice = { tier: 'container', network: 'model' }
     expect(create({ agentId: 'gemini', projectPath: '/p', sandbox: choice })).toEqual({
       agentId: 'gemini',
       projectPath: '/p',
@@ -552,7 +651,7 @@ describe('sandbox requests and what is stored', () => {
     }
     const read = (extra: Record<string, unknown>) =>
       parseSessionsFile({ sessions: [{ ...session, ...extra }] })
-    const sandbox = { tier: 'container', network: 'none' }
+    const sandbox = { tier: 'container', network: 'model' }
     expect(read({ sandbox })).toEqual({ version: 1, sessions: [{ ...session, sandbox }] })
     expect(read({ sandbox: { tier: 'vm', network: 'none' } })).toEqual({
       version: 1,

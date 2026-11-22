@@ -10,7 +10,8 @@ import {
   DEFAULT_SANDBOX_SETTINGS,
   SANDBOX_IMAGE_MB,
   SANDBOX_MEASURED,
-  SANDBOX_NETWORKS,
+  networkFor,
+  TIER_NETWORKS,
   SANDBOX_TIERS,
   type ContainerEngineKind,
   type ContainerStatus,
@@ -70,7 +71,13 @@ export function SandboxDefault({ text }: { text: ReactNode }) {
             value: tier,
             label: t(`agents.sandbox.tier.${tier}.name`),
           }))}
-          onChange={(tier) => apply({ sandbox: { tier } })}
+          onChange={(tier) =>
+            apply({
+              // A tier's network is one it has: each tier's strictest stands for the other's.
+              sandbox:
+                tier === 'off' ? { tier } : { tier, network: networkFor(tier, sandbox.network) },
+            })
+          }
         />
       </BlockLine>
       {sandbox.tier !== 'off' && (
@@ -83,8 +90,8 @@ export function SandboxDefault({ text }: { text: ReactNode }) {
         >
           <SettingSelect
             label={t('agents.sandbox.network.name')}
-            value={sandbox.network}
-            options={SANDBOX_NETWORKS.map((network) => ({
+            value={networkFor(sandbox.tier, sandbox.network)}
+            options={TIER_NETWORKS[sandbox.tier].map((network) => ({
               value: network,
               label: t(`agents.sandbox.network.${network}`),
             }))}
@@ -108,7 +115,7 @@ export function SandboxDefault({ text }: { text: ReactNode }) {
           <p>{t('agents.sandbox.native')}</p>
           <p>
             {t('agents.sandbox.container', {
-              start: m.containerStart.toFixed(1),
+              start: (m.containerStart + m.egressStart).toFixed(1),
               memory: m.engineMemoryMb,
               build: ratio(m.containerWindowsDrive, m.windowsNative),
               native: m.windowsNative,
@@ -218,6 +225,22 @@ function ContainerImage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+export function SandboxGitWritable() {
+  const { t } = useTranslation('settings')
+  const sandbox = useSandbox()
+  const [apply, error] = useApply()
+  return (
+    <>
+      <ControlError error={error} />
+      <SettingSwitch
+        label={t('agents.sandbox.git.name')}
+        checked={sandbox.gitWritable === true}
+        onChange={(gitWritable) => apply({ sandbox: { gitWritable } })}
+      />
+    </>
   )
 }
 

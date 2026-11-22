@@ -2,6 +2,7 @@
 // over the container's stdio with the project's folder renamed on the way, and is stopped with the
 // session: EOF first, then the engine removes whatever is left of the container.
 
+import { randomBytes } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,6 +25,7 @@ import {
   type ContainerSandbox,
 } from './container'
 import { projectMount } from './mounts'
+import { EgressTunnel } from './tunnel'
 
 export interface ContainerStart {
   sessionId: string
@@ -32,7 +34,17 @@ export interface ContainerStart {
   agent: ContainerAgent
   /** The session's folder on the computer. */
   folder: string
-  network: 'none' | 'open'
+  /**
+   * `model`: out only to the model's addresses; `agent`: out only through the agent's listener of
+   * Agent 网络, at `proxyPort`; `open`: the engine's bridge.
+   */
+  network: 'model' | 'agent' | 'open'
+  /** The model's addresses `model` lets through; empty refuses the start. */
+  modelHosts: string[]
+  /** The port of the agent's listener of Agent 网络; null refuses `agent`. */
+  proxyPort: number | null
+  /** The project's `.git` stays writable, as the user let the sandbox commit. */
+  gitWritable: boolean
   /** The environment of the engine's program, which holds the values of `keyNames`. */
   env: Env
   /** The variables of the agent's API key that Kite holds, which the container gets by name. */
@@ -66,12 +78,20 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
     dataDir: start.dataDir,
     realpath: (value) => realpath(value),
   })
+  if (start.network === 'model' && start.modelHosts.length === 0) {
+    throw new ContainerError('noModelHosts', 'network')
+  }
+  if (start.network === 'agent' && start.proxyPort === null) {
+    throw new ContainerError('noExit', 'network')
+  }
   const engine = await containers.prepare(start.agent)
   const project = await containers.engineFolder(engine, folder)
-  const gitDir = await stat(path.join(folder, '.git')).then(
-    (info) => info.isDirectory(),
-    () => false,
-  )
+  const gitDir =
+    !start.gitWritable &&
+    (await stat(path.join(folder, '.git')).then(
+      (info) => info.isDirectory(),
+      () => false,
+    ))
   const keyNames = start.keyNames.filter((name) => KEY_NAME.test(name) && start.env[name])
   const name = engineName('kite-sbx', start.sessionId)
   const command = agentCommand(start.agent)
@@ -79,12 +99,32 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
     start.agent.kind === 'script'
       ? await containers.engineFolder(engine, start.agent.folder)
       : undefined
+  const egress =
+    start.network === 'open'
+      ? null
+      : {
+          name: engineName('kite-sbx-egress', start.sessionId),
+          network: engineName('kite-sbx-net', start.sessionId),
+          mode: start.network === 'model' ? ('allow' as const) : ('tunnel' as const),
+          allow: start.network === 'model' ? start.modelHosts : [],
+        }
+  const token = randomBytes(24).toString('hex')
+  let tunnel: EgressTunnel | null = null
+  if (egress) {
+    const { tunnelPort } = await containers.startEgress(engine, egress, {
+      ...start.env,
+      KITE_EGRESS_TOKEN: token,
+    })
+    if (tunnelPort !== null && start.proxyPort !== null) {
+      tunnel = new EgressTunnel({ port: tunnelPort, token, upstream: start.proxyPort })
+    }
+  }
   const args = runArgs({
     name,
     owner: containers.owner,
     project,
     gitDir,
-    network: start.network,
+    network: egress ? { kind: 'egress', name: egress.network } : { kind: 'open' },
     user: engine.user,
     home: engineName('kite-sandbox-home', start.agentId),
     env: keyNames,
@@ -102,9 +142,20 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
     display: { command: line.file, args: line.args, env: {} },
   }
   const env = containers.engineEnv(engine, start.env, keyNames)
-  const launched = start.launcher.launch(start.def, spec, env, start.output)
+  const unwind = async (): Promise<void> => {
+    tunnel?.stop()
+    if (egress) await containers.stopEgress(egress.name, egress.network)
+  }
+  let launched: LaunchedAgent
+  try {
+    launched = start.launcher.launch(start.def, spec, env, start.output)
+  } catch (error) {
+    await unwind()
+    throw error
+  }
   if (launched.transport.kind !== 'stdio') {
     await launched.stop()
+    await unwind()
     throw new ContainerError('The agent does not speak over its stdio', 'engine')
   }
   const transport: StdioTransport = mappedTransport(launched.transport, folder, platform)
@@ -120,6 +171,7 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
     connection.close()
     await launched.stop()
     await containers.removeContainer(name)
+    await unwind()
   }
   try {
     const init = await Promise.race([

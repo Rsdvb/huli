@@ -335,6 +335,7 @@ const SECTION_FIELDS = {
     tier: oneOf(...SANDBOX_TIERS),
     network: oneOf(...SANDBOX_NETWORKS),
     autoApproveEdits: isBoolean,
+    gitWritable: isBoolean,
   },
 } as const satisfies Record<string, Record<string, Check>>
 

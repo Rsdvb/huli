@@ -4256,6 +4256,7 @@ describe('the native sandbox', () => {
     network: 'none' as const,
     roots: ['/repo-wt', '/repo'],
     proxyPort: null,
+    gitWritable: false,
   }
 
   it("starts the query in Claude Code's sandbox, failing closed with no way around it", async () => {

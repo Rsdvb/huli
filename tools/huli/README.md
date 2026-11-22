@@ -414,7 +414,7 @@ deterministic classifier, and the user may have the host answer low ones by itse
 
 Agents run commands with the user's rights. A session may instead run in a sandbox the user picks,
 at three levels: Settings › Agents › 沙箱 (`sandbox` in the settings: `tier`, `network`,
-`autoApproveEdits`), a project's menu (`sandbox` in `projects.json`, absent for the default) and New
+`autoApproveEdits`, `gitWritable`), a project's menu (`sandbox` in `projects.json`, absent for the default) and New
 session's chip, which is also the session's badge on the composer's tray (`sandbox` in
 `sessions.json`, changed between turns with `sessions.setSandbox`, which starts its agent again).
 Off is the default. Kite never picks or changes a tier by itself, and a tier that cannot run stops
@@ -422,6 +422,15 @@ the session's start with what to do; it never falls back to another or to none. 
 holds the choices, what each harness offers on each system and the measured costs the copy shows.
 
 - 关闭 (`off`): as before.
+- The network choice means what the tier holds. The harness's own sandbox holds only the agent's
+  commands, while the agent still calls its model itself: `none` (命令不联网), `agent` (its commands
+  only through its Agent network exit) or `open`. A container holds the whole agent, its model
+  calls included, so it has no `none`: `model` (只允许模型接口, the default), `agent` or `open`. A
+  stored `none` on a container reads as `model` and a `model` on the harness's own sandbox as
+  `none`, each tier's strictest (`networkFor`).
+- 允许在沙箱里提交 (`gitWritable`, off by default): off, a container mounts the project's `.git`
+  read-only and Claude Code's sandbox denies writes to it, so the agent cannot commit or rewrite
+  history; Codex always keeps `.git` read-only itself.
 - Agent 自带沙箱 (`native`), `src/agent-host/sandbox/native.ts`: Claude Code gets the SDK's
   `sandbox` option (`failIfUnavailable`, `allowUnsandboxedCommands: false`, writes only in the
   session's folders, no reads of the key folders; network `none` is an empty strict allowlist,
@@ -437,21 +446,34 @@ holds the choices, what each harness offers on each system and the measured cost
 - 容器 (`container`), `src/agent-host/sandbox/container.ts` and `runtimes.ts`: for an ACP agent Kite
   installs from npm (and the fake agent), the session gets an agent process of its own in a
   container: `--rm -i --init`, no capabilities, `no-new-privileges`, a read-only root with a private
-  `/tmp`, half the cores and memory (at most 8 GB), `--network none` or the bridge, the project at
-  `/workspace` with its `.git` read-only, the agent's packages from the `kite-sandbox-tools` volume
+  `/tmp`, half the cores and memory (at most 8 GB), the project at `/workspace` (its `.git`
+  read-only unless commits are allowed), the agent's packages from the `kite-sandbox-tools` volume
   (installed once by a container that mounts no project) and a home volume of the agent's own, never
   the user's sign-ins: only the API key variables Kite holds for the agent go in, by name. The
   project's path is renamed in every message both ways, so the thread shows real paths; no MCP
   server, skill or plugin of the computer goes in. `mounts.ts` refuses a root, the home folder and
   what holds it, system folders, the key and settings folders in home, Kite's data folder, `.` and
   `..`, device paths and characters a mount option could be bent with, as written and again once
-  links are followed. Engines: Docker or Podman; on Windows Docker Desktop, else Docker inside WSL
+  links are followed. Network (`egress.ts`, `tunnel.ts`): with `open` the container is on the
+  engine's bridge. Otherwise it is on a network of the session's own with no way out
+  (`--internal`; a direct connection fails with `ENETUNREACH`), and its proxy variables (and
+  `NODE_USE_ENV_PROXY=1`) name an egress proxy beside it, `kite-egress:3128`: a container of Kite's
+  image on that network and the bridge, running `EGRESS_SOURCE` as `node -e`, with nothing mounted,
+  no capabilities and 128 MB. For `model` it lets CONNECT and plain HTTP through to the model's
+  addresses alone (`model-hosts.ts`: the hosts each harness's docs name, plus the hosts of the
+  base-address variables Kite hands the agent; an agent with none cannot take `model`) and refuses
+  everything else with 403. For `agent` it lets everything through, but only over a tunnel: its
+  port is published on the engine's loopback, the agent host dials into it with a token of the
+  session's, and each request goes on through the agent's own mihomo listener, which holds it to
+  the exit Agent network picks (REJECT while it has none); with no dial-in to take, 503. Engines:
+  Docker or Podman; on Windows Docker Desktop, else Docker inside WSL
   through `wsl.exe -e docker`, with paths from `wslpath` and keys passed in `WSLENV`. The image is
   `node:22-bookworm-slim` by digest (80 MB download, about 330 MB on disk), pulled only from
   Settings after a dialog that names its size, and removable there. Nothing of this loads until a
-  container session starts or Settings asks (`sandbox.containerStatus`); the container starts with
-  the session's agent, stops when the session lets it go (the idle-session rules), and the ones a
-  crashed Kite left are removed by their owner label before the next one starts. A container's
+  container session starts or Settings asks (`sandbox.containerStatus`); the container and its
+  proxy start with the session's agent, stop when the session lets it go (the idle-session rules),
+  and the containers and networks a crashed Kite left are removed by their owner label before the
+  next one starts. A container's
   sessions are never prepared on New session's screen, and a paired device can neither pass a
   sandbox nor set one.
 - Measured on the owner's computer (2026-11-22; `npm ci`, `tsc` and `vitest run` of a 46-package
@@ -459,11 +481,16 @@ holds the choices, what each harness offers on each system and the measured cost
   (41.5 s in WSL itself, so the share and not Docker costs it), 7.4 s in a container on WSL's own
   disk (7.2 s in WSL itself). A search over 2,499 files took 0.71 s on Windows and 5.2 s through the
   share. `docker run` of an idle container through `wsl.exe` took 0.76 s, Docker's own socket start
-  0.79 s; Docker's services hold about 105 MB and each container about 11 MB beside its agent.
+  0.79 s; the session's network and egress proxy add 1.3 to 1.7 s. Docker's services hold about
+  105 MB and each container about 11 MB beside its agent. Checked end to end against Docker in WSL:
+  with `model` a container reached a stand-in model's address and got 403 for another port and for
+  example.com, Node's own `fetch` went through the proxy, and direct connections failed; with
+  `agent` a request reached a stand-in model on Windows through the tunnel and a stand-in listener,
+  and one the listener refused got 503.
 - With 沙箱里自动批准项目内修改 on, a sandboxed session's edits inside the project are allowed once
   as the edits level allows them; a high request is always asked.
 - Not built: a VM tier (the measured cost and the no-bloat rule leave it for later, downloaded on
-  demand), a container held to the Agent network's exit, Antigravity's `--sandbox`, Codex's Windows
+  demand), extra model addresses the user names, Antigravity's `--sandbox`, Codex's Windows
   sandbox setup from Kite (`windowsSandbox/setupStart`), and signing an agent in inside its
   container.
 

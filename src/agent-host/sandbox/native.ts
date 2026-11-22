@@ -17,6 +17,8 @@ export interface SessionSandbox {
    * setting gives it none, which `agent` refuses rather than open the network.
    */
   proxyPort: number | null
+  /** The project's `.git` may be written, as the user let the sandbox commit. */
+  gitWritable: boolean
 }
 
 export class SandboxUnavailableError extends Error {
@@ -52,7 +54,7 @@ export interface ClaudeSandboxOption {
   failIfUnavailable: true
   allowUnsandboxedCommands: false
   autoAllowBashIfSandboxed: false
-  filesystem: { allowWrite: string[]; denyRead: string[] }
+  filesystem: { allowWrite: string[]; denyWrite?: string[]; denyRead: string[] }
   network: {
     allowedDomains?: string[]
     strictAllowlist?: boolean
@@ -83,6 +85,10 @@ export function claudeSandbox(
     autoAllowBashIfSandboxed: false,
     filesystem: {
       allowWrite: [...new Set(sandbox.roots)],
+      // Commits and history stay as they are unless the user lets the sandbox commit.
+      ...(sandbox.gitWritable
+        ? {}
+        : { denyWrite: [...new Set(sandbox.roots)].map((root) => join(root, '.git')) }),
       denyRead: SECRET_DIRS.map((dir) => join(home, ...dir)),
     },
     network: claudeNetwork(sandbox),
@@ -91,7 +97,9 @@ export function claudeSandbox(
 
 function claudeNetwork(sandbox: SessionSandbox): ClaudeSandboxOption['network'] {
   switch (sandbox.network) {
+    // The model's calls are Claude Code's own, outside the sandbox: its commands get none.
     case 'none':
+    case 'model':
       return { allowedDomains: [], strictAllowlist: true }
     case 'agent':
       if (sandbox.proxyPort === null) throw noExit()
@@ -134,6 +142,7 @@ export function codexPolicy(mode: CodexPolicy, sandbox: SessionSandbox): CodexPo
       'network',
     )
   }
+  // Codex calls its model itself, outside the sandbox, so only the commands lose the network.
   const networkAccess = sandbox.network === 'open'
   if (mode.type === 'readOnly') return { type: 'readOnly', networkAccess }
   if (mode.type === 'dangerFullAccess') {

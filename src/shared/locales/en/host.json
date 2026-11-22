@@ -1558,7 +1558,8 @@
       "container": "a container"
     },
     "network": {
-      "none": "no network",
+      "none": "its commands offline",
+      "model": "only its model's addresses",
       "agent": "only its Agent network exit",
       "open": "the network open"
     },
@@ -1592,7 +1593,8 @@
         "credentials": "it holds sign-ins, keys or settings",
         "kiteData": "it is Kite's own data folder",
         "missing": "it does not exist"
-      }
+      },
+      "noModelHosts": "Kite does not know the addresses of {{agent}}'s model service, so “only its model's addresses” would leave it none. Pick “only its Agent network exit” or “the network open”."
     }
   }
 }

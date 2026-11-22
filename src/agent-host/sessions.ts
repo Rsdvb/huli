@@ -4185,7 +4185,8 @@ export class SessionManager {
         t('sandbox.noExit', { agent: this.deps.agents.name(record.agentId) }),
       )
     }
-    return { tier: choice.tier, network: choice.network, roots, proxyPort }
+    const gitWritable = this.deps.sandbox?.()?.gitWritable === true
+    return { tier: choice.tier, network: choice.network, roots, proxyPort, gitWritable }
   }
 
   /** Huli: whether the session's agent runs in a container of the session's own. */
@@ -4204,12 +4205,20 @@ export class SessionManager {
       return this.deps.agents.ensureReady(record.agentId)
     }
     this.assertSandbox(record.agentId, record.sandbox)
-    const network = record.sandbox.network === 'none' ? 'none' : 'open'
+    const { network } = record.sandbox
+    if (network !== 'model' && network !== 'agent' && network !== 'open') {
+      throw new HostError('invalid_params', t('sandbox.unknown'))
+    }
     const runtime = await this.deps.agents.containerRuntime(
       live.id,
       record.agentId,
       await this.cwdOf(live),
       network,
+      {
+        proxyPort:
+          network === 'agent' ? (this.deps.agentProxyPort?.(record.agentId) ?? null) : null,
+        gitWritable: this.deps.sandbox?.()?.gitWritable === true,
+      },
     )
     this.containerLives.add(live.id)
     return runtime

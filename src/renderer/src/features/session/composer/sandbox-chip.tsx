@@ -7,8 +7,8 @@ import type { Ref } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   SANDBOX_IMAGE_MB,
-  SANDBOX_NETWORKS,
   supportsChoice,
+  TIER_NETWORKS,
   type AgentSandboxSupport,
   type SandboxChoice,
   type SandboxTier,
@@ -17,7 +17,15 @@ import type { AgentId } from '@shared/thread'
 import { Dropdown, type MenuItem } from '@renderer/components/affect/app-shell'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
-import { sandboxAllowed, sandboxCost, sandboxLabel, slowContainer, type T } from './sandbox-text'
+import { useSettingsStore } from '@renderer/stores/settings'
+import {
+  networkNote,
+  sandboxAllowed,
+  sandboxCost,
+  sandboxLabel,
+  slowContainer,
+  type T,
+} from './sandbox-text'
 
 function tierItems(
   t: T,
@@ -49,14 +57,18 @@ function tierItems(
   if (!own.available) return [heading]
   return [
     heading,
-    ...SANDBOX_NETWORKS.map((network) => {
+    ...TIER_NETWORKS[tier].map((network) => {
       const held = own.networks.includes(network)
       const checked = value.tier === tier && value.network === network
       return {
         label: t(`sandbox.network.${network}`),
         checked,
         disabled: !held,
-        ...(held ? {} : { description: t('sandbox.networkUnsupported') }),
+        description: held
+          ? networkNote(t, tier, network, own.modelHosts)
+          : network === 'model'
+            ? t('sandbox.noModelHosts')
+            : t('sandbox.networkUnsupported'),
         onSelect: () => !checked && onChange({ tier, network }),
       }
     }),
@@ -84,6 +96,7 @@ export function SandboxChip({
 }) {
   const { t } = useTranslation('agents')
   const support = useAgentsStore((s) => agentsOn(s, hostId).byId[agentId]?.sandbox)
+  const gitWritable = useSettingsStore((s) => s.settings.sandbox?.gitWritable === true)
   if (!support) return null
   const usable = supportsChoice(support, value)
   // A hint from what was measured, never a choice made for the user: the harness's own sandbox
@@ -104,7 +117,7 @@ export function SandboxChip({
     ...tierItems(t, 'container', support, value, folder, onChange, recommend === 'container'),
   ]
   const label = sandboxLabel(t, value)
-  const allowed = sandboxAllowed(t, value)
+  const allowed = sandboxAllowed(t, value, gitWritable)
   return (
     <Dropdown
       side="top"

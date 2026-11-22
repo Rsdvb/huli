@@ -5853,6 +5853,8 @@ li[data-row-exit='dust'] > * {
 /* The sandbox menu says what each tier protects and costs under its title, wrapped to its width. */
 .kettu-sandbox-menu .ui-as-menu {
   width: 340px;
+  max-height: min(38vh, 420px);
+  overflow-y: auto;
 }
 .kettu-sandbox-menu .ui-as-menu__heading {
   flex-wrap: wrap;
