@@ -91,15 +91,15 @@
     "networkUnsupported": "这一档管不住这种网络",
     "cost": {
       "native": "几乎没有开销：每条命令启动稍慢一点",
-      "container": "连同网络代理启动约 {{start}} 秒；运行时 Docker 占约 {{memory}} MB 内存",
-      "drive": "这个项目在 Windows 盘上：实测构建和测试慢 {{build}} 倍（{{native}} 秒 → {{container}} 秒），搜索文件慢 {{search}} 倍",
+      "container": "启动约 {{start}} 秒，Docker 占约 {{memory}} MB",
+      "drive": "这个项目在 Windows 盘上，构建慢 {{build}} 倍、搜索慢 {{search}} 倍",
       "wsl": "放在 WSL 自己的磁盘里的项目不会变慢"
     },
     "setup": {
       "claudeWindows": "要先运行一次 `claude sandbox install`（会弹一次管理员确认）",
       "claudeLinux": "需要装好 bubblewrap 和 socat",
       "codexWindows": "要先设置一次 Codex 的 Windows 沙箱",
-      "container": "需要 Docker 或 Podman，第一次要下载镜像（{{mb}} MB）"
+      "container": "需要 Docker 或 Podman，第一次下载 {{mb}} MB 镜像"
     },
     "recommended": "建议",
     "betweenTurns": "两轮之间才能换",
@@ -123,16 +123,17 @@
     "withHint": "{{tier}} · {{hint}}",
     "networkNote": {
       "native": {
-        "none": "Agent 跑的命令连不了网；Agent 自己调用模型不受影响",
-        "agent": "命令只能经 Agent 网络给它选的出口上网；Agent 自己调用模型照旧",
+        "none": "命令连不了网，Agent 调用模型不受影响",
+        "agent": "命令只经 Agent 网络的出口上网",
         "open": "命令能连任何地址"
       },
       "container": {
-        "model": "整个 Agent 只能连到它的模型服务（{{hosts}}），其他一律拒绝",
-        "agent": "Agent 的所有网络都经纸鸢走 Agent 网络给它选的出口",
-        "open": "Agent 能连任何地址"
+        "model": "只放行 {{hosts}}",
+        "agent": "全部经纸鸢走 Agent 网络的出口",
+        "open": "能连任何地址"
       }
     },
-    "moreHosts": "{{first}} 等 {{count}} 个"
+    "moreHosts": "{{first}} 等 {{count}} 个",
+    "noModelHosts": "纸鸢不知道这个 Agent 的模型接口地址"
   }
 }

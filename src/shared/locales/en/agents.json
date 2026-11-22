@@ -91,15 +91,15 @@
     "networkUnsupported": "This tier cannot hold it to that",
     "cost": {
       "native": "Almost free: each command starts a little slower",
-      "container": "Starts in about {{start}} s with its network proxy; Docker holds about {{memory}} MB while it runs",
-      "drive": "this project is on a Windows drive: builds and tests ran {{build}}× slower ({{native}} s → {{container}} s), searches {{search}}× slower",
+      "container": "Starts in about {{start}} s; Docker holds about {{memory}} MB",
+      "drive": "this project on a Windows drive builds {{build}}× and searches {{search}}× slower",
       "wsl": "in WSL's own disk a project runs at full speed"
     },
     "setup": {
       "claudeWindows": "Needs `claude sandbox install` once (one administrator prompt)",
       "claudeLinux": "Needs bubblewrap and socat",
       "codexWindows": "Needs Codex's Windows sandbox set up once",
-      "container": "Needs Docker or Podman, and the image once ({{mb}} MB)"
+      "container": "Needs Docker or Podman and an {{mb}} MB image once"
     },
     "recommended": "Suggested",
     "betweenTurns": "Changes between turns",
@@ -123,16 +123,17 @@
     "withHint": "{{tier}} · {{hint}}",
     "networkNote": {
       "native": {
-        "none": "The agent's commands reach no network; the agent still calls its model",
-        "agent": "The commands go out only through the exit Agent network picks for it; the agent still calls its model itself",
-        "open": "The commands reach any address"
+        "none": "Commands offline; the agent still calls its model",
+        "agent": "Commands go out only through its Agent network exit",
+        "open": "Commands reach any address"
       },
       "container": {
-        "model": "The whole agent reaches only its model service ({{hosts}}); everything else is refused",
-        "agent": "All of the agent's traffic goes out through Kite to the exit Agent network picks for it",
-        "open": "The agent reaches any address"
+        "model": "Only {{hosts}}",
+        "agent": "Everything through Kite to its Agent network exit",
+        "open": "Any address"
       }
     },
-    "moreHosts": "{{first}} and {{count}} more"
+    "moreHosts": "{{first}} and {{count}} more",
+    "noModelHosts": "Kite does not know this agent's model addresses"
   }
 }

@@ -36,8 +36,6 @@ export function sandboxCost(t: T, tier: SandboxTier, folder: string | null): str
   if (folder && onWindowsDrive(folder)) {
     const drive = t('sandbox.cost.drive', {
       build: ratio(m.containerWindowsDrive, m.windowsNative),
-      native: m.windowsNative,
-      container: m.containerWindowsDrive,
       search: Math.round(m.searchShare / m.searchWindows),
     })
     return t('sandbox.joinCost', { first: start, next: drive })

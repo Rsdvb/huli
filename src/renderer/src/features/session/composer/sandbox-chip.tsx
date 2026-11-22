@@ -66,7 +66,9 @@ function tierItems(
         disabled: !held,
         description: held
           ? networkNote(t, tier, network, own.modelHosts)
-          : t('sandbox.networkUnsupported'),
+          : network === 'model'
+            ? t('sandbox.noModelHosts')
+            : t('sandbox.networkUnsupported'),
         onSelect: () => !checked && onChange({ tier, network }),
       }
     }),
