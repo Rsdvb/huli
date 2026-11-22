@@ -78,7 +78,7 @@ function fieldError(
   return null
 }
 
-function SecretCard({
+export function SecretCard({
   sessionId,
   entry,
   agentName,

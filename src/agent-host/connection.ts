@@ -443,6 +443,11 @@ export interface SessionOptions {
    */
   env?: Record<string, string>
   /**
+   * Huli: manager mode holds the session to reading: an agent that can take its file-writing
+   * tools away does, and Kite's guard answers the rest.
+   */
+  readOnly?: boolean
+  /**
    * Huli: the sandbox the session runs in; absent for none. `native` is the driver's to turn on
    * with the harness's own sandbox, failing the start where it cannot; `container` is already held
    * by the container the agent runs in.

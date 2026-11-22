@@ -83,6 +83,21 @@ export function StepCard({
         level: t(`permission.risk.${result.risk?.level ?? 'low'}`),
       })
     }
+    // Huli: manager mode's guard, or the manager's agent, answered it.
+    if (note === undefined && typeof result === 'object' && result?.by === 'readonly') {
+      note = t(
+        result.kind === 'allow_once'
+          ? 'permission.answer.readOnlyAllowed'
+          : 'permission.answer.readOnlyDenied',
+      )
+    }
+    if (note === undefined && typeof result === 'object' && result?.by === 'manager') {
+      note = t(
+        result.kind === 'allow_once'
+          ? 'permission.answer.managerAllowed'
+          : 'permission.answer.managerDenied',
+      )
+    }
     // Huli: a denied call reads Denied, not Cancelled, and says what denied it.
     const denial = entry.denied
     const appeal = entry.review?.status === 'denied' ? entry.review.appeal : undefined

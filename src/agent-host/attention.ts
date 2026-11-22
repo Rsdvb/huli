@@ -132,10 +132,15 @@ export function replySummary(thread: ThreadState): string | null {
 
 /** How many files the turn's finished edits changed, each counted once. */
 export function changedFiles(thread: ThreadState): number {
+  return changedPaths(thread).length
+}
+
+/** Huli: the files the turn's finished edits changed, each once, in the order they were. */
+export function changedPaths(thread: ThreadState): string[] {
   const paths = new Set<string>()
   for (const entry of finishedTurn(thread)) {
     if (entry.kind !== 'tool' || entry.status !== 'completed') continue
     for (const item of entry.content) if (item.type === 'diff') paths.add(item.path)
   }
-  return paths.size
+  return [...paths]
 }

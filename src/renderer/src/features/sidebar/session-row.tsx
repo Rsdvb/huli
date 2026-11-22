@@ -169,7 +169,8 @@ export const SessionRow = memo(function SessionRow({
   const status = rowStatus(node, hasChildren && !expanded)
   // What waits gets a button of its own in the row's tools, over the status slot.
   const waiting = !away && status.waiting > 0
-  const title = sessionTitle(summary)
+  // Huli: a manager's worker shows the task its manager gave it.
+  const title = summary.worker?.title || sessionTitle(summary)
 
   // Mod-click and Shift-click pick rows for a menu that acts on all of them; a plain click opens
   // the session and lets go of the picked ones.
@@ -276,8 +277,19 @@ export const SessionRow = memo(function SessionRow({
       {caret}
       {mark}
       <span className="ui-as-side__text" dir="auto">
+        {/* Huli: a manager's worker leads with its roster name; a manager says it is one. */}
+        {summary.worker && <span className="text-(--faint)">{summary.worker.name} · </span>}
         {title}
       </span>
+      {summary.manager && (
+        <span
+          aria-label={t('row.manager')}
+          title={t('row.manager')}
+          className="shrink-0 text-[11px] font-normal text-(--faint)"
+        >
+          {t('row.managerBadge')}
+        </span>
+      )}
       {node.subagents.length > 0 && !away && (
         <SubagentBadge
           parent={summary}

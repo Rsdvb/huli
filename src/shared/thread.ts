@@ -2,6 +2,7 @@
 // It never imports ACP types; only the mapper in src/agent-host/acp/ does.
 
 import { isAgentId, type AgentId } from './agents'
+import type { DigestItem } from './manager'
 import type { LastRequest } from './model-requests'
 import type { PermissionRisk } from './risk'
 import type { BrowserOriginAnswer } from './browser'
@@ -243,6 +244,8 @@ export interface FromSession {
    * the turn ended, null for a failure. The thread draws it from these, not from the message text.
    */
   ended?: { agent: string; stopReason: StopReason | null }
+  /** Huli: set on manager mode's report to a manager: each worker it reports on. */
+  digest?: DigestItem[]
 }
 
 /** The paired device a message or answer came from, under the name the host lists it by. */
@@ -331,7 +334,7 @@ export function answeredUnasked(result: ToolEntry['permissionResult']): boolean 
   return (
     typeof result === 'object' &&
     result !== null &&
-    (result.by === 'routine' || result.by === 'risk')
+    (result.by === 'routine' || result.by === 'risk' || result.by === 'readonly')
   )
 }
 
@@ -987,7 +990,9 @@ export interface ToolEntry {
     | {
         optionId: string
         kind: PermissionKind
-        by?: 'routine' | 'task' | 'risk'
+        // Huli: 'readonly', manager mode's guard of a session that only reads; 'manager', the
+        // manager's agent answering its worker's low request.
+        by?: 'routine' | 'task' | 'risk' | 'readonly' | 'manager'
         // Huli: the request's risk when the host answered it by itself, which its line says.
         risk?: PermissionRisk
         device?: FromDevice

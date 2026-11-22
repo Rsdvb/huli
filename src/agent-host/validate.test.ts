@@ -1126,6 +1126,66 @@ describe('routine requests', () => {
     rejects(() => posix['sessions.setBoardStatus']({ status: 'done' }))
   })
 
+  it("takes manager mode's choices, switches and a project's own roster only as they are", () => {
+    const choices = { autoReview: true, approvals: 'low' }
+    expect(
+      posix['sessions.create']({ agentId: 'codex', projectPath: '/repo', manager: choices }),
+    ).toEqual({ agentId: 'codex', projectPath: '/repo', manager: choices })
+    for (const manager of [
+      { autoReview: true },
+      { autoReview: 'yes', approvals: 'user' },
+      { autoReview: true, approvals: 'all' },
+      { ...choices, extra: 1 },
+      true,
+    ]) {
+      rejects(() => posix['sessions.create']({ agentId: 'codex', projectPath: '/repo', manager }))
+    }
+    expect(posix['manager.set']({ sessionId: 's', on: true, choices })).toEqual({
+      sessionId: 's',
+      on: true,
+      choices,
+    })
+    expect(posix['manager.set']({ sessionId: 's', on: false })).toEqual({
+      sessionId: 's',
+      on: false,
+    })
+    rejects(() => posix['manager.set']({ sessionId: 's', on: 'yes' }))
+    expect(posix['manager.pause']({ sessionId: 's', paused: true })).toEqual({
+      sessionId: 's',
+      paused: true,
+    })
+    rejects(() => posix['manager.detach']({ sessionId: 's' }))
+    rejects(() => posix['manager.stopAll']({}))
+    const writer = {
+      id: 'w-0a1b2c3d',
+      name: '写手',
+      role: 'implement',
+      agentId: 'codex',
+      model: null,
+      effort: null,
+      profileId: null,
+      mode: null,
+      worktree: false,
+      persona: '',
+    }
+    const manager = { workers: [writer], reviewerId: null }
+    expect(posix['projects.setManager']({ path: '/repo', manager })).toEqual({
+      path: '/repo',
+      manager,
+    })
+    expect(posix['projects.setManager']({ path: '/repo', manager: null })).toEqual({
+      path: '/repo',
+      manager: null,
+    })
+    rejects(() =>
+      posix['projects.setManager']({
+        path: '/repo',
+        manager: { workers: [writer, writer], reviewerId: null },
+      }),
+    )
+    rejects(() => posix['projects.setManager']({ path: '/repo', manager: { workers: [] } }))
+  })
+
   it("reads a project's issues and starts a session only for an issue of a project", () => {
     expect(posix['github.issues']({ projectPath: '/repo', filter: 'mine' })).toEqual({
       projectPath: '/repo',
