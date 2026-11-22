@@ -29,6 +29,7 @@ import { isComputerToolName } from '@shared/computer-use'
 import type { McpServer } from '../connection'
 import { PROXY_PREFIX } from '../marketplace/proxy'
 import type { McpToolGroup, McpToolSummary } from '@shared/agent-host'
+import { featureOfTool, featureOn, type FeatureId } from '@shared/features'
 import {
   isMarketToolName,
   MARKET_AUTO_ALLOW,
@@ -164,6 +165,14 @@ const TOOL_GROUPS: ReadonlyMap<string, McpToolGroup> = new Map(
     .flatMap(([tools, group]) => tools.map((tool) => [tool.name, group] as const))
     .concat([[GUIDE_TOOL, 'sessions']]),
 )
+/** Huli: the tools a feature switch gates, by name, from the registry's names and groups. */
+const GATED_TOOLS: ReadonlyMap<string, FeatureId> = new Map(
+  [...TOOL_GROUPS].flatMap(([name, group]) => {
+    const feature = featureOfTool(name, group)
+    return feature ? [[name, feature] as const] : []
+  }),
+)
+
 /** The tools that wait for the user's answer in the session before they act. */
 const ASKING_TOOLS: ReadonlySet<string> = new Set([
   MARKET_PUBLISH,
@@ -248,6 +257,11 @@ export interface ArtifactServiceDeps extends ArtifactToolsDeps {
   secrets?: SecretTools
   /** Huli: the theme tools, which ask in Kettu's own card unless in Full access; without them none. */
   theme?: ThemeTools
+  /**
+   * Huli: which optional features are on (Settings > Features); a feature turned off has its
+   * tools neither listed nor answered. Without it all are on.
+   */
+  features?: () => Partial<Record<string, boolean>> | undefined
   /** The proxy to the Marketplace's OAuth servers, under its own paths; without it none. */
   proxy?: {
     handle(req: http.IncomingMessage, res: http.ServerResponse, path: string): Promise<void>
@@ -497,6 +511,10 @@ export class ArtifactService {
       market: this.marketOn,
       suggest: this.workflowTools?.suggests ?? false,
       memory: this.memoryOn,
+      board: this.featureOn('board'),
+      devices: this.featureOn('devices'),
+      secrets: this.deps.secrets !== undefined && this.featureOn('secrets'),
+      theme: this.deps.theme !== undefined && this.featureOn('agentTheme'),
     }
   }
 
@@ -519,7 +537,7 @@ export class ArtifactService {
    */
   private listedTools(grant?: Grant): Tool[] {
     const sessionId = grant && 'sessionId' in grant ? grant.sessionId : null
-    const managing = this.managerTools?.listed(sessionId) ?? []
+    const managing = this.featureOn('manager') ? (this.managerTools?.listed(sessionId) ?? []) : []
     const service =
       managing === MANAGER_TOOLS
         ? this.serviceTools.filter((tool) => tool.name !== 'start_session')
@@ -534,7 +552,18 @@ export class ArtifactService {
       ...(this.deps.settings ? SETTINGS_TOOLS : []),
       ...(this.deps.secrets ? SECRET_TOOLS : []),
       ...(this.deps.theme ? THEME_TOOLS : []),
-    ]
+    ].filter((tool) => !this.toolOff(tool.name))
+  }
+
+  /** Huli: whether an optional feature is on, as Settings > Features has it. */
+  private featureOn(id: FeatureId): boolean {
+    return featureOn(this.deps.features?.(), id)
+  }
+
+  /** Huli: whether a tool belongs to a feature that is turned off. */
+  private toolOff(name: string): boolean {
+    const feature = GATED_TOOLS.get(name)
+    return feature !== undefined && !this.featureOn(feature)
   }
 
   /** Each tool's name, the first sentence of its description and its group, for the Marketplace. */
@@ -792,6 +821,12 @@ export class ArtifactService {
         )
       }
       if (name === GUIDE_TOOL) return callGuide(input, flags)
+      if (this.toolOff(name)) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `${name} is not available: the user turned its feature off in Kite's settings`,
+        )
+      }
       if (this.managerTools && isManagerToolName(name)) {
         try {
           return await this.managerTools.call(caller, name, input)

@@ -143,6 +143,8 @@ export class RoutinesManager {
   private problem: RoutinesProblem | null = null
   private loaded = false
   private stopped = false
+  /** Huli: routines are turned off in Settings > Features. */
+  private off = false
   private working = false
 
   constructor(private readonly deps: RoutinesDeps) {
@@ -206,7 +208,20 @@ export class RoutinesManager {
 
   /** Starts the schedule timer, once the host and its sessions are loaded. */
   start(): void {
+    this.off = false
     this.scheduler.start()
+  }
+
+  /**
+   * Huli: Settings > Features turned routines off or on. Off, the schedule's timer stops and no
+   * event starts a run; back on, it starts as at launch, catching up as a launch would.
+   */
+  setOn(on: boolean): void {
+    if (on) this.start()
+    else {
+      this.off = true
+      this.scheduler.stop()
+    }
   }
 
   /** The computer slept or woke; the timer starts over from the wall clock. */
@@ -353,7 +368,7 @@ export class RoutinesManager {
 
   /** Huli: the enabled routines that run on a GitHub event, each in a project. */
   eventTriggers(): { routineId: string; projectPath: string; event: GithubEvent }[] {
-    if (!this.loaded || this.stopped) return []
+    if (!this.loaded || this.stopped || this.off) return []
     return [...this.routines.values()].flatMap((routine) =>
       routine.enabled && routine.trigger.kind === 'github' && routine.projectPath !== null
         ? [
@@ -375,6 +390,7 @@ export class RoutinesManager {
       routine.enabled &&
       routine.trigger.kind === 'github' &&
       !this.stopped &&
+      !this.off &&
       !this.deleting.has(routineId) &&
       !this.activeOf(routineId)
     )

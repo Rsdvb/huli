@@ -1639,5 +1639,6 @@
       },
       "noModelHosts": "Kite does not know the addresses of {{agent}}'s model service, so “only its model's addresses” would leave it none. Pick “only its Agent network exit” or “the network open”."
     }
-  }
+  },
+  "featureOff": "{{name}} is turned off in Settings › Features."
 }
