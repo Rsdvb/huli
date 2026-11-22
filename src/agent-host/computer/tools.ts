@@ -596,7 +596,8 @@ export function computerCall(name: string, input: unknown, platform: Platform): 
       return {
         tool: name,
         driverTool,
-        args: { pid, window_id: windowId, path },
+        // Named, since the driver's menus take a delivery mode of their own since 0.47.17.
+        args: { pid, window_id: windowId, path, delivery_mode: 'background' },
         pid,
         windowId,
         acts: true,
