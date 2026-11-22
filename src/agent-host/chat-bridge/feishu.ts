@@ -345,7 +345,7 @@ export class FeishuAdapter implements ChatAdapter {
     void this.botInfo()
     const parts = new FrameParts()
     let lastHeard = Date.now()
-    let pingTimer: NodeJS.Timeout | null = null
+    let pingTimer: NodeJS.Timeout | undefined
     const ping = () => {
       if (Date.now() - lastHeard > 2 * pingMs + 5_000) {
         socket.terminate()

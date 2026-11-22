@@ -269,7 +269,7 @@ export class TelegramAdapter implements ChatAdapter {
           timeoutMs: 180_000,
         },
       )
-      let data: TgAnswer<{ message_id: number }> | null = null
+      let data: TgAnswer<{ message_id: number }> | null
       try {
         data = JSON.parse(answer.body.toString('utf8')) as TgAnswer<{ message_id: number }>
       } catch {

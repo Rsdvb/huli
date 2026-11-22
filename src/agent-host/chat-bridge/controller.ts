@@ -936,7 +936,11 @@ export class ChatController {
     })
     let file: { name: string; bytes: Buffer; mimeType: string } | null = null
     const safe = (
-      artifact.title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').trim() || 'artifact'
+      [...artifact.title]
+        .map((char) => (char < ' ' || '\\/:*?"<>|'.includes(char) ? ' ' : char))
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim() || 'artifact'
     ).slice(0, 80)
     if (content.type) {
       const format = EXPORT_FORMATS[content.type.name].find((each) => each !== 'pdf')

@@ -79,6 +79,7 @@ import {
 import { useComputerUseSection } from './computer-section'
 import { useAgentNetworkSection } from './agent-network-section'
 import { useBackupSection } from './backup-section'
+import { useChatBridgeSection } from './chat-bridge-section'
 import { useMemorySection } from './memory-section'
 
 const FLASH_MS = 1200
@@ -182,6 +183,7 @@ export function SettingsContent({ titleId }: { titleId?: string }) {
     useDevicesSection(),
     useComputerUseSection(),
     useAgentNetworkSection(),
+    useChatBridgeSection(),
     useBackupSection(),
   ]
   const about = useAboutSection()

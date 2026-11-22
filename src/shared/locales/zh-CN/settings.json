@@ -20,7 +20,8 @@
     "devices": "移动设备",
     "computer-use": "Computer use",
     "agent-network": "Agent 网络",
-    "backup": "备份"
+    "backup": "备份",
+    "chat-bridge": "聊天软件"
   },
   "page": {
     "title": "设置",
@@ -1499,7 +1500,8 @@
     "devices": "智能体不用先问就能使用的模拟器和手机。",
     "computer-use": "让智能体读取并操作这台电脑上的桌面应用，同一时间只用一个应用、只给一个会话。",
     "agent-network": "让每个 Agent 的流量经由你的机场订阅里的节点出去，绝不绕开它。",
-    "backup": "每天把 Kettu 自己的数据备份一份，存在这台电脑上，丢失后可以恢复。"
+    "backup": "每天把 Kettu 自己的数据备份一份，存在这台电脑上，丢失后可以恢复。",
+    "chat-bridge": "在飞书、钉钉、企业微信、QQ 或 Telegram 里看会话、回答请求、给 Agent 发消息。"
   },
   "archived": {
     "description": "{{project}} · {{when}}归档",
@@ -2676,6 +2678,110 @@
       "relay": "设备将能从任何网络经 Kettu 中继连到这台电脑。",
       "proxy": "智能体、npx 和更新都会经过这个代理。",
       "source": "会改变 Kettu 下载更新的来源。"
+    }
+  },
+  "chatBridge": {
+    "keywords": "聊天 机器人 飞书 钉钉 企业微信 QQ Telegram 远程 通知 手机 bot",
+    "platforms": {
+      "feishu": "飞书",
+      "dingtalk": "钉钉",
+      "wecom": "企业微信",
+      "qq": "QQ",
+      "telegram": "Telegram"
+    },
+    "enabled": "启用{{platform}}机器人",
+    "connection": {
+      "description": "机器人的凭据、开关和连接状态"
+    },
+    "accounts": {
+      "name": "绑定的账号",
+      "description": "只有绑定的账号能通过机器人操控 Agent，其他人发消息不会得到任何回复",
+      "none": "还没有绑定账号",
+      "another": "再绑定一个账号",
+      "hint": "点「绑定」后，用你自己的账号把一次性验证码私聊发给机器人。",
+      "turnOnFirst": "先填好凭据并启用机器人。",
+      "bind": "绑定",
+      "bound": "{{id}} · {{time}}绑定",
+      "remove": "解除绑定"
+    },
+    "binding": {
+      "send": {
+        "feishu": "在飞书里私聊机器人，发送这 6 位数字，{{until}} 前有效。",
+        "dingtalk": "在钉钉里私聊机器人，发送这 6 位数字，{{until}} 前有效。",
+        "wecom": "在企业微信里私聊机器人，发送这 6 位数字，{{until}} 前有效。",
+        "qq": "先加机器人为好友，再私聊它发送这 6 位数字，{{until}} 前有效。",
+        "telegram": "在 Telegram 里私聊机器人，发送这 6 位数字，{{until}} 前有效。"
+      },
+      "openTelegram": "在 Telegram 中打开",
+      "cancel": "取消"
+    },
+    "state": {
+      "noCredentials": "还没有填凭据",
+      "disabled": "已关闭",
+      "starting": "正在启动…",
+      "connecting": "正在连接…",
+      "connected": "已连接",
+      "connectedAs": "已连接 · {{bot}}",
+      "error": "连不上"
+    },
+    "problem": {
+      "credentials": "平台不认这组凭据，请检查后重新保存",
+      "rejected": "平台拒绝了请求",
+      "network": "网络不通，正在重试",
+      "conflict": "另一个程序在用这个机器人",
+      "unsupported": "这个平台不支持这项操作",
+      "failed": "出错了"
+    },
+    "about": {
+      "feishu": "在飞书里私聊机器人就能操控 Agent，按钮可以直接允许或拒绝。",
+      "dingtalk": "在钉钉里私聊机器人就能操控 Agent，用 /y、/n 这样的文字命令回答。",
+      "wecom": "在企业微信里私聊机器人就能操控 Agent，按钮可以直接允许或拒绝。",
+      "qq": "在 QQ 里私聊机器人就能操控 Agent，用 /y、/n 这样的文字命令回答。",
+      "telegram": "在 Telegram 里私聊机器人就能操控 Agent，按钮可以直接允许或拒绝。"
+    },
+    "notes": {
+      "feishu": "在飞书开放平台创建企业自建应用，开启机器人能力，事件订阅选「长连接」。免费版每月有调用次数上限。",
+      "dingtalk": "在钉钉开放平台创建企业内部应用，添加机器人，消息接收模式选「Stream 模式」。免费版每月有调用次数上限。",
+      "wecom": "在企业微信「工作台 › 智能机器人」里用 API 模式创建，连接方式选「长连接」。",
+      "qq": "在 QQ 开放平台创建机器人，连接方式选 WebSocket。机器人只回复私聊，主动发的消息每天有条数上限。",
+      "telegram": "向 @BotFather 发 /newbot 创建机器人。Telegram 的请求会经过「高级 › 代理」里的设置。"
+    },
+    "credentials": {
+      "add": "填写凭据",
+      "edit": "凭据",
+      "title": "{{platform}}机器人的凭据",
+      "where": {
+        "feishu": "在飞书开放平台应用的「凭证与基础信息」里复制。",
+        "dingtalk": "在钉钉开放平台应用的「凭证与基础信息」里复制。",
+        "wecom": "创建智能机器人时选择「长连接」后显示。",
+        "qq": "在 QQ 开放平台机器人的「开发管理」里复制。",
+        "telegram": "@BotFather 创建机器人后发给你的 token。"
+      },
+      "keep": "已设置（{{shown}}），留空则保持不变",
+      "clear": "清除凭据",
+      "save": "保存",
+      "saveOn": "保存并启用"
+    },
+    "fields": {
+      "feishu": {
+        "appId": "App ID",
+        "appSecret": "App Secret"
+      },
+      "dingtalk": {
+        "clientId": "Client ID（原 AppKey）",
+        "clientSecret": "Client Secret（原 AppSecret）"
+      },
+      "wecom": {
+        "botId": "Bot ID",
+        "secret": "Secret"
+      },
+      "qq": {
+        "appId": "AppID（机器人 ID）",
+        "appSecret": "AppSecret（机器人密钥）"
+      },
+      "telegram": {
+        "token": "Bot Token"
+      }
     }
   }
 }
