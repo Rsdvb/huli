@@ -101,6 +101,11 @@ export interface SessionView {
    * oldest first. Absent for an agent that reports none.
    */
   background?: BackgroundTaskView[]
+  /**
+   * Huli: ephemeral: the commands and subagents that still hold up their tool call, which the agent
+   * can move to the background so the turn goes on. Absent for an agent that reports none.
+   */
+  foreground?: ForegroundTaskView[]
   /** Ephemeral: how fast the model writes, for an agent whose stream times its requests. */
   speed?: OutputSpeed
   /** Ephemeral: the main thread's latest request, for an agent whose stream counts its tokens. */
@@ -204,7 +209,37 @@ export interface BackgroundTaskView {
   endedAt: number | null
   /** How it ended, as the agent reported it; null while it runs. */
   summary: string | null
+  /** Huli: its latest one-line status while it runs, as the agent reports one. */
+  progress?: string
+  /** Huli: its process, for an agent that names it. */
+  pid?: number
+  /** Huli: the tool call that started it, where the agent names it rather than the task. */
+  toolCallId?: string
 }
+
+/** Huli: a command or subagent that holds up the tool call that started it. */
+export interface ForegroundTaskView {
+  /** The tool call that waits for it, which a move to the background names. */
+  toolCallId: string
+  /** The agent's own id of the task; a subagent's is its session's. */
+  taskId: string
+  kind: 'shell' | 'subagent'
+  title: string
+  startedAt: number
+}
+
+/** Huli: a memory an agent of its own recalled into a turn, or saved. */
+export interface RecalledMemory {
+  /** Its file; for one with no file of its own, such as a summary of many, what it stands for. */
+  path: string
+  scope: 'personal' | 'team' | 'organization'
+  /** Its text, when the agent sent it; a file's is read from the file. */
+  content?: string
+}
+
+/** Huli: the most memories one recall entry lists, and the characters of each one's text. */
+export const RECALL_MEMORIES_MAX = 50
+export const RECALL_CONTENT_CHARS = 4_000
 
 /** A session's hold on the computer, which the label on its composer shows. */
 export interface ComputerUseView {
@@ -404,6 +439,8 @@ export type ThreadEntry =
   | { kind: 'session_started'; id: string; sessionId: string; after: string | null }
   | { kind: 'session_message'; id: string; senderId: string | null; content: UserContent[] }
   | { kind: 'plan'; id: string; items: PlanItem[] }
+  // Huli: the agent's own memory at work in a turn: what it recalled, or the memories it saved.
+  | { kind: 'recall'; id: string; action: 'recalled' | 'saved'; memories: RecalledMemory[] }
   | {
       kind: 'notice'
       id: string
@@ -1720,6 +1757,15 @@ function isProblemReportOutcome(value: unknown): value is ProblemReportOutcome {
   return value.kind === 'saved' || value.kind === 'skipped'
 }
 
+function isRecalledMemory(value: unknown): value is RecalledMemory {
+  return (
+    isRecord(value) &&
+    typeof value.path === 'string' &&
+    (value.scope === 'personal' || value.scope === 'team' || value.scope === 'organization') &&
+    (value.content === undefined || typeof value.content === 'string')
+  )
+}
+
 const isListOf = <T>(value: unknown, guard: (item: unknown) => item is T): value is T[] =>
   Array.isArray(value) && value.every(guard)
 
@@ -1761,6 +1807,11 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
       )
     case 'plan':
       return isListOf(value.items, isRecord)
+    case 'recall':
+      return (
+        (value.action === 'recalled' || value.action === 'saved') &&
+        isListOf(value.memories, isRecalledMemory)
+      )
     case 'notice':
       return (
         typeof value.severity === 'string' &&

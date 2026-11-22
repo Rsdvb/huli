@@ -34,10 +34,14 @@ import {
   type ScenarioName,
 } from './options.ts'
 import { managerRoute, withoutBlocks } from './manager.ts'
+import { boardOf, KITE_TASKS } from './processes.ts'
 import { SCENARIO_RUNNERS, compact, syntheticAttachments, syntheticHistory } from './scenarios.ts'
 import { isReportDraftPrompt, reportDraft } from './report-draft.ts'
 import { isTitlesPrompt, titles } from './titles.ts'
 import type { FakeSessionState, Turn } from './turn.ts'
+
+// Kite's own ACP extension for background tasks, declared in the capabilities' `_meta`.
+const TASKS_META = 'kite/tasks'
 
 export const FAKE_AGENT_VERSION = '0.1.0'
 
@@ -678,10 +682,12 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
           mcpCapabilities: { http: !without.has('mcp'), sse: false },
           sessionCapabilities: sessionCapabilities(),
           auth: without.has('auth') ? { logout: {} } : { logout: {}, status: {} },
-          // Like agy's `_meta.antigravity.systemPrompt.append`, a new session's system prompt addition.
-          ...(takesSystemPrompt
-            ? { _meta: { antigravity: { systemPrompt: { append: true } } } }
-            : {}),
+          // Like agy's `_meta.antigravity.systemPrompt.append`, a new session's system prompt
+          // addition; and Kite's own extension for background tasks (the processes scenario).
+          _meta: {
+            ...(takesSystemPrompt ? { antigravity: { systemPrompt: { append: true } } } : {}),
+            ...(without.has('tasks') ? {} : { [TASKS_META]: true }),
+          },
         },
         authMethods,
         agentInfo: {
@@ -773,6 +779,40 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       setTimeout(() => announceCommands(ctx.client, session.id), 0)
       return sessionSetup(session)
     })
+    .onRequest(
+      KITE_TASKS.stop,
+      (params: unknown) => params,
+      (ctx) => {
+        const { board, params } = boardOf(ctx.params)
+        board.stop(String(params.taskId))
+        return {}
+      },
+    )
+    .onRequest(
+      KITE_TASKS.output,
+      (params: unknown) => params,
+      (ctx) => {
+        const { board, params } = boardOf(ctx.params)
+        return board.output(String(params.taskId))
+      },
+    )
+    .onRequest(
+      KITE_TASKS.background,
+      (params: unknown) => params,
+      (ctx) => {
+        const { board, params } = boardOf(ctx.params)
+        const toolCallId = typeof params.toolCallId === 'string' ? params.toolCallId : undefined
+        return { moved: board.background(toolCallId) }
+      },
+    )
+    .onRequest(
+      KITE_TASKS.clean,
+      (params: unknown) => params,
+      (ctx) => {
+        boardOf(ctx.params).board.clean()
+        return {}
+      },
+    )
     .onRequest(
       '_session/steering',
       (params: unknown) =>
@@ -1001,6 +1041,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
         send,
         sendRaw: (update) =>
           ctx.client.notify(methods.client.session.update, { sessionId: session.id, update }),
+        notify: (method, params) => connection?.client.notify(method, params) ?? Promise.resolve(),
         sleep: (ms) => sleep(ms, abort.signal),
         requestPermission: async (toolCall, permissionOptions, request = {}) => {
           const withdraw = new AbortController()

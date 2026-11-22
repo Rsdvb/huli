@@ -170,8 +170,11 @@ import {
   type TurnRefusal,
   type UserContent,
   type OutsideKind,
+  type BackgroundTaskView,
   appealConfirms,
 } from '@shared/thread'
+import type { SessionProcesses } from '@shared/task-processes'
+import { readTaskProcesses } from './task-processes'
 import {
   agentEntryBefore,
   gitPatch,
@@ -236,6 +239,7 @@ import {
   type McpServer,
   type ModelTokens,
   type PermissionAnswer,
+  type AgentProcesses,
   type PermissionRequest,
   type FolderHooks,
   type ProjectHooksGate,
@@ -785,6 +789,13 @@ interface Live {
   turn: Turn | null
   /** For a subagent: whether its own work is running, from its last state. */
   childRunning: boolean
+  /** Huli: for a running subagent: its agent's latest line on what it does. */
+  progress: string | null
+  /**
+   * Huli: the background tasks of the board's latest reading, for an agent whose tasks no event
+   * lists; null for the others.
+   */
+  listedTasks: BackgroundTaskView[] | null
   childStartedAt: number | null
   mentioned: boolean
   permissions: Map<string, PendingRequest>
@@ -1839,6 +1850,7 @@ export class SessionManager {
       limitPause: record.limitPause ?? null,
       autoResume: this.autoResumes(record),
       stall: this.stalls.stallOf(record.id),
+      ...(live?.progress ? { progress: live.progress } : {}),
       group: record.group
         ? {
             id: record.group.id,
@@ -4369,6 +4381,8 @@ export class SessionManager {
       replaying: false,
       turn: null,
       childRunning: false,
+      progress: null,
+      listedTasks: null,
       childStartedAt: null,
       mentioned: false,
       permissions: new Map(),
@@ -5127,6 +5141,9 @@ export class SessionManager {
       case 'tasks':
         this.update(live, { background: effect.tasks })
         break
+      case 'foreground':
+        this.update(live, { foreground: effect.tasks })
+        break
       case 'agentTurn':
         this.agentTurn(live, effect)
         break
@@ -5285,6 +5302,7 @@ export class SessionManager {
     ) {
       child.record.agentWorktree = { ...effect.worktree }
     }
+    if (effect.progress !== undefined && child.childRunning) child.progress = effect.progress
     if (effect.state) this.applySubagentState(child, effect.state, changes, nextInfo, now)
     changes.subagent = nextInfo
     this.update(child, changes)
@@ -5316,6 +5334,7 @@ export class SessionManager {
         const startedAt = child.childStartedAt
         child.childRunning = false
         child.childStartedAt = null
+        child.progress = null
         info.stateKnown = true
         info.stopReason = state.stopReason
         changes.updatedAt = now
@@ -10888,19 +10907,24 @@ export class SessionManager {
     live.background = false
     live.backgroundListed = false
     live.scheduled = 0
+    live.listedTasks = live.listedTasks && []
     if (live.thread.session.background?.length) this.update(live, { background: [] })
+    if (live.thread.session.foreground?.length) this.update(live, { foreground: [] })
   }
 
-  /** The live session, with its connection, when the agent lists `taskId` as a background task. */
+  /**
+   * The live session, with its connection, when the agent lists `taskId` as a background task:
+   * in the session's own list, or in the board's latest reading for an agent that keeps none.
+   */
   private backgroundTask(
     sessionId: string,
     taskId: string,
-  ): { live: Live; connection: TaskConnection; running: boolean } {
+  ): { live: Live; connection: TaskConnection; task: BackgroundTaskView } {
     const live = this.live.get(sessionId)
     if (!live?.connection) throw new HostError('busy', t('session.openFirst'))
     const { connection } = live
-    const tasks = live.thread.session.background
-    if (!reportsTasks(connection) || tasks === undefined) {
+    const tasks = live.thread.session.background ?? live.listedTasks ?? undefined
+    if (!connection.stopTask || tasks === undefined) {
       throw new HostError(
         'restricted',
         t('session.noBackgroundTasks', { agent: this.deps.agents.name(live.record.agentId) }),
@@ -10908,31 +10932,139 @@ export class SessionManager {
     }
     const task = tasks.find((item) => item.id === taskId)
     if (!task) throw new HostError('not_found', t('session.noBackgroundTask'))
-    return { live, connection, running: task.status === 'running' }
+    return { live, connection: connection as TaskConnection, task }
   }
 
   /** Stops a background task the session lists as running. */
   async stopTask(sessionId: string, taskId: string): Promise<void> {
-    const { live, connection, running } = this.backgroundTask(sessionId, taskId)
-    if (!running) throw new HostError('conflict', t('session.backgroundTaskEnded'))
+    const { live, connection, task } = this.backgroundTask(sessionId, taskId)
+    if (task.status !== 'running') throw new HostError('conflict', t('session.backgroundTaskEnded'))
     try {
       await connection.stopTask(live.record.acpSessionId, taskId)
     } catch (error) {
       throw agentError(error)
     }
+    if (live.listedTasks) live.listedTasks = live.listedTasks.filter((item) => item.id !== taskId)
   }
 
-  /** The end of the output of a background task the session lists, running or ended. */
+  /**
+   * The end of the output of a background task the session lists, running or ended; for an agent
+   * that reads none, what the call that started it printed, as its row in the thread shows.
+   */
   async taskOutput(
     sessionId: string,
     taskId: string,
   ): Promise<{ output: string; truncated: boolean }> {
-    const { live, connection } = this.backgroundTask(sessionId, taskId)
+    const { live, connection, task } = this.backgroundTask(sessionId, taskId)
+    if (!connection.taskOutput) return printedBy(live.thread, task.toolCallId)
     try {
       return await connection.taskOutput(live.record.acpSessionId, taskId)
     } catch (error) {
       throw agentError(error)
     }
+  }
+
+  /**
+   * Huli: the session's background processes for its board, read now: the CPU, memory and ports
+   * of each running task, and the tasks themselves for an agent whose tasks no event lists.
+   */
+  async processes(sessionId: string): Promise<SessionProcesses> {
+    const live = this.live.get(sessionId)
+    const recordNow = live?.record ?? this.recordOf(sessionId)
+    // A session whose agent was let go has no tasks running; its block's ports are still read.
+    const connection = live?.connection ?? null
+    const agent = this.deps.agents.name(recordNow.agentId)
+    let own: AgentProcesses | null = null
+    let error: string | undefined
+    if (live && connection?.backgroundProcesses) {
+      try {
+        own = await connection.backgroundProcesses(recordNow.acpSessionId)
+        if (own === null) error = t('session.backgroundUnsupported', { agent })
+      } catch (reason) {
+        error = agentError(reason).message
+      }
+      live.listedTasks = own?.tasks ?? []
+    }
+    const tasks = own?.tasks ?? live?.thread.session.background ?? []
+    const record = recordNow.parentId ? (this.recordOf(recordNow.parentId) ?? recordNow) : recordNow
+    const block = this.portsOf(record)
+    const reading = await readTaskProcesses(
+      {
+        tasks: tasks
+          .filter((task) => task.status === 'running')
+          .map((task) => ({
+            id: task.id,
+            ...(task.command !== undefined ? { command: task.command } : {}),
+            ...(task.pid !== undefined ? { pid: task.pid } : {}),
+          })),
+        known: own?.processes ?? [],
+        root: connection?.toolProcess?.(recordNow.acpSessionId) ?? null,
+        block,
+        held: this.heldPorts(record.id).map((held) => held.block),
+      },
+      { platform: this.deps.platform },
+    )
+    return {
+      tasks: connection?.backgroundProcesses ? (own?.tasks ?? []) : null,
+      listed: tasks.map((task) => ({ ...task })),
+      held: (live?.thread.session.foreground ?? []).map((task) => ({ ...task })),
+      processes: reading.processes,
+      block: block ? { ...block } : null,
+      taken: reading.taken,
+      clean: !connection?.cleanTasks
+        ? null
+        : connection.backgroundProcesses
+          ? own
+            ? 'all'
+            : null
+          : live?.thread.session.background !== undefined
+            ? 'ended'
+            : null,
+      ...(error !== undefined ? { error } : {}),
+    }
+  }
+
+  /**
+   * Huli: moves the command or subagent that holds up the tool call `toolCallId` to the
+   * background, or every one without it, so the turn goes on.
+   */
+  async toBackground(sessionId: string, toolCallId?: string): Promise<{ moved: boolean }> {
+    const live = this.live.get(sessionId)
+    if (!live?.connection) throw new HostError('busy', t('session.openFirst'))
+    const { connection } = live
+    if (!connection.toBackground || live.thread.session.foreground === undefined) {
+      throw new HostError(
+        'restricted',
+        t('session.noToBackground', { agent: this.deps.agents.name(live.record.agentId) }),
+      )
+    }
+    try {
+      return { moved: await connection.toBackground(live.record.acpSessionId, toolCallId) }
+    } catch (error) {
+      throw agentError(error)
+    }
+  }
+
+  /**
+   * Huli: the board's Clean: forgets the session's ended background tasks, or for an agent that
+   * lists only running ones stops them all.
+   */
+  async cleanTasks(sessionId: string): Promise<void> {
+    const live = this.live.get(sessionId)
+    if (!live?.connection) throw new HostError('busy', t('session.openFirst'))
+    const { connection } = live
+    if (!connection.cleanTasks) {
+      throw new HostError(
+        'restricted',
+        t('session.noBackgroundTasks', { agent: this.deps.agents.name(live.record.agentId) }),
+      )
+    }
+    try {
+      await connection.cleanTasks(live.record.acpSessionId)
+    } catch (error) {
+      throw agentError(error)
+    }
+    if (live.listedTasks) live.listedTasks = []
   }
 
   // Side questions.
@@ -14525,11 +14657,35 @@ function canSend(status: SessionStatus): boolean {
 }
 
 /** A connection to an agent that reports background tasks and can stop and read them. */
-type TaskConnection = AgentConnection & Required<Pick<AgentConnection, 'stopTask' | 'taskOutput'>>
+type TaskConnection = AgentConnection & Required<Pick<AgentConnection, 'stopTask'>>
 
-function reportsTasks(connection: AgentConnection): connection is TaskConnection {
-  return connection.stopTask !== undefined && connection.taskOutput !== undefined
+/** Whether the agent keeps the session's list of background tasks, sent as it changes. */
+function reportsTasks(connection: AgentConnection): boolean {
+  return (
+    connection.stopTask !== undefined &&
+    connection.taskOutput !== undefined &&
+    connection.backgroundProcesses === undefined
+  )
 }
+
+/** Huli: the end of what a tool call printed, as its row's fenced output holds it. */
+function printedBy(
+  thread: ThreadState,
+  toolCallId: string | undefined,
+): { output: string; truncated: boolean } {
+  const entry = toolCallId ? thread.byId[`t:${toolCallId}`] : undefined
+  if (entry?.kind !== 'tool') return { output: '', truncated: false }
+  const text = entry.content
+    .flatMap((item) => (item.type === 'markdown' ? [item.markdown] : []))
+    .join('\n')
+    .replace(/^(`{3,}|~{3,})[^\n]*\n/, '')
+    .replace(/\n?(`{3,}|~{3,})\s*$/, '')
+  const cut = text.length > TASK_OUTPUT_CHARS
+  return { output: cut ? text.slice(-TASK_OUTPUT_CHARS) : text, truncated: cut }
+}
+
+/** The most of a task's output the board reads, as Claude Code's own reading. */
+const TASK_OUTPUT_CHARS = 8 * 1024
 
 /** JSON-RPC's code for a session the agent does not have. */
 const RESOURCE_NOT_FOUND = -32002

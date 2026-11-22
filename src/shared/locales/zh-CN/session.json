@@ -104,7 +104,9 @@
         "critical": "极高风险"
       }
     },
-    "mcp": "{{server}}：{{tool}}"
+    "mcp": "{{server}}：{{tool}}",
+    "toBackground": "转到后台",
+    "toBackgroundTitle": "让这一轮继续，命令转到后台运行"
   },
   "kettuTool": {
     "read_kettu_guide": "读取 Kettu 指南",
@@ -514,7 +516,8 @@
   },
   "subagent": {
     "fallbackTitle": "子智能体",
-    "tools_other": "{{count}} 个工具"
+    "tools_other": "{{count}} 个工具",
+    "toBackground": "转到后台"
   },
   "subagentBar": {
     "runsFor": "{{agent}} 正在为 <parent/> 运行这个子智能体",
@@ -2017,6 +2020,16 @@
       "transfer": "传过去",
       "apply": "在 {{name}} 上还原",
       "finish": "完成"
+    }
+  },
+  "recall": {
+    "recalled_other": "回忆了 {{count}} 条记忆",
+    "saved_other": "保存了 {{count}} 条记忆",
+    "summary": "多条记忆的摘要",
+    "scope": {
+      "personal": "个人",
+      "team": "团队",
+      "organization": "组织"
     }
   }
 }

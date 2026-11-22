@@ -38,7 +38,11 @@
     "copy": "Copy",
     "copied": "Copied",
     "openTitle": "Open {{title}}",
-    "close": "Close"
+    "close": "Close",
+    "toBackground": "To background",
+    "clean": "Clear ended",
+    "stopAll": "Stop all",
+    "refresh": "Read processes again"
   },
   "detail": {
     "command": "Command",
@@ -52,5 +56,21 @@
   },
   "artifact": {
     "version": "v{{version}}"
+  },
+  "held": {
+    "command": "Runs in the foreground; the turn waits for it",
+    "subagent": "Runs in the foreground; the turn waits for it",
+    "notMoved": "It was no longer holding up the turn."
+  },
+  "process": {
+    "pid": "PID {{pid}}",
+    "cpu": "{{cpu}} CPU",
+    "listens": "Listens on port {{port}}",
+    "outside": "Port {{port}} is outside this session's ports ({{range}})",
+    "collides": "Port {{port}} is outside this session's ports ({{range}}) and in another session's",
+    "taken_one": "A program outside this session listens on its port {{ports}} ({{range}})",
+    "taken_other": "Programs outside this session listen on its ports {{ports}} ({{range}})",
+    "takenBy": ":{{port}} ({{process}})",
+    "separator": ", "
   }
 }

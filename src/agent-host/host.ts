@@ -3682,6 +3682,10 @@ export class AgentHost {
       'sessions.idleRelease': () => this.idleRelease.state(),
       'sessions.stopTask': ({ sessionId, taskId }) => sessions.stopTask(sessionId, taskId),
       'sessions.taskOutput': ({ sessionId, taskId }) => sessions.taskOutput(sessionId, taskId),
+      'sessions.processes': ({ sessionId }) => sessions.processes(sessionId),
+      'sessions.toBackground': ({ sessionId, toolCallId }) =>
+        sessions.toBackground(sessionId, toolCallId),
+      'sessions.cleanTasks': ({ sessionId }) => sessions.cleanTasks(sessionId),
       'sessions.retry': ({ sessionId }, { portId }) => sessions.retry(sessionId, portId),
       'sessions.sideAsk': ({ sessionId, question, quote, agentId }) =>
         sessions.sideAsk(sessionId, question, quote ?? null, agentId ?? null),
