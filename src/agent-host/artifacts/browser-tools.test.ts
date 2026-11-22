@@ -199,3 +199,32 @@ describe('browser_console_messages arguments', () => {
     expect(call).not.toHaveBeenCalled()
   })
 })
+
+describe('the network tools arguments', () => {
+  it.each([
+    ['browser_network_requests', { url: '/api/', include_static: true }],
+    ['browser_network_requests', { since_navigation: true }],
+    ['browser_network_request', { id: '1234.56' }],
+  ])('forwards %s %j to main as given', async (name, input) => {
+    const { service, call } = tools()
+    const result = await service.call(caller, name, input)
+    expect(result.isError).toBeUndefined()
+    expect(call.mock.calls[0][0]).toMatchObject({ tool: name, args: input })
+  })
+
+  it.each([
+    ['browser_network_requests', { url: 42 }, /url must be text/],
+    ['browser_network_requests', { include_static: 'yes' }, /true or false/],
+    ['browser_network_requests', { url: 'x'.repeat(2_001) }, /url must be text/],
+    ['browser_network_request', {}, /id is needed/],
+    ['browser_network_request', { id: ' ' }, /must not be empty/],
+    ['browser_network_request', { id: 'x'.repeat(201) }, /id must be text/],
+    ['browser_network_request', { id: '1', body: true }, /Unknown argument body/],
+  ])('refuses %s %j before main sees it', async (name, input, message) => {
+    const { service, call } = tools()
+    const result = await service.call(caller, name, input)
+    expect(result.isError).toBe(true)
+    expect(String((result.content[0] as { text: string }).text)).toMatch(message)
+    expect(call).not.toHaveBeenCalled()
+  })
+})

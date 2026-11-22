@@ -25,6 +25,16 @@ import {
   type ConsoleEntry,
   type ConsoleLevel,
 } from './console'
+import {
+  bodyText,
+  isStaticResource,
+  isTextType,
+  MAX_POST_DATA,
+  redactHeaders,
+  requestTiming,
+  type BodyText,
+  type ResourceTiming,
+} from './network'
 import { buildOutline, mergeFrames, outlineText, type AXNode } from './outline'
 import { isNeverOpened } from './policy'
 import { UploadRefused, type UploadFile } from './upload'
@@ -118,6 +128,23 @@ interface NetworkRequest {
   type: string
   size: number | null
   nav: number
+  statusText: string
+  mimeType: string
+  requestHeaders: Record<string, unknown>
+  responseHeaders: Record<string, unknown> | null
+  /** The body the page sent, when short enough to come with the event; `hasPostData` says one went. */
+  postData: string | null
+  hasPostData: boolean
+  /** Why it failed, such as net::ERR_CONNECTION_REFUSED; null when it did not. */
+  error: string | null
+  /** The earlier addresses it was redirected from, each with its status. */
+  redirects: string[]
+  /** The protocol's monotonic seconds when it was sent and when it ended, and the clock then. */
+  sent: number | null
+  ended: number | null
+  wallTime: number | null
+  timing: ResourceTiming | null
+  fromCache: boolean
 }
 
 interface Snapshot {
@@ -139,6 +166,12 @@ interface PageState {
   logged: number
   reported: number
   requests: NetworkRequest[]
+  /** The same requests by id, and headers whose request came after them. */
+  requestsById: Map<string, NetworkRequest>
+  extraHeaders: Map<
+    string,
+    { request?: Record<string, unknown>; response?: Record<string, unknown> }
+  >
   snapshot: Snapshot | null
   dialogs: string[]
   /** Input events injected right now; the page reports them as it reports the user's. */
@@ -361,6 +394,8 @@ export class BrowserCdp {
       logged: 0,
       reported: 0,
       requests: [],
+      requestsById: new Map(),
+      extraHeaders: new Map(),
       snapshot: null,
       dialogs: [],
       injecting: 0,
@@ -537,6 +572,8 @@ export class BrowserCdp {
         return this.consoleMessages(sessionId, args)
       case 'browser_network_requests':
         return this.networkRequests(sessionId, args)
+      case 'browser_network_request':
+        return this.networkRequest(sessionId, args)
       case 'browser_evaluate':
         return this.evaluate(sessionId, args)
       case 'browser_tabs':
@@ -634,9 +671,19 @@ export class BrowserCdp {
         const id = String(params.requestId ?? '')
         if (!id) break
         page.inFlight.add(id)
-        const existing = page.requests.find((entry) => entry.id === id)
-        if (existing) break
-        page.requests.push({
+        const existing = page.requestsById.get(id)
+        const redirect = params.redirectResponse as Record<string, unknown> | undefined
+        if (existing) {
+          // A redirect goes on under the same id, to the address it was sent to.
+          if (redirect) {
+            existing.redirects.push(`${Number(redirect.status ?? 0)} ${existing.url}`)
+            existing.url = String(request.url ?? existing.url)
+            existing.method = String(request.method ?? existing.method)
+            existing.requestHeaders = objectOf(request.headers)
+          }
+          break
+        }
+        const entry: NetworkRequest = {
           id,
           method: String(request.method ?? 'GET'),
           url: String(request.url ?? ''),
@@ -644,17 +691,70 @@ export class BrowserCdp {
           type: String(params.type ?? ''),
           size: null,
           nav: page.nav,
-        })
+          statusText: '',
+          mimeType: '',
+          requestHeaders: objectOf(request.headers),
+          responseHeaders: null,
+          postData:
+            typeof request.postData === 'string' && request.postData.length <= MAX_POST_DATA
+              ? request.postData
+              : null,
+          hasPostData: request.hasPostData === true || typeof request.postData === 'string',
+          error: null,
+          redirects: [],
+          sent: numberOr(params.timestamp),
+          ended: null,
+          wallTime: numberOr(params.wallTime),
+          timing: null,
+          fromCache: false,
+        }
+        page.requests.push(entry)
+        page.requestsById.set(id, entry)
+        const extra = page.extraHeaders.get(id)
+        if (extra) {
+          page.extraHeaders.delete(id)
+          if (extra.request) entry.requestHeaders = { ...entry.requestHeaders, ...extra.request }
+          if (extra.response) entry.responseHeaders = extra.response
+        }
         this.trimRequests(page)
+        break
+      }
+      case 'Network.requestWillBeSentExtraInfo':
+      case 'Network.responseReceivedExtraInfo': {
+        // The headers as they went on the wire, cookies too, which may come before the request.
+        const id = String(params.requestId ?? '')
+        const headers = objectOf(params.headers)
+        const side = method === 'Network.requestWillBeSentExtraInfo' ? 'request' : 'response'
+        const entry = page.requestsById.get(id)
+        if (entry && side === 'request')
+          entry.requestHeaders = { ...entry.requestHeaders, ...headers }
+        else if (entry) entry.responseHeaders = { ...(entry.responseHeaders ?? {}), ...headers }
+        else if (id) {
+          page.extraHeaders.set(id, { ...page.extraHeaders.get(id), [side]: headers })
+          if (page.extraHeaders.size > MAX_REQUESTS) {
+            page.extraHeaders.delete(page.extraHeaders.keys().next().value!)
+          }
+        }
         break
       }
       case 'Network.responseReceived': {
         const id = String(params.requestId ?? '')
         const response = (params.response ?? {}) as Record<string, unknown>
-        const entry = page.requests.find((item) => item.id === id)
+        const entry = page.requestsById.get(id)
         if (entry) {
           entry.status = Number(response.status ?? 0) || null
           if (!entry.type) entry.type = String(params.type ?? '')
+          entry.statusText = String(response.statusText ?? '')
+          entry.mimeType = String(response.mimeType ?? '')
+          entry.responseHeaders = {
+            ...objectOf(response.headers),
+            ...(entry.responseHeaders ?? {}),
+          }
+          entry.timing = (response.timing as ResourceTiming | undefined) ?? null
+          entry.fromCache =
+            response.fromDiskCache === true ||
+            response.fromServiceWorker === true ||
+            response.fromPrefetchCache === true
         }
         if (entry?.type === 'Document' && page.status === null) {
           page.status = Number(response.status ?? 0) || null
@@ -664,12 +764,24 @@ export class BrowserCdp {
       case 'Network.loadingFinished': {
         const id = String(params.requestId ?? '')
         page.inFlight.delete(id)
-        const entry = page.requests.find((item) => item.id === id)
-        if (entry) entry.size = Number(params.encodedDataLength ?? 0)
+        const entry = page.requestsById.get(id)
+        if (entry) {
+          entry.size = Number(params.encodedDataLength ?? 0)
+          entry.ended = numberOr(params.timestamp)
+        }
         break
       }
       case 'Network.loadingFailed': {
-        page.inFlight.delete(String(params.requestId ?? ''))
+        const id = String(params.requestId ?? '')
+        page.inFlight.delete(id)
+        const entry = page.requestsById.get(id)
+        if (entry) {
+          entry.ended = numberOr(params.timestamp)
+          entry.error =
+            params.canceled === true
+              ? 'canceled'
+              : String(params.blockedReason ?? params.errorText ?? 'failed')
+        }
         break
       }
       case 'Page.frameStartedLoading': {
@@ -730,7 +842,9 @@ export class BrowserCdp {
   private trimRequests(page: PageState): void {
     while (page.requests.length > MAX_REQUESTS) {
       const dropped = page.requests.shift()
-      if (dropped) page.inFlight.delete(dropped.id)
+      if (!dropped) continue
+      page.inFlight.delete(dropped.id)
+      if (page.requestsById.get(dropped.id) === dropped) page.requestsById.delete(dropped.id)
     }
   }
 
@@ -1560,15 +1674,119 @@ export class BrowserCdp {
   ): Promise<BrowserCallResult> {
     const page = this.pageOf(sessionId)
     const since = args.since_navigation === true
+    const wanted = typeof args.url === 'string' ? args.url.toLowerCase() : ''
+    const statics = args.include_static === true
+    let left = 0
     const requests = page.requests
-      .filter((request) => !since || request.nav === page.nav)
-      .map(({ method, url, status, type, size }) => ({ method, url, status, type, size }))
+      .filter((request) => {
+        if (since && request.nav !== page.nav) return false
+        if (wanted !== '' && !request.url.toLowerCase().includes(wanted)) return false
+        if (!statics && isStaticResource(request)) {
+          left += 1
+          return false
+        }
+        return true
+      })
+      .map(({ id, method, url, status, type, size, error }) => ({
+        id,
+        method,
+        url,
+        status,
+        type,
+        size,
+        ...(error === null ? {} : { error }),
+      }))
+    const count =
+      requests.length === 0
+        ? 'No network requests'
+        : `${requests.length} network request${requests.length === 1 ? '' : 's'}, oldest first`
+    const statement =
+      left === 0
+        ? `${count}.`
+        : `${count}; ${left} loaded image${left === 1 ? '' : 's'}, script${left === 1 ? '' : 's'} and other static resources left out (include_static shows them).`
     return {
-      text:
-        requests.length === 0
-          ? 'No network requests.'
-          : `${requests.length} network request${requests.length === 1 ? '' : 's'}, oldest first.`,
+      text: `${statement}${requests.length > 0 ? ' browser_network_request gives one by its id.' : ''}`,
       value: { requests },
+    }
+  }
+
+  /** One request's headers, status, timing and text bodies, with credentials replaced. */
+  private async networkRequest(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const page = this.pageOf(sessionId)
+    const id = String(args.id ?? '')
+    const entry = page.requestsById.get(id)
+    if (!entry) {
+      throw new ToolFailure(
+        'invalid',
+        `No request ${JSON.stringify(id)} on this page; browser_network_requests lists their ids.`,
+      )
+    }
+    const notes: string[] = []
+    const requestType = headerOf(entry.requestHeaders, 'content-type')
+    let requestBody: BodyText | null = null
+    if (entry.hasPostData) {
+      let sent = entry.postData
+      if (sent === null) {
+        const fetched = await this.send<{ postData?: string }>(
+          sessionId,
+          'Network.getRequestPostData',
+          { requestId: id },
+        ).catch(() => null)
+        sent = fetched?.postData ?? null
+      }
+      requestBody =
+        sent === null
+          ? { text: null, note: 'The browser no longer holds it.' }
+          : bodyText(sent, requestType)
+      if (requestBody.note) notes.push(`Request body: ${requestBody.note}`)
+    }
+    let responseBody: BodyText | null = null
+    if (entry.error !== null) notes.push(`It failed: ${entry.error}.`)
+    else if (entry.ended === null) notes.push('It is still loading, so its body is not here yet.')
+    else if (entry.status !== null && entry.status >= 300 && entry.status < 400) {
+      // A redirect has no body of its own.
+    } else {
+      const type = entry.mimeType || headerOf(entry.responseHeaders ?? {}, 'content-type')
+      const got = await this.send<{ body?: string; base64Encoded?: boolean }>(
+        sessionId,
+        'Network.getResponseBody',
+        { requestId: id },
+      ).catch(() => null)
+      if (!got || typeof got.body !== 'string') {
+        responseBody = { text: null, note: 'The browser no longer holds it.' }
+      } else if (got.base64Encoded) {
+        responseBody = isTextType(type)
+          ? bodyText(Buffer.from(got.body, 'base64').toString('utf8'), type)
+          : bodyText(got.body, type, true)
+      } else responseBody = bodyText(got.body, type)
+      if (responseBody.note) notes.push(`Response body: ${responseBody.note}`)
+    }
+    const status = entry.status === null ? 'no response yet' : `HTTP ${entry.status}`
+    return {
+      text: `${entry.method} ${entry.url}: ${entry.error ?? status}.`,
+      value: {
+        id,
+        method: entry.method,
+        url: entry.url,
+        status: entry.status,
+        status_text: entry.statusText,
+        type: entry.type,
+        mime_type: entry.mimeType,
+        size: entry.size,
+        from_cache: entry.fromCache,
+        error: entry.error,
+        redirects: entry.redirects,
+        request_headers: redactHeaders(entry.requestHeaders),
+        response_headers:
+          entry.responseHeaders === null ? null : redactHeaders(entry.responseHeaders),
+        timing: requestTiming(entry),
+        request_body: requestBody?.text ?? null,
+        response_body: responseBody?.text ?? null,
+        notes,
+      },
     }
   }
 
@@ -1634,6 +1852,23 @@ export class BrowserCdp {
       value: { value: json },
     }
   }
+}
+
+function objectOf(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function headerOf(headers: Record<string, unknown>, name: string): string {
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name) return String(value)
+  }
+  return ''
+}
+
+function numberOr(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function consoleFilter(value: unknown): ConsoleLevel {

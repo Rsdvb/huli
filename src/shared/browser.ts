@@ -119,6 +119,7 @@ export const BROWSER_TOOL_NAMES = [
   'browser_wait_for',
   'browser_console_messages',
   'browser_network_requests',
+  'browser_network_request',
   'browser_evaluate',
   'browser_ask_user',
   'browser_tabs',

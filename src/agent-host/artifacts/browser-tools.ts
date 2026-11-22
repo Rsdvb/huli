@@ -1,4 +1,4 @@
-// The seventeen browser tools of the `kettu` MCP server: what agents are told, the schemas, the
+// The eighteen browser tools of the `kettu` MCP server: what agents are told, the schemas, the
 // checks, and the forwarding to main, which drives the calling session's page.
 
 import { isAbsolute } from 'node:path'
@@ -38,6 +38,10 @@ const MAX_SCRIPT_CHARS = 20_000
 const MAX_VALUES = 50
 const MAX_REASON_CHARS = 500
 const MAX_PATH_CHARS = 4_096
+const MAX_URL_FILTER_CHARS = 2_000
+const MAX_REQUEST_ID_CHARS = 200
+/** As main's MAX_BODY_CHARS, in round kilobytes for the description. */
+const MAX_BODY_KB = 32
 
 export type BrowserToolDeps = {
   /** Runs a call on main, which drives the session's page; `caller` is the calling session. */
@@ -135,6 +139,7 @@ export const BROWSER_READ_TOOLS: readonly BrowserToolName[] = [
   'browser_wait_for',
   'browser_console_messages',
   'browser_network_requests',
+  'browser_network_request',
 ]
 
 const TAB = object(
@@ -375,22 +380,100 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_network_requests',
     title: 'Network requests',
     description:
-      'Returns the page’s network requests, the last 300, with their method, address, status, ' +
-      'type and size; no headers or bodies.',
-    inputSchema: object({ since_navigation: SINCE }),
+      'Returns the page’s network requests, the last 300, with their id, method, address, ' +
+      'status, type, size and why one failed. Images, scripts and other static resources that ' +
+      'loaded are left out unless include_static. browser_network_request gives one’s headers, ' +
+      'timing and body.',
+    inputSchema: object({
+      since_navigation: SINCE,
+      url: {
+        type: 'string',
+        maxLength: MAX_URL_FILTER_CHARS,
+        description: 'Only requests whose address holds this text, in any case.',
+      },
+      include_static: {
+        type: 'boolean',
+        default: false,
+        description: 'Also lists images, fonts, style sheets, scripts and media that loaded.',
+      },
+    }),
     outputSchema: output({
       requests: {
         type: 'array',
         items: object(
           {
+            id: { type: 'string' },
             method: { type: 'string' },
             url: { type: 'string' },
             status: { type: ['integer', 'null'] },
             type: { type: 'string' },
             size: { type: ['integer', 'null'] },
+            error: { type: 'string', description: 'Why it failed, such as net::ERR_FAILED.' },
           },
-          ['method', 'url', 'status', 'type', 'size'],
+          ['id', 'method', 'url', 'status', 'type', 'size'],
         ),
+      },
+    }),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'browser_network_request',
+    title: 'Network request',
+    description:
+      'Returns one request from browser_network_requests: its request and response headers, ' +
+      'status, timing, and its request and response bodies when they are text, at most ' +
+      `${MAX_BODY_KB} KB each. The values of credential headers (Authorization, Cookie, ` +
+      'Set-Cookie and the like) and of password, token and other secret fields are replaced ' +
+      'with [redacted].',
+    inputSchema: object(
+      {
+        id: {
+          type: 'string',
+          maxLength: MAX_REQUEST_ID_CHARS,
+          description: 'The id browser_network_requests gave the request.',
+        },
+      },
+      ['id'],
+    ),
+    outputSchema: output({
+      id: { type: 'string' },
+      method: { type: 'string' },
+      url: { type: 'string' },
+      status: { type: ['integer', 'null'] },
+      status_text: { type: 'string' },
+      type: { type: 'string' },
+      mime_type: { type: 'string' },
+      size: { type: ['integer', 'null'], description: 'Bytes on the wire.' },
+      from_cache: { type: 'boolean' },
+      error: { type: ['string', 'null'] },
+      redirects: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'The addresses it was redirected from, each after its status.',
+      },
+      request_headers: { type: 'object', additionalProperties: { type: 'string' } },
+      response_headers: {
+        type: ['object', 'null'],
+        additionalProperties: { type: 'string' },
+      },
+      timing: object(
+        {
+          started_at: { type: ['string', 'null'] },
+          total_ms: { type: ['number', 'null'] },
+          dns_ms: { type: ['number', 'null'] },
+          connect_ms: { type: ['number', 'null'] },
+          tls_ms: { type: ['number', 'null'] },
+          wait_ms: { type: ['number', 'null'], description: 'From sent to the first headers.' },
+          download_ms: { type: ['number', 'null'] },
+        },
+        ['started_at', 'total_ms', 'dns_ms', 'connect_ms', 'tls_ms', 'wait_ms', 'download_ms'],
+      ),
+      request_body: { type: ['string', 'null'] },
+      response_body: { type: ['string', 'null'] },
+      notes: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Why a body is cut or not shown, and how the request ended.',
       },
     }),
     annotations: { ...READ_ONLY },
@@ -550,7 +633,8 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_take_screenshot: ['ref', 'full_page'],
     browser_wait_for: ['text', 'text_gone', 'time'],
     browser_console_messages: ['since_navigation', 'level'],
-    browser_network_requests: ['since_navigation'],
+    browser_network_requests: ['since_navigation', 'url', 'include_static'],
+    browser_network_request: ['id'],
     browser_evaluate: ['function', 'ref'],
     browser_ask_user: ['step', 'reason'],
     browser_tabs: ['action', 'index'],
@@ -688,6 +772,16 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     case 'browser_network_requests': {
       const since = flag('since_navigation')
       if (since !== undefined) args.since_navigation = since
+      const url = text('url', false, MAX_URL_FILTER_CHARS)
+      if (url !== undefined && url !== '') args.url = url
+      const statics = flag('include_static')
+      if (statics !== undefined) args.include_static = statics
+      break
+    }
+    case 'browser_network_request': {
+      const id = text('id', true, MAX_REQUEST_ID_CHARS)!
+      if (id.trim() === '') throw invalid('id must not be empty.')
+      args.id = id
       break
     }
     case 'browser_ask_user': {

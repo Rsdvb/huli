@@ -158,6 +158,7 @@
     "browser_wait_for": "Wait for page",
     "browser_console_messages": "Read console",
     "browser_network_requests": "Read network requests",
+    "browser_network_request": "Read network request",
     "browser_evaluate": "Run script on page",
     "browser_ask_user": "Ask for your help",
     "browser_tabs": "Browser tabs",

@@ -73,6 +73,7 @@ const OWN_TOOLS: Names = {
   browser_wait_for: ['Browser wait', '浏览器等待'],
   browser_console_messages: ['Read browser console', '读取浏览器控制台'],
   browser_network_requests: ['Read browser network requests', '读取浏览器网络请求'],
+  browser_network_request: ['Read browser network request', '读取浏览器网络请求详情'],
   browser_evaluate: ['Run script in browser', '在浏览器中运行脚本'],
   browser_ask_user: ['Ask you to act in the browser', '请你在浏览器中操作'],
   browser_tabs: ['Browser tabs', '浏览器标签页'],

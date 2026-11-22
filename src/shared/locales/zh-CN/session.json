@@ -147,6 +147,7 @@
     "browser_wait_for": "等待网页",
     "browser_console_messages": "读取控制台",
     "browser_network_requests": "读取网络请求",
+    "browser_network_request": "读取网络请求详情",
     "browser_evaluate": "在网页中运行脚本",
     "browser_ask_user": "请你帮忙",
     "browser_tabs": "浏览器标签页",
