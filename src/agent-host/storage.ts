@@ -32,6 +32,7 @@ import { isProfileId } from '@shared/provider-profiles'
 import { isBoardStatus, type SessionBoard } from '@shared/session-board'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
 import type { MovedTo } from '@shared/session-move'
+import type { SettledBy } from '@shared/session-tidy'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
@@ -62,6 +63,7 @@ import {
   type RoutineRef,
 } from '@shared/routines'
 import type { AgentInit } from './connection'
+import type { StoredTidy } from './session-tidy'
 import { isAbsolutePath, pathKey } from './paths'
 import { isVersion } from './versions'
 
@@ -424,6 +426,8 @@ export interface SessionRecord {
   managerOff?: true
   /** Huli: moved to another computer, where it goes on; this one stays as it was left. */
   movedTo?: MovedTo
+  /** Huli: snoozed or settled out of the active list, or kept from settling (会话整理). */
+  tidy?: StoredTidy
 }
 
 /** Huli: a session's pull request automation, as its record keeps it. */
@@ -1033,6 +1037,29 @@ function boardOf(value: unknown): { board?: SessionBoard } {
   return { board: { status: value.status, at: value.at } }
 }
 
+const SETTLED_BY: readonly SettledBy[] = ['user', 'idle', 'merged']
+
+/** Huli: a session's tidy state; each part that does not read is dropped on its own. */
+function tidyOf(value: unknown): { tidy?: StoredTidy } {
+  if (!isRecord(value)) return {}
+  const tidy: StoredTidy = {}
+  const { snooze, settled, never, keptAt, merged } = value
+  if (isRecord(snooze) && isTime(snooze.until)) {
+    tidy.snooze = snooze.reset === true ? { until: snooze.until, reset: true } : { until: snooze.until }
+  }
+  if (
+    isRecord(settled) &&
+    isTime(settled.at) &&
+    (SETTLED_BY as readonly unknown[]).includes(settled.by)
+  ) {
+    tidy.settled = { at: settled.at, by: settled.by as SettledBy }
+  }
+  if (never === true) tidy.never = true
+  if (isTime(keptAt)) tidy.keptAt = keptAt
+  if (isString(merged) && merged !== '') tidy.merged = merged
+  return Object.keys(tidy).length > 0 ? { tidy } : {}
+}
+
 /** The most ports one block may hold, far above what Kite gives, against a file edited by hand. */
 const MAX_PORT_BLOCK = 1000
 
@@ -1185,6 +1212,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...workerOf(item.worker),
       ...(item.managerOff === true ? { managerOff: true as const } : {}),
       ...movedToOf(item.movedTo),
+      ...tidyOf(item.tidy),
     })
   }
   return {

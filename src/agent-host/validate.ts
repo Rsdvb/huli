@@ -2473,6 +2473,26 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), pinned: flag(o, 'pinned') }
     },
+    'sessions.snooze': (params) => {
+      const o = fields(params)
+      const until = o.until
+      if (
+        until !== null &&
+        until !== 'reset' &&
+        !(typeof until === 'number' && Number.isSafeInteger(until) && until > 0)
+      ) {
+        throw invalidParams('until must be a time in ms, "reset" or null')
+      }
+      return { sessionId: sessionId(o), until }
+    },
+    'sessions.settle': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), settled: flag(o, 'settled') }
+    },
+    'sessions.setNeverSettle': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), never: flag(o, 'never') }
+    },
     'sessions.archive': (params) => {
       const o = fields(params)
       const subSessions = optionalFlag(o, 'subSessions')

@@ -182,6 +182,23 @@
       "thread": "Thread",
       "startup": "Startup",
       "cloud": "Kettu cloud"
+    },
+    "autoSettle": {
+      "name": "Settle idle sessions",
+      "description": "Sessions nobody has touched for a while move to Settled at the foot of the sidebar. Pinned sessions, ones at work and ones set to Never settle stay.",
+      "keywords": "settle idle tidy clean up hide old sessions archive auto"
+    },
+    "settleDays": {
+      "name": "Settle after",
+      "description": "How long a session sits idle before it settles.",
+      "keywords": "settle idle days inactive",
+      "after_one": "{{count}} day idle",
+      "after_other": "{{count}} days idle"
+    },
+    "settleMerged": {
+      "name": "Settle when the pull request merges",
+      "description": "A session whose pull request merged settles after an hour of quiet.",
+      "keywords": "settle merged pull request pr"
     }
   },
   "appearance": {
@@ -3193,6 +3210,10 @@
       "agentSync": {
         "name": "Agent sync",
         "description": "The Marketplace's Sync tab: sync MCP servers, skills and instructions across your agents."
+      },
+      "sessionTidy": {
+        "name": "Snooze and settle",
+        "description": "Snooze a session until later; it comes back then, or sooner if it needs you. Idle sessions and ones whose pull request merged settle out of the list by themselves."
       }
     }
   }

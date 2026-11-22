@@ -79,6 +79,10 @@
       "closesWithParent": "A subagent session closes with its parent",
       "deletedWithParent": "A subagent session is deleted with its parent",
       "failed": "The subagent failed"
+    },
+    "tidy": {
+      "noReset": "Kite doesn't know when this agent's plan resets, so pick a time instead.",
+      "snoozeRange": "Pick a time after now and within a year."
     }
   },
   "notice": {

@@ -180,6 +180,22 @@
       "thread": "对话",
       "startup": "启动",
       "cloud": "Kettu 云服务"
+    },
+    "autoSettle": {
+      "name": "自动收起闲置的会话",
+      "description": "很久没动过的会话移到侧栏底部的「已收起」。置顶的、正在干活的、设了「永不收起」的不会被收起。",
+      "keywords": "收起 闲置 整理 清理 隐藏 旧会话 自动 归档 settle"
+    },
+    "settleDays": {
+      "name": "闲置多久后收起",
+      "description": "会话闲置这么久以后收起。",
+      "keywords": "收起 闲置 天数 不活跃",
+      "after_other": "闲置 {{count}} 天"
+    },
+    "settleMerged": {
+      "name": "PR 合并后收起",
+      "description": "会话的 Pull Request 合并、再安静一小时后收起。",
+      "keywords": "收起 合并 拉取请求 PR"
     }
   },
   "appearance": {
@@ -3148,6 +3164,10 @@
       "agentSync": {
         "name": "Agent 同步",
         "description": "插件市场的「同步」页：在几个 Agent 之间同步 MCP 服务器、技能和指令。"
+      },
+      "sessionTidy": {
+        "name": "稍后提醒与自动收起",
+        "description": "会话可以「稍后提醒」，到时间或需要你处理时再回到列表；闲置的、PR 已合并的会话自动收进「已收起」。"
       }
     }
   }

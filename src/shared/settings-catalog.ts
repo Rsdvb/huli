@@ -22,6 +22,7 @@ import {
 import { AUTO_APPROVE_LEVELS } from './risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from './sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
+import { SETTLE_DAYS } from './session-tidy'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
 
@@ -201,6 +202,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   bestOfN: 'work',
   routines: 'work',
   github: 'work',
+  sessionTidy: 'work',
   sandbox: 'agents',
   devices: 'agents',
   secrets: 'agents',
@@ -1970,6 +1972,50 @@ const ENTRIES = {
             : { key: 'general.stallMinutes.after', params: { count: String(minutes) } },
       })),
     ),
+  },
+  'general.auto-settle': {
+    section: 'general',
+    row: 'auto-settle',
+    group: 'general.groups.sessions',
+    name: 'general.autoSettle.name',
+    description: 'general.autoSettle.description',
+    keywords: 'general.autoSettle.keywords',
+    part: 'host',
+    access: 'change',
+    feature: 'sessionTidy',
+    ...flag('tidy', 'autoSettle', (file) => file.tidy.autoSettle),
+  },
+  'general.settle-days': {
+    section: 'general',
+    row: 'settle-days',
+    group: 'general.groups.sessions',
+    name: 'general.settleDays.name',
+    description: 'general.settleDays.description',
+    keywords: 'general.settleDays.keywords',
+    part: 'host',
+    access: 'change',
+    feature: 'sessionTidy',
+    ...pick(
+      'tidy',
+      'idleDays',
+      (file) => file.tidy.idleDays,
+      SETTLE_DAYS.map((days) => ({
+        value: days,
+        label: { key: 'general.settleDays.after', params: { count: String(days) } },
+      })),
+    ),
+  },
+  'general.settle-merged': {
+    section: 'general',
+    row: 'settle-merged',
+    group: 'general.groups.sessions',
+    name: 'general.settleMerged.name',
+    description: 'general.settleMerged.description',
+    keywords: 'general.settleMerged.keywords',
+    part: 'host',
+    access: 'change',
+    feature: 'sessionTidy',
+    ...flag('tidy', 'merged', (file) => file.tidy.merged),
   },
   'notifications.limits': {
     section: 'notifications',

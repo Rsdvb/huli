@@ -41,6 +41,7 @@ function manager(
     profiles?: ConstructorParameters<typeof SessionManager>[0]['profiles']
     worktrees?: WorktreeManager
     portFree?: (port: number) => Promise<boolean>
+    settings?: Record<string, unknown>
   } = {},
 ) {
   const added: string[] = []
@@ -76,7 +77,7 @@ function manager(
     diagnostics: { log: () => {}, event: () => {} } as unknown as Diagnostics,
     git: () => null,
     events: new Proxy({}, { get: () => () => {} }) as SessionEvents,
-    settings: () => ({}) as never,
+    settings: () => (extra.settings ?? {}) as never,
     ...(extra.outside ? { outside: extra.outside } : {}),
     ...(extra.profiles ? { profiles: extra.profiles } : {}),
     ...(extra.worktrees ? { worktrees: extra.worktrees } : {}),
@@ -630,6 +631,105 @@ describe('Huli: the task board', () => {
     const child = await loaded([record('p'), record('c', { parentId: 'p' })])
     expect(() => child.setBoardStatus('c', 'done')).toThrow(HostError)
     expect(child.summary('c').board).toBeNull()
+  })
+})
+
+describe('Huli: snoozed and settled sessions', () => {
+  const NOW = Date.now()
+  const record = (id: string, extra: Partial<SessionRecord> = {}) =>
+    ({
+      id,
+      agentId: 'claude-code',
+      acpSessionId: `acp-${id}`,
+      projectPath: '/repo',
+      title: id,
+      createdAt: NOW - 1_000,
+      updatedAt: NOW - 1_000,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+      ...extra,
+    }) satisfies SessionRecord
+
+  async function loaded(records: SessionRecord[], settings?: Record<string, unknown>) {
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: records })
+    await store.flush()
+    const { sessions } = manager({}, settings ? { settings } : {})
+    await sessions.load()
+    return sessions
+  }
+
+  it('keeps a snooze and a settle across a restart, and brings a session back from either', async () => {
+    const before = await loaded([record('a'), record('b')])
+    const until = NOW + 3_600_000
+    before.snooze('a', until)
+    before.settle('b', true)
+    expect(before.summary('a').snooze).toEqual({ until, reset: false })
+    expect(before.summary('b').settled?.by).toBe('user')
+    await before.flush()
+    const after = await loaded((await index())!.sessions)
+    expect(after.summary('a').snooze).toEqual({ until, reset: false })
+    expect(after.summary('b').settled?.by).toBe('user')
+    after.snooze('a', null)
+    after.settle('b', false)
+    expect(after.summary('a').snooze).toBeUndefined()
+    expect(after.summary('b').settled).toBeUndefined()
+    await after.flush()
+    // Brought back by the user, it stays under no rule until their next message.
+    expect((await index())!.sessions.find((s) => s.id === 'b')?.tidy?.keptAt).toBeGreaterThan(0)
+    after.shutdown()
+  })
+
+  it("snoozes until the plan's reset only when it is known, and refuses a sub-session", async () => {
+    const resetsAt = NOW + 7_200_000
+    const pause = { since: NOW, resetsAt, resumeAt: resetsAt + 60_000, checks: 0 }
+    const sessions = await loaded([
+      record('paused', { limitPause: pause }),
+      record('open'),
+      record('child', { parentId: 'open' }),
+    ])
+    sessions.snooze('paused', 'reset')
+    expect(sessions.summary('paused').snooze).toEqual({ until: resetsAt + 60_000, reset: true })
+    expect(() => sessions.snooze('open', 'reset')).toThrow(HostError)
+    expect(() => sessions.snooze('open', NOW - 1)).toThrow(HostError)
+    expect(() => sessions.snooze('child', NOW + 60_000)).toThrow(HostError)
+    expect(() => sessions.settle('child', true)).toThrow(HostError)
+    sessions.shutdown()
+  })
+
+  it('settles an idle session by the rules, never a pinned one or one kept from it', async () => {
+    const old = NOW - 8 * 86_400_000
+    const sessions = await loaded(
+      [
+        record('idle', { updatedAt: old }),
+        record('pinned', { updatedAt: old, pinnedAt: old }),
+        record('never', { updatedAt: old, tidy: { never: true } }),
+        record('fresh'),
+      ],
+      { tidy: { autoSettle: true, idleDays: 7, merged: true } },
+    )
+    for (const id of ['idle', 'pinned', 'never', 'fresh']) sessions.rename(id, `${id}!`)
+    expect(sessions.summary('idle').settled?.by).toBe('idle')
+    expect(sessions.summary('pinned').settled).toBeUndefined()
+    expect(sessions.summary('never').settled).toBeUndefined()
+    expect(sessions.summary('never').neverSettle).toBe(true)
+    expect(sessions.summary('fresh').settled).toBeUndefined()
+    sessions.setNeverSettle('idle', true)
+    expect(sessions.summary('idle').settled).toBeUndefined()
+    sessions.shutdown()
+  })
+
+  it('shows nothing of it while the feature is off', async () => {
+    const sessions = await loaded(
+      [record('a', { tidy: { snooze: { until: NOW + 60_000 }, never: true } })],
+      { features: { sessionTidy: false } },
+    )
+    expect(sessions.summary('a').snooze).toBeUndefined()
+    expect(sessions.summary('a').neverSettle).toBeUndefined()
+    sessions.shutdown()
   })
 })
 

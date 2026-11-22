@@ -79,6 +79,10 @@
       "closesWithParent": "子智能体会话随父会话一起关闭",
       "deletedWithParent": "子智能体会话随父会话一起删除",
       "failed": "子智能体运行失败"
+    },
+    "tidy": {
+      "noReset": "不知道这个 Agent 的额度什么时候恢复，请改选一个时间。",
+      "snoozeRange": "请选现在之后、一年以内的时间。"
     }
   },
   "notice": {

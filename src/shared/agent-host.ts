@@ -56,6 +56,7 @@ import type {
 } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type { BoardStatus, SessionBoard } from './session-board'
+import type { SessionSettled, SessionSnooze, SnoozeUntil } from './session-tidy'
 import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './session-groups'
 import type { IssueInbox, SessionIssue, SessionPrFlow } from './github-flow'
 import type {
@@ -942,6 +943,11 @@ export interface SessionSummary {
   worker?: WorkerSummary | null
   // Huli: moved to another computer, where it goes on; absent while it was not
   movedTo?: MovedTo
+  // Huli: out of the active list until a time or its plan's reset, or settled, and the user's
+  // 永不收起 (会话整理); absent from older hosts, null and absent while the feature is off.
+  snooze?: SessionSnooze | null
+  settled?: SessionSettled | null
+  neverSettle?: boolean
 }
 
 /**
@@ -1780,6 +1786,15 @@ export interface HostContract {
   }
   'sessions.pin': { params: { sessionId: string; pinned: boolean }; result: void }
   /**
+   * Huli: takes a top-level session out of the active list until `until`, or until its agent's
+   * plan resets (`reset`, refused while no reset is known); null brings it back now.
+   */
+  'sessions.snooze': { params: { sessionId: string; until: SnoozeUntil }; result: void }
+  /** Huli: settles a top-level session out of the active list, or brings it back. */
+  'sessions.settle': { params: { sessionId: string; settled: boolean }; result: void }
+  /** Huli: 永不收起: no rule of the settings settles the session. */
+  'sessions.setNeverSettle': { params: { sessionId: string; never: boolean }; result: void }
+  /**
    * `subSessions: false` archives the session alone, its sub-sessions staying in the list on their
    * own until it is restored; without it, its whole tree is archived.
    */
@@ -2543,6 +2558,9 @@ export const HOST_METHODS = [
   'sessions.close',
   'sessions.terminalCommand',
   'sessions.pin',
+  'sessions.snooze',
+  'sessions.settle',
+  'sessions.setNeverSettle',
   'sessions.archive',
   'sessions.unarchive',
   'sessions.markUnread',

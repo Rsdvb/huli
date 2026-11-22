@@ -62,6 +62,7 @@ import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports
 import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
+import { SETTLE_DAYS } from '@shared/session-tidy'
 import { THEME_ID } from '@shared/themes'
 import { isAbsolutePath } from '../agent-host/paths'
 import {
@@ -318,6 +319,11 @@ const SECTION_FIELDS = {
     resumeAfterLimit: isBoolean,
     resumeText: isResumeText,
     stallMinutes: oneOf(...STALL_MINUTES),
+  },
+  tidy: {
+    autoSettle: isBoolean,
+    idleDays: oneOf(...SETTLE_DAYS),
+    merged: isBoolean,
   },
   computerUse: {
     enabled: isBoolean,
@@ -1788,6 +1794,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     startModes: { ...settings.startModes },
     idleSessions: { ...settings.idleSessions },
     supervisor: { ...settings.supervisor },
+    tidy: { ...settings.tidy },
     usage: { fromComputer: settings.usage.fromComputer },
     sessionTitles: settings.general.sessionTitles,
     claudeTestEntrypoint: settings.general.claudeTestEntrypoint
@@ -1833,6 +1840,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'startModes',
   'idleSessions',
   'supervisor',
+  'tidy',
   'usage',
   'computerUse',
   'agentNetwork',

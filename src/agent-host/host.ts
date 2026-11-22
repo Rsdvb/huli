@@ -1936,6 +1936,7 @@ export class AgentHost {
     if (JSON.stringify(previous.supervisor) !== JSON.stringify(next.supervisor)) {
       this.sessions.supervisorChanged()
     }
+    if (JSON.stringify(previous.tidy) !== JSON.stringify(next.tidy)) this.sessions.tidyChanged()
     this.marketChanged(previous.marketplace.mcp, this.marketKeys)
     if (JSON.stringify(previous.marketplace.mcp) !== JSON.stringify(next.marketplace.mcp)) {
       void this.marketBundles.sweep()
@@ -1976,6 +1977,7 @@ export class AgentHost {
     }
     if (changed('github') || changed('routines')) void this.githubFlow.refresh()
     if (changed('chatBridge')) this.applyChatBridge()
+    if (changed('sessionTidy')) this.sessions.tidyChanged()
     if (changed('board') || changed('devices')) void this.ownSkillsChanged()
     else if (['manager', 'secrets', 'agentTheme'].some((id) => changed(id as FeatureId))) {
       this.sessions.libraryChanged(() => true)
@@ -3746,6 +3748,10 @@ export class AgentHost {
         return agents.resumeCommand(target.agentId, target, true)
       },
       'sessions.pin': ({ sessionId, pinned }) => sessions.pin(sessionId, pinned),
+      'sessions.snooze': ({ sessionId, until }) => sessions.snooze(sessionId, until),
+      'sessions.settle': ({ sessionId, settled }) => sessions.settle(sessionId, settled),
+      'sessions.setNeverSettle': ({ sessionId, never }) =>
+        sessions.setNeverSettle(sessionId, never),
       'sessions.archive': ({ sessionId, subSessions }) =>
         sessions.archive(sessionId, subSessions ?? true),
       'sessions.unarchive': ({ sessionId }) => sessions.unarchive(sessionId),

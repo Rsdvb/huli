@@ -9,6 +9,7 @@ import type { DirectAddress } from './remote/protocol'
 import type { AutoApprove } from './risk'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from './sandbox'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
+import { DEFAULT_TIDY, type TidySettings } from './session-tidy'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
 import { DEFAULT_PORT_BASE } from './worktree-ports'
@@ -131,6 +132,8 @@ export interface SettingsFile {
   idleSessions: IdleSessionsSettings
   // Huli: a turn a plan limit stopped goes on once the plan resets; a silent turn is flagged.
   supervisor: SupervisorSettings
+  // Huli: the rules that settle sessions out of the active list by themselves (会话整理).
+  tidy: TidySettings
   // source: where updates come from; GitHub only never reaches Kettu's download service.
   updates: { automatic: 'download' | 'restart' | 'notify' | 'off'; source: 'auto' | 'github' }
   privacy: { hideAccount: boolean } // kept so older files still parse; loading turns it off
@@ -386,6 +389,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   startModes: {},
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
   supervisor: DEFAULT_SUPERVISOR,
+  tidy: { ...DEFAULT_TIDY },
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
   diagnostics: { verboseUntil: null },
@@ -456,6 +460,7 @@ export interface SettingsPatch {
   startModes?: Partial<Record<AgentId, string | null>> // merged by agent; null clears one
   idleSessions?: Partial<SettingsFile['idleSessions']>
   supervisor?: Partial<SettingsFile['supervisor']>
+  tidy?: Partial<SettingsFile['tidy']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
   diagnostics?: Partial<SettingsFile['diagnostics']>
@@ -501,6 +506,8 @@ export interface HostSettings {
   idleSessions: SettingsFile['idleSessions']
   // Huli: absent from a parent older than it, which leaves the defaults.
   supervisor?: SettingsFile['supervisor']
+  // Huli: the rules that settle sessions by themselves; absent from a parent older than them.
+  tidy?: SettingsFile['tidy']
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled
   claudeTestEntrypoint: string | null
