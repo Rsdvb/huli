@@ -7,6 +7,7 @@ import type { DirectAddress } from './remote/protocol'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
+import { DEFAULT_PORT_BASE } from './worktree-ports'
 
 /** Whether a host's first start has run, so it runs once. */
 export interface InitialSetup {
@@ -110,8 +111,9 @@ export interface SettingsFile {
     fontSize: 12 | 13 | 14
     fontFamily?: string // an installed face tried before the theme's code font
   }
-  // worktreeRoot: where sessions' worktrees go; null puts them beside each project.
-  git: { backgroundFetch: boolean; worktreeRoot: string | null }
+  // worktreeRoot: where sessions' worktrees go; null puts them beside each project. Huli:
+  // portBase: the first port of the blocks worktree sessions hold (KITE_PORT).
+  git: { backgroundFetch: boolean; worktreeRoot: string | null; portBase: number }
   mcp: { kettu: { off: AgentId[] } } // the agents whose sessions get no Kettu MCP server
   // What the Marketplace installed that Kettu keeps and hands to agents; keys live apart.
   marketplace: { mcp: MarketServer[]; skills: MarketSkill[] }
@@ -358,7 +360,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   disabledAgents: [],
   proxy: { mode: 'environment' },
   terminal: { fontSize: 13 },
-  git: { backgroundFetch: false, worktreeRoot: null },
+  git: { backgroundFetch: false, worktreeRoot: null, portBase: DEFAULT_PORT_BASE },
   mcp: { kettu: { off: [] } },
   marketplace: { mcp: [], skills: [] },
   startModes: {},

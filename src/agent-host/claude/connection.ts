@@ -1064,6 +1064,7 @@ export class ClaudeConnection implements AgentConnection {
       cwd,
       env: {
         ...this.env,
+        ...options.env,
         CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
         // Without it Claude Code sends no summary of its tool calls.
         CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: '1',

@@ -1034,6 +1034,20 @@ describe('routine requests', () => {
     }
   })
 
+  // Huli: the task board's columns, from a window or a paired phone.
+  it("moves a session on the task board only to one of the board's columns", () => {
+    for (const status of ['todo', 'in_progress', 'review', 'done']) {
+      expect(posix['sessions.setBoardStatus']({ sessionId: 's', status })).toEqual({
+        sessionId: 's',
+        status,
+      })
+    }
+    for (const status of ['blocked', 'Done', '', 3, null, undefined]) {
+      rejects(() => posix['sessions.setBoardStatus']({ sessionId: 's', status }))
+    }
+    rejects(() => posix['sessions.setBoardStatus']({ status: 'done' }))
+  })
+
   it("reads a project's issues and starts a session only for an issue of a project", () => {
     expect(posix['github.issues']({ projectPath: '/repo', filter: 'mine' })).toEqual({
       projectPath: '/repo',

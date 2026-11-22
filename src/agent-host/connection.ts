@@ -430,6 +430,11 @@ export interface SessionOptions {
     plain: Record<string, string>
     secret: Record<string, string>
   }
+  /**
+   * Huli: variables of the session's own, such as its worktree's ports, for an agent whose
+   * sessions each run a process of their own; the others' processes serve several sessions.
+   */
+  env?: Record<string, string>
 }
 
 /** Kettu's memory as a session starts with it. */

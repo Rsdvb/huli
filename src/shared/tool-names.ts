@@ -37,6 +37,7 @@ const OWN_TOOLS: Names = {
   read_session_history: ['Read session history', '读取会话记录'],
   rename_session: ['Rename session', '重命名会话'],
   archive_session: ['Archive session', '归档会话'],
+  set_board_status: ['Set board status', '设置看板状态'],
   start_session: ['Start session', '开始会话'],
   send_message: ['Send message', '发送消息'],
   set_plan: ['Update plan', '更新计划'],

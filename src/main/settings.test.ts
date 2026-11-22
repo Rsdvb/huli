@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { splitSettingsPatch } from '@shared/remote/host-admin'
 import { DEFAULT_SETTINGS } from '@shared/settings'
+import { DEFAULT_PORT_BASE } from '@shared/worktree-ports'
 import { SettingsStore } from './settings'
 import { hostSettings, mergeSettings, validateSettingsPatch } from './settings-schema'
 
@@ -274,6 +275,7 @@ describe('where worktrees go', () => {
     expect((await SettingsStore.load(dir)).get().git).toEqual({
       backgroundFetch: true,
       worktreeRoot: root,
+      portBase: DEFAULT_PORT_BASE,
     })
     for (const bad of ['relative/worktrees', '', 7, `${root}\0x`]) {
       await save({ version: 1, git: { worktreeRoot: bad } })
@@ -291,6 +293,29 @@ describe('where worktrees go', () => {
     })
     for (const bad of ['relative', '', 3, `${root}\0x`]) {
       expect(() => validateSettingsPatch({ git: { worktreeRoot: bad } })).toThrow()
+    }
+  })
+})
+
+// Huli: where the port blocks of worktree sessions start.
+describe('the worktree ports', () => {
+  it('start at the default until changed, and keep a base with room for a block', async () => {
+    expect((await SettingsStore.load(dir)).get().git.portBase).toBe(DEFAULT_PORT_BASE)
+    await save({ version: 1, git: { portBase: 41_000 } })
+    expect((await SettingsStore.load(dir)).get().git.portBase).toBe(41_000)
+    for (const bad of [80, 65_530, 20_000.5, '20000', null]) {
+      await save({ version: 1, git: { portBase: bad } })
+      expect((await SettingsStore.load(dir)).get().git.portBase).toBe(DEFAULT_PORT_BASE)
+    }
+  })
+
+  it('takes a base from 1024 that leaves a whole block, and refuses the rest', () => {
+    expect(validateSettingsPatch({ git: { portBase: 1024 } })).toEqual({ git: { portBase: 1024 } })
+    expect(validateSettingsPatch({ git: { portBase: 65_526 } })).toEqual({
+      git: { portBase: 65_526 },
+    })
+    for (const bad of [1023, 65_527, 3.5, '4000', null]) {
+      expect(() => validateSettingsPatch({ git: { portBase: bad } })).toThrow()
     }
   })
 })

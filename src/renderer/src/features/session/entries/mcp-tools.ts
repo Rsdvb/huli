@@ -45,6 +45,7 @@ const TARGETS = {
   get_session: [{ session: 'id' }],
   rename_session: ['title'],
   archive_session: [{ session: 'id' }],
+  set_board_status: ['status'],
   start_session: ['title'],
   read_session_history: [{ session: 'id' }],
   send_message: [{ session: 'id' }],

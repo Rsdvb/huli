@@ -1,6 +1,7 @@
 // Repository status and pull requests, as the git service in the agent host reports them.
 
 import type { Platform } from './platform'
+import type { PortBlock } from './worktree-ports'
 
 export interface GitStatus {
   projectPath: string
@@ -298,6 +299,8 @@ export interface SessionWorktree {
   baseOid: string
   state: WorktreeState
   failure?: WorktreeFailure // with state 'setup-failed'
+  // Huli: the ports the session holds for its servers while it is live; absent without a block
+  ports?: PortBlock
 }
 
 /** A worktree's state when the user is asked what to remove. */

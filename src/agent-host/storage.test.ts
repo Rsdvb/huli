@@ -374,6 +374,45 @@ describe('the host files', () => {
     })
   })
 
+  // Huli: the task board's column and when the session moved there.
+  it("keeps a session's board column and drops one that does not read", () => {
+    const moved: SessionRecord = { ...session, board: { status: 'review', at: 5 } }
+    expect(parseSessionsFile({ sessions: [moved] })).toEqual({ version: 1, sessions: [moved] })
+    for (const board of [
+      'review',
+      { status: 'blocked', at: 5 },
+      { status: 'done' },
+      { status: 'done', at: -1 },
+      { status: 'todo', at: '5' },
+    ]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, board }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
+  // Huli: the block of ports a worktree session holds.
+  it("keeps a session's port block and drops one that does not read", () => {
+    const held: SessionRecord = { ...session, ports: { first: 20_010, count: 10 } }
+    expect(parseSessionsFile({ sessions: [held] })).toEqual({ version: 1, sessions: [held] })
+    for (const ports of [
+      20_010,
+      { first: 20_010 },
+      { first: 0, count: 10 },
+      { first: 20_010.5, count: 10 },
+      { first: 65_530, count: 10 },
+      { first: 20_010, count: 0 },
+      { first: 20_010, count: 5000 },
+      { first: '20010', count: 10 },
+    ]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, ports }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
   it('keeps the sub-sessions a session archived alone left in the list', () => {
     const archived: SessionRecord = { ...session, archivedAt: 3, leftSubSessions: ['c1', 'c2'] }
     expect(parseSessionsFile({ sessions: [archived] })).toEqual({

@@ -116,6 +116,7 @@
     "get_session": "查看会话",
     "rename_session": "重命名会话",
     "archive_session": "归档会话",
+    "set_board_status": "设置看板状态",
     "start_session": "开始新会话",
     "read_session_history": "读取会话历史",
     "send_message": "发送消息",

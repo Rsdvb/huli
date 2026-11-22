@@ -6,6 +6,7 @@ import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { AgentStatus, RunningWork } from '@shared/agent-host'
 import { harnessOf, START_MODE_CHARS } from '@shared/agents'
 import { longer } from '@shared/artifacts'
+import { BOARD_STATUSES, isBoardStatus, type BoardStatus } from '@shared/session-board'
 import {
   isAgentId,
   type AgentId,
@@ -13,6 +14,7 @@ import {
   type SessionStatus,
   type StopReason,
 } from '@shared/thread'
+import { lastPort, PORT_ENV, type PortBlock } from '@shared/worktree-ports'
 import { folded, type Caller } from './artifacts/tools'
 import { cutStart, historyPage, HISTORY_TOOL, type RenderedTurn } from './carried-context'
 import {
@@ -61,6 +63,10 @@ export interface ToolSession {
   /** Off the sidebar, its own archive or a parent's. */
   archived: boolean
   projectPath: string
+  /** Huli: its column on the user's task board; null for a session not on it. */
+  board: BoardStatus | null
+  /** Huli: the ports its worktree holds while it is live; null without a block. */
+  ports: PortBlock | null
 }
 
 export interface SessionToolsDeps {
@@ -74,6 +80,8 @@ export interface SessionToolsDeps {
   history(sessionId: string): Promise<RenderedTurn[]>
   /** Sets the agent's title; a user's title still wins. */
   rename(sessionId: string, title: string): void
+  /** Huli: moves the session to a column of the user's task board. */
+  setBoard(sessionId: string, status: BoardStatus): void
   /** What ending the session and its sub-sessions would stop, for the ones with any. */
   work(sessionId: string): RunningWork[]
   /** Archives the caller once its running turn ends, unless that turn left work running. */
@@ -335,6 +343,24 @@ const INFO: Record<string, Schema> = {
   is_you: { type: 'boolean' },
   archived: { type: 'boolean' },
   mode: MODE_INFO,
+  board_status: {
+    type: ['string', 'null'],
+    enum: [...BOARD_STATUSES, null],
+    description: "Its column on the user's task board; null for a session not on it.",
+  },
+  ports: {
+    type: 'object',
+    properties: {
+      first: { type: 'integer' },
+      last: { type: 'integer' },
+      count: { type: 'integer' },
+    },
+    required: ['first', 'last', 'count'],
+    additionalProperties: false,
+    description:
+      `The ports Kettu holds for its worktree, no other live session's: run its servers on them. ` +
+      `Its setup command sees them as ${PORT_ENV.first} and ${PORT_ENV.count}.`,
+  },
 }
 
 const INFO_REQUIRED = [
@@ -411,6 +437,26 @@ export const SESSION_TOOLS: Tool[] = [
     inputSchema: object({ title: TITLE, id: ID }, ['title']),
     outputSchema: output(INFO, INFO_REQUIRED),
     annotations: { destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'set_board_status',
+    title: 'Set board status',
+    description:
+      "Moves your session to a column of the user's task board: todo, in_progress, review or " +
+      'done. When you finish work the user should look at, move it to review; leave done to the ' +
+      'user unless they asked you to. Only top-level sessions are on the board.',
+    inputSchema: object(
+      {
+        status: {
+          type: 'string',
+          enum: [...BOARD_STATUSES],
+          description: 'The column: todo, in_progress, review or done.',
+        },
+      },
+      ['status'],
+    ),
+    outputSchema: output(INFO, INFO_REQUIRED),
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'archive_session',
@@ -719,6 +765,16 @@ function infoOf(
     started_by_you: session.startedBy === callerId,
     is_you: session.id === callerId,
     archived: session.archived,
+    board_status: session.board,
+    ...(session.ports
+      ? {
+          ports: {
+            first: session.ports.first,
+            last: lastPort(session.ports),
+            count: session.ports.count,
+          },
+        }
+      : {}),
     ...(mode ? { mode } : {}),
     ...(lastReply ? { last_reply: lastReply } : {}),
   }
@@ -752,6 +808,8 @@ export class SessionTools {
         return this.get(caller, args(input, ['id']))
       case 'rename_session':
         return this.rename(caller, args(input, ['title', 'id']))
+      case 'set_board_status':
+        return this.setBoard(caller, args(input, ['status']))
       case 'archive_session':
         return this.archive(caller, args(input, ['id']))
       case 'start_session':
@@ -892,6 +950,9 @@ export class SessionTools {
     return result(
       `${titleOf(session)} (${session.agentId}), ${toolStatus(session.status)}` +
         `${modeText(current)}, updated ${iso(session.updatedAt)}.` +
+        (session.ports
+          ? ` Its worktree holds ports ${session.ports.first} to ${lastPort(session.ports)}.`
+          : '') +
         (cut
           ? ` Its latest reply is cut to 8 KB here; ${HISTORY_TOOL} with this id reads more of it.`
           : ''),
@@ -909,6 +970,27 @@ export class SessionTools {
     this.deps.rename(session.id, value)
     const updated = this.deps.info(session.id) ?? session
     return result(`Renamed the session to "${value}".`, infoOf(updated, caller.sessionId))
+  }
+
+  /** Huli: the caller's own session only; one it started is a sub-session, never on the board. */
+  private async setBoard(caller: Caller, o: Args): Promise<CallToolResult> {
+    const status = o.status
+    if (!isBoardStatus(status)) {
+      throw invalid(`status must be one of ${BOARD_STATUSES.join(', ')}.`)
+    }
+    const session = this.target(caller, undefined)
+    if (session.board === null) {
+      throw new SessionToolError(
+        'not_allowed',
+        "Your session is not on the user's task board: only a top-level session the user started is.",
+      )
+    }
+    this.deps.setBoard(session.id, status)
+    const updated = this.deps.info(session.id) ?? session
+    return result(
+      `Moved your session to ${status} on the user's task board.`,
+      infoOf(updated, caller.sessionId),
+    )
   }
 
   private async archive(caller: Caller, o: Args): Promise<CallToolResult> {

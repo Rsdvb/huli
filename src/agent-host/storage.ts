@@ -16,8 +16,10 @@ import {
 } from '@shared/git'
 import { isGithubEvent } from '@shared/github-flow'
 import { isProfileId } from '@shared/provider-profiles'
+import { isBoardStatus, type SessionBoard } from '@shared/session-board'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
+import type { PortBlock } from '@shared/worktree-ports'
 import {
   isAgentId,
   isUserContent,
@@ -381,6 +383,13 @@ export interface SessionRecord {
   issue?: string
   /** Huli: its pull request merged once its checks pass, watched for its agent, or both. */
   prFlow?: StoredPrFlow
+  /** Huli: its column on the user's task board; absent puts it in progress from its creation. */
+  board?: SessionBoard
+  /**
+   * Huli: the ports Kite gave its worktree, kept while archived so a restore gets them back when
+   * no live session took them meanwhile; only a live session's block holds them.
+   */
+  ports?: PortBlock
 }
 
 /** Huli: a session's pull request automation, as its record keeps it. */
@@ -940,6 +949,34 @@ function agentWorktreeOf(value: unknown): { agentWorktree?: SessionRecord['agent
 
 const MAX_GROUP_TITLE = 500
 
+/** Huli: a session's board column; one that does not read is dropped, which puts it in progress. */
+function boardOf(value: unknown): { board?: SessionBoard } {
+  if (!isRecord(value) || !isBoardStatus(value.status) || !isTime(value.at)) return {}
+  return { board: { status: value.status, at: value.at } }
+}
+
+/** The most ports one block may hold, far above what Kite gives, against a file edited by hand. */
+const MAX_PORT_BLOCK = 1000
+
+/** Huli: a session's port block; one that does not read is dropped, and the session holds none. */
+function portsOf(value: unknown): { ports?: PortBlock } {
+  if (!isRecord(value)) return {}
+  const { first, count } = value
+  if (
+    typeof first !== 'number' ||
+    typeof count !== 'number' ||
+    !Number.isInteger(first) ||
+    !Number.isInteger(count) ||
+    first < 1 ||
+    count < 1 ||
+    count > MAX_PORT_BLOCK ||
+    first + count - 1 > 65_535
+  ) {
+    return {}
+  }
+  return { ports: { first, count } }
+}
+
 /** A run's group; one that does not read is dropped, and the run is then a session on its own. */
 function groupOf(value: unknown): { group?: StoredGroup } {
   if (
@@ -1047,6 +1084,8 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...groupOf(item.group),
       ...(isString(item.issue) && GITHUB_ISSUE_URL.test(item.issue) ? { issue: item.issue } : {}),
       ...prFlowOf(item.prFlow),
+      ...boardOf(item.board),
+      ...portsOf(item.ports),
     })
   }
   return {

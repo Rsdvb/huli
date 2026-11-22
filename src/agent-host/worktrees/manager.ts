@@ -101,19 +101,21 @@ export class WorktreeManager {
   }
 
   /**
-   * Copies the project's local files, then runs its setup command, once per worktree at a time.
-   * Never rejects: a failure is a state, with the stage and the end of the output.
+   * Copies the project's local files, then runs its setup command, once per worktree at a time,
+   * with `extraEnv` (Huli: the session's ports) over the agents' environment. Never rejects: a
+   * failure is a state, with the stage and the end of the output.
    */
   prepare(
     projectPath: string,
     record: WorktreeRecord,
     onState: (state: PrepareState) => void,
+    extraEnv: Record<string, string> = {},
   ): Promise<PrepareState> {
     const key = pathKey(record.path, this.deps.platform)
     const running = this.running.get(key)
     if (running) return running.done
     const abort = new AbortController()
-    const done = this.run(projectPath, record, abort.signal, onState).finally(() => {
+    const done = this.run(projectPath, record, abort.signal, onState, extraEnv).finally(() => {
       if (this.running.get(key)?.abort === abort) this.running.delete(key)
     })
     this.running.set(key, { abort, done })
@@ -181,6 +183,7 @@ export class WorktreeManager {
     record: WorktreeRecord,
     signal: AbortSignal,
     onState: (state: PrepareState) => void,
+    extraEnv: Record<string, string>,
   ): Promise<PrepareState> {
     const key = pathKey(record.path, this.deps.platform)
     const settings = this.settings(projectPath)
@@ -212,7 +215,7 @@ export class WorktreeManager {
     this.written.set(key, 0)
     let env: NodeJS.ProcessEnv
     try {
-      env = withLongPaths(await this.deps.env(), this.deps.platform)
+      env = withLongPaths({ ...(await this.deps.env()), ...extraEnv }, this.deps.platform)
     } catch (error) {
       return fail({ stage: 'setup', exitCode: null, message: messageOf(error) })
     }

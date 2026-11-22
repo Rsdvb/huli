@@ -126,6 +126,7 @@
     "get_session": "Read session",
     "rename_session": "Rename session",
     "archive_session": "Archive session",
+    "set_board_status": "Set board status",
     "start_session": "Start session",
     "read_session_history": "Read session history",
     "send_message": "Send message",
