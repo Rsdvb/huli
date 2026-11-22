@@ -25,7 +25,7 @@ import type {
   BrowserOriginAnswer,
   BrowserOriginDecision,
 } from './browser'
-import type { ComputerAppDecision } from './computer-use'
+import type { ComputerAppDecision, ElevatedHelperChange, ElevatedHelperState } from './computer-use'
 import type {
   AgentNetworkDeviceStatus,
   AgentNetworkStatus,
@@ -2219,6 +2219,11 @@ export interface HostContract {
     params: { sessionId: string }
     result: void
   }
+  // Huli: the elevated helper's install in Program Files, from this computer's windows only:
+  // whether it is there for this Kite, and installing or removing it through Windows' prompt.
+  'computer.elevatedStatus': { params: void; result: { state: ElevatedHelperState } }
+  'computer.installElevated': { params: void; result: ElevatedHelperChange }
+  'computer.uninstallElevated': { params: void; result: ElevatedHelperChange }
   // Take over: the user holds the app the session uses, and its calls wait until Hand back.
   'computer.takeOver': {
     params: { sessionId: string }
@@ -2695,6 +2700,9 @@ export const HOST_METHODS = [
   'memory.import',
   'computer.stop',
   'computer.stopElevated',
+  'computer.elevatedStatus',
+  'computer.installElevated',
+  'computer.uninstallElevated',
   'computer.takeOver',
   'computer.handBack',
   'computer.show',

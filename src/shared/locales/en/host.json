@@ -173,7 +173,6 @@
     "terminalRename": "Wants to rename your terminal {{terminal}} to {{name}}",
     "computerApp": "Wants to use {{app}}",
     "computerElevated": "Wants to use {{app}} as administrator",
-    "computerRisky": "Asks to confirm a step in {{app}}",
     "computerSetup": "Wants to use your computer",
     "controlAsk": {
       "sign_in": "Needs you to sign in to {{target}}",

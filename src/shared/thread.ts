@@ -639,30 +639,12 @@ export interface ComputerAppEntry {
   appId: string
   appName: string
   decision: ComputerAppAnswer | null
-  /**
-   * Huli: what the card asks beside a first use: leave to drive the app as administrator, or to
-   * take the risky `step` there. Absent for a first use.
-   */
+  /** Huli: set when the card asks leave to drive the app as administrator. */
   ask?: ComputerAppAsk
-  step?: ComputerRiskyStep | null
   /** Set when a paired device gave the answer; the host's own windows give none. */
   device?: FromDevice
   /** The agent's entry before it, to put it back after a replay. */
   after: string | null
-}
-
-/** Huli: a step in an app run as administrator, as its card names it. */
-export interface ComputerRiskyStep {
-  kind: 'click' | 'type' | 'key' | 'drag' | 'menu'
-  text: string | null
-}
-
-const RISKY_KINDS = new Set(['click', 'type', 'key', 'drag', 'menu'])
-
-function isRiskyStep(value: unknown): value is ComputerRiskyStep {
-  if (typeof value !== 'object' || value === null) return false
-  const { kind, text } = value as Record<string, unknown>
-  return RISKY_KINDS.has(kind as string) && (text === null || typeof text === 'string')
 }
 
 /**
@@ -1863,7 +1845,6 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         typeof value.appId === 'string' &&
         typeof value.appName === 'string' &&
         (value.ask === undefined || isComputerAppAsk(value.ask)) &&
-        (value.step === undefined || value.step === null || isRiskyStep(value.step)) &&
         (value.decision === null ||
           value.decision === 'session' ||
           value.decision === 'always' ||

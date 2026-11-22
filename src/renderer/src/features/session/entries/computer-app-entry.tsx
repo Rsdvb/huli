@@ -2,7 +2,6 @@ import { memo } from 'react'
 import { DashboardSquare01Icon, Shield01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { ComputerAppAnswer } from '@shared/computer-use'
-import type { ComputerRiskyStep } from '@shared/thread'
 import { host } from '@renderer/lib/host'
 import { useEntry, useEntryAnimation } from '../use-thread'
 import { AccessCard } from './access-card'
@@ -21,25 +20,10 @@ const ELEVATED_ANSWER = {
   timeout: 'computerApp.answer.timeout',
 } as const satisfies Record<ComputerAppAnswer, string>
 
-const RISKY_ANSWER = {
-  session: 'computerApp.risky.answer.allow',
-  always: 'computerApp.risky.answer.allow',
-  deny: 'computerApp.risky.answer.deny',
-  timeout: 'computerApp.answer.timeout',
-} as const satisfies Record<ComputerAppAnswer, string>
-
-const STEP_TEXT = {
-  click: 'computerApp.risky.step.click',
-  type: 'computerApp.risky.step.type',
-  key: 'computerApp.risky.step.key',
-  drag: 'computerApp.risky.step.drag',
-  menu: 'computerApp.risky.step.menu',
-} as const satisfies Record<ComputerRiskyStep['kind'], string>
-
 /**
  * An agent asked to use an app on the user's computer for the first time in its session; or, in
- * Huli, to drive an app run as administrator, or to take a risky step in one. Those two have no
- * Always allow and are answered only on this computer.
+ * Huli, to drive an app run as administrator, which has no Always allow and is answered only on
+ * this computer.
  */
 export const ComputerAppEntry = memo(function ComputerAppEntry({
   sessionId,
@@ -57,37 +41,25 @@ export const ComputerAppEntry = memo(function ComputerAppEntry({
   const app = entry.appName
   const request = (decision: 'session' | 'always' | 'deny') =>
     host('computer.answerApp', { sessionId, entryId: entry.id, decision })
-  if (entry.ask === 'elevated' || entry.ask === 'risky') {
-    const elevated = entry.ask === 'elevated'
-    const step = entry.step ?? null
-    const answers = elevated ? ELEVATED_ANSWER : RISKY_ANSWER
+  if (entry.ask === 'elevated') {
     return (
       <AccessCard
         sessionId={sessionId}
         entryId={entryId}
         agentName={agentName}
         className={animation}
-        action={t(elevated ? 'computerApp.elevated.action' : 'computerApp.risky.action', { app })}
-        target={
-          elevated
-            ? app
-            : step
-              ? t(STEP_TEXT[step.kind], { text: step.text ?? '' })
-              : t('computerApp.risky.step.unknown')
-        }
+        action={t('computerApp.elevated.action', { app })}
+        target={app}
         glyph={Shield01Icon}
-        reason={t(elevated ? 'computerApp.elevated.where' : 'computerApp.risky.where', { app })}
+        reason={t('computerApp.elevated.where', { app })}
         answer={entry.decision}
         device={entry.device}
-        risk={elevated ? 'risky' : 'destructive'}
+        risk="risky"
         trailing={null}
         words={{
-          allow: {
-            session: t(elevated ? 'computerApp.elevated.allow' : 'computerApp.risky.allow'),
-            always: '',
-          },
-          deny: t(elevated ? 'computerApp.elevated.deny' : 'computerApp.risky.deny'),
-          answer: (a) => t(answers[a as ComputerAppAnswer] ?? answers.deny),
+          allow: { session: t('computerApp.elevated.allow'), always: '' },
+          deny: t('computerApp.elevated.deny'),
+          answer: (a) => t(ELEVATED_ANSWER[a as ComputerAppAnswer] ?? ELEVATED_ANSWER.deny),
         }}
         request={request}
       />

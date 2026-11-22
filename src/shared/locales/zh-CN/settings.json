@@ -575,6 +575,16 @@
       "description": "应用在后台不接收的操作（很多 Electron 应用和游戏都这样），会把它的窗口短暂切到前台再试一次，然后切回。对话里和屏幕上的标签都会提示。",
       "keywords": "前台 切换 焦点 electron 后台 操作 电脑 computer use"
     },
+    "allowElevated": {
+      "name": "允许以管理员权限操作指定程序",
+      "description": "打开时会在 Windows 管理员提示里确认一次，把纸鸢的管理员助手安装到 Program Files。纸鸢的助手没有代码签名证书，Windows 会显示「未知发布者」，只确认你刚刚自己发起的提示。之后每个程序都会在会话里先问你，再在 Windows 提示和助手自己标明程序的窗口里确认；有风险的步骤也会在那个窗口里问你。会启动别的程序的程序（命令行、任务管理器、资源管理器等）永远不会这样操作。",
+      "keywords": "管理员 权限 提权 uac 以管理员身份运行 电脑 computer use",
+      "waiting": "等待 Windows 管理员提示…",
+      "reinstall": "重新安装",
+      "remove": "移除",
+      "cancelled": "你在 Windows 提示里选了否，没有改动。",
+      "failed": "管理员助手没有装好（代码 {{code}}）。"
+    },
     "stopShortcut": {
       "name": "在任何地方停止",
       "description": "在任何应用里停止使用电脑，Kettu 在后台时也行，那时屏幕顶部会显示一枚标签。",
@@ -604,7 +614,7 @@
     },
     "windows": {
       "name": "Windows",
-      "description": "不需要授权。以管理员身份运行的程序无法操作，Electron 应用的部分操作需要窗口在前台。"
+      "description": "不需要授权。以管理员身份运行的程序默认无法操作（可在上方开启），Electron 应用的部分操作需要窗口在前台。"
     },
     "desktop": {
       "name": "桌面",

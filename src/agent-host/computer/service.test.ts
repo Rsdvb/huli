@@ -26,6 +26,13 @@ const APPS = [
   { pid: 12, name: 'Notes', bundle_id: 'com.apple.Notes', running: true, active: false },
   { pid: 13, name: 'Kettu', bundle_id: 'sh.kettu.app', running: true, active: true },
   { pid: 0, name: 'Pages', bundle_id: 'com.apple.iWork.Pages', running: false, active: false },
+  {
+    pid: 14,
+    name: 'File Explorer',
+    launch_path: 'C:\\Windows\\explorer.exe',
+    running: true,
+    active: false,
+  },
 ]
 
 class FakeDriver implements DriverLike {
@@ -542,11 +549,16 @@ describe('Huli: apps run as administrator', () => {
           pids: Object.fromEntries(
             pids.map((pid) => [
               pid,
-              { integrity: pid === 12 ? 0x3000 : 0x2000, elevated: pid === 12 },
+              { integrity: pid === 12 || pid === 14 ? 0x3000 : 0x2000, elevated: pid === 12 },
             ]),
           ),
         }),
         ocr: async () => ({ languages: [], width: 1, height: 1, lines: [] }),
+        process: async () => ({ image: null, started: null }),
+        layout: async () => ({ installDir: 'C:\\x', state: 'current' }),
+        install: async () => null,
+        uninstall: async () => null,
+        elevate: async () => null,
         stop: () => {},
       },
       elevate: async (pid) => {
@@ -579,21 +591,19 @@ describe('Huli: apps run as administrator', () => {
     expect(started).toEqual([])
   })
 
-  it('asks, starts the helper and acts only through it, confirming risky steps', async () => {
+  it('asks once, starts the helper and acts only through it', async () => {
     const { h, elevated, started } = elevatedHarness()
     h.settings.allowElevated = true
     await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
-    expect(h.asked[0]?.ask).toEqual({ kind: 'elevated', step: null })
+    expect(h.asked[0]?.ask).toEqual({ kind: 'elevated' })
     expect(started).toEqual([12])
     expect(h.holds.at(-1)?.elevated).toBe('Notes')
-    // Scrolling needs no confirmation; a key that commits does.
+    // Risky steps are the broker's to confirm in its own window, not a card's.
     await h.service.call('a', 'computer_scroll', { ...NOTES, x: 1, y: 1, direction: 'down' })
+    await h.service.call('a', 'computer_press_key', { ...NOTES, key: 'return' })
     expect(h.asked).toHaveLength(1)
-    const key = { ...NOTES, key: 'return' }
-    expect(code(await answered(h, 'a', 'computer_press_key', key, 'deny'))).toBe('not_allowed')
-    expect(h.asked.at(-1)?.ask).toEqual({ kind: 'risky', step: { kind: 'key', text: 'return' } })
-    await answered(h, 'a', 'computer_press_key', key, 'session')
     expect(elevated.calls.map((c) => c.tool)).toEqual(['get_window_state', 'scroll', 'press_key'])
+    expect(elevated.calls[2]?.args.delivery_mode).toBe('background')
     expect(h.driver.acted()).toEqual([])
     // The helper acts in the background only.
     const front = { ...NOTES, x: 1, y: 1, delivery_mode: 'foreground' }
@@ -624,6 +634,15 @@ describe('Huli: apps run as administrator', () => {
     const result = await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
     expect(code(result)).toBe('not_allowed')
     expect(h.holds.at(-1)?.elevated ?? null).toBeNull()
+  })
+
+  it('never drives a program that starts programs as administrator', async () => {
+    const { h, started } = elevatedHarness()
+    h.settings.allowElevated = true
+    const explorer = { pid: 14, window_id: 6 }
+    expect(code(await h.service.call('a', 'computer_get_window_state', explorer))).toBe('blocked')
+    expect(h.asked).toEqual([])
+    expect(started).toEqual([])
   })
 
   it('keeps a no on the card for the rest of the turn', async () => {

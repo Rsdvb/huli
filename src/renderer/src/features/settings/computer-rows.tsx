@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { BrowserIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import {
@@ -8,15 +8,92 @@ import {
   type ComputerApp,
   type ComputerPermission,
   type ComputerPermissionKind,
+  type ElevatedHelperChange,
+  type ElevatedHelperState,
 } from '@shared/computer-use'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { Kbd, KbdGroup } from '@renderer/components/ui/kbd'
-import { errorMessage } from '@renderer/lib/host'
+import { Spinner } from '@renderer/components/ui/spinner'
+import { errorMessage, host } from '@renderer/lib/host'
 import { platform } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { ControlError, Pill, SetButton, SettingSwitch } from './controls'
 import { ItemLine, Thing } from './rows'
+
+/**
+ * Huli: the administrator switch. Turning it on installs the elevated helper into Program Files
+ * through Windows' administrator prompt, and the switch shows on only while that install is current
+ * for this Kite; Remove takes it out again, through the prompt as well.
+ */
+export function ElevatedSwitch({ label }: { label: string }) {
+  const { t } = useTranslation('settings')
+  const on = useSettingsStore((s) => s.settings.computerUse.allowElevated)
+  const [state, setState] = useState<ElevatedHelperState | null>(null)
+  const [busy, setBusy] = useState<'install' | 'remove' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    host('computer.elevatedStatus', undefined).then(
+      (answer) => setState(answer.state),
+      () => setState(null),
+    )
+  }, [])
+  const save = (value: boolean) =>
+    useSettingsStore.getState().update({ computerUse: { allowElevated: value } })
+  const change = async (mode: 'install' | 'remove') => {
+    setBusy(mode)
+    setError(null)
+    try {
+      const answer: ElevatedHelperChange = await host(
+        mode === 'install' ? 'computer.installElevated' : 'computer.uninstallElevated',
+        undefined,
+      )
+      setState(answer.state)
+      const done = mode === 'install' ? answer.state === 'current' : answer.state === 'missing'
+      if (done) await save(mode === 'install')
+      else if (answer.cancelled) setError(t('computer.allowElevated.cancelled'))
+      else setError(t('computer.allowElevated.failed', { code: answer.exitCode ?? '?' }))
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const installed = state === 'current' || state === 'outdated'
+  return (
+    <>
+      <ControlError error={error} />
+      {busy ? (
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Spinner className="size-3.5" />
+          {t('computer.allowElevated.waiting')}
+        </span>
+      ) : (
+        <>
+          {on && state === 'outdated' && (
+            <SetButton size="sm" onClick={() => void change('install')}>
+              {t('computer.allowElevated.reinstall')}
+            </SetButton>
+          )}
+          {installed && (
+            <SetButton size="sm" variant="ghost" onClick={() => void change('remove')}>
+              {t('computer.allowElevated.remove')}
+            </SetButton>
+          )}
+        </>
+      )}
+      <SettingSwitch
+        label={label}
+        checked={on && state === 'current'}
+        disabled={busy !== null || state === null || state === 'unsupported'}
+        onChange={(next) => {
+          if (next) void change('install')
+          else save(false).catch((caught: unknown) => setError(errorMessage(caught)))
+        }}
+      />
+    </>
+  )
+}
 
 /** The switch, on this computer's own settings whichever host the page shows. */
 export function ComputerSwitch({

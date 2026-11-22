@@ -33,10 +33,9 @@ import {
   blockedApp,
   refusedMenuItem,
   refusedShortcut,
-  riskyStep,
+  startsPrograms,
   type BlockReason,
   type DriverApp,
-  type RiskyStep,
   type SelfApp,
 } from './policy'
 import { isBlankPng, placeholderPng } from './screenshot'
@@ -76,10 +75,9 @@ export interface ElevatedDriverLike extends DriverLike {
   onClosed: (() => void) | null
 }
 
-/** What a card asks beside a first use, and the step a risky one names. */
+/** What a card asks beside a first use. */
 export interface ComputerAsk {
   kind: ComputerAppAsk
-  step: RiskyStep | null
 }
 
 export interface ComputerUseDeps {
@@ -95,7 +93,7 @@ export interface ComputerUseDeps {
   sessionTitle(sessionId: string): string
   /**
    * Shows the first use of an app in the session's thread, or (Huli) `ask`: leave to drive it as
-   * administrator, or to take a risky step there. The answer comes to `answer`.
+   * administrator. The answer comes to `answer`.
    */
   asked(sessionId: string, requestId: number, app: ComputerApp, ask?: ComputerAsk): void
   /** The wait ended, with its answer, so the card shows it. */
@@ -193,8 +191,6 @@ interface WindowRead {
   shot: { width: number; height: number } | null
   /** Element frames in screen points, by their row in the window's latest snapshot. */
   frames: Map<number, Bounds>
-  /** Huli: element labels by their row, for naming a risky click. */
-  labels: Map<number, string>
 }
 
 /** The app a call touches, as the label on the composer shows it. */
@@ -527,6 +523,13 @@ export class ComputerUse {
     const elevated = call.tool !== 'computer_list_windows' && (await this.isElevated(call.pid))
     const viaElevated = elevated && settings.allowElevated && !!this.deps.elevate
     if (elevated && !viaElevated && call.acts) throw elevatedError(app, !!this.deps.elevate)
+    // Their own dialogs start programs, which would run as administrator too.
+    if (viaElevated && startsPrograms(app.id)) {
+      throw new ComputerToolError(
+        'blocked',
+        `${app.name} starts other programs, so computer use never drives it as administrator.`,
+      )
+    }
     const foreground = call.args.delivery_mode === 'foreground'
     if (viaElevated && foreground) {
       throw new ComputerToolError(
@@ -542,7 +545,6 @@ export class ComputerUse {
     const target: DriverLike = viaElevated
       ? await this.elevatedDriver(sessionId, app, call.pid)
       : driver
-    if (viaElevated && call.acts) await this.confirmRisky(sessionId, app, call)
     if (this.stopped.has(sessionId)) throw stoppedError()
     const using: Using = { name: app.name, path, action: call.acts ? 'act' : 'read' }
     this.take(sessionId, using, call)
@@ -1045,9 +1047,7 @@ export class ComputerUse {
     const key = `${sessionId}\n${app.id}\nelevated`
     let asking = this.asking.get(key)
     if (!asking) {
-      asking = this.ask(sessionId, app, { kind: 'elevated', step: null }).finally(() =>
-        this.asking.delete(key),
-      )
+      asking = this.ask(sessionId, app, { kind: 'elevated' }).finally(() => this.asking.delete(key))
       this.asking.set(key, asking)
     }
     const answer = await asking
@@ -1145,33 +1145,6 @@ export class ComputerUse {
     if (hold.elevated === elevated) return
     hold.elevated = elevated
     this.emit(hold)
-  }
-
-  /** Huli: asks the user before a risky step in an app run as administrator. */
-  private async confirmRisky(
-    sessionId: string,
-    app: ComputerApp,
-    call: ComputerCall,
-  ): Promise<void> {
-    const step = riskyStep(call, this.labelOf(call))
-    if (!step) return
-    const answer = await this.ask(sessionId, app, { kind: 'risky', step })
-    if (answer === 'session' || answer === 'always') return
-    if (this.stopped.has(sessionId)) throw stoppedError()
-    throw new ComputerToolError(
-      'not_allowed',
-      answer === 'timeout'
-        ? 'The user did not confirm that step in time, so it was not taken.'
-        : 'The user did not allow that step, so it was not taken. Ask them how to go on.',
-    )
-  }
-
-  /** The label of the element a click's token names, from its window's latest read. */
-  private labelOf(call: ComputerCall): string | null {
-    if (!call.elementToken || call.pid === null || call.windowId === null) return null
-    const read = this.windows.get(windowKey(call.pid, call.windowId))
-    const row = Number(call.elementToken.slice(call.elementToken.indexOf(':') + 1))
-    return read?.labels.get(row) ?? null
   }
 
   /**
@@ -1297,7 +1270,6 @@ export class ComputerUse {
     const width = found.screenshot_width
     const height = found.screenshot_height
     const read: WindowRead = {
-      labels: diff && before ? new Map(before.labels) : new Map(),
       title: typeof found.window_title === 'string' ? found.window_title : (before?.title ?? null),
       bounds: boundsOf(found.window_bounds) ?? before?.bounds ?? null,
       shot:
@@ -1308,12 +1280,9 @@ export class ComputerUse {
     }
     if (Array.isArray(found.elements)) {
       for (const element of found.elements as unknown[]) {
-        const e = element as { element_index?: unknown; frame?: unknown; label?: unknown } | null
+        const e = element as { element_index?: unknown; frame?: unknown } | null
         const frame = frameOf(e?.frame)
         if (typeof e?.element_index === 'number' && frame) read.frames.set(e.element_index, frame)
-        if (typeof e?.element_index === 'number' && typeof e.label === 'string') {
-          read.labels.set(e.element_index, e.label)
-        }
       }
       delete found.elements
     }

@@ -151,7 +151,6 @@ import {
   type ThemeChangeOutcome,
   type ThemeState,
   type ComputerAppEntry,
-  type ComputerRiskyStep,
   type ComputerSetupEntry,
   type ComputerUseView,
   type DeclaredMcpServer,
@@ -3370,7 +3369,7 @@ export class SessionManager {
     sessionId: string,
     requestId: number,
     app: ComputerApp,
-    ask?: { kind: ComputerAppAsk; step: ComputerRiskyStep | null },
+    ask?: { kind: ComputerAppAsk },
   ): void {
     const live = this.live.get(sessionId)
     if (!live || this.appRequests.has(requestId)) return
@@ -3381,7 +3380,7 @@ export class SessionManager {
       appId: app.id,
       appName: app.name,
       decision: null,
-      ...(ask ? { ask: ask.kind, step: ask.step } : {}),
+      ...(ask ? { ask: ask.kind } : {}),
       after: agentEntryBefore(live.thread),
     }
     live.apps.set(requestId, entry.id)
@@ -3396,14 +3395,9 @@ export class SessionManager {
       live.id,
       'permission',
       this.titleOf(live),
-      t(
-        ask?.kind === 'elevated'
-          ? 'attention.computerElevated'
-          : ask?.kind === 'risky'
-            ? 'attention.computerRisky'
-            : 'attention.computerApp',
-        { app: app.name },
-      ),
+      t(ask?.kind === 'elevated' ? 'attention.computerElevated' : 'attention.computerApp', {
+        app: app.name,
+      }),
       { id: entry.id },
     )
   }
