@@ -18,10 +18,9 @@ import {
 } from '@shared/diff-notes'
 import type { Diff, DiffRow } from '../diff'
 import { readDraftNotes, subscribeDrafts, useDraftNotes, writeDraftNotes } from '../drafts'
-import { call } from '../git'
-import { useLink, useSession } from '../host'
-import { hostErrorText } from '../hostErrors'
+import { useSession } from '../host'
 import { Button, Field, FormSheet } from '../manage/kit'
+import { queueMessage } from '../outbox'
 import { BottomSheet } from '../ui/BottomSheet'
 import { haptic } from '../ui/haptics'
 import { Press } from '../ui/Press'
@@ -280,34 +279,26 @@ export function NotesTray(props: {
 }) {
   const { computer, sessionId } = props
   const { c, s } = useSessionTokens()
-  const link = useLink()
   const status = useSession(sessionId)?.status
   const notes = useDraftNotes(computer, sessionId)
   const [listOpen, setListOpen] = useState(false)
   const [edited, setEdited] = useState<DiffNote | null>(null)
-  const [sending, setSending] = useState(false)
   if (notes.length === 0) return null
 
   const save = (next: DiffNote[]) => writeDraftNotes(computer, sessionId, next)
-  const send = async () => {
-    if (sending) return
-    const sent = [...notes]
-    setSending(true)
+  // Through the outbox, as the composer's messages go when the link is down: the message is kept on
+  // the phone and shown as the newest until the computer takes it, so a link that drops as Send is
+  // tapped loses nothing. Sending straight and clearing first lost the comments in that moment.
+  const send = () => {
+    queueMessage(
+      computer,
+      { sessionId },
+      { text: diffNotesMessage([...notes], LABELS), attachments: [] },
+    )
     save([])
-    try {
-      await call(link, 'sessions.queue', {
-        sessionId,
-        content: [{ type: 'text', text: diffNotesMessage(sent, LABELS) }],
-      })
-      haptic.success()
-      if (status === 'running' || status === 'awaiting_permission') {
-        Alert.alert('已排队', 'Agent 这一轮做完就会收到这些意见。')
-      }
-    } catch (error) {
-      save([...sent, ...readDraftNotes(computer, sessionId)])
-      Alert.alert('意见没发出去', hostErrorText(error, '请稍后再试。'))
-    } finally {
-      setSending(false)
+    haptic.success()
+    if (status === 'running' || status === 'awaiting_permission') {
+      Alert.alert('已排队', 'Agent 这一轮做完就会收到这些意见。')
     }
   }
   const clearAll = () =>
@@ -337,9 +328,8 @@ export function NotesTray(props: {
       <Button
         label="发送给 Agent"
         tone="primary"
-        busy={sending}
         disabled={status === 'starting' || status === undefined}
-        onPress={() => void send()}
+        onPress={send}
       />
       <BottomSheet
         visible={listOpen}
