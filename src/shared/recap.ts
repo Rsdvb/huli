@@ -160,14 +160,15 @@ function askedUser(entry: Extract<Entry, { kind: 'tool' }>): boolean {
 /**
  * What happened since the device last saw the session, or null when the user was not away long
  * enough, the device never saw it, or nothing worth a line happened. `older`: the thread has pages
- * before the loaded ones, where an entry not found may lie.
+ * before the loaded ones, where an entry not found may lie. `awayMs`: how long counts as away,
+ * RECAP_AWAY_MS unless a test run shortens it.
  */
 export function recapSince(
   thread: RecapThread,
   mark: SeenMark | null,
-  { now, older }: { now: number; older: boolean },
+  { now, older, awayMs = RECAP_AWAY_MS }: { now: number; older: boolean; awayMs?: number },
 ): Recap | null {
-  if (!mark || now - mark.at < RECAP_AWAY_MS) return null
+  if (!mark || now - mark.at < awayMs) return null
   let start = 0
   let partial = false
   if (mark.entry !== null) {

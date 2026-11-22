@@ -4,9 +4,10 @@
 // front after a while, from where this phone last saw the session. Nothing runs in between.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, Pressable, StyleSheet, Text, View } from 'react-native'
-import { recapSince, type Recap } from '@shared/recap'
+import { AppState, Platform, Pressable, Settings, StyleSheet, Text, View } from 'react-native'
+import { RECAP_AWAY_MS, recapSince, type Recap } from '@shared/recap'
 import type { ThreadState } from '@shared/thread'
+import { devMode } from '../dev/devMode'
 import { loadSeen, markSeen } from '../seen'
 import type { ThreadView } from '../thread'
 import { haptic } from '../ui/session/feedback'
@@ -31,6 +32,16 @@ export function recapText(recap: Recap): string {
   if (recap.errors > 0) parts.push(`出了 ${recap.errors} 次错`)
   if (recap.reply) parts.push(`最后回复：${recap.reply}`)
   return `${recap.partial ? '你离开期间至少：' : '你离开期间：'}${parts.join('，')}`
+}
+
+/**
+ * How long counts as away: half an hour, or for the simulator scripts the milliseconds a developer
+ * build's `-huliRecapAwayMs` launch argument gives, which a phone's user cannot pass.
+ */
+function awayMs(): number {
+  if (!devMode() || Platform.OS !== 'ios') return RECAP_AWAY_MS
+  const given = Number(Settings.get('huliRecapAwayMs'))
+  return Number.isFinite(given) && given > 0 ? given : RECAP_AWAY_MS
 }
 
 /** The latest message the user sent, whose change, a new one, ends the recap. */
@@ -72,6 +83,7 @@ export function useRecap(
         const found = recapSince(now, marks[sessionId] ?? null, {
           now: Date.now(),
           older: latest.current.older,
+          awayMs: awayMs(),
         })
         if (found) setShown({ recap: found, sent: lastSent(now) })
         markSeen(computer, sessionId, lastEntry(now))

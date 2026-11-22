@@ -11,7 +11,9 @@
 // box at once, giving the message back if it could not go.
 
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -93,6 +95,9 @@ import { hostErrorText } from '../hostErrors'
 import { useMenuEdge, type MenuSource, type ViewHandle } from '../ui/session/Popover'
 import { PressScale, RoundButton } from '../ui/session/Press'
 import { PictureViewer, type Picture } from './Pictures'
+
+// The markup editor and its drawing load only once a picture is marked up.
+const MarkupEditor = lazy(() => import('./MarkupEditor'))
 
 export interface ComposerProps {
   placeholder: string
@@ -286,6 +291,8 @@ export function Composer(props: ComposerProps) {
   const [focused, setFocused] = useState(false)
   const [opened, setOpened] = useState<string | null>(null)
   const [viewing, setViewing] = useState<Picture | null>(null)
+  // The photo tile being marked up.
+  const [marking, setMarking] = useState<PendingAttachment | null>(null)
   const input = useRef<ComponentRef<typeof TextInput>>(null)
   const attachAnchor = useRef<ViewHandle>(null)
   const caretRef = useRef<number | null>(null)
@@ -595,6 +602,37 @@ export function Composer(props: ComposerProps) {
       }
     }
     if (item) announce(`已移除 ${item.source.name}`)
+  }
+
+  /**
+   * Puts a marked-up picture in place of a tile's: the same tile, sent again from the new file,
+   * with what the old one held let go.
+   */
+  const replacePhoto = (key: string, image: { uri: string; mimeType: string }) => {
+    const item = latest.current.find((each) => each.key === key)
+    if (!item) return
+    release(item)
+    const extension = image.mimeType === 'image/png' ? 'png' : 'jpg'
+    const source: PickedSource = {
+      ...item.source,
+      kind: 'image',
+      uri: image.uri,
+      mimeType: image.mimeType,
+      size: null,
+      name: `${item.source.name.replace(/\.[^./]*$/, '') || '图片'}.${extension}`,
+    }
+    patch(key, {
+      source,
+      status: 'waiting',
+      attachment: null,
+      local: null,
+      thumb: null,
+      size: null,
+      error: null,
+      gone: false,
+    })
+    announce(`已标注 ${item.source.name}`)
+    enqueue(key, source)
   }
 
   const retry = (key: string) => {
@@ -1164,6 +1202,10 @@ export function Composer(props: ComposerProps) {
           setOpened(null)
           setViewing(picture)
         }}
+        onMarkup={(item) => {
+          setOpened(null)
+          setMarking(item)
+        }}
         onOpenFile={
           props.sessionId
             ? (path) => {
@@ -1174,6 +1216,19 @@ export function Composer(props: ComposerProps) {
         }
       />
       {viewing && <PictureViewer picture={viewing} onClose={() => setViewing(null)} />}
+      {marking && (
+        <Suspense fallback={null}>
+          <MarkupEditor
+            uri={marking.source.uri}
+            mimeType={marking.source.mimeType}
+            onCancel={() => setMarking(null)}
+            onDone={(image) => {
+              setMarking(null)
+              replacePhoto(marking.key, image)
+            }}
+          />
+        </Suspense>
+      )}
     </View>
   )
 }
@@ -1571,6 +1626,7 @@ function TileSheet(props: {
   onRemove(key: string): void
   onView(picture: Picture): void
   onOpenFile: ((path: string) => void) | null
+  onMarkup(item: PendingAttachment): void
 }) {
   const { c } = useSessionTokens()
   const [shown, setShown] = useState<PendingAttachment | null>(props.item)
@@ -1623,6 +1679,17 @@ function TileSheet(props: {
           </Text>
         </View>
       ) : null}
+      {item &&
+        item.source.kind === 'image' &&
+        item.source.uri &&
+        (item.status === 'ready' || item.status === 'local' || item.status === 'failed') && (
+          <SheetButton
+            label="标注"
+            icon={G.pencil}
+            color={c.text}
+            onPress={() => props.onMarkup(item)}
+          />
+        )}
       {item?.source.kind === 'project' && props.onOpenFile && (
         <SheetButton
           label="打开文件"
