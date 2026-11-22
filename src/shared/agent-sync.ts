@@ -105,6 +105,8 @@ export interface SyncSnippet {
 }
 
 export interface AgentSyncState {
+  /** The host's home folder, which the page shortens paths by. */
+  home: string
   mcp: SyncMcpPlace[]
   skills: SyncSkillPlace[]
   instructions: SyncInstructionsPlace[]

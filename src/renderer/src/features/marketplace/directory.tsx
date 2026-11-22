@@ -1,7 +1,15 @@
 // The Marketplace's directory: its tabs, search and Add over sections of plugins, skills, MCP
 // servers and workflows. Each source fills its sections as it answers; the rest show at once.
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import {
   Add01Icon,
   File02Icon,
@@ -97,8 +105,18 @@ import {
   type TileSubject,
 } from './tile-art'
 
-const TABS: readonly MarketplaceTab[] = ['all', 'plugins', 'skills', 'mcp', 'workflow', 'installed']
+const TABS: readonly MarketplaceTab[] = [
+  'all',
+  'plugins',
+  'skills',
+  'mcp',
+  'workflow',
+  'installed',
+  'sync',
+]
 /** With Published last, while the host's Kettu account is signed in with Kettu's services on. */
+// Agent sync's page and its parsers' views load only when its tab opens.
+const SyncView = lazy(() => import('./sync/sync-view'))
 const SIGNED_IN_TABS: readonly MarketplaceTab[] = [...TABS, 'published']
 
 /** Rows a section shows before it folds the rest into "… and N more", and how many more a click shows. */
@@ -683,6 +701,7 @@ export function Directory({ tab }: { tab: MarketplaceTab }) {
     mcp: t('page.tabs.mcp'),
     workflow: t('page.tabs.workflow'),
     installed: t('page.tabs.installed'),
+    sync: t('page.tabs.sync'),
     published: t('page.tabs.published'),
   }
   const publishedStore = usePublishedStore()
@@ -710,7 +729,8 @@ export function Directory({ tab }: { tab: MarketplaceTab }) {
   }, [registry, useMarketplaceStore])
 
   // The Kettu Marketplace is read by the service a page at a time, each kind and search on its own.
-  const lists = COMMUNITY_MARKETPLACE && tab !== 'installed' && tab !== 'published'
+  const lists =
+    COMMUNITY_MARKETPLACE && tab !== 'installed' && tab !== 'sync' && tab !== 'published'
   const communityKey = lists ? communityScopeKey(communityScope(tab, filter)) : null
   useEffect(() => {
     const store = useMarketplaceStore.getState()
@@ -841,6 +861,12 @@ export function Directory({ tab }: { tab: MarketplaceTab }) {
         ) : tab === 'installed' ? (
           <div key="installed">
             <InstalledView query={filter} />
+          </div>
+        ) : tab === 'sync' ? (
+          <div key="sync">
+            <Suspense fallback={null}>
+              <SyncView query={filter} />
+            </Suspense>
           </div>
         ) : tab === 'workflow' ? (
           <div key={`workflow|${filter}`}>

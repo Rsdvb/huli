@@ -15,7 +15,8 @@
       "plugins": "插件",
       "skills": "技能",
       "workflow": "工作流",
-      "published": "已发布"
+      "published": "已发布",
+      "sync": "同步"
     },
     "searchPublished": "搜索你发布的"
   },
@@ -979,5 +980,120 @@
     "multipleHint": "需要几个就加几个。",
     "keepHint": "留空就沿用之前填的值。",
     "updateSubmit": "更新"
+  },
+  "sync": {
+    "title": "在智能体之间同步",
+    "intro": "纸鸢只在这个标签页打开时读取各智能体自己的文件。写入前会先给你看每个文件的确切改动，原文件会先备份到纸鸢的数据文件夹。",
+    "refresh": "重新读取",
+    "readFailed": "读取智能体的文件失败：{{error}}",
+    "noMatch": "没有与“{{query}}”匹配的项。",
+    "newFile": "尚未创建",
+    "sections": {
+      "mcp": "MCP 服务器",
+      "skills": "技能",
+      "instructions": "指令"
+    },
+    "transport": {
+      "stdio": "本地",
+      "http": "HTTP",
+      "sse": "SSE"
+    },
+    "readProblem": {
+      "not-utf8": "不是 UTF-8 文本，不做改动",
+      "too-large": "文件太大，无法读取",
+      "not-file": "不是文件",
+      "parse": "无法读取：{{detail}}",
+      "unpaired": "纸鸢的标记不成对，请在文件里修好",
+      "several": "文件里有多个纸鸢区块，请在文件里修好"
+    },
+    "mcp": {
+      "server": "服务器",
+      "none": "这些智能体自己的文件里还没有 MCP 服务器。",
+      "noAgentsTitle": "没有找到智能体的文件",
+      "noAgents": "这里的智能体都没有把 MCP 服务器存在纸鸢认识的文件里。",
+      "disabled": "已停用",
+      "differs": "各处不同",
+      "differsLine": "各智能体里的这个服务器配置不一样；复制时取第一列里的。",
+      "unreadable_other": "有 {{count}} 项纸鸢读不了：{{names}}",
+      "addTo": "{{agent}} 中的 {{server}}",
+      "removeFrom": "{{agent}} 中的 {{server}}",
+      "noTransport": "{{agent}} 不支持连接 {{transport}} 服务器"
+    },
+    "skills": {
+      "skill": "技能",
+      "none": "这些文件夹里还没有技能。",
+      "noneTitle": "没有技能文件夹",
+      "has": "在这个文件夹里",
+      "via": "已从别处读取",
+      "reachable": "这些智能体已经能从另一个文件夹读到这个技能",
+      "readOnly": "{{agents}} 也会读取",
+      "alsoRead": "{{agents}} 也会读取",
+      "copyTo": "把 {{skill}} 复制给 {{agent}}",
+      "syncTo": "同步到…",
+      "syncToTitle": "把 {{skill}} 复制到"
+    },
+    "instructions": {
+      "note": "为某个文件选中的片段会写进文件末尾的纸鸢区块，位于 <!-- kite:shared start --> 和 <!-- kite:shared end --> 之间。区块以外的内容一个字节都不会改。",
+      "snippets": "共享片段",
+      "snippet": "片段",
+      "add": "新建片段",
+      "untitled": "未命名片段",
+      "titleLabel": "片段标题",
+      "bodyLabel": "片段内容",
+      "bodyPlaceholder": "希望选中的智能体都遵守的指令，支持 Markdown",
+      "save": "保存",
+      "delete": "删除",
+      "saveFailed": "保存片段失败：{{error}}",
+      "noneTitle": "还没有片段",
+      "none": "先新建一个片段，再选择要写进哪些智能体的指令文件。",
+      "include": "把 {{snippet}} 写进 {{agent}} 的指令",
+      "overwrite": "用纸鸢的内容覆盖",
+      "block": {
+        "none": "没有区块",
+        "synced": "已同步",
+        "outdated": "待更新",
+        "edited": "文件里被改过"
+      }
+    },
+    "bar": {
+      "count_other": "{{count}} 项更改待写入",
+      "discard": "放弃",
+      "preview": "预览更改"
+    },
+    "preview": {
+      "title": "写入这些更改？",
+      "description": "下面是每个文件将得到的确切内容，密钥只显示末尾几位。写入前会先备份原文件；如果预览之后文件又被改动，纸鸢不会写入任何内容。",
+      "nothing": "没有文件需要改动。",
+      "lines": "改动的行",
+      "added": "新增：",
+      "removed": "删除：",
+      "action": {
+        "edit": "修改",
+        "create": "新建文件",
+        "copy": "复制文件夹"
+      },
+      "copyLine_other": "复制 {{count}} 个文件（{{size}}）。",
+      "converted": "{{server}} 会从 {{from}} 的格式转换为 {{to}} 的格式。",
+      "convertedDropped": "{{server}} 会从 {{from}} 的格式转换为 {{to}} 的格式，{{fields}} 对方不支持，不会带过去。",
+      "outsideEdit": "这个文件里的纸鸢区块在文件中被改过，写入会替换这些改动。",
+      "newFile": "文件还不存在，将新建。",
+      "problems": "以下更改不会写入",
+      "confirm_other": "写入 {{count}} 处",
+      "changed": "没有写入任何内容：预览之后 {{files}} 被改动过。请重新预览。",
+      "failed": "写入 {{path}} 失败：{{error}}。在它之前的文件已写入并备份。",
+      "done_other": "已写入 {{count}} 个文件，原文件已备份",
+      "doneNoBackup_other": "已写入 {{count}} 处",
+      "showBackup": "查看备份"
+    },
+    "problem": {
+      "unknown-place": "这个位置不是这里某个智能体的",
+      "missing": "来源里已经没有这一项",
+      "exists": "目标里已有同名的一项",
+      "transport": "这个智能体不支持这种连接方式（{{detail}}）",
+      "unreadable": "无法读取这个文件（{{detail}}）",
+      "unsupported": "文件里的写法纸鸢无法安全修改，请手动修改",
+      "skill-link": "技能文件夹里有链接，纸鸢不复制链接（{{detail}}）",
+      "skill-too-large": "技能文件夹太大，无法复制"
+    }
   }
 }

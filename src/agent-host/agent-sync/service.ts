@@ -461,6 +461,7 @@ export class AgentSync {
       ),
     ])
     return {
+      home: this.deps.home,
       mcp,
       // A folder that no agent here writes to shows only while it holds skills.
       skills: skills.filter((place) => place.owners.length > 0 || place.skills.length > 0),

@@ -6265,11 +6265,12 @@ export class AgentManager {
 
   /**
    * Huli: what Agent sync needs to find each agent's files: its harness, its variables and the
-   * folder picked in Settings, for every agent but those in `skip`.
+   * folder picked in Settings, for every agent but those in `skip`. An agent not added in Kite
+   * is among them, as the user may run it in a terminal; only its folder tells it was used.
    */
   syncContexts(skip: readonly AgentId[]): SyncAgentContext[] {
     const { platform } = this.deps
-    return this.ids()
+    return [...this.slots.keys()]
       .filter((id) => !skip.includes(id))
       .map((agentId) => {
         const slot = this.slots.get(agentId)!
@@ -6279,7 +6280,7 @@ export class AgentManager {
           harness: slot.def.id,
           getEnv: (name: string) => getEnv(env, name, platform),
           chosen: this.chosenFolder(slot),
-          installed: async () => (await this.harnessProgram(agentId)) !== null,
+          installed: async () => this.has(agentId) && (await this.harnessProgram(agentId)) !== null,
         }
       })
   }
