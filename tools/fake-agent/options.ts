@@ -97,7 +97,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   },
   'slow-start': { description: 'Explains how to start the agent slowly (set at launch)' },
   'all-updates': { description: 'Sends every session update variant once, plus an unknown one' },
-  subagent: { description: 'Runs a subagent in a child session with a permission request' },
+  subagent: {
+    description: 'Runs a subagent in a child session with a permission request',
+    hint: '--finished <n quick subagents that end first> --busy <n reads, a second each, before it asks>',
+  },
   plan: {
     description: 'A plan whose items progress while the agent works',
     hint: '--step <ms each step takes>',
@@ -211,6 +214,8 @@ export interface ScenarioOptions {
   silent: boolean // error, crash, plan-limit: fails before writing anything
   resetS: number // plan-limit: seconds until the plan resets, not scaled
   summaries: boolean // reasoning: short summaries in place of the raw reasoning
+  finished: number // subagent: quick subagents that run and end before the one that asks
+  busy: number // subagent: reads its child makes, a second each, before it asks
   // titles: a branch name is held until this file exists, FAKE_AGENT_BRANCH_NAME_GATE
   branchNameGate: string | null
 }
@@ -325,6 +330,8 @@ export function chooseScenario(prompt: string, env: Env): ScenarioChoice {
     silent: flagValue(args, 'silent') !== undefined,
     resetS: parseNumber(flagValue(args, 'reset')) ?? 300,
     summaries: flagValue(args, 'summaries') !== undefined,
+    finished: parseNumber(flagValue(args, 'finished')) ?? 0,
+    busy: parseNumber(flagValue(args, 'busy')) ?? 0,
     branchNameGate: env.FAKE_AGENT_BRANCH_NAME_GATE || null,
   }
   return { scenario, options, text }
