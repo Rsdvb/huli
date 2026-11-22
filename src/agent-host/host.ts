@@ -129,7 +129,7 @@ import { writeCommitMessage } from './commit-message'
 import { lightTarget } from './light-model'
 import { reportDraftPrompt, writeReportDraft } from './report-draft'
 import { Diagnostics } from './diagnostics'
-import { HostError, invalidParams } from './errors'
+import { HostError, invalidParams, isHostError } from './errors'
 import { setLocale, t, tSettings, tSettingsEnglish } from './i18n'
 import { FilesService } from './files'
 import { MediaService } from './media'
@@ -183,7 +183,8 @@ import { opencodeModelRequests } from './model-requests/opencode'
 import { byHarness } from './model-requests/reader'
 import { AcpMessages, acpModelRequests } from './model-requests/acp-messages'
 import { IdleRelease } from './idle-release'
-import { PortHub, type Handlers, type RequestContext } from './rpc'
+import { MAIN_PORT, PortHub, type Handlers, type RequestContext } from './rpc'
+import type { SessionMoves } from './session-move/service'
 import { Attachments, toArrayBuffer } from './attachments'
 import { storageUsage } from './data-usage'
 import { RoutinesManager, type RoutineTimings } from './routines/manager'
@@ -565,6 +566,8 @@ export class AgentHost {
   /** The skills catalog, the skills Kettu keeps, and what each agent gets of them. */
   private readonly marketSkills: MarketSkillsService
   private agentSyncService: Promise<AgentSync> | null = null
+  /** Huli: moving sessions to other computers, loaded at the first move. */
+  private movesService: Promise<SessionMoves> | null = null
   /** The Kettu Marketplace's listings, the downloads of their files and its plugins. */
   private readonly marketCommunity: MarketCommunityService
   private readonly marketBundles: MarketBundlesService
@@ -2355,6 +2358,21 @@ export class AgentHost {
     this.options.send({ type: 'host:busy', requestId, sessions: this.sessions.busy() })
   }
 
+  /** Huli: main's own request of a host method, which only main may make of some. */
+  mainCall(callId: number, method: string, params: unknown): void {
+    this.hub.callFromMain(method, params).then(
+      (result) => this.options.send({ type: 'host:main-answer', callId, result }),
+      (error: unknown) =>
+        this.options.send({
+          type: 'host:main-answer',
+          callId,
+          error: isHostError(error)
+            ? error.toPortError()
+            : { code: 'internal', message: (error as Error)?.message ?? String(error) },
+        }),
+    )
+  }
+
   /** The floating label's buttons and the stop shortcut, from main. */
   computerControl(sessionId: string, action: ComputerControlAction): void {
     this.computer?.control(sessionId, action)
@@ -3084,6 +3102,41 @@ export class AgentHost {
     this.assertOpenFolder(canonical)
     await this.env.ready()
     return run(canonical)
+  }
+
+  /**
+   * Huli: moving sessions to other computers. Main runs a move: of this computer's host through
+   * its own messages, of another as a device that is a desktop app; a window never.
+   */
+  private sessionMoves(ctx: RequestContext): Promise<SessionMoves> {
+    if (ctx.portId !== MAIN_PORT && ctx.device?.browser !== true) {
+      throw new HostError('forbidden', 'Only the app moves sessions')
+    }
+    this.movesService ??= import('./session-move/service').then(
+      ({ SessionMoves }) =>
+        new SessionMoves({
+          platform: this.options.platform,
+          homeDir: this.options.homeDir ?? os.homedir(),
+          folder: path.join(this.options.userDataPath, 'moves'),
+          exec: this.execRunner.exec,
+          ready: () => this.env.ready(),
+          sessions: this.sessions,
+          agents: this.agents,
+          projects: {
+            paths: () => this.projects.paths(),
+            add: (folder) => this.projects.add(folder),
+            remove: (folder) => {
+              const record = this.projects.find(folder)
+              if (record && this.sessions.list(record.path).length === 0) {
+                this.projects.remove(record)
+              }
+            },
+          },
+          worktreeRoot: (projectPath) => this.worktrees.rootFor(projectPath),
+          log: (level, message) => this.diagnostics.log(level, message),
+        }),
+    )
+    return this.movesService
   }
 
   /** Huli: Agent sync, loaded the first time Marketplace › Sync asks for it. */
@@ -3910,6 +3963,24 @@ export class AgentHost {
       'agentHistory.planCopy': ({ agentId, folder, sessionIds }) =>
         this.agentHistory.planCopy(agentId, folder, sessionIds),
       'agentHistory.copy': ({ token }) => this.agentHistory.copy(token),
+      'moves.inspect': async ({ sessionId }, ctx) =>
+        (await this.sessionMoves(ctx)).inspect(sessionId),
+      'moves.pack': async ({ sessionId, moveId, haves }, ctx) =>
+        (await this.sessionMoves(ctx)).pack(sessionId, moveId, haves),
+      'moves.part': async ({ moveId, name, offset }, ctx) =>
+        (await this.sessionMoves(ctx)).part(moveId, name, offset),
+      'moves.finish': async ({ moveId, sessionId, to }, ctx) =>
+        (await this.sessionMoves(ctx)).finish(moveId, sessionId, to),
+      'moves.abort': async ({ moveId }, ctx) => (await this.sessionMoves(ctx)).abort(moveId),
+      'moves.check': async (params, ctx) => (await this.sessionMoves(ctx)).check(params),
+      'moves.prepare': async ({ moveId, project, url }, ctx) =>
+        (await this.sessionMoves(ctx)).prepare(moveId, project, url),
+      'moves.receive': async ({ moveId, name, offset, size, bytes }, ctx) =>
+        (await this.sessionMoves(ctx)).receive(moveId, name, offset, size, bytes),
+      'moves.apply': async (params, ctx) => (await this.sessionMoves(ctx)).apply(params),
+      'moves.undo': async ({ moveId }, ctx) => (await this.sessionMoves(ctx)).undo(moveId),
+      'moves.commit': async ({ moveId }, ctx) => (await this.sessionMoves(ctx)).commit(moveId),
+      'sessions.clearMoved': ({ sessionId }) => sessions.setMovedTo(sessionId, null),
       // A device never gets to these: the allow-list refuses them to every device's port.
       'agentNetwork.status': () => this.nodeProxy.status(),
       'agentNetwork.addSubscription': ({ name, url }) => this.nodeProxy.addSubscription(name, url),

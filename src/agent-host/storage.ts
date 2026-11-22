@@ -18,6 +18,7 @@ import { isGithubEvent } from '@shared/github-flow'
 import { isProfileId } from '@shared/provider-profiles'
 import { isBoardStatus, type SessionBoard } from '@shared/session-board'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
+import type { MovedTo } from '@shared/session-move'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
 import type { PortBlock } from '@shared/worktree-ports'
@@ -392,6 +393,8 @@ export interface SessionRecord {
    * no live session took them meanwhile; only a live session's block holds them.
    */
   ports?: PortBlock
+  /** Huli: moved to another computer, where it goes on; this one stays as it was left. */
+  movedTo?: MovedTo
 }
 
 /** Huli: a session's pull request automation, as its record keeps it. */
@@ -1089,6 +1092,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...prFlowOf(item.prFlow),
       ...boardOf(item.board),
       ...portsOf(item.ports),
+      ...movedToOf(item.movedTo),
     })
   }
   return {
@@ -1421,6 +1425,25 @@ export function projectsFile(userDataPath: string, log: LogFn): JsonFile<Project
     empty: () => ({ version: 1, projects: [] }),
     log,
   })
+}
+
+/** Huli: where a session was moved to; one that does not read is dropped, and the session stays. */
+function movedToOf(value: unknown): { movedTo?: MovedTo } {
+  if (
+    !isRecord(value) ||
+    !(value.hostId === null || (isString(value.hostId) && /^[0-9a-f]{32}$/.test(value.hostId))) ||
+    !isString(value.name) ||
+    value.name.length > 200 ||
+    !isString(value.sessionId) ||
+    value.sessionId.length === 0 ||
+    value.sessionId.length > 256 ||
+    !isTime(value.at)
+  ) {
+    return {}
+  }
+  return {
+    movedTo: { hostId: value.hostId, name: value.name, sessionId: value.sessionId, at: value.at },
+  }
 }
 
 const MAX_PR_FLOW_SEEN = 200

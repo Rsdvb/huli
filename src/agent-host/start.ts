@@ -167,6 +167,11 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       case 'host:busy-request':
         withHost((h) => h.busy(message.requestId))
         break
+      case 'host:main-call':
+        if (Number.isSafeInteger(message.callId) && typeof message.method === 'string') {
+          withHost((h) => h.mainCall(message.callId, message.method, message.params))
+        }
+        break
       case 'host:report-request':
         if (Number.isSafeInteger(message.requestId)) withHost((h) => void h.report(message))
         break

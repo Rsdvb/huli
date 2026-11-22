@@ -358,6 +358,18 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'folders.delete': HOST_MS,
   'folders.reorder': HOST_MS,
   'folders.move': HOST_MS,
+  'moves.inspect': AGENT_MS,
+  'moves.pack': NONE,
+  'moves.part': AGENT_MS,
+  'moves.finish': HOST_MS,
+  'moves.abort': HOST_MS,
+  'moves.check': AGENT_MS,
+  'moves.prepare': NONE,
+  'moves.receive': AGENT_MS,
+  'moves.apply': NONE,
+  'moves.undo': NONE,
+  'moves.commit': HOST_MS,
+  'sessions.clearMoved': HOST_MS,
 }
 
 /** How long to wait for `method`'s answer; null to wait as long as it takes. */
