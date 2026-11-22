@@ -768,8 +768,9 @@ host is forwarded to this computer and opens in the session's browser.
   byte streams over the encrypted channel the host's session already runs on (the one an agent's
   navigation to the host's localhost uses). The host's remote host grants the port
   (`ports.forward`, `ports.unforward`, scope a session's id or none) and lists its user's listening
-  ports above 1024 with each program's name and folder (`ports.list`, `src/remote-host/
-  listening-ports.ts`: /proc on Linux, lsof on macOS, netstat on Windows), Kite's own left out.
+  ports above 1024 with each program's name and folder (`ports.list`, from
+  `src/remote-host/listening-ports.ts`: /proc on Linux, lsof on macOS, netstat on Windows),
+  Kite's own left out.
   Only main asks these (`hosts:ports`, `hosts:forward-port`, `hosts:stop-forward`, checked in
   `src/main/port-forwards.ts`); a window cannot send them to a host.
 - Main keeps the forwards (`PortForwards`, `ForwardBook`, `hosts:forwards` event): one listener a
