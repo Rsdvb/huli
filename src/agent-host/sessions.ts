@@ -891,6 +891,8 @@ interface Live {
   routineScope: PermissionScope | null
   routineTurnStarted: boolean
   routineTurnEnded: boolean
+  /** Huli: its next turn is Kite's own going on after a plan limit, which nobody typed. */
+  goesOn: boolean
   /** A session another session's agent or a workflow started: what its mode is held to. */
   startedMode: StartedModeHold | null
   /** Since when nothing has needed its agent, and since when no port has shown it in front. */
@@ -4354,6 +4356,7 @@ export class SessionManager {
       routineScope: null,
       routineTurnStarted: false,
       routineTurnEnded: false,
+      goesOn: false,
       startedMode: null,
       idleSince: null,
       hiddenSince: this.inFront(record.id) ? null : this.now(),
@@ -4553,6 +4556,10 @@ export class SessionManager {
     }
     const next = choice.tier === 'off' ? undefined : choice
     if (next) this.assertSandbox(record.agentId, next)
+    // Huli: a manager's agent dispatches through Kite's tools, which a container's never gets.
+    if (record.manager && next?.tier === 'container') {
+      throw new HostError('restricted', t('manager.contained'))
+    }
     const before = record.sandbox
     if (!record.sandboxUnknown && (before && next ? sameSandbox(before, next) : before === next)) {
       return
@@ -5665,6 +5672,8 @@ export class SessionManager {
       if (params.parentId !== undefined || !readOnly) {
         throw invalidParams(t('manager.unsupported'))
       }
+      // Huli: a container's agent gets none of Kite's tools, so it could dispatch nothing.
+      if (sandbox?.tier === 'container') throw invalidParams(t('manager.contained'))
       record.manager = newManager(params.manager, now)
       options[readOnly.option] = readOnly.mode
     }
@@ -8977,10 +8986,12 @@ export class SessionManager {
     // Whatever started this turn, a message of the user's or the plan's reset, takes over.
     if (live.record.limitPause) this.setLimitPause(live.record, null)
     this.stalls.turnStarted(live.id)
+    const goesOn = live.goesOn
+    live.goesOn = false
     if (live.record.manager || live.record.worker) {
       const entry = entryId === null ? undefined : live.thread.byId[entryId]
       const typed =
-        entry?.kind === 'user' && !entry.from
+        entry?.kind === 'user' && !entry.from && !goesOn
           ? entry.content.flatMap((item) => (item.type === 'text' ? [item.text] : [])).join(' ')
           : null
       this.manager.turnStarted(live.id, typed)
@@ -9910,6 +9921,8 @@ export class SessionManager {
       !turn.cancelRequested &&
       agentAddedNothing(live.thread, turn.entryId)
     if (givenBack) turn.attachments = []
+    // Huli: a worker stopped at its limit for good is no failure to its manager.
+    if (planLimit && !pauses && !turn.cancelRequested) this.manager.limitStopped(live.id)
     this.finishTurn(live, turn, null)
     const now = this.now()
     if (authRequired) {
@@ -10307,6 +10320,8 @@ export class SessionManager {
       this.touch(live.id)
       return
     }
+    // Huli: a manager or worker hears of this turn as Kite's, never as one the user typed.
+    live.goesOn = true
     if (kind === 'resend' && message) {
       this.startTurn(live, message.content, this.now(), message.entryId)
       return
@@ -12473,6 +12488,9 @@ export class SessionManager {
       entry.agentId,
       takesProfiles(entry.agentId) ? (entry.profileId ?? undefined) : undefined,
     )
+    // Held as any session another one starts: in the manager's sandbox, else its entry's, else the
+    // project's or the default; one its agent cannot run in fails the start, before any worktree.
+    const sandbox = this.sandboxFor(entry.agentId, manager.projectPath, entry.sandbox, managerId)
     const known = this.deps.options?.get(entry.agentId) ?? null
     const options: Record<string, string | boolean> = {
       ...(this.deps.options?.rememberedOf(entry.agentId) ?? {}),
@@ -12531,6 +12549,7 @@ export class SessionManager {
       branch: null,
       startedBy: managerId,
       ...(profileId !== undefined ? { profileId } : {}),
+      ...(sandbox ? { sandbox } : {}),
       ...(ports ? { ports: { ...ports } } : {}),
       worker: {
         ...spec.worker,
@@ -12594,6 +12613,9 @@ export class SessionManager {
     if (on === (record.manager !== undefined)) return
     const readOnly = readOnlyModeOf(record.agentId)
     if (on && !readOnly) throw new HostError('restricted', t('manager.unsupported'))
+    if (on && record.sandbox?.tier === 'container') {
+      throw new HostError('restricted', t('manager.contained'))
+    }
     const live = this.live.get(sessionId)
     if (live) {
       const status = live.thread.session.status
@@ -12781,6 +12803,26 @@ export class SessionManager {
         return `${name} · ${model ?? entry.model}`
       },
       readOnlyMode: (agentId) => readOnlyModeOf(agentId)?.mode ?? null,
+      tools: (id) => {
+        const live = this.live.get(id)
+        return live ? !this.contained(live) : recordOf(id)?.sandbox?.tier !== 'container'
+      },
+      toolsFor: (managerId, entry) => {
+        const manager = recordOf(managerId)
+        if (!manager) return true
+        try {
+          const sandbox = this.sandboxFor(
+            entry.agentId,
+            manager.projectPath,
+            entry.sandbox,
+            managerId,
+          )
+          return sandbox?.tier !== 'container'
+        } catch {
+          // Its start fails and says why, so no prompt reaches it.
+          return true
+        }
+      },
       createWorker: (managerId, spec) => this.createWorker(managerId, spec),
       send: async (id, text, from) => {
         await this.sendFromTool(id, text, from, false)
@@ -14035,7 +14077,12 @@ export class SessionManager {
     const record = this.recordOf(sessionId)
     const live = this.live.get(sessionId)
     const problems: MoveProblem[] = []
-    if (record.origin === 'subagent' || record.parentId !== null) problems.push('subagent')
+    // Huli: a manager's workers run here, and an attached worker reports to its manager here.
+    if (record.manager) problems.push('manager')
+    else if (record.worker && !record.worker.detached) problems.push('worker')
+    else if (record.origin === 'subagent' || (record.parentId !== null && !record.worker)) {
+      problems.push('subagent')
+    }
     if (live?.prepared) problems.push('prepared')
     if (this.deps.scratch.contains(record.projectPath)) problems.push('noProject')
     if (live) {

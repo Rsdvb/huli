@@ -143,6 +143,20 @@ export interface WorkerBlockInput {
   branch: string | null
   /** No other writer works in its folder: it is the only one, or it has its own worktree. */
   alone: boolean
+  /** Kite's tools reach it; a worker in a container gets none, so it reports in its reply. */
+  tools: boolean
+}
+
+/** How a worker without Kite's tools ends its reply, which Kite reads as its report. */
+function replyReport(lang: Lang, review: boolean): string {
+  if (lang === 'zh') {
+    return review
+      ? '你在容器里，用不了 Kite 的工具（没有 report_work）。审完在最后一条回复里写清问题，每条一行：- [must|should|nit] 文件:行 说明；最后单独一行写 VERDICT: approve（可以合并）或 VERDICT: changes（必须改）。'
+      : '你在容器里，用不了 Kite 的工具（没有 report_work）。做完或卡住时，在最后一条回复里写简短汇报：做了什么、改了哪些文件、怎么验证的、还剩什么。'
+  }
+  return review
+    ? "You run in a container, where Kite's tools (report_work among them) do not reach. End your last reply with each problem on a line of its own, as - [must|should|nit] file:line text, then a line of its own: VERDICT: approve (it can go in) or VERDICT: changes (it must change)."
+    : "You run in a container, where Kite's tools (report_work among them) do not reach. When done or stuck, end your last reply with a short report: what you did, the files you changed, how you checked it and what is left."
 }
 
 /** A worker's block: who it is, its persona and how it reports. */
@@ -169,9 +183,11 @@ export function workerBlock(lang: Lang, input: WorkerBlockInput): string {
       ...(persona ? [persona] : []),
       '- 只做下面这条任务，别扩大范围；拿不准的地方做合理假设，并在汇报里写明。',
       `- ${where}${mode}`,
-      input.kind === 'review'
-        ? '- 做完时调用 report_work：status、简短摘要，verdict 必须填 approve（可以合并）或 changes（必须改），findings 写具体问题（must 必须改、should 建议、nit 小问题）。'
-        : '- 做完或卡住时调用 report_work：status、简短摘要、改动的文件。',
+      !input.tools
+        ? `- ${replyReport(lang, input.kind === 'review')}`
+        : input.kind === 'review'
+          ? '- 做完时调用 report_work：status、简短摘要，verdict 必须填 approve（可以合并）或 changes（必须改），findings 写具体问题（must 必须改、should 建议、nit 小问题）。'
+          : '- 做完或卡住时调用 report_work：status、简短摘要、改动的文件。',
       '- 你不能再派别的会话。需要用户决定时，status 用 needs_user，并写清问题。',
       `</${WORKER_TAG}>`,
     ].join('\n')
@@ -182,9 +198,11 @@ export function workerBlock(lang: Lang, input: WorkerBlockInput): string {
     ...(persona ? [persona] : []),
     '- Do only the task below; do not widen it. Where you are unsure, make a reasonable assumption and say so in your report.',
     `- ${where} ${mode}`.trimEnd(),
-    input.kind === 'review'
-      ? '- When done, call report_work with a status, a short summary, a verdict of approve (it can go in) or changes (it must change), and findings with each problem (must, should or nit).'
-      : '- When done or stuck, call report_work with a status, a short summary and the files you changed.',
+    !input.tools
+      ? `- ${replyReport(lang, input.kind === 'review')}`
+      : input.kind === 'review'
+        ? '- When done, call report_work with a status, a short summary, a verdict of approve (it can go in) or changes (it must change), and findings with each problem (must, should or nit).'
+        : '- When done or stuck, call report_work with a status, a short summary and the files you changed.',
     '- You cannot start other sessions. When the user must decide something, use status needs_user and state the question.',
     `</${WORKER_TAG}>`,
   ].join('\n')
@@ -251,6 +269,8 @@ export interface ReviewPromptInput {
   rounds: number
   /** The implementer's answer to the last round's findings, from round 2. */
   answer: string | null
+  /** Kite's tools reach the reviewer. */
+  tools: boolean
 }
 
 /** What Kite sends the reviewer each round. */
@@ -272,7 +292,9 @@ export function reviewPrompt(lang: Lang, input: ReviewPromptInput): string {
         : []),
       `改动的文件：\n${changedText(lang, input.changed)}`,
       diff,
-      '审完调用 report_work：verdict 填 approve 或 changes，findings 写具体问题。只有必须改的问题才给 changes。',
+      input.tools
+        ? '审完调用 report_work：verdict 填 approve 或 changes，findings 写具体问题。只有必须改的问题才给 changes。'
+        : `${replyReport(lang, true)}只有必须改的问题才给 changes。`,
     ].join('\n\n')
   }
   return [
@@ -284,7 +306,9 @@ export function reviewPrompt(lang: Lang, input: ReviewPromptInput): string {
       : []),
     `Changed files:\n${changedText(lang, input.changed)}`,
     diff,
-    'When done, call report_work with a verdict of approve or changes and findings with each problem. Give changes only for what must change.',
+    input.tools
+      ? 'When done, call report_work with a verdict of approve or changes and findings with each problem. Give changes only for what must change.'
+      : `${replyReport(lang, true)} Give changes only for what must change.`,
   ].join('\n\n')
 }
 
@@ -297,15 +321,30 @@ export function fixPrompt(
     rounds: number
     findings: readonly Finding[]
     summary: string
+    /** Kite's tools reach the implementer. */
+    tools: boolean
   },
 ): string {
   const list = input.findings.length > 0 ? findingsText(input.findings) : input.summary
+  const then =
+    lang === 'zh'
+      ? input.tools
+        ? '改完后调用 report_work，摘要里逐条说你怎么处理的。'
+        : '改完后在最后一条回复里逐条说你怎么处理的。'
+      : input.tools
+        ? 'When done, call report_work and say in the summary how you handled each point.'
+        : 'When done, say in your last reply how you handled each point.'
   return lang === 'zh'
-    ? `审阅者「${input.reviewer}」要求修改（第 ${input.round}/${input.rounds} 轮）：\n\n${list}\n\n改完后调用 report_work，摘要里逐条说你怎么处理的。`
-    : `The reviewer "${input.reviewer}" asks for changes (round ${input.round} of ${input.rounds}):\n\n${list}\n\nWhen done, call report_work and say in the summary how you handled each point.`
+    ? `审阅者「${input.reviewer}」要求修改（第 ${input.round}/${input.rounds} 轮）：\n\n${list}\n\n${then}`
+    : `The reviewer "${input.reviewer}" asks for changes (round ${input.round} of ${input.rounds}):\n\n${list}\n\n${then}`
 }
 
-export function reviewReminder(lang: Lang): string {
+export function reviewReminder(lang: Lang, tools = true): string {
+  if (!tools) {
+    return lang === 'zh'
+      ? '你的审阅还没有结论。请在回复最后单独一行写 VERDICT: approve 或 VERDICT: changes。'
+      : 'Your review has no verdict yet. End your reply with a line of its own: VERDICT: approve or VERDICT: changes.'
+  }
   return lang === 'zh'
     ? '你的审阅还没有结论。请调用 report_work，verdict 填 approve 或 changes。'
     : 'Your review has no verdict yet. Call report_work with a verdict of approve or changes.'
@@ -317,7 +356,12 @@ export function reportReminder(lang: Lang): string {
     : 'You have not called report_work yet. If the task is done, call it now with a status, a short summary and the files you changed; if not, finish it first.'
 }
 
-export function resumePrompt(lang: Lang): string {
+export function resumePrompt(lang: Lang, tools = true): string {
+  if (!tools) {
+    return lang === 'zh'
+      ? 'Kite 重启了，你的回合被打断。检查做到哪一步，接着做完，然后在最后一条回复里写简短汇报。'
+      : 'Kite restarted and cut your turn. Check where you stopped, finish the task, then end your last reply with a short report.'
+  }
   return lang === 'zh'
     ? 'Kite 重启了，你的回合被打断。检查做到哪一步，接着做完，然后调用 report_work。'
     : 'Kite restarted and cut your turn. Check where you stopped, finish the task, then call report_work.'
@@ -331,8 +375,8 @@ export function readOnlyRefusal(lang: Lang, manager: boolean): string {
       : 'Manager mode: the manager does not change files or run commands that change things. Dispatch this to a worker with start_worker, then go on.'
   }
   return lang === 'zh'
-    ? '你是只读的工人，不改文件。把需要改的写进 report_work 的 findings，然后接着做。'
-    : 'You are a read-only worker and do not change files. Put what should change in the findings of report_work, then go on.'
+    ? '你是只读的工人，不改文件。把需要改的写进汇报，然后接着做。'
+    : 'You are a read-only worker and do not change files. Put what should change in your report, then go on.'
 }
 
 const STATUS: Record<Lang, Record<DigestItem['status'], string>> = {
@@ -343,6 +387,7 @@ const STATUS: Record<Lang, Record<DigestItem['status'], string>> = {
     needs_user: '需要用户决定',
     stopped: '停止了',
     interrupted: '被 Kite 重启打断',
+    limit: '达到套餐上限停下了，不会自己继续（「额度恢复后自动继续」已关）',
     approved: '完成，审阅通过',
     out_of_rounds: '审阅到轮数上限仍未通过',
     review_failed: '审阅没有结论',
@@ -358,6 +403,8 @@ const STATUS: Record<Lang, Record<DigestItem['status'], string>> = {
     needs_user: 'needs the user',
     stopped: 'stopped',
     interrupted: 'cut by a Kite restart',
+    limit:
+      'stopped at its plan limit and does not go on by itself ("Go on when a plan limit resets" is off)',
     approved: 'done, review approved',
     out_of_rounds: 'not approved within the round limit',
     review_failed: 'review gave no verdict',

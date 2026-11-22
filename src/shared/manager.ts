@@ -6,6 +6,7 @@
 
 import { isAgentId, START_MODE_CHARS, type AgentId } from './agents'
 import type { RiskLevel } from './risk'
+import { isSandboxNetwork, isSandboxTier, sandboxChoiceOf, type SandboxChoice } from './sandbox'
 
 /** The harnesses whose sessions manager mode can hold to reading, so can be managers. */
 export const MANAGER_HARNESSES = [
@@ -78,6 +79,11 @@ export interface RosterWorker {
   worktree: boolean
   /** Goes only into the worker session's first message, never into the agent's own files. */
   persona: string
+  /**
+   * The sandbox its sessions start in; absent for the project's or the default. A sandboxed
+   * manager's workers run in the manager's own, as any session another one starts does.
+   */
+  sandbox?: SandboxChoice
 }
 
 export interface ManagerLimits {
@@ -204,6 +210,7 @@ export function workerProblem(value: unknown): string | null {
     'mode',
     'worktree',
     'persona',
+    'sandbox',
   ]
   const extra = Object.keys(value).find((key) => !(keys as string[]).includes(key))
   if (extra !== undefined) return `has an unknown field "${extra}"`
@@ -232,7 +239,22 @@ export function workerProblem(value: unknown): string | null {
   if (typeof value.persona !== 'string' || value.persona.length > PERSONA_CHARS) {
     return `persona must be text of at most ${PERSONA_CHARS} characters`
   }
+  if (value.sandbox !== undefined && !isSandboxField(value.sandbox)) {
+    return 'sandbox must be a tier and a network'
+  }
   return null
+}
+
+function isSandboxField(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const keys = Object.keys(value)
+  return (
+    keys.length === 2 &&
+    keys.includes('tier') &&
+    keys.includes('network') &&
+    isSandboxTier(value.tier) &&
+    isSandboxNetwork(value.network)
+  )
 }
 
 function limitsProblem(value: unknown): string | null {
@@ -354,7 +376,11 @@ function readWorkers(raw: unknown, problems: string[], path: string): RosterWork
       out.some((kept) => kept.id === entry.id || nameKey(kept.name) === nameKey(entry.name))
     ) {
       problems.push(`"${path}[${index}]" repeats an id or a name`)
-    } else out.push({ ...entry })
+    } else {
+      const { sandbox, ...rest } = entry
+      const choice = sandbox === undefined ? null : sandboxChoiceOf(sandbox)
+      out.push({ ...rest, ...(choice ? { sandbox: choice } : {}) })
+    }
   }
   return out
 }
@@ -441,6 +467,8 @@ export const REPORT_STATUSES = [
   'needs_user',
   'stopped',
   'interrupted',
+  // Stopped at its plan's limit, with going on by itself after the reset turned off.
+  'limit',
 ] as const
 export type ReportStatus = (typeof REPORT_STATUSES)[number]
 

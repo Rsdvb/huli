@@ -87,6 +87,10 @@ class FakePort implements ManagerPort {
   runs = (entry: Pick<RosterWorker, 'agentId' | 'model'>) =>
     `${entry.agentId}${entry.model ? ` · ${entry.model}` : ''}`
   readOnlyMode = () => 'read-only'
+  /** Sessions and roster entries whose agent runs in a container, out of Kite's tools' reach. */
+  readonly contained = new Set<string>()
+  tools = (id: string) => !this.contained.has(id)
+  toolsFor = (_managerId: string, entry: RosterWorker) => !this.contained.has(entry.id)
   createWorker = async (managerId: string, spec: WorkerSpec) => {
     const id = `s${++this.next}`
     this.store.set(id, {
@@ -96,6 +100,7 @@ class FakePort implements ManagerPort {
       title: spec.title,
       worker: spec.worker,
     })
+    if (this.contained.has(spec.entry.id)) this.contained.add(id)
     this.created.push({ id, spec })
     this.hub.added(this.store.get(id)!)
     this.startTurn(id, null)
@@ -666,6 +671,113 @@ describe('after a restart', () => {
     await flush()
     expect(port.sent).toHaveLength(0)
     expect(port.wakes[0]!.digest[0]).toMatchObject({ sessionId: 's1', status: 'interrupted' })
+  })
+})
+
+describe('a worker in a container', () => {
+  it('reports in its reply: told so, never reminded of report_work', async () => {
+    port.contained.add(helper.id)
+    manager({ autoReview: false })
+    await hub.startWorker('m', { worker: '杂活', task: 't', acceptance: [], files: [] })
+    const block = hub.aheadFor('s1', 'acp-s1')!.text
+    expect(block).toContain('用不了 Kite 的工具')
+    expect(block).not.toContain('调用 report_work')
+    port.replies.set('s1', '做完了，改了 a.ts，测试通过')
+    port.endTurn('s1', 'end_turn')
+    await flush()
+    expect(port.sent).toHaveLength(0)
+    expect(port.wakes).toHaveLength(1)
+    expect(port.store.get('s1')!.worker!.report).toMatchObject({
+      status: 'done',
+      by: 'derived',
+      summary: '做完了，改了 a.ts，测试通过',
+    })
+  })
+
+  it("reads a reviewer's verdict from its reply, reminding it once when there is none", async () => {
+    port.contained.add(reviewer.id)
+    manager()
+    await hub.startWorker('m', { worker: '写手', task: '修复', acceptance: [], files: [] })
+    await finish('s1')
+    const review = port.created[1]!
+    expect(review.spec.prompt).toContain('VERDICT: approve')
+    expect(review.spec.prompt).not.toContain('调用 report_work')
+    port.replies.set('s2', '看过了，没问题')
+    port.endTurn('s2', 'end_turn')
+    await flush()
+    expect(port.sent.at(-1)).toMatchObject({ id: 's2' })
+    expect(port.sent.at(-1)!.text).toContain('VERDICT: approve 或 VERDICT: changes')
+    expect(port.wakes).toHaveLength(0)
+    port.replies.set('s2', '看过了，没问题\n\nVERDICT: approve')
+    port.endTurn('s2', 'end_turn')
+    await flush()
+    expect(port.wakes).toHaveLength(1)
+    expect(port.wakes[0]!.digest[0]).toMatchObject({ sessionId: 's1', status: 'approved' })
+  })
+
+  it('sends the fix in words a contained implementer can answer', async () => {
+    port.contained.add(writer.id)
+    manager()
+    await hub.startWorker('m', { worker: '写手', task: '修复', acceptance: [], files: [] })
+    port.replies.set('s1', '改好了')
+    port.endTurn('s1', 'end_turn')
+    await flush()
+    await finish('s2', {
+      status: 'done',
+      summary: '要改',
+      changed: [],
+      verdict: 'changes',
+      findings: [{ level: 'must', text: 'null 没处理' }],
+    })
+    expect(port.sent.at(-1)).toMatchObject({ id: 's1' })
+    expect(port.sent.at(-1)!.text).toContain('在最后一条回复里逐条说')
+    expect(port.sent.at(-1)!.text).not.toContain('report_work')
+  })
+})
+
+describe("a worker at its plan's limit", () => {
+  it('keeps its folder and slot while paused, and wakes the manager once', async () => {
+    manager({ autoReview: false })
+    await hub.startWorker('m', { worker: '写手', task: 'one', acceptance: [], files: [] })
+    port.endTurn('s1', null)
+    port.states.set('s1', { ...port.idle(), status: 'failed', limitPaused: true })
+    await flush()
+    expect(port.wakes).toHaveLength(1)
+    expect(port.wakes[0]!.digest[0]).toMatchObject({ sessionId: 's1', status: 'limit_paused' })
+    // Another writer waits: the paused one goes on in this folder after the reset.
+    const held = await hub.startWorker('m', {
+      worker: '杂活',
+      task: 'two',
+      acceptance: [],
+      files: [],
+    })
+    expect(held).toEqual({ kind: 'held', position: 1, reason: 'folder' })
+    void hub.check('s1')
+    await flush()
+    expect(port.wakes).toHaveLength(1)
+    // The plan reset: Kite goes on with it, which is no word of the user's.
+    port.startTurn('s1', null)
+    await finish('s1')
+    expect(port.wakes).toHaveLength(2)
+    expect(port.wakes[1]!.digest[0]).toMatchObject({ sessionId: 's1', status: 'done' })
+    expect(port.created.map((item) => item.spec.worker.name)).toEqual(['写手', '杂活'])
+  })
+
+  it('reports a stop at the limit with no going on as its own status, not a failure', async () => {
+    manager({ autoReview: false })
+    await hub.startWorker('m', { worker: '杂活', task: 't', acceptance: [], files: [] })
+    port.errors.set('s1', 'You have hit your ChatGPT usage limit.')
+    hub.limitStopped('s1')
+    port.endTurn('s1', null)
+    await flush()
+    expect(port.wakes[0]!.digest[0]).toMatchObject({ sessionId: 's1', status: 'limit' })
+    expect(port.store.get('s1')!.worker!.report!.status).toBe('limit')
+    // A later failure of another kind is a failure again.
+    port.startTurn('s1', null)
+    port.errors.set('s1', 'boom')
+    port.endTurn('s1', null)
+    await flush()
+    expect(port.store.get('s1')!.worker!.report!.status).toBe('failed')
   })
 })
 

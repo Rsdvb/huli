@@ -129,6 +129,13 @@ export interface ManagerPort {
   runs(entry: Pick<RosterWorker, 'agentId' | 'model'>): string
   /** The mode a read-only session of the agent starts in; null when the agent has none. */
   readOnlyMode(agentId: AgentId): string | null
+  /**
+   * Whether Kite's tools reach the session, report_work among them; a container's agent gets
+   * none, so its reply is its report.
+   */
+  tools(id: string): boolean
+  /** Whether they would reach a worker the manager starts from this entry now. */
+  toolsFor(managerId: string, entry: RosterWorker): boolean
   createWorker(managerId: string, spec: WorkerSpec): Promise<string>
   /** Sends a prompt as from the manager: at once when the session is free, else queued. */
   send(id: string, text: string, from: FromSession): Promise<void>
@@ -207,6 +214,8 @@ export class ManagerHub {
   private readonly reminded = new Set<string>()
   /** Workers whose plan-limit pause the manager was told of. */
   private readonly limitTold = new Set<string>()
+  /** Workers whose last turn stopped at their plan's limit without pausing to go on. */
+  private readonly limitStops = new Set<string>()
   /** Items that wait for the manager's next wake rather than waking it. */
   private readonly quiet = new Map<string, DigestItem[]>()
   /** Workers a restart cut that wait for a slot to go on. */
@@ -241,6 +250,7 @@ export class ManagerHub {
     this.ends.delete(id)
     this.reminded.delete(id)
     this.limitTold.delete(id)
+    this.limitStops.delete(id)
   }
 
   workerIds(managerId: string): string[] {
@@ -395,6 +405,7 @@ export class ManagerHub {
         folder: this.port.folder(id),
         branch: this.port.branch(id),
         alone: writes(worker.kind),
+        tools: this.port.tools(id),
       })
       const mark = `${acpSessionId}:${hash(text)}`
       return worker.sentTo === mark ? null : { text, mark }
@@ -448,6 +459,7 @@ export class ManagerHub {
   turnStarted(id: string, typed: string | null): void {
     const record = this.port.record(id)
     if (!record) return
+    this.limitStops.delete(id)
     const now = this.port.now()
     if (record.manager && typed !== null) {
       // The user writing to the manager starts a new task: its counters, and it goes on after a stop.
@@ -472,11 +484,17 @@ export class ManagerHub {
     this.port.touch(worker.managerId)
   }
 
+  /** The turn ending now failed at the plan's limit and does not pause to go on after its reset. */
+  limitStopped(id: string): void {
+    if (this.port.record(id)?.worker) this.limitStops.add(id)
+  }
+
   /** A turn ended; the check after it runs once the session manager has drained its queue. */
   turnEnded(id: string, stopReason: StopReason | null): void {
     const record = this.port.record(id)
     if (!record?.worker && !record?.manager) return
     this.ends.set(id, stopReason)
+    if (stopReason !== null) this.limitStops.delete(id)
     queueMicrotask(() => void this.check(id))
   }
 
@@ -587,13 +605,18 @@ export class ManagerHub {
     const end = { stopReason, error: stopReason === null ? this.port.lastError(id) : null }
     const reported =
       worker.report?.by === 'tool' && worker.owed !== undefined && worker.report.at >= worker.owed
-    // A turn that ended well without report_work is reminded once, as a workflow step is.
-    if (!reported && end.stopReason === 'end_turn' && !this.reminded.has(id)) {
+    const tools = this.port.tools(id)
+    // A turn that ended well without report_work is reminded once, as a workflow step is. A worker
+    // Kite's tools never reach reports in its reply, which is reminded only of a missing verdict.
+    const remind = tools
+      ? !reported
+      : worker.kind === 'review' && verdictIn((await this.port.lastReply(id)) ?? '') === null
+    if (remind && end.stopReason === 'end_turn' && !this.reminded.has(id)) {
       this.reminded.add(id)
       const lang = this.port.lang()
       await this.port.send(
         id,
-        worker.kind === 'review' ? reviewReminder(lang) : reportReminder(lang),
+        worker.kind === 'review' ? reviewReminder(lang, tools) : reportReminder(lang),
         this.fromManager(worker.managerId),
       )
       return
@@ -640,13 +663,15 @@ export class ManagerHub {
     }
     const reply = (await this.port.lastReply(id)) ?? ''
     const status: ReportStatus =
-      end.stopReason === 'end_turn'
-        ? 'done'
-        : end.stopReason === 'cancelled'
-          ? 'stopped'
-          : end.stopReason === null || end.stopReason === 'refusal'
-            ? 'failed'
-            : 'blocked'
+      end.stopReason === null && this.limitStops.has(id)
+        ? 'limit'
+        : end.stopReason === 'end_turn'
+          ? 'done'
+          : end.stopReason === 'cancelled'
+            ? 'stopped'
+            : end.stopReason === null || end.stopReason === 'refusal'
+              ? 'failed'
+              : 'blocked'
     const summary =
       status === 'failed' && end.error
         ? cut(`${end.error}${reply ? `\n${reply}` : ''}`, SUMMARY_CHARS)
@@ -723,6 +748,7 @@ export class ManagerHub {
             rounds: settings.limits.reviewRounds,
             findings: report.findings ?? [],
             summary: report.summary,
+            tools: this.port.tools(current.implementerId),
           }),
           this.fromManager(managerId),
         )
@@ -785,6 +811,8 @@ export class ManagerHub {
     if (!manager || !implementer) return false
     const settings = this.settingsOf(managerId)
     const lang = this.port.lang()
+    const reviewing = loop?.reviewerId && this.attached(loop.reviewerId) ? loop.reviewerId : null
+    const entry = settings.workers.find((w) => w.id === settings.reviewerId)
     const text = reviewPrompt(lang, {
       implementer: implementer.name,
       title: implementer.title,
@@ -795,6 +823,11 @@ export class ManagerHub {
       round,
       rounds: settings.limits.reviewRounds,
       answer: round > 1 ? (implementer.report?.summary ?? null) : null,
+      tools: reviewing
+        ? this.port.tools(reviewing)
+        : entry
+          ? this.port.toolsFor(managerId, entry)
+          : true,
     })
     let current = loop
     if (!current) {
@@ -811,11 +844,9 @@ export class ManagerHub {
     current.state = 'reviewing'
     current.round = round
     this.port.save(managerId)
-    const reviewerId = current.reviewerId
-    if (reviewerId && this.attached(reviewerId)) {
-      await this.port.send(reviewerId, text, this.fromManager(managerId))
+    if (reviewing && current.reviewerId === reviewing) {
+      await this.port.send(reviewing, text, this.fromManager(managerId))
     } else {
-      const entry = settings.workers.find((w) => w.id === settings.reviewerId)
       if (!entry) {
         current.state = 'failed'
         this.port.save(managerId)
@@ -978,7 +1009,10 @@ export class ManagerHub {
     for (const id of this.workerIds(managerId)) {
       const link = this.attached(id)
       const state = this.port.state(id)
-      if (!link || !state || !(state.turn || WORKING.has(state.status))) continue
+      // One paused at its plan's limit goes on by itself, so it keeps its slot and its folder.
+      if (!link || !state || !(state.turn || WORKING.has(state.status) || state.limitPaused)) {
+        continue
+      }
       working.push({
         id,
         folder: this.port.folderKey(this.port.folder(id)),
@@ -1601,7 +1635,11 @@ export class ManagerHub {
     worker.resumedAt = this.port.now()
     this.port.save(id)
     try {
-      await this.port.send(id, resumePrompt(this.port.lang()), this.fromManager(worker.managerId))
+      await this.port.send(
+        id,
+        resumePrompt(this.port.lang(), this.port.tools(id)),
+        this.fromManager(worker.managerId),
+      )
     } catch (error) {
       this.port.log(
         'warn',

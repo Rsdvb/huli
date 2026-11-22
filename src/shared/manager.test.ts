@@ -72,6 +72,25 @@ describe('roster checks', () => {
     expect(workerProblem(worker({ agentId: 'not an agent' as never }))).toMatch(/agentId/)
   })
 
+  it('takes a sandbox of a tier and a network only', () => {
+    const sandbox = { tier: 'container', network: 'model' } as const
+    expect(workerProblem(worker({ sandbox }))).toBeNull()
+    expect(workerProblem(worker({ sandbox: { tier: 'jail', network: 'none' } as never }))).toMatch(
+      /sandbox/,
+    )
+    expect(workerProblem(worker({ sandbox: { ...sandbox, extra: 1 } as never }))).toMatch(/sandbox/)
+    expect(workerProblem(worker({ sandbox: { tier: 'native' } as never }))).toMatch(/sandbox/)
+    expect(workerProblem(worker({ sandbox: null as never }))).toMatch(/sandbox/)
+    // Read back as its own copy, held to what the tier can do.
+    const stored = { tier: 'container', network: 'none' }
+    const read = readManagerSettings({ workers: [worker({ sandbox: stored as never })] }, [])
+    expect(read.workers[0]!.sandbox).toEqual({ tier: 'container', network: 'model' })
+    expect(read.workers[0]!.sandbox).not.toBe(stored)
+    expect(readManagerSettings({ workers: [worker()] }, []).workers[0]).not.toHaveProperty(
+      'sandbox',
+    )
+  })
+
   it('counts a name in characters, not UTF-16 units', () => {
     expect(workerProblem(worker({ name: '🐱'.repeat(20) }))).toBeNull()
   })
@@ -722,5 +741,7 @@ describe('stored records', () => {
     expect(readStoredWorker({ ...base, managerId: '' })).toBeNull()
     expect(readStoredWorker({ ...base, role: 'boss' })).toBeNull()
     expect(readStoredWorker({ ...base, report: { status: 'nope' } })?.report).toBeUndefined()
+    const limit = { at: 1, status: 'limit', by: 'derived', summary: '', changed: [] }
+    expect(readStoredWorker({ ...base, report: limit })?.report?.status).toBe('limit')
   })
 })

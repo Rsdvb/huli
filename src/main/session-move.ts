@@ -40,6 +40,8 @@ const KEPT = 20
 const KNOWN_REASONS: ReadonlySet<string> = new Set<MoveProblem>([
   'busy',
   'subagent',
+  'manager',
+  'worker',
   'prepared',
   'noProject',
   'noGit',
