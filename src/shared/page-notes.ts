@@ -89,7 +89,10 @@ export function cssIdent(value: string): string {
 
 /** A double-quoted CSS string for an attribute's value. */
 export function cssString(value: string): string {
-  return `"${value.replace(/[\\"]/g, '\\$&').replace(/[\n\r\f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `)}"`
+  const escaped = value
+    .replace(/[\\"]/g, '\\$&')
+    .replace(/[\n\r\f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `)
+  return `"${escaped}"`
 }
 
 /**
@@ -257,8 +260,10 @@ export interface ElementPick {
   viewport: { width: number; height: number }
   /** The box in the view's own pixels, where the pane draws its outline and the comment's box. */
   frame: PageBox
-  /** The element as the page showed it, cropped to the viewport; null when none could be taken. */
-  shot: Uint8Array | null
+  /** The page as it showed, a PNG `data:` URL: the pane's still, and the screenshot's source. */
+  still: string
+  /** The element's visible part in the still's pixels; null when none of it is in view. */
+  crop: PageBox | null
 }
 
 /** The pick mode's outline color, the theme's accent as the pane reads it. */
@@ -344,7 +349,7 @@ const round = (value: number): number => Math.round(value)
 /** A note of `comment` on the element `pick` names, its screenshot's record in `shot`. */
 export function newPageNote(
   input: { id: string; comment: string; at: number; shot: Attachment | null; shotHost?: string },
-  pick: Omit<ElementPick, 'shot' | 'frame'>,
+  pick: Omit<ElementPick, 'still' | 'crop' | 'frame'>,
 ): PageNote {
   return {
     id: input.id,

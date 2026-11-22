@@ -214,6 +214,13 @@ export class BrowserViews {
         return { tabId: tab.id, contents, zoom: this.zoomOf(tab) }
       },
       event: (event) => deps.picked?.(event),
+      freeze: (sessionId) => {
+        const browser = this.browsers.get(sessionId)
+        if (!browser || browser.frozen) return
+        browser.frozen = true
+        this.present(browser)
+        this.syncOverlay()
+      },
       log: (message) => log.warn(message),
     })
     this.policy = new BrowserPolicy(this.browserSession, {

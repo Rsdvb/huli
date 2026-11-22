@@ -2,7 +2,7 @@
 // the pointer with its tag and classes, and a click there names it to the pane. Nothing is put in
 // the page: Chromium draws the overlay in a layer of its own, which the page's styles never reach
 // and its scripts never see, and it goes when the mode ends. The element's place, text and box are
-// read in an isolated world, and its picture is a screenshot clipped to it.
+// read in an isolated world; one screenshot of the page is the pane's still and its picture.
 
 import type { WebContents } from 'electron'
 import {
@@ -45,8 +45,6 @@ export function highlightConfig(color: PickColor): Record<string, unknown> {
 
 /** How long reading a picked element may take before the pick is given up. */
 const READ_MS = 5_000
-/** The longest side of the element's screenshot, in the page's CSS pixels. */
-const MAX_SHOT_SIDE = 2_000
 const GROUP = 'kite-pick'
 const WORLD = 'kite-pick'
 
@@ -163,6 +161,13 @@ export async function endInspect(contents: WebContents, keep = false): Promise<v
   if (!keep) await send(contents, 'Overlay.disable').catch(() => {})
 }
 
+/** A PNG's width from its header, in base64; null when it is no PNG. */
+export function pngWidth(base64: string): number | null {
+  const head = Buffer.from(base64.slice(0, 32), 'base64')
+  if (head.length < 24 || head.toString('ascii', 12, 16) !== 'IHDR') return null
+  return head.readUInt32BE(16)
+}
+
 function isBox(value: unknown): value is PageBox {
   if (typeof value !== 'object' || value === null) return false
   const { x, y, width, height } = value as Record<string, unknown>
@@ -236,7 +241,7 @@ async function call<T>(
 
 /**
  * The element the user clicked, by its backend id: its selector, label, text, box, and a
- * screenshot clipped to its visible part. `zoom` is the page's zoom factor, which scales its CSS
+ * screenshot of the page with its visible part. `zoom` is the page's zoom factor, which scales its CSS
  * pixels to the view's. Null when the element could not be read.
  */
 export async function readPick(
@@ -273,32 +278,29 @@ async function readElement(
   const inner = unique ?? candidates.at(-1)!
   const host = parseElementPath(read.host ? [read.host] : null)
   const selector = host ? `${elementLabel(host[0]!)} >>> ${inner}` : inner
-  const metrics = await send<{
-    cssVisualViewport?: { pageX: number; pageY: number; clientWidth: number; clientHeight: number }
-  }>(contents, 'Page.getLayoutMetrics')
-  const viewport = metrics.cssVisualViewport ?? {
-    pageX: 0,
-    pageY: 0,
-    clientWidth: 0,
-    clientHeight: 0,
-  }
+  const metrics = await send<{ cssVisualViewport?: { clientWidth: number; clientHeight: number } }>(
+    contents,
+    'Page.getLayoutMetrics',
+  )
+  const viewport = metrics.cssVisualViewport ?? { clientWidth: 0, clientHeight: 0 }
   const box = read.box
+  // The whole viewport, unclipped: a clip moves the viewport to it, which a still taken right
+  // after would show. Its fresh frame has none of the overlay, which left before.
+  const image = await send<{ data: string }>(contents, 'Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: false,
+  })
+  const width = pngWidth(image.data)
   const seen = visiblePart(box, viewport.clientWidth, viewport.clientHeight)
-  let shot: Uint8Array | null = null
-  if (seen) {
-    const scale = Math.min(1, MAX_SHOT_SIDE / Math.max(seen.width, seen.height))
-    const image = await send<{ data: string }>(contents, 'Page.captureScreenshot', {
-      format: 'png',
-      clip: {
-        x: seen.x + viewport.pageX,
-        y: seen.y + viewport.pageY,
-        width: seen.width,
-        height: seen.height,
-        scale,
-      },
-    }).catch(() => null)
-    if (image?.data) shot = new Uint8Array(Buffer.from(image.data, 'base64'))
-  }
+  const scale = width && viewport.clientWidth > 0 ? width / viewport.clientWidth : 1
+  const crop = seen
+    ? {
+        x: Math.floor(seen.x * scale),
+        y: Math.floor(seen.y * scale),
+        width: Math.max(1, Math.round(seen.width * scale)),
+        height: Math.max(1, Math.round(seen.height * scale)),
+      }
+    : null
   const url = contents.getURL()
   return {
     url,
@@ -314,7 +316,8 @@ async function readElement(
       width: box.width * zoom,
       height: box.height * zoom,
     },
-    shot,
+    still: `data:image/png;base64,${image.data}`,
+    crop,
   }
 }
 
@@ -331,6 +334,8 @@ export interface PagePickerDeps {
   page(sessionId: string): PickPage | null
   /** Tells the pane of an element picked, or of the mode's end. */
   event(event: PickEvent): void
+  /** Hides the page for the pane's still of it, which the pick carries, until the pane thaws it. */
+  freeze(sessionId: string): void
   log(message: string): void
 }
 
@@ -448,6 +453,7 @@ export class PagePicker {
       void beginInspect(picking.contents, picking.color)
       return
     }
+    this.deps.freeze(sessionId)
     this.deps.event({ sessionId, kind: 'picked', pick })
   }
 }

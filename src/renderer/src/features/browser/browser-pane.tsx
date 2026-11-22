@@ -127,6 +127,9 @@ export function BrowserPane({
   // A notice, the address row or the origin card moves the page's frame without resizing it.
   useLayoutEffect(report)
 
+  // The frame is another element once the page appears, which the observer must follow: the pick
+  // mode's hint and the comments under the page resize it without this pane rendering again.
+  const framed = !!state && (!!state.url || state.page)
   useLayoutEffect(() => {
     const element = page.current
     if (!element) return
@@ -137,7 +140,7 @@ export function BrowserPane({
       observer.disconnect()
       window.removeEventListener('resize', report)
     }
-  }, [report])
+  }, [report, framed])
 
   // An overlay that covers the page takes a still in its place: a web view is a native layer the
   // renderer cannot draw over.
@@ -178,23 +181,12 @@ export function BrowserPane({
     return () => stopPicking(sessionId)
   }, [sessionId])
 
-  // Huli: a picked element's comment opens over a still of the page; once it closes the page
-  // comes back, and picking goes on while the mode is on.
+  // Huli: a picked element's comment opens over the still of the page the pick carries, main having
+  // hidden the page; once it closes the page comes back, and picking goes on while the mode is on.
   useEffect(() => {
     if (!sessionId || !picked) return
-    let cancelled = false
-    void window.kettu.browser
-      .freeze(sessionId)
-      .then((image) => {
-        if (cancelled) return
-        if (image) useBrowserStore.getState().setStill(sessionId, image)
-        else if (!useBrowserStore.getState().stills[sessionId]) {
-          useBrowserStore.getState().setPicked(sessionId, null)
-        }
-      })
-      .catch(() => {})
+    useBrowserStore.getState().setStill(sessionId, picked.still)
     return () => {
-      cancelled = true
       void window.kettu.browser.thaw(sessionId).finally(() => {
         useBrowserStore.getState().setStill(sessionId, null)
         if (useBrowserStore.getState().picking[sessionId]) void startPicking(sessionId)

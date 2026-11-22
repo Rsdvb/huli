@@ -13,6 +13,7 @@ import {
 import type { Attachment } from '@shared/thread'
 import { readDraftPageNotes, writeDraftPageNotes } from '@renderer/features/session/composer/drafts'
 import { prepareImage } from '@renderer/features/session/composer/image-work'
+import { base64Bytes } from '@renderer/features/session/media/carried'
 import { host, hostAt, learnAttachmentHost } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
 
@@ -24,10 +25,29 @@ function shotName(url: string): string {
   return site ? `element-${site}.png` : 'element.png'
 }
 
+/** The element's visible part, cut from the still of the page; null when none was in view. */
+async function cropShot(pick: ElementPick): Promise<Blob | null> {
+  const { crop } = pick
+  if (!crop) return null
+  const bytes = base64Bytes(pick.still.slice(pick.still.indexOf(',') + 1))
+  const bitmap = await createImageBitmap(
+    new Blob([new Uint8Array(bytes)], { type: 'image/png' }),
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+  )
+  const canvas = new OffscreenCanvas(crop.width, crop.height)
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0)
+  bitmap.close()
+  return canvas.convertToBlob({ type: 'image/png' })
+}
+
 /** Adds the element's screenshot on the session's host, `hostId` null being this computer. */
 async function addShot(pick: ElementPick, hostId: string | null): Promise<Attachment | null> {
-  if (!pick.shot) return null
-  const image = await prepareImage(new Blob([new Uint8Array(pick.shot)], { type: 'image/png' }))
+  const shot = await cropShot(pick)
+  if (!shot) return null
+  const image = await prepareImage(shot)
   const params = {
     source: { bytes: image.bytes, mimeType: image.mimeType, name: shotName(pick.url) },
     thumb: image.thumb,

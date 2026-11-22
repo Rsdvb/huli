@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({}))
 
-const { highlightConfig, parsePickColor, visiblePart } = await import('./pick')
+const { highlightConfig, parsePickColor, pngWidth, visiblePart } = await import('./pick')
 
 describe('parsePickColor', () => {
   it('takes three channels of 0 to 255', () => {
@@ -24,6 +24,20 @@ describe('parsePickColor', () => {
     expect(config.borderColor).toEqual({ r: 10, g: 20, b: 30, a: 0.75 })
     expect(config.showInfo).toBe(true)
     expect(config.showStyles).toBe(false)
+  })
+})
+
+describe('pngWidth', () => {
+  it('reads the width from a PNG header', () => {
+    const header = Buffer.alloc(24)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header)
+    header.writeUInt32BE(13, 8)
+    header.write('IHDR', 12, 'ascii')
+    header.writeUInt32BE(1503, 16)
+    header.writeUInt32BE(900, 20)
+    expect(pngWidth(header.toString('base64'))).toBe(1503)
+    expect(pngWidth(Buffer.from('not a png at all, really').toString('base64'))).toBeNull()
+    expect(pngWidth('')).toBeNull()
   })
 })
 
