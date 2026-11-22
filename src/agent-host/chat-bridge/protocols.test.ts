@@ -99,8 +99,10 @@ describe('WeCom files', () => {
 
   it('refuses a file the key does not open', () => {
     const plain = Buffer.from('a picture')
-    const encrypted = encrypt(plain, randomBytes(32))
-    expect(() => decryptWeComFile(encrypted, randomBytes(32).toString('base64'))).toThrow()
+    // Fixed keys: a random wrong key leaves valid padding about once in 256 tries, as CBC has no
+    // check of its own, so a random pair failed the test now and then.
+    const encrypted = encrypt(plain, Buffer.alloc(32, 1))
+    expect(() => decryptWeComFile(encrypted, Buffer.alloc(32, 2).toString('base64'))).toThrow()
     expect(() => decryptWeComFile(encrypted, randomBytes(16).toString('base64'))).toThrow()
     expect(() =>
       decryptWeComFile(encrypted.subarray(1), randomBytes(32).toString('base64')),

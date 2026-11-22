@@ -15,6 +15,11 @@ export default defineConfig({
     expect: { poll: { timeout: 5_000 } },
     // A full run on Windows starts processes and writes files many times slower than on Linux,
     // so tests that write a few hundred files outlast the defaults there.
-    ...(process.platform === 'win32' ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}),
+    // Huli: there, a worker per core also starts hundreds of short processes in a burst that an
+    // antivirus scans one by one, which stutters the owner's machine; a quarter of the cores keeps
+    // a full run near its speed without that.
+    ...(process.platform === 'win32'
+      ? { testTimeout: 20_000, hookTimeout: 30_000, maxWorkers: '25%' }
+      : {}),
   },
 })
