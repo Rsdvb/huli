@@ -3,7 +3,8 @@
 // architecture into resources/cua-driver/, with Cua's license and third-party notices for the
 // notices file. Every download is pinned to the release and checked against its SHA-256 before it
 // is used, and nothing downloaded is run. The release run calls it before the build; in a checkout,
-// `pnpm fetch:cua-driver`. No dependencies beyond the system's tar, and lipo on macOS.
+// `pnpm fetch:cua-driver`. No dependencies beyond the system's tar, and lipo on macOS. It then
+// builds Kite's own kite-computer-helper beside it from native/computer-helper (Windows and macOS).
 //
 // Usage: node tools/install/cua-driver.mjs [--platform darwin|win32|linux] [--arch arm64|x64]
 
@@ -14,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { buildComputerHelper } from '../../native/computer-helper/build.mjs'
 
 const VERSION = '0.58.1'
 const RELEASE = `https://github.com/trycua/cua/releases/download/cua-driver-rs-v${VERSION}`
@@ -157,4 +159,14 @@ if (
   } finally {
     await rm(work, { recursive: true, force: true })
   }
+}
+
+// The helper is built on the target's own system. A macOS build that fails leaves computer use
+// without text recognition rather than failing the release, as no Mac checks it before the run.
+if (platform === process.platform) {
+  const code = buildComputerHelper(out, platform, arch)
+  if (code !== 0 && platform !== 'darwin') throw new Error(`kite-computer-helper failed (${code})`)
+  if (code !== 0) console.warn('kite-computer-helper: not built; computer use reads no text from pictures')
+} else if (platform === 'win32' || platform === 'darwin') {
+  console.warn(`kite-computer-helper: not built for ${platform} on ${process.platform}`)
 }
