@@ -186,8 +186,11 @@ const SECTION_TOPICS = [
   'Persistence',
 ]
 
-/** Markdown of about `bytes` characters, made of varied sections. */
-export function longMarkdown(bytes: number): string {
+/**
+ * Markdown of about `bytes` characters, made of varied sections; with `rich`, every twentieth is
+ * the reply content scenario's text and blocks: maths, a diagram, a picture and a long code block.
+ */
+export function longMarkdown(bytes: number, rich = false): string {
   const parts: string[] = []
   let size = 0
   let index = 0
@@ -213,8 +216,9 @@ function step${index + 1}(input: string): string {
 | ${index + 1}.2 | done | second pass |
 
 `
-    parts.push(section)
-    size += section.length
+    const extra = rich && index % 20 === 10 ? `${CONTENT_TEXT}\n${CONTENT_BLOCKS}\n` : ''
+    parts.push(section + extra)
+    size += section.length + extra.length
     index++
   }
   return parts.join('').slice(0, bytes)
