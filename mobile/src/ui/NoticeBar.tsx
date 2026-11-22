@@ -15,6 +15,8 @@ export interface Notice {
   text: string
   tone?: 'success' | 'info' | 'warning'
   action?: { label: string; onPress(): void }
+  /** How long it shows, in ms; Undo after a snooze or settle shows for five seconds. */
+  ms?: number
 }
 
 const SHOWN_MS = 6000
@@ -70,7 +72,7 @@ export function NoticeBar() {
           if (finished && current?.id === notice.id) hideNotice()
         },
       )
-    }, SHOWN_MS)
+    }, notice.ms ?? SHOWN_MS)
     return () => clearTimeout(timer)
   }, [notice, shown, reduce])
 

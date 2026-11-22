@@ -17,6 +17,9 @@ import { agentLabel } from '../agentName'
 import { BOARD_STATUSES } from '@shared/session-board'
 import { BOARD_ICON, BOARD_LABEL, boardStatusOf } from '../board'
 import { entryShownOnPhone } from '../host'
+import { planReturns, snoozePresets } from '@shared/session-tidy'
+import { PRESET_LABEL, laterTimes } from '../tidy'
+import { momentText } from '../ui/session/format'
 
 export interface SessionMenuContext {
   summary: SessionSummary
@@ -157,6 +160,32 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         page: 'title-board',
       })
     }
+    // Huli: 稍后提醒, 收起 and 永不收起, for a session of the user's own in the list (会话整理).
+    const tidy: MenuEntry[] =
+      topLevel && summary.origin === 'user' && !archived && entryShownOnPhone('phone.snooze')
+        ? [
+            {
+              key: 'snooze',
+              label: '稍后提醒',
+              icon: G.alarm,
+              ...(summary.snooze ? { detail: momentText(summary.snooze.until) } : {}),
+              page: 'title-snooze',
+            },
+            summary.settled
+              ? {
+                  key: 'unsettle',
+                  label: '移回列表',
+                  icon: G.undo,
+                  onPress: () => actions.settle(summary, false),
+                }
+              : {
+                  key: 'settle',
+                  label: '收起',
+                  icon: G.tray,
+                  onPress: () => actions.settle(summary, true),
+                },
+          ]
+        : []
     const forks: MenuEntry[] =
       topLevel && ctx.canFork
         ? [
@@ -242,7 +271,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         onPress: () => actions.remove(summary),
       },
     ]
-    return { entries: joined([[headRow(ctx)], state, own, make, links, ending]) }
+    return { entries: joined([[headRow(ctx)], state, own, tidy, make, links, ending]) }
   }
 
   return (id) => {
@@ -257,6 +286,62 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
           icon: BOARD_ICON[status],
           checked: status === board,
           onPress: () => actions.setBoard(summary, status),
+        })),
+      }
+    }
+    if (id === 'title-snooze') {
+      const now = Date.now()
+      const reset = planReturns(summary, ctx.agent, now)
+      return {
+        title: '稍后提醒',
+        entries: joined([
+          snoozePresets(now).map(({ preset, until }) => ({
+            key: preset,
+            label: PRESET_LABEL[preset],
+            detail: momentText(until, now),
+            onPress: () => actions.snooze(summary, until),
+          })),
+          [
+            {
+              key: 'reset',
+              label: '额度恢复后',
+              detail: reset === null ? '额度没用完' : momentText(reset, now),
+              disabled: reset === null,
+              onPress: () => actions.snooze(summary, 'reset'),
+            },
+            { key: 'later', label: '更多时间', page: 'title-snooze-later' },
+          ],
+          summary.snooze
+            ? [
+                {
+                  key: 'wake',
+                  label: '取消推迟',
+                  icon: G.undo,
+                  onPress: () => actions.wake(summary),
+                },
+              ]
+            : [],
+          [
+            {
+              key: 'never',
+              label: '永不收起',
+              icon: G.tray,
+              checked: summary.neverSettle === true,
+              onPress: () => actions.setNeverSettle(summary, summary.neverSettle !== true),
+            },
+          ],
+        ]),
+      }
+    }
+    if (id === 'title-snooze-later') {
+      const now = Date.now()
+      return {
+        title: '更多时间',
+        entries: laterTimes(now).map((time) => ({
+          key: time.key,
+          label: time.label,
+          detail: momentText(time.until, now),
+          onPress: () => actions.snooze(summary, time.until),
         })),
       }
     }
