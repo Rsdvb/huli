@@ -129,6 +129,7 @@ import {
   isOverlayWindow,
   showMainWindow,
   watchTheme,
+  watchWindowsShown,
   WindowStateStore,
 } from './window'
 
@@ -1132,6 +1133,7 @@ async function start(): Promise<void> {
     updater.systemShutdown()
   })
   powerMonitor.on('suspend', () => agentHost.power('suspend'))
+  watchWindowsShown((shown) => agentHost.windowsVisible(shown))
   powerMonitor.on('resume', () => {
     agentHost.power('resume')
     remoteHost.resume()

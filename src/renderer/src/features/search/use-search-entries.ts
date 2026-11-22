@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { ConversationHit, SessionSummary } from '@shared/agent-host'
 import { artifactKind, recency } from '@renderer/features/artifacts/model'
-import { scheduleWords } from '@renderer/features/routines/model'
+import { triggerWords } from '@renderer/features/routines/model'
 import { shortcutList, type ShortcutAction } from '@renderer/features/shell/shortcuts'
 import { useCloudOff } from '@renderer/lib/cloud'
 import { basename, dirname, shortAgo } from '@renderer/lib/format'
@@ -232,7 +232,7 @@ function useRoutineEntries(): SearchEntry[] {
   return useMemo(
     () =>
       routines.map((routine): SearchEntry => {
-        const schedule = scheduleWords(routine.trigger.schedule)
+        const schedule = triggerWords(routine.trigger)
         const project = projectName(routine.projectPath)
         const host = named ? hostName(routineHost(routine.id)) : null
         return {

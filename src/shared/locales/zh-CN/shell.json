@@ -99,7 +99,8 @@
       "marketplaceItem": "市场 › {{item}}",
       "settings": "设置 › {{section}}",
       "settingsItem": "设置 › {{section}} › {{item}}",
-      "group": "同时交给几个 Agent"
+      "group": "同时交给几个 Agent",
+      "issues": "议题"
     }
   },
   "debugMode": {

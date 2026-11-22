@@ -49,6 +49,7 @@ import type {
 } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './session-groups'
+import type { IssueInbox, SessionIssue, SessionPrFlow } from './github-flow'
 import type {
   CatalogServer,
   ConnectStart,
@@ -861,6 +862,10 @@ export interface SessionSummary {
   stall?: Stall | null
   // Huli: a run of a best-of-N group; null for a session on its own; absent from older hosts
   group?: SessionGroupRef | null
+  // Huli: the GitHub issue it was started for; null for none; absent from older hosts
+  issue?: SessionIssue | null
+  // Huli: its pull request merged once green or watched for its agent; null while neither is on
+  prFlow?: SessionPrFlow | null
 }
 
 /**
@@ -1581,6 +1586,15 @@ export interface HostContract {
   'sessions.limitPause': { params: { sessionId: string; action: LimitPauseAction }; result: void }
   /** Huli: whether the session goes on by itself after a plan limit, over the settings' choice. */
   'sessions.setAutoResume': { params: { sessionId: string; on: boolean }; result: void }
+  /**
+   * Huli: merges the session's pull request at `url` once its checks pass, then archives the
+   * session, and/or tells its agent of new failures, conflicts and reviews. Each switch changes
+   * only when named; both off ends it. `url` must be one of the session's pull requests.
+   */
+  'sessions.setPrFlow': {
+    params: { sessionId: string; url: string; autoMerge?: boolean; watch?: boolean }
+    result: SessionSummary
+  }
   /** Huli: stops a turn that looks stuck, stops it and goes on again, or keeps waiting. */
   'sessions.stall': { params: { sessionId: string; action: StallAction }; result: void }
   // An image or pasted text the thread store keeps for a sent attachment, by its hash.
@@ -1688,6 +1702,24 @@ export interface HostContract {
   'git.avatarUrl': { params: { login: string }; result: string | null }
   'git.currentPullRequest': { params: { projectPath: string }; result: PullRequest | null }
   'git.tools': { params: void; result: GitTools }
+  // Huli: the open issues of the project's GitHub repository, the most recently updated first;
+  // `mine` asks for those assigned to the account gh is signed in as. Read when asked, never polled.
+  'github.issues': {
+    params: { projectPath: string; filter: 'mine' | 'all' }
+    result: IssueInbox
+  }
+  // Huli: starts a session in the project with the issue's title, text and link as its first
+  // message, linked to the issue, in a new worktree cut from `worktree.base` when given.
+  'github.startIssue': {
+    params: {
+      projectPath: string
+      url: string
+      agentId: AgentId
+      options?: Record<string, string | boolean>
+      worktree?: { base: string }
+    }
+    result: SessionSummary
+  }
   // Kettu's own repository through this host's gh; the repository is fixed, never a parameter.
   'star.state': { params: void; result: GitHubStarState }
   // Stars it on the user's click; false when gh could not, and the client opens the page instead.
@@ -2280,6 +2312,7 @@ export const HOST_METHODS = [
   'sessions.resumeQueue',
   'sessions.limitPause',
   'sessions.setAutoResume',
+  'sessions.setPrFlow',
   'sessions.stall',
   'sessions.blob',
   'sessions.setConfigOption',
@@ -2348,6 +2381,8 @@ export const HOST_METHODS = [
   'git.avatarUrl',
   'git.currentPullRequest',
   'git.tools',
+  'github.issues',
+  'github.startIssue',
   'star.state',
   'star.add',
   'star.dismiss',

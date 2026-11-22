@@ -1008,3 +1008,11 @@ button.k-run:focus-visible {
     grid-area: 1 / 3 / span 2;
   }
 }
+/* Huli: the label or branch a routine's GitHub event takes. */
+.k-trigger-input {
+  width: 200px;
+  max-width: 100%;
+}
+.k-trigger-input[aria-invalid] {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}

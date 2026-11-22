@@ -192,6 +192,7 @@ import { STEP_HARNESSES } from './workflow/picks'
 import { createTaskGit } from './workflow/git'
 import { createGroupGit } from './groups/git'
 import { SessionGroups } from './groups/groups'
+import { GithubFlow } from './github-flow/flow'
 import { optionsOfPick, pickOfOptions, workflowAgents } from './workflow/host-agents'
 import { WorkflowLibrary, workflowsFile } from './workflow/library'
 import type { RoutineSessionHooksRef } from './routines/hooks'
@@ -226,6 +227,7 @@ import {
   harnessManifestFile,
   returnedFile,
   routinesFile,
+  githubFlowFile,
   sessionsFile,
   type AgentsFile,
   type AgentUpdatesFile,
@@ -480,6 +482,10 @@ export class AgentHost {
   /** The tasks that run through workflows. */
   readonly tasks: TaskEngine
   private readonly groups: SessionGroups
+  /** Huli: the issue inbox, pull requests merged once green or watched, and GitHub triggers. */
+  private readonly githubFlow: GithubFlow
+  /** The routines' GitHub triggers the flow last planned for. */
+  private flowTriggers = ''
   /** The attachments of drafts and queued prompts, until sent or removed. */
   readonly attachments: Attachments
   /** Every session's thread, read a page at a time, in a worker of its own. */
@@ -1233,6 +1239,7 @@ export class AgentHost {
       idleRelease: this.idleRelease,
       diagnostics: this.diagnostics,
       git: () => this.git,
+      prFlowChanged: () => void this.githubFlow.refresh(),
       options: this.agentOptions,
       settings: () => this.settings,
       ...(options.sessionTimings ? { timings: options.sessionTimings } : {}),
@@ -1387,8 +1394,14 @@ export class AgentHost {
       timings: options.routineTimings,
       ...(options.routineClock ? { clock: options.routineClock } : {}),
       events: {
-        changed: (routine) => this.broadcast({ type: 'routine.changed', routine }),
-        removed: (routineId) => this.broadcast({ type: 'routine.removed', routineId }),
+        changed: (routine) => {
+          this.broadcast({ type: 'routine.changed', routine })
+          this.routineTriggersChanged()
+        },
+        removed: (routineId) => {
+          this.broadcast({ type: 'routine.removed', routineId })
+          this.routineTriggersChanged()
+        },
         run: (run) => this.broadcast({ type: 'routine.run', run }),
         working: (working) => options.send({ type: 'host:routines-working', working }),
         attention: (kind, sessionId, title, body) =>
@@ -1470,6 +1483,32 @@ export class AgentHost {
       releaseAttachments: (ids) => void attachments.release(ids),
       agentName: (agentId) => this.agents.name(agentId),
       log,
+    })
+    const sessions = this.sessions
+    this.githubFlow = new GithubFlow({
+      exec: this.execRunner.exec,
+      home: os.homedir(),
+      tools: () => this.gitCall((git) => git.tools()),
+      repoOf: async (folder) => {
+        const status = await this.gitCall((git) => git.status(folder))
+        return status.remote?.github ?? null
+      },
+      sessions: {
+        flows: () => sessions.prFlows(),
+        update: (sessionId, url, change) => sessions.updatePrFlow(sessionId, url, change),
+        setState: (sessionId, state) => sessions.setPrFlowState(sessionId, state),
+        note: (sessionId, severity, title, description) =>
+          sessions.flowNote(sessionId, severity, title, description),
+        tell: (sessionId, text) => sessions.tellFromHost(sessionId, text),
+        closeMerged: (sessionId, headOid) => sessions.closeMerged(sessionId, headOid),
+      },
+      routines: {
+        triggers: () => this.routines.eventTriggers(),
+        idle: (routineId) => this.routines.idleForEvent(routineId),
+        fire: (routineId, cause, context) => this.routines.runOnEvent(routineId, cause, context),
+      },
+      file: githubFlowFile(options.userDataPath, log),
+      log: (level, message) => log(level, message),
     })
     this.consents = new ArtifactConsents({
       store: this.artifacts,
@@ -1588,6 +1627,9 @@ export class AgentHost {
     host.agents.restoreUpdates(updates)
     void host.moveLocalMarketplaces()
     host.routines.start()
+    // Huli: reads GitHub only for what a session or a routine turned on.
+    host.routineTriggersChanged()
+    void host.githubFlow.refresh()
     void host.marketSkills.sync()
     host.sendFolders()
     void host.sessions.checkWorktrees()
@@ -2289,6 +2331,20 @@ export class AgentHost {
   /** The computer slept or woke, so the routines' timer starts over from the wall clock. */
   power(state: 'suspend' | 'resume'): void {
     this.routines.power(state)
+    this.githubFlow.power(state)
+  }
+
+  /** Huli: whether a window of the app shows, which the GitHub flow reads more slowly without. */
+  windowsVisible(visible: boolean): void {
+    this.githubFlow.setVisible(visible)
+  }
+
+  /** Huli: the routines' GitHub triggers changed, so the flow plans its reads again. */
+  private routineTriggersChanged(): void {
+    const triggers = JSON.stringify(this.routines.eventTriggers())
+    if (triggers === this.flowTriggers) return
+    this.flowTriggers = triggers
+    void this.githubFlow?.refresh()
   }
 
   busy(requestId: number): void {
@@ -2867,6 +2923,7 @@ export class AgentHost {
     this.stopping ??= (async () => {
       this.chatBridge?.stop()
       await this.routines.shutdown()
+      this.githubFlow.stop()
       this.sessions.shutdown()
       this.idleRelease.stop()
       this.usage.stop()
@@ -3363,6 +3420,13 @@ export class AgentHost {
       'sessions.limitPause': ({ sessionId, action }) =>
         sessions.limitPauseAction(sessionId, action),
       'sessions.setAutoResume': ({ sessionId, on }) => sessions.setAutoResume(sessionId, on),
+      'sessions.setPrFlow': ({ sessionId, url, autoMerge, watch }) =>
+        this.gitCall(() =>
+          sessions.setPrFlow(sessionId, url, {
+            ...(autoMerge === undefined ? {} : { autoMerge }),
+            ...(watch === undefined ? {} : { watch }),
+          }),
+        ),
       'sessions.stall': ({ sessionId, action }) => sessions.stallAction(sessionId, action),
       'sessions.blob': ({ sessionId, hash }) => sessions.blob(sessionId, hash),
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
@@ -3500,6 +3564,24 @@ export class AgentHost {
         this.gitProjectCall(projectPath, (g, p) => g.discardChanges(p, paths)),
       'git.pullRequest': ({ url }) => this.gitCall((g) => g.pullRequest(url)),
       'git.issue': ({ url }) => this.gitCall((g) => g.issue(url)),
+      'github.issues': ({ projectPath, filter }) =>
+        this.gitCall(() => this.githubFlow.issues(projects.match(projectPath).path, filter)),
+      'github.startIssue': async (params, { portId, device }) => {
+        const projectPath = projects.match(params.projectPath).path
+        const text = await this.gitCall(() => this.githubFlow.issuePrompt(projectPath, params.url))
+        return sessions.create(
+          {
+            agentId: params.agentId,
+            projectPath,
+            ...(params.options ? { options: params.options } : {}),
+            prompt: [{ type: 'text', text }],
+            ...(params.worktree ? { worktree: params.worktree } : {}),
+            issue: params.url,
+            ...(device ? { device: fromDevice(device) } : {}),
+          },
+          portId,
+        )
+      },
       'git.watchReferences': ({ urls }, { portId }) => {
         if (this.hub.has(portId)) this.requireGit().watchReferences(portId, urls)
       },

@@ -1,0 +1,54 @@
+{
+  "author": {
+    "id": "U_1",
+    "is_bot": false,
+    "login": "octocat",
+    "name": "Mona Octocat"
+  },
+  "baseRefName": "main",
+  "comments": [],
+  "headRefName": "kite/fix-login",
+  "headRefOid": "d43c4e3ad3c34332c803a568f85f116e3ee58f19",
+  "isDraft": false,
+  "mergeStateStatus": "CLEAN",
+  "mergeable": "MERGEABLE",
+  "number": 44,
+  "reviewDecision": "APPROVED",
+  "reviews": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-03T21:29:08Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/octo-org/hello-world/actions/runs/41722208901/job/126217657403",
+      "name": "label-external",
+      "startedAt": "2026-11-03T21:29:09Z",
+      "status": "COMPLETED",
+      "workflowName": "PR Triaging"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-03T21:23:31Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/octo-org/hello-world/actions/runs/41721000240/job/126213408501",
+      "name": "CodeQL-Build (go, manual, ./.github/codeql/codeql-config.yml)",
+      "startedAt": "2026-11-03T21:21:08Z",
+      "status": "COMPLETED",
+      "workflowName": "Code Scanning"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-03T21:22:59Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/octo-org/hello-world/actions/runs/41720843855/job/126212878043",
+      "name": "lint",
+      "startedAt": "2026-11-03T21:20:09Z",
+      "status": "COMPLETED",
+      "workflowName": "Lint"
+    }
+  ],
+  "title": "Tidy the README",
+  "updatedAt": "2026-11-13T12:06:21Z",
+  "url": "https://github.com/octo-org/hello-world/pull/44"
+}

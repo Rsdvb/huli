@@ -244,6 +244,11 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       case 'host:power':
         withHost((h) => h.power(message.state))
         break
+      case 'host:windows-visible':
+        if (typeof message.visible === 'boolean') {
+          withHost((h) => h.windowsVisible(message.visible))
+        }
+        break
       case 'host:computer-control':
         if (
           typeof message.sessionId === 'string' &&

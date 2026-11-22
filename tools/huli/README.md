@@ -265,6 +265,49 @@ exists: the session list, its events and the phone get the groups for free.
   be (`components/BestOfRow.tsx`), opening to the runs' rows; a finished run's menu offers 保留这个.
 - The fake agent's `/write [file] [text]` makes a real edit, to compare runs with.
 
+### GitHub flow (议题、自动合并、盯 PR、GitHub 触发)
+
+After T3 Code's Issues page, Conductor, Claude desktop's merge when ready and JetBrains Air's
+triggers. Everything goes through the user's own `gh` (no auth of Kite's own) and only reads,
+except the merge.
+
+- `src/shared/github-flow.ts`: the inbox's issues, a session's linked issue and pull request
+  automation (`SessionPrFlow`), the routine events (`GithubEvent`) and a run's cause.
+- `src/agent-host/github-flow/gh-api.ts`: the `gh` calls and their mapping. REST reads go through
+  `gh api --include` with the last ETag in `If-None-Match`; gh exits 1 on a 304, which is read
+  from the status line. The merge is `gh pr merge <url> --squash|--merge|--rebase
+--match-head-commit <oid>` (squash, else a merge commit, else rebase, as the repository
+  allows), run outside any checkout so gh touches no local branch.
+- `decide.ts` (pure, tested with recorded responses in `fixtures/`): merge only an open, not
+  draft pull request whose checks all passed, which GitHub calls mergeable and CLEAN (or
+  HAS_HOOKS), with no change requested and the session's agent idle; with no checks at all, two
+  reads must find the same head ready. The watch tells the agent once per head of failing checks
+  (names, links, `gh run view <run> --job <job> --log-failed`) and of a conflict (files from
+  `git merge-tree` in the session's folder), and once per review or comment by someone other
+  than the author; reviews and comments from before the watch began count as seen. Triggers:
+  issues and pull requests opened after the trigger was armed; checks, pushes and a branch
+  behind the default branch count from the first read on, each event once.
+- `flow.ts`: the reads. Only repositories that a session's automation or an enabled routine
+  trigger needs are read, one timer each, at most once a minute, at the git service's cadence
+  (60 s while checks run, else 5 min), three times slower while no window shows
+  (`host:windows-visible` from `watchWindowsShown` in `src/main/window.ts`), backing off after
+  failures up to 30 min, and not at all while the computer sleeps. With nothing turned on there
+  is no timer. The issue inbox is read when its page opens or on Refresh, never polled.
+- Sessions: `issue` and `prFlow` in the session record (`seen` keys, `ended`); `setPrFlow`
+  accepts only one of the session's pull requests. After a merge the session is archived, and its
+  worktree removed (its branch kept) unless it has uncommitted changes, commits the merge lacks,
+  or another session works in it; a note in the thread says what happened. Routine triggers'
+  cursors live in `state/github-flow.json`; a routine on an event keeps its schedule for older
+  clients, and a run on an event gets the event appended to its prompt.
+- Desktop: the project menu's 议题 opens `features/issues/issues-page.tsx`; the session menus'
+  检查通过后自动合并 and 盯着这个 PR, the top bar's issue and automation chips and the row's
+  issue badge (`features/git/flow-chips.tsx`, `flow-model.ts`); the routine page's trigger
+  (`features/routines/trigger-field.tsx`). Phone: the session's chips show the linked issue and
+  the automation's state; routines show their event.
+- Checking it without GitHub: a fake `gh.exe` (a C# launcher compiled with the .NET Framework's
+  `csc.exe` that runs a Node script of recorded answers) first on the test copy's `PATH`, and a
+  repository whose `origin` names a github.com repository nothing is pushed to.
+
 ### Backup
 
 A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,

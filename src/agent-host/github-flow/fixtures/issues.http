@@ -1,0 +1,10 @@
+HTTP/2.0 200 OK
+Access-Control-Allow-Origin: *
+Cache-Control: private, max-age=60, s-maxage=60
+Content-Type: application/json; charset=utf-8
+Etag: W/"6c1f2a0b7d9e"
+Link: <https://api.github.com/repositories/1/issues?state=open&per_page=100&page=2>; rel="next", <https://api.github.com/repositories/1/issues?state=open&per_page=100&page=4>; rel="last"
+X-Ratelimit-Remaining: 4979
+X-Ratelimit-Resource: core
+
+[{"url": "https://api.github.com/repos/octo-org/hello-world/issues/51", "html_url": "https://github.com/octo-org/hello-world/issues/51", "number": 51, "title": "Login times out on slow networks", "user": {"login": "hubot", "id": 2, "type": "User"}, "labels": [{"id": 0, "name": "bug", "color": "d73a4a", "default": false}, {"id": 1, "name": "kite", "color": "0e8a16", "default": false}], "state": "open", "assignees": [{"login": "octocat", "id": 9, "type": "User"}], "comments": 2, "created_at": "2026-11-20T08:00:00Z", "updated_at": "2026-11-21T09:30:00Z", "body": "Steps:\n1. Throttle the network\n2. Sign in", "author_association": "MEMBER"}, {"url": "https://api.github.com/repos/octo-org/hello-world/issues/50", "html_url": "https://github.com/octo-org/hello-world/issues/50", "number": 50, "title": "Add a dark app icon", "user": {"login": "hubot", "id": 2, "type": "User"}, "labels": [{"id": 0, "name": "enhancement", "color": "a2eeef", "default": false}], "state": "open", "assignees": [], "comments": 2, "created_at": "2026-11-19T08:00:00Z", "updated_at": "2026-11-21T08:00:00Z", "body": null, "author_association": "MEMBER"}, {"url": "https://api.github.com/repos/octo-org/hello-world/issues/49", "html_url": "https://github.com/octo-org/hello-world/issues/49", "number": 49, "title": "Bump the build image", "user": {"login": "hubot", "id": 2, "type": "User"}, "labels": [], "state": "open", "assignees": [], "comments": 2, "created_at": "2026-11-18T08:00:00Z", "updated_at": "2026-11-20T08:00:00Z", "body": "", "author_association": "MEMBER", "pull_request": {"url": "https://api.github.com/repos/octo-org/hello-world/pulls/49"}}]

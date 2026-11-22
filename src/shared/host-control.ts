@@ -176,6 +176,8 @@ export type MainToHost =
       format: ArtifactExportFormat
     }
   | { type: 'host:power'; state: 'suspend' | 'resume' }
+  // Huli: whether any window of the app shows; the GitHub flow reads more slowly while none does.
+  | { type: 'host:windows-visible'; visible: boolean }
   /** `verbose`: detailed records, which the debug level alone does not write. */
   | { type: 'host:log-level'; level: 'debug' | 'info'; verbose: boolean }
   // Allow once, from a request's notification: answered as one of the host's own windows would.

@@ -112,7 +112,8 @@
       "showIn": "Show in {{name}}",
       "showArchived": "Show archived",
       "worktreeSettings": "Worktree settings…",
-      "remove": "Remove project…"
+      "remove": "Remove project…",
+      "issues": "Issues"
     },
     "remove": {
       "title": "Remove {{name}}?",
@@ -235,7 +236,10 @@
     "moreFor": "More for {{title}}",
     "deleteKeepsAppCopy": "{{agent}} keeps its own copy, which Kettu can’t delete.",
     "deleteRemovesAgentCopy_one": "It’s also deleted from {{agent}}’s own local history, so the official app and CLI won’t show it anymore.",
-    "deleteRemovesAgentCopy_other": "They’re also deleted from {{agent}}’s own local history, so the official app and CLI won’t show them anymore."
+    "deleteRemovesAgentCopy_other": "They’re also deleted from {{agent}}’s own local history, so the official app and CLI won’t show them anymore.",
+    "autoMerge": "Merge when checks pass",
+    "watchPr": "Watch this pull request",
+    "issue": "Issue #{{number}}"
   },
   "work": {
     "turn": "Current turn",

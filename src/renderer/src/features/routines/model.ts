@@ -9,9 +9,11 @@ import {
   type RoutineRun,
   type RoutineView,
   type RunStatus,
+  type RoutineTrigger,
   type RunView,
   type Schedule,
 } from '@shared/routines'
+import type { GithubEvent } from '@shared/github-flow'
 import { startConfig, startValues } from '@renderer/features/session/new-session/start-options'
 import { limitPhrase, shortDuration } from '@renderer/lib/format'
 import { currentLocale, i18n } from '@renderer/lib/i18n'
@@ -217,11 +219,36 @@ export function runEntries(runs: readonly RunView[]): RunEntry[] {
   return entries
 }
 
-/** "Run now", "Catch-up" or "Scheduled", after a run's time. */
+/** "Run now", "Catch-up" or "Scheduled", after a run's time; Huli: the GitHub event it ran for. */
 export function runTrigger(run: RoutineRun): string {
   if (run.trigger === 'manual') return i18n.t('routines:trigger.manual')
   if (run.trigger === 'catch-up') return i18n.t('routines:trigger.catchUp')
+  if (run.trigger === 'event') return run.cause?.title ?? i18n.t('routines:trigger.event')
   return i18n.t('routines:trigger.schedule')
+}
+
+/** Huli: when a routine runs, in words: its schedule's, or the GitHub event it runs on. */
+export function triggerWords(trigger: RoutineTrigger): string {
+  if (trigger.kind === 'schedule') return scheduleWords(trigger.schedule)
+  return githubEventWords(trigger.event)
+}
+
+/** Huli: a GitHub event a routine runs on, as its row says it. */
+export function githubEventWords(event: GithubEvent): string {
+  switch (event.kind) {
+    case 'issue_opened':
+      return event.label
+        ? i18n.t('routines:on.summary.issue_label', { label: event.label })
+        : i18n.t('routines:on.summary.issue_opened')
+    case 'pr_opened':
+      return i18n.t('routines:on.summary.pr_opened')
+    case 'checks_failed':
+      return i18n.t('routines:on.summary.checks_failed')
+    case 'pushed':
+      return i18n.t('routines:on.summary.pushed', { branch: event.branch })
+    case 'behind':
+      return i18n.t('routines:on.summary.behind', { branch: event.branch })
+  }
 }
 
 /** What became of a run, or what it is doing. */

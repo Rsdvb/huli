@@ -27,10 +27,12 @@ import {
   type PermissionScope,
   type RoutineChanges,
   type RoutineOption,
+  type RoutineTrigger,
   type RoutineView,
   type Schedule,
   type TimeLimitMinutes,
 } from '@shared/routines'
+import type { GithubEvent } from '@shared/github-flow'
 import type { ScheduleProblem } from '@shared/schedule'
 import type { AgentId } from '@shared/thread'
 import { backTo } from '@renderer/app/history'
@@ -91,6 +93,7 @@ import { PermissionField } from './permission-field'
 import { routineMenu } from './menu-items'
 import { RunAnnouncements, RunHistory, RunsCard, RunsEmpty } from './run-history'
 import { ScheduleField } from './schedule-field'
+import { TriggerField } from './trigger-field'
 
 export default function RoutinePage({
   routineId,
@@ -404,6 +407,8 @@ function RoutineBody({ routine }: { routine: RoutineView }) {
             onOnLimit={(onLimit) => save({ onLimit })}
             scope={routine.scope}
             onScope={(scope) => save({ scope })}
+            trigger={routine.trigger}
+            onTrigger={(trigger) => save({ trigger })}
             schedule={routine.trigger.schedule}
             savedSchedule={routine.trigger.schedule}
             done={routine.state === 'done'}
@@ -504,6 +509,11 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
   const [scope, setScope] = useState<PermissionScope>(seed?.scope ?? DEFAULT_SCOPE)
   const [schedule, setSchedule] = useState<Schedule>(seed?.schedule ?? DEFAULT_SCHEDULE)
   const [scheduleProblem, setScheduleProblem] = useState<ScheduleProblem | null>(null)
+  // Huli: the GitHub event it runs on instead of its schedule, when chosen.
+  const [event, setEvent] = useState<GithubEvent | null>(null)
+  const trigger: RoutineTrigger = event
+    ? { kind: 'github', event, schedule }
+    : { kind: 'schedule', schedule }
   const now = useNow()
 
   useBackOnEscape()
@@ -522,9 +532,11 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
         ? t('routine.createMissingProject')
         : !agentId
           ? t('routine.createMissingAgent')
-          : scheduleProblem
-            ? t('routine.createMissingSchedule')
-            : null
+          : event && projectPath === null
+            ? t('on.needsProject')
+            : scheduleProblem && !event
+              ? t('routine.createMissingSchedule')
+              : null
 
   const create = async () => {
     if (missing || !agentId || creating) return
@@ -539,7 +551,7 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
           agentId,
           projectPath,
           options: entry ? routineOptions(entry, values) : optionsFrom(values),
-          trigger: { kind: 'schedule', schedule },
+          trigger,
           scope,
           timeLimitMinutes: timeLimit,
           keptRunSessions: kept,
@@ -651,13 +663,18 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
             onOnLimit={setOnLimit}
             scope={scope}
             onScope={setScope}
+            trigger={trigger}
+            onTrigger={(next) => {
+              setSchedule(next.schedule)
+              setEvent(next.kind === 'github' ? next.event : null)
+            }}
             schedule={schedule}
             savedSchedule={null}
             onSchedule={setSchedule}
             onScheduleProblem={setScheduleProblem}
           />
           <RunsCard>
-            <RunsEmpty hint={firstRunHint(schedule, now)} />
+            <RunsEmpty hint={event ? t('on.hint') : firstRunHint(schedule, now)} />
           </RunsCard>
         </div>
       </AwayContent>
@@ -720,6 +737,8 @@ function RoutineFields({
   onOnLimit,
   scope,
   onScope,
+  trigger,
+  onTrigger,
   schedule,
   savedSchedule,
   done = false,
@@ -751,6 +770,9 @@ function RoutineFields({
   onOnLimit: (onLimit: OnLimit) => void
   scope: PermissionScope
   onScope: (scope: PermissionScope) => void
+  /** Huli: on its schedule or on a GitHub event. */
+  trigger: RoutineTrigger
+  onTrigger: (trigger: RoutineTrigger) => void
   schedule: Schedule
   savedSchedule: Schedule | null
   /** A one-time routine that has run. */
@@ -823,14 +845,20 @@ function RoutineFields({
           </span>
         </Row>
       </div>
-      <Head title={t('routine.schedule')} note={t('routine.scheduleHint')} />
-      <ScheduleField
-        schedule={schedule}
-        saved={savedSchedule}
-        done={done}
-        onSchedule={onSchedule}
-        {...(onScheduleProblem ? { onProblem: onScheduleProblem } : {})}
-      />
+      <Head title={t('on.title')} />
+      <TriggerField trigger={trigger} onTrigger={onTrigger} noProject={noProject} />
+      {trigger.kind === 'schedule' && (
+        <>
+          <Head title={t('routine.schedule')} note={t('routine.scheduleHint')} />
+          <ScheduleField
+            schedule={schedule}
+            saved={savedSchedule}
+            done={done}
+            onSchedule={onSchedule}
+            {...(onScheduleProblem ? { onProblem: onScheduleProblem } : {})}
+          />
+        </>
+      )}
       <Head title={t('routine.permissions')} note={t('routine.permissionsHint')} />
       <PermissionField scope={scope} agentId={agentId} onChange={onScope} />
       <Head title={t('routine.limits')} />
