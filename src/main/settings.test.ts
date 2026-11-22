@@ -162,6 +162,48 @@ describe("the agents' lower priority", () => {
   })
 })
 
+// Huli: the sandbox default and its approvals rule.
+describe('the sandbox settings', () => {
+  it('start off, keep known values and drop the rest', async () => {
+    await save({ version: 1, general: { language: 'en' } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.sandbox).toEqual({ tier: 'off', network: 'none', autoApproveEdits: false })
+    expect(hostSettings(settings, 'en').sandbox).toEqual(settings.sandbox)
+    await save({
+      version: 1,
+      sandbox: { tier: 'container', network: 'open', autoApproveEdits: true },
+    })
+    expect((await SettingsStore.load(dir)).get().sandbox).toEqual({
+      tier: 'container',
+      network: 'open',
+      autoApproveEdits: true,
+    })
+    await save({
+      version: 1,
+      sandbox: { tier: 'vm', network: 'everything', autoApproveEdits: 'yes' },
+    })
+    expect((await SettingsStore.load(dir)).get().sandbox).toEqual({
+      tier: 'off',
+      network: 'none',
+      autoApproveEdits: false,
+    })
+  })
+
+  it('takes only known tiers, networks and a boolean', () => {
+    expect(() =>
+      validateSettingsPatch({ sandbox: { tier: 'native', network: 'agent' } }),
+    ).not.toThrow()
+    for (const sandbox of [
+      { tier: 'vm' },
+      { network: 'all' },
+      { autoApproveEdits: 'true' },
+      { tier: null },
+    ]) {
+      expect(() => validateSettingsPatch({ sandbox })).toThrow()
+    }
+  })
+})
+
 describe('the first start record on load', () => {
   it('leaves a host without a settings file to run its first start', async () => {
     const store = await SettingsStore.load(dir)

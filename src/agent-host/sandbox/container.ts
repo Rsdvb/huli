@@ -227,8 +227,10 @@ export function runArgs(run: ContainerRun): string[] {
   for (const name of [run.name, run.home]) {
     if (!isEngineName(name)) throw new ContainerError(`Not a container name: ${name}`, 'mount')
   }
-  if (/[,\0\r\n]/.test(run.project)) {
-    throw new ContainerError(`The folder cannot be mounted: ${run.project}`, 'mount')
+  for (const folder of [run.project, ...(run.agentFolder === undefined ? [] : [run.agentFolder])]) {
+    if (/[,\0\r\n]/.test(folder)) {
+      throw new ContainerError(`The folder cannot be mounted: ${folder}`, 'mount')
+    }
   }
   const args = [
     'run',

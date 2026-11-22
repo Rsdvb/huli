@@ -76,7 +76,6 @@ const POSIX_SYSTEM = [
   '/Applications',
   '/private',
   '/cores',
-  '/Volumes',
 ]
 
 /**
@@ -138,10 +137,10 @@ export function folderProblem(
 ): MountProblem | null {
   const { platform } = ctx
   const p = api(platform)
+  // \\?\ and \\.\ reach devices and paths Windows' own rules do not normalize.
+  if (platform === 'win32' && /^[\\/]{2}[?.][\\/]/.test(folder)) return 'devicePath'
   if (BAD_CHARACTERS.test(folder)) return 'badCharacters'
   if (platform === 'win32') {
-    // \\?\ and \\.\ reach devices and paths Windows' own rules do not normalize.
-    if (/^[\\/]{2}[?.][\\/]/.test(folder)) return 'devicePath'
     // A drive's folder, or a share's: `C:\x`, `\\server\share\x`.
     if (!/^[a-zA-Z]:[\\/]/.test(folder) && !/^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(folder)) {
       return 'notAbsolute'
@@ -156,11 +155,11 @@ export function folderProblem(
   if (key(normal, platform) === key(p.parse(normal).root, platform)) return 'root'
   // A share's own root, `\\server\share`, is a drive's root too.
   if (platform === 'win32' && /^[\\/]{2}[^\\/]+[\\/][^\\/]+[\\/]?$/.test(normal)) return 'root'
-  if (within(ctx.dataDir, normal, platform) || within(normal, ctx.dataDir, platform)) {
-    return 'kiteData'
-  }
+  if (within(normal, ctx.dataDir, platform)) return 'kiteData'
   if (key(normal, platform) === key(ctx.home, platform)) return 'home'
   if (within(ctx.home, normal, platform)) return 'aboveHome'
+  // A folder that holds Kite's data folder, wherever that is.
+  if (within(ctx.dataDir, normal, platform)) return 'kiteData'
   if (within(normal, ctx.home, platform)) {
     const relative = p.relative(ctx.home, normal)
     const first = relative.split(/[\\/]/)[0] ?? ''
@@ -184,6 +183,8 @@ export function folderProblem(
   }
   // /home and /Users themselves list every user.
   if (key(normal, platform) === '/home' || key(normal, platform) === '/Users') return 'aboveHome'
+  // macOS mounts every other disk at /Volumes/<name>, which is that disk's root.
+  if (platform === 'darwin' && /^\/Volumes(?:\/[^/]+)?$/.test(key(normal, platform))) return 'root'
   return null
 }
 

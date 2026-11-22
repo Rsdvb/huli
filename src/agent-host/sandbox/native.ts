@@ -33,17 +33,17 @@ export class SandboxUnavailableError extends Error {
  * Folders in the home folder that hold keys and sign-ins: a sandboxed command may read none of
  * them, though it may read the rest of the computer as before.
  */
-const SECRET_DIRS = [
-  '.ssh',
-  '.gnupg',
-  '.aws',
-  '.azure',
-  '.kube',
-  '.docker',
-  '.git-credentials',
-  '.netrc',
-  path.join('.config', 'gh'),
-  path.join('.config', 'gcloud'),
+const SECRET_DIRS: readonly string[][] = [
+  ['.ssh'],
+  ['.gnupg'],
+  ['.aws'],
+  ['.azure'],
+  ['.kube'],
+  ['.docker'],
+  ['.git-credentials'],
+  ['.netrc'],
+  ['.config', 'gh'],
+  ['.config', 'gcloud'],
 ]
 
 /** The part of Claude Code's `SandboxSettings` Kite sets. */
@@ -83,7 +83,7 @@ export function claudeSandbox(
     autoAllowBashIfSandboxed: false,
     filesystem: {
       allowWrite: [...new Set(sandbox.roots)],
-      denyRead: SECRET_DIRS.map((dir) => join(home, dir)),
+      denyRead: SECRET_DIRS.map((dir) => join(home, ...dir)),
     },
     network: claudeNetwork(sandbox),
   }

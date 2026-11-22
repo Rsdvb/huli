@@ -15,6 +15,7 @@ import { DEFAULT_WORKTREE_SETTINGS } from '@shared/git'
 import type { SessionOptions } from './connection'
 import { HostError } from './errors'
 import type { WorktreeManager } from './worktrees/manager'
+import { agentSandboxSupport } from '@shared/sandbox'
 
 let dir: string
 
@@ -515,6 +516,56 @@ describe('Huli: a session’s API profile', () => {
     await expect(sessions.setProfile(id, 'p1')).rejects.toMatchObject({ code: 'invalid_params' })
     // Null is its own sign-in already.
     await sessions.setProfile(id, null)
+  })
+})
+
+// Huli: the sandbox a session runs in.
+describe('Huli: a session’s sandbox', () => {
+  const support = (agentId: string) =>
+    agentSandboxSupport(agentId as never, agentId === 'gemini' ? 'acp-package' : 'other', 'darwin')
+  const name = (agentId: string) => agentId
+
+  it('changes between turns to one its agent can run in, never to another', async () => {
+    const { sessions } = manager({}, { agents: { sandboxSupport: support, name } })
+    await sessions.load()
+    const { id } = await sessions.importSession({
+      agentId: 'claude-code',
+      projectPath: '/repo',
+      acpSessionId: 'acp-1',
+    })
+    expect(sessions.summary(id).sandbox).toBeNull()
+    await sessions.setSandbox(id, { tier: 'native', network: 'none' })
+    expect(sessions.summary(id).sandbox).toEqual({ tier: 'native', network: 'none' })
+    // Claude Code runs in no container: the choice stays as it was.
+    await expect(
+      sessions.setSandbox(id, { tier: 'container', network: 'none' }),
+    ).rejects.toMatchObject({ code: 'invalid_params' })
+    expect(sessions.summary(id).sandbox).toEqual({ tier: 'native', network: 'none' })
+    await vi.waitFor(
+      async () =>
+        expect((await index())?.sessions.find((record) => record.id === id)?.sandbox).toEqual({
+          tier: 'native',
+          network: 'none',
+        }),
+      { timeout: 5_000 },
+    )
+    await sessions.setSandbox(id, { tier: 'off', network: 'open' })
+    expect(sessions.summary(id).sandbox).toBeNull()
+  })
+
+  it('refuses a tier the agent has none of', async () => {
+    const { sessions } = manager({}, { agents: { sandboxSupport: support, name } })
+    await sessions.load()
+    const { id } = await sessions.importSession({
+      agentId: 'opencode',
+      projectPath: '/repo',
+      acpSessionId: 'acp-2',
+    })
+    for (const tier of ['native', 'container'] as const) {
+      await expect(sessions.setSandbox(id, { tier, network: 'none' })).rejects.toMatchObject({
+        code: 'invalid_params',
+      })
+    }
   })
 })
 
