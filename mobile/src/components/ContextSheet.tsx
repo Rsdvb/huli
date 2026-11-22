@@ -3,13 +3,13 @@
 // cache's time left, and the plan's windows on the computer, whose line opens the plan's usage.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Svg, { ClipPath, Defs, G as SvgGroup, Path, Pattern, Rect } from 'react-native-svg'
 import type { AgentStatus, ContextList } from '@shared/agent-host'
 import type { ContextBreakdown } from '@shared/context'
 import { expiryOf, knownExpiry, modelOption } from '@shared/prompt-cache'
 import type { HostLink } from '@shared/remote/link'
-import type { SessionView } from '@shared/thread'
+import { compactPrompt, type SessionView } from '@shared/thread'
 import { hostErrorText } from '../hostErrors'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
@@ -219,6 +219,29 @@ export function ContextSheet(props: {
     setUsageOpen(true)
   }
 
+  // Huli: the agent's own compaction, in one tap, while the session is free to take it; the
+  // conversation shows it running as the agent's compaction divider.
+  const compact =
+    props.connected && session?.status === 'ready' && session.queue.length === 0
+      ? compactPrompt(session.commands)
+      : null
+  const [compacting, setCompacting] = useState(false)
+  const runCompact = () => {
+    if (!compact || compacting) return
+    haptic.tap()
+    setCompacting(true)
+    link.request('sessions.queue', { sessionId, content: [{ type: 'text', text: compact }] }).then(
+      () => {
+        setCompacting(false)
+        props.onClose()
+      },
+      (error: unknown) => {
+        setCompacting(false)
+        Alert.alert('没能压缩上下文', hostErrorText(error))
+      },
+    )
+  }
+
   return (
     <BottomSheet visible={props.visible} onClose={props.onClose}>
       <View style={styles.head}>
@@ -352,6 +375,29 @@ export function ContextSheet(props: {
       ) : size > 0 && reports && running && !canRead ? (
         <Text style={[styles.note, { color: c.textSecondary }]}>这一轮结束后可以看到构成。</Text>
       ) : null}
+
+      {compact && (
+        <Pressable
+          onPress={runCompact}
+          disabled={compacting}
+          accessibilityRole="button"
+          accessibilityLabel="压缩上下文，把之前的对话总结成摘要"
+          accessibilityState={{ busy: compacting }}
+          style={({ pressed }) => [
+            styles.compact,
+            { backgroundColor: c.fill, opacity: pressed || compacting ? 0.6 : 1 },
+          ]}
+        >
+          <Icon icon={G.compact} size={16} color={c.text} />
+          <View style={{ flex: 1, gap: 1 }}>
+            <Text style={[styles.compactTitle, { color: c.text }]}>压缩上下文</Text>
+            <Text style={[styles.note, styles.compactNote, { color: c.textSecondary }]}>
+              把之前的对话总结成摘要，腾出空间
+            </Text>
+          </View>
+          <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
+        </Pressable>
+      )}
 
       {expiry && <CacheBlock expiry={expiry} used={used} />}
 
@@ -621,5 +667,16 @@ const styles = StyleSheet.create({
     minHeight: 26,
   },
   limitName: { fontSize: 15, flex: 1 },
+  compact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  compactTitle: { fontSize: 16, fontWeight: '600' },
+  compactNote: { paddingHorizontal: 0 },
   limitValue: { fontSize: 15, fontWeight: '500', fontVariant: ['tabular-nums'] },
 })
