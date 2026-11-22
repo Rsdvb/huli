@@ -344,17 +344,14 @@ export function PlatformRow({ platform, name }: { platform: ChatPlatform; name: 
         <RowText
           name={name}
           description={
-            line && (
-              <>
-                {view?.ready && view.enabled ? t(`chatBridge.about.${platform}`) : line.text}
-                {line.problem && (
-                  <>
-                    <br />
-                    <span className="text-danger">{line.problem}</span>
-                  </>
-                )}
-              </>
-            )
+            line &&
+            (line.problem ? (
+              <span className="text-danger">{line.problem}</span>
+            ) : view?.ready && view.enabled ? (
+              t(`chatBridge.about.${platform}`)
+            ) : (
+              line.text
+            ))
           }
         />
       }

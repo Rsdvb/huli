@@ -2733,6 +2733,7 @@
     },
     "enabled": "Turn on the {{platform}} bot",
     "connection": {
+      "name": "Bot",
       "description": "The bot's credentials, its switch and its connection"
     },
     "accounts": {

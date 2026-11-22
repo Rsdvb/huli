@@ -2689,8 +2689,9 @@
       "qq": "QQ",
       "telegram": "Telegram"
     },
-    "enabled": "启用{{platform}}机器人",
+    "enabled": "启用机器人（{{platform}}）",
     "connection": {
+      "name": "机器人",
       "description": "机器人的凭据、开关和连接状态"
     },
     "accounts": {
@@ -2749,7 +2750,7 @@
     "credentials": {
       "add": "填写凭据",
       "edit": "凭据",
-      "title": "{{platform}}机器人的凭据",
+      "title": "{{platform}} · 机器人凭据",
       "where": {
         "feishu": "在飞书开放平台应用的「凭证与基础信息」里复制。",
         "dingtalk": "在钉钉开放平台应用的「凭证与基础信息」里复制。",

@@ -37,7 +37,7 @@ export function useChatBridgeSection(): SectionDef {
         setting: `chat-bridge.${platform}` as SettingId,
         group,
         layout: 'custom',
-        render: () => <PlatformRow platform={platform} name={name} />,
+        render: () => <PlatformRow platform={platform} name={t('chatBridge.connection.name')} />,
       },
       {
         id: `${platform}-accounts`,
