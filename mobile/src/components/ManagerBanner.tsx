@@ -49,6 +49,7 @@ export function ManagerBanner(props: { summary: SessionSummary }) {
     <View style={[styles.card, { backgroundColor: s.dockCard, borderColor: c.borderStrong }]}>
       <PressScale
         scale={0.98}
+        outerStyle={styles.outer}
         style={styles.main}
         onPress={() => router.push(`/workers/${props.summary.id}`)}
         accessibilityRole="button"
@@ -83,7 +84,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 18,
   },
-  main: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+  // The pressable takes the row's room; the view inside it lays out the badge and the line.
+  outer: { flex: 1, minWidth: 0 },
+  main: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
   badge: {
     width: 28,
     height: 28,

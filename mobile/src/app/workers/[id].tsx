@@ -56,13 +56,17 @@ export default function WorkersScreen() {
   const link = useLink()
   const manager = sessions.get(id)
   const [busy, setBusy] = useState<'pause' | 'stop' | null>(null)
-  const workers = useMemo(
-    () =>
-      [...sessions.values()]
-        .filter((s) => s.worker?.managerId === id && s.archivedAt === null)
-        .sort((a, b) => a.createdAt - b.createdAt),
-    [sessions, id],
-  )
+  // Oldest first, each reviewer the loop started right under what it reviews.
+  const workers = useMemo(() => {
+    const all = [...sessions.values()]
+      .filter((s) => s.worker?.managerId === id && s.archivedAt === null)
+      .sort((a, b) => a.createdAt - b.createdAt)
+    const ids = new Set(all.map((s) => s.id))
+    const nested = (s: SessionSummary) => !!s.worker?.reviewOf && ids.has(s.worker.reviewOf)
+    return all
+      .filter((s) => !nested(s))
+      .flatMap((top) => [top, ...all.filter((s) => nested(s) && s.worker?.reviewOf === top.id)])
+  }, [sessions, id])
   const waiting = workers.filter((w) => w.permissionCount > 0)
   const info = manager?.manager
 
