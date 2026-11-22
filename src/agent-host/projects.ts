@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { Project } from '@shared/agent-host'
 import { DEFAULT_WORKTREE_SETTINGS, type ProjectWorktreeSettings } from '@shared/git'
 import type { Platform } from '@shared/platform'
+import type { AutoApprove } from '@shared/risk'
 import { invalidParams, notFound } from './errors'
 import { canonicalizePath, folderName, isAbsolutePath, pathKey } from './paths'
 import type { JsonFile, ProjectRecord, ProjectsFile } from './storage'
@@ -57,6 +58,7 @@ export class Projects {
         missing: this.missing.get(this.key(record.path)) ?? false,
         lastOpenedAt: record.lastOpenedAt,
         pinnedAt: record.pinnedAt ?? null,
+        autoApprove: record.autoApprove ?? null,
       }))
   }
 
@@ -137,6 +139,18 @@ export class Projects {
     }
     if (Object.keys(differs).length > 0) record.worktree = differs
     else delete record.worktree
+    this.changed()
+  }
+
+  /** Huli: the project's own choice of what the host allows by itself; null keeps the default. */
+  autoApprove(value: string): AutoApprove | null {
+    return this.find(value)?.autoApprove ?? null
+  }
+
+  setAutoApprove(record: ProjectRecord, level: AutoApprove | null): void {
+    if ((record.autoApprove ?? null) === level) return
+    if (level === null) delete record.autoApprove
+    else record.autoApprove = level
     this.changed()
   }
 

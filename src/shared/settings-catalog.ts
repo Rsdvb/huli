@@ -18,6 +18,7 @@ import {
   type SettingsFile,
   type SettingsPatch,
 } from './settings'
+import { AUTO_APPROVE_LEVELS } from './risk'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
 import type { AgentId, HarnessId } from './thread'
 
@@ -1006,6 +1007,21 @@ const ENTRIES = {
     part: 'host',
     kind: 'info',
     on: () => false,
+  },
+  // Huli: which requests the host allows by itself. Agents read it and never change it, since a
+  // change would widen what they may do without asking.
+  'agents.auto-approve': {
+    section: 'agents',
+    row: 'auto-approve',
+    group: 'agents.autoApprove.group',
+    name: 'agents.autoApprove.name',
+    description: 'agents.autoApprove.description',
+    keywords: 'agents.autoApprove.keywords',
+    part: 'host',
+    access: 'read',
+    kind: 'choice',
+    options: choices(AUTO_APPROVE_LEVELS, (level) => `agents.autoApprove.level.${level}`),
+    get: (file) => file.permissions.autoApprove,
   },
   'agents.workflow-auto': {
     section: 'agents',

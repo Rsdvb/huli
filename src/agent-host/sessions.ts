@@ -62,6 +62,7 @@ import type {
   SessionProgress,
 } from '@shared/host-control'
 import type { Platform } from '@shared/platform'
+import type { AutoApprove, PermissionRisk } from '@shared/risk'
 import type { PortDevice } from '@shared/remote/device'
 import type { PermissionScope } from '@shared/routines'
 import type { HostSettings } from '@shared/settings'
@@ -293,6 +294,8 @@ import {
 } from './started-mode'
 import type { RoutineSessionHooksRef, RoutineSessionStart } from './routines/hooks'
 import type { TaskSessionHooksRef, TaskStepStart } from './workflow/engine'
+import { assessRisk, autoApproves, entrySubject, type Assessment } from './risk/classify'
+import { riskReason } from './risk/text'
 import { scopeAnswer } from './routines/scope'
 import { CONTEXT_REPORT, runReport } from './reports'
 import type { ScratchFolders } from './scratch'
@@ -535,6 +538,11 @@ export interface SessionManagerDeps {
   portDevice?(portId: string): PortDevice | null
   /** Huli: the agents' API provider profiles; without them every session runs on its own sign-in. */
   profiles?: Pick<ProviderProfiles, 'get' | 'defaultOf'>
+  /**
+   * Huli: which requests the host allows by itself in a project that keeps the default; without
+   * it, none.
+   */
+  autoApprove?(): AutoApprove
   /** Where threads are stored; without it every session opens through its agent. */
   threads: ThreadStore | null
   /**
@@ -10549,6 +10557,60 @@ export class SessionManager {
     )
   }
 
+  /**
+   * Huli: how risky a request is, from what its driver says it does or else from its tool entry;
+   * null for an ask's questions, a plan and an MCP server's form, which allow nothing to run.
+   */
+  private riskOf(live: Live, request: PermissionRequest): Assessment | null {
+    if (request.plan !== undefined || request.elicitation || request.questions) return null
+    if (request.nonBlocking) return null
+    const entry = live.thread.byId[request.toolEntryId]
+    if (entry?.kind === 'tool' && entry.question !== undefined) return null
+    const subject = request.subject ?? (entry?.kind === 'tool' ? entrySubject(entry) : null)
+    if (!subject) return null
+    const cwd = workDir(live.record)
+    return assessRisk(subject, {
+      platform: this.deps.platform,
+      cwd,
+      roots: [...new Set([cwd, live.record.projectPath])],
+    })
+  }
+
+  /**
+   * Huli: the `allow_once` option the user's setting has the host answer with, or null to ask: a
+   * low request, or with the edits level an edit inside the project, never in plan mode and never
+   * for a routine's run, whose own scope says what it may do. An `allow_always` option is never
+   * picked, so nothing outlives the one call.
+   */
+  private autoAnswer(
+    live: Live,
+    request: PermissionRequest,
+    risk: Assessment | null,
+  ): string | null {
+    if (!risk || live.record.origin === 'routine') return null
+    const setting =
+      this.deps.projects.autoApprove(live.record.projectPath) ?? this.deps.autoApprove?.() ?? 'off'
+    if (!autoApproves(setting, risk)) return null
+    if (this.planning(live)) return null
+    return request.options.find((option) => option.kind === 'allow_once')?.id ?? null
+  }
+
+  /**
+   * Huli: whether the session's agent plans now, in a mode of its own whose id says so, as
+   * Claude Code's, Codex's and an ACP agent's plan modes do.
+   */
+  private planning(live: Live): boolean {
+    const config = live.thread.session.config
+    const optionId = modeOptionId(live.record.agentId)
+    const mode = config.find((option) =>
+      optionId === null
+        ? option.category === 'mode' && option.type === 'select'
+        : option.id === optionId,
+    )?.value
+    if (typeof mode === 'string' && /plan/i.test(mode)) return true
+    return config.some((option) => option.id === CODEX_COLLABORATION_ID && option.value === 'plan')
+  }
+
   private requestPermission(
     live: Live,
     request: PermissionRequest,
@@ -10557,6 +10619,11 @@ export class SessionManager {
     this.applyOutput(live, request.output)
     // The user already stopped this turn or closed the session: the request is moot.
     if (live.closing || live.turn?.cancelRequested) return Promise.resolve('cancelled')
+    const assessed = this.riskOf(live, request)
+    const risk: PermissionRisk | null = assessed && {
+      level: assessed.level,
+      reason: riskReason(assessed),
+    }
     // A run answers inside its scope while its first turn works; anything else waits for the user.
     if (live.routineScope && live.record.origin === 'routine' && !live.routineTurnEnded) {
       const optionId = this.routineAnswer(live, live.routineScope, request)
@@ -10592,6 +10659,21 @@ export class SessionManager {
         this.touch(live.id)
         return Promise.resolve({ optionId })
       }
+    }
+    const auto = this.autoAnswer(live, request, assessed)
+    if (auto !== null && risk) {
+      this.emit(live, [
+        {
+          op: 'entry.update',
+          id: request.toolEntryId,
+          changes: {
+            permission: null,
+            permissionResult: { optionId: auto, kind: 'allow_once', by: 'risk', risk },
+          },
+        },
+      ])
+      this.touch(live.id)
+      return Promise.resolve({ optionId: auto })
     }
     const requestId = `${this.requestPrefix}${++this.requestCounter}`
     const { elicitation } = request
@@ -10634,6 +10716,7 @@ export class SessionManager {
               ...(plan ? { plan: { markdown: request.plan!, previous: plan.previous } } : {}),
               ...(elicitation ? { elicitation } : {}),
               ...(request.reason ? { reason: request.reason } : {}),
+              ...(risk ? { risk } : {}),
             },
             permissionResult: null,
             ...(plan ? { planVersion: plan.version } : {}),
@@ -10670,11 +10753,12 @@ export class SessionManager {
         const allow = request.options.find((option) => option.id === optionId)
         const deny = request.options.find((option) => option.kind === 'reject_once')
         const question = notificationQuestion(request.questions)
+        const asked = requestText(tool, workDir(live.record))
         this.deps.events.attention(
           live.id,
           'permission',
           this.titleOf(live),
-          requestText(tool, workDir(live.record)),
+          risk ? t('risk.withLevel', { text: asked, level: t(`risk.level.${risk.level}`) }) : asked,
           {
             id: requestId,
             ...(allow ? { allow: { optionId: allow.id, name: allow.name } } : {}),

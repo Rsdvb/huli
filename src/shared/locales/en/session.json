@@ -48,7 +48,9 @@
     "move_other": "Moved {{count}} files",
     "moveNamed": "Moved {{names}}",
     "moveMore": "Moved {{names}} and {{more}} more",
-    "failed": "{{failed}} failed"
+    "failed": "{{failed}} failed",
+    "autoApproved_one": "{{count}} approved automatically",
+    "autoApproved_other": "{{count}} approved automatically"
   },
   "refusal": {
     "title": "The model declined to continue",
@@ -210,9 +212,15 @@
       "rejectOnce": "Denied",
       "rejectAlways": "Always denied",
       "allowedByRoutine": "Allowed by the routine",
+      "autoApproved": "Approved automatically · {{level}}",
       "cancelled": "Cancelled",
       "withdrawn": "No longer needed",
       "onDevice": "{{answer}} · {{device}}"
+    },
+    "risk": {
+      "low": "Low risk",
+      "medium": "Medium risk",
+      "high": "High risk"
     },
     "answeredOn": "Already answered on {{device}}.",
     "answeredInWindow": "Already answered in another window.",

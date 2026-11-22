@@ -5,6 +5,7 @@ import type { PendingPermission, PendingQuestion, QuestionAnswer } from '@shared
 import { unsafeCommand, unsafeCommandPrefix } from '../command-safety'
 import { t } from '../i18n'
 import { answerWords } from '../question-answers'
+import type { RiskSubject } from '../risk/classify'
 import { modeDescription, modeName } from './config'
 import type { AskedQuestion } from './tools'
 import type {
@@ -175,6 +176,51 @@ export function planOptions(modes: readonly string[], preferred: PermissionMode)
       note: true,
     },
   ]
+}
+
+function inputText(input: Record<string, unknown>, key: string): string | undefined {
+  const value = input[key]
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/**
+ * Huli: what a request of Claude Code's does, for its risk: a command in the shell its tool runs
+ * in, the files a tool reads or edits, a fetch, or an MCP tool by its server. Undefined for a
+ * tool this does not know, whose entry then tells.
+ */
+export function riskSubject(
+  toolName: string,
+  input: Record<string, unknown>,
+): RiskSubject | undefined {
+  const file = inputText(input, 'file_path') ?? inputText(input, 'notebook_path')
+  switch (toolName) {
+    case 'Bash':
+      return { kind: 'command', command: inputText(input, 'command') ?? '', shell: 'posix' }
+    case 'PowerShell':
+      return { kind: 'command', command: inputText(input, 'command') ?? '', shell: 'powershell' }
+    case 'Read':
+    case 'NotebookRead':
+      return { kind: 'read', paths: file ? [file] : [] }
+    // A search with no folder searches the one the session works in.
+    case 'Grep':
+    case 'Glob':
+    case 'LS':
+      return { kind: 'read', paths: [inputText(input, 'path') ?? '.'] }
+    case 'Write':
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return { kind: 'edit', paths: file ? [file] : [] }
+    case 'WebFetch': {
+      const url = inputText(input, 'url')
+      return url ? { kind: 'fetch', url } : { kind: 'fetch' }
+    }
+    case 'WebSearch':
+      return { kind: 'fetch' }
+  }
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName)
+  if (mcp) return { kind: 'mcp', server: mcp[1]!, tool: mcp[2]! }
+  return undefined
 }
 
 /** The options of one request, in the order Claude Code offers them. */

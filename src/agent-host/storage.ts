@@ -16,6 +16,7 @@ import {
 } from '@shared/git'
 import { isGithubEvent } from '@shared/github-flow'
 import { isProfileId } from '@shared/provider-profiles'
+import { isAutoApprove, type AutoApprove } from '@shared/risk'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
 import type { SessionTaskRef } from '@shared/workflow'
 import {
@@ -285,6 +286,7 @@ export interface ProjectRecord {
   lastOpenedAt: number
   pinnedAt?: number
   worktree?: Partial<ProjectWorktreeSettings> // only what differs from the defaults
+  autoApprove?: AutoApprove // Huli: absent keeps the settings' default
 }
 
 /**
@@ -727,6 +729,7 @@ export function parseProjectsFile(data: Record<string, unknown>): ProjectsFile |
       lastOpenedAt: item.lastOpenedAt,
       ...(isTime(item.pinnedAt) ? { pinnedAt: item.pinnedAt } : {}),
       ...projectWorktreeOf(item.worktree),
+      ...(isAutoApprove(item.autoApprove) ? { autoApprove: item.autoApprove } : {}),
     })
   }
   return { version: 1, projects }

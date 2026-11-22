@@ -56,6 +56,7 @@ import {
 import { useAgentHistoryRow } from '@renderer/features/agent-history/settings-row'
 import { AboutHero, AutomaticUpdates, NoUpdates, UpdateRow } from './about-section'
 import { useIdleSessionRows } from './idle-sessions'
+import { useAutoApproveRows } from './auto-approve'
 import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
 import { useWorkflowRows } from './workflow-settings'
 import {
@@ -638,6 +639,7 @@ export function useAgentsSection(): SectionDef {
   const { useAgentsStore } = useHostScope()
   const agents = useAgentsStore(useShallow((s) => usableAgents(s.order, s.byId)))
   const idleRows = useIdleSessionRows()
+  const approvalRows = useAutoApproveRows()
   const workflowRows = useWorkflowRows()
   // The footer goes under the list, so the workflow groups after it keep their own notes.
   const list: GroupDef =
@@ -700,6 +702,7 @@ export function useAgentsSection(): SectionDef {
               render: () => null,
             },
           ] satisfies RowDef[])),
+      ...approvalRows,
       ...idleRows,
       ...workflowRows,
     ],

@@ -113,7 +113,8 @@
       "showArchived": "Show archived",
       "worktreeSettings": "Worktree settings…",
       "remove": "Remove project…",
-      "issues": "Issues"
+      "issues": "Issues",
+      "autoApprove": "Auto-approve"
     },
     "remove": {
       "title": "Remove {{name}}?",
@@ -125,6 +126,14 @@
       "folderStays": "The folder and its files stay on this computer.",
       "separator": " ",
       "confirm": "Remove"
+    },
+    "autoApprove": {
+      "default": "Default ({{level}})",
+      "level": {
+        "off": "Off",
+        "low": "Low-risk actions",
+        "edits": "Low-risk actions and edits"
+      }
     }
   },
   "prs": {

@@ -35,6 +35,7 @@ import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/s
 import { useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
 import { openIssues, openSettings } from '@renderer/stores/view'
+import { ProjectApprovalsMenu } from './project-approvals'
 import { openProjectTerminal } from './project-menu-model'
 
 /**
@@ -110,21 +111,22 @@ export function ProjectMenuItems({
           </DropdownMenuItem>
         )}
       </DropdownMenuGroup>
-      {git && (
-        <DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          {github && (
-            <DropdownMenuItem disabled={gone} onClick={() => openIssues(project.path)}>
-              <MenuGlyph icon={RadioButtonIcon} />
-              {t('project.menu.issues')}
-            </DropdownMenuItem>
-          )}
+      <DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <ProjectApprovalsMenu project={project} disabled={!!gone} />
+        {git && github && (
+          <DropdownMenuItem disabled={gone} onClick={() => openIssues(project.path)}>
+            <MenuGlyph icon={RadioButtonIcon} />
+            {t('project.menu.issues')}
+          </DropdownMenuItem>
+        )}
+        {git && (
           <DropdownMenuItem disabled={gone} onClick={() => openWorktreeSettings(project)}>
             <MenuGlyph icon={GitBranchIcon} />
             {t('project.menu.worktreeSettings')}
           </DropdownMenuItem>
-        </DropdownMenuGroup>
-      )}
+        )}
+      </DropdownMenuGroup>
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => openSettings('archived')}>

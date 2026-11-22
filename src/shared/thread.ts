@@ -3,6 +3,7 @@
 
 import { isAgentId, type AgentId } from './agents'
 import type { LastRequest } from './model-requests'
+import type { PermissionRisk } from './risk'
 import type { BrowserOriginAnswer } from './browser'
 import {
   isControlOutcome,
@@ -318,6 +319,18 @@ export function isConfigValue(option: ConfigOption, value: string | boolean): bo
     return typeof value === 'boolean' || (value === 'default' && 'defaultValue' in option)
   }
   return typeof value === 'string' && !!option.choices?.some((choice) => choice.value === value)
+}
+
+/**
+ * Whether nobody was asked: a routine's scope, or Huli's host for a request its setting allows,
+ * answered it, so the call folds as work with a quiet note rather than as an answered card.
+ */
+export function answeredUnasked(result: ToolEntry['permissionResult']): boolean {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    (result.by === 'routine' || result.by === 'risk')
+  )
 }
 
 /**
@@ -874,12 +887,15 @@ export interface ToolEntry {
   locations: { path: string; line?: number }[]
   permission: PendingPermission | null
   permissionResult:
-    // by: answered within a scope; device: answered on a paired device; name: a question's answer;
+    // by: answered within a scope, or by the host for a request its setting allows (risk);
+    // device: answered on a paired device; name: a question's answer;
     // questions: what each question of an ask got, in the agent's order
     | {
         optionId: string
         kind: PermissionKind
-        by?: 'routine' | 'task'
+        by?: 'routine' | 'task' | 'risk'
+        // Huli: the request's risk when the host answered it by itself, which its line says.
+        risk?: PermissionRisk
         device?: FromDevice
         name?: string
         questions?: AnsweredQuestion[]
@@ -952,6 +968,9 @@ export interface PendingPermission {
   elicitation?: PendingElicitation
   // Huli: why the agent asks, in its words: the check or rule that made it ask, what allowing grants.
   reason?: string
+  // Huli: how risky the host judges the request, with why in its words; absent for an ask's
+  // questions, a plan, an MCP server's form and from a host older than it.
+  risk?: PermissionRisk
 }
 
 export interface PermissionOption {

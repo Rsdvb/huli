@@ -121,6 +121,7 @@ import type { PortConnectionState } from './port-rpc'
 import type { AgentProfiles, ProfileBalance } from './provider-profiles'
 import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
+import type { AutoApprove } from './risk'
 import type {
   RoutineChanges,
   RoutineDraft,
@@ -782,6 +783,9 @@ export interface Project {
   missing: boolean // the folder no longer exists
   lastOpenedAt: number
   pinnedAt?: number | null // absent on hosts that do not support project pins
+  // Huli: which permission requests the host allows by itself in this project; null keeps the
+  // settings' default, absent on hosts older than it.
+  autoApprove?: AutoApprove | null
 }
 
 export type SessionAttention = 'none' | 'permission' | 'unread' | 'error'
@@ -1270,6 +1274,12 @@ export interface HostContract {
   'projects.remove': { params: { path: string }; result: void }
   'projects.touch': { params: { path: string }; result: void }
   'projects.pin': { params: { path: string; pinned: boolean }; result: void }
+  // Huli: the project's own choice of the requests the host allows by itself; null keeps the
+  // default. The windows' alone: a paired device cannot widen what is allowed without asking.
+  'projects.setAutoApprove': {
+    params: { path: string; autoApprove: AutoApprove | null }
+    result: void
+  }
   // How the project names and prepares its sessions' worktrees.
   'projects.worktreeSettings': { params: { path: string }; result: ProjectWorktreeSettings }
   // A device needs the owner's leave to use the terminal to change these, as they run a command.
@@ -2252,6 +2262,7 @@ export const HOST_METHODS = [
   'projects.remove',
   'projects.touch',
   'projects.pin',
+  'projects.setAutoApprove',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
   'paths.complete',

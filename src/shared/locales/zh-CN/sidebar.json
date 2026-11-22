@@ -108,7 +108,8 @@
       "showArchived": "显示已归档的会话",
       "worktreeSettings": "工作树设置…",
       "remove": "移除项目…",
-      "issues": "议题"
+      "issues": "议题",
+      "autoApprove": "自动批准"
     },
     "remove": {
       "title": "移除 {{name}}？",
@@ -118,6 +119,14 @@
       "folderStays": "文件夹和里面的文件会留在这台电脑上。",
       "separator": "",
       "confirm": "移除"
+    },
+    "autoApprove": {
+      "default": "跟随默认（{{level}}）",
+      "level": {
+        "off": "关闭",
+        "low": "低风险操作",
+        "edits": "低风险操作和项目内的修改"
+      }
     }
   },
   "prs": {

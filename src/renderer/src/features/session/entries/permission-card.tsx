@@ -34,6 +34,7 @@ import { codeSpans, labelText, respondToPermission, toolInputFields, toolLabel }
 import { StepCard } from './tool-call'
 import { ToolInput } from './tool-call-parts'
 import { KIND_GLYPH, stepFacts, useToolCallLabels } from './tool-call-model'
+import { RiskBadge } from './risk-badge'
 import { ContentBlock, ToolMedia } from './tool-parts'
 import { useAnswering } from './use-answering'
 import { cachedStats, useDiffStats } from './use-diff-stats'
@@ -188,6 +189,8 @@ export function PermissionEntry({
   useDiffStats(entry.content)
   const permission = entry.permission
   const result = entry.permissionResult
+  // Huli: the host's judgment of the request, which a host older than it does not send.
+  const risk = permission?.risk ?? null
   const answers = useMemo(() => answersOf(permission?.options ?? []), [permission])
   const label = toolLabel(entry, projectPath)
   const command = label.kind === 'command' ? label.target : null
@@ -358,10 +361,22 @@ export function PermissionEntry({
           action={action}
           target={target ?? undefined}
           toolIcon={<Icon icon={KIND_GLYPH[entry.toolKind]} size={12} />}
-          risk={entry.toolKind === 'execute' || entry.toolKind === 'delete' ? 'risky' : 'safe'}
+          risk={
+            risk
+              ? risk.level === 'high'
+                ? 'destructive'
+                : 'safe'
+              : entry.toolKind === 'execute' || entry.toolKind === 'delete'
+                ? 'risky'
+                : 'safe'
+          }
+          badge={risk ? <RiskBadge level={risk.level} /> : undefined}
           reason={
-            // Huli: why the agent asks, beside what a command says it does.
-            [entry.description, permission?.reason].filter(Boolean).join(' · ') || undefined
+            // Huli: why the host rates it so, then why the agent asks, beside what a command
+            // says it does.
+            [risk?.reason, [entry.description, permission?.reason].filter(Boolean).join(' · ')]
+              .filter(Boolean)
+              .join('\n') || undefined
           }
           previewTitle={t('permission.card.touches')}
           preview={preview}

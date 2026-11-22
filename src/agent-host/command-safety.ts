@@ -101,6 +101,36 @@ export function unsafeArgvPrefix(words: readonly string[]): boolean {
   )
 }
 
+/** Whether one step, as its words, is unsafe to run as written; the steps of `commandSteps`. */
+export function unsafeWords(words: readonly string[]): boolean {
+  return words.length === 0 || unsafeStep(words, false)
+}
+
+/**
+ * The command a step runs: past its variable assignments and the wrappers that only start it,
+ * such as `env` or `timeout`, as the last of its words. `input` when `xargs` adds what it reads to
+ * them. Null when that cannot be read.
+ */
+export function stepCommand(
+  words: readonly string[],
+): { words: readonly string[]; input: boolean } | null {
+  let rest = words
+  let input = false
+  for (let depth = 0; depth < 8; depth++) {
+    let i = 0
+    while (i < rest.length && ASSIGNMENT.test(rest[i]!)) i++
+    rest = rest.slice(i)
+    if (rest.length === 0) return null
+    const head = commandName(rest[0]!)
+    if (!WRAPPERS.has(head)) return { words: rest, input }
+    if (head === 'xargs') input = true
+    const inner = unwrap(head, rest.slice(1))
+    if (inner === null || inner.length === 0 || inner[0]!.startsWith('-')) return null
+    rest = inner
+  }
+  return null
+}
+
 function unsafeLine(command: string, open: boolean, shell: Shell): boolean {
   const steps = commandSteps(command, shell)
   return (
@@ -346,7 +376,7 @@ const FIND_ACTIONS = new Set([
 ])
 
 /** A command word as the program it runs: its file name, in lower case, without `.exe`. */
-function commandName(word: string): string {
+export function commandName(word: string): string {
   const base = word.slice(Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\')) + 1)
   return base.toLowerCase().replace(/\.(?:exe|cmd|bat|com|ps1)$/, '')
 }

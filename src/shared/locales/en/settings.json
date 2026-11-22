@@ -1330,6 +1330,22 @@
         "body": "Twice in a row, a session resumed on this version read less than half of its context from the prompt cache. So idle sessions keep their agent until their cache expires, over the settings below, until Claude Code updates to another version. When memory is critical they are still released."
       }
     },
+    "autoApprove": {
+      "group": "Approvals",
+      "name": "Approve low-risk actions automatically",
+      "description": "Answers a request once by itself when it only reads or runs the project’s tests, checks or build, and notes each one in the thread. Never in plan mode, and never a change outside the project, a deletion or a push. Each project can choose its own in its menu.",
+      "keywords": "auto approve permission risk low allow 自动批准",
+      "level": {
+        "off": "Off",
+        "low": "Low-risk actions",
+        "edits": "Low-risk actions and edits in the project"
+      },
+      "confirm": {
+        "title": "Also approve edits in the project?",
+        "body": "Agents then change files inside the project without asking, and the project’s tests, which run its code, run without asking too. Edits of agent, editor, hook and CI settings, and everything outside the project, still ask.",
+        "action": "Approve edits too"
+      }
+    },
     "workflow": {
       "group": "Workflows",
       "keywords": "Workflow suggest auto pick steps tasks flow",

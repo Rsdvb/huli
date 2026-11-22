@@ -12,6 +12,7 @@ import type {
 } from '@shared/thread'
 import { commandSteps, unsafeArgvPrefix, unsafeCommand } from '../command-safety'
 import type { OptionAnswer, PermissionAnswer, PermissionRequest } from '../connection'
+import type { RiskSubject } from '../risk/classify'
 import { formFields, isWebUrl } from '../elicitation'
 import { hasMessage, t } from '../i18n'
 import { answerWords } from '../question-answers'
@@ -126,6 +127,45 @@ export function unsafeSessionCommand(command: string | null | undefined): boolea
     return unsafeCommand(script)
   }
   return unsafeCommand(command)
+}
+
+/**
+ * Huli: wider sandbox rights as what they open, for their risk: a special place or a path this
+ * cannot read counts as the whole file system.
+ */
+export function grantSubject(permissions: AdditionalPermissions | null | undefined): RiskSubject {
+  const reads = [...(permissions?.fileSystem?.read ?? [])]
+  const writes = [...(permissions?.fileSystem?.write ?? [])]
+  for (const entry of permissions?.fileSystem?.entries ?? []) {
+    const where =
+      entry.path?.type === 'path'
+        ? entry.path.path
+        : entry.path?.type === 'glob_pattern'
+          ? entry.path.pattern
+          : '/'
+    if (entry.access === 'read') reads.push(where)
+    else if (entry.access === 'write') writes.push(where)
+  }
+  return { kind: 'grant', network: permissions?.network?.enabled === true, reads, writes }
+}
+
+/**
+ * Huli: what a command's request does: the network it asks for, the rights it widens, or the
+ * command itself in the folder it names. Codex sends the command as its words joined as a POSIX
+ * shell quotes them, `bash -lc '...'` or `powershell.exe -Command '...'`, whose script is read in
+ * its own shell.
+ */
+export function commandSubject(params: CommandExecutionRequestApprovalParams): RiskSubject {
+  const network = params.networkApprovalContext
+  if (network) return { kind: 'fetch', url: `${network.protocol}://${network.host}` }
+  if (params.additionalPermissions) return grantSubject(params.additionalPermissions)
+  if (!params.command) return { kind: 'other' }
+  return {
+    kind: 'command',
+    command: params.command,
+    shell: 'posix',
+    ...(params.cwd ? { cwd: params.cwd } : {}),
+  }
 }
 
 /** An option for a decision; null for one to leave out, such as remembering an unsafe command. */
@@ -252,7 +292,13 @@ export function commandApproval(
     .filter((choice) => choice !== null)
   const options = ordered(choices.map((choice) => choice.option))
   return {
-    request: { toolCallId: params.itemId, toolEntryId: entryId, output: out, options },
+    request: {
+      toolCallId: params.itemId,
+      toolEntryId: entryId,
+      output: out,
+      options,
+      subject: commandSubject(params),
+    },
     respond: (answer) => {
       const chosen =
         answer === 'cancelled'
@@ -303,8 +349,9 @@ function checkpointApproval(
     .map((decision, index) => commandOption(decision, index, true))
     .filter((choice) => choice !== null)
   const options = ordered(choices.map((choice) => choice.option))
+  const subject: RiskSubject = kind === 'writeStdin' ? { kind: 'input' } : commandSubject(params)
   return {
-    request: { toolCallId: callId, toolEntryId: entryId, output: out, options },
+    request: { toolCallId: callId, toolEntryId: entryId, output: out, options, subject },
     respond: (answer) => {
       const chosen =
         answer === 'cancelled'
@@ -345,8 +392,18 @@ export function fileChangeApproval(
     decline: 'decline',
     cancel: 'cancel',
   }
+  // Write access to a folder for the rest of the session is wider than the edit it comes with.
+  const grant: RiskSubject | null = params.grantRoot
+    ? { kind: 'grant', network: false, reads: [], writes: [params.grantRoot] }
+    : null
   return {
-    request: { toolCallId: params.itemId, toolEntryId: entryId, output: out, options },
+    request: {
+      toolCallId: params.itemId,
+      toolEntryId: entryId,
+      output: out,
+      options,
+      ...(grant ? { subject: grant } : {}),
+    },
     respond: (answer) => ({
       decision: answer === 'cancelled' ? 'cancel' : (decisions[answer.optionId] ?? 'cancel'),
     }),
@@ -377,7 +434,13 @@ export function permissionsApproval(
     { id: 'reject_permissions', name: t('codex.approval.decline'), kind: 'reject_once' },
   ]
   return {
-    request: { toolCallId: params.itemId, toolEntryId: entryId, output: out, options },
+    request: {
+      toolCallId: params.itemId,
+      toolEntryId: entryId,
+      output: out,
+      options,
+      subject: grantSubject(params.permissions),
+    },
     respond: (answer) => {
       const id = answer === 'cancelled' ? 'reject_permissions' : answer.optionId
       if (id === 'allow_permissions_turn') return { permissions: params.permissions, scope: 'turn' }
@@ -635,7 +698,13 @@ export function elicitationApproval(
     { id: 'dismiss', name: t('codex.approval.dismiss'), kind: 'reject_once' },
   ])
   return {
-    request: { toolCallId, toolEntryId: entryId, output: out, options },
+    request: {
+      toolCallId,
+      toolEntryId: entryId,
+      output: out,
+      options,
+      subject: { kind: 'mcp', server, tool: 'confirm' },
+    },
     respond: (answer) => {
       const id = answer === 'cancelled' ? 'dismiss' : answer.optionId
       const action = id === 'allow_once' ? 'accept' : id === 'decline' ? 'decline' : 'cancel'

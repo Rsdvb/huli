@@ -385,6 +385,12 @@ const parallelPermissions: Scenario = async (turn) => {
       kind: call.kind,
       status: 'pending',
       rawInput: { command: call.command },
+      // The files an edit or a deletion names, which its risk reads.
+      ...(call.kind === 'execute'
+        ? {}
+        : {
+            locations: [{ path: filePath(turn, call.kind === 'edit' ? 'package.json' : '.cache') }],
+          }),
     })
   }
   const outcomes = await Promise.all(

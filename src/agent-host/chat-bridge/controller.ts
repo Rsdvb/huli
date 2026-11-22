@@ -639,6 +639,11 @@ export class ChatController {
         parts.push(`\`\`\`\n${clip(preview, PREVIEW_CHARS)}\n\`\`\``)
       else if (tool.locations[0]) parts.push(`\`${plain(tool.locations[0].path)}\``)
     }
+    // Huli: the host's judgment of the request, as every card shows it.
+    if (permission.risk) {
+      const level = t(`risk.level.${permission.risk.level}`)
+      parts.push(`**${level}** · ${plain(clip(permission.risk.reason, 200))}`)
+    }
     if (permission.reason) parts.push(`_${plain(clip(permission.reason, 300))}_`)
     parts.push(optionLines(permission.options))
     parts.push(t('chatBridge.optionsHint'))
