@@ -165,10 +165,23 @@ describe('changedLines', () => {
     expect(changedLines(null, 'a\nb\n')).toEqual({ added: 2, removed: 0 })
   })
 
-  it('counts what lies between the lines both texts share at their ends', () => {
+  it('counts the lines a change replaced', () => {
     expect(changedLines('a\nb\nc\nd', 'a\nx\nd')).toEqual({ added: 1, removed: 2 })
     expect(changedLines('same', 'same')).toEqual({ added: 0, removed: 0 })
     expect(changedLines('a\nb', 'a\nb\nc')).toEqual({ added: 1, removed: 0 })
+  })
+
+  it('counts two changes apart as a diff does, not the lines between them', () => {
+    expect(changedLines('a\nb\nc\nd\ne\nf', 'a\nB\nc\nd\ne\nF')).toEqual({ added: 2, removed: 2 })
+  })
+
+  it('bounds a change too large to diff by what lies between the shared ends', () => {
+    const before = Array.from({ length: 900 }, (_, i) => `old ${i}`).join('\n')
+    const after = Array.from({ length: 900 }, (_, i) => `new ${i}`).join('\n')
+    expect(changedLines(`top\n${before}\nend`, `top\n${after}\nend`)).toEqual({
+      added: 900,
+      removed: 900,
+    })
   })
 })
 

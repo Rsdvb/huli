@@ -58,10 +58,47 @@ function lineCount(text: string): number {
   return text.endsWith('\n') ? count - 1 : count
 }
 
+/** The most edits a diff is counted through before the cheap bound stands in for it. */
+const MOST_EDITS = 400
+
 /**
- * Lines added and removed from `oldText` to `newText`: what lies between the lines both start
- * and end with. Exact for one change, and an upper bound for several, which is enough for a line
- * that sums a session up and never spends a diff's time on it.
+ * The lines added and removed between `a` and `b`, by the shortest edit script (Myers' O(ND)
+ * search), or null when it takes more than MOST_EDITS edits.
+ */
+function editCounts(
+  a: readonly string[],
+  b: readonly string[],
+): { added: number; removed: number } | null {
+  const n = a.length
+  const m = b.length
+  const most = Math.min(n + m, MOST_EDITS)
+  const offset = most + 1
+  const v = new Array<number>(2 * most + 3).fill(0)
+  for (let d = 0; d <= most; d++) {
+    for (let k = -d; k <= d; k += 2) {
+      let x =
+        k === -d || (k !== d && v[offset + k - 1]! < v[offset + k + 1]!)
+          ? v[offset + k + 1]!
+          : v[offset + k - 1]! + 1
+      let y = x - k
+      while (x < n && y < m && a[x] === b[y]) {
+        x++
+        y++
+      }
+      v[offset + k] = x
+      if (x >= n && y >= m) {
+        const same = (n + m - d) / 2
+        return { added: m - same, removed: n - same }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Lines added and removed from `oldText` to `newText`, as a diff counts them; for a change of
+ * more than a few hundred lines, what lies between the lines both start and end with, an upper
+ * bound that never spends long on one diff.
  */
 export function changedLines(
   oldText: string | null,
@@ -81,7 +118,9 @@ export function changedLines(
   ) {
     end++
   }
-  return { added: after.length - start - end, removed: before.length - start - end }
+  const removed = before.slice(start, before.length - end)
+  const added = after.slice(start, after.length - end)
+  return editCounts(removed, added) ?? { added: added.length, removed: removed.length }
 }
 
 /** A reply's first line of text without its Markdown marks, spaces collapsed. */

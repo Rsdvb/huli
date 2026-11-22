@@ -1,5 +1,5 @@
 import { ArrowUp01Icon, Cancel01Icon } from '@hugeicons/core-free-icons'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { memo, useEffect, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { recapSince, type Recap } from '@shared/recap'
@@ -70,7 +70,7 @@ function itemFrom(items: readonly Item[], order: readonly string[], from: string
  * when the window comes to the front, from where this device last saw it; nothing runs between.
  * Inside the message scroller.
  */
-export function RecapLine({
+export const RecapLine = memo(function RecapLine({
   sessionId,
   items,
   sent,
@@ -79,7 +79,8 @@ export function RecapLine({
   jumps,
 }: {
   sessionId: string
-  items: readonly Item[]
+  /** The thread's items now. */
+  items: () => readonly Item[]
   /** The latest message sent, whose change, a new one, ends the recap. */
   sent: string | null
   viewport: RefObject<HTMLDivElement | null>
@@ -90,10 +91,6 @@ export function RecapLine({
   const [recap, setRecap] = useState(() => recapNow(sessionId))
   const [sentAtRecap, setSentAtRecap] = useState(sent)
   const { jumpTo } = useJumpToMessage(sessionId, viewport, content, jumps)
-  const latest = useRef(items)
-  useEffect(() => {
-    latest.current = items
-  })
 
   useEffect(() => {
     markSeen(sessionId)
@@ -122,7 +119,7 @@ export function RecapLine({
 
   const jump = (): void => {
     const order = useThreadsStore.getState().replicas[sessionId]?.state?.order ?? []
-    const key = itemFrom(latest.current, order, recap.from)
+    const key = itemFrom(items(), order, recap.from)
     if (!key) return
     // The item is loaded, as the recap's own entries are: no page is read for it.
     void jumpTo({ entryId: key, pos: Number.MAX_SAFE_INTEGER }).then((arrived) => {
@@ -132,6 +129,8 @@ export function RecapLine({
       if (!item) return
       item.dataset.found = ''
       setTimeout(() => delete item.dataset.found, FOUND_MS)
+      // Arrived, the line has done its work, and would cover the item it brought to the top.
+      setRecap(null)
     })
   }
 
@@ -156,7 +155,7 @@ export function RecapLine({
       </button>
     </div>
   )
-}
+})
 
 /** The latest message the user sent in the session, as the thread's `sent` reads it. */
 function latestSent(sessionId: string): string | null {

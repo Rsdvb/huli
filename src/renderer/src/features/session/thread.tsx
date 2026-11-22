@@ -469,6 +469,8 @@ export const Thread = memo(function Thread({
   useLayoutEffect(() => {
     latest.current = { items, shownFrom, returnPending }
   })
+  // Read when the recap's jump is pressed, so the line never redraws as the items change.
+  const itemsNow = useCallback(() => latest.current.items, [])
   useLayoutEffect(() => {
     const view = viewport.current
     const column = content.current
@@ -616,7 +618,7 @@ export const Thread = memo(function Thread({
         <RecapLine
           key={sessionId}
           sessionId={sessionId}
-          items={items}
+          items={itemsNow}
           sent={sent}
           viewport={viewport}
           content={content}

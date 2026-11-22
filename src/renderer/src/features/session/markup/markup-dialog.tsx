@@ -131,6 +131,7 @@ export default function MarkupDialog({
   // The label being written, read by its input's blur, which may come after another one started.
   const writingNow = useRef<Writing | null>(null)
   const labels = useRef(1)
+  const pressedAt = useRef<MarkupPoint | null>(null)
   const setWriting = (next: Writing | null) => {
     writingNow.current = next
     setShownWriting(next)
@@ -232,10 +233,10 @@ export default function MarkupDialog({
     if (!image || event.button !== 0 || saving) return
     const point = at(event)
     if (tool === 'text') {
-      // A click elsewhere ends the label being written and starts another.
+      // The label starts once the click ends, so the press's own focus change cannot take its
+      // input's focus away; a press elsewhere ends the label being written.
       if (writing) commitWriting(writing.id)
-      setWriting({ id: labels.current++, x: point.x, y: point.y - sizes.text / 2, text: '' })
-      event.preventDefault()
+      pressedAt.current = point
       return
     }
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -276,7 +277,13 @@ export default function MarkupDialog({
     redraw()
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
+    const pressed = pressedAt.current
+    pressedAt.current = null
+    if (pressed && tool === 'text' && event.type === 'pointerup') {
+      setWriting({ id: labels.current++, x: pressed.x, y: pressed.y - sizes.text / 2, text: '' })
+      return
+    }
     const now = draft.current
     draft.current = null
     start.current = null
@@ -340,7 +347,7 @@ export default function MarkupDialog({
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="w-auto max-w-[calc(100vw-2rem)] gap-3 p-3 sm:max-w-[calc(100vw-2rem)]"
+        className="w-max max-w-[calc(100vw-2rem)] gap-3 p-3 sm:max-w-[calc(100vw-2rem)]"
         onKeyDown={onKeyDown}
       >
         <div className="flex items-center gap-3 pr-1 pl-1.5">
