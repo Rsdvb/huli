@@ -166,7 +166,8 @@ if (
 if (platform === process.platform) {
   const code = buildComputerHelper(out, platform, arch)
   if (code !== 0 && platform !== 'darwin') throw new Error(`kite-computer-helper failed (${code})`)
-  if (code !== 0) console.warn('kite-computer-helper: not built; computer use reads no text from pictures')
+  if (code !== 0)
+    console.warn('kite-computer-helper: not built; computer use reads no text from pictures')
 } else if (platform === 'win32' || platform === 'darwin') {
   console.warn(`kite-computer-helper: not built for ${platform} on ${process.platform}`)
 }
