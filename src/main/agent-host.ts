@@ -41,6 +41,7 @@ import type {
   SessionProgress,
   SettingsCallAnswer,
 } from '@shared/host-control'
+import type { ThemeCallAnswer } from '@shared/theme-palette'
 import {
   isComputerApp,
   isComputerFrame,
@@ -111,6 +112,8 @@ export interface AgentHostDeps {
   market?: (call: MarketCall) => Promise<MarketCallAnswer>
   /** An agent's settings tool reads or changes the settings. */
   settingsCall?: (call: unknown) => SettingsCallAnswer
+  /** Huli: an agent's theme tool reads or sets the agent theme, unchecked. */
+  themeCall?: (call: unknown) => Promise<ThemeCallAnswer>
   /** The host's first start found the programs of these harnesses; main adds their agents. */
   onFirstStart?(harnesses: unknown): void
   onAttention(message: Extract<HostToMain, { type: 'host:attention' }>): void
@@ -819,6 +822,15 @@ export class AgentHost {
         void trashAll(paths).then((error) =>
           this.host.post({ type: 'trash-result', callId, error }),
         )
+        break
+      }
+      case 'host:theme-call': {
+        const { callId } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.deps.themeCall
+        void (run ? run(message.call) : Promise.resolve({ error: 'This build shows no themes.' }))
+          .catch((error: unknown) => ({ error: (error as Error).message }))
+          .then((answer) => this.host.post({ type: 'theme-result', callId, answer }))
         break
       }
       case 'host:settings-call': {

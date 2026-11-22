@@ -36,6 +36,7 @@ import type { MemoryAction, MemoryDraft, MemoryLayer, MemoryWriteStatus } from '
 import type { RoutineRef } from './routines'
 import type { SecretField, SecretTarget } from './secret-request'
 import type { SettingScalar, SettingsSection } from './settings-catalog'
+import type { AgentThemeInstalled } from './theme-palette'
 import type { LimitPause, Stall } from './supervisor'
 
 export {
@@ -446,6 +447,7 @@ export type ThreadEntry =
   | MarketPublishEntry // Kettu's own record of a publish to the Kettu Marketplace, and its outcome
   | SettingsChangeEntry // Kettu's own record of an agent's change to Kettu's settings, and its answer
   | SecretRequestEntry // Kite's own record of an agent asking for secrets, never their values
+  | ThemeChangeEntry // Kite's own record of an agent's change to the theme colors, and its undo
 
 /**
  * Huli: why a model refused a turn: the explanation its provider gave, to show and never parse, the
@@ -883,6 +885,45 @@ export interface SecretRequestEntry {
   /** When an unanswered card counts as declined, in the host's milliseconds. */
   expiresAt: number
   outcome: SecretRequestOutcome | null
+  /** Set when a paired device gave the answer; the host's own windows give none. */
+  device?: FromDevice
+  /** The agent's entry before it, to put it back after a replay. */
+  after: string | null
+}
+
+/** Which theme shows, and what the agent theme holds, before or after an agent's change. */
+export interface ThemeState {
+  /** The chosen theme's id, the built-in theme's included, and its name. */
+  theme: string
+  name: string
+  agent: AgentThemeInstalled | null
+}
+
+/**
+ * What became of a theme change: made (and later undone, or changed again since, which takes its
+ * undo away), not made because the user said Don't change, nobody answered in time or the turn
+ * ended first, or refused when it was applied.
+ */
+export type ThemeChangeOutcome =
+  | { kind: 'changed'; undone?: true; stale?: true }
+  | { kind: 'declined' | 'expired' | 'ended' }
+  | { kind: 'failed'; message: string }
+
+/**
+ * Huli: an agent's `set_theme_colors`: a card while it waits for the user (`outcome` null), or,
+ * when Full access made it without asking, only the line it leaves, which can undo it. Each one is
+ * a version of the theme: `from` is what Undo puts back.
+ */
+export interface ThemeChangeEntry {
+  kind: 'theme_change'
+  id: string
+  from: ThemeState
+  to: ThemeState
+  /** It waited for the user in a card; false when Full access changed it without asking. */
+  asked: boolean
+  /** When an unanswered card counts as declined, in the host's milliseconds; null when not asked. */
+  expiresAt: number | null
+  outcome: ThemeChangeOutcome | null
   /** Set when a paired device gave the answer; the host's own windows give none. */
   device?: FromDevice
   /** The agent's entry before it, to put it back after a replay. */

@@ -178,7 +178,8 @@
     "marketPublish": "想把 {{name}} 发布到 Kettu 市场",
     "marketUnlist": "想把 {{name}} 从 Kettu 市场下架",
     "settingsChange_other": "想修改 {{count}} 项设置",
-    "secretRequest": "需要你提供 {{title}}"
+    "secretRequest": "需要你提供 {{title}}",
+    "themeChange": "想更换纸鸢的主题颜色"
   },
   "supervisor": {
     "continueText": "继续",

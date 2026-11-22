@@ -181,7 +181,8 @@
     "marketUnlist": "Wants to unlist {{name}} from the Kettu Marketplace",
     "settingsChange_one": "Wants to change {{count}} setting",
     "settingsChange_other": "Wants to change {{count}} settings",
-    "secretRequest": "Needs {{title}} from you"
+    "secretRequest": "Needs {{title}} from you",
+    "themeChange": "Wants to change Kettu’s theme colors"
   },
   "supervisor": {
     "continueText": "Continue",

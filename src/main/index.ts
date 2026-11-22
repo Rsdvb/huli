@@ -100,6 +100,7 @@ import { systemReleaseForRun } from './system-name'
 import { rendererPage } from './renderer'
 import { SettingsStore } from './settings'
 import { answerSettingsCall } from './settings-call'
+import { answerThemeCall } from './theme-call'
 import { effectiveDirect, hostSettings, reachesHost, terminalSettings } from './settings-schema'
 import { hasPendingFrame, isRevoked, watchSubframes } from './subframes'
 import { DeviceHost } from './device-host'
@@ -534,6 +535,7 @@ async function start(): Promise<void> {
         : Promise.resolve({
             error: { code: 'no_page', message: 'Another host’s session has this page.' },
           }),
+    themeCall: (call) => answerThemeCall(call, { themes, settings }),
     settingsCall: (call) =>
       answerSettingsCall(call, {
         settings,

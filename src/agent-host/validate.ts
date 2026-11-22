@@ -1801,6 +1801,21 @@ export function createValidators(platform: Platform): Validators {
         decision: o.decision,
       }
     },
+    'theme.answerChange': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'apply' && o.decision !== 'keep') {
+        throw invalidParams('decision must be apply or keep')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+      }
+    },
+    'theme.undoChange': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
+    },
     'secrets.answer': (params) => {
       const o = fields(params)
       if (o.decision !== 'provide' && o.decision !== 'decline') {

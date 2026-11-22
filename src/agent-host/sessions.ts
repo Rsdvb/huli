@@ -136,6 +136,9 @@ import {
   type SettingsChangeOutcome,
   type SecretRequestEntry,
   type SecretRequestOutcome,
+  type ThemeChangeEntry,
+  type ThemeChangeOutcome,
+  type ThemeState,
   type ComputerAppEntry,
   type ComputerSetupEntry,
   type ComputerUseView,
@@ -173,6 +176,7 @@ import {
 } from './attention'
 import type { MarketAnswer, MarketAsk } from './marketplace/publish-tools'
 import type { SecretAnswer, SecretAsk } from './secrets/tools'
+import type { ThemeAnswer } from './theme/tools'
 import type { SettingsAnswer, SettingsAsk } from './settings/tools'
 import type { AgentCopies } from './agent-copies'
 import type { DeletedSessions } from './deleted-sessions'
@@ -1309,6 +1313,8 @@ export class SessionManager {
   private readonly settingsWaits = new Map<string, (answer: SettingsAnswer) => void>()
   /** Huli: secret cards that wait for the user, by entry id. */
   private readonly secretWaits = new Map<string, (answer: SecretAnswer) => void>()
+  /** Huli: theme cards that wait for the user, by entry id. */
+  private readonly themeWaits = new Map<string, (answer: ThemeAnswer) => void>()
   /** Each first use of an app that waits, by the computer use service's request id. */
   private readonly appRequests = new Map<number, AppRequest>()
   /** Each session's card holding its folder's own MCP servers while it waits, with the folder. */
@@ -2935,6 +2941,147 @@ export class SessionManager {
       })
     })
     return { entryId: entry.id, answer }
+  }
+
+  /**
+   * Huli: an agent wants to change Kettu's theme colors: a card in the thread that waits as a
+   * permission request does, and settles with the user's answer, `expired` after `waitMs`, or
+   * `ended` with the turn.
+   */
+  themeAsked(
+    sessionId: string,
+    change: { from: ThemeState; to: ThemeState },
+    waitMs: number,
+  ): { entryId: string; answer: Promise<ThemeAnswer> } | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: ThemeChangeEntry = {
+      kind: 'theme_change',
+      id: this.nextId(live),
+      from: change.from,
+      to: change.to,
+      asked: true,
+      expiresAt: Date.now() + waitMs,
+      outcome: null,
+      after: agentEntryBefore(live.thread),
+    }
+    live.origins.set(`theme:${entry.id}`, entry.id)
+    this.emit(live, [{ op: 'entry.add', entry }])
+    const status = live.thread.session.status
+    if (status === 'running' || status === 'ready')
+      this.update(live, { status: 'awaiting_permission' })
+    this.touch(live.id)
+    this.updateBadge()
+    this.deps.events.attention(
+      live.id,
+      'permission',
+      this.titleOf(live),
+      t('attention.themeChange'),
+      { id: entry.id },
+    )
+    const answer = new Promise<ThemeAnswer>((resolve) => {
+      const timer = setTimeout(
+        () => this.settleTheme(sessionId, entry.id, { decision: 'expired' }),
+        waitMs,
+      )
+      this.themeWaits.set(entry.id, (given) => {
+        clearTimeout(timer)
+        resolve(given)
+      })
+    })
+    return { entryId: entry.id, answer }
+  }
+
+  /** A theme change Full access made without asking: only the line it leaves, with its undo. */
+  themeRecorded(sessionId: string, change: { from: ThemeState; to: ThemeState }): string | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: ThemeChangeEntry = {
+      kind: 'theme_change',
+      id: this.nextId(live),
+      from: change.from,
+      to: change.to,
+      asked: false,
+      expiresAt: null,
+      outcome: { kind: 'changed' },
+      after: agentEntryBefore(live.thread),
+    }
+    this.emit(live, [{ op: 'entry.add', entry }])
+    return entry.id
+  }
+
+  /** A window's or a device's answer to a theme card; the first one counts. */
+  answerTheme(
+    sessionId: string,
+    entryId: string,
+    decision: 'apply' | 'keep',
+    device?: FromDevice,
+  ): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const entry = live?.thread.byId[entryId]
+    if (!live || entry?.kind !== 'theme_change') throw notFound(`No theme card ${entryId}`)
+    if (entry.outcome !== null || !this.themeWaits.has(entryId)) {
+      throw new HostError('not_found', `The theme card ${entryId} was already answered`, {
+        reason: ALREADY_ANSWERED,
+        device: entry.device ?? null,
+      })
+    }
+    this.settleTheme(sessionId, entryId, { decision }, device)
+  }
+
+  /** What became of a theme change the user confirmed, or of one undone later. */
+  themeSettled(sessionId: string, entryId: string, outcome: ThemeChangeOutcome): void {
+    const live = this.live.get(sessionId)
+    if (live?.thread.byId[entryId]?.kind !== 'theme_change') return
+    this.emit(live, [{ op: 'entry.update', id: entryId, changes: { outcome } }])
+  }
+
+  /** A theme line's change, for its undo, once it was made and not undone. */
+  themeChange(sessionId: string, entryId: string): { from: ThemeState; to: ThemeState } {
+    this.recordOf(sessionId)
+    const entry = this.live.get(sessionId)?.thread.byId[entryId]
+    if (entry?.kind !== 'theme_change') throw notFound(`No theme change ${entryId}`)
+    if (entry.outcome?.kind !== 'changed' || entry.outcome.undone || entry.outcome.stale) {
+      throw new HostError('conflict', 'This change cannot be undone')
+    }
+    return { from: entry.from, to: entry.to }
+  }
+
+  private settleTheme(
+    sessionId: string,
+    entryId: string,
+    answer: ThemeAnswer,
+    device?: FromDevice,
+  ): void {
+    const resolve = this.themeWaits.get(entryId)
+    this.themeWaits.delete(entryId)
+    const live = this.live.get(sessionId)
+    if (live) {
+      live.origins.delete(`theme:${entryId}`)
+      const entry = live.thread.byId[entryId]
+      if (entry?.kind === 'theme_change' && entry.outcome === null) {
+        // Apply is settled by what applying it gives; the card holds until then.
+        if (answer.decision !== 'apply') {
+          const outcome: ThemeChangeOutcome = {
+            kind: answer.decision === 'keep' ? 'declined' : answer.decision,
+          }
+          this.emit(live, [
+            {
+              op: 'entry.update',
+              id: entryId,
+              changes: { outcome, ...(device ? { device } : {}) },
+            },
+          ])
+        } else if (device) {
+          this.emit(live, [{ op: 'entry.update', id: entryId, changes: { device } }])
+        }
+      }
+      this.stopWaiting(live)
+      this.touch(live.id)
+      this.updateBadge()
+    }
+    resolve?.(answer)
   }
 
   /** Huli: whether the session's agent runs its file of exports before each of its commands. */
@@ -11217,6 +11364,11 @@ export class SessionManager {
       // So does a secret card, and no value goes anywhere.
       if (requestId.startsWith('secret:')) {
         this.settleSecret(live.id, entryId, { decision: 'ended' })
+        continue
+      }
+      // And a theme card, changing nothing.
+      if (requestId.startsWith('theme:')) {
+        this.settleTheme(live.id, entryId, { decision: 'ended' })
         continue
       }
       live.origins.delete(requestId)

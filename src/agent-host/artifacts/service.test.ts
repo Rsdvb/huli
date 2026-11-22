@@ -74,6 +74,9 @@ describe('the servers a session attaches with', () => {
       'change_settings',
       // Kettu's own card asks the user for the values, so the agent's prompt never does.
       'request_secrets',
+      // So does the theme's, unless the session is in Full access.
+      'read_theme',
+      'set_theme_colors',
       'read_kettu_guide',
     ]
     for (const server of [

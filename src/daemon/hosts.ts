@@ -1020,6 +1020,16 @@ export class Hosts {
       case 'host:market-call':
         if (Number.isSafeInteger(message.callId)) void this.marketCall(message.callId, message.call)
         break
+      case 'host:theme-call':
+        if (Number.isSafeInteger(message.callId)) {
+          // Each device shows the theme it chose; the daemon has no window of its own.
+          this.agent.post({
+            type: 'theme-result',
+            callId: message.callId,
+            answer: { error: 'This computer runs Kettu without a window, so it shows no theme.' },
+          })
+        }
+        break
       case 'host:settings-call':
         if (Number.isSafeInteger(message.callId)) {
           const run = this.options.settingsCall
