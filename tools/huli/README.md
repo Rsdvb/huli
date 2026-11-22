@@ -1224,6 +1224,57 @@ Generated before a build (not hand edits, never committed):
 - `node tools/huli/update-path.mjs` fills in the update channel's path (see Update channel). The
   rebrand runs it; the phone builds run it alone, before bundling.
 
+### Computer use: administrator apps, text recognition, the foreground (电脑操作增强)
+
+Cua Driver (pinned in `tools/install/cua-driver.mjs`) keeps to the background and refuses windows
+of programs run as administrator, which Windows' UIPI keeps a normal process from driving. Kite adds
+`native/computer-helper` (see its README): on Windows C# built with the .NET Framework compiler
+Windows ships, on macOS Swift; `tools/install/cua-driver.mjs` builds it beside the driver. The
+agent host starts it on a session's first call that needs it and ends it with the hold
+(`src/agent-host/computer/helper.ts`); nothing runs at startup or while idle.
+
+- **Elevated apps up front.** On Windows `computer_list_apps` asks the helper for each process's
+  integrity level (`PROCESS_QUERY_LIMITED_INFORMATION`, `TokenIntegrityLevel`, `TokenElevation`)
+  and marks those above Kite's own as run as administrator ("管理员权限运行，普通权限无法操作");
+  an action in one is refused before the driver is called, with code `elevated`. A read still
+  goes through, with a note.
+- **Blank screenshots.** A screenshot that is one solid color (or transparent), or missing when it
+  was asked for, gives way to a placeholder (a crossed-out picture, no words) and a note, so the
+  agent does not act on an empty frame (`screenshot.ts`).
+- **Text recognition.** `computer_get_window_state` reads the screenshot's text with the system's
+  OCR (Windows.Media.Ocr, Apple Vision) when the agent passes `ocr: true`, or by itself when the
+  tree holds no more than the window's frame (5 elements or fewer, no `query` or `since`). Lines
+  come back with boxes in screenshot pixels, which `computer_click` takes as x and y. On Windows two
+  engines read when installed, the user's first language's and one of the other script family,
+  merged line by line. No model is downloaded; cua-perception and OmniParser's detector are AGPL,
+  and OmniParser's MIT icon weights were not worth a download yet.
+- **The foreground once.** An action the driver refuses as `background_unavailable` (or
+  `effect: refused` with a foreground escalation) is sent once more with `delivery_mode:
+foreground` while Settings › Computer use › 允许必要时切到前台操作 is on (the default); the thread
+  notes it once a turn per app, and the floating label notes each time. Off, the agent hears it was
+  not tried. An agent may ask for the foreground on any action, which the same switch allows. An
+  action the driver delivered in the foreground by itself (Windows menus) is noted the same way.
+- **Administrator use, opt in** (允许以管理员权限操作指定程序, Windows, off by default, `access: 'read'`
+  so agents can never turn it on). An action or read of an elevated app then shows a card naming
+  it (only this computer's window can answer it). On approve, the helper starts its `broker` mode
+  through `ShellExecute` `runas`: Windows' administrator prompt, which the owner answers. The
+  broker creates `\\.\pipe\kite-computer-<random>` with a DACL for Kite's user's SID alone (passed
+  in, as under Administrator protection the broker runs as the shadow admin) and a medium label,
+  checks that the client is the agent host's process and account, and takes the per-session token
+  as the first line (only its SHA-256 is on the command line). It runs `cua-driver mcp --direct`
+  as its child and relays only the read and input tools, scoped to the approved process's windows,
+  background only, with Kite's arguments only. The host asks again before risky steps (`riskyStep`
+  in `policy.ts`: keys, shortcuts, line breaks, drags, menus, committing buttons, bare points). A red
+  badge on the composer says 正在以管理员权限操作 <程序> with a Stop that ends only the helper, and
+  the floating label turns red. The broker ends with the hold (turn end, idle, Stop), when its idle
+  time passes, or when the program or the agent host exits. No UIAccess.
+
+A test copy (`KITE_TEST_WINDOW=background`) keeps computer use's floating label and light off every
+display and registers no stop shortcut. To try computer use there, start a window of your own and
+drive it through the fake agent's `fake:/computer <tool> <json> ; ...` turns (see
+`tools/fake-agent/computer.ts`); the administrator broker is tested without elevation by
+`src/agent-host/computer/elevated.test.ts` on Windows.
+
 ### Kite in development
 
 `pnpm dev` runs the tree as committed, yet looks like Kite: `tools/huli/dev-brand.mjs`, a Vite
