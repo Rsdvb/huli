@@ -142,7 +142,7 @@ export const managerDemo: Scenario = async (turn) => {
     await call('start_worker', {
       worker: '规划',
       title: '查重试库',
-      task: 'fake:/work --read\n看看项目里有没有现成的重试工具。',
+      task: 'fake:/work --read --secret\n看看项目里有没有现成的重试工具。',
     })
     state.helper = typeof helper.structured?.id === 'string' ? helper.structured.id : null
     const told = blocks.includes('kite-manager') ? '（收到了总管说明）' : ''
@@ -182,7 +182,7 @@ export const managerDemo: Scenario = async (turn) => {
   return 'end_turn'
 }
 
-/** `/work [--ask] [--fail-once] [--file <path>] [--read]`: a worker's task, reported with report_work. */
+/** `/work [--ask] [--secret] [--fail-once] [--file <path>] [--read]`: a task, reported with report_work. */
 export const work: Scenario = async (turn) => {
   const { text } = promptOf(turn)
   const call = await tools(turn)
@@ -215,6 +215,17 @@ export const work: Scenario = async (turn) => {
       toolCallId,
       status: outcome === 'allow' ? 'completed' : 'failed',
     })
+  }
+  if (flag(text, 'secret') !== null && call) {
+    // As an agent does: the call returns within a minute while the card waits, so it calls again.
+    for (let tries = 0; tries < 15; tries++) {
+      const result = await call('request_secrets', {
+        title: 'Demo API key',
+        reason: 'The fake retry service needs a key.',
+        fields: [{ name: 'DEMO_API_KEY', label: 'API key' }],
+      })
+      if (!/has not answered/i.test(result.text)) break
+    }
   }
   const changed: string[] = []
   if (flag(text, 'read') === null) {

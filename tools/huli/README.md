@@ -302,8 +302,17 @@ issues with parents left unwoken and interjections that interrupted children sha
   (`features/manager/new-session-chip.tsx`), the 工人 pane (`workers-pane.tsx`, lazily loaded),
   the strip above the composer, the 汇报 card and the session menu's switch. Phone: the banner,
   the 工人 screen with approvals (`mobile/src/app/workers/[id].tsx`) and New session's switch.
-- The fake agent's `fake:/manager-demo`, `/work` and `/review` drive it end to end; simulator
-  flow `95-manager` with a roster `seed-manager.mjs` writes.
+- Sandboxes: a worker starts in its manager's sandbox, else its roster entry's, else the
+  project's or the default (`createWorker`). A container gets no Kite tools, so a contained
+  worker's last reply is its report (a reviewer's verdict from a `VERDICT:` line) and it is never
+  reminded of `report_work`; a manager cannot run in a container.
+- A manager, and a worker its manager still runs, refuse to move to another computer
+  (`moveFacts`). A worker paused at its plan limit keeps its slot and folder; a limit stop that
+  does not resume reports `limit`, not a failure. A worker's secret cards are answered in the 工人
+  pane and on the phone, never by the manager.
+- The fake agent's `fake:/manager-demo`, `/work` (`--ask`, `--secret`, `--fail-once`, `--read`)
+  and `/review` drive it end to end; simulator flow `95-manager` with a roster `seed-manager.mjs`
+  writes.
 
 ### GitHub flow (议题、自动合并、盯 PR、GitHub 触发)
 
