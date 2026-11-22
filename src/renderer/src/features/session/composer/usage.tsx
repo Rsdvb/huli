@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react'
-import { ArrowDown01Icon, ArrowRight01Icon, Timer02Icon } from '@hugeicons/core-free-icons'
+import {
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  ArrowShrink02Icon,
+  Timer02Icon,
+} from '@hugeicons/core-free-icons'
 import { Trans, useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import type { AgentAccount, ContextList, PlanLimit } from '@shared/agent-host'
@@ -15,7 +20,7 @@ import {
   type CachePhase,
   type KnownExpiry,
 } from '@shared/prompt-cache'
-import type { AgentId, SessionUsage } from '@shared/thread'
+import type { AgentId, SessionUsage, UserContent } from '@shared/thread'
 import { Button } from '@renderer/components/ui/button'
 import {
   Collapsible,
@@ -48,6 +53,7 @@ import { errorMessage, host, sessionHost } from '@renderer/lib/host'
 import { isUsedUp, limitLevel, limitPercent, shownPercent } from '@renderer/lib/plan-limit'
 import { useClock, useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
+import { showSending } from '@renderer/stores/threads'
 import { loadContext, refreshLimits, useUsageStore } from '@renderer/stores/usage'
 import { toggleSidePane } from '@renderer/stores/view'
 import { REQUESTS_ICON } from '@renderer/features/requests/icon'
@@ -269,6 +275,7 @@ export function ContextButton({
   account,
   model,
   subagent,
+  compact,
 }: {
   sessionId: string
   agentId: AgentId
@@ -293,9 +300,15 @@ export function ContextButton({
   model: string | null
   /** A sub-agent's context: its agent counts the total but breaks down only the parent's. */
   subagent?: boolean
+  /**
+   * Huli: the prompt that compacts the context, such as `/compact`, while the session is free to
+   * take it; null for an agent that offers none, or while a turn runs.
+   */
+  compact?: string | null
 }) {
   const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
+  const [compactError, setCompactError] = useState<string | null>(null)
   const limit = trayLimit(holding)
   // An account of another kind has no plan; an unknown one shows the limits the agent reports, and
   // so does one through other providers, such as OpenCode's, whose windows are theirs.
@@ -322,6 +335,7 @@ export function ContextButton({
   const onOpenChange = (next: boolean) => {
     setOpen(next)
     if (!next) return
+    setCompactError(null)
     // The user opened the popover: a read they asked for.
     refreshLimits(agentId, sessionHost(sessionId), true).catch((error: unknown) =>
       console.warn(`Could not read the plan limits: ${errorMessage(error)}`),
@@ -396,6 +410,30 @@ export function ContextButton({
             />
           )}
           <UsageLines sessionId={sessionId} usage={shown} />
+          {compact && (
+            <button
+              type="button"
+              className="kettu-ctx__link"
+              onClick={() => {
+                // The thread shows the compaction as it runs, from the agent's own entries.
+                compactContext(sessionId, compact).then(
+                  () => setOpen(false),
+                  (error: unknown) => setCompactError(errorMessage(error)),
+                )
+              }}
+            >
+              <span className="kettu-ctx__link-name">
+                <Glyph icon={ArrowShrink02Icon} size={14} />
+                {t('usage.compact')}
+              </span>
+              <span className="kettu-ctx__link-hint">{t('usage.compactHint')}</span>
+            </button>
+          )}
+          {compactError && (
+            <p className="kettu-ctx__note kettu-ctx__note--alert" role="alert">
+              {t('usage.compactFailed', { error: compactError })}
+            </p>
+          )}
           {readsModelRequests(agentId) && (
             <button
               type="button"
@@ -417,6 +455,20 @@ export function ContextButton({
       </PopoverContent>
     </Popover>
   )
+}
+
+/** Huli: sends the agent's compaction command as the session's next message. */
+async function compactContext(sessionId: string, prompt: string): Promise<void> {
+  const content: UserContent[] = [{ type: 'text', text: prompt }]
+  const unshow = showSending(sessionId, content)
+  try {
+    const { itemId } = await host('sessions.queue', { sessionId, content })
+    // A turn started meanwhile, and it waits in the queue, which shows it there.
+    if (itemId) unshow()
+  } catch (error) {
+    unshow()
+    throw error
+  }
 }
 
 /**

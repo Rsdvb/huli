@@ -106,6 +106,9 @@
     "wait": "继续等"
   },
   "usage": {
+    "compact": "压缩上下文",
+    "compactHint": "把之前的对话总结成摘要",
+    "compactFailed": "没能压缩：{{error}}",
     "title": "用量",
     "contextPercent": "上下文已使用 {{percent}}%",
     "contextPercentStale": "上次读取的上下文用量为 {{percent}}%，正在重试",

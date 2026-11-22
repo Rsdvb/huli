@@ -109,6 +109,9 @@
     "wait": "Keep waiting"
   },
   "usage": {
+    "compact": "Compact context",
+    "compactHint": "Summarizes the conversation so far",
+    "compactFailed": "Couldn’t compact: {{error}}",
     "title": "Usage",
     "contextPercent": "Context {{percent}}% used",
     "contextPercentStale": "Context {{percent}}% used at last reading; retrying",
