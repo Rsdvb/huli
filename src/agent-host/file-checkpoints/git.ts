@@ -246,30 +246,24 @@ export async function treeOf(
   return tree
 }
 
-/**
- * Blobs as the user's checkout writes them, through their filters and line endings, by
- * `git cat-file --batch --filters`; a blob the repository lacks is missing from the result.
- */
-export async function checkedOut(
+/** Blobs as stored, by path, by `git cat-file --batch`; one the repository lacks is missing. */
+export async function storedBlobs(
   run: RunGit,
   top: string,
   wanted: readonly { oid: string; path: string }[],
 ): Promise<Map<string, Buffer> | null> {
   const out = new Map<string, Buffer>()
-  for (let at = 0; at < wanted.length; at += 200) {
-    const batch = wanted.slice(at, at + 200)
-    // A path with a line break cannot be named on the command's input.
-    const named = batch.filter((item) => !/[\r\n]/.test(item.path))
-    if (named.length === 0) continue
-    const result = await run(['cat-file', '--batch', '--filters'], {
+  for (let at = 0; at < wanted.length; at += 500) {
+    const batch = wanted.slice(at, at + 500)
+    const result = await run(['cat-file', '--batch'], {
       cwd: top,
       timeoutMs: 120_000,
-      input: named.map((item) => `${item.oid} ${item.path}\n`).join(''),
+      input: batch.map((item) => `${item.oid}\n`).join(''),
     })
     if (result.code !== 0) return null
     const data = result.stdout
     let offset = 0
-    for (const item of named) {
+    for (const item of batch) {
       const end = data.indexOf(0x0a, offset)
       if (end < 0) break
       const header = data.subarray(offset, end).toString('utf8').split(' ')
@@ -282,4 +276,21 @@ export async function checkedOut(
     }
   }
   return out
+}
+
+/**
+ * One blob as the user's checkout writes it, through their filters and line endings. One command
+ * each: with `--batch`, `--filters` names the stored size while it prints the filtered bytes.
+ */
+export async function checkedOutBlob(
+  run: RunGit,
+  top: string,
+  oid: string,
+  repoPath: string,
+): Promise<Buffer | null> {
+  const result = await run(['cat-file', '--filters', `--path=${repoPath}`, oid], {
+    cwd: top,
+    timeoutMs: 60_000,
+  })
+  return result.code === 0 ? result.stdout : null
 }

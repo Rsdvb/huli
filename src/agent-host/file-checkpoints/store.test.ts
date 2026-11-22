@@ -101,8 +101,8 @@ function checkpoints(
 async function take(store: FileCheckpoints, entryId: string, folders: string[]): Promise<void> {
   const taking = store.begin(SESSION, entryId, folders)
   await taking.listed
-  // Settles once the copying is done.
-  await store.has(SESSION, entryId, folders)
+  // Settles once each folder's copying is done.
+  for (const folder of folders) await store.has(SESSION, entryId, [folder])
 }
 
 async function repo(): Promise<string> {
@@ -285,6 +285,41 @@ describe('in a repository', () => {
     expect(await readFile(path.join(top, 'a.txt'), 'utf8')).toBe('outside the folder\n')
   })
 
+  it('keeps the line endings of a clean file under core.autocrlf', async () => {
+    const folder = await repo()
+    git(folder, 'config', 'core.autocrlf', 'true')
+    // Written by a tool with LF, which git counts clean though its checkout would write CRLF.
+    await write(folder, 'lf.txt', 'one\ntwo\n')
+    git(folder, 'add', 'lf.txt')
+    git(folder, 'commit', '-q', '-m', 'lf')
+    // Checked out by git, with CRLF.
+    await write(folder, 'checked.txt', 'a\nb\n')
+    git(folder, 'add', 'checked.txt')
+    git(folder, 'commit', '-q', '-m', 'checked')
+    await rm(path.join(folder, 'checked.txt'))
+    execFileSync('git', ['checkout', '--', 'checked.txt'], {
+      cwd: folder,
+      env: { ...process.env, ...ENV },
+    })
+    const before = await files(folder)
+    const store = checkpoints()
+    await take(store, 'e:1', [folder])
+    await write(folder, 'lf.txt', 'one\nTWO\n')
+    await write(folder, 'checked.txt', 'a\r\nB\r\n')
+    const preview = await store.preview(SESSION, { entryId: 'e:1' }, [folder])
+    const counts = preview!.folders[0]!.changes.map((change) => [
+      change.key,
+      change.insertions,
+      change.deletions,
+    ])
+    expect(counts).toEqual([
+      ['checked.txt', 1, 1],
+      ['lf.txt', 1, 1],
+    ])
+    await store.restore(SESSION, { entryId: 'e:1' }, [folder], preview!.token)
+    expect(await files(folder)).toEqual(before)
+  })
+
   it('restores across a commit the turn made', async () => {
     const folder = await repo()
     const store = checkpoints()
@@ -407,7 +442,7 @@ describe('the store', () => {
     const folder = path.join(root, 'plain')
     await write(folder, 'f.txt', 'text\n')
     const store = checkpoints()
-    expect(() => store.begin('../escape', 'e:1', [folder])).not.toThrow()
+    await store.begin('../escape', 'e:1', [folder]).listed
     await expect(store.preview(SESSION, { backup: '../../x' }, [folder])).rejects.toThrow()
   })
 })

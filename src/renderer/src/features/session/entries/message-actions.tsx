@@ -70,20 +70,31 @@ function userText(content: UserContent[]): string {
     .join('\n')
 }
 
-/** Whether `entryId` starts the thread's latest turn, read from the end. */
-function startsLatestTurn(
-  state: {
-    order: readonly string[]
-    byId: Readonly<Record<string, { kind: string; steered?: boolean } | undefined>>
-  },
-  entryId: string,
-): boolean {
+type TurnState = {
+  order: readonly string[]
+  byId: Readonly<Record<string, { kind: string; steered?: boolean } | undefined>>
+}
+
+/**
+ * The message a thread's latest turn starts at, by its order: entries keep their kind, so it
+ * changes only with the order, which a patch that adds or removes entries replaces.
+ */
+const latestStarts = new WeakMap<readonly string[], string | null>()
+
+/** The message the thread's latest turn starts at, read from the end. */
+function latestTurnStartOf(state: TurnState): string | null {
+  const known = latestStarts.get(state.order)
+  if (known !== undefined) return known
+  let found: string | null = null
   for (let i = state.order.length - 1; i >= 0; i--) {
-    const id = state.order[i]!
-    const entry = state.byId[id]
-    if (entry?.kind === 'user' && !entry.steered) return id === entryId
+    const entry = state.byId[state.order[i]!]
+    if (entry?.kind === 'user' && !entry.steered) {
+      found = state.order[i]!
+      break
+    }
   }
-  return false
+  latestStarts.set(state.order, found)
+  return found
 }
 
 /**
@@ -107,7 +118,7 @@ function useRewindActions(sessionId: string, entryId: string, steered: boolean) 
   )
   const latest = useThreadsStore((s) => {
     const state = s.replicas[sessionId]?.state
-    return state ? startsLatestTurn(state, entryId) : true
+    return state ? latestTurnStartOf(state) === entryId : true
   })
   const agent = useAgentsStore((s) =>
     view
@@ -125,7 +136,7 @@ function useRewindActions(sessionId: string, entryId: string, steered: boolean) 
       key: 'edit',
       tip: view.blocked ? notReady : t('rewind.editAction'),
       label: t('rewind.editAction'),
-      icon: <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.9} />,
+      icon: <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.9} className="size-4" />,
       disabled: view.blocked,
       onClick: () => setOpen('edit'),
     },
@@ -136,7 +147,9 @@ function useRewindActions(sessionId: string, entryId: string, steered: boolean) 
             key: 'rewind',
             tip: view.blocked ? notReady : t('rewind.rewindAction'),
             label: t('rewind.rewindAction'),
-            icon: <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={1.9} />,
+            icon: (
+              <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={1.9} className="size-4" />
+            ),
             disabled: view.blocked,
             onClick: () => setOpen('rewind'),
           },
@@ -196,6 +209,9 @@ export function UserActions({
         label={t('userActions.label')}
         labels={labels}
         extraActions={rewind.actions}
+        {...(rewind.actions.length > 0
+          ? { className: `ks-user__actions-${rewind.actions.length + 1}` }
+          : {})}
       />
       {rewind.dialog}
     </span>

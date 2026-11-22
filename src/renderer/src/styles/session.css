@@ -214,6 +214,13 @@
   flex: none;
   width: 28px;
 }
+/* Huli: with Edit from here and Rewind to here, the width of the buttons it holds. */
+.ks-user__meta .ui-mac.ks-user__actions-2 {
+  width: calc(28px * 2 + 2px);
+}
+.ks-user__meta .ui-mac.ks-user__actions-3 {
+  width: calc(28px * 3 + 2px * 2);
+}
 .ks-user:hover .ks-user__meta,
 .ks-user__meta:focus-within {
   opacity: 1;

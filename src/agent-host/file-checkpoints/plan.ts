@@ -17,7 +17,7 @@ import {
 } from 'node:fs/promises'
 import path from 'node:path'
 import { diffCounts } from '../threads/digest'
-import { checkedOut, treeOf, type RunGit, type TreeEntry } from './git'
+import { checkedOutBlob, storedBlobs, treeOf, type RunGit, type TreeEntry } from './git'
 import { fromKey, objectPath, type FileState, type Snapshot } from './snapshot'
 
 /** One path's content as a snapshot has it, HEAD's blob for a clean path in a repository. */
@@ -133,11 +133,41 @@ function lines(content: Content): string {
   return content.kind === 'link' ? `${content.target}\n` : content.data.toString('utf8')
 }
 
+/** HEAD's blobs as stored, and a way to one as the user's checkout writes it. */
+interface Blobs {
+  stored: Map<string, Buffer>
+  checkout: (oid: string, repoPath: string) => Promise<Buffer | null>
+}
+
+const LFS_POINTER = Buffer.from('version https://git-lfs.github.com/spec/v1')
+
+/**
+ * The bytes a clean file of HEAD had. Git counts a file clean whose line endings its checkout
+ * would change, as one a tool wrote with LF where `core.autocrlf` checks out CRLF, so the file as
+ * it is now tells its line endings; a file gone, or one Git LFS keeps, is as the checkout writes it.
+ */
+async function cleanBytes(
+  blobs: Blobs,
+  side: { oid: string; repo: string },
+  now: Buffer | null,
+): Promise<Buffer | null> {
+  const stored = blobs.stored.get(side.repo)
+  if (!stored) return null
+  if (now === null || stored.subarray(0, LFS_POINTER.length).equals(LFS_POINTER)) {
+    return (await blobs.checkout(side.oid, side.repo)) ?? stored
+  }
+  if (!stored.includes(0x0d) && now.includes('\r\n')) {
+    return Buffer.from(stored.toString('latin1').replace(/\n/g, '\r\n'), 'latin1')
+  }
+  return stored
+}
+
 /** The bytes of the checkpoint's side; null when the store or the repository no longer has them. */
 async function contentOf(
   objects: string,
   side: Side,
-  blobs: Map<string, Buffer>,
+  blobs: Blobs,
+  now: Buffer | null,
 ): Promise<Content | null> {
   if (side.k === 'f') {
     try {
@@ -148,10 +178,12 @@ async function contentOf(
   }
   if (side.k === 'l') return { kind: 'link', target: side.t }
   if (side.k === 'b') {
-    const data = blobs.get(side.repo)
-    if (!data) return null
-    if (side.mode === '120000') return { kind: 'link', target: data.toString('utf8') }
-    return { kind: 'file', data, exec: side.mode === '100755' }
+    if (side.mode === '120000') {
+      const target = blobs.stored.get(side.repo)
+      return target ? { kind: 'link', target: target.toString('utf8') } : null
+    }
+    const data = await cleanBytes(blobs, side, now)
+    return data ? { kind: 'file', data, exec: side.mode === '100755' } : null
   }
   return null
 }
@@ -227,15 +259,18 @@ export async function planRestore(
   for (const { key, from, to } of candidates) {
     const abs = fromKey(folder, key)
     if (abs === null) continue
-    const want = from.k === 'absent' ? null : await contentOf(objects, from, blobs)
-    if (from.k !== 'absent' && want === null) {
-      // The checkpoint's copy or HEAD's blob is gone: nothing to put back.
-      kept.push(key)
-      continue
-    }
     const have = await onDisk(abs)
     // Something the snapshot of now did not keep, such as an ignored file, is never overwritten.
     if (have === 'other' || (to.k === 'absent' && have !== null)) {
+      kept.push(key)
+      continue
+    }
+    const want =
+      from.k === 'absent'
+        ? null
+        : await contentOf(objects, from, blobs, have?.kind === 'file' ? have.data : null)
+    if (from.k !== 'absent' && want === null) {
+      // The checkpoint's copy or HEAD's blob is gone: nothing to put back.
       kept.push(key)
       continue
     }
@@ -268,13 +303,17 @@ export async function planRestore(
   return { changes, kept: [...new Set(kept)].sort(), sources }
 }
 
-/** HEAD's blobs a set of sides needs, as the user's checkout writes them, by repository path. */
-async function blobsOf(run: RunGit, snap: Snapshot, sides: Side[]): Promise<Map<string, Buffer>> {
+/** HEAD's blobs a set of sides needs, by repository path. */
+async function blobsOf(run: RunGit, snap: Snapshot, sides: Side[]): Promise<Blobs> {
   const wanted = sides.flatMap((side) =>
     side.k === 'b' ? [{ oid: side.oid, path: side.repo }] : [],
   )
-  if (wanted.length === 0 || !snap.git) return new Map()
-  return (await checkedOut(run, snap.git.top, wanted)) ?? new Map()
+  const git = snap.git
+  if (wanted.length === 0 || !git) return { stored: new Map(), checkout: async () => null }
+  return {
+    stored: (await storedBlobs(run, git.top, wanted)) ?? new Map(),
+    checkout: (oid, repoPath) => checkedOutBlob(run, git.top, oid, repoPath),
+  }
 }
 
 export interface Applied {
@@ -319,7 +358,8 @@ export async function applyPlan(
   for (const change of writes) {
     const abs = fromKey(folder, change.key)!
     try {
-      const content = await contentOf(objects, plan.sources.get(change.key)!, blobs)
+      const now = await readFile(abs).catch(() => null)
+      const content = await contentOf(objects, plan.sources.get(change.key)!, blobs, now)
       if (!content) throw new Error('its saved copy is gone')
       await clearWay(folder, abs)
       const present = await lstat(abs).then(

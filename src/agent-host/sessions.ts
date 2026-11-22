@@ -9704,6 +9704,9 @@ export class SessionManager {
     if (earlier.length > 0) record.earlier = earlier
     else delete record.earlier
     if (record.carry && removed.has(record.carry.entryId)) delete record.carry
+    // As a takeover does: a title of its own, so one the new session gives itself does not replace it.
+    const title = record.customTitle ?? live.thread.session.title
+    if (title !== null && record.customTitle === undefined) record.customTitle = title
     if (record.carry) {
       record.carry.fromTurn = 1
     } else if (carry) {
