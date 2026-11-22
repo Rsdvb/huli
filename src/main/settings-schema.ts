@@ -267,6 +267,7 @@ const SECTION_FIELDS = {
     claudeRuns: isClaudeRuns,
     promptSuggestions: isBoolean,
     lightModel: isLightModel,
+    lowerAgentPriority: isBoolean,
   },
   thread: {
     outlineSummaries: isBoolean,
@@ -1768,6 +1769,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     agentNetwork: structuredClone(settings.agentNetwork),
     downloadService: settings.cloud.enabled && settings.updates.source === 'auto',
     autoApprove: settings.permissions.autoApprove,
+    lowerAgentPriority: settings.general.lowerAgentPriority,
   }
 }
 

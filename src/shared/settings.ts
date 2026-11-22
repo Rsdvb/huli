@@ -63,6 +63,8 @@ export interface SettingsFile {
     claudeRuns: Partial<Record<AgentId, ClaudeRunSettings>>
     promptSuggestions: boolean // Claude Code's sessions predict the next prompt for the composer
     lightModel: LightModel // replaced whole
+    // Huli: the agent host runs below normal priority, and so does every program it starts.
+    lowerAgentPriority: boolean
   }
   thread: {
     outlineSummaries: boolean // a small model titles the outline's messages
@@ -340,6 +342,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     claudeRuns: {},
     promptSuggestions: true,
     lightModel: { mode: 'small' },
+    lowerAgentPriority: true,
   },
   thread: { outlineSummaries: true, confirmLinks: true, openLinksIn: 'browser', alwaysOpenIn: {} },
   appearance: {
@@ -494,6 +497,8 @@ export interface HostSettings {
   // Huli: the requests the host allows by itself in a project that keeps the default; absent from
   // a parent older than it, which allows none.
   autoApprove?: AutoApprove
+  // Huli: the host lowers its own priority; absent from a parent older than it, which leaves it.
+  lowerAgentPriority?: boolean
 }
 
 /** The part of the settings the terminal host receives. */

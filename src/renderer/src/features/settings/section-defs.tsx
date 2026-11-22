@@ -705,6 +705,14 @@ export function useAgentsSection(): SectionDef {
           ] satisfies RowDef[])),
       ...approvalRows,
       ...idleRows,
+      {
+        id: 'lower-priority',
+        setting: 'agents.lower-priority',
+        group: { id: 'priority', label: t('agents.priority.group') },
+        render: () => (
+          <GeneralSwitch field="lowerAgentPriority" label={t('agents.priority.name')} />
+        ),
+      },
       ...workflowRows,
     ],
     itemPage: (agentId) => <AgentPage agentId={agentId as AgentId} />,

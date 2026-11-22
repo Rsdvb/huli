@@ -1337,6 +1337,13 @@
         "body": "Twice in a row, a session resumed on this version read less than half of its context from the prompt cache. So idle sessions keep their agent until their cache expires, over the settings below, until Claude Code updates to another version. When memory is critical they are still released."
       }
     },
+    "priority": {
+      "group": "Performance",
+      "name": "Agents yield to you",
+      "description": "Agents and the programs they start run at lower priority, so builds and tests don’t make the computer stutter. When it is otherwise idle, they run just as fast. Turning it on applies to programs started after it; turning it off, once Kite restarts.",
+      "descriptionWindows": "Agents and the programs they start run at lower priority, so builds and tests don’t make the computer stutter. When it is otherwise idle, they run just as fast. A change applies to programs started after it.",
+      "keywords": "priority lag stutter slow cpu build test nice background 优先级 卡顿"
+    },
     "autoApprove": {
       "group": "Approvals",
       "name": "Approve low-risk actions automatically",

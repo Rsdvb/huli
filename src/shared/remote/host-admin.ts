@@ -40,7 +40,7 @@ import type { RemoteStatus } from './status'
  * keeps the rest, which only changes the window showing them.
  */
 export const HOST_SETTING_KEYS = {
-  general: ['sessionTitles', 'claudeRuns', 'promptSuggestions', 'lightModel'],
+  general: ['sessionTitles', 'claudeRuns', 'promptSuggestions', 'lightModel', 'lowerAgentPriority'],
   agents: 'all',
   addedAgents: 'all',
   disabledAgents: 'all',
@@ -61,7 +61,7 @@ export const HOST_SETTING_KEYS = {
 export interface HostSettingsPart {
   general: Pick<
     SettingsFile['general'],
-    'sessionTitles' | 'claudeRuns' | 'promptSuggestions' | 'lightModel'
+    'sessionTitles' | 'claudeRuns' | 'promptSuggestions' | 'lightModel' | 'lowerAgentPriority'
   >
   agents: SettingsFile['agents']
   addedAgents: SettingsFile['addedAgents']
