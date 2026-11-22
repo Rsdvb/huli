@@ -1,0 +1,231 @@
+// Huli: what happened in a session while the user was away from it, for the one line that greets
+// them when they come back. Worked out from the thread's entries alone, with no model, so the
+// desktop and the phone always say the same.
+
+import type { DigestedThreadEntry, ThreadEntry } from './thread'
+
+/** How long the user has to have been away for coming back to show a recap. */
+export const RECAP_AWAY_MS = 30 * 60_000
+
+/** The most sessions a device keeps a seen mark for; the least recently seen go first. */
+export const SEEN_MARKS_KEPT = 300
+
+/** Where a device last saw a session: when, and the thread's last entry then (null if empty). */
+export interface SeenMark {
+  at: number
+  entry: string | null
+}
+
+export interface Recap {
+  /** The first entry since the user left, where "jump to where you left off" goes. */
+  from: string
+  /** Distinct files the agent changed, and the lines it added and removed in them. */
+  files: number
+  added: number
+  removed: number
+  /** Commands it ran. */
+  commands: number
+  /** Requests that asked the user, answered or not. */
+  approvals: number
+  /** Of those, the ones still waiting. */
+  waiting: number
+  /** Errors that ended a turn or stopped the agent. */
+  errors: number
+  /** The latest reply's first line as plain text, or null when the agent wrote none. */
+  reply: string | null
+  /**
+   * The entry the user left at lies on a page not loaded, so the counts start at the loaded
+   * ones and may be short.
+   */
+  partial: boolean
+}
+
+type Entry = ThreadEntry | DigestedThreadEntry
+
+export interface RecapThread {
+  order: readonly string[]
+  byId: Readonly<Record<string, Entry | undefined>>
+}
+
+/** How long a reply's line may run; a client shortens it further to fit. */
+const REPLY_CHARS = 160
+
+/** The lines in a text, a final newline ending its last line rather than starting another. */
+function lineCount(text: string): number {
+  if (text === '') return 0
+  let count = 1
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) count++
+  return text.endsWith('\n') ? count - 1 : count
+}
+
+/**
+ * Lines added and removed from `oldText` to `newText`: what lies between the lines both start
+ * and end with. Exact for one change, and an upper bound for several, which is enough for a line
+ * that sums a session up and never spends a diff's time on it.
+ */
+export function changedLines(
+  oldText: string | null,
+  newText: string,
+): { added: number; removed: number } {
+  if (oldText === null || oldText === '') return { added: lineCount(newText), removed: 0 }
+  if (oldText === newText) return { added: 0, removed: 0 }
+  const before = oldText.split('\n')
+  const after = newText.split('\n')
+  let start = 0
+  const shorter = Math.min(before.length, after.length)
+  while (start < shorter && before[start] === after[start]) start++
+  let end = 0
+  while (
+    end < shorter - start &&
+    before[before.length - 1 - end] === after[after.length - 1 - end]
+  ) {
+    end++
+  }
+  return { added: after.length - start - end, removed: before.length - start - end }
+}
+
+/** A reply's first line of text without its Markdown marks, spaces collapsed. */
+export function replyLine(markdown: string): string | null {
+  let fenced = false
+  for (const raw of markdown.split('\n', 200)) {
+    const line = raw.trim()
+    if (/^(```|~~~)/.test(line)) {
+      fenced = !fenced
+      continue
+    }
+    if (fenced || line === '' || /^([-*_]\s*){3,}$/.test(line) || /^\|?[\s:|-]+\|?$/.test(line)) {
+      continue
+    }
+    const text = line
+      .replace(/^(#{1,6}\s+|>\s*|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)+/, '')
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/(\*\*|__|~~|`)/g, '')
+      .replace(/(^|[^\w*])[*_]([^*_]+)[*_](?=[^\w*]|$)/g, '$1$2')
+      .replace(/^\|\s*|\s*\|$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text === '') continue
+    return text.length > REPLY_CHARS ? `${text.slice(0, REPLY_CHARS - 1)}…` : text
+  }
+  return null
+}
+
+/** Whether a call's request asked the user, rather than a routine, a task or the host answering. */
+function askedUser(entry: Extract<Entry, { kind: 'tool' }>): boolean {
+  if (entry.permission) return true
+  const result = entry.permissionResult
+  if (result === 'cancelled' || result === 'withdrawn') return true
+  return typeof result === 'object' && result !== null && result.by === undefined
+}
+
+/**
+ * What happened since the device last saw the session, or null when the user was not away long
+ * enough, the device never saw it, or nothing worth a line happened. `older`: the thread has pages
+ * before the loaded ones, where an entry not found may lie.
+ */
+export function recapSince(
+  thread: RecapThread,
+  mark: SeenMark | null,
+  { now, older }: { now: number; older: boolean },
+): Recap | null {
+  if (!mark || now - mark.at < RECAP_AWAY_MS) return null
+  let start = 0
+  let partial = false
+  if (mark.entry !== null) {
+    const at = thread.order.indexOf(mark.entry)
+    if (at >= 0) start = at + 1
+    // Without older pages, an entry gone from the thread means it was read anew, as after a
+    // replay, and nothing places the user in it.
+    else if (older) partial = true
+    else return null
+  }
+  if (start >= thread.order.length) return null
+
+  const files = new Set<string>()
+  let added = 0
+  let removed = 0
+  let commands = 0
+  let approvals = 0
+  let waiting = 0
+  let errors = 0
+  let reply: string | null = null
+  for (let i = start; i < thread.order.length; i++) {
+    const entry = thread.byId[thread.order[i]!]
+    if (!entry) continue
+    if (entry.kind === 'agent') {
+      reply = replyLine(entry.markdown) ?? reply
+    } else if (entry.kind === 'notice') {
+      if (entry.severity === 'error' || entry.cause === 'agent_stopped') errors++
+    } else if (entry.kind === 'tool') {
+      if (askedUser(entry)) {
+        approvals++
+        if (entry.permission) waiting++
+      }
+      if (entry.denied) continue
+      if (
+        entry.toolKind === 'execute' &&
+        entry.status !== 'pending' &&
+        entry.status !== 'cancelled'
+      )
+        commands++
+      if (entry.status !== 'completed') continue
+      for (const part of entry.content) {
+        if (part.type === 'diff') {
+          files.add(part.path)
+          const lines = changedLines(part.oldText, part.newText)
+          added += lines.added
+          removed += lines.removed
+        } else if (part.type === 'digest' && part.of === 'diff') {
+          files.add(part.path)
+          added += part.added ?? 0
+          removed += part.removed ?? 0
+        }
+      }
+    }
+  }
+  if (files.size === 0 && commands === 0 && approvals === 0 && errors === 0 && reply === null) {
+    return null
+  }
+  return {
+    from: thread.order[start]!,
+    files: files.size,
+    added,
+    removed,
+    commands,
+    approvals,
+    waiting,
+    errors,
+    reply,
+    partial,
+  }
+}
+
+/** The marks a device keeps with `sessionId` seen now, the oldest past the most kept let go. */
+export function withSeen(
+  marks: Readonly<Record<string, SeenMark>>,
+  sessionId: string,
+  mark: SeenMark,
+): Record<string, SeenMark> {
+  const next: Record<string, SeenMark> = {}
+  for (const [id, each] of Object.entries(marks)) if (id !== sessionId) next[id] = each
+  next[sessionId] = mark
+  const ids = Object.keys(next)
+  if (ids.length <= SEEN_MARKS_KEPT) return next
+  ids.sort((a, b) => next[a]!.at - next[b]!.at)
+  for (const id of ids.slice(0, ids.length - SEEN_MARKS_KEPT)) delete next[id]
+  return next
+}
+
+/** The marks read back from storage, each one well formed; anything else is dropped. */
+export function parseSeenMarks(value: unknown): Record<string, SeenMark> {
+  const marks: Record<string, SeenMark> = {}
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return marks
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const { at, entry } = raw as { at?: unknown; entry?: unknown }
+    if (typeof at !== 'number' || !Number.isFinite(at)) continue
+    if (entry !== null && (typeof entry !== 'string' || entry.length > 512)) continue
+    marks[id] = { at, entry }
+  }
+  return marks
+}
