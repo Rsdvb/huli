@@ -167,16 +167,22 @@ describe('the sandbox settings', () => {
   it('start off, keep known values and drop the rest', async () => {
     await save({ version: 1, general: { language: 'en' } })
     const settings = (await SettingsStore.load(dir)).get()
-    expect(settings.sandbox).toEqual({ tier: 'off', network: 'none', autoApproveEdits: false })
+    expect(settings.sandbox).toEqual({
+      tier: 'off',
+      network: 'none',
+      autoApproveEdits: false,
+      gitWritable: false,
+    })
     expect(hostSettings(settings, 'en').sandbox).toEqual(settings.sandbox)
     await save({
       version: 1,
-      sandbox: { tier: 'container', network: 'open', autoApproveEdits: true },
+      sandbox: { tier: 'container', network: 'model', autoApproveEdits: true, gitWritable: true },
     })
     expect((await SettingsStore.load(dir)).get().sandbox).toEqual({
       tier: 'container',
-      network: 'open',
+      network: 'model',
       autoApproveEdits: true,
+      gitWritable: true,
     })
     await save({
       version: 1,
@@ -186,6 +192,7 @@ describe('the sandbox settings', () => {
       tier: 'off',
       network: 'none',
       autoApproveEdits: false,
+      gitWritable: false,
     })
   })
 
@@ -197,6 +204,7 @@ describe('the sandbox settings', () => {
       { tier: 'vm' },
       { network: 'all' },
       { autoApproveEdits: 'true' },
+      { gitWritable: 1 },
       { tier: null },
     ]) {
       expect(() => validateSettingsPatch({ sandbox })).toThrow()

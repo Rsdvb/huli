@@ -193,6 +193,7 @@ import {
   type ContainerLaunch,
 } from '@shared/sandbox'
 import type { ContainerAgent, ContainerSandbox } from './sandbox/container'
+import { modelHosts } from './sandbox/model-hosts'
 import type { ContainerRuntime } from './sandbox/runtimes'
 import type { AgentDriver, AgentTransport } from './driver'
 import { driverOf, preferredProtocol, protocolFor, type DriverOverrides } from './drivers'
@@ -679,9 +680,13 @@ async function containerFailure(error: unknown, agent: string): Promise<HostErro
           ? t('sandbox.container.engineNotRunning')
           : error.reason === 'image'
             ? t('sandbox.container.imageMissing', { mb: String(SANDBOX_IMAGE.downloadMb) })
-            : error.reason === 'install'
-              ? t('sandbox.container.install', { agent, detail: error.message })
-              : t('sandbox.container.failed', { agent, detail: error.message })
+            : error.reason === 'network' && error.message === 'noModelHosts'
+              ? t('sandbox.container.noModelHosts', { agent })
+              : error.reason === 'network' && error.message === 'noExit'
+                ? t('sandbox.noExit', { agent })
+                : error.reason === 'install'
+                  ? t('sandbox.container.install', { agent, detail: error.message })
+                  : t('sandbox.container.failed', { agent, detail: error.message })
     return new HostError('agent_unavailable', message)
   }
   if (error instanceof HostError) return error
@@ -3691,7 +3696,13 @@ export class AgentManager {
 
   /** Huli: the sandbox tiers the agent can run in here. */
   sandboxSupport(agentId: AgentId): AgentSandboxSupport {
-    const support = agentSandboxSupport(agentId, this.containerLaunch(agentId), this.deps.platform)
+    const def = this.slots.get(agentId)?.def
+    const support = agentSandboxSupport(
+      agentId,
+      this.containerLaunch(agentId),
+      this.deps.platform,
+      def ? modelHosts(def.id, def.env ?? {}) : [],
+    )
     return this.deps.containers
       ? support
       : {
@@ -3738,7 +3749,8 @@ export class AgentManager {
     sessionId: string,
     agentId: AgentId,
     folder: string,
-    network: 'none' | 'open',
+    network: 'model' | 'agent' | 'open',
+    options: { proxyPort: number | null; gitWritable: boolean },
   ): Promise<AgentRuntime> {
     const running = this.containerRuns.get(sessionId)
     if (running && !running.launched.hasExited) return running.runtime
@@ -3771,6 +3783,9 @@ export class AgentManager {
       agent: this.containerAgent(slot),
       folder,
       network,
+      modelHosts: modelHosts(slot.def.id, env),
+      proxyPort: options.proxyPort,
+      gitWritable: options.gitWritable,
       env,
       keyNames: this.deps.envKeyNames?.(agentId) ?? [],
       platform: this.deps.platform,

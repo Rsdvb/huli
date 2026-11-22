@@ -75,7 +75,8 @@
       "container": "Container"
     },
     "network": {
-      "none": "No network",
+      "none": "Commands offline",
+      "model": "Model's addresses only",
       "agent": "Only its Agent network exit",
       "open": "Network open"
     },
@@ -90,7 +91,7 @@
     "networkUnsupported": "This tier cannot hold it to that",
     "cost": {
       "native": "Almost free: each command starts a little slower",
-      "container": "Starts in about {{start}} s; Docker holds about {{memory}} MB while it runs",
+      "container": "Starts in about {{start}} s with its network proxy; Docker holds about {{memory}} MB while it runs",
       "drive": "this project is on a Windows drive: builds and tests ran {{build}}× slower ({{native}} s → {{container}} s), searches {{search}}× slower",
       "wsl": "in WSL's own disk a project runs at full speed"
     },
@@ -107,15 +108,31 @@
       "nativeWrites": "Commands write only in the project",
       "nativeReads": "They read your files, except keys and sign-ins",
       "nativeTools": "File edits and web tools still ask as before",
-      "containerSees": "Sees only the project; its .git is read-only",
+      "containerSees": "Sees only the project",
       "containerSignIn": "None of your sign-ins: an API key Kite holds, or one made inside",
       "containerTools": "No Kite tools inside (artifacts, memory)",
-      "network": "Network: {{network}}"
+      "networkCommands": "Its commands: {{network}}",
+      "networkAgent": "Network: {{network}}",
+      "gitReadOnly": "Its .git is read-only: no commits inside",
+      "gitWritable": "Its .git is writable: it may commit"
     },
     "switching": "Switching the sandbox…",
     "joinCost": "{{first}}; {{next}}",
     "joinSetup": "{{first}}. {{next}}",
     "unsupportedBecause": "This agent does not support it: {{reason}}",
-    "withHint": "{{tier}} · {{hint}}"
+    "withHint": "{{tier}} · {{hint}}",
+    "networkNote": {
+      "native": {
+        "none": "The agent's commands reach no network; the agent still calls its model",
+        "agent": "The commands go out only through the exit Agent network picks for it; the agent still calls its model itself",
+        "open": "The commands reach any address"
+      },
+      "container": {
+        "model": "The whole agent reaches only its model service ({{hosts}}); everything else is refused",
+        "agent": "All of the agent's traffic goes out through Kite to the exit Agent network picks for it",
+        "open": "The agent reaches any address"
+      }
+    },
+    "moreHosts": "{{first}} and {{count}} more"
   }
 }

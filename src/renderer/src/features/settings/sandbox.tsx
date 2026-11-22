@@ -3,7 +3,7 @@
 
 import { useTranslation } from 'react-i18next'
 import type { GroupDef, RowDef } from './model'
-import { SandboxAutoApprove, SandboxDefault } from './sandbox-rows'
+import { SandboxAutoApprove, SandboxDefault, SandboxGitWritable } from './sandbox-rows'
 
 export function useSandboxRows(): RowDef[] {
   const { t } = useTranslation('settings')
@@ -23,6 +23,12 @@ export function useSandboxRows(): RowDef[] {
       group,
       searchOnly: true,
       render: () => null,
+    },
+    {
+      id: 'sandbox-git',
+      setting: 'agents.sandbox-git',
+      group,
+      render: () => <SandboxGitWritable />,
     },
     {
       id: 'sandbox-auto-approve',

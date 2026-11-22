@@ -2242,6 +2242,7 @@ describe('the native sandbox', () => {
     network: 'none' as const,
     roots: ['/project-wt', '/project'],
     proxyPort: null,
+    gitWritable: false,
   }
 
   it('holds every turn to the project and refuses full access', async () => {
