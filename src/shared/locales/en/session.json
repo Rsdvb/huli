@@ -115,7 +115,9 @@
         "critical": "critical risk"
       }
     },
-    "mcp": "{{server}}: {{tool}}"
+    "mcp": "{{server}}: {{tool}}",
+    "toBackground": "To background",
+    "toBackgroundTitle": "Let the turn go on while this command runs in the background"
   },
   "kettuTool": {
     "read_kettu_guide": "Read Kettu guide",
@@ -508,7 +510,8 @@
   "subagent": {
     "fallbackTitle": "Sub-agent",
     "tools_one": "{{count}} tool",
-    "tools_other": "{{count}} tools"
+    "tools_other": "{{count}} tools",
+    "toBackground": "To background"
   },
   "subagentBar": {
     "runsFor": "{{agent}} runs this sub-agent for <parent/>",
@@ -2080,6 +2083,18 @@
       "transfer": "Send them over",
       "apply": "Put them back together on {{name}}",
       "finish": "Finish"
+    }
+  },
+  "recall": {
+    "recalled_one": "Recalled 1 memory",
+    "recalled_other": "Recalled {{count}} memories",
+    "saved_one": "Saved 1 memory",
+    "saved_other": "Saved {{count}} memories",
+    "summary": "Summary of many memories",
+    "scope": {
+      "personal": "Personal",
+      "team": "Team",
+      "organization": "Organization"
     }
   }
 }

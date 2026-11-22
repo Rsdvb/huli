@@ -2264,6 +2264,13 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), taskId: string(o, 'taskId', ID_CHARS) }
     },
+    'sessions.processes': session,
+    'sessions.toBackground': (params) => {
+      const o = fields(params)
+      const toolCallId = optionalString(o, 'toolCallId', ACP_ID_CHARS)
+      return { sessionId: sessionId(o), ...(toolCallId !== undefined ? { toolCallId } : {}) }
+    },
+    'sessions.cleanTasks': session,
     'sessions.retry': session,
     'sessions.sideAsk': (params) => {
       const o = fields(params)

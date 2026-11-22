@@ -130,6 +130,7 @@ import type { AgentProfiles, ProfileBalance } from './provider-profiles'
 import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
+import type { SessionProcesses } from './task-processes'
 import type { AgentSandboxSupport, ContainerStatus, SandboxChoice } from './sandbox'
 import type {
   ManagerChoices,
@@ -927,6 +928,9 @@ export interface SessionSummary {
   autoResume?: boolean
   // Huli: its running turn has said nothing for a while and may be stuck
   stall?: Stall | null
+  // Huli: a running subagent's latest one-line summary of what it does, as its agent wrote it;
+  // null or absent when there is none
+  progress?: string | null
   // Huli: a run of a best-of-N group; null for a session on its own; absent from older hosts
   group?: SessionGroupRef | null
   // Huli: the GitHub issue it was started for; null for none; absent from older hosts
@@ -1626,6 +1630,18 @@ export interface HostContract {
     params: { sessionId: string; taskId: string }
     result: { output: string; truncated: boolean }
   }
+  // Huli: the session's background processes for its board, read now: their CPU, memory and
+  // ports, and the tasks of an agent whose tasks no event lists.
+  'sessions.processes': { params: { sessionId: string }; result: SessionProcesses }
+  // Huli: moves a command or subagent that holds up its tool call to the background, so the turn
+  // goes on; without `toolCallId`, every one of the session's. False when none matched.
+  'sessions.toBackground': {
+    params: { sessionId: string; toolCallId?: string }
+    result: { moved: boolean }
+  }
+  // Huli: the board's Clean: forgets the ended tasks, or for an agent that lists only running
+  // ones, as Codex, stops them all.
+  'sessions.cleanTasks': { params: { sessionId: string }; result: void }
   'sessions.retry': { params: { sessionId: string }; result: void }
   // Asks a side question, answered beside the session; the answer arrives in `sideChat` patches.
   // `agentId` picks the agent that answers for a session whose own agent cannot, and is kept.
@@ -2509,6 +2525,9 @@ export const HOST_METHODS = [
   'sessions.idleRelease',
   'sessions.stopTask',
   'sessions.taskOutput',
+  'sessions.processes',
+  'sessions.toBackground',
+  'sessions.cleanTasks',
   'sessions.sideAsk',
   'sessions.sideStop',
   'sessions.sideClear',

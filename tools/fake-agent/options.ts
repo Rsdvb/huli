@@ -46,6 +46,8 @@ export const SCENARIOS = [
   'documents',
   'write',
   'anchors',
+  // Huli: background tasks through Kite's own extension, for the session board.
+  'processes',
   // Huli: manager mode's manager, worker and reviewer.
   'manager-demo',
   'work',
@@ -122,6 +124,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   },
   background: {
     description: 'Starts a command in the background, as Claude Code does with run_in_background',
+  },
+  processes: {
+    description:
+      'Starts dev servers and a watcher listed on the session board, then a test run that waits to be moved to the background',
   },
   requests: {
     description: "Reports a request's usage as claude-agent-acp does, then the result's",

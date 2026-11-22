@@ -48,6 +48,7 @@ import { computer } from './computer.ts'
 import { documents } from './documents.ts'
 import { write } from './write.ts'
 import { managerDemo, review, work } from './manager.ts'
+import { processes } from './processes.ts'
 import type { ScenarioName } from './options.ts'
 import type { Scenario, Turn } from './turn.ts'
 
@@ -1681,6 +1682,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   documents,
   write,
   anchors,
+  processes,
   'manager-demo': managerDemo,
   work,
   review,

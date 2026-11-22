@@ -56,6 +56,8 @@ export interface Turn {
   send(update: SessionUpdate, sessionId?: string): Promise<void>
   /** Sends an update that is not part of ACP, to check that clients ignore it. */
   sendRaw(update: Record<string, unknown>): Promise<void>
+  /** Sends a notification of any method, as an extension's, on the agent's connection. */
+  notify(method: string, params: unknown): Promise<void>
   /** A scaled delay that ends early when the turn is cancelled. */
   sleep(ms: number): Promise<void>
   requestPermission(

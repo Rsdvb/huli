@@ -233,6 +233,11 @@ function ChildRow(props: {
           {'  '}
           {[kind, child.description].filter(Boolean).join(' · ')}
         </Text>
+        {isRunning && child.progress ? (
+          <Text style={[styles.reply, { color: c.textSecondary }]} numberOfLines={1}>
+            {child.progress}
+          </Text>
+        ) : null}
         {reply ? (
           <Text style={[styles.reply, { color: c.textSecondary }]} numberOfLines={2}>
             {reply}

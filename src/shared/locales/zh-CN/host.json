@@ -79,7 +79,9 @@
       "closesWithParent": "子智能体会话随父会话一起关闭",
       "deletedWithParent": "子智能体会话随父会话一起删除",
       "failed": "子智能体运行失败"
-    }
+    },
+    "backgroundUnsupported": "这个版本的 {{agent}} 不能列出后台进程",
+    "noToBackground": "{{agent}} 不能把任务转到后台"
   },
   "notice": {
     "historyUnavailable": {
@@ -647,6 +649,15 @@
       "effortDescription": "这个模型能用的推理强度",
       "fast": "快速模式",
       "fastDescription": "支持的模型回复更快"
+    },
+    "background": {
+      "unsupported": "这个版本的 Claude Code 不能把任务转到后台，请先更新"
+    },
+    "goal": {
+      "active": "目标：{{objective}}",
+      "ended": "目标已结束：{{objective}}",
+      "checks_other": "已检查 {{count}} 次",
+      "unmet": "{{checks}} · 尚未达成：{{reason}}"
     }
   },
   "codex": {
@@ -947,6 +958,9 @@
         "stop": "停止",
         "interrupt": "打断"
       }
+    },
+    "background": {
+      "unsupported": "这个版本的 Codex 不能管理后台终端，请先更新"
     }
   },
   "dsh": {

@@ -79,7 +79,9 @@
       "closesWithParent": "A subagent session closes with its parent",
       "deletedWithParent": "A subagent session is deleted with its parent",
       "failed": "The subagent failed"
-    }
+    },
+    "backgroundUnsupported": "This version of {{agent}} cannot list its background processes",
+    "noToBackground": "{{agent}} cannot move a task to the background"
   },
   "notice": {
     "historyUnavailable": {
@@ -659,6 +661,16 @@
       "effortDescription": "Available effort levels for this model",
       "fast": "Fast mode",
       "fastDescription": "Faster responses on supported models"
+    },
+    "background": {
+      "unsupported": "This Claude Code cannot move a task to the background; update it first"
+    },
+    "goal": {
+      "active": "Goal: {{objective}}",
+      "ended": "Goal ended: {{objective}}",
+      "checks_one": "Checked once",
+      "checks_other": "Checked {{count}} times",
+      "unmet": "{{checks}} · not met yet: {{reason}}"
     }
   },
   "codex": {
@@ -965,6 +977,9 @@
         "stop": "stop",
         "interrupt": "interrupt"
       }
+    },
+    "background": {
+      "unsupported": "This Codex cannot manage background terminals; update it first"
     }
   },
   "dsh": {
