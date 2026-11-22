@@ -29,6 +29,7 @@ import { Skeleton } from '@renderer/components/ui/skeleton'
 import { usePhoneWindow } from '@renderer/features/shell/narrow'
 import { useCloudOff } from '@renderer/lib/cloud'
 import { formatShortcut, isMod, isWeb } from '@renderer/lib/platform'
+import { useEntry } from '@renderer/lib/features'
 import {
   hostScope,
   HostScopeContext,
@@ -80,6 +81,7 @@ import { useComputerUseSection } from './computer-section'
 import { useAgentNetworkSection } from './agent-network-section'
 import { useBackupSection } from './backup-section'
 import { useChatBridgeSection } from './chat-bridge-section'
+import { useFeaturesSection } from './features-section'
 import { useManagerSection } from './manager-section'
 import { useMemorySection } from './memory-section'
 
@@ -174,6 +176,10 @@ function SettingsStyles() {
 export function SettingsContent({ titleId }: { titleId?: string }) {
   const cloudOff = useCloudOff()
   const account = useAccountSection()
+  const devices = useDevicesSection()
+  const chatBridge = useChatBridgeSection()
+  const devicesOn = useEntry('settings.devices')
+  const chatBridgeOn = useEntry('settings.chatBridge')
   const client = [
     useGeneralSection(),
     useAppearanceSection(),
@@ -181,11 +187,12 @@ export function SettingsContent({ titleId }: { titleId?: string }) {
     ...(cloudOff ? [] : [account]),
     useHostsSection(),
     useBrowserSection(),
-    useDevicesSection(),
+    ...(devicesOn ? [devices] : []),
     useComputerUseSection(),
     useAgentNetworkSection(),
-    useChatBridgeSection(),
+    ...(chatBridgeOn ? [chatBridge] : []),
     useBackupSection(),
+    useFeaturesSection(),
   ]
   const about = useAboutSection()
   const hostId = useShownHost()
@@ -227,11 +234,13 @@ function SettingsLayout({
 }) {
   const { t } = useTranslation('settings')
   // The list in clusters: what belongs to this client first, then the host's, then About.
+  const manager = useManagerSection()
+  const managerOn = useEntry('settings.manager')
   const all: SectionDef[][] = [
     client,
     [
       useAgentsSection(),
-      useManagerSection(),
+      ...(managerOn ? [manager] : []),
       useHarnessesSection(),
       useMemorySection(),
       useUsageSection(),

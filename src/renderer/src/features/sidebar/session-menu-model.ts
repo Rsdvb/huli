@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from 'react'
 import type { BaseUIEvent } from '@base-ui/react/types'
 import type { SessionSummary } from '@shared/agent-host'
+import { entryShown } from '@renderer/lib/features'
 
 export type SessionMenuItem =
   | 'stop'
@@ -137,18 +138,24 @@ export function sessionMenuGroups(
   ]
   // Huli: a session of the user's own goes on by itself after a plan limit, or not, and a
   // top-level one sits in a column of the task board.
-  const onBoard = topLevel && summary.origin === 'user' && summary.archivedAt === null
+  const onBoard =
+    topLevel &&
+    summary.origin === 'user' &&
+    summary.archivedAt === null &&
+    entryShown('sessionMenu.board')
   const own: SessionMenuItem[] =
     summary.origin === 'user'
       ? [
           ...(onBoard ? (['board'] as const) : []),
           // Huli: manager mode, for a session the user started.
-          ...(topLevel ? (['manager'] as const) : []),
+          ...(topLevel && entryShown('sessionMenu.manager') ? (['manager'] as const) : []),
           'autoResume',
         ]
       : []
   // Huli: its pull request merged once its checks pass, or watched for its agent.
-  const flow: SessionMenuItem[] = prFlow && topLevel ? ['autoMerge', 'watchPr'] : []
+  const flow: SessionMenuItem[] =
+    prFlow && topLevel && entryShown('sessionMenu.prFlow') ? ['autoMerge', 'watchPr'] : []
+
   const state: SessionMenuItem[] = running
     ? ['stop']
     : status === 'failed' || status === 'auth_required'

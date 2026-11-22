@@ -23,6 +23,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@renderer/components/ui/dropdown-menu'
+import { useEntry } from '@renderer/lib/features'
 import { leaveSession } from '@renderer/app/actions'
 import { Kbd } from '@renderer/components/ui/kbd'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -132,9 +133,11 @@ export function HeaderTools({
     (s) => !!sessionId && s.devices.some((device) => device.sessionId === sessionId),
   )
   // Hidden only once the host says it can run no device and the session holds none.
-  const devices = useDevicesStore(
-    (s) => !s.environment || s.environment.ios || s.environment.android || deviceHeld,
-  )
+  const devicesOn = useEntry('pane.devices')
+  const devices =
+    useDevicesStore(
+      (s) => !s.environment || s.environment.ios || s.environment.android || deviceHeld,
+    ) && devicesOn
   // The browser runs in the desktop app, for another host's agents too; a web page has no such
   // view. A session has one, so a session still being created does not.
   const browser = !isWeb && !!sessionId
@@ -142,7 +145,9 @@ export function HeaderTools({
   const computer = !isWeb && !!session?.computer && !!summary && hostOfSession(summary) === null
   const requests = !!sessionId && readsModelRequests(summary?.agentId)
   // Huli: a manager session's workers.
-  const workers = !!sessionId && !!summary?.manager
+  const workersOn = useEntry('pane.workers')
+  const workers = !!sessionId && !!summary?.manager && workersOn
+
   const available: Pane[] = [
     ...(workers ? (['workers'] as const) : []),
     ...(computer ? (['computer'] as const) : []),

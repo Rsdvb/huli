@@ -6,6 +6,7 @@ import {
   type Layout,
   type LayoutChangedMeta,
 } from 'react-resizable-panels'
+import { useEntry } from '@renderer/lib/features'
 import { onAppEvent } from '@renderer/app/events'
 import {
   ResizableHandle,
@@ -119,8 +120,12 @@ export function SidePanelArea({
   const terminal = useTerminalAllowed(projectPath)
   // Another host's project has its files, its artifacts and this computer's browser through its
   // connection, and its terminal while the host allows it.
+  // Huli: a pane whose feature Settings > Features turned off does not show.
+  const devicesOn = useEntry('pane.devices')
+  const workersOn = useEntry('pane.workers')
   const pane = useViewStore((s) => {
     const shown = panel ? s.sidePane[panel] : undefined
+    if ((shown === 'devices' && !devicesOn) || (shown === 'workers' && !workersOn)) return undefined
     if (
       !remote ||
       shown === 'files' ||

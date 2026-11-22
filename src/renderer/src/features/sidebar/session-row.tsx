@@ -63,6 +63,8 @@ import { PrBadge } from './pr-badge'
 import { IssueBadge } from '@renderer/features/git/flow-chips'
 import { BoardRowMark } from '@renderer/features/task-board/status'
 import { onBoard } from '@shared/session-board'
+import { useEntry } from '@renderer/lib/features'
+
 import { SubagentBadge } from './subagent-badge'
 import { useRenaming } from './use-renaming'
 import { WaitingMark } from './waiting-mark'
@@ -156,6 +158,8 @@ export const SessionRow = memo(function SessionRow({
   const [moreOpen, setMoreOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [cardOpen, setCardOpen] = useState(false)
+  const issueBadge = useEntry('sidebar.issueBadge')
+  const boardMark = useEntry('sidebar.boardMark')
   const row = useRef<HTMLDivElement>(null)
   const rename = useRenaming(() => row.current?.querySelector<HTMLElement>('[data-sidebar-row]'))
   const drag = useSessionDragSource(summary.id, rename.renaming)
@@ -300,9 +304,11 @@ export const SessionRow = memo(function SessionRow({
       {summary.worktree && (
         <WorktreeRowMark worktree={summary.worktree} onEnter={() => setCardOpen(false)} />
       )}
-      {summary.issue && <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />}
+      {summary.issue && issueBadge && (
+        <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />
+      )}
       <PrBadge summary={summary} onEnter={() => setCardOpen(false)} />
-      {summary.board && onBoard(summary) && (
+      {summary.board && boardMark && onBoard(summary) && (
         <BoardRowMark status={summary.board.status} onEnter={() => setCardOpen(false)} />
       )}
       {hasChildren && !expanded && (

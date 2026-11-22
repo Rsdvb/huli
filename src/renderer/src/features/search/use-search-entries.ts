@@ -2,10 +2,12 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { ConversationHit, SessionSummary } from '@shared/agent-host'
+import { entryOn, type FeatureEntry } from '@shared/features'
 import { artifactKind, recency } from '@renderer/features/artifacts/model'
 import { triggerWords } from '@renderer/features/routines/model'
 import { shortcutList, type ShortcutAction } from '@renderer/features/shell/shortcuts'
 import { useCloudOff } from '@renderer/lib/cloud'
+import { useEntry } from '@renderer/lib/features'
 import { basename, dirname, shortAgo } from '@renderer/lib/format'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
@@ -16,6 +18,7 @@ import { artifactHost, routineHost } from '@renderer/lib/host'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
 import { useOtherHosts } from '@renderer/stores/hosts'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useSettingsStore } from '@renderer/stores/settings'
 import {
   hostOfSession,
   sessionArchived,
@@ -36,6 +39,7 @@ const SECTIONS: readonly SettingsSection[] = [
   'browser',
   'chat-bridge',
   'backup',
+  'features',
   'agents',
   'manager',
   'harnesses',
@@ -221,9 +225,13 @@ function useArtifactEntries(): SearchEntry[] {
   )
 }
 
+const NO_ROUTINES: ReturnType<typeof useShownRoutines> = []
+
 function useRoutineEntries(): SearchEntry[] {
   const { t } = useTranslation('routines')
-  const routines = useShownRoutines()
+  const shown = useShownRoutines()
+  const routinesOn = useEntry('search.routines')
+  const routines = routinesOn ? shown : NO_ROUTINES
   const projectName = useProjectName()
   const hostName = useHostName()
   const namesHosts = useNamesHosts()
@@ -299,12 +307,15 @@ function onHost(only: string | null | undefined, hostId: string | null): boolean
 
 function useActionEntries(): SearchEntry[] {
   const { t } = useTranslation('sidebar')
+  const routinesOn = useEntry('search.routines')
   return useMemo(() => {
     const english = i18n.getFixedT('en', 'sidebar')
     const keys = new Map(shortcutList('enter').map((shortcut) => [shortcut.action, shortcut.keys]))
     // Huli: no palette action asks to star upstream's repository.
     const listed = (action: SearchAction): boolean =>
-      action !== 'starKettu' && !(isWeb && action === 'openProject')
+      action !== 'starKettu' &&
+      !(isWeb && action === 'openProject') &&
+      !(!routinesOn && action === 'openRoutines')
     return SEARCH_ACTIONS.filter(listed).map((action): SearchEntry => {
       const title = t(`search.action.${action}`)
       const shortcut = ACTION_SHORTCUT[action]
@@ -320,18 +331,26 @@ function useActionEntries(): SearchEntry[] {
         shortcut: (shortcut && keys.get(shortcut)) || null,
       }
     })
-  }, [t])
+  }, [t, routinesOn])
 }
 
 function useSectionEntries(): SearchEntry[] {
   const { t } = useTranslation(['settings', 'usage'])
   const cloudOff = useCloudOff()
+  const features = useSettingsStore((s) => s.settings.features)
   return useMemo(() => {
     const english = i18n.getFixedT('en', ['settings', 'usage'])
     const noAccount = isWeb || cloudOff
+    // Huli: a section whose feature is off, as the page leaves it out.
+    const gated: Partial<Record<SettingsSection, FeatureEntry>> = {
+      manager: 'settings.manager',
+      'chat-bridge': 'settings.chatBridge',
+    }
     const shown = SECTIONS.filter(
       (id) =>
-        !(noAccount && id === 'account') && !(isWeb && (id === 'backup' || id === 'chat-bridge')),
+        !(noAccount && id === 'account') &&
+        !(isWeb && (id === 'backup' || id === 'chat-bridge' || id === 'features')) &&
+        !(gated[id] && !entryOn(features, gated[id])),
     )
     return shown.map((id): SearchEntry => {
       const usage = id === 'usage'
@@ -349,5 +368,5 @@ function useSectionEntries(): SearchEntry[] {
         section: id,
       }
     })
-  }, [t, cloudOff])
+  }, [t, cloudOff, features])
 }

@@ -30,6 +30,7 @@ import { errorMessage } from '@renderer/lib/host'
 import { useHostContext, useHostHas } from '@renderer/lib/host-features'
 import { formatShortcut, isHosted, isMac, isWeb, isWindows, platform } from '@renderer/lib/platform'
 import { useAppInfo } from '@renderer/lib/use-app-info'
+import { useEntry } from '@renderer/lib/features'
 import {
   agentName,
   awaitsPackage,
@@ -398,6 +399,7 @@ export function useNotificationsSection(): SectionDef {
   const onHost = useHostContext()
   const when = group('when', t('notifications.groups.when'))
   const how = group('how', t('notifications.groups.how'))
+  const routinesOn = useEntry('settings.routineNotifications')
   const rows: RowDef[] = [
     {
       id: 'preview',
@@ -432,14 +434,18 @@ export function useNotificationsSection(): SectionDef {
         <NotificationSwitch field="turnEnded" label={t('notifications.turnEnded.name')} />
       ),
     },
-    {
-      id: 'routines',
-      setting: 'notifications.routines',
-      group: when,
-      render: () => (
-        <NotificationSwitch field="routines" label={t('notifications.routines.name')} />
-      ),
-    },
+    ...(routinesOn
+      ? [
+          {
+            id: 'routines',
+            setting: 'notifications.routines',
+            group: when,
+            render: () => (
+              <NotificationSwitch field="routines" label={t('notifications.routines.name')} />
+            ),
+          } satisfies RowDef,
+        ]
+      : []),
     {
       id: 'limits',
       setting: 'notifications.limits',
@@ -649,6 +655,7 @@ export function useAgentsSection(): SectionDef {
   const idleRows = useIdleSessionRows()
   const approvalRows = useAutoApproveRows()
   const sandboxRows = useSandboxRows()
+  const sandboxOn = useEntry('settings.sandbox')
   const workflowRows = useWorkflowRows()
   // The footer goes under the list, so the workflow groups after it keep their own notes.
   const list: GroupDef =
@@ -712,7 +719,7 @@ export function useAgentsSection(): SectionDef {
             },
           ] satisfies RowDef[])),
       ...approvalRows,
-      ...sandboxRows,
+      ...(sandboxOn ? sandboxRows : []),
       ...idleRows,
       {
         id: 'lower-priority',

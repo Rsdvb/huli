@@ -6,6 +6,7 @@ import { BubbleChatIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { CHAT_PLATFORMS } from '@shared/chat-bridge'
 import type { SettingId } from '@shared/settings-catalog'
+import { useEntry } from '@renderer/lib/features'
 import { useChatBridgeStore, useFollowChatBridge } from '@renderer/stores/chat-bridge'
 import { AccountsControl, PlatformRow } from './chat-bridge-rows'
 import type { GroupDef, RowDef, SectionDef } from './model'
@@ -13,7 +14,7 @@ import { GroupNote } from './rows'
 
 export function useChatBridgeSection(): SectionDef {
   const { t } = useTranslation('settings')
-  useFollowChatBridge()
+  useFollowChatBridge(useEntry('settings.chatBridge'))
   const loaded = useChatBridgeStore((s) => s.view !== null)
   const unavailable = useChatBridgeStore((s) => s.view?.unavailable ?? null)
   const failed = useChatBridgeStore((s) => s.error)

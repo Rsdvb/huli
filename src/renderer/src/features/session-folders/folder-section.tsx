@@ -37,6 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@renderer/components/ui/dropdown-menu'
+import { useEntry } from '@renderer/lib/features'
 import { GroupRenameHints } from '@renderer/features/sidebar/rename-hints'
 import { RenameScope } from '@renderer/features/sidebar/rename-scope'
 import { limitRows, rowInSight, ROWS_SHOWN } from '@renderer/features/sidebar/row-limit'
@@ -236,7 +237,9 @@ function FolderGroup({
       [folder.sessionIds, roots],
     ),
   )
-  const rows = useMemo(() => sidebarRows(nodes, [], byActivity), [nodes])
+  const fold = useEntry('sidebar.runGroup')
+  const rows = useMemo(() => sidebarRows(nodes, [], byActivity, fold), [nodes, fold])
+
   const limited = limitRows(rows, allShown, (row) => rowInSight(row, shownId))
   const tabStopId = stop?.kind === 'session' ? stop.id : null
   const toggle = () => void updateFolder(hostId, folder.id, { collapsed: open })

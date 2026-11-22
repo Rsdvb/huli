@@ -14,11 +14,14 @@ export const useChatBridgeStore = create<ChatBridgeStore>()(() => ({ view: null,
 
 let following = false
 
-/** Reads the view once and follows it from then on; the web client has no chat bridges. */
-export function useFollowChatBridge(): void {
+/**
+ * Reads the view once and follows it from then on, once `on` (Huli: the feature's switch); the
+ * web client has no chat bridges.
+ */
+export function useFollowChatBridge(on: boolean): void {
   useEffect(() => {
     const api = window.kettu.chatBridge
-    if (following || !api) return
+    if (following || !api || !on) return
     following = true
     api.onChanged((view) => useChatBridgeStore.setState({ view }))
     void api.state().then(
@@ -28,7 +31,7 @@ export function useFollowChatBridge(): void {
           error: error instanceof Error ? error.message : String(error),
         }),
     )
-  }, [])
+  }, [on])
 }
 
 /** Keeps an answer of main's, which is the whole view after the change. */
