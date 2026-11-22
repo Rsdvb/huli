@@ -811,6 +811,31 @@ export interface Project {
   // Huli: the sandbox its sessions start in; null keeps the settings' default, absent on hosts
   // older than sandboxes.
   sandbox?: SandboxChoice | null
+  // Huli: further folders its sessions work in beside its own, such as a frontend and a backend
+  // repository, in the order they were added; absent on hosts older than them.
+  folders?: ProjectFolder[]
+}
+
+/** Huli: a further folder of a project, which its sessions' agents may read and change too. */
+export interface ProjectFolder {
+  path: string
+  name: string
+  missing: boolean // the folder no longer exists
+}
+
+/** Huli: the most further folders a project holds. */
+export const MAX_PROJECT_FOLDERS = 32
+
+/**
+ * Huli: a folder the host found for a project to add: a Git repository one level inside the
+ * project's folder, or a folder a `.code-workspace` file in it lists.
+ */
+export interface FolderSuggestion {
+  path: string
+  name: string
+  source: 'repository' | 'workspace'
+  /** Whether the folder is a Git repository of its own. */
+  repo: boolean
 }
 
 export type SessionAttention = 'none' | 'permission' | 'unread' | 'error'
@@ -1351,6 +1376,12 @@ export interface HostContract {
   // Huli: the sandbox the project's new sessions start in; null keeps the default. The windows'
   // alone, like what is allowed without asking.
   'projects.setSandbox': { params: { path: string; sandbox: SandboxChoice | null }; result: void }
+  // Huli: a further folder for the project's sessions to work in; adding one already listed
+  // changes nothing. Its sessions' agents get it when they next start.
+  'projects.addFolder': { params: { path: string; folder: string }; result: Project }
+  'projects.removeFolder': { params: { path: string; folder: string }; result: void }
+  // Huli: the folders it could add, read from the disk only when asked.
+  'projects.suggestFolders': { params: { path: string }; result: FolderSuggestion[] }
   // How the project names and prepares its sessions' worktrees.
   'projects.worktreeSettings': { params: { path: string }; result: ProjectWorktreeSettings }
   // A device needs the owner's leave to use the terminal to change these, as they run a command.
@@ -2399,6 +2430,9 @@ export const HOST_METHODS = [
   'projects.pin',
   'projects.setAutoApprove',
   'projects.setSandbox',
+  'projects.addFolder',
+  'projects.removeFolder',
+  'projects.suggestFolders',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
   'paths.complete',

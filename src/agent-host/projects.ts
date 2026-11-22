@@ -2,13 +2,15 @@
 
 import { realpath as fsRealpath, stat } from 'node:fs/promises'
 import path from 'node:path'
-import type { Project } from '@shared/agent-host'
+import { MAX_PROJECT_FOLDERS, type Project } from '@shared/agent-host'
 import { DEFAULT_WORKTREE_SETTINGS, type ProjectWorktreeSettings } from '@shared/git'
 import type { Platform } from '@shared/platform'
 import type { AutoApprove } from '@shared/risk'
 import { sameSandbox, type SandboxChoice } from '@shared/sandbox'
 import { invalidParams, notFound } from './errors'
+import { t } from './i18n'
 import { canonicalizePath, folderName, isAbsolutePath, pathKey } from './paths'
+import { folderProblem, type MountProblem } from './sandbox/mounts'
 import type { JsonFile, ProjectRecord, ProjectsFile } from './storage'
 
 export interface ProjectsDeps {
@@ -17,6 +19,32 @@ export interface ProjectsDeps {
   now?: () => number
   realpath?: (value: string) => Promise<string>
   isDirectory?: (value: string) => Promise<boolean>
+  /**
+   * Huli: the home and data folders a further folder may be neither of, nor hold; without them
+   * only the file system's roots are refused.
+   */
+  home?: string
+  dataDir?: string
+}
+
+/**
+ * Huli: what a further folder may not be, as a sandbox's mount may not: a further folder is a
+ * place its agents may change and its edits count as the project's, so the computer's roots, the
+ * home folder and what holds it, and Kite's own data are refused. Keys and system folders a mount
+ * also refuses stay allowed, as a project's own folder may be one; a sandbox still keeps them out.
+ */
+const REFUSED_FOLDERS = [
+  'notAbsolute',
+  'devicePath',
+  'root',
+  'home',
+  'aboveHome',
+  'kiteData',
+] as const
+type RefusedFolder = (typeof REFUSED_FOLDERS)[number]
+
+function refused(problem: MountProblem | null): problem is RefusedFolder {
+  return (REFUSED_FOLDERS as readonly string[]).includes(problem ?? '')
 }
 
 async function isDirectory(value: string): Promise<boolean> {
@@ -61,6 +89,11 @@ export class Projects {
         pinnedAt: record.pinnedAt ?? null,
         autoApprove: record.autoApprove ?? null,
         sandbox: record.sandbox ? { ...record.sandbox } : null,
+        folders: (record.folders ?? []).map((folder) => ({
+          path: folder,
+          name: folderName(folder, this.deps.platform),
+          missing: this.missing.get(this.key(folder)) ?? false,
+        })),
       }))
   }
 
@@ -71,6 +104,24 @@ export class Projects {
   find(value: string): ProjectRecord | undefined {
     const key = this.key(value)
     return this.records.find((record) => this.key(record.path) === key)
+  }
+
+  /** Huli: the project's further folders as stored, missing ones included; none for no project. */
+  folders(value: string): string[] {
+    return [...(this.find(value)?.folders ?? [])]
+  }
+
+  /** Huli: the further folders that were there when last looked at, for its sessions' agents. */
+  presentFolders(value: string): string[] {
+    return this.folders(value).filter((folder) => this.missing.get(this.key(folder)) !== true)
+  }
+
+  /** Huli: whether a canonical folder is a further folder of any project. */
+  isFolder(value: string): boolean {
+    const key = this.key(value)
+    return this.records.some((record) =>
+      (record.folders ?? []).some((folder) => this.key(folder) === key),
+    )
   }
 
   /**
@@ -110,6 +161,55 @@ export class Projects {
     }
     this.changed()
     return this.list().find((project) => this.key(project.path) === this.key(canonical))!
+  }
+
+  /**
+   * Huli: adds a further folder to the project: an existing folder, canonical, other than the
+   * project's own and none `REFUSED_FOLDERS` names. One already listed changes nothing.
+   */
+  async addFolder(record: ProjectRecord, value: string): Promise<Project> {
+    const canonical = await this.resolveDirectory(value)
+    const problem = this.folderProblem(canonical)
+    if (problem) throw invalidParams(t(`projectFolders.refused.${problem}`, { folder: canonical }))
+    if (this.key(canonical) === this.key(record.path)) {
+      throw invalidParams(t('projectFolders.own'))
+    }
+    const folders = record.folders ?? []
+    if (!folders.some((folder) => this.key(folder) === this.key(canonical))) {
+      if (folders.length >= MAX_PROJECT_FOLDERS) {
+        throw invalidParams(t('projectFolders.tooMany', { count: MAX_PROJECT_FOLDERS }))
+      }
+      record.folders = [...folders, canonical]
+      this.missing.set(this.key(canonical), false)
+      this.changed()
+    }
+    return this.list().find((project) => this.key(project.path) === this.key(record.path))!
+  }
+
+  /** Huli: takes a further folder out of the project, matched without realpath; its files stay. */
+  removeFolder(record: ProjectRecord, value: string): void {
+    if (!isAbsolutePath(value, this.deps.platform)) {
+      throw invalidParams('folder must be an absolute path')
+    }
+    const api = this.deps.platform === 'win32' ? path.win32 : path.posix
+    const key = this.key(api.resolve(value))
+    const folders = record.folders ?? []
+    const kept = folders.filter((folder) => this.key(folder) !== key)
+    if (kept.length === folders.length) throw notFound(`${value} is not a folder of the project`)
+    if (kept.length > 0) record.folders = kept
+    else delete record.folders
+    if (!this.isFolder(value) && !this.find(value)) this.missing.delete(key)
+    this.changed()
+  }
+
+  private folderProblem(canonical: string): RefusedFolder | null {
+    const { home, dataDir, platform } = this.deps
+    if (home === undefined || dataDir === undefined) {
+      const api = platform === 'win32' ? path.win32 : path.posix
+      return this.key(api.parse(canonical).root) === this.key(canonical) ? 'root' : null
+    }
+    const problem = folderProblem(canonical, { platform, home, dataDir })
+    return refused(problem) ? problem : null
   }
 
   /** The stored project for a path that may no longer exist, matched without realpath. */
@@ -173,6 +273,9 @@ export class Projects {
   remove(record: ProjectRecord): void {
     this.records = this.records.filter((item) => item !== record)
     this.missing.delete(this.key(record.path))
+    for (const folder of record.folders ?? []) {
+      if (!this.isFolder(folder) && !this.find(folder)) this.missing.delete(this.key(folder))
+    }
     this.changed()
   }
 
@@ -191,10 +294,11 @@ export class Projects {
   /** Marks projects whose folder is gone; they stay listed, so an unmounted drive loses nothing. */
   async refreshMissing(notify = true): Promise<void> {
     let changed = false
+    const folders = this.records.flatMap((record) => [record.path, ...(record.folders ?? [])])
     await Promise.all(
-      this.records.map(async (record) => {
-        const missing = !(await this.isDirectory(record.path))
-        const key = this.key(record.path)
+      [...new Set(folders)].map(async (folder) => {
+        const missing = !(await this.isDirectory(folder))
+        const key = this.key(folder)
         if (this.missing.get(key) !== missing) {
           this.missing.set(key, missing)
           changed = true

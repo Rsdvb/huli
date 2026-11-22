@@ -2,12 +2,13 @@
 
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
-import type {
-  AgentAccount,
-  AgentUpdate,
-  PlanLimit,
-  ProviderBalance,
-  VersionMoveReason,
+import {
+  MAX_PROJECT_FOLDERS,
+  type AgentAccount,
+  type AgentUpdate,
+  type PlanLimit,
+  type ProviderBalance,
+  type VersionMoveReason,
 } from '@shared/agent-host'
 import {
   GITHUB_ISSUE_URL,
@@ -15,6 +16,7 @@ import {
   type ProjectWorktreeSettings,
 } from '@shared/git'
 import { isGithubEvent } from '@shared/github-flow'
+import type { Platform } from '@shared/platform'
 import { isProfileId } from '@shared/provider-profiles'
 import { isBoardStatus, type SessionBoard } from '@shared/session-board'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
@@ -49,6 +51,7 @@ import {
   type RoutineRef,
 } from '@shared/routines'
 import type { AgentInit } from './connection'
+import { isAbsolutePath, pathKey } from './paths'
 import { isVersion } from './versions'
 
 export type LogFn = (level: 'info' | 'warn' | 'error', message: string) => void
@@ -292,6 +295,8 @@ export interface ProjectRecord {
   worktree?: Partial<ProjectWorktreeSettings> // only what differs from the defaults
   autoApprove?: AutoApprove // Huli: absent keeps the settings' default
   sandbox?: SandboxChoice // Huli: the sandbox its sessions start in; absent keeps the default
+  // Huli: further folders its sessions work in, absolute and resolved, each once; absent for none.
+  folders?: string[]
 }
 
 /**
@@ -727,7 +732,10 @@ const isNullable =
   (value: unknown): value is V | null =>
     value === null || guard(value)
 
-export function parseProjectsFile(data: Record<string, unknown>): ProjectsFile | string {
+export function parseProjectsFile(
+  data: Record<string, unknown>,
+  platform: Platform = process.platform as Platform,
+): ProjectsFile | string {
   if (!Array.isArray(data.projects)) return 'projects is not a list'
   const projects: ProjectRecord[] = []
   for (const [index, item] of data.projects.entries()) {
@@ -749,9 +757,39 @@ export function parseProjectsFile(data: Record<string, unknown>): ProjectsFile |
       ...projectWorktreeOf(item.worktree),
       ...(isAutoApprove(item.autoApprove) ? { autoApprove: item.autoApprove } : {}),
       ...sandboxField(item.sandbox),
+      ...projectFoldersOf(item.folders, item.path, platform),
     })
   }
   return { version: 1, projects }
+}
+
+/** The longest further folder path stored; a longer one is dropped. */
+const MAX_FOLDER_PATH = 4096
+
+/**
+ * Huli: a project's further folders: absolute paths by the platform's rules, resolved, each once
+ * and never the project's own, at most MAX_PROJECT_FOLDERS; one that does not read is dropped.
+ */
+function projectFoldersOf(
+  value: unknown,
+  projectPath: string,
+  platform: Platform,
+): { folders?: string[] } {
+  if (!Array.isArray(value)) return {}
+  const api = platform === 'win32' ? path.win32 : path.posix
+  const seen = new Set([pathKey(projectPath, platform)])
+  const folders: string[] = []
+  for (const item of value) {
+    if (folders.length >= MAX_PROJECT_FOLDERS) break
+    if (!isString(item) || item.length > MAX_FOLDER_PATH || item.includes('\0')) continue
+    if (!isAbsolutePath(item, platform)) continue
+    const resolved = api.resolve(item)
+    const key = pathKey(resolved, platform)
+    if (seen.has(key)) continue
+    seen.add(key)
+    folders.push(resolved)
+  }
+  return folders.length > 0 ? { folders } : {}
 }
 
 // A queue that does not parse is dropped rather than failing the whole index.
@@ -1424,12 +1462,16 @@ export function parseAgentProcessesFile(
   return { version: 1, processes }
 }
 
-export function projectsFile(userDataPath: string, log: LogFn): JsonFile<ProjectsFile> {
+export function projectsFile(
+  userDataPath: string,
+  log: LogFn,
+  platform: Platform = process.platform as Platform,
+): JsonFile<ProjectsFile> {
   return new JsonFile<ProjectsFile>({
     file: path.join(userDataPath, 'state', 'projects.json'),
     version: PROJECTS_VERSION,
     migrations: PROJECTS_MIGRATIONS,
-    parse: parseProjectsFile,
+    parse: (data) => parseProjectsFile(data, platform),
     empty: () => ({ version: 1, projects: [] }),
     log,
   })

@@ -467,6 +467,38 @@ describe('sessions', () => {
     }
   })
 
+  it('makes the project’s further folders workspace roots of the thread and of every turn', async () => {
+    const { server, connection } = await connect()
+    const folders = ['/api', '/web']
+    const opened = await connection.newSession('/project', { folders })
+    await connection.resumeSession('thread-7', '/project', { folders })
+    await connection.forkSession(opened.sessionId, '/project', { folders })
+    for (const method of ['thread/start', 'thread/resume', 'thread/fork']) {
+      expect(server.sent(method)[0]).toMatchObject({
+        runtimeWorkspaceRoots: ['/project', '/api', '/web'],
+      })
+    }
+    expect(connection.takesFolders(opened.sessionId)).toBe(true)
+    const { target } = threadTarget()
+    connection.register(opened.sessionId, target)
+    const prompt = connection.prompt(opened.sessionId, [{ type: 'text', text: 'hi' }])
+    await until(() => server.sent('turn/start').length === 1)
+    expect(server.sent('turn/start')[0]).toMatchObject({
+      runtimeWorkspaceRoots: ['/project', '/api', '/web'],
+      sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/api', '/web'] },
+    })
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-1', 'completed'),
+    })
+    await prompt
+
+    // Without further folders nothing changes: Codex takes the folder alone.
+    const plain = await connection.newSession('/project')
+    expect(server.sent('thread/start')[1]).not.toHaveProperty('runtimeWorkspaceRoots')
+    expect(connection.takesFolders(plain.sessionId)).toBe(false)
+  })
+
   it('sets the Marketplace’s skill folders on app-server before a thread starts, once while unchanged', async () => {
     const { server, connection } = await connect()
     server.on('skills/extraRoots/set', () => ({}))

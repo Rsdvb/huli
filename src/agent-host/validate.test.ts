@@ -634,6 +634,25 @@ describe('createValidators', () => {
     rejects(() => windows['sessions.create']({ agentId: 'codex', projectPath: 'app' }))
   })
 
+  it("wants a project's further folder as an absolute path by the platform rules", () => {
+    for (const method of ['projects.addFolder', 'projects.removeFolder'] as const) {
+      const call = posix[method]
+      expect(call({ path: '/repo', folder: '/api' })).toEqual({ path: '/repo', folder: '/api' })
+      rejects(() => call({ path: '/repo' }))
+      rejects(() => call({ path: '/repo', folder: 'api' }))
+      rejects(() => call({ path: '/repo', folder: '/a\0b' }))
+      rejects(() => call({ path: '/repo', folder: 3 }))
+      rejects(() => call({ path: 'repo', folder: '/api' }))
+      rejects(() => windows[method]({ path: 'C:\\repo', folder: '\\api' }))
+      expect(windows[method]({ path: 'C:\\repo', folder: 'D:\\api' })).toEqual({
+        path: 'C:\\repo',
+        folder: 'D:\\api',
+      })
+    }
+    expect(posix['projects.suggestFolders']({ path: '/repo' })).toEqual({ path: '/repo' })
+    rejects(() => posix['projects.suggestFolders']({ path: 'repo' }))
+  })
+
   it("takes only a known auto-approve level, or null for the settings' default", () => {
     const set = posix['projects.setAutoApprove']
     for (const autoApprove of ['off', 'low', 'edits', null] as const) {

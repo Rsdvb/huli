@@ -713,7 +713,12 @@ export class AgentHost {
       settle: (sessionId, entryId, outcome) =>
         this.sessions.themeSettled(sessionId, entryId, outcome),
     })
-    this.projects = new Projects({ file: projectsFile(options.userDataPath, log), platform })
+    this.projects = new Projects({
+      file: projectsFile(options.userDataPath, log, platform),
+      platform,
+      home: options.homeDir ?? os.homedir(),
+      dataDir: options.userDataPath,
+    })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
     this.remembered = agentsFile(options.userDataPath, log)
     this.updates = agentUpdatesFile(options.userDataPath, log)
@@ -1146,6 +1151,7 @@ export class AgentHost {
       },
       takenByPullRequest: (projectPath, branch) =>
         this.git?.branchPullRequests(projectPath).has(branch) ?? false,
+      severalFolders: (projectPath) => this.projects.folders(projectPath).length > 0,
       log,
     })
     this.idleRelease = new IdleRelease({
@@ -3199,11 +3205,12 @@ export class AgentHost {
   }
 
   /**
-   * Refuses a canonical folder that is not a registered project, a scratch folder or a worktree a
-   * session works in: files, git and media are read nowhere else.
+   * Refuses a canonical folder that is not a registered project, a further folder of one, a
+   * scratch folder or a worktree a session works in: files, git and media are read nowhere else.
    */
   private assertOpenFolder(canonical: string): void {
     if (this.scratch.contains(canonical) || this.sessions.isSessionWorktree(canonical)) return
+    if (this.projects.isFolder(canonical)) return
     this.projects.match(canonical)
   }
 
@@ -3522,6 +3529,16 @@ export class AgentHost {
       'projects.pin': ({ path, pinned }) => projects.pin(projects.match(path), pinned),
       'projects.setSandbox': ({ path, sandbox }) =>
         projects.setSandbox(projects.match(path), sandbox),
+      'projects.addFolder': ({ path, folder }) => projects.addFolder(projects.match(path), folder),
+      'projects.removeFolder': ({ path, folder }) =>
+        projects.removeFolder(projects.match(path), folder),
+      'projects.suggestFolders': async ({ path }) => {
+        const record = projects.match(path)
+        const { suggestFolders } = await import('./project-folders')
+        return suggestFolders(record.path, record.folders ?? [], {
+          platform: this.options.platform,
+        })
+      },
       'sessions.setSandbox': ({ sessionId, sandbox }) =>
         this.sessions.setSandbox(sessionId, sandbox),
       'sandbox.containerStatus': async () => (await this.containerSandbox()).status(),

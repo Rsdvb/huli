@@ -453,6 +453,12 @@ export interface SessionOptions {
    * for an agent that runs such a file before each of its commands by itself.
    */
   envFile?: string
+  /**
+   * Huli: the further folders of the session's project, absolute, which its agent may read and
+   * change as it does its own folder: as the harness's own extra workspace roots where it takes
+   * them; absent for none.
+   */
+  folders?: readonly string[]
 }
 
 /** Kettu's memory as a session starts with it. */
@@ -511,6 +517,11 @@ export interface AgentConnection {
    * themselves, as Claude Code does with `CLAUDE_ENV_FILE`; absent where none do.
    */
   loadsEnvFile?(sessionId: string): boolean
+  /**
+   * Huli: whether the session's agent was handed `SessionOptions.folders` as workspace roots of its
+   * own; where not, the host names them ahead of the session's next prompt.
+   */
+  takesFolders?(sessionId: string): boolean
   readonly isClosed: boolean
   close(): void
 

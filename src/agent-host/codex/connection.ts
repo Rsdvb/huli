@@ -464,6 +464,8 @@ interface ThreadRecord {
   asked: Set<string>
   /** Huli: the session's own sandbox, which every turn's policy is held to; null for none. */
   sandbox: SessionSandbox | null
+  /** Huli: the project's further folders, which are the thread's workspace roots beside its own. */
+  folders: readonly string[]
 }
 
 function threadRecord(
@@ -484,7 +486,27 @@ function threadRecord(
     plan: null,
     asked: new Set(),
     sandbox: null,
+    folders: [],
   }
+}
+
+/**
+ * Huli: the thread's workspace roots, its folder and then the project's further folders, which
+ * `:workspace_roots` stands for in its policies; nothing for none, as Codex then takes `cwd` alone.
+ */
+function workspaceRoots(
+  cwd: string | null,
+  folders: readonly string[] | undefined,
+): { runtimeWorkspaceRoots?: string[] } {
+  return cwd !== null && folders && folders.length > 0
+    ? { runtimeWorkspaceRoots: [cwd, ...folders] }
+    : {}
+}
+
+/** Huli: a policy that writes in the workspace writes in the project's further folders too. */
+function withFolders(policy: SandboxPolicy, folders: readonly string[]): SandboxPolicy {
+  if (policy.type !== 'workspaceWrite' || folders.length === 0) return policy
+  return { ...policy, writableRoots: [...new Set([...policy.writableRoots, ...folders])] }
 }
 
 /** The mode whose turns run in no sandbox. */
@@ -573,6 +595,11 @@ export class CodexConnection implements AgentConnection {
 
   get isClosed(): boolean {
     return this.rpc.isClosed
+  }
+
+  /** Huli: a thread opened with further folders has them as runtime workspace roots of its own. */
+  takesFolders(sessionId: string): boolean {
+    return (this.threads.get(sessionId)?.folders.length ?? 0) > 0
   }
 
   get ownInstructions(): boolean {
@@ -880,12 +907,14 @@ export class CodexConnection implements AgentConnection {
       sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
+      ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
       experimentalRawEvents: false,
     })
     const record = await this.record(response.thread.id, cwd, response, hidden)
     record.settings = { ...record.settings, mode: DEFAULT_MODE }
     record.sandbox = sandbox
+    record.folders = [...(options.folders ?? [])]
     return { sessionId: record.id, config: await this.config(record) }
   }
 
@@ -915,11 +944,13 @@ export class CodexConnection implements AgentConnection {
           : {}),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
+      ...workspaceRoots(cwd, options.folders),
       excludeTurns: true,
     })
     const record = await this.record(threadId, cwd, response, options.hidden !== undefined, known)
     record.settings = sandboxedSettings(record.settings, sandbox)
     record.sandbox = sandbox
+    record.folders = [...(options.folders ?? [])]
     record.prompted = true
     return record
   }
@@ -1011,11 +1042,13 @@ export class CodexConnection implements AgentConnection {
       ...(source ? { model: source.model } : {}),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
+      ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
       excludeTurns: true,
     })
     const record = await this.record(response.thread.id, cwd, response, hidden, held)
     record.sandbox = sandbox
+    record.folders = [...(options.folders ?? [])]
     record.prompted = true
     return { sessionId: record.id, config: await this.config(record) }
   }
@@ -1092,6 +1125,7 @@ export class CodexConnection implements AgentConnection {
       ...(source ? { model: source.model } : {}),
       config: sessionConfig(cwd, { ...options, mcpServers: servers }),
       developerInstructions: own ? `${own}\n\n${SIDE_INSTRUCTIONS}` : SIDE_INSTRUCTIONS,
+      ...workspaceRoots(cwd, parent.folders),
       ephemeral: true,
       excludeTurns: true,
     })
@@ -1682,7 +1716,8 @@ export class CodexConnection implements AgentConnection {
       threadId: record.id,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
-      sandboxPolicy: heldPolicy(mode.sandbox, record.sandbox),
+      sandboxPolicy: withFolders(heldPolicy(mode.sandbox, record.sandbox), record.folders),
+      ...workspaceRoots(record.cwd, record.folders),
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.effort ? { effort: settings.effort } : {}),
