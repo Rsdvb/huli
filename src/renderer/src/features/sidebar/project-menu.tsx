@@ -36,6 +36,7 @@ import { useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
 import { openIssues, openSettings } from '@renderer/stores/view'
 import { ProjectApprovalsMenu } from './project-approvals'
+import { ProjectSandboxMenu } from './project-sandbox'
 import { openProjectTerminal } from './project-menu-model'
 
 /**
@@ -114,6 +115,7 @@ export function ProjectMenuItems({
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
         <ProjectApprovalsMenu project={project} disabled={!!gone} />
+        {local && <ProjectSandboxMenu project={project} disabled={!!gone} />}
         {git && github && (
           <DropdownMenuItem disabled={gone} onClick={() => openIssues(project.path)}>
             <MenuGlyph icon={RadioButtonIcon} />

@@ -129,6 +129,7 @@ import { writeCommitMessage } from './commit-message'
 import { lightTarget } from './light-model'
 import { reportDraftPrompt, writeReportDraft } from './report-draft'
 import { Diagnostics } from './diagnostics'
+import type { ContainerSandbox } from './sandbox/container'
 import { HostError, invalidParams, isHostError } from './errors'
 import { setLocale, t, tSettings, tSettingsEnglish } from './i18n'
 import { FilesService } from './files'
@@ -551,6 +552,8 @@ export class AgentHost {
   /** The values of the Marketplace servers' inputs from main, held only in memory. */
   private marketKeys: MarketKeys = new Map()
   private agentEnvKeys: Record<string, Record<string, string>> = {}
+  /** Huli: the container tier's engine and image, loaded on its first use. */
+  private containers: Promise<ContainerSandbox> | null = null
   /** Huli: the agents' API provider profiles from main, with their keys, held only in memory. */
   private readonly profiles = new ProviderProfiles()
   /** The Marketplace's catalog of MCP servers, from the registry. */
@@ -1064,6 +1067,9 @@ export class AgentHost {
       }),
       envKeyIsSet: (agentId, variable) =>
         typeof this.agentEnvKeys[agentId]?.[variable] === 'string',
+      envKeyNames: (agentId) => Object.keys(this.agentEnvKeys[agentId] ?? {}),
+      containers: () => this.containerSandbox(),
+      dataDir: options.userDataPath,
       profiles: (agentId) => ({
         view: this.profiles.view(agentId),
         balances: this.profiles.balancesOf(agentId),
@@ -1113,6 +1119,8 @@ export class AgentHost {
       agents: this.agents,
       projects: this.projects,
       autoApprove: () => this.settings.autoApprove ?? 'off',
+      sandbox: () => this.settings.sandbox,
+      agentProxyPort: (agentId) => this.nodeProxy.portFor(agentId),
       scratch: this.scratch,
       worktrees: this.worktrees,
       file: sessionsFile(options.userDataPath, log),
@@ -1662,6 +1670,21 @@ export class AgentHost {
    * their agents. A host whose login shell could not be read waits for the next start, since
    * the programs on its `PATH` may be missing.
    */
+  /** Huli: made on the first container session or status request, never at startup. */
+  private containerSandbox(): Promise<ContainerSandbox> {
+    this.containers ??= import('./sandbox/container').then(
+      ({ ContainerSandbox }) =>
+        new ContainerSandbox({
+          platform: this.options.platform,
+          // The engine's own program goes through the proxy Kite's settings name, as git does.
+          env: () => this.env.agentEnv(),
+          dataDir: this.options.userDataPath,
+          log: (level, message) => this.diagnostics.log(level, message),
+        }),
+    )
+    return this.containers
+  }
+
   private firstStart(): void {
     if (this.settings.initialSetupDone || this.env.info().source === 'fallback') return
     this.options.send({ type: 'host:first-start', harnesses: this.agents.userPrograms() })
@@ -3393,6 +3416,13 @@ export class AgentHost {
       },
       'projects.touch': ({ path }) => projects.touch(projects.match(path)),
       'projects.pin': ({ path, pinned }) => projects.pin(projects.match(path), pinned),
+      'projects.setSandbox': ({ path, sandbox }) =>
+        projects.setSandbox(projects.match(path), sandbox),
+      'sessions.setSandbox': ({ sessionId, sandbox }) =>
+        this.sessions.setSandbox(sessionId, sandbox),
+      'sandbox.containerStatus': async () => (await this.containerSandbox()).status(),
+      'sandbox.pullImage': async () => (await this.containerSandbox()).pull(),
+      'sandbox.removeImage': async () => (await this.containerSandbox()).remove(),
       'projects.setAutoApprove': ({ path, autoApprove }) =>
         projects.setAutoApprove(projects.match(path), autoApprove),
       'projects.worktreeSettings': ({ path }) =>

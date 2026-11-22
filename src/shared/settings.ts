@@ -5,6 +5,7 @@ import type { LanguageSetting, Locale } from './locale'
 import type { MarketServer, MarketSkill } from './marketplace'
 import type { DirectAddress } from './remote/protocol'
 import type { AutoApprove } from './risk'
+import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from './sandbox'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
@@ -160,6 +161,9 @@ export interface SettingsFile {
   // Huli: which permission requests the host allows once by itself, for a project that keeps the
   // default; a project may choose its own. Agents never change it.
   permissions: { autoApprove: AutoApprove }
+  // Huli: the sandbox a session of a project that keeps the default starts in, and whether a
+  // sandboxed session's edits inside its project need no asking. Agents never change it.
+  sandbox: SandboxSettings
 }
 
 /**
@@ -395,6 +399,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   onboarding: { done: false, step: 'welcome' },
   backup: { enabled: true, time: '03:00', keep: 7, folder: null },
   permissions: { autoApprove: 'off' },
+  sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
 }
 
 /** The zoom one step in (1) or out (-1), held at the ends; 0 returns to the default. */
@@ -458,6 +463,7 @@ export interface SettingsPatch {
     discoverable?: boolean
   }
   permissions?: Partial<SettingsFile['permissions']>
+  sandbox?: Partial<SandboxSettings>
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
     enabled?: boolean
@@ -499,6 +505,9 @@ export interface HostSettings {
   autoApprove?: AutoApprove
   // Huli: the host lowers its own priority; absent from a parent older than it, which leaves it.
   lowerAgentPriority?: boolean
+  // Huli: the sandbox default and its approvals rule; absent from a parent older than it, which
+  // starts every session unsandboxed.
+  sandbox?: SandboxSettings
 }
 
 /** The part of the settings the terminal host receives. */

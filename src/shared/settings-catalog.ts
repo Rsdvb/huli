@@ -19,6 +19,7 @@ import {
   type SettingsPatch,
 } from './settings'
 import { AUTO_APPROVE_LEVELS } from './risk'
+import { SANDBOX_NETWORKS, SANDBOX_TIERS } from './sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
@@ -1037,6 +1038,47 @@ const ENTRIES = {
     kind: 'choice',
     options: choices(AUTO_APPROVE_LEVELS, (level) => `agents.autoApprove.level.${level}`),
     get: (file) => file.permissions.autoApprove,
+  },
+  // Huli: the sandbox new sessions start in. Agents read it and never change it: a change would
+  // loosen what holds them back, and only the user picks a tier.
+  'agents.sandbox': {
+    section: 'agents',
+    row: 'sandbox',
+    group: 'agents.sandbox.group',
+    name: 'agents.sandbox.name',
+    description: 'agents.sandbox.description',
+    keywords: 'agents.sandbox.keywords',
+    part: 'host',
+    access: 'read',
+    kind: 'choice',
+    options: choices(SANDBOX_TIERS, (tier) => `agents.sandbox.tier.${tier}.name`),
+    get: (file) => file.sandbox.tier,
+  },
+  'agents.sandbox-network': {
+    section: 'agents',
+    row: 'sandbox-network',
+    group: 'agents.sandbox.group',
+    name: 'agents.sandbox.network.name',
+    description: 'agents.sandbox.network.description',
+    keywords: 'agents.sandbox.keywords',
+    part: 'host',
+    access: 'read',
+    kind: 'choice',
+    options: choices(SANDBOX_NETWORKS, (network) => `agents.sandbox.network.${network}`),
+    get: (file) => file.sandbox.network,
+  },
+  'agents.sandbox-auto-approve': {
+    section: 'agents',
+    row: 'sandbox-auto-approve',
+    group: 'agents.sandbox.group',
+    name: 'agents.sandbox.autoApprove.name',
+    description: 'agents.sandbox.autoApprove.description',
+    keywords: 'agents.sandbox.keywords',
+    part: 'host',
+    access: 'read',
+    kind: 'switch',
+    options: ON_OFF,
+    get: (file) => file.sandbox.autoApproveEdits,
   },
   'agents.workflow-auto': {
     section: 'agents',

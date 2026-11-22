@@ -109,7 +109,8 @@
       "worktreeSettings": "工作树设置…",
       "remove": "移除项目…",
       "issues": "议题",
-      "autoApprove": "自动批准"
+      "autoApprove": "自动批准",
+      "sandbox": "沙箱"
     },
     "remove": {
       "title": "移除 {{name}}？",
@@ -127,6 +128,9 @@
         "low": "低风险操作",
         "edits": "低风险操作和项目内的修改"
       }
+    },
+    "sandbox": {
+      "default": "默认（{{choice}}）"
     }
   },
   "prs": {

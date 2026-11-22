@@ -77,6 +77,7 @@ import {
 import type { Platform } from '@shared/platform'
 import { isProfileId } from '@shared/provider-profiles'
 import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
+import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
 import { BOARD_STATUSES, isBoardStatus } from '@shared/session-board'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
@@ -209,6 +210,19 @@ function string(o: Fields, key: string, max: number): string {
 
 function optionalString(o: Fields, key: string, max: number): string | undefined {
   return o[key] === undefined ? undefined : string(o, key, max)
+}
+
+/** Huli: a sandbox choice, its tier and its network preset; nothing else is taken. */
+function sandboxChoice(value: unknown): SandboxChoice {
+  const choice = sandboxChoiceOf(value)
+  if (!choice) throw invalidParams('sandbox must be { tier, network } with known values')
+  const extra = Object.keys(value as object).find((key) => key !== 'tier' && key !== 'network')
+  if (extra !== undefined) throw invalidParams(`Unknown sandbox field "${extra}"`)
+  return choice
+}
+
+function optionalSandbox(o: Fields): { sandbox?: SandboxChoice } {
+  return o.sandbox === undefined ? {} : { sandbox: sandboxChoice(o.sandbox) }
 }
 
 /** Huli: an API provider profile's id, or null for the agent's own sign-in; undefined when absent. */
@@ -1960,6 +1974,13 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { path: absolutePath(o, 'path', platform), pinned: flag(o, 'pinned') }
     },
+    'projects.setSandbox': (params) => {
+      const o = fields(params)
+      return {
+        path: absolutePath(o, 'path', platform),
+        sandbox: o.sandbox === null ? null : sandboxChoice(o.sandbox),
+      }
+    },
     'projects.setAutoApprove': (params) => {
       const o = fields(params)
       const level = o.autoApprove
@@ -1998,6 +2019,7 @@ export function createValidators(platform: Platform): Validators {
       const profileId = optionalProfile(o)
       return {
         ...(profileId !== undefined ? { profileId } : {}),
+        ...optionalSandbox(o),
         agentId: agentId(o),
         // null: no project, so the host makes a scratch folder.
         projectPath: o.projectPath === null ? null : absolutePath(o, 'projectPath', platform),
@@ -2018,6 +2040,7 @@ export function createValidators(platform: Platform): Validators {
       const profileId = optionalProfile(o)
       return {
         ...(profileId !== undefined ? { profileId } : {}),
+        ...optionalSandbox(o),
         agentId: agentId(o),
         projectPath: o.projectPath === null ? null : absolutePath(o, 'projectPath', platform),
         ...(parentId !== undefined ? { parentId } : {}),
@@ -2026,6 +2049,13 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'sessions.discard': (params) => ({ sessionId: sessionId(fields(params)) }),
+    'sessions.setSandbox': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), sandbox: sandboxChoice(o.sandbox) }
+    },
+    'sandbox.containerStatus': none,
+    'sandbox.pullImage': none,
+    'sandbox.removeImage': none,
     'sessions.setProfile': (params) => {
       const o = fields(params)
       const profileId = optionalProfile(o)

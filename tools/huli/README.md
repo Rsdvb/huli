@@ -410,6 +410,63 @@ deterministic classifier, and the user may have the host answer low ones by itse
   project's tests runs its code, which edits allowed by the agent's own mode (or the edits level)
   may have changed.
 
+### Sandbox (沙箱)
+
+Agents run commands with the user's rights. A session may instead run in a sandbox the user picks,
+at three levels: Settings › Agents › 沙箱 (`sandbox` in the settings: `tier`, `network`,
+`autoApproveEdits`), a project's menu (`sandbox` in `projects.json`, absent for the default) and New
+session's chip, which is also the session's badge on the composer's tray (`sandbox` in
+`sessions.json`, changed between turns with `sessions.setSandbox`, which starts its agent again).
+Off is the default. Kite never picks or changes a tier by itself, and a tier that cannot run stops
+the session's start with what to do; it never falls back to another or to none. `src/shared/sandbox.ts`
+holds the choices, what each harness offers on each system and the measured costs the copy shows.
+
+- 关闭 (`off`): as before.
+- Agent 自带沙箱 (`native`), `src/agent-host/sandbox/native.ts`: Claude Code gets the SDK's
+  `sandbox` option (`failIfUnavailable`, `allowUnsandboxedCommands: false`, writes only in the
+  session's folders, no reads of the key folders; network `none` is an empty strict allowlist,
+  `agent` hands its proxy ports to the agent's mihomo listener, `open` lets Claude Code ask per new
+  domain). It runs on macOS (Seatbelt), Linux and WSL 2 (bubblewrap and socat) and Windows, where
+  `claude sandbox install` must have run once (one administrator prompt). Codex gets its turns'
+  `sandboxPolicy` held to `workspaceWrite` (read-only stays read-only, full access is refused, the
+  network on or off); on Windows the session starts only once `windowsSandbox/readiness` says
+  `ready`. Only Claude Code's commands are held: its Read, Edit and web tools, hooks and MCP servers
+  still go through the permission requests. Gemini CLI, Qwen Code, Copilot, Cursor, Droid, Qoder and
+  Goose have sandboxes Kite does not drive yet (each turns its own on for a whole process, which Kite
+  shares between sessions); the others have none.
+- 容器 (`container`), `src/agent-host/sandbox/container.ts` and `runtimes.ts`: for an ACP agent Kite
+  installs from npm (and the fake agent), the session gets an agent process of its own in a
+  container: `--rm -i --init`, no capabilities, `no-new-privileges`, a read-only root with a private
+  `/tmp`, half the cores and memory (at most 8 GB), `--network none` or the bridge, the project at
+  `/workspace` with its `.git` read-only, the agent's packages from the `kite-sandbox-tools` volume
+  (installed once by a container that mounts no project) and a home volume of the agent's own, never
+  the user's sign-ins: only the API key variables Kite holds for the agent go in, by name. The
+  project's path is renamed in every message both ways, so the thread shows real paths; no MCP
+  server, skill or plugin of the computer goes in. `mounts.ts` refuses a root, the home folder and
+  what holds it, system folders, the key and settings folders in home, Kite's data folder, `.` and
+  `..`, device paths and characters a mount option could be bent with, as written and again once
+  links are followed. Engines: Docker or Podman; on Windows Docker Desktop, else Docker inside WSL
+  through `wsl.exe -e docker`, with paths from `wslpath` and keys passed in `WSLENV`. The image is
+  `node:22-bookworm-slim` by digest (80 MB download, about 330 MB on disk), pulled only from
+  Settings after a dialog that names its size, and removable there. Nothing of this loads until a
+  container session starts or Settings asks (`sandbox.containerStatus`); the container starts with
+  the session's agent, stops when the session lets it go (the idle-session rules), and the ones a
+  crashed Kite left are removed by their owner label before the next one starts. A container's
+  sessions are never prepared on New session's screen, and a paired device can neither pass a
+  sandbox nor set one.
+- Measured on the owner's computer (2026-11-22; `npm ci`, `tsc` and `vitest run` of a 46-package
+  project): 19.2 s on Windows on E:, 40.6 s in a container mounted from E: through WSL's file share
+  (41.5 s in WSL itself, so the share and not Docker costs it), 7.4 s in a container on WSL's own
+  disk (7.2 s in WSL itself). A search over 2,499 files took 0.71 s on Windows and 5.2 s through the
+  share. `docker run` of an idle container through `wsl.exe` took 0.76 s, Docker's own socket start
+  0.79 s; Docker's services hold about 105 MB and each container about 11 MB beside its agent.
+- With 沙箱里自动批准项目内修改 on, a sandboxed session's edits inside the project are allowed once
+  as the edits level allows them; a high request is always asked.
+- Not built: a VM tier (the measured cost and the no-bloat rule leave it for later, downloaded on
+  demand), a container held to the Agent network's exit, Antigravity's `--sandbox`, Codex's Windows
+  sandbox setup from Kite (`windowsSandbox/setupStart`), and signing an agent in inside its
+  container.
+
 ### Backup
 
 A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,

@@ -395,9 +395,10 @@ export class AgentHost {
         platform: process.platform,
         isPackaged: app.isPackaged,
         nodeRuntime: { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
-        fakeAgentPath: app.isPackaged
-          ? (process.env.KETTU_FAKE_AGENT ?? null)
-          : join(app.getAppPath(), 'tools/fake-agent/main.ts'),
+        // Huli: a development copy may run a bundled fake agent too, as a container needs one.
+        fakeAgentPath:
+          process.env.KETTU_FAKE_AGENT ??
+          (app.isPackaged ? null : join(app.getAppPath(), 'tools/fake-agent/main.ts')),
         threadWorkerPath,
         usageWorkerPath,
         // The router runs on the user's Node.js, which cannot read inside app.asar.

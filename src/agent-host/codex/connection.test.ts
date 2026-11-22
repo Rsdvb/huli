@@ -65,13 +65,15 @@ function hooks() {
   return { value, accounts, ignored, logs }
 }
 
-async function connect(options: { run?: (o: ProgramOptions) => Promise<ProgramRun> } = {}) {
+async function connect(
+  options: { run?: (o: ProgramOptions) => Promise<ProgramRun>; platform?: 'darwin' | 'win32' } = {},
+) {
   const server = new FakeAppServer()
   const h = hooks()
   const connection = new CodexConnection(server.transport, h.value, {
     spec: SPEC,
     env: { HOME: '/home' },
-    platform: 'darwin',
+    platform: options.platform ?? 'darwin',
     ...(options.run ? { run: options.run } : {}),
   })
   const init = await connection.initialize('1.2.3')
@@ -2230,5 +2232,70 @@ describe('limits and subagents', () => {
     server.notify('turn/diff/updated', { threadId: 'thread-1', turnId: 't', diff: '' })
     await until(() => ignored.length > 0)
     expect(ignored).toEqual(['notification item/someNewThing'])
+  })
+})
+
+// Huli: a session in Codex's own sandbox.
+describe('the native sandbox', () => {
+  const sandbox = {
+    tier: 'native' as const,
+    network: 'none' as const,
+    roots: ['/project-wt', '/project'],
+    proxyPort: null,
+  }
+
+  it('holds every turn to the project and refuses full access', async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project-wt', { sandbox })
+    expect(server.sent('thread/start')[0]).toMatchObject({ sandbox: 'workspace-write' })
+    await expect(
+      connection.setConfigOption('thread-1', 'mode', 'agent-full-access'),
+    ).rejects.toThrow()
+    const { target } = threadTarget()
+    connection.register('thread-1', target)
+    const prompt = connection.prompt('thread-1', [{ type: 'text', text: 'hi' }])
+    await until(() => server.sent('turn/start').length === 1)
+    expect(server.sent('turn/start')[0]).toMatchObject({
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: ['/project-wt', '/project'],
+        networkAccess: false,
+      },
+    })
+    server.notify('turn/completed', { threadId: 'thread-1', turn: turn('turn-1', 'completed') })
+    await prompt
+  })
+
+  it('goes on in the default mode where a resumed thread had full access', async () => {
+    const { server, connection } = await connect()
+    server.on('thread/resume', (params) =>
+      threadResponse(params.threadId as string, {
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandbox: { type: 'dangerFullAccess' },
+      }),
+    )
+    const setup = await connection.resumeSession('thread-7', '/project', {
+      sandbox: { ...sandbox, network: 'open' },
+    })
+    expect(setup.config.find((o) => o.id === 'mode')?.value).toBe('agent')
+    expect(server.sent('thread/resume')[0]).toMatchObject({ sandbox: 'workspace-write' })
+  })
+
+  it('starts on Windows only once Codex says its sandbox is set up', async () => {
+    const unset = await connect({ platform: 'win32' })
+    unset.server.on('windowsSandbox/readiness', () => ({ status: 'notConfigured' }))
+    await expect(unset.connection.newSession('C:/p', { sandbox })).rejects.toThrow()
+    expect(unset.server.sent('thread/start')).toEqual([])
+    const old = await connect({ platform: 'win32' })
+    await expect(old.connection.newSession('C:/p', { sandbox })).rejects.toThrow()
+    const ready = await connect({ platform: 'win32' })
+    ready.server.on('windowsSandbox/readiness', () => ({ status: 'ready' }))
+    await ready.connection.newSession('C:/p', { sandbox })
+    expect(ready.server.sent('thread/start')).toHaveLength(1)
+    // Without a sandbox Codex starts as before, unasked.
+    const plain = await connect({ platform: 'win32' })
+    await plain.connection.newSession('C:/p')
+    expect(plain.server.sent('windowsSandbox/readiness')).toEqual([])
   })
 })

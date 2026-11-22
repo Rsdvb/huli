@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { StarLine } from '@renderer/features/github-star/star-prompts'
 import type { AgentStatus, Project, SessionSummary, StartNotice } from '@shared/agent-host'
 import type { AgentId, SlashCommand, UserContent } from '@shared/thread'
+import { resolveSandbox, type SandboxChoice } from '@shared/sandbox'
 import { usableWorkflow, type Workflow, type WireWorkflowEntry } from '@shared/workflow'
 import { limitsForModel } from '@shared/plan-limits'
 import { planQuota } from '@shared/plan-quota'
@@ -91,6 +92,7 @@ import { useBlockedEnter } from './composer/use-blocked-enter'
 import { useBoxText, usePromptBox } from './composer/use-prompt-box'
 import { AgentPicker } from './new-session/agent-picker'
 import { ProfileChip } from './composer/profile-chip'
+import { SandboxChip } from './composer/sandbox-chip'
 import { HostMenu } from './new-session/host-menu'
 import { ProjectMenu } from './new-session/project-menu'
 import {
@@ -299,6 +301,22 @@ function DraftComposer({
       ? profilePick.id
       : undefined
   const profileId = profiles ? (picked !== undefined ? picked : profiles.defaultId) : undefined
+  // Huli: the sandbox the session starts in: its project's or the default until another is picked
+  // here; undefined on another host, which goes by its own settings, or one older than sandboxes.
+  const [sandboxPick, setSandboxPick] = useState<{ key: string; choice: SandboxChoice } | null>(
+    null,
+  )
+  const sandboxDefault = useSettingsStore((s) => s.settings.sandbox)
+  const sandboxKey = `${pickKey}
+${parent?.projectPath ?? project?.path ?? ''}`
+  const sandbox =
+    hostId === null && status?.sandbox
+      ? sandboxPick?.key === sandboxKey
+        ? sandboxPick.choice
+        : resolveSandbox(undefined, parent?.sandbox ?? project?.sandbox, sandboxDefault)
+      : undefined
+  const sandboxTier = sandbox?.tier
+  const sandboxNetwork = sandbox?.network
   const readings = usePlanReadings()
   const limits = status ? newestLimits(readings, status) : undefined
   // A default agent that became usable after this page opened, such as the first start's, is what
@@ -451,18 +469,35 @@ function DraftComposer({
   // The session the first message will use opens while it is written, so the menu shows what the
   // agent reports for it and the send only adopts it.
   useEffect(() => {
+    // Huli: a container starts with the first message, so nothing is prepared for one. The
+    // choice goes by its parts, so a new object with the same choice prepares nothing again.
     prepareFor(
-      agentId && ready && agentsRead && !signIn
+      agentId && ready && agentsRead && !signIn && sandboxTier !== 'container'
         ? {
             hostId,
             agentId,
             projectPath,
             parentId,
             ...(profileId !== undefined ? { profileId } : {}),
+            ...(sandboxTier && sandboxNetwork
+              ? { sandbox: { tier: sandboxTier, network: sandboxNetwork } }
+              : {}),
           }
         : null,
     )
-  }, [hostId, agentId, ready, agentsRead, signIn, projectPath, parentId, profileId])
+    // The choice's parts, so a new object with the same choice prepares nothing again.
+  }, [
+    hostId,
+    agentId,
+    ready,
+    agentsRead,
+    signIn,
+    projectPath,
+    parentId,
+    profileId,
+    sandboxTier,
+    sandboxNetwork,
+  ])
 
   // Without a folder nothing is prepared, so an agent with no options cached reads them once, and
   // the menu lists its models before a project is chosen.
@@ -579,7 +614,16 @@ function DraftComposer({
         project && !inScratch
           ? worktreeRequest(project.path, gitStatus ? currentBase(gitStatus) : null)
           : null
-      void startNewSession(agentId, projectPath, content, options, preparedId, worktree, profileId)
+      void startNewSession(
+        agentId,
+        projectPath,
+        content,
+        options,
+        preparedId,
+        worktree,
+        profileId,
+        sandbox,
+      )
     } finally {
       sending.current = false
     }
@@ -808,6 +852,15 @@ function DraftComposer({
                     hostId={hostId}
                     value={profileId}
                     onChange={(id) => setProfilePick({ key: pickKey, id })}
+                  />
+                )}
+                {agentId && sandbox && !workflow && !several && (
+                  <SandboxChip
+                    agentId={agentId}
+                    hostId={hostId}
+                    value={sandbox}
+                    folder={projectPath}
+                    onChange={(choice) => setSandboxPick({ key: sandboxKey, choice })}
                   />
                 )}
                 {taskProject && (
