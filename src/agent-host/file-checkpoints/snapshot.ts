@@ -41,11 +41,11 @@ export const LIMITS = {
   /** At most this many files are copied for one checkpoint. */
   files: 5000,
   /** At most this much is copied for one checkpoint that the store does not hold yet. */
-  newBytes: 256 * 1024 * 1024,
+  newBytes: 128 * 1024 * 1024,
   /** At most this many skipped paths are named; past it the snapshot is partial. */
   skippedNamed: 2000,
   /** Copies running at once. */
-  parallel: 8,
+  parallel: 4,
 }
 
 // Outside a repository nothing says what is generated, so these are left out as git would leave
@@ -85,6 +85,8 @@ export interface CaptureOptions {
   limits?: typeof LIMITS
   /** Paths below the folder that another checkpoint of the session keeps, relative and `/`-separated. */
   exclude?: readonly string[]
+  /** The repository the folder was last found in, null for none; looked up when not given. */
+  repo?: RepoInfo | null
 }
 
 export interface Capture {
@@ -150,7 +152,15 @@ interface Listing {
 async function list(options: CaptureOptions, limits: typeof LIMITS): Promise<Listing> {
   const excluded = (key: string): boolean =>
     (options.exclude ?? []).some((prefix) => key === prefix || key.startsWith(`${prefix}/`))
-  const repo = await repoOf(options.run, options.folder)
+  let repo = options.repo === undefined ? await repoOf(options.run, options.folder) : options.repo
+  // A folder that became a repository since, as by `git init`, is looked up again.
+  if (
+    repo === null &&
+    options.repo === null &&
+    (await present(path.join(options.folder, '.git')))
+  ) {
+    repo = await repoOf(options.run, options.folder)
+  }
   if (repo) {
     const status = await statusOf(options.run, options.folder)
     if (status) {
@@ -281,7 +291,7 @@ async function keep(
   const exec = process.platform !== 'win32' && (before.mode & 0o111) !== 0
   const id = identity(before)
   const cached = options.cache.get(id)
-  if (cached && (await present(objectPath(options.objects, cached.h)))) {
+  if (cached) {
     return { state: { k: 'f', h: cached.h, s: cached.s, ...(exec ? { x: true } : {}) }, added: 0 }
   }
   if (spent() + before.size > limits.newBytes) return null

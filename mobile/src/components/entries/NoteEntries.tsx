@@ -29,7 +29,14 @@ export function TakeoverEntry(props: { entry: Of<'takeover'> }) {
   const agent = useAgent(entry.agentId)
   const [open, setOpen] = useDisclosure(`takeover:${entry.id}`)
   const name = agentLabel(entry.agentId, agent?.name)
-  const text = entry.turns > 0 ? `由 ${name} 接手 · 带上前面 ${entry.turns} 轮` : `由 ${name} 接手`
+  // Huli: a rewind's new session of the same agent says so, rather than that it took over.
+  const text = entry.rewound
+    ? entry.turns > 0
+      ? `在新的 ${name} 会话里继续 · 带上前面 ${entry.turns} 轮`
+      : `在新的 ${name} 会话里继续`
+    : entry.turns > 0
+      ? `由 ${name} 接手 · 带上前面 ${entry.turns} 轮`
+      : `由 ${name} 接手`
   return (
     <View>
       <QuietLine

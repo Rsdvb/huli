@@ -1,9 +1,15 @@
 import { memo, useState } from 'react'
-import { ArrowTurnDownIcon, Undo02Icon } from '@hugeicons/core-free-icons'
+import {
+  ArrowTurnBackwardIcon,
+  ArrowTurnDownIcon,
+  PencilEdit02Icon,
+  Undo02Icon,
+} from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import { turnText, type StopReason, type UserContent } from '@shared/thread'
+import type { RewindMode } from '@shared/agent-host'
+import { harnessOf, turnText, type StopReason, type UserContent } from '@shared/thread'
 import { forkSession, putBackUndone } from '@renderer/app/actions'
 import { MessageActions } from '@renderer/components/affect/message-actions'
 import { ForkIcon } from '@renderer/components/fork-icon'
@@ -22,7 +28,7 @@ import { longAgo, mediumAgo } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
-import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
+import { AGENT_NAMES, agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { hostOfSession } from '@renderer/stores/sessions'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { useReplyHover } from '../reply-hover'
@@ -30,6 +36,7 @@ import { useEntry, useEntryAnimation } from '../use-thread'
 import { ChangesCard } from './changes-card'
 import { forkBlocked, forkEntry, latestTurnStart, revertBlocked } from './helpers'
 import { RefusalEnd } from './refusal-end'
+import { RewindDialog } from './rewind-dialog'
 import { TurnEndTag } from './turn-end-tag'
 
 function Ago({ at }: { at: number }) {
@@ -63,13 +70,102 @@ function userText(content: UserContent[]): string {
     .join('\n')
 }
 
-/** Under a message you sent, while the pointer is on it: the time and Copy. */
+/** Whether `entryId` starts the thread's latest turn, read from the end. */
+function startsLatestTurn(
+  state: {
+    order: readonly string[]
+    byId: Readonly<Record<string, { kind: string; steered?: boolean } | undefined>>
+  },
+  entryId: string,
+): boolean {
+  for (let i = state.order.length - 1; i >= 0; i--) {
+    const id = state.order[i]!
+    const entry = state.byId[id]
+    if (entry?.kind === 'user' && !entry.steered) return id === entryId
+  }
+  return false
+}
+
+/**
+ * Huli: Edit from here and Rewind to here, on a message of the user's that started a turn, in a
+ * session of the user's own.
+ */
+function useRewindActions(sessionId: string, entryId: string, steered: boolean) {
+  const { t } = useTranslation('session')
+  const view = useThreadsStore(
+    useShallow((s) => {
+      const session = s.replicas[sessionId]?.state?.session
+      return session
+        ? {
+            agentId: session.agentId,
+            projectPath: session.projectPath,
+            origin: session.origin,
+            blocked: revertBlocked(session.status),
+          }
+        : null
+    }),
+  )
+  const latest = useThreadsStore((s) => {
+    const state = s.replicas[sessionId]?.state
+    return state ? startsLatestTurn(state, entryId) : true
+  })
+  const agent = useAgentsStore((s) =>
+    view
+      ? (agentsOn(s, hostOfSession(view)).byId[view.agentId]?.name ??
+        AGENT_NAMES[harnessOf(view.agentId)])
+      : '',
+  )
+  const [open, setOpen] = useState<RewindMode | null>(null)
+  if (!view || view.origin !== 'user' || steered || !entryId) {
+    return { actions: [], dialog: null }
+  }
+  const notReady = t('rewind.notReady')
+  const actions = [
+    {
+      key: 'edit',
+      tip: view.blocked ? notReady : t('rewind.editAction'),
+      label: t('rewind.editAction'),
+      icon: <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.9} />,
+      disabled: view.blocked,
+      onClick: () => setOpen('edit'),
+    },
+    ...(latest
+      ? []
+      : [
+          {
+            key: 'rewind',
+            tip: view.blocked ? notReady : t('rewind.rewindAction'),
+            label: t('rewind.rewindAction'),
+            icon: <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={1.9} />,
+            disabled: view.blocked,
+            onClick: () => setOpen('rewind'),
+          },
+        ]),
+  ]
+  const dialog =
+    open === null ? null : (
+      <RewindDialog
+        sessionId={sessionId}
+        entryId={entryId}
+        mode={open}
+        agent={agent}
+        onClose={() => setOpen(null)}
+      />
+    )
+  return { actions, dialog }
+}
+
+/** Under a message you sent, while the pointer is on it: the time, Copy, and the rewinds. */
 export function UserActions({
+  sessionId = '',
+  entryId = '',
   content,
   at,
   steered,
   end,
 }: {
+  sessionId?: string
+  entryId?: string
   content: UserContent[]
   at?: number
   steered?: boolean
@@ -78,6 +174,7 @@ export function UserActions({
 }) {
   const { t } = useTranslation('session')
   const labels = useCopyLabels(t('userActions.copyMessage'))
+  const rewind = useRewindActions(sessionId, entryId, steered === true)
   const meta = (
     <span className="ks-user__meta">
       {steered && (
@@ -98,7 +195,9 @@ export function UserActions({
         actions={['copy']}
         label={t('userActions.label')}
         labels={labels}
+        extraActions={rewind.actions}
       />
+      {rewind.dialog}
     </span>
   )
   if (!end) return meta

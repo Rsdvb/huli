@@ -7,9 +7,11 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile, rename } from 'node:fs/promises'
 import path from 'node:path'
+import { promisify } from 'node:util'
+import { gunzip, gzip } from 'node:zlib'
 import type { Platform } from '@shared/platform'
 import { pathKey } from '../paths'
-import type { RunGit } from './git'
+import type { RepoInfo, RunGit } from './git'
 import { applyPlan, planRestore, type FolderPlan, type PlannedChange } from './plan'
 import { capture, LIMITS, objectPath, type CopyCache, type Snapshot } from './snapshot'
 
@@ -75,9 +77,13 @@ interface Store {
   lastSweep: number
   expired: boolean
   cache: CopyCache
+  /** The repository the folder was last found in; undefined until looked up. */
+  repo: RepoInfo | null | undefined
 }
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/
+const gzipped = promisify(gzip)
+const gunzipped = promisify(gunzip)
 
 /** A snapshot's file name for a message, or a backup's own name. */
 function snapshotName(point: { entryId: string } | { backup: string }): string {
@@ -135,6 +141,7 @@ export class FileCheckpoints {
         lastSweep: 0,
         expired: false,
         cache: new Map(),
+        repo: undefined,
       }
       this.stores.set(key, store)
       await mkdir(path.join(store.dir, 'objects'), { recursive: true })
@@ -158,7 +165,7 @@ export class FileCheckpoints {
     for (const folder of folders) {
       const job = (async () => {
         const store = await this.store(folder)
-        const file = path.join(sessionDir(store, sessionId), `${snapshotName({ entryId })}.json`)
+        const file = snapshotFile(store, sessionId, { entryId })
         const pendingKey = `${store.dir}\0${file}`
         if (this.pending.has(pendingKey) || (await exists(file))) return
         if (store.sweeping) await store.sweeping
@@ -171,9 +178,13 @@ export class FileCheckpoints {
           cache: store.cache,
           now: () => this.now(),
           limits: this.limits,
+          ...(store.repo === undefined ? {} : { repo: store.repo }),
         })
         const saved = taking.done
           .then(async (snapshot) => {
+            store.repo = snapshot.git
+              ? { top: snapshot.git.top, prefix: snapshot.git.prefix }
+              : null
             if (cancelled) return null
             await writeJson(file, snapshot)
             return snapshot
@@ -209,11 +220,11 @@ export class FileCheckpoints {
     sessionId: string,
     point: { entryId: string } | { backup: string },
   ): Promise<Snapshot | null> {
-    const file = path.join(sessionDir(store, sessionId), `${snapshotName(point)}.json`)
+    const file = snapshotFile(store, sessionId, point)
     const pending = this.pending.get(`${store.dir}\0${file}`)
     if (pending) await pending
     try {
-      const snapshot = JSON.parse(await readFile(file, 'utf8')) as Snapshot
+      const snapshot = await readSnapshot(file)
       return snapshot.v === 1 ? snapshot : null
     } catch {
       return null
@@ -234,7 +245,7 @@ export class FileCheckpoints {
     if (store.sweeping) await store.sweeping
     store.active++
     try {
-      return await capture({
+      const snapshot = await capture({
         run: this.deps.run,
         folder: store.folder,
         objects: path.join(store.dir, 'objects'),
@@ -242,7 +253,10 @@ export class FileCheckpoints {
         cache: store.cache,
         now: () => this.now(),
         limits: this.limits,
+        ...(store.repo === undefined ? {} : { repo: store.repo }),
       }).done
+      store.repo = snapshot.git ? { top: snapshot.git.top, prefix: snapshot.git.prefix } : null
+      return snapshot
     } finally {
       store.active--
     }
@@ -301,7 +315,7 @@ export class FileCheckpoints {
     if (tokenOf(plans.map((item) => item.now)) !== token) throw new ChangedSincePreview()
     const backup = `b-${this.now()}`
     for (const { store, now } of plans) {
-      await writeJson(path.join(sessionDir(store, sessionId), `${backup}.json`), now)
+      await writeJson(snapshotFile(store, sessionId, { backup }), now)
     }
     let restored = 0
     const failed: FilesRestored['failed'] = []
@@ -329,9 +343,8 @@ export class FileCheckpoints {
   ): Promise<void> {
     for (const folder of folders) {
       const store = await this.store(folder)
-      const dir = sessionDir(store, sessionId)
       for (const entryId of entryIds) {
-        await rm(path.join(dir, `${snapshotName({ entryId })}.json`), { force: true })
+        await rm(snapshotFile(store, sessionId, { entryId }), { force: true })
       }
     }
   }
@@ -439,6 +452,8 @@ export class FileCheckpoints {
         for (const file of Object.values(snapshot.files)) if (file.k === 'f') named.add(file.h)
       }
       const objects = path.join(dir, 'objects')
+      // A copy the cache names may go now; the cache trusts what it names.
+      for (const store of this.stores.values()) if (store.dir === dir) store.cache.clear()
       let bytes = 0
       for (const prefix of await names(objects)) {
         for (const file of await listed(path.join(objects, prefix))) {
@@ -474,11 +489,26 @@ function tokenOf(snapshots: readonly Snapshot[]): string {
   return hash.digest('hex')
 }
 
+// A folder outside a repository names every file in each snapshot, so they are kept compressed.
+const SNAPSHOT_EXT = '.json.gz'
+
+function snapshotFile(
+  store: Store,
+  sessionId: string,
+  point: { entryId: string } | { backup: string },
+): string {
+  return path.join(sessionDir(store, sessionId), `${snapshotName(point)}${SNAPSHOT_EXT}`)
+}
+
 async function writeJson(file: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true })
   const temp = `${file}.${process.pid}.tmp`
-  await writeFile(temp, JSON.stringify(value))
+  await writeFile(temp, await gzipped(JSON.stringify(value)))
   await rename(temp, file)
+}
+
+async function readSnapshot(file: string): Promise<Snapshot> {
+  return JSON.parse((await gunzipped(await readFile(file))).toString('utf8')) as Snapshot
 }
 
 async function exists(file: string): Promise<boolean> {
@@ -518,10 +548,10 @@ async function allSnapshots(
   const out = []
   for (const session of await names(root)) {
     for (const file of await listed(path.join(root, session))) {
-      if (!file.name.endsWith('.json')) continue
+      if (!file.name.endsWith(SNAPSHOT_EXT)) continue
       const full = path.join(root, session, file.name)
       try {
-        const snapshot = JSON.parse(await readFile(full, 'utf8')) as Snapshot
+        const snapshot = await readSnapshot(full)
         out.push({ file: full, mtimeMs: file.mtimeMs, snapshot })
       } catch {
         await rm(full, { force: true })

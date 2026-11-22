@@ -99,6 +99,7 @@ import {
   waitsForUser,
 } from '../../components/entries/Waiting'
 import { PlanUsageSheet } from '../../components/PlanUsageSheet'
+import { RewindDialog, type RewindDone } from '../../components/RewindDialog'
 import { WorktreeLine } from '../../components/git/WorktreeCard'
 import { toggleMuted, useSessionActions } from '../../components/SessionActions'
 import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionChips'
@@ -629,6 +630,72 @@ function Session() {
       setReverting(false)
     }
   }, [revertStart, view.store, link, id])
+  // Huli: back to any of the user's messages, from its menu, after the dialog's preview.
+  const [rewinding, setRewinding] = useState<{
+    entryId: string
+    mode: 'edit' | 'rewind'
+    text: string
+  } | null>(null)
+  const between = useRef(false)
+  between.current = status === 'ready' || status === 'closed'
+  const openRewind = useCallback(
+    (entryId: string, mode: 'edit' | 'rewind') => {
+      if (!between.current) {
+        Alert.alert('现在不能回退', '这一轮结束后才能回退。')
+        return
+      }
+      const thread = view.store.get()
+      if (mode === 'rewind' && thread && latestTurn(thread).start === entryId) {
+        Alert.alert('不能回退到这里', '这条消息之后没有别的内容。')
+        return
+      }
+      const entry = thread?.byId[entryId]
+      const text =
+        entry?.kind === 'user'
+          ? entry.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n\n')
+          : ''
+      setRewinding({ entryId, mode, text })
+    },
+    [view.store],
+  )
+  const rewind = summary?.origin === 'user' ? openRewind : null
+  const rewound = (done: RewindDone) => {
+    const asked = rewinding
+    setRewinding(null)
+    haptic.success()
+    const back =
+      done.mode === 'edit' && !!asked?.text.trim() && !!composer.current?.putBack(asked.text)
+    const files =
+      done.restored === null
+        ? ''
+        : done.failed > 0
+          ? `，还原了 ${done.restored} 个文件，${done.failed} 个没能还原`
+          : `，还原了 ${done.restored} 个文件`
+    const backup = done.backup
+    showNotice({
+      text: `已回退${files}${back ? '，消息放回了输入框' : ''}`,
+      tone: done.failed > 0 ? 'warning' : 'success',
+      ...(backup
+        ? {
+            action: {
+              label: '撤销还原',
+              onPress: () => {
+                call(link, 'sessions.undoRewindFiles', { sessionId: id, backup }).then(
+                  () => showNotice({ text: '文件已改回还原之前的样子', tone: 'success' }),
+                  (error: unknown) => Alert.alert('没能撤销还原', hostErrorText(error)),
+                )
+              },
+            },
+          }
+        : {}),
+    })
+    if (done.mode === 'edit' && asked?.text.trim() && !back) {
+      Alert.alert('输入框里已有草稿', '这条消息没有放回去。', [
+        { text: '复制消息', onPress: () => void copyText(asked.text) },
+        { text: '好', style: 'cancel' },
+      ])
+    }
+  }
   const undoEnd = canRevert ? lastTurn.end : null
   const undoBlocked = reverting || (status !== 'ready' && status !== 'closed')
   const undo = useMemo(
@@ -689,6 +756,7 @@ function Session() {
       config: session?.config ?? [],
       commands: commandNames,
       command: putCommand,
+      rewind,
     }),
     [
       id,
@@ -703,6 +771,7 @@ function Session() {
       session?.config,
       commandNames,
       putCommand,
+      rewind,
     ],
   )
 
@@ -1609,6 +1678,13 @@ function Session() {
       />
       {actions.element}
       {menu.render(pages)}
+      <RewindDialog
+        sessionId={id}
+        target={rewinding}
+        agent={agent?.name ?? 'Agent'}
+        onClose={() => setRewinding(null)}
+        onDone={rewound}
+      />
       {DEV ? <FrameMeter label="session" top={headerHeight + 4} /> : null}
     </SessionRows.Provider>
   )

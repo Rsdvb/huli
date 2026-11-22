@@ -45,6 +45,12 @@ export interface SessionRowsContext {
   commands?: readonly string[]
   /** Puts a command into the composer, as tapping a sent prompt's command does. */
   command?: (name: string) => void
+  /**
+   * Huli: going back to one of the user's messages, 从这里重来 or 回退到这里; null where the session
+   * takes none, as a subagent's. It says itself when it cannot go now, so the rows stay as they are
+   * while turns come and go.
+   */
+  rewind?: ((entryId: string, mode: 'edit' | 'rewind') => void) | null
 }
 
 const EMPTY: SessionRowsContext = {
