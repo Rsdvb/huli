@@ -490,7 +490,9 @@
     "done": "Done",
     "failed": "Failed",
     "waiting": "one waits for you",
-    "showFinished": "Show finished sub-agents"
+    "showFinished": "Show finished sub-agents",
+    "finishedSection_one": "{{count}} finished",
+    "finishedSection_other": "{{count}} finished"
   },
   "worktree": {
     "menu": "Remove worktree…",

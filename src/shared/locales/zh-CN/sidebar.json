@@ -445,7 +445,8 @@
     "done": "完成",
     "failed": "失败",
     "waiting": "有子 Agent 在等你处理",
-    "showFinished": "显示已结束的子智能体"
+    "showFinished": "显示已结束的子智能体",
+    "finishedSection_other": "已结束 {{count}} 个"
   },
   "worktree": {
     "menu": "删除工作树…",
