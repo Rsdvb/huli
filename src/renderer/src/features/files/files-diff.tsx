@@ -24,18 +24,27 @@ const FLAT_SEPARATOR = [
 // The hunk header sits on the first line, with the diff's 6px margin above it.
 const CODE_SPACING = '[data-code]{padding-block:0 6px}'
 
+// The numbers of rows a comment in the session's draft covers (diff-notes/notes-layer.tsx sets
+// the attribute), in the pane's fox with a bar along the code. Only paint changes: a heavier
+// weight would lay the whole gutter's grid out again.
+const NOTE_MARK =
+  '[data-column-number][data-note]{color:var(--diff-note);box-shadow:inset -2px 0 var(--diff-note)}'
+
 /**
  * The Files pane's diff of a parsed change: unified, a bar along each changed line, the first
  * hunk's header above, unchanged runs folded, lines selectable by their numbers to mention them.
+ * `onRendered` hears of each render the library makes.
  */
 function FilesDiffImpl({
   fileDiff,
   selected,
   onSelect,
+  onRendered,
 }: {
   fileDiff: FileDiffMetadata
   selected: SelectedLineRange | null
   onSelect: (range: SelectedLineRange | null) => void
+  onRendered: () => void
 }) {
   const dark = useDark()
   const theme = useCodeThemes()
@@ -52,9 +61,10 @@ function FilesDiffImpl({
       preferredHighlighter: 'shiki-js' as const,
       enableLineSelection: true,
       onLineSelected: onSelect,
-      unsafeCSS: TINTS_AS_GIVEN + FLAT_SEPARATOR + CODE_SPACING,
+      onPostRender: onRendered,
+      unsafeCSS: TINTS_AS_GIVEN + FLAT_SEPARATOR + CODE_SPACING + NOTE_MARK,
     }),
-    [dark, theme, onSelect],
+    [dark, theme, onSelect, onRendered],
   )
   const first = fileDiff.hunks[0]
   return (

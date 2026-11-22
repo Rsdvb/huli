@@ -36,6 +36,7 @@ import {
   Info,
   Layers,
   ListChecks,
+  MessageSquare,
   Monitor,
   OctagonAlert,
   Paperclip,
@@ -165,6 +166,7 @@ export const G = {
   sliders: { sf: 'slider.horizontal.3', lucide: SlidersHorizontal },
   sendNow: { sf: 'arrow.turn.down.left', lucide: CornerDownLeft },
   select: { sf: 'character.cursor.ibeam', lucide: TextSelect },
+  comment: { sf: 'bubble.left', lucide: MessageSquare },
 } satisfies Record<string, IconSpec>
 
 export const TOOL_ICONS: Record<ToolKind, IconSpec> = {

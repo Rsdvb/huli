@@ -2846,6 +2846,271 @@ li[data-row-exit='dust'] > * {
   font-weight: 400;
   color: var(--text-disabled);
 }
+
+/* Mention and Comment side by side, for lines picked while comments can go to a session. */
+.kp-lines-row {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  translate: -50% 0;
+}
+.kp-lines-row > .kp-lines {
+  position: static;
+  translate: none;
+}
+
+/* ---------- Files pane: comments on a diff's lines for the agent ---------- */
+/* Over the scrolled diff, laid out on its own: a pin or the editor coming or going lays out
+   nothing of the diff's thousands of rows. Its overflow adds nothing to the scrolled height. */
+.kp-notes-layer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  height: 0;
+  contain: layout size style;
+  pointer-events: none;
+}
+.kp-notes-layer > * {
+  pointer-events: auto;
+}
+/* On a layer of its own, so following the pointer only moves it. */
+.kp-note-plus {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--pane-fox);
+  color: var(--on-fill);
+  box-shadow: 0 1px 2px var(--border-strong);
+}
+.kp-note-plus[data-shown='false'] {
+  visibility: hidden;
+}
+.kp-note-pin {
+  position: absolute;
+  right: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 19px;
+  min-width: 22px;
+  margin-top: 1px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--border-default);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pane-fox);
+}
+.kp-note-pin:hover {
+  background: color-mix(in srgb, var(--selection) 60%, var(--bg-surface));
+}
+.kp-note-editor {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 560px;
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow:
+    0 0 0 var(--hairline) var(--border-default),
+    var(--elevation-popover);
+  opacity: 0;
+}
+.kp-note-editor[data-placed] {
+  opacity: 1;
+  animation: kp-rise 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kp-note-editor__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  color: var(--pane-fox);
+}
+.kp-note-editor__place {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.kp-note-editor__text {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  max-height: 220px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-strong);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary);
+  resize: none;
+  outline: none;
+  field-sizing: content;
+  transition: box-shadow 140ms ease;
+}
+.kp-note-editor__text:focus {
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--border-strong),
+    0 0 0 3px var(--selection);
+}
+.kp-note-editor__text::placeholder {
+  color: var(--text-placeholder);
+}
+.kp-note-editor__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kp-note-editor__keys {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--text-disabled);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kp-note-editor__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+/* The comments waiting to go, under the diff in place of its hint. */
+.kp-notes-foot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  padding: 8px 10px;
+  background: linear-gradient(transparent, var(--bg-surface) 30%);
+  pointer-events: none;
+}
+.kp-notes-foot > .kp-notes-tray {
+  margin-inline: auto;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 4px 3px 6px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow:
+    0 0 0 var(--hairline) var(--border-default),
+    var(--elevation-popover);
+  pointer-events: auto;
+  animation: kp-rise 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kp-notes-tray {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kp-notes-tray__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.kp-notes-tray__count > svg:first-child {
+  color: var(--pane-fox);
+}
+.kp-notes-tray__count:hover,
+.kp-notes-tray__count[data-popup-open] {
+  background: var(--bg-hover);
+}
+.kp-notes-tray__chevron {
+  color: var(--text-disabled);
+}
+.kp-notes-tray__acts {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.kp-notes-list {
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+.kp-notes-list__row {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.kp-notes-list__row:hover {
+  background: var(--bg-hover);
+}
+.kp-notes-list__head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+}
+.kp-notes-list__place {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.kp-notes-list__text {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.kp-notes-list__edit {
+  display: grid;
+  gap: 6px;
+}
 .kp-files__foot {
   display: flex;
   flex: none;

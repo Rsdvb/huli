@@ -653,6 +653,39 @@ app's own viewer.
   The fake agent's `/documents` writes a PDF, a Word document and a 24 MB PDF for the simulator's
   `60-preview` and `61-preview-word` flows and the emulator's `preview` (see Workflows).
 
+### Comments on a diff's lines
+
+The lines of an agent's diff take comments that go back to the agent together, as Claude
+desktop, Warp, Conductor and Vibe Kanban have them. On the desktop it is the Files pane's diff,
+whichever way it opened (the Changes list, a turn's changes card, the branch popover); on the phone
+the diff screen, for a working-tree or commit diff and for a turn's or a tool's edit.
+
+- `src/shared/diff-notes.ts`: a note (file, commit, the lines' numbers on one side or none for an
+  edit's partial diff, up to 40 quoted lines with their `+`/`-`/space mark, the comment), its
+  check for stored drafts, and the message they go as: for each, `path:start-end`, the quoted
+  lines in a `diff` fence, the comment. The desktop words it in the interface's language
+  (`files:notes.message.*`), the phone in Chinese.
+- Kept in the session's draft beside its text and attachments (`notes`): the desktop's
+  `composer/drafts.ts` (`draft:<session id>` in localStorage), whose `clearDraft` on a send now
+  leaves them and `forgetDraft` drops them with a deleted session, and the phone's `drafts.ts`,
+  whose composer writes leave them. At most 50 a session.
+- Desktop (`features/diff-notes/`): a + by the line number the pointer rests on (120 ms), or
+  Comment for lines picked by their numbers, opens a box under the lines; comments mark their rows'
+  numbers, show a pin to edit them and gather in a tray under the diff and over the composer
+  (`NotesTray`), whose Send to agent puts them in one message through `sessions.queue`, which sends
+  at once when the session is free and queues it during a turn. Nothing in the diff renders for a
+  comment: the marks are a `data-note` attribute on a few number cells, styled by paint alone, and
+  the pins, the box and the + sit on a layout-contained layer over the scrolled diff. The library's
+  own gutter + is not used: it moves into the hovered row's cell, and every row lays the whole
+  grid out again (over 100 ms a row on 7,000 rows). The diff's scroller is layout-contained, so a
+  change elsewhere in the window (the composer growing) no longer lays out its rows.
+- Phone (`components/DiffNotes.tsx`, `DiffView.tsx`): a tap picks a line and a second stretches
+  the pick, a long press comments, a bar under the diff has 写意见 or the comments' count, 发送给
+  Agent and 清空, and a strip over the session's composer does the same. Rows stay memoized and
+  take only booleans for their state, so a pick redraws the rows it changed. A turn's or a tool's
+  edit opens with the session's id; its comments name the file alone.
+- The simulator's `80-diff-notes` flow walks the phone's part.
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,
