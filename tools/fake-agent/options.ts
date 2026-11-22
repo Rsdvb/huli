@@ -71,7 +71,7 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   },
   'long-stream': {
     description: '200 KB of markdown in small chunks',
-    hint: '--rate <updates per second> --size <bytes, such as 200k>',
+    hint: '--rate <updates per second> --size <bytes, such as 200k> --rich',
   },
   'tool-storm': {
     description: '500 tool calls with updates for each',
@@ -211,6 +211,7 @@ export interface ScenarioOptions {
   exitCode: number
   entries: number // large-history: the entries its replay synthesizes
   plain: boolean // usage: Claude Code's own text, as the adapter forwards it when its report fails
+  rich: boolean // long-stream: maths, diagrams and long code blocks among the sections
   // usage: a reply without limits, as an account without a plan gets; FAKE_AGENT_USAGE=unreadable
   // gives it to the `/usage` Kettu runs itself.
   unreadable: boolean
@@ -328,6 +329,7 @@ export function chooseScenario(prompt: string, env: Env): ScenarioChoice {
     exitCode: parseNumber(flagValue(args, 'code')) ?? 3,
     entries: historyEntries(env, parseNumber(flagValue(args, 'entries'))),
     plain: flagValue(args, 'plain') !== undefined,
+    rich: flagValue(args, 'rich') !== undefined,
     unreadable:
       flagValue(args, 'unreadable') !== undefined || env.FAKE_AGENT_USAGE === 'unreadable',
     stepMs: parseNumber(flagValue(args, 'step')) ?? 300,

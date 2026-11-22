@@ -206,7 +206,7 @@ const basicTurn: Scenario = async (turn) => {
 }
 
 const longStream: Scenario = async (turn) => {
-  const text = longMarkdown(turn.options.size)
+  const text = longMarkdown(turn.options.size, turn.options.rich)
   const chunks = chunkText(text, 100)
   const interval = 1000 / turn.options.rate
   const start = Date.now()
