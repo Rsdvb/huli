@@ -97,6 +97,8 @@ export interface AgentHostDeps {
   marketKeys(): MarketKeysPush
   /** The host asks to keep or clear a server's OAuth sign-in; main checks it against the settings. */
   onMarketOAuth?(serverId: unknown, state: unknown): void
+  /** Huli: values a secret card saved or forgot for a project, unchecked. */
+  onProjectSecrets?(project: unknown, values: unknown): void
   /** The Kettu account the Marketplace tools publish with, which follows init at each start. */
   marketAccount(): MarketAccount | null
   /** Huli: the chat bridges' configuration, which follows init at each start. */
@@ -878,6 +880,9 @@ export class AgentHost {
         break
       case 'host:market-oauth':
         this.deps.onMarketOAuth?.(message.serverId, message.state)
+        break
+      case 'host:project-secrets':
+        this.deps.onProjectSecrets?.(message.project, message.values)
         break
       case 'host:first-start':
         this.deps.onFirstStart?.(message.harnesses)

@@ -493,3 +493,41 @@ describe('API provider profiles in the key store', () => {
     expect(keys.contentsForHost().agentEnv).toEqual({ a: { X: 'y' } })
   })
 })
+
+describe('values saved from secret cards', () => {
+  const VALUE = 'sk-live-SECRET-0123'
+
+  it('keeps them encrypted by project and reads them back', async () => {
+    const keys = await load()
+    await keys.setProjectSecrets('/p', { OPENAI_API_KEY: VALUE })
+    expect(keys.contentsForHost().projectSecrets).toEqual({ '/p': { OPENAI_API_KEY: VALUE } })
+    expect(await fileText()).not.toContain('SECRET')
+    expect((await load()).contentsForHost().projectSecrets).toEqual({
+      '/p': { OPENAI_API_KEY: VALUE },
+    })
+    expect(keys.state()).toEqual({})
+  })
+
+  it('forgets a value with null, and the project once it has none', async () => {
+    const keys = await load()
+    await keys.setProjectSecrets('/p', { A: VALUE, B: 'b' })
+    await keys.setProjectSecrets('/p', { A: null })
+    expect(keys.contentsForHost().projectSecrets).toEqual({ '/p': { B: 'b' } })
+    await keys.setProjectSecrets('/p', { B: null })
+    expect(keys.contentsForHost().projectSecrets).toBeUndefined()
+  })
+
+  it.each([
+    ['no project', '', { A: VALUE }],
+    ['a name that is no variable', '/p', { 'a-b': VALUE }],
+    ['a reserved name', '/p', { PATH: VALUE }],
+    ['a value of two lines', '/p', { A: 'a\nB=b' }],
+    ['a value that is no text', '/p', { A: 1 }],
+  ])('refuses %s without naming the value', async (_, project, values) => {
+    const keys = await load()
+    const refused = keys.setProjectSecrets(project, values)
+    await expect(refused).rejects.toThrow(MarketKeysError)
+    await refused.catch((error: Error) => expect(error.message).not.toContain('SECRET'))
+    expect(keys.contentsForHost().projectSecrets).toBeUndefined()
+  })
+})

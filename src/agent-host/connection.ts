@@ -448,6 +448,11 @@ export interface SessionOptions {
    * by the container the agent runs in.
    */
   sandbox?: SessionSandbox
+  /**
+   * Huli: the file of exports Kettu keeps for the session, such as the secrets the user gave it,
+   * for an agent that runs such a file before each of its commands by itself.
+   */
+  envFile?: string
 }
 
 /** Kettu's memory as a session starts with it. */
@@ -501,6 +506,11 @@ export interface AgentConnection {
    * the session's messages. Only a session created with it has the text; the host records which.
    */
   readonly systemPromptAppend?: boolean
+  /**
+   * Huli: whether the session's commands run its `SessionOptions.envFile` before each by
+   * themselves, as Claude Code does with `CLAUDE_ENV_FILE`; absent where none do.
+   */
+  loadsEnvFile?(sessionId: string): boolean
   readonly isClosed: boolean
   close(): void
 

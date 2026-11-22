@@ -462,6 +462,10 @@ async function start(): Promise<void> {
     onChatBridgeStatus: (statuses) => chatBridge.setStatuses(statuses),
     onChatBridgeBind: (platform, code, account) => void chatBridge.bind(platform, code, account),
     onMarketOAuth: (serverId, state) => void marketKeys.setOAuth(serverId, state),
+    onProjectSecrets: (project, values) =>
+      void marketKeys.setProjectSecrets(project, values).catch((error: unknown) => {
+        log.warn(`Could not save a project's secrets: ${(error as Error).message}`)
+      }),
     onFirstStart: (harnesses) => settings.firstStart(harnesses),
     onAttention: (message) => {
       notifyAttention(message, settings.get(), (sessionId, requestId, optionId) =>

@@ -134,6 +134,8 @@ import {
   type SettingChangeItem,
   type SettingsChangeEntry,
   type SettingsChangeOutcome,
+  type SecretRequestEntry,
+  type SecretRequestOutcome,
   type ComputerAppEntry,
   type ComputerSetupEntry,
   type ComputerUseView,
@@ -170,6 +172,7 @@ import {
   requestText,
 } from './attention'
 import type { MarketAnswer, MarketAsk } from './marketplace/publish-tools'
+import type { SecretAnswer, SecretAsk } from './secrets/tools'
 import type { SettingsAnswer, SettingsAsk } from './settings/tools'
 import type { AgentCopies } from './agent-copies'
 import type { DeletedSessions } from './deleted-sessions'
@@ -550,6 +553,11 @@ export interface SessionManagerDeps {
   portDevice?(portId: string): PortDevice | null
   /** Huli: the agents' API provider profiles; without them every session runs on its own sign-in. */
   profiles?: Pick<ProviderProfiles, 'get' | 'defaultOf'>
+  /**
+   * Huli: the session's file of exports, which holds the secrets its user gave it, and its
+   * removal once the session is deleted; without it no agent is handed one.
+   */
+  envFiles?: { of(sessionId: string): string; remove(sessionId: string): Promise<void> }
   /**
    * Huli: which requests the host allows by itself in a project that keeps the default; without
    * it, none.
@@ -1299,6 +1307,8 @@ export class SessionManager {
   private readonly marketAnswering = new Set<string>()
   /** Settings cards that wait for the user, by entry id. */
   private readonly settingsWaits = new Map<string, (answer: SettingsAnswer) => void>()
+  /** Huli: secret cards that wait for the user, by entry id. */
+  private readonly secretWaits = new Map<string, (answer: SecretAnswer) => void>()
   /** Each first use of an app that waits, by the computer use service's request id. */
   private readonly appRequests = new Map<number, AppRequest>()
   /** Each session's card holding its folder's own MCP servers while it waits, with the folder. */
@@ -2876,6 +2886,120 @@ export class SessionManager {
   }
 
   /**
+   * Huli: an agent asks the user for secrets: a card in the thread that waits as a permission
+   * request does, and settles with their answer, `expired` after `waitMs`, or `ended` with the
+   * turn. The entry holds the fields and the target, never a value.
+   */
+  secretAsked(
+    sessionId: string,
+    ask: SecretAsk,
+    waitMs: number,
+  ): { entryId: string; answer: Promise<SecretAnswer> } | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: SecretRequestEntry = {
+      kind: 'secret_request',
+      id: this.nextId(live),
+      title: ask.title,
+      reason: ask.reason,
+      url: ask.url,
+      fields: ask.fields,
+      target: ask.target,
+      saved: ask.saved,
+      expiresAt: Date.now() + waitMs,
+      outcome: null,
+      after: agentEntryBefore(live.thread),
+    }
+    live.origins.set(`secret:${entry.id}`, entry.id)
+    this.emit(live, [{ op: 'entry.add', entry }])
+    const status = live.thread.session.status
+    if (status === 'running' || status === 'ready')
+      this.update(live, { status: 'awaiting_permission' })
+    this.touch(live.id)
+    this.updateBadge()
+    this.deps.events.attention(
+      live.id,
+      'permission',
+      this.titleOf(live),
+      t('attention.secretRequest', { title: ask.title }),
+      { id: entry.id },
+    )
+    const answer = new Promise<SecretAnswer>((resolve) => {
+      const timer = setTimeout(
+        () => this.settleSecret(sessionId, entry.id, { decision: 'expired' }),
+        waitMs,
+      )
+      this.secretWaits.set(entry.id, (given) => {
+        clearTimeout(timer)
+        resolve(given)
+      })
+    })
+    return { entryId: entry.id, answer }
+  }
+
+  /** Huli: whether the session's agent runs its file of exports before each of its commands. */
+  loadsEnvFile(sessionId: string): boolean {
+    const live = this.live.get(sessionId)
+    const acpSessionId = live?.record.acpSessionId
+    if (!live || !acpSessionId) return false
+    const runtime = this.deps.agents.runtime(live.record.agentId)
+    return runtime?.connection.loadsEnvFile?.(acpSessionId) ?? false
+  }
+
+  /** Throws unless the secret card still waits: not found, or answered already and where. */
+  checkSecret(sessionId: string, entryId: string): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const entry = live?.thread.byId[entryId]
+    if (!live || entry?.kind !== 'secret_request') throw notFound(`No secret card ${entryId}`)
+    if (entry.outcome !== null || !this.secretWaits.has(entryId)) {
+      throw new HostError('not_found', `The secret card ${entryId} was already answered`, {
+        reason: ALREADY_ANSWERED,
+        device: entry.device ?? null,
+      })
+    }
+  }
+
+  /** The answer to a secret card, once its values went where they go or the user declined. */
+  answerSecret(
+    sessionId: string,
+    entryId: string,
+    answer: SecretAnswer,
+    device?: FromDevice,
+  ): void {
+    this.checkSecret(sessionId, entryId)
+    this.settleSecret(sessionId, entryId, answer, device)
+  }
+
+  private settleSecret(
+    sessionId: string,
+    entryId: string,
+    answer: SecretAnswer,
+    device?: FromDevice,
+  ): void {
+    const resolve = this.secretWaits.get(entryId)
+    this.secretWaits.delete(entryId)
+    const live = this.live.get(sessionId)
+    if (live) {
+      live.origins.delete(`secret:${entryId}`)
+      const entry = live.thread.byId[entryId]
+      if (entry?.kind === 'secret_request' && entry.outcome === null) {
+        const outcome: SecretRequestOutcome =
+          answer.decision === 'provided'
+            ? { kind: 'provided', names: answer.names, saved: answer.saved }
+            : { kind: answer.decision }
+        this.emit(live, [
+          { op: 'entry.update', id: entryId, changes: { outcome, ...(device ? { device } : {}) } },
+        ])
+      }
+      this.stopWaiting(live)
+      this.touch(live.id)
+      this.updateBadge()
+    }
+    resolve?.(answer)
+  }
+
+  /**
    * The agent asked the user to do a step on the session's page: the thread shows it, waiting, and
    * the session waits as for a permission. A call made again for the same step adds nothing.
    */
@@ -4127,6 +4251,7 @@ export class SessionManager {
       ...(append ? { systemPromptAppend: append } : {}),
       ...(record.origin === 'routine' ? { routine: true } : {}),
       ...(ports ? { env: portEnv(ports) } : {}),
+      ...(this.deps.envFiles ? { envFile: this.deps.envFiles.of(sessionId) } : {}),
     }
   }
 
@@ -11089,6 +11214,11 @@ export class SessionManager {
         this.settleSettings(live.id, entryId, { decision: 'ended' })
         continue
       }
+      // So does a secret card, and no value goes anywhere.
+      if (requestId.startsWith('secret:')) {
+        this.settleSecret(live.id, entryId, { decision: 'ended' })
+        continue
+      }
       live.origins.delete(requestId)
       this.originRequests.delete(requestId)
       const entry = live.thread.byId[entryId]
@@ -12672,6 +12802,7 @@ export class SessionManager {
       if (removed === null ? !deleted : !removed) this.deps.deleted?.add(agentId, acpSessionId)
     }
     void this.deps.attachments?.release(queuedAttachments(all))
+    for (const item of all) void this.deps.envFiles?.remove(item.id).catch(() => {})
     for (const item of all) this.forget(item.id)
     this.saveIndex()
     this.removeThreads(all.map((item) => item.id))

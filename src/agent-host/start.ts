@@ -130,6 +130,7 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
         withHost((h) => {
           h.setMarketKeys(message.values, message.oauth, message.agentEnv)
           h.setProfiles(message.profiles)
+          h.setProjectSecrets(message.projectSecrets)
         })
         break
       case 'host:chat-bridge':

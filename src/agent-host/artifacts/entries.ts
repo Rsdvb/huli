@@ -27,6 +27,7 @@ type OwnEntry = Extract<
       | 'memory'
       | 'market_publish'
       | 'settings_change'
+      | 'secret_request'
       | 'takeover'
   }
 >
@@ -160,6 +161,7 @@ function isOwn(entry: ThreadEntry): entry is OwnEntry {
     case 'memory':
     case 'market_publish':
     case 'settings_change':
+    case 'secret_request':
     case 'session_started':
     case 'git':
     case 'turn_end':

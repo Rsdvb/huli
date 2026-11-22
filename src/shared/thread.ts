@@ -34,6 +34,7 @@ import type {
 } from './market-publish'
 import type { MemoryAction, MemoryDraft, MemoryLayer, MemoryWriteStatus } from './memory'
 import type { RoutineRef } from './routines'
+import type { SecretField, SecretTarget } from './secret-request'
 import type { SettingScalar, SettingsSection } from './settings-catalog'
 import type { LimitPause, Stall } from './supervisor'
 
@@ -444,6 +445,7 @@ export type ThreadEntry =
   | MemoryWriteEntry // Kettu's own record of an agent's write to Kettu's memory, and its answer
   | MarketPublishEntry // Kettu's own record of a publish to the Kettu Marketplace, and its outcome
   | SettingsChangeEntry // Kettu's own record of an agent's change to Kettu's settings, and its answer
+  | SecretRequestEntry // Kite's own record of an agent asking for secrets, never their values
 
 /**
  * Huli: why a model refused a turn: the explanation its provider gave, to show and never parse, the
@@ -845,6 +847,42 @@ export interface SettingsChangeEntry {
   /** When an unanswered card counts as declined, in the host's milliseconds; null when not asked. */
   expiresAt: number | null
   outcome: SettingsChangeOutcome | null
+  /** Set when a paired device gave the answer; the host's own windows give none. */
+  device?: FromDevice
+  /** The agent's entry before it, to put it back after a replay. */
+  after: string | null
+}
+
+/**
+ * What became of a request for secrets: the values went to their target, under these names, and
+ * were saved for the project too; or none went, because the user declined, nobody answered in time
+ * or the turn ended first; or delivering them failed.
+ */
+export type SecretRequestOutcome =
+  | { kind: 'provided'; names: string[]; saved: boolean }
+  | { kind: 'declined' | 'expired' | 'ended' }
+  | { kind: 'failed'; message: string }
+
+/**
+ * Huli: an agent's `request_secrets`: a card while it waits for the user (`outcome` null), then
+ * one line of what came of it. It holds the fields' names and labels and where the values go,
+ * never a value: those go from the card straight to the target.
+ */
+export interface SecretRequestEntry {
+  kind: 'secret_request'
+  id: string
+  /** The card's title and why the agent asks, in its words. */
+  title: string
+  reason: string
+  /** A page where the user gets the value, which the card opens in the browser; null for none. */
+  url: string | null
+  fields: SecretField[]
+  target: SecretTarget
+  /** The fields with a value saved for the project, which the card may use without typing it. */
+  saved: string[]
+  /** When an unanswered card counts as declined, in the host's milliseconds. */
+  expiresAt: number
+  outcome: SecretRequestOutcome | null
   /** Set when a paired device gave the answer; the host's own windows give none. */
   device?: FromDevice
   /** The agent's entry before it, to put it back after a replay. */

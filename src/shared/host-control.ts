@@ -133,6 +133,8 @@ export type MainToHost =
       // Huli: each agent's API provider profiles with their keys, and its default; see
       // provider-profiles.
       profiles?: Record<string, { items: StoredProfile[]; defaultId: string | null }>
+      // Huli: the values saved from secret cards, by project path, then name.
+      projectSecrets?: Record<string, Record<string, string>>
     }
   // Huli: the chat bridges' credentials, bound accounts and the binding under way, whole, after
   // host:init at every start and whenever they change; only the agent host reads them.
@@ -344,6 +346,9 @@ export type HostToMain =
   // Keep (or, with null, clear) a server's OAuth sign-in after the host connected, renewed or
   // disconnected it; main stores the text as it stores keys and pushes host:market-keys again.
   | { type: 'host:market-oauth'; serverId: string; state: string | null }
+  // Huli: save (or, with null, forget) values the user gave an agent's secret card for the
+  // project, in the key store; main pushes host:market-keys again.
+  | { type: 'host:project-secrets'; project: string; values: Record<string, string | null> }
   | { type: 'host:ready' }
   // The harnesses whose user program the host's first start found, in the order to add them: the
   // settings' owner adds their default agents and records the first start as done.

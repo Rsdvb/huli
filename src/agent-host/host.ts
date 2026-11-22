@@ -255,6 +255,8 @@ import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
 import { ProviderProfiles } from './provider-profiles'
+import { removeSessionEnv, sessionEnvFiles } from './secrets/deliver'
+import { SECRET_WAIT_MS, SecretTools } from './secrets/tools'
 import { anyBridgeOn, parseChatBridgeConfig, type ChatBridgeConfig } from '@shared/chat-bridge'
 import type { ChatBridgeService } from './chat-bridge/service'
 
@@ -587,6 +589,10 @@ export class AgentHost {
   private nextSettingsCall = 1
   /** The settings tools of Kettu's MCP service. */
   private readonly settingsTools: SettingsTools
+  /** Huli: the secrets tool of Kettu's MCP service. */
+  private readonly secretTools: SecretTools
+  /** Huli: the values the user saved for each project, by project path, then name; host only. */
+  private projectSecrets: Record<string, Record<string, string>> = {}
   /** What was put off or refused, to publish later. */
   private readonly publishDrafts: PublishDrafts
   /** The Marketplace tools of Kettu's MCP service. */
@@ -671,6 +677,26 @@ export class AgentHost {
       open: (sessionId, target) => this.openSettings(sessionId, target),
       words: tSettings,
       english: tSettingsEnglish,
+    })
+    const envDir = path.join(options.userDataPath, 'session-env')
+    this.secretTools = new SecretTools({
+      platform,
+      envDir,
+      saved: (project) => new Map(Object.entries(this.projectSecrets[project] ?? {})),
+      save: (project, values) => options.send({ type: 'host:project-secrets', project, values }),
+      loadsEnv: (sessionId) => this.sessions.loadsEnvFile(sessionId),
+      ask: (sessionId, ask) => this.sessions.secretAsked(sessionId, ask, SECRET_WAIT_MS),
+      answer: (sessionId, entryId, answer, device) =>
+        this.sessions.answerSecret(sessionId, entryId, answer, device),
+      check: (sessionId, entryId) => this.sessions.checkSecret(sessionId, entryId),
+      ignored: async (folder, relative) => {
+        const result = await this.execRunner.exec('git', ['check-ignore', '-q', '--', relative], {
+          cwd: folder,
+          timeoutMs: 10_000,
+        })
+        if (result.failure !== null) return null
+        return result.code === 0 ? true : result.code === 1 ? false : null
+      },
     })
     this.projects = new Projects({ file: projectsFile(options.userDataPath, log), platform })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
@@ -965,6 +991,7 @@ export class AgentHost {
       ...(this.computer ? { computer: this.computer } : {}),
       market: this.marketTools,
       settings: this.settingsTools,
+      secrets: this.secretTools,
       proxy: this.mcpProxy,
       sessions: {
         info: (sessionId) => this.sessions.sessionInfo(sessionId),
@@ -1131,6 +1158,10 @@ export class AgentHost {
       portOpen: (portId) => this.hub.has(portId),
       portDevice: (portId) => this.hub.deviceOf(portId),
       profiles: this.profiles,
+      envFiles: {
+        of: (sessionId) => sessionEnvFiles(envDir, sessionId, platform).sh,
+        remove: (sessionId) => removeSessionEnv(envDir, sessionId, platform),
+      },
       threads: this.threads,
       agentFile: (sessionId, file) =>
         this.agentFiles.read(sessionId, file).then(
@@ -1187,6 +1218,7 @@ export class AgentHost {
           this.browserTurnEnded(sessionId)
           this.marketTools.turnEnded(sessionId)
           this.settingsTools.turnEnded(sessionId)
+          this.secretTools.turnEnded(sessionId)
           if (this.deviceTurns.delete(sessionId)) {
             this.options.send({ type: 'host:device-turn-ended', sessionId })
           }
@@ -2173,6 +2205,21 @@ export class AgentHost {
     this.marketChanged(this.settings.marketplace.mcp, previous)
     if (signIns) this.signInsPushed(signIns)
     this.hub.broadcast({ type: 'market.keysChanged' })
+  }
+
+  /** Huli: the values saved from secret cards, in place of those before; a bad message keeps none. */
+  setProjectSecrets(raw: unknown): void {
+    const kept: Record<string, Record<string, string>> = {}
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      for (const [project, values] of Object.entries(raw)) {
+        if (typeof values !== 'object' || values === null || Array.isArray(values)) continue
+        const own = Object.entries(values).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        )
+        if (own.length > 0) kept[project] = Object.fromEntries(own)
+      }
+    }
+    this.projectSecrets = kept
   }
 
   /**
@@ -3339,6 +3386,8 @@ export class AgentHost {
       'settings.answerChange': ({ sessionId, entryId, decision }, { device }) =>
         this.sessions.answerSettings(sessionId, entryId, decision, fromDevice(device)),
       'settings.undoChange': ({ sessionId, entryId }) => this.undoSettings(sessionId, entryId),
+      'secrets.answer': ({ sessionId, entryId, ...answer }, { device }) =>
+        this.secretTools.answer(sessionId, entryId, answer, fromDevice(device)),
       'market.answerPublish': ({ sessionId, entryId, ...answer }, { device }) =>
         this.sessions.answerMarket(
           sessionId,

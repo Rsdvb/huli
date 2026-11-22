@@ -88,6 +88,8 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'settings.answerChange': HOST_MS,
   // Undo writes the settings through main or the daemon.
   'settings.undoChange': AGENT_MS,
+  // Provide writes the values to a file before it answers.
+  'secrets.answer': AGENT_MS,
   'market.publishDrafts': HOST_MS,
   'market.discardPublishDraft': HOST_MS,
   'market.community': AGENT_MS,

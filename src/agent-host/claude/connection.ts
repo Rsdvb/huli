@@ -338,6 +338,8 @@ interface Session {
   suggestable: boolean
   /** The predicted prompt the session offers, so it is cleared once and only when shown. */
   suggestion: PromptSuggestion | null
+  /** Huli: its process runs Kettu's file of exports before each command, as CLAUDE_ENV_FILE. */
+  envFile: boolean
 }
 
 interface Pending {
@@ -564,6 +566,10 @@ export class ClaudeConnection implements AgentConnection {
 
   get isClosed(): boolean {
     return this.done
+  }
+
+  loadsEnvFile(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.envFile === true
   }
 
   get ownInstructions(): boolean {
@@ -1033,6 +1039,8 @@ export class ClaudeConnection implements AgentConnection {
       version: undefined,
       suggestable: false,
       suggestion: null,
+      // The user's own CLAUDE_ENV_FILE stays theirs; the session's secrets then load by hand.
+      envFile: !!options.envFile && !hidden && !this.env.CLAUDE_ENV_FILE,
     }
     const flags: Record<string, unknown> = {}
     // Through the SDK, Claude Code runs the hooks of a folder's own settings without asking.
@@ -1079,6 +1087,7 @@ export class ClaudeConnection implements AgentConnection {
         CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: '1',
         // Kettu's memory stands in for Claude Code's own, which would load and write beside it.
         ...(options.memory ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}),
+        ...(session.envFile && options.envFile ? { CLAUDE_ENV_FILE: options.envFile } : {}),
       },
       pathToClaudeCodeExecutable: await this.runnableCli(),
       spawnClaudeCodeProcess: (spawn) => {
