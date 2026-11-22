@@ -169,6 +169,7 @@ export function AccessCard({
           )
         }
         labels={{
+          risk: (level) => t(`permission.card.${level}`),
           title: (name, what) =>
             title ? (
               title(name, what)

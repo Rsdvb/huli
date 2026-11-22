@@ -451,7 +451,8 @@
     "stopLabel": "这一轮不再使用电脑，回合继续",
     "elevated": "正在以管理员权限操作 <app>{{app}}</app>",
     "elevatedStop": "停止",
-    "elevatedStopLabel": "结束管理员助手，回合继续"
+    "elevatedStopLabel": "结束管理员助手，回合继续",
+    "waitingAdmin": "等你回答：以管理员权限操作 <app>{{app}}</app>"
   },
   "computerPane": {
     "title": "Computer",

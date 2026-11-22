@@ -1256,7 +1256,9 @@ it as on a screen; measured on Windows, a minimized or never-shown window instea
 captured and throttles its animation frames, so it is not used. An installed build ignores the
 variable. Stop the copy by ending its process tree (`taskkill /PID <electron-vite's node> /T /F`);
 it saves no window position. `src/main/test-window.ts` holds it; hooks in `src/main/window.ts`
-(the place and `keepInBackground`), `src/main/index.ts` (no tray) and `src/main/notifications.ts`.
+(the place and `keepInBackground`), `src/main/index.ts` (no tray), `src/main/notifications.ts` and
+`src/main/computer-overlay.ts`: computer use's floating label and light go off every display too,
+and the copy registers no stop shortcut.
 
 ### Kite's artwork
 

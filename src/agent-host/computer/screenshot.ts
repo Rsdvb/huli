@@ -149,9 +149,13 @@ async function drawPlaceholder(): Promise<string> {
   const background = 0xe4
   const ink = 0x8c
   const raw = Buffer.alloc((width * 3 + 1) * height, background)
-  const set = (x: number, y: number) => {
+  const set = (px: number, py: number) => {
+    // Whole pixels only: a fraction would land on a row's filter byte and end the picture there.
+    const x = Math.round(px)
+    const y = Math.round(py)
     if (x < 0 || y < 0 || x >= width || y >= height) return
-    raw.fill(ink, y * (width * 3 + 1) + 1 + x * 3, y * (width * 3 + 1) + 1 + x * 3 + 3)
+    const at = y * (width * 3 + 1) + 1 + x * 3
+    raw.fill(ink, at, at + 3)
   }
   for (let y = 0; y < height; y++) raw[y * (width * 3 + 1)] = 0
   // A picture's frame, a hill and a sun, crossed out.
