@@ -120,6 +120,11 @@
       "keywords": "background tray menu bar notification area close window keep running",
       "lockedByRemote": "On while remote access is on."
     },
+    "keepAwake": {
+      "name": "Keep the computer awake while agents work",
+      "description": "While a session works or waits for your answer, or a routine runs, the computer doesn't go to sleep on its own; the display still turns off. Closing a laptop's lid or a low battery still puts it to sleep as the system's settings say.",
+      "keywords": "sleep awake keep awake prevent sleep power lid battery caffeinate"
+    },
     "openAtLogin": {
       "name": "Open at login",
       "description": "Routines run only while Kettu is open.",

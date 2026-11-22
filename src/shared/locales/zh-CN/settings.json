@@ -118,6 +118,11 @@
       "keywords": "后台 托盘 菜单栏 通知区域 关闭 窗口 继续运行 background tray menu bar close window",
       "lockedByRemote": "远程访问开启时保持开启。"
     },
+    "keepAwake": {
+      "name": "Agent 干活时不让电脑睡眠",
+      "description": "有会话在运行或在等你批准、或有定时任务在跑时，电脑不会自动睡眠，屏幕照常熄灭。合上笔记本盖子、电量不足等情况仍按系统的规则睡眠。",
+      "keywords": "睡眠 休眠 唤醒 保持唤醒 防止睡眠 电源 合盖 电池 sleep awake keep awake power lid battery"
+    },
     "openAtLogin": {
       "name": "登录时打开",
       "description": "定时任务只在 Kettu 打开时运行。",

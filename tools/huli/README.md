@@ -1336,6 +1336,17 @@ left alone. The daemon's agent host does the same from the same setting.
 `src/agent-host/priority.ts` (with its test) and `start.ts` hold it; the row is in
 `section-defs.tsx` and `settings-catalog.ts`.
 
+### Keeping the computer awake (Agent 干活时不让电脑睡眠)
+
+With `general.keepAwake` on (the default, Settings › General › Sessions), main holds one
+`powerSaveBlocker` of the `prevent-app-suspension` kind, which stops idle system sleep but not the
+display's, while any session's turn runs or waits on a permission (the tray's `running` count from
+`host:busy-changed`) or a routine run works (`host:routines-working`), and lets it go once all are
+idle. A session paused at a plan limit holds none. The system's lid and battery rules still apply.
+It is all events, nothing polls. `src/main/power-save.ts` (with its test) holds it, wired in
+`src/main/index.ts`. The `kettu` daemon holds nothing: Node.js has no portable way to, and it
+mostly runs on machines that do not sleep.
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and
