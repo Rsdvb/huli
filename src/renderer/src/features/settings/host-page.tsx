@@ -24,6 +24,7 @@ import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { monthDay } from '@renderer/lib/format'
 import { isAway, useHostsStore } from '@renderer/stores/hosts'
 import { openSettingsItem } from '@renderer/stores/view'
+import { PortsPanel } from '@renderer/features/ports/ports-panel'
 import { Fact } from './agent-parts'
 import { CONFIRM, ControlError, DangerButton, IconAction, SetButton, SetInput } from './controls'
 import { AddHostDialog } from './host-add'
@@ -172,6 +173,15 @@ function HostPageBody({ host, onAddAgain }: { host: HostStatus; onAddAgain: () =
               : t('hosts.page.addressesNote', { name })}
           </GroupNote>
         </section>
+        {host.connection.state === 'online' && (
+          <section aria-label={t('hosts.page.ports.label')} className="k-group">
+            <GroupLabel group={{ id: 'ports', label: t('hosts.page.ports.label') }} />
+            <RowGroup>
+              <PortsPanel hostId={host.id} sessionId={null} className="kp-ports--page" />
+            </RowGroup>
+            <GroupNote>{t('hosts.page.ports.note', { name })}</GroupNote>
+          </section>
+        )}
         <section aria-label={t('hosts.page.self', { name })} className="k-group">
           <GroupLabel group={{ id: 'self', label: t('hosts.page.self', { name }) }} />
           <RowGroup>

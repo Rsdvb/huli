@@ -10,7 +10,14 @@ import {
   type DiffNoteRow,
 } from '@shared/diff-notes'
 import type { UserContent } from '@shared/thread'
-import { readDraftNotes, writeDraftNotes } from '@renderer/features/session/composer/drafts'
+import {
+  readDraftNotes,
+  readDraftPageNotes,
+  writeDraftNotes,
+  writeDraftPageNotes,
+} from '@renderer/features/session/composer/drafts'
+import { pageNoteShots, pageNotesText } from '@renderer/features/page-notes/notes'
+import { MAX_PAGE_NOTES } from '@shared/page-notes'
 import { host } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
 import { useSessionsStore } from '@renderer/stores/sessions'
@@ -200,17 +207,30 @@ export function notesMessage(notes: readonly DiffNote[]): string {
 
 /**
  * Sends the session's notes as one message through its queue, which sends at once when the
- * session is free; they leave the draft as they go and come back if the send fails.
+ * session is free; they leave the draft as they go and come back if the send fails. Huli: the
+ * comments on page elements go in the same message, after the diff's, with their screenshots.
  */
 export async function sendNotes(sessionId: string): Promise<void> {
   const notes = readDraftNotes(sessionId)
-  if (notes.length === 0) return
-  const content: UserContent[] = [{ type: 'text', text: notesMessage(notes) }]
+  const pageNotes = readDraftPageNotes(sessionId)
+  if (notes.length === 0 && pageNotes.length === 0) return
+  const text = [
+    ...(notes.length > 0 ? [notesMessage(notes)] : []),
+    ...(pageNotes.length > 0 ? [pageNotesText(pageNotes)] : []),
+  ].join('\n\n')
+  const content: UserContent[] = [
+    { type: 'text', text },
+    ...pageNoteShots(pageNotes).map((attachment): UserContent => ({
+      type: 'ref',
+      ref: { kind: 'attachment', attachment },
+    })),
+  ]
   const status =
     useThreadsStore.getState().replicas[sessionId]?.state?.session.status ??
     useSessionsStore.getState().byId[sessionId]?.status
   const unshow = status === 'ready' || status === 'closed' ? showSending(sessionId, content) : null
   writeDraftNotes(sessionId, [])
+  writeDraftPageNotes(sessionId, [])
   try {
     const { itemId } = await host('sessions.queue', { sessionId, content })
     // It waits in the queue after all, which shows it there.
@@ -219,6 +239,8 @@ export async function sendNotes(sessionId: string): Promise<void> {
     unshow?.()
     const written = readDraftNotes(sessionId)
     writeDraftNotes(sessionId, [...notes, ...written].slice(0, MAX_DIFF_NOTES))
+    const writtenPages = readDraftPageNotes(sessionId)
+    writeDraftPageNotes(sessionId, [...pageNotes, ...writtenPages].slice(0, MAX_PAGE_NOTES))
     throw error
   }
 }

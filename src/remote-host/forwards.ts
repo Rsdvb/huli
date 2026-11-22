@@ -35,6 +35,8 @@ export interface HostForwardsOptions {
 }
 
 interface Forwarded {
+  /** The grant it was opened under. */
+  key: string
   socket: net.Socket
   /** This side sent `stream.end`, as its dev server ended its direction. */
   sentEnd: boolean
@@ -67,6 +69,29 @@ export class HostForwards {
     this.grants.add(grantKey(sessionId, forward.host, forward.port))
   }
 
+  /**
+   * Huli: the device's owner forwarded the port, for one of its sessions' pages or, with `scope`
+   * empty, for the device itself; false when the session keeps as many grants as it may.
+   */
+  grant(scope: string, port: number): boolean {
+    const key = grantKey(scope, 'localhost', port)
+    if (this.grants.has(key)) return true
+    if (this.grants.size >= MAX_GRANTS) return false
+    this.grants.add(key)
+    return true
+  }
+
+  /** Huli: the owner stopped the forward: its grant and its connections go. */
+  revoke(scope: string, port: number): void {
+    const key = grantKey(scope, 'localhost', port)
+    this.grants.delete(key)
+    for (const [stream, forwarded] of [...this.forwards]) {
+      if (forwarded.key !== key) continue
+      this.drop(stream, forwarded)
+      this.refuse(stream, { code: 'unavailable', message: 'The forward was stopped' })
+    }
+  }
+
   has(stream: number): boolean {
     return this.forwards.has(stream)
   }
@@ -93,7 +118,8 @@ export class HostForwards {
       })
     }
     const socket = (this.options.connect ?? connectLoopback)(forward.host, forward.port)
-    const forwarded: Forwarded = { socket, sentEnd: false, gotEnd: false, quiet: false }
+    const key = grantKey(sessionId, forward.host, forward.port)
+    const forwarded: Forwarded = { key, socket, sentEnd: false, gotEnd: false, quiet: false }
     this.forwards.set(stream, forwarded)
     socket.on('data', (data: Buffer) => this.toDevice(stream, forwarded, data))
     socket.on('end', () => {

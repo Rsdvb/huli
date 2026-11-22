@@ -1903,6 +1903,10 @@
         "foreign": "{{name}} 上的 {{path}} 不是 Kettu 的安装脚本装的，所以那里的 Kettu 没有动。",
         "running": "{{name}} 上还有一个 Kettu daemon 在服务之外运行，比如用 kettu run 起的。它的服务已经移除；在那台机器上停掉这个 daemon 后再试。",
         "failed": "没能从 {{name}} 卸载 Kettu。"
+      },
+      "ports": {
+        "label": "端口",
+        "note": "把 {{name}} 上的开发服务器转发到这台电脑，就能在这里打开。走纸鸢和 {{name}} 已有的连接，连接断开时转发也停止。"
       }
     },
     "web": {

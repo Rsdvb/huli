@@ -48,27 +48,49 @@ export class ClientForwards {
 
   constructor(private readonly options: ClientForwardsOptions) {}
 
-  /** The port on 127.0.0.1 that reaches `forward` for the session's page; null when none could. */
-  listen(sessionId: string, forward: BrowserForward): Promise<number | null> {
+  /**
+   * The port on 127.0.0.1 that reaches `forward` for the session's page; null when none could.
+   * `samePort` tries the host's own port number first, so the page's address stays the one its
+   * dev server printed.
+   */
+  listen(sessionId: string, forward: BrowserForward, samePort = false): Promise<number | null> {
     const key = listenerKey(sessionId, forward)
     const known = this.listeners.get(key)
     if (known) return known.port
     const server = net.createServer({ allowHalfOpen: true }, (socket) =>
       this.accept(key, sessionId, forward, socket),
     )
-    const port = new Promise<number | null>((resolve) => {
-      server.once('error', (error) => {
-        this.options.log('warn', `Could not listen for a forward: ${error.message}`)
-        if (this.listeners.get(key)?.server === server) this.listeners.delete(key)
-        resolve(null)
+    const listenAt = (at: number): Promise<number | null> =>
+      new Promise((resolve) => {
+        const failed = (error: NodeJS.ErrnoException): void => {
+          if (at !== 0) return resolve(-1)
+          this.options.log('warn', `Could not listen for a forward: ${error.message}`)
+          resolve(null)
+        }
+        server.once('error', failed)
+        server.listen(at, '127.0.0.1', () => {
+          server.removeListener('error', failed)
+          const address = server.address()
+          resolve(typeof address === 'object' && address ? address.port : null)
+        })
       })
-      server.listen(0, '127.0.0.1', () => {
-        const address = server.address()
-        resolve(typeof address === 'object' && address ? address.port : null)
-      })
-    })
+    const port = (async () => {
+      const first = samePort ? await listenAt(forward.port) : -1
+      const found = first === -1 ? await listenAt(0) : first
+      if (found === null && this.listeners.get(key)?.server === server) this.listeners.delete(key)
+      return found
+    })()
     this.listeners.set(key, { key, sessionId, server, port })
     return port
+  }
+
+  /** Stops the one listener for `forward` of the session, and its connections. */
+  stopOne(sessionId: string, forward: BrowserForward): void {
+    const key = listenerKey(sessionId, forward)
+    const listener = this.listeners.get(key)
+    if (!listener) return
+    this.listeners.delete(key)
+    this.stop(listener)
   }
 
   /** The session's page is gone: its listeners and their connections go. */

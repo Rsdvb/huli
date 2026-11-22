@@ -765,6 +765,58 @@ the diff screen, for a working-tree or commit diff and for a turn's or a tool's 
   edit opens with the session's id; its comments name the file alone.
 - The simulator's `80-diff-notes` flow walks the phone's part.
 
+### Comments on page elements (点选元素)
+
+The browser pane's Pick element toggle (点选元素), in the address row, comments on elements of the
+page for the agent, as Cursor's Design Mode, Codex's browser comments and Factory's design mode
+do. They join the session's comment tray beside the diff's and go with them as one message.
+
+- `src/shared/page-notes.ts`: the element's path as the page reports it, the selectors that may
+  name it (a steady id or test id, a name or label, tag and classes, under the nearest anchored
+  ancestor, and last the full path by place, which only it matches), a note (page, selector,
+  label, visible text, box, viewport, the screenshot's attachment record, the comment), its check
+  for stored drafts, and the message: for each, the page, selector, text, box and which attached
+  image is its screenshot, then the comment (`browser:pick.message.*`, the interface's language).
+- Main (`src/main/browser/pick.ts`): the page's own DevTools inspect overlay
+  (`Overlay.setInspectMode`, `searchForNode`) outlines the element under the pointer with its
+  tag, classes and size in the theme's accent, which the pane reads from `--pane-fox`. Nothing is
+  put in the page: Chromium draws the overlay in a layer of its own, which the page's styles and
+  scripts never reach, only while the mode is on. A click ends inspect mode until the comment
+  closes; the element is read in an isolated world (`Page.createIsolatedWorld`), its selector is
+  the first candidate that matches it alone there, a field's value is never read, and its
+  screenshot is `Page.captureScreenshot` clipped to its visible part. Escape in the page, another
+  tab, hiding the pane or the agent taking the page ends the mode (`browser:pick` event).
+- Renderer (`features/browser/pick-mode.tsx`, `features/page-notes/`): a click freezes the page
+  into its still, and the comment's box opens at the element over it; Add comment uploads the
+  screenshot with `attachments.add` on the session's host, as a pasted image, and keeps the note
+  in the draft's `pageNotes` (at most 20), then the page and the mode come back. The tray
+  (`NotesTray`) lists both kinds, under the page too, and Send to agent puts them in one message
+  with the screenshots as its images.
+
+### Ports of other computers (端口转发)
+
+A computer added over SSH (or any other host) runs dev servers on its own loopback, which this
+computer's browser cannot reach. As T3 Code's and Conductor's port forwarding do, a port of the
+host is forwarded to this computer and opens in the session's browser.
+
+- No new SSH process: a forward is the remote host link's existing `ClientForwards` listener on
+  this computer's 127.0.0.1, at the host's own port number when free, whose connections go as
+  byte streams over the encrypted channel the host's session already runs on (the one an agent's
+  navigation to the host's localhost uses). The host's remote host grants the port
+  (`ports.forward`, `ports.unforward`, scope a session's id or none) and lists its user's listening
+  ports above 1024 with each program's name and folder (`ports.list`, from
+  `src/remote-host/listening-ports.ts`: /proc on Linux, lsof on macOS, netstat on Windows),
+  Kite's own left out.
+  Only main asks these (`hosts:ports`, `hosts:forward-port`, `hosts:stop-forward`, checked in
+  `src/main/port-forwards.ts`); a window cannot send them to a host.
+- Main keeps the forwards (`PortForwards`, `ForwardBook`, `hosts:forwards` event): one listener a
+  port of a host; a session's forward goes with the session, every forward with the host's session.
+- Where: the browser pane of a session on another host has Ports (forwarded ports, and those
+  listening there, read when it opens and on Refresh); its address field and a remote terminal's
+  link open the host's `localhost` through a forward; Settings › Computers › the host has Ports.
+  Its switch forwards on their own the dev servers a session's terminals print on that host,
+  watching the terminals only while some host has it on (`stores/forwards.ts`).
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,

@@ -34,6 +34,8 @@ import { receiveAgentNetwork } from '@renderer/stores/agent-network'
 import { loadAgentOptions, receiveAgentOptions } from '@renderer/stores/agent-options'
 import { initDevices } from '@renderer/stores/devices'
 import { initBrowser } from '@renderer/stores/browser'
+import { initForwards } from '@renderer/stores/forwards'
+import { autoForwarded } from '@renderer/features/ports/ports'
 import {
   hostRestarted,
   preparedRemoved,
@@ -451,6 +453,7 @@ export function bootstrap(): Promise<unknown> {
       }
     })
     initBrowser()
+    initForwards(autoForwarded)
     initDevices()
     void initAccount()
     followWindowTitle()

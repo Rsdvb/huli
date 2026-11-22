@@ -7645,3 +7645,257 @@ li[data-row-exit='dust'] > * {
   font-family: inherit;
   font-size: 12px;
 }
+
+/* Huli: the browser pane's pick mode. The page's own inspect overlay outlines the element under
+   the pointer; once one is picked, the page is a still, under the element's outline and the
+   comment's box. */
+.kp-pick-toggle[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--pane-fox) 14%, transparent);
+  color: var(--pane-fox);
+}
+.kp-pick-hint {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--pane-fox) 9%, var(--bg-surface));
+  box-shadow: 0 0 0 var(--hairline) color-mix(in srgb, var(--pane-fox) 28%, transparent);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  animation: kp-rise 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kp-pick-hint > svg {
+  color: var(--pane-fox);
+}
+.kp-pick-hint__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kp-pick-hint .kp-link {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.kp-pick-hint .kp-link:hover {
+  background: var(--bg-hover);
+}
+.kp-pick-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.kp-pick-box {
+  position: absolute;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--pane-fox) 10%, transparent);
+  box-shadow:
+    0 0 0 1.5px var(--pane-fox),
+    0 0 0 4px color-mix(in srgb, var(--pane-fox) 22%, transparent);
+  pointer-events: none;
+}
+.kp-pick-editor {
+  right: auto;
+  max-width: none;
+  margin-top: 0;
+}
+.kp-pick-editor__label {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kp-pick-editor__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kp-pick-foot {
+  display: flex;
+  flex: none;
+  justify-content: center;
+}
+.kp-pick-foot > .kp-notes-tray {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 4px 3px 6px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow:
+    0 0 0 var(--hairline) var(--border-default),
+    var(--elevation-control);
+  animation: kp-rise 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kp-notes-list__thumb {
+  flex: none;
+  width: 28px;
+  height: 20px;
+  margin-right: 6px;
+  border-radius: 4px;
+  object-fit: cover;
+  box-shadow: 0 0 0 var(--hairline) var(--border-default);
+}
+
+/* Huli: a host's ports, forwarded and listening, in the browser pane's popover and on the host's
+   page in Settings. */
+.kp-ports-trigger {
+  position: relative;
+}
+.kp-ports-trigger__count {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--pane-fox);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 13px;
+  color: var(--on-fill);
+}
+.kp-ports {
+  display: grid;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+.kp-ports--page {
+  padding: 12px 14px;
+}
+.kp-ports__group {
+  display: grid;
+  gap: 2px;
+}
+.kp-ports__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.kp-ports__label {
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.kp-ports__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px 4px 2px 6px;
+  border-radius: 7px;
+}
+.kp-ports__row:hover {
+  background: var(--bg-hover);
+}
+.kp-ports__port {
+  flex: none;
+  min-width: 42px;
+  font-weight: 500;
+}
+.kp-ports__arrow {
+  color: var(--text-disabled);
+}
+.kp-ports__what {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.kp-ports__folder {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.kp-ports__tag {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--pane-fox) 12%, transparent);
+  font-size: 10.5px;
+  color: var(--pane-fox);
+}
+.kp-ports__link {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+.kp-ports__link:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.kp-ports__skeleton {
+  display: grid;
+  gap: 6px;
+  padding: 2px 6px;
+}
+.kp-ports__note {
+  margin: 0;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.kp-ports__manual {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+}
+.kp-ports__input {
+  box-sizing: border-box;
+  width: 84px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-strong);
+  font-size: 12px;
+  color: var(--text-primary);
+  outline: none;
+}
+.kp-ports__input:focus {
+  box-shadow:
+    inset 0 0 0 var(--hairline) var(--border-strong),
+    0 0 0 3px var(--selection);
+}
+.kp-ports__input::placeholder {
+  color: var(--text-placeholder);
+}
+.kp-ports__auto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 2px;
+  border-top: var(--hairline) solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
+}

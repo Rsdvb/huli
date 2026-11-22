@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { BrowserState } from '@shared/browser'
+import type { ElementPick } from '@shared/page-notes'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { isSurfacePane } from '@renderer/stores/surface-tabs'
 import { useViewStore } from '@renderer/stores/view'
@@ -11,6 +12,11 @@ interface BrowserStore {
   stills: Record<string, string>
   /** Sessions whose page an agent opened while the pane showed something else. */
   unseen: Record<string, true>
+  /** Huli: the sessions whose pane is in pick mode, and the element each waits to comment on. */
+  picking: Record<string, true>
+  picked: Record<string, ElementPick>
+  setPicking(sessionId: string, on: boolean): void
+  setPicked(sessionId: string, pick: ElementPick | null): void
   receive(state: BrowserState): void
   setStill(sessionId: string, still: string | null): void
   /** The pane shows the page now, so the toggle's dot is no longer needed. */
@@ -22,6 +28,26 @@ export const useBrowserStore = create<BrowserStore>()((set) => ({
   bySession: {},
   stills: {},
   unseen: {},
+  picking: {},
+  picked: {},
+  setPicking(sessionId, on) {
+    set((s) => {
+      if (!!s.picking[sessionId] === on) return s
+      const picking = { ...s.picking }
+      if (on) picking[sessionId] = true
+      else delete picking[sessionId]
+      return { picking }
+    })
+  },
+  setPicked(sessionId, pick) {
+    set((s) => {
+      if (!pick && !s.picked[sessionId]) return s
+      const picked = { ...s.picked }
+      if (pick) picked[sessionId] = pick
+      else delete picked[sessionId]
+      return { picked }
+    })
+  },
   receive(state) {
     set((s) => ({ bySession: { ...s.bySession, [state.sessionId]: state } }))
   },
@@ -49,7 +75,11 @@ export const useBrowserStore = create<BrowserStore>()((set) => ({
       delete bySession[sessionId]
       delete stills[sessionId]
       delete unseen[sessionId]
-      return { bySession, stills, unseen }
+      const picking = { ...s.picking }
+      const picked = { ...s.picked }
+      delete picking[sessionId]
+      delete picked[sessionId]
+      return { bySession, stills, unseen, picking, picked }
     })
   },
 }))
@@ -62,6 +92,15 @@ export const useBrowserStore = create<BrowserStore>()((set) => ({
  */
 export function initBrowser(): void {
   window.kettu.browser.onState((state) => useBrowserStore.getState().receive(state))
+  window.kettu.browser.onPick((event) => {
+    const store = useBrowserStore.getState()
+    if (event.kind === 'picked') {
+      if (store.picking[event.sessionId]) store.setPicked(event.sessionId, event.pick)
+      return
+    }
+    store.setPicking(event.sessionId, false)
+    store.setPicked(event.sessionId, null)
+  })
   window.kettu.browser.onOpened(({ sessionId }) => {
     if (!useSessionsStore.getState().byId[sessionId]) return
     const shown = useViewStore.getState().sidePane[sessionId]

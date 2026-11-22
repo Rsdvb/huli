@@ -161,5 +161,53 @@
     "agentAsks": "{{agent}} is waiting for you here",
     "agentTab": "{{agent}}’s tab"
   },
-  "title": "Browser"
+  "title": "Browser",
+  "pick": {
+    "toggle": "Pick an element to comment on",
+    "stop": "Stop picking elements",
+    "hint": "Point at an element and click it to comment. Esc stops.",
+    "done": "Done",
+    "unavailable": "This page can't be picked from right now",
+    "editorLabel": "Comment on {{element}}",
+    "placeholder": "What should the agent change here?",
+    "save": "Add comment",
+    "cancel": "Cancel",
+    "keys": "{{keys}} to add",
+    "full": "A page holds at most 20 comments at once; send or clear some first",
+    "failed": "Couldn't add the comment: {{error}}",
+    "message": {
+      "intro_one": "Please address my comment on an element of the page:",
+      "intro_other": "Please address my {{count}} comments on elements of the page:",
+      "page": "Page",
+      "selector": "Selector",
+      "text": "Text",
+      "box": "Box: {{width}} × {{height}} px at ({{x}}, {{y}}) in a {{viewWidth}} × {{viewHeight}} viewport",
+      "shot": "Screenshot: attached image {{index}}"
+    }
+  },
+  "ports": {
+    "button": "Ports on {{host}}",
+    "forwarded": "Forwarded to this computer",
+    "listening": "Listening on {{host}}",
+    "loading": "Reading the ports",
+    "refresh": "Read the ports again",
+    "none": "No program of yours listens above port 1024 on {{host}}",
+    "unknown": "Unknown program",
+    "forward": "Forward",
+    "forwardOpen": "Open",
+    "open": "Open",
+    "openPort": "Open localhost:{{port}}",
+    "stop": "Stop forwarding port {{port}}",
+    "auto": "auto",
+    "portLabel": "Port to forward",
+    "portPlaceholder": "Port",
+    "autoLabel": "Forward the dev servers this computer's session terminals print",
+    "autoForwarded": "Forwarded port {{port}} from {{host}}",
+    "failure": {
+      "offline": "{{host}} isn't connected right now",
+      "unsupported": "Update Kite on {{host}} to forward its ports",
+      "full": "{{host}} has as many forwarded ports as it keeps; stop one first",
+      "failed": "Couldn't forward port {{port}} from {{host}}"
+    }
+  }
 }

@@ -10,6 +10,7 @@ import { SurfacePill } from '@renderer/components/control/surface-pill'
 import { useControlAgent } from '@renderer/components/control/use-control-agent'
 import { useHeldBubble } from '@renderer/components/control/use-held-bubble'
 import { addressText } from '@renderer/features/browser/address'
+import { openOnHost } from '@renderer/features/ports/ports'
 import { PaneIcon } from '@renderer/features/shell/panel-button'
 import { longAgo } from '@renderer/lib/format'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
@@ -35,11 +36,15 @@ export function OwnerBar({ terminal, owner }: { terminal: TerminalState; owner: 
   const hostId = hostOfPath(terminal.projectPath)
   const sessionId = terminal.sessionId ?? owner.sessionId
   const running = terminal.busy && terminal.exitCode === null && !terminal.stale
-  // Another host's localhost is not this computer's, which the session's browser runs on.
-  const url = hostId === null ? terminal.localUrl : null
+  // Huli: another host's localhost opens through a forward of its port to this computer.
+  const url = terminal.localUrl
 
   const openInBrowser = () => {
     if (!sessionId || !url) return
+    if (hostId !== null) {
+      openOnHost(hostId, sessionId, url)
+      return
+    }
     void window.kettu.browser.navigate(sessionId, url)
     toggleSidePane(sessionId, 'browser', true)
   }
