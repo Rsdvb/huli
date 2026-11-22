@@ -226,6 +226,17 @@ export function RefTiles(props: { refs: Tiled[]; align: 'start' | 'end' }) {
             return <Tile key={i} icon={G.link} name={ref.name} detail="网页" onPress={null} />
           case 'device':
             return <Tile key={i} icon={G.info} name={ref.name} detail="设备" onPress={null} />
+          // Huli: another session the user referenced, which opens it.
+          case 'session':
+            return (
+              <Tile
+                key={i}
+                icon={G.subagent}
+                name={ref.name}
+                detail="会话"
+                onPress={() => router.push(`/session/${ref.sessionId}`)}
+              />
+            )
           default:
             return <Tile key={i} icon={G.info} name={ref.label} detail={null} onPress={null} />
         }

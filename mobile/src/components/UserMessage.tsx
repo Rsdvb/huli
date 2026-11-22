@@ -62,12 +62,16 @@ export const UserMessage = memo(function UserMessage(props: {
   const refs = useFileRefs()
   const text = textOf(content)
   // Read from the content once, so what follows them changes only with it.
-  const { carried, attachments, pictures } = useMemo(() => {
+  const { carried, attachments, sessions, pictures } = useMemo(() => {
     const carried = content.flatMap((part): ContentRef[] => (part.type === 'ref' ? [part.ref] : []))
     return {
       carried,
       attachments: carried.flatMap((ref): Attachment[] =>
         ref.kind === 'attachment' ? [ref.attachment] : [],
+      ),
+      // Huli: the other sessions it referenced (@ a session).
+      sessions: carried.flatMap((ref) =>
+        ref.kind === 'session' ? [{ id: ref.sessionId, name: ref.name }] : [],
       ),
       pictures: carried.map(pictureOf).filter((each): each is Picture => each !== null),
     }
@@ -80,8 +84,9 @@ export const UserMessage = memo(function UserMessage(props: {
       mentionResolver(
         attachments,
         mentions && refs?.known ? { files: refs.known, folders: foldersOf(refs.known) } : null,
+        sessions,
       ),
-    [attachments, mentions, refs?.known],
+    [attachments, mentions, refs?.known, sessions],
   )
   const chips = useMemo<MarkdownChips>(
     () => ({
@@ -89,6 +94,10 @@ export const UserMessage = memo(function UserMessage(props: {
       onOpen: (chip: Chip) => {
         if (chip.kind === 'link') {
           openUrl(chip.url)
+          return
+        }
+        if (chip.kind === 'session') {
+          if (chip.sessionId) router.push(`/session/${chip.sessionId}`)
           return
         }
         const attachment = chip.attachmentId
@@ -123,6 +132,7 @@ export const UserMessage = memo(function UserMessage(props: {
     for (const chip of [...text.matchAll(/[@＠](\S+)/g)]) {
       const target = resolve(chip[1]!.replace(/[.,;:!?)\]}>'"。，；：！？）、]+$/, ''))
       if (target?.attachmentId) ids.add(target.attachmentId)
+      if (target?.sessionId) ids.add(target.sessionId)
     }
     return ids
   }, [text, mentions, resolve])
@@ -130,7 +140,8 @@ export const UserMessage = memo(function UserMessage(props: {
     (ref): ref is Exclude<ContentRef, { kind: 'image' }> =>
       ref.kind !== 'image' &&
       pictureOf(ref) === null &&
-      !(ref.kind === 'attachment' && named.has(ref.attachment.id)),
+      !(ref.kind === 'attachment' && named.has(ref.attachment.id)) &&
+      !(ref.kind === 'session' && named.has(ref.sessionId)),
   )
 
   // The command the text starts with reads as the composer's: colored, and tapped, it goes into

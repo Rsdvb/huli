@@ -80,7 +80,11 @@ import {
 } from '../composerText'
 import { readDraft, useDraftsReady, writeDraft, type SavedAttachment } from '../drafts'
 import { matchFiles, useProjectFiles } from '../files'
-import { useComputerId, useHostState, useLink, useLinkDown } from '../host'
+import { useComputerId, useEntryOn, useHostState, useLink, useLinkDown, useSessions } from '../host'
+import { folder as folderName, sessionTitle } from '../sessions'
+import { matchSessions, sessionKey, withSessionRefs } from '../sessionMentions'
+import { AgentGlyph } from '../ui/AgentAvatar'
+import type { SessionSummary } from '@shared/agent-host'
 import { dropFile, keepFile, type OutboxAttachment, type OutboxMessage } from '../outbox'
 import { BottomSheet } from '../ui/BottomSheet'
 import { countRender } from '../ui/renders'
@@ -298,6 +302,10 @@ export function Composer(props: ComposerProps) {
   const caretRef = useRef<number | null>(null)
   const latestText = useRef('')
   const latestMentions = useRef<Mention[]>([])
+  // Huli: other sessions in the `@` list (@ a session), and the titles they were put in with.
+  const sessionMentionsOn = useEntryOn('phone.sessionMention')
+  const allSessions = useSessions()
+  const sessionTitles = useRef(new Map<string, string>())
   const latest = useRef<PendingAttachment[]>([])
   const mounted = useRef(true)
   /** The keys of attachments a message is carrying, which leaving the screen must not remove. */
@@ -836,6 +844,28 @@ export function Composer(props: ComposerProps) {
     placeCaret(from + put.length + (after.startsWith(' ') ? 1 : 0))
   }
 
+  /** Puts another session in as a mention, `@<title>`, in place of `range`. */
+  const mentionSession = (session: SessionSummary, range: MentionQuery) => {
+    const title = sessionTitle(session)
+    const current = latestText.current
+    const before = current.slice(0, range.start)
+    const after = current.slice(range.end)
+    const lead = before === '' || /\s$/.test(before) ? '' : ' '
+    const token = `@${title}`
+    const put = `${lead}${token}${after.startsWith(' ') ? '' : ' '}`
+    const next = replaceRange(current, latestMentions.current, range.start, range.end, put)
+    const start = range.start + lead.length
+    sessionTitles.current.set(session.id, title)
+    setBox({
+      text: next.text,
+      mentions: [
+        ...next.mentions,
+        { key: sessionKey(session.id), from: start, to: start + token.length },
+      ].sort((a, b) => a.from - b.from),
+    })
+    placeCaret(range.start + put.length + (after.startsWith(' ') ? 1 : 0))
+  }
+
   const command = (name: string, names: readonly string[]) => {
     const current = latestText.current
     const typed = /^\/\S*/.exec(current)?.[0].length ?? leadingCommand(current, names)
@@ -965,14 +995,16 @@ export function Composer(props: ComposerProps) {
       items: latest.current,
       mentions: latestMentions.current,
     }
-    const content = messageContent(taken.text, taken.items)
+    // Huli: each session mentioned goes as `@session:<id>` with a reference the agent reads.
+    const sent = withSessionRefs(taken.text, taken.mentions, sessionTitles.current)
+    const content = [...messageContent(sent.text, taken.items), ...sent.refs]
     for (const item of taken.items) carried.current.add(item.key)
     // The box empties at once; the message comes back if it could not go.
     setBox({ text: '', mentions: [] })
     change(() => [])
     if (!connected && props.onQueue) {
       haptic.success()
-      props.onQueue({ text: taken.text, attachments: taken.items.flatMap(outboxAttachment) })
+      props.onQueue({ text: sent.text, attachments: taken.items.flatMap(outboxAttachment) })
       announce('已存在手机上，连上电脑后发送')
       return
     }
@@ -1062,6 +1094,12 @@ export function Composer(props: ComposerProps) {
             query={mentionQuery.query}
             used={props.usedFiles ?? []}
             onPick={(path) => props.folder && mention(props.folder, path, mentionQuery)}
+            sessions={
+              sessionMentionsOn
+                ? matchSessions(allSessions.values(), mentionQuery.query, props.sessionId ?? null)
+                : NO_SESSIONS
+            }
+            onPickSession={(session) => mentionSession(session, mentionQuery)}
           />
         )}
         <View
@@ -1383,11 +1421,16 @@ function SlashList(props: { commands: SlashCommand[]; onPick(name: string): void
   )
 }
 
+const NO_SESSIONS: SessionSummary[] = []
+
 function MentionList(props: {
   folder: string | null
   query: string
   used: readonly string[]
   onPick(path: string): void
+  /** Huli: the sessions whose title has the query, listed over the files. */
+  sessions: readonly SessionSummary[]
+  onPickSession(session: SessionSummary): void
 }) {
   const link = useLink()
   const { c } = useSessionTokens()
@@ -1441,7 +1484,28 @@ function MentionList(props: {
         </>
       )
   }
-  return <Picker label="提及文件">{body}</Picker>
+  // Huli: the sessions over the files, each with its agent and project.
+  const sessions =
+    props.sessions.length > 0 ? (
+      <>
+        <Text style={[styles.pickerHead, { color: c.textTertiary }]}>会话</Text>
+        {props.sessions.map((session) => (
+          <PickerRow
+            key={session.id}
+            lead={<AgentGlyph agentId={session.agentId} size={16} />}
+            label={sessionTitle(session)}
+            subtitle={session.scratch ? '无项目' : folderName(session.projectPath)}
+            onPress={() => props.onPickSession(session)}
+          />
+        ))}
+      </>
+    ) : null
+  return (
+    <Picker label="提及文件">
+      {sessions}
+      {body}
+    </Picker>
+  )
 }
 
 /** Offers the clipboard's picture: the system's paste button where there is one. */
