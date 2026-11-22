@@ -3129,10 +3129,10 @@
       "connections": "Connections and previews"
     },
     "note": "Sessions, the terminal, the browser, Git, artifacts and the Marketplace are Kite's core and always on. A feature turned off no longer loads or runs, and turns back on any time without a restart; code it already loaded leaves memory at the next launch.",
-    "sandboxHeld": "Turns off only while the default sandbox is Off. Set the default to Off in Agents › Sandbox first.",
+    "sandboxHeld": "Turns off only while the default sandbox is Off, since new sessions still start in it. Set it to Off in Agents › Sandbox first.",
     "computerUse": {
       "name": "Computer use",
-      "description": "Agents operate apps on this computer; it has its own switch in Computer use.",
+      "description": "Agents operate apps on this computer. It has its own switch on the Computer use page.",
       "on": "On",
       "off": "Off",
       "open": "Open"

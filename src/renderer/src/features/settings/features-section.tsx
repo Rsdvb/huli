@@ -39,9 +39,7 @@ export function useFeaturesSection(): SectionDef {
       setting: `features.${id}` as SettingId,
       group: groups[group],
       ...(id === 'sandbox' && sandboxHeld && sandboxOn
-        ? {
-            description: `${t('features.items.sandbox.description')} ${t('features.sandboxHeld')}`,
-          }
+        ? { description: t('features.sandboxHeld') }
         : {}),
       render: () => (
         <FeatureSwitch
