@@ -1311,7 +1311,9 @@
     "gone": "This session's worktree and branch were removed, so it can't continue.",
     "agentWorktree": "Worked in its own worktree <branch/>",
     "agentWorktreeUnnamed": "Worked in its own worktree",
-    "copyPath": "Copy path"
+    "copyPath": "Copy path",
+    "severalFolders": "Worktrees are off while this project has several folders.",
+    "useProjectFolder": "Use the project folder"
   },
   "workflow": {
     "pace": "Pace",

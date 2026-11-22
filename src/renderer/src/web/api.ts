@@ -425,6 +425,10 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       },
       chooseAgentFolder: () => askPath('agentFolder', null),
       chooseHistoryFolder: () => askPath('agentFolder', null),
+      chooseProjectFolder: async () => {
+        const { useProjectsStore } = await import('@renderer/stores/projects')
+        return askPath('project', useProjectsStore.getState().projects[0]?.path ?? null)
+      },
       chooseAgentBinary: (harnessId) =>
         askPath(
           'agentProgram',

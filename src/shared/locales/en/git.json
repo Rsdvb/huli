@@ -25,7 +25,8 @@
     "ahead_one": "{{count}} commit to push",
     "ahead_other": "{{count}} commits to push",
     "behind_one": "{{count}} commit to pull",
-    "behind_other": "{{count}} commits to pull"
+    "behind_other": "{{count}} commits to pull",
+    "repoBranch": "{{repo}}: {{branch}}"
   },
   "pr": {
     "state": {

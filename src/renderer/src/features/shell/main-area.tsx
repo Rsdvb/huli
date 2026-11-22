@@ -59,11 +59,25 @@ export function MainArea() {
     return task ? (task.worktreePath ?? task.projectPath) : null
   })
 
+  // Huli: and each further folder of those projects, which their trays and Files panes show.
+  const further = useProjectsStore((s) =>
+    paths
+      ? paths
+          .split('\n')
+          .flatMap((path) =>
+            (s.projects.find((p) => p.path === path)?.folders ?? []).flatMap((folder) =>
+              folder.missing ? [] : [folder.path],
+            ),
+          )
+          .join('\n')
+      : '',
+  )
+
   // Every project or worktree a pane in view works in keeps its git status live.
   useEffect(() => {
-    const folders = [paths, worktrees].filter(Boolean).join('\n')
+    const folders = [paths, worktrees, further].filter(Boolean).join('\n')
     showProjects(folders ? [...new Set(folders.split('\n'))] : [])
-  }, [paths, worktrees])
+  }, [paths, worktrees, further])
 
   if (main.kind === 'overview') {
     return (

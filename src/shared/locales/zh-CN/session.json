@@ -1261,7 +1261,9 @@
     "gone": "这个会话的工作树和分支都已删除，不能再继续对话。",
     "agentWorktree": "在自己的工作树 <branch/> 里工作过",
     "agentWorktreeUnnamed": "在自己的工作树里工作过",
-    "copyPath": "复制路径"
+    "copyPath": "复制路径",
+    "severalFolders": "这个项目有多个文件夹，不能用工作树。",
+    "useProjectFolder": "改用项目文件夹"
   },
   "workflow": {
     "pace": "Pace",
